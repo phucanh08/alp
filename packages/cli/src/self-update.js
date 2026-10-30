@@ -180,7 +180,9 @@ export function npmMessage(positionals = []) {
 function extract(archive, directory, asset, platform, run = spawnSync) {
   const windows = platform.startsWith('windows-');
   // tar reads both: GNU/bsd tar for .tar.gz, Windows' bsdtar (tar.exe) for .zip.
-  const result = run('tar', [windows ? '-xf' : '-xzf', archive, '-C', directory], { encoding: 'utf8', windowsHide: true });
+  // On Windows, Git's GNU tar (which reads no zip) may come first on PATH: use the system's bsdtar.
+  const tar = process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+  const result = run(tar, [windows ? '-xf' : '-xzf', archive, '-C', directory], { encoding: 'utf8', windowsHide: true });
   if (result.status !== 0) throw new Error(`Could not extract ${asset.name}: ${(result.stderr || result.error?.message || '').trim()}`);
   const name = asset.name.slice(0, -archiveExtension(platform).length);
   const binary = path.join(directory, name, windows ? 'alp.exe' : 'alp');
@@ -244,7 +246,8 @@ export async function selfUpdate(args, overrides = {}) {
     deps.log(order === 0 ? `alp ${deps.version} is up to date (${platform})` : `alp ${deps.version} → ${asset.version} available (${asset.name}); run: alp update${wanted ? ` --version ${wanted}` : ''}`);
     return 0;
   }
-  if (order === 0) { deps.log(`alp ${deps.version} is up to date (${platform})`); return 0; }
+  // An explicit --version of the running version reinstalls it (a repair); without one there is nothing to do.
+  if (order === 0 && !wanted) { deps.log(`alp ${deps.version} is up to date (${platform})`); return 0; }
   if (order < 0 && !wanted) { deps.log(`alp ${deps.version} is newer than the latest release ${asset.version}; nothing to do (pass --version ${asset.version} to go back)`); return 0; }
 
   let target;
@@ -268,7 +271,7 @@ export async function selfUpdate(args, overrides = {}) {
     nodeFs.writeFileSync(archive, bytes);
     const provenance = deps.provenance(archive, repo);
     if (provenance === 'verified') deps.log(`Provenance verified by gh attestation (${repo}, refs/heads/main, release-binaries.yml)`);
-    else deps.warn('alp: warning: gh is not installed, so only the SHA256SUMS checksum was verified, not the build provenance (install gh to verify it)');
+    else deps.warn('alp: warning: gh is not available, so only the SHA256SUMS checksum was verified, not the build provenance (install gh to verify it)');
     const unpacked = path.join(work, 'x');
     nodeFs.mkdirSync(unpacked);
     const binary = deps.extract(archive, unpacked, asset, platform);

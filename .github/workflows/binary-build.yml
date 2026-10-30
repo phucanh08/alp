@@ -75,6 +75,8 @@ jobs:
           file dist/bin/${{ matrix.exe }} || true
       - name: Smoke (with Node)
         run: node scripts/binary-smoke.mjs dist/bin/${{ matrix.exe }}
+      - name: alp update against local file:// and HTTP mirrors
+        run: node scripts/binary-update-smoke.mjs dist/bin/${{ matrix.exe }}
       - name: Smoke without Node (debian:bookworm-slim)
         if: runner.os == 'Linux'
         run: |
