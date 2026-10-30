@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '../../packages/core/src/init.js';
-import { createTask, getTask } from '../../packages/core/src/tasks.js';
+import { addGate, createTask, getTask } from '../../packages/core/src/tasks.js';
 import { saveEntry } from '../../packages/core/src/library-edit.js';
 import { isTrusted, trustProject } from '../../packages/core/src/trust.js';
 import { fileURLToPath } from 'node:url';
@@ -209,4 +209,33 @@ test('blocking hooks refuse a handoff, a task close and a merge, with their outp
   await until(async () => (await blocked()).length === 4, 'four refusals in the run log');
   assert.deepEqual(await blocked(), ['handoff', 'merge', 'task.close', 'task.close']);
   assert.match(renderLog('root', (await log()).filter(entry => entry.event === 'hook')).join('\n'), /⛔ peer's handoff hook handoff-gate exit 1 in .*, refused it: handoff: tests failed/);
+});
+
+test('an agent\'s close of a task with an open human gate is refused before any task.close hook runs (t-f438, t-e706)', async t => {
+  const { root, home, runtimes, start, scope } = await setup(t);
+  await trustProject(home, root, 'test');
+  // One recording hook and one blocking hook: neither may run for a close that is refused anyway.
+  await saveEntry('hooks', 'close-record', recorder('task.close', 'close'), { ...scope, scope: 'project' });
+  await saveEntry('hooks', 'close-block', recorder('task.close', 'blocked', { blocking: true }), { ...scope, scope: 'project' });
+  await saveEntry('agents', 'main', { instructions: '# Main\n', config: { hooks: ['close-record', 'close-block'] } }, { ...scope, scope: 'project' });
+  const runtime = start();
+  await runtime.open('root', { cwd: root });
+  await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Work' }] });
+  const main = runtimes[0];
+
+  const gated = await createTask(root, { title: 'Gated' }, 'user');
+  await addGate(root, gated.id, { kind: 'human', note: 'Duyệt giúp' }, 'main');
+  for (const reason of ['done', 'wontfix']) {
+    const refused = await main.call('alp_task', { action: 'close', id: gated.id, reason, summary: 'Skip it' });
+    assert.match(refused.error ?? '', /Only the user closes/, JSON.stringify(refused));
+  }
+  assert.equal((await getTask(root, gated.id)).status, 'open');
+  assert.equal(await exists(path.join(root, 'out', 'close.log')), false, 'the recording task.close hook did not run');
+  assert.equal(await exists(path.join(root, 'out', 'blocked.log')), false, 'the blocking task.close hook did not run');
+
+  // The same hooks do run for a close that is not refused: the check above is not vacuous.
+  const plain = await createTask(root, { title: 'Plain' }, 'user');
+  await main.call('alp_task', { action: 'close', id: plain.id, reason: 'done', summary: 'Done' });
+  await until(() => written(path.join(root, 'out', 'close.log')), 'the recording hook on an ungated close');
+  assert.match(await readFile(path.join(root, 'out', 'close.log'), 'utf8'), new RegExp(`task\\.close main ${plain.id}`));
 });

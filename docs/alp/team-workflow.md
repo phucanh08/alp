@@ -762,6 +762,10 @@ answers a question an agent asked. ALP enforces this on every path it controls:
   alpd then refuses that connection `task.gate.resolve` on a human gate and
   `question.answer` (alp_ask questions, approvals and gate cards). Agent mail
   (`alp_send` answers) does not go through `question.answer` and is unaffected.
+- The remote gateway carries the mark: when a client announces
+  `principal.agent` in its `daemon.hello` to the gateway, the gateway says so
+  on that client's own alpd connection before it answers, so alpd refuses the
+  same calls through the gateway. If it cannot, it closes the client.
 - An agent's connection may not open, attach to or type into a daemon terminal
   (`terminal.create`, `terminal.attach`, `terminal.input`): those shells carry no
   `ALP_AGENT_SESSION`.
@@ -799,7 +803,9 @@ did not start. There is no TTY requirement.
 Residual risk: this raises the bar and detects naive bypasses; it is not a
 security boundary. A full-access agent runs as the same OS user as you, so it
 can unset `ALP_AGENT_SESSION`, speak to the daemon socket directly without
-announcing `principal.agent`, edit the ledger in `$ALP_HOME` as well as the task
+announcing `principal.agent` (or reach the gateway with a credential you
+paired and not announce it: the gateway cannot tell such a client from ALP
+Web), edit the ledger in `$ALP_HOME` as well as the task
 file, or fake a TTY. An older alpd does not enforce the daemon refusals. Human
 gates opened before the ledger existed enter it only the next time ALP writes
 their task; until then a file edit that clears them goes undetected. Only
