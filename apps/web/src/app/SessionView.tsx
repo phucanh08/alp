@@ -231,11 +231,11 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
       <RewindDialog turn={rewinding} onClose={() => setRewinding(null)} onDone={text => { setRewinding(null); if (text) setRefill({ id: Date.now(), text }); }} />
       <ForkDialog turnId={forking} title={title} onClose={() => setForking(null)} />
       {loading && !entries.length && questionCards ? (
-        <div className="px-3 pb-3 md:px-4"><div className="mx-auto flex w-full max-w-[820px] flex-col gap-2 px-2">{questionCards}</div></div>
+        <div className="px-3 pb-3 md:px-4"><div className="mx-auto flex w-full max-w-(--content-width) flex-col gap-2 px-2">{questionCards}</div></div>
       ) : null}
       {viewing === root && controller.isArchived(root) ? <ArchivedCallout sessionId={root} /> : viewing === root ? (
         <>
-          {closed && !running ? <p className="mx-auto w-full max-w-[820px] px-4 pb-2 text-center text-xs text-muted-foreground">This session is closed on the host. Sending a message reopens it.</p> : null}
+          {closed && !running ? <p className="mx-auto w-full max-w-(--content-width) px-4 pb-2 text-center text-xs text-muted-foreground">This session is closed on the host. Sending a message reopens it.</p> : null}
           <Composer
             meter={<ContextMeter usage={rootSession?.usage} />}
             images={rootSession?.promptImages === true && connection.capabilities.includes('prompt.images') && !!connection.promptImageLimits?.maxBytes}
@@ -267,7 +267,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         </>
       ) : (
         <div className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-4 md:pb-4">
-          <div className="mx-auto flex w-full max-w-[820px] items-center gap-3 rounded-2xl border border-dotted border-input bg-card px-3 py-2 text-[15px] leading-[21px] text-muted-foreground md:px-4 md:py-3">
+          <div className="mx-auto flex w-full max-w-(--content-width) items-center gap-3 rounded-2xl border border-dotted border-input bg-card px-3 py-2 text-[15px] leading-[21px] text-muted-foreground md:px-4 md:py-3">
             <span className="min-w-0 flex-1">{agentOf(viewing)} works on an assignment from main. Talk to main to steer it.</span>
             <ContextMeter usage={projection.sessions[viewing]?.usage} />
             <Button size="sm" variant="secondary" onClick={() => openAgent(root)}><ArrowLeft aria-hidden /> Main</Button>

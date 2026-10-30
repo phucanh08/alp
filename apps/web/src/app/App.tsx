@@ -13,7 +13,7 @@ import { HistoryScreen } from './History';
 import { ShortcutsDialog, useShortcuts } from './Shortcuts';
 import { TabsProvider, tabKey, useTabs, type Tab } from './tabs';
 import { can } from '../lib/gateway.js';
-import { applyTheme } from '../lib/theme';
+import { applyContentWidth, applyTheme } from '../lib/theme';
 import { BINDINGS, formatShortcut, isMacPlatform, shortcutKeys, type Binding } from '../lib/shortcuts.js';
 import { baseName, relativeTime, sessionName } from '../lib/format';
 import { CommandCenter, type CommandScope, type RunnableAction } from './CommandCenter';
@@ -448,6 +448,7 @@ export function App() {
   const { principal, connection, preferences } = useAppState();
   // Before paint, so a reload in light mode does not flash the dark palette.
   React.useLayoutEffect(() => applyTheme(preferences.theme), [preferences.theme]);
+  React.useLayoutEffect(() => applyContentWidth(preferences.contentWidth), [preferences.contentWidth]);
   const connected = !!principal && (connection.phase === 'open' || connection.phase === 'reconnecting');
   return connected ? <Shell /> : <ConnectScreen />;
 }

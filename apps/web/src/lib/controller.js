@@ -1418,6 +1418,15 @@ export class Controller {
       await this.refreshRegistry();
     } catch (error) { this.#notify('error', `Pin was not saved. ${error instanceof Error ? error.message : String(error)} Refresh and try again.`); await this.refreshRegistry(); }
   }
+  /** Renames a shared workspace (workspace.update title); an empty title goes back to the directory's name. @param {string} workspaceId @param {string} title */
+  async renameWorkspace(workspaceId, title) {
+    if (!can(this.#state.principal ?? undefined, 'workspace.write')) { this.#notify('error', 'Ask the host owner to add workspace.write to your credential to rename shared workspaces.'); return false; }
+    try {
+      await this.#client().request('workspace.update', { workspaceId, title: title.trim() || null, ifRevision: this.#state.registry.revision, requestId: globalThis.crypto.randomUUID() });
+      await this.refreshRegistry();
+      return true;
+    } catch (error) { this.#notify('error', `Name was not saved. ${error instanceof Error ? error.message : String(error)} Refresh and try again.`); await this.refreshRegistry(); return false; }
+  }
   /** @param {string} workspaceId @returns {Promise<string[]>} */
   async worktreeOptions(workspaceId) {
     const result = await this.#client().request('workspace.worktree.options', {workspaceId});
@@ -3327,6 +3336,16 @@ export class Controller {
   /** Paseo's Appearance › Theme: light, dark, or the system's. @param {'system' | 'light' | 'dark'} theme */
   setTheme(theme) {
     this.#setPreferences({ theme });
+  }
+
+  /** Appearance › Content width: the chat column's maximum width. @param {import('./preferences.js').ContentWidth} contentWidth */
+  setContentWidth(contentWidth) {
+    this.#setPreferences({ contentWidth });
+  }
+
+  /** Chat › Tool calls: whether tool call rows start open. @param {import('./preferences.js').ToolCallDisplay} toolCalls */
+  setToolCalls(toolCalls) {
+    this.#setPreferences({ toolCalls });
   }
 
   /** @param {Partial<import('./preferences.js').Preferences>} change */

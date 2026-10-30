@@ -83,3 +83,20 @@ test('a shell command keeps its view', async ({ page }) => {
   await open(shell);
   await expect(shell).toContainText('util.ts');
 });
+
+test('Settings › Chat › Tool call details: Expanded opens new rows with their view; a click closes one', async ({ page }) => {
+  await connect(page, world);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  const settings = page.getByRole('region', { name: 'Settings' });
+  await settings.getByTestId('settings-chat').click();
+  await settings.getByLabel('Tool call details').selectOption('expanded');
+  await settings.getByRole('button', { name: 'Back' }).click();
+  await newSession(page, 'Expanded tools');
+  await send(page, 'List the files [tool]');
+  await idle(page);
+  const shell = tool(page, 'shell');
+  await expect(shell.getByRole('button').first()).toHaveAttribute('aria-expanded', 'true');
+  await expect(shell).toContainText('util.ts');
+  await shell.getByRole('button').first().click();
+  await expect(shell.getByRole('button').first()).toHaveAttribute('aria-expanded', 'false');
+});

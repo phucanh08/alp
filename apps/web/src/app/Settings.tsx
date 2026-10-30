@@ -1,9 +1,12 @@
 import * as React from 'react';
 import {
   ArrowLeft, Ban, Blocks, BookOpen, Bot, Boxes, ChevronRight, CircleCheck, Code, FolderGit2, Gauge, Info, MessageSquare, Network,
-  PanelLeft, Palette, Plug, Server, Settings as SettingsIcon, Smartphone, Sparkles, SquareTerminal, Stethoscope, Users, Webhook,
+  PanelLeft, Palette, Pin, Plug, Server, Settings as SettingsIcon, Smartphone, Sparkles, SquareTerminal, Stethoscope, Users, Webhook,
 } from 'lucide-react';
 import { can } from '../lib/gateway.js';
+import { diagnosticsSections, diagnosticsText } from '../lib/diagnostics.js';
+import type { ContentWidth, TerminalPreferences, ToolCallDisplay } from '../lib/preferences.js';
+import { TERMINAL_MESSAGES, TERMINAL_NOTICE, terminalGate } from '../lib/terminal.js';
 import { describe } from '../lib/errors.js';
 import { Button } from '../components/ui/button';
 import { Input, NativeSelect } from '../components/ui/input';
@@ -148,7 +151,7 @@ function General() {
         </Row>
       </Section>
       <Section title="This browser">
-        <Row first title="Saved preferences" hint="Default send, the theme and your last New session choices (team, model, thinking, permissions) stay in this browser. The access token never does.">
+        <Row first title="Saved preferences" hint="Default send, the theme, content width, tool call and terminal display, and your last New session choices (team, model, thinking, permissions) stay in this browser. The access token never does.">
           <Button size="sm" variant="secondary" onClick={() => controller.resetPreferences()}>Reset</Button>
         </Row>
         <NotificationsRow />
@@ -168,7 +171,100 @@ function Appearance() {
             options={[{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }]} />
         </Row>
       </Section>
-      <Unavailable what="Paseo's other themes, fonts, sizes, content width and code highlighting" why="This beta keeps Paseo's defaults for them." />
+      <Section title="Layout">
+        <Row first title="Content width" hint="How wide the chat, history, task and file columns grow on a large screen. Saved in this browser.">
+          <Select<ContentWidth> label="Content width" value={preferences.contentWidth} onChange={value => controller.setContentWidth(value)}
+            options={[{ value: 'default', label: 'Default' }, { value: 'wide', label: 'Wide' }, { value: 'full', label: 'Full width' }]} />
+        </Row>
+      </Section>
+      <Unavailable what="Paseo's other themes, fonts, text sizes and code highlighting" why="This beta keeps Paseo's defaults for them." />
+    </>
+  );
+}
+
+function Chat() {
+  const controller = useController();
+  const { preferences } = useAppState();
+  return (
+    <>
+      <Section title="Tool calls">
+        <Row first title="Tool call details" hint={`${preferences.toolCalls === 'expanded'
+          ? 'Tool calls open with their command, diff or output shown; click one to close it.'
+          : 'Each tool call is one quiet line; click it to see its command, diff or output.'} Saved in this browser.`}>
+          <Select<ToolCallDisplay> label="Tool call details" value={preferences.toolCalls} onChange={value => controller.setToolCalls(value)}
+            options={[{ value: 'collapsed', label: 'Collapsed' }, { value: 'expanded', label: 'Expanded' }]} />
+        </Row>
+      </Section>
+      <Unavailable what="Paseo's other chat display settings" why="Reasoning and the chat outline show as Paseo's defaults." />
+    </>
+  );
+}
+
+const TERMINAL_FONTS: Array<{ value: TerminalPreferences['fontFamily']; label: string }> = [
+  { value: 'mono', label: 'Monospace' }, { value: 'menlo', label: 'Menlo' }, { value: 'consolas', label: 'Consolas' },
+];
+const TERMINAL_SIZES = Array.from({ length: 15 }, (_, index) => String(index + 10));
+
+function Terminal() {
+  const controller = useController();
+  const { preferences } = useAppState();
+  const prefs = preferences.terminal;
+  return (
+    <>
+      <Section title="Display">
+        <Row first title="Font" hint="Every open terminal follows at once. Saved in this browser.">
+          <Select label="Terminal font" value={prefs.fontFamily} onChange={value => controller.setTerminalPreferences({ fontFamily: value })} options={TERMINAL_FONTS} />
+        </Row>
+        <Row title="Font size">
+          <Select label="Terminal font size" value={String(prefs.fontSize)} onChange={value => controller.setTerminalPreferences({ fontSize: Number(value) })}
+            options={TERMINAL_SIZES.map(size => ({ value: size, label: `${size} px` }))} />
+        </Row>
+        <Row title="Colors">
+          <Select<TerminalPreferences['theme']> label="Terminal theme" value={prefs.theme} onChange={value => controller.setTerminalPreferences({ theme: value })}
+            options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }]} />
+        </Row>
+      </Section>
+      <Section title="Where it runs">
+        <Row first title="Shell on the host" hint={`${TERMINAL_NOTICE} Open one from the + menu (Terminal). Whether this host allows it is under Host › Terminals.`} />
+      </Section>
+    </>
+  );
+}
+
+/** What the browser reports about itself, for Diagnostics. */
+function browserFacts() {
+  const light = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: light)').matches;
+  return {
+    userAgent: navigator.userAgent,
+    language: navigator.language,
+    online: navigator.onLine,
+    secure: window.isSecureContext,
+    viewport: `${window.innerWidth}×${window.innerHeight} @${window.devicePixelRatio}x`,
+    colorScheme: light ? 'light' : 'dark',
+  };
+}
+
+function Diagnostics() {
+  const { connection, principal, preferences } = useAppState();
+  const [copied, setCopied] = React.useState<'idle' | 'copied' | 'failed'>('idle');
+  const input = { version: __ALP_WEB_VERSION__, connection, principal, preferences, browser: browserFacts() };
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(diagnosticsText(input)); setCopied('copied'); }
+    catch { setCopied('failed'); }
+  };
+  return (
+    <>
+      <Section title="Report" action={<Button size="sm" variant="secondary" className="h-7 text-xs" data-testid="settings-diagnostics-copy" onClick={() => { void copy(); }}>{copied === 'copied' ? 'Copied' : 'Copy report'}</Button>}>
+        <Row first title="What this browser sees" hint="Copy it into a bug report. It holds no access token, prompts or files. For providers, logs and the daemon itself, run alp doctor on the host." />
+        {copied === 'failed' ? <p role="alert" className="border-t border-border px-4 py-3 text-xs text-destructive">This browser did not allow copying. Select the values below instead.</p> : null}
+      </Section>
+      {diagnosticsSections(input).map(section => (
+        <Section key={section.title} title={section.title}>
+          {section.rows.map(([key, value], index) => (
+            <Row key={key} first={index === 0} title={key}><span className="break-all font-mono text-xs" data-testid={`diagnostics-${key.toLowerCase().replace(/\W+/g, '-')}`}>{value}</span></Row>
+          ))}
+        </Section>
+      ))}
     </>
   );
 }
@@ -198,7 +294,7 @@ function Overview() {
   const { principal, connection, settings } = useAppState();
   const [refreshing, setRefreshing] = React.useState(false);
   React.useEffect(() => { void controller.loadSettings(); }, [controller]);
-  const permissions = ['session.read', 'session.write', 'project.read', 'project.write'];
+  const permissions = ['session.read', 'session.write', 'project.read', 'project.write', 'workspace.write', 'workspace.manage', 'files.read', 'library.write', 'terminal.exec'];
   return (
     <>
       <Section title="Host">
@@ -243,20 +339,155 @@ function Overview() {
   );
 }
 
+type RegistryRow = ReturnType<typeof useAppState>['registry']['workspaces'][number];
+
+/** The host's shared workspace rows of a granted directory (by path, or by its real path). */
+function useRegistered() {
+  const { principal, registry } = useAppState();
+  return React.useCallback((path: string) => registry.workspaces.filter(row => !row.archivedAt
+    && (row.directory === path || principal?.workspaceRoots?.some(root => root.path === path && root.canonical === row.directory))), [principal, registry]);
+}
+
+/** Why the host's workspace list cannot be read here, if it cannot. */
+function registryBlock(hasRegistry: boolean, principal: Parameters<typeof can>[0] | null) {
+  if (!hasRegistry) return 'This host does not list its workspaces. Update ALP on the host.';
+  if (!can(principal ?? undefined, 'project.read')) return 'Your access token cannot read the host\'s workspace list (it needs project.read).';
+  return undefined;
+}
+
 function Projects() {
   const controller = useController();
-  const { principal, workspace } = useAppState();
+  const { principal, workspace, registry, connection } = useAppState();
+  const registered = useRegistered();
+  const [chosen, setChosen] = React.useState('');
   const workspaces = principal?.workspaces ?? [];
+  const blocked = registryBlock(controller.hasCapability('workspace.registry'), principal);
+  React.useEffect(() => { if (!blocked) void controller.refreshRegistry(); }, [controller, blocked]);
+  const unregistered = blocked ? [] : workspaces.filter(path => !registered(path).length);
+  const writable = can(principal ?? undefined, 'workspace.write');
+  const online = connection.phase === 'open';
   return (
     <>
       <Section title="Projects this token opens">
         {workspaces.length ? workspaces.map((path, index) => (
           <Row key={path} first={index === 0} title={baseName(path)} hint={<span className="break-all font-mono">{path}</span>}>
-            {path === workspace ? <span className="text-highlight">Open</span> : <Button size="sm" variant="secondary" onClick={() => controller.selectWorkspace(path)}>Open</Button>}
+            <span className="flex items-center gap-2">
+              {!blocked ? <span className="text-xs" data-testid="project-registered">{registered(path).length ? 'Registered' : 'Not registered'}</span> : null}
+              {path === workspace ? <span className="text-highlight">Open</span> : <Button size="sm" variant="secondary" onClick={() => controller.selectWorkspace(path)}>Open</Button>}
+            </span>
           </Row>
         )) : <Row first title="No projects" hint="This access token grants no workspace." />}
       </Section>
-      <Unavailable what="Adding or removing projects" why="The access token decides which projects you can open. The host owner grants them with alp-gateway credential create --workspace." />
+      {blocked ? null : (
+        <Section title="Register a project">
+          <Row first title="Granted directory" hint={writable
+            ? 'Registering adds a granted directory to the host\'s shared workspace list, so terminals, Git and worktrees can use it. It changes no files.'
+            : 'Ask the host owner to add workspace.write to your credential to register projects.'}>
+            {writable && unregistered.length ? (
+              <form className="flex flex-wrap items-center gap-2" onSubmit={event => { event.preventDefault(); if (chosen) void controller.registerProject(chosen).then(() => setChosen('')); }}>
+                <Select label="Directory to register" value={chosen} onChange={setChosen}
+                  options={[{ value: '', label: 'Choose a directory' }, ...unregistered.map(path => ({ value: path, label: baseName(path) }))]} />
+                <Button size="sm" type="submit" disabled={!chosen || !online || registry.loading}>Register</Button>
+              </form>
+            ) : writable ? <span className="text-xs">Every granted directory is registered</span> : null}
+          </Row>
+          {registry.error ? <p role="alert" className="border-t border-border px-4 py-3 text-xs text-destructive">{registry.error}</p> : null}
+        </Section>
+      )}
+      <Unavailable what="Granting or removing projects" why="The access token decides which projects you can open. The host owner grants them with alp-gateway credential create --workspace." />
+    </>
+  );
+}
+
+function WorkspaceRow({ row, first, writable, online, busy }: { row: RegistryRow; first: boolean; writable: boolean; online: boolean; busy: boolean }) {
+  const controller = useController();
+  const { workspace, principal } = useAppState();
+  const [editing, setEditing] = React.useState(false);
+  const [title, setTitle] = React.useState(row.title ?? '');
+  const name = row.title || baseName(row.directory);
+  const openable = principal?.workspaces?.some(path => path === row.directory || principal.workspaceRoots?.some(root => root.path === path && root.canonical === row.directory)) || row.managedWorktree;
+  const local = principal?.workspaceRoots?.find(root => root.canonical === row.directory)?.path ?? row.directory;
+  const save = async () => { if (await controller.renameWorkspace(row.id, title)) setEditing(false); };
+  return (
+    <div className={cn('flex flex-col gap-2 p-4', !first && 'border-t border-border')} data-testid="settings-workspace-row" data-workspace-id={row.id}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-sm text-foreground">
+            <span className="truncate">{name}</span>
+            {row.pinnedAt ? <Pin aria-label="Pinned" className="size-3 shrink-0 text-muted-foreground" /> : null}
+            {row.managedWorktree ? <span className="rounded-full bg-secondary px-2 py-0.5 text-[11px] text-muted-foreground">Worktree</span> : null}
+          </div>
+          <div className="mt-1 break-all font-mono text-xs text-muted-foreground">{row.directory}</div>
+          {row.branch !== undefined ? <div className="mt-1 text-xs text-muted-foreground">{row.branch || 'Detached HEAD'}</div> : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" variant="ghost" aria-pressed={!!row.pinnedAt} disabled={!writable || !online || busy} onClick={() => void controller.pinWorkspace(row.id, !row.pinnedAt)}
+            aria-label={`${row.pinnedAt ? 'Unpin' : 'Pin'} workspace ${name}`}>{row.pinnedAt ? 'Unpin' : 'Pin'}</Button>
+          <Button size="sm" variant="ghost" disabled={!writable || !online || busy} onClick={() => { setTitle(row.title ?? ''); setEditing(value => !value); }}
+            aria-label={`Rename workspace ${name}`}>Rename</Button>
+          {openable ? (local === workspace ? <span className="text-xs text-highlight">Open</span>
+            : <Button size="sm" variant="secondary" onClick={() => controller.selectWorkspace(local)}>Open</Button>) : null}
+        </div>
+      </div>
+      {editing ? (
+        <form className="flex flex-wrap items-center gap-2" onSubmit={event => { event.preventDefault(); void save(); }}>
+          <Input aria-label={`New name for ${name}`} value={title} maxLength={200} onChange={event => setTitle(event.target.value)} placeholder={baseName(row.directory)} className="h-8 min-w-0 flex-1" autoFocus />
+          <Button size="sm" type="submit" disabled={!online || busy}>Save</Button>
+          <Button size="sm" variant="ghost" type="button" onClick={() => setEditing(false)}>Cancel</Button>
+        </form>
+      ) : null}
+    </div>
+  );
+}
+
+function Workspaces() {
+  const controller = useController();
+  const { principal, registry, connection } = useAppState();
+  const blocked = registryBlock(controller.hasCapability('workspace.registry'), principal);
+  React.useEffect(() => { if (!blocked) void controller.refreshRegistry(); }, [controller, blocked]);
+  if (blocked) return <Unavailable what="Workspace settings" why={blocked} />;
+  const writable = can(principal ?? undefined, 'workspace.write');
+  const online = connection.phase === 'open';
+  const rows = registry.workspaces.filter(row => !row.archivedAt)
+    .sort((a, b) => Number(!!b.pinnedAt) - Number(!!a.pinnedAt) || (a.title || baseName(a.directory)).localeCompare(b.title || baseName(b.directory)) || a.id.localeCompare(b.id));
+  return (
+    <>
+      <Section title={`Shared with every client of this host${rows.length ? ` (${rows.length})` : ''}`}
+        action={<Button size="sm" variant="ghost" className="h-7 text-xs" disabled={registry.loading || !online} onClick={() => void controller.refreshRegistry()}>{registry.loading ? 'Refreshing…' : 'Refresh'}</Button>}>
+        {registry.error ? <p role="alert" className="px-4 py-3 text-xs text-destructive">{registry.error}</p> : null}
+        {!rows.length ? <Row first={!registry.error} title={registry.loading ? 'Loading…' : 'No workspaces'} hint={registry.loading ? undefined : 'Register a granted directory under Host › Projects.'} />
+          : rows.map((row, index) => <WorkspaceRow key={row.id} row={row} first={index === 0 && !registry.error} writable={writable} online={online} busy={!!registry.loading} />)}
+      </Section>
+      {!writable ? <Section><Row first title="Read only" hint="Pins and names are shared with every client of this host. Ask the host owner to add workspace.write to your credential to change them." /></Section> : null}
+      <Unavailable what="Archiving workspaces, labels and placement" why="The host's owner manages them with alp on the host." />
+    </>
+  );
+}
+
+function Terminals() {
+  const state = useAppState();
+  const hostAllows = state.connection.capabilities.includes('terminal');
+  const tokenAllows = can(state.principal ?? undefined, 'terminal.exec');
+  const gate = terminalGate(state as Parameters<typeof terminalGate>[0]);
+  const yes = (ok: boolean, label: string) => (
+    <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs [&_svg]:size-3', ok ? 'bg-primary/15 text-highlight' : 'bg-secondary text-muted-foreground')}>
+      {ok ? <CircleCheck aria-hidden /> : <Ban aria-hidden />}{label}
+    </span>
+  );
+  return (
+    <>
+      <Section title="Remote terminals">
+        <Row first title="Host" hint={hostAllows ? 'The host\'s owner allowed remote terminals.' : TERMINAL_MESSAGES.capability}>
+          <span data-testid="terminals-host">{yes(hostAllows, hostAllows ? 'Allowed' : 'Not allowed')}</span>
+        </Row>
+        <Row title="Access token" hint={tokenAllows ? 'Your access token may open terminals (terminal.exec).' : TERMINAL_MESSAGES.permission}>
+          <span data-testid="terminals-token">{yes(tokenAllows, tokenAllows ? 'terminal.exec' : 'No terminal.exec')}</span>
+        </Row>
+        <Row title="This workspace" hint={gate.ok ? 'A terminal can open here from the + menu (Terminal).' : gate.messages.join(' ')}>
+          <span data-testid="terminals-workspace">{yes(gate.ok, gate.ok ? 'Ready' : 'Not available')}</span>
+        </Row>
+      </Section>
+      <Unavailable what="Changing the host's terminal switch" why="Only the host's owner turns remote terminals on or off, on the host: alp terminal allow --yes, alp terminal deny, alp terminal status. Font and colors are under App › Terminal." />
     </>
   );
 }
@@ -426,10 +657,10 @@ function PageContent({ page }: { page: Page }) {
     case 'general': return <General />;
     case 'appearance': return <Appearance />;
     case 'sidebar': return <Unavailable what="Arranging the sidebar" why="This beta's sidebar has a fixed layout: New session, then the workspaces and their sessions." />;
-    case 'chat': return <Unavailable what="Chat display settings" why="Reasoning, tool calls and the chat outline show as Paseo's defaults; tool calls expand on click." />;
-    case 'terminal': return <Unavailable what="Terminal settings" why="Terminals open from the + menu (Terminal) with a fixed font and colors. A terminal is a shell on the daemon host as the account that runs alpd; the workspace is not a sandbox." />;
-    case 'editor': return <Unavailable what="Editor" why="The gateway has no file access, so this app has no editor." />;
-    case 'diagnostics': return <Unavailable what="App diagnostics" why="Collecting host, provider and log details runs on the host: use alp doctor there. Connection details are under Host › Connections." />;
+    case 'chat': return <Chat />;
+    case 'terminal': return <Terminal />;
+    case 'editor': return <Unavailable what="Editor" why="This app opens a workspace's files read only (the Files panel); changing them is the agents' work, or yours on the host." />;
+    case 'diagnostics': return <Diagnostics />;
     case 'about': return <About />;
     case 'host': return <Overview />;
     case 'projects': return <Projects />;
@@ -447,9 +678,9 @@ function PageContent({ page }: { page: Page }) {
     );
     case 'pair-device': return <Unavailable what="Pairing a device" why="This app is the remote client: open it on the other device and connect with an access token." />;
     case 'metadata': return <Unavailable what="Metadata generation" why="A host setting the gateway does not expose." />;
-    case 'workspaces': return <Unavailable what="Workspace settings" why="The gateway has no file or git access, so workspaces and worktrees are managed on the host." />;
+    case 'workspaces': return <Workspaces />;
     case 'usage': return <Unavailable what="Usage and limits" why="Account-wide on the host; check with alp usage there." />;
-    case 'terminals': return <Unavailable what="Changing the host's terminal switch" why="Only the host's owner turns remote terminals on or off, on the host: alp terminal allow --yes, alp terminal deny, alp terminal status. An access token also needs terminal.exec." />;
+    case 'terminals': return <Terminals />;
     case 'plugins': return <Unavailable what="Plugins" why="Installing plugins changes the host; not offered remotely." />;
   }
 }

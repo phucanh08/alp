@@ -89,7 +89,7 @@ export function FileView({ path }: { path: string }) {
         <FileError failure={read.failure} onRetry={refresh} onShowIgnored={() => setIncludeIgnored(true)} />
       ) : !showSource ? (
         <div className="min-h-0 flex-1 overflow-y-auto" data-testid="file-view-preview">
-          <article className="mx-auto w-full max-w-[820px] px-4 py-6 sm:px-6"><RichText text={read.content} /></article>
+          <article className="mx-auto w-full max-w-(--content-width) px-4 py-6 sm:px-6"><RichText text={read.content} /></article>
         </div>
       ) : (
         <div ref={scroller} className="relative min-h-0 flex-1 overflow-auto" data-testid="file-view-source">
