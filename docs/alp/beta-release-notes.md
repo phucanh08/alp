@@ -20,6 +20,8 @@ The GitHub release `v0.0.1-beta.5` stays as it is. Everything else is as in beta
 
 # ALP 0.0.1-beta.5 — release notes
 
+> Superseded: the npm part of beta.5 below was never published. Read `0.0.1-beta.5` npm packages and the `v0.0.1-beta.5` release they pack from as `0.0.1-beta.6` / `v0.0.1-beta.6` (see above).
+
 Prepared 2026-10-30 (task t-1e02). This is the first version shipped two ways, with the same
 version number in both:
 

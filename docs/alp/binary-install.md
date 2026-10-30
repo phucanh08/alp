@@ -57,7 +57,7 @@ The project template upgrade that `alp update` ran before is now `alp update-tem
 
 ## How the executable works
 
-`scripts/build-binary.mjs` runs `bun build --compile` on the npm build output. It embeds the assets with a sha256 manifest. The runtime imports the Claude Agent SDK by a computed name that Bun cannot follow, so the generated entry imports it by its literal name and registers that import (`modules` in `registerPackaged`); without it every Claude session fails with `Cannot find package '@anthropic-ai/claude-agent-sdk'` (0.0.1-beta.5). On first use, `@anhlp/alp-core/packaged` extracts them to `<ALP_HOME>/cache/<version>/`. The cache must be a private (0700) directory owned by you, and its parent must not be group- or world-writable. Each process checks every file's size and sha256 before reusing the cache. Staging directories left by a crashed extraction are removed once they are ten minutes old and their process is gone, or an hour old. The ten-minute wait covers an extractor in another pid namespace. After the rename, the cache is checked again. Concurrent first runs all end up with one complete cache.
+`scripts/build-binary.mjs` runs `bun build --compile` on the npm build output. It embeds its runtime assets (web UI, licences, native add-ons) with a sha256 manifest. The runtime imports the Claude Agent SDK by a computed name that Bun cannot follow, so the generated entry imports it by its literal name and registers that import (`modules` in `registerPackaged`); without it every Claude session fails with `Cannot find package '@anthropic-ai/claude-agent-sdk'` (0.0.1-beta.5). On first use, `@anhlp/alp-core/packaged` extracts those embedded assets to `<ALP_HOME>/cache/<version>/`. The cache must be a private (0700) directory owned by you, and its parent must not be group- or world-writable. Each process checks every file's size and sha256 before reusing the cache. Staging directories left by a crashed extraction are removed once they are ten minutes old and their process is gone, or an hour old. The ten-minute wait covers an extractor in another pid namespace. After the rename, the cache is checked again. Concurrent first runs all end up with one complete cache.
 
 ALP starts its other roles through subcommands of the same file: `alp daemon run`, `alp web serve`, `alp bridge acp|antigravity`. It never spawns `process.execPath` with a script. `scripts/check-boundaries.mjs` enforces this. It catches `process.execPath`, `process['execPath']` and `const { execPath } = process` in `.js`, `.ts`, `.mjs` and `.cjs` sources.
 
@@ -107,15 +107,15 @@ Platform packages are not stored in the repository. `scripts/npm-platform.mjs` g
 1. `release-binaries.yml` (run name `Release binaries <sha>`) drafts the GitHub release. It keeps the archives and SHA256SUMS as the 90-day artifact `alp-release-binaries`.
 2. `release-acceptance.yml` is run with `sha` and `binaries_run` set to that run's id. It checks that the run is a successful release-binaries run of the same SHA on main, checks the archives against SHA256SUMS, and runs `release:pack --binaries <archives>`. Each platform package's executable is extracted from its archive. `release-manifest.json` records the executable's sha256 and size and the archive's name and sha256 under `binary`. A5 (`release:verify`) fails if a packed executable differs from that record.
 3. Before publishing to npm, compare the `archiveSha256` values in the manifest with the SHA256SUMS asset of the GitHub release.
-   For an already-published GitHub release, `release:pack --binaries-release v<version>` downloads the release's archives and SHA256SUMS with `gh` and refuses a draft or another version. The manifest records `pack.binariesRelease` (repo, tag, target commit), and that ties the platform packages to the release the same way `binariesRun` does. For beta.5 (the GitHub release `v0.0.1-beta.5` from `2b63a7a`), pack the 13 tarballs from a clean clone of the merge commit. The tag `v0.0.1-beta.5` belongs to the binary release, so `release:pack` needs a local tag at HEAD:
+   For an already-published GitHub release, `release:pack --binaries-release v<version>` downloads the release's archives and SHA256SUMS with `gh` and refuses a draft or another version. The manifest records `pack.binariesRelease` (repo, tag, target commit), and that ties the platform packages to the release the same way `binariesRun` does. For a release `v<version>` (for example `v0.0.1-beta.6`, which is the first npm release; beta.5 was never published to npm), pack the 13 tarballs from a clean clone of the release commit. The tag `v<version>` belongs to the binary release, so `release:pack` needs a local tag at HEAD:
 
    ```sh
-   git clone https://github.com/phucanh08/alp.git alp-npm && cd alp-npm && git checkout <merge sha>
-   git tag npm-v0.0.1-beta.5            # local only, never pushed: release:pack packs a tagged commit
+   git clone https://github.com/phucanh08/alp.git alp-npm && cd alp-npm && git checkout <release sha>
+   git tag npm-v0.0.1-beta.6            # local only, never pushed: release:pack packs a tagged commit
    npm ci && npm run build:packages
-   npm run release:pack -- --out /tmp/alp-npm-0.0.1-beta.5 --binaries-release v0.0.1-beta.5
-   npm run release:verify -- /tmp/alp-npm-0.0.1-beta.5 --sha <merge sha>
-   npm run release:consumer -- /tmp/alp-npm-0.0.1-beta.5
+   npm run release:pack -- --out /tmp/alp-npm-0.0.1-beta.6 --binaries-release v0.0.1-beta.6
+   npm run release:verify -- /tmp/alp-npm-0.0.1-beta.6 --sha <release sha>
+   npm run release:consumer -- /tmp/alp-npm-0.0.1-beta.6
    ```
 
 4. Publish order: the seven JavaScript packages, then the five platform packages, then `@anhlp/alp` last, so the launcher never points at a version that is not on the registry.
