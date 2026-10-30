@@ -34,6 +34,8 @@ const allowed = {
 const bundledApps = { '@anhlp/alp-cli': ['@anhlp/alp-gateway'] };
 const bundledSources = { '@anhlp/alp-cli': `src${path.sep}web${path.sep}` };
 const failures = corePackageProblems(manifest);
+/** The only sources that may name process.execPath directly: the runtime-neutral launch helpers. */
+const EXECPATH_HOMES = new Set(['packages/core/src/packaged.js', 'packages/core/src/bridges.js']);
 const supportDirectory = path.join(root, 'test', 'support');
 
 /** Names bound to createRequire(...) so an aliased require('...') is caught like a bare one. */
@@ -93,6 +95,20 @@ for (const location of manifest.workspaces ?? []) {
       ts.forEachChild(node, inspect);
     }
     inspect(source);
+    // t-1e02: in the ALP executable process.execPath is ALP itself, which cannot run a script or
+    // `-e` code; production sources start ALP through @anhlp/alp-core/packaged (selfCommand,
+    // entryCommand, scriptCommand, bridgeCommand). Tests and default parameters may still name it.
+    if (!/(^|[\\/])(tests?|e2e)[\\/]|\.(test|spec)\.[cm]?[jt]sx?$/.test(relative) && !EXECPATH_HOMES.has(`${location}/${relative}`.replaceAll(path.sep, '/'))) {
+      const lines = text.split('\n');
+      (function execPath(node) {
+        if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'process' && node.name.text === 'execPath') {
+          const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
+          const defaulted = ts.isParameter(node.parent) || (ts.isBindingElement(node.parent) && node.parent.initializer === node);
+          if (!defaulted && !lines[line].includes('alp-allow-execpath')) failures.push(`${location}/${relative}:${line + 1}: process.execPath outside @anhlp/alp-core/packaged; use selfCommand, entryCommand, scriptCommand or bridgeCommand (t-1e02)`);
+        }
+        ts.forEachChild(node, execPath);
+      })(source);
+    }
     // The Paseo remote entry (docs/alp/paseo-remote.md) reaches alpd only through the gateway; the
     // build checks its whole bundle (assertRemoteInputs), this its direct imports.
     if (pkg.name === '@anhlp/alp-paseo' && relative.startsWith(`server${path.sep}remote${path.sep}`)) {
