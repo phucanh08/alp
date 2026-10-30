@@ -16,6 +16,9 @@
 # The archive is checked against the release's SHA256SUMS before anything is installed.
 set -eu
 
+# Everything runs from main, called on the last line: a download cut short by `curl | sh` runs nothing.
+main() {
+
 REPO="${ALP_INSTALL_REPO:-phucanh08/alp}"
 VERSION=""
 SYSTEM=0
@@ -35,8 +38,8 @@ USAGE
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --version) [ $# -ge 2 ] || die "--version needs a value"; VERSION="${2#v}"; shift 2 ;;
-    --version=*) VERSION="${1#--version=}"; VERSION="${VERSION#v}"; shift ;;
+    --version) [ $# -ge 2 ] && [ -n "${2#v}" ] || die "--version needs a value"; VERSION="${2#v}"; shift 2 ;;
+    --version=*) VERSION="${1#--version=}"; VERSION="${VERSION#v}"; [ -n "$VERSION" ] || die "--version needs a value"; shift ;;
     --system) SYSTEM=1; shift ;;
     --dir) [ $# -ge 2 ] || die "--dir needs a value"; DIR="$2"; shift 2 ;;
     --dir=*) DIR="${1#--dir=}"; shift ;;
@@ -48,6 +51,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# The install directory is written into a shell profile: keep it to plain path characters.
+case "$DIR" in *[!A-Za-z0-9._/@+~\ -]*) die "unsupported characters in --dir: $DIR" ;; esac
 case "$VERSION" in
   ''|[0-9]*) ;;
   *) die "invalid version: $VERSION" ;;
@@ -101,13 +106,16 @@ fi
 BASE_URL="${BASE_URL%/}"
 # A local mirror directory (an absolute path) is read through file://.
 case "$BASE_URL" in /*) BASE_URL="file://$BASE_URL" ;; esac
+case "$BASE_URL" in https://*|file://*) ;; *) die "the release mirror must be https:// or file:// ($BASE_URL)" ;; esac
 
 if [ -n "$DIR" ]; then :
 elif [ "$SYSTEM" = 1 ]; then DIR=/usr/local/bin
 else DIR="$HOME/.alp/bin"; fi
 
 tmp=$(mktemp -d 2>/dev/null || mktemp -d -t alp-install)
-trap 'rm -rf "$tmp"' EXIT INT TERM
+trap 'rm -rf "$tmp"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # --- download and verify --------------------------------------------------------------------
 say "downloading SHA256SUMS from $BASE_URL"
@@ -155,15 +163,20 @@ if [ -n "$SUDO" ]; then
   sudo mkdir -p "$DIR"
 fi
 # Copy beside the target, then rename: a running alp keeps its old file, and no half-written binary is ever on PATH.
-$SUDO cp "$binary" "$DIR/.alp.install.$$"
-$SUDO chmod 755 "$DIR/.alp.install.$$"
-$SUDO mv -f "$DIR/.alp.install.$$" "$DIR/alp"
+staged=$($SUDO mktemp "$DIR/.alp.install.XXXXXX") || die "could not create a file in $DIR"
+$SUDO cp "$binary" "$staged"
+$SUDO chmod 755 "$staged"
+$SUDO mv -f "$staged" "$DIR/alp"
 # The licence files ride along under <prefix>/share/doc/alp (or ~/.alp/share/doc/alp).
 doc="$(dirname "$DIR")/share/doc/alp"
-if $SUDO mkdir -p "$doc" 2>/dev/null; then
+docsudo="$SUDO"
+[ "$SYSTEM" = 1 ] && [ -z "$docsudo" ] && [ ! -w "$(dirname "$doc")" ] && [ ! -w "$doc" ] && command -v sudo >/dev/null 2>&1 && docsudo=sudo
+if $docsudo mkdir -p "$doc" 2>/dev/null; then
   for file in LICENSE NOTICE THIRD-PARTY-NOTICES.txt; do
-    [ -f "$tmp/x/$name/$file" ] && $SUDO cp "$tmp/x/$name/$file" "$doc/$file"
+    if [ -f "$tmp/x/$name/$file" ]; then $docsudo cp "$tmp/x/$name/$file" "$doc/$file" || say "warning: could not copy $file to $doc"; fi
   done
+else
+  say "warning: could not create $doc; the licence files were not installed"
 fi
 say "installed $DIR/alp"
 
@@ -196,3 +209,6 @@ if [ "$on_path" = 0 ]; then
 fi
 
 "$DIR/alp" --version || die "$DIR/alp --version failed"
+}
+
+main "$@"

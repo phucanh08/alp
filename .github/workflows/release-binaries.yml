@@ -21,6 +21,8 @@ concurrency:
 
 jobs:
   check:
+    # Only main's copy of this workflow may run: a branch copy could drop the checks below.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
@@ -48,6 +50,7 @@ jobs:
 
   draft:
     needs: [check, build]
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

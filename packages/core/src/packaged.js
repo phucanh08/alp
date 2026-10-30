@@ -170,6 +170,7 @@ function extracted(/** @type {string} */ directory, /** @type {string} */ digest
 
 const STAGING = /^(.+)\.tmp-(\d+)-(\d+)$/;
 const STALE_MS = 60 * 60 * 1000;
+const SWEEP_MIN_MS = 10 * 60 * 1000;
 
 /** Removes staging directories another process left behind (it crashed, or was killed mid-extraction). @param {string} parent */
 function sweepStaging(parent) {
@@ -180,10 +181,13 @@ function sweepStaging(parent) {
     if (!match) continue;
     const pid = Number(match[2]);
     if (pid === process.pid) continue;
+    const age = Date.now() - Number(match[3]);
+    // Another pid namespace (a bind-mounted ALP_HOME) may hold a live extractor this one cannot see,
+    // so even a dead-looking pid's staging is kept for a few minutes; past an hour nothing is running.
+    if (age < SWEEP_MIN_MS) continue;
     let alive = false;
     try { process.kill(pid, 0); alive = true; } catch (error) { alive = /** @type {any} */ (error)?.code === 'EPERM'; }
-    // A live pid may be reused; past an hour no extraction is still running.
-    if (alive && Date.now() - Number(match[3]) < STALE_MS) continue;
+    if (alive && age < STALE_MS) continue;
     try { rmSync(path.join(parent, name), { recursive: true, force: true }); } catch {}
   }
 }
@@ -241,6 +245,7 @@ function extract(directory, digest, assets, version) {
       rmSync(directory, { recursive: true, force: true });
     }
     renameSync(staging, directory);
+    if (!extracted(directory, digest, assets)) throw new Error(`ALP asset cache ${directory} is incomplete after extraction`);
   } catch (error) {
     rmSync(staging, { recursive: true, force: true });
     if (existsSync(directory) && extracted(directory, digest, assets)) return directory;
