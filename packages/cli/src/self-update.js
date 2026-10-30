@@ -4,7 +4,7 @@ import * as nodeFs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { executablePath } from '@anhlp/alp-core/packaged';
 
@@ -80,7 +80,12 @@ export function verifyChecksum(bytes, asset) {
 
 /** Compares dotted versions numerically, prerelease below release. @param {string} a @param {string} b */
 export function compareVersions(a, b) {
-  const split = (/** @type {string} */ v) => { const [core, pre] = v.replace(/^v/, '').split(/-(.*)/s); return { core: core.split('.').map(Number), pre }; };
+  const split = (/** @type {string} */ v) => {
+    // Build metadata (+b) does not order versions.
+    const [core, pre] = v.replace(/^v/, '').replace(/\+.*$/s, '').split(/-(.*)/s);
+    if (!/^\d+(\.\d+)*$/.test(core)) throw new Error(`Invalid version: ${JSON.stringify(v)}`);
+    return { core: core.split('.').map(Number), pre };
+  };
   const x = split(a), y = split(b);
   for (let i = 0; i < Math.max(x.core.length, y.core.length); i++) {
     const d = (x.core[i] ?? 0) - (y.core[i] ?? 0);
@@ -96,7 +101,7 @@ export function compareVersions(a, b) {
 export function releaseBaseUrl({ repo, version, baseUrl }) {
   let base = baseUrl;
   if (!base) base = version ? `https://github.com/${repo}/releases/download/v${version}` : `https://github.com/${repo}/releases/latest/download`;
-  if (path.isAbsolute(base) && !/^[a-z]+:\/\//i.test(base)) base = new URL(`file://${base.startsWith('/') ? '' : '/'}${base.replaceAll('\\', '/')}`).href;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(base) && (path.isAbsolute(base) || path.win32.isAbsolute(base))) base = pathToFileURL(base).href;
   base = base.replace(/\/+$/, '');
   const url = new URL(base);
   const loopback = url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
@@ -104,12 +109,28 @@ export function releaseBaseUrl({ repo, version, baseUrl }) {
   return base;
 }
 
-/** Downloads `url` (https, loopback http or file). @param {string} url */
-async function fetchBytes(url) {
-  if (url.startsWith('file:')) return new Uint8Array(await nodeFs.promises.readFile(fileURLToPath(url)));
-  const response = await fetch(url, { redirect: 'follow' });
+/** The largest file alp update downloads: the executable is about 100 MB. */
+export const MAX_DOWNLOAD = 512 * 1024 * 1024;
+
+/** Downloads `url` (https, loopback http or file) within a time and size limit; an https download never ends on plain http. @param {string} url */
+async function fetchBytes(url, { timeoutMs = 10 * 60_000, max = MAX_DOWNLOAD } = {}) {
+  if (url.startsWith('file:')) {
+    const file = fileURLToPath(url);
+    if (nodeFs.statSync(file).size > max) throw new Error(`${url} is larger than ${max} bytes`);
+    return new Uint8Array(await nodeFs.promises.readFile(file));
+  }
+  const response = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(timeoutMs) });
+  if (new URL(url).protocol === 'https:' && new URL(response.url || url).protocol !== 'https:') throw new Error(`${url} redirected away from https (${response.url}); refused`);
   if (!response.ok) throw new Error(`Could not download ${url} (HTTP ${response.status})`);
-  return new Uint8Array(await response.arrayBuffer());
+  if (Number(response.headers.get('content-length') ?? 0) > max) throw new Error(`${url} is larger than ${max} bytes`);
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of /** @type {AsyncIterable<Uint8Array>} */ (response.body ?? [])) {
+    size += chunk.byteLength;
+    if (size > max) throw new Error(`${url} is larger than ${max} bytes`);
+    chunks.push(chunk);
+  }
+  return new Uint8Array(Buffer.concat(chunks));
 }
 
 /** Whether a program is on PATH. @param {string} name */
@@ -147,26 +168,46 @@ export const oldPath = (target, platform = process.platform) => {
  * start) and the new file takes its name; a failure puts the old one back.
  * @param {string} staged @param {string} target @param {{ platform?: string, fs?: Pick<typeof nodeFs, 'renameSync' | 'rmSync' | 'existsSync'> }} [options]
  */
-export function replaceExecutable(staged, target, { platform = process.platform, fs = nodeFs } = {}) {
+export function replaceExecutable(staged, target, { platform = process.platform, fs = nodeFs, unique = () => randomBytes(4).toString('hex') } = {}) {
   if (platform !== 'win32') { fs.renameSync(staged, target); return { old: undefined }; }
   const old = oldPath(target, platform);
-  if (fs.existsSync(old)) fs.rmSync(old, { force: true });
+  if (fs.existsSync(old)) {
+    // A process started from the previous update's file (an alpd not restarted yet) keeps it locked:
+    // it cannot be deleted, but it can be moved aside for a later start to delete.
+    try { fs.rmSync(old, { force: true }); } catch {
+      const aside = old.replace(/\.exe$/i, `.${unique()}.exe`);
+      try { fs.renameSync(old, aside); } catch (error) {
+        throw new Error(`${old} is in use and could not be moved (${error.code ?? error.message}); stop the ALP processes started from it (alp daemon stop) and run alp update again`);
+      }
+    }
+  }
   fs.renameSync(target, old);
   try {
     fs.renameSync(staged, target);
   } catch (error) {
-    try { fs.renameSync(old, target); } catch {}
+    try { fs.renameSync(old, target); } catch (restore) {
+      throw new Error(`Could not put the new executable at ${target} (${error.code ?? error.message}), and could not move the previous one back (${restore.code ?? restore.message}): rename ${old} to ${target} yourself`);
+    }
     throw error;
   }
   return { old };
 }
 
-/** Deletes the alp.old.exe a Windows update left behind; called on every packaged start. @param {string} target @param {{ platform?: string, fs?: Pick<typeof nodeFs, 'rmSync' | 'existsSync'> }} [options] */
+/** Deletes the alp.old.exe (and alp.old.<hex>.exe) a Windows update left behind; called on every packaged start. @param {string} target @param {{ platform?: string, fs?: Pick<typeof nodeFs, 'rmSync' | 'readdirSync'> }} [options] */
 export function cleanupOldExecutable(target, { platform = process.platform, fs = nodeFs } = {}) {
   if (platform !== 'win32') return false;
-  const old = oldPath(target, platform);
-  if (!fs.existsSync(old)) return false;
-  try { fs.rmSync(old, { force: true }); return true; } catch { return false; }
+  const old = path.win32.basename(oldPath(target, platform));
+  const stem = old.slice(0, -'.exe'.length).toLowerCase();
+  let names;
+  try { names = fs.readdirSync(path.win32.dirname(target)); } catch { return false; }
+  let removed = false;
+  // alp.old.exe, and the alp.old.<hex>.exe a locked one was moved aside to.
+  for (const name of names) {
+    const lower = name.toLowerCase();
+    if (lower !== `${stem}.exe` && !(lower.startsWith(`${stem}.`) && /^[0-9a-f]+\.exe$/.test(lower.slice(stem.length + 1)))) continue;
+    try { fs.rmSync(path.win32.join(path.win32.dirname(target), name), { force: true }); removed = true; } catch {}
+  }
+  return removed;
 }
 
 /** What to say outside the executable (an npm install). @param {string[]} positionals */
@@ -244,7 +285,9 @@ export async function selfUpdate(args, overrides = {}) {
   const asset = selectAsset(sums, platform, wanted);
   const order = compareVersions(asset.version, deps.version);
   if (values.check) {
-    deps.log(order === 0 ? `alp ${deps.version} is up to date (${platform})` : `alp ${deps.version} → ${asset.version} available (${asset.name}); run: alp update${wanted ? ` --version ${wanted}` : ''}`);
+    if (order === 0) deps.log(`alp ${deps.version} is up to date (${platform})`);
+    else if (order < 0 && !wanted) deps.log(`alp ${deps.version} is newer than the latest release ${asset.version}`);
+    else deps.log(`alp ${deps.version} → ${asset.version} available (${asset.name}); run: alp update${wanted ? ` --version ${wanted}` : ''}`);
     return 0;
   }
   // An explicit --version of the running version reinstalls it (a repair); without one there is nothing to do.
@@ -292,10 +335,11 @@ export async function selfUpdate(args, overrides = {}) {
 
   const running = await deps.daemon().catch(() => undefined);
   if (running && running.version !== asset.version) {
-    const sessions = running.sessions ?? 0;
-    deps.log(`alpd ${running.version} is still running${sessions ? ` with ${sessions} live session${sessions === 1 ? '' : 's'}` : ''}; it runs the new version after: alp daemon restart`);
-    // Never restart on our own: only an interactive yes with no live session restarts it.
-    if (!values.yes && deps.interactive && sessions === 0 && await deps.confirm('Restart alpd now?')) {
+    const sessions = running.sessions;
+    const known = Number.isSafeInteger(sessions);
+    deps.log(`alpd ${running.version} is still running${!known ? ' (its live sessions could not be read)' : sessions ? ` with ${sessions} live session${sessions === 1 ? '' : 's'}` : ''}; it runs the new version after: alp daemon restart`);
+    // Never restart on our own: only an interactive yes with no live session known restarts it.
+    if (!values.yes && deps.interactive && known && sessions === 0 && await deps.confirm('Restart alpd now?')) {
       if (deps.restartDaemon(target) !== 0) deps.warn('alp: alp daemon restart failed; run it yourself');
     }
   }
