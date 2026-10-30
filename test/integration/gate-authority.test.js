@@ -156,3 +156,71 @@ test('every agent process ALP starts carries ALP_AGENT_SESSION', async t => {
   assert.ok(seen.length >= 1);
   for (const env of seen) assert.equal(env.ALP_AGENT_SESSION, '1');
 });
+
+// t-f438: closing a task is no way around its human gate.
+test('the CLI under an ALP agent refuses to close a task with an open human gate or a human step; the user closes it, overriding the gate', async t => {
+  const { root, home, run } = await setup(t);
+  const task = await createTask(root, { title: 'Release' }, 'main');
+  await addGate(root, task.id, { kind: 'human', note: 'Ship it?' }, 'main');
+  for (const reason of ['done', 'wontfix', 'superseded', 'duplicate']) {
+    const refused = run({ ALP_AGENT_SESSION: '1' }, 'task', 'close', task.id, '--reason', reason);
+    assert.notEqual(refused.status, 0, refused.stdout);
+    assert.match(refused.stderr, /Only the user closes/);
+  }
+  // Core refuses any closer that is not the user, whatever the caller says.
+  await assert.rejects(closeTask(root, task.id, { reason: 'wontfix' }, 'main'), error => error.code === 'GATE_USER_ONLY');
+  await assert.rejects(closeTask(root, task.id, { reason: 'wontfix', agent: true }, 'user'), error => error.code === 'GATE_USER_ONLY');
+  assert.equal((await loadTasks(root)).tasks[0].status, 'open');
+
+  const formula = { formula: 'ship', description: '', vars: {}, steps: [{ id: 'approve', title: 'Approve', type: 'human', needs: [] }] };
+  await pourFormula(root, formula, {}, 'main');
+  const step = (await loadTasks(root)).tasks.find(entry => entry.step?.human);
+  const stepRefused = run({ ALP_AGENT_SESSION: '1' }, 'task', 'close', step.id);
+  assert.notEqual(stepRefused.status, 0);
+  assert.match(stepRefused.stderr, /Only the user closes/);
+
+  // The user's CLI closes: the gate is recorded overridden, in the ledger too, so it is no tampering.
+  const closed = run({}, 'task', 'close', task.id, '--reason', 'wontfix');
+  assert.equal(closed.status, 0, closed.stderr);
+  const after = (await loadTasks(root)).tasks.find(entry => entry.id === task.id);
+  assert.equal(after.status, 'closed');
+  assert.deepEqual([after.gates[0].resolved.by, after.gates[0].resolved.overridden, after.gates[0].resolved.channel, !!after.gates[0].tampered], ['user', true, 'cli', false]);
+  assert.ok(after.log.some(entry => entry.event === 'gate overridden'));
+  const [ledgerName] = await readdir(path.join(home, 'gates'));
+  const ledger = JSON.parse(await readFile(path.join(home, 'gates', ledgerName), 'utf8'));
+  assert.equal(ledger.gates[`${task.id}/g1@${after.gates[0].at}`].resolved.channel, 'cli');
+  assert.equal(run({}, 'task', 'close', step.id).status, 0);
+  assert.equal((await loadTasks(root)).tasks.find(entry => entry.id === step.id).status, 'closed');
+});
+
+test('compaction drops gate ledger entries that guard nothing any more', async t => {
+  const { root, home } = await setup(t);
+  const open = await createTask(root, { title: 'Still waiting' }, 'main');
+  await addGate(root, open.id, { kind: 'human', note: 'Wait' }, 'main');
+  const cleared = await createTask(root, { title: 'Cleared' }, 'main');
+  await addGate(root, cleared.id, { kind: 'human', note: 'OK?' }, 'main');
+  await resolveGate(root, cleared.id, 'g1', { by: 'user', channel: 'cli' });
+  const forced = await createTask(root, { title: 'Forced' }, 'main');
+  await addGate(root, forced.id, { kind: 'human', note: 'Sure?' }, 'main');
+  await closeTask(root, forced.id, { reason: 'wontfix' }, 'user');
+  // A task closed before t-f438 with its gate still open in the file.
+  const legacy = await createTask(root, { title: 'Legacy' }, 'main');
+  await addGate(root, legacy.id, { kind: 'human', note: 'Old' }, 'main');
+  const data = JSON.parse(await readFile(taskFile(root, legacy.id), 'utf8'));
+  Object.assign(data, { status: 'closed', closed: { at: new Date().toISOString(), by: 'user', reason: 'wontfix' } });
+  await writeFile(taskFile(root, legacy.id), JSON.stringify(data));
+  const gone = await createTask(root, { title: 'Gone' }, 'main');
+  await addGate(root, gone.id, { kind: 'human', note: 'Gone?' }, 'main');
+  await rm(taskFile(root, gone.id));
+
+  const [name] = await readdir(path.join(home, 'gates'));
+  const entries = async () => Object.keys(JSON.parse(await readFile(path.join(home, 'gates', name), 'utf8')).gates).map(key => key.split('/')[0]).sort();
+  assert.equal((await entries()).length, 5);
+  await compactTasks(root, { days: 30 }, 'user');
+  assert.deepEqual(await entries(), [open.id]);
+  // The open gate still guards its task.
+  const file = JSON.parse(await readFile(taskFile(root, open.id), 'utf8'));
+  file.gates[0].resolved = { at: new Date().toISOString(), by: 'user' };
+  await writeFile(taskFile(root, open.id), JSON.stringify(file));
+  assert.ok((await loadTasks(root)).tasks.find(entry => entry.id === open.id).gates[0].tampered);
+});

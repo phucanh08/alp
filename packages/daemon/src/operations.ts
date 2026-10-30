@@ -60,6 +60,7 @@ function fromCore(error: any, context: { notFound?: 'not_found' | 'invalid_entry
     case 'TASK_NOT_FOUND': return failure(ERROR.notFound, 'unknown_task', message);
     case 'TASK_CHANGED': case 'REVISION_CONFLICT': return failure(ERROR.conflict, 'revision_conflict', message);
     case 'INVALID_TASK': case 'TASK_CYCLE': case 'TASK_TAKEN': case 'TASK_UNVERIFIED': return failure(ERROR.conflict, 'task_state', message);
+    case 'GATE_USER_ONLY': return failure(ERROR.forbidden, 'user_only', message);
     case 'TASKS_LOCKED': return failure(ERROR.unavailable, 'busy', message);
     case 'IN_USE': return failure(ERROR.conflict, 'in_use', message);
     case 'INVALID_SCOPE': return failure(RPC_ERROR.invalidParams, 'invalid_scope', message);
@@ -193,14 +194,14 @@ export function createOperations({ home, templates, knownProjects = () => [], on
       return result;
     }),
 
-    'task.update': guard(async ({ projectRoot, id, action, note, ifRev }) => {
+    'task.update': guard(async ({ projectRoot, id, action, note, ifRev }, caller) => {
       const root = await project(projectRoot);
       const options = ifRev !== undefined ? { ifRev } : undefined;
       if (action === 'reopen') {
         const task = await reopenTask(root, id, { ...(note ? { note } : {}) }, 'user', options);
         return { id: task.id, status: task.status, rev: task.rev };
       }
-      const task = await closeTask(root, id, { reason: 'done', ...(note ? { summary: note } : {}) }, 'user', options);
+      const task = await closeTask(root, id, { reason: 'done', ...(note ? { summary: note } : {}), agent: caller?.agent === true, channel: 'web' }, 'user', options);
       const { tasks } = await loadTasks(root);
       const landed = tasks.some(entry => entry.parent === task.id) ? epicReport(task.id, tasks).text.split('\n')[0] : undefined;
       return { id: task.id, status: task.status, rev: task.rev, ...(landed ? { landed } : {}) };

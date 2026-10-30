@@ -219,7 +219,7 @@ async function taskCommand([action, ...args]) {
     task = await updateTask(root, positionals[0], { ...fields, ...(values.title !== undefined ? { title: values.title } : {}), note: values.message }, 'user');
   } else if (action === 'close') {
     if (positionals.length !== 1) throw new UsageError();
-    task = await closeTask(root, positionals[0], { reason: values.reason, summary: values.message, unverified: values.unverified }, 'user');
+    task = await closeTask(root, positionals[0], { reason: values.reason, summary: values.message, unverified: values.unverified, agent: isAgentProcess(), channel: 'cli' }, 'user');
   } else if (action === 'reopen') {
     if (positionals.length !== 1) throw new UsageError();
     task = await reopenTask(root, positionals[0], { note: values.message }, 'user');

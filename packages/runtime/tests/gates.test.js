@@ -152,6 +152,9 @@ test('a clear made outside alpd (CLI) settles the card by the timer; alp_task ga
   await until(() => card(runtime, id), 'card for a new gate');
   const gateId = card(runtime, id).gate.gateId;
   assert.match((await main().call('alp_task', { action: 'clear', id, gate: gateId })).error, /Only the user clears a human gate/);
+  // Nor close the task around it, for any reason (t-f438).
+  for (const reason of ['done', 'wontfix', 'superseded', 'duplicate']) assert.match((await main().call('alp_task', { action: 'close', id, reason, unverified: 'x' })).error ?? '', /Only the user closes/);
+  assert.equal((await getTask(root, id)).status, 'open');
   await resolveGate(root, id, gateId, { by: 'user', channel: 'cli', choice: 'B' });
   await until(() => !card(runtime, id), 'card settled by the timer');
   await until(() => decisions(main()) === 1, 'cli decision mail');

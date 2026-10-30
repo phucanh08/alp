@@ -772,6 +772,19 @@ answers a question an agent asked. ALP enforces this on every path it controls:
   marks it `tampered`; `alp task show` warns that it was changed outside ALP.
   An unreadable ledger detects nothing on read, and ALP refuses to clear a human
   gate until you fix or remove it.
+- Closing a task is no way around its gate: no agent closes a task with an
+  open human gate, or a formula's human step, for any reason (`done`,
+  `wontfix`, `superseded`, `duplicate`). `alp_task close` refuses it, and so do
+  `alp task close` under `ALP_AGENT_SESSION` and `task.update` close on a
+  connection that announced `principal.agent`.
+- You may still close such a task yourself (CLI without the variable, the Paseo
+  Tasks panel, ALP Web). Each open human gate is then recorded cleared with
+  `overridden: true`, by `user`, with the channel (`cli`, `paseo`, `web`), in
+  the ledger as well; the task log says `gate overridden`. Main is not mailed
+  an approval for it.
+- `alp task compact` also drops ledger entries that guard nothing any more:
+  cleared ones, open ones of closed tasks, and those of task files that are gone
+  (only when every task file reads).
 
 The ledger is per machine, while task files travel with Git. A human gate you
 clear in another clone or on another machine, then pull, or a checkout of a
