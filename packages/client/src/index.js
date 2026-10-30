@@ -319,7 +319,7 @@ export async function connectSocket(socketPath, options) {
 export async function connect(socketPath, client = { name: 'alp', version: '0' }, options = {}) {
   const connection = new AlpClient(await openSocket(socketPath), options);
   try {
-    const greeting = await hello(connection, client);
+    const greeting = await hello(connection, client, undefined, { agent: typeof process.env.ALP_AGENT_SESSION === 'string' && process.env.ALP_AGENT_SESSION !== '' });
     connection.capabilities = Object.freeze(Array.isArray(greeting.capabilities) ? greeting.capabilities.filter(value => typeof value === 'string') : []);
     if (greeting.attachmentLimits && typeof greeting.attachmentLimits === 'object') {
       connection.attachmentLimits = Object.freeze({ ...greeting.attachmentLimits });
