@@ -307,12 +307,15 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
             return;
           }
           case 'session.closed':
+            // Paseo drops a closed agent's commands: a reopened one is offered them again.
+            listedCommands.delete(sessionId);
             // alpd closes an idle root nobody watches, as it did while this view was away: Paseo
             // keeps the session, and the next prompt reopens it (wake). Live closes still reach Paseo.
             if (replayed && roots.has(sessionId)) { dormant.add(sessionId); return; }
             emit({ type: 'session.closed', sessionId });
             return;
           case 'session.failed':
+            listedCommands.delete(sessionId);
             emit({ type: 'session.runtime_failed', sessionId, error: event.error });
             return;
           case 'prompt.accepted':
@@ -490,6 +493,7 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
           if (!endsRoot(error)) throw error;
           roots.delete(sessionId);
           dormant.delete(sessionId);
+          listedCommands.delete(sessionId);
           emit({ type: 'session.runtime_failed', sessionId, error: errorData(error) });
         }
       }
@@ -693,7 +697,9 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
           const { prompt } = input;
           await wake(input.sessionId);
           const sessionId = toAlpd(input.sessionId);
-          // A command chosen from the "/" list is the text the user would type for it (t-f628).
+          // A command chosen from the "/" list is the text the user would type for it (t-f628); a name
+          // with a space or a control character would be another command or more text, so it is refused.
+          if (prompt.input.type === 'command' && !/^[^\s\u0000-\u001f\u007f]{1,256}$/.test(prompt.input.name)) throw new Error('A command name has no spaces or control characters');
           const content = prompt.input.type === 'command'
             ? [{ type: 'text' as const, text: `/${prompt.input.name}${prompt.input.arguments ? ` ${prompt.input.arguments}` : ''}` }]
             : await promptContent(sessionId, prompt.clientMessageId, prompt.input.content);
@@ -716,6 +722,7 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
           // Closing a view: alpd closes the session once idle, or lets running work finish.
           await client.request('session.release', { sessionId: toAlpd(input.sessionId) });
           roots.delete(input.sessionId);
+          listedCommands.delete(input.sessionId);
           cwds.delete(input.sessionId);
           dormant.delete(input.sessionId);
         } else if (input.type === 'session.interrupt') {

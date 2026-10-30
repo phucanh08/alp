@@ -270,6 +270,7 @@ capability and the root's summary allows it (`conversation.fork`, `rewind`, `rel
 | `rewind(params)` | `session.rewind`: the root continues from before `beforeTurnId` under the same id; the later turns stay a branch | `session.rewind` |
 | `reload(params)` | `session.reload`: a live root's native process restarts on its own conversation | `session.reload` |
 | `resumeCommand(params)` | `session.resumeCommand`: the `alp attach` command for the clipboard, never to run | `session.resumeCommand` |
+| `commands(params)` | `session.commands`: the slash commands and skills a composer offers after "/" (§12.12) | `session.commands` |
 | `configure(params)` | `session.configure` with `model`, `thinking` or `team` (plus `requestId` and `ifGeneration`): a restart on the same conversation | `session.configure.live` |
 | `configurePreview(params)` | `session.configure.preview`: what a change would run with, and whether it would be taken now; reads only | `session.configure.live` |
 

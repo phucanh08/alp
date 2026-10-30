@@ -32,6 +32,7 @@ Public imports use the package root and its explicitly exported subpaths. See [a
 `session.fork`, `session.rewind`, `session.reload`, `session.resumeCommand` and
 `session.configure.live`; docs/protocol/alp-json-rpc-v1.md §12.7–§12.9): `fork`, `rewind`, `reload`,
 `resumeCommand`, `configure` and `configurePreview`. They change only the conversation, never a file.
+`commands` (capability `session.commands`, §12.12) lists the slash commands and skills a composer offers after "/".
 Each mutation is sent once: keep its `requestId` and `ifGeneration` (the generation `session.history`
 answered) and send the identical request again only after a lost answer, which alpd answers with the
 first result and `duplicate: true`. After a rewind, attached clients get `history.reset`: drop the

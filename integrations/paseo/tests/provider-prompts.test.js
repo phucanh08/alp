@@ -182,7 +182,11 @@ test('native commands are sent as their slash text', async t => {
   assert.deepEqual(f.calls.at(-1).params.content, [{ type: 'text', text: '/compact' }]);
   const sent = f.calls.length;
   for (const invalid of [{ type: 'command', name: 'compact' }, { type: 'command', name: 7, arguments: '' }]) await assert.rejects(f.send(invalid));
-  assert.equal(f.calls.length, sent);
+  for (const name of ['two words', 'line\nbreak']) {
+    await f.send({ type: 'command', name, arguments: '' });
+    assert.equal(f.events.at(-1).result.type, 'failed');
+  }
+  assert.equal(f.calls.filter(call => call.method === 'session.prompt').length, 2, 'no prompt for a malformed name');
 });
 
 test('a ready root gets its slash commands and skills, again after a turn only when they change', async t => {
@@ -199,6 +203,11 @@ test('a ready root gets its slash commands and skills, again after a turn only w
   f.envelope('s', { type: 'turn.ended', turnId: 't2', state: 'completed' });
   assert.equal((await offered(2)).at(-1).commands.at(-1).name, 'alp:bug-loop');
   assert.ok(f.calls.filter(call => call.method === 'session.commands').every(call => call.params.sessionId === 's'));
+  // A closed agent loses its list in Paseo: reopened, it is offered the same list again.
+  await f.connection.send({ type: 'session.close', requestId: 'close', sessionId: 's' });
+  f.envelope('s', { type: 'session.closed' });
+  f.envelope('s', { type: 'session.ready' });
+  assert.equal((await offered(3)).length, 3);
 });
 
 test('no slash commands are asked for when alpd does not list session.commands', async t => {
