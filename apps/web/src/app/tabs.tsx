@@ -55,8 +55,8 @@ type TabsValue = {
   /** The tab a pane shows. */
   activeOf: (paneId: string) => Tab | null;
   focusPane: (paneId: string) => void;
-  /** Paseo's Split pane right / down: a new pane beside the focused one with a New tab. */
-  splitEmpty: (position: 'right' | 'bottom') => void;
+  /** Paseo's Split pane right / down (and ALP's left / up): a new pane with a New tab beside `target`, else the focused pane. */
+  splitEmpty: (position: SplitPosition, target?: string) => void;
   /** Whether splitEmpty can run now. */
   canSplitEmpty: boolean;
   /** A New tab picked: it gives way to `open`'s tab, in its pane. */
@@ -454,13 +454,13 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
   }, [panes, byPane, leaving, activate]);
 
   const canSplitEmpty = !!workspace;
-  const splitEmpty = React.useCallback((position: 'right' | 'bottom') => {
+  const splitEmpty = React.useCallback((position: SplitPosition, target = focusedPane) => {
     if (!canSplitEmpty) return;
     const used = new Set(launchers);
     let n = 1;
     while (used.has(`n${n}`)) n += 1;
     const launcher: Tab = { kind: 'launcher', id: `n${n}` };
-    const next = splitPane(panes, { target: focusedPane, position, key: tabKey(launcher) });
+    const next = splitPane(panes, { target, position, key: tabKey(launcher) });
     if (!next) return;
     setPanes(next);
     setLaunchers(current => [...current, launcher.id]);
