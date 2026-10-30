@@ -5,7 +5,7 @@ import path from 'node:path';
 import { AlpError } from './errors.js';
 import { assertNoSymlinks } from './safe-path.js';
 import { describeVerification } from './verify.js';
-import { applyLedger, ledgerAdopt, ledgerResolve, readLedger } from './gate-ledger.js';
+import { applyLedger, ledgerAdopt, ledgerPrune, ledgerResolve, readLedger } from './gate-ledger.js';
 
 /**
  * ALP sets this in the environment of every agent process it starts (t-ca1f). The CLI and
@@ -462,8 +462,8 @@ export function startTask(projectRoot, id, assignee, by, options) {
  * needs the last verification to have passed, or `unverified`: why it is done
  * anyway. The user may always close; the failed verification is noted.
  */
-export function closeTask(projectRoot, id, { reason = 'done', summary, unverified } = {}, by, options) {
-  return mutate(projectRoot, id, (task, tasks) => {
+export function closeTask(projectRoot, id, { reason = 'done', summary, unverified, agent = false, channel } = {}, by, options) {
+  return mutate(projectRoot, id, async (task, tasks) => {
     if (!CLOSE_REASONS.includes(reason)) fail('INVALID_TASK', `reason must be one of ${CLOSE_REASONS.join(', ')}`);
     const closing = checkText(summary, 'summary', NOTE_CHARS);
     let excuse = checkText(unverified, 'unverified', NOTE_CHARS);
@@ -473,6 +473,18 @@ export function closeTask(projectRoot, id, { reason = 'done', summary, unverifie
     if (reason === 'done' && verificationFailed(task) && !excuse?.trim()) {
       if (by !== 'user') fail('TASK_UNVERIFIED', `${id}'s last ${describeVerification(task.verified)}; fix it and verify again, or close it with unverified saying why it is done anyway`);
       excuse = `the user closed it after ${describeVerification(task.verified)}`;
+    }
+    // Only the user decides a human gate, and a formula's human step is the user's to do (t-f438):
+    // no agent closes such a task, for any reason. The user may; the open human gates are then
+    // recorded as overridden by the user, in the gate ledger first, so no edit is taken for tampering.
+    const held = (task.gates ?? []).filter(gate => gate.kind === 'human' && !gate.resolved);
+    if (held.length || task.step?.human) {
+      if (agent || by !== 'user') fail('GATE_USER_ONLY', `Only the user closes ${id}: ${held.length ? `it waits on ${held.map(describeGate).join('; ')}` : 'it is a step for the user'}. Ask the user to decide it`);
+      checkChannel(channel);
+      for (const gate of held) await ledgerResolve(projectRoot, task.id, gate, { by, channel });
+      const note = `overridden: the user closed ${id} (${reason})`;
+      task.gates = task.gates.map(gate => held.includes(gate) ? { ...gate, resolved: { at: now(), by, note, overridden: true, ...(channel ? { channel } : {}) } } : gate);
+      for (const gate of held) addLog(task, by, 'gate overridden', { gate: describeGate(gate), ...(channel ? { channel } : {}) });
     }
     task.status = 'closed';
     task.closed = { at: now(), by, reason, ...(closing ? { summary: closing } : {}), ...(excuse ? { unverified: excuse } : {}) };
@@ -808,6 +820,7 @@ export function gateDecisions(tasks) {
   const found = [];
   for (const task of tasks) for (const gate of task.gates ?? []) {
     if (gate.kind !== 'human') continue;
+    if (gate.resolved?.overridden) continue;
     if (gate.resolved?.channel && !gate.resolved.notified) found.push({ task, gate, decision: 'approved', record: gate.resolved });
     else if (!gate.resolved && gate.rejected?.channel && !gate.rejected.notified) found.push({ task, gate, decision: 'rejected', record: gate.rejected });
   }
@@ -879,7 +892,7 @@ const clipText = (text, limit) => text.length > limit ? `${text.slice(0, limit -
 export async function compactTasks(projectRoot, { days = 30, dryRun = false } = {}, by) {
   if (!Number.isFinite(days) || days < 0) fail('INVALID_TASK', 'days must be a number of days, 0 or more');
   return locked(projectRoot, async () => {
-    const { tasks } = await loadTasks(projectRoot);
+    const { tasks, errors } = await loadTasks(projectRoot);
     const cutoff = Date.now() - days * 86_400_000;
     const compacted = [];
     for (const task of tasks) {
@@ -903,6 +916,8 @@ export async function compactTasks(projectRoot, { days = 30, dryRun = false } = 
       compacted.push({ id: task.id, before, after });
       if (!dryRun) await save(projectRoot, next);
     }
+    // The gate ledger sheds what no longer guards anything (t-f438); best-effort, as ledgering is.
+    if (!dryRun) await ledgerPrune(projectRoot, tasks, { complete: !errors?.length }).catch(() => {});
     return compacted;
   });
 }

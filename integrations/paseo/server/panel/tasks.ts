@@ -48,7 +48,7 @@ export function registerTaskRpc(server: PluginServerContext) {
   server.handle(tasksChange, async ({ directory, id, action, gate, note, choice }) => {
     const root = await requireProject(directory);
     const task =
-      action === 'close' ? await closeTask(root, id, { reason: 'done', ...(note ? { summary: note } : {}) }, 'user')
+      action === 'close' ? await closeTask(root, id, { reason: 'done', ...(note ? { summary: note } : {}), channel: 'paseo' }, 'user')
       : action === 'reopen' ? await reopenTask(root, id, { ...(note ? { note } : {}) }, 'user')
       // A gate decision made here is recorded with channel paseo; alpd reads it and tells main by mail.
       : action === 'reject' ? await rejectGate(root, id, gate ?? '', { by: 'user', channel: 'paseo', ...(note ? { reason: note } : {}) })
