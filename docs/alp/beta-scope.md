@@ -1,5 +1,7 @@
 # Phạm vi beta (`0.0.0-beta.1`, `0.0.0-beta.2`, `0.0.1-beta.3`, `0.0.1-beta.4`)
 
+> **Beta.5 (`0.0.1-beta.5`, t-1e02):** cùng version cho npm (dist-tag `beta`) và binary GitHub release (release thường, không prerelease); xem [beta-release-notes.md](beta-release-notes.md) và [binary-install.md](binary-install.md). Chưa publish.
+>
 > **Beta.4 (`0.0.1-beta.4`):** phạm vi và gate ở **§13**; chưa publish.
 
 > **Beta.3 (`0.0.1-beta.3`):** phạm vi, gate, kế hoạch publish và acceptance ở **§12**, dùng lại

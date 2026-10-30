@@ -1,3 +1,18 @@
+# ALP 0.0.1-beta.5 — release notes
+
+Prepared 2026-10-30 (task t-1e02). This is the first version shipped two ways, with the same
+version number in both:
+
+- **npm**: all eight public packages use `0.0.1-beta.5`, internal dependencies pinned to it, published
+  under the `beta` dist-tag (`npm install -g @anhlp/alp@beta`), never `latest`.
+- **Standalone executable**: a GitHub release `v0.0.1-beta.5` with archives for macOS and Linux
+  (glibc), arm64 and x64, `SHA256SUMS`, build provenance and `install.sh`
+  ([binary-install.md](binary-install.md)). The release is a normal release, not a prerelease, so
+  `releases/latest/download/install.sh` installs it.
+
+`release-binaries.yml` only creates the draft; the owner reviews it and publishes it by hand, and
+publishes npm separately. Nothing else changes from `0.0.1-beta.4` below.
+
 # ALP 0.0.1-beta.4 — release notes
 
 Prepared 2026-10-27. Publication and acceptance results will be recorded in

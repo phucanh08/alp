@@ -13,7 +13,7 @@ curl -fsSL https://github.com/phucanh08/alp/releases/latest/download/install.sh 
 
 | Option | Effect |
 | --- | --- |
-| `--version 0.1.0` | Installs that release (tag `v0.1.0`) instead of the latest. |
+| `--version 0.0.1-beta.5` | Installs that release (tag `v0.0.1-beta.5`) instead of the latest. |
 | `--system` | Installs to `/usr/local/bin`. It uses `sudo` only when the directory is not writable. |
 | `--dir <path>` | Installs to `<path>`. |
 | `--no-modify-path` | Leaves your shell profile alone and only prints the PATH line. |
@@ -52,4 +52,4 @@ node --test test/integration/binary-release.test.js     # archive layout and ins
 
 - **`binary` in `ci.yml`** (`.github/workflows/binary-build.yml`) runs on every PR and push to main. It builds natively on four runners: macos-14 (darwin-arm64), macos-15-intel (darwin-x64), ubuntu-24.04 (linux-x64) and ubuntu-24.04-arm (linux-arm64), with a pinned `oven-sh/setup-bun` and Bun 1.4.2. It runs both smokes. The Node-less smoke runs in `debian:bookworm-slim` on Linux and under `env -i PATH=/usr/bin:/bin` on macOS. Then it packs the archive. A separate job runs shellcheck on `install.sh`.
 - **`release-binaries.yml`** is started by hand with `workflow_dispatch` from main, with a `sha` input that must be a full commit on main. Its `draft` job runs in the `release` environment, which admits deployments from main only. It runs the same build. Then it writes `SHA256SUMS`, attests build provenance for every archive and `install.sh`, and creates a **draft** release `v<version>` (the version comes from `packages/cli/package.json`). An existing draft is replaced. A published release is never touched. The workflow never publishes anything. The owner reviews the draft and publishes it, and publishing creates the tag.
-- `releases/latest/download` resolves only to a published release that is not marked as a prerelease. If a beta is published as a prerelease, install it with `--version`.
+- **Version policy.** npm and the executable share one version, the one in every `package.json` (first: `0.0.1-beta.5`). npm keeps betas on the `beta` dist-tag. The binary release is a normal release, not a prerelease: the workflow creates the draft with `--prerelease=false` and fails if the draft says otherwise, because `releases/latest/download` resolves only to a published release that is not a prerelease. Do not tick "Set as a pre-release" when publishing, or `install.sh` without `--version` keeps installing the previous release.

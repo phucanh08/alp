@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp-gateway",
-  "version": "0.0.1-beta.4",
+  "version": "0.0.1-beta.5",
   "private": true,
   "type": "module",
   "description": "ALP remote gateway: authenticated WebSocket access to one user's alpd over Protocol v1, through the client SDK",
@@ -44,9 +44,9 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@anhlp/alp-client": "0.0.1-beta.4",
-    "@anhlp/alp-core": "0.0.1-beta.4",
-    "@anhlp/alp-protocol": "0.0.1-beta.4",
+    "@anhlp/alp-client": "0.0.1-beta.5",
+    "@anhlp/alp-core": "0.0.1-beta.5",
+    "@anhlp/alp-protocol": "0.0.1-beta.5",
     "ws": "^8.22.0"
   },
   "scripts": {
