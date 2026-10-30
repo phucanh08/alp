@@ -31,8 +31,8 @@ export function QuestionCard({ question, onAnswer, onDecline, busy, blocked }: {
   return (
     <section aria-label={`Question from ${question.agent}`} className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3" data-testid="question">
       <div className="flex flex-col gap-1 px-3 pt-1">
-        {asker ? <p className="text-[13px] text-muted-foreground">{asker} asks</p> : null}
-        <p className="whitespace-pre-wrap text-[15px] leading-[22px] text-foreground [overflow-wrap:anywhere]" data-testid="question-text">{question.body}</p>
+        {asker ? <p className="text-[length:calc(13px*var(--ui-scale))] text-muted-foreground">{asker} asks</p> : null}
+        <p className="whitespace-pre-wrap text-(length:--content-font-size) leading-[1.467] text-foreground [overflow-wrap:anywhere]" data-testid="question-text">{question.body}</p>
       </div>
       <div className="flex flex-col gap-1">
         {options.length ? (
@@ -53,7 +53,7 @@ export function QuestionCard({ question, onAnswer, onDecline, busy, blocked }: {
                 <button key={`${index}:${option}`} type="button" role="radio" aria-checked={checked} disabled={disabled}
                   tabIndex={checked || (selected == null && index === 0) ? 0 : -1}
                   onClick={() => { setSelected(checked ? null : index); setText(''); }}
-                  className={cn('flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-[15px] leading-[22px] outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring active:opacity-90 disabled:pointer-events-none disabled:opacity-50',
+                  className={cn('flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-(length:--content-font-size) leading-[1.467] outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring active:opacity-90 disabled:pointer-events-none disabled:opacity-50',
                     checked ? 'bg-muted text-foreground' : 'text-muted-foreground')}>
                   <span aria-hidden className={cn('flex size-[18px] shrink-0 items-center justify-center rounded-full border', checked ? 'border-primary' : 'border-input')}>
                     {checked ? <span className="size-2.5 rounded-full bg-primary" /> : null}
@@ -69,7 +69,7 @@ export function QuestionCard({ question, onAnswer, onDecline, busy, blocked }: {
           onChange={event => { setText(event.target.value); if (event.target.value) setSelected(null); }}
           onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); submit(); } }}
           placeholder={options.length ? 'Other...' : 'Type your answer...'}
-          className="w-full rounded-lg border border-transparent bg-muted p-3 text-[15px] text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-input disabled:cursor-not-allowed disabled:opacity-50" />
+          className="w-full rounded-lg border border-transparent bg-muted p-3 text-(length:--content-font-size) text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-input disabled:cursor-not-allowed disabled:opacity-50" />
       </div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <button type="button" disabled={disabled} onClick={dismiss}

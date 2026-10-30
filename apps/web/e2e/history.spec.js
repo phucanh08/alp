@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test';
 import { startWorld } from './support/world.js';
-import { connect, newSession, send, idle, assistant } from './support/app.js';
+import { connect, fullChat, newSession, send, idle, assistant } from './support/app.js';
 let world;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 test('650 history items load older with a stable visible anchor, then append and reconnect once', async ({ page }, info) => {
+  await fullChat(page);
   await connect(page, world);
   await newSession(page, 'Durable history');
   await send(page, '[history650]');

@@ -42,8 +42,19 @@
   --input: #2f3534;
   --ring: #7ccba0;
   --radius: 0.625rem;
-  /* The chat column's maximum width: Appearance › Content width (lib/theme.ts applyContentWidth). */
+  /*
+   * Appearance (lib/theme.ts applyAppearance): the chat column's maximum width, the interface
+   * scale (Interface size / 14), chat text and code sizes, and the two font stacks.
+   */
   --content-width: 820px;
+  --ui-scale: 1;
+  --content-font-size: 15px;
+  --code-font-size: 12px;
+  --app-font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --app-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* The terminal's black and bright black (the rest of its palette is per light/dark, lib/theme.ts). */
+  --terminal-black: #141716;
+  --terminal-bright-black: #434645;
   /* Surfaces that were literal colors: the composer's focused border, the error toast, scrollbars, the connect glow. */
   --input-focus: #3d4544;
   --notice-error: #2a1515;
@@ -92,6 +103,57 @@
   --scrollbar: #d4d4d8;
   --glow: #e3f1e8;
   --shadow: rgb(0 0 0 / 0.12);
+  --terminal-black: #1a1a1e;
+  --terminal-bright-black: #3f3f46;
+}
+
+/*
+ * Paseo's dark variants (styles/theme.ts zinc, midnight, claude, ghostty and pure black tints),
+ * mapped onto the tokens as the default dark one is: background surface0, sidebar surfaceSidebar,
+ * hover/selected/card surface1-2, bubble surface3, primary its accent, highlight accentBright.
+ */
+:root[data-theme="zinc"], :root[data-theme="midnight"], :root[data-theme="claude"], :root[data-theme="ghostty"], :root[data-theme="pureBlack"] {
+  --foreground: #fafafa;
+  --card-foreground: #fafafa;
+  --popover-foreground: #fafafa;
+  --secondary-foreground: #fafafa;
+  --accent-foreground: #fafafa;
+  --primary-foreground: #ffffff;
+}
+:root[data-theme="zinc"] {
+  --background: #18181b; --sidebar: #131316; --sidebar-hover: #1f1f22; --sidebar-selected: #27272a; --extra-muted: #71717a;
+  --card: #1f1f22; --popover: #1f1f22; --primary: #e4e4e7; --primary-foreground: #18181b; --highlight: #fafafa;
+  --secondary: #27272a; --muted: #27272a; --muted-foreground: #a1a1aa; --accent: #27272a; --bubble: #3f3f46;
+  --stop: #c44a4a; --border: #27272a; --input: #303036; --ring: #fafafa; --input-focus: #52525b; --scrollbar: #303036; --glow: #232326;
+  --terminal-black: #131316; --terminal-bright-black: #3f3f46;
+}
+:root[data-theme="midnight"] {
+  --background: #161820; --sidebar: #121420; --sidebar-hover: #1c1e27; --sidebar-selected: #252731; --extra-muted: #6b6e82;
+  --card: #1c1e27; --popover: #1c1e27; --primary: #3b6fcf; --highlight: #7eaaeb;
+  --secondary: #252731; --muted: #252731; --muted-foreground: #9a9db0; --accent: #252731; --bubble: #3c3e4c;
+  --stop: #c44a52; --border: #242636; --input: #2e3040; --ring: #7eaaeb; --input-focus: #535564; --scrollbar: #2e3040; --glow: #1b2236;
+  --terminal-black: #121420; --terminal-bright-black: #3c3e4c;
+}
+:root[data-theme="claude"] {
+  --background: #1f1f1e; --sidebar: #1a1918; --sidebar-hover: #262523; --sidebar-selected: #2f2d2b; --extra-muted: #78746f;
+  --card: #262523; --popover: #262523; --primary: #d97757; --highlight: #e89a7f;
+  --secondary: #2f2d2b; --muted: #2f2d2b; --muted-foreground: #ada9a5; --accent: #2f2d2b; --bubble: #4a4745;
+  --stop: #cf513e; --border: #2c2a27; --input: #36332f; --ring: #e89a7f; --input-focus: #605d5b; --scrollbar: #36332f; --glow: #2c221d;
+  --terminal-black: #1a1918; --terminal-bright-black: #4a4745;
+}
+:root[data-theme="ghostty"] {
+  --background: #282c34; --sidebar: #21252d; --sidebar-hover: #2f333d; --sidebar-selected: #383c48; --extra-muted: #a0a4b2;
+  --card: #2f333d; --popover: #2f333d; --primary: #89b4fa; --highlight: #b4d0fc;
+  --secondary: #383c48; --muted: #383c48; --muted-foreground: #c8ccd8; --accent: #383c48; --bubble: #4a4f5e;
+  --stop: #c44a55; --border: #353a47; --input: #3f4454; --ring: #b4d0fc; --input-focus: #5b6175; --scrollbar: #3f4454; --glow: #2c3446;
+  --terminal-black: #21252d; --terminal-bright-black: #4a4f5e;
+}
+:root[data-theme="pureBlack"] {
+  --background: #000000; --sidebar: #000000; --sidebar-hover: #0a0a0a; --sidebar-selected: #111111; --extra-muted: #71717a;
+  --card: #0a0a0a; --popover: #0a0a0a; --primary: #20744a; --highlight: #7ccba0;
+  --secondary: #111111; --muted: #111111; --muted-foreground: #a1a1aa; --accent: #111111; --bubble: #202020;
+  --stop: #c44a4a; --border: #1c1c1c; --input: #242424; --ring: #7ccba0; --input-focus: #2d2d2d; --scrollbar: #242424; --glow: #0b1a12;
+  --terminal-black: #595959; --terminal-bright-black: #8a8a8a;
 }
 
 @theme inline {
@@ -131,8 +193,14 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-sans: var(--app-font-sans);
+  --font-mono: var(--app-font-mono);
+  /* Interface size scales Tailwind's text sizes (Paseo scales its ramp from the base size). */
+  --text-xs: calc(0.75rem * var(--ui-scale));
+  --text-sm: calc(0.875rem * var(--ui-scale));
+  --text-base: calc(1rem * var(--ui-scale));
+  --text-lg: calc(1.125rem * var(--ui-scale));
+  --text-xl: calc(1.25rem * var(--ui-scale));
 }
 
 @layer base {
@@ -142,7 +210,7 @@
     background: var(--background);
     color: var(--foreground);
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: calc(14px * var(--ui-scale));
     letter-spacing: -0.003em;
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;

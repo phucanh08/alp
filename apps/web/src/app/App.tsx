@@ -13,7 +13,7 @@ import { HistoryScreen } from './History';
 import { ShortcutsDialog, useShortcuts } from './Shortcuts';
 import { TabsProvider, tabKey, useTabs, type Tab } from './tabs';
 import { can } from '../lib/gateway.js';
-import { applyContentWidth, applyTheme } from '../lib/theme';
+import { applyAppearance, applyTheme } from '../lib/theme';
 import { BINDINGS, formatShortcut, isMacPlatform, shortcutKeys, type Binding } from '../lib/shortcuts.js';
 import { baseName, relativeTime, sessionName } from '../lib/format';
 import { CommandCenter, type CommandScope, type RunnableAction } from './CommandCenter';
@@ -391,7 +391,7 @@ function Shell() {
           {...(!medium && !navOpen ? { inert: true } : {})}>
           {medium ? <ResizeHandle which="sidebar" side="right" width={sidebarWidth.width} onWidth={sidebarWidth.setWidth} onCommit={sidebarWidth.save} testId="left-sidebar-resize-handle" /> : null}
           <Sidebar onNewSession={() => { toWorkspace(); newSession(); }} onRename={setRenaming} onArchive={setArchiving} onSettings={() => setSettings(true)} onNavigate={() => setNavOpen(false)} onClose={medium ? undefined : () => setNavOpen(false)}
-            onHistory={() => openHistory()} historyOpen={history} onOpenSession={() => toWorkspace()} searchRequest={searchRequest} onSearchRequestHandled={() => setSearchRequest(0)} />
+            onHistory={() => openHistory()} historyOpen={history} onTasks={() => { if (workspace) { setHistory(false); setTasksScreen(true); } }} tasksOpen={tasksScreen} onOpenSession={() => toWorkspace()} searchRequest={searchRequest} onSearchRequestHandled={() => setSearchRequest(0)} />
         </div>
       )}
 
@@ -447,8 +447,10 @@ function Shell() {
 export function App() {
   const { principal, connection, preferences } = useAppState();
   // Before paint, so a reload in light mode does not flash the dark palette.
-  React.useLayoutEffect(() => applyTheme(preferences.theme), [preferences.theme]);
-  React.useLayoutEffect(() => applyContentWidth(preferences.contentWidth), [preferences.contentWidth]);
+  React.useLayoutEffect(() => applyTheme(preferences.theme, preferences.syntaxTheme), [preferences.theme, preferences.syntaxTheme]);
+  const { uiFontFamily, monoFontFamily, uiFontSize, contentFontSize, codeFontSize, contentMaxWidth } = preferences;
+  React.useLayoutEffect(() => applyAppearance({ uiFontFamily, monoFontFamily, uiFontSize, contentFontSize, codeFontSize, contentMaxWidth }),
+    [uiFontFamily, monoFontFamily, uiFontSize, contentFontSize, codeFontSize, contentMaxWidth]);
   const connected = !!principal && (connection.phase === 'open' || connection.phase === 'reconnecting');
   return connected ? <Shell /> : <ConnectScreen />;
 }

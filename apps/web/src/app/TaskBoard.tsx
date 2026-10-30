@@ -34,7 +34,7 @@ function StateDot({ state }: { state: TaskState }) {
 
 /** A priority badge: P0 and P1 stand out. */
 function Priority({ value }: { value: number }) {
-  return <span className={cn('shrink-0 rounded border px-1 text-[10.5px] font-semibold tabular-nums leading-4', value === 0 ? 'border-destructive text-destructive' : value === 1 ? 'border-warning text-warning' : 'border-border text-muted-foreground')}>P{value}</span>;
+  return <span className={cn('shrink-0 rounded border px-1 text-[length:calc(10.5px*var(--ui-scale))] font-semibold tabular-nums leading-4', value === 0 ? 'border-destructive text-destructive' : value === 1 ? 'border-warning text-warning' : 'border-border text-muted-foreground')}>P{value}</span>;
 }
 
 /**
@@ -94,7 +94,7 @@ export function Tasks({ onPicked, onOpen, current: shown }: { onPicked?: () => v
             return (
               <button key={key} type="button" aria-pressed={on} onClick={() => setBoard(state => ({ ...state, filter: key }))} data-testid={`tasks-filter-${key}`}
                 className={cn('h-6 rounded-full border px-2.5 text-xs', on ? 'border-foreground bg-foreground font-semibold text-background' : 'border-border text-foreground hover:bg-secondary', focusRing)}>
-                {key[0].toUpperCase() + key.slice(1)} <span className="text-[11px] opacity-60">{counts[key]}</span>
+                {key[0].toUpperCase() + key.slice(1)} <span className="text-[length:calc(11px*var(--ui-scale))] opacity-60">{counts[key]}</span>
               </button>
             );
           })}
@@ -264,7 +264,7 @@ function BoardView({ tasks, isCurrent, onOpen }: Pick & { tasks: TaskRow[] }) {
                       <span className="flex-1" />
                       <span className="tabular-nums">{age(column.key === 'closed' ? task.closed?.at : task.updatedAt)}</span>
                     </span>
-                    <span className={cn('line-clamp-3 text-[13px] leading-[18px]', column.key === 'closed' && 'text-muted-foreground')}>{task.title}</span>
+                    <span className={cn('line-clamp-3 text-[length:calc(13px*var(--ui-scale))] leading-[18px]', column.key === 'closed' && 'text-muted-foreground')}>{task.title}</span>
                     {task.assignee ? <span className="truncate text-xs text-muted-foreground">@{task.assignee}</span> : null}
                     {task.blockedBy?.length ? <span className="truncate text-xs text-dot-danger">after {task.blockedBy.join(', ')}</span> : null}
                     {task.labels?.length ? <span className="flex flex-wrap gap-1.5 text-xs text-info">{task.labels.map(label => <span key={label}>#{label}</span>)}</span> : null}

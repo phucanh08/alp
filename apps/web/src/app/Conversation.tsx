@@ -53,7 +53,7 @@ export function RewindAction({ entryKey }: { entryKey: string }) {
   return (
     <button type="button" data-testid="rewind-action" aria-label="Rewind to here…" title={value.rewind.reason ?? 'Rewind to here… (the conversation only; files are not changed)'}
       disabled={!!value.rewind.reason} onClick={() => value.askRewind(entryKey)}
-      className="flex shrink-0 items-center gap-1 rounded p-1 text-[13px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-45 [&_svg]:size-3.5">
+      className="flex shrink-0 items-center gap-1 rounded p-1 text-[length:calc(13px*var(--ui-scale))] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-45 [&_svg]:size-3.5">
       <Undo2 aria-hidden /><span>Rewind to here…</span>
     </button>
   );
@@ -69,7 +69,7 @@ export function ForkAction({ userKeys }: { userKeys: string[] }) {
   return (
     <button type="button" data-testid="fork-action" aria-label="Fork from here…" title={value.fork.reason ?? 'Fork from here… (a new session with this conversation; files are not copied)'}
       disabled={!!value.fork.reason} onClick={() => value.askFork(turn.turnId)}
-      className="flex shrink-0 items-center gap-1 rounded p-1 text-[13px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-45 [&_svg]:size-3.5">
+      className="flex shrink-0 items-center gap-1 rounded p-1 text-[length:calc(13px*var(--ui-scale))] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-45 [&_svg]:size-3.5">
       <GitFork aria-hidden /><span>Fork from here…</span>
     </button>
   );
@@ -203,7 +203,7 @@ export function ForkDialog({ turnId, title, onClose }: { turnId: string | null; 
 /** A divider between two rules, as the compaction marker. */
 function Divider({ children, testId }: { children: React.ReactNode; testId: string }) {
   return (
-    <div className="flex items-center gap-2 px-1 py-3 text-[13px] text-muted-foreground" data-testid={testId} role="note">
+    <div className="flex items-center gap-2 px-1 py-3 text-[length:calc(13px*var(--ui-scale))] text-muted-foreground" data-testid={testId} role="note">
       <span aria-hidden className="h-px min-w-6 flex-1 bg-border" />
       <span className="flex min-w-0 flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center [&_svg]:size-3.5">{children}</span>
       <span aria-hidden className="h-px min-w-6 flex-1 bg-border" />

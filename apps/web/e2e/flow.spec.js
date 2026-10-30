@@ -3,7 +3,7 @@
 // tasks with a human gate, rename; the token never lands in storage, the URL or the gateway log.
 import { expect, test } from '@playwright/test';
 import { startWorld } from './support/world.js';
-import { assistant, connect, idle, newSession, openDockPanel, openTasks, send, users } from './support/app.js';
+import { assistant, connect, fullChat, idle, newSession, openDockPanel, openTasks, send, users } from './support/app.js';
 
 /** @type {Awaited<ReturnType<typeof startWorld>>} */
 let world;
@@ -11,6 +11,7 @@ test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
 test('create, stream, tool call, questions, stop, rename', async ({ page }) => {
+  await fullChat(page);
   await connect(page, world);
   const project = page.getByTestId('project-row');
   await expect(project).toHaveAttribute('data-workspace', world.projects.main);
@@ -162,13 +163,13 @@ test('settings: the old app\'s layout, what the token allows, names from the lib
   const settings = page.getByRole('region', { name: 'Settings' });
   await expect(settings.getByTestId('settings-detail-header-title')).toHaveText('General');
 
-  // The old app's App pages, in its order.
-  for (const name of ['General', 'Appearance', 'Sidebar', 'Chat', 'Terminal', 'Editor', 'Diagnostics', 'About']) await expect(settings.getByRole('button', { name, exact: true })).toBeVisible();
+  // Paseo 0.14's App pages on the web, in its order.
+  for (const name of ['General', 'Appearance', 'Sidebar', 'Chat', 'Terminal', 'Editor', 'Files', 'Diagnostics', 'About']) await expect(settings.getByRole('button', { name, exact: true })).toBeVisible();
 
   // General: what Enter does while the agent works.
   await settings.getByLabel('Default send').selectOption('queue');
   await expect(settings.getByLabel('Default send')).toHaveValue('queue');
-  await expect(settings).toContainText('Enter queues. Command/Ctrl+Enter steers');
+  await expect(settings).toContainText('Enter queues. Command/Ctrl+Enter submits.');
   await settings.getByLabel('Default send').selectOption('steer');
   await expect(settings.getByLabel('Default send')).toHaveValue('steer');
 
