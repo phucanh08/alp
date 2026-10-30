@@ -67,6 +67,15 @@ test('font families are kept as typed (trimmed, up to 200 characters), never CSS
   for (const bad of ['x'.repeat(201), 'Inter; color: red', 'a{b}', '</style>', 'a\\b', 42]) assert.equal(parse({ uiFontFamily: bad }).uiFontFamily, '', String(bad));
 });
 
+test('font families never carry a CSS function: url() and var() are dropped, quoted names kept', () => {
+  for (const bad of ['url(https://example.com/font.woff2)', 'Inter, url("x.woff")', 'URL(x)', 'var(--app-font-mono)', 'Inter, var(--x), sans-serif', 'env(safe-area-inset-top)', 'attr(data-font)', 'image-set("a.png" 1x)', 'Inter ( x )']) {
+    assert.equal(parse({ uiFontFamily: bad }).uiFontFamily, '', bad);
+    assert.equal(parse({ monoFontFamily: bad }).monoFontFamily, '', bad);
+  }
+  assert.equal(parse({ uiFontFamily: '"Inter Var", system-ui, -apple-system' }).uiFontFamily, '"Inter Var", system-ui, -apple-system');
+  assert.equal(parse({ monoFontFamily: '\'Fira Code\', ui-monospace' }).monoFontFamily, '\'Fira Code\', ui-monospace');
+});
+
 test('sidebar sections keep the stored order and switches; unknown rows are dropped, missing ones added', () => {
   const sidebar = parse({ sidebar: { header: [{ id: 'search', visible: false }, { id: 'nope' }, { id: 'search', visible: true }, { id: 'new-session', visible: true }], footer: [{ id: 'tasks', visible: true }, { id: 'history', visible: true }] } }).sidebar;
   assert.deepEqual(sidebar, {

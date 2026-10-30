@@ -109,11 +109,16 @@ function clamped(value, [min, max, fallback]) {
   return typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : fallback;
 }
 
-/** A font family as typed (trimmed, at most 200 characters; no CSS-breaking characters), else "". @param {unknown} value */
+/**
+ * A font family as typed (trimmed, at most 200 characters), else "": no CSS-breaking characters,
+ * and no parentheses, so no CSS function (url(), var(), env(), attr()...) reaches the stylesheet;
+ * a font stack is names and generic families only.
+ * @param {unknown} value
+ */
 function fontFamily(value) {
   if (typeof value !== 'string') return '';
   const trimmed = value.trim();
-  return trimmed.length <= MAX_FONT_FAMILY_LENGTH && !/[;{}<>\\]/.test(trimmed) ? trimmed : '';
+  return trimmed.length <= MAX_FONT_FAMILY_LENGTH && !/[;{}<>\\()]/.test(trimmed) ? trimmed : '';
 }
 
 /** One sidebar section: the known rows in the stored order, any missing one at its default. @param {unknown} value @param {'header' | 'footer'} section */
