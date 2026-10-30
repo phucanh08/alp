@@ -11,7 +11,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { bootTime, daemonPaths, ensureDaemon } from '../../packages/client/src/index.js';
-import { diagnose } from '../../packages/client/src/doctor.js';
+import { diagnose, diskCheck } from '../../packages/client/src/doctor.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createDaemonServer, createStore } from '../../dist/daemon/index.js';
 
@@ -163,4 +163,28 @@ test('alp acp keeps stdout to protocol frames and puts structured, scrubbed diag
   assert.deepEqual([failure.component, failure.level], ['acp', 'warn']);
   assert.match(failure.error.message, /ALP_HOME_UNUSABLE/);
   assert.ok(!stdout.join('\n').includes(SECRET) && !JSON.stringify(stderr).includes(SECRET));
+});
+
+test('alp doctor reports free disk space and the worktrees earlier runs left, deleting none (t-2831)', { skip }, async t => {
+  const { directory, home } = await privateHome(t);
+  const temp = path.join(directory, 'tmp');
+  await mkdir(path.join(home, 'worktrees', 'alp-child-1'), { recursive: true });
+  await writeFile(path.join(home, 'worktrees', 'alp-child-1', 'big'), 'x'.repeat(64 * 1024));
+  await mkdir(path.join(temp, 'alp-group14'), { recursive: true });
+  await mkdir(path.join(temp, 'other'), { recursive: true });
+  const low = await diskCheck(home, { free: 1.2 * 1024 ** 3, tempDirs: [temp] });
+  assert.equal(low.status, 'warn');
+  assert.match(low.summary, /^1\.2 GB free where ALP_HOME lives; when the disk is full, alpd pauses all work until space returns$/);
+  assert.equal(low.details.length, 2);
+  assert.match(low.details[0], /^1 left in .*worktrees, \d+ (MB|GB)$/);
+  assert.match(low.details[1], /^1 left in .*alp-\*/);
+  assert.match(low.hint, /ALP deletes none of these/);
+  const plenty = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp] });
+  assert.equal(plenty.status, 'info');
+  assert.equal(plenty.summary, '50.0 GB free where ALP_HOME lives');
+  assert.equal((await diskCheck(path.join(directory, 'empty-home'), { free: 50 * 1024 ** 3, tempDirs: [] })).status, 'ok');
+  // Nothing was removed.
+  await readFile(path.join(home, 'worktrees', 'alp-child-1', 'big'));
+  const checks = await diagnose({ home, env: { PATH: path.join(directory, 'empty') } });
+  assert.equal(checks.find(check => check.id === 'disk').id, 'disk');
 });
