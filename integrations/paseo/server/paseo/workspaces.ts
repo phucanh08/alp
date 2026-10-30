@@ -70,28 +70,40 @@ export function createWorkspaces({ rpc, broadcast, agents, inDevelopment, receip
   log?: (message: string) => void;
 }) {
   let registry: Registry = { projects: [], workspaces: [], sessions: {}, labels: { generation: hex(), seq: 0, catalog: [] } };
-  // Only registered live workspace roots have an existing daemon Git contract. Empty
-  // projects and pre-registration validation retain the isolated legacy read for now.
+  // A registered live workspace root is read by workspace.git.status. Empty projects,
+  // pre-registration validation and nested folders are read by workspace.git.facts, the
+  // owner-only facts of a host directory (this facade uses the owner's private connection).
   const registered = (directory: string) => registry.workspaces.filter(entry => entry.directory === directory && active(entry))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+  // Older daemons have neither method (-32601): only they keep the previous optional
+  // metadata seam, the bridge's own read. The checkout panels still report their own
+  // capability error, without Git.
+  const legacy = (directory: string): Promise<CheckoutFacts> => checkoutFacts(directory).catch(() => ({ isGit: false }));
+  async function directoryFacts(directory: string): Promise<CheckoutFacts> {
+    let facts;
+    try { facts = await rpc('workspace.git.facts', { directory }); }
+    catch (error: any) {
+      if (error?.code === -32601) return legacy(directory);
+      throw error;
+    }
+    if (facts.kind === 'unknown') return { isGit: false };
+    // A nested folder's facts are its enclosing repository's: repoRoot is that ancestor, never the folder.
+    if (facts.kind === 'ok' || facts.kind === 'not_repository_root') return { isGit: true, repoRoot: facts.repoRoot, currentBranch: facts.branch, remoteUrl: facts.remoteUrl, isDirty: facts.dirty };
+    throw new RequestError('Git metadata requires a supported repository');
+  }
   const git = checkoutCache(10_000, async directory => {
     const entry = registered(directory);
-    if (!entry) return checkoutFacts(directory).catch(() => ({ isGit: false }));
+    if (!entry) return directoryFacts(directory);
     // Permission, transport and read failures propagate; none are evidence of non-Git.
-    // Only explicit unsupported-contract boundaries retain legacy owner metadata.
     let status;
     try { status = await rpc('workspace.git.status', { workspaceId: entry.id }); }
     catch (error: any) {
-      // This facade uses the owner's private daemon connection. Older daemons have
-      // no workspace.git method: retain only the previous optional metadata seam.
-      // The checkout panels still report their own capability error, without Git.
-      if (error?.code === -32601) return checkoutFacts(directory).catch(() => ({ isGit: false }));
+      if (error?.code === -32601) return legacy(directory);
       throw error;
     }
     if (status.state === 'not_repository') return { isGit: false };
-    // A nested checkout is outside workspace.git's top-level-only contract. Its
-    // legacy facts retain the actual ancestor root, never the requested directory.
-    if (status.state === 'unsupported' && status.reason === 'not_repository_root') return checkoutFacts(directory).catch(() => ({ isGit: false }));
+    // A nested checkout is outside workspace.git.status's top-level-only contract.
+    if (status.state === 'unsupported' && status.reason === 'not_repository_root') return directoryFacts(directory);
     if (status.state !== 'repository') throw new RequestError('Git metadata requires a supported repository root');
     return { isGit: true, repoRoot: directory, currentBranch: status.branch, remoteUrl: status.remoteUrl, isDirty: status.dirty };
   }, directory => `${registered(directory)?.id ?? 'project-only'}:${directory}`);

@@ -4,8 +4,9 @@ import { promisify } from 'node:util';
 
 /**
  * What the app shows of a directory's checkout (ALPD §62 steps 6 and 8): whether it is git, its
- * root, branch, remote and whether anything changed. Read-only git, without optional locks, as
- * Paseo's daemon runs it.
+ * root, branch, remote and whether anything changed. alpd answers these (workspace.git.status
+ * and workspace.git.facts, workspaces.ts); `checkoutFacts` is the bridge's own read-only git,
+ * without optional locks, kept only for a daemon that has neither method (-32601).
  */
 
 const run = promisify(execFile);
@@ -37,10 +38,10 @@ export async function checkoutFacts(cwd: string): Promise<CheckoutFacts> {
   return { isGit: true, repoRoot, currentBranch: branch && branch !== 'HEAD' ? branch : null, remoteUrl, isDirty: status.trim().length > 0 };
 }
 
-/** Checkout facts kept for a while, so a poll does not run git for every directory each time. */
+/** Checkout facts kept for a while, so a poll does not ask for every directory each time. */
 export function checkoutCache(
-  ttlMs = 10_000,
-  readFacts: (cwd: string) => Promise<CheckoutFacts> = cwd => checkoutFacts(cwd).catch(() => ({ isGit: false })),
+  ttlMs: number,
+  readFacts: (cwd: string) => Promise<CheckoutFacts>,
   identity: (cwd: string) => string = cwd => cwd,
 ) {
   const entries = new Map<string, { at: number; facts: CheckoutFacts; pending?: Promise<CheckoutFacts> }>();
