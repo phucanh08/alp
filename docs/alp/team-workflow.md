@@ -782,9 +782,9 @@ answers a question an agent asked. ALP enforces this on every path it controls:
   `overridden: true`, by `user`, with the channel (`cli`, `paseo`, `web`), in
   the ledger as well; the task log says `gate overridden`. Main is not mailed
   an approval for it.
-- `alp task compact` also drops ledger entries that guard nothing any more:
-  cleared ones, open ones of closed tasks, and those of task files that are gone
-  (only when every task file reads).
+- `alp task compact` also drops the ledger entries of cleared gates, which
+  guard nothing any more. An open entry stays, even when its task is closed or
+  its file is gone: those are file edits too.
 
 The ledger is per machine, while task files travel with Git. A human gate you
 clear in another clone or on another machine, then pull, or a checkout of a

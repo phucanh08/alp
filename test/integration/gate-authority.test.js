@@ -193,7 +193,7 @@ test('the CLI under an ALP agent refuses to close a task with an open human gate
   assert.equal((await loadTasks(root)).tasks.find(entry => entry.id === step.id).status, 'closed');
 });
 
-test('compaction drops gate ledger entries that guard nothing any more', async t => {
+test('compaction drops cleared gate ledger entries and keeps every open one, even of a closed or missing task', async t => {
   const { root, home } = await setup(t);
   const open = await createTask(root, { title: 'Still waiting' }, 'main');
   await addGate(root, open.id, { kind: 'human', note: 'Wait' }, 'main');
@@ -203,24 +203,26 @@ test('compaction drops gate ledger entries that guard nothing any more', async t
   const forced = await createTask(root, { title: 'Forced' }, 'main');
   await addGate(root, forced.id, { kind: 'human', note: 'Sure?' }, 'main');
   await closeTask(root, forced.id, { reason: 'wontfix' }, 'user');
-  // A task closed before t-f438 with its gate still open in the file.
-  const legacy = await createTask(root, { title: 'Legacy' }, 'main');
-  await addGate(root, legacy.id, { kind: 'human', note: 'Old' }, 'main');
-  const data = JSON.parse(await readFile(taskFile(root, legacy.id), 'utf8'));
-  Object.assign(data, { status: 'closed', closed: { at: new Date().toISOString(), by: 'user', reason: 'wontfix' } });
-  await writeFile(taskFile(root, legacy.id), JSON.stringify(data));
+  // An agent edits a task to closed, and deletes another, hoping compaction forgets their gates.
+  const edited = await createTask(root, { title: 'Edited closed' }, 'main');
+  await addGate(root, edited.id, { kind: 'human', note: 'Edited' }, 'main');
+  const editedFile = await readFile(taskFile(root, edited.id), 'utf8');
+  await writeFile(taskFile(root, edited.id), JSON.stringify({ ...JSON.parse(editedFile), status: 'closed', closed: { at: new Date().toISOString(), by: 'user', reason: 'wontfix' } }));
   const gone = await createTask(root, { title: 'Gone' }, 'main');
   await addGate(root, gone.id, { kind: 'human', note: 'Gone?' }, 'main');
+  const goneFile = await readFile(taskFile(root, gone.id), 'utf8');
   await rm(taskFile(root, gone.id));
 
   const [name] = await readdir(path.join(home, 'gates'));
   const entries = async () => Object.keys(JSON.parse(await readFile(path.join(home, 'gates', name), 'utf8')).gates).map(key => key.split('/')[0]).sort();
   assert.equal((await entries()).length, 5);
   await compactTasks(root, { days: 30 }, 'user');
-  assert.deepEqual(await entries(), [open.id]);
-  // The open gate still guards its task.
-  const file = JSON.parse(await readFile(taskFile(root, open.id), 'utf8'));
-  file.gates[0].resolved = { at: new Date().toISOString(), by: 'user' };
-  await writeFile(taskFile(root, open.id), JSON.stringify(file));
-  assert.ok((await loadTasks(root)).tasks.find(entry => entry.id === open.id).gates[0].tampered);
+  assert.deepEqual(await entries(), [open.id, edited.id, gone.id].sort());
+  // Each open gate still detects a forged clear afterwards.
+  const forge = async (id, text) => { const data = JSON.parse(text); data.status = 'open'; data.closed = null; data.gates[0].resolved = { at: new Date().toISOString(), by: 'user' }; await writeFile(taskFile(root, id), JSON.stringify(data)); };
+  await forge(open.id, await readFile(taskFile(root, open.id), 'utf8'));
+  await forge(edited.id, editedFile);
+  await forge(gone.id, goneFile);
+  const { tasks } = await loadTasks(root);
+  for (const id of [open.id, edited.id, gone.id]) assert.ok(tasks.find(entry => entry.id === id).gates[0].tampered, id);
 });

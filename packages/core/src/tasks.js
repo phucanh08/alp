@@ -892,7 +892,7 @@ const clipText = (text, limit) => text.length > limit ? `${text.slice(0, limit -
 export async function compactTasks(projectRoot, { days = 30, dryRun = false } = {}, by) {
   if (!Number.isFinite(days) || days < 0) fail('INVALID_TASK', 'days must be a number of days, 0 or more');
   return locked(projectRoot, async () => {
-    const { tasks, errors } = await loadTasks(projectRoot);
+    const { tasks } = await loadTasks(projectRoot);
     const cutoff = Date.now() - days * 86_400_000;
     const compacted = [];
     for (const task of tasks) {
@@ -917,7 +917,7 @@ export async function compactTasks(projectRoot, { days = 30, dryRun = false } = 
       if (!dryRun) await save(projectRoot, next);
     }
     // The gate ledger sheds what no longer guards anything (t-f438); best-effort, as ledgering is.
-    if (!dryRun) await ledgerPrune(projectRoot, tasks, { complete: !errors?.length }).catch(() => {});
+    if (!dryRun) await ledgerPrune(projectRoot).catch(() => {});
     return compacted;
   });
 }
