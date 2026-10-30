@@ -1,6 +1,7 @@
 import { optionalRead, codexUsage } from './runtime-context.js';
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { scriptCommand } from '@anhlp/alp-core/packaged';
 
 /**
  * A request that was written but never answered: the process died, timed out or closed, so
@@ -25,7 +26,8 @@ export class CodexTransport {
     if (/\.(cmd|bat|ps1)$/i.test(command)) throw new Error('Codex executable must be a native binary, not a shell launcher');
     // Windows cannot exec a script by its shebang; a JavaScript command (the fake Codex of the tests) runs under this Node, still without a shell.
     const script = process.platform === 'win32' && /\.[cm]?js$/i.test(command);
-    this.child = spawn(script ? process.execPath : command, script ? [command, ...args] : args, { cwd, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const run = script ? scriptCommand(command, args) : { command, args, env: undefined };
+    this.child = spawn(run.command, run.args, { cwd, env: run.env ? { ...env, ...run.env } : env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.exit = new Promise(resolve => { this.child.once('close', resolve); this.child.once('error', () => resolve()); });
     // Drain diagnostics without writing credentials or user configuration to the host log.
     this.child.stderr.on('data', () => {});

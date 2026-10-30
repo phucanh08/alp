@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { selfEntry } from '@anhlp/alp-core/packaged';
 
 /** Locate artifacts in either the independently shipped CLI or the legacy root build. */
 export function distributionEntry(name) {
@@ -13,4 +14,5 @@ export function distributionEntry(name) {
   return candidates.find(candidate => existsSync(candidate)) ?? candidates[0];
 }
 
-export const DAEMON_ENTRY = fileURLToPath(distributionEntry('alpd.js'));
+/** What starts alpd: alpd.js under Node, or the ALP executable itself (`alp daemon run`). */
+export const DAEMON_ENTRY = selfEntry(fileURLToPath(distributionEntry('alpd.js')));

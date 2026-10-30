@@ -8,6 +8,7 @@ import path from 'node:path';
 import { createInterface, type Interface } from 'node:readline';
 import { openMcpTools } from './mcp-tools.js';
 import { antigravityToolDetail } from './tool-detail.js';
+import { bridgeCommand, isBridgeArgs } from '@anhlp/alp-core/bridges';
 
 /**
  * Antigravity provider definition for ALP.
@@ -29,40 +30,6 @@ type Listener = (method: string, params: any) => void;
 type RequestHandler = (method: string, params: any) => Promise<unknown>;
 
 /** The MCP server ALP's tools reach an Antigravity agent through via local socket. */
-const BRIDGE = `// ALP Antigravity bridge v1
-
-const net = require('node:net');
-const readline = require('node:readline');
-const socket = process.env.ALP_BRIDGE_SOCKET ? net.connect(process.env.ALP_BRIDGE_SOCKET) : null;
-const waiting = new Map();
-let sequence = 0;
-let buffer = '';
-socket?.setEncoding('utf8');
-socket?.write(JSON.stringify({ token: process.env.ALP_BRIDGE_TOKEN }) + '\\n');
-socket?.on('data', data => {
-  buffer += data;
-  for (let index; (index = buffer.indexOf('\\n')) >= 0;) {
-    const line = buffer.slice(0, index); buffer = buffer.slice(index + 1);
-    try { const message = JSON.parse(line); const waiter = waiting.get(message.id); if (waiter) { waiting.delete(message.id); waiter(message); } } catch {}
-  }
-});
-socket?.on('close', () => process.exit(0));
-socket?.on('error', () => process.exit(1));
-const ask = message => !socket ? Promise.resolve({ tools: [], result: { content: [{ type: 'text', text: 'No ALP session' }], isError: true } }) : new Promise(resolve => { const id = ++sequence; waiting.set(id, resolve); socket.write(JSON.stringify({ ...message, id }) + '\\n'); });
-const send = value => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...value }) + '\\n');
-readline.createInterface({ input: process.stdin }).on('line', async line => {
-  let message; try { message = JSON.parse(line); } catch { return; }
-  if (message.id === undefined || message.id === null) return;
-  try {
-    if (message.method === 'initialize') return send({ id: message.id, result: { protocolVersion: (message.params && message.params.protocolVersion) || '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'alp', version: '1' } } });
-    if (message.method === 'ping') return send({ id: message.id, result: {} });
-    if (message.method === 'tools/list') { const reply = await ask({ op: 'list' }); return send({ id: message.id, result: { tools: reply.tools } }); }
-    if (message.method === 'tools/call') { const reply = await ask({ op: 'call', name: message.params.name, arguments: message.params.arguments || {} }); return send({ id: message.id, result: reply.result }); }
-    send({ id: message.id, error: { code: -32601, message: 'Method not found' } });
-  } catch (error) { send({ id: message.id, error: { code: -32603, message: String((error && error.message) || error) } }); }
-});
-process.stdin.on('end', () => process.exit(0));
-`;
 
 const MODES = ['read-only', 'workspace-write', 'full-access'];
 /**
@@ -568,10 +535,10 @@ export class AntigravityTransport {
       }
       config.mcpServers ??= {};
       const existing = config.mcpServers.alp;
-      if (existing && !existing.args?.some((arg: unknown) => typeof arg === 'string' && arg.startsWith('// ALP Antigravity bridge v1'))) {
+      if (existing && !isBridgeArgs('antigravity', existing.args)) {
         throw new Error('Antigravity already has an MCP server named alp; rename it before using ALP');
       }
-      const launcher = { command: process.execPath, args: ['-e', BRIDGE], ...(process.versions.electron ? { env: { ELECTRON_RUN_AS_NODE: '1' } } : {}) };
+      const launcher = { ...bridgeCommand('antigravity'), ...(process.versions.electron ? { env: { ELECTRON_RUN_AS_NODE: '1' } } : {}) };
       if (JSON.stringify(existing) === JSON.stringify(launcher)) return;
       config.mcpServers.alp = launcher;
       await writeFile(temporary, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });

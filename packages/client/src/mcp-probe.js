@@ -35,7 +35,7 @@ export function stdioSession(server, cwd, timeoutMs) {
   // Its own process group, so a launcher such as npx is stopped with what it started.
   const env = { ...process.env, ...(server.env ?? {}) };
   const launch = launchCommand(server.command, server.args ?? [], env);
-  const child = spawn(launch.command, launch.args, { cwd: server.cwd ?? cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+  const child = spawn(launch.command, launch.args, { cwd: server.cwd ?? cwd, env: launch.env ? { ...env, ...launch.env } : env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
   const signal = name => { try { process.kill(-child.pid, name); } catch { child.kill(name); } };
   let stderr = '';
   child.stderr.setEncoding('utf8');
