@@ -11,6 +11,10 @@ jobs:
   terminal-native:
     uses: ./.github/workflows/terminal-native.yml
 
+  # The self-contained executable on four native runners, smoked with and without Node (t-1e02).
+  binary:
+    uses: ./.github/workflows/binary-build.yml
+
   core:
     needs: terminal-native
     runs-on: ubuntu-latest
