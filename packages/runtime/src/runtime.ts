@@ -2,6 +2,7 @@ import { createAssignmentResults } from './assignment-results.js';
 import { constants as fsConstants } from 'node:fs';
 import type { Session, Assignment, Waiter } from './session-state.js';
 import { errorData, plainObject, toolResult } from './tool-results.js';
+import { inputLimitError, POUR_VARS, TOOL_INPUT, VAR_NAME } from './input-limits.js';
 import { createLogger } from '@anhlp/alp-core/log';
 import { PROMPT_IMAGES, base64Bytes } from '@anhlp/alp-protocol';
 import { createBoardDomain } from './board-domain.js';
@@ -1092,8 +1093,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         return toolResult(true, { tasks: rows.slice(0, limit).map(task => summarize(task, tasks)), ...(rows.length > limit ? { more: rows.length - limit } : {}), ...warnings });
       }
       const { action: _action, id, note, reason, summary, unverified, add, remove, ...input } = args;
-      if (action === 'pour' && (typeof input.formula !== 'string' || (input.vars !== undefined && (!input.vars || typeof input.vars !== 'object' || Array.isArray(input.vars) || !Object.values(input.vars).every(value => typeof value === 'string'))))) {
-        return toolResult(false, { error: 'pour needs formula, and vars as an object of text values' });
+      if (action === 'pour' && (typeof input.formula !== 'string' || (input.vars !== undefined && (!input.vars || typeof input.vars !== 'object' || Array.isArray(input.vars) || inputLimitError(input.vars, POUR_VARS) || !Object.entries(input.vars).every(([name, value]) => VAR_NAME.test(name) && typeof value === 'string'))))) {
+        return toolResult(false, { error: `pour needs formula, and vars as an object of text values: at most ${POUR_VARS.items}, named like formula variables, each at most ${POUR_VARS.string} characters` });
       }
       const { kind, until, ref, gate, options: gateChoices, formula: _formula, vars: _vars, ...fields } = input;
       if (action === 'clear') {
@@ -2684,6 +2685,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (cached) return cached;
 
     const args = params.arguments;
+    // Every transport's arguments, before any tool walks them: the Codex, ACP and Antigravity paths have no schema of their own.
+    const oversized = inputLimitError(args, TOOL_INPUT, `${params.tool} input`);
+    if (oversized) return toolResult(false, { error: oversized });
     // The supervisor only reads the board and tasks, and writes to main.
     if (session.role === 'supervisor' && !['alp_send', 'alp_board', 'alp_task'].includes(params.tool)) return toolResult(false, { error: 'The supervisor only uses alp_send, alp_board and alp_task' });
     if (['alp_lesson', 'alp_lesson_curate', 'alp_skill'].includes(params.tool) && !supervises(session)) return toolResult(false, { error: 'Only a supervised main records lessons and skills' });

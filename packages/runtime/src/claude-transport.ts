@@ -5,7 +5,8 @@ import path from 'node:path';
 import { optionalRead, claudeUsage } from './runtime-context.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { PIN_KINDS } from './board.js';
+import { BOARD_KINDS_INPUT, PIN_BODY_CHARS, PIN_KINDS, PIN_PATH_CHARS, PIN_PATHS, PIN_PATHS_INPUT } from './board.js';
+import { inputLimitError, POUR_VARS, VAR_NAME, type InputLimits } from './input-limits.js';
 import { claudeToolDetail, resultText } from './tool-detail.js';
 import { CLOSE_REASONS, GATE_KINDS, TASK_STATUSES, TASK_TYPES } from '@anhlp/alp-core/tasks';
 import { commandDecision } from '@anhlp/alp-core/permissions';
@@ -26,6 +27,13 @@ type ClaudeQuery = AsyncGenerator<SDKMessage, void> & {
   close(): void;
   initializationResult?(): Promise<unknown>;
 };
+
+/** A field whose size is checked before zod walks it; its JSON Schema is the inner schema's (input-limits.ts). */
+const bounded = <T extends z.ZodType>(schema: T, limits: InputLimits) => z.preprocess((value, ctx) => {
+  const error = inputLimitError(value, limits);
+  if (error) ctx.addIssue({ code: 'custom', message: error });
+  return value;
+}, schema);
 
 // Zod mirrors of the provider's dynamic tool schemas; the provider validates again.
 const handoffList = z.array(z.string().min(1)).max(100).optional();
@@ -119,7 +127,7 @@ export const toolShapes: Record<string, Record<string, z.ZodType>> = {
     options: z.array(z.string().min(1).max(200)).max(10).optional(),
     gate: z.string().min(1).optional(),
     formula: z.string().min(1).optional(),
-    vars: z.record(z.string(), z.string()).optional(),
+    vars: bounded(z.record(z.string().regex(VAR_NAME), z.string().max(POUR_VARS.string)), POUR_VARS).optional(),
     summary: z.string().min(1).max(2000).optional(),
     unverified: z.string().min(1).max(2000).optional(),
     note: z.string().min(1).max(2000).optional(),
@@ -136,11 +144,11 @@ export const toolShapes: Record<string, Record<string, z.ZodType>> = {
   },
   alp_pin: {
     kind: z.enum(PIN_KINDS),
-    body: z.string().min(1),
-    paths: z.array(z.string().min(1)).optional(),
+    body: z.string().min(1).max(PIN_BODY_CHARS),
+    paths: bounded(z.array(z.string().min(1).max(PIN_PATH_CHARS)).max(PIN_PATHS), PIN_PATHS_INPUT).optional(),
   },
   alp_board: {
-    kinds: z.array(z.enum(PIN_KINDS)).optional(),
+    kinds: bounded(z.array(z.enum(PIN_KINDS)).max(PIN_KINDS.length), BOARD_KINDS_INPUT).optional(),
     limit: z.number().int().positive().optional(),
   },
   alp_unpin: {
