@@ -129,7 +129,7 @@ export function createDiskGuard(options: DiskGuardOptions) {
   /** A statfs or probe that hangs (a stuck network disk) gives `fallback` after 10 s, so checks go on. */
   function bounded<T>(work: Promise<T>, fallback: T): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<T>(resolve => { timer = setTimeout(() => resolve(fallback), options.checkTimeoutMs ?? 10_000); timer.unref?.(); });
+    const late = new Promise<T>(resolve => { timer = setTimeout(() => resolve(fallback), options.checkTimeoutMs ?? 10_000); });
     return Promise.race([work, late]).finally(() => clearTimeout(timer));
   }
 
