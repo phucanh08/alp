@@ -52,7 +52,7 @@ while [ $# -gt 0 ]; do
 done
 
 # The install directory is written into a shell profile: keep it to plain path characters.
-case "$DIR" in *[!A-Za-z0-9._/@+~\ -]*) die "unsupported characters in --dir: $DIR" ;; esac
+case "$DIR" in *[!A-Za-z0-9._/@+\ -]*) die "unsupported characters in --dir: $DIR" ;; esac
 case "$VERSION" in
   ''|[0-9]*) ;;
   *) die "invalid version: $VERSION" ;;
@@ -86,7 +86,8 @@ fi
 if command -v curl >/dev/null 2>&1; then
   fetch() { curl --proto '=https,file' --tlsv1.2 -fsSL --retry 3 -o "$2" "$1"; }
 elif command -v wget >/dev/null 2>&1; then
-  fetch() { wget -q -O "$2" "$1"; }
+  # wget reads no file:// mirror; https only.
+  fetch() { case "$1" in https://*) wget -q --https-only -O "$2" "$1" ;; *) echo "wget cannot read $1; install curl" >&2; return 1 ;; esac; }
 else
   die "curl or wget is required"
 fi
@@ -164,9 +165,10 @@ if [ -n "$SUDO" ]; then
 fi
 # Copy beside the target, then rename: a running alp keeps its old file, and no half-written binary is ever on PATH.
 staged=$($SUDO mktemp "$DIR/.alp.install.XXXXXX") || die "could not create a file in $DIR"
-$SUDO cp "$binary" "$staged"
-$SUDO chmod 755 "$staged"
-$SUDO mv -f "$staged" "$DIR/alp"
+if ! { $SUDO cp "$binary" "$staged" && $SUDO chmod 755 "$staged" && $SUDO mv -f "$staged" "$DIR/alp"; }; then
+  $SUDO rm -f "$staged"
+  die "could not install $DIR/alp"
+fi
 # The licence files ride along under <prefix>/share/doc/alp (or ~/.alp/share/doc/alp).
 doc="$(dirname "$DIR")/share/doc/alp"
 docsudo="$SUDO"
