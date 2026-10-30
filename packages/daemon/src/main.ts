@@ -15,6 +15,7 @@ import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { clearRestoredMarker, readRestoredMarker, recoverInterruptedRestore } from '@anhlp/alp-core/backup';
 import { migrateState } from '@anhlp/alp-core/migrations';
 import { createLogger } from '@anhlp/alp-core/log';
+import { selfCommand, selfEntry } from '@anhlp/alp-core/packaged';
 
 declare const __ALP_VERSION__: string;
 const VERSION = typeof __ALP_VERSION__ === 'string' ? __ALP_VERSION__ : '0.0.0-dev';
@@ -39,7 +40,8 @@ async function detach(home: string) {
   await assertPrivateDirectory(path.dirname(log), { create: true });
   await rotate(log);
   const output = await open(log, 'a', 0o600);
-  const child = spawn(process.execPath, [fileURLToPath(import.meta.url)], {
+  const self = selfCommand('daemon', { script: fileURLToPath(import.meta.url) });
+  const child = spawn(self.command, self.args, {
     detached: true,
     stdio: ['ignore', output.fd, output.fd, 'ipc'],
     env: process.env,
@@ -268,7 +270,7 @@ async function run(home: string) {
   await updateLock(home, { ...lock, ready: true });
   // Clients that cannot locate alpd themselves (the Paseo plugin) start it from here next time.
   const { install } = daemonPaths(home);
-  await writeFile(`${install}.tmp`, JSON.stringify({ entry: fileURLToPath(import.meta.url), version: VERSION }), { mode: 0o600 })
+  await writeFile(`${install}.tmp`, JSON.stringify({ entry: selfEntry(fileURLToPath(import.meta.url)), version: VERSION }), { mode: 0o600 })
     .then(() => rename(`${install}.tmp`, install))
     .catch(error => log.warn('could not record alpd\'s location', { code: 'ALP_INSTALL_RECORD_FAILED', error }));
   if (opened.restored) await clearRestoredMarker(home).catch(error => log.warn('could not clear the restore marker', { code: 'ALP_STATE_RESTORED', error }));

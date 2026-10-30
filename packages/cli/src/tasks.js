@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util';
 import { exportBeads, importBeads, parseJsonl } from '@anhlp/alp-core/beads';
 import { findFormula, formulaDirs, listFormulas, pourFormula } from '@anhlp/alp-core/formulas';
 import { describeVerification } from '@anhlp/alp-core/verify';
+import { scriptCommand } from '@anhlp/alp-core/packaged';
 import { ago } from '@anhlp/alp-client/render';
 import { parse as toml } from 'smol-toml';
 import { addGate, blockersOf, checkGates, childrenOf, closeTask, compactTasks, createTask, describeGate, gateOpen, epicReport, gatesOf, linkTask, listTasks, loadTasks, readyTasks, rejectGate, reopenTask, resolveGate, summarize, TASKS_DIR, updateTask, isAgentProcess, AGENT_MARKER } from '@anhlp/alp-core/tasks';
@@ -63,7 +64,8 @@ const gh = (args, { cwd }) => new Promise((resolve, reject) => {
   const bin = process.env.ALP_GH_BIN ?? 'gh';
   // Windows cannot exec a script by its shebang (the tests' stand-in for gh); a JavaScript one runs under this Node.
   const script = process.platform === 'win32' && /\.[cm]?js$/i.test(bin);
-  const child = spawn(script ? process.execPath : bin, script ? [bin, ...args] : args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+  const run = script ? scriptCommand(bin, args) : { command: bin, args };
+  const child = spawn(run.command, run.args, { cwd, ...(run.env ? { env: { ...process.env, ...run.env } } : {}), stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', chunk => { stdout += chunk; });

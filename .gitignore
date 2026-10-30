@@ -8,3 +8,4 @@ dist/
 packages/*/dist/
 packages/core/templates/
 integrations/paseo/server/dist/
+packages/cli/.binary/

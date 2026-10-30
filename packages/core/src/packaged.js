@@ -1,0 +1,177 @@
+import { createHash } from 'node:crypto';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+/**
+ * ALP runs either as npm scripts under Node (`node cli.js`, `node alpd.js`) or as one self-contained
+ * executable (`alp`, built with `bun build --compile`, t-1e02). In the executable, `process.execPath`
+ * is ALP itself: it cannot run a script path, and `-e code` is not evaluated. Every place that starts
+ * another ALP process asks this module for the command instead of spawning `process.execPath`.
+ *
+ * The executable's entry registers itself before importing anything else; the registration lives
+ * on globalThis because alpd.js and the CLI each inline their own copy of this module.
+ */
+
+const KEY = Symbol.for('alp.packaged');
+
+/** Subcommands of the executable that run each ALP role (the npm CLI understands them too). */
+export const ROLE_ARGS = Object.freeze({
+  daemon: Object.freeze(['daemon', 'run']),
+  web: Object.freeze(['web', 'serve']),
+  'bridge-acp': Object.freeze(['bridge', 'acp']),
+  'bridge-antigravity': Object.freeze(['bridge', 'antigravity']),
+});
+
+/**
+ * @typedef {{ path: string, sha256: string, size: number }} PackagedAsset
+ * @typedef {{ version: string, assets?: Record<string, PackagedAsset>, roles?: Record<string, () => Promise<unknown>> }} PackagedRegistration
+ */
+
+/** Called once by the executable's entry. @param {PackagedRegistration} registration */
+export function registerPackaged(registration) {
+  if (!registration || typeof registration.version !== 'string') throw new TypeError('registerPackaged needs a version');
+  Object.defineProperty(globalThis, KEY, { value: Object.freeze({ ...registration }), configurable: true, enumerable: false, writable: false });
+}
+
+/** The registration when this process is the ALP executable, else undefined. @returns {PackagedRegistration | undefined} */
+export function packagedInfo() { return /** @type {any} */ (globalThis)[KEY]; }
+
+/** Whether this process is the self-contained ALP executable. */
+export function isPackaged() { return packagedInfo() !== undefined; }
+
+/** A file path that names a JavaScript entry rather than an executable. @param {string} file */
+export const isScript = file => /\.[cm]?js$/i.test(file);
+
+/** The role's argument prefix. @param {keyof typeof ROLE_ARGS} role */
+function roleArgs(role) {
+  const args = ROLE_ARGS[role];
+  if (!args) throw new TypeError(`Unknown ALP role: ${role}`);
+  return [...args];
+}
+
+/**
+ * The command that starts ALP's `role` from this process: the executable's subcommand when packaged,
+ * else `script` under this Node, exactly as before.
+ * @param {keyof typeof ROLE_ARGS} role
+ * @param {{ script: string, args?: string[] }} options
+ * @returns {{ command: string, args: string[] }}
+ */
+export function selfCommand(role, { script, args = [] }) {
+  if (isPackaged()) return { command: process.execPath, args: [...roleArgs(role), ...args] };
+  return { command: process.execPath, args: [script, ...args] };
+}
+
+/**
+ * The command that runs an `entry` found on disk (an install record, a service definition, a CLI
+ * on PATH): a script runs under `execPath`; an executable runs its own role subcommand.
+ * @param {string} entry
+ * @param {keyof typeof ROLE_ARGS} role
+ * @param {string[]} [args]
+ * @param {string} [execPath]
+ * @param {{ scriptOnly?: boolean }} [options] scriptOnly: `entry` is always run under execPath (third-party integrations)
+ * @returns {{ command: string, args: string[] }}
+ */
+export function entryCommand(entry, role, args = [], execPath = process.execPath, { scriptOnly = false } = {}) {
+  if (isScript(entry) || scriptOnly) {
+    // The executable cannot run a script itself; a script entry then needs a real Node.
+    if (isPackaged() && execPath === process.execPath) return { command: 'node', args: [entry, ...args] };
+    return { command: execPath, args: [entry, ...args] };
+  }
+  return { command: entry, args: [...roleArgs(role), ...args] };
+}
+
+/**
+ * The command that runs a user's JavaScript file (a fake provider, an npm cmd shim on Windows)
+ * with this process's runtime. The executable runs it as Bun does when BUN_BE_BUN is set.
+ * @param {string} script
+ * @param {string[]} [args]
+ * @returns {{ command: string, args: string[], env?: Record<string, string> }}
+ */
+export function scriptCommand(script, args = []) {
+  if (isPackaged()) return { command: process.execPath, args: [script, ...args], env: { BUN_BE_BUN: '1' } };
+  return { command: process.execPath, args: [script, ...args] };
+}
+
+/** Where this process's own entry lives: the executable when packaged, else `script`. @param {string} script */
+export function selfEntry(script) { return isPackaged() ? process.execPath : script; }
+
+const sha256 = (/** @type {Buffer} */ bytes) => createHash('sha256').update(bytes).digest('hex');
+const MARKER = '.alp-assets.json';
+
+/** The directory the executable's assets are extracted to. @param {string} version @param {NodeJS.ProcessEnv} [env] */
+export function assetCacheDir(version, env = process.env) {
+  if (!/^[0-9A-Za-z][0-9A-Za-z.+-]*$/.test(version)) throw new TypeError(`Invalid ALP version for the asset cache: ${JSON.stringify(version)}`);
+  const home = env.ALP_HOME ? path.resolve(env.ALP_HOME) : path.join(os.homedir(), '.alp');
+  return path.join(home, 'cache', version);
+}
+
+/** The manifest digest the marker records, so a changed build never reuses an older extraction. @param {Record<string, PackagedAsset>} assets */
+const manifestDigest = assets => sha256(Buffer.from(JSON.stringify(Object.keys(assets).sort().map(name => [name, assets[name].sha256, assets[name].size]))));
+
+/** Rejects names that would leave the cache directory. @param {string} name */
+function assertAssetName(name) {
+  if (!name || path.isAbsolute(name) || name.split(/[\\/]/).some(part => part === '..' || part === '' || part === '.') || name === MARKER) throw new Error(`Invalid packaged asset name: ${JSON.stringify(name)}`);
+}
+
+/** A private directory we own, not a symlink. @param {string} directory */
+function assertPrivate(directory) {
+  const info = lstatSync(directory);
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new Error(`ALP asset cache is not a directory: ${directory}`);
+  if (process.platform !== 'win32' && (info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0)) throw new Error(`ALP asset cache must be private to the current user (0700): ${directory}`);
+}
+
+/** Whether `directory` holds exactly this manifest's extraction. */
+function extracted(/** @type {string} */ directory, /** @type {string} */ digest, /** @type {Record<string, PackagedAsset>} */ assets) {
+  try {
+    if (JSON.parse(readFileSync(path.join(directory, MARKER), 'utf8')).digest !== digest) return false;
+    return Object.entries(assets).every(([name, asset]) => { const info = lstatSync(path.join(directory, name)); return info.isFile() && info.size === asset.size; });
+  } catch { return false; }
+}
+
+/**
+ * The directory holding the executable's embedded assets (templates, the web app, the native
+ * terminal helper), extracted once per version to `<ALP_HOME or ~/.alp>/cache/<version>/` and
+ * checked against the build's sha256 manifest. Undefined when not packaged: callers then use the
+ * files beside their scripts, as before.
+ * @param {{ env?: NodeJS.ProcessEnv, info?: PackagedRegistration }} [options]
+ * @returns {string | undefined}
+ */
+export function assetDir({ env = process.env, info = packagedInfo() } = {}) {
+  if (!info) return undefined;
+  const assets = info.assets ?? {};
+  const directory = assetCacheDir(info.version, env);
+  const digest = manifestDigest(assets);
+  const parent = path.dirname(directory);
+  mkdirSync(parent, { recursive: true, mode: 0o700 });
+  if (existsSync(directory)) {
+    assertPrivate(directory);
+    if (extracted(directory, digest, assets)) return directory;
+  }
+  const staging = `${directory}.tmp-${process.pid}-${Date.now()}`;
+  mkdirSync(staging, { mode: 0o700 });
+  try {
+    for (const [name, asset] of Object.entries(assets)) {
+      assertAssetName(name);
+      const bytes = readFileSync(asset.path);
+      if (bytes.length !== asset.size || sha256(bytes) !== asset.sha256) throw new Error(`Packaged asset ${name} does not match its manifest`);
+      const target = path.join(staging, name);
+      mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+      writeFileSync(target, bytes, { mode: 0o600 });
+      if (/(^|\/)terminal-owner(\.exe)?$/.test(name)) chmodSync(target, 0o700);
+    }
+    writeFileSync(path.join(staging, MARKER), JSON.stringify({ version: info.version, digest }), { mode: 0o600 });
+    // Another ALP process may have finished the same extraction first; its copy is equivalent.
+    if (existsSync(directory)) {
+      assertPrivate(directory);
+      if (extracted(directory, digest, assets)) { rmSync(staging, { recursive: true, force: true }); return directory; }
+      rmSync(directory, { recursive: true, force: true });
+    }
+    renameSync(staging, directory);
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true });
+    if (existsSync(directory) && extracted(directory, digest, assets)) return directory;
+    throw error;
+  }
+  return directory;
+}

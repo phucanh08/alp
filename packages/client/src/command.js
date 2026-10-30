@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { scriptCommand } from '@anhlp/alp-core/packaged';
 
 /** Runs a command; resolves with its exit code and output, never rejects. */
 export function runCommand(command, args, { cwd, env = process.env, timeoutMs = 15_000 } = {}) {
@@ -6,7 +7,8 @@ export function runCommand(command, args, { cwd, env = process.env, timeoutMs = 
     let child;
     // Windows cannot exec a script by its shebang; a JavaScript command runs under this Node, as the Codex transport does.
     const script = process.platform === 'win32' && /\.[cm]?js$/i.test(command);
-    try { child = spawn(script ? process.execPath : command, script ? [command, ...args] : args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] }); }
+    const run = script ? scriptCommand(command, args) : { command, args };
+    try { child = spawn(run.command, run.args, { cwd, env: run.env ? { ...env, ...run.env } : env, stdio: ['ignore', 'pipe', 'pipe'] }); }
     catch (error) { resolve({ code: -1, stdout: '', stderr: error.message }); return; }
     let stdout = '', stderr = '';
     child.stdout.on('data', chunk => { stdout += chunk; });

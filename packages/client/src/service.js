@@ -3,6 +3,7 @@ import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { runCommand } from './command.js';
+import { entryCommand } from '@anhlp/alp-core/packaged';
 
 /**
  * alpd as a user service (ALPD §37): a LaunchAgent on macOS, a systemd user unit on
@@ -53,11 +54,13 @@ export function serviceFor({ home, env = process.env, platform = process.platfor
   return undefined;
 }
 
-/** The service definition that runs `entry` with `execPath` for `home`. */
+/** The service definition that runs `entry` (alpd.js with `execPath`, or the ALP executable) for `home`. */
 export function serviceDefinition(service, { home, entry, execPath = process.execPath, env = process.env }) {
   const variables = { ALP_HOME: path.resolve(home), PATH: env.PATH ?? '' };
   for (const name of CARRIED) if (env[name]) variables[name] = env[name];
-  const program = [execPath, entry, '--service'];
+  // A script entry runs under execPath; the ALP executable runs `alp daemon run --service`.
+  const launch = entryCommand(entry, 'daemon', ['--service'], execPath);
+  const program = [launch.command, ...launch.args];
   const fatal = path.join(path.resolve(home), 'logs', 'alpd.service.log');
   if (service.kind === 'launchd') {
     return `<?xml version="1.0" encoding="UTF-8"?>
