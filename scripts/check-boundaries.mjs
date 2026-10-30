@@ -3,6 +3,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import ts from 'typescript';
 import { corePackageProblems } from './core-package-boundary.mjs';
+import { namesExecPath } from './execpath-lint.mjs';
 import { builtinModules } from 'node:module';
 import { coreManifestPaths, validateBuildManifest } from './build-manifest.mjs';
 
@@ -37,6 +38,7 @@ const failures = corePackageProblems(manifest);
 /** The only sources that may name process.execPath directly: the runtime-neutral launch helpers. */
 const EXECPATH_HOMES = new Set(['packages/core/src/packaged.js', 'packages/core/src/bridges.js']);
 const supportDirectory = path.join(root, 'test', 'support');
+
 
 /** Names bound to createRequire(...) so an aliased require('...') is caught like a bare one. */
 function requireAliases(source) {
@@ -83,7 +85,9 @@ for (const location of manifest.workspaces ?? []) {
     }
   }
   const files = await readdir(directory, { recursive: true });
-  for (const relative of files.filter(file => /\.(?:ts|tsx|js)$/.test(file) && !file.startsWith('dist/') && !file.includes('/dist/'))) {
+  // .mjs/.cjs sources get the execPath check only; the import checks below cover .ts/.tsx/.js as before.
+  for (const relative of files.filter(file => /\.(?:ts|tsx|[cm]?js)$/.test(file) && !file.startsWith('dist/') && !file.includes('/dist/') && !file.split(/[\\/]/).includes('node_modules'))) {
+    const importChecked = /\.(?:ts|tsx|js)$/.test(relative);
     const text = await readFile(path.join(directory, relative), 'utf8');
     const source = ts.createSourceFile(relative, text, ts.ScriptTarget.Latest, true);
     const aliases = requireAliases(source);
@@ -95,13 +99,14 @@ for (const location of manifest.workspaces ?? []) {
       ts.forEachChild(node, inspect);
     }
     inspect(source);
+    if (!importChecked) specifiers.length = 0;
     // t-1e02: in the ALP executable process.execPath is ALP itself, which cannot run a script or
     // `-e` code; production sources start ALP through @anhlp/alp-core/packaged (selfCommand,
     // entryCommand, scriptCommand, bridgeCommand). Tests and default parameters may still name it.
     if (!/(^|[\\/])(tests?|e2e)[\\/]|\.(test|spec)\.[cm]?[jt]sx?$/.test(relative) && !EXECPATH_HOMES.has(`${location}/${relative}`.replaceAll(path.sep, '/'))) {
       const lines = text.split('\n');
       (function execPath(node) {
-        if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'process' && node.name.text === 'execPath') {
+        if (namesExecPath(node)) {
           const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
           const defaulted = ts.isParameter(node.parent) || (ts.isBindingElement(node.parent) && node.parent.initializer === node);
           if (!defaulted && !lines[line].includes('alp-allow-execpath')) failures.push(`${location}/${relative}:${line + 1}: process.execPath outside @anhlp/alp-core/packaged; use selfCommand, entryCommand, scriptCommand or bridgeCommand (t-1e02)`);

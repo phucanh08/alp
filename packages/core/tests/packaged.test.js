@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { promisify } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
 import { assetDir, entryCommand, executablePath, isPackaged, registerPackaged, scriptCommand, selfCommand, selfEntry } from '../src/packaged.js';
@@ -10,6 +12,7 @@ import { shippedTemplateRoot } from '../src/template-path.js';
 
 const KEY = Symbol.for('alp.packaged');
 const unregister = () => { delete globalThis[KEY]; };
+const execFileP = promisify(execFile);
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 
 test('under Node, ALP starts its roles exactly as before: scripts under process.execPath, bridges as -e', () => {
@@ -137,4 +140,70 @@ test('packaged, the templates come from the extracted cache', async t => {
   const root = shippedTemplateRoot();
   assert.equal(await readFile(new URL('ALP.md', root), 'utf8'), '# ALP\n');
   assert.ok(root.pathname.includes('/cache/3.0.0/templates/'));
+});
+
+test('isSelf follows symlinks and, on macOS and Windows, ignores case', async t => {
+  t.after(unregister);
+  const { isSelf, samePath } = await import('../src/packaged.js');
+  assert.equal(isSelf(process.execPath), false, 'not packaged: nothing is self');
+  registerPackaged({ version: '1.2.3', assets: {} });
+  const work = await mkdtemp(path.join(os.tmpdir(), 'alp-self-'));
+  t.after(() => rm(work, { recursive: true, force: true }));
+  if (process.platform !== 'win32') {
+    const link = path.join(work, 'alp');
+    await symlink(process.execPath, link);
+    assert.equal(isSelf(link), true, 'a symlink to the executable (~/.alp/bin/alp) is self');
+    assert.deepEqual(entryCommand(link, 'daemon'), { command: link, args: ['daemon', 'run'] });
+  }
+  const upper = process.execPath.toUpperCase();
+  if (upper !== process.execPath) assert.equal(isSelf(upper), process.platform === 'darwin' || process.platform === 'win32');
+  assert.equal(isSelf(path.join(work, 'other')), false);
+  assert.equal(samePath(work, `${work}/.`), true);
+});
+
+test('assetDir re-extracts a cache whose file was altered in place with the same size', async t => {
+  const { assets, env } = await fixture(t);
+  const info = { version: '1.4.0', assets };
+  const directory = assetDir({ env, info });
+  const file = path.join(directory, 'templates/ALP.md');
+  await writeFile(file, '# XLP\n');
+  // A fresh process (no per-process memo) checks every file's sha256, not only its size.
+  const { stdout } = await execFileP(process.execPath, ['--input-type=module', '-e', `
+    import { assetDir } from ${JSON.stringify(new URL('../src/packaged.js', import.meta.url).href)};
+    console.log(assetDir({ env: ${JSON.stringify(env)}, info: ${JSON.stringify(info)} }));`]);
+  assert.equal(stdout.trim(), directory);
+  assert.equal(await readFile(file, 'utf8'), '# ALP\n');
+});
+
+test('assetDir refuses a group-writable cache parent and sweeps stale staging directories', async t => {
+  if (process.platform === 'win32') return t.skip('POSIX modes');
+  const { home, assets, env } = await fixture(t);
+  const parent = path.join(home, 'cache');
+  await mkdir(parent, { mode: 0o700 });
+  // A dead process's staging directory and a live one's recent one.
+  const dead = path.join(parent, `1.5.0.tmp-999999-${Date.now()}`);
+  const live = path.join(parent, `1.5.0.tmp-${process.ppid}-${Date.now()}`);
+  const old = path.join(parent, `1.5.0.tmp-${process.ppid}-${Date.now() - 2 * 60 * 60 * 1000}`);
+  for (const directory of [dead, live, old]) await mkdir(directory);
+  assetDir({ env, info: { version: '1.5.0', assets } });
+  const { existsSync } = await import('node:fs');
+  assert.equal(existsSync(dead), false, 'a dead process\'s staging is removed');
+  assert.equal(existsSync(old), false, 'an hour-old staging is removed even when its pid is alive');
+  assert.equal(existsSync(live), true, 'a running extraction is left alone');
+  await chmod(parent, 0o770);
+  assert.throws(() => assetDir({ env, info: { version: '1.6.0', assets } }), /parent must belong to the current user/);
+});
+
+test('concurrent processes extracting the same version all get one complete cache', async t => {
+  const { home, assets, env } = await fixture(t);
+  const info = { version: '1.7.0', assets };
+  const script = `
+    import { assetDir } from ${JSON.stringify(new URL('../src/packaged.js', import.meta.url).href)};
+    console.log(assetDir({ env: ${JSON.stringify(env)}, info: ${JSON.stringify(info)} }));`;
+  const results = await Promise.all(Array.from({ length: 8 }, () => execFileP(process.execPath, ['--input-type=module', '-e', script])));
+  const directory = path.join(home, 'cache', '1.7.0');
+  for (const { stdout } of results) assert.equal(stdout.trim(), directory);
+  for (const [name, asset] of Object.entries(assets)) assert.equal(sha(await readFile(path.join(directory, name))), asset.sha256);
+  const { readdir } = await import('node:fs/promises');
+  assert.deepEqual((await readdir(path.join(home, 'cache'))).filter(name => name.includes('.tmp-')), [], 'no staging directory is left');
 });
