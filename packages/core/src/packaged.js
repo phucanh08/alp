@@ -25,7 +25,7 @@ export const ROLE_ARGS = Object.freeze({
 
 /**
  * @typedef {{ path: string, sha256: string, size: number }} PackagedAsset
- * @typedef {{ version: string, assets?: Record<string, PackagedAsset>, roles?: Record<string, () => Promise<unknown>> }} PackagedRegistration
+ * @typedef {{ version: string, assets?: Record<string, PackagedAsset>, roles?: Record<string, () => Promise<unknown>>, modules?: Record<string, () => Promise<unknown>> }} PackagedRegistration
  */
 
 /** Called once by the executable's entry. @param {PackagedRegistration} registration */

@@ -85,6 +85,11 @@ ${manifest.join('\n')}
     web: () => import('../dist/alp-web.js'),
     acp: () => import('../dist/acp.js'),
   },
+  // The runtime imports these by a computed name (claude-transport.ts) that Bun cannot follow; a
+  // literal import here embeds them.
+  modules: {
+    '@anthropic-ai/claude-agent-sdk': () => import('@anthropic-ai/claude-agent-sdk'),
+  },
 });
 
 // Packaged-mode guard: a caller that still spawns process.execPath with a script path would re-enter
