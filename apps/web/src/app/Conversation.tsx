@@ -128,13 +128,16 @@ export function ForkDialog({ turnId, title, onClose }: { turnId: string | null; 
   const [target, setTarget] = React.useState<'tab' | 'worktree'>('tab');
   const [mappings, setMappings] = React.useState<string[] | null>(null);
   const [mapping, setMapping] = React.useState('');
+  // Kept for a retry when the answer was lost: the same request goes to the same place, so the choice is locked.
+  const [pinned, setPinned] = React.useState(false);
   const source = controller.worktreeForkSource();
-  // One worktree per opening of the dialog: a fork refused after its worktree was made reuses it.
+  // Names the worktrees this opening of the dialog makes, one per destination chosen (`<key>:<mapping>`):
+  // a fork refused after its worktree was made forks into that one when tried again.
   const worktreeKey = React.useRef<string | null>(null);
   void registry;
   const worktrees = !!source && connection.phase === 'open';
   React.useEffect(() => {
-    setError(null); setTarget('tab'); request.reset(); worktreeKey.current = null;
+    setError(null); setTarget('tab'); setPinned(false); request.reset(); worktreeKey.current = null;
     if (!turnId || !worktrees) return;
     let live = true;
     controller.worktreeForkDestinations().then(ids => { if (live) { setMappings(ids); setMapping(ids[0] ?? ''); } }, () => { if (live) setMappings([]); });
@@ -154,16 +157,18 @@ export function ForkDialog({ turnId, title, onClose }: { turnId: string | null; 
       }
       else await controller.forkConversation({ requestId: request.take(), boundary: { throughTurnId: turnId } });
       request.reset();
+      setPinned(false);
       onClose();
     } catch (failure) {
       const described = describeConversationError(failure);
       request.settle(described.retrySame);
+      setPinned(described.retrySame);
       setError(described.message);
     } finally {
       setBusy(false);
     }
   };
-  const option = (value: 'tab' | 'worktree', label: string, detail: string, disabled = false) => (
+  const option = (value: 'tab' | 'worktree', label: string, detail: string, disabled = pinned) => (
     <label className={cn('flex cursor-pointer items-start gap-2 rounded-md border border-border p-2', target === value && 'border-ring bg-accent/40', disabled && 'cursor-not-allowed opacity-50')}>
       <input type="radio" name="fork-target" className="mt-1" checked={target === value} disabled={disabled || busy} onChange={() => setTarget(value)} aria-label={label} />
       <span><span className="block font-medium">{label}</span><span className="block text-muted-foreground">{detail}</span></span>
@@ -186,12 +191,13 @@ export function ForkDialog({ turnId, title, onClose }: { turnId: string | null; 
             mappings === null ? <p className="text-muted-foreground">Loading destinations…</p>
               : mappings.length ? (
                 <label className="block">Destination
-                  <select aria-label="Worktree destination" className="mt-1 w-full rounded border border-border bg-background p-1" value={mapping} onChange={event => setMapping(event.target.value)} disabled={busy}>
+                  <select aria-label="Worktree destination" className="mt-1 w-full rounded border border-border bg-background p-1" value={mapping} onChange={event => setMapping(event.target.value)} disabled={busy || pinned}>
                     {mappings.map(id => <option key={id}>{id}</option>)}
                   </select>
                 </label>
               ) : <p className="text-muted-foreground">Ask the host owner to configure a worktree destination and grant it to this credential.</p>
           ) : null}
+          {pinned ? <p className="text-muted-foreground" data-testid="fork-pinned">Trying again sends the same fork to the same place, so where it runs cannot change now.</p> : null}
           <p className="rounded-md bg-[rgba(147,197,253,0.1)] px-3 py-2 font-medium" data-testid="fork-files-note">{FORK_FILES_NOTE} Only the conversation is forked.</p>
           {error ? <p role="alert" className="text-destructive">{error}</p> : null}
         </div>

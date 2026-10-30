@@ -69,6 +69,21 @@ test('refusals read as words; only a lost answer keeps the request id', () => {
   assert.equal(describeConversationError(rpc(1004, 'key_conflict')).retrySame, false);
 });
 
+test('a token outside the session\'s mode and invalid parameters read as their own words, not a generic error', () => {
+  const mode = describeConversationError(new AlpRpcError({ code: 1003, message: 'this credential may use the modes read-only', data: { reason: 'mode', modes: ['read-only', 'workspace-write'] } }));
+  assert.equal(mode.message, 'Your access token cannot drive this conversation in its mode (it may use read-only, workspace-write). Ask the host owner for a token with that mode.');
+  assert.equal(mode.retrySame, false);
+  assert.match(describeConversationError(new AlpRpcError({ code: 1003, message: 'no', data: { reason: 'mode' } })).message, /^Your access token cannot drive this conversation in its mode\. /);
+  // alpd's invalid_params, as the gateway passes it on, and a -32602 without a reason.
+  for (const error of [new AlpRpcError({ code: -32602, message: 'The daemon host refused these parameters for this session', data: { reason: 'invalid_params' } }), new AlpRpcError({ code: -32602, message: 'Invalid params: boundary must be an object' })]) {
+    const described = describeConversationError(error);
+    assert.match(described.message, /^The host did not accept this request for this session\. Reload the page and try again/);
+    assert.equal(described.retrySame, false);
+    assert.equal(described.code, -32602);
+  }
+  assert.match(describeReloadError(new AlpRpcError({ code: -32602, message: 'x', data: { reason: 'invalid_params' } })).message, /did not accept this request/);
+});
+
 // ---- turns --------------------------------------------------------------------------------
 
 /** A root timeline: user messages, their prompt.accepted, turn start/end, replies. */
@@ -316,6 +331,49 @@ test('a fork into a worktree reuses the worktree it made for that destination af
   controller.selectSession('ses_a');
   await until(() => controller.getState().tree?.rootId === 'ses_a' && controller.getState().tree.status === 'attached', 'the source again');
   await controller.forkIntoWorktree({ requestId: 'f3', worktreeKey: 'dialog:m2', mappingId: 'm2', boundary: { throughTurnId: alpha.turnId } });
+  assert.equal(created.length, 2);
+  assert.equal(created[1].mappingId, 'm2');
+});
+
+test('a fork into a worktree whose answer was lost goes to the same worktree again when the destination changes', async t => {
+  const { host, make } = setup(t);
+  host.capabilities.push('workspace.registry', 'workspace.worktree');
+  host.principal.permissions.push('workspace.manage');
+  host.seed('ses_a', { title: 'Codes' });
+  host.root('ses_a').summary.conversation = { fork: true, rewind: true };
+  host.intercept.set('workspace.list', (_params, _connection, { answer }) => { answer({ workspaces: [{ id: 'wks_a', projectId: 'prj', directory: '/w/a', canonical: '/w/a', labels: [], createdAt: 'x', revision: 1 }], revision: 1, total: 1, nextCursor: null }); return 'handled'; });
+  const created = [];
+  host.intercept.set('workspace.worktree.create', (params, _connection, { answer }) => {
+    created.push(params);
+    answer({ workspace: { id: `wks_${params.mappingId}_${created.length}`, projectId: 'prj', directory: `/w/${params.mappingId}-${created.length}`, labels: [], createdAt: 'x', revision: 2 }, revision: 2 });
+    return 'handled';
+  });
+  // The first fork's answer is lost on its way back (the gateway timed out waiting for the host).
+  let lost = 1;
+  host.intercept.set('session.fork', (_params, _connection, { fail }) => {
+    if (lost-- > 0) { fail(1000, 'The daemon host did not answer in time', { reason: 'gateway_timeout' }); return 'handled'; }
+    return undefined;
+  });
+  const controller = make();
+  await open(controller, 'ses_a');
+  await controller.refreshRegistry();
+  await until(() => controller.worktreeForkSource()?.id === 'wks_a', 'the registry');
+  await say(controller, 'codeword ALPHA');
+  const [alpha] = [...turnsByMessage(controller.getState().tree.projection).values()];
+  await assert.rejects(controller.forkIntoWorktree({ requestId: 'f1', worktreeKey: 'dialog:m1', mappingId: 'm1', boundary: { throughTurnId: alpha.turnId } }), error => describeConversationError(error).retrySame);
+  assert.equal(created.length, 1);
+  // The same request id, now asked for another destination: no second worktree; the same fork goes again.
+  const fork = await controller.forkIntoWorktree({ requestId: 'f1', worktreeKey: 'dialog:m2', mappingId: 'm2', boundary: { throughTurnId: alpha.turnId } });
+  assert.equal(created.length, 1, 'no worktree for the destination the retry named');
+  const forks = host.calls.filter(call => call.method === 'session.fork');
+  assert.deepEqual(forks.map(call => [call.params.requestId, call.params.workspaceId]), [['f1', 'wks_m1_1'], ['f1', 'wks_m1_1']]);
+  assert.ok(fork.session.id);
+  // Answered: a new request id is a new attempt, and the destination it names is its own.
+  controller.selectWorkspace('/w/a');
+  await until(() => controller.worktreeForkSource()?.id === 'wks_a', 'the source workspace again');
+  controller.selectSession('ses_a');
+  await until(() => controller.getState().tree?.rootId === 'ses_a' && controller.getState().tree.status === 'attached', 'the source again');
+  await controller.forkIntoWorktree({ requestId: 'f2', worktreeKey: 'dialog:m2', mappingId: 'm2', boundary: { throughTurnId: alpha.turnId } });
   assert.equal(created.length, 2);
   assert.equal(created[1].mappingId, 'm2');
 });
