@@ -64,7 +64,11 @@ try {
     check(greeting.capabilities.includes('terminal.watch'), 'WebSocket upgrade and hello through the gateway');
     const events = [], output = [];
     client.onEvent(envelope => events.push(envelope.event.type));
-    client.onNotification((method, event) => { if (method === 'terminal.event' && event.type === 'output') output.push(event.data); });
+    const exits = [];
+    client.onNotification((method, event) => {
+      if (method === 'terminal.event' && event.type === 'output') output.push(event.data);
+      if (method === 'terminal.event' && event.type === 'exit') exits.push(event);
+    });
     {
       // POSIX: the extracted native helper running /bin/sh. Windows: the extracted node-pty (ConPTY) running cmd.exe.
       const windows = process.platform === 'win32';
@@ -83,7 +87,13 @@ try {
       }
       if (!output.join('').includes(expected)) log(`terminal output so far (${output.length} chunks): ${JSON.stringify(output.join('').slice(-2000))}`);
       check(output.join('').includes(expected), windows ? 'a terminal through the extracted node-pty (ConPTY)' : 'a terminal through the extracted native helper');
+      const closing = Date.now();
       await client.request('terminal.close', { terminalId: terminal.terminalId });
+      if (windows) {
+        // With the embedded conpty.dll, closing ends the session at once (no console-list helper, no 5 s wait).
+        for (let i = 0; exits.length === 0 && i < 160; i++) await new Promise(resolve => setTimeout(resolve, 25));
+        check(exits.length > 0 && Date.now() - closing < 4000, `the Windows terminal ended on close (${Date.now() - closing} ms)`);
+      }
       const extracted = windows ? ['node-pty', 'prebuilds', 'win32-x64', 'conpty', 'conpty.dll'] : ['terminal-native'];
       check(existsSync(path.join(home, 'cache', record.version, ...extracted)), `${extracted.join('/')} was extracted to <ALP_HOME>/cache/<version>`);
     }

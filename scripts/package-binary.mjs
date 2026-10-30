@@ -35,8 +35,32 @@ export function archiveName(version, target) {
 // alp-web's server (packages/cli/dist) and the browser app (packages/cli/dist/alp-web).
 const NOTICE_SOURCES = ['dist/THIRD-PARTY-NOTICES.txt', 'packages/cli/dist/THIRD-PARTY-NOTICES.txt', 'packages/cli/dist/alp-web/THIRD-PARTY-NOTICES.txt'];
 
-/** The combined THIRD-PARTY-NOTICES.txt of the executable. @param {string} root */
-export async function combinedNotices(root = ROOT) {
+// The Windows executable also embeds node-pty and the ConPTY binaries it ships (conpty.dll, OpenConsole.exe).
+const MICROSOFT_TERMINAL_NOTICE = `conpty.dll and OpenConsole.exe (node-pty/prebuilds/win32-x64/conpty) are built from
+Windows Terminal, https://github.com/microsoft/terminal, under the MIT License:
+
+MIT License
+
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+`;
+
+/** The combined THIRD-PARTY-NOTICES.txt of the executable. @param {string} root @param {{ windows?: boolean }} [options] */
+export async function combinedNotices(root = ROOT, { windows = false } = {}) {
   const parts = [`Third-party software in the ALP executable
 
 The executable is built with Bun (https://bun.sh, MIT; its embedded JavaScriptCore is LGPL-2.1 and
@@ -46,6 +70,13 @@ it contains include the packages below, grouped by bundle.
   for (const source of NOTICE_SOURCES) {
     const text = await readFile(path.join(root, source), 'utf8').catch(() => { throw new Error(`${source} is missing; run npm run build first`); });
     parts.push(`\n${'='.repeat(100)}\n${source}\n${'='.repeat(100)}\n\n${text.trim()}\n`);
+  }
+  if (windows) {
+    const source = 'node_modules/node-pty/LICENSE';
+    const text = await readFile(path.join(root, source), 'utf8').catch(() => { throw new Error(`${source} is missing; run npm ci first`); });
+    const { version } = JSON.parse(await readFile(path.join(root, 'node_modules/node-pty/package.json'), 'utf8').catch(() => '{}'));
+    parts.push(`\n${'='.repeat(100)}\nnode-pty${version ? `@${version}` : ''} (MIT, embedded in the Windows executable for terminals)\n${'='.repeat(100)}\n\n${text.trim()}\n`);
+    parts.push(`\n${'='.repeat(100)}\nConPTY (conpty.dll, OpenConsole.exe)\n${'='.repeat(100)}\n\n${MICROSOFT_TERMINAL_NOTICE}`);
   }
   return parts.join('');
 }
@@ -64,7 +95,7 @@ export async function pack({ binary, target, out, version, root = ROOT }) {
     if (!windows) await chmod(path.join(directory, executable), 0o755);
     await copyFile(path.join(root, 'LICENSE'), path.join(directory, 'LICENSE'));
     await copyFile(path.join(root, 'NOTICE'), path.join(directory, 'NOTICE'));
-    await writeFile(path.join(directory, 'THIRD-PARTY-NOTICES.txt'), await combinedNotices(root));
+    await writeFile(path.join(directory, 'THIRD-PARTY-NOTICES.txt'), await combinedNotices(root, { windows }));
     await mkdir(out, { recursive: true });
     const archive = path.resolve(out, `${name}${windows ? '.zip' : '.tar.gz'}`);
     // bsdtar (Windows' tar.exe, macOS) writes a zip with --format zip; GNU tar cannot.

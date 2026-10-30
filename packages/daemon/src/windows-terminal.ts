@@ -47,7 +47,10 @@ export const windowsPtySpawn: PtySpawn = (file, args, options) => {
   if (options.signal?.aborted) throw new Error('Terminal startup cancelled');
   const pty = loadNodePty();
   if (!pty) throw new Error('node-pty is unavailable on this host');
-  const spawnOptions = { name: options.name, cols: options.cols, rows: options.rows, cwd: options.cwd, env: options.env, useConpty: true };
+  // The executable uses the conpty.dll and OpenConsole.exe it embeds: with the system ConPTY, node-pty's
+  // kill() forks a console-list helper through process.execPath, which there is alp.exe (it would refuse
+  // the script and leave node-pty waiting 5 s). With the DLL, kill() ends the session by closing input.
+  const spawnOptions = { name: options.name, cols: options.cols, rows: options.rows, cwd: options.cwd, env: options.env, useConpty: true, ...(packagedNodePty() ? { useConptyDll: true } : {}) };
   const child = typeof process.versions.bun === 'string' ? spawnUnderBun(pty, file, args, spawnOptions) : pty.spawn(file, args, spawnOptions);
   let killed = false;
   return {
@@ -84,21 +87,25 @@ function spawnUnderBun(pty: NodePty, file: string, args: string[], options: Reco
   try { return pty.spawn(file, args, options); } finally { net.Socket = Socket; }
 }
 
-/** A write-only stand-in for net.Socket over a pipe fd: ordered writes, closed once. */
+/** A write-only stand-in for net.Socket over a pipe fd: ordered writes, closed once; after a failed write it drops the rest. */
 function fdWriter(fs: typeof import('node:fs'), fd: number) {
   let queue: Promise<void> = Promise.resolve();
   let closed = false;
+  let failed = false;
   const writer = {
     readable: false,
     writable: true,
     setEncoding() { return writer; },
     write(data: string | Uint8Array) {
-      if (closed) return false;
+      if (closed || failed) return false;
       const bytes = typeof data === 'string' ? Buffer.from(data, 'utf8') : Buffer.from(data);
       queue = queue.then(() => new Promise<void>(resolve => {
         const rest = (offset: number): void => {
-          if (closed || offset >= bytes.length) return resolve();
-          fs.write(fd, bytes, offset, bytes.length - offset, null, (error, written) => (error ? resolve() : rest(offset + written)));
+          if (closed || failed || offset >= bytes.length) return resolve();
+          fs.write(fd, bytes, offset, bytes.length - offset, null, (error, written) => {
+            if (error) { failed = true; writer.writable = false; return resolve(); }
+            rest(offset + written);
+          });
         };
         rest(0);
       }));
