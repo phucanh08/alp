@@ -73,13 +73,6 @@ jobs:
           size=$(wc -c < dist/bin/${{ matrix.exe }} | tr -d ' ')
           echo "alp ${{ matrix.platform }}: $size bytes ($((size / 1048576)) MiB)" | tee -a "$GITHUB_STEP_SUMMARY"
           file dist/bin/${{ matrix.exe }} || true
-      - name: TEMPORARY node-pty probe
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        run: |
-          node scripts/pty-probe.mjs plain || true
-          bun scripts/pty-probe.mjs plain || true
-          bun scripts/pty-probe.mjs fd || true
       - name: Smoke (with Node)
         run: node scripts/binary-smoke.mjs dist/bin/${{ matrix.exe }}
       - name: Smoke without Node (debian:bookworm-slim)
