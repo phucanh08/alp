@@ -105,8 +105,11 @@ export function ContextMenu({ label, at, items, onClose, testId, fallbackFocus }
     const width = list.current?.offsetWidth ?? 0;
     const height = list.current?.offsetHeight ?? 0;
     setPlace({ left: Math.max(8, Math.min(at.x, window.innerWidth - width - 8)), top: Math.max(8, Math.min(at.y, window.innerHeight - height - 8)) });
-    list.current?.querySelector<HTMLButtonElement>('[role^="menuitem"]:not([disabled])')?.focus();
   }, [at]);
+  // The first row takes focus once placed: a hidden element cannot take it.
+  React.useLayoutEffect(() => {
+    if (at && place.visibility !== 'hidden') list.current?.querySelector<HTMLButtonElement>('[role^="menuitem"]:not([disabled])')?.focus();
+  }, [place]); // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => {
     if (!at) return;
     const dismiss = () => close(false);

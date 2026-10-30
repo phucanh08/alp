@@ -192,6 +192,48 @@ test('a narrow window shows the focused pane with every tab, without the split a
   await expect(pane(page, 'pane-2')).toHaveAttribute('data-focused', 'true');
 });
 
+test('a right click in a pane: split it left, up, right or down; a field and a narrow window keep the browser\'s menu', async ({ page }) => {
+  await connect(page, world);
+  await newSession(page, 'Context split');
+  const body = pane(page, 'main').locator('[data-pane-body]');
+  const menu = page.getByRole('menu', { name: 'Pane actions' });
+
+  // The composer is a field: no pane menu there.
+  await pane(page, 'main').getByPlaceholder(/^Message main/).click({ button: 'right' });
+  await expect(menu).toHaveCount(0);
+
+  await body.click({ button: 'right', position: { x: 200, y: 120 } });
+  await expect(menu.getByRole('menuitem')).toHaveText(['Split pane left', 'Split pane up', 'Split pane right', 'Split pane down']);
+  await expect(menu.getByRole('menuitem', { name: 'Split pane left' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+
+  // Left: the new pane (with its New tab, focused) comes before the one clicked.
+  await body.click({ button: 'right', position: { x: 200, y: 120 } });
+  await menu.getByRole('menuitem', { name: 'Split pane left' }).click();
+  await expect(panes(page)).toHaveAttribute('data-panes', '2');
+  await expect(paneTabs(page, 'pane-1')).toHaveText(['New tab']);
+  await expect(pane(page, 'pane-1')).toHaveAttribute('data-focused', 'true');
+  const left = await pane(page, 'pane-1').boundingBox();
+  const right = await pane(page, 'main').boundingBox();
+  expect(left.x + left.width).toBeLessThanOrEqual(right.x + 2);
+
+  // Up, from the clicked pane (not the focused one): a vertical group with the new pane on top.
+  await body.click({ button: 'right', position: { x: 100, y: 120 } });
+  await menu.getByRole('menuitem', { name: 'Split pane up' }).click();
+  await expect(panes(page)).toHaveAttribute('data-panes', '3');
+  await expect(paneTabs(page, 'pane-2')).toHaveText(['New tab']);
+  const top = await pane(page, 'pane-2').boundingBox();
+  const bottom = await pane(page, 'main').boundingBox();
+  expect(top.y + top.height).toBeLessThanOrEqual(bottom.y + 2);
+  expect(Math.abs(top.x - bottom.x)).toBeLessThan(2);
+
+  // A narrow window has no splits: the browser's menu stays.
+  await page.setViewportSize({ width: 700, height: 900 });
+  await pane(page, 'pane-2').locator('[data-pane-body]').click({ button: 'right', position: { x: 50, y: 50 } });
+  await expect(menu).toHaveCount(0);
+});
+
 test('command center: Open ALP tasks, and the full-screen board', async ({ page }) => {
   await connect(page, world);
   await page.locator('body').click({ position: { x: 700, y: 300 } });
