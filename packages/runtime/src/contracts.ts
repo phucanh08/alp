@@ -136,6 +136,13 @@ export type AlpRuntime = {
   registerWorkspace(directory: string): Promise<void>;
   /** Reserves runtime admission while an external checkout mutation runs. */
   withWorkspaceMutation<T>(directory: string, run: () => Promise<T>): Promise<T>;
+  /**
+   * Owner-audited adoption of a checkout that predates birth certification (t-c1ba). Under the
+   * removal guard's reservation and ownership checks, `verify` must prove the checkout's identity
+   * (it throws otherwise); only then is the canonical directory certified. Never call it without
+   * the owner's explicit confirmation of the facts `verify` checks.
+   */
+  adoptWorkspace?(directory: string, verify: (canonical: string) => Promise<void>): Promise<void>;
   /** Opens a root session under a client-chosen id. */
   open(sessionId: string, spec: SessionSpec, options?: OpenOptions): Promise<SessionSnapshot>;
   /** What a new root would run as, before it opens, and the teams it may choose (ALPD §60). */

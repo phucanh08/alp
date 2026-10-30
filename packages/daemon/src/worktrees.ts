@@ -1,11 +1,14 @@
 import { randomBytes } from 'node:crypto';
-import { lstat, readFile, realpath, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, mkdir, open, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { user_worktree } from '@anhlp/alp-core';
 import { RegistryError, type RegistryService, type Registry, type WorkspaceRecord } from './registry.js';
 
 type Mapping = { id: string; source: string; commonDir: string; parent: string };
 type Context = { principalId?: string; principalEpoch?: string; mappingIds?: string[]; authorizedRoots?: string[] };
+/** What the owner confirms before a legacy managed worktree is adopted (t-c1ba), each proven from Git and the filesystem. */
+export type AdoptionFacts = { workspaceId: string; directory: string; source: string; commonDir: string; gitDir: string; branch: string; head: string };
 const fail = (reason: string, message: string, code = 1004): never => {
   throw new RegistryError(code, message, { reason });
 };
@@ -52,7 +55,8 @@ export function createWorkspaceWorktrees(
   home: string,
   registry: RegistryService,
   guard: <T>(directory: string, run: () => Promise<T>) => Promise<T>,
-  register: (directory: string) => Promise<void>
+  register: (directory: string) => Promise<void>,
+  adoptWorkspace?: (directory: string, verify: (canonical: string) => Promise<void>) => Promise<void>
 ) {
   const adapter = git();
   async function approved(context: Context, source: string, mappingId: string, native = true) {
@@ -77,6 +81,62 @@ export function createWorkspaceWorktrees(
       fail('identity_changed', 'Source identity changed', 1003);
     return w;
   }
+  /**
+   * Proves what adopting a managed worktree would certify. The registry row only names what to
+   * check; it is never evidence of identity, and never permission to delete.
+   */
+  async function adoptionFacts(r: Registry, id: string): Promise<AdoptionFacts> {
+    const w = workspace(r, id);
+    const meta = w.worktree;
+    if (!meta || meta.kind !== 'user' || meta.removedAt || w.archivedAt)
+      return fail('not_managed', 'Only a present managed user worktree can be adopted', 1003);
+    if (Object.values(r.worktreeJournal ?? {}).some((j) => j.intent.id === w.id))
+      fail('reconciliation_required', 'Workspace is pending reconciliation');
+    // The source repository and its commonDir as the host approves them now, not as the row recorded them.
+    const mapping = (await worktreeMappings(home)).find(
+      (m) => m.id === meta.mappingId && m.source === meta.source && m.commonDir === meta.commonDir
+    );
+    if (!mapping) return fail('outside_workspace', 'The host does not approve its destination mapping now', 1003);
+    const directory = path.join(mapping.parent, w.id);
+    const branch = `alp/workspace/${w.id}`;
+    if (!/^wks_[0-9a-f]{16}$/.test(w.id) || w.directory !== directory || (w.canonical ?? w.directory) !== directory || meta.branch !== branch)
+      fail('identity_changed', 'Not a generated managed worktree', 1003);
+    // No symlink anywhere on the path: it is a real directory whose canonical path is itself.
+    const info = await lstat(directory).catch(() => undefined);
+    if (!info?.isDirectory() || (await realpath(directory).catch(() => undefined)) !== directory)
+      fail('identity_changed', 'Managed worktree path is missing or not canonical', 1003);
+    const origin = await adapter.facts(mapping.source).catch(() => undefined);
+    if (origin?.commonDir !== mapping.commonDir) fail('identity_changed', 'Source repository identity changed', 1003);
+    // Git lists it as a linked worktree of that repository on its own branch, neither locked nor prunable.
+    const row = await adapter.inspect(mapping.source, directory, branch).catch(() => undefined);
+    const target = row ? await adapter.facts(directory).catch(() => undefined) : undefined;
+    if (
+      !row ||
+      !target ||
+      target.commonDir !== mapping.commonDir ||
+      target.gitDir === target.commonDir ||
+      target.gitDir !== meta.gitDir ||
+      target.branch !== branch ||
+      row.HEAD !== target.head
+    )
+      return fail('identity_changed', 'Git does not list it as this managed worktree', 1003);
+    return { workspaceId: w.id, directory, source: mapping.source, commonDir: mapping.commonDir, gitDir: target.gitDir, branch, head: target.head };
+  }
+  const owner = (context: Context) => {
+    if ((context.principalId ?? 'owner') !== 'owner' || (context.principalEpoch ?? 'owner') !== 'owner' || context.mappingIds || context.authorizedRoots)
+      fail('owner_only', 'Only the host owner adopts a workspace', 1003);
+  };
+  /** Owner-private append-only record of every adoption request and its outcome. */
+  async function audit(entry: Record<string, unknown>) {
+    const file = path.join(home, 'state', 'workspace-adoptions.jsonl');
+    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+    const handle = await open(file, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
+    try {
+      await handle.writeFile(JSON.stringify({ at: new Date().toISOString(), ...entry }) + '\n');
+    } finally {
+      await handle.close();
+    }
+  }
   async function clean(source: string, target: string, branch: string, head: string) {
     if (!(await adapter.inspect(source, target, branch)))
       fail('outcome_unknown', 'Worktree creation needs owner reconciliation', 1005);
@@ -97,6 +157,41 @@ export function createWorkspaceWorktrees(
           branch = (await user_worktree.repositoryIdentity(canonical)).branch;
       } catch {}
       return { ...row, branch, ...(worktree ? { managedWorktree: true } : {}) };
+    },
+    /** What adopting this legacy managed worktree would certify (t-c1ba); it changes nothing. */
+    async adoption(workspaceId: string, context: Context = {}) {
+      owner(context);
+      return adoptionFacts(await registry.snapshot(), workspaceId);
+    },
+    /**
+     * Certifies a managed worktree that predates birth certification, once the owner confirmed the
+     * facts `adoption` showed. The facts are proven again under the runtime's removal guard, which
+     * also refuses any checkout an assignment, claim, lease or session still owns. Removal stays a
+     * separate request with all of its own checks.
+     */
+    async adopt(p: { workspaceId: string; confirm: AdoptionFacts }, context: Context = {}) {
+      owner(context);
+      if (!adoptWorkspace) return fail('guard_unavailable', 'Runtime cannot prove safe adoption', 1005);
+      const confirmed = (facts: AdoptionFacts) =>
+        !!p.confirm &&
+        typeof p.confirm === 'object' &&
+        Object.keys(p.confirm).length === Object.keys(facts).length &&
+        (Object.keys(facts) as (keyof AdoptionFacts)[]).every((k) => p.confirm[k] === facts[k]);
+      const facts = await adoptionFacts(await registry.snapshot(), p.workspaceId);
+      if (!confirmed(facts)) fail('confirmation_mismatch', 'The workspace differs from what was confirmed; review it and confirm again', 1003);
+      // Logged before certification: no adoption happens unrecorded.
+      await audit({ event: 'adoption.requested', actor: 'owner', ...facts });
+      try {
+        await adoptWorkspace(facts.directory, async () => {
+          if (!confirmed(await adoptionFacts(await registry.snapshot(), p.workspaceId)))
+            fail('confirmation_mismatch', 'The workspace changed after it was confirmed; review it and confirm again', 1003);
+        });
+      } catch (error: any) {
+        await audit({ event: 'adoption.refused', actor: 'owner', workspaceId: facts.workspaceId, reason: error?.data?.reason ?? 'failed', error: error?.message ?? String(error) }).catch(() => {});
+        throw error;
+      }
+      await audit({ event: 'adoption.certified', actor: 'owner', workspaceId: facts.workspaceId, directory: facts.directory });
+      return { adopted: facts };
     },
     async assertAvailable(directory: string) {
       const r = await registry.snapshot();

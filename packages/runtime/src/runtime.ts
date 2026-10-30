@@ -172,7 +172,7 @@ const isolationOf = (args: { isolation?: string }) => args.isolation ?? 'shared'
 
 const log = createLogger({ component: 'runtime' });
 
-export type WorkspaceMutationReason = 'workspace_busy' | 'workspace_claimed' | 'workspace_leased' | 'workspace_assignment_result';
+export type WorkspaceMutationReason = 'workspace_busy' | 'workspace_claimed' | 'workspace_leased' | 'workspace_assignment_result' | 'workspace_identity';
 export class WorkspaceMutationError extends Error {
   readonly data: { reason: WorkspaceMutationReason };
   constructor(reason: WorkspaceMutationReason, message: string) {
@@ -242,6 +242,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   let workspaceMutation = false;
   let admitting = 0;
   const refuseMutation = (reason: WorkspaceMutationReason, message: string): never => { throw new WorkspaceMutationError(reason, message); };
+  /** Never exported: no caller of withWorkspaceMutation can skip the birth certificate but adoptWorkspace. */
+  const ADOPTION = Symbol('adoption');
   // Admission registers synchronously, before resolving configuration or creating copies.
   async function admission<T>(run: () => Promise<T>): Promise<T> {
     if (workspaceMutation) refuseMutation('workspace_busy', 'A workspace mutation is in progress; retry after it finishes');
@@ -4785,12 +4787,12 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   // Threads past their recall time go when the host starts, and after each assignment.
   if (options.recallFile) void forgetExpired();
 
-  return {
+  const api = {
     registerWorkspace: directory => enqueue(async () => {
       try { await assignmentResults.register(await realpath(directory)); }
       catch (error) { refuseMutation('workspace_assignment_result', error instanceof Error ? error.message : 'Cannot register workspace result ownership'); }
     }),
-    withWorkspaceMutation: <T>(directory: string, run: () => Promise<T>): Promise<T> => {
+    withWorkspaceMutation: <T>(directory: string, run: () => Promise<T>, adoption?: typeof ADOPTION): Promise<T> => {
       // Reserve before enqueue/await: in-flight admission causes refusal, future admission cannot start.
       if (workspaceMutation || admitting) return Promise.reject(new WorkspaceMutationError('workspace_busy', 'A session or assignment is opening; retry after it finishes'));
       workspaceMutation = true;
@@ -4799,7 +4801,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
           let resultLedger: Awaited<ReturnType<typeof assignmentResults.inspect>>;
           try { resultLedger = await assignmentResults.inspect(); }
           catch (error) { refuseMutation('workspace_assignment_result', error instanceof Error ? error.message : 'Cannot inspect permanent assignment results'); }
-          if (!resultLedger!.workspaces.includes(target)) refuseMutation('workspace_assignment_result', 'Workspace predates authoritative assignment tracking; an audited migration is required before removal');
+          // Only adoptWorkspace passes ADOPTION, to certify an old checkout after every check below.
+          if (!resultLedger!.workspaces.includes(target) && adoption !== ADOPTION) refuseMutation('workspace_assignment_result', 'Workspace predates authoritative assignment tracking; an audited migration is required before removal');
           const canonical = (value: string): string => {
             try { return realpathSync(value); }
             catch (error) {
@@ -4856,6 +4859,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
           return await run();
       }).finally(() => { workspaceMutation = false; });
     },
+    adoptWorkspace: (directory: string, verify: (canonical: string) => Promise<void>): Promise<void> => api.withWorkspaceMutation(directory, async () => {
+      // A path through a symlink names whatever the link points at today; adopt only the canonical path.
+      if (await realpath(directory) !== directory) refuseMutation('workspace_identity', `Adopt ${directory} by its canonical path`);
+      await verify(directory);
+      try { await assignmentResults.register(directory); }
+      catch (error) { refuseMutation('workspace_assignment_result', error instanceof Error ? error.message : 'Cannot register workspace result ownership'); }
+    }, ADOPTION),
     bindSchedules(handler: ScheduleHandler | undefined) { scheduleHandler = handler; },
     bindAttachments(reader: AttachmentReader | undefined) { attachmentReader = reader; },
     takesAttachments(sessionId: string) {
@@ -5190,5 +5200,6 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
       listeners.clear();
     },
-  };
+  } satisfies AlpRuntime;
+  return api;
 }
