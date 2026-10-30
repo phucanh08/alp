@@ -68,7 +68,8 @@ test('the release archive holds the executable and its licences under alp-<versi
   execFileSync('tar', ['-xzf', archive, '-C', x]);
   const notices = await readFile(path.join(x, 'alp-1.2.3-linux-arm64/THIRD-PARTY-NOTICES.txt'), 'utf8');
   for (const part of ['Bun', 'notices of dist/THIRD-PARTY-NOTICES.txt', 'notices of packages/cli/dist/alp-web/THIRD-PARTY-NOTICES.txt']) assert.ok(notices.includes(part), part);
-  assert.throws(() => archiveName('1.0.0', 'bun-windows-x64'), /No release archive/);
+  assert.throws(() => archiveName('1.0.0', 'bun-windows-arm64'), /No release archive/);
+  assert.equal(archiveName('1.0.0', 'bun-windows-x64'), 'alp-1.0.0-windows-x64');
   assert.throws(() => archiveName('../1', 'bun-linux-x64'), /Invalid version/);
   await sums(out);
   const line = (await readFile(path.join(out, 'SHA256SUMS'), 'utf8')).trim();

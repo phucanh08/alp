@@ -45,6 +45,19 @@ export async function binaryAssets(slot) {
   await add(path.join(ROOT, 'packages/cli/dist/alp-web'), 'alp-web');
   // Only this target's helper: native-terminal.ts checks it against terminal-owner.c and its manifest.
   await add(path.join(ROOT, 'packages/cli/dist/terminal-native'), 'terminal-native', file => file === 'terminal-owner.c' || file.startsWith(`prebuilt/${slot}/`));
+  // Windows has no protection helper; its terminals use node-pty (ConPTY). The executable carries
+  // node-pty's JavaScript and this target's prebuilt (conpty.node, conpty/conpty.dll, OpenConsole.exe),
+  // and windows-terminal.ts loads it from the extracted cache. Debug symbols (.pdb) stay out.
+  if (slot.startsWith('win32-')) {
+    const pty = path.join(ROOT, 'node_modules/node-pty');
+    const prebuilds = `prebuilds/${slot}/`;
+    await add(pty, 'node-pty', file => file === 'package.json' || file === 'LICENSE'
+      || (file.startsWith('lib/') && file.endsWith('.js') && !file.endsWith('.test.js'))
+      || (file.startsWith(prebuilds) && !file.endsWith('.pdb')));
+    for (const required of [`${prebuilds}conpty.node`, `${prebuilds}conpty/conpty.dll`, `${prebuilds}conpty/OpenConsole.exe`, 'lib/index.js']) {
+      if (!assets.has(`node-pty/${required}`)) throw new Error(`node-pty is missing ${required}; run npm ci on a ${slot} host`);
+    }
+  }
   return assets;
 }
 

@@ -1,5 +1,5 @@
 # Binary release (t-1e02 P1, docs/alp/binary-install.md): builds and smokes the ALP executable for
-# darwin-arm64, darwin-x64, linux-x64 and linux-arm64 at the given SHA on main (binary-build.yml),
+# darwin-arm64, darwin-x64, linux-x64, linux-arm64 and windows-x64 (.zip, P2) at the given SHA on main (binary-build.yml),
 # then writes SHA256SUMS, attests build provenance for every archive, and creates or refreshes a
 # DRAFT (non-prerelease) GitHub release v<version> with the archives, SHA256SUMS and install.sh. It never publishes:
 # the owner reviews the draft and publishes it by hand (which is when the tag is created).
@@ -77,14 +77,18 @@ jobs:
           for platform in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
             test -f "release/alp-$VERSION-$platform.tar.gz" || { echo "missing alp-$VERSION-$platform.tar.gz"; exit 1; }
           done
+          test -f "release/alp-$VERSION-windows-x64.zip" || { echo "missing alp-$VERSION-windows-x64.zip"; exit 1; }
           cp install.sh release/install.sh
+          cp install.ps1 release/install.ps1
           node scripts/package-binary.mjs sums release
           ls -l release
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             release/*.tar.gz
+            release/*.zip
             release/install.sh
+            release/install.ps1
       - name: Draft release v${{ needs.check.outputs.version }} (never published here)
         run: |
           tag="v$VERSION"
@@ -97,7 +101,7 @@ jobs:
           fi
           gh release create "$tag" release/* --draft --prerelease=false --target "$RELEASE_SHA" --repo "$GITHUB_REPOSITORY" \
             --title "ALP $VERSION" \
-            --notes "Draft binary release built from $RELEASE_SHA by run $GITHUB_RUN_ID. Install: curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/install.sh | sh -s -- --version $VERSION. Verify provenance: gh attestation verify <archive> --repo $GITHUB_REPOSITORY --source-ref refs/heads/main --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release-binaries.yml."
+            --notes "Draft binary release built from $RELEASE_SHA by run $GITHUB_RUN_ID. Install: curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/install.sh | sh -s -- --version $VERSION (Windows: install.ps1 -Version $VERSION). Verify provenance: gh attestation verify <archive> --repo $GITHUB_REPOSITORY --source-ref refs/heads/main --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release-binaries.yml."
           # A normal release (not a prerelease) so install.sh's releases/latest resolves to it once published;
           # npm keeps betas on the beta dist-tag (docs/alp/binary-install.md, version policy).
           gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,tagName,targetCommitish,assets \
