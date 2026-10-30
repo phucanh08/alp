@@ -46,7 +46,7 @@ if command -v curl >/dev/null 2>&1; then
   log "ok: alp web serves the app and gates tickets"
 fi
 web_pid=$(sed -n 's/.*"pid":[ ]*\([0-9][0-9]*\).*/\1/p' "$ALP_HOME/web.json" 2>/dev/null | head -n 1)
-[ -n "$web_pid" ] && kill "$web_pid" 2>/dev/null || true
+if [ -n "$web_pid" ]; then kill "$web_pid" 2>/dev/null || true; fi
 
 "$binary" daemon stop | grep -q stopped || fail "alp daemon stop"
 log "ok: alp daemon stop"
