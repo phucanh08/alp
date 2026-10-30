@@ -34,7 +34,7 @@ try {
   const { findDaemonEntry } = await import('@anhlp/alp-client/index');
   check(await findDaemonEntry({ home: path.join(work, 'none'), env: { PATH: path.dirname(binary) } }) === binary, 'discovery recognises the built executable by its marker');
   // A renamed copy (a release asset name) still starts its own roles.
-  const renamed = path.join(work, 'alp-renamed');
+  const renamed = path.join(work, process.platform === 'win32' ? 'alp-renamed.exe' : 'alp-renamed');
   await copyFile(binary, renamed);
   const renamedHome = path.join(work, 'renamed-home');
   await mkdir(renamedHome, { mode: 0o700 });
@@ -64,17 +64,38 @@ try {
     check(greeting.capabilities.includes('terminal.watch'), 'WebSocket upgrade and hello through the gateway');
     const events = [], output = [];
     client.onEvent(envelope => events.push(envelope.event.type));
-    client.onNotification((method, event) => { if (method === 'terminal.event' && event.type === 'output') output.push(event.data); });
-    if (process.platform !== 'win32') {
+    const exits = [];
+    client.onNotification((method, event) => {
+      if (method === 'terminal.event' && event.type === 'output') output.push(event.data);
+      if (method === 'terminal.event' && event.type === 'exit') exits.push(event);
+    });
+    {
+      // POSIX: the extracted native helper running /bin/sh. Windows: the extracted node-pty (ConPTY) running cmd.exe.
+      const windows = process.platform === 'win32';
       const { workspaces } = await client.request('workspace.list', {});
-      const workspace = workspaces.find(row => row.directory === project || row.canonical === project);
+      const workspace = workspaces.find(row => row.directory === project || row.canonical === project || row.directory?.toLowerCase() === project.toLowerCase());
       const { terminal } = await client.request('terminal.create', { workspaceId: workspace.id, cols: 80, rows: 24, requestId: 'smoke' });
       await client.request('terminal.attach', { terminalId: terminal.terminalId });
-      await client.request('terminal.input', { terminalId: terminal.terminalId, data: 'echo SMOKE-$((19*19))\r' });
-      for (let i = 0; !output.join('').includes('SMOKE-361') && i < 400; i++) await new Promise(resolve => setTimeout(resolve, 25));
-      check(output.join('').includes('SMOKE-361'), 'a terminal through the extracted native helper');
+      // The typed line echoes back too, so the expected text is one the input does not contain.
+      const [input, expected] = windows ? ['set /a 19*19+1000\r', '1361'] : ['echo SMOKE-$((19*19))\r', 'SMOKE-361'];
+      // Type only once the shell shows its prompt (cmd.exe may drop input sent while ConPTY starts), then retry.
+      const prompt = windows ? />\s*(\u001b\][^\u0007]*\u0007)?(\u001b\[\?25h)?\s*$/ : /./;
+      for (let i = 0; !prompt.test(output.join('')) && i < 400; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      for (let attempt = 0; attempt < 3 && !output.join('').includes(expected); attempt++) {
+        await client.request('terminal.input', { terminalId: terminal.terminalId, data: input });
+        for (let i = 0; !output.join('').includes(expected) && i < 300; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      if (!output.join('').includes(expected)) log(`terminal output so far (${output.length} chunks): ${JSON.stringify(output.join('').slice(-2000))}`);
+      check(output.join('').includes(expected), windows ? 'a terminal through the extracted node-pty (ConPTY)' : 'a terminal through the extracted native helper');
+      const closing = Date.now();
       await client.request('terminal.close', { terminalId: terminal.terminalId });
-      check(existsSync(path.join(home, 'cache', record.version, 'terminal-native')), 'the native helper was extracted to <ALP_HOME>/cache/<version>');
+      if (windows) {
+        // With the embedded conpty.dll, closing ends the session at once (no console-list helper, no 5 s wait).
+        for (let i = 0; exits.length === 0 && i < 160; i++) await new Promise(resolve => setTimeout(resolve, 25));
+        check(exits.length > 0 && Date.now() - closing < 4000, `the Windows terminal ended on close (${Date.now() - closing} ms)`);
+      }
+      const extracted = windows ? ['node-pty', 'prebuilds', 'win32-x64', 'conpty', 'conpty.dll'] : ['terminal-native'];
+      check(existsSync(path.join(home, 'cache', record.version, ...extracted)), `${extracted.join('/')} was extracted to <ALP_HOME>/cache/<version>`);
     }
     const { session } = await client.request('session.create', { spec: { cwd: project, model: 'codex:gpt-5.6-sol' }, history: 'skip' });
     await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'smoke-1', content: [{ type: 'text', text: 'hello' }] });
