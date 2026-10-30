@@ -18,7 +18,7 @@ import { conversationMarker } from '../lib/conversation.js';
 import { ConversationMarker, ForkAction, RewindAction } from './Conversation';
 
 /**
- * One agent's conversation laid out as Paseo's agent stream: a centered 820px column, user
+ * One agent's conversation laid out as Paseo's agent stream: a centered column (820px, or Appearance › Content width), user
  * messages as right-aligned bubbles, assistant text as plain markdown, tool calls as quiet
  * one-line rows that open into their detail, and a footer after each turn (copy, "Worked for").
  */
@@ -26,7 +26,7 @@ import { ConversationMarker, ForkAction, RewindAction } from './Conversation';
 type Icon = React.ComponentType<{ className?: string }>;
 
 /** Paseo's expandable badge: icon (a chevron on hover), label, secondary label; opens into detail. */
-function Badge({ icon: IconComponent, label, secondary, status, trailing, detail, testId, kind }: {
+function Badge({ icon: IconComponent, label, secondary, status, trailing, detail, testId, kind, defaultOpen = false }: {
   icon: Icon;
   label: string;
   secondary?: string;
@@ -36,8 +36,10 @@ function Badge({ icon: IconComponent, label, secondary, status, trailing, detail
   testId?: string;
   /** The tool call's detail type, for tests. */
   kind?: string;
+  /** Starts open (Settings › Chat › Tool calls: Expanded); a click still closes it. */
+  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = React.useState(defaultOpen);
   const detailId = React.useId();
   const failed = status === 'failed';
   const running = status === 'running';
@@ -88,11 +90,13 @@ function EditStat({ detail }: { detail: any }) {
 
 function ToolCall({ item }: { item: any }) {
   const roots = useWorkspaceRoots();
+  const { preferences } = useAppState();
   const status = item.status as 'running' | 'completed' | 'failed';
   const view = presentToolCall(item, roots);
   const exitCode = view.kind === 'shell' && status !== 'running' ? item.detail.exitCode : null;
   return (
     <Badge testId="tool-call" kind={view.kind} icon={TOOL_ICONS[view.icon]} label={view.label} secondary={view.secondary} status={status}
+      defaultOpen={preferences.toolCalls === 'expanded'}
       trailing={exitCode != null ? (
         <span className={cn('ml-2 shrink-0 text-xs tabular-nums', exitCode === 0 ? 'text-muted-foreground opacity-0 group-hover/badge:opacity-100 group-aria-expanded/badge:opacity-100' : 'text-destructive')}>exit {exitCode}</span>
       ) : view.kind === 'edit' ? <EditStat detail={item.detail} /> : null}
@@ -452,7 +456,7 @@ export function Timeline({ entries, prompts, agentOf, running, runningAgent, his
       // The reader taking over ends the jump at once.
       onWheel={() => { jumping.current = 0; }} onTouchStart={() => { jumping.current = 0; }} onKeyDown={() => { jumping.current = 0; }}
       className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none] px-3 md:px-4" role="log" aria-label="Conversation" aria-live="off">
-      <div className="mx-auto flex w-full max-w-[820px] flex-col px-2 py-4">
+      <div className="mx-auto flex w-full max-w-(--content-width) flex-col px-2 py-4">
         {older?.hasOlder ? <div className="mb-4 flex flex-col items-center gap-2"><Button variant="ghost" disabled={older.loading} onClick={() => void loadOlder()}>{older.loading ? 'Loading…' : 'Load older messages'}</Button>{older.error ? <p role="alert" className="text-xs text-destructive">{older.error}</p> : null}</div> : null}
         {historyUnavailable ? <div className="mb-4"><Notice level="warning">Earlier history of this conversation is no longer available on the host.</Notice></div> : null}
         {!entries.length && !prompts.length ? <p className="py-12 text-center text-sm text-muted-foreground">{emptyText}</p> : null}

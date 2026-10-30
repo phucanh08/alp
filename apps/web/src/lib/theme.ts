@@ -1,4 +1,4 @@
-import type { ThemePreference } from './preferences.js';
+import type { ContentWidth, ThemePreference } from './preferences.js';
 
 /**
  * Applies Paseo's theme preference to the page: `light` and `dark` as named, `system` follows
@@ -20,4 +20,12 @@ export function applyTheme(preference: ThemePreference): () => void {
   if (preference !== 'system' || !media) return () => {};
   media.addEventListener('change', set);
   return () => media.removeEventListener('change', set);
+}
+
+/** Paseo's content widths: the chat column's maximum width, as `--content-width` (styles.css). */
+export const CONTENT_WIDTH_VALUES: Record<ContentWidth, string> = { default: '820px', wide: '1100px', full: '100%' };
+
+/** Applies Appearance › Content width to every centered column that reads `--content-width`. */
+export function applyContentWidth(width: ContentWidth): void {
+  document.documentElement.style.setProperty('--content-width', CONTENT_WIDTH_VALUES[width] ?? CONTENT_WIDTH_VALUES.default);
 }
