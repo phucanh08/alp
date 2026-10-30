@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { isPackaged, ROLE_ARGS } from './packaged.js';
+import { isExecutableName, isPackaged, ROLE_ARGS } from './packaged.js';
 
 /**
  * The stdio MCP bridges an agent CLI starts to reach alpd's tools (ACP agents and Antigravity).
@@ -98,10 +98,16 @@ export function bridgeCommand(kind) {
   return { command: process.execPath, args: ['-e', BRIDGES[kind]] };
 }
 
-/** Whether an MCP server's arguments are one of ALP's bridge launchers. @param {'acp' | 'antigravity'} kind @param {unknown} args */
-export function isBridgeArgs(kind, args) {
+/**
+ * Whether an MCP server entry is one of ALP's bridge launchers: the `-e` source, or the ALP
+ * executable's `bridge <kind>` (only when its command is named alp, so another server is kept).
+ * @param {'acp' | 'antigravity'} kind
+ * @param {unknown} args
+ * @param {unknown} [command]
+ */
+export function isBridgeArgs(kind, args, command = undefined) {
   if (!Array.isArray(args)) return false;
   const marker = kind === 'antigravity' ? '// ALP Antigravity bridge v1' : undefined;
   if (marker && args.some(arg => typeof arg === 'string' && arg.startsWith(marker))) return true;
-  return args.length === 2 && args[0] === 'bridge' && args[1] === kind;
+  return typeof command === 'string' && isExecutableName(command) && args.length === 2 && args[0] === 'bridge' && args[1] === kind;
 }
