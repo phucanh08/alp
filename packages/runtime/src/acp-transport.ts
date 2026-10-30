@@ -157,7 +157,7 @@ export class AcpTransport {
   async initialize() {
     if (/\.(cmd|bat|ps1)$/i.test(this.provider.command)) throw new Error(`${this.provider.label}: the command must be a native executable, not a shell launcher`);
     const env = acpEnv(this.provider, this.env);
-    const launch = launchCommand(this.provider.command, this.provider.args, env);
+    const launch: { command: string; args: string[]; env?: Record<string, string> } = launchCommand(this.provider.command, this.provider.args, env);
     const child = spawn(launch.command, launch.args, { cwd: this.cwd, env: launch.env ? { ...env, ...launch.env } : env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.child = child;
     this.exit = new Promise(resolve => { child.once('close', () => resolve()); child.once('error', () => resolve()); });
