@@ -9,6 +9,7 @@ import { mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
+import { seedLibrary } from '@anhlp/alp-core/library';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
@@ -60,7 +61,8 @@ async function setup(t) {
   const native = { branches: [], rebinds: [], reloads: [], next: 0, branch: undefined, rebind: undefined, reload: undefined };
   let count = 0;
   async function start(options = {}) {
-    const runtime = createAlpRuntime({ supervisor: false, transport: fakeTransport(transports), runLogDir: path.join(directory, 'runs') });
+    const { libraryDir, ...serverOptions } = options;
+    const runtime = createAlpRuntime({ supervisor: false, transport: fakeTransport(transports), runLogDir: path.join(directory, 'runs'), ...(libraryDir ? { libraryDir } : {}) });
     runtime.branch = async request => {
       native.branches.push(request);
       if (native.branch) return native.branch(request);
@@ -79,7 +81,7 @@ async function setup(t) {
     };
     const store = createStore(state);
     const socketPath = daemonPaths(path.join(directory, `d${count++}`)).socket;
-    const server = createDaemonServer({ runtime, socketPath, version: 'test', store, ...options });
+    const server = createDaemonServer({ runtime, socketPath, version: 'test', store, ...serverOptions });
     await server.listen();
     const clients = [];
     const open = async () => {
@@ -1532,4 +1534,35 @@ for (const [restart, state] of [[false, 'applied'], [true, 'applied'], [true, 'p
   assert.equal(result.forkedFrom.sessionId, a.sessionId);
   assert.equal((await d.store.get(a.newSessionId)).forkedFrom.sessionId, a.sessionId);
   assert.equal(world.native.branches.length, 1, 'retry commits the existing native fork');
+});
+
+// ---- session.commands (t-f628)
+
+test('session.commands: the runtime\'s commands, then the agent\'s ALP skills, deduplicated and validated', async t => {
+  const world = await setup(t);
+  const libraryDir = path.join(world.directory, 'home');
+  await seedLibrary(libraryDir);
+  const d = { ...await world.start({ libraryDir }), ...world };
+  const hello = await d.request('daemon.hello', { protocolVersion: 1 });
+  assert.ok(hello.capabilities.includes('session.commands'));
+  await d.request('session.create', { sessionId: 'sc', spec: { cwd: d.project, persist: true } });
+  const transport = d.transports.at(-1);
+  transport.commands = async () => [
+    { name: 'compact', description: 'Clear history', argumentHint: '<what>', kind: 'command' },
+    { name: 'compact', description: 'again', kind: 'command' },
+    { name: 'bad name', description: 'refused', kind: 'command' },
+  ];
+  const { commands } = await d.request('session.commands', { sessionId: 'sc' });
+  validateResult('session.commands', { commands });
+  assert.deepEqual(commands[0], { name: 'compact', description: 'Clear history', argumentHint: '<what>', kind: 'command' });
+  assert.equal(commands.filter(command => command.name === 'compact').length, 1);
+  assert.ok(!commands.some(command => command.name === 'bad name'));
+  const skills = commands.slice(1);
+  assert.deepEqual(skills.map(command => command.name), ['bug-loop', 'compact', 'curate', 'goal-griller', 'prompt-leverage', 'sequence-execution-plan', 'smart-commits', 'xia'].map(name => `alp:${name}`), 'main\'s ALP skills, as Claude names them');
+  assert.ok(skills.every(command => command.description.length > 0));
+  assert.ok(skills.every(command => command.kind === 'skill' && !command.description.includes('/SKILL.md')));
+  transport.commands = async () => { throw new Error('runtime gone'); };
+  const fallback = await d.request('session.commands', { sessionId: 'sc' });
+  assert.deepEqual(fallback.commands, skills, 'a runtime that cannot answer still leaves the skills');
+  await assert.rejects(d.request('session.commands', { sessionId: 'nobody' }), rpcError(1001, 'not_found'));
 });

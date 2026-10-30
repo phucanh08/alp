@@ -9,10 +9,15 @@ import type { AntigravityProvider } from './antigravity-transport.js';
 import type { GitHubRunner } from './github.js';
 import type { AttachmentReader } from './attachments.js';
 
+/** A slash command or skill an agent's composer offers after "/" (t-f628). */
+export type RuntimeCommand = { name: string; description: string; argumentHint?: string; kind: 'command' | 'skill' };
+
 export type RuntimeTransport = {
   request(method: string, params: any): Promise<any>;
   initialize(): Promise<void>;
   orchestrationContext?: () => Promise<unknown>;
+  /** The runtime's own slash commands and skills for the composer (t-f628); omitted, the runtime offers none. */
+  commands?: () => Promise<RuntimeCommand[]>;
   onNotification(listener: (method: string, params: any) => void): void;
   onFailure(listener: (error: unknown) => void): void;
   close(): Promise<void>;
@@ -238,6 +243,8 @@ export type AlpRuntime = {
   reload?(sessionId: string): Promise<SessionSnapshot>;
   /** Compacts a root's context at its next turn boundary, with a checkpoint main writes by skill compact (t-0e56). */
   compact?(sessionId: string): { status: 'started' | 'deferred' | 'running' };
+  /** The slash commands and skills a live session's composer offers (t-f628): its runtime's, then its ALP skills. */
+  commands?(sessionId: string): Promise<RuntimeCommand[]>;
   /**
    * Holds the turns the runtime would start by itself on this session (mail wakes) while a lifecycle
    * operation changes its conversation (a rewind, later a reload or live configure): mail stays queued

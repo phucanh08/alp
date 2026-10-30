@@ -38,7 +38,10 @@ export type TerminalNotification = { jsonrpc: '2.0'; method: 'terminal.event'; p
 export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
 export type HistoryPage = { generation: string; items: HistoryItem[]; olderCursor?: string; hasOlder: boolean; tipCursor: number };
 
-export type Capability = 'session.interrupt.turn' | 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.configure.live' | 'terminal' | 'terminal.capture' | 'terminal.watch' | 'attachments' | 'workspace.git' | 'workspace.git.facts' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'workspace.files.browse' | 'host.directories' | 'prompt.images' | 'schedule' | 'catalog.live';
+/** One entry of session.commands: inserted as `/<name>` into the composer. */
+export type SessionCommand = { name: string; description: string; argumentHint?: string; kind: 'command' | 'skill' };
+
+export type Capability = 'session.interrupt.turn' | 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.commands' | 'session.configure.live' | 'terminal' | 'terminal.capture' | 'terminal.watch' | 'attachments' | 'workspace.git' | 'workspace.git.facts' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'workspace.files.browse' | 'host.directories' | 'prompt.images' | 'schedule' | 'catalog.live';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -260,6 +263,11 @@ export type RpcMethodMap = {
   'session.compact': {
     params: { sessionId: string };
     result: { status: 'started' | 'deferred' | 'running' };
+  };
+  /** The slash commands and skills a live session's composer offers after "/" (capability `session.commands`, t-f628). */
+  'session.commands': {
+    params: { sessionId: string };
+    result: { commands: SessionCommand[] };
   };
   'session.resumeCommand': {
     params: { sessionId: string };

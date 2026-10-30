@@ -9,7 +9,7 @@ import { createBoardDomain } from './board-domain.js';
 import { ATTACHMENT_ROUTES, STAGED_PATH, attachmentPart, createAttachmentStager, runtimeAttachment, stagingExposure, type AttachmentReader, type AttachmentRoute } from './attachments.js';
 import type { RuntimeAttachment } from '@anhlp/alp-protocol/session';
 import { createWorktreeDomain } from './worktree-domain.js';
-import { type RuntimeTransport, type RuntimeOptions, type OpenOptions, type PromptContent, type PromptInput, type AlpRuntime, type SessionPreview, type RecoveryOutcome, type Pause, type PauseState, type RecallAnswer, type ScheduleHandler, type BranchRequest, type NativeBinding, type ConfigurePreview, type ConfigureResult, type ConversationErrorReason, ConversationError } from './contracts.js';
+import { type RuntimeTransport, type RuntimeOptions, type OpenOptions, type PromptContent, type PromptInput, type AlpRuntime, type SessionPreview, type RecoveryOutcome, type Pause, type PauseState, type RecallAnswer, type ScheduleHandler, type BranchRequest, type NativeBinding, type ConfigurePreview, type ConfigureResult, type ConversationErrorReason, type RuntimeCommand, ConversationError } from './contracts.js';
 import { claudeCut, codexForkEnd, codexForkRefusal, pendingChain, type ChainEntry } from './conversation.js';
 export type { RuntimeTransport, RuntimeOptions, OpenOptions, PromptContent, PromptInput, AlpRuntime, SessionPreview, RecoveryOutcome, Pause, PauseState, RecallAnswer } from './contracts.js';
 export { DEFAULT_TEAM } from './contracts.js';
@@ -36,7 +36,7 @@ import { isTrusted, trustProject } from '@anhlp/alp-core/trust';
 import { listTeams, teamOf } from '@anhlp/alp-core/teams';
 import { CONFIGURABLE, changesOf, effectiveOf, executablesOf, nativeModelOf, offered, type ConfigureChange, type ConfigureChanges, type EffectiveConfig } from './configure.js';
 import { anyModel, offers, profileModel, selectedProfile } from '@anhlp/alp-core/profiles';
-import { LESSONS_FILE, READ_ONLY_AGENTS, resolveSession, type ResolvedSession, type RuntimeKind, type SessionSpec } from './resolve.js';
+import { LESSONS_FILE, READ_ONLY_AGENTS, resolveSession, skillDescription, type ResolvedSession, type RuntimeKind, type SessionSpec } from './resolve.js';
 import { MAIL_BODY_CHARS, MAIL_HEADER, publicEvent, renderMail, takeBatch, USER, type MailEvent } from './mailbox.js';
 import type { AlpEvent, AssignmentSnapshot, Envelope, SessionSnapshot, TurnOrigin, UserQuestion } from './events.js';
 import { live, normalizePaths, overlapping, renderBoard, type Pin } from './board.js';
@@ -1796,6 +1796,21 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (compactHeld(sessionId, session, true)) return { status: 'deferred' as const };
     compactAtBoundary(sessionId, session);
     return { status: 'started' as const };
+  }
+
+  /**
+   * The composer's "/" list for a live session (t-f628): its runtime's slash commands and skills,
+   * then each ALP skill of its agent the runtime did not list, as Claude names them (`alp:<name>`).
+   */
+  async function listCommands(sessionId: string): Promise<RuntimeCommand[]> {
+    const session = sessions.get(sessionId);
+    if (!session || session.closed) throw new ConversationError('session_busy', 'The session is not open');
+    const listed = session.runtime.commands ? await session.runtime.commands().catch(() => [] as RuntimeCommand[]) : [];
+    const seen = new Set(listed.map(command => command.name));
+    const prefix = session.runtimeKind === 'claude' ? `${SKILL_PLUGIN}:` : '';
+    const skills = await Promise.all(session.mapping.agent.skills.filter(skill => !seen.has(prefix + skill.name))
+      .map(async skill => ({ name: prefix + skill.name, description: await skillDescription(skill.path), kind: 'skill' as const })));
+    return [...listed, ...skills];
   }
 
   /** What ALP holds of a session's work, told to it after a compaction (ALPD §57). */
@@ -5101,6 +5116,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     reload: sessionId => enqueue(() => reloadSession(sessionId)),
     compact: (sessionId: string) => requestCompact(sessionId),
+    commands: (sessionId: string) => listCommands(sessionId),
 
     previewConfigure: (sessionId, changes) => previewConfigureSession(sessionId, changes),
 

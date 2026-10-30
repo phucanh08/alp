@@ -1568,6 +1568,17 @@ export class ClientConnection {
       await this.#seeForkSources([session]);
       return { session: this.#safeSession(session), ...(result.duplicate === true ? { duplicate: true } : {}) };
     },
+    // The composer's "/" list: known fields of each entry only, never a path.
+    'session.commands': async params => {
+      await this.#resolve(params.sessionId);
+      const result = await this.#call('session.commands', params);
+      const text = (value, max) => typeof value === 'string' ? value.slice(0, max) : '';
+      const commands = (Array.isArray(result?.commands) ? result.commands : [])
+        .filter(entry => entry && typeof entry.name === 'string' && /^[^\s\u0000-\u001f\u007f]{1,256}$/.test(entry.name))
+        .slice(0, 1000)
+        .map(entry => ({ name: entry.name, description: text(entry.description, 4096), ...(typeof entry.argumentHint === 'string' && entry.argumentHint ? { argumentHint: text(entry.argumentHint, 256) } : {}), kind: entry.kind === 'skill' ? 'skill' : 'command' }));
+      return { commands };
+    },
     // The ALP CLI command for the clipboard: rebuilt here from the id, passed on only when alpd's is the same.
     'session.resumeCommand': async params => {
       await this.#resolve(params.sessionId);

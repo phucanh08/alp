@@ -33,6 +33,8 @@ import { displayName, mimeOf, storedName, uploadRequestId, type UploadedFile } f
 const supported = [
   'prompt.message',
   'prompt.steer',
+  // A command chosen after "/" goes to the agent as the text `/<name> <arguments>`, as Paseo's ACP adapter sends it (t-f628).
+  'prompt.command',
   'session.persistence',
   'session.subsession',
   'session.configure',
@@ -238,6 +240,25 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
       };
 
       /**
+       * The slash commands and skills of a root for Paseo's "/" list (session.commands, t-f628): its
+       * runtime's, then main's ALP skills. Sent when the root is ready and after each of its turns, so
+       * skills found later are offered too; nothing when alpd does not list them.
+       */
+      const listedCommands = new Map<string, string>();
+      function offerCommands(sessionId: string) {
+        const alpdId = toAlpd(sessionId);
+        if ((rootOf.get(alpdId) ?? alpdId) !== alpdId || !(client.capabilities ?? offered ?? []).includes('session.commands')) return;
+        void client.request('session.commands', { sessionId: alpdId }).then((result: { commands?: Array<{ name: string; description: string; argumentHint?: string }> }) => {
+          if (closed || !Array.isArray(result?.commands)) return;
+          const commands = result.commands.map(({ name, description, argumentHint }) => ({ name, description, ...(argumentHint ? { argumentHint } : {}) }));
+          const key = JSON.stringify(commands);
+          if (listedCommands.get(sessionId) === key) return;
+          listedCommands.set(sessionId, key);
+          emit({ type: 'session.commands', sessionId, commands });
+        }, () => {});
+      }
+
+      /**
        * One alpd envelope to Paseo. `replayed`: it arrived while reattaching, so it happened while this
        * view was away (§8.3).
        */
@@ -276,6 +297,7 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
             return;
           }
           case 'session.ready':
+            offerCommands(sessionId);
             if (roots.has(sessionId) && !opening.has(envelope.sessionId)) return;
             emit({ type: 'session.ready', requestId: opening.get(envelope.sessionId) ?? `open-${sessionId}`, sessionId });
             return;
@@ -304,6 +326,7 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
             return;
           case 'turn.ended':
             emit({ type: 'session.turn', sessionId, turnId: event.turnId, state: event.state, ...(event.error ? { error: event.error } : {}) });
+            offerCommands(sessionId);
             return;
           case 'usage':
             // The session's whole latest usage (t-7679.12): Paseo keeps it as the agent's lastUsage for its context meter.
@@ -586,8 +609,7 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
       }
 
       async function handle(input: ProviderInput) {
-        // Prompt capabilities are checked below after the native-command refusal.
-        if (input.type !== 'session.prompt') requireProviderCapabilities(capabilities, input);
+        requireProviderCapabilities(capabilities, input);
 
         if (input.type === 'catalog') {
           emit({
@@ -669,17 +691,17 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
 
         if (input.type === 'session.prompt') {
           const { prompt } = input;
-          // alpd has no native-command prompt contract. Never turn a command into user
-          // prose or send an incomplete command part; reject before waking a session.
-          if (prompt.input.type === 'command') throw new Error('ALP does not support native command prompts');
-          requireProviderCapabilities(capabilities, input);
           await wake(input.sessionId);
           const sessionId = toAlpd(input.sessionId);
+          // A command chosen from the "/" list is the text the user would type for it (t-f628).
+          const content = prompt.input.type === 'command'
+            ? [{ type: 'text' as const, text: `/${prompt.input.name}${prompt.input.arguments ? ` ${prompt.input.arguments}` : ''}` }]
+            : await promptContent(sessionId, prompt.clientMessageId, prompt.input.content);
           await client.request('session.prompt', {
             sessionId,
             clientMessageId: prompt.clientMessageId,
             delivery: prompt.delivery === 'steer' ? 'steer' : 'auto',
-            content: await promptContent(sessionId, prompt.clientMessageId, prompt.input.content),
+            content,
           });
           return;
         }
@@ -733,12 +755,6 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
             );
 
           try {
-            // Refuse unsupported native commands even while disconnected: no relink,
-            // retry, session wake or daemon request is needed to know this limitation.
-            if (input.type === 'session.prompt' && input.prompt.input.type === 'command') {
-              await handle(input);
-              return;
-            }
             await linked();
             try {
               await handle(input);

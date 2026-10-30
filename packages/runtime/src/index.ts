@@ -2,7 +2,7 @@
 export { createAlpRuntime, DEFAULT_TEAM, WorkspaceMutationError } from './runtime.js';
 export type { WorkspaceMutationReason, AlpRuntime, RuntimeOptions, OpenOptions, RuntimeTransport, PromptInput, PromptContent, SessionPreview } from './runtime.js';
 export { ConversationError } from './contracts.js';
-export type { BranchRequest, ConversationErrorReason, NativeBase, NativeBinding, ConfigureChanges, ConfigureResult, ConfigurePreview, EffectiveConfig } from './contracts.js';
+export type { RuntimeCommand, BranchRequest, ConversationErrorReason, NativeBase, NativeBinding, ConfigureChanges, ConfigureResult, ConfigurePreview, EffectiveConfig } from './contracts.js';
 export type { AlpEvent, AlpError, Envelope, SessionSnapshot, TimelineItem, TurnOrigin, AssignmentSnapshot, UserQuestion, TreeStatus, SessionState } from './events.js';
 export { resolveSession, InstructionsAdapter, skillDescription } from './resolve.js';
 export type { SessionSpec, HostMcpServer, ResolvedSession, RuntimeKind } from './resolve.js';

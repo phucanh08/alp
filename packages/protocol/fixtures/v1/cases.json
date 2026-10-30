@@ -6573,6 +6573,92 @@
    }
   },
   {
+   "name": "session.commands params",
+   "check": "params",
+   "method": "session.commands",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_1"
+   }
+  },
+  {
+   "name": "session.commands params with an extra field",
+   "check": "params",
+   "method": "session.commands",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_1",
+    "agent": "main"
+   }
+  },
+  {
+   "name": "session.commands result",
+   "check": "result",
+   "method": "session.commands",
+   "valid": true,
+   "value": {
+    "commands": [
+     {
+      "name": "compact",
+      "description": "Clear history but keep a summary",
+      "argumentHint": "<instructions>",
+      "kind": "command"
+     },
+     {
+      "name": "alp:bug-loop",
+      "description": "Diagnose a bug",
+      "kind": "skill"
+     }
+    ]
+   }
+  },
+  {
+   "name": "session.commands result with a path",
+   "check": "result",
+   "method": "session.commands",
+   "valid": false,
+   "value": {
+    "commands": [
+     {
+      "name": "xia",
+      "description": "",
+      "kind": "skill",
+      "path": "/home/u/.alp/skills/xia/SKILL.md"
+     }
+    ]
+   }
+  },
+  {
+   "name": "session.commands result with a space in a name",
+   "check": "result",
+   "method": "session.commands",
+   "valid": false,
+   "value": {
+    "commands": [
+     {
+      "name": "rm -rf",
+      "description": "",
+      "kind": "command"
+     }
+    ]
+   }
+  },
+  {
+   "name": "session.commands result of an unknown kind",
+   "check": "result",
+   "method": "session.commands",
+   "valid": false,
+   "value": {
+    "commands": [
+     {
+      "name": "x",
+      "description": "",
+      "kind": "agent"
+     }
+    ]
+   }
+  },
+  {
    "name": "session.resumeCommand params",
    "check": "params",
    "method": "session.resumeCommand",

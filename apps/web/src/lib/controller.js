@@ -2168,6 +2168,28 @@ export class Controller {
     });
   }
 
+  /** The last "/" list each session answered (t-f628): kept while it is closed and cannot answer. */
+  #commands = new Map();
+
+  /**
+   * The slash commands and skills the session's composer offers after "/" (session.commands, t-f628):
+   * its runtime's, then its agent's ALP skills. Without the capability or an answer, the last list
+   * the session gave, else none; never an error.
+   * @param {string} sessionId @returns {Promise<import('@anhlp/alp-protocol').SessionCommand[]>}
+   */
+  async listCommands(sessionId) {
+    if (!this.#state.connection.capabilities.includes('session.commands')) return this.#commands.get(sessionId) ?? [];
+    try {
+      /** @type {import('@anhlp/alp-protocol').RpcMethodMap['session.commands']['result']} */
+      const result = await this.#client().request('session.commands', { sessionId });
+      const commands = Array.isArray(result?.commands) ? result.commands.filter(entry => typeof entry?.name === 'string' && entry.name) : [];
+      if (commands.length || !this.#commands.has(sessionId)) this.#commands.set(sessionId, commands);
+      return this.#commands.get(sessionId) ?? [];
+    } catch {
+      return this.#commands.get(sessionId) ?? [];
+    }
+  }
+
   /**
    * Copy resume command: the ALP CLI command the host builds (session.resumeCommand) goes to the
    * clipboard; it is never run here. A notice says what was copied, or why nothing was.

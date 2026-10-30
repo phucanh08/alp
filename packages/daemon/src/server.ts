@@ -1600,6 +1600,20 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       catch (error) { throw new RpcError(ERROR.unavailable, error instanceof Error ? error.message : String(error)); }
     },
 
+    /** The slash commands and skills a live session's composer offers after "/" (t-f628). */
+    async 'session.commands'(_connection, { sessionId }) {
+      if (typeof sessionId !== 'string' || !sessionId) throw new RpcError(-32602, 'sessionId is required');
+      if (!runtime.commands) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd lists no commands (capability session.commands is not listed)');
+      if (!runtime.snapshot(sessionId)) throw new RpcError(ERROR.notFound, `No session ${sessionId}`, { reason: 'not_found' });
+      try {
+        const listed = await runtime.commands(sessionId);
+        const seen = new Set<string>();
+        const commands = listed.filter(command => /^[^\s\u0000-\u001f\u007f]{1,256}$/.test(command.name) && !seen.has(command.name) && seen.add(command.name)).slice(0, 1000)
+          .map(command => ({ name: command.name, description: command.description.slice(0, 4096), ...(command.argumentHint ? { argumentHint: command.argumentHint.slice(0, 256) } : {}), kind: command.kind }));
+        return { commands };
+      } catch (error) { throw new RpcError(ERROR.unavailable, error instanceof Error ? error.message : String(error)); }
+    },
+
     /** The ALP CLI command that follows a session in a terminal, for the clipboard (§12.8). */
     async 'session.resumeCommand'(_connection, { sessionId }) {
       if (!conversation) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd has no resume command (capability session.resumeCommand is not listed)');
@@ -1888,7 +1902,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [...(runtime.interruptTurn ? [CAPABILITY.sessionInterruptTurn] : []), CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.workspaceFilesBrowse, CAPABILITY.hostDirectories, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), CAPABILITY.workspaceGitFacts, ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...(conversation?.reloads ? [CAPABILITY.sessionReload] : []), ...(conversation?.configures ? [CAPABILITY.sessionConfigureLive] : []), ...(conversation ? [CAPABILITY.sessionResumeCommand] : []), ...(modelCatalog ? [CAPABILITY.catalogLive] : []), ...operations.capabilities];
+  const capabilities = [...(runtime.interruptTurn ? [CAPABILITY.sessionInterruptTurn] : []), ...(runtime.commands ? [CAPABILITY.sessionCommands] : []), CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.workspaceFilesBrowse, CAPABILITY.hostDirectories, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), CAPABILITY.workspaceGitFacts, ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...(conversation?.reloads ? [CAPABILITY.sessionReload] : []), ...(conversation?.configures ? [CAPABILITY.sessionConfigureLive] : []), ...(conversation ? [CAPABILITY.sessionResumeCommand] : []), ...(modelCatalog ? [CAPABILITY.catalogLive] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {

@@ -2,6 +2,8 @@ import * as React from 'react';
 import { ArrowUp, FileText, Pencil, Plus, Square, X } from 'lucide-react';
 import { IMAGE_TYPES, NO_FILES, fileSize, filesOf, fitFiles, fitImages, imageType, previewUrl, readFiles, readImages, type FileAttachment, type FileLimits, type ImageAttachment } from '../lib/attachments.js';
 import type { QueuedPrompt } from '../lib/controller.js';
+import { insertCommand, matchCommands, slashQuery } from '../lib/slash-commands.js';
+import type { SessionCommand } from '@anhlp/alp-protocol';
 import { cn } from '../lib/utils';
 import { usePaneFocused } from './pane';
 
@@ -38,10 +40,13 @@ import { usePaneFocused } from './pane';
  *   progress on the message. Without `files`, a file is refused with `filesUnavailable` before
  *   anything is sent. Like images, a message with files is sent, never queued.
  * - The context meter (t-7679.12): Paseo's ring before the primary action, when given `meter`.
+ * - Slash commands (t-f628): with `commands`, a "/" at the start of the box lists every command and
+ *   skill of the session, filtered as the name is typed; Up/Down move, Enter or Tab inserts `/<name> `,
+ *   Escape closes the list. A click inserts too.
  */
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
-export function Composer({ meter, imageLimits, images: takesImages = false, imagesUnavailable, files: takesFiles = false, fileLimits, filesUnavailable, onSend, onQueue, onInterruptSend, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', sendShortcut = 'enter', startLabel, startHold, initialText, addText, autoFocus, inputId }: {
+export function Composer({ meter, imageLimits, images: takesImages = false, imagesUnavailable, files: takesFiles = false, fileLimits, filesUnavailable, onSend, onQueue, onInterruptSend, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', sendShortcut = 'enter', startLabel, startHold, initialText, addText, autoFocus, inputId, commands: loadCommands }: {
   /** Paseo's context window meter, before the primary action (t-7679.12). */
   meter?: React.ReactNode;
   /** The session takes images: the + button, paste and drop add them. */
@@ -90,6 +95,8 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
   autoFocus?: boolean;
   /** The box's id (one of its own by default: split panes can show two composers). */
   inputId?: string;
+  /** The session's slash commands and skills, offered after "/" (t-f628). */
+  commands?: () => Promise<SessionCommand[]>;
 }) {
   const [text, setText] = React.useState(initialText ?? '');
   React.useEffect(() => {
@@ -146,6 +153,29 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
     setError(refused ?? failed);
   };
   const [focused, setFocused] = React.useState(false);
+
+  // The "/" list: loaded each time the box starts a command, filtered as the name is typed.
+  const [commandList, setCommandList] = React.useState<SessionCommand[]>([]);
+  const [activeCommand, setActiveCommand] = React.useState(0);
+  // Escape closes the list for the text it was pressed on; typing on opens it again.
+  const [closedOn, setClosedOn] = React.useState<string | null>(null);
+  const typingCommand = !!loadCommands && slashQuery(text) !== null;
+  const loaderRef = React.useRef(loadCommands);
+  loaderRef.current = loadCommands;
+  React.useEffect(() => {
+    if (!typingCommand || !loaderRef.current) return;
+    let current = true;
+    void loaderRef.current().then(list => { if (current) setCommandList(list); }, () => {});
+    return () => { current = false; };
+  }, [typingCommand]);
+  const suggestions = typingCommand && closedOn !== text && !reason ? (matchCommands(commandList, text) ?? []) : [];
+  const selected = suggestions.length ? Math.min(activeCommand, suggestions.length - 1) : 0;
+  React.useEffect(() => { setActiveCommand(0); }, [text]);
+  const choose = (command: SessionCommand) => {
+    setText(insertCommand(command));
+    area.current?.focus();
+  };
+  const listId = `${React.useId()}-commands`;
 
   // Paseo's composer keys outside the box: Cmd/Ctrl+L focuses it; Escape interrupts the agent
   // from the box or from nowhere in particular (not from another field, a menu or a dialog).
@@ -294,6 +324,22 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
           {!focused && !text && !reason ? (
             <span aria-hidden className="pointer-events-none absolute right-4 top-3 hidden text-xs text-muted-foreground/80 [@media(pointer:fine)]:md:block" data-testid="composer-focus-hint">{isMac ? '⌘L' : 'Ctrl+L'} to focus</span>
           ) : null}
+          {suggestions.length ? (
+            <ul id={listId} role="listbox" aria-label="Commands and skills" data-testid="composer-commands"
+              className="absolute inset-x-0 bottom-full z-20 mb-2 max-h-72 overflow-y-auto rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-lg">
+              {suggestions.map((command, index) => (
+                <li key={command.name} id={`${listId}-${index}`} role="option" aria-selected={index === selected} data-testid="composer-command"
+                  onMouseDown={event => { event.preventDefault(); choose(command); }}
+                  onMouseEnter={() => setActiveCommand(index)}
+                  className={cn('flex cursor-pointer items-baseline gap-2 rounded-lg px-2 py-1.5 text-sm', index === selected && 'bg-muted')}>
+                  <span className="shrink-0 font-medium text-foreground">/{command.name}</span>
+                  {command.argumentHint ? <span className="shrink-0 text-xs text-muted-foreground">{command.argumentHint}</span> : null}
+                  <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={command.description}>{command.description}</span>
+                  <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground/80">{command.kind === 'skill' ? 'skill' : 'command'}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
           <label htmlFor={boxId} className="sr-only">Message</label>
           <textarea
             id={boxId}
@@ -313,7 +359,32 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
             onBlur={() => setFocused(false)}
             autoFocus={autoFocus}
             aria-keyshortcuts={isMac ? 'Meta+L' : 'Control+L'}
+            role={loadCommands ? 'combobox' : undefined}
+            aria-expanded={loadCommands ? suggestions.length > 0 : undefined}
+            aria-controls={suggestions.length ? listId : undefined}
+            aria-autocomplete={loadCommands ? 'list' : undefined}
+            aria-activedescendant={suggestions.length ? `${listId}-${selected}` : undefined}
             onKeyDown={event => {
+              if (suggestions.length && !event.nativeEvent.isComposing) {
+                if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  setActiveCommand((selected + (event.key === 'ArrowDown' ? 1 : suggestions.length - 1)) % suggestions.length);
+                  return;
+                }
+                if ((event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) || (event.key === 'Tab' && !event.shiftKey)) {
+                  event.preventDefault();
+                  choose(suggestions[selected]);
+                  return;
+                }
+                if (event.key === 'Escape') {
+                  // Closes the list only; the window's Escape (interrupt) does not see it.
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.nativeEvent.stopImmediatePropagation();
+                  setClosedOn(text);
+                  return;
+                }
+              }
               if (event.key === 'Tab' && event.shiftKey && onCycleMode && !event.nativeEvent.isComposing) {
                 event.preventDefault();
                 if (!event.repeat) onCycleMode();
