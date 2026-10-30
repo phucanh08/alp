@@ -7,7 +7,8 @@ import { findFormula, formulaDirs, listFormulas, pourFormula } from '@anhlp/alp-
 import { describeVerification } from '@anhlp/alp-core/verify';
 import { ago } from '@anhlp/alp-client/render';
 import { parse as toml } from 'smol-toml';
-import { addGate, blockersOf, checkGates, childrenOf, closeTask, compactTasks, createTask, describeGate, gateOpen, epicReport, gatesOf, linkTask, listTasks, loadTasks, readyTasks, rejectGate, reopenTask, resolveGate, summarize, TASKS_DIR, updateTask } from '@anhlp/alp-core/tasks';
+import { addGate, blockersOf, checkGates, childrenOf, closeTask, compactTasks, createTask, describeGate, gateOpen, epicReport, gatesOf, linkTask, listTasks, loadTasks, readyTasks, rejectGate, reopenTask, resolveGate, summarize, TASKS_DIR, updateTask, isAgentProcess, AGENT_MARKER } from '@anhlp/alp-core/tasks';
+import { AlpError } from '@anhlp/alp-core/errors';
 import { alpHome } from '@anhlp/alp-client/index';
 import { UsageError } from './usage.js';
 
@@ -230,6 +231,11 @@ async function taskCommand([action, ...args]) {
   } else if (action === 'gate') {
     const [change, id, gate, ...rest] = positionals;
     const kinds = ['human', 'timer', 'pr', 'run'].filter(kind => values[kind] !== undefined);
+    // Only the user decides a human gate: never from a process an ALP agent started (t-ca1f).
+    if (['clear', 'reject', 'rm'].includes(change) && id && gate && isAgentProcess()) {
+      const { tasks: current } = await loadTasks(root);
+      if (current.find(entry => entry.id === id)?.gates.find(entry => entry.id === gate)?.kind === 'human') throw new AlpError('GATE_USER_ONLY', `Only the user clears a human gate; this process runs under an ALP agent (${AGENT_MARKER}). Ask the user to decide it`);
+    }
     if (change === 'add' && id && !gate && kinds.length === 1) {
       const kind = kinds[0];
       if (values.option && kind !== 'human') throw new UsageError();
@@ -240,7 +246,7 @@ async function taskCommand([action, ...args]) {
     } else if (change === 'reject' && id && gate && !rest.length && !kinds.length && !values.option && values.choice === undefined) {
       task = await rejectGate(root, id, gate, { by: 'user', reason: values.message, channel: 'cli' });
     } else if (change === 'rm' && id && gate && !rest.length && !kinds.length && !values.option && values.choice === undefined) {
-      task = await resolveGate(root, id, gate, { by: 'user', note: values.message, remove: true });
+      task = await resolveGate(root, id, gate, { by: 'user', note: values.message, remove: true, channel: 'cli' });
     } else {
       throw new UsageError();
     }
@@ -267,7 +273,7 @@ function printTask(task, tasks) {
     task.related.length && `related ${task.related.join(', ')}`,
   ].filter(Boolean);
   if (relations.length) console.log(`  ${relations.join('; ')}`);
-  for (const gate of task.gates) console.log(`  ${gateOpen(gate) ? '⏸' : '✓'} gate ${describeGate(gate)}${gate.resolved ? ` (cleared by ${gate.resolved.by}${gate.resolved.choice ? ` with "${gate.resolved.choice}"` : ''}${gate.resolved.channel ? ` in ${gate.resolved.channel}` : ''}${gate.resolved.note ? `: ${gate.resolved.note}` : ''})` : gate.rejected ? ` (rejected by ${gate.rejected.by}${gate.rejected.reason ? `: ${gate.rejected.reason}` : ''})` : ''}${gateOpen(gate) && gate.options ? ` options: ${gate.options.join(' | ')}` : ''}`);
+  for (const gate of task.gates) console.log(`  ${gateOpen(gate) ? '⏸' : '✓'} gate ${describeGate(gate)}${gate.resolved ? ` (cleared by ${gate.resolved.by}${gate.resolved.choice ? ` with "${gate.resolved.choice}"` : ''}${gate.resolved.channel ? ` in ${gate.resolved.channel}` : ''}${gate.resolved.note ? `: ${gate.resolved.note}` : ''})` : gate.rejected ? ` (rejected by ${gate.rejected.by}${gate.rejected.reason ? `: ${gate.rejected.reason}` : ''})` : ''}${gateOpen(gate) && gate.options ? ` options: ${gate.options.join(' | ')}` : ''}${gate.tampered ? ' ⚠ changed outside ALP (a task file edit cleared or removed it); reopened for you to decide' : ''}`);
   const inherited = gatesOf(task, tasks).filter(label => label.startsWith('t-'));
   if (task.status !== 'closed' && inherited.length) console.log(`  waits on its parent's gates: ${inherited.join('; ')}`);
   if (task.compacted) console.log(`  compacted ${task.compacted.at.slice(0, 10)} from ${task.compacted.chars} characters`);

@@ -117,6 +117,8 @@ function digest(value: unknown) {
 type Connection = {
   socket?: net.Socket;
   helloed: boolean;
+  /** It said in daemon.hello that an ALP agent started it (t-ca1f): refused what only the user may do. */
+  agent?: boolean;
   /** The client name daemon.hello gave: a gate card answered from alp-paseo* is recorded as paseo, else web. */
   client?: string;
   roots: Set<string>;
@@ -127,6 +129,8 @@ type Connection = {
 
 /** Retained events per live tree, for attach and replay. */
 const TREE_LOG_LIMIT = 20_000;
+/** The daemon.hello capability a process an ALP agent started announces (t-ca1f; the client's handshake sends it). */
+const AGENT_CAPABILITY = 'principal.agent';
 const SESSION_ID = /^[\w.:-]{1,128}$/;
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -1264,6 +1268,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     },
 
     'question.answer'(connection, { questionId, text, dismiss = false, reason }) {
+      // An answer speaks for the user (a gate card's answer decides the gate): never from a connection an ALP agent opened (t-ca1f).
+      if (connection.agent) throw new RpcError(ERROR.forbidden, 'Only the user answers a question; this connection was opened by an ALP agent', { reason: 'user_only' });
       if (typeof questionId !== 'string') throw new RpcError(-32602, 'questionId is required');
       if (dismiss !== true && typeof text !== 'string') throw new RpcError(-32602, 'text or dismiss is required');
       // A unique prefix is enough, as in the CLI.
@@ -1780,7 +1786,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     return result.workspace ? { ...result, workspace: await workspaceDescriptor(result.workspace) } : result;
   });
   runtime.bindSchedules?.(async (action, params) => handlers[`schedule.${action}`](undefined as any, params));
-  for (const [method, handler] of Object.entries(operations.handlers)) handlers[method] = (_connection, params) => handler(params);
+  for (const [method, handler] of Object.entries(operations.handlers)) handlers[method] = (connection, params) => handler(params, { agent: connection.agent === true });
   Object.setPrototypeOf(handlers, null);
   // Every v1 method name stays the daemon's, served here or not, so no extension takes one.
   const originalMethods = new Set([...Object.keys(handlers), ...RPC_METHODS]);
@@ -1889,6 +1895,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         const issues = validateParams(method, params)!;
         if (issues.length) throw invalidParams(issues);
         connection.helloed = true;
+        // Sticky: a later hello never sheds it.
+        connection.agent = connection.agent === true || (Array.isArray(params?.capabilities) && params.capabilities.includes(AGENT_CAPABILITY));
         if (typeof params?.client?.name === 'string') connection.client = params.client.name;
         // Terminals are listed only while the host's switch is on (and the PTY module loads).
         const terminalLimits = await terminals?.advertised();

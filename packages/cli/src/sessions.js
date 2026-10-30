@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
 import { ago, duration, renderLog, renderPs } from '@anhlp/alp-client/render';
-import { isTaskId } from '@anhlp/alp-core/tasks';
+import { AGENT_MARKER, isAgentProcess, isTaskId } from '@anhlp/alp-core/tasks';
 import { connect } from '@anhlp/alp-client/index';
 import { UsageError } from './usage.js';
 import { start, running, stop } from './daemon.js';
@@ -261,6 +261,8 @@ async function answer(args) {
   const { values, positionals: [questionId, ...words] } = parseArgs({ args, allowPositionals: true, options: { dismiss: { type: 'boolean' }, reason: { type: 'string' } } });
   const text = words.join(' ').trim();
   if (!questionId || (values.dismiss ? text : !text)) throw new UsageError();
+  // An answer speaks for the user: never from a process an ALP agent started (t-ca1f).
+  if (isAgentProcess()) throw new Error(`Only the user answers a question; this process runs under an ALP agent (${AGENT_MARKER})`);
   const client = await running();
   const result = await client.request('question.answer', values.dismiss ? { questionId, dismiss: true, reason: values.reason } : { questionId, text }).finally(() => client.close());
   console.log(`${values.dismiss ? 'Dismissed' : 'Answered'} ${result.questionId}`);

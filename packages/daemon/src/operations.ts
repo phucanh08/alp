@@ -31,7 +31,9 @@ export type OperationsOptions = {
   onGateChange?: (projectRoot: string) => Promise<void> | void;
 };
 
-type Handler = (params: any) => Promise<unknown>;
+/** `caller.agent`: the connection said in daemon.hello that an ALP agent started it (t-ca1f). */
+export type Caller = { agent?: boolean };
+type Handler = (params: any, caller?: Caller) => Promise<unknown>;
 
 /** How long task.create remembers a requestId (§10): within one alpd process only. */
 const REQUEST_TTL_MS = 10 * 60 * 1000;
@@ -158,8 +160,8 @@ export function createOperations({ home, templates, knownProjects = () => [], on
     catch (error: any) { if (error?.code === 'NOT_FOUND') return undefined; throw error; }
   }
 
-  const guard = (handler: Handler, context?: Parameters<typeof fromCore>[1]): Handler => async params => {
-    try { return await handler(params); }
+  const guard = (handler: Handler, context?: Parameters<typeof fromCore>[1]): Handler => async (params, caller) => {
+    try { return await handler(params, caller); }
     catch (error) { throw fromCore(error, context); }
   };
 
@@ -206,8 +208,13 @@ export function createOperations({ home, templates, knownProjects = () => [], on
 
     // Approves a gate, or with reject records the user's rejection and leaves it open. Either way
     // the runtime is told, so main gets the decision by mail once and the gate's card settles.
-    'task.gate.resolve': guard(async ({ projectRoot, id, gate, note, ifRev, choice, reject, channel = 'web' }) => {
+    'task.gate.resolve': guard(async ({ projectRoot, id, gate, note, ifRev, choice, reject, channel = 'web' }, caller) => {
       const root = await project(projectRoot);
+      // Only the user decides a human gate: never a connection an ALP agent opened (t-ca1f).
+      if (caller?.agent) {
+        const { tasks } = await loadTasks(root);
+        if (tasks.find(task => task.id === id)?.gates.find(entry => entry.id === gate)?.kind === 'human') throw failure(ERROR.forbidden, 'user_only', 'Only the user decides a human gate; this connection was opened by an ALP agent');
+      }
       const guarded = ifRev !== undefined ? { ifRev } : {};
       const task = reject === true
         ? await rejectGate(root, id, gate, { by: 'user', channel, ...(note ? { reason: note } : {}), ...guarded })
