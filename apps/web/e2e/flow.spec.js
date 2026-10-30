@@ -115,8 +115,9 @@ test('create, stream, tool call, questions, stop, rename', async ({ page }) => {
   expect(stored).not.toContain(world.tokens.owner.split('.')[2]);
   expect(await world.gatewayLog()).not.toContain(world.tokens.owner.split('.')[2]);
 
-  // Disconnect forgets it.
-  await page.getByRole('button', { name: 'Disconnect' }).click();
+  // Disconnect (the footer's Hosts menu, as Paseo's host picker) forgets it.
+  await page.getByTestId('sidebar-hosts-trigger').click();
+  await page.getByTestId('sidebar-disconnect').click();
   await expect(page.getByLabel('Access token')).toHaveValue('');
 });
 

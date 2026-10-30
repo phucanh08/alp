@@ -222,10 +222,11 @@ test('Settings › Projects registers a granted directory; Workspaces renames an
   await row.getByRole('button', { name: 'Pin workspace Storefront' }).click();
   await expect(row.getByRole('button', { name: 'Unpin workspace Storefront' })).toHaveAttribute('aria-pressed', 'true');
 
+  // The sidebar follows: the project, renamed, sits in Paseo's Pinned section.
   await settings.getByRole('button', { name: 'Back' }).click();
-  const shared = page.getByTestId('shared-workspace-row').filter({ hasText: 'Storefront' });
-  await expect(shared).toHaveCount(1);
-  await expect(shared.getByRole('button', { name: 'Unpin workspace Storefront' })).toHaveAttribute('aria-pressed', 'true');
+  const pinned = page.getByTestId('sidebar-pinned');
+  await expect(pinned).toContainText('Storefront');
+  await expect(pinned.getByTestId('sidebar-project')).toHaveAttribute('data-pinned', 'true');
 });
 
 test('a token without workspace.write sees Workspaces read only', async ({ page }) => {

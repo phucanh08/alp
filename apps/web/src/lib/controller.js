@@ -1413,8 +1413,16 @@ export class Controller {
   /** @param {string} workspaceId @param {boolean} pinned */
   async pinWorkspace(workspaceId, pinned) {
     if (!can(this.#state.principal ?? undefined, 'workspace.write')) { this.#notify('error', 'Ask the host owner to add workspace.write to your credential to change shared pins.'); return; }
+    const update = () => this.#client().request('workspace.update', { workspaceId, pinned, ifRevision: this.#state.registry.revision, requestId: globalThis.crypto.randomUUID() });
     try {
-      await this.#client().request('workspace.update', { workspaceId, pinned, ifRevision: this.#state.registry.revision, requestId: globalThis.crypto.randomUUID() });
+      try { await update(); }
+      catch (error) {
+        // Another client changed the list since it was read: a pin sets a state, so it is safe to
+        // read the list again and ask once more.
+        if (/** @type {any} */ (error)?.data?.reason !== 'stale_revision') throw error;
+        await this.refreshRegistry();
+        await update();
+      }
       await this.refreshRegistry();
     } catch (error) { this.#notify('error', `Pin was not saved. ${error instanceof Error ? error.message : String(error)} Refresh and try again.`); await this.refreshRegistry(); }
   }
@@ -1457,6 +1465,23 @@ export class Controller {
       await this.#client().request('project.register', { directory, ifRevision: this.#state.registry.revision, requestId: globalThis.crypto.randomUUID() });
       await this.refreshRegistry();
     } catch (error) { this.#notify('error', `Project was not added. ${error instanceof Error ? error.message : String(error)} Refresh and try again.`); await this.refreshRegistry(); }
+  }
+
+  /**
+   * The root sessions of each workspace in `paths` (session.list, read only), for the sidebar's
+   * status grouping, which shows every project's sessions as Paseo's does. A workspace the host
+   * cannot list is left out. @param {string[]} paths @returns {Promise<Record<string, SessionSummary[]>>}
+   */
+  async listWorkspaceSessions(paths) {
+    if (!can(this.#state.principal ?? undefined, 'session.read') || this.#state.connection.phase !== 'open') return {};
+    const client = this.#client();
+    const entries = await Promise.all(paths.map(async path => {
+      try {
+        const result = await client.request('session.list', { projectRoot: path, rootsOnly: true, includeClosed: true });
+        return [path, (Array.isArray(result?.sessions) ? result.sessions : []).filter((/** @type {any} */ session) => session && typeof session.id === 'string' && !session.parentId && !session.archived)];
+      } catch { return null; }
+    }));
+    return Object.fromEntries(/** @type {Array<[string, SessionSummary[]]>} */ (entries.filter(Boolean)));
   }
 
   /** @param {{ quiet?: boolean }} [options] */

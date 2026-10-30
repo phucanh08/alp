@@ -898,8 +898,8 @@ function SettingsNav({ page, onSelect, mobile }: { page: Page | null; onSelect: 
   );
 }
 
-export function SettingsScreen({ onClose, mobile }: { onClose: () => void; mobile: boolean }) {
-  const [page, setPage] = React.useState<Page | null>(mobile ? null : 'general');
+export function SettingsScreen({ onClose, mobile, initialPage }: { onClose: () => void; mobile: boolean; initialPage?: Page }) {
+  const [page, setPage] = React.useState<Page | null>(initialPage ?? (mobile ? null : 'general'));
   React.useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !(event.target instanceof HTMLElement && event.target.closest('[role="menu"],dialog'))) onClose(); };
     window.addEventListener('keydown', onKey);

@@ -6,25 +6,31 @@ test.beforeAll(async()=>{world=await startWorld();});
 test.afterAll(async()=>{await world?.close();});
 test('register a granted project, two clients share durable pin after daemon restart; default credential explains missing permission',async({browser,page})=>{
  await connect(page,world,world.tokens.registryWriter);
- await page.getByRole('button',{name:'Add project',exact:true}).click();
+ // Paseo's footer Add project, for ALP: register a directory the token grants.
+ await page.getByTestId('sidebar-add-project').click();
  await page.getByLabel('Existing granted directory').selectOption(world.projects.main);
  await page.getByRole('button',{name:'Register project',exact:true}).click();
- const row=page.getByTestId('shared-workspace-row').filter({hasText:'shop'});await expect(row).toHaveCount(1);
+ const project=target=>target.locator(`[data-testid="sidebar-project"][data-path="${world.projects.main}"]`);
+ const row=project(page);await expect(row).toHaveAttribute('data-workspace-id',/.+/);
  const id=await row.getAttribute('data-workspace-id');
  const {connect:hostConnect}=await import('@anhlp/alp-client');const owner=await hostConnect(world.socket);let alternateId;
  try{const original=await owner.request('workspace.get',{workspaceId:id});const made=await owner.request('registry.owner',{operation:'workspace.create',args:{directory:world.projects.main,projectId:original.workspace.projectId,title:'Alternate workspace'},requestId:'second-workspace'});alternateId=made.result.workspace.id;}finally{owner.close();}
- await expect(page.getByTestId('shared-workspace-row')).toHaveCount(2,{timeout:30000});
  const second=await browser.newContext();const other=await second.newPage();
+ const pin=async(target,testId)=>{await project(target).getByTestId('project-row').hover();await project(target).getByTestId('project-actions').click();await target.getByTestId(testId).click();};
  try {
-  await connect(other,world,world.tokens.registryWriter);await expect(other.getByTestId('shared-workspace-row')).toHaveCount(2);await expect(other.getByTestId('shared-workspace-row').filter({hasText:'shop'})).toHaveAttribute('data-workspace-id',id);
-  await row.getByRole('button',{name:/^Pin workspace/}).click();await expect(row.getByRole('button',{name:/^Unpin workspace/})).toHaveAttribute('aria-pressed','true');
-  await expect(other.getByTestId('shared-workspace-row').filter({hasText:'shop'}).getByRole('button',{name:/^Unpin workspace/})).toHaveAttribute('aria-pressed','true',{timeout:30000});
-  const alternate=other.locator(`[data-workspace-id="${alternateId}"]`);await alternate.getByRole('button',{name:'Pin workspace Alternate workspace',exact:true}).click();await expect(alternate.getByRole('button',{name:'Unpin workspace Alternate workspace',exact:true})).toHaveAttribute('aria-pressed','true');
-  await expect(row.getByRole('button',{name:/^Unpin workspace/})).toHaveAttribute('aria-pressed','true');
+  await connect(other,world,world.tokens.registryWriter);await expect(project(other)).toHaveAttribute('data-workspace-id',id);
+  // Pin to top from the project's actions: the project moves to Paseo's Pinned section, for every client.
+  await pin(page,'project-pin');await expect(row).toHaveAttribute('data-pinned','true');await expect(page.getByTestId('sidebar-pinned')).toContainText('shop');
+  await expect(project(other)).toHaveAttribute('data-pinned','true',{timeout:30000});
+  // The second record of the same directory is pinned from Settings › Workspaces; the project's own pin stays.
+  await other.getByTestId('sidebar-settings').click();const settings=other.getByRole('region',{name:'Settings'});await settings.getByTestId('settings-workspaces').click();
+  const alternate=settings.locator(`[data-workspace-id="${alternateId}"]`);await alternate.getByRole('button',{name:'Pin workspace Alternate workspace',exact:true}).click();await expect(alternate.getByRole('button',{name:'Unpin workspace Alternate workspace',exact:true})).toHaveAttribute('aria-pressed','true');
+  await expect(row).toHaveAttribute('data-pinned','true');
   await alternate.getByRole('button',{name:'Unpin workspace Alternate workspace',exact:true}).click();await expect(alternate.getByRole('button',{name:'Pin workspace Alternate workspace',exact:true})).toHaveAttribute('aria-pressed','false');
-  await world.restartDaemon();await connect(page,world,world.tokens.registryWriter);await expect(row).toHaveAttribute('data-workspace-id',id);await expect(page.locator(`[data-workspace-id="${alternateId}"]`)).toBeVisible();await expect(page.getByRole('button',{name:/^Unpin workspace/})).toHaveAttribute('aria-pressed','true');await page.screenshot({path:test.info().outputPath('shared-pins-after-restart.png')});
+  await world.restartDaemon();await connect(page,world,world.tokens.registryWriter);await expect(row).toHaveAttribute('data-workspace-id',id);await expect(row).toHaveAttribute('data-pinned','true');await page.screenshot({path:test.info().outputPath('shared-pins-after-restart.png')});
+  await pin(page,'project-unpin');await expect(row).not.toHaveAttribute('data-pinned','true');await expect(page.getByTestId('sidebar-pinned')).toHaveCount(0);
  } finally {await second.close();}
- const defaults=await browser.newContext();const read=await defaults.newPage();try{await connect(read,world);await read.getByRole('button',{name:'Add project',exact:true}).click();await expect(read.getByRole('status').filter({hasText:'workspace.write'})).toContainText('host owner');}finally{await defaults.close();}
+ const defaults=await browser.newContext();const read=await defaults.newPage();try{await connect(read,world);await read.getByTestId('sidebar-add-project').click();await expect(read.getByRole('status').filter({hasText:'workspace.write'})).toContainText('host owner');}finally{await defaults.close();}
 });
 
 test('real gateway and daemon filter before page/count and deny outside grants without registry or credential writes; removed/archived mutations replay',async()=>{
