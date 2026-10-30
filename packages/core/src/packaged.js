@@ -145,6 +145,18 @@ export function assetDir({ env = process.env, info = packagedInfo() } = {}) {
   const assets = info.assets ?? {};
   const directory = assetCacheDir(info.version, env);
   const digest = manifestDigest(assets);
+  // Checked once per process and directory; later calls (every template read) reuse the answer.
+  const key = `${directory}\0${digest}`;
+  if (verified.has(key) && existsSync(path.join(directory, MARKER))) return directory;
+  const result = extract(directory, digest, assets, info.version);
+  verified.add(key);
+  return result;
+}
+
+const verified = new Set();
+
+/** @param {string} directory @param {string} digest @param {Record<string, PackagedAsset>} assets @param {string} version */
+function extract(directory, digest, assets, version) {
   const parent = path.dirname(directory);
   mkdirSync(parent, { recursive: true, mode: 0o700 });
   if (existsSync(directory)) {
@@ -163,7 +175,7 @@ export function assetDir({ env = process.env, info = packagedInfo() } = {}) {
       writeFileSync(target, bytes, { mode: 0o600 });
       if (/(^|\/)terminal-owner(\.exe)?$/.test(name)) chmodSync(target, 0o700);
     }
-    writeFileSync(path.join(staging, MARKER), JSON.stringify({ version: info.version, digest }), { mode: 0o600 });
+    writeFileSync(path.join(staging, MARKER), JSON.stringify({ version, digest }), { mode: 0o600 });
     // Another ALP process may have finished the same extraction first; its copy is equivalent.
     if (existsSync(directory)) {
       assertPrivate(directory);

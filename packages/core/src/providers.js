@@ -101,7 +101,8 @@ export function acpModel(model) {
  * native executable it calls, or the Node script, under this Node. A bare name with an .exe or
  * .com on PATH, any other command, and every command elsewhere are returned as they are.
  * @param {string} command @param {string[]} [args] @param {Record<string, string | undefined>} [env]
- * @returns {{ command: string, args: string[] }}
+ * In the ALP executable a Node script runs with the executable as its Bun runtime, via `env` to add.
+ * @returns {{ command: string, args: string[], env?: Record<string, string> }}
  */
 export function launchCommand(command, args = [], env = process.env) {
   if (process.platform !== 'win32' || /[\\/]/.test(command) || path.extname(command)) return { command, args };

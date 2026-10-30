@@ -86,10 +86,11 @@ test('assetDir extracts the embedded assets once per version into a private cach
     assert.equal((await stat(path.join(directory, 'terminal-native/prebuilt/x/terminal-owner'))).mode & 0o777, 0o700, 'the helper is executable');
     assert.equal((await stat(path.join(directory, 'templates/ALP.md'))).mode & 0o777, 0o600);
   }
-  // Reused while intact; re-extracted when a file was lost or the build changed.
+  // Reused while intact; re-extracted when the cache was cleared or the build changed.
   const marker = await readFile(path.join(directory, '.alp-assets.json'), 'utf8');
   assert.equal(assetDir({ env, info }), directory);
   await rm(path.join(directory, 'alp-web/index.html'));
+  await rm(path.join(directory, '.alp-assets.json'));
   assert.equal(assetDir({ env, info }), directory);
   assert.equal(await readFile(path.join(directory, 'alp-web/index.html'), 'utf8'), '<html></html>');
   const changed = { ...assets, 'templates/ALP.md': { ...assets['templates/ALP.md'] } };
