@@ -126,7 +126,8 @@ export function acpWhat(request: AcpPermission) {
  * user passed in OPENCODE_CONFIG_CONTENT, and ALP answers each by the mode.
  */
 export function acpEnv(provider: Pick<AcpProvider, 'command' | 'env'>, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const env = { ...base, ...provider.env };
+  // Provider env never sheds the agent mark (t-ca1f).
+  const env: NodeJS.ProcessEnv = { ...base, ...provider.env, ...(base.ALP_AGENT_SESSION ? { ALP_AGENT_SESSION: base.ALP_AGENT_SESSION } : {}) };
   if (provider.command.split(/[\\/]/).pop()!.replace(/\.exe$/i, '').toLowerCase() !== 'opencode') return env;
   let config: any = {};
   try { config = JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}') ?? {}; } catch {}

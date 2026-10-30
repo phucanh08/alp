@@ -775,7 +775,8 @@ answers a question an agent asked. ALP enforces this on every path it controls:
 
 The ledger is per machine, while task files travel with Git. A human gate you
 clear in another clone or on another machine, then pull, or a checkout of a
-commit from before the gate, looks like a change outside ALP here: ALP reopens
+commit or a restore of a backup from before the gate, looks like a change
+outside ALP here: ALP reopens
 the gate, and you clear (or `alp task gate rm`) it again on this machine.
 
 The user's own paths are unchanged: Paseo cards and the Tasks panel, ALP Web,
@@ -788,9 +789,10 @@ can unset `ALP_AGENT_SESSION`, speak to the daemon socket directly without
 announcing `principal.agent`, edit the ledger in `$ALP_HOME` as well as the task
 file, or fake a TTY. An older alpd does not enforce the daemon refusals. Human
 gates opened before the ledger existed enter it only the next time ALP writes
-their task; until then a file edit that clears them goes undetected. Only OS-level separation (running agents as another
-user, or in a sandbox that cannot reach `$ALP_HOME`, the daemon socket and
-`.alp/tasks`) prevents it. Give full access only to agents you trust with that.
+their task; until then a file edit that clears them goes undetected. Only
+OS-level separation (running agents as another user, or in a sandbox that cannot
+reach `$ALP_HOME`, the daemon socket and `.alp/tasks`) prevents it. Give full
+access only to agents you trust with that.
 
 ### Compaction
 
