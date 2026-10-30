@@ -13,7 +13,7 @@ async function fixture(t, events, { hold = false, afterInterrupt, resistTerminat
   const tail = afterInterrupt ? `const fs = require('node:fs'); const timer = setInterval(() => {
     if (!fs.existsSync(${JSON.stringify(trigger)})) return;
     clearInterval(timer); console.log(${JSON.stringify(JSON.stringify(end(afterInterrupt)))});
-  }, 5); setTimeout(() => { clearInterval(timer); }, 2000).unref();` : hold ? 'setTimeout(() => {}, 1000);' : '';
+  }, 5); setTimeout(() => { clearInterval(timer); }, 10_000).unref();` : hold ? 'setTimeout(() => {}, 1000);' : '';
   const gate = path.join(dir, 'ready');
   const startup = startupDelay ? `const fsGate = require('node:fs'); const gateTimer = setInterval(() => {
     if (!fsGate.existsSync(${JSON.stringify(gate)})) return;
@@ -97,10 +97,12 @@ test('C5 interrupt command failure stops viewer and fails', async t => {
 
 test('follow missing event after close rejects immediately; timed-out waits do not consume later matches', async t => {
   const stream = await fixture(t, [opened, started], { afterInterrupt: 'canceled' });
-  await stream.next(e => e.event.type === 'turn.started', 'start', 500);
+  // Child startup and the fixture's 5 ms polling are not what this test measures: give them room
+  // on a loaded machine (t-e706). The fixture keeps polling for the interrupt for 10 s.
+  await stream.next(e => e.event.type === 'turn.started', 'start', 5000);
   const terminal = e => e.event.type === 'turn.ended';
   await assert.rejects(stream.next(terminal, 'end', 20), /no end within/);
-  const next = stream.next(terminal, 'end', 500);
+  const next = stream.next(terminal, 'end', 5000);
   stream.interrupt();
   assert.equal((await next).event.state, 'canceled');
   await stream.exit;
