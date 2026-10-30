@@ -39,7 +39,7 @@ const RESULT_MARKER = `${RESULT_LEDGER}.initialized`;
 const DESTINATIONS = 'worktree-destinations.json';
 // Evidence only: the daemon never loads mapping authority from this path.
 const QUARANTINED_DESTINATIONS = 'state/worktree-destinations.quarantined.json';
-export const STATE_UNITS = [RESULT_LEDGER, RESULT_MARKER, 'state/schema.json', 'state/sessions', 'state/timeline', 'state/receipts', 'state/recall.json', 'state/pause.json', 'state/trust.json', 'state/web-workspaces.json'];
+export const STATE_UNITS = [RESULT_LEDGER, RESULT_MARKER, 'state/assignment-archive', 'state/schema.json', 'state/sessions', 'state/timeline', 'state/receipts', 'state/recall.json', 'state/pause.json', 'state/trust.json', 'state/web-workspaces.json'];
 /**
  * Live work (running assignments alpd continues after a restart) and the journal of an
  * unfinished migration are never backed up: a restore of the state removes them, so restored
@@ -448,8 +448,14 @@ async function prepareWorkspaceRestore(home, root, units, warnings) {
     for (const entry of value.results) {
       const owner = { assignmentId: entry.assignmentId, checkout: entry.checkout, ...(entry.worktree === undefined ? {} : { worktree: entry.worktree }) };
       const previous = owners.get(owner.assignmentId);
-      if (previous && JSON.stringify(previous) !== JSON.stringify(owner)) throw invalid('assignment result ownership conflicts with current data; reconcile it before restoring');
-      owners.set(owner.assignmentId, owner);
+      const identity = value => JSON.stringify({ assignmentId: value.assignmentId, checkout: value.checkout, worktree: value.worktree });
+      if (previous && identity(previous) !== identity(owner)) throw invalid('assignment result ownership conflicts with current data; reconcile it before restoring');
+      // Its evidence comes along, the current data's first; how it was handled does not, so a restored result is resolved again.
+      const evidence = value => !!value && typeof value === 'object' && !Array.isArray(value) &&
+        ['agent', 'status', 'finishedAt', 'project', 'brief', 'summary'].every(key => typeof value[key] === 'string') &&
+        Array.isArray(value.requesters) && value.requesters.every(id => typeof id === 'string') && (value.taskId === undefined || typeof value.taskId === 'string');
+      const result = evidence(entry.result) ? entry.result : previous?.result;
+      owners.set(owner.assignmentId, { ...owner, ...(result === undefined ? {} : { result }) });
     }
   }
   const markers = [await incoming(RESULT_MARKER), await regular(home, RESULT_MARKER)];

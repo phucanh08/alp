@@ -6,7 +6,7 @@ import { models, thinkingOptionsFor } from './catalog.js';
 import { claudeSandboxAvailable, SKILL_PLUGIN } from './claude-transport.js';
 import { languageInstruction } from './language.js';
 import { antigravityModeText } from './antigravity-transport.js';
-import { HANDOFF_TOOL, WAIT_TOOL, SEND_TOOL, MERGE_TOOL, VERIFY_TOOL, DISCARD_TOOL, CANCEL_TOOL, RECALL_TOOL, PIN_TOOL, BOARD_TOOL, UNPIN_TOOL, ASK_TOOL, LESSON_TOOL, LESSON_CURATE_TOOL, SKILL_TOOL, ISSUE_TOOL, SCHEDULE_TOOL, mainOf, taskActions, taskTool } from './tools.js';
+import { HANDOFF_TOOL, WAIT_TOOL, SEND_TOOL, MERGE_TOOL, VERIFY_TOOL, DISCARD_TOOL, RESOLVE_TOOL, CANCEL_TOOL, RECALL_TOOL, PIN_TOOL, BOARD_TOOL, UNPIN_TOOL, ASK_TOOL, LESSON_TOOL, LESSON_CURATE_TOOL, SKILL_TOOL, ISSUE_TOOL, SCHEDULE_TOOL, mainOf, taskActions, taskTool } from './tools.js';
 
 import { COMPACT_SHARE } from './runtime-context.js';
 
@@ -162,6 +162,7 @@ export function nativeSessionConfig(
       `At most ${mapping.workflow.maxPeers} peers may run concurrently. Concurrent peers must be read-only or isolated: pass isolation "worktree" to give a writing peer its own git worktree. ` +
       'A worktree result lists its branch and changed files; apply it with alp_merge (uncommitted, conflicts left as markers) or drop it with alp_discard, then verify. ' +
       'Writers in this shared checkout run one at a time. ' +
+      "A writer's change outside a worktree stays a result ALP keeps, and its checkout cannot be removed, until you record with alp_resolve that you applied, discarded or acknowledged it. " +
       'To learn why a finished assignment did something, ask it with alp_recall rather than guessing from its handoff. ' +
       'When the project configures verify commands, ALP runs them before alp_merge applies a change, and after a writer in your checkout finishes; a failed check applies nothing. To fix a failed worktree change, delegate again with continueFrom set to its assignmentId. ' +
       'Do not run shell/file mutations in parallel with delegation. ' +
@@ -288,7 +289,7 @@ export function nativeSessionConfig(
           },
         ]
       : []),
-      ...(targets.length ? [WAIT_TOOL, CANCEL_TOOL, MERGE_TOOL, DISCARD_TOOL, VERIFY_TOOL, RECALL_TOOL] : []),
+      ...(targets.length ? [WAIT_TOOL, CANCEL_TOOL, MERGE_TOOL, DISCARD_TOOL, RESOLVE_TOOL, VERIFY_TOOL, RECALL_TOOL] : []),
       ...(targets.length || parentAgent ? [SEND_TOOL] : []),
       ...(parentAgent ? [HANDOFF_TOOL] : []),
       ...(supervised ? [LESSON_TOOL, LESSON_CURATE_TOOL, SKILL_TOOL] : []),

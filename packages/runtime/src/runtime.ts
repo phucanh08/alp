@@ -1,4 +1,4 @@
-import { createAssignmentResults } from './assignment-results.js';
+import { createAssignmentResults, RESULT_OUTCOMES } from './assignment-results.js';
 import { constants as fsConstants } from 'node:fs';
 import type { Session, Assignment, Waiter } from './session-state.js';
 import { errorData, plainObject, toolResult } from './tool-results.js';
@@ -127,6 +127,9 @@ const COMPACT_NATIVE_MS = 5 * 60_000;
 
 /** How much of an assignment's brief ALP repeats after a compaction. */
 const BRIEF_CHARS = 8000;
+/** How much of a writer's brief and of its handoff and output the result ledger keeps as evidence. */
+const RESULT_EVIDENCE_CHARS = 2000;
+const RESOLVE_NOTE_CHARS = 2000;
 // Placeholder delivery marks while a steer or a woken turn is starting.
 const STEERING = '\u0000steering';
 const STARTING = '\u0000starting';
@@ -1228,6 +1231,49 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       return toolResult(true, { assignmentId: entry.assignmentId, agent: entry.agent, ...(entry.taskId ? { taskId: entry.taskId } : {}), finishedAt: entry.finishedAt, answer });
     } catch (error) {
       return toolResult(false, { assignmentId: entry.assignmentId, error: errorData(error).message });
+    }
+  }
+
+  /**
+   * Records how the requester handled a finished writer's change in its checkout, then archives the
+   * result: until then the removal guard keeps that checkout. Recall expiry never stands in for this.
+   */
+  async function resolveTool(sessionId: string, session: Session, args: unknown) {
+    if (!plainObject(args, ['assignmentId', 'outcome', 'note']) || typeof args.assignmentId !== 'string' || !RESULT_OUTCOMES.includes(args.outcome as any) ||
+      (args.note !== undefined && (typeof args.note !== 'string' || args.note.length > RESOLVE_NOTE_CHARS))) {
+      return toolResult(false, { error: `Pass assignmentId, outcome (${RESULT_OUTCOMES.join(', ')}), and optionally a note of at most ${RESOLVE_NOTE_CHARS} characters` });
+    }
+    const id = args.assignmentId;
+    const outcome = args.outcome as typeof RESULT_OUTCOMES[number];
+    const note = args.note as string | undefined;
+    const live = [...sessions.values()];
+    if (sessions.has(id) || live.some(other => other.assignments.has(id)) || inFlight.all().some(entry => entry.assignmentId === id) || inherited.some(entry => entry.assignmentId === id)) {
+      return toolResult(false, { error: 'That assignment is still running or can still be recovered; wait for its result' });
+    }
+    if (live.some(other => other.worktrees.has(id))) return toolResult(false, { error: 'Its change waits in a worktree; apply it with alp_merge or drop it with alp_discard' });
+    let ledger: Awaited<ReturnType<typeof assignmentResults.inspect>>;
+    try { ledger = await assignmentResults.inspect(); } catch (error) { return toolResult(false, { error: errorData(error).message }); }
+    const entry = ledger.results.find(owner => owner.assignmentId === id && !owner.handled);
+    const project = session.mapping.agent.projectRoot;
+    const overlapping = async (a: string, b: string) => {
+      const [x, y] = [await realpath(a).catch(() => a), await realpath(b).catch(() => b)];
+      const within = (parent: string, child: string) => { const relative = path.relative(parent, child); return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)); };
+      return within(x, y) || within(y, x);
+    };
+    // Its requesters may resolve it, and so may a root of its project, so a closed requester never leaves it held for good.
+    // An entry from before evidence was kept names only its checkout: a root working there may resolve it.
+    const allowed = !!entry && (entry.result
+      ? entry.result.requesters.includes(sessionId) || (!session.parent && await sameDirectory(entry.result.project, project))
+      : !session.parent && await overlapping(entry.checkout, project));
+    if (!entry || !allowed) return toolResult(false, { error: `No unresolved assignment result ${id} of yours` });
+    // A worktree still on disk holds work only a merge or discard may settle.
+    if (entry.worktree && await stat(entry.worktree).then(() => true, () => false)) return toolResult(false, { error: `Its worktree ${entry.worktree} still exists; merge or remove it first` });
+    try {
+      const archived = await assignmentResults.resolve(id, { outcome, by: `${session.mapping.agent.name} in ${sessionId}`, at: new Date().toISOString(), ...(note ? { note } : {}) });
+      runLog(rootOf(sessionId), { event: 'result.resolved', assignmentId: id, agent: session.mapping.agent.name, outcome, ...(note ? { note: clip(note, 500) } : {}) });
+      return toolResult(true, { resolved: id, outcome, archivedAt: archived.archivedAt });
+    } catch (error) {
+      return toolResult(false, { assignmentId: id, error: errorData(error).message });
     }
   }
 
@@ -2569,6 +2615,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         assignmentId: assignment.id,
         checkout: assignment.worktree?.checkout ?? assignment.writeCheckout ?? resultChild?.mapping.workdir ?? parent.mapping.workdir,
         ...(assignment.worktree ? { worktree: assignment.worktree.path } : {}),
+        // Outside a worktree, the change stays in the checkout: keep its evidence until the requester resolves it.
+        ...(!assignment.worktree ? { result: {
+          agent: assignment.agent, status: state, finishedAt: new Date().toISOString(),
+          project: (resultChild ?? parent).mapping.agent.projectRoot, requesters: lineage(parentId), ...(assignment.taskId ? { taskId: assignment.taskId } : {}),
+          brief: cut(resultChild?.brief ?? '', RESULT_EVIDENCE_CHARS),
+          summary: cut(JSON.stringify({ handoff: resultChild?.handoff ?? null, output: resultChild ? [...resultChild.text.values()].at(-1) ?? '' : '', ...(error ? { error: errorData(error).message } : {}) }), RESULT_EVIDENCE_CHARS),
+        } } : {}),
       });
     } catch (failure) {
       // Keep both the assignment and its recovery evidence; never close away unrecorded ownership.
@@ -2671,7 +2724,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
 
     if (
-      !['alp_delegate', 'alp_handoff', 'alp_wait', 'alp_cancel', 'alp_send', 'alp_ask', 'alp_merge', 'alp_discard', 'alp_recall', 'alp_verify', 'alp_pin', 'alp_board', 'alp_unpin', 'alp_lesson', 'alp_lesson_curate', 'alp_skill', 'alp_issue', 'alp_task', 'alp_schedule'].includes(params.tool) ||
+      !['alp_delegate', 'alp_handoff', 'alp_wait', 'alp_cancel', 'alp_send', 'alp_ask', 'alp_merge', 'alp_discard', 'alp_resolve', 'alp_recall', 'alp_verify', 'alp_pin', 'alp_board', 'alp_unpin', 'alp_lesson', 'alp_lesson_curate', 'alp_skill', 'alp_issue', 'alp_task', 'alp_schedule'].includes(params.tool) ||
       params.namespace != null ||
       typeof params.callId !== 'string'
     ) {
@@ -2702,6 +2755,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       : params.tool === 'alp_board' ? boardTool(session, args)
       : params.tool === 'alp_unpin' ? unpinTool(sessionId, session, args)
       : params.tool === 'alp_recall' ? recallTool(sessionId, session, args)
+      : params.tool === 'alp_resolve' ? resolveTool(sessionId, session, args)
       : params.tool === 'alp_verify' ? verifyTool(sessionId, session, args)
       : params.tool === 'alp_cancel' ? cancelTool(sessionId, session, args)
       : params.tool === 'alp_merge' || params.tool === 'alp_discard' ? worktreeTool(sessionId, session, args, params.tool === 'alp_merge' ? 'merge' : 'discard')
@@ -4337,6 +4391,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       assignmentId: entry.assignmentId,
       checkout: entry.worktree?.checkout ?? entry.lease ?? entry.spec.writeRoot ?? entry.spec.workdir ?? entry.project,
       ...(entry.worktree ? { worktree: entry.worktree.path } : {}),
+      ...(!entry.worktree ? { result: {
+        agent: entry.agent, status: 'abandoned', finishedAt: new Date().toISOString(), project: entry.project, requesters: sessions.has(entry.parentId) ? lineage(entry.parentId) : [entry.parentId],
+        ...(entry.taskId ? { taskId: entry.taskId } : {}), brief: cut(entry.brief ?? '', RESULT_EVIDENCE_CHARS), summary: cut(JSON.stringify({ reason }), RESULT_EVIDENCE_CHARS),
+      } } : {}),
     });
     await inFlight.remove(entry.assignmentId);
     const parent = sessions.get(entry.parentId);
@@ -4820,7 +4878,14 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
             };
             return contains(target, owner) || contains(owner, target);
           };
-          for (const entry of resultLedger!.results) if (overlaps(entry.checkout) || overlaps(entry.worktree)) refuseMutation('workspace_assignment_result', `Resolve permanent assignment result ${entry.assignmentId} before removing ${directory}`);
+          // A handled result no longer holds its paths; its evidence stays in the ledger until archived.
+          for (const entry of resultLedger!.results) if (!entry.handled && (overlaps(entry.checkout) || overlaps(entry.worktree))) refuseMutation('workspace_assignment_result', `Resolve permanent assignment result ${entry.assignmentId} before removing ${directory}`);
+          // A recall entry outlives the result it describes by up to its own 14 days; once the result is handled, it holds nothing.
+          const resolved = async (assignmentId: string) => {
+            if (resultLedger!.results.some(owner => owner.assignmentId === assignmentId && owner.handled)) return true;
+            try { return !!(await assignmentResults.archived(assignmentId)); }
+            catch { return refuseMutation('workspace_assignment_result', 'Cannot inspect the assignment result archive; repair it before removing the workspace'); }
+          };
           for (const [project, pins] of loadedBoards) for (const pin of pins) {
             if (pin.kind === 'claim' && live(pin) && pin.paths?.some(value => overlaps(path.resolve(project, value)))) refuseMutation('workspace_claimed', `Release claim ${pin.id} before removing ${directory}`);
           }
@@ -4849,10 +4914,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
               if (entry.worktree !== undefined && (!entry.worktree || !['path', 'checkout', 'workdir'].every(key => typeof entry.worktree[key] === 'string'))) refuseMutation('workspace_assignment_result', `Invalid worktree result in ${file}`);
               if (entry.shared !== undefined && (!entry.shared || typeof entry.shared !== 'object' || Array.isArray(entry.shared))) refuseMutation('workspace_assignment_result', `Invalid shared result in ${file}`);
               if (kind === 'live') checkLive(entry);
-              else if (overlaps(entry.cwd) || overlaps(entry.shared?.writeRoot)) refuseMutation('workspace_assignment_result', `Preserve retained assignment ${entry.assignmentId} before removing ${directory}`);
+              else if ((overlaps(entry.cwd) || overlaps(entry.shared?.writeRoot)) && !(await resolved(entry.assignmentId))) refuseMutation('workspace_assignment_result', `Preserve retained assignment ${entry.assignmentId} before removing ${directory}`);
             }
           }
-          for (const entry of await recalls.all()) if (overlaps(entry.cwd) || overlaps(entry.shared?.writeRoot)) refuseMutation('workspace_assignment_result', `Preserve retained assignment ${entry.assignmentId} before removing ${directory}`);
+          for (const entry of await recalls.all()) if ((overlaps(entry.cwd) || overlaps(entry.shared?.writeRoot)) && !(await resolved(entry.assignmentId))) refuseMutation('workspace_assignment_result', `Preserve retained assignment ${entry.assignmentId} before removing ${directory}`);
           return await run();
       }).finally(() => { workspaceMutation = false; });
     },
