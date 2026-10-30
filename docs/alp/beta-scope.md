@@ -1,5 +1,7 @@
 # Phạm vi beta (`0.0.0-beta.1`, `0.0.0-beta.2`, `0.0.1-beta.3`, `0.0.1-beta.4`)
 
+> **Beta.6 (`0.0.1-beta.6`, t-693e):** sửa lỗi của beta.5: file thực thi không nhúng Claude Agent SDK, nên mọi phiên Claude đều lỗi `Cannot find package '@anthropic-ai/claude-agent-sdk'`. npm bỏ qua beta.5; beta.6 phát hành cả npm lẫn GitHub release từ cùng một SHA của main. Chưa phát hành (t-36f6). Xem [beta-release-notes.md](beta-release-notes.md).
+
 > **Beta.5 (`0.0.1-beta.5`, t-1e02):** cùng version cho npm (dist-tag `beta`) và binary GitHub release (release thường, không prerelease); xem [beta-release-notes.md](beta-release-notes.md) và [binary-install.md](binary-install.md). GitHub release đã publish (từ `2b63a7a`). Trên npm (t-cd7f), `@anhlp/alp` là launcher, đi cùng 5 package platform (13 tarball, thứ tự ở §7.4). File thực thi trong các package platform lấy từ asset của release `v0.0.1-beta.5`, pack bằng `release:pack --binaries-release v0.0.1-beta.5` ([binary-install.md](binary-install.md#npm-packages)). npm chưa publish.
 >
 > **Beta.4 (`0.0.1-beta.4`):** phạm vi và gate ở **§13**; chưa publish.

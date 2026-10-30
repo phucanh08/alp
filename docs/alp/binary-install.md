@@ -13,7 +13,7 @@ curl -fsSL https://github.com/phucanh08/alp/releases/latest/download/install.sh 
 
 | Option | Effect |
 | --- | --- |
-| `--version 0.0.1-beta.5` | Installs that release (tag `v0.0.1-beta.5`) instead of the latest. |
+| `--version 0.0.1-beta.6` | Installs that release (tag `v0.0.1-beta.6`) instead of the latest. |
 | `--system` | Installs to `/usr/local/bin`. It uses `sudo` only when the directory is not writable. |
 | `--dir <path>` | Installs to `<path>`. |
 | `--no-modify-path` | Leaves your shell profile alone and only prints the PATH line. |
@@ -36,7 +36,7 @@ To check provenance yourself, run `gh attestation verify alp-<version>-<os>-<arc
 irm https://github.com/phucanh08/alp/releases/latest/download/install.ps1 | iex
 ```
 
-`install.ps1` takes `-Version <v>`, `-Dir <path>`, `-NoModifyPath` and `-BaseUrl <https://, file:// or an absolute directory>`. With `| iex`, set `ALP_INSTALL_VERSION`, `ALP_INSTALL_DIR`, `ALP_INSTALL_NO_MODIFY_PATH=1` or `ALP_INSTALL_BASE_URL` instead, or run `& ([scriptblock]::Create((irm <url>/install.ps1))) -Version 0.0.1-beta.5`. It works in Windows PowerShell 5.1 and PowerShell 7. It reports an error by throwing, never with `exit`, so a failure does not close the shell you piped it into, and its body runs in a child scope, so it leaves no variables or preferences behind (only `$env:Path` gains the directory).
+`install.ps1` takes `-Version <v>`, `-Dir <path>`, `-NoModifyPath` and `-BaseUrl <https://, file:// or an absolute directory>`. With `| iex`, set `ALP_INSTALL_VERSION`, `ALP_INSTALL_DIR`, `ALP_INSTALL_NO_MODIFY_PATH=1` or `ALP_INSTALL_BASE_URL` instead, or run `& ([scriptblock]::Create((irm <url>/install.ps1))) -Version 0.0.1-beta.6`. It works in Windows PowerShell 5.1 and PowerShell 7. It reports an error by throwing, never with `exit`, so a failure does not close the shell you piped it into, and its body runs in a child scope, so it leaves no variables or preferences behind (only `$env:Path` gains the directory).
 
 1. It refuses anything but Windows. On arm64 Windows it warns and installs the x64 build, which runs under emulation.
 2. It downloads `SHA256SUMS` and takes `alp-<version>-windows-x64.zip` from it, with no GitHub API call.

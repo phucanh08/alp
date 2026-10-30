@@ -1,3 +1,23 @@
+# ALP 0.0.1-beta.6 — release notes
+
+Prepared 2026-10-30 (task t-693e). Not published yet; publishing is the owner's step (t-36f6).
+`0.0.1-beta.6` replaces beta.5 on both channels, with one version and one main SHA:
+
+- **Fixed: every Claude session failed in the beta.5 executable** with
+  `Cannot find package '@anthropic-ai/claude-agent-sdk' imported from /$bunfs/root/alp`. The runtime
+  imports the Claude Agent SDK by a computed name, which `bun build --compile` did not embed. The
+  executable's entry now imports the SDK by its literal name and registers it
+  ([binary-install.md](binary-install.md)). Codex sessions were not affected. If you installed the
+  beta.5 executable, run `alp update` once beta.6 is published, or re-run `install.sh`.
+- **New check:** `scripts/binary-smoke.mjs` runs a Claude turn (with a fake Claude) through the
+  embedded SDK on all five binary-build platforms. Before this, no smoke started a Claude session,
+  which is how beta.5 shipped broken.
+- **npm:** beta.5 was never published to npm. `0.0.1-beta.6` is the first npm release of the
+  `@anhlp/alp` launcher and its five platform packages, as described for beta.5 below. Their
+  executables come from the GitHub release `v0.0.1-beta.6`.
+
+The GitHub release `v0.0.1-beta.5` stays as it is. Everything else is as in beta.5 below.
+
 # ALP 0.0.1-beta.5 — release notes
 
 Prepared 2026-10-30 (task t-1e02). This is the first version shipped two ways, with the same
