@@ -1,7 +1,9 @@
 # The ALP executable (t-1e02, docs/alp/binary-install.md): built with `bun build --compile` on a
 # native runner per target, smoked there with Node (scripts/binary-smoke.mjs) and without it
 # (scripts/binary-smoke-nodeless.sh: debian:bookworm-slim on Linux, `env -i PATH=/usr/bin:/bin` on
-# macOS), then packed as alp-<version>-<os>-<arch>.tar.gz. Called by ci.yml and release-binaries.yml.
+# macOS; scripts/binary-smoke-nodeless.ps1 with a system-only PATH on Windows), then packed as
+# alp-<version>-<os>-<arch>.tar.gz (alp-<version>-windows-x64.zip on Windows, P2). Called by ci.yml
+# and release-binaries.yml.
 name: Binary build
 
 on:
@@ -25,6 +27,14 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.sha }}
       - run: shellcheck --version && shellcheck -s sh install.sh scripts/binary-smoke-nodeless.sh
+      - name: PowerShell scripts parse
+        shell: pwsh
+        run: |
+          foreach ($file in 'install.ps1', 'scripts/binary-smoke-nodeless.ps1') {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { $errors | ForEach-Object { Write-Error "${file}: $_" }; exit 1 }
+          }
 
   binary:
     runs-on: ${{ matrix.runner }}
@@ -33,11 +43,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: bun-darwin-arm64, platform: darwin-arm64, runner: macos-14 }
-          - { target: bun-darwin-x64, platform: darwin-x64, runner: macos-15-intel }
-          - { target: bun-linux-x64, platform: linux-x64, runner: ubuntu-24.04 }
-          - { target: bun-linux-arm64, platform: linux-arm64, runner: ubuntu-24.04-arm }
+          - { target: bun-darwin-arm64, platform: darwin-arm64, host: darwin-arm64, exe: alp, runner: macos-14 }
+          - { target: bun-darwin-x64, platform: darwin-x64, host: darwin-x64, exe: alp, runner: macos-15-intel }
+          - { target: bun-linux-x64, platform: linux-x64, host: linux-x64, exe: alp, runner: ubuntu-24.04 }
+          - { target: bun-linux-arm64, platform: linux-arm64, host: linux-arm64, exe: alp, runner: ubuntu-24.04-arm }
+          - { target: bun-windows-x64, platform: windows-x64, host: win32-x64, exe: alp.exe, runner: windows-2022 }
     name: binary (${{ matrix.platform }})
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,15 +66,15 @@ jobs:
       - run: npm ci
       - name: The runner is the target (native build, no emulation)
         run: |
-          bun -e 'const want = process.argv[1]; const have = `${process.platform}-${process.arch}`; if (have !== want) { console.error(`runner is ${have}, target ${want}`); process.exit(1); }' '${{ matrix.platform }}'
+          bun -e 'const want = process.argv[1]; const have = `${process.platform}-${process.arch}`; if (have !== want) { console.error(`runner is ${have}, target ${want}`); process.exit(1); }' '${{ matrix.host }}'
       - run: node scripts/build-binary.mjs --target ${{ matrix.target }}
       - name: Size
         run: |
-          size=$(wc -c < dist/bin/alp | tr -d ' ')
+          size=$(wc -c < dist/bin/${{ matrix.exe }} | tr -d ' ')
           echo "alp ${{ matrix.platform }}: $size bytes ($((size / 1048576)) MiB)" | tee -a "$GITHUB_STEP_SUMMARY"
-          file dist/bin/alp
+          file dist/bin/${{ matrix.exe }} || true
       - name: Smoke (with Node)
-        run: node scripts/binary-smoke.mjs dist/bin/alp
+        run: node scripts/binary-smoke.mjs dist/bin/${{ matrix.exe }}
       - name: Smoke without Node (debian:bookworm-slim)
         if: runner.os == 'Linux'
         run: |
@@ -71,11 +85,20 @@ jobs:
         run: |
           env -i PATH=/usr/bin:/bin sh -c '! command -v node' || { echo "node is in /usr/bin or /bin"; exit 1; }
           env -i PATH=/usr/bin:/bin TMPDIR="$RUNNER_TEMP" sh scripts/binary-smoke-nodeless.sh dist/bin/alp
+      - name: Smoke without Node (PATH of Windows system directories only)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/binary-smoke-nodeless.ps1 dist/bin/alp.exe
+      - name: install.ps1 against a local mirror
+        if: runner.os == 'Windows'
+        run: node --test test/integration/binary-install-ps1.test.js
       - name: Pack
-        run: node scripts/package-binary.mjs pack --binary dist/bin/alp --target ${{ matrix.target }} --out dist/release
+        run: node scripts/package-binary.mjs pack --binary dist/bin/${{ matrix.exe }} --target ${{ matrix.target }} --out dist/release
       - uses: actions/upload-artifact@v4
         with:
           name: alp-binary-${{ matrix.platform }}
-          path: dist/release/*.tar.gz
+          path: |
+            dist/release/*.tar.gz
+            dist/release/*.zip
           retention-days: 7
           if-no-files-found: error

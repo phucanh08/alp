@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Packs a built ALP executable as a release archive (t-1e02 P1, docs/alp/binary-install.md):
 // alp-<version>-<os>-<arch>.tar.gz holding alp-<version>-<os>-<arch>/{alp, LICENSE, NOTICE,
-// THIRD-PARTY-NOTICES.txt}. `sums` writes SHA256SUMS for every archive (and install.sh) in a directory.
+// THIRD-PARTY-NOTICES.txt}; on Windows (P2) alp-<version>-windows-x64.zip with alp.exe instead.
+// `sums` writes SHA256SUMS for every archive (and install.sh, install.ps1) in a directory.
 //
 //   node scripts/package-binary.mjs pack --binary dist/bin/alp --target bun-linux-x64 [--out dist/release]
 //   node scripts/package-binary.mjs sums dist/release
@@ -14,12 +15,15 @@ import { parseArgs } from 'node:util';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
-/** The release platform of a Bun target: bun-darwin-arm64 → darwin-arm64. @param {string} target */
+/** The release platform of a Bun target: bun-darwin-arm64 → darwin-arm64, bun-windows-x64 → windows-x64. @param {string} target */
 export function releasePlatform(target) {
-  const match = /^bun-(darwin|linux)-(x64|arm64)$/.exec(target);
-  if (!match) throw new Error(`No release archive for ${target}; expected bun-(darwin|linux)-(x64|arm64)`);
+  const match = /^bun-(darwin|linux)-(x64|arm64)$/.exec(target) ?? /^bun-(windows)-(x64)$/.exec(target);
+  if (!match) throw new Error(`No release archive for ${target}; expected bun-(darwin|linux)-(x64|arm64) or bun-windows-x64`);
   return `${match[1]}-${match[2]}`;
 }
+
+/** Windows archives are .zip holding alp.exe; the others are .tar.gz holding alp. @param {string} target */
+const isWindows = target => releasePlatform(target).startsWith('windows-');
 
 /** The archive's base name. @param {string} version @param {string} target */
 export function archiveName(version, target) {
@@ -54,23 +58,30 @@ export async function pack({ binary, target, out, version, root = ROOT }) {
   try {
     const directory = path.join(work, name);
     await mkdir(directory);
-    await copyFile(binary, path.join(directory, 'alp'));
-    await chmod(path.join(directory, 'alp'), 0o755);
+    const windows = isWindows(target);
+    const executable = windows ? 'alp.exe' : 'alp';
+    await copyFile(binary, path.join(directory, executable));
+    if (!windows) await chmod(path.join(directory, executable), 0o755);
     await copyFile(path.join(root, 'LICENSE'), path.join(directory, 'LICENSE'));
     await copyFile(path.join(root, 'NOTICE'), path.join(directory, 'NOTICE'));
     await writeFile(path.join(directory, 'THIRD-PARTY-NOTICES.txt'), await combinedNotices(root));
     await mkdir(out, { recursive: true });
-    const archive = path.resolve(out, `${name}.tar.gz`);
-    const result = spawnSync('tar', ['-czf', archive, '-C', work, name], { stdio: 'inherit', env: { ...process.env, COPYFILE_DISABLE: '1' } });
+    const archive = path.resolve(out, `${name}${windows ? '.zip' : '.tar.gz'}`);
+    // bsdtar (Windows' tar.exe, macOS) writes a zip with --format zip; GNU tar cannot.
+    const args = windows ? ['--format', 'zip', '-cf', archive, '-C', work, name] : ['-czf', archive, '-C', work, name];
+    // On Windows, Git's GNU tar may come first on PATH; use the system's bsdtar.
+    const tar = process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+    const result = spawnSync(tar, args, { stdio: 'inherit', env: { ...process.env, COPYFILE_DISABLE: '1' } });
     if (result.status !== 0) throw new Error(`tar failed (${result.status ?? result.error})`);
     return archive;
   } finally { await rm(work, { recursive: true, force: true }); }
 }
 
-/** Writes `SHA256SUMS` (sha256sum format) for the archives and install.sh in `directory`. @param {string} directory */
+/** Writes `SHA256SUMS` (sha256sum format) for the archives and installers in `directory`. @param {string} directory */
 export async function sums(directory) {
-  const names = (await readdir(directory)).filter(name => /^alp-.+\.tar\.gz$/.test(name) || name === 'install.sh').sort();
-  if (!names.some(name => name.endsWith('.tar.gz'))) throw new Error(`No alp-*.tar.gz archive in ${directory}`);
+  const archive = name => /^alp-.+\.(tar\.gz|zip)$/.test(name);
+  const names = (await readdir(directory)).filter(name => archive(name) || name === 'install.sh' || name === 'install.ps1').sort();
+  if (!names.some(archive)) throw new Error(`No alp-*.tar.gz or alp-*.zip archive in ${directory}`);
   const lines = [];
   for (const name of names) lines.push(`${createHash('sha256').update(await readFile(path.join(directory, name))).digest('hex')}  ${name}`);
   await writeFile(path.join(directory, 'SHA256SUMS'), `${lines.join('\n')}\n`);
