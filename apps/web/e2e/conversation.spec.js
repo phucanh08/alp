@@ -40,10 +40,10 @@ test('fork through a turn, rewind before one, reload, restore the branch, fork i
   const token = world.tokens.worktreeWriter;
   await connect(page, world, token);
   // The registry row of the project, which Create worktree (and a fork into a worktree) needs.
-  await page.getByRole('button', { name: 'Add project', exact: true }).click();
+  await page.getByTestId('sidebar-add-project').click();
   await page.getByLabel('Existing granted directory').selectOption(world.projects.main);
   await page.getByRole('button', { name: 'Register project', exact: true }).click();
-  await expect(page.getByTestId('shared-workspace-row').filter({ hasText: 'shop' })).toHaveCount(1);
+  await expect(page.locator(`[data-testid="sidebar-project"][data-path="${world.projects.main}"]`)).toHaveAttribute('data-workspace-id', /.+/);
 
   // A workspace file made before any conversation: it must stay byte-identical.
   const fixture = path.join(world.projects.main, 'conversation-fixture.txt');

@@ -22,6 +22,16 @@ export const PREFERENCES_VERSION = 1;
 /** @typedef {{ id: SidebarItemId, visible: boolean }} SidebarItem */
 /** @typedef {{ header: SidebarItem[], footer: SidebarItem[] }} SidebarItems */
 /**
+ * Paseo's sidebar Display preferences (components/sidebar/display-preferences): how the
+ * Workspaces section groups and sorts its rows, what a row's title is, which facts a row shows
+ * under it (Show), what its trailing slot holds and which projects it lists.
+ * @typedef {{
+ *   grouping: 'project' | 'status', sort: 'created' | 'lastPrompt', titleSource: 'title' | 'branch',
+ *   rowItems: { branch: boolean, project: boolean, host: boolean, labels: boolean },
+ *   trailing: 'timestamp' | 'none', projectFilters: string[],
+ * }} SidebarDisplay
+ */
+/**
  * The last choices of the New session screen, as Paseo remembers provider, model, mode and the
  * thinking option per model. Empty strings never stored: absent means the host's default.
  * @typedef {{ team?: string, mode?: string, model?: string, thinkingByModel?: Record<string, string> }} NewSessionChoices
@@ -34,7 +44,7 @@ export const PREFERENCES_VERSION = 1;
  *   uiFontFamily: string, monoFontFamily: string, uiFontSize: number, contentFontSize: number, codeFontSize: number,
  *   contentMaxWidth: number | null, syntaxTheme: SyntaxTheme,
  *   chatDisplay: ChatDisplay, chatOutline: boolean, terminalScrollback: number,
- *   sidebar: SidebarItems, newSession: NewSessionChoices,
+ *   sidebar: SidebarItems, sidebarDisplay: SidebarDisplay, newSession: NewSessionChoices,
  * }} Preferences
  */
 
@@ -60,6 +70,29 @@ const SIDEBAR_HIDDEN_BY_DEFAULT = new Set(['tasks']);
 /** @param {'header' | 'footer'} section */
 const defaultSidebarSection = section => SIDEBAR_ITEMS[section].map(id => ({ id, visible: !SIDEBAR_HIDDEN_BY_DEFAULT.has(id) }));
 
+/** Paseo's defaults (sidebar-view-store, row-items.ts, storage.ts). */
+export const DEFAULT_SIDEBAR_DISPLAY = Object.freeze(/** @type {SidebarDisplay} */ ({
+  grouping: 'project', sort: 'created', titleSource: 'title',
+  rowItems: Object.freeze({ branch: false, project: false, host: true, labels: true }),
+  trailing: 'timestamp', projectFilters: /** @type {string[]} */ ([]),
+}));
+const MAX_PROJECT_FILTERS = 64;
+
+/** @param {unknown} value @returns {SidebarDisplay} */
+function parseSidebarDisplay(value) {
+  const row = isRecord(value) ? /** @type {Record<string, any>} */ (value) : {};
+  const items = isRecord(row.rowItems) ? row.rowItems : {};
+  const defaults = DEFAULT_SIDEBAR_DISPLAY;
+  return {
+    grouping: row.grouping === 'status' ? 'status' : 'project',
+    sort: row.sort === 'lastPrompt' ? 'lastPrompt' : 'created',
+    titleSource: row.titleSource === 'branch' ? 'branch' : 'title',
+    rowItems: /** @type {SidebarDisplay['rowItems']} */ (Object.fromEntries(Object.entries(defaults.rowItems).map(([key, fallback]) => [key, typeof items[key] === 'boolean' ? items[key] : fallback]))),
+    trailing: row.trailing === 'none' ? 'none' : 'timestamp',
+    projectFilters: [...new Set(Array.isArray(row.projectFilters) ? row.projectFilters.filter(path => typeof path === 'string' && path && path.length <= 4096) : [])].slice(0, MAX_PROJECT_FILTERS),
+  };
+}
+
 /** @type {Preferences} */
 export const DEFAULT_PREFERENCES = Object.freeze({
   sendBehavior: 'steer', sendShortcut: 'enter', theme: 'system',
@@ -67,6 +100,7 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   contentMaxWidth: null, syntaxTheme: 'one',
   chatDisplay: 'collapseTurns', chatOutline: true, terminalScrollback: 10_000,
   sidebar: Object.freeze({ header: defaultSidebarSection('header'), footer: defaultSidebarSection('footer') }),
+  sidebarDisplay: DEFAULT_SIDEBAR_DISPLAY,
   newSession: Object.freeze({}),
 });
 
@@ -129,7 +163,7 @@ function parseNewSession(value) {
  * @param {unknown} raw @returns {Preferences}
  */
 export function parsePreferences(raw) {
-  const defaults = () => ({ ...DEFAULT_PREFERENCES, sidebar: { header: defaultSidebarSection('header'), footer: defaultSidebarSection('footer') }, newSession: {} });
+  const defaults = () => ({ ...DEFAULT_PREFERENCES, sidebar: { header: defaultSidebarSection('header'), footer: defaultSidebarSection('footer') }, sidebarDisplay: parseSidebarDisplay(null), newSession: {} });
   if (typeof raw !== 'string' || !raw) return defaults();
   let value;
   try { value = JSON.parse(raw); } catch { return defaults(); }
@@ -151,12 +185,13 @@ export function parsePreferences(raw) {
     chatOutline: typeof value.chatOutline === 'boolean' ? value.chatOutline : DEFAULT_PREFERENCES.chatOutline,
     terminalScrollback: clamped(value.terminalScrollback, LIMITS.terminalScrollback),
     sidebar: { header: parseSidebarSection(sidebar.header, 'header'), footer: parseSidebarSection(sidebar.footer, 'footer') },
+    sidebarDisplay: parseSidebarDisplay(value.sidebarDisplay),
     newSession: parseNewSession(value.newSession),
   };
 }
 
 /** The fields stored, in order: the known ones only, never anything else on the object. */
-const STORED_FIELDS = /** @type {const} */ (['sendBehavior', 'sendShortcut', 'theme', 'uiFontFamily', 'monoFontFamily', 'uiFontSize', 'contentFontSize', 'codeFontSize', 'contentMaxWidth', 'syntaxTheme', 'chatDisplay', 'chatOutline', 'terminalScrollback', 'sidebar', 'newSession']);
+const STORED_FIELDS = /** @type {const} */ (['sendBehavior', 'sendShortcut', 'theme', 'uiFontFamily', 'monoFontFamily', 'uiFontSize', 'contentFontSize', 'codeFontSize', 'contentMaxWidth', 'syntaxTheme', 'chatDisplay', 'chatOutline', 'terminalScrollback', 'sidebar', 'sidebarDisplay', 'newSession']);
 
 /**
  * The string stored for `preferences`: its known fields only, re-validated.
