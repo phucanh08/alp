@@ -158,5 +158,6 @@ test('the execPath lint catches property and element access and destructuring of
   assert.equal(hits('const { execPath } = process; const { execPath: bin } = process; const { "execPath": q } = globalThis.process;'), 3);
   assert.equal(hits('globalThis.process.execPath;'), 1);
   assert.equal(hits("import { execPath } from 'node:process'; import { execPath as e } from 'process'; import { execPath as f } from 'other';"), 2);
+  assert.equal(hits("import * as p from 'node:process'; import q from 'process'; p.execPath; q.execPath; const r = {}; r.execPath;"), 2);
   assert.equal(hits('const { argv } = process; other.execPath; process.argv0; const { execPath } = other;'), 0);
 });

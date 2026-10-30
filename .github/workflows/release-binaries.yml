@@ -51,6 +51,8 @@ jobs:
   draft:
     needs: [check, build]
     if: github.ref == 'refs/heads/main'
+    # The release environment admits deployments from main only (repository setting).
+    environment: release
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -95,5 +97,5 @@ jobs:
           fi
           gh release create "$tag" release/* --draft --target "$RELEASE_SHA" --repo "$GITHUB_REPOSITORY" \
             --title "ALP $VERSION" \
-            --notes "Draft binary release built from $RELEASE_SHA by run $GITHUB_RUN_ID. Install: curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/install.sh | sh -s -- --version $VERSION. Verify provenance: gh attestation verify <archive> --repo $GITHUB_REPOSITORY."
+            --notes "Draft binary release built from $RELEASE_SHA by run $GITHUB_RUN_ID. Install: curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/install.sh | sh -s -- --version $VERSION. Verify provenance: gh attestation verify <archive> --repo $GITHUB_REPOSITORY --source-ref refs/heads/main --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release-binaries.yml."
           gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,tagName,targetCommitish,assets --jq '{isDraft, tagName, targetCommitish, assets: [.assets[].name]}'
