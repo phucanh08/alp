@@ -1,4 +1,5 @@
-// The process.execPath rule of check-boundaries.mjs (t-1e02), separate so it can be tested.
+// The process.execPath rule of check-boundaries.mjs (t-1e02), separate so it can be tested. Best effort:
+// require('process').execPath, dynamic import() and aliases (const p = process) are not caught.
 import ts from 'typescript';
 
 /** Whether `node` reads process.execPath: process.execPath, process['execPath'], or `{ execPath } = process`. */

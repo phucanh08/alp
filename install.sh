@@ -87,7 +87,7 @@ if command -v curl >/dev/null 2>&1; then
   fetch() { curl --proto '=https,file' --tlsv1.2 -fsSL --retry 3 -o "$2" "$1"; }
 elif command -v wget >/dev/null 2>&1; then
   # wget reads no file:// mirror; https only.
-  fetch() { case "$1" in https://*) wget -q --https-only -O "$2" "$1" ;; *) echo "wget cannot read $1; install curl" >&2; return 1 ;; esac; }
+  fetch() { case "$1" in https://*) wget -q -O "$2" "$1" ;; *) echo "wget cannot read $1; install curl" >&2; return 1 ;; esac; }
 else
   die "curl or wget is required"
 fi
