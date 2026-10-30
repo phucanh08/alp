@@ -67,6 +67,23 @@ test('the matrix: status needs project.read, diff project.read and files.read; t
   assert.ok(!DEFAULT_PERMISSIONS.includes('files.read'));
 });
 
+test('workspace.git.facts is owner-only: prohibited, its capability withheld, -32601 for every grant and never at alpd', async t => {
+  assert.equal(EXPOSURE['workspace.git.facts'].status, 'prohibited');
+  assert.ok(!FORWARDED_CAPABILITIES.includes('workspace.git.facts'));
+  const daemon = fakeDaemon({ capabilities: [...CAPABILITIES, 'workspace.git.facts'] });
+  daemon.state.handlers['workspace.git.facts'] = () => ({ kind: 'unknown' });
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-facts-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { sdk } = await startGateway(t, { daemon, credentials: { reader: { workspaces: [directory], permissions: ['project.read', 'files.read'] } } });
+  const { client, hello } = await sdk('reader');
+  assert.ok(!hello.capabilities.includes('workspace.git.facts'), 'the capability is not forwarded');
+  const mark = daemon.calls().length;
+  for (const params of [{ directory }, { directory: await realpath(directory) }, { directory: '/' }]) {
+    await assert.rejects(client.request('workspace.git.facts', params), error => error.code === -32601, JSON.stringify(params));
+  }
+  assert.deepEqual(reached(daemon, mark), [], 'nothing reached alpd');
+});
+
 test('permissions: refused with 1003 grant naming what is missing, before alpd hears of the workspace', async t => {
   const { daemon, sdk } = await world(t);
   const diffParams = { workspaceId: 'wks_a', compare: { mode: 'uncommitted' } };

@@ -1088,6 +1088,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   const workspaceDescriptor = async (w: any) => worktrees ? worktrees.describe(w) : w;
   // workspace.git.status and workspace.git.diff (§12.5): read-only, by registry workspaceId.
   const gitReader = registry ? createGitReader({ registry, log: (message, fields) => log.warn(message, { code: 'ALPD_GIT_READ_FAILED', ...fields }) }) : undefined;
+  // workspace.git.facts (§12.5): the owner's host directory, registered or not; no registry, so
+  // never a gateway's (prohibited there) nor an agent's connection's.
+  const gitFacts = createGitReader({ log: (message, fields) => log.warn(message, { code: 'ALPD_GIT_READ_FAILED', ...fields }) });
   // Terminals (§12.10): a real PTY shell as the daemon's account, only while the host opted in
   // (<ALP_HOME>/terminal.json); bound to the caller's principal and the workspace's directory.
   const terminals = home && registry ? createTerminalService({
@@ -1324,6 +1327,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     'workspace.worktree.remove': (_c, p) => registryCall(async () => { if (!worktrees) throw new RegistryError(1005, 'Worktrees are unavailable on this platform', { reason: 'worktrees_unsupported' }); const result = await worktrees.mutate('remove', p, p); return { ...result, workspace: await workspaceDescriptor(result.workspace) }; }),
     'workspace.git.status': (_c, p) => gitCall(reader => reader.status(p.workspaceId)),
     'workspace.git.diff': (_c, p) => gitCall(reader => reader.diff({ workspaceId: p.workspaceId, compare: p.compare, path: p.path, cursor: p.cursor })),
+    'workspace.git.facts': (c, p) => agentRefused(c, 'workspace.git.facts') ?? gitFacts.facts(p.directory),
     'project.list': (_c, p) => registryList('projects', p),
     'workspace.list': (_c, p) => registryList('workspaces', p),
     'workspace.get': (_c, p) => registryCall(async () => {
@@ -1878,7 +1882,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [...(runtime.interruptTurn ? [CAPABILITY.sessionInterruptTurn] : []), CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.workspaceFilesBrowse, CAPABILITY.hostDirectories, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...(conversation?.reloads ? [CAPABILITY.sessionReload] : []), ...(conversation?.configures ? [CAPABILITY.sessionConfigureLive] : []), ...(conversation ? [CAPABILITY.sessionResumeCommand] : []), ...(modelCatalog ? [CAPABILITY.catalogLive] : []), ...operations.capabilities];
+  const capabilities = [...(runtime.interruptTurn ? [CAPABILITY.sessionInterruptTurn] : []), CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.workspaceFilesBrowse, CAPABILITY.hostDirectories, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), CAPABILITY.workspaceGitFacts, ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...(conversation?.reloads ? [CAPABILITY.sessionReload] : []), ...(conversation?.configures ? [CAPABILITY.sessionConfigureLive] : []), ...(conversation ? [CAPABILITY.sessionResumeCommand] : []), ...(modelCatalog ? [CAPABILITY.catalogLive] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {

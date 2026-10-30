@@ -5257,6 +5257,197 @@
    }
   },
   {
+   "name": "workspace.git.facts params",
+   "check": "params",
+   "method": "workspace.git.facts",
+   "valid": true,
+   "value": {
+    "directory": "/work/project"
+   }
+  },
+  {
+   "name": "workspace.git.facts without directory",
+   "check": "params",
+   "method": "workspace.git.facts",
+   "valid": false,
+   "value": {}
+  },
+  {
+   "name": "workspace.git.facts with an empty directory",
+   "check": "params",
+   "method": "workspace.git.facts",
+   "valid": false,
+   "value": {
+    "directory": ""
+   }
+  },
+  {
+   "name": "workspace.git.facts with a workspaceId",
+   "check": "params",
+   "method": "workspace.git.facts",
+   "valid": false,
+   "value": {
+    "directory": "/work/project",
+    "workspaceId": "wks_0123456789abcdef"
+   }
+  },
+  {
+   "name": "workspace.git.facts with a principal context",
+   "check": "params",
+   "method": "workspace.git.facts",
+   "valid": false,
+   "value": {
+    "directory": "/work/project",
+    "principalId": "cred",
+    "authorizedRoots": [
+     "/work/project"
+    ]
+   }
+  },
+  {
+   "name": "workspace.git.facts result",
+   "check": "result",
+   "method": "workspace.git.facts",
+   "valid": true,
+   "value": {
+    "kind": "ok",
+    "repoRoot": "/work/project",
+    "branch": "main",
+    "detached": false,
+    "head": "0123456789abcdef0123456789abcdef01234567",
+    "hasRemote": true,
+    "remoteUrl": "https://example.com/project.git",
+    "dirty": true
+   }
+  },
+  {
+   "name": "workspace.git.facts nested folder",
+   "check": "result",
+   "method": "workspace.git.facts",
+   "valid": true,
+   "value": {
+    "kind": "not_repository_root",
+    "repoRoot": "/work/project",
+    "branch": null,
+    "detached": true,
+    "head": "0123456789abcdef0123456789abcdef01234567",
+    "hasRemote": false,
+    "remoteUrl": null,
+    "dirty": false
+   }
+  },
+  {
+   "name": "workspace.git.facts before the first commit",
+   "check": "result",
+   "method": "workspace.git.facts",
+   "valid": true,
+   "value": {
+    "kind": "ok",
+    "repoRoot": "/work/project",
+    "branch": "main",
+    "detached": false,
+    "head": null,
+    "hasRemote": true,
+    "remoteUrl": "https://example.com/project.git",
+    "dirty": false
+   }
+  },
+  {
+   "name": "workspace.git.facts no repository",
+   "check": "result",
+   "method": "workspace.git.facts",
+   "valid": true,
+   "value": {
+    "kind": "unknown"
+   }
+  },
+  {
+   "name": "workspace.git.facts unsupported",
+   "check": "result",
+   "method": "workspace.git.facts",
+   "valid": true,
+   "value": {
+    "kind": "unsupported",
+    "reason": "worktree_elsewhere"
+   }
+  },
+  {
+   "name": "workspace.git.facts inside a git directory",
+   "check": "result",
+   "method": "workspace.git.facts",
+   "valid": true,
+   "value": {
+    "kind": "unsupported",
+    "reason": "inside_git_dir"
+   }
+  },
+  {
+   "name": "workspace.git.facts unsupported without a reason",
+   "check": "result",
+   "method": "workspace.git.facts",
+   "valid": false,
+   "value": {
+    "kind": "unsupported"
+   }
+  },
+  {
+   "name": "workspace.git.facts unknown with facts",
+   "check": "result",
+   "method": "workspace.git.facts",
+   "valid": false,
+   "value": {
+    "kind": "unknown",
+    "repoRoot": "/work/project",
+    "branch": "main",
+    "detached": false,
+    "head": "0123456789abcdef0123456789abcdef01234567",
+    "hasRemote": true,
+    "remoteUrl": "https://example.com/project.git",
+    "dirty": true
+   }
+  },
+  {
+   "name": "workspace.git.facts ok without repoRoot",
+   "check": "result",
+   "method": "workspace.git.facts",
+   "valid": false,
+   "value": {
+    "kind": "ok",
+    "branch": "main",
+    "detached": false,
+    "head": "0123456789abcdef0123456789abcdef01234567",
+    "hasRemote": true,
+    "remoteUrl": "https://example.com/project.git",
+    "dirty": true
+   }
+  },
+  {
+   "name": "workspace.git.facts an unlisted kind",
+   "check": "result",
+   "method": "workspace.git.facts",
+   "valid": false,
+   "value": {
+    "kind": "not_repository"
+   }
+  },
+  {
+   "name": "workspace.git.facts with status rows",
+   "check": "result",
+   "method": "workspace.git.facts",
+   "valid": false,
+   "value": {
+    "kind": "ok",
+    "repoRoot": "/work/project",
+    "branch": "main",
+    "detached": false,
+    "head": "0123456789abcdef0123456789abcdef01234567",
+    "hasRemote": true,
+    "remoteUrl": "https://example.com/project.git",
+    "dirty": true,
+    "files": []
+   }
+  },
+  {
    "name": "workspace.git.diff params",
    "check": "params",
    "method": "workspace.git.diff",

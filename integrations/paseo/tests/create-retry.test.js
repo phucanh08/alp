@@ -29,6 +29,8 @@ async function fixture(t) {
     if (method === 'registry.owner') result.registry = await registry.snapshot();
     if (method === 'session.list') result = { sessions: structuredClone(sessions) };
     if (method === 'workspace.git.status') result = { state: 'not_repository' };
+    // Pre-registration validation of the project directory, as alpd answers it: no repository.
+    if (method === 'workspace.git.facts') result = { kind: 'unknown' };
     if (method === 'question.list') result = { questions: [] };
     if (method === 'session.create') { const session = summary(params.sessionId); sessions.push(session); result = { session }; }
     if (method === 'session.prompt') result = { outcome: 'accepted' };
