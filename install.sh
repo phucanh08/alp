@@ -38,7 +38,7 @@ USAGE
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --version) [ $# -ge 2 ] && [ -n "${2#v}" ] || die "--version needs a value"; VERSION="${2#v}"; shift 2 ;;
+    --version) if [ $# -lt 2 ] || [ -z "${2#v}" ]; then die "--version needs a value"; fi; VERSION="${2#v}"; shift 2 ;;
     --version=*) VERSION="${1#--version=}"; VERSION="${VERSION#v}"; [ -n "$VERSION" ] || die "--version needs a value"; shift ;;
     --system) SYSTEM=1; shift ;;
     --dir) [ $# -ge 2 ] || die "--dir needs a value"; DIR="$2"; shift 2 ;;
