@@ -176,7 +176,7 @@ Compared with Paseo **0.14.0** (getpaseo/paseo `v0.14.0`, `8c6de84`) for the App
 | Projects: register a granted directory | host-page.tsx | Only in the sidebar (Add project) | yes: `project.register` (workspace.write) | P1 | **Đã làm**: Host › Projects shows which granted directories are registered and registers one; granting stays `alp-gateway credential create --workspace` |
 | Workspaces: shared names and pins | host-page.tsx | Unavailable | yes: `workspace.list`, `workspace.update` title/pinned (workspace.write) | P1 | **Đã làm**: Host › Workspaces lists the registry (pins first, worktree badge, branch), renames (blank goes back to the directory name), pins and opens; read only without workspace.write. Archive, labels and placement stay owner-only |
 | Terminals | host-page.tsx | Unavailable (names `alp terminal allow --yes` / `deny` / `status` and `terminal.exec`) | read only: capability `terminal`, the token's `terminal.exec` (the switch is host-only by design, §12.10) | P2 | **Đã làm** (status): Host › Terminals shows whether the host allows terminals, whether the token may open one, and whether this workspace can; the switch itself stays on the host |
-| Plugins, Usage, Pair device, Metadata | host-page.tsx and others | Unavailable | no | P2 | — |
+| Plugins, Usage, Pair device, Metadata, Voice (new in 0.14) | host-page.tsx, voice/voice-page.tsx and others | Unavailable | no | P2 | — : each page says why; Voice: ALP has no speech provider |
 
 ### 3.4 Other areas
 

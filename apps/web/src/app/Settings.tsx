@@ -1,7 +1,7 @@
 import * as React from 'react';
 import {
   ArrowDown, ArrowLeft, ArrowUp, Ban, Blocks, BookOpen, Bot, Boxes, ChevronRight, CircleCheck, Code, Files as FilesIcon, FolderGit2, Gauge, History, Info,
-  ListChecks, MessageSquare, Network, PanelLeft, Palette, Pin, Plug, Plus, Search, Server, Settings as SettingsIcon, Smartphone, Sparkles, SquareTerminal,
+  ListChecks, MessageSquare, Mic, Network, PanelLeft, Palette, Pin, Plug, Plus, Search, Server, Settings as SettingsIcon, Smartphone, Sparkles, SquareTerminal,
   Stethoscope, Users, Webhook,
 } from 'lucide-react';
 import { can } from '../lib/gateway.js';
@@ -33,7 +33,7 @@ type Icon = typeof Server;
 type Page =
   | 'general' | 'appearance' | 'sidebar' | 'chat' | 'terminal' | 'editor' | 'files' | 'diagnostics' | 'about'
   | 'host' | 'projects' | 'connections' | 'pair-device' | 'alp-templates' | 'alp-agents' | 'alp-skills' | 'alp-hooks' | 'alp-mcp'
-  | 'metadata' | 'workspaces' | 'providers' | 'usage' | 'terminals' | 'plugins';
+  | 'metadata' | 'voice' | 'workspaces' | 'providers' | 'usage' | 'terminals' | 'plugins';
 
 const APP_PAGES: Array<{ id: Page; label: string; icon: Icon }> = [
   { id: 'general', label: 'General', icon: SettingsIcon },
@@ -58,6 +58,7 @@ const HOST_PAGES: Array<{ id: Page; label: string; icon: Icon }> = [
   { id: 'alp-hooks', label: 'Hooks', icon: Webhook },
   { id: 'alp-mcp', label: 'MCP servers', icon: Plug },
   { id: 'metadata', label: 'Metadata', icon: Sparkles },
+  { id: 'voice', label: 'Voice', icon: Mic },
   { id: 'workspaces', label: 'Workspaces', icon: FolderGit2 },
   { id: 'providers', label: 'Providers', icon: Boxes },
   { id: 'usage', label: 'Usage', icon: Gauge },
@@ -538,7 +539,7 @@ function Projects() {
           <Row key={path} first={index === 0} title={baseName(path)} hint={<span className="break-all font-mono">{path}</span>}>
             <span className="flex items-center gap-2">
               {!blocked ? <span className="text-xs" data-testid="project-registered">{registered(path).length ? 'Registered' : 'Not registered'}</span> : null}
-              {path === workspace ? <span className="text-highlight">Open</span> : <Button size="sm" variant="secondary" onClick={() => controller.selectWorkspace(path)}>Open</Button>}
+              {path === workspace ? <span className="text-highlight" data-testid="project-current">Current</span> : <Button size="sm" variant="secondary" onClick={() => controller.selectWorkspace(path)}>Open</Button>}
             </span>
           </Row>
         )) : <Row first title="No projects" hint="This access token grants no workspace." />}
@@ -629,11 +630,13 @@ function Workspaces() {
   );
 }
 
-function Terminals() {
+function Terminals({ onNavigate }: { onNavigate: (page: Page) => void }) {
   const state = useAppState();
   const hostAllows = state.connection.capabilities.includes('terminal');
   const tokenAllows = can(state.principal ?? undefined, 'terminal.exec');
   const gate = terminalGate(state as Parameters<typeof terminalGate>[0]);
+  const unregistered = !gate.ok && gate.reasons.includes('unregistered');
+  const canRegister = can(state.principal ?? undefined, 'workspace.write');
   const yes = (ok: boolean, label: string) => (
     <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs [&_svg]:size-3', ok ? 'bg-primary/15 text-highlight' : 'bg-secondary text-muted-foreground')}>
       {ok ? <CircleCheck aria-hidden /> : <Ban aria-hidden />}{label}
@@ -648,8 +651,13 @@ function Terminals() {
         <Row title="Access token" hint={tokenAllows ? 'Your access token may open terminals (terminal.exec).' : TERMINAL_MESSAGES.permission}>
           <span data-testid="terminals-token">{yes(tokenAllows, tokenAllows ? 'terminal.exec' : 'No terminal.exec')}</span>
         </Row>
-        <Row title="This workspace" hint={gate.ok ? 'A terminal can open here from the + menu (Terminal).' : gate.messages.join(' ')}>
-          <span data-testid="terminals-workspace">{yes(gate.ok, gate.ok ? 'Ready' : 'Not available')}</span>
+        <Row title="This workspace" hint={gate.ok ? 'A terminal can open here from the + menu (Terminal).' : [...gate.messages, unregistered ? (canRegister
+          ? 'Register it under Host › Projects; the terminal opens once it is in the list.'
+          : 'Registering it needs workspace.write: ask the host owner to register it, or to add workspace.write to your credential.') : ''].filter(Boolean).join(' ')}>
+          <span className="flex items-center gap-2">
+            {unregistered && canRegister ? <Button size="sm" variant="secondary" data-testid="terminals-register" onClick={() => onNavigate('projects')}>Register in Projects</Button> : null}
+            <span data-testid="terminals-workspace">{yes(gate.ok, gate.ok ? 'Ready' : 'Not available')}</span>
+          </span>
         </Row>
       </Section>
       <Unavailable what="Changing the host's terminal switch" why="Only the host's owner turns remote terminals on or off, on the host: alp terminal allow --yes, alp terminal deny, alp terminal status. Font and colors are under App › Terminal." />
@@ -726,9 +734,10 @@ function LibraryEditor({ kind, selected, onChanged }: { kind: LibraryKind; selec
   const [ready, setReady] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [note, setNote] = React.useState<string | null>(null);
   React.useEffect(() => {
     let live = true;
-    setReady(false); setError(null); setTarget('');
+    setReady(false); setError(null); setNote(null); setTarget('');
     if (!selected) {
       setName(''); setRevision(null);
       setContent(JSON.stringify(kind === 'skills' ? { body: '' } : { instructions: '', config: { description: '' } }, null, 2));
@@ -736,7 +745,7 @@ function LibraryEditor({ kind, selected, onChanged }: { kind: LibraryKind; selec
     } else controller.getLibraryEntry(kind, selected).then(entry => {
       if (!live) return;
       if (entry.source !== 'project' || entry.overrides || entry.secrets.length || entry.revision === undefined) {
-        setError('Only project-only instruction entries can be edited here.'); return;
+        setNote('This entry holds configuration the host runs or values kept on the host, so it is read only here.'); return;
       }
       setName(selected); setRevision(entry.revision); setContent(JSON.stringify(entry.content, null, 2)); setReady(true);
     }, failure => { if (live) setError(describe(failure).message); });
@@ -757,6 +766,7 @@ function LibraryEditor({ kind, selected, onChanged }: { kind: LibraryKind; selec
     <div className="flex flex-col gap-3 p-4">
       <p className="text-xs text-muted-foreground">Agents and skills only. Host entries, executable configuration, references and extra files cannot be changed here.</p>
       {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
+      {note ? <p role="note" className="text-xs text-muted-foreground">{note}</p> : null}
       {ready ? <>
         <Input aria-label="Entry name" value={name} onChange={e => setName(e.target.value)} disabled={busy || !!selected} placeholder="Entry name" />
         <textarea aria-label="Instruction entry JSON" className="min-h-48 rounded border border-border bg-background p-2 font-mono text-xs" value={content} onChange={e => setContent(e.target.value)} disabled={busy} />
@@ -792,6 +802,8 @@ function Library({ kind, noun }: { kind: LibraryKind; noun: string }) {
   React.useEffect(() => blocked ? undefined : load(), [load, blocked, workspace]);
   React.useEffect(() => { setOpen(null); }, [kind, workspace]);
   if (blocked) return <Unavailable what={`Listing ${noun}`} why={blocked} />;
+  const opened = open ? state.entries.find(entry => entry.name === open) : undefined;
+  const editable: string | null = opened && opened.source === 'project' && !opened.overrides ? opened.name : null;
   return (
     <>
       <Section title={workspace ? `As ${baseName(workspace)} sees them` : undefined}
@@ -810,14 +822,16 @@ function Library({ kind, noun }: { kind: LibraryKind; noun: string }) {
           </button>
         ))}
       </Section>
-      {!controller.libraryWriteBlock(kind) ? <LibraryEditor key={`${kind}:${workspace}:${open ?? 'new'}`} kind={kind} selected={open} onChanged={() => load()} /> : null}
+      {/* An entry from the host or the library (builtin, user, library) is read only: opening it
+          to read keeps the New editor; this project's own entries open in the editor. */}
+      {!controller.libraryWriteBlock(kind) ? <LibraryEditor key={`${kind}:${workspace}:${editable ?? 'new'}`} kind={kind} selected={editable} onChanged={() => load()} /> : null}
       {open ? <LibraryEntryView kind={kind} name={open} onClose={() => setOpen(null)} /> : null}
       {controller.libraryWriteBlock(kind) ? <Unavailable what={`Editing ${noun}`} why={`${controller.libraryWriteBlock(kind)} Open an entry to read it. Values that can hold secrets (environment, headers, MCP URLs and arguments, hook commands) show as ${HIDDEN}. Changes configure commands the host runs, so edit them on the host with alp.`} /> : null}
     </>
   );
 }
 
-function PageContent({ page, mobile }: { page: Page; mobile: boolean }) {
+function PageContent({ page, mobile, onNavigate }: { page: Page; mobile: boolean; onNavigate: (page: Page) => void }) {
   switch (page) {
     case 'general': return <General mobile={mobile} />;
     case 'appearance': return <Appearance />;
@@ -843,10 +857,11 @@ function PageContent({ page, mobile }: { page: Page; mobile: boolean }) {
       </>
     );
     case 'pair-device': return <Unavailable what="Pairing a device" why="This app is the remote client: open it on the other device and connect with an access token." />;
+    case 'voice': return <Unavailable what="Voice" why="Paseo's dictation and voice mode turn speech into prompts with a speech provider set up on the host. ALP's agents take text, and its hosts have no speech provider to set up." />;
     case 'metadata': return <Unavailable what="Metadata generation" why="A host setting the gateway does not expose." />;
     case 'workspaces': return <Workspaces />;
     case 'usage': return <Unavailable what="Usage and limits" why="Account-wide on the host; check with alp usage there." />;
-    case 'terminals': return <Terminals />;
+    case 'terminals': return <Terminals onNavigate={onNavigate} />;
     case 'plugins': return <Unavailable what="Plugins" why="Installing plugins changes the host; not offered remotely." />;
   }
 }
@@ -902,7 +917,7 @@ export function SettingsScreen({ onClose, mobile }: { onClose: () => void; mobil
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-[720px] p-4 pt-14">
         <h2 className="mb-6 ml-1 text-[length:calc(26px*var(--ui-scale))] font-semibold text-foreground" data-testid="settings-detail-header-title">{LABEL[page]}</h2>
-        <PageContent page={page} mobile={mobile} />
+        <PageContent page={page} mobile={mobile} onNavigate={setPage} />
       </div>
     </div>
   ) : null;

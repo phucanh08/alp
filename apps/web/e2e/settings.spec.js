@@ -235,3 +235,38 @@ test('a token without workspace.write sees Workspaces read only', async ({ page 
   await expect(settings).toContainText('Read only');
   for (const button of await settings.getByRole('button', { name: /^(Pin|Unpin|Rename) workspace/ }).all()) await expect(button).toBeDisabled();
 });
+
+test('Host pages: a builtin library entry reads without an error, the open project says Current, Voice says why it is not offered', async ({ page }) => {
+  await connect(page, world, world.tokens.libraryWriter);
+  const settings = await openSettings(page);
+  await settings.getByTestId('settings-alp-agents').click();
+  await settings.getByTestId('library-row-main').click();
+  await expect(settings.getByTestId('library-entry')).toBeVisible();
+  await expect(settings.getByRole('alert')).toHaveCount(0);
+  // The editor stays on a new project entry: a builtin is read, not edited.
+  await expect(settings.getByText('New project instructions')).toBeVisible();
+
+  await settings.getByTestId('settings-projects').click();
+  await expect(settings.getByTestId('project-current')).toHaveText('Current');
+
+  await settings.getByTestId('settings-voice').click();
+  await expect(settings.getByTestId('settings-detail-header-title')).toHaveText('Voice');
+  await expect(settings).toContainText('Voice is not available in this beta');
+});
+
+test.describe('Host › Terminals on a host that allows terminals', () => {
+  /** @type {Awaited<ReturnType<typeof startWorld>>} */
+  let terminals;
+  test.beforeAll(async () => { terminals = await startWorld({ terminal: true }); });
+  test.afterAll(async () => { await terminals?.close(); });
+
+  test('an unregistered workspace says how to get a terminal: register it, or ask the owner', async ({ page }) => {
+    // terminal.exec without workspace.write: the owner has to register the workspace.
+    await connect(page, terminals, terminals.tokens.terminal);
+    const settings = await openSettings(page);
+    await settings.getByTestId('settings-terminals').click();
+    await expect(settings.getByTestId('terminals-workspace')).toContainText('Not available');
+    await expect(settings).toContainText('ask the host owner to register it');
+    await expect(settings.getByTestId('terminals-register')).toHaveCount(0);
+  });
+});
