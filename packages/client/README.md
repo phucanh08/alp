@@ -28,6 +28,16 @@ Build: `npm run build --workspace=@anhlp/alp-client`. Test: `npm run test --work
 
 Public imports use the package root and its explicitly exported subpaths. See [architecture, provider extension, compatibility and release instructions](../../docs/modular-monorepo.md).
 
+`conversation(client)` from the portable entry wraps the conversation methods (capabilities
+`session.fork`, `session.rewind`, `session.reload`, `session.resumeCommand` and
+`session.configure.live`; docs/protocol/alp-json-rpc-v1.md §12.7–§12.9): `fork`, `rewind`, `reload`,
+`resumeCommand`, `configure` and `configurePreview`. They change only the conversation, never a file.
+Each mutation is sent once: keep its `requestId` and `ifGeneration` (the generation `session.history`
+answered) and send the identical request again only after a lost answer, which alpd answers with the
+first result and `duplicate: true`. After a rewind, attached clients get `history.reset`: drop the
+cached history and attach again with its generation. See
+[docs/alp/client-sdk.md](../../docs/alp/client-sdk.md).
+
 Terminal directory clients can use `watchTerminals(connection, {capabilities, onSnapshot,
 onMode, onError})` from the portable entry. Install one per connection, await `ready`, and call
 `close()` when leaving. It uses atomic scoped snapshots and cursor invalidations on hosts with

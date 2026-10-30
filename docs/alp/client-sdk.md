@@ -259,3 +259,34 @@ principal. Cầu nối WS trong test chỉ chuyển frame và không xác thực
 contract (`workspace.registry`). Updates require the last registry `revision` as `ifRevision` and
 a caller-retained `requestId`. The helper sends once; an uncertain result is reconciled with the
 identical ID/payload/precondition. Remote registry writes require explicit `workspace.write`.
+
+`conversation(client)` is available from the portable and Node entries. It wraps the conversation
+methods of docs/protocol/alp-json-rpc-v1.md §12.7–§12.9; offer each one only when the host lists its
+capability and the root's summary allows it (`conversation.fork`, `rewind`, `reload`, `configure`):
+
+| Method | Sends | Capability |
+|---|---|---|
+| `fork(params)` | `session.fork`: a new closed root with the conversation through or before a turn (`boundary`), or a branch a rewind set aside (`branchId`); open it with `session.create { sessionId, resume: true }` | `session.fork` |
+| `rewind(params)` | `session.rewind`: the root continues from before `beforeTurnId` under the same id; the later turns stay a branch | `session.rewind` |
+| `reload(params)` | `session.reload`: a live root's native process restarts on its own conversation | `session.reload` |
+| `resumeCommand(params)` | `session.resumeCommand`: the `alp attach` command for the clipboard, never to run | `session.resumeCommand` |
+| `configure(params)` | `session.configure` with `model`, `thinking` or `team` (plus `requestId` and `ifGeneration`): a restart on the same conversation | `session.configure.live` |
+| `configurePreview(params)` | `session.configure.preview`: what a change would run with, and whether it would be taken now; reads only | `session.configure.live` |
+
+Only the conversation changes: no file is copied, restored or changed. Each mutation is sent once
+and never retried by the helper. Keep `requestId` (and `ifGeneration`): after a lost answer (timeout,
+disconnect) or `persistence_failed`, send the identical request again, and alpd answers the first result with
+`duplicate: true`. Any other answer means a new attempt takes a new `requestId`; never repeat one after
+`outcome_unknown`. `ifGeneration` is the history generation the client read (`session.history`);
+`1004 stale_generation` means read the history again. After a rewind, connections attached to the
+tree get `history.reset { generation, reason: 'rewind', branchId }`: drop the cached history, fetch a
+new tail and attach again with that generation. Principal fields of `fork` are set by a trusted
+gateway on its own connection, never by a remote client.
+
+```js
+import { conversation } from '@anhlp/alp-client/portable';
+const alp = conversation(client);
+const { generation } = await client.request('session.history', { sessionId, limit: 1 });
+const { session } = await alp.fork({ sessionId, requestId, ifGeneration: generation, boundary: { throughTurnId } });
+await client.request('session.create', { sessionId: session.id, spec: { cwd }, resume: true });
+```
