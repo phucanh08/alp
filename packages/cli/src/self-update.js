@@ -101,10 +101,10 @@ export function compareVersions(a, b) {
 export function releaseBaseUrl({ repo, version, baseUrl }) {
   let base = baseUrl;
   if (!base) base = version ? `https://github.com/${repo}/releases/download/v${version}` : `https://github.com/${repo}/releases/latest/download`;
-  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(base) && (path.isAbsolute(base) || path.win32.isAbsolute(base))) base = pathToFileURL(base).href;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(base) && (path.isAbsolute(base) || (process.platform === 'win32' && path.win32.isAbsolute(base)))) base = pathToFileURL(base).href;
   base = base.replace(/\/+$/, '');
   const url = new URL(base);
-  const loopback = url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+  const loopback = isLoopbackHttp(url);
   if (url.protocol !== 'https:' && url.protocol !== 'file:' && !loopback) throw new Error(`The release mirror must be https:// or file:// (${base})`);
   return base;
 }
@@ -112,22 +112,54 @@ export function releaseBaseUrl({ repo, version, baseUrl }) {
 /** The largest file alp update downloads: the executable is about 100 MB. */
 export const MAX_DOWNLOAD = 512 * 1024 * 1024;
 
-/** Downloads `url` (https, loopback http or file) within a time and size limit; an https download never ends on plain http. @param {string} url */
-async function fetchBytes(url, { timeoutMs = 10 * 60_000, max = MAX_DOWNLOAD } = {}) {
+const LOOPBACK = ['127.0.0.1', 'localhost', '[::1]'];
+const isLoopbackHttp = (/** @type {URL} */ url) => url.protocol === 'http:' && LOOPBACK.includes(url.hostname);
+
+/**
+ * Whether a download may go to `next`: every hop of an https download stays https, since one plain
+ * http hop lets a man in the middle replace the archive and SHA256SUMS together. Only a loopback
+ * http mirror given explicitly (tests) may use loopback http, besides https.
+ * @param {string} start @param {string} next
+ */
+export function allowedHop(start, next) {
+  const to = new URL(next);
+  if (to.protocol === 'https:') return true;
+  return isLoopbackHttp(new URL(start)) && isLoopbackHttp(to);
+}
+
+/**
+ * Downloads `url` (https, loopback http or file) within a time and size limit, following at most 10
+ * redirects itself and refusing any hop that `allowedHop` refuses.
+ * @param {string} url @param {{ timeoutMs?: number, max?: number, fetch?: typeof globalThis.fetch }} [options]
+ */
+export async function fetchBytes(url, { timeoutMs = 10 * 60_000, max = MAX_DOWNLOAD, fetch: fetchImpl = globalThis.fetch } = {}) {
   if (url.startsWith('file:')) {
     const file = fileURLToPath(url);
     if (nodeFs.statSync(file).size > max) throw new Error(`${url} is larger than ${max} bytes`);
     return new Uint8Array(await nodeFs.promises.readFile(file));
   }
-  const response = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(timeoutMs) });
-  if (new URL(url).protocol === 'https:' && new URL(response.url || url).protocol !== 'https:') throw new Error(`${url} redirected away from https (${response.url}); refused`);
-  if (!response.ok) throw new Error(`Could not download ${url} (HTTP ${response.status})`);
-  if (Number(response.headers.get('content-length') ?? 0) > max) throw new Error(`${url} is larger than ${max} bytes`);
+  if (!allowedHop(url, url)) throw new Error(`Refusing to download ${url}: not https`);
+  const signal = AbortSignal.timeout(timeoutMs);
+  let current = url;
+  let response;
+  for (let hop = 0; ; hop++) {
+    response = await fetchImpl(current, { redirect: 'manual', signal });
+    if (![301, 302, 303, 307, 308].includes(response.status)) break;
+    const location = response.headers.get('location');
+    await response.body?.cancel().catch(() => {});
+    if (!location) throw new Error(`${current} redirected without a location`);
+    if (hop >= 10) throw new Error(`${url} redirected more than 10 times`);
+    const next = new URL(location, current).href;
+    if (!allowedHop(url, next)) throw new Error(`${url} redirected to ${next}, which is not https; refused`);
+    current = next;
+  }
+  if (!response.ok) throw new Error(`Could not download ${current} (HTTP ${response.status})`);
+  if (Number(response.headers.get('content-length') ?? 0) > max) throw new Error(`${current} is larger than ${max} bytes`);
   const chunks = [];
   let size = 0;
   for await (const chunk of /** @type {AsyncIterable<Uint8Array>} */ (response.body ?? [])) {
     size += chunk.byteLength;
-    if (size > max) throw new Error(`${url} is larger than ${max} bytes`);
+    if (size > max) throw new Error(`${current} is larger than ${max} bytes`);
     chunks.push(chunk);
   }
   return new Uint8Array(Buffer.concat(chunks));
