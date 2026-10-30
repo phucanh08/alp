@@ -1,0 +1,163 @@
+// t-1e02 P1: the release archive layout, SHA256SUMS, install.sh against a file:// mirror, and the
+// process.execPath lint. The executable itself is smoked by scripts/binary-smoke*.{mjs,sh} in CI.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { execFile, execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import ts from 'typescript';
+import { archiveName, pack, sums } from '../../scripts/package-binary.mjs';
+import { namesExecPath } from '../../scripts/execpath-lint.mjs';
+
+const ROOT = path.resolve(import.meta.dirname, '../..');
+const INSTALL = path.join(ROOT, 'install.sh');
+const posix = process.platform !== 'win32';
+const TARGETS = ['bun-darwin-arm64', 'bun-darwin-x64', 'bun-linux-x64', 'bun-linux-arm64'];
+
+async function temp(t, prefix) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), prefix));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  return directory;
+}
+
+/** A source tree with licence files and a fake `alp` that prints `version`. */
+async function fakeRoot(t, version) {
+  const root = await temp(t, 'alp-fake-root-');
+  await writeFile(path.join(root, 'LICENSE'), 'Apache License\n');
+  await writeFile(path.join(root, 'NOTICE'), 'ALP NOTICE\n');
+  for (const file of ['dist/THIRD-PARTY-NOTICES.txt', 'packages/cli/dist/THIRD-PARTY-NOTICES.txt', 'packages/cli/dist/alp-web/THIRD-PARTY-NOTICES.txt']) {
+    await mkdir(path.dirname(path.join(root, file)), { recursive: true });
+    await writeFile(path.join(root, file), `notices of ${file}\n`);
+  }
+  const binary = path.join(root, 'alp');
+  await writeFile(binary, `#!/bin/sh\necho ${version}\n`);
+  await chmod(binary, 0o755);
+  return { root, binary };
+}
+
+/** A release mirror: one archive per platform for each version, SHA256SUMS and install.sh. */
+async function mirror(t, versions = ['9.8.7']) {
+  const out = await temp(t, 'alp-mirror-');
+  for (const version of versions) {
+    const { root, binary } = await fakeRoot(t, version);
+    for (const target of TARGETS) await pack({ binary, target, out, version, root });
+  }
+  await copyFile(INSTALL, path.join(out, 'install.sh'));
+  await sums(out);
+  return out;
+}
+
+/** Runs install.sh with a private HOME and a PATH without the install directory. */
+function install(args, { home, shell = '/bin/sh', extraEnv = {} }) {
+  return new Promise(resolve => execFile('/bin/sh', [INSTALL, ...args], {
+    env: { HOME: home, SHELL: shell, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', ...extraEnv }, timeout: 60_000,
+  }, (error, stdout, stderr) => resolve({ code: error ? error.code ?? 1 : 0, stdout, stderr })));
+}
+
+test('the release archive holds the executable and its licences under alp-<version>-<os>-<arch>/', { skip: !posix }, async t => {
+  const { root, binary } = await fakeRoot(t, '1.2.3');
+  const out = await temp(t, 'alp-pack-');
+  const archive = await pack({ binary, target: 'bun-linux-arm64', out, version: '1.2.3', root });
+  assert.equal(path.basename(archive), 'alp-1.2.3-linux-arm64.tar.gz');
+  const listing = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n').map(line => line.replace(/\/$/, '')).sort();
+  assert.deepEqual(listing, ['alp-1.2.3-linux-arm64', ...['LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.txt', 'alp'].map(name => `alp-1.2.3-linux-arm64/${name}`)].sort());
+  const x = await temp(t, 'alp-x-');
+  execFileSync('tar', ['-xzf', archive, '-C', x]);
+  const notices = await readFile(path.join(x, 'alp-1.2.3-linux-arm64/THIRD-PARTY-NOTICES.txt'), 'utf8');
+  for (const part of ['Bun', 'notices of dist/THIRD-PARTY-NOTICES.txt', 'notices of packages/cli/dist/alp-web/THIRD-PARTY-NOTICES.txt']) assert.ok(notices.includes(part), part);
+  assert.throws(() => archiveName('1.0.0', 'bun-windows-x64'), /No release archive/);
+  assert.throws(() => archiveName('../1', 'bun-linux-x64'), /Invalid version/);
+  await sums(out);
+  const line = (await readFile(path.join(out, 'SHA256SUMS'), 'utf8')).trim();
+  assert.match(line, /^[0-9a-f]{64} {2}alp-1\.2\.3-linux-arm64\.tar\.gz$/);
+});
+
+test('install.sh installs the latest release to ~/.alp/bin after checking SHA256SUMS, and adds a PATH line once', { skip: !posix }, async t => {
+  const releases = await mirror(t);
+  const home = await temp(t, 'alp-home-');
+  const first = await install(['--base-url', pathToFileURL(releases).href], { home });
+  assert.equal(first.code, 0, first.stderr);
+  assert.match(first.stdout, /checksum verified/);
+  assert.match(first.stdout, /\n9\.8\.7\n$/, 'it runs alp --version last');
+  assert.equal(execFileSync(path.join(home, '.alp/bin/alp'), { encoding: 'utf8' }).trim(), '9.8.7');
+  for (const file of ['LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.txt']) assert.ok(existsSync(path.join(home, '.alp/share/doc/alp', file)), file);
+  const profile = await readFile(path.join(home, '.profile'), 'utf8');
+  assert.ok(profile.includes('export PATH="$HOME/.alp/bin:$PATH"'), profile);
+  const again = await install(['--base-url', pathToFileURL(releases).href], { home });
+  assert.equal(again.code, 0, again.stderr);
+  assert.equal((await readFile(path.join(home, '.profile'), 'utf8')).split('$HOME/.alp/bin').length, 2, 'the PATH line is added only once');
+  // zsh and fish get their own profile files.
+  const zsh = await install(['--base-url', releases], { home, shell: '/bin/zsh', extraEnv: { ALP_INSTALL_BASE_URL: 'file:///nowhere' } });
+  assert.equal(zsh.code, 0, zsh.stderr);
+  assert.ok((await readFile(path.join(home, '.zshrc'), 'utf8')).includes('export PATH="$HOME/.alp/bin:$PATH"'));
+  const fish = await install([], { home, shell: '/usr/bin/fish', extraEnv: { ALP_INSTALL_BASE_URL: pathToFileURL(releases).href } });
+  assert.equal(fish.code, 0, fish.stderr);
+  assert.ok((await readFile(path.join(home, '.config/fish/conf.d/alp.fish'), 'utf8')).includes('fish_add_path "$HOME/.alp/bin"'));
+});
+
+test('install.sh --version picks that release, --dir installs elsewhere, --no-modify-path only prints the line', { skip: !posix }, async t => {
+  const releases = await mirror(t, ['1.0.0', '1.1.0-beta.2']);
+  const home = await temp(t, 'alp-home-');
+  const dir = path.join(home, 'tools/bin');
+  const result = await install(['--version', 'v1.1.0-beta.2', '--dir', dir, '--no-modify-path', '--base-url', releases], { home });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(execFileSync(path.join(dir, 'alp'), { encoding: 'utf8' }).trim(), '1.1.0-beta.2');
+  assert.match(result.stdout, /is not on PATH; add it with:\n {2}export PATH="\$HOME\/tools\/bin:\$PATH"/);
+  assert.equal(existsSync(path.join(home, '.profile')), false, '--no-modify-path edits no profile');
+  // Two versions in one SHA256SUMS: "latest" is ambiguous and refused rather than guessed.
+  const ambiguous = await install(['--base-url', releases], { home });
+  assert.notEqual(ambiguous.code, 0);
+  assert.match(ambiguous.stderr, /more than one/);
+  const missing = await install(['--version', '2.0.0', '--base-url', releases], { home });
+  assert.notEqual(missing.code, 0);
+  assert.match(missing.stderr, /no build for/);
+});
+
+test('install.sh refuses a corrupted archive, a malformed SHA256SUMS, bad options and versions, and installs nothing', { skip: !posix }, async t => {
+  const releases = await mirror(t);
+  const home = await temp(t, 'alp-home-');
+  const name = (await readFile(path.join(releases, 'SHA256SUMS'), 'utf8')).match(/alp-9\.8\.7-[a-z]+-[a-z0-9]+\.tar\.gz/g);
+  for (const archive of name) await writeFile(path.join(releases, archive), 'corrupted');
+  const corrupted = await install(['--base-url', releases], { home });
+  assert.notEqual(corrupted.code, 0);
+  assert.match(corrupted.stderr, /checksum mismatch/);
+  assert.equal(existsSync(path.join(home, '.alp/bin/alp')), false);
+  await writeFile(path.join(releases, 'SHA256SUMS'), (await readFile(path.join(releases, 'SHA256SUMS'), 'utf8')).replace(/^[0-9a-f]{64}/gm, 'xyz'));
+  const malformed = await install(['--base-url', releases], { home });
+  assert.match(malformed.stderr, /malformed checksum/);
+  const unknown = await install(['--frobnicate'], { home });
+  assert.match(unknown.stderr, /unknown option/);
+  const version = await install(['--version', '1.0;rm -rf /'], { home });
+  assert.match(version.stderr, /invalid version/);
+  const absent = await install(['--base-url', pathToFileURL(path.join(releases, 'none')).href], { home });
+  assert.match(absent.stderr, /could not download/);
+  assert.equal(existsSync(path.join(home, '.alp/bin/alp')), false);
+  const injected = await install(['--dir', `${home}/a"; touch pwned; "`, '--base-url', releases], { home });
+  assert.match(injected.stderr, /unsupported characters in --dir/);
+  const http = await install(['--base-url', 'http://example.invalid/r'], { home });
+  assert.match(http.stderr, /must be https:\/\/ or file:\/\//);
+  const empty = await install(['--version', 'v'], { home });
+  assert.match(empty.stderr, /--version needs a value/);
+  const help = await install(['--help'], { home });
+  assert.equal(help.code, 0);
+  assert.match(help.stdout, /^Usage: install\.sh/);
+});
+
+test('the execPath lint catches property and element access and destructuring of process.execPath', () => {
+  const hits = text => {
+    const source = ts.createSourceFile('x.mjs', text, ts.ScriptTarget.Latest, true);
+    let count = 0;
+    (function visit(node) { if (namesExecPath(node)) count++; ts.forEachChild(node, visit); })(source);
+    return count;
+  };
+  assert.equal(hits('spawn(process.execPath, [x]);'), 1);
+  assert.equal(hits("spawn(process['execPath'], [x]); spawn(process[`execPath`]);"), 2);
+  assert.equal(hits('const { execPath } = process; const { execPath: bin } = process; const { "execPath": q } = globalThis.process;'), 3);
+  assert.equal(hits('globalThis.process.execPath;'), 1);
+  assert.equal(hits("import { execPath } from 'node:process'; import { execPath as e } from 'process'; import { execPath as f } from 'other';"), 2);
+  assert.equal(hits("import * as p from 'node:process'; import q from 'process'; p.execPath; q.execPath; const r = {}; r.execPath;"), 2);
+  assert.equal(hits('const { argv } = process; other.execPath; process.argv0; const { execPath } = other;'), 0);
+});

@@ -106,3 +106,20 @@ export function applyLedger(tasks, ledger) {
   }
   return tasks;
 }
+
+/**
+ * Drops the entries that no longer guard anything (t-f438): the cleared ones, which applyLedger
+ * skips. An open entry stays even for a closed or missing task: status and presence are file
+ * state an agent can edit, so only a clear ALP recorded ends an entry. Called from compaction.
+ */
+export async function ledgerPrune(projectRoot) {
+  const ledger = await readLedger(projectRoot, { strict: true });
+  let dropped = 0;
+  for (const [name, entry] of Object.entries(ledger.gates)) {
+    if (entry && !entry.resolved) continue;
+    delete ledger.gates[name];
+    dropped += 1;
+  }
+  if (dropped) await writeLedger(projectRoot, ledger);
+  return dropped;
+}

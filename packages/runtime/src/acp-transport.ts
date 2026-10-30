@@ -8,6 +8,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { commandDecision, unwrapShell, type PermissionProfile } from '@anhlp/alp-core/permissions';
 import { launchCommand } from '@anhlp/alp-core/providers';
+import { bridgeCommand } from '@anhlp/alp-core/bridges';
 import { acpText, acpToolDetail, type AcpCall } from './tool-detail.js';
 
 /**
@@ -40,39 +41,6 @@ type RequestHandler = (method: string, params: any) => Promise<unknown>;
 export type AcpPermission = { kind: string; title: string; command?: string; paths: string[]; alpTool: boolean };
 
 /** The MCP server ALP's tools reach an ACP agent through; it speaks MCP on stdio and forwards calls to the socket. */
-const BRIDGE = `
-const net = require('node:net');
-const readline = require('node:readline');
-const socket = net.connect(process.env.ALP_BRIDGE_SOCKET);
-const waiting = new Map();
-let sequence = 0;
-let buffer = '';
-socket.setEncoding('utf8');
-socket.write(JSON.stringify({ token: process.env.ALP_BRIDGE_TOKEN }) + '\\n');
-socket.on('data', data => {
-  buffer += data;
-  for (let index; (index = buffer.indexOf('\\n')) >= 0;) {
-    const line = buffer.slice(0, index); buffer = buffer.slice(index + 1);
-    try { const message = JSON.parse(line); const waiter = waiting.get(message.id); if (waiter) { waiting.delete(message.id); waiter(message); } } catch {}
-  }
-});
-socket.on('close', () => process.exit(0));
-socket.on('error', () => process.exit(1));
-const ask = message => new Promise(resolve => { const id = ++sequence; waiting.set(id, resolve); socket.write(JSON.stringify({ ...message, id }) + '\\n'); });
-const send = value => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...value }) + '\\n');
-readline.createInterface({ input: process.stdin }).on('line', async line => {
-  let message; try { message = JSON.parse(line); } catch { return; }
-  if (message.id === undefined || message.id === null) return;
-  try {
-    if (message.method === 'initialize') return send({ id: message.id, result: { protocolVersion: (message.params && message.params.protocolVersion) || '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'alp', version: '1' } } });
-    if (message.method === 'ping') return send({ id: message.id, result: {} });
-    if (message.method === 'tools/list') { const reply = await ask({ op: 'list' }); return send({ id: message.id, result: { tools: reply.tools } }); }
-    if (message.method === 'tools/call') { const reply = await ask({ op: 'call', name: message.params.name, arguments: message.params.arguments || {} }); return send({ id: message.id, result: reply.result }); }
-    send({ id: message.id, error: { code: -32601, message: 'Method not found' } });
-  } catch (error) { send({ id: message.id, error: { code: -32603, message: String((error && error.message) || error) } }); }
-});
-process.stdin.on('end', () => process.exit(0));
-`;
 
 const READERS = ['read', 'search', 'think', 'fetch'];
 
@@ -189,8 +157,8 @@ export class AcpTransport {
   async initialize() {
     if (/\.(cmd|bat|ps1)$/i.test(this.provider.command)) throw new Error(`${this.provider.label}: the command must be a native executable, not a shell launcher`);
     const env = acpEnv(this.provider, this.env);
-    const launch = launchCommand(this.provider.command, this.provider.args, env);
-    const child = spawn(launch.command, launch.args, { cwd: this.cwd, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const launch: { command: string; args: string[]; env?: Record<string, string> } = launchCommand(this.provider.command, this.provider.args, env);
+    const child = spawn(launch.command, launch.args, { cwd: this.cwd, env: launch.env ? { ...env, ...launch.env } : env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.child = child;
     this.exit = new Promise(resolve => { child.once('close', () => resolve()); child.once('error', () => resolve()); });
     child.stderr.on('data', () => {});
@@ -432,7 +400,8 @@ export class AcpTransport {
     }
     // Under Paseo, alpd runs on Electron's binary, which is node only with ELECTRON_RUN_AS_NODE; the agent may not pass its own environment on.
     const electron = process.versions.electron ? [{ name: 'ELECTRON_RUN_AS_NODE', value: '1' }] : [];
-    return { name: 'alp', command: process.execPath, args: ['-e', BRIDGE], env: [{ name: 'ALP_BRIDGE_SOCKET', value: this.bridge.socket }, { name: 'ALP_BRIDGE_TOKEN', value: this.bridge.token }, ...electron] };
+    const bridge = bridgeCommand('acp');
+    return { name: 'alp', command: bridge.command, args: bridge.args, env: [{ name: 'ALP_BRIDGE_SOCKET', value: this.bridge.socket }, { name: 'ALP_BRIDGE_TOKEN', value: this.bridge.token }, ...electron] };
   }
 
   private serveBridge(connection: net.Socket, token: string) {

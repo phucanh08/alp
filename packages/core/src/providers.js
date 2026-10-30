@@ -3,6 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { AlpError } from './errors.js';
 import { settingsKeys, unknownMessage } from './validation.js';
+import { isPackaged, scriptCommand } from './packaged.js';
 
 /**
  * ACP providers (ALPD §46): agents that speak the Agent Client Protocol, such as Gemini
@@ -100,7 +101,8 @@ export function acpModel(model) {
  * native executable it calls, or the Node script, under this Node. A bare name with an .exe or
  * .com on PATH, any other command, and every command elsewhere are returned as they are.
  * @param {string} command @param {string[]} [args] @param {Record<string, string | undefined>} [env]
- * @returns {{ command: string, args: string[] }}
+ * In the ALP executable a Node script runs with the executable as its Bun runtime, via `env` to add.
+ * @returns {{ command: string, args: string[], env?: Record<string, string> }}
  */
 export function launchCommand(command, args = [], env = process.env) {
   if (process.platform !== 'win32' || /[\\/]/.test(command) || path.extname(command)) return { command, args };
@@ -113,7 +115,7 @@ export function launchCommand(command, args = [], env = process.env) {
     // for a Node script. Anything else (a hand-written batch file) stays refused by spawn, as before.
     const text = readFileSync(shim, 'utf8');
     const script = /"%_prog%"((?:\s+[^\s"]+)*)\s+"%~?dp0%\\?([^"]+)"\s+%\*/i.exec(text);
-    if (script) return { command: process.execPath, args: [...script[1].split(/\s+/).filter(Boolean), path.join(directory, script[2]), ...args] };
+    if (script) { const flags = script[1].split(/\s+/).filter(Boolean); const run = scriptCommand(path.join(directory, script[2]), args); return { command: run.command, args: isPackaged() ? run.args : [...flags, ...run.args], ...(run.env ? { env: run.env } : {}) }; }
     const native = /^\s*"%~?dp0%\\?([^"]+\.(?:exe|com))"\s+%\*/im.exec(text);
     if (native) return { command: path.join(directory, native[1]), args };
     break;

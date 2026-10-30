@@ -6,6 +6,7 @@ import { alpHome, connect, lockAlive, readLock, withDaemonLifecycle } from '@anh
 import { scrubText } from '@anhlp/alp-core/log';
 import { UsageError } from './usage.js';
 import { DAEMON_ENTRY } from './paths.js';
+import { runRole } from './roles.js';
 
 async function built() {
   try {
@@ -60,6 +61,8 @@ async function stop() {
 }
 
 async function daemon([action, ...rest]) {
+  // alpd itself in this process; its own options (--detach, --service, --startup-timeout=MS) follow.
+  if (action === 'run') { await built(); return runRole('daemon', DAEMON_ENTRY, rest); }
   if (rest.length && !(action === 'status' && rest.length === 1 && rest[0] === '--json')) throw new UsageError();
   if (action === 'start') {
     const socket = await start();

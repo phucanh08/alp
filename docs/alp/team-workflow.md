@@ -762,6 +762,10 @@ answers a question an agent asked. ALP enforces this on every path it controls:
   alpd then refuses that connection `task.gate.resolve` on a human gate and
   `question.answer` (alp_ask questions, approvals and gate cards). Agent mail
   (`alp_send` answers) does not go through `question.answer` and is unaffected.
+- The remote gateway carries the mark: when a client announces
+  `principal.agent` in its `daemon.hello` to the gateway, the gateway says so
+  on that client's own alpd connection before it answers, so alpd refuses the
+  same calls through the gateway. If it cannot, it closes the client.
 - An agent's connection may not open, attach to or type into a daemon terminal
   (`terminal.create`, `terminal.attach`, `terminal.input`): those shells carry no
   `ALP_AGENT_SESSION`.
@@ -772,6 +776,19 @@ answers a question an agent asked. ALP enforces this on every path it controls:
   marks it `tampered`; `alp task show` warns that it was changed outside ALP.
   An unreadable ledger detects nothing on read, and ALP refuses to clear a human
   gate until you fix or remove it.
+- Closing a task is no way around its gate: no agent closes a task with an
+  open human gate, or a formula's human step, for any reason (`done`,
+  `wontfix`, `superseded`, `duplicate`). `alp_task close` refuses it, and so do
+  `alp task close` under `ALP_AGENT_SESSION` and `task.update` close on a
+  connection that announced `principal.agent`.
+- You may still close such a task yourself (CLI without the variable, the Paseo
+  Tasks panel, ALP Web). Each open human gate is then recorded cleared with
+  `overridden: true`, by `user`, with the channel (`cli`, `paseo`, `web`), in
+  the ledger as well; the task log says `gate overridden`. Main is not mailed
+  an approval for it.
+- `alp task compact` also drops the ledger entries of cleared gates, which
+  guard nothing any more. An open entry stays, even when its task is closed or
+  its file is gone: those are file edits too.
 
 The ledger is per machine, while task files travel with Git. A human gate you
 clear in another clone or on another machine, then pull, or a checkout of a
@@ -786,7 +803,9 @@ did not start. There is no TTY requirement.
 Residual risk: this raises the bar and detects naive bypasses; it is not a
 security boundary. A full-access agent runs as the same OS user as you, so it
 can unset `ALP_AGENT_SESSION`, speak to the daemon socket directly without
-announcing `principal.agent`, edit the ledger in `$ALP_HOME` as well as the task
+announcing `principal.agent` (or reach the gateway with a credential you
+paired and not announce it: the gateway cannot tell such a client from ALP
+Web), edit the ledger in `$ALP_HOME` as well as the task
 file, or fake a TTY. An older alpd does not enforce the daemon refusals. Human
 gates opened before the ledger existed enter it only the next time ALP writes
 their task; until then a file edit that clears them goes undetected. Only

@@ -1,5 +1,5 @@
 import { realpathSync } from 'node:fs';
-import { access, chmod, constants, lstat, readdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { access, chmod, constants, lstat, readdir, readFile, statfs, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { runCommand } from './command.js';
@@ -565,6 +565,63 @@ async function homeLocationCheck(home, project) {
   return { id: 'home', status: 'ok', summary: home };
 }
 
+const GIB = 1024 ** 3;
+const formatSize = bytes => bytes >= GIB ? `${(bytes / GIB).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
+
+/** Entries of `directory` whose names start with `prefix`, as full paths; none when it cannot be read. */
+async function entries(directory, prefix = '') {
+  const names = await readdir(directory).catch(() => []);
+  return names.filter(name => name.startsWith(prefix)).map(name => path.join(directory, name));
+}
+
+/**
+ * Free space where ALP_HOME lives (t-2831), and what earlier runs left that takes room:
+ * worktrees under ALP_HOME/worktrees and alp-* directories in the temp directory. When
+ * the disk fills, alpd pauses work instead of stopping; this says so before it happens.
+ * Nothing is deleted, by --fix either: a leftover may hold someone's uncommitted work.
+ */
+export async function diskCheck(home, { run = runCommand, env = process.env, free, tempDirs = [...new Set([os.tmpdir(), ...(process.platform === 'win32' ? [] : ['/tmp'])])] } = {}) {
+  let bytes = free;
+  if (bytes === undefined) {
+    try { const info = await statfs(home); bytes = Number(info.bavail) * Number(info.bsize); } catch {}
+  }
+  const worktrees = await entries(path.join(home, 'worktrees'));
+  const temp = [];
+  for (const directory of tempDirs) {
+    for (const entry of await entries(directory, 'alp-')) {
+      const info = await lstat(entry).catch(() => undefined);
+      if (info?.isDirectory() && !temp.includes(realpathOr(entry))) temp.push(realpathOr(entry));
+    }
+  }
+  /** Kilobytes du counts under the paths; undefined when du is missing, slow or fails. */
+  async function size(paths) {
+    if (!paths.length) return 0;
+    if (process.platform === 'win32') return undefined;
+    const result = await run('du', ['-sk', ...paths], { env, timeoutMs: 20_000 });
+    if (result.code !== 0 && !result.stdout) return undefined;
+    const total = result.stdout.split('\n').reduce((sum, line) => sum + (Number(line.split(/\s+/)[0]) || 0), 0);
+    return total * 1024;
+  }
+  const details = [];
+  for (const [label, paths] of [[`${path.join(home, 'worktrees')}`, worktrees], [`${tempDirs.map(directory => path.join(directory, 'alp-*')).join(', ')}`, temp]]) {
+    if (!paths.length) continue;
+    const used = await size(paths);
+    details.push(`${paths.length} left in ${label}${used === undefined ? '' : `, ${formatSize(used)}`}`);
+  }
+  const hint = details.length ? 'ALP deletes none of these: some may belong to running assignments or hold uncommitted work. Remove those you no longer need (git worktree remove, or rm -rf).' : undefined;
+  const where = bytes === undefined ? 'free space unknown' : `${formatSize(bytes)} free`;
+  // Leftovers are listed, not judged: some may be live.
+  const status = bytes !== undefined && bytes < 2 * GIB ? 'warn' : 'ok';
+  const summary = bytes !== undefined && bytes < 2 * GIB
+    ? `${where} where ALP_HOME lives; when the disk is full, alpd pauses all work until space returns`
+    : `${where} where ALP_HOME lives`;
+  return { id: 'disk', status, summary, ...(details.length ? { details } : {}), ...(hint ? { hint } : {}) };
+}
+
+function realpathOr(file) {
+  try { return realpathSync(file); } catch { return file; }
+}
+
 export async function diagnose({ home, project, env = process.env, run = runCommand, sandbox, daemonEntry, timeoutMs = 3000 } = {}) {
   const checks = [];
   if (daemonEntry) {
@@ -572,6 +629,7 @@ export async function diagnose({ home, project, env = process.env, run = runComm
   }
   checks.push(...await runtimeChecks({ env, run }));
   checks.push(await homeLocationCheck(home, project));
+  if (home) checks.push(await diskCheck(home, { run, env }));
   const daemon = await daemonCheck(home);
   checks.push(daemon);
   const service = await serviceCheck(home, env);

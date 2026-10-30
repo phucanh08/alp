@@ -368,11 +368,14 @@ test('a busy web.port moves to the next port, and web.permissions adds only know
   const context = await createHome(t, { web: { port, permissions: ['files.read'] } });
   const service = await startService(context, { env: { ALP_SUPERVISE: '0' } });
   t.after(() => stopService(service).catch(() => {}));
-  assert.equal(service.web.port, port + 1);
-  assert.equal(service.web.url, `http://127.0.0.1:${port + 1}/`);
+  // The next usable port: port + 1 unless another process took it after freePorts saw it free
+  // (its ephemeral range is shared with every outgoing connection on the host).
+  const moved = service.web.port;
+  assert.ok(moved > port && moved < port + 10, `moved to ${moved}`);
+  assert.equal(service.web.url, `http://127.0.0.1:${moved}/`);
   // The page's origin and Host follow the port it got.
-  assert.equal((await tickets(port + 1, service.web.token, { origin: `http://127.0.0.1:${port + 1}` })).status, 201);
-  assert.equal((await tickets(port + 1, service.web.token, { origin: `http://127.0.0.1:${port}` })).status, 403);
+  assert.equal((await tickets(moved, service.web.token, { origin: `http://127.0.0.1:${moved}` })).status, 201);
+  assert.equal((await tickets(moved, service.web.token, { origin: `http://127.0.0.1:${port}` })).status, 403);
   assert.deepEqual((await credentialsOf(context.home))[0].permissions, ['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'workspace.write']);
 });
 

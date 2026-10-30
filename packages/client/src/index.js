@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { scrubText } from '@anhlp/alp-core/log';
+import { EXECUTABLE_MARKER, entryCommand, executablePath, isExecutableName, isScript } from '@anhlp/alp-core/packaged';
 import { createSocketTransport } from './ipc.js';
 import { AlpRpcClient } from './rpc/client.js';
 import { hello } from './rpc/handshake.js';
@@ -88,8 +89,39 @@ export async function assertPrivateSocket(socketPath) {
 
 const isFile = file => stat(file).then(info => info.isFile(), () => false);
 
+/**
+ * Whether `file` is the self-contained ALP executable (t-1e02) rather than a script or a shell
+ * wrapper: a native image (Mach-O, ELF or PE) named alp that carries ALP's executable marker.
+ * @param {string} file
+ */
+async function isAlpExecutable(file) {
+  if (isScript(file) || !isExecutableName(file) || !await isFile(file)) return false;
+  const handle = await open(file, 'r').catch(() => undefined);
+  if (!handle) return false;
+  try {
+    const { buffer, bytesRead } = await handle.read(Buffer.alloc(4), 0, 4, 0);
+    if (bytesRead < 4) return false;
+    const magic = buffer.readUInt32BE(0);
+    const native = buffer.toString('latin1') === '\x7fELF' || buffer.subarray(0, 2).toString('latin1') === 'MZ'
+      || [0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe, 0xcafebabe].includes(magic);
+    if (!native) return false;
+    // Identity without running it: ALP's generated entry embeds EXECUTABLE_MARKER (an unrelated `alp` does not).
+    const marker = Buffer.from(EXECUTABLE_MARKER, 'latin1');
+    const chunk = Buffer.alloc(1 << 20);
+    let tail = Buffer.alloc(0);
+    for (let position = 0; ;) {
+      const { bytesRead: read } = await handle.read(chunk, 0, chunk.length, position);
+      if (!read) return false;
+      const window = Buffer.concat([tail, chunk.subarray(0, read)]);
+      if (window.includes(marker)) return true;
+      tail = window.subarray(Math.max(0, window.length - marker.length + 1));
+      position += read;
+    }
+  } finally { await handle.close(); }
+}
+
 /** Global bin directories that a GUI app's PATH may lack. */
-const BIN_DIRECTORIES = [path.join(os.homedir(), '.npm-global', 'bin'), path.join(os.homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin'];
+const BIN_DIRECTORIES = [path.join(os.homedir(), '.alp', 'bin'), path.join(os.homedir(), '.npm-global', 'bin'), path.join(os.homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin'];
 
 /** The npm package that ships the `alp` command and alpd. */
 const CLI_PACKAGES = ['@anhlp/alp', '@anhlp/alp-cli'];
@@ -101,12 +133,16 @@ const CLI_PACKAGES = ['@anhlp/alp', '@anhlp/alp-cli'];
  */
 export async function findDaemonEntry({ home = alpHome(), env = process.env, candidates = /** @type {Array<string | undefined>} */ ([]) } = {}) {
   for (const candidate of candidates) if (candidate && await isFile(candidate)) return candidate;
+  // The ALP executable carries alpd itself (`alp daemon run`).
+  const own = executablePath();
+  if (own) return own;
   try {
     const { entry } = JSON.parse(await readFile(daemonPaths(home).install, 'utf8'));
     if (typeof entry === 'string' && await isFile(entry)) return entry;
   } catch {}
   for (const directory of [...(env.PATH ?? '').split(path.delimiter).filter(Boolean), ...BIN_DIRECTORIES]) {
-    const cli = await realpath(path.join(directory, 'alp')).catch(() => undefined);
+    const cli = await realpath(path.join(directory, process.platform === 'win32' ? 'alp.exe' : 'alp')).catch(() => undefined);
+    if (cli && await isAlpExecutable(cli)) return cli;
     if (!cli || path.basename(cli) !== 'cli.js') continue;
     const root = path.resolve(path.dirname(cli), '..');
     const name = await readFile(path.join(root, 'package.json'), 'utf8').then(text => JSON.parse(text)?.name).catch(() => undefined);
@@ -454,7 +490,8 @@ export async function ensureDaemon({ home = alpHome(), entry = /** @type {string
     if (!entry) throw new Error('ALP daemon is not running and alpd.js was not found. Install the ALP CLI and run `alp daemon start`, or set ALP_DAEMON_ENTRY to alpd.js');
     signal?.throwIfAborted();
     await new Promise((resolve, reject) => {
-      const launcher = spawn(execPath, [entry, '--detach', `--startup-timeout=${timeoutMs}`], {
+      const launch = entryCommand(entry, 'daemon', ['--detach', `--startup-timeout=${timeoutMs}`], execPath);
+      const launcher = spawn(launch.command, launch.args, {
         env: { ...env, ALP_HOME: home, ELECTRON_RUN_AS_NODE: '1' },
         stdio: ['ignore', 'ignore', 'pipe'],
         windowsHide: true,
@@ -696,7 +733,9 @@ export async function startIntegration(nameOrOptions = 'web') {
   // The child is detached with its stdio ignored, so it cannot rely on the parent's console. `--service`
   // is the generic contract: the entry writes its own log (the path its error messages advertise) and
   // keeps the process alive as a service. `--register` still prints to stdout and is not passed here.
-  const child = spawn(process.execPath, [entry, '--service', ...args], { stdio: 'ignore', detached: true, env: { ...process.env, ALP_HOME: home } });
+  // alp-web may be the ALP executable itself (`alp web serve`); other integrations are scripts.
+  const launch = name === 'web' ? entryCommand(entry, 'web', ['--service', ...args]) : entryCommand(entry, 'web', ['--service', ...args], undefined, { scriptOnly: true });
+  const child = spawn(launch.command, launch.args, { stdio: 'ignore', detached: true, env: { ...process.env, ALP_HOME: home } });
   let spawnError = null;
   child.on('error', error => { spawnError = error; });
   let exited = false;

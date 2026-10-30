@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { openSync, writeSync } from 'node:fs';
+import { fstatSync, openSync, writeSync } from 'node:fs';
 import { mkdir, open, readFile, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,11 +9,13 @@ import { attachmentStageDir, createAlpRuntime, liveProbes, ModelCatalog, reclaim
 import { createDaemonServer } from './server.js';
 import { acquireLock, heartbeat, releaseLock, updateLock } from './lock.js';
 import { createStore } from './store.js';
+import { createDiskGuard, guardOutput, isDiskError } from './disk.js';
 import { readAttachmentConfig } from './attachments.js';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { clearRestoredMarker, readRestoredMarker, recoverInterruptedRestore } from '@anhlp/alp-core/backup';
 import { migrateState } from '@anhlp/alp-core/migrations';
 import { createLogger } from '@anhlp/alp-core/log';
+import { selfCommand, selfEntry } from '@anhlp/alp-core/packaged';
 
 declare const __ALP_VERSION__: string;
 const VERSION = typeof __ALP_VERSION__ === 'string' ? __ALP_VERSION__ : '0.0.0-dev';
@@ -38,7 +40,8 @@ async function detach(home: string) {
   await assertPrivateDirectory(path.dirname(log), { create: true });
   await rotate(log);
   const output = await open(log, 'a', 0o600);
-  const child = spawn(process.execPath, [fileURLToPath(import.meta.url)], {
+  const self = selfCommand('daemon', { script: fileURLToPath(import.meta.url) });
+  const child = spawn(self.command, self.args, {
     detached: true,
     stdio: ['ignore', output.fd, output.fd, 'ipc'],
     env: process.env,
@@ -76,7 +79,7 @@ async function detach(home: string) {
  * log at start as the detached launcher does, then writes its output there itself. The
  * manager's own file keeps only what Node prints when it dies.
  */
-async function serviceLog(home: string) {
+async function serviceLog(home: string, onError: (error: unknown) => void) {
   await assertPrivateDirectory(home, { create: true });
   const { log } = daemonPaths(home);
   await assertPrivateDirectory(path.dirname(log), { create: true });
@@ -84,7 +87,7 @@ async function serviceLog(home: string) {
   const fd = openSync(log, 'a', 0o600);
   for (const stream of [process.stdout, process.stderr]) {
     stream.write = ((chunk: string | Uint8Array, encoding?: unknown, callback?: unknown) => {
-      try { if (typeof chunk === 'string') writeSync(fd, chunk); else writeSync(fd, chunk); } catch {}
+      try { if (typeof chunk === 'string') writeSync(fd, chunk); else writeSync(fd, chunk); } catch (error) { onError(error); }
       const done = typeof encoding === 'function' ? encoding : callback;
       if (typeof done === 'function') done();
       return true;
@@ -213,13 +216,17 @@ async function run(home: string) {
     assignmentResultFile: path.join(home, 'state', 'assignment-results.json'), recallFile: path.join(home, 'state', 'recall.json'), pauseFile: path.join(home, 'state', 'pause.json'), liveFile: path.join(home, 'state', 'live.json'),
     autoResume: settings?.limits?.autoResume !== false, recoveryResume: settings?.recovery?.autoResume !== false && !opened.restored, previousExit: exit,
   });
-  const store = createStore(path.join(home, 'state'));
+  // A full disk pauses ALP's work instead of stopping alpd (t-2831).
+  const disk = createDiskGuard({ home, runtime, log, ...(Number(process.env.ALP_DISK_CHECK_MS) > 0 ? { intervalMs: Number(process.env.ALP_DISK_CHECK_MS) } : {}) });
+  diskReport = error => { disk.report(error); };
+  const store = createStore(path.join(home, 'state'), { onWriteError: error => { disk.report(error); } });
   let stopping: Promise<void> | undefined;
   const shutdown = (code = 0) => {
     stopping ??= (async () => {
       const force = setTimeout(() => process.exit(code), 10_000);
       force.unref();
       clearInterval(beat);
+      disk.stop();
       modelCatalog?.stop();
       await server.close().catch(() => {});
       await runtime.shutdown().catch(() => {});
@@ -248,8 +255,9 @@ async function run(home: string) {
   }, 30_000);
   beat.unref();
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => void shutdown());
-  process.on('uncaughtException', error => { log.error('uncaught exception; alpd stops', { code: 'ALP_FATAL', error }); void shutdown(1); });
-  process.on('unhandledRejection', error => { log.error('unhandled rejection; alpd stops', { code: 'ALP_FATAL', error }); void shutdown(1); });
+  // A write the disk refused is no reason to stop: the disk guard pauses work until it takes writes again.
+  process.on('uncaughtException', error => { if (disk.report(error)) return; log.error('uncaught exception; alpd stops', { code: 'ALP_FATAL', error }); void shutdown(1); });
+  process.on('unhandledRejection', error => { if (disk.report(error)) return; log.error('unhandled rejection; alpd stops', { code: 'ALP_FATAL', error }); void shutdown(1); });
   phase = 'listen';
   try {
     await server.listen();
@@ -262,22 +270,27 @@ async function run(home: string) {
   await updateLock(home, { ...lock, ready: true });
   // Clients that cannot locate alpd themselves (the Paseo plugin) start it from here next time.
   const { install } = daemonPaths(home);
-  await writeFile(`${install}.tmp`, JSON.stringify({ entry: fileURLToPath(import.meta.url), version: VERSION }), { mode: 0o600 })
+  await writeFile(`${install}.tmp`, JSON.stringify({ entry: selfEntry(fileURLToPath(import.meta.url)), version: VERSION }), { mode: 0o600 })
     .then(() => rename(`${install}.tmp`, install))
     .catch(error => log.warn('could not record alpd\'s location', { code: 'ALP_INSTALL_RECORD_FAILED', error }));
   if (opened.restored) await clearRestoredMarker(home).catch(error => log.warn('could not clear the restore marker', { code: 'ALP_STATE_RESTORED', error }));
+  disk.start();
   if (process.connected) process.send?.('alpd.ready');
   log.info(`alpd ${VERSION} ready on ${socket} (pid ${process.pid})`, { event: 'ready', version: VERSION, pid: process.pid });
 }
 
 const home = alpHome();
+/** Where a failed write to alpd's own output goes once the disk guard exists. */
+let diskReport = (_error: unknown) => {};
+// Before anything logs: a log write the full disk refused must not end alpd (t-2831).
+guardOutput(error => { if (isDiskError(error)) diskReport(error); }, { fstatSync, writeSync });
 try {
   if (process.argv.includes('--detach')) await detach(home);
   else {
     // A direct foreground/login invocation is an explicit start. Do this before
     // admission registration, so a stop published during startup is preserved.
     if (!process.connected) await unlink(path.join(home, 'state', 'alpd.held')).catch(() => {});
-    if (process.argv.includes('--service')) await serviceLog(home);
+    if (process.argv.includes('--service')) await serviceLog(home, error => { if (isDiskError(error)) diskReport(error); });
     if (process.connected) await run(home);
     else {
       // Retain admission through readiness even if the requesting service client

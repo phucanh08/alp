@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { bootTime, isSameBoot, readLock } from '@anhlp/alp-client/index';
 import { distributionEntry } from './paths.js';
+import { isPackaged, selfEntry } from '@anhlp/alp-core/packaged';
 
 /**
  * The CLI's side of alp-web (packages/cli/src/web), the service behind `alp web`: where it is, which
@@ -24,11 +25,15 @@ const execFileAsync = promisify(execFile);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 /** The alp-web service script beside this CLI; a clear error when this CLI was built without it. */
-export function alpWebEntry() {
+export function alpWebScript() {
   const entry = fileURLToPath(distributionEntry('alp-web.js'));
-  if (!existsSync(entry)) throw new Error(`alp web is not built: ${entry} is missing. Build the CLI (npm run build in the ALP checkout) or reinstall ALP.`);
+  // The ALP executable carries alp-web inside itself.
+  if (!isPackaged() && !existsSync(entry)) throw new Error(`alp web is not built: ${entry} is missing. Build the CLI (npm run build in the ALP checkout) or reinstall ALP.`);
   return entry;
 }
+
+/** What starts alp-web: its script under Node, or the ALP executable (`alp web serve`). */
+export const alpWebEntry = () => selfEntry(alpWebScript());
 
 const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
 

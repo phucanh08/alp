@@ -49,7 +49,7 @@ export type TaskGate = {
   by: string;
   /** A human gate's answers; choosing any of them approves it. */
   options?: string[];
-  resolved?: { at: string; by: string; note?: string; choice?: string; channel?: GateChannel; notified?: string };
+  resolved?: { at: string; by: string; note?: string; choice?: string; channel?: GateChannel; notified?: string; overridden?: true };
   /** A human gate ALP opened that a task file edit showed cleared or removed: reopened (t-ca1f). */
   tampered?: { at?: string | null; by?: string | null; removed?: true };
   /** The user's latest rejection; the gate stays open. */
@@ -100,7 +100,7 @@ export function createTask(projectRoot: string, input: TaskInput & { title: stri
 export function updateTask(projectRoot: string, id: string, input: TaskInput & { note?: string }, by: string, options?: WriteOptions): Promise<Task>;
 export function linkTask(projectRoot: string, id: string, change: { add?: TaskLinks; remove?: TaskLinks }, by: string, options?: WriteOptions): Promise<Task>;
 export function startTask(projectRoot: string, id: string, assignee: { agent: string; session?: string; assignment?: string; pid?: number; pidStartedAt?: number; epoch?: string }, by: string, options?: WriteOptions): Promise<Task>;
-export function closeTask(projectRoot: string, id: string, close: { reason?: CloseReason; summary?: string; unverified?: string }, by: string, options?: WriteOptions): Promise<Task>;
+export function closeTask(projectRoot: string, id: string, close: { reason?: CloseReason; summary?: string; unverified?: string; agent?: boolean; channel?: GateChannel }, by: string, options?: WriteOptions): Promise<Task>;
 export function verificationFailed(task: Task): boolean;
 export function recordVerification(projectRoot: string, id: string, verification: { passed: boolean; where?: string; commands?: Array<{ step: string; command: string; exitCode: number; ms: number; output?: string; timedOut?: boolean }>; skipped?: string }, by: string): Promise<Task>;
 export function reopenTask(projectRoot: string, id: string, reopen: { note?: string }, by: string, options?: WriteOptions): Promise<Task>;

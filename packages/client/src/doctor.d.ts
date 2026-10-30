@@ -10,4 +10,5 @@ export type CommandResult = { code: number; stdout: string; stderr: string };
 export type CommandRunner = (command: string, args: string[], options?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number }) => Promise<CommandResult>;
 export const runCommand: CommandRunner;
 export function diagnose(options?: { home?: string; project?: string; env?: NodeJS.ProcessEnv; run?: CommandRunner; sandbox?: boolean; daemonEntry?: string; timeoutMs?: number }): Promise<DoctorCheck[]>;
+export function diskCheck(home: string, options?: { run?: CommandRunner; env?: NodeJS.ProcessEnv; free?: number; tempDirs?: string[] }): Promise<DoctorCheck>;
 export function repair(checks: DoctorCheck[]): Promise<Array<{ id: string; result: string }>>;

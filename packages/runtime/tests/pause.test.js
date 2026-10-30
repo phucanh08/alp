@@ -488,3 +488,52 @@ for (const paused of [false, true]) {
     assert.equal(runtime.snapshot('root').parked, undefined);
   });
 }
+
+test('a full disk pauses all ALP and parks running work; releasing it continues that work and keeps a usage-limit pause (t-2831)', async t => {
+  const { runtime, runtimes, events, main } = await setup(t, none);
+  const { assignmentId } = await main.call('alp_delegate', { agent: 'peer', task: 'Write a lot', mode: 'read-only', wait: false });
+  await until(() => runtimes[1]?.started.length === 1);
+  const peer = runtimes[1];
+
+  const state = runtime.holdForDisk('the disk is full');
+  assert.deepEqual([state.all.by, state.all.reason, state.all.cause], ['alpd', 'the disk is full', 'disk']);
+  assert.equal(runtime.diskHeld(), true);
+  assert.match(notices(events).at(-1).text, /^Disk full: the disk is full\. ALP paused its work and parked running assignments/);
+  assert.equal(notices(events).at(-1).level, 'error');
+  assert.ok(peer.calls.some(call => call.method === 'turn/interrupt'));
+  peer.notification('turn/completed', { threadId: peer.threadId, turn: { id: peer.turnId, status: 'interrupted' } });
+  await until(() => runtime.pauses().parked.length === 1);
+  assert.equal(runtime.snapshot(assignmentId).parked, 'the disk is full');
+  // Main learns why and what happens next.
+  const steered = () => main.calls.filter(call => call.method === 'turn/steer').map(call => call.params.input.at(-1).text).join('\n');
+  await until(() => /Parked:/.test(steered()));
+  assert.match(steered(), /Parked: the disk is full\. ALP continues this assignment where it stopped as soon as the disk takes writes again/);
+  // Another hold changes nothing; a usage-limit pause made meanwhile survives the release.
+  runtime.holdForDisk('the disk is full');
+  assert.equal(notices(events).filter(item => /^Disk full/.test(item.text)).length, 1);
+  runtime.pause({ runtime: 'claude' });
+
+  runtime.releaseDisk('alpd, after disk space returned');
+  assert.equal(runtime.diskHeld(), false);
+  await until(() => peer.started.length === 2);
+  assert.match(peer.started[1].params.input.at(-1).text, /it had stopped because the disk is full\. Continue where you left off/);
+  assert.equal(runtime.pauses().all, undefined);
+  assert.equal(runtime.pauses().runtimes.claude.by, 'the user');
+  assert.match(notices(events).at(-1).text, /^ALP resumed by alpd, after disk space returned\. Parked assignments continue\.$/);
+  await peer.call('alp_handoff', { outcome: 'complete', summary: 'Wrote it' });
+  peer.finish('Done');
+  await main.call('alp_wait', { assignments: [assignmentId] });
+  main.finish('Done');
+});
+
+test('a full disk leaves a pause the user made theirs to lift (t-2831)', async t => {
+  const { runtime, main } = await setup(t, none);
+  runtime.pause({ reason: 'Lunch' });
+  runtime.holdForDisk('the disk is full');
+  assert.equal(runtime.diskHeld(), false);
+  assert.equal(runtime.pauses().all.by, 'the user');
+  runtime.releaseDisk('alpd');
+  assert.equal(runtime.pauses().all.reason, 'Lunch');
+  runtime.resume();
+  main.finish('Done');
+});

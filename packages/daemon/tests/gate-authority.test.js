@@ -69,3 +69,33 @@ test('an agent connection cannot clear a human gate or answer a question; the us
   // The user's answer reaches the lookup (no such question), not the refusal.
   await assert.rejects(user.request('question.answer', { questionId: 'q-any', text: 'yes' }), error => error.code === 1001);
 });
+
+test('an agent connection cannot close a task with an open human gate; the user closes it, overriding the gate (t-f438)', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alpd-close-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const savedHome = process.env.ALP_HOME;
+  process.env.ALP_HOME = path.join(directory, 'alp-home');
+  t.after(() => { if (savedHome === undefined) delete process.env.ALP_HOME; else process.env.ALP_HOME = savedHome; });
+  const home = path.join(directory, 'home');
+  await mkdir(home, { mode: 0o700 });
+  const project = path.join(directory, 'project');
+  await initProject(project);
+  const runtime = createAlpRuntime({ transport: fakeTransport(), libraryDir: home });
+  const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', home });
+  await server.listen();
+  t.after(async () => { await server.close(); await runtime.shutdown(); });
+
+  const task = await createTask(project, { title: 'Release' }, 'main');
+  await addGate(project, task.id, { kind: 'human', note: 'Ship it?' }, 'main');
+  const agent = await connectAs(daemonPaths(directory).socket, true);
+  t.after(() => agent.close());
+  await assert.rejects(agent.request('task.update', { projectRoot: project, id: task.id, action: 'close' }), error => error.code === 1003 && error.data?.reason === 'user_only');
+  assert.equal((await loadTasks(project)).tasks[0].status, 'open');
+
+  const user = await connectAs(daemonPaths(directory).socket, false);
+  t.after(() => user.close());
+  await user.request('task.update', { projectRoot: project, id: task.id, action: 'close' });
+  const closed = (await loadTasks(project)).tasks[0];
+  assert.equal(closed.status, 'closed');
+  assert.deepEqual([closed.gates[0].resolved.overridden, closed.gates[0].resolved.channel, !!closed.gates[0].tampered], [true, 'web', false]);
+});

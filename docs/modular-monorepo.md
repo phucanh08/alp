@@ -141,7 +141,7 @@ Restarting is non-destructive. `alp daemon restart` (or the plugin's supervision
 
 ## Independent versions and publishing
 
-> **For the beta `0.0.1-beta.4`, do not use the commands in this section.** The beta gives all
+> **For the beta `0.0.1-beta.5`, do not use the commands in this section.** The beta gives all
 > eight published packages one version, packs them once and publishes those tarballs with
 > `--tag beta`, following the manual checklist in [beta-scope.md](alp/beta-scope.md) §7. The
 > `npm publish` below has no `--tag`, so it would set `latest`.

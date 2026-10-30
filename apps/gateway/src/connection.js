@@ -4,7 +4,7 @@ import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:
 import { homedir } from 'node:os';
 import { CAPABILITY, ERROR, PROTOCOL_VERSION, RPC_ERROR, TERMINAL, WORKSPACE_FILES, base64Bytes, blockedFilePath, resumeCommandOf } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
-import { isAlpClientError } from '@anhlp/alp-client/portable';
+import { AGENT_CAPABILITY, isAlpClientError } from '@anhlp/alp-client/portable';
 import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.js';
 import { projectGitDiff, projectGitStatus, gatewayAttachmentLimits, projectAttachment, projectUploadBegun } from './policy.js';
 import { CONFIGURE_REASONS, isGeneration, projectBranch, projectConfigured, projectConfigurePreview, projectConversation, projectForkedFrom } from './policy.js';
@@ -339,6 +339,8 @@ export class ClientConnection {
   /** @type {Array<{ frame: string | null | undefined }>} */ #queue = [];
   #queuedBytes = 0;
   #helloed = false;
+  /** The client said in daemon.hello that an ALP agent started it: the re-hello that says so on its alpd connection (t-e706). */
+  /** @type {Promise<unknown> | undefined} */ #agent;
   /** A hello waiting for alpd: requests pipelined behind it wait too, as alpd answers hello at once. */
   /** @type {Promise<unknown> | undefined} */ #helloing;
   #closed = false;
@@ -703,10 +705,12 @@ export class ClientConnection {
   async #handle(method, params) {
     if (method === 'daemon.hello') {
       const greeting = this.#hello(params);
-      this.#helloing = greeting.catch(() => {});
+      // Chained: what follows waits for every hello before it, so none can hide a pending mark (t-e706).
+      this.#helloing = Promise.all([this.#helloing, greeting.catch(() => {})]);
       return greeting;
     }
-    if (!this.#helloed && this.#helloing) await this.#helloing;
+    // Behind every hello, even a later one: a hello that marks an agent lands before what follows it (t-e706).
+    if (this.#helloing) await this.#helloing;
     if (!this.#helloed) throw new GatewayError(ERROR.protocol, 'daemon.hello is required first', { reason: 'hello_required' });
     await this.#refreshWorktrees();
     const exposure = exposureOf(method);
@@ -732,6 +736,17 @@ export class ClientConnection {
     const issues = validateParams('daemon.hello', params);
     if (issues?.length) throw new GatewayError(RPC_ERROR.invalidParams, `Invalid params: ${issues.map(issue => `${issue.path || 'params'} ${issue.message}`).join('; ')}`, { reason: 'invalid_params', issues });
     await this.#ready.catch(() => { throw new GatewayError(GATEWAY_ERROR.unavailable, 'alpd is unavailable', { reason: GATEWAY_REASON.daemonDisconnected }); });
+    // A client an ALP agent started says so (t-ca1f): this connection's own alpd connection then says
+    // so too (alpd keeps the mark for good), so alpd refuses it what only the user may do (t-e706).
+    // Once per connection, shared by hellos that overlap; every later hello, marked or not, waits for it.
+    if (Array.isArray(params.capabilities) && params.capabilities.includes(AGENT_CAPABILITY)) this.#agent ??= this.#call('daemon.hello', { protocolVersion: PROTOCOL_VERSION, client: { name: 'alp-gateway', version: '0' }, capabilities: [AGENT_CAPABILITY] });
+    if (this.#agent) {
+      try { await this.#agent; }
+      catch {
+        this.close(CLOSE_CODE.internal, 'Could not mark the agent connection to alpd; reconnect');
+        throw new GatewayError(GATEWAY_ERROR.unavailable, 'alpd is unavailable', { reason: GATEWAY_REASON.daemonDisconnected });
+      }
+    }
     this.#helloed = true;
     return {
       protocolVersion: PROTOCOL_VERSION,

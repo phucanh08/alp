@@ -7,7 +7,9 @@ import { alpHome, connect, daemonPaths, discoverIntegration, startIntegration } 
 import { UsageError } from './usage.js';
 import { built, start, running } from './daemon.js';
 import { DAEMON_ENTRY, distributionEntry } from './paths.js';
-import { alpWebEntry, isWebClaimed, isWebReady, refusal, stopPreRenamePaseo, stopWebService, webOwner } from './web-service.js';
+import { entryCommand, packagedInfo } from '@anhlp/alp-core/packaged';
+import { runRole } from './roles.js';
+import { alpWebEntry, alpWebScript, isWebClaimed, isWebReady, refusal, stopPreRenamePaseo, stopWebService, webOwner } from './web-service.js';
 
 /** The Paseo integration (its web app, bridge and relay) runs as integration `paseo`. */
 const PASEO = 'paseo';
@@ -186,6 +188,8 @@ async function serveWeb(home, entry) {
 async function webCommand(args) {
   if (args[0] === 'pair') return pairCommand(args.slice(1));
   if (args[0] === 'rotate') return rotateCommand(args.slice(1));
+  // alp-web itself in this process; its own options (--service, --rotate, --project DIR) follow.
+  if (args[0] === 'serve') return runRole('web', alpWebScript(), args.slice(1));
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { print: { type: 'boolean' } } });
   if (positionals.length) throw new UsageError();
   const entry = alpWebEntry();
@@ -214,7 +218,8 @@ async function rotateCommand(args) {
   for (let attempt = 1; ; attempt++) {
     await stopWebService(home);
     const rotated = await new Promise(resolve => {
-      execFile(process.execPath, [entry, '--rotate', ...project], { env: { ...process.env, ALP_HOME: home }, encoding: 'utf8', timeout: 60_000, killSignal: 'SIGTERM' },
+      const rotate = entryCommand(entry, 'web', ['--rotate', ...project]);
+      execFile(rotate.command, rotate.args, { env: { ...process.env, ALP_HOME: home }, encoding: 'utf8', timeout: 60_000, killSignal: 'SIGTERM' },
         (error, stdout, stderr) => resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, output: `${stderr}${stdout}`.trim() }));
     });
     if (rotated.code === 0) break;
@@ -282,7 +287,8 @@ async function pairCommand(args) {
 async function acpCommand(args) {
   if (args.length) throw new UsageError();
   await built();
-  const { runAcp } = await import(distributionEntry('acp.js'));
+  const acp = packagedInfo()?.roles?.acp;
+  const { runAcp } = /** @type {{ runAcp: (options: { daemonEntry: string }) => Promise<void> }} */ (acp ? await acp() : await import(distributionEntry('acp.js').href));
   await runAcp({ daemonEntry: DAEMON_ENTRY });
 }
 

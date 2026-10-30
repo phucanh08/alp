@@ -1,0 +1,106 @@
+# Binary release (t-1e02 P1, docs/alp/binary-install.md): builds and smokes the ALP executable for
+# darwin-arm64, darwin-x64, linux-x64 and linux-arm64 at the given SHA on main (binary-build.yml),
+# then writes SHA256SUMS, attests build provenance for every archive, and creates or refreshes a
+# DRAFT (non-prerelease) GitHub release v<version> with the archives, SHA256SUMS and install.sh. It never publishes:
+# the owner reviews the draft and publishes it by hand (which is when the tag is created).
+name: Release binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Release SHA (a full commit SHA on main)
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-binaries
+  cancel-in-progress: false
+
+jobs:
+  check:
+    # Only main's copy of this workflow may run: a branch copy could drop the checks below.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+      - name: The SHA is a full commit on main
+        env:
+          RELEASE_SHA: ${{ inputs.sha }}
+        run: |
+          echo "$RELEASE_SHA" | grep -Eq '^[0-9a-f]{40}$' || { echo "inputs.sha must be a full commit SHA"; exit 1; }
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA" || { echo "checked out $(git rev-parse HEAD), not $RELEASE_SHA"; exit 1; }
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main || { echo "$RELEASE_SHA is not on main"; exit 1; }
+      - id: version
+        run: echo "version=$(node -p "require('./packages/cli/package.json').version")" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: check
+    uses: ./.github/workflows/binary-build.yml
+    with:
+      ref: ${{ inputs.sha }}
+
+  draft:
+    needs: [check, build]
+    if: github.ref == 'refs/heads/main'
+    # The release environment admits deployments from main only (repository setting).
+    environment: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      RELEASE_SHA: ${{ inputs.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: alp-binary-*
+          path: release
+          merge-multiple: true
+      - name: Archives, install.sh and SHA256SUMS
+        run: |
+          for platform in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            test -f "release/alp-$VERSION-$platform.tar.gz" || { echo "missing alp-$VERSION-$platform.tar.gz"; exit 1; }
+          done
+          cp install.sh release/install.sh
+          node scripts/package-binary.mjs sums release
+          ls -l release
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            release/*.tar.gz
+            release/install.sh
+      - name: Draft release v${{ needs.check.outputs.version }} (never published here)
+        run: |
+          tag="v$VERSION"
+          state=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo none)
+          if [ "$state" = false ]; then echo "release $tag is already published; refusing to touch it"; exit 1; fi
+          if [ "$state" = true ]; then
+            # A draft has no tag yet; replace it so its target and assets are this SHA's.
+            echo "replacing the existing draft $tag"
+            gh release delete "$tag" --yes --repo "$GITHUB_REPOSITORY"
+          fi
+          gh release create "$tag" release/* --draft --prerelease=false --target "$RELEASE_SHA" --repo "$GITHUB_REPOSITORY" \
+            --title "ALP $VERSION" \
+            --notes "Draft binary release built from $RELEASE_SHA by run $GITHUB_RUN_ID. Install: curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/install.sh | sh -s -- --version $VERSION. Verify provenance: gh attestation verify <archive> --repo $GITHUB_REPOSITORY --source-ref refs/heads/main --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release-binaries.yml."
+          # A normal release (not a prerelease) so install.sh's releases/latest resolves to it once published;
+          # npm keeps betas on the beta dist-tag (docs/alp/binary-install.md, version policy).
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,tagName,targetCommitish,assets \
+            --jq '{isDraft, isPrerelease, tagName, targetCommitish, assets: [.assets[].name]}'
+          test "$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" = false \
+            || { echo "draft $tag is marked as a prerelease"; exit 1; }
