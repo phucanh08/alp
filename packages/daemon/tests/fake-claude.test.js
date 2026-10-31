@@ -93,6 +93,20 @@ test('alpd on the fake Claude: a prompt is answered, a held turn is interrupted,
   assert.match(spawned.sessionId, /^[0-9a-f-]{36}$/);
   assert.ok(spawned.args.includes(`--session-id=${spawned.sessionId}`));
 
+  // t-e906: /clear and its aliases are refused by session.prompt before anything is sent or recorded.
+  for (const [id, body] of [['c1', '/clear'], ['c2', '/new please'], ['c3', '  /reset']]) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await assert.rejects(first.request('session.prompt', { sessionId: session.id, clientMessageId: id, content: text(body) }), error => {
+        assert.equal(error.code, -32602);
+        assert.equal(error.data?.reason, 'native_command_unsupported');
+        assert.match(error.message, /does not pass \/clear/);
+        return true;
+      }, `${body} (attempt ${attempt + 1})`);
+    }
+  }
+  assert.ok(!(await journal()).some(entry => entry.method === 'user' && /^\s*\/(?:clear|new|reset)\b/.test(entry.text ?? '')), 'nothing reached Claude');
+  assert.equal(ended(first, 0).length, 1, 'no turn started');
+
   // A held turn: it runs until alp interrupts it, then ends canceled.
   await first.request('session.prompt', { sessionId: session.id, clientMessageId: 'm2', content: text('count slowly [hold]') });
   await until(() => first.events.some(e => e.event.type === 'turn.started' && e.cursor > ended(first, 0)[0].cursor), 'the held turn to start');

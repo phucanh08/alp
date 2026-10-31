@@ -383,7 +383,10 @@ some of the runtime's own commands or skills as well, name them without the lead
 `/` in `commands`, as in `"team": {"pho": {"main": {"profiles": [...], "commands":
 ["model", "context"]}}}`; the default is none. Claude's `/clear`, `/compact` and
 `/rewind` are never offered, because ALP does that work itself. The list hides
-commands only: a command you type is still sent as written.
+commands only: a command you type is still sent as written, except on Claude
+`/clear` and its aliases `/reset` and `/new`. Claude would start a new conversation
+that the ALP session does not follow, so `session.prompt` refuses them
+(`native_command_unsupported`); start a new session, or compact this one, instead.
 
 ## Doctor
 
