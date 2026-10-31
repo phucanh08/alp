@@ -77,7 +77,6 @@ type Terminal = {
   rows: number;
   pty: PtyProcess;
   screen: TerminalScreen;
-  pid: number;
   /** The PTY's device as ps names it (ttys004, pts/3): a controlling terminal outlives double forks. */
   tty?: string;
   createdAt: number;
@@ -491,7 +490,7 @@ export function createTerminalService(options: TerminalServiceOptions) {
           }
           const terminal: Terminal = {
             id: `term_${randomBytes(16).toString('hex')}`, principal: { id: principal.id, epoch: principal.epoch }, workspaceId: params.workspaceId,
-            root, ...(protection ? { protection } : {}), title: path.basename(file).slice(0, 64), cols: params.cols, rows: params.rows, pty: process_, pid: process_.pid, screen: new TerminalScreen(params.cols, params.rows),
+            root, ...(protection ? { protection } : {}), title: path.basename(file).slice(0, 64), cols: params.cols, rows: params.rows, pty: process_, screen: new TerminalScreen(params.cols, params.rows),
             ...(typeof process_.ptsName === 'string' && process_.ptsName.startsWith('/dev/') ? { tty: process_.ptsName.slice('/dev/'.length) } : {}),
             createdAt: at, lastActivityAt: at, expiresAt: at + limits.maxLifetimeMs, requestKey, ring: [], ringBytes: 0, nextSeq: 1,
             detachedAt: at, marker, disposables: [],
@@ -634,8 +633,8 @@ export function createTerminalService(options: TerminalServiceOptions) {
       if (cleanupFault || outcomes.some(result => result.status === 'rejected')) throw refused('terminal_cleanup_uncertain');
     },
 
-    /** Test hook: pids of every running terminal's shell. */
-    pids() { return [...terminals.values()].filter(terminal => !terminal.exit).map(terminal => terminal.pid); },
+    /** Test hook: pids of every running terminal's shell (read live: the win32 owner learns it after spawn). */
+    pids() { return [...terminals.values()].filter(terminal => !terminal.exit).map(terminal => terminal.pty.pid); },
   };
 }
 export type TerminalService = ReturnType<typeof createTerminalService>;

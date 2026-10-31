@@ -40,7 +40,9 @@ export const createWindowsPtySpawn = (load: () => NodePty | undefined = loadNode
   const child = pty.spawn(file, args, { name: options.name, cols: options.cols, rows: options.rows, cwd: options.cwd, env: options.env, useConpty: true });
   let killed = false;
   return {
-    pid: child.pid,
+    // node-pty reports the ConPTY shell's pid only once its output worker connects (0 until then), so
+    // the pid is read live rather than copied at spawn.
+    get pid() { return child.pid; },
     write(data: string) { if (!killed) child.write(data); },
     resize(cols: number, rows: number) { if (!killed) try { child.resize(cols, rows); } catch { /* exited */ } },
     // Best-effort: node-pty ends the ConPTY session and its shell; descendants are not guaranteed.
