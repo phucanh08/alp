@@ -116,15 +116,18 @@ A gateway credential also needs the separate permission `terminal.exec`, which i
 (docs/alp/remote-gateway.md §5.18).
 
 The PTY comes from [`node-pty`](https://github.com/microsoft/node-pty) `1.2.0-beta.15` (MIT,
-Microsoft), pinned exactly. It is an **optional dependency** of `@anhlp/alp`, `@anhlp/alp-cli`,
-`@anhlp/alp-daemon` and `@anhlp/alp-paseo`, and alpd loads it only when a terminal is first needed:
+Microsoft), pinned exactly. It is an **optional dependency** of `@anhlp/alp-cli` (so of the npm
+wrapper `@anhlp/alp`), `@anhlp/alp-daemon` and `@anhlp/alp-paseo`, and alpd loads it only when a terminal is first needed:
 
 - Its tarball carries prebuilt N-API binaries for macOS and Linux (x64, arm64) and Windows, so no
-  compiler is needed. Its install script only checks for a prebuild; with `--ignore-scripts`, or npm's
-  pending `allow-scripts` approval, it still works.
+  compiler is needed. It is the only dependency of ALP with install scripts, so it is what npm's
+  "allow-scripts" pending-approval warning on `npm i -g @anhlp/alp` names. Neither script is needed:
+  `install` only checks that a prebuild exists (else it compiles with node-gyp), and `postinstall`
+  cleans the build folder and, on Windows, copies node-pty's own `conpty.dll`, which alpd never
+  asks for (it uses the system ConPTY). With `--ignore-scripts`, or the approval left pending, it still works.
 - It adds about 27 MB unpacked, mostly Windows debug symbols.
 - If it fails to install or load, everything else works and alpd simply never offers terminals.
-- Windows: terminals are not supported and the capability is never listed.
+- Windows: terminals go through node-pty and ConPTY, best-effort, without the process protection of macOS and Linux.
 
 ## Paseo plugin
 

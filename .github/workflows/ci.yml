@@ -108,6 +108,8 @@ jobs:
       - run: node --test packages/client/tests/daemon-paths.test.js packages/daemon/tests/daemon.test.js packages/daemon/tests/ipc-security.test.js integrations/paseo/tests/daemon-git.test.js
       - run: npm test --workspace @anhlp/alp-gateway
       - run: node --test packages/cli/tests/alp-web.test.js
+      # npm install -g of the packed wrapper into a throwaway prefix: npm's alp.cmd runs, and alpd is found through it (t-1f14).
+      - run: node scripts/npm-wrapper-smoke.mjs
 
   # The standalone browser app (apps/web, docs/alp/web.md): types, unit tests, the bundle's SDK-only
   # boundary, then Playwright against a real gateway and alpd with a fake provider on random ports.

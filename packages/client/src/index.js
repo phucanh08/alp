@@ -98,15 +98,27 @@ const CLI_PACKAGES = ['@anhlp/alp', '@anhlp/alp-cli'];
 /**
  * alpd.js behind an `alp` found on PATH (its real path), or undefined: the ALP bundle's launcher
  * (<bundle>/bin/alp or alp.cmd, t-1807), npm's @anhlp/alp-cli (dist/cli.js) or the @anhlp/alp wrapper (bin/alp.js),
- * which depends on @anhlp/alp-cli (installed beside it, or in its own node_modules).
- * @param {string} cli
+ * which depends on @anhlp/alp-cli (installed beside it, or in its own node_modules). On Windows an
+ * alp.cmd shim of npm or install.ps1 is followed to the script it runs (t-1f14).
+ * @param {string} cli @param {number} [depth]
  */
-async function cliDaemonEntry(cli) {
+async function cliDaemonEntry(cli, depth = 0) {
   const base = path.basename(cli).toLowerCase();
   const root = path.resolve(path.dirname(cli), '..');
   const alpd = directory => path.join(directory, 'dist', 'alpd.js');
   const named = async directory => readFile(path.join(directory, 'package.json'), 'utf8').then(text => JSON.parse(text)?.name).catch(() => undefined);
   let candidates = [];
+  if (base === 'alp.cmd' && depth < 1 && !await isFile(path.join(root, 'alp-bundle.json'))) {
+    // A Windows shim that is not the bundle's own: npm's ("%dp0%\node_modules\@anhlp\alp\bin\alp.js")
+    // or install.ps1's ("<root>\app\current\lib\node_modules\@anhlp\alp-cli\dist\cli.js"): follow the script it runs.
+    const text = await stat(cli).then(info => info.size <= 64 * 1024 ? readFile(cli, 'utf8') : '', () => '');
+    for (const [, quoted] of text.matchAll(/"([^"\r\n]+\.js)"/gi)) {
+      const script = quoted.replace(/^%~?dp0%?[\\/]?/i, `${path.dirname(cli)}${path.sep}`);
+      const entry = path.isAbsolute(script) && await isFile(script) ? await cliDaemonEntry(script, depth + 1) : undefined;
+      if (entry) return entry;
+    }
+    return undefined;
+  }
   if (base === 'alp' || base === 'alp.cmd') {
     // A bundle: bin/ beside alp-bundle.json; name alpd through app/current when that is this bundle.
     if (!await isFile(path.join(root, 'alp-bundle.json'))) return undefined;
