@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { isExecutableName } from './packaged.js';
+import { isExecutableName, stablePath } from './packaged.js';
 
 /**
  * The stdio MCP bridges an agent CLI starts to reach alpd's tools (ACP agents and Antigravity).
@@ -93,7 +93,8 @@ export function runBridge(kind) {
  */
 export function bridgeCommand(kind) {
   if (!Object.hasOwn(BRIDGES, kind)) throw new Error(`Unknown bridge: ${kind}; expected acp or antigravity`);
-  return { command: process.execPath, args: ['-e', BRIDGES[kind]] };
+  // Agents keep this command in their MCP configuration: name the ALP bundle's Node through app/current.
+  return { command: stablePath(process.execPath), args: ['-e', BRIDGES[kind]] };
 }
 
 /**

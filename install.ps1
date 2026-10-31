@@ -140,6 +140,7 @@ param(
     try { New-Item -ItemType Directory -Path $App -Force | Out-Null; New-Item -ItemType Directory -Path $Dir -Force | Out-Null } catch { Die "could not create $App or $Dir" }
     $current = Join-Path $App 'current'
     $previous = $null
+    $aside = $null
     $currentItem = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
     if ($currentItem) {
       if (-not $currentItem.LinkType) { Die "$current exists and is not a junction; move it away and rerun" }
@@ -163,7 +164,8 @@ param(
       if (Test-Path -LiteralPath $target) {
         if ($previous -eq $newVersion) {
           # Reinstalling the running version: keep its files for the processes that use them.
-          Move-Item -LiteralPath $target -Destination (Join-Path $App (".alp-old-" + [System.Guid]::NewGuid().ToString('N').Substring(0, 12)))
+          $aside = ".alp-old-" + [System.Guid]::NewGuid().ToString('N').Substring(0, 12)
+          try { Move-Item -LiteralPath $target -Destination (Join-Path $App $aside) } catch { Die "ALP $newVersion is in use (Windows cannot move a running version); close ALP (alp daemon stop) and rerun" }
         } else { Remove-Item -LiteralPath $target -Recurse -Force }
       }
       Move-Item -LiteralPath $unpacked -Destination $target
@@ -175,8 +177,13 @@ param(
     }
     Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
     # Point current at the new version: a junction (no administrator rights needed).
-    if ($currentItem) { [System.IO.Directory]::Delete($current, $false) }
-    New-Item -ItemType Junction -Path $current -Target $target | Out-Null
+    $previousTarget = $null
+    if ($currentItem) { $previousTarget = [string]$currentItem.Target; [System.IO.Directory]::Delete($current, $false) }
+    try { New-Item -ItemType Junction -Path $current -Target $target | Out-Null } catch {
+      $reason = $_.Exception.Message
+      if ($previousTarget) { New-Item -ItemType Junction -Path $current -Target $previousTarget -ErrorAction SilentlyContinue | Out-Null }
+      Die "could not point $current at $target ($reason)"
+    }
     Say "installed ALP $newVersion in $target"
 
     # The alp command. A 0.0.1-beta.5/6 alp.exe would win over alp.cmd on PATH: move it aside (a
@@ -200,7 +207,8 @@ param(
     # Older versions go; the previous one stays until the next install, for an alpd still running it.
     foreach ($old in Get-ChildItem -LiteralPath $App -Directory -Force) {
       if ($old.Name -eq 'current' -or $old.Name -eq $newVersion -or $old.Name -eq $previous) { continue }
-      if ($old.Name -match '^[0-9]') { Remove-Item -LiteralPath $old.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+      if ($old.Name -eq $aside) { continue }
+      if ($old.Name -match '^[0-9]' -or $old.Name -match '^\.alp-(old|update)-') { Remove-Item -LiteralPath $old.FullName -Recurse -Force -ErrorAction SilentlyContinue }
     }
   } finally {
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue

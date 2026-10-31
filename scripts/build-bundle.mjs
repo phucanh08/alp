@@ -90,6 +90,19 @@ export async function nodeArchive(platform, cache) {
   return { file, version: pinned.version, name: entry.file.replace(/\.(tar\.gz|zip)$/, '') };
 }
 
+/** Third-party packages the lockfile holds at exactly one version: name → version. */
+export function lockedVersions(lock) {
+  const seen = new Map();
+  for (const [key, entry] of Object.entries(lock.packages ?? {})) {
+    const match = /(?:^|\/)node_modules\/((?:@[^/]+\/)?[^/]+)$/.exec(key);
+    if (!match || entry.link || !entry.version || match[1].startsWith('@anhlp/')) continue;
+    const versions = seen.get(match[1]) ?? new Set();
+    versions.add(entry.version);
+    seen.set(match[1], versions);
+  }
+  return new Map([...seen].filter(([, versions]) => versions.size === 1).map(([name, versions]) => [name, [...versions][0]]));
+}
+
 /** Removes the files only other platforms use: their node-pty prebuilds and native terminal helpers. */
 async function prune(modules, platform) {
   const npm = npmTarget(platform);
@@ -157,12 +170,21 @@ export async function buildBundle({ platform, out, build = true, nodeCache = pat
     // 2. npm install them, with their production dependencies, as `npm install -g @anhlp/alp-cli` lays them out.
     const lib = path.join(directory, 'lib');
     const target = npmTarget(platform);
-    await writeFile(path.join(lib, 'package.json'), JSON.stringify({ private: true, dependencies: Object.fromEntries(Object.entries(tarballs).map(([pkg, file]) => [pkg, `file:${file}`])) }));
+    // The repository's lockfile decides every third-party version, so the five platforms ship the
+    // tree CI tested: each package locked at one version is pinned to it through overrides.
+    const overrides = lockedVersions(JSON.parse(await readFile(path.join(ROOT, 'package-lock.json'), 'utf8')));
+    await writeFile(path.join(lib, 'package.json'), JSON.stringify({ private: true, dependencies: Object.fromEntries(Object.entries(tarballs).map(([pkg, file]) => [pkg, `file:${file}`])), overrides: Object.fromEntries(overrides) }));
     run('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock', '--ignore-scripts', `--os=${target.os}`, `--cpu=${target.cpu}`, ...(target.os === 'linux' ? ['--libc=glibc'] : [])], { cwd: lib, stdio: ['ignore', 'inherit', 'inherit'] });
     await rm(path.join(lib, 'package.json'), { force: true });
     const modules = path.join(lib, 'node_modules');
     await rm(path.join(modules, '.package-lock.json'), { force: true });
     if (!existsSync(path.join(modules, '@anthropic-ai/claude-agent-sdk/package.json'))) throw new Error('@anthropic-ai/claude-agent-sdk was not installed');
+    const drift = [];
+    for (const [pkg, version] of overrides) {
+      const installed = await readFile(path.join(modules, pkg, 'package.json'), 'utf8').then(text => JSON.parse(text).version, () => undefined);
+      if (installed !== undefined && installed !== version) drift.push(`${pkg} ${installed} (locked ${version})`);
+    }
+    if (drift.length) throw new Error(`The bundle's dependencies differ from package-lock.json: ${drift.join(', ')}`);
     await prune(modules, platform);
     // 3. Node itself: only the executable and its licence (no npm, headers or docs).
     const node = await nodeArchive(platform, nodeCache);

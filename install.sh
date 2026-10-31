@@ -177,26 +177,47 @@ fi
 [ ! -e "$APP/current" ] || [ -L "$APP/current" ] || die "$APP/current exists and is not a symlink; move it away and rerun"
 previous=$(readlink "$APP/current" 2>/dev/null || true)
 
-# Unpack beside the versions, then move into place: no half-written version is ever current.
+# The version a running alpd uses (its lock names it): its files must stay.
+lock="${ALP_HOME:-$HOME/.alp}/alpd.lock"
+alpd_version=""
+if [ -f "$lock" ]; then
+  alpd_pid=$(sed -n 's/.*"pid":[ ]*\([0-9][0-9]*\).*/\1/p' "$lock" | head -n 1)
+  if [ -n "$alpd_pid" ] && kill -0 "$alpd_pid" 2>/dev/null; then
+    alpd_version=$(sed -n 's/.*"version":[ ]*"\([0-9A-Za-z.+-]*\)".*/\1/p' "$lock" | head -n 1)
+  fi
+fi
+
+# Unpack and check as this user, then move into place beside the versions: no half-written
+# version is ever current.
+mkdir "$tmp/x"
+tar -xzf "$tmp/$asset" -C "$tmp/x" || die "could not extract $asset"
+if [ ! -f "$tmp/x/$name/alp-bundle.json" ] || [ ! -x "$tmp/x/$name/bin/alp" ]; then die "$asset does not contain an ALP bundle ($name/bin/alp)"; fi
+reported=$("$tmp/x/$name/bin/alp" --version 2>/dev/null || true)
+[ "$reported" = "$version" ] || die "the downloaded ALP reports version '$reported', not $version"
 stage=$($SUDO mktemp -d "$APP/.alp-update-XXXXXX") || die "could not create a directory in $APP"
 cleanup_stage() { $SUDO rm -rf "$stage"; }
-if ! $SUDO tar -xzf "$tmp/$asset" -C "$stage"; then cleanup_stage; die "could not extract $asset"; fi
-if [ ! -f "$stage/$name/alp-bundle.json" ] || [ ! -x "$stage/$name/bin/alp" ]; then cleanup_stage; die "$asset does not contain an ALP bundle ($name/bin/alp)"; fi
-reported=$("$stage/$name/bin/alp" --version 2>/dev/null || true)
-if [ "$reported" != "$version" ]; then cleanup_stage; die "the downloaded ALP reports version '$reported', not $version"; fi
+if ! $SUDO cp -R "$tmp/x/$name" "$stage/$name"; then cleanup_stage; die "could not copy the bundle into $APP"; fi
+[ -n "$SUDO" ] && $SUDO chmod 755 "$stage"
+aside=""
 if [ -e "$APP/$version" ]; then
-  if [ "$previous" = "$version" ]; then
-    # Reinstalling the running version: keep its files for the processes that use them.
-    aside="$APP/.alp-old-${stage##*.alp-update-}"
-    $SUDO mv "$APP/$version" "$aside" || { cleanup_stage; die "could not move $APP/$version aside"; }
+  if [ "$previous" = "$version" ] || [ "$alpd_version" = "$version" ]; then
+    # Reinstalling a version in use: keep its files for the processes that use them.
+    aside=".alp-old-${stage##*.alp-update-}"
+    $SUDO mv "$APP/$version" "$APP/$aside" || { cleanup_stage; die "could not move $APP/$version aside"; }
   else
     $SUDO rm -rf "$APP/$version"
   fi
 fi
 $SUDO mv "$stage/$name" "$APP/$version" || { cleanup_stage; die "could not install $APP/$version"; }
 cleanup_stage
-# A relative link, so the whole root can move. ln -n replaces the old link instead of entering it.
-$SUDO ln -sfn "$version" "$APP/current" || die "could not point $APP/current at $version"
+# A relative link, so the whole root can move, renamed over the old one in one step (GNU mv -T,
+# BSD mv -h: replace the link instead of entering the directory it points at).
+if mv --version 2>/dev/null | grep -q GNU; then over="-fT"; else over="-fh"; fi
+$SUDO rm -f "$APP/.current.$$"
+if ! { $SUDO ln -s "$version" "$APP/.current.$$" && $SUDO mv $over "$APP/.current.$$" "$APP/current"; }; then
+  $SUDO rm -f "$APP/.current.$$"
+  die "could not point $APP/current at $version"
+fi
 say "installed ALP $version in $APP/$version"
 
 # The alp command: a symlink renamed over the old one (a 0.0.1-beta.5/6 single-file alp included);
@@ -209,11 +230,12 @@ if ! { $SUDO ln -s "$APP/current/bin/alp" "$link" && $SUDO mv -f "$link" "$DIR/a
 fi
 say "installed $DIR/alp -> $APP/current/bin/alp"
 
-# Older versions go; the previous one stays until the next install, for an alpd still running it.
-for old in "$APP"/*; do
+# Older versions and leftovers of earlier installs go. Kept: the previous version and the copy just
+# moved aside (for processes still running them) and the version a running alpd uses.
+for old in "$APP"/* "$APP"/.alp-old-* "$APP"/.alp-update-*; do
   [ -d "$old" ] || continue
   base=$(basename "$old")
-  case "$base" in current|"$version"|"$previous") continue ;; [0-9]*) $SUDO rm -rf "$old" ;; esac
+  case "$base" in current|"$version"|"$previous"|"$alpd_version"|"$aside") continue ;; [0-9]*|.alp-old-*|.alp-update-*) $SUDO rm -rf "$old" ;; esac
 done
 
 # --- PATH -----------------------------------------------------------------------------------

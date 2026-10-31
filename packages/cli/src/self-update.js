@@ -343,6 +343,10 @@ export async function selfUpdate(args, overrides = {}) {
   if (order < 0 && !wanted) { deps.log(`alp ${deps.version} is newer than the latest release ${asset.version}; nothing to do (pass --version ${asset.version} to go back)`); return 0; }
 
   const { app, current } = bundle;
+  // Windows cannot rename or delete a directory that a running node.exe (this one) comes from.
+  if (deps.platform === 'win32' && asset.version === path.basename(bundle.root)) throw new Error(`ALP ${asset.version} is the version running now; Windows cannot replace it in place. Close ALP (alp daemon stop) and rerun install.ps1 to repair it`);
+  // The version a running alpd uses keeps its files, like the one this process runs.
+  const running = await deps.daemon().catch(() => undefined);
   try { nodeFs.accessSync(app, nodeFs.constants.W_OK); } catch { throw new Error(`${app} is not writable; run alp update with the permissions that installed ALP there`); }
   const target = path.join(app, asset.version);
 
@@ -374,7 +378,7 @@ export async function selfUpdate(args, overrides = {}) {
     if (reported !== asset.version) throw new Error(`The downloaded ALP reports version ${JSON.stringify(reported)}, not ${asset.version}; nothing was changed`);
     if (nodeFs.existsSync(target)) {
       // A reinstall of the running version moves it aside (its processes keep their files); any other copy is stale.
-      if (samePath(target, bundle.root)) { aside = `.alp-old-${randomBytes(6).toString('hex')}`; retryBusy(() => nodeFs.renameSync(target, path.join(app, aside))); }
+      if (samePath(target, bundle.root) || running?.version === asset.version) { aside = `.alp-old-${randomBytes(6).toString('hex')}`; retryBusy(() => nodeFs.renameSync(target, path.join(app, aside))); }
       else nodeFs.rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
     retryBusy(() => nodeFs.renameSync(unpacked, target));
@@ -385,10 +389,9 @@ export async function selfUpdate(args, overrides = {}) {
     try { nodeFs.rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
   }
   // The version this process (and maybe alpd) runs stays until the next update.
-  pruneVersions(app, [asset.version, path.basename(bundle.root), ...(aside ? [aside] : [])]);
+  pruneVersions(app, [asset.version, path.basename(bundle.root), ...(running?.version ? [running.version] : []), ...(aside ? [aside] : [])]);
   deps.log(`Updated ALP ${deps.version} → ${asset.version} (${current} → ${target})`);
 
-  const running = await deps.daemon().catch(() => undefined);
   if (running && running.version !== asset.version) {
     const sessions = running.sessions;
     const known = Number.isSafeInteger(sessions);
