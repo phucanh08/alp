@@ -4827,6 +4827,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       const after = mail.length && !wake ? [{ type: 'text', text: promptSafe(renderMail(mail, session.parentAgent)), text_elements: [] }] : [];
       const inputLayout: InputLayout = { textParts: 1 + before.length + 1 + attached.length + after.length, prompt: 1 + before.length };
       const listed = attached.map(({ attachment }) => attachmentMeta(attachment));
+      const invoked = session.runtimeKind === 'codex' && origin === 'user' && prompt.delivery !== 'steer'
+        ? session.mapping.agent.skills.find(skill => text.match(/^\/(\S+)(?:\s|$)/)?.[1] === skill.name) : undefined;
       const nativeInput = [
         { type: 'text', text: promptSafe(CATALOG + JSON.stringify({ inputLayout, ...(orchestration as object), ...(listed.length ? { attachments: listed } : {}) })), text_elements: [] },
         ...before,
@@ -4838,6 +4840,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         ...attached.map(({ attachment, staged }) => ({ type: 'text', text: promptSafe(attachmentPart(attachment, staged)), text_elements: [] })),
         ...images.map(image => ({ type: 'image', url: `data:${image.mimeType};base64,${image.data}` })),
         ...after,
+        // "/<skill> ..." from the user loads that ALP skill in Codex, as its own $<skill> does (t-efa3).
+        ...(invoked ? [{ type: 'skill', name: invoked.name, path: invoked.path }] : []),
       ];
 
       const result =

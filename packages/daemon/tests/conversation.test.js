@@ -1566,3 +1566,28 @@ test('session.commands: the runtime\'s commands, then the agent\'s ALP skills, d
   assert.deepEqual(fallback.commands, skills, 'a runtime that cannot answer still leaves the skills');
   await assert.rejects(d.request('session.commands', { sessionId: 'nobody' }), rpcError(1001, 'not_found'));
 });
+
+// t-efa3: on Codex, "/<skill> ..." from the user loads that ALP skill as a skill input; other text does not.
+test('a user prompt "/<skill> ..." reaches Codex with that skill as a skill input', async t => {
+  const world = await setup(t);
+  const libraryDir = path.join(world.directory, 'home');
+  await seedLibrary(libraryDir);
+  const d = { ...await world.start({ libraryDir }), ...world };
+  await d.request('session.create', { sessionId: 'sk', spec: { cwd: d.project, persist: true, model: 'codex:gpt-5.6-sol' } });
+  const transport = d.transports.at(-1);
+  const inputs = () => transport.calls.filter(call => call.method === 'turn/start').map(call => call.params.input);
+  let sent = 0;
+  const send = async body => {
+    await d.request('session.prompt', { sessionId: 'sk', clientMessageId: `m${++sent}`, content: [{ type: 'text', text: body }] });
+    await until(() => inputs().length === sent, 'turn started');
+    transport.finish();
+    return inputs().at(-1);
+  };
+  const input = await send('/xia find the README');
+  const skills = input.filter(part => part.type === 'skill');
+  assert.equal(skills.length, 1);
+  assert.equal(skills[0].name, 'xia');
+  assert.match(skills[0].path, /[\\/]xia[\\/]SKILL\.md$/);
+  assert.ok(input.some(part => part.type === 'text' && part.text === '/xia find the README'), 'the words stay as typed');
+  for (const body of ['/xiax no such skill', 'see /xia later', '/nope']) assert.ok(!(await send(body)).some(part => part.type === 'skill'), body);
+});

@@ -226,6 +226,8 @@ type NativeConfig = {
 
 /** The plugin name ALP's skills are loaded under, so Claude Code calls them alp:<name>. */
 export const SKILL_PLUGIN = 'alp';
+/** Claude's own commands the composer does not offer: ALP does their work its own way (t-efa3). */
+const ALP_HANDLED_COMMANDS = new Set(['clear', 'compact', 'rewind']);
 
 /**
  * A Claude Code plugin in `directory` holding the given skills, linked to their own
@@ -464,10 +466,14 @@ export class ClaudeTransport {
       models: (catalog ?? []).map(model => ({ id: `claude:${model.value}`, label: model.displayName,
         description: model.description, thinking: model.supportedEffortLevels })), usage: claudeUsage(usage) };
   }
-  /** Claude's slash commands, skills included, for the composer (t-f628); none before the session starts. */
+  /**
+   * Claude's slash commands, skills included, for the composer (t-f628); none before the session starts.
+   * Not the ones whose work ALP does itself (t-efa3): /clear moves Claude to a new conversation ALP does not
+   * follow, and /compact and /rewind skip ALP's checkpoint and its rewind of the timeline.
+   */
   async commands() {
     const listed = this.query ? await optionalRead(async () => this.query!.supportedCommands(), 10_000) : undefined;
-    return (Array.isArray(listed) ? listed : []).filter(command => typeof command?.name === 'string' && command.name).map(command => ({
+    return (Array.isArray(listed) ? listed : []).filter(command => typeof command?.name === 'string' && command.name && !ALP_HANDLED_COMMANDS.has(command.name)).map(command => ({
       name: command.name, description: typeof command.description === 'string' ? command.description : '',
       ...(command.argumentHint ? { argumentHint: command.argumentHint } : {}),
       kind: command.name.startsWith(`${SKILL_PLUGIN}:`) ? 'skill' as const : 'command' as const,

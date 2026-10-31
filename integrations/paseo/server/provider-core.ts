@@ -245,11 +245,15 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
        * skills found later are offered too; nothing when alpd does not list them.
        */
       const listedCommands = new Map<string, string>();
+      const commandsGeneration = new Map<string, number>();
+      const forgetCommands = (sessionId: string) => { commandsGeneration.set(sessionId, (commandsGeneration.get(sessionId) ?? 0) + 1); listedCommands.delete(sessionId); };
       function offerCommands(sessionId: string) {
         const alpdId = toAlpd(sessionId);
         if ((rootOf.get(alpdId) ?? alpdId) !== alpdId || !(client.capabilities ?? offered ?? []).includes('session.commands')) return;
+        const generation = commandsGeneration.get(sessionId);
         void client.request('session.commands', { sessionId: alpdId }).then((result: { commands?: Array<{ name: string; description: string; argumentHint?: string }> }) => {
-          if (closed || !Array.isArray(result?.commands)) return;
+          // An answer from before a close is dropped: kept, it would hide the reopened session's list (t-efa3).
+          if (closed || generation !== commandsGeneration.get(sessionId) || !Array.isArray(result?.commands)) return;
           const commands = result.commands.map(({ name, description, argumentHint }) => ({ name, description, ...(argumentHint ? { argumentHint } : {}) }));
           const key = JSON.stringify(commands);
           if (listedCommands.get(sessionId) === key) return;
@@ -308,14 +312,14 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
           }
           case 'session.closed':
             // Paseo drops a closed agent's commands: a reopened one is offered them again.
-            listedCommands.delete(sessionId);
+            forgetCommands(sessionId);
             // alpd closes an idle root nobody watches, as it did while this view was away: Paseo
             // keeps the session, and the next prompt reopens it (wake). Live closes still reach Paseo.
             if (replayed && roots.has(sessionId)) { dormant.add(sessionId); return; }
             emit({ type: 'session.closed', sessionId });
             return;
           case 'session.failed':
-            listedCommands.delete(sessionId);
+            forgetCommands(sessionId);
             emit({ type: 'session.runtime_failed', sessionId, error: event.error });
             return;
           case 'prompt.accepted':
@@ -493,7 +497,7 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
           if (!endsRoot(error)) throw error;
           roots.delete(sessionId);
           dormant.delete(sessionId);
-          listedCommands.delete(sessionId);
+          forgetCommands(sessionId);
           emit({ type: 'session.runtime_failed', sessionId, error: errorData(error) });
         }
       }
@@ -722,7 +726,7 @@ export function createAlpProvider(strategy: ProviderStrategy): ProviderRegistrat
           // Closing a view: alpd closes the session once idle, or lets running work finish.
           await client.request('session.release', { sessionId: toAlpd(input.sessionId) });
           roots.delete(input.sessionId);
-          listedCommands.delete(input.sessionId);
+          forgetCommands(input.sessionId);
           cwds.delete(input.sessionId);
           dormant.delete(input.sessionId);
         } else if (input.type === 'session.interrupt') {
