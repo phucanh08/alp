@@ -574,13 +574,112 @@ async function entries(directory, prefix = '') {
   return names.filter(name => name.startsWith(prefix)).map(name => path.join(directory, name));
 }
 
+/** A path quoted for a POSIX shell, so a suggested command can be pasted as it is. */
+const shellQuote = text => `'${String(text).replaceAll("'", `'\\''`)}'`;
+
+/** What each leftover state means, in the order alp doctor lists them. */
+export const LEFTOVER_STATES = {
+  'clean-pushed': 'clean and pushed (nothing would be lost; remove by hand with the command shown)',
+  dirty: 'dirty (uncommitted or untracked changes, or a merge or rebase in progress; keep)',
+  unpushed: 'unpushed (commits or a stash no remote-tracking branch has; keep)',
+  'in-use': 'in use (a running assignment, a retained result, this shell, or changed in the last day; keep)',
+  unknown: 'unknown (not a git checkout of its own, or git could not tell; check by hand)',
+};
+
+/** Paths ALP still owns: running assignments' worktrees and the retained results' checkouts. */
+async function ownedPaths(home) {
+  const owned = new Set();
+  const read = async file => JSON.parse(await readFile(file, 'utf8'));
+  const live = await read(path.join(home, 'state', 'live.json')).catch(() => []);
+  for (const entry of Array.isArray(live) ? live : []) if (typeof entry?.worktree?.path === 'string') owned.add(realpathOr(entry.worktree.path));
+  const ledger = await read(path.join(home, 'state', 'assignment-results.json')).catch(() => undefined);
+  for (const entry of Array.isArray(ledger?.results) ? ledger.results : []) {
+    if (entry?.handled) continue;
+    for (const where of [entry?.worktree, entry?.checkout]) if (typeof where === 'string') owned.add(realpathOr(where));
+  }
+  return owned;
+}
+
+/**
+ * Classifies one leftover directory (t-e80a) without changing it: clean-pushed when it is a git
+ * checkout of its own with no changes, no untracked files, no operation in progress, and a HEAD
+ * (for a standalone clone: every branch, and no stash) that a remote-tracking branch already
+ * holds. "Pushed" is what this clone last fetched. Anything git cannot answer is unknown.
+ */
+async function classifyLeftover(directory, { run, env, owned, here, recentMs }) {
+  const real = realpathOr(directory);
+  const inside = (outer, inner) => inner === outer || inner.startsWith(outer.endsWith(path.sep) ? outer : outer + path.sep);
+  if ([...owned].some(owner => inside(real, owner) || inside(owner, real)) || inside(real, here)) return { path: directory, state: 'in-use' };
+  const git = args => run('git', ['-C', directory, ...args], { env, timeoutMs: 10_000 });
+  const unknown = reason => ({ path: directory, state: 'unknown', reason });
+  // The top of every git checkout holds .git (a directory, or a file in a linked worktree): without it, no git is needed.
+  if (!await lstat(path.join(directory, '.git')).then(() => true, () => false)) return unknown('not a git checkout');
+  const where = await git(['rev-parse', '--show-toplevel', '--absolute-git-dir', '--git-common-dir']);
+  if (where.code !== 0) return unknown('not a git checkout');
+  const [top, gitDir, common] = where.stdout.trim().split('\n');
+  if (!top || !gitDir || !common || realpathOr(top) !== real) return unknown('not the top of a git checkout');
+  const commonDir = realpathOr(path.resolve(top, common));
+  const status = await git(['status', '--porcelain']);
+  if (status.code !== 0) return unknown('git status failed');
+  if (status.stdout.trim()) return { path: directory, state: 'dirty' };
+  for (const name of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply']) {
+    if (await lstat(path.join(gitDir, name)).then(() => true, () => false)) return { path: directory, state: 'dirty' };
+  }
+  // A worktree someone made by hand moments ago (a peer's, which ALP does not track) looks clean and pushed: recent work stays.
+  const touched = Math.max(...await Promise.all([directory, path.join(gitDir, 'index'), path.join(gitDir, 'HEAD')].map(file => lstat(file).then(info => info.mtimeMs, () => 0))));
+  if (Date.now() - touched < recentMs) return { path: directory, state: 'in-use', reason: 'changed in the last day' };
+  const linked = realpathOr(gitDir) !== commonDir;
+  // A linked worktree's branches live in its main repository and stay there when it goes; a clone holds its own.
+  const ahead = await git(['rev-list', '-n', '1', 'HEAD', ...(linked ? [] : ['--branches']), '--not', '--remotes']);
+  if (ahead.code !== 0) return unknown('git could not compare HEAD with the remotes');
+  if (ahead.stdout.trim()) return { path: directory, state: 'unpushed' };
+  const list = await git(['worktree', 'list', '--porcelain']);
+  if (list.code !== 0) return unknown('git could not list its worktrees');
+  if (!linked) {
+    const stash = await git(['rev-parse', '-q', '--verify', 'refs/stash']);
+    if (stash.code === 0) return { path: directory, state: 'unpushed' };
+    // Removing a clone removes the repository of every worktree made from it.
+    if ((list.stdout.match(/^worktree /gm) ?? []).length > 1) return { path: directory, state: 'in-use', reason: 'other worktrees use its repository' };
+    return { path: directory, state: 'clean-pushed', command: `rm -rf ${shellQuote(directory)}` };
+  }
+  const main = list.stdout.match(/^worktree (.*)$/m)?.[1];
+  if (!main) return unknown('git could not name its main worktree');
+  return { path: directory, state: 'clean-pushed', command: `git -C ${shellQuote(main)} worktree remove ${shellQuote(directory)}` };
+}
+
+/** Why a leftover alp doctor had no time left for is unknown. */
+const NOT_CHECKED = 'not checked: alp doctor ran out of time; run it again, or check by hand';
+
+/**
+ * Classifies leftovers eight at a time, within `budgetMs` in all: a machine can hold thousands
+ * (old test homes in the temp directory), and doctor must still answer. Those it does not
+ * reach are unknown.
+ */
+async function classifyLeftovers(paths, { budgetMs, ...options }) {
+  const results = paths.map(directory => ({ path: directory, state: 'unknown', reason: NOT_CHECKED }));
+  const deadline = Date.now() + budgetMs;
+  let next = 0;
+  const worker = async () => {
+    while (next < paths.length && Date.now() < deadline) { const index = next++; results[index] = await classifyLeftover(paths[index], options); }
+  };
+  await Promise.all(Array.from({ length: Math.min(8, paths.length) }, worker));
+  return results;
+}
+
+/** How many suggested commands the text output shows; --json lists every one. */
+const SHOWN_COMMANDS = 20;
+
 /**
  * Free space where ALP_HOME lives (t-2831), and what earlier runs left that takes room:
  * worktrees under ALP_HOME/worktrees and alp-* directories in the temp directory. When
  * the disk fills, alpd pauses work instead of stopping; this says so before it happens.
  * Nothing is deleted, by --fix either: a leftover may hold someone's uncommitted work.
+ * Each leftover is classified (t-e80a): clean and pushed, dirty, unpushed, in use, or
+ * unknown; only a clean and pushed one gets a command, for the user to run by hand.
+ * Classifying stops after `classifyMs` (10 s); what it did not reach is unknown. A clean one
+ * changed within `recentMs` (a day) is in use: someone may have just started in it.
  */
-export async function diskCheck(home, { run = runCommand, env = process.env, free, tempDirs = [...new Set([os.tmpdir(), ...(process.platform === 'win32' ? [] : ['/tmp'])])] } = {}) {
+export async function diskCheck(home, { run = runCommand, env = process.env, free, tempDirs = [...new Set([os.tmpdir(), ...(process.platform === 'win32' ? [] : ['/tmp'])])], cwd = process.cwd(), classifyMs = 10_000, recentMs = 24 * 60 * 60 * 1000 } = {}) {
   let bytes = free;
   if (bytes === undefined) {
     try { const info = await statfs(home); bytes = Number(info.bavail) * Number(info.bsize); } catch {}
@@ -602,20 +701,33 @@ export async function diskCheck(home, { run = runCommand, env = process.env, fre
     const total = result.stdout.split('\n').reduce((sum, line) => sum + (Number(line.split(/\s+/)[0]) || 0), 0);
     return total * 1024;
   }
-  const details = [];
-  for (const [label, paths] of [[`${path.join(home, 'worktrees')}`, worktrees], [`${tempDirs.map(directory => path.join(directory, 'alp-*')).join(', ')}`, temp]]) {
-    if (!paths.length) continue;
-    const used = await size(paths);
-    details.push(`${paths.length} left in ${label}${used === undefined ? '' : `, ${formatSize(used)}`}`);
+  // git must answer about each leftover itself, not about a repository the caller's environment names,
+  // and only read: GIT_OPTIONAL_LOCKS=0 keeps git status from refreshing the index of a worktree in use.
+  const gitEnv = { ...Object.fromEntries(Object.entries(env).filter(([name]) => !/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|OBJECT_DIRECTORY|NAMESPACE|CEILING_DIRECTORIES)$/.test(name))), GIT_OPTIONAL_LOCKS: '0' };
+  const groups = [[`${path.join(home, 'worktrees')}`, worktrees], [`${tempDirs.map(directory => path.join(directory, 'alp-*')).join(', ')}`, temp]].filter(([, paths]) => paths.length);
+  // Sizing and classifying run side by side: du alone can take many seconds over thousands of leftovers.
+  const [sizes, leftovers] = await Promise.all([
+    Promise.all(groups.map(([, paths]) => size(paths))),
+    ownedPaths(home).then(owned => classifyLeftovers([...new Set([...worktrees, ...temp])], { run, env: gitEnv, owned, here: realpathOr(cwd), budgetMs: classifyMs, recentMs })),
+  ]);
+  const details = groups.map(([label, paths], index) => `${paths.length} left in ${label}${sizes[index] === undefined ? '' : `, ${formatSize(sizes[index])}`}`);
+  for (const [state, meaning] of Object.entries(LEFTOVER_STATES)) {
+    const count = leftovers.filter(entry => entry.state === state).length;
+    if (count) details.push(`${count} ${meaning}`);
   }
-  const hint = details.length ? 'ALP deletes none of these: some may belong to running assignments or hold uncommitted work. Remove those you no longer need (git worktree remove, or rm -rf).' : undefined;
+  const unchecked = leftovers.filter(entry => entry.reason === NOT_CHECKED).length;
+  if (unchecked) details.push(`  ${unchecked} of the unknown were not checked within ${Math.round(classifyMs / 1000)} s`);
+  const commands = leftovers.filter(entry => entry.command).map(entry => entry.command);
+  for (const command of commands.slice(0, SHOWN_COMMANDS)) details.push(`  ${command}`);
+  if (commands.length > SHOWN_COMMANDS) details.push(`  … ${commands.length - SHOWN_COMMANDS} more; alp doctor --json lists every one`);
+  const hint = details.length ? 'ALP deletes none of these, and --fix does not either. Only a clean and pushed leftover gets a command, for you to run by hand; inspect the others before removing anything.' : undefined;
   const where = bytes === undefined ? 'free space unknown' : `${formatSize(bytes)} free`;
-  // Leftovers are listed, not judged: some may be live.
+  // Leftovers never change the status: some may be live.
   const status = bytes !== undefined && bytes < 2 * GIB ? 'warn' : 'ok';
   const summary = bytes !== undefined && bytes < 2 * GIB
     ? `${where} where ALP_HOME lives; when the disk is full, alpd pauses all work until space returns`
     : `${where} where ALP_HOME lives`;
-  return { id: 'disk', status, summary, ...(details.length ? { details } : {}), ...(hint ? { hint } : {}) };
+  return { id: 'disk', status, summary, ...(details.length ? { details } : {}), ...(hint ? { hint } : {}), ...(leftovers.length ? { leftovers } : {}) };
 }
 
 function realpathOr(file) {

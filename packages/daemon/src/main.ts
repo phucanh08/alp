@@ -44,6 +44,16 @@ async function rotate(log: string) {
   }
 }
 
+/** What a detached alpd that failed to start tells its launcher over IPC. */
+type StartupFailure = { code: string; message: string };
+
+/** alpd failed to start and said why; the launcher reports it with alpd's own code. */
+class ChildStartupError extends Error {
+  constructor(readonly failure: StartupFailure, exit: number | string | null) {
+    super(`alpd exited during startup (${exit}): ${failure.message}`);
+  }
+}
+
 /** The launcher owns its detached child until that child acknowledges readiness or exits.
  * A ready lock belonging to some other process cannot settle this launch.
  */
@@ -72,12 +82,17 @@ async function detach(home: string) {
       force = setTimeout(() => child.kill('SIGKILL'), 1_000);
     }, timeoutMs);
     child.once('error', error => { clearTimeout(timer); clearTimeout(force); reject(error); });
+    // Why alpd failed, from alpd itself: on a full disk its log line may never reach the log.
+    let failed: StartupFailure | undefined;
     child.once('exit', (code, signal) => {
       clearTimeout(timer);
       clearTimeout(force);
-      reject(new Error(timedOut ? `alpd startup timed out after ${timeoutMs} ms` : `alpd exited during startup (${code ?? signal})`));
+      reject(timedOut ? new Error(`alpd startup timed out after ${timeoutMs} ms`)
+        : failed ? new ChildStartupError(failed, code ?? signal)
+        : new Error(`alpd exited during startup (${code ?? signal})`));
     });
-    child.once('message', message => {
+    child.on('message', (message: any) => {
+      if (message?.type === 'alpd.failed' && typeof message.code === 'string' && typeof message.message === 'string') { failed = { code: message.code, message: message.message }; return; }
       if (message !== 'alpd.ready' || timedOut) return;
       clearTimeout(timer);
       child.disconnect();
@@ -236,6 +251,8 @@ async function run(home: string) {
     ...(process.platform !== 'win32' ? { attachmentStageDir: attachmentStageDir(home) } : {}),
     assignmentResultFile: path.join(home, 'state', 'assignment-results.json'), recallFile: path.join(home, 'state', 'recall.json'), pauseFile: path.join(home, 'state', 'pause.json'), liveFile: path.join(home, 'state', 'live.json'),
     autoResume: settings?.limits?.autoResume !== false, recoveryResume: settings?.recovery?.autoResume !== false && !opened.restored, previousExit: exit,
+    // Pause, live, recall and result writes the disk refused hold work at once, not at the next check (t-e80a).
+    onWriteError: error => diskReport(error),
   });
   // A full disk pauses ALP's work instead of stopping alpd (t-2831).
   const disk = createDiskGuard({ home, runtime, log, ...(Number(process.env.ALP_DISK_CHECK_MS) > 0 ? { intervalMs: Number(process.env.ALP_DISK_CHECK_MS) } : {}) });
@@ -300,6 +317,14 @@ async function run(home: string) {
   log.info(`alpd ${VERSION} ready on ${socket} (pid ${process.pid})`, { event: 'ready', version: VERSION, pid: process.pid });
 }
 
+/** Why a start-up write failed on a disk that takes none, and what helps. */
+function diskStartupReason(error: any, home: string) {
+  let current = error;
+  for (let depth = 0; current && depth < 4 && !['ENOSPC', 'EDQUOT', 'EROFS'].includes(current.code); depth++) current = current.cause;
+  const what = current?.code === 'EROFS' ? 'the disk is read-only' : current?.code === 'EDQUOT' ? 'the disk quota is used up' : 'the disk is full';
+  return `${what} (${current?.code}${current?.path ? ` writing ${current.path}` : ''}); free space on the disk that holds ${home}, then start alpd again`;
+}
+
 const home = alpHome();
 /** Where a failed write to alpd's own output goes once the disk guard exists. */
 let diskReport = (_error: unknown) => {};
@@ -322,11 +347,27 @@ try {
     }
   }
 } catch (error: any) {
+  // The launcher of a detached alpd that failed: alpd's own reason and code, which its log may lack.
+  if (error instanceof ChildStartupError) {
+    log.error(error.message, { code: error.failure.code, phase: 'home' });
+    process.exit(1);
+  }
   // The log says where start-up stopped; alp doctor reads it from there.
   const stoppedIn = phase as Phase;
+  // A full disk is named as such (t-e80a): alpd cannot take its lock or write its marker, and
+  // nothing but freeing space helps. The lock stays exclusive; alpd only says why it stopped.
+  const disk = isDiskError(error);
   // Opening the state fails with the state's own code (a newer schema, a failed migration).
-  const code = /already running|ALP is busy/.test(error?.message ?? '') ? 'ALP_LOCK_HELD'
+  const code = disk ? 'ALP_DISK_FULL'
+    : /already running|ALP is busy/.test(error?.message ?? '') ? 'ALP_LOCK_HELD'
     : stoppedIn === 'state' && typeof error?.code === 'string' && /^[A-Z_]+$/.test(error.code) ? `ALP_${error.code}` : STARTUP_CODES[stoppedIn];
-  log.error(`alpd failed to start while ${{ home: 'preparing its home', lock: 'taking its lock', state: 'opening its state', recovery: 'recovering earlier work', listen: 'opening its IPC endpoint', ready: 'finishing start-up' }[stoppedIn]}${stoppedIn === 'state' ? `: ${error?.message ?? error}` : ''}`, { code, phase: stoppedIn, error });
+  const step = { home: 'preparing its home', lock: 'taking its lock', state: 'opening its state', recovery: 'recovering earlier work', listen: 'opening its IPC endpoint', ready: 'finishing start-up' }[stoppedIn];
+  const message = `alpd failed to start while ${step}${disk ? `: ${diskStartupReason(error, home)}` : stoppedIn === 'state' ? `: ${error?.message ?? error}` : ''}`;
+  log.error(message, { code, phase: stoppedIn, error });
+  // A detached alpd tells its launcher too, which passes it to the client that started it.
+  if (process.connected) await new Promise<void>(resolve => {
+    const timer = setTimeout(resolve, 1_000);
+    try { process.send!({ type: 'alpd.failed', code, message }, () => { clearTimeout(timer); resolve(); }); } catch { clearTimeout(timer); resolve(); }
+  });
   process.exit(1);
 }

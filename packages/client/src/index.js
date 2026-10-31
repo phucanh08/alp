@@ -297,16 +297,29 @@ export async function acquireDaemonLock(home, contents) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const handle = await open(file, 'wx', 0o600);
-      await handle.writeFile(JSON.stringify(lock));
+      try { await handle.writeFile(JSON.stringify(lock)); }
+      catch (error) {
+        // The write failed (a full disk): the file this call created exclusively holds no lock, and
+        // a lock no one can read would stop every later start. Nobody else removes an unreadable
+        // lock (below), so this one is still ours; remove it, unless another file took its place.
+        const [ours, there] = await Promise.all([handle.stat().catch(() => undefined), lstat(file).catch(() => undefined)]);
+        await handle.close().catch(() => {});
+        if (ours && there && ours.ino === there.ino && ours.dev === there.dev) await unlink(file).catch(() => {});
+        throw error;
+      }
       await handle.close();
       return lock;
     } catch (error) {
       if (error?.code !== 'EEXIST') throw error;
       const current = await readLock(home);
       if (lockAlive(current)) throw new Error(current.maintenance ? `ALP is busy: alp ${current.maintenance} runs (pid ${current.pid}); try again when it finishes` : `ALP daemon already running (pid ${current.pid})`);
-      // Remove the stale lock only if nobody replaced it meanwhile.
+      // Remove the stale lock only if nobody replaced it meanwhile. A lock that cannot be read may
+      // be one another start is writing now: it stays, and this start says so.
       const again = await readFile(file, 'utf8').catch(() => undefined);
-      if (again === undefined || JSON.stringify(current) === again || !lockAlive(JSON.parse(again))) await unlink(file).catch(() => {});
+      let parsed;
+      try { parsed = again === undefined ? undefined : JSON.parse(again); }
+      catch { throw new Error(`ALP daemon lock ${file} cannot be read: another start may be writing it. If no alpd or alp command is starting, remove it and try again`); }
+      if (again === undefined || JSON.stringify(current) === again || !lockAlive(parsed)) await unlink(file).catch(() => {});
     }
   }
   throw new Error('Could not acquire the ALP daemon lock');

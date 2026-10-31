@@ -1,6 +1,7 @@
 import { readFile, readdir, mkdir, writeFile, open, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { writeAtomic } from '@anhlp/alp-core/atomic';
+import { tell } from './live.js';
 
 /** What a finished writer outside a worktree left in its checkout, kept until its requester handles it (recall entries expire, this does not). */
 export type AssignmentResultEvidence = { agent: string; status: string; finishedAt: string; project: string; requesters: string[]; taskId?: string; brief: string; summary: string };
@@ -25,8 +26,11 @@ const valid = (value: any): value is Ledger => value?.version === 1 && Array.isA
     evidence(entry.result) && handling(entry.handled));
 const MONTH = /^(\d{4})-(\d{2})\.jsonl$/;
 
-/** Permanent ownership, independent of native-thread recall expiry. Missing initialized data is never recreated. */
-export function createAssignmentResults(file?: string) {
+/**
+ * Permanent ownership, independent of native-thread recall expiry. Missing initialized data is never recreated.
+ * A failed write still fails its caller; `onError` hears of it too, so a full disk is seen at once.
+ */
+export function createAssignmentResults(file?: string, onError: (error: unknown) => void = () => {}) {
   let memory = empty();
   let archivedInMemory: ArchivedAssignmentResult[] = [];
   let queue = Promise.resolve();
@@ -51,10 +55,12 @@ export function createAssignmentResults(file?: string) {
   }
   async function save(value: Ledger) {
     if (!file) { memory = value; return; }
-    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-    await writeAtomic(file, JSON.stringify(value) + '\n');
-    // The marker survives a lost ledger; registration must never silently reset ownership.
-    await writeFile(marker!, '1\n', { flag: 'wx', mode: 0o600 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+    try {
+      await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+      await writeAtomic(file, JSON.stringify(value) + '\n');
+      // The marker survives a lost ledger; registration must never silently reset ownership.
+      await writeFile(marker!, '1\n', { flag: 'wx', mode: 0o600 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+    } catch (error) { tell(onError, error); throw error; }
   }
   function serialize<T>(run: () => Promise<T>): Promise<T> {
     const result = queue.then(run);
@@ -64,16 +70,18 @@ export function createAssignmentResults(file?: string) {
   /** Appends a record and syncs it before its ledger entry may go; a crash in between archives it again, never loses it. */
   async function append(record: ArchivedAssignmentResult) {
     if (!archiveDir) { archivedInMemory.push(record); return; }
-    await mkdir(archiveDir, { recursive: true, mode: 0o700 });
-    const handle = await open(path.join(archiveDir, `${record.archivedAt.slice(0, 7)}.jsonl`), 'a+', 0o600);
     try {
-      const { size } = await handle.stat();
-      const last = Buffer.alloc(1);
-      // A line cut short by a crash must not swallow the next record.
-      const torn = size > 0 && (await handle.read(last, 0, 1, size - 1)).bytesRead === 1 && last[0] !== 0x0a;
-      await handle.appendFile(`${torn ? '\n' : ''}${JSON.stringify(record)}\n`);
-      await handle.sync();
-    } finally { await handle.close(); }
+      await mkdir(archiveDir, { recursive: true, mode: 0o700 });
+      const handle = await open(path.join(archiveDir, `${record.archivedAt.slice(0, 7)}.jsonl`), 'a+', 0o600);
+      try {
+        const { size } = await handle.stat();
+        const last = Buffer.alloc(1);
+        // A line cut short by a crash must not swallow the next record.
+        const torn = size > 0 && (await handle.read(last, 0, 1, size - 1)).bytesRead === 1 && last[0] !== 0x0a;
+        await handle.appendFile(`${torn ? '\n' : ''}${JSON.stringify(record)}\n`);
+        await handle.sync();
+      } finally { await handle.close(); }
+    } catch (error) { tell(onError, error); throw error; }
   }
   async function archived(): Promise<ArchivedAssignmentResult[]> {
     if (!archiveDir) return archivedInMemory;

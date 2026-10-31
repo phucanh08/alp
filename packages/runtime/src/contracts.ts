@@ -109,6 +109,14 @@ export type RuntimeOptions = {
   /** Where running assignments are kept, so the next alpd continues them (ALPD §31). Omitted keeps them in memory. */
   liveFile?: string;
 
+  /**
+   * Told of every failed write to pauseFile, liveFile, recallFile and assignmentResultFile, as it
+   * happens, so the host's disk guard pauses work on a full disk at once (t-e80a). Each write still
+   * fails as before: pauses and recall go on in memory, live entries are logged, and result
+   * ownership is refused to its caller.
+   */
+  onWriteError?: (error: unknown) => void;
+
   /** False parks assignments an earlier alpd left running until the user runs alp resume. Default true: they continue. */
   recoveryResume?: boolean;
 

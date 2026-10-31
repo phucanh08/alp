@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { closeSync, openSync } from 'node:fs';
-import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -19,6 +19,7 @@ const ALPD = fileURLToPath(new URL('../../dist/alpd.js', import.meta.url));
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
 const run = promisify(execFile);
 const skip = process.platform === 'win32' && 'POSIX modes and sockets only';
+const realpathOf = file => realpath(file);
 const SECRET = 'sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
 
 async function privateHome(t) {
@@ -206,17 +207,97 @@ test('alp doctor reports free disk space and the worktrees earlier runs left, de
   const low = await diskCheck(home, { free: 1.2 * 1024 ** 3, tempDirs: [temp] });
   assert.equal(low.status, 'warn');
   assert.match(low.summary, /^1\.2 GB free where ALP_HOME lives; when the disk is full, alpd pauses all work until space returns$/);
-  assert.equal(low.details.length, 2);
+  assert.equal(low.details.length, 3);
   assert.match(low.details[0], /^1 left in .*worktrees, \d+ (MB|GB)$/);
   assert.match(low.details[1], /^1 left in .*alp-\*/);
+  // Neither is a git checkout: unknown, with no command (t-e80a).
+  assert.match(low.details[2], /^2 unknown \(/);
+  assert.deepEqual(low.leftovers.map(entry => [path.basename(entry.path), entry.state, entry.command]), [['alp-child-1', 'unknown', undefined], ['alp-group14', 'unknown', undefined]]);
   assert.match(low.hint, /ALP deletes none of these/);
   const plenty = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp] });
   assert.equal(plenty.status, 'ok');
-  assert.equal(plenty.details.length, 2);
+  assert.equal(plenty.details.length, 3);
   assert.equal(plenty.summary, '50.0 GB free where ALP_HOME lives');
   assert.equal((await diskCheck(path.join(directory, 'empty-home'), { free: 50 * 1024 ** 3, tempDirs: [] })).status, 'ok');
   // Nothing was removed.
   await readFile(path.join(home, 'worktrees', 'alp-child-1', 'big'));
   const checks = await diagnose({ home, env: { PATH: path.join(directory, 'empty') } });
   assert.equal(checks.find(check => check.id === 'disk').id, 'disk');
+});
+
+test('alp doctor classifies leftover worktrees and suggests a command only for clean and pushed ones (t-e80a)', { skip }, async t => {
+  const { directory, home } = await privateHome(t);
+  const temp = path.join(directory, 'tmp');
+  await mkdir(temp, { recursive: true });
+  const env = { ...process.env, GIT_AUTHOR_NAME: 'ALP', GIT_AUTHOR_EMAIL: 'alp@example.invalid', GIT_COMMITTER_NAME: 'ALP', GIT_COMMITTER_EMAIL: 'alp@example.invalid', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(directory, 'gitconfig') };
+  const git = (cwd, ...args) => run('git', ['-C', cwd, ...args], { env });
+  const origin = path.join(directory, 'origin.git');
+  const main = path.join(directory, 'main');
+  await run('git', ['init', '-q', '--bare', '-b', 'main', origin], { env });
+  await run('git', ['init', '-q', '-b', 'main', main], { env });
+  await writeFile(path.join(main, 'a.txt'), 'a\n');
+  await git(main, 'add', '.');
+  await git(main, 'commit', '-qm', 'first');
+  await git(main, 'remote', 'add', 'origin', origin);
+  await git(main, 'push', '-q', 'origin', 'main');
+  const worktree = async (where, name) => { const target = path.join(where, name); await git(main, 'worktree', 'add', '-q', '-b', name, target, 'main'); return target; };
+  const clean = await worktree(temp, 'alp-clean');
+  const dirty = await worktree(temp, 'alp-dirty');
+  await writeFile(path.join(dirty, 'new.txt'), 'untracked\n');
+  const unpushed = await worktree(path.join(home, 'worktrees'), 'alp-unpushed');
+  await writeFile(path.join(unpushed, 'b.txt'), 'b\n');
+  await git(unpushed, 'add', '.');
+  await git(unpushed, 'commit', '-qm', 'local only');
+  const live = await worktree(path.join(home, 'worktrees'), 'alp-live');
+  await mkdir(path.join(home, 'state'), { recursive: true });
+  await writeFile(path.join(home, 'state', 'live.json'), JSON.stringify([{ assignmentId: 'a1', worktree: { path: live } }]));
+  // A standalone clone: clean and pushed, then one with a stash, which is unpushed.
+  const clone = path.join(temp, 'alp-clone');
+  await run('git', ['clone', '-q', origin, clone], { env });
+  const stashed = path.join(temp, 'alp-stashed');
+  await run('git', ['clone', '-q', origin, stashed], { env });
+  await writeFile(path.join(stashed, 'a.txt'), 'changed\n');
+  await git(stashed, 'stash', '-q');
+  await mkdir(path.join(temp, 'alp-plain'));
+  // Every fixture is minutes old; recentMs 0 lets them be judged by their git state alone.
+  const fresh = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory });
+  for (const name of ['alp-clean', 'alp-clone']) assert.deepEqual(fresh.leftovers.filter(entry => entry.path.endsWith(name)).map(entry => [entry.state, entry.reason, entry.command]), [['in-use', 'changed in the last day', undefined]]);
+  const check = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0 });
+  const states = Object.fromEntries(check.leftovers.map(entry => [path.basename(entry.path), entry.state]));
+  assert.deepEqual(states, { 'alp-unpushed': 'unpushed', 'alp-live': 'in-use', 'alp-clean': 'clean-pushed', 'alp-dirty': 'dirty', 'alp-clone': 'clean-pushed', 'alp-stashed': 'unpushed', 'alp-plain': 'unknown' });
+  const commands = check.leftovers.filter(entry => entry.command).map(entry => entry.command).sort();
+  assert.deepEqual(commands, [
+    `git -C '${await realpathOf(main)}' worktree remove '${await realpathOf(clean)}'`,
+    `rm -rf '${await realpathOf(clone)}'`,
+  ].sort());
+  assert.ok(check.details.includes('2 clean and pushed (nothing would be lost; remove by hand with the command shown)'));
+  for (const state of ['dirty', 'in use', 'unknown']) assert.ok(check.details.some(line => line.startsWith(`1 ${state} (`)), state);
+  assert.ok(check.details.some(line => line.startsWith('2 unpushed (')));
+  for (const command of commands) assert.ok(check.details.includes(`  ${command}`));
+  // A clean clone that other worktrees were made from holds their repository: in use, no command.
+  const parent = path.join(temp, 'alp-parent');
+  await run('git', ['clone', '-q', origin, parent], { env });
+  await git(parent, 'worktree', 'add', '-q', '--detach', path.join(directory, 'elsewhere'), 'HEAD');
+  const shared = (await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0 })).leftovers.find(entry => entry.path.endsWith('alp-parent'));
+  assert.deepEqual([shared.state, shared.reason, shared.command], ['in-use', 'other worktrees use its repository', undefined]);
+  await rm(parent, { recursive: true, force: true });
+  // Running doctor from inside a leftover keeps it.
+  const inside = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: path.join(clone), recentMs: 0 });
+  assert.equal(inside.leftovers.find(entry => entry.path.endsWith('alp-clone')).state, 'in-use');
+  // Report only: every leftover is still there, with its changes.
+  for (const target of [clean, dirty, unpushed, live, clone, stashed]) await lstat(target);
+  assert.equal(await readFile(path.join(dirty, 'new.txt'), 'utf8'), 'untracked\n');
+  // A clean worktree whose branch gained a commit no remote has is unpushed, not clean.
+  await writeFile(path.join(clean, 'c.txt'), 'c\n');
+  await git(clean, 'add', '.');
+  await git(clean, 'commit', '-qm', 'not pushed');
+  assert.equal((await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0 })).leftovers.find(entry => entry.path.endsWith('alp-clean')).state, 'unpushed');
+  // Out of time: nothing more is classified, and what was not reached is unknown, never clean.
+  const late = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, classifyMs: 0, recentMs: 0 });
+  assert.ok(late.leftovers.every(entry => entry.state === 'unknown' && /^not checked/.test(entry.reason) && !entry.command));
+  assert.ok(late.details.includes('  7 of the unknown were not checked within 0 s'));
+  // The suggested command is one the user can paste as it is; git keeps the branch.
+  await run('sh', ['-c', commands.find(command => command.includes('worktree remove'))], { env });
+  await assert.rejects(lstat(clean), { code: 'ENOENT' });
+  assert.match((await git(main, 'branch', '--list', 'alp-clean')).stdout, /alp-clean/);
 });

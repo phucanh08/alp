@@ -49,8 +49,8 @@ const valid = (entry: any): entry is LiveEntry => !!entry && typeof entry === 'o
   ['assignmentId', 'rootId', 'parentId', 'agent', 'project', 'runtime', 'model', 'threadId', 'mode', 'isolation', 'epoch'].every(key => typeof entry[key] === 'string') &&
   Array.isArray(entry.ancestry) && !!entry.spec && typeof entry.spec === 'object' && typeof entry.startedAt === 'number';
 
-/** The book of running assignments, in `file` when given, else in memory. */
-export function createLiveBook(file?: string) {
+/** The book of running assignments, in `file` when given, else in memory; `onError` hears of each failed write. */
+export function createLiveBook(file?: string, onError: (error: unknown) => void = () => {}) {
   let entries: LiveEntry[] = [];
   if (file) {
     try { entries = (JSON.parse(readFileSync(file, 'utf8')) as unknown[]).filter(valid); } catch {}
@@ -64,7 +64,10 @@ export function createLiveBook(file?: string) {
       const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
       await writeFile(temporary, body, { mode: 0o600 });
       await rename(temporary, file);
-    }).catch(error => createLogger({ component: 'runtime' }).error('could not save the live assignments', { code: 'ALP_PERSISTENCE_WRITE_FAILED', operation: 'live assignments', error }));
+    }).catch(error => {
+      tell(onError, error);
+      createLogger({ component: 'runtime' }).error('could not save the live assignments', { code: 'ALP_PERSISTENCE_WRITE_FAILED', operation: 'live assignments', error });
+    });
     return writes;
   };
   return {
@@ -84,3 +87,8 @@ export function createLiveBook(file?: string) {
 }
 
 export type LiveBook = ReturnType<typeof createLiveBook>;
+
+/** Tells `onError` of a failed write; what it throws must not change how the write failed. */
+export function tell(onError: (error: unknown) => void, error: unknown) {
+  try { onError(error); } catch {}
+}
