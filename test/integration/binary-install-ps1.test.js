@@ -44,7 +44,7 @@ const restoreUserPath = saved => execFileSync('powershell.exe', ['-NoProfile', '
 /** Runs install.ps1 with Windows PowerShell 5.1 (as a file), with a private LOCALAPPDATA. */
 function install(args, { localAppData, extraEnv = {} }) {
   return new Promise(resolve => execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', INSTALL, ...args], {
-    env: { ...process.env, LOCALAPPDATA: localAppData, ALP_INSTALL_BASE_URL: '', ALP_INSTALL_VERSION: '', ALP_INSTALL_DIR: '', ALP_INSTALL_ROOT: '', ALP_INSTALL_NO_MODIFY_PATH: '', ...extraEnv }, timeout: 120_000,
+    env: { ...process.env, LOCALAPPDATA: localAppData, ALP_INSTALL_BASE_URL: '', ALP_INSTALL_VERSION: '', ALP_INSTALL_DIR: '', ALP_INSTALL_ROOT: '', ALP_INSTALL_NO_MODIFY_PATH: '', ALP_INSTALL_MODIFY_PATH: '', ...extraEnv }, timeout: 120_000,
   }, (error, stdout, stderr) => resolve({ code: error ? error.code ?? 1 : 0, stdout, stderr })));
 }
 
@@ -159,10 +159,14 @@ test('install.ps1 piped to Invoke-Expression leaves the session usable: no exit,
   }
 });
 
-test('install.ps1 refuses a -Dir with a PATH separator', { skip: !windows }, async t => {
+test('install.ps1 refuses a -Dir with a PATH separator or a %', { skip: !windows }, async t => {
   const releases = await mirror(t);
   const localAppData = await temp(t, 'alp-ps-lad-');
   const result = await install(['-Dir', `${localAppData}\\a;b`, '-BaseUrl', releases], { localAppData });
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /cannot contain ';'/);
+  // t-598d: the user Path is REG_EXPAND_SZ, so a '%' would be expanded.
+  const percent = await install(['-Dir', `${localAppData}\\a%TEMP%b`, '-BaseUrl', releases], { localAppData });
+  assert.notEqual(percent.code, 0);
+  assert.match(percent.stderr, /cannot contain '%'/);
 });

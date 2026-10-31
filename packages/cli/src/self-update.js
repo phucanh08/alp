@@ -194,7 +194,7 @@ const pause = (/** @type {number} */ ms) => Atomics.wait(new Int32Array(new Shar
 
 /**
  * Runs `action`, again after a pause while Windows reports the file busy: a virus scanner holds an
- * executable it just saw run (the staged bundle's --version) for a moment. About 6 s in all.
+ * executable it just saw run (the staged bundle's --version) for a moment. About 8 s in all.
  * @template T @param {() => T} action @param {(ms: number) => void} [sleep]
  */
 export function retryBusy(action, sleep = pause, attempts = 25) {
