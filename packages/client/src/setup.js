@@ -125,14 +125,15 @@ async function change(seats, home) {
   seats[seat][at] = { provider: current.provider, model, ...(effort ? { effort } : {}) };
 }
 
-/** Every Phở and Cafe agent's profiles, keeping each agent's own compaction setting. */
+/** Every Phở and Cafe agent's profiles, keeping each agent's own compaction setting and "/" commands (t-efa3). */
 async function profiles(root, home, seats, peers, settings) {
   const profile = {};
   for (const id of ['pho', 'cafe']) {
     const team = await resolveTeam(root, id, { library: home });
     const agents = {};
     const seat = (name, choices) => {
-      agents[name] = { profiles: choices.map(choice => typeof choice === 'string' ? choice : describe(choice)), autocompact: (settings?.team ?? settings?.profile)?.[id]?.[name]?.autocompact ?? 'auto' };
+      const old = (settings?.team ?? settings?.profile)?.[id]?.[name];
+      agents[name] = { profiles: choices.map(choice => typeof choice === 'string' ? choice : describe(choice)), autocompact: old?.autocompact ?? 'auto', ...(old?.commands ? { commands: old.commands } : {}) };
     };
     for (const [name, member] of Object.entries(team.members)) {
       if (name !== 'oracle') seat(name, name === team.main ? seats.main : member.role === 'peer' ? peers : seats.worker);

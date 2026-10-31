@@ -60,6 +60,7 @@ for (const runtime of ['codex', 'claude']) test(`setup ${runtime} only keeps one
   const settings = await read(f.file);
   settings.workflow.mode = 'cafe';
   settings.team.cafe.peer.autocompact = 200000;
+  settings.team.cafe.main.commands = ['model'];
   settings.team.mine = { main: { profiles: ['codex:gpt-5.5'] } };
   await writeFile(f.file, JSON.stringify(settings));
   const result = cli(f, '--runtime', runtime);
@@ -70,6 +71,7 @@ for (const runtime of ['codex', 'claude']) test(`setup ${runtime} only keeps one
   assert.equal(after.workflow.mode, 'cafe');
   assert.deepEqual(after.team.mine, settings.team.mine);
   assert.equal(after.team.cafe.peer.autocompact, 200000);
+  assert.deepEqual(after.team.cafe.main.commands, ['model'], 'alp setup keeps the "/" commands (t-efa3)');
   for (const id of ['pho', 'cafe']) {
     for (const config of Object.values(after.team[id])) assert.deepEqual(config.profiles.map(profile => profile.split(':')[0]), [runtime]);
     assert.deepEqual(after.team[id].peer.profiles, [`${runtime}:*`]);
