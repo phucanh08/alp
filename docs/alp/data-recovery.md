@@ -289,19 +289,29 @@ one in a class, and only the first class gets a command, for you to run by hand:
 - *clean and pushed*: a git checkout of its own with no changes, no untracked files, no
   ignored files at all, no files marked
   assume-unchanged or skip-worktree, no submodules, and no merge or rebase in progress,
-  whose HEAD a remote-tracking branch already holds. For a standalone clone, every ref
-  (branches, tags, notes and the stash) must be held that way. The command is
-  `git -C <main worktree> worktree remove <path>` (git keeps the branch), or `rm -rf <path>`
-  for a clone (on Windows, `Remove-Item -Recurse -Force <path>`, for PowerShell). "Pushed" means pushed as of that clone's last
-  fetch: a branch deleted on the remote since then still counts. An annotated tag's own
-  message is not compared, only the commit it names. Look before you run the command.
+  whose HEAD a remote-tracking branch already holds. A standalone clone's refs go with it,
+  so every commit any of its refs names must be on a remote, and every local ref must be
+  mirrored by a remote-tracking ref: a branch by name, a tag, note or other ref by name
+  and object (`refs/tags/v1` by `refs/remotes/<remote>/tags/v1`). A clone cannot tell
+  without a fetch which tags a remote has, so a clone holding any tag is *unpushed*,
+  unless its remote's tags are fetched as remote-tracking refs
+  (`git config --add remote.origin.fetch '+refs/tags/*:refs/remotes/origin/tags/*'`). The command is
+  `git -C '<main worktree>' worktree remove '<path>'` (git keeps the branch), or
+  `rm -rf '<path>'` for a clone (on Windows, `Remove-Item -LiteralPath '<path>' -Recurse -Force`,
+  for PowerShell). A command is given only for an absolute path made of ASCII letters,
+  digits, spaces and `. _ - / \ :`, which needs no escaping in either shell. Any other
+  path (a quote of any kind, shell syntax, a control or non-ASCII character) gets no
+  command: the text shows it as a comment line,
+  `# remove by hand after checking (no safe command): <path>`, with control and format
+  characters escaped. "Pushed" means pushed as of that clone's last
+  fetch: a branch deleted on the remote since then still counts. Look before you run the command.
 - *dirty*: uncommitted changes, untracked files, or a merge or rebase in progress. Keep it.
 - *local-only data*: ignored files are present, such as `.env`, local config,
   `node_modules` or build output. git status alone does not show them, and they exist
   only here, so any ignored file, whatever it is, keeps the checkout and gets no command.
   Keep it, or move what you need and remove it yourself.
-- *unpushed*: commits, tags, other refs or a stash that no remote-tracking branch holds.
-  Keep it.
+- *unpushed*: commits no remote-tracking branch holds, or, in a standalone clone, a
+  branch, tag, note, stash or other ref no remote-tracking ref mirrors. Keep it.
 - *in use*: the worktree of a running assignment (`state/live.json`), the checkout of a
   result no one has handled yet (`state/assignment-results.json`), the directory you run
   `alp doctor` from, a clone that other worktrees were made from, or a clean checkout
@@ -309,8 +319,10 @@ one in a class, and only the first class gets a command, for you to run by hand:
   made by hand looks clean and pushed, and ALP does not track it). Keep it.
 - *unknown*: not the top of a git checkout, git could not answer, it has assume-unchanged,
   skip-worktree or submodule entries git status cannot vouch for, or `alp doctor` ran out
-  of time. Classifying has a hard 10 s deadline: each git command is cut off when it comes,
-  and whatever was not finished by then is unknown. Check it by hand.
+  of time. Classifying has a hard 10 s deadline of its own: each git command is cut off when
+  it comes, and whatever was not finished by then is unknown. Check it by hand. (Sizing the
+  leftovers with `du` runs beside it under a separate 20 s limit; when it does not finish,
+  the size is left out.)
 
 The text output shows the first 20 commands. `alp doctor --json` lists every leftover in
 the check's `leftovers` field, with its class and its command, if it has one.

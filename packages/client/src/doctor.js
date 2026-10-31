@@ -574,17 +574,37 @@ async function entries(directory, prefix = '') {
   return names.filter(name => name.startsWith(prefix)).map(name => path.join(directory, name));
 }
 
-/** A path quoted for the user's shell (POSIX sh, or PowerShell on Windows), so a suggested command can be pasted as it is. */
-const shellQuote = (text, platform = process.platform) => platform === 'win32'
-  ? `'${String(text).replaceAll("'", "''")}'`
-  : `'${String(text).replaceAll("'", `'\\''`)}'`;
+/**
+ * What a path in a suggested command may hold, on every platform: ASCII letters and digits,
+ * `. _ - / \\ :` and a space (common in Windows user folders; literal inside single quotes in sh
+ * and PowerShell alike). Nothing else: no quote of any kind (PowerShell ends a single-quoted string
+ * at ' and at four typographic quotes), no shell syntax, no control, format or non-ASCII character.
+ */
+const QUOTABLE = /^[A-Za-z0-9._\-/\\: ]+$/;
+
+/**
+ * A path for a suggested command (POSIX sh, or PowerShell on win32), in single quotes; undefined
+ * unless it is absolute (so it cannot read as an option) and every character is QUOTABLE, in which
+ * case nothing in it needs escaping. A path that is not gets no command at all.
+ */
+export function shellQuote(text, platform = process.platform) {
+  const value = String(text);
+  const absolute = platform === 'win32' ? path.win32.isAbsolute(value) : path.posix.isAbsolute(value);
+  return absolute && QUOTABLE.test(value) ? `'${value}'` : undefined;
+}
+
+/** A path as alp doctor prints it: control, format and unusual space characters escaped, so it stays one line and reads as it is. */
+const printable = text => String(text).replace(/[\p{C}\p{Zl}\p{Zp}]|(?! )\p{Zs}/gu, char => `\\u{${char.codePointAt(0).toString(16)}}`);
+
+/** Why a clean and pushed leftover has no command. */
+const UNQUOTABLE = 'no command: its path holds characters other than ASCII letters, digits, space and . _ - / \\ :, which a pasted command might not carry safely; check it and remove it by hand';
 
 /** What each leftover state means, in the order alp doctor lists them. */
 export const LEFTOVER_STATES = {
-  'clean-pushed': 'clean and pushed (no changes, no untracked or ignored files, and every commit on a remote it last fetched; remove by hand with the command shown)',
+  'clean-pushed': 'clean and pushed (no changes, no untracked or ignored files, and every commit and, for a clone, every ref on a remote it last fetched; remove by hand with the command shown, given only for a plain ASCII path)',
   dirty: 'dirty (uncommitted changes or untracked files, or a merge or rebase in progress; keep)',
   'local-only': 'local-only data (ignored files such as .env, local config, node_modules or build output, which exist only here; keep)',
-  unpushed: 'unpushed (commits, tags, other refs or a stash no remote-tracking branch has; keep)',
+  unpushed: 'unpushed (commits, or for a clone tags, branches or other refs, that no remote-tracking ref mirrors; keep)',
   'in-use': 'in use (a running assignment, a retained result, this shell, or changed in the last day; keep)',
   unknown: 'unknown (not a git checkout of its own, or git could not tell; check by hand)',
 };
@@ -665,17 +685,37 @@ async function classifyLeftover(directory, { run, env, owned, here, recentMs, de
   const ahead = await git(['rev-list', '-n', '1', ...(linked ? ['HEAD'] : ['HEAD', '--all']), '--not', '--remotes']);
   if (ahead.code !== 0) return unknown('git could not compare HEAD with the remotes');
   if (ahead.stdout.trim()) return { path: directory, state: 'unpushed' };
+  if (!linked) {
+    // A clone's refs go with it, and a tag (or note, or other ref) on a pushed commit is not seen
+    // above. Without a fetch no one can tell which tags a remote has, so every local ref must be
+    // mirrored by a remote-tracking ref: a branch by name (its commits are checked above), any
+    // other ref by name and object (refs/tags/v1 by refs/remotes/<remote>/tags/v1).
+    const refs = await git(['for-each-ref', '--format=%(objectname) %(refname)']);
+    if (refs.code !== 0) return unknown('git could not list its refs');
+    const all = refs.stdout.split('\n').filter(Boolean).map(line => { const at = line.indexOf(' '); return [line.slice(at + 1), line.slice(0, at)]; });
+    const mirrors = all.filter(([name]) => name.startsWith('refs/remotes/'));
+    const mirrored = ([name, object]) => {
+      const branch = name.startsWith('refs/heads/');
+      const suffix = `/${branch ? name.slice('refs/heads/'.length) : name.slice('refs/'.length)}`;
+      return mirrors.some(([remote, target]) => remote.endsWith(suffix) && remote.length > 'refs/remotes/'.length + suffix.length && (branch || target === object));
+    };
+    const local = all.filter(entry => !entry[0].startsWith('refs/remotes/') && !mirrored(entry));
+    if (local.length) return { path: directory, state: 'unpushed', reason: `local refs no remote-tracking ref mirrors: ${local.slice(0, 3).map(([name]) => name).join(', ')}${local.length > 3 ? `, … ${local.length - 3} more` : ''}` };
+  }
   const list = await git(['worktree', 'list', '--porcelain']);
   if (list.code !== 0) return unknown('git could not list its worktrees');
   if (!linked) {
     // Removing a clone removes the repository of every worktree made from it.
     if ((list.stdout.match(/^worktree /gm) ?? []).length > 1) return { path: directory, state: 'in-use', reason: 'other worktrees use its repository' };
-    const remove = platform === 'win32' ? `Remove-Item -Recurse -Force ${shellQuote(directory, platform)}` : `rm -rf ${shellQuote(directory, platform)}`;
-    return { path: directory, state: 'clean-pushed', command: remove };
+    const quoted = shellQuote(directory, platform);
+    if (quoted === undefined) return { path: directory, state: 'clean-pushed', reason: UNQUOTABLE };
+    return { path: directory, state: 'clean-pushed', command: platform === 'win32' ? `Remove-Item -LiteralPath ${quoted} -Recurse -Force` : `rm -rf ${quoted}` };
   }
   const main = list.stdout.match(/^worktree (.*)$/m)?.[1];
   if (!main) return unknown('git could not name its main worktree');
-  return { path: directory, state: 'clean-pushed', command: `git -C ${shellQuote(main, platform)} worktree remove ${shellQuote(directory, platform)}` };
+  const [quotedMain, quoted] = [shellQuote(main, platform), shellQuote(directory, platform)];
+  if (quotedMain === undefined || quoted === undefined) return { path: directory, state: 'clean-pushed', reason: UNQUOTABLE };
+  return { path: directory, state: 'clean-pushed', command: `git -C ${quotedMain} worktree remove ${quoted}` };
 }
 
 /**
@@ -757,10 +797,12 @@ export async function diskCheck(home, { run = runCommand, env = process.env, fre
   }
   const unchecked = leftovers.filter(entry => entry.reason === NOT_CHECKED).length;
   if (unchecked) details.push(`  ${unchecked} of the unknown were not checked within ${classifyMs < 1000 ? `${classifyMs} ms` : `${Math.round(classifyMs / 1000)} s`}`);
-  const commands = leftovers.filter(entry => entry.command).map(entry => entry.command);
+  // A clean and pushed leftover whose path no command can safely carry is listed by its path alone,
+  // as a shell comment: pasted with the rest, it runs nothing.
+  const commands = leftovers.filter(entry => entry.state === 'clean-pushed').map(entry => entry.command ?? `# remove by hand after checking (no safe command): ${printable(entry.path)}`);
   for (const command of commands.slice(0, SHOWN_COMMANDS)) details.push(`  ${command}`);
   if (commands.length > SHOWN_COMMANDS) details.push(`  … ${commands.length - SHOWN_COMMANDS} more; alp doctor --json lists every one`);
-  const hint = details.length ? 'ALP deletes none of these, and --fix does not either. Only a clean and pushed leftover gets a command, for you to run by hand; inspect the others before removing anything.' : undefined;
+  const hint = details.length ? 'ALP deletes none of these, and --fix does not either. Only a clean and pushed leftover gets a command, for you to run by hand, and only when its path is plain ASCII; inspect the others before removing anything.' : undefined;
   const where = bytes === undefined ? 'free space unknown' : `${formatSize(bytes)} free`;
   // Leftovers never change the status: some may be live.
   const status = bytes !== undefined && bytes < 2 * GIB ? 'warn' : 'ok';

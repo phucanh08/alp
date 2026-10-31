@@ -297,13 +297,17 @@ export async function acquireDaemonLock(home, contents) {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const handle = await open(file, 'wx', 0o600);
-      try { await handle.writeFile(JSON.stringify(lock)); }
-      catch (error) {
+      // The identity of the file this call created, taken before anything can fail on it.
+      let ours;
+      try {
+        ours = await handle.stat();
+        await handle.writeFile(JSON.stringify(lock));
+      } catch (error) {
         // The write failed (a full disk): the file this call created exclusively holds no lock, and
         // a lock no one can read would stop every later start. Nobody else removes an unreadable
         // lock (below), so this one is still ours; remove it, unless another file took its place.
-        const [ours, there] = await Promise.all([handle.stat().catch(() => undefined), lstat(file).catch(() => undefined)]);
         await handle.close().catch(() => {});
+        const there = await lstat(file).catch(() => undefined);
         if (ours && there && ours.ino === there.ino && ours.dev === there.dev) await unlink(file).catch(() => {});
         throw error;
       }

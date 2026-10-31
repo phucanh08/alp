@@ -11,7 +11,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { assertPrivateDirectory, bootTime, daemonPaths, ensureDaemon } from '../../packages/client/src/index.js';
-import { diagnose, diskCheck } from '../../packages/client/src/doctor.js';
+import { diagnose, diskCheck, shellQuote } from '../../packages/client/src/doctor.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createDaemonServer, createStore } from '../../dist/daemon/index.js';
 
@@ -305,7 +305,7 @@ test('alp doctor classifies leftover worktrees and suggests a command only for c
   assert.ok(check.details.some(line => line.startsWith('3 unpushed (')));
   // On Windows the commands are for PowerShell.
   const windows = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0, platform: 'win32' });
-  assert.equal(windows.leftovers.find(entry => entry.path.endsWith('alp-clone')).command, `Remove-Item -Recurse -Force '${await realpathOf(clone)}'`);
+  assert.equal(windows.leftovers.find(entry => entry.path.endsWith('alp-clone')).command, `Remove-Item -LiteralPath '${await realpathOf(clone)}' -Recurse -Force`);
   for (const command of commands) assert.ok(check.details.includes(`  ${command}`));
   // A clean clone that other worktrees were made from holds their repository: in use, no command.
   const parent = path.join(temp, 'alp-parent');
@@ -334,6 +334,140 @@ test('alp doctor classifies leftover worktrees and suggests a command only for c
   await run('sh', ['-c', commands.find(command => command.includes('worktree remove'))], { env });
   await assert.rejects(lstat(clean), { code: 'ENOENT' });
   assert.match((await git(main, 'branch', '--list', 'alp-clean')).stdout, /alp-clean/);
+});
+
+/** How PowerShell's own parser reads `command`: each statement's command elements as [kind, value]; undefined without pwsh. */
+async function powershellParse(command) {
+  const script = [
+    '$tokens = $null; $errors = $null',
+    '$ast = [System.Management.Automation.Language.Parser]::ParseInput($env:ALP_PS_COMMAND, [ref]$tokens, [ref]$errors)',
+    'if ($errors.Count) { ConvertTo-Json -Compress @{ errors = @($errors | ForEach-Object { $_.Message }) }; exit 0 }',
+    '$statements = @($ast.EndBlock.Statements | ForEach-Object { ,@($_.PipelineElements | ForEach-Object { ,@($_.CommandElements | ForEach-Object { if ($_ -is [System.Management.Automation.Language.CommandParameterAst]) { ,@("parameter", $_.ParameterName) } elseif ($_ -is [System.Management.Automation.Language.StringConstantExpressionAst]) { ,@($_.StringConstantType.ToString(), $_.Value) } else { ,@($_.GetType().Name, $_.Extent.Text) } }) }) })',
+    'ConvertTo-Json -Compress -Depth 6 @{ statements = $statements }',
+  ].join('\n');
+  try {
+    const { stdout } = await run('pwsh', ['-NoProfile', '-NonInteractive', '-Command', script], { env: { ...process.env, ALP_PS_COMMAND: command } });
+    return JSON.parse(stdout);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
+test('shellQuote gives a command only for plain ASCII absolute paths, on sh and PowerShell alike (t-e80a)', async t => {
+  // Safe: ASCII letters, digits, . _ - / \ : and space, in an absolute path; nothing needs escaping.
+  assert.equal(shellQuote('/tmp/alp-a b/c_d.e-f:1', 'linux'), "'/tmp/alp-a b/c_d.e-f:1'");
+  assert.equal(shellQuote('C:\\Users\\John Doe\\alp-1', 'win32'), "'C:\\Users\\John Doe\\alp-1'");
+  assert.equal(shellQuote('\\\\server\\share\\alp-1', 'win32'), "'\\\\server\\share\\alp-1'");
+  // Hostile or merely unusual: every quote PowerShell honours, shell syntax, control and format
+  // characters, a newline, non-ASCII letters, a relative path or one that reads as an option. No command.
+  const hostile = [
+    "/tmp/alp-x'; calc; '", '/tmp/alp-x\u2018; calc; \u2018', '/tmp/alp-x\u2019; calc; \u2019', '/tmp/alp-x\u201A; calc; \u201A', '/tmp/alp-x\u201B; calc; \u201B',
+    '/tmp/alp-"x"', '/tmp/alp-$(id)', '/tmp/alp-`id`', '/tmp/alp-a;b', '/tmp/alp-a&b', '/tmp/alp-a|b', '/tmp/alp-a>b', '/tmp/alp-~', '/tmp/alp-a*b', '/tmp/alp-a#b',
+    '/tmp/alp-a\nb', '/tmp/alp-a\rb', '/tmp/alp-a\tb', '/tmp/alp-a\u0007b', '/tmp/alp-a\u007Fb', '/tmp/alp-a\u0085b', '/tmp/alp-a\u2028b', '/tmp/alp-a\u202Eb', '/tmp/alp-a\u200Bb', '/tmp/alp-a\u00A0b', '/tmp/alp-a\uFEFFb',
+    '/tmp/alp-Phúc', 'alp-relative', '-rf', '',
+  ];
+  for (const text of hostile) for (const platform of ['win32', 'linux', 'darwin']) assert.equal(shellQuote(text, platform), undefined, JSON.stringify([text, platform]));
+  // Where PowerShell is installed (GitHub's Linux runners), its own parser reads each safe command as one command with the path as one literal argument.
+  for (const directory of ['C:\\Users\\John Doe\\alp-1', '/tmp/alp-a b/c_d.e-f:1', '\\\\server\\share\\alp-1']) {
+    const parsed = await powershellParse(`Remove-Item -LiteralPath ${shellQuote(directory, 'win32')} -Recurse -Force`);
+    if (!parsed) { t.diagnostic('pwsh is not installed: PowerShell parsing not checked'); return; }
+    assert.deepEqual(parsed, { statements: [[[['BareWord', 'Remove-Item'], ['parameter', 'LiteralPath'], ['SingleQuoted', directory], ['parameter', 'Recurse'], ['parameter', 'Force']]]] }, directory);
+    const git = await powershellParse(`git -C ${shellQuote(directory, 'win32')} worktree remove ${shellQuote(`${directory}-2`, 'win32')}`);
+    assert.deepEqual(git, { statements: [[[['BareWord', 'git'], ['parameter', 'C'], ['SingleQuoted', directory], ['BareWord', 'worktree'], ['BareWord', 'remove'], ['SingleQuoted', `${directory}-2`]]]] }, directory);
+  }
+});
+
+test('alp doctor gives a clean leftover with a hostile path no command, only its path (t-e80a)', { skip }, async t => {
+  const { directory, home } = await privateHome(t);
+  const temp = path.join(directory, 'tmp');
+  await mkdir(temp, { recursive: true });
+  const env = { ...process.env, GIT_AUTHOR_NAME: 'ALP', GIT_AUTHOR_EMAIL: 'alp@example.invalid', GIT_COMMITTER_NAME: 'ALP', GIT_COMMITTER_EMAIL: 'alp@example.invalid', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(directory, 'gitconfig') };
+  const origin = path.join(directory, 'origin.git');
+  const seed = path.join(directory, 'seed');
+  await run('git', ['init', '-q', '--bare', '-b', 'main', origin], { env });
+  await run('git', ['init', '-q', '-b', 'main', seed], { env });
+  await writeFile(path.join(seed, 'a.txt'), 'a\n');
+  await run('git', ['-C', seed, 'add', '.'], { env });
+  await run('git', ['-C', seed, 'commit', '-qm', 'first'], { env });
+  await run('git', ['-C', seed, 'push', '-q', origin, 'main'], { env });
+  const hostile = ["alp-x'; touch pwned; '", 'alp-x\u2019; touch pwned; \u2018', 'alp-$(touch pwned)', 'alp-bidi\u202Etxt', 'alp-Phúc'];
+  const names = ['alp-plain name', ...hostile, 'alp-new\nline'];
+  for (const name of names) await run('git', ['clone', '-q', origin, path.join(temp, name)], { env });
+  const real = await realpathOf(temp);
+  for (const platform of ['win32', 'linux']) {
+    const check = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0, platform });
+    const found = Object.fromEntries(check.leftovers.map(entry => [path.basename(entry.path), entry]));
+    assert.equal(found['alp-plain name'].command, platform === 'win32' ? `Remove-Item -LiteralPath '${real}/alp-plain name' -Recurse -Force` : `rm -rf '${real}/alp-plain name'`);
+    for (const name of hostile) {
+      assert.deepEqual([found[name].state, found[name].command], ['clean-pushed', undefined], name);
+      assert.match(found[name].reason, /^no command: its path holds characters other than ASCII letters/);
+    }
+    // A newline: git's line-by-line answer cannot name it, so it is unknown, with no command either.
+    assert.deepEqual([found['alp-new\nline'].state, found['alp-new\nline'].command], ['unknown', undefined]);
+    // The text lists those paths as shell comments, one line each, with format characters escaped.
+    assert.ok(check.details.includes(`  # remove by hand after checking (no safe command): ${real}/alp-bidi\\u{202e}txt`), check.details.join('\n'));
+    assert.ok(check.details.includes(`  # remove by hand after checking (no safe command): ${real}/alp-x'; touch pwned; '`));
+    assert.ok(check.details.every(line => !/[\n\u202E]/.test(line)));
+    // Pasted into sh as a whole, the listed lines run nothing but the one safe command.
+    const lines = check.details.filter(line => /^ {2}(rm -rf|Remove-Item|#)/.test(line)).map(line => line.trim());
+    assert.equal(lines.length, 6);
+    if (platform === 'linux') await run('sh', ['-c', lines.join('\n')], { env, cwd: directory });
+  }
+  await assert.rejects(lstat(path.join(temp, 'alp-plain name')), { code: 'ENOENT' });
+  await assert.rejects(lstat(path.join(directory, 'pwned')), { code: 'ENOENT' });
+  for (const name of [...hostile, 'alp-new\nline']) await lstat(path.join(temp, name));
+});
+
+test('alp doctor counts a clone with local tags or refs no remote-tracking ref mirrors as unpushed (t-e80a)', { skip }, async t => {
+  const { directory, home } = await privateHome(t);
+  const temp = path.join(directory, 'tmp');
+  await mkdir(temp, { recursive: true });
+  const env = { ...process.env, GIT_AUTHOR_NAME: 'ALP', GIT_AUTHOR_EMAIL: 'alp@example.invalid', GIT_COMMITTER_NAME: 'ALP', GIT_COMMITTER_EMAIL: 'alp@example.invalid', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(directory, 'gitconfig') };
+  const git = (cwd, ...args) => run('git', ['-C', cwd, ...args], { env });
+  const origin = path.join(directory, 'origin.git');
+  const seed = path.join(directory, 'seed');
+  await run('git', ['init', '-q', '--bare', '-b', 'main', origin], { env });
+  await run('git', ['init', '-q', '-b', 'main', seed], { env });
+  await writeFile(path.join(seed, 'a.txt'), 'a\n');
+  await git(seed, 'add', '.');
+  await git(seed, 'commit', '-qm', 'first');
+  await git(seed, 'push', '-q', origin, 'main');
+  const clone = async name => { const target = path.join(temp, name); await run('git', ['clone', '-q', origin, target], { env }); return target; };
+  await clone('alp-plain-clone');
+  // Tags on a commit the remote already has: the commit is pushed, the tag may not be.
+  await git(await clone('alp-light-tag'), 'tag', 'v-light');
+  await git(await clone('alp-annotated-tag'), 'tag', '-a', '-m', 'only here', 'v-annotated');
+  // A branch whose commits are pushed but whose name no remote has.
+  await git(await clone('alp-local-branch'), 'branch', 'only-here');
+  // A note: a ref outside branches and tags.
+  await git(await clone('alp-note'), 'notes', 'add', '-m', 'only here', 'HEAD');
+  // A tag the remote does have: offline, git cannot tell, so it is not clean either.
+  await git(seed, 'tag', 'v-remote');
+  await git(seed, 'push', '-q', origin, 'v-remote');
+  await clone('alp-remote-tag');
+  // A clone that mirrors the remote's tags as remote-tracking refs can tell: clean and pushed.
+  const mirrored = await clone('alp-mirrored-tags');
+  await git(mirrored, 'config', '--add', 'remote.origin.fetch', '+refs/tags/*:refs/remotes/origin/tags/*');
+  await git(mirrored, 'fetch', '-q', 'origin');
+  // The mirror names the tag, but a local tag moved to another (pushed) commit is not it.
+  const moved = await clone('alp-moved-tag');
+  await git(moved, 'config', '--add', 'remote.origin.fetch', '+refs/tags/*:refs/remotes/origin/tags/*');
+  await git(moved, 'fetch', '-q', 'origin');
+  await git(moved, 'tag', '-f', '-a', '-m', 'retagged', 'v-remote', 'HEAD');
+  const check = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0 });
+  const found = Object.fromEntries(check.leftovers.map(entry => [path.basename(entry.path), [entry.state, entry.reason, Boolean(entry.command)]]));
+  const unpushed = ref => ['unpushed', `local refs no remote-tracking ref mirrors: ${ref}`, false];
+  assert.deepEqual(found, {
+    'alp-plain-clone': ['clean-pushed', undefined, true],
+    'alp-light-tag': unpushed('refs/tags/v-light'),
+    'alp-annotated-tag': unpushed('refs/tags/v-annotated'),
+    'alp-local-branch': unpushed('refs/heads/only-here'),
+    'alp-note': ['unpushed', undefined, false],
+    'alp-remote-tag': unpushed('refs/tags/v-remote'),
+    'alp-mirrored-tags': ['clean-pushed', undefined, true],
+    'alp-moved-tag': unpushed('refs/tags/v-remote'),
+  });
 });
 
 test('alp doctor stops classifying leftovers at its deadline, even with git commands still running (t-e80a)', { skip }, async t => {
