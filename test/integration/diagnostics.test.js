@@ -249,10 +249,10 @@ test('alp doctor classifies leftover worktrees and suggests a command only for c
   await writeFile(path.join(unpushed, 'b.txt'), 'b\n');
   await git(unpushed, 'add', '.');
   await git(unpushed, 'commit', '-qm', 'local only');
-  // Only an ignored .env, which git status does not show and exists nowhere else: dirty, never clean.
+  // Only an ignored .env, which git status does not show and exists nowhere else: local-only, never clean.
   const ignored = await worktree(temp, 'alp-ignored');
   await writeFile(path.join(ignored, '.env'), 'SECRET=1\n');
-  // Only an ignored node_modules, which npm installs again: still clean and pushed.
+  // Only an ignored node_modules: local-only too. Any ignored file keeps a checkout, with no command.
   const modules = await worktree(temp, 'alp-modules');
   await mkdir(path.join(modules, 'node_modules', 'left-pad'), { recursive: true });
   await writeFile(path.join(modules, 'node_modules', 'left-pad', 'index.js'), '\n');
@@ -285,22 +285,23 @@ test('alp doctor classifies leftover worktrees and suggests a command only for c
   const check = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0 });
   const states = Object.fromEntries(check.leftovers.map(entry => [path.basename(entry.path), entry.state]));
   assert.deepEqual(states, {
-    'alp-unpushed': 'unpushed', 'alp-live': 'in-use', 'alp-clean': 'clean-pushed', 'alp-dirty': 'dirty', 'alp-ignored': 'dirty', 'alp-modules': 'clean-pushed', 'alp-hidden': 'unknown',
+    'alp-unpushed': 'unpushed', 'alp-live': 'in-use', 'alp-clean': 'clean-pushed', 'alp-dirty': 'dirty', 'alp-ignored': 'local-only', 'alp-modules': 'local-only', 'alp-hidden': 'unknown',
     'alp-clone': 'clean-pushed', 'alp-stashed': 'unpushed', 'alp-tagged': 'unpushed', 'alp-plain': 'unknown',
   });
   const reasons = Object.fromEntries(check.leftovers.map(entry => [path.basename(entry.path), entry.reason]));
   assert.equal(reasons['alp-ignored'], 'ignored files: .env');
+  assert.equal(reasons['alp-modules'], 'ignored files: node_modules/');
   assert.match(reasons['alp-hidden'], /assume-unchanged/);
   const commands = check.leftovers.filter(entry => entry.command).map(entry => entry.command).sort();
   assert.deepEqual(commands, [
     `git -C '${await realpathOf(main)}' worktree remove '${await realpathOf(clean)}'`,
-    `git -C '${await realpathOf(main)}' worktree remove '${await realpathOf(modules)}'`,
     `rm -rf '${await realpathOf(clone)}'`,
   ].sort());
-  assert.ok(check.details.some(line => line.startsWith('3 clean and pushed (no changes, untracked or ignored files other than node_modules')));
+  assert.ok(check.details.some(line => line.startsWith('2 clean and pushed (no changes, no untracked or ignored files')));
+  assert.ok(check.details.some(line => line.startsWith('2 local-only data (ignored files such as .env')));
   assert.ok(!check.details.some(line => /nothing would be lost/.test(line)));
-  for (const state of ['in use']) assert.ok(check.details.some(line => line.startsWith(`1 ${state} (`)), state);
-  for (const state of ['dirty', 'unknown']) assert.ok(check.details.some(line => line.startsWith(`2 ${state} (`)), state);
+  for (const state of ['dirty', 'in use']) assert.ok(check.details.some(line => line.startsWith(`1 ${state} (`)), state);
+  assert.ok(check.details.some(line => line.startsWith('2 unknown (')));
   assert.ok(check.details.some(line => line.startsWith('3 unpushed (')));
   // On Windows the commands are for PowerShell.
   const windows = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0, platform: 'win32' });

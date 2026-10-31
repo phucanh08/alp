@@ -287,18 +287,19 @@ still belong to running work or hold the only copy of a change. `alp doctor` put
 one in a class, and only the first class gets a command, for you to run by hand:
 
 - *clean and pushed*: a git checkout of its own with no changes, no untracked files, no
-  ignored files other than `node_modules` (which npm installs again), no files marked
+  ignored files at all, no files marked
   assume-unchanged or skip-worktree, no submodules, and no merge or rebase in progress,
   whose HEAD a remote-tracking branch already holds. For a standalone clone, every ref
   (branches, tags, notes and the stash) must be held that way. The command is
   `git -C <main worktree> worktree remove <path>` (git keeps the branch), or `rm -rf <path>`
-  for a clone (on Windows, `Remove-Item -Recurse -Force <path>`, for PowerShell). Removing
-  it still deletes its `node_modules`, and "pushed" means pushed as of that clone's last
+  for a clone (on Windows, `Remove-Item -Recurse -Force <path>`, for PowerShell). "Pushed" means pushed as of that clone's last
   fetch: a branch deleted on the remote since then still counts. An annotated tag's own
   message is not compared, only the commit it names. Look before you run the command.
-- *dirty*: uncommitted changes, untracked files, ignored files such as `.env` or local
-  config (git status alone does not show them, and they exist nowhere else), or a merge or
-  rebase in progress. Keep it.
+- *dirty*: uncommitted changes, untracked files, or a merge or rebase in progress. Keep it.
+- *local-only data*: ignored files are present, such as `.env`, local config,
+  `node_modules` or build output. git status alone does not show them, and they exist
+  only here, so any ignored file, whatever it is, keeps the checkout and gets no command.
+  Keep it, or move what you need and remove it yourself.
 - *unpushed*: commits, tags, other refs or a stash that no remote-tracking branch holds.
   Keep it.
 - *in use*: the worktree of a running assignment (`state/live.json`), the checkout of a

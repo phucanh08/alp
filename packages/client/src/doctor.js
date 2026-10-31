@@ -581,8 +581,9 @@ const shellQuote = (text, platform = process.platform) => platform === 'win32'
 
 /** What each leftover state means, in the order alp doctor lists them. */
 export const LEFTOVER_STATES = {
-  'clean-pushed': 'clean and pushed (no changes, untracked or ignored files other than node_modules, and every commit on a remote it last fetched; remove by hand with the command shown)',
-  dirty: 'dirty (uncommitted changes, untracked or ignored files such as .env, or a merge or rebase in progress; keep)',
+  'clean-pushed': 'clean and pushed (no changes, no untracked or ignored files, and every commit on a remote it last fetched; remove by hand with the command shown)',
+  dirty: 'dirty (uncommitted changes or untracked files, or a merge or rebase in progress; keep)',
+  'local-only': 'local-only data (ignored files such as .env, local config, node_modules or build output, which exist only here; keep)',
   unpushed: 'unpushed (commits, tags, other refs or a stash no remote-tracking branch has; keep)',
   'in-use': 'in use (a running assignment, a retained result, this shell, or changed in the last day; keep)',
   unknown: 'unknown (not a git checkout of its own, or git could not tell; check by hand)',
@@ -609,15 +610,8 @@ const NOT_CHECKED = 'not checked: alp doctor ran out of time; run it again, or c
 class OutOfTime extends Error {}
 
 /**
- * Ignored entries that removing a checkout may lose for good. Only node_modules is left out: npm
- * installs it again from the tracked lockfile, and git lists an ignored directory as one entry.
- * Everything else ignored (.env, local config, build output someone may still want) keeps it.
- */
-const keptIgnored = entries => entries.filter(entry => path.posix.basename(entry.replace(/\/$/, '')) !== 'node_modules');
-
-/**
  * Classifies one leftover directory (t-e80a) without changing it: clean-pushed when it is a git
- * checkout of its own with no changes, no untracked files, no ignored files but node_modules, no
+ * checkout of its own with no changes, no untracked files, no ignored files at all, no
  * hidden index state or submodules, no operation in progress, and a HEAD (for a standalone clone:
  * every ref, including tags and a stash) that a remote-tracking branch already holds. "Pushed" is
  * what this clone last fetched. Anything git cannot answer is unknown. Each git command ends by
@@ -644,13 +638,15 @@ async function classifyLeftover(directory, { run, env, owned, here, recentMs, de
   if (!top || !gitDir || !common || realpathOr(top) !== real) return unknown('not the top of a git checkout');
   const commonDir = realpathOr(path.resolve(top, common));
   // Untracked files are listed one by one whatever status.showUntrackedFiles says, and ignored ones
-  // too: git status alone does not show an ignored .env, which exists nowhere else.
+  // too: git status alone does not show an ignored .env, which exists nowhere else. Any ignored
+  // file, node_modules and build output included, keeps the checkout: removing it loses them.
+  // git lists an ignored directory as one entry.
   const status = await git(['-c', 'status.showUntrackedFiles=all', 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=matching']);
   if (status.code !== 0) return unknown('git status failed');
   const rows = status.stdout.split('\0').filter(Boolean);
   if (rows.some(row => !row.startsWith('!! '))) return { path: directory, state: 'dirty' };
-  const ignored = keptIgnored(rows.map(row => row.slice(3)));
-  if (ignored.length) return { path: directory, state: 'dirty', reason: `ignored files: ${ignored.slice(0, 3).join(', ')}${ignored.length > 3 ? `, … ${ignored.length - 3} more` : ''}` };
+  const ignored = rows.map(row => row.slice(3));
+  if (ignored.length) return { path: directory, state: 'local-only', reason: `ignored files: ${ignored.slice(0, 3).join(', ')}${ignored.length > 3 ? `, … ${ignored.length - 3} more` : ''}` };
   // git status cannot see a change to a file marked assume-unchanged or skip-worktree, nor inside a submodule.
   const index = await git(['ls-files', '-z', '-v', '--stage']);
   if (index.code !== 0) return unknown('git could not list its index');
@@ -718,7 +714,7 @@ const SHOWN_COMMANDS = 20;
  * worktrees under ALP_HOME/worktrees and alp-* directories in the temp directory. When
  * the disk fills, alpd pauses work instead of stopping; this says so before it happens.
  * Nothing is deleted, by --fix either: a leftover may hold someone's uncommitted work.
- * Each leftover is classified (t-e80a): clean and pushed, dirty, unpushed, in use, or
+ * Each leftover is classified (t-e80a): clean and pushed, dirty, local-only data, unpushed, in use, or
  * unknown; only a clean and pushed one gets a command, for the user to run by hand.
  * Classifying stops after `classifyMs` (10 s); what it did not reach is unknown. A clean one
  * changed within `recentMs` (a day) is in use: someone may have just started in it.
