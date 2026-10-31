@@ -52,7 +52,7 @@ Order, borrowed from Paseo `stop()`: stop accepting connections → refuse new s
 Shared client library (`src/client/`), used by CLI and plugin:
 
 1. Read the lock. If live and `ready`, connect to `socket`.
-2. Otherwise spawn `alpd` detached (stdio to the log), and poll the lock every 100 ms up to 15 s. On timeout, report the last 30 log lines (as Paseo does).
+2. Otherwise spawn `alpd` detached (stdio to the log), and poll the lock every 100 ms up to 60 s (`ALP_DAEMON_START_TIMEOUT_MS` sets another wait, in ms, up to one hour; `alp daemon install` and `alp restore --stop` wait as long). On timeout, report the last 30 log lines (as Paseo does).
 3. `daemon.hello` (§3.2). If `protocolVersion` differs, fail with a clear message (`alp daemon restart` after upgrading). Clients never restart a daemon they did not start, and never one with running sessions, without the user's command.
 
 **Environment:** an auto-started daemon inherits the starting client's environment (PATH, provider credentials). Runtimes receive that environment with the same scrubbing as today (`PASEO_*`, `CODEX_*`, `CLAUDE_CODE_*`). See open question Q3.

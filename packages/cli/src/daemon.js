@@ -2,7 +2,7 @@ import { access } from 'node:fs/promises';
 import path from 'node:path';
 import { installedProgram, installService, serviceFor, uninstallService } from '@anhlp/alp-client/service';
 import { holdDaemon, startDaemon } from '@anhlp/alp-client/supervise';
-import { alpHome, connect, lockAlive, readLock, withDaemonLifecycle } from '@anhlp/alp-client/index';
+import { alpHome, connect, daemonStartTimeoutMs, lockAlive, readLock, withDaemonLifecycle } from '@anhlp/alp-client/index';
 import { scrubText } from '@anhlp/alp-core/log';
 import { UsageError } from './usage.js';
 import { DAEMON_ENTRY } from './paths.js';
@@ -16,9 +16,9 @@ async function built() {
   }
 }
 
-/** Waits until an alpd for this home is ready; returns its socket. */
+/** Waits until an alpd for this home is ready; returns its socket. Default wait: ALP_DAEMON_START_TIMEOUT_MS, else 60 s. */
 
-async function ready(timeoutMs = 15_000) {
+async function ready(timeoutMs = daemonStartTimeoutMs()) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const lock = await readLock(alpHome());

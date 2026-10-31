@@ -1,6 +1,6 @@
 import { mkdir, unlink, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { ensureDaemon, lockAlive, readLock, withDaemonLifecycle } from './index.js';
+import { daemonStartTimeoutMs, ensureDaemon, lockAlive, readLock, withDaemonLifecycle } from './index.js';
 import { installedProgram, serviceFor, startService } from './service.js';
 
 /**
@@ -40,9 +40,10 @@ async function whenReady(home, timeoutMs, signal) {
 
 /**
  * Starts alpd for `home` unless it runs, and lifts a hold: someone asked for it.
- * Returns its socket.
+ * Returns its socket. Waits up to `timeoutMs`, by default daemonStartTimeoutMs(env)
+ * (ALP_DAEMON_START_TIMEOUT_MS, else 60 s).
  */
-export async function startDaemon({ home, entry, env = process.env, timeoutMs = 15_000, automatic = false, signal }) {
+export async function startDaemon({ home, entry, env = process.env, timeoutMs = daemonStartTimeoutMs(env), automatic = false, signal }) {
   return withDaemonLifecycle(home, 'start', async () => {
     signal?.throwIfAborted();
     if (automatic) {
