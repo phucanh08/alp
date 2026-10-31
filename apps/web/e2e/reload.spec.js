@@ -43,7 +43,7 @@ test('Copy resume command copies the host\'s ALP command; Reload agent restarts 
 
   // Paseo's menu order: Copy resume command first, Reload agent just above Close.
   await page.getByRole('tab', { name: 'Reload me' }).click({ button: 'right' });
-  await expect(tabMenu(page).getByRole('menuitem')).toHaveText(['Copy resume command', /^Copy agent id\s*\w{7}$/, 'Rename', 'Close to the left', 'Close to the right', 'Close other tabs', 'Reload agent', 'Close']);
+  await expect(tabMenu(page).getByRole('menuitem')).toHaveText(['Copy resume command', /^Copy agent id\s*\w{7}$/, 'Rename', 'Close to the left', 'Close to the right', 'Close other tabs', 'Reload agent', 'Compact context', 'Close']);
   await expect(tabMenu(page).getByRole('menuitem', { name: 'Reload agent' })).toHaveAttribute('title', /same conversation/);
   await tabMenu(page).getByRole('menuitem', { name: 'Copy resume command' }).click();
   await expect(page.getByRole('status').filter({ hasText: 'Copied the resume command' })).toBeVisible();

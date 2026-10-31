@@ -38,7 +38,7 @@ test('tab menu, drag order and the tabs kept across a reload', async ({ page, co
   await page.getByRole('tab', { name: 'Tab work' }).click({ button: 'right' });
   const menu = tabMenu(page);
   // Copy resume command and Reload agent: reload.spec.js.
-  await expect(menu.getByRole('menuitem')).toHaveText(['Copy resume command', /^Copy agent id\s*\w{7}$/, 'Rename', 'Close to the left', 'Close to the right', 'Close other tabs', 'Reload agent', 'Close']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Copy resume command', /^Copy agent id\s*\w{7}$/, 'Rename', 'Close to the left', 'Close to the right', 'Close other tabs', 'Reload agent', 'Compact context', 'Close']);
   await expect(menu.getByRole('menuitem', { name: 'Close to the left' })).toBeDisabled();
   await menu.getByRole('menuitem', { name: /^Copy agent id/ }).click();
   await expect(menu).toBeHidden();
