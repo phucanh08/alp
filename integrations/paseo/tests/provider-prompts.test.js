@@ -10,7 +10,7 @@ async function fixture(t, { backend = ['prompt.images'], offered = PROVIDER_CAPA
   const client = {
     ...(backend === null ? {} : { capabilities: backend }), closed: false,
     onEvent: listener => { deliver = listener; return () => {}; }, onClose: listener => { onClose = listener; return () => {}; },
-    async request(method, params) { calls.push({ method, params }); if (method === 'daemon.hello') { if (helloError) throw helloError; return hello; } if (method === 'session.prompt' && error) throw error; if (method === 'session.commands') return { commands: commands() }; return {}; },
+    async request(method, params) { calls.push({ method, params }); if (method === 'daemon.hello') { if (helloError) throw helloError; return hello; } if (method === 'session.prompt' && error) throw error; if (method === 'session.commands') return Promise.resolve(commands()).then(listed => ({ commands: listed })); return {}; },
   };
   const provider = createAlpProvider({ description: 'test', open: async () => ({ client, async shutdown() {} }), teams: async () => [], spec: () => ({ spec: { cwd: '/w' } }), projectRoot: cwd => cwd, modes: () => ({ modes: [], defaultMode: 'read-only' }), cursors: false, repeatAfterRelink: false });
   const connection = await provider.connect({ versions: [1], capabilities: offered });
@@ -208,6 +208,24 @@ test('a ready root gets its slash commands and skills, again after a turn only w
   f.envelope('s', { type: 'session.closed' });
   f.envelope('s', { type: 'session.ready' });
   assert.equal((await offered(3)).length, 3);
+});
+
+test('a list that answers after its session closed is dropped, so the reopened session is offered it (t-efa3)', async t => {
+  const listed = [{ name: 'alp:xia', description: 'Research', kind: 'skill' }];
+  let release;
+  let late = true;
+  const f = await fixture(t, { backend: ['session.commands'], commands: () => late ? new Promise(resolve => { release = () => resolve(listed); }) : listed });
+  await f.connection.send({ type: 'session.open', requestId: 'open', sessionId: 's', config: { cwd: '/w', env: {}, mcpServers: {}, settings: {}, persist: true }, history: 'skip' });
+  f.envelope('s', { type: 'session.ready' });
+  for (let i = 0; i < 100 && !release; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  f.envelope('s', { type: 'session.closed' });
+  late = false;
+  release();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(f.events.filter(e => e.type === 'session.commands').length, 0, 'the late answer is not offered');
+  f.envelope('s', { type: 'session.ready' });
+  for (let i = 0; i < 100 && !f.events.some(e => e.type === 'session.commands'); i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.deepEqual(f.events.filter(e => e.type === 'session.commands').map(e => e.commands), [[{ name: 'alp:xia', description: 'Research' }]]);
 });
 
 test('no slash commands are asked for when alpd does not list session.commands', async t => {

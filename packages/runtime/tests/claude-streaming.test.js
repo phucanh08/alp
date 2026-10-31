@@ -213,3 +213,11 @@ test('a reply written before a blocking ALP tool reaches viewers before the tool
   await until(() => events.some(event => event.type === 'turn.ended'));
   assert.equal(replies().at(-1), 'Thanks for answering.');
 });
+
+// t-efa3: the composer is not offered Claude's /clear, /compact and /rewind, whose work ALP does its own way.
+test('Claude\'s commands for the composer leave out /clear, /compact and /rewind', async () => {
+  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env);
+  assert.deepEqual(await transport.commands(), [], 'none before the session starts');
+  transport.query = { supportedCommands: async () => ['clear', 'compact', 'rewind', 'model', 'alp:xia'].map(name => ({ name, description: name, argumentHint: '' })) };
+  assert.deepEqual(await transport.commands(), [{ name: 'model', description: 'model', kind: 'command' }, { name: 'alp:xia', description: 'alp:xia', kind: 'skill' }]);
+});
