@@ -203,14 +203,14 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
     bắt đầu bằng chữ, tối đa 64 ký tự, không phải `true`/`false`). `--agent` trống bị từ chối với thông
     báo rõ và không tạo gì. Gateway gửi tên đó trong hello đánh dấu tới alpd
     (`capabilities: ["principal.agent"], principal: { agent: "<tên>" }`); alpd giữ tên đầu tiên của
-    connection và ghi log `ALP_AGENT_CONNECTION` kèm tên, nên log biết **agent nào** đã nối. Tên lấy
+    connection và ghi log `ALP_AGENT_CONNECTION` kèm tên (khóa `agentName`), nên log biết **agent nào** đã nối. Tên lấy
     từ credential, không bao giờ từ client: `principal` client gửi qua gateway bị bỏ qua. Tên chỉ là
     nhãn, không cấp thêm quyền; hello có `principal.agent` luôn là của agent.
   - Tên cố định suốt đời credential: `rotate`/`update`/`reissue` giữ nguyên; `reissue --agent <tên>`
     được đặt tên cho credential agent chưa có tên (hoặc đánh dấu credential của người dùng), nhưng không
     đổi tên một credential đã có tên. `credential list` hiện `agent <tên>`.
   - Không tự cấp, không tự hết hạn: chỉ người dùng tạo credential bằng tay; alpd và gateway không bao giờ
-    tự phát credential. Không có hạn mặc định; `--expires-in-days` vẫn tùy chọn như trước.
+    tự phát credential cho agent. (`alp web` tạo credential người dùng cho trình duyệt trên máy này, nhưng từ chối khi `ALP_AGENT_SESSION` có giá trị.) Không có hạn mặc định; `--expires-in-days` vẫn tùy chọn như trước.
   - Chỉ người dùng quản lý credential: tạo, `rotate`, `reissue`/`edit`, `revoke` chỉ có ở CLI cục bộ;
     gateway và alpd không có RPC nào về credential (connection, agent hay không, gọi `credential.*` nhận
     -32601). CLI từ chối các lệnh đổi credential khi `ALP_AGENT_SESSION` có giá trị (tiến trình do ALP

@@ -395,7 +395,7 @@ test('a named agent credential tells a real alpd which agent connected, and is r
   await until(async () => /ALP_AGENT_CONNECTION/.test(await w.alpdLog()), 'alpd logging the agent connection');
   const lines = (await w.alpdLog()).split('\n').filter(line => line.includes('ALP_AGENT_CONNECTION'));
   assert.equal(lines.length, 1, lines.join('\n'));
-  assert.match(lines[0], /reviewer/);
+  assert.match(lines[0], /"agentName":"reviewer"/);
   assert.doesNotMatch(lines[0], /lead/, 'the client\'s claimed name never reaches alpd');
   assert.equal((await user.request('task.gate.resolve', { projectRoot: project, id, gate: 'g1', note: 'OK' })).status, 'open');
 });

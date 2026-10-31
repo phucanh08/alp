@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
+import { isAgentProcess } from '@anhlp/alp-core/tasks';
 import { alpHome, connectSocket, daemonPaths } from '@anhlp/alp-client';
 import { resolveConfig } from './config.js';
 import { CredentialStore, createCredential, gatewayHome, listCredentials, reissueCredential, revokeCredential, rotateCredential } from './credentials.js';
@@ -97,7 +98,7 @@ async function serve(/** @type {string[]} */ args) {
 async function credential(/** @type {string[]} */ args) {
   const [action, ...rest] = args;
   // Only the user manages credentials (t-1c59): a process an ALP agent started is refused every change.
-  if (['create', 'rotate', 'reissue', 'edit', 'revoke'].includes(action) && typeof process.env.ALP_AGENT_SESSION === 'string' && process.env.ALP_AGENT_SESSION !== '') {
+  if (['create', 'rotate', 'reissue', 'edit', 'revoke'].includes(action) && isAgentProcess()) {
     fail(`alp-gateway: credential ${action} is the user's; this process was started by an ALP agent (ALP_AGENT_SESSION is set)`);
   }
   if (['create', 'reissue', 'edit'].includes(action)) {

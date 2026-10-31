@@ -4,6 +4,7 @@ import path from 'node:path';
 import { assertPrivateDirectory, connect } from '@anhlp/alp-client/index';
 import { createCredential, listCredentials, revokeCredential, updateCredential } from '@anhlp/alp-gateway';
 import { DEFAULT_PERMISSIONS, PERMISSIONS } from '@anhlp/alp-gateway/policy';
+import { isAgentProcess } from '@anhlp/alp-core/tasks';
 
 /**
  * The one gateway credential `alp web` hands the browser (docs/alp/web.md): its token travels in
@@ -159,6 +160,8 @@ export function createGrant({ home, store, permissions, project, socket, log = (
      * @param {{ token?: unknown, credentialId?: unknown }} previous what web.json held
      */
     ensure: previous => serial(async () => {
+      // Only the user holds alp web's user credential (t-1c59): a process an ALP agent started gets no token.
+      if (isAgentProcess()) throw new Error('alp web hands out a user credential; this process was started by an ALP agent (ALP_AGENT_SESSION is set), so it is refused');
       // Throws unless the directory is the user's and private; creates it (0700) on the first start.
       await assertPrivateDirectory(credentialsHome, { create: true }).catch(error => {
         throw new Error(`alp web keeps its credentials in ${credentialsHome}, which must be a directory owned by you with private permissions (0700); run chmod 700 on it (${error?.message ?? error})`, { cause: error });
