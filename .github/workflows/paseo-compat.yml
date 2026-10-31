@@ -67,6 +67,7 @@ jobs:
     needs: [latest-range, latest-sdk]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       issues: write
     steps:

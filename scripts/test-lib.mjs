@@ -46,7 +46,8 @@ export function runNodeTests(files, { extra = [] } = {}) {
   const home = mkdtempSync(path.join(os.tmpdir(), 'alp-test-'));
   try {
     // alpd under test never asks the real providers for models (t-e5ee); a test that wants it unsets this.
-    const result = spawnSync(process.execPath, ['--test', ...extra, ...files], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...process.env, ALP_HOME: home } });
+    // A hung test fails after 5 minutes instead of stalling the CI job until its timeout (t-ffbd).
+    const result = spawnSync(process.execPath, ['--test', '--test-timeout=300000', ...extra, ...files], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...process.env, ALP_HOME: home } });
     return result.status ?? 1;
   } finally { rmSync(home, { recursive: true, force: true }); }
 }
