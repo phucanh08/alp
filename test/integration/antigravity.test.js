@@ -240,7 +240,25 @@ test('antigravity never reports an edit as done in read-only mode, even when agy
     if (want === 'failed') {
       assert.equal(completed[0].exitCode, 1);
       assert.match(completed[0].error, /denied.*read-only/);
+      assert.match(completed[2].error, /denied replace_file_content in read-only/);
     }
+  }
+});
+
+test('antigravity records a refused terminal command as failed in read-only mode, even when agy says DONE', async t => {
+  const lines = { 'ls -la src': 'completed', 'pwd': 'completed', 'cat /etc/passwd': 'failed', 'tail -f log': 'failed', 'ls; rm -rf x': 'failed', 'ls $(whoami)': 'failed', 'rm x': 'failed', [undefined]: 'failed' };
+  for (const mode of ['read-only', 'workspace-write']) {
+    const transport = new AntigravityTransport();
+    t.after(() => transport.close());
+    transport.config = { sandbox: mode };
+    const completed = [];
+    transport.onNotification((method, params) => { if (method === 'item/completed') completed.push(params.item); });
+    transport.activeTurn = 'test-turn';
+    Object.keys(lines).forEach((CommandLine, step_index) => transport.receiveLine(JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index, tool_name: 'RunCommand', state: 'DONE', tool_info: { name: 'run_command', parameters: CommandLine === 'undefined' ? {} : { CommandLine }, output: 'x' } } })));
+    Object.values(lines).forEach((want, i) => {
+      assert.equal(completed[i].status, mode === 'read-only' ? want : 'completed', `${mode} ${Object.keys(lines)[i]}`);
+      if (mode === 'read-only' && want === 'failed') { assert.notEqual(completed[i].aggregatedOutput, 'x'); assert.match(completed[i].error, /denied run_command in read-only/); }
+    });
   }
 });
 
@@ -416,7 +434,7 @@ test('Antigravity runs each ALP mode with the agy flags that enforce it', async 
   const { root, runtime, turn, dir } = await setup(t);
   const log = path.join(dir, 'agy.jsonl');
   const expected = {
-    'read-only': { mode: undefined, permission: 'request-review', allow: ['mcp(alp/*)', 'command(pwd)', 'command(ls)', 'command(cat)', 'command(head)', 'command(tail)', 'command(wc)', 'command(grep)'] },
+    'read-only': { mode: undefined, permission: 'request-review', allow: ['mcp(alp/*)', 'command(pwd)', 'command(ls)'] },
     'workspace-write': { mode: 'accept-edits', permission: 'proceed-in-sandbox', allow: ['mcp(alp/*)'] },
   };
   for (const [mode, want] of Object.entries(expected)) {
