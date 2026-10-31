@@ -1588,6 +1588,8 @@ export class ClientConnection {
     // Compaction (t-de1a): a root in the grant, looked up afresh and driven within the grant's modes as
     // session.prompt is (its checkpoint turn drives the session); the answer is its status only.
     'session.compact': async params => {
+      // User-only (t-de1a review): an agent-marked credential may not rewrite a conversation's context.
+      if (this.#grant.agent === true) throw forbidden('session.compact is the user\'s; this credential is an agent\'s', 'user_only');
       await this.#conversationRoot(params.sessionId, COMPACT_REFUSALS);
       const result = await this.#call('session.compact', { sessionId: params.sessionId }).catch(error => { throw this.#conversationError(error, COMPACT_REFUSALS); });
       const status = result?.status;

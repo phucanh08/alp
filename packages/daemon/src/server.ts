@@ -1596,7 +1596,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     },
 
     /** Compacts a live root's context now or at its next turn boundary (t-0e56). */
-    async 'session.compact'(_connection, { sessionId }) {
+    async 'session.compact'(connection, { sessionId }) {
+      // Compaction rewrites the user's conversation context; an agent's connection may not (t-de1a review).
+      agentRefused(connection, 'session.compact');
       if (typeof sessionId !== 'string' || !sessionId) throw new RpcError(-32602, 'sessionId is required');
       if (!runtime.compact) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd does not compact sessions');
       try { return runtime.compact(sessionId); }
