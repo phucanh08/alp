@@ -141,11 +141,38 @@ export function describeReloadError(error) {
   return words ? { ...described, message: words } : described;
 }
 
+/** Compact context's tooltip: what happens and what stays (t-0e56, t-de1a). */
+export const COMPACT_NOTE = 'Main writes a checkpoint of its work, then its context is compacted (or a fresh conversation starts from the checkpoint). Its session, history and files stay; while it is busy, this waits for the end of its turn.';
+
+/** The words of a refusal of session.compact, by data.reason; other reasons as describeConversationError. */
+export const COMPACT_MESSAGES = Object.freeze(/** @type {Record<string, string>} */ ({
+  session_busy: 'The session is not open. Send it a message to open it, then compact it.',
+  session_closed: 'The session is closed. Send it a message to open it, then compact it.',
+  runtime_unsupported: 'Only the main agent of a session can be compacted.',
+  not_root: 'Only the main agent of a session can be compacted.',
+}));
+
+/** What a session.compact answer means for people. @param {string | undefined} status */
+export function compactStatusText(status) {
+  if (status === 'deferred') return 'Compaction will start when the main agent finishes its current turn.';
+  if (status === 'running') return 'The main agent is already compacting its context.';
+  return 'Compacting the main agent\'s context: it writes a checkpoint first.';
+}
+
+/** A refusal of session.compact for people. @param {unknown} error */
+export function describeCompactError(error) {
+  const described = describeConversationError(error);
+  const words = described.reason ? COMPACT_MESSAGES[described.reason] : undefined;
+  return words ? { ...described, message: words } : described;
+}
+
 /**
- * Whether a session tab offers Reload agent and Copy resume command now (§12.8), and why not. An item
- * is hidden without its capability (an older host); otherwise shown, disabled with a reason.
+ * Whether a session tab offers Reload agent, Compact context and Copy resume command now (§12.8,
+ * t-de1a), and why not. An item is hidden without its capability (an older host); otherwise shown,
+ * disabled with a reason. Compact has no capability of its own: an older host answers -32601, which
+ * reads as "update ALP on the host". A busy root may be compacted: alpd waits for its turn boundary.
  * @param {{ capabilities: string[], canRead: boolean, canWrite: boolean, summary?: Partial<SessionSummary> | null, root: boolean, closed?: boolean, busy?: boolean, generation?: string | null, online?: boolean, driveBlock?: string }} input
- * @returns {{ reload: { shown: boolean, enabled: boolean, reason?: string }, resume: { shown: boolean, enabled: boolean, reason?: string } }}
+ * @returns {{ reload: { shown: boolean, enabled: boolean, reason?: string }, compact: { shown: boolean, enabled: boolean, reason?: string }, resume: { shown: boolean, enabled: boolean, reason?: string } }}
  */
 export function agentControlsGate({ capabilities, canRead, canWrite, summary, root, closed = false, busy = false, generation, online = true, driveBlock }) {
   const off = (/** @type {string} */ reason) => ({ shown: true, enabled: false, reason });
@@ -166,7 +193,16 @@ export function agentControlsGate({ capabilities, canRead, canWrite, summary, ro
     if (busy) return off('Wait until main and its agents are idle.');
     return { shown: true, enabled: true };
   };
-  return { reload: reload(), resume };
+  /** @returns {{ shown: boolean, enabled: boolean, reason?: string }} */
+  const compact = () => {
+    if (!root) return { shown: false, enabled: false };
+    if (!canWrite) return off('Your access token cannot compact agents (it needs session.write).');
+    if (driveBlock) return off(driveBlock);
+    if (closed) return off(COMPACT_MESSAGES.session_closed);
+    if (!online) return off('Reconnecting…');
+    return { shown: true, enabled: true };
+  };
+  return { reload: reload(), compact: compact(), resume };
 }
 
 /**

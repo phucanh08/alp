@@ -3,6 +3,7 @@ import { sessionTasks } from '../session-tasks.js';
 import { tasksAdd, tasksChange, tasksList, type TaskRow } from '../../shared/tasks.js';
 import { languageGet, languageSet, libraryDelete, libraryDuplicate, libraryGet, libraryList, libraryModels, libraryRename, librarySave, librarySkills, libraryTest } from '../../shared/library.js';
 import { usageGet } from '../../shared/usage.js';
+import { agentCompact, compactFirst } from '../../shared/compact.js';
 import { openGateway, workspaceFor, type GatewayConfig, type GatewayLink, type Principal } from './link.js';
 
 /**
@@ -124,4 +125,9 @@ export function registerRemoteLibraryRpc(server: PluginServerContext, link: Remo
 
 export function registerRemoteUsageRpc(server: PluginServerContext) {
   server.handle(usageGet, async () => { throw new RemoteUnavailableError('provider usage (it is account-wide on the ALP host)', 'See it on the ALP host with alp usage.'); });
+}
+
+/** Compact context through the gateway (t-de1a): session.write on a root in the grant, as the gateway checks. */
+export function registerRemoteCompactRpc(server: PluginServerContext, link: RemoteLink) {
+  server.handle(agentCompact, async ({ sessions }) => compactFirst((method, params) => link.request(method, params), sessions));
 }

@@ -70,7 +70,7 @@ test('plugin registers ALP with public SDK contract', async t => {
   let registration; const rpc = [];
   dispose = contribute({ registerProvider(p) { registration = p; }, handle(contract) { rpc.push(contract.name); } });
   assert.equal(registration.id, 'alp');
-  assert.deepEqual(rpc, ['alp.tasks.list', 'alp.tasks.add', 'alp.tasks.change', 'alp.library.models', 'alp.library.list', 'alp.library.get', 'alp.library.save', 'alp.library.skills', 'alp.settings.language.get', 'alp.settings.language.set', 'alp.library.delete', 'alp.library.duplicate', 'alp.library.rename', 'alp.library.test', 'alp.usage.get']);
+  assert.deepEqual(rpc, ['alp.tasks.list', 'alp.tasks.add', 'alp.tasks.change', 'alp.library.models', 'alp.library.list', 'alp.library.get', 'alp.library.save', 'alp.library.skills', 'alp.settings.language.get', 'alp.settings.language.set', 'alp.library.delete', 'alp.library.duplicate', 'alp.library.rename', 'alp.library.test', 'alp.usage.get', 'alp.agent.compact']);
   await assert.rejects(registration.connect({ versions: [99], capabilities: [] }), /protocol/);
   const conn = await registration.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
   const events = []; conn.onEvent(e => events.push(e));

@@ -258,3 +258,69 @@ test('with the supervisor on, a failed native compaction still falls back to a f
   assert.deepEqual((await log('compact.failed')), []);
   assert.equal((await log('compact'))[0].via, 'fresh');
 });
+
+// t-de1a: the 5-minute deadlines (COMPACT_NATIVE_MS) with node:test's mock timers. Only setTimeout is
+// mocked, once main is in the step under test; waits use setImmediate, which stays real.
+const FIVE_MINUTES = 5 * 60_000;
+async function untilReal(check, what) {
+  for (let i = 0; i < 2000; i++) { if (await check()) return; await new Promise(resolve => setImmediate(resolve)); }
+  assert.fail(`Expected ${what} did not arrive`);
+}
+
+test('a checkpoint held past 5 minutes (a user question in the tree) fails the compaction and releases main', async t => {
+  const { runtime, runtimes, main, log, events } = await open(t);
+  // An assignment the user has written to, so it may ask the user.
+  const delegated = await main.call('alp_delegate', { agent: 'peer', task: 'Look into the parser', wait: false });
+  const childId = delegated.assignmentId ?? delegated.sessionId ?? delegated.id;
+  assert.ok(childId, JSON.stringify(delegated));
+  await until(() => runtimes.length > 1 && runtimes[1].turnId, 'the assignment\'s turn');
+  const peer = runtimes[1];
+  runtime.message(childId, 'Ask me if unsure');
+  await until(() => main.steered.some(text => text.includes('wrote to me directly')), 'the note to main');
+  await settle();
+  main.usage(80_000);
+  // Main's turns end (its own, and the one the note of the user's message to the assignment wakes) until the checkpoint turn starts.
+  const checkpointing = () => main.started.some(call => promptText(call).includes('ALP compact checkpoint'));
+  let finished = 0;
+  await until(() => { if (!checkpointing() && main.started.length > finished) { finished = main.started.length; main.finish('turn done'); } return checkpointing(); }, 'the checkpoint turn');
+  // While main writes its checkpoint, the assignment asks the user something.
+  void peer.call('alp_ask', { question: 'Keep the parser branch?', to: 'user' }).catch(() => undefined);
+  await until(() => events.some(event => event.type === 'question'), 'the open question');
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.after(() => t.mock.timers.reset());
+  main.finish(CHECKPOINT);
+  for (let i = 0; i < 50; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(main.calls.filter(call => call.method === 'thread/compact/start').length, 0, 'held: no compaction yet');
+  assert.equal((await log('compact.failed')).length, 0);
+  t.mock.timers.tick(FIVE_MINUTES - 1);
+  for (let i = 0; i < 20; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await log('compact.failed')).length, 0, 'not before 5 minutes');
+  t.mock.timers.tick(1);
+  await untilReal(async () => (await log('compact.failed')).length === 1, 'the failure at 5 minutes');
+  assert.match((await log('compact.failed'))[0].error, /stayed busy after its checkpoint/);
+  assert.ok(notices(events).some(text => /stayed busy after its checkpoint/.test(text)));
+  t.mock.timers.reset();
+  const question = events.find(event => event.type === 'question').question;
+  runtime.answer(question.id, { dismiss: true });
+  peer.finish('done');
+});
+
+test('a native compaction the runtime takes but never reports fails at 5 minutes, not before', async t => {
+  const { main, log } = await open(t);
+  main.usage(80_000);
+  main.finish('turn done');
+  await until(() => main.started.length === 2, 'the checkpoint turn');
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  main.finish(CHECKPOINT);
+  t.after(() => t.mock.timers.reset());
+  await untilReal(() => main.calls.some(call => call.method === 'thread/compact/start'), 'the native request');
+  for (let i = 0; i < 20; i++) await new Promise(resolve => setImmediate(resolve));
+  t.mock.timers.tick(FIVE_MINUTES - 1);
+  for (let i = 0; i < 20; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await log('compact.failed')).length, 0, 'not before 5 minutes');
+  t.mock.timers.tick(1);
+  await untilReal(async () => (await log('compact.failed')).length === 1, 'the failure at 5 minutes');
+  assert.match((await log('compact.failed'))[0].error, /reported no compaction in time/);
+  assert.equal((await log('compact')).length, 0);
+  t.mock.timers.reset();
+});

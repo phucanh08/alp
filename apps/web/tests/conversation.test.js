@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AlpClientError, AlpRpcError } from '@anhlp/alp-client/portable';
 import { Controller } from '../src/lib/controller.js';
-import { RELOAD_MESSAGES, agentControlsGate, allTurnsEnded, branchTurns, conversationGate, conversationMarker, describeConversationError, describeReloadError, turnsByMessage } from '../src/lib/conversation.js';
+import { COMPACT_MESSAGES, RELOAD_MESSAGES, agentControlsGate, describeCompactError, allTurnsEnded, branchTurns, conversationGate, conversationMarker, describeConversationError, describeReloadError, turnsByMessage } from '../src/lib/conversation.js';
 import { emptyProjection, entriesOf, project, prependHistory } from '../src/lib/timeline.js';
 import { FakeHost, until } from './support/fake-host.js';
 
@@ -382,8 +382,8 @@ test('a fork into a worktree whose answer was lost goes to the same worktree aga
 
 test('tab controls: hidden without the capability; reload only for an idle open root the token may drive', () => {
   const base = { capabilities: ['session.history', 'session.reload', 'session.resumeCommand'], canRead: true, canWrite: true, summary: { conversation: { fork: true, rewind: true, reload: true } }, root: true, generation: 'g' };
-  assert.deepEqual(agentControlsGate(base), { reload: { shown: true, enabled: true }, resume: { shown: true, enabled: true } });
-  assert.deepEqual(agentControlsGate({ ...base, capabilities: ['session.history'] }), { reload: { shown: false, enabled: false }, resume: { shown: false, enabled: false } });
+  assert.deepEqual(agentControlsGate(base), { reload: { shown: true, enabled: true }, compact: { shown: true, enabled: true }, resume: { shown: true, enabled: true } });
+  assert.deepEqual(agentControlsGate({ ...base, capabilities: ['session.history'] }), { reload: { shown: false, enabled: false }, compact: { shown: true, enabled: true }, resume: { shown: false, enabled: false } });
   const reason = input => agentControlsGate({ ...base, ...input }).reload;
   assert.deepEqual(reason({ root: false }), { shown: true, enabled: false, reason: RELOAD_MESSAGES.not_root });
   assert.equal(reason({ summary: { conversation: { fork: false, rewind: false, reload: false, reason: 'runtime_unsupported' } } }).enabled, false);
@@ -407,7 +407,7 @@ test('Reload agent sends the held generation once per request id; history and th
   const controller = make();
   await open(controller, 'ses_a');
   await say(controller, 'codeword ALPHA');
-  assert.deepEqual(controller.agentControls('ses_a'), { reload: { shown: true, enabled: true }, resume: { shown: true, enabled: true } });
+  assert.deepEqual(controller.agentControls('ses_a'), { reload: { shown: true, enabled: true }, compact: { shown: true, enabled: true }, resume: { shown: true, enabled: true } });
   const before = texts(controller);
   const result = await controller.reloadAgent({ sessionId: 'ses_a', requestId: 'rl1' });
   assert.equal(result.session.id, 'ses_a');
@@ -428,6 +428,42 @@ test('Reload agent sends the held generation once per request id; history and th
   const sent = host.count('session.reload');
   await assert.rejects(controller.reloadAgent({ sessionId: 'ses_other', requestId: 'rl3' }), /main agent/);
   assert.equal(host.count('session.reload'), sent);
+});
+
+test('tab controls: Compact context only for the open root the token may drive; busy is fine (t-de1a)', () => {
+  const base = { capabilities: [], canRead: true, canWrite: true, summary: {}, root: true, generation: null };
+  const compact = input => agentControlsGate({ ...base, ...input }).compact;
+  assert.deepEqual(compact({}), { shown: true, enabled: true });
+  assert.deepEqual(compact({ busy: true }), { shown: true, enabled: true }, 'alpd waits for the turn boundary');
+  assert.deepEqual(compact({ root: false }), { shown: false, enabled: false });
+  assert.match(compact({ canWrite: false }).reason, /session\.write/);
+  assert.equal(compact({ driveBlock: 'Not in your modes' }).reason, 'Not in your modes');
+  assert.equal(compact({ closed: true }).reason, COMPACT_MESSAGES.session_closed);
+  assert.match(compact({ online: false }).reason, /Reconnecting/);
+  assert.equal(describeCompactError(new AlpRpcError({ code: 1005, message: '/secret', data: { reason: 'session_busy' } })).message, COMPACT_MESSAGES.session_busy);
+  assert.match(describeCompactError(new AlpRpcError({ code: -32601, message: 'x' })).message, /Update ALP on the host/);
+});
+
+test('Compact context sends session.compact for the open root and says what happens; refusals notify', async t => {
+  const { host, make } = setup(t);
+  host.seed('ses_a', { title: 'Codes' });
+  const controller = make();
+  await open(controller, 'ses_a');
+  assert.deepEqual(await controller.compactAgent({ sessionId: 'ses_a' }), { status: 'started' });
+  assert.deepEqual(host.calls.find(call => call.method === 'session.compact').params, { sessionId: 'ses_a' });
+  assert.match(controller.getState().notice.text, /checkpoint/);
+  host.compactError = new AlpRpcError({ code: 1005, message: 'The session is not open', data: { reason: 'session_busy' } });
+  await assert.rejects(controller.compactAgent({ sessionId: 'ses_a' }));
+  assert.equal(controller.getState().notice.level, 'error');
+  assert.equal(controller.getState().notice.text, COMPACT_MESSAGES.session_busy);
+  host.compactError = undefined;
+  host.compactUnknown = true;
+  await assert.rejects(controller.compactAgent({ sessionId: 'ses_a' }));
+  assert.match(controller.getState().notice.text, /Update ALP on the host/);
+  const sent = host.count('session.compact');
+  await assert.rejects(controller.compactAgent({ sessionId: 'ses_other' }), /main agent/);
+  assert.equal(host.count('session.compact'), sent);
+  assert.equal(host.compacts, 1);
 });
 
 test('Copy resume command writes the host\'s command to the clipboard only, and says what it copied', async t => {
