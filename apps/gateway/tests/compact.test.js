@@ -78,10 +78,10 @@ test('compact: only sessionId reaches alpd; only the status passes back; alpd\'s
   assert.match(error.message, /not open/);
 });
 
-test('compact: an agent-marked credential reaches alpd on a marked connection, as other session mutations do', async t => {
+test('compact: an agent-marked credential is refused as user-only and never reaches alpd', async t => {
   const { daemon, sdk } = await world(t);
   const { client } = await sdk('agent');
-  assert.deepEqual(await client.request('session.compact', { sessionId: 'sa' }), { status: 'started' });
-  const hellos = daemon.calls().filter(call => call.method === 'daemon.hello');
-  assert.ok(hellos.some(call => call.params?.capabilities?.includes('principal.agent')), 'the alpd connection was marked as an agent\'s');
+  const error = await client.request('session.compact', { sessionId: 'sa' }).catch(failure => failure);
+  assert.equal(error.data?.reason, 'user_only');
+  assert.ok(!daemon.calls().some(call => call.method === 'session.compact'), 'alpd was not asked to compact');
 });
