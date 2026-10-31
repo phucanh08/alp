@@ -18,16 +18,16 @@ export async function until(check, what = 'condition', ms = 5000) {
 
 /**
  * @param {import('node:test').TestContext} t
- * @param {{ daemon: ReturnType<typeof import('./fake-daemon.js').fakeDaemon>, credentials?: Record<string, { workspaces: string[], permissions?: string[], modes?: string[], worktreeMappings?: string[] }>, config?: object, serveStatic?: Function }} options
+ * @param {{ daemon: ReturnType<typeof import('./fake-daemon.js').fakeDaemon>, credentials?: Record<string, { workspaces: string[], permissions?: string[], modes?: string[], worktreeMappings?: string[], agent?: boolean }>, config?: object, serveStatic?: Function }} options
  */
 export async function startGateway(t, { daemon, credentials = {}, config = {}, serveStatic }) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gateway-'));
   const home = path.join(directory, 'gateway');
   const tokens = {};
   const ids = {};
-  for (const [label, { workspaces, permissions = ['session.read', 'session.write', 'project.read', 'project.write'], modes, worktreeMappings }] of Object.entries(credentials)) {
+  for (const [label, { workspaces, permissions = ['session.read', 'session.write', 'project.read', 'project.write'], modes, worktreeMappings, agent }] of Object.entries(credentials)) {
     for (const workspace of workspaces) await mkdir(workspace, { recursive: true });
-    const { credential, token } = await createCredential(home, { label, workspaces, permissions, ...(worktreeMappings ? {worktreeMappings}:{}), ...(modes ? { modes } : {}) });
+    const { credential, token } = await createCredential(home, { label, workspaces, permissions, ...(worktreeMappings ? {worktreeMappings}:{}), ...(modes ? { modes } : {}), ...(agent ? { agent } : {}) });
     tokens[label] = token;
     ids[label] = credential.id;
   }

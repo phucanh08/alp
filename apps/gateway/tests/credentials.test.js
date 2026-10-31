@@ -85,6 +85,89 @@ test('CLI edit/reissue replaces named grants, retains omitted fields, and reject
   await assert.rejects(run('edit', original.credential.id, '--permission', 'session.write'), /revoked/);
 });
 
+test('an agent credential keeps its mark through rotate, update and reissue; a user credential is unchanged (t-53aa)', async t => {
+  const { home: gatewayHome, workspace } = await home(t);
+  const user = await createCredential(gatewayHome, { label: 'phone', workspaces: [workspace], permissions: ['session.write'] });
+  assert.equal(user.credential.agent, undefined, 'a credential is a user\'s unless --agent');
+  const agent = await createCredential(gatewayHome, { label: 'bot', workspaces: [workspace], permissions: ['session.write'], agent: true });
+  assert.equal(agent.credential.agent, true);
+  await assert.rejects(createCredential(gatewayHome, { label: 'odd', workspaces: [workspace], permissions: ['session.write'], agent: 'yes' }), /agent must be true or false/);
+  const store = new CredentialStore({ home: gatewayHome, pollMs: 0 });
+  t.after(() => store.close());
+  await store.reload();
+  const userGrant = store.verify(user.token);
+  assert.equal(userGrant.agent, undefined);
+  assert.equal(store.verify(agent.token).agent, true);
+
+  // A user credential's fingerprint, its epoch when it has no scopeId, keeps its old form.
+  const stored = (await credentials.readCredentials(gatewayHome)).credentials.find(entry => entry.id === user.credential.id);
+  assert.equal(userGrant.fingerprint, JSON.stringify([stored.workspaces, stored.permissions, null, null, stored.worktreeMappings, stored.scopeId]));
+
+  const rotated = await rotateCredential(gatewayHome, agent.credential.id);
+  assert.equal(rotated.credential.agent, true);
+  const updated = await credentials.updateCredential(gatewayHome, agent.credential.id, { permissions: ['session.read'] });
+  assert.equal(updated.credential.agent, true);
+  const reissued = await credentials.reissueCredential(gatewayHome, agent.credential.id, { label: 'bot 2' });
+  assert.equal(reissued.credential.agent, true);
+  const before = await readFile(credentialsFile(gatewayHome), 'utf8');
+  await assert.rejects(credentials.reissueCredential(gatewayHome, agent.credential.id, { agent: false }), /stays one/);
+  assert.equal(await readFile(credentialsFile(gatewayHome), 'utf8'), before, 'a refused reissue writes nothing');
+  // A user credential may become an agent's (it only takes away); the change closes its connections.
+  const notices = [];
+  store.onChange(change => notices.push(Object.fromEntries(change)));
+  await store.reload();
+  notices.length = 0;
+  const marked = await credentials.reissueCredential(gatewayHome, user.credential.id, { agent: true });
+  assert.equal(marked.credential.agent, true);
+  await store.reload();
+  assert.equal(store.verify(marked.token).agent, true);
+  assert.deepEqual(notices, [{ [user.credential.id]: 'revoked' }]);
+});
+
+test('a hand-edited agent mark that is not true leaves the credential unusable; true marks it (t-53aa)', async t => {
+  const { home: gatewayHome, workspace } = await home(t);
+  const { credential, token } = await createCredential(gatewayHome, { label: 'phone', workspaces: [workspace], permissions: ['session.write'] });
+  const store = new CredentialStore({ home: gatewayHome, pollMs: 0 });
+  t.after(() => store.close());
+  await store.reload();
+  const before = store.verify(token);
+  const notices = [];
+  store.onChange(change => notices.push(Object.fromEntries(change)));
+  const file = credentialsFile(gatewayHome);
+  const edit = async agent => {
+    const data = JSON.parse(await readFile(file, 'utf8'));
+    data.credentials[0].agent = agent;
+    await writeFile(file, JSON.stringify(data), { mode: 0o600 });
+    await store.reload();
+  };
+  for (const value of ['true', 1, false, null, {}]) {
+    await edit(value);
+    assert.equal(store.verify(token), undefined, `agent: ${JSON.stringify(value)} is refused`);
+  }
+  await edit(true);
+  const after = store.verify(token);
+  assert.equal(after.agent, true);
+  assert.notEqual(after.fingerprint, before.fingerprint, 'gaining the mark is a grant change');
+  assert.ok(notices.length >= 1 && notices.every(notice => notice[credential.id]), JSON.stringify(notices));
+});
+
+test('CLI --agent makes an agent credential, list shows it, and reissue keeps it (t-53aa)', async t => {
+  const { home: gatewayHome, workspace, directory } = await home(t);
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const run = (...args) => promisify(execFile)(process.execPath, [path.join(import.meta.dirname, '../src/cli.js'), 'credential', ...args], { env: { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory } });
+  const user = JSON.parse((await run('create', '--label', 'phone', '--workspace', workspace, '--json')).stdout);
+  assert.equal(user.credential.agent, undefined);
+  const bot = JSON.parse((await run('create', '--label', 'bot', '--workspace', workspace, '--agent', '--json')).stdout);
+  assert.equal(bot.credential.agent, true);
+  const listed = (await run('list')).stdout.split('\n');
+  assert.match(listed.find(line => line.startsWith(bot.credential.id)), /  agent$/);
+  assert.doesNotMatch(listed.find(line => line.startsWith(user.credential.id)), /agent/);
+  const reissued = JSON.parse((await run('reissue', bot.credential.id, '--label', 'bot 2', '--json')).stdout);
+  assert.equal(reissued.credential.agent, true, 'reissue without --agent keeps the mark');
+  await assert.rejects(run('reissue', bot.credential.id, '--agent=false'), 'a boolean flag takes no value');
+});
+
 test('reissue closes active old-grant connections, kills outstanding tickets and enforces the replacement grant', async t => {
   const { workspace } = await home(t);
   const daemon = fakeDaemon();

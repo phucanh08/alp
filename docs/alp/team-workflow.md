@@ -791,6 +791,11 @@ answers a question an agent asked. ALP enforces this on every path it controls:
   `principal.agent` in its `daemon.hello` to the gateway, the gateway says so
   on that client's own alpd connection before it answers, so alpd refuses the
   same calls through the gateway. If it cannot, it closes the client.
+- A gateway credential made with `alp-gateway credential create --agent` (or
+  given the mark with `reissue --agent`) is an agent's: the gateway marks every
+  connection it opens the same way, whatever its client announces, so the mark
+  is bound to the credential rather than declared. No command removes the mark.
+  Credentials without it are the user's, as before.
 - An agent's connection may not open, attach to or type into a daemon terminal
   (`terminal.create`, `terminal.attach`, `terminal.input`): those shells carry no
   `ALP_AGENT_SESSION`.
@@ -830,9 +835,10 @@ did not start. There is no TTY requirement.
 Residual risk: this raises the bar and detects naive bypasses; it is not a
 security boundary. A full-access agent runs as the same OS user as you, so it
 can unset `ALP_AGENT_SESSION`, speak to the daemon socket directly without
-announcing `principal.agent` (or reach the gateway with a credential you
-paired and not announce it: the gateway cannot tell such a client from ALP
-Web), edit the ledger in `$ALP_HOME` as well as the task
+announcing `principal.agent` (or reach the gateway with a user credential, one
+you paired without `--agent`, and not announce it: the gateway cannot tell such
+a client from ALP Web; give agents their own `--agent` credentials and keep
+user tokens where agents cannot read them), edit the ledger in `$ALP_HOME` as well as the task
 file, or fake a TTY. An older alpd does not enforce the daemon refusals. Human
 gates opened before the ledger existed enter it only the next time ALP writes
 their task; until then a file edit that clears them goes undetected. Only

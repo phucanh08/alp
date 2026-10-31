@@ -335,6 +335,42 @@ test('a client that announces principal.agent to the gateway is refused the user
   assert.equal(stored.gates[0].resolved.by, 'user');
 });
 
+test('an agent credential is refused the user\'s calls on a real alpd even when its client does not announce principal.agent (t-53aa)', { skip, timeout: 60_000 }, async t => {
+  const w = await world(t);
+  const all = ['session.read', 'session.write', 'project.read', 'project.write'];
+  const bot = await createCredential(w.gatewayHome, { label: 'bot', workspaces: [w.projects.a], permissions: all, agent: true });
+  await sleep(150);
+  const user = new AlpRpcClient(await w.open(w.tokens.alice));
+  t.after(() => user.close());
+  await hello(user);
+  // The agent's client says nothing about being an agent: the credential says it.
+  const agent = new AlpRpcClient(await w.open(bot.token));
+  t.after(() => agent.close());
+  await hello(agent, { name: 'looks-like-web', version: '0' });
+  const project = w.projects.a;
+  const { id } = await user.request('task.create', { projectRoot: project, title: 'gated', requestId: 'e53aa-1' });
+  const previous = process.env.ALP_HOME;
+  process.env.ALP_HOME = w.home;
+  try { await addGate(project, id, { kind: 'human', note: 'Duyệt giúp' }, 'main'); }
+  finally { if (previous === undefined) delete process.env.ALP_HOME; else process.env.ALP_HOME = previous; }
+
+  const refused = error => error.code === 1003 && error.data?.reason === 'user_only';
+  await assert.rejects(agent.request('task.gate.resolve', { projectRoot: project, id, gate: 'g1' }), refused);
+  await assert.rejects(agent.request('task.update', { projectRoot: project, id, action: 'close' }), refused);
+  await hello(agent);
+  await assert.rejects(agent.request('task.gate.resolve', { projectRoot: project, id, gate: 'g1', reject: true }), refused);
+  // What an agent may do it still does: it reads the task.
+  assert.ok((await agent.request('task.list', { projectRoot: project })).tasks.some(task => task.id === id));
+  let stored = await getTask(project, id);
+  assert.equal(stored.status, 'open');
+  assert.ok(!stored.gates[0].resolved && !stored.gates[0].rejected);
+
+  // A user credential through the same gateway, its client also silent, still decides it.
+  assert.equal((await user.request('task.gate.resolve', { projectRoot: project, id, gate: 'g1', note: 'OK' })).status, 'open');
+  stored = await getTask(project, id);
+  assert.equal(stored.gates[0].resolved.by, 'user');
+});
+
 test('a read-only grant cannot wake, steer or answer a full-access session on a real alpd, and can drive its own read-only one', { skip, timeout: 60_000 }, async t => {
   const w = await world(t);
   const local = new AlpRpcClient(await connectSocket(w.socket));
