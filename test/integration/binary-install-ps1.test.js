@@ -179,7 +179,7 @@ const CLI = path.join('lib', 'node_modules', '@anhlp', 'alp-cli', 'dist', 'cli.j
 const resolvedCurrent = dir => realpathSync.native(path.join(dir, 'app', 'current')).toLowerCase();
 const version = command => execFileSync(command, ['--version'], { encoding: 'utf8', shell: true }).trim();
 
-test('install.ps1: a failed upgrade leaves the previous version current and the alp command running it (t-598d)', { skip: !windows }, async t => {
+test('install.ps1: an upgrade refused before any move leaves the previous version current and the alp command running it (t-598d)', { skip: !windows }, async t => {
   const localAppData = await temp(t, 'alp-ps-lad-');
   const dir = path.join(localAppData, 'alp');
   const command = path.join(dir, 'alp.cmd');

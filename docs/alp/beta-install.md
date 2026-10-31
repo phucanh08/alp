@@ -1,14 +1,13 @@
-# Installing, upgrading and removing the ALP beta (`0.0.1-beta.3`)
+# Installing, upgrading and removing the ALP beta (`0.0.1-beta.7`)
 
-This guide covers the beta (`0.0.1-beta.3`; earlier betas were `0.0.0-beta.1` and `0.0.0-beta.2`): a new install, signing in to a provider, the daemon, the
+This guide covers the beta (`0.0.1-beta.7`; earlier betas were `0.0.0-beta.1`, `0.0.0-beta.2` and `0.0.1-beta.3` to `0.0.1-beta.6`): a new install, signing in to a provider, the daemon, the
 Paseo plugin, `alp web` on this machine, upgrading from 0.10.0 or earlier, backups, going back,
 and removing ALP. What the beta includes and what it does not is in the
 [release notes](beta-release-notes.md); the scope, gate and release checklist are in
 [beta-scope.md](beta-scope.md).
 
-> **Check the version.** Until `0.0.1-beta.3` is on npm, the `@beta` commands below install
-> `0.0.0-beta.2`, whose plugin does not load in Paseo 0.12. Check with `npm view @anhlp/alp
-> dist-tags`: it lists `beta: '0.0.1-beta.3'` once beta.3 is published.
+> **Check the version.** The `@beta` commands below install whatever npm's `beta` tag points at.
+> Check with `npm view @anhlp/alp dist-tags`: it lists `beta: '0.0.1-beta.7'` for this guide.
 
 ## Always ask for the beta
 
@@ -18,14 +17,14 @@ either by tag or exactly:
 
 | Package | By tag | Exact |
 |---|---|---|
-| CLI and daemon | `@anhlp/alp@beta` | `@anhlp/alp@0.0.1-beta.3` |
-| Paseo plugin (and `alp web` up to `0.0.1-beta.3`) | `@anhlp/alp-paseo@beta` | `@anhlp/alp-paseo@0.0.1-beta.3` |
+| CLI and daemon | `@anhlp/alp@beta` | `@anhlp/alp@0.0.1-beta.7` |
+| Paseo plugin (and `alp web` up to `0.0.1-beta.3`) | `@anhlp/alp-paseo@beta` | `@anhlp/alp-paseo@0.0.1-beta.7` |
 
 The six core packages (`@anhlp/alp-protocol`, `-core`, `-runtime`, `-client`, `-daemon`,
 `-cli`) come with these at the same pinned version; you do not install them yourself. The old
 plugin name `alp-paseo-plugin` stays at `0.10.0`; do not install it with the beta.
 
-Use `npm install`, not `npm update`, to move to the beta: by semver, `0.0.1-beta.3` sorts below
+Use `npm install`, not `npm update`, to move to the beta: by semver, `0.0.1-beta.7` sorts below
 `0.10.0`.
 
 ## Requirements
@@ -51,7 +50,7 @@ install or sign in to them.
 ```sh
 node -v                                   # v22.12+ or v24
 npm install -g @anhlp/alp@beta
-npm ls -g @anhlp/alp                      # @anhlp/alp@0.0.1-beta.3
+npm ls -g @anhlp/alp                      # @anhlp/alp@0.0.1-beta.7
 ```
 
 The package provides `alp`; `alp` starts `alpd`, the per-user daemon that runs sessions.
@@ -272,7 +271,7 @@ plugin ID, `alp-provider`, is the same).
 
    ```sh
    npm install -g @anhlp/alp@beta @anhlp/alp-paseo@beta
-   npm ls -g @anhlp/alp @anhlp/alp-paseo     # both 0.0.1-beta.3
+   npm ls -g @anhlp/alp @anhlp/alp-paseo     # both 0.0.1-beta.7
    alp-paseo-integration --register
    ```
 
