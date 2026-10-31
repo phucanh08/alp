@@ -378,6 +378,8 @@ Cột Test dùng các mã sau:
 |---|---|---|---|---|---|
 | `daemon.hello` | — | connection | — | gateway tự trả lời | handshake, I |
 | `catalog.get` | — | không (catalogue tĩnh) | session.read | exposed | P |
+| `catalog.updated` (notification) | — | chỉ `{fetchedAt}` | session.read | forwarded | P |
+| `catalog.refresh` | — | — | — | denied (từ xa) | — |
 | `session.list` | (`session.list.page` cho `limit`/`cursor`/`query`) | result lọc theo grant; `projectRoot` phải thuộc grant; trang đọc tiếp tới khi đủ | session.read | exposed | P S R I |
 | `session.get` | — | session (tree) | session.read | exposed | P S I |
 | `session.status` | — | session; answer phải là tree của root đã kiểm tra, mọi session thuộc grant. Có đường dẫn host của tree (§5.6) | session.read | exposed | P S T |
