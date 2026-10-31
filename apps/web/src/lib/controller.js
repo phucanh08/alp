@@ -6,7 +6,7 @@ import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
 import { can, gatewayUrl, grantedWorkspace, openGateway } from './gateway.js';
 import { LINK_TOKEN_INVALID, forgetLinkToken } from './link-token.js';
 import { newConversationRequestId, newMessageId, newRequestId, newSessionId } from './ids.js';
-import { RELOAD_MESSAGES, agentControlsGate, conversationGate, describeConversationError, describeReloadError } from './conversation.js';
+import { COMPACT_MESSAGES, RELOAD_MESSAGES, agentControlsGate, compactStatusText, conversationGate, describeCompactError, describeConversationError, describeReloadError } from './conversation.js';
 import { GIT_ERROR_MESSAGES, GitAccessError, describeGitError, gitAccess, gitCompare, gitRequestPath, registryWorkspaceOf } from './git.js';
 import { NO_FILES, abortUpload, fileLimits, fileRefusal, fitFiles, fitImages, imageLimits, messageContent, uploadRequestId } from './attachments.js';
 import { applyAttach, historyEnvelope, prependHistory, deliveredPrompts, emptyProjection, members, project, promptTurnOver } from './timeline.js';
@@ -2144,8 +2144,9 @@ export class Controller {
   }
 
   /**
-   * Reload agent and Copy resume command for a session's tab (§12.8, lib/conversation.js
-   * agentControlsGate): reload only for the open root, idle, within the token's modes.
+   * Reload agent, Compact context and Copy resume command for a session's tab (§12.8, t-de1a,
+   * lib/conversation.js agentControlsGate): reload only for the open root, idle, within the token's
+   * modes; compact for the open root within them, busy or not.
    * @param {string} sessionId
    */
   agentControls(sessionId) {
@@ -2228,6 +2229,25 @@ export class Controller {
     } catch (error) {
       this.#conversationRefused(root, error);
       this.#notify('error', describeReloadError(error).message);
+      throw error;
+    }
+  }
+
+  /**
+   * session.compact (t-0e56, t-de1a): main writes a checkpoint, then its context is compacted natively
+   * or replaced by a fresh conversation seeded with it; now, or at its next turn boundary.
+   * @param {{ sessionId: string }} input
+   */
+  async compactAgent({ sessionId }) {
+    const root = this.#state.tree?.rootId;
+    if (!root || sessionId !== root) throw new ConfigurationError(COMPACT_MESSAGES.not_root);
+    try {
+      /** @type {import('@anhlp/alp-protocol').RpcMethodMap['session.compact']['result']} */
+      const result = await this.#client().request('session.compact', { sessionId: root });
+      this.#notify('info', compactStatusText(result?.status));
+      return result;
+    } catch (error) {
+      this.#notify('error', describeCompactError(error).message);
       throw error;
     }
   }

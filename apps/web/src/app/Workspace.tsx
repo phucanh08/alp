@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ArrowLeftToLine, ArrowRightToLine, Bot, CircleAlert, CircleDot, Columns2, Copy, CopyX, Ellipsis, FileText, ListTodo, Maximize, Minimize, PanelBottom, PanelLeft, PanelRight, PanelTop, Pencil, Plus, RotateCw, Rows2, ShieldAlert, SquarePen, Archive, X } from 'lucide-react';
+import { ArrowLeftToLine, ArrowRightToLine, Bot, CircleAlert, CircleDot, Columns2, Copy, CopyX, Ellipsis, FileText, ListTodo, Maximize, Minimize, PanelBottom, PanelLeft, PanelRight, PanelTop, Pencil, Plus, RotateCw, Rows2, Shrink, ShieldAlert, SquarePen, Archive, X } from 'lucide-react';
 import type { SessionSummary } from '../lib/controller.js';
 import { can } from '../lib/gateway.js';
 import { ContextMenu, Menu, type MenuItem } from '../components/ui/menu';
@@ -9,7 +9,7 @@ import { MAIN_PANE, MIN_SPLIT_SIZE, dropPosition, paneIds, splitPane, type Group
 import { isMacPlatform, shortcutLabel } from '../lib/shortcuts.js';
 import { baseName, sessionName } from '../lib/format';
 import { cn } from '../lib/utils';
-import { RELOAD_NOTE } from '../lib/conversation.js';
+import { COMPACT_NOTE, RELOAD_NOTE } from '../lib/conversation.js';
 import { newConversationRequestId } from '../lib/ids.js';
 import { PANELS, PanelView, type PanelKind } from './panels';
 import { NewSessionScreen } from './NewSession';
@@ -168,6 +168,8 @@ function useTabMenuItems(paneId: string, onRename: (session: SessionSummary) => 
       { id: 'close-others', label: 'Close other tabs', icon: <CopyX aria-hidden />, disabled: none('others'), testId: `${base}-close-others`, onSelect: () => closeOthers(tab, 'others', row) },
       ...(controls?.reload.shown ? [{ id: 'reload-agent', label: 'Reload agent', icon: <RotateCw aria-hidden />, disabled: !controls.reload.enabled, title: controls.reload.reason ?? RELOAD_NOTE, testId: `${base}-reload-agent`,
         onSelect: () => { void controller.reloadAgent({ sessionId: tab.id, requestId: newConversationRequestId() }).catch(() => undefined); } } satisfies MenuItem] : []),
+      ...(controls?.compact.shown ? [{ id: 'compact-agent', label: 'Compact context', icon: <Shrink aria-hidden />, disabled: !controls.compact.enabled, title: controls.compact.reason ?? COMPACT_NOTE, testId: `${base}-compact-agent`,
+        onSelect: () => { void controller.compactAgent({ sessionId: tab.id }).catch(() => undefined); } } satisfies MenuItem] : []),
       { id: 'close', label: 'Close', icon: <X aria-hidden />, testId: `${base}-close`, onSelect: () => close(tab) },
     ];
     // Paseo puts a divider under Rename.

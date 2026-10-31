@@ -513,6 +513,15 @@ export class FakeHost {
       }
       case 'session.rewind': return this.#rewind(params);
       case 'session.reload': return this.#reload(params);
+      case 'session.compact': {
+        // t-de1a: an older host has no such method; this one answers started, or deferred while busy.
+        if (this.compactUnknown) throw Object.assign(new Error('unknown method session.compact'), { code: -32601 });
+        const root = this.roots.get(params.sessionId);
+        if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
+        if (this.compactError) throw this.compactError;
+        this.compacts = (this.compacts ?? 0) + 1;
+        return { status: root.running ? 'deferred' : 'started' };
+      }
       case 'session.resumeCommand': {
         if (!this.capabilities.includes('session.resumeCommand')) throw Object.assign(new Error('unknown method session.resumeCommand'), { code: -32601 });
         if (!this.roots.has(params.sessionId) && ![...this.roots.values()].some(root => root.children?.some?.(child => child.id === params.sessionId))) throw Object.assign(new Error('no such session'), { code: 1001 });

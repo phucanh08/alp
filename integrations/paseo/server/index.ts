@@ -4,6 +4,7 @@ import { createProvider, daemonEntry } from './provider.js';
 import { registerTaskRpc } from './tasks.js';
 import { registerLibraryRpc } from './library.js';
 import { registerUsageRpc } from './usage.js';
+import { registerCompactRpc } from './compact.js';
 import { alpHome } from '@anhlp/alp-client/index';
 import { superviseDaemon } from '@anhlp/alp-client/supervise';
 import { contributeRemote, gatewayConfig } from './remote/index.js';
@@ -27,6 +28,8 @@ export default function contribute(server: PluginServerContext) {
   // The ALP settings screen edits agents, skills, MCP servers, hooks and teams through these.
   registerLibraryRpc(server);
   registerUsageRpc(server);
+  // Compact context (t-de1a): the agent command and slash command of index.client.tsx.
+  registerCompactRpc(server);
   // While Paseo runs, alpd runs: started now, and again whenever it goes down, unless the user stopped it (ALPD §40).
   const stop = process.env.ALP_SUPERVISE === '0'
     ? async () => {}

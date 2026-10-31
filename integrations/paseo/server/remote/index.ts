@@ -1,11 +1,11 @@
 import type { PluginServerContext } from '../compat.js';
 import { gatewayConfig, type GatewayConfig } from './link.js';
 import { createRemoteProvider } from './provider.js';
-import { registerRemoteLibraryRpc, registerRemoteTaskRpc, registerRemoteUsageRpc, remoteLink } from './panels.js';
+import { registerRemoteCompactRpc, registerRemoteLibraryRpc, registerRemoteTaskRpc, registerRemoteUsageRpc, remoteLink } from './panels.js';
 
 export { gatewayConfig, openGateway, GatewayAuthError, REQUIRED_CAPABILITIES, sameWorkspace, workspaceFor, type GatewayConfig, type GatewayLink, type Principal } from './link.js';
 export { createRemoteProvider, remoteState } from './provider.js';
-export { registerRemoteLibraryRpc, registerRemoteTaskRpc, registerRemoteUsageRpc, remoteLink, RemoteUnavailableError, UNAVAILABLE } from './panels.js';
+export { registerRemoteCompactRpc, registerRemoteLibraryRpc, registerRemoteTaskRpc, registerRemoteUsageRpc, remoteLink, RemoteUnavailableError, UNAVAILABLE } from './panels.js';
 
 /**
  * The plugin in remote mode (docs/alp/paseo-remote.md): the ALP provider and the panels, all
@@ -18,5 +18,6 @@ export function contributeRemote(server: PluginServerContext, config: GatewayCon
   registerRemoteTaskRpc(server, link);
   registerRemoteLibraryRpc(server, link);
   registerRemoteUsageRpc(server);
+  registerRemoteCompactRpc(server, link);
   return () => link.close();
 }

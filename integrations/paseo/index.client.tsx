@@ -3,6 +3,7 @@ import { TasksPanel, TasksScreen } from './client/tasks-panel';
 import { TASKS_SCREEN, addTaskPills, tasksScreen } from './client/task-pills';
 import { LibrarySettings, ProjectLibraryPanel, TeamsSettings, AgentsSettings, SkillsSettings, HooksSettings, McpSettings } from './client/library';
 import { UsageScreen } from './client/usage';
+import { addCompactCommands } from './client/compact';
 
 /**
  * ALP's client contributions: the Tasks panel of a workspace's project, the Tasks screen
@@ -38,6 +39,8 @@ export default function contribute(client: PluginClientContext) {
     context: 'agent',
     onSubmit({ workspace, args, openScreen }) { openScreen(tasksScreen(workspace.id, workspace.directory || workspace.projectRootPath, args.trim() || undefined)); },
   });
+  // Compact context (t-de1a): a command-center item and "/alp-compact" for an ALP agent.
+  const removeCompact = addCompactCommands(client);
   const removeSettings = client.addSettingsScreen({ id: 'alp-settings', title: 'ALP', icon: 'Bot', Component: LibrarySettings });
   const removeHostSettings = [
     { id: 'alp-templates', title: 'Templates', icon: 'Users', Component: TeamsSettings },
@@ -49,5 +52,5 @@ export default function contribute(client: PluginClientContext) {
   const removeUsage = client.addSettingsScreen({ id: 'alp-usage', title: 'Usage', icon: 'ChartNoAxesCombined', Component: UsageScreen });
   const removeUsagePanel = client.addWorkspacePanel({ id: 'alp-usage', title: 'Usage', icon: 'ChartNoAxesCombined', context: 'workspace', Component: UsageScreen });
   const removeProject = client.addWorkspacePanel({ id: 'alp-project', title: 'ALP project', icon: 'Bot', context: 'workspace', Component: ProjectLibraryPanel });
-  return () => { removePanel(); removeScreen(); removePills(); removeCommand(); removeScreenCommand(); removeSlash(); removeSettings(); removeHostSettings.forEach(remove => remove()); removeProject(); removeUsage(); removeUsagePanel(); };
+  return () => { removePanel(); removeScreen(); removePills(); removeCommand(); removeScreenCommand(); removeSlash(); removeCompact(); removeSettings(); removeHostSettings.forEach(remove => remove()); removeProject(); removeUsage(); removeUsagePanel(); };
 }

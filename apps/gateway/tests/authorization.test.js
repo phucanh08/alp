@@ -91,6 +91,8 @@ const OUT_OF_SCOPE = {
   'session.rewind': () => [{ sessionId: 'sb-c', requestId: 'r', ifGeneration: '0'.repeat(32), beforeTurnId: 't' }, 1001],
   // reload.test.js covers children (not_root), modes and the projected answer.
   'session.reload': () => [{ sessionId: 'sb', requestId: 'r', ifGeneration: '0'.repeat(32) }, 1001],
+  // compact.test.js covers children (not_root), modes and the projected answer.
+  'session.compact': () => [{ sessionId: 'sb' }, 1001],
   'session.configure.preview': () => [{ sessionId: 'sb', model: 'gpt' }, 1001],
   'session.resumeCommand': () => [{ sessionId: 'sb-c' }, 1001],
   'session.commands': () => [{ sessionId: 'sb-c' }, 1001],
@@ -134,6 +136,7 @@ const IN_SCOPE = ({ a }) => ({
   'session.rename': { sessionId: 'sa', title: 't' }, 'session.archive': { sessionId: 'sa' }, 'session.message': { sessionId: 'sa', text: 'x' },
   'session.fork': { sessionId: 'sa', requestId: 'r', ifGeneration: '0'.repeat(32) }, 'session.rewind': { sessionId: 'sa', requestId: 'r', ifGeneration: '0'.repeat(32), beforeTurnId: 't' },
   'session.reload': { sessionId: 'sa', requestId: 'r', ifGeneration: '0'.repeat(32) }, 'session.resumeCommand': { sessionId: 'sa' }, 'session.commands': { sessionId: 'sa' },
+  'session.compact': { sessionId: 'sa' },
   'session.configure.preview': { sessionId: 'sa' },
   'question.answer': { questionId: 'q-a-111', text: 'x' },
   'team.list': { projectRoot: a }, 'task.list': { projectRoot: a }, 'task.create': { projectRoot: a, title: 't' },

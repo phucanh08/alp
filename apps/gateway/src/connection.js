@@ -231,6 +231,12 @@ const RELOAD_REFUSALS = Object.freeze({
   not_root: 'Only a root session can be reloaded',
   native_refused: 'The agent could not be restarted on its conversation; the session is closed with its conversation kept and opens again with the next message',
 });
+/** The message the client gets for each alpd refusal of session.compact (t-de1a): fixed, as reload's. @type {Readonly<Record<string, string>>} */
+const COMPACT_REFUSALS = Object.freeze({
+  session_busy: 'The session is not open; open it first, then compact it',
+  runtime_unsupported: 'Only a root session can be compacted',
+  not_root: 'Only a root session can be compacted',
+});
 /**
  * The message the client gets for each alpd refusal of session.fork and session.rewind
  * (docs/protocol/alp-json-rpc-v1.md §12.7, docs/alp/remote-gateway.md §5.15): fixed here, so no
@@ -1579,6 +1585,15 @@ export class ClientConnection {
       if (!session || session.id !== params.sessionId || session.parentId || !workspaceOf(this.#grant, session.projectRoot)) throw this.#conversationRefused('session.reload', 'session');
       await this.#seeForkSources([session]);
       return { session: this.#safeSession(session), ...(result.duplicate === true ? { duplicate: true } : {}) };
+    },
+    // Compaction (t-de1a): a root in the grant, looked up afresh and driven within the grant's modes as
+    // session.prompt is (its checkpoint turn drives the session); the answer is its status only.
+    'session.compact': async params => {
+      await this.#conversationRoot(params.sessionId, COMPACT_REFUSALS);
+      const result = await this.#call('session.compact', { sessionId: params.sessionId }).catch(error => { throw this.#conversationError(error, COMPACT_REFUSALS); });
+      const status = result?.status;
+      if (status !== 'started' && status !== 'deferred' && status !== 'running') throw this.#conversationRefused('session.compact', 'shape');
+      return { status };
     },
     // The composer's "/" list: known fields of each entry only, never a path.
     'session.commands': async params => {

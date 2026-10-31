@@ -22,8 +22,10 @@ async function project(command, args) {
   try {
     const result = await (command === 'upgrade' ? upgradeProject : initProject)(args[0] ?? process.cwd(), { library: alpHome() });
     console.log(`ALP initialized: ${result.created.length} files created, ${result.preserved.length} existing files preserved.`);
-    const library = await seedLibrary(alpHome());
+    // On upgrade an edited role-skills.json is offered the built-in role skills it never was (t-de1a).
+    const library = await seedLibrary(alpHome(), { offerRoleSkills: command === 'upgrade' });
     if (library.created.length || library.updated.length) console.log(`Skill library ${alpHome()}: ${library.created.length} files added, ${library.updated.length} unchanged files updated.`);
+    if (library.offered?.length) console.log(`New built-in skills given to roles in your edited role-skills.json: ${library.offered.join(', ')} (remove any you do not want; ALP will not add it again).`);
     if (command === 'init' && result.updated?.length) console.log(`Template model profiles refreshed: ${result.updated.join(', ')}`);
     if (command === 'upgrade') {
       console.log(`ALP upgraded: ${result.updated.length} files updated.${result.backup ? ` Backup: ${result.backup}` : ''}`);

@@ -1602,7 +1602,11 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       if (typeof sessionId !== 'string' || !sessionId) throw new RpcError(-32602, 'sessionId is required');
       if (!runtime.compact) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd does not compact sessions');
       try { return runtime.compact(sessionId); }
-      catch (error) { throw new RpcError(ERROR.unavailable, error instanceof Error ? error.message : String(error)); }
+      catch (error) {
+        // A refusal keeps its reason (session_busy, runtime_unsupported), so a client can word it (t-de1a).
+        const reason = (error as { data?: { reason?: unknown } })?.data?.reason;
+        throw new RpcError(ERROR.unavailable, error instanceof Error ? error.message : String(error), typeof reason === 'string' ? { reason } : undefined);
+      }
     },
 
     /** The slash commands and skills a live session's composer offers after "/" (t-f628). */
