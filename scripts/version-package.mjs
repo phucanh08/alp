@@ -14,6 +14,14 @@ for (const pkg of packages) {
   if (pkg.manifest.dependencies?.[workspace]) pkg.manifest.dependencies[workspace] = version;
   await writeFile(path.join(root, pkg.location, 'package.json'), `${JSON.stringify(pkg.manifest, null, 2)}\n`);
 }
+// npm/alp (the @anhlp/alp wrapper) is not a workspace: it pins @anhlp/alp-cli exactly and ships at the same version.
+const wrapperPath = path.join(root, 'npm/alp/package.json');
+const wrapper = JSON.parse(await readFile(wrapperPath, 'utf8'));
+if (wrapper.dependencies?.[workspace]) {
+  wrapper.dependencies[workspace] = version;
+  wrapper.version = version;
+  await writeFile(wrapperPath, `${JSON.stringify(wrapper, null, 2)}\n`);
+}
 if (manifest.dependencies?.[workspace]) {
   manifest.dependencies[workspace] = version;
   await writeFile(path.join(root, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);

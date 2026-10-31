@@ -3,7 +3,7 @@
 # junction <Root>\app\current points at it, and <Dir>\alp.cmd runs it.
 #
 #   irm https://github.com/phucanh08/alp/releases/latest/download/install.ps1 | iex
-#   & ([scriptblock]::Create((irm https://github.com/phucanh08/alp/releases/latest/download/install.ps1))) -Version 0.0.1-beta.6
+#   & ([scriptblock]::Create((irm https://github.com/phucanh08/alp/releases/latest/download/install.ps1))) -Version 0.0.1-beta.7
 #
 # Options (or the environment variables in brackets, which also work with `| iex`):
 #   -Version <v>     install release v<v> instead of the latest      [ALP_INSTALL_VERSION]
