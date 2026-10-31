@@ -6,7 +6,7 @@ import { models, thinkingOptionsFor } from './catalog.js';
 import { claudeSandboxAvailable, SKILL_PLUGIN } from './claude-transport.js';
 import { languageInstruction } from './language.js';
 import { antigravityModeText } from './antigravity-transport.js';
-import { HANDOFF_TOOL, WAIT_TOOL, SEND_TOOL, MERGE_TOOL, VERIFY_TOOL, DISCARD_TOOL, RESOLVE_TOOL, CANCEL_TOOL, RECALL_TOOL, PIN_TOOL, BOARD_TOOL, UNPIN_TOOL, ASK_TOOL, LESSON_TOOL, LESSON_CURATE_TOOL, SKILL_TOOL, ISSUE_TOOL, SCHEDULE_TOOL, mainOf, taskActions, taskTool } from './tools.js';
+import { HANDOFF_TOOL, WAIT_TOOL, SEND_TOOL, MERGE_TOOL, VERIFY_TOOL, DISCARD_TOOL, RESOLVE_TOOL, CANCEL_TOOL, RECALL_TOOL, PIN_TOOL, BOARD_TOOL, UNPIN_TOOL, ASK_TOOL, LESSON_TOOL, LESSON_CURATE_TOOL, SKILL_TOOL, SKILL_RETIRE_TOOL, ISSUE_TOOL, SCHEDULE_TOOL, mainOf, taskActions, taskTool } from './tools.js';
 
 import { COMPACT_SHARE } from './runtime-context.js';
 
@@ -292,7 +292,7 @@ export function nativeSessionConfig(
       ...(targets.length ? [WAIT_TOOL, CANCEL_TOOL, MERGE_TOOL, DISCARD_TOOL, RESOLVE_TOOL, VERIFY_TOOL, RECALL_TOOL] : []),
       ...(targets.length || parentAgent ? [SEND_TOOL] : []),
       ...(parentAgent ? [HANDOFF_TOOL] : []),
-      ...(supervised ? [LESSON_TOOL, LESSON_CURATE_TOOL, SKILL_TOOL] : []),
+      ...(supervised ? [LESSON_TOOL, LESSON_CURATE_TOOL, SKILL_TOOL, SKILL_RETIRE_TOOL] : []),
       ...(!parentAgent && mapping.agent.name === mainOf(mapping) ? [ISSUE_TOOL, SCHEDULE_TOOL] : []),
       ASK_TOOL,
       PIN_TOOL,

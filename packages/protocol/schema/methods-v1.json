@@ -1471,6 +1471,9 @@
             "minLength": 1,
             "maxLength": 8000,
             "pattern": "\\S"
+          },
+          "keepsSession": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -8921,6 +8924,9 @@
         },
         "lastError": {
           "$ref": "#/$defs/scheduleError"
+        },
+        "keepsSession": {
+          "const": false
         }
       },
       "required": [

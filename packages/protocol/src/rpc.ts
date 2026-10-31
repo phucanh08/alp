@@ -307,7 +307,7 @@ export type RpcMethodMap = {
   'settings.language.get': { params: Empty; result: LanguageSetting };
   'settings.language.set': { params: { language: string | null }; result: LanguageSetting };
   /** Capability `schedule`: a one-shot continuation of a root session, due at `dueAt` (UTC, ISO 8601). */
-  'schedule.create': { params: { projectRoot: string; sessionId: string; dueAt: string; prompt: string }; result: { job: ScheduleJob } };
+  'schedule.create': { params: { projectRoot: string; sessionId: string; dueAt: string; prompt: string; keepsSession?: boolean }; result: { job: ScheduleJob } };
   'schedule.list': { params: { projectRoot: string; status?: ScheduleStatus }; result: { jobs: ScheduleJob[] } };
   'schedule.get': { params: { id: string; projectRoot: string }; result: { job: ScheduleJob } };
   'schedule.cancel': { params: { id: string; projectRoot: string }; result: { job: ScheduleJob } };

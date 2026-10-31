@@ -304,6 +304,22 @@ export const SKILL_TOOL = {
   },
 };
 
+export const SKILL_RETIRE_TOOL = {
+  type: 'function',
+  name: 'alp_skill_retire',
+  description: 'Propose to retire a skill of the user\'s skill library that is no longer needed. ALP shows the skill and the roles that lose it to the user, and only when the user approves moves it out of the library into retired-skills (kept, so it can be restored) and removes it from role-skills.json. Nothing changes without that approval. Returns pending_approval with approvalId immediately; the result arrives once by mail. Never delete skill files any other way.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      name: { type: 'string', description: 'The skill directory name in the library.' },
+      reason: { type: 'string', description: 'Why it is no longer needed, in one line (at most 300 characters).' },
+      requestId: { type: 'string', description: 'Optional session-scoped idempotency key (1-100 characters).' },
+    },
+    required: ['name', 'reason'],
+    additionalProperties: false,
+  },
+};
+
 export const ISSUE_TOOL = {
   type: 'function',
   name: 'alp_issue',
