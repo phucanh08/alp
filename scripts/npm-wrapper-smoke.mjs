@@ -26,6 +26,24 @@ function run(command, args, options = {}) {
   return result.stdout;
 }
 
+// `npm install -g` resolves third-party dependencies from the registry into an empty cache; on
+// Windows CI that has run past the 300s spawn timeout (t-b3a0). Give it a longer, overridable
+// timeout, let npm retry fetches itself, and retry the whole install a bounded number of times
+// on a fresh prefix; the npm cache is kept between attempts so later attempts mostly hit it.
+const INSTALL_TIMEOUT_MS = Number(process.env.ALP_SMOKE_INSTALL_TIMEOUT_MS) || 480_000;
+const INSTALL_ATTEMPTS = 3;
+function installGlobal(args) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return run('npm', args, { timeout: INSTALL_TIMEOUT_MS, env: { ...env, npm_config_fetch_retries: '5', npm_config_fetch_retry_mintimeout: '10000', npm_config_fetch_retry_maxtimeout: '120000', npm_config_fetch_timeout: '120000', npm_config_prefer_offline: 'true' } });
+    } catch (error) {
+      if (attempt >= INSTALL_ATTEMPTS) throw error;
+      console.warn(`[npm-wrapper-smoke] npm install -g attempt ${attempt}/${INSTALL_ATTEMPTS} failed, retrying:\n${String(error.message).slice(0, 2000)}`);
+      rmSync(prefix, { recursive: true, force: true });
+    }
+  }
+}
+
 try {
   mkdirSync(env.ALP_HOME, { recursive: true, mode: 0o700 });
   let tarballs;
@@ -43,7 +61,7 @@ try {
   }
   // The local tarballs satisfy @anhlp/alp's pinned @anhlp/alp-cli and its @anhlp/* dependencies,
   // so nothing of ALP's comes from the registry.
-  run('npm', ['install', '-g', '--no-audit', '--no-fund', ...tarballs]);
+  installGlobal(['install', '-g', '--no-audit', '--no-fund', ...tarballs]);
   const bin = process.platform === 'win32' ? path.join(prefix, 'alp.cmd') : path.join(prefix, 'bin', 'alp');
   if (!existsSync(bin)) throw new Error(`npm install -g made no ${bin}`);
   // @anhlp/alp-cli declares bin alp too: the command must be the wrapper's.
