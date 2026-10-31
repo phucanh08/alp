@@ -110,7 +110,7 @@ try {
     throw new Error(`standalone core driver exited ${status} without passing\n${output}`);
   }
   // Exercise the actual CLI/ACP entry of the installed @anhlp/alp-cli. (@anhlp/alp is the npm
-  // launcher of the ALP executable since t-cd7f and carries no JavaScript of ALP's; package-smoke runs it.)
+  // wrapper that runs @anhlp/alp-cli since t-1807; package-smoke runs it.)
   mkdirSync(path.join(core, 'test/support'), { recursive: true });
   mkdirSync(path.join(core, 'test/integration'), { recursive: true });
   copyFileSync(path.join(root, 'test/support/recovery.js'), path.join(core, 'test/support/recovery.js'));

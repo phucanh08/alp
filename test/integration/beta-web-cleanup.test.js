@@ -96,7 +96,7 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
       await writeFile(path.join(scripts, 'fixture-child-process.mjs'), `
         import { spawnSync as realSpawnSync } from 'node:child_process'; import fs from 'node:fs'; import path from 'node:path';
         export function spawnSync(command, args, options) {
-          // The launcher without a platform package: exit 1 with the install hints.
+          // The npm wrapper (runs @anhlp/alp-cli): prints the fixture version.
           if (String(args[0]).endsWith('alp.js') && args[1] === '--version') return { status: 0, stdout: '0.0.0-fixture\\n', stderr: '' };
           if (args[1] === 'web' && args[2] === '--print') {
             for (const role of ['daemon', 'web']) {
