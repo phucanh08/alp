@@ -1,7 +1,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
-import { MODELS } from './models.js';
+import { knownModel } from './models.js';
 import { resolveTeam, teamSources } from './teams.js';
 
 export const userLibrary = () => process.env.ALP_HOME ?? path.join(os.homedir(), '.alp');
@@ -31,13 +31,13 @@ export const parseProfile = profile => {
 };
 /** The string form of a profile: "provider:model", with ":effort" when it has one. */
 export const profileString = profile => `${profileModel(profile)}${profile.effort ? `:${profile.effort}` : ''}`;
-/** The efforts a runtime-prefixed model takes, for the models ALP knows; undefined for others. */
-export const modelEfforts = id => MODELS.find(model => `${model.runtime}:${model.id}` === id)?.efforts;
+/** The efforts a runtime-prefixed model takes, for the models ALP knows (the live catalog when loaded, t-086c); undefined for others. */
+export const modelEfforts = id => knownModel(id)?.efforts;
 /** An effort the model takes: the one wanted, or else the model's own default. */
 export const fitEffort = (id, effort) => {
   const efforts = modelEfforts(id);
   if (!efforts?.length || efforts.includes(effort)) return effort;
-  return MODELS.find(model => `${model.runtime}:${model.id}` === id)?.effort ?? efforts[0];
+  return knownModel(id)?.effort ?? efforts[0];
 };
 /** Whether a profile stands for every model of its provider. */
 export const anyModel = profile => profile?.model === '*';

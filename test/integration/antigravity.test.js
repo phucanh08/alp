@@ -536,3 +536,18 @@ test('Antigravity probe advertises the three enforced modes; legacy readOnlyMode
     assert.deepEqual(discovered.modes.map(mode => mode.id), ['read-only', 'workspace-write', 'full-access']);
   }
 });
+
+test('Antigravity passes ALP\'s effort as agy --effort when agy takes it, and leaves agy\'s default otherwise (t-086c)', async t => {
+  const { root, runtime, turn, dir } = await setup(t);
+  const log = path.join(dir, 'agy.jsonl');
+  await writeFile(log, '');
+  await runtime.open('high', { cwd: root, model: 'antigravity:gemini-2.5-pro', mode: 'full-access', thinking: 'high' });
+  await turn('say ok', 'high');
+  const [high] = await startArgs(log);
+  assert.equal(high[high.indexOf('--effort') + 1], 'high');
+  await writeFile(log, '');
+  await runtime.open('none', { cwd: root, model: 'antigravity:gemini-2.5-pro', mode: 'full-access' });
+  await turn('say ok', 'none');
+  const [none] = await startArgs(log);
+  assert.ok(!none.includes('--effort'), 'none is not an agy effort');
+});

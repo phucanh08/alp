@@ -2,7 +2,7 @@ import { copyFile, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { initProject } from '@anhlp/alp-core/init';
-import { catalogModels } from '@anhlp/alp-core/models';
+import { catalogModels, useLiveModels } from '@anhlp/alp-core/models';
 import { fitEffort, modelEfforts } from '@anhlp/alp-core/profiles';
 import { resolveTeam } from '@anhlp/alp-core/teams';
 import { validateSettings } from '@anhlp/alp-core/validation';
@@ -23,6 +23,8 @@ const ANY_EFFORT = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 /** Write Phở and Cafe's agent profiles into a project's .alp/settings.json, without installing software or calling models. */
 export async function setup(args, home) {
+  // Effort fitting reads alpd's cached live catalog when there is one (t-086c); no provider is asked.
+  useLiveModels(catalogModels(home));
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: Object.fromEntries(
     ['runtime', 'prefer', ...PROVIDERS.flatMap(provider => Object.values(FLAGS).map(flag => `${provider}-${flag}`))].map(name => [name, { type: 'string' }]),
   ) });

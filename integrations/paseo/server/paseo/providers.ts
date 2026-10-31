@@ -30,8 +30,10 @@ const PASEO_ID = /^[a-z][a-z0-9-]*$/;
 /** Snapshots the app asked for by folder, so a finished discovery reaches each of them. */
 const KEPT_FOLDERS = 20;
 
-export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
+export function createProviders({ home, broadcast, alpEntry, refreshCatalog, log = () => {} }: {
   home?: string;
+  /** alpd's catalog.refresh over the local connection (t-086c): asks each native CLI for its models now. */
+  refreshCatalog?: () => Promise<unknown>;
   broadcast: (message: Outbound) => void;
   /** ALP's own entry for a folder (agents.ts). */
   alpEntry: (cwd?: string) => Promise<Entry>;
@@ -55,6 +57,12 @@ export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
     })());
     // The models are read fresh each time: alpd's live catalog cache may have changed since (t-e5ee).
     return native.get(id)!.then((entry): Entry => ({ ...entry, models: catalogModels(home).filter(model => model.runtime === id).map((model, index) => ({ provider: id, id: model.id, label: model.label, description: model.description, isDefault: index === 0 })) }));
+  }
+
+  /** Refreshes alpd's live model catalog; the native entries read its cache again on the next push. */
+  async function refreshNativeModels() {
+    if (!refreshCatalog) throw new Error('the model list refreshes through the ALP daemon, which this server does not reach');
+    await refreshCatalog();
   }
 
   async function files() {
@@ -194,8 +202,11 @@ export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
   async function diagnostic(id: string) {
     if (nativeIds.includes(id)) {
       native.delete(id);
+      let refreshed = 'Model list refreshed from the provider.';
+      try { await refreshNativeModels(); } catch (error: any) { refreshed = `Model list not refreshed: ${error?.message ?? error}`; }
       const entry = await nativeEntry(id);
-      return `${entry.label}: ${entry.status === 'ready' ? 'installed' : entry.error}. Models are from the ALP catalog; access depends on your account.`;
+      void push();
+      return `${entry.label}: ${entry.status === 'ready' ? 'installed' : entry.error}. Models are from the ALP catalog; access depends on your account.\n${refreshed}\nModels: ${(entry.models as Model[] | undefined)?.map(model => model.id).join(', ') || 'none'}`;
     }
     if (id === 'alp') return 'ALP runs its teams of Codex and Claude Code agents. Check them with: alp doctor';
     if (home) await ensureLibrary(home, { templates });
@@ -236,6 +247,8 @@ export function createProviders({ home, broadcast, alpEntry, log = () => {} }: {
     async refresh_providers_snapshot_request(message: Inbound<'refresh_providers_snapshot_request'>) {
       const ids = message.providers?.length ? message.providers : (await files()).map(row => row.id);
       if (!message.providers?.length) native.clear();
+      // Native models come from alpd's live catalog: ask it to refresh, then push the new lists.
+      if (ids.some(id => nativeIds.includes(id))) void refreshNativeModels().then(() => push(), error => log(`model catalog refresh failed: ${error?.message ?? error}`));
       for (const id of ids) {
         if (nativeIds.includes(id)) native.delete(id);
         else if (id !== 'alp') { found.delete(id); void discover(id); }

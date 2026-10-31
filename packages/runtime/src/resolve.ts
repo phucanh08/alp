@@ -174,9 +174,12 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
       throw new Error('Antigravity cannot enforce custom permission rules');
     }
   }
-  // An ACP or Antigravity agent chooses its own effort.
+  // An ACP agent chooses its own effort. Antigravity runs at agy's default unless an effort is chosen for
+  // it explicitly (the spec, the profile, the oracle's or the team's choice); agy takes it as --effort (t-086c).
   const availableThinking = ['acp', 'antigravity'].includes(runtimeKind) ? [] : thinkingOptionsFor(runtimeKind as 'codex' | 'claude' | 'antigravity', model);
-  const preferred = ['acp', 'antigravity'].includes(runtimeKind) ? 'none' : spec.thinking ?? profileChoice?.effort ?? agent.projectRuntime?.reasoning ?? (agent.name === 'oracle' ? team?.oracleThinking?.[`${runtimeKind}:${model}`] ?? team?.oracleThinking?.[runtimeKind] : undefined) ?? teamChoice?.thinking ?? agent.runtime.reasoning ??
+  const preferred = runtimeKind === 'acp' ? 'none'
+    : runtimeKind === 'antigravity' ? spec.thinking ?? profileChoice?.effort ?? (agent.name === 'oracle' ? team?.oracleThinking?.[`${runtimeKind}:${model}`] ?? team?.oracleThinking?.[runtimeKind] : undefined) ?? teamChoice?.thinking ?? 'none'
+    : spec.thinking ?? profileChoice?.effort ?? agent.projectRuntime?.reasoning ?? (agent.name === 'oracle' ? team?.oracleThinking?.[`${runtimeKind}:${model}`] ?? team?.oracleThinking?.[runtimeKind] : undefined) ?? teamChoice?.thinking ?? agent.runtime.reasoning ??
     (agent.name === 'oracle' ? ORACLE_THINKING : availableThinking.length ? 'medium' : 'none');
   // A default the model does not take gives way to the model's own (GPT-6 Astra runs at low only); an explicit choice is checked below.
   const thinking = spec.thinking === undefined && availableThinking.length && !availableThinking.some(candidate => candidate.id === preferred)

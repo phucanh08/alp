@@ -15,12 +15,12 @@ import { seedLibrary } from '@anhlp/alp-core/library';
 import { saveEntry } from '@anhlp/alp-core/library-edit';
 import { loadProvider } from '@anhlp/alp-core/providers';
 import { initProject } from '@anhlp/alp-core/init';
-import { resolveSession } from '@anhlp/alp-runtime';
+import { resolveSession, ModelCatalog } from '@anhlp/alp-runtime';
 
 const FAKE = fileURLToPath(new URL('../../../test/support/fake-acp.js', import.meta.url));
 
 /** alpd with its web socket, and an app past hello whose frames must pass Paseo's validator. */
-async function setup(t) {
+async function setup(t, { modelCatalog } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-providers-'));
   const home = path.join(directory, 'home');
   await seedLibrary(home);
@@ -30,7 +30,7 @@ async function setup(t) {
     await saveEntry('providers', id, { provider: { ...file, command: `alp-test-missing-${id}` } }, { scope: 'library', library: home });
   }
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false, libraryDir: home });
-  const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test', home });
+  const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test', home, ...(modelCatalog ? { modelCatalog: modelCatalog(home) } : {}) });
   let web;
   const gateway = createPaseoBridge({ clientFactory: async (onEvent) => {
     const client = daemon.local();
@@ -195,4 +195,24 @@ test('Antigravity supports partial provider edits and can be disabled', async t 
   const config = JSON.parse(await readFile(path.join(home, 'providers/antigravity.json'), 'utf8'));
   assert.equal(config.enabled, false);
   assert.equal(config.label, 'AGY local');
+});
+
+test('a native provider\'s diagnostic and refresh ask alpd to refresh its live model list (t-086c)', async t => {
+  let calls = 0;
+  const { ask } = await setup(t, { modelCatalog: home => new ModelCatalog({ home, refreshMs: 0, apply: false, probes: { codex: async () => { calls++; return [{ id: 'gpt-live-probe', label: 'Live probe' }]; } } }) });
+  const diagnostic = await ask({ type: 'provider_diagnostic_request', provider: 'codex' });
+  assert.equal(calls, 1);
+  assert.match(diagnostic.payload.diagnostic, /Model list refreshed/);
+  assert.match(diagnostic.payload.diagnostic, /gpt-live-probe/);
+  assert.equal((await ask({ type: 'refresh_providers_snapshot_request', providers: ['codex'] })).payload.acknowledged, true);
+  for (let i = 0; i < 100 && calls < 2; i++) await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(calls, 2);
+  const snapshot = await ask({ type: 'get_providers_snapshot_request' });
+  assert.ok(snapshot.payload.entries.find(entry => entry.provider === 'codex').models.some(model => model.id === 'gpt-live-probe'));
+});
+
+test('without a live catalog the native diagnostic says the model list was not refreshed (t-086c)', async t => {
+  const { ask } = await setup(t);
+  const diagnostic = await ask({ type: 'provider_diagnostic_request', provider: 'codex' });
+  assert.match(diagnostic.payload.diagnostic, /Model list not refreshed: .*not available/);
 });

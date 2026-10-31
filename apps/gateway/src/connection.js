@@ -415,7 +415,7 @@ export class ClientConnection {
       this.#terminalFramesTooSmall = true;
       this.#log.warn('alpd\'s terminal output does not fit this gateway\'s frame limit; terminals are not forwarded', { code: 'ALP_GATEWAY_TERMINAL_FRAME' });
     }
-    client.onNotification((method, params) => { if (method === 'terminal.event') this.#terminalEvent(params); else if (method === 'terminal.changed') this.#terminalChanged(params); });
+    client.onNotification((method, params) => { if (method === 'terminal.event') this.#terminalEvent(params); else if (method === 'terminal.changed') this.#terminalChanged(params); else if (method === 'catalog.updated') this.#catalogUpdated(params); });
     client.onEvent(envelope => { if (!this.#capabilities.includes('workspace.worktree') || !this.#grant.permissions.has('workspace.manage')) { this.#event(envelope); return; } this.#eventTail = this.#eventTail.then(async () => { await this.#refreshWorktrees(); this.#event(envelope); }).catch(() => { this.close(CLOSE_CODE.internal, 'Workspace authority unavailable; reconnect'); }); });
     client.onClose(error => this.#upstreamClosed(error));
   }
@@ -1119,6 +1119,15 @@ export class ClientConnection {
     }
     if (event.type === 'detached') this.#terminals.delete(event.terminalId);
     this.#push(JSON.stringify({ jsonrpc: '2.0', method: 'terminal.event', params: event }));
+  }
+
+  /** The live catalog changed (t-e5ee): read-only news for clients that may read it (catalog.get), with
+   * fetchedAt only; the client re-reads catalog.get, which the gateway projects.
+   * @param {any} raw */
+  #catalogUpdated(raw) {
+    if (this.#closed || !this.#helloed || !this.#grant.permissions.has('session.read')) return;
+    const fetchedAt = typeof raw?.fetchedAt === 'string' && raw.fetchedAt.length <= 64 ? raw.fetchedAt : undefined;
+    this.#push(JSON.stringify({ jsonrpc: '2.0', method: 'catalog.updated', params: fetchedAt ? { fetchedAt } : {} }));
   }
 
   /** Only this connection's authorized watch gets opaque invalidations; never host terminal data.

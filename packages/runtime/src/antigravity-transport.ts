@@ -70,6 +70,12 @@ export function antigravityModeArgs(sandbox: unknown, cwd: string): string[] {
 }
 
 /** What each mode lets an Antigravity agent do, for its instructions. */
+/** Efforts `agy --effort` takes (agy --help: low|medium|high|xhigh|max); others leave agy's default. */
+export const AGY_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+export function antigravityEffortArgs(thinking: unknown): string[] {
+  return typeof thinking === 'string' && AGY_EFFORTS.includes(thinking) ? ['--effort', thinking] : [];
+}
+
 export function antigravityModeText(sandbox: unknown): string {
   const mode = modeOf(sandbox);
   if (mode === 'read-only') return 'agy enforces read-only: its own file reading and search tools work, and ALP\'s tools; it allows only the terminal commands pwd, ls, cat, head, tail, wc and grep, with no redirection or chaining, and denies every file edit and other command. A denied tool ends your turn, so do not attempt one: report work that needs changes to your requester.';
@@ -250,6 +256,7 @@ export class AntigravityTransport {
     if (params.model) {
       args.push('--model', params.model);
     }
+    args.push(...antigravityEffortArgs(params.thinking));
 
     if (params.threadId) {
       args.push('--conversation', params.threadId);
