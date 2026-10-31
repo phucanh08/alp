@@ -18,7 +18,7 @@ export async function until(check, what = 'condition', ms = 5000) {
 
 /**
  * @param {import('node:test').TestContext} t
- * @param {{ daemon: ReturnType<typeof import('./fake-daemon.js').fakeDaemon>, credentials?: Record<string, { workspaces: string[], permissions?: string[], modes?: string[], worktreeMappings?: string[], agent?: boolean }>, config?: object, serveStatic?: Function }} options
+ * @param {{ daemon: ReturnType<typeof import('./fake-daemon.js').fakeDaemon>, credentials?: Record<string, { workspaces: string[], permissions?: string[], modes?: string[], worktreeMappings?: string[], agent?: boolean | string }>, config?: object, serveStatic?: Function }} options
  */
 export async function startGateway(t, { daemon, credentials = {}, config = {}, serveStatic }) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gateway-'));

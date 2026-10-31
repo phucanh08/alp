@@ -161,7 +161,7 @@ test('the credential CLI says what terminal.exec grants where it is granted', as
   await mkdir(workspace);
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
-  const run = (...args) => promisify(execFile)(process.execPath, [path.join(import.meta.dirname, '../src/cli.js'), ...args], { env: { ...process.env, ALP_GATEWAY_HOME: path.join(directory, 'gateway'), ALP_HOME: directory } });
+  const run = (...args) => promisify(execFile)(process.execPath, [path.join(import.meta.dirname, '../src/cli.js'), ...args], { env: { ...process.env, ALP_GATEWAY_HOME: path.join(directory, 'gateway'), ALP_HOME: directory, ALP_AGENT_SESSION: '' } });
   const help = await run('--help');
   assert.match(help.stdout, /terminal\.exec/);
   assert.match(help.stdout, /NOT a sandbox/);

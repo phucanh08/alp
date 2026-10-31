@@ -57,12 +57,21 @@ export async function renameWithRetry(temporary, destination, {
  * a credential without it keeps what it had, and a client may still mark itself. A credential
  * never loses the mark: make a new one for a user.
  *
+ * A named agent credential (t-1c59) also carries the agent's name (`agentName`, which the owner
+ * gives with `credential create --agent NAME`): the gateway sends it to alpd in its re-hello as
+ * `principal: { agent: NAME }`, so alpd and the logs can tell which agent connected. The name is
+ * fixed for the credential's life (reissue may name an unnamed agent credential, never rename
+ * one); it never adds access, and a credential with a malformed name is refused, not read as a
+ * user's. Only the owner's local CLI makes, changes or revokes credentials; no RPC does.
+ *
  * Token: `alpgw1.<id>.<secret>`; id is 16 hex characters, secret 32 random bytes in base64url.
  */
 
 const TOKEN = /^alpgw1\.([a-f0-9]{16})\.([A-Za-z0-9_-]{43})$/;
 const FILE_VERSION = 1;
 const MODE = /^[a-z][a-z0-9-]{0,63}$/;
+/** An agent's name on a credential: lower-case letters, digits and single hyphens, 1 to 64 characters. */
+export const AGENT_NAME = /^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){0,63}$/;
 
 /**
  * @typedef {{ path: string, canonical: string }} Workspace
@@ -70,11 +79,11 @@ const MODE = /^[a-z][a-z0-9-]{0,63}$/;
  *   names a workspace by either string, exactly.
  * @typedef {{
  *   id: string, label: string, hash: string, workspaces: Workspace[], permissions: string[],
- *   worktreeMappings?: string[], scopeId?: string, modes?: string[], agent?: true, createdAt: string, rotatedAt?: string, updatedAt?: string, expiresAt?: string, revokedAt?: string,
+ *   worktreeMappings?: string[], scopeId?: string, modes?: string[], agent?: true, agentName?: string, createdAt: string, rotatedAt?: string, updatedAt?: string, expiresAt?: string, revokedAt?: string,
  * }} StoredCredential
  * @typedef {{
  *   id: string, label: string, workspaces: Workspace[], permissions: Set<string>,
- *   worktreeMappings?: string[], scopeId?: string, modes?: Set<string>, agent?: true, expiresAt?: number, secretHash: string, fingerprint: string,
+ *   worktreeMappings?: string[], scopeId?: string, modes?: Set<string>, agent?: true, agentName?: string, expiresAt?: number, secretHash: string, fingerprint: string,
  * }} Grant
  */
 
@@ -187,17 +196,21 @@ function checkModes(modes) {
   return [...new Set(modes)];
 }
 
-/** @param {unknown} agent */
+/**
+ * `agent`: undefined or false (a user's), true (an unnamed agent credential, as before t-1c59) or
+ * an agent name. @param {unknown} agent @returns {{ agent: boolean, name?: string }}
+ */
 function checkAgent(agent) {
-  if (agent !== undefined && typeof agent !== 'boolean') throw new Error('agent must be true or false');
-  return agent === true;
+  if (agent === undefined || typeof agent === 'boolean') return { agent: agent === true };
+  if (typeof agent !== 'string' || !AGENT_NAME.test(agent) || agent === 'true' || agent === 'false') throw new Error(`agent must be true, false or an agent name (lower-case letters, digits and single hyphens, starting with a letter, at most 64 characters, not true or false); got ${JSON.stringify(agent)}`);
+  return { agent: true, name: agent };
 }
 
 /**
  * Creates a credential and returns its token, which is not stored and cannot be shown again.
  * `agent: true` makes an agent credential (see above); the default is a user's.
  * @param {string} home
- * @param {{ label: string, workspaces: string[], permissions: string[], worktreeMappings?: string[], modes?: string[], agent?: boolean, expiresAt?: string, now?: Date }} options
+ * @param {{ label: string, workspaces: string[], permissions: string[], worktreeMappings?: string[], modes?: string[], agent?: boolean | string, expiresAt?: string, now?: Date }} options
  */
 export async function createCredential(home, { label, workspaces, permissions, worktreeMappings = [], modes, agent, expiresAt, now = new Date() }) {
   if (typeof label !== 'string' || !label.trim() || label.length > 100) throw new Error('A credential needs a label of 1 to 100 characters');
@@ -214,7 +227,8 @@ export async function createCredential(home, { label, workspaces, permissions, w
     permissions: checkPermissions(permissions),
     worktreeMappings: checkMappings(worktreeMappings), scopeId: randomBytes(16).toString('hex'),
     ...(checkModes(modes) ? { modes: checkModes(modes) } : {}),
-    ...(forAgent ? { agent: true } : {}),
+    ...(forAgent.agent ? { agent: true } : {}),
+    ...(forAgent.name ? { agentName: forAgent.name } : {}),
     createdAt: now.toISOString(),
     ...(expiresAt ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
   };
@@ -250,7 +264,7 @@ export async function rotateCredential(home, id, { now = new Date() } = {}) {
  * Omitted fields retain their grants; supplied lists replace rather than append. `agent: true`
  * makes it an agent credential; an agent credential stays one (`agent: false` is refused).
  * @param {string} home @param {string} id
- * @param {{ label?: string, workspaces?: string[], permissions?: string[], worktreeMappings?: string[], modes?: string[], agent?: boolean, expiresAt?: string, now?: Date }} [options]
+ * @param {{ label?: string, workspaces?: string[], permissions?: string[], worktreeMappings?: string[], modes?: string[], agent?: boolean | string, expiresAt?: string, now?: Date }} [options]
  */
 export async function reissueCredential(home, id, { label, workspaces, permissions, worktreeMappings, modes, agent, expiresAt, now = new Date() } = {}) {
   const data = await readCredentials(home);
@@ -258,6 +272,7 @@ export async function reissueCredential(home, id, { label, workspaces, permissio
   if (credential.revokedAt) throw new Error(`Credential ${id} is revoked; create a new one`);
   const forAgent = checkAgent(agent);
   if (agent === false && credential.agent !== undefined) throw new Error(`Credential ${id} is an agent credential and stays one; create a new credential for a user`);
+  if (forAgent.name && credential.agentName !== undefined && credential.agentName !== forAgent.name) throw new Error(`Credential ${id} belongs to agent ${credential.agentName}; an agent credential is never renamed, create a new one for ${forAgent.name}`);
   if (label !== undefined && (typeof label !== 'string' || !label.trim() || label.length > 100)) throw new Error('A credential needs a label of 1 to 100 characters');
   if (expiresAt !== undefined && !(Date.parse(expiresAt) > now.getTime())) throw new Error('expiresAt must be a future ISO 8601 time');
   const replacement = {
@@ -267,7 +282,8 @@ export async function reissueCredential(home, id, { label, workspaces, permissio
     ...(workspaces !== undefined ? { workspaces: await resolveWorkspaces(workspaces) } : {}),
     ...(permissions !== undefined ? { permissions: checkPermissions(permissions) } : {}),
     ...(modes !== undefined ? { modes: checkModes(modes) } : {}),
-    ...(forAgent ? { agent: /** @type {true} */ (true) } : {}),
+    ...(forAgent.agent ? { agent: /** @type {true} */ (true) } : {}),
+    ...(forAgent.name ? { agentName: forAgent.name } : {}),
     ...(expiresAt !== undefined ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
   };
   const token = newToken(id);
@@ -328,6 +344,9 @@ function grantOf(stored, now) {
   // Anything but `true` in `agent` is not a credential the CLI wrote: refused, not read as a user's.
   if (stored.agent !== undefined && stored.agent !== true) return undefined;
   const agent = stored.agent === true;
+  // A name only on an agent credential, and only one the CLI could have written.
+  if (stored.agentName !== undefined && (!agent || typeof stored.agentName !== 'string' || !AGENT_NAME.test(stored.agentName))) return undefined;
+  const agentName = stored.agentName;
   return /** @type {Grant} */ ({
     id: stored.id,
     label: String(stored.label ?? ''),
@@ -336,11 +355,12 @@ function grantOf(stored, now) {
     worktreeMappings: mappingIds, scopeId: stored.scopeId ?? digest(JSON.stringify([workspaces, permissions, stored.worktreeMappings ?? []])),
     ...(Array.isArray(stored.modes) ? { modes: new Set(stored.modes.filter(mode => typeof mode === 'string')) } : {}),
     ...(agent ? { agent: true } : {}),
+    ...(agentName ? { agentName } : {}),
     ...(expiresAt !== undefined ? { expiresAt } : {}),
     secretHash: stored.hash,
     // The mark is appended only when set: a user credential's fingerprint (its epoch, when it has
     // no scopeId) stays what it was; gaining the mark changes it, so its connections close.
-    fingerprint: JSON.stringify([workspaces, permissions, stored.modes ?? null, stored.expiresAt ?? null, stored.worktreeMappings ?? [], stored.scopeId ?? null, ...(agent ? ['agent'] : [])]),
+    fingerprint: JSON.stringify([workspaces, permissions, stored.modes ?? null, stored.expiresAt ?? null, stored.worktreeMappings ?? [], stored.scopeId ?? null, ...(agent ? ['agent'] : []), ...(agentName ? [agentName] : [])]),
   });
 }
 

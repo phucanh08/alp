@@ -60,7 +60,7 @@ test('CLI edit/reissue replaces named grants, retains omitted fields, and reject
   const { home: gatewayHome, workspace, directory } = await home(t);
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
-  const run = (...args) => promisify(execFile)(process.execPath, [path.join(import.meta.dirname, '../src/cli.js'), 'credential', ...args], { env: { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory } });
+  const run = (...args) => promisify(execFile)(process.execPath, [path.join(import.meta.dirname, '../src/cli.js'), 'credential', ...args], { env: { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory, ALP_AGENT_SESSION: '' } });
   const original = JSON.parse((await run('create', '--label', 'phone', '--workspace', workspace, '--permission', 'session.write', '--mode', 'cafe', '--json')).stdout);
   const edited = JSON.parse((await run('edit', original.credential.id, '--permission', 'files.read', '--expires-in-days', '2', '--json')).stdout);
   assert.equal(edited.credential.id, original.credential.id);
@@ -91,7 +91,7 @@ test('an agent credential keeps its mark through rotate, update and reissue; a u
   assert.equal(user.credential.agent, undefined, 'a credential is a user\'s unless --agent');
   const agent = await createCredential(gatewayHome, { label: 'bot', workspaces: [workspace], permissions: ['session.write'], agent: true });
   assert.equal(agent.credential.agent, true);
-  await assert.rejects(createCredential(gatewayHome, { label: 'odd', workspaces: [workspace], permissions: ['session.write'], agent: 'yes' }), /agent must be true or false/);
+  await assert.rejects(createCredential(gatewayHome, { label: 'odd', workspaces: [workspace], permissions: ['session.write'], agent: 'Yes!' }), /agent must be true, false or an agent name/);
   const store = new CredentialStore({ home: gatewayHome, pollMs: 0 });
   t.after(() => store.close());
   await store.reload();
@@ -155,17 +155,93 @@ test('CLI --agent makes an agent credential, list shows it, and reissue keeps it
   const { home: gatewayHome, workspace, directory } = await home(t);
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
-  const run = (...args) => promisify(execFile)(process.execPath, [path.join(import.meta.dirname, '../src/cli.js'), 'credential', ...args], { env: { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory } });
+  const run = (...args) => promisify(execFile)(process.execPath, [path.join(import.meta.dirname, '../src/cli.js'), 'credential', ...args], { env: { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory, ALP_AGENT_SESSION: '' } });
   const user = JSON.parse((await run('create', '--label', 'phone', '--workspace', workspace, '--json')).stdout);
   assert.equal(user.credential.agent, undefined);
-  const bot = JSON.parse((await run('create', '--label', 'bot', '--workspace', workspace, '--agent', '--json')).stdout);
+  // A bare --agent is refused with a clear message, and makes nothing (t-1c59).
+  await assert.rejects(run('create', '--label', 'bot', '--workspace', workspace, '--agent'), error => /--agent needs the agent's name/.test(error.stderr) && error.code === 2);
+  await assert.rejects(run('create', '--label', 'bot', '--workspace', workspace, '--agent', '--json'), error => /--agent needs the agent's name/.test(error.stderr));
+  await assert.rejects(run('create', '--label', 'bot', '--workspace', workspace, '--agent=Bad_Name'), error => /agent must be/.test(error.stderr));
+  await assert.rejects(run('create', '--label', 'bot', '--workspace', workspace, '--agent='), error => /agent must be/.test(error.stderr));
+  assert.equal((await listCredentials(gatewayHome)).length, 1, 'no refused create wrote a credential');
+  const bot = JSON.parse((await run('create', '--label', 'bot', '--workspace', workspace, '--agent', 'reviewer', '--json')).stdout);
   assert.equal(bot.credential.agent, true);
+  assert.equal(bot.credential.agentName, 'reviewer');
+  assert.equal(bot.credential.expiresAt, undefined, 'no expiry by default');
   const listed = (await run('list')).stdout.split('\n');
-  assert.match(listed.find(line => line.startsWith(bot.credential.id)), /  agent$/);
+  assert.match(listed.find(line => line.startsWith(bot.credential.id)), /  agent reviewer$/);
   assert.doesNotMatch(listed.find(line => line.startsWith(user.credential.id)), /agent/);
   const reissued = JSON.parse((await run('reissue', bot.credential.id, '--label', 'bot 2', '--json')).stdout);
   assert.equal(reissued.credential.agent, true, 'reissue without --agent keeps the mark');
-  await assert.rejects(run('reissue', bot.credential.id, '--agent=false'), 'a boolean flag takes no value');
+  assert.equal(reissued.credential.agentName, 'reviewer', 'and the name');
+  await assert.rejects(run('reissue', bot.credential.id, '--agent=false'), error => /agent must be/.test(error.stderr));
+  await assert.rejects(run('reissue', bot.credential.id, '--agent', 'other'), error => /never renamed/.test(error.stderr));
+  await assert.rejects(run('reissue', bot.credential.id, '--agent'), error => /--agent needs the agent's name/.test(error.stderr));
+  assert.equal((await listCredentials(gatewayHome)).find(entry => entry.id === bot.credential.id).agentName, 'reviewer');
+});
+
+test('a process an ALP agent started may not create, rotate, reissue or revoke credentials (t-1c59)', async t => {
+  const { home: gatewayHome, workspace, directory } = await home(t);
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const run = (env, ...args) => promisify(execFile)(process.execPath, [path.join(import.meta.dirname, '../src/cli.js'), 'credential', ...args], { env: { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory, ALP_AGENT_SESSION: '', ...env } });
+  const user = JSON.parse((await run({}, 'create', '--label', 'phone', '--workspace', workspace, '--json')).stdout);
+  const before = await readFile(credentialsFile(gatewayHome), 'utf8');
+  const agent = { ALP_AGENT_SESSION: 'ses-1' };
+  for (const args of [['create', '--label', 'x', '--workspace', workspace, '--agent', 'bot'], ['create', '--label', 'x', '--workspace', workspace], ['rotate', user.credential.id], ['reissue', user.credential.id, '--label', 'y'], ['edit', user.credential.id, '--label', 'y'], ['revoke', user.credential.id]]) {
+    await assert.rejects(run(agent, ...args), error => error.code === 2 && /is the user's; this process was started by an ALP agent/.test(error.stderr), args.join(' '));
+  }
+  assert.equal(await readFile(credentialsFile(gatewayHome), 'utf8'), before, 'nothing changed');
+  assert.equal(JSON.parse((await run(agent, 'list', '--json')).stdout).length, 1, 'listing is still allowed');
+});
+
+test('a named agent credential keeps its name through rotate, update and reissue, and a bad name is refused (t-1c59)', async t => {
+  const { home: gatewayHome, workspace } = await home(t);
+  for (const bad of ['', 'true', 'false', 'Bot', '-bot', 'bot-', 'bo--t', 'bot_1', 'a'.repeat(65), 'bot name', 7]) {
+    await assert.rejects(createCredential(gatewayHome, { label: 'bot', workspaces: [workspace], permissions: ['session.write'], agent: bad }), /agent must be/, JSON.stringify(bad));
+  }
+  const user = await createCredential(gatewayHome, { label: 'phone', workspaces: [workspace], permissions: ['session.write'] });
+  const legacy = await createCredential(gatewayHome, { label: 'old', workspaces: [workspace], permissions: ['session.write'], agent: true });
+  assert.equal(legacy.credential.agentName, undefined, 'agent: true stays an unnamed agent credential');
+  const bot = await createCredential(gatewayHome, { label: 'bot', workspaces: [workspace], permissions: ['session.write'], agent: 'reviewer' });
+  assert.deepEqual([bot.credential.agent, bot.credential.agentName, bot.credential.expiresAt], [true, 'reviewer', undefined]);
+  const store = new CredentialStore({ home: gatewayHome, pollMs: 0 });
+  t.after(() => store.close());
+  await store.reload();
+  const userGrant = store.verify(user.token);
+  assert.equal(userGrant.agentName, undefined);
+  assert.equal(userGrant.fingerprint, JSON.stringify([userGrant.workspaces.map(({ path: p, canonical }) => ({ path: p, canonical })), [...userGrant.permissions], null, null, [], userGrant.scopeId]), 'a user credential\'s fingerprint is as before');
+  assert.ok(store.verify(legacy.token).fingerprint.endsWith(',"agent"]'), 'an unnamed agent credential\'s fingerprint is as before');
+  assert.equal(store.verify(bot.token).agentName, 'reviewer');
+  assert.equal((await rotateCredential(gatewayHome, bot.credential.id)).credential.agentName, 'reviewer');
+  assert.equal((await credentials.updateCredential(gatewayHome, bot.credential.id, { permissions: ['session.read'] })).credential.agentName, 'reviewer');
+  assert.equal((await credentials.reissueCredential(gatewayHome, bot.credential.id, { agent: true })).credential.agentName, 'reviewer');
+  await assert.rejects(credentials.reissueCredential(gatewayHome, bot.credential.id, { agent: 'other' }), /never renamed/);
+  // An unnamed agent credential may be named; a user credential may become a named agent's.
+  assert.equal((await credentials.reissueCredential(gatewayHome, legacy.credential.id, { agent: 'old-bot' })).credential.agentName, 'old-bot');
+  const named = await credentials.reissueCredential(gatewayHome, user.credential.id, { agent: 'helper' });
+  assert.deepEqual([named.credential.agent, named.credential.agentName], [true, 'helper']);
+});
+
+test('a hand-edited agent name that is malformed or without the mark leaves the credential unusable (t-1c59)', async t => {
+  const { home: gatewayHome, workspace } = await home(t);
+  const { credential, token } = await createCredential(gatewayHome, { label: 'bot', workspaces: [workspace], permissions: ['session.write'], agent: 'reviewer' });
+  const store = new CredentialStore({ home: gatewayHome, pollMs: 0 });
+  t.after(() => store.close());
+  const edit = async change => {
+    const data = JSON.parse(await readFile(credentialsFile(gatewayHome), 'utf8'));
+    Object.assign(data.credentials[0], change);
+    for (const key of Object.keys(change)) if (change[key] === undefined) delete data.credentials[0][key];
+    await writeFile(credentialsFile(gatewayHome), JSON.stringify(data), { mode: 0o600 });
+    await store.reload();
+  };
+  for (const change of [{ agentName: 'Bad' }, { agentName: 7 }, { agentName: '' }, { agent: undefined }]) {
+    await edit({ agent: true, agentName: 'reviewer' });
+    assert.equal(store.verify(token)?.agentName, 'reviewer');
+    await edit(change);
+    assert.equal(store.verify(token), undefined, JSON.stringify(change));
+  }
+  void credential;
 });
 
 test('reissue closes active old-grant connections, kills outstanding tickets and enforces the replacement grant', async t => {
@@ -216,7 +292,7 @@ test('files.read is held only when named: never by default, implied by nothing, 
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const cli = path.join(import.meta.dirname, '..', 'src', 'cli.js');
-  const env = { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory };
+  const env = { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory, ALP_AGENT_SESSION: '' };
   const create = async (...extra) => JSON.parse((await promisify(execFile)(process.execPath, [cli, 'credential', 'create', '--label', 'x', '--workspace', workspace, '--json', ...extra], { env })).stdout).credential.permissions;
   assert.deepEqual(await create(), ['session.read', 'session.write', 'project.read', 'project.write'], 'the default leaves files.read out');
   assert.deepEqual(await create('--permission', 'session.write,project.write'), ['session.read', 'session.write', 'project.read', 'project.write']);
