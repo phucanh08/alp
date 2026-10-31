@@ -262,15 +262,16 @@ export function switchCurrent(app, version, { platform = process.platform, fs = 
 
 /**
  * Removes what earlier updates left in `<app>`: versions other than `keep`, and staging directories.
- * A failure (a file still in use on Windows) leaves that entry for the next update.
+ * A failure (a file still in use on Windows) leaves that entry for the next update. keepAside keeps
+ * the copies earlier reinstalls moved aside, which a running alpd may still run from.
  * @param {string} app @param {string[]} keep
  */
-export function pruneVersions(app, keep, fs = nodeFs) {
+export function pruneVersions(app, keep, fs = nodeFs, { keepAside = false } = {}) {
   let names;
   try { names = fs.readdirSync(app); } catch { return []; }
   const removed = [];
   for (const name of names) {
-    if (name === 'current' || keep.includes(name)) continue;
+    if (name === 'current' || keep.includes(name) || (keepAside && name.startsWith('.alp-old-'))) continue;
     if (!/^[0-9][0-9A-Za-z.+-]*$/.test(name) && !/^\.alp-(update|old)-[0-9A-Za-z]+$/.test(name) && !/^\.current-[0-9a-f]+$/.test(name)) continue;
     try { fs.rmSync(path.join(app, name), { recursive: true, force: true }); removed.push(name); } catch {}
   }
@@ -389,7 +390,7 @@ export async function selfUpdate(args, overrides = {}) {
     try { nodeFs.rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
   }
   // The version this process (and maybe alpd) runs stays until the next update.
-  pruneVersions(app, [asset.version, path.basename(bundle.root), ...(running?.version ? [running.version] : []), ...(aside ? [aside] : [])]);
+  pruneVersions(app, [asset.version, path.basename(bundle.root), ...(running?.version ? [running.version] : []), ...(aside ? [aside] : [])], nodeFs, { keepAside: Boolean(running) });
   deps.log(`Updated ALP ${deps.version} → ${asset.version} (${current} → ${target})`);
 
   if (running && running.version !== asset.version) {

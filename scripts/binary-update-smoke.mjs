@@ -77,9 +77,7 @@ try {
     r = await alp(['update', '--yes', '--version', version, '--base-url', fileUrl]);
     check(r.code !== 0 && /Windows cannot replace it in place/.test(r.stderr), `a reinstall of the running version is refused on Windows (${r.stderr.trim()})`);
     check(JSON.stringify(versions()) === JSON.stringify(before), 'the refused reinstall changed nothing');
-    log('ok');
-    process.exit(0);
-  }
+  } else {
   r = await alp(['update', '--version', version, '--base-url', fileUrl]);
   check(r.code !== 0 && /pass --yes/.test(r.stderr), 'without a terminal, alp update needs --yes');
 
@@ -116,6 +114,7 @@ try {
   if (!windows) {
     r = await runCmd('sh', [path.join(ROOT, 'install.sh'), '--base-url', mirror, '--dir', bin, '--root', root, '--no-modify-path']);
     check(r.code === 0 && (await alp(['--version'])).stdout.trim() === version, 'rerunning install.sh over an install works');
+  }
   }
   log('ok');
 } finally {

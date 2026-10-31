@@ -248,3 +248,11 @@ test('the CLI routes update-template to the template upgrade and update to the s
   assert.match(npm.stdout, /did you mean `alp update-template`/);
   assert.match(npm.stdout, /npm install -g @anhlp\/alp@beta/);
 });
+
+test('pruneVersions keeps listed versions, and with keepAside the copies a running alpd may use', async t => {
+  const app = await mkdtemp(path.join(tmpdir(), 'alp-prune-aside-'));
+  t.after(() => rm(app, { recursive: true, force: true }));
+  for (const name of ['1.0.0', '2.0.0', '3.0.0', '.alp-old-ab', '.alp-update-cd']) await mkdir(path.join(app, name));
+  assert.deepEqual(pruneVersions(app, ['3.0.0', '1.0.0'], undefined, { keepAside: true }).sort(), ['.alp-update-cd', '2.0.0']);
+  assert.deepEqual(readdirSync(app).sort(), ['.alp-old-ab', '1.0.0', '3.0.0']);
+});

@@ -192,12 +192,13 @@ fi
 mkdir "$tmp/x"
 tar -xzf "$tmp/$asset" -C "$tmp/x" || die "could not extract $asset"
 if [ ! -f "$tmp/x/$name/alp-bundle.json" ] || [ ! -x "$tmp/x/$name/bin/alp" ]; then die "$asset does not contain an ALP bundle ($name/bin/alp)"; fi
-reported=$("$tmp/x/$name/bin/alp" --version 2>/dev/null || true)
-[ "$reported" = "$version" ] || die "the downloaded ALP reports version '$reported', not $version"
 stage=$($SUDO mktemp -d "$APP/.alp-update-XXXXXX") || die "could not create a directory in $APP"
 cleanup_stage() { $SUDO rm -rf "$stage"; }
 if ! $SUDO cp -R "$tmp/x/$name" "$stage/$name"; then cleanup_stage; die "could not copy the bundle into $APP"; fi
 [ -n "$SUDO" ] && $SUDO chmod 755 "$stage"
+# Checked on the copy that is installed (not in TMPDIR, which may be noexec).
+reported=$("$stage/$name/bin/alp" --version 2>/dev/null || true)
+if [ "$reported" != "$version" ]; then cleanup_stage; die "the downloaded ALP reports version '$reported', not $version"; fi
 aside=""
 if [ -e "$APP/$version" ]; then
   if [ "$previous" = "$version" ] || [ "$alpd_version" = "$version" ]; then
@@ -208,7 +209,11 @@ if [ -e "$APP/$version" ]; then
     $SUDO rm -rf "$APP/$version"
   fi
 fi
-$SUDO mv "$stage/$name" "$APP/$version" || { cleanup_stage; die "could not install $APP/$version"; }
+if ! $SUDO mv "$stage/$name" "$APP/$version"; then
+  [ -n "$aside" ] && $SUDO mv "$APP/$aside" "$APP/$version"
+  cleanup_stage
+  die "could not install $APP/$version"
+fi
 cleanup_stage
 # A relative link, so the whole root can move, renamed over the old one in one step (GNU mv -T,
 # BSD mv -h: replace the link instead of entering the directory it points at).
@@ -235,7 +240,10 @@ say "installed $DIR/alp -> $APP/current/bin/alp"
 for old in "$APP"/* "$APP"/.alp-old-* "$APP"/.alp-update-*; do
   [ -d "$old" ] || continue
   base=$(basename "$old")
-  case "$base" in current|"$version"|"$previous"|"$alpd_version"|"$aside") continue ;; [0-9]*|.alp-old-*|.alp-update-*) $SUDO rm -rf "$old" ;; esac
+  case "$base" in current|"$version"|"$previous"|"$alpd_version"|"$aside") continue ;; esac
+  # A running alpd may run from a copy an earlier reinstall moved aside: keep those while it runs.
+  case "$base" in .alp-old-*) [ -n "$alpd_version" ] && continue ;; esac
+  case "$base" in [0-9]*|.alp-old-*|.alp-update-*) $SUDO rm -rf "$old" ;; esac
 done
 
 # --- PATH -----------------------------------------------------------------------------------
