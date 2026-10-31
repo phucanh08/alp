@@ -2,7 +2,8 @@
 import { spawnSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-const root = path.resolve(import.meta.dirname, '..');
+// ALP_VERSION_PACKAGE_ROOT: a copy of the repository's manifests, for the test (t-37f1).
+const root = process.env.ALP_VERSION_PACKAGE_ROOT || path.resolve(import.meta.dirname, '..');
 const [workspace, version] = process.argv.slice(2);
 if (!workspace || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(version ?? '')) throw new Error('Usage: npm run version:package -- <package-name> <semver>');
 const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
@@ -26,5 +27,6 @@ if (manifest.dependencies?.[workspace]) {
   manifest.dependencies[workspace] = version;
   await writeFile(path.join(root, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 }
+if (process.env.ALP_VERSION_PACKAGE_SKIP_LOCK === '1') process.exit(0);
 const result = spawnSync('npm', ['install', '--package-lock-only', '--ignore-scripts'], { cwd: root, stdio: 'inherit' });
 process.exitCode = result.status ?? 1;

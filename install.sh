@@ -11,8 +11,10 @@
 #   --system           install to /usr/local/lib/alp with the command in /usr/local/bin (uses sudo when needed)
 #                      instead of ~/.alp with the command in ~/.alp/bin
 #   --dir <path>       put the alp command in <path>
-#   --root <path>      put the bundle in <path>/app
+#   --root <path>      put the bundle in <path>/app; without --dir the command goes to <path>/bin, and
+#                      no shell profile is edited unless --modify-path is given
 #   --no-modify-path   never edit a shell profile; only print the PATH line
+#   --modify-path      edit the shell profile even with --root
 #   --base-url <url>   download from this release mirror (it holds SHA256SUMS and the archives)
 #   -h, --help
 #
@@ -28,14 +30,14 @@ VERSION=""
 SYSTEM=0
 DIR=""
 ROOT=""
-MODIFY_PATH=1
+MODIFY_PATH=""
 BASE_URL="${ALP_INSTALL_BASE_URL:-}"
 
 say() { printf '%s\n' "alp-install: $*"; }
 die() { printf '%s\n' "alp-install: error: $*" >&2; exit 1; }
 usage() {
   cat <<'USAGE'
-Usage: install.sh [--version <v>] [--system] [--dir <path>] [--root <path>] [--no-modify-path] [--base-url <url>]
+Usage: install.sh [--version <v>] [--system] [--dir <path>] [--root <path>] [--no-modify-path | --modify-path] [--base-url <url>]
 Installs ALP to ~/.alp/app/<version> with the alp command in ~/.alp/bin (or /usr/local/lib/alp and
 /usr/local/bin with --system) after checking it against the release's SHA256SUMS. Rerun it to
 upgrade an ALP 0.0.1-beta.5/6 single-file install. ALP_INSTALL_BASE_URL and ALP_INSTALL_REPO override the source.
@@ -52,6 +54,7 @@ while [ $# -gt 0 ]; do
     --root) [ $# -ge 2 ] || die "--root needs a value"; ROOT="$2"; shift 2 ;;
     --root=*) ROOT="${1#--root=}"; shift ;;
     --no-modify-path) MODIFY_PATH=0; shift ;;
+    --modify-path) MODIFY_PATH=1; shift ;;
     --base-url) [ $# -ge 2 ] || die "--base-url needs a value"; BASE_URL="$2"; shift 2 ;;
     --base-url=*) BASE_URL="${1#--base-url=}"; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -118,7 +121,12 @@ BASE_URL="${BASE_URL%/}"
 case "$BASE_URL" in /*) BASE_URL="file://$BASE_URL" ;; esac
 case "$BASE_URL" in https://*|file://*) ;; *) die "the release mirror must be https:// or file:// ($BASE_URL)" ;; esac
 
+# --root keeps the install self-contained: the command in <root>/bin and no shell profile edit.
+if [ -z "$MODIFY_PATH" ]; then
+  if [ -n "$ROOT" ]; then MODIFY_PATH=0; else MODIFY_PATH=1; fi
+fi
 if [ -n "$DIR" ]; then :
+elif [ -n "$ROOT" ]; then DIR="$ROOT/bin"
 elif [ "$SYSTEM" = 1 ]; then DIR=/usr/local/bin
 else DIR="$HOME/.alp/bin"; fi
 if [ -n "$ROOT" ]; then :

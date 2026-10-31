@@ -10,7 +10,10 @@
 #   -Dir <path>      put the alp command (alp.cmd) in <path>          [ALP_INSTALL_DIR]
 #                    (default %LOCALAPPDATA%\Programs\alp, else ~\.alp\bin)
 #   -Root <path>     put the bundle in <path>\app (default: -Dir)     [ALP_INSTALL_ROOT]
+#                    without -Dir the command goes to <path>\bin and the user PATH is left alone
+#                    unless -ModifyPath is given
 #   -NoModifyPath    leave the user PATH alone and only print the step [ALP_INSTALL_NO_MODIFY_PATH=1]
+#   -ModifyPath      add the command directory to the user PATH even with -Root
 #   -BaseUrl <url>   read SHA256SUMS and the archive from a mirror     [ALP_INSTALL_BASE_URL]
 #                    (https://, file:// or an absolute directory)
 #   -Help
@@ -26,6 +29,7 @@ param(
   [string]$Dir = $env:ALP_INSTALL_DIR,
   [string]$Root = $env:ALP_INSTALL_ROOT,
   [switch]$NoModifyPath,
+  [switch]$ModifyPath,
   [string]$BaseUrl = $env:ALP_INSTALL_BASE_URL,
   [switch]$Help
 )
@@ -43,7 +47,7 @@ param(
   function Die([string]$Message) { throw "alp-install: error: $Message" }
 
   if ($Help) {
-    Write-Host 'Usage: install.ps1 [-Version <v>] [-Dir <path>] [-Root <path>] [-NoModifyPath] [-BaseUrl <url or dir>]'
+    Write-Host 'Usage: install.ps1 [-Version <v>] [-Dir <path>] [-Root <path>] [-NoModifyPath | -ModifyPath] [-BaseUrl <url or dir>]'
     return
   }
   if ($env:ALP_INSTALL_NO_MODIFY_PATH -eq '1') { $NoModifyPath = $true }
@@ -77,6 +81,10 @@ param(
   elseif ([System.IO.Path]::IsPathRooted($BaseUrl) -and $BaseUrl -notmatch '^[a-zA-Z][a-zA-Z0-9+.-]+://') { $localMirror = $BaseUrl }
   elseif ($BaseUrl -notmatch '^https://') { Die "the release mirror must be https://, file:// or an absolute directory ($BaseUrl)" }
 
+  if ($NoModifyPath -and $ModifyPath) { Die '-NoModifyPath and -ModifyPath conflict' }
+  # -Root keeps the install self-contained: the command in <Root>\bin and no user PATH edit.
+  if ($Root -and -not $ModifyPath) { $NoModifyPath = $true }
+  if (-not $Dir -and $Root) { $Dir = Join-Path $Root 'bin' }
   if (-not $Dir) {
     if ($env:LOCALAPPDATA) { $Dir = Join-Path $env:LOCALAPPDATA 'Programs\alp' }
     else { $Dir = Join-Path $HOME '.alp\bin' }

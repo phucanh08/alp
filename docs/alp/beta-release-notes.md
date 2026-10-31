@@ -3,9 +3,8 @@
 Prepared 2026-10-31 (tasks t-1807, t-7933). The first release shipped as the Node bundle; GitHub
 release and npm (8 packages) carry the same version from one main SHA.
 
-- **Users of 0.0.1-beta.5 or beta.6 must rerun the installer:** `curl -fsSL
-  https://github.com/phucanh08/alp/releases/latest/download/install.sh | sh` (Windows:
-  `install.ps1`), then `alp daemon restart`. `alp update` from beta.5/6 cannot install beta.7.
+- **Users of 0.0.1-beta.5 or beta.6 must rerun the installer**; see *Upgrading from
+  0.0.1-beta.5/6* below. `alp update` from beta.5/6 cannot install beta.7.
 
 - **Breaking: the release is the ALP bundle, not one executable.** The GitHub release archives
   (`alp-<version>-<os>-<arch>.tar.gz`, `alp-<version>-windows-x64.zip`) now hold ALP's npm install
