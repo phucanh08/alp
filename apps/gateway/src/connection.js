@@ -339,7 +339,7 @@ export class ClientConnection {
   /** @type {Array<{ frame: string | null | undefined }>} */ #queue = [];
   #queuedBytes = 0;
   #helloed = false;
-  /** The client said in daemon.hello that an ALP agent started it: the re-hello that says so on its alpd connection (t-e706). */
+  /** The credential is an agent's (t-53aa), or the client said in daemon.hello that an ALP agent started it: the re-hello that says so on its alpd connection (t-e706). */
   /** @type {Promise<unknown> | undefined} */ #agent;
   /** A hello waiting for alpd: requests pipelined behind it wait too, as alpd answers hello at once. */
   /** @type {Promise<unknown> | undefined} */ #helloing;
@@ -738,8 +738,10 @@ export class ClientConnection {
     await this.#ready.catch(() => { throw new GatewayError(GATEWAY_ERROR.unavailable, 'alpd is unavailable', { reason: GATEWAY_REASON.daemonDisconnected }); });
     // A client an ALP agent started says so (t-ca1f): this connection's own alpd connection then says
     // so too (alpd keeps the mark for good), so alpd refuses it what only the user may do (t-e706).
-    // Once per connection, shared by hellos that overlap; every later hello, marked or not, waits for it.
-    if (Array.isArray(params.capabilities) && params.capabilities.includes(AGENT_CAPABILITY)) this.#agent ??= this.#call('daemon.hello', { protocolVersion: PROTOCOL_VERSION, client: { name: 'alp-gateway', version: '0' }, capabilities: [AGENT_CAPABILITY] });
+    // An agent credential is marked whatever its client says (t-53aa): the mark is bound to the
+    // credential, not declared. Once per connection, shared by hellos that overlap; every later
+    // hello, marked or not, waits for it.
+    if (this.#grant.agent === true || (Array.isArray(params.capabilities) && params.capabilities.includes(AGENT_CAPABILITY))) this.#agent ??= this.#call('daemon.hello', { protocolVersion: PROTOCOL_VERSION, client: { name: 'alp-gateway', version: '0' }, capabilities: [AGENT_CAPABILITY] });
     if (this.#agent) {
       try { await this.#agent; }
       catch {

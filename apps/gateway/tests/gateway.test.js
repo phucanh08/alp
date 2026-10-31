@@ -490,6 +490,45 @@ test('socket closing before upgrade cleans up perPrincipal entry without memory 
   assert.equal(gateway.perPrincipal.size, 0);
 });
 
+test('an agent credential marks its alpd connection whatever the client says; a user credential is unchanged (t-53aa)', async t => {
+  const daemon = fakeDaemon();
+  const root = path.join(tmpdir(), 'alp-53aa-a');
+  const h = await startGateway(t, { daemon, credentials: { bot: { workspaces: [root], agent: true }, alice: { workspaces: [root] } } });
+  const hellos = () => daemon.state.calls.filter(call => call.method === 'daemon.hello');
+  const marked = () => hellos().filter(call => call.params?.capabilities?.includes('principal.agent'));
+
+  // The user's credential, a client that does not mark itself: alpd sees no mark (as before).
+  const web = await h.rawSession('alice');
+  assert.ok((await web.call('daemon.hello', { protocolVersion: 1, client: { name: 'web', version: '0' } })).result);
+  assert.equal(marked().length, 0, 'a user credential is not marked by the gateway');
+
+  // The agent's credential, a client that does not say it is an agent: marked anyway, before hello answers.
+  const bot = await h.rawSession('bot');
+  const answer = await bot.call('daemon.hello', { protocolVersion: 1, client: { name: 'pretends-to-be-web', version: '0' } });
+  assert.ok(answer.result);
+  assert.equal(marked().length, 1, 'the agent credential\'s connection is marked');
+  const botLink = marked()[0].link;
+  assert.ok(!hellos().some(call => call.link !== botLink && call.params?.capabilities), 'only the agent credential\'s own alpd connection is marked');
+  // Later hellos neither shed the mark (alpd keeps it) nor mark again.
+  await bot.call('daemon.hello', { protocolVersion: 1, client: { name: 'pretends-to-be-web', version: '0' } });
+  assert.equal(marked().length, 1);
+  // Requests follow the mark on the same alpd connection.
+  await bot.call('task.list', { projectRoot: root });
+  const order = daemon.state.calls.filter(call => call.link === botLink).map(call => call.params?.capabilities ? 'mark' : call.method);
+  assert.ok(order.indexOf('mark') >= 0 && order.indexOf('mark') < order.indexOf('task.list'), order.join(','));
+
+  // Failing to mark an agent credential's connection closes it, with no hello answer (fail closed).
+  daemon.state.handlers['daemon.hello'] = params => { if (params.capabilities) throw { code: 1005, message: 'down' }; return { protocolVersion: 1, capabilities: [] }; };
+  const failing = await h.rawSession('bot');
+  const pending = failing.call('daemon.hello', { protocolVersion: 1, client: { name: 'pretends-to-be-web', version: '0' } });
+  assert.equal((await failing.closed).code, 1011);
+  assert.ok(!failing.frames.some(frame => frame.result), 'no hello answer without the mark');
+  void pending;
+  // The user's credential still connects unmarked while marking fails.
+  const user = await h.rawSession('alice');
+  assert.ok((await user.call('daemon.hello', { protocolVersion: 1, client: { name: 'web', version: '0' } })).result);
+});
+
 test('a client that announces principal.agent has its own alpd connection say so before hello answers; a failure closes it (t-e706)', async t => {
   const daemon = fakeDaemon();
   const h = await startGateway(t, { daemon, credentials: { alice: { workspaces: [path.join(tmpdir(), 'alp-e706-a')] } } });
