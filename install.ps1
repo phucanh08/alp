@@ -141,6 +141,13 @@ param(
     $current = Join-Path $App 'current'
     $previous = $null
     $aside = $null
+    # The version a running alpd uses (its lock names it): its files must stay.
+    $alpdVersion = $null
+    $alpHome = if ($env:ALP_HOME) { $env:ALP_HOME } else { Join-Path $HOME '.alp' }
+    try {
+      $lock = Get-Content -Raw -LiteralPath (Join-Path $alpHome 'alpd.lock') -ErrorAction Stop | ConvertFrom-Json
+      if ($lock.pid -and (Get-Process -Id ([int]$lock.pid) -ErrorAction SilentlyContinue)) { $alpdVersion = [string]$lock.version }
+    } catch { }
     $currentItem = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
     if ($currentItem) {
       if (-not $currentItem.LinkType) { Die "$current exists and is not a junction; move it away and rerun" }
@@ -162,7 +169,7 @@ param(
       if ($reported -ne $newVersion) { Die "the downloaded ALP reports version '$reported', not $newVersion" }
       $target = Join-Path $App $newVersion
       if (Test-Path -LiteralPath $target) {
-        if ($previous -eq $newVersion) {
+        if ($previous -eq $newVersion -or $alpdVersion -eq $newVersion) {
           # Reinstalling the running version: keep its files for the processes that use them.
           $aside = ".alp-old-" + [System.Guid]::NewGuid().ToString('N').Substring(0, 12)
           try { Move-Item -LiteralPath $target -Destination (Join-Path $App $aside) } catch { Die "ALP $newVersion is in use (Windows cannot move a running version); close ALP (alp daemon stop) and rerun" }
@@ -207,7 +214,8 @@ param(
     # Older versions go; the previous one stays until the next install, for an alpd still running it.
     foreach ($old in Get-ChildItem -LiteralPath $App -Directory -Force) {
       if ($old.Name -eq 'current' -or $old.Name -eq $newVersion -or $old.Name -eq $previous) { continue }
-      if ($old.Name -eq $aside) { continue }
+      if ($old.Name -eq $aside -or $old.Name -eq $alpdVersion) { continue }
+      if ($alpdVersion -and $old.Name -like '.alp-old-*') { continue }
       if ($old.Name -match '^[0-9]' -or $old.Name -match '^\.alp-(old|update)-') { Remove-Item -LiteralPath $old.FullName -Recurse -Force -ErrorAction SilentlyContinue }
     }
   } finally {

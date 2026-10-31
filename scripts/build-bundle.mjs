@@ -116,9 +116,11 @@ async function prune(modules, platform) {
   }
   for (const pdb of (await readdir(prebuilds, { recursive: true }).catch(() => [])).filter(name => name.endsWith('.pdb'))) await rm(path.join(prebuilds, pdb), { force: true });
   // Nothing at run time reads type declarations or source maps (Node uses maps only with
-  // --enable-source-maps); third-party docs go too. ALP's own packages keep everything (templates are .md).
-  for (const file of await readdir(modules, { recursive: true })) {
-    const name = String(file);
+  // --enable-source-maps), in any package; third-party READMEs and changelogs go too (ALP's own
+  // packages keep their markdown: the templates are .md).
+  for (const entry of await readdir(modules, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const name = path.relative(modules, path.join(entry.parentPath, entry.name));
     const own = name.startsWith(`@anhlp${path.sep}`);
     if (/\.(map|d\.[cm]?ts)$/.test(name) || (!own && /(^|[\\/])(README|CHANGELOG|HISTORY)(\.md|\.markdown)?$/i.test(name))) await rm(path.join(modules, name), { force: true });
   }

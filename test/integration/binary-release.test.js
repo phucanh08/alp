@@ -159,3 +159,13 @@ test('the execPath lint catches property and element access and destructuring of
   assert.equal(hits("import * as p from 'node:process'; import q from 'process'; p.execPath; q.execPath; const r = {}; r.execPath;"), 2);
   assert.equal(hits('const { argv } = process; other.execPath; process.argv0; const { execPath } = other;'), 0);
 });
+
+test('build-bundle pins exactly the third-party packages the lockfile holds at one version', async () => {
+  const { lockedVersions } = await import('../../scripts/build-bundle.mjs');
+  const pins = lockedVersions({ packages: {
+    '': {}, 'node_modules/a': { version: '1.0.0' }, 'node_modules/@s/b': { version: '2.0.0' },
+    'node_modules/c': { version: '1.0.0' }, 'node_modules/x/node_modules/c': { version: '2.0.0' },
+    'node_modules/@anhlp/alp-core': { link: true }, 'packages/cli/node_modules/a': { version: '1.0.0' }, 'node_modules/@anhlp/alp-gateway': { version: '1.0.0' },
+  } });
+  assert.deepEqual(Object.fromEntries(pins), { a: '1.0.0', '@s/b': '2.0.0' });
+});
