@@ -37,8 +37,23 @@ const MODES = ['read-only', 'workspace-write', 'full-access'];
  * redirection, chaining and substitution itself (checked with agy 1.4.10), so each
  * entry must have no flag that writes: git is left out (`git log --output`, and
  * `git status` refreshes the index), as are rg (`--pre`) and find (`-delete`).
+ * A prefix rule cannot check a path or a flag, so no command that reads file contents
+ * is allowed: cat, head, grep and wc read files outside the workspace, and tail -f or a
+ * read of a FIFO hangs the turn. agy's own file reading and search tools remain.
  */
-const READ_ONLY_COMMANDS = ['pwd', 'ls', 'cat', 'head', 'tail', 'wc', 'grep'];
+const READ_ONLY_COMMANDS = ['pwd', 'ls'];
+/** Shell syntax that makes a command line more than one allowed command. */
+const SHELL_SYNTAX = /[;&|<>`$(){}\\\n\r]/;
+/**
+ * Whether read-only allows a terminal command line, by ALP's own reading of the allowlist:
+ * one allowed command with no shell syntax. Unknown input is refused.
+ */
+export function antigravityReadOnlyCommandAllowed(commandLine: unknown): boolean {
+  if (typeof commandLine !== 'string' || SHELL_SYNTAX.test(commandLine)) return false;
+  const [command] = commandLine.trim().split(/\s+/);
+  return READ_ONLY_COMMANDS.includes(command);
+}
+const COMMAND_TOOLS = new Set(['run_command']);
 /** agy's file-editing tools, which read-only always denies. */
 const EDIT_TOOLS = new Set(['write_file', 'write_to_file', 'replace_file_content', 'multi_replace_file_content', 'sed_file', 'notebook_edit']);
 const modeOf = (sandbox: unknown) => sandbox === 'danger-full-access' ? 'full-access' : String(sandbox);
@@ -72,7 +87,7 @@ export function antigravityModeArgs(sandbox: unknown, cwd: string): string[] {
 /** What each mode lets an Antigravity agent do, for its instructions. */
 export function antigravityModeText(sandbox: unknown): string {
   const mode = modeOf(sandbox);
-  if (mode === 'read-only') return 'agy enforces read-only: its own file reading and search tools work, and ALP\'s tools; it allows only the terminal commands pwd, ls, cat, head, tail, wc and grep, with no redirection or chaining, and denies every file edit and other command. A denied tool ends your turn, so do not attempt one: report work that needs changes to your requester.';
+  if (mode === 'read-only') return 'agy enforces read-only: its own file reading and search tools work, and ALP\'s tools; it allows only the terminal commands pwd and ls, with no redirection or chaining (read files with its own tools), and denies every file edit and other command. A denied tool ends your turn, so do not attempt one: report work that needs changes to your requester.';
   if (mode === 'workspace-write') return 'agy accepts file edits and runs terminal commands in its sandbox, which writes only inside your workspace; anything outside the workspace or the sandbox is denied, and a denied tool ends your turn. Report work that needs more to your requester.';
   return 'Antigravity runs with full access: every tool runs without asking.';
 }
@@ -418,10 +433,11 @@ export class AntigravityTransport {
           },
         });
       } else if (step.state === 'DONE' || step.state === 'ERROR') {
-        // agy 1.4.10 sometimes marks a write_file it denied DONE, with no error and no file written:
-        // read-only denies every edit, so never report one as done.
-        if (step.state === 'DONE' && modeOf(this.config?.sandbox) === 'read-only' && (EDIT_TOOLS.has(toolName) || EDIT_TOOLS.has(step.tool_info?.name))) {
-          step = { ...step, state: 'ERROR', tool_info: { ...step.tool_info, output: undefined, error: { message: `Antigravity denied ${toolName} in read-only mode` } } };
+        // agy 1.4.10 sometimes marks a tool step it denied DONE, with no error and nothing run. ALP's own
+        // record is authoritative: read-only denies every edit and every command outside its allowlist,
+        // so never report one as done, whatever agy says.
+        if (step.state === 'DONE' && modeOf(this.config?.sandbox) === 'read-only' && this.readOnlyRefuses(toolName, step.tool_info)) {
+          step = { ...step, state: 'ERROR', tool_info: { ...step.tool_info, output: undefined, error: { message: `Antigravity denied ${typed.tool} in read-only mode` } } };
         }
         const output = typeof step.tool_info?.output === 'string'
           ? step.tool_info.output
@@ -442,6 +458,14 @@ export class AntigravityTransport {
         });
       }
     }
+  }
+
+  /** Whether read-only refuses this tool step: an edit, or a terminal command outside the allowlist. */
+  private readOnlyRefuses(toolName: string, info: any): boolean {
+    const name = typeof info?.name === 'string' && info.name ? info.name : toolName;
+    if (EDIT_TOOLS.has(toolName) || EDIT_TOOLS.has(name)) return true;
+    if (COMMAND_TOOLS.has(toolName) || COMMAND_TOOLS.has(name)) return !antigravityReadOnlyCommandAllowed(info?.parameters?.CommandLine);
+    return false;
   }
 
   private handleResult(result: any): void {
