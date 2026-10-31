@@ -529,6 +529,33 @@ test('an agent credential marks its alpd connection whatever the client says; a 
   assert.ok((await user.call('daemon.hello', { protocolVersion: 1, client: { name: 'web', version: '0' } })).result);
 });
 
+test('a named agent credential sends its name, never the client\'s, with the mark; a user credential sends none (t-1c59)', async t => {
+  const daemon = fakeDaemon();
+  const root = path.join(tmpdir(), 'alp-1c59-a');
+  const h = await startGateway(t, { daemon, credentials: { bot: { workspaces: [root], agent: 'reviewer' }, old: { workspaces: [root], agent: true }, alice: { workspaces: [root] } } });
+  const hellos = () => daemon.state.calls.filter(call => call.method === 'daemon.hello');
+  const bot = await h.rawSession('bot');
+  assert.ok((await bot.call('daemon.hello', { protocolVersion: 1, client: { name: 'web', version: '0' }, principal: { agent: 'lead' } })).result);
+  const marks = hellos().filter(call => call.params?.capabilities?.includes('principal.agent'));
+  assert.equal(marks.length, 1);
+  assert.deepEqual(marks[0].params.principal, { agent: 'reviewer' }, 'the credential\'s name, not the client\'s');
+  const old = await h.rawSession('old');
+  await old.call('daemon.hello', { protocolVersion: 1, client: { name: 'web', version: '0' } });
+  const oldMark = hellos().filter(call => call.params?.capabilities?.includes('principal.agent'))[1];
+  assert.equal(oldMark.params.principal, undefined, 'an unnamed agent credential is marked as before');
+  const user = await h.rawSession('alice');
+  await user.call('daemon.hello', { protocolVersion: 1, client: { name: 'web', version: '0' }, principal: { agent: 'lead' } });
+  assert.ok(!hellos().some(call => call.params?.principal && call.params.principal.agent !== 'reviewer'), 'a client cannot name itself through the gateway');
+  // No connection, agent or not, reaches a credential operation: the gateway exposes none.
+  for (const method of ['credential.create', 'credential.reissue', 'credential.update', 'credential.rotate', 'credential.revoke', 'gateway.credential.create']) {
+    for (const session of [bot, old]) {
+      const reply = await session.call(method, { label: 'x', id: 'x' });
+      assert.equal(reply.error?.code, -32601, `${method}: ${JSON.stringify(reply)}`);
+    }
+  }
+  assert.ok(!daemon.state.calls.some(call => /credential/.test(call.method)), 'nothing about credentials reaches alpd');
+});
+
 test('a client that announces principal.agent has its own alpd connection say so before hello answers; a failure closes it (t-e706)', async t => {
   const daemon = fakeDaemon();
   const h = await startGateway(t, { daemon, credentials: { alice: { workspaces: [path.join(tmpdir(), 'alp-e706-a')] } } });

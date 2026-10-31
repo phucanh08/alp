@@ -114,6 +114,7 @@ async function world(t) {
   return {
     projects, home, tokens: { alice: alice.token, bob: bob.token, viewer: viewer.token, reader: reader.token, files: files.token, bobFiles: bobFiles.token, uploader: uploader.token, bobUploader: bobUploader.token }, ids: { alice: alice.credential.id, uploader: uploader.credential.id }, gatewayHome, lines, open, turnStarts, journal: () => readFile(journal, 'utf8').catch(() => ''),
     get base() { return base; }, get gateway() { return gateway; }, get socket() { return socket; },
+    alpdLog: () => readFile(logFile, 'utf8').catch(() => ''),
     startDaemon, stopDaemon, startGateway,
     async stopGateway() { await gateway?.close(); gateway = undefined; },
   };
@@ -369,6 +370,34 @@ test('an agent credential is refused the user\'s calls on a real alpd even when 
   assert.equal((await user.request('task.gate.resolve', { projectRoot: project, id, gate: 'g1', note: 'OK' })).status, 'open');
   stored = await getTask(project, id);
   assert.equal(stored.gates[0].resolved.by, 'user');
+});
+
+test('a named agent credential tells a real alpd which agent connected, and is refused the user\'s calls (t-1c59)', { skip, timeout: 60_000 }, async t => {
+  const w = await world(t);
+  const all = ['session.read', 'session.write', 'project.read', 'project.write'];
+  const bot = await createCredential(w.gatewayHome, { label: 'bot', workspaces: [w.projects.a], permissions: all, agent: 'reviewer' });
+  await sleep(150);
+  const user = new AlpRpcClient(await w.open(w.tokens.alice));
+  t.after(() => user.close());
+  await hello(user);
+  const agent = new AlpRpcClient(await w.open(bot.token));
+  t.after(() => agent.close());
+  // The client claims another name and no agent mark: the credential decides both.
+  await agent.request('daemon.hello', { protocolVersion: 1, client: { name: 'looks-like-web', version: '0' }, principal: { agent: 'lead' } });
+  const project = w.projects.a;
+  const { id } = await user.request('task.create', { projectRoot: project, title: 'gated', requestId: 'e1c59-1' });
+  const previous = process.env.ALP_HOME;
+  process.env.ALP_HOME = w.home;
+  try { await addGate(project, id, { kind: 'human', note: 'Duyệt giúp' }, 'main'); }
+  finally { if (previous === undefined) delete process.env.ALP_HOME; else process.env.ALP_HOME = previous; }
+  await assert.rejects(agent.request('task.gate.resolve', { projectRoot: project, id, gate: 'g1' }), error => error.code === 1003 && error.data?.reason === 'user_only');
+  assert.equal((await getTask(project, id)).gates[0].resolved, undefined);
+  await until(async () => /ALP_AGENT_CONNECTION/.test(await w.alpdLog()), 'alpd logging the agent connection');
+  const lines = (await w.alpdLog()).split('\n').filter(line => line.includes('ALP_AGENT_CONNECTION'));
+  assert.equal(lines.length, 1, lines.join('\n'));
+  assert.match(lines[0], /reviewer/);
+  assert.doesNotMatch(lines[0], /lead/, 'the client\'s claimed name never reaches alpd');
+  assert.equal((await user.request('task.gate.resolve', { projectRoot: project, id, gate: 'g1', note: 'OK' })).status, 'open');
 });
 
 test('a read-only grant cannot wake, steer or answer a full-access session on a real alpd, and can drive its own read-only one', { skip, timeout: 60_000 }, async t => {

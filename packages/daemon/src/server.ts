@@ -119,6 +119,8 @@ type Connection = {
   helloed: boolean;
   /** It said in daemon.hello that an ALP agent started it (t-ca1f): refused what only the user may do. */
   agent?: boolean;
+  /** The agent's name an agent connection gave in daemon.hello (`principal.agent`, t-1c59): who it is, for the logs; never grants anything. Sticky: the first name stays. */
+  agentName?: string;
   /** The client name daemon.hello gave: a gate card answered from alp-paseo* is recorded as paseo, else web. */
   client?: string;
   roots: Set<string>;
@@ -1959,6 +1961,17 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         // Sticky: a later hello never sheds it.
         connection.agent = connection.agent === true || (Array.isArray(params?.capabilities) && params.capabilities.includes(AGENT_CAPABILITY));
         if (typeof params?.client?.name === 'string') connection.client = params.client.name;
+        // A named principal (t-1c59: the gateway sends a named agent credential's name) is an agent's
+        // too: naming one only ever takes away. The name is a label for the logs, not a credential.
+        const named = params?.principal?.agent;
+        if (named !== undefined) {
+          if (typeof named !== 'string' || !/^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){0,63}$/.test(named)) throw new RpcError(RPC_ERROR.invalidParams, 'principal.agent must be an agent name', { reason: 'invalid_params' });
+          connection.agent = true;
+          if (connection.agentName === undefined) {
+            connection.agentName = named;
+            log.info('an agent connection named itself', { code: 'ALP_AGENT_CONNECTION', agent: named, client: connection.client });
+          }
+        }
         // Terminals are listed only while the host's switch is on (and the PTY module loads).
         const terminalLimits = await terminals?.advertised();
         respond({ result: { protocolVersion: PROTOCOL_VERSION, daemonVersion: version, pid: process.pid, hostname: os.hostname(), capabilities: terminalLimits ? [...capabilities, CAPABILITY.terminal, CAPABILITY.terminalCapture, CAPABILITY.terminalWatch] : capabilities, ...(attachments ? { attachmentLimits: attachments.limits } : {}), ...(terminalLimits ? { terminalLimits } : {}) } });

@@ -123,9 +123,9 @@ gateway, không phải trường mới của Protocol v1.
 
 ```sh
 alp-gateway credential create --label phone --workspace /home/me/project \
-    [--permission session.read] [--permission files.read] [--mode read-only] [--agent] [--expires-in-days 90] [--json]
+    [--permission session.read] [--permission files.read] [--mode read-only] [--agent <tên-agent>] [--expires-in-days 90] [--json]
 alp-gateway credential list
-alp-gateway credential reissue <id> [--workspace <absolute>] [--permission <permission>] [--mode <mode>] [--label <label>] [--agent] [--expires-in-days 90] [--json]
+alp-gateway credential reissue <id> [--workspace <absolute>] [--permission <permission>] [--mode <mode>] [--label <label>] [--agent <tên-agent>] [--expires-in-days 90] [--json]
 # edit is an alias; retains device id, replaces secret and only the supplied grant fields
 alp-gateway credential rotate <id>     # token cũ chết ngay; connection của nó đóng 4401
 alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, ticket bị hủy
@@ -187,7 +187,7 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
   file (ví dụ `--permission session.read,session.write,project.read,files.read`). Dùng `credential reissue`
   để sửa grant giữ device id, và nêu đủ danh sách quyền muốn giữ; `rotate` chỉ thay secret.
   `library.write` cũng cần explicit opt-in, không có trong default grant. Không có permission quản trị host qua remote.
-- Credential cho agent (`--agent`, t-53aa): chủ máy cấp riêng một credential cho client mà một ALP
+- Credential cho agent (`--agent <tên>`, t-53aa, t-1c59): chủ máy cấp riêng một credential cho client mà một ALP
   agent dùng. Mọi connection của credential đó được gateway đánh dấu `principal.agent` trên chính
   connection alpd của nó **trước khi trả lời hello**, bất kể client khai gì; alpd giữ dấu đó và từ
   chối những việc chỉ người dùng được làm (human gate, đóng task còn gate, `question.answer`,
@@ -199,10 +199,30 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
   - Một chiều: `reissue --agent` thêm dấu cho credential của người dùng (connection của nó đóng và
     nối lại có dấu); không lệnh nào gỡ dấu, `reissue` với `agent: false` bị từ chối. Cần credential
     cho người dùng thì tạo cái mới.
-  - Trong file là `"agent": true`; giá trị khác `true` → credential đó không dùng được (fail closed).
-  - Giới hạn: gateway không biết **agent nào**; dấu là một bit cho cả credential. Agent cầm được token
-    của người dùng (ví dụ đọc từ nơi client lưu) vẫn vào như người dùng; chỉ tách OS user hoặc sandbox
-    mới chặn được việc đó.
+  - Danh tính theo agent (t-1c59): `--agent <tên>` bắt buộc có tên (chữ thường, số, gạch nối đơn,
+    bắt đầu bằng chữ, tối đa 64 ký tự, không phải `true`/`false`). `--agent` trống bị từ chối với thông
+    báo rõ và không tạo gì. Gateway gửi tên đó trong hello đánh dấu tới alpd
+    (`capabilities: ["principal.agent"], principal: { agent: "<tên>" }`); alpd giữ tên đầu tiên của
+    connection và ghi log `ALP_AGENT_CONNECTION` kèm tên, nên log biết **agent nào** đã nối. Tên lấy
+    từ credential, không bao giờ từ client: `principal` client gửi qua gateway bị bỏ qua. Tên chỉ là
+    nhãn, không cấp thêm quyền; hello có `principal.agent` luôn là của agent.
+  - Tên cố định suốt đời credential: `rotate`/`update`/`reissue` giữ nguyên; `reissue --agent <tên>`
+    được đặt tên cho credential agent chưa có tên (hoặc đánh dấu credential của người dùng), nhưng không
+    đổi tên một credential đã có tên. `credential list` hiện `agent <tên>`.
+  - Không tự cấp, không tự hết hạn: chỉ người dùng tạo credential bằng tay; alpd và gateway không bao giờ
+    tự phát credential. Không có hạn mặc định; `--expires-in-days` vẫn tùy chọn như trước.
+  - Chỉ người dùng quản lý credential: tạo, `rotate`, `reissue`/`edit`, `revoke` chỉ có ở CLI cục bộ;
+    gateway và alpd không có RPC nào về credential (connection, agent hay không, gọi `credential.*` nhận
+    -32601). CLI từ chối các lệnh đổi credential khi `ALP_AGENT_SESSION` có giá trị (tiến trình do ALP
+    agent chạy); `list` vẫn được.
+  - Trong file: `"agent": true` và, khi có tên, `"agentName": "<tên>"`. `agent` khác `true`, hoặc
+    `agentName` sai dạng hay không có `agent: true` → credential đó không dùng được (fail closed).
+    Credential cũ (không dấu, hoặc `agent: true` không tên) giữ nguyên grant, fingerprint và epoch;
+    gateway cũ đọc file mới vẫn đánh dấu (bỏ qua tên).
+  - Giới hạn (cùng OS user): kiểm tra `ALP_AGENT_SESSION` chỉ chặn tiến trình agent không cố lách; một
+    agent chạy cùng OS user có thể xóa biến đó, sửa trực tiếp `credentials.json`, hay đọc token người
+    dùng từ nơi client lưu, và vào như người dùng. Socket alpd cục bộ cũng tin `principal.agent` client
+    tự khai (chỉ làm bớt quyền). Chỉ tách OS user hoặc sandbox mới chặn được những việc đó.
 - Thu hồi khẩn cấp: `credential revoke`. Nếu file credentials hỏng hoặc bị lộ: dừng gateway
   (`systemctl --user stop alp-gateway`). alpd vẫn chạy bình thường.
 

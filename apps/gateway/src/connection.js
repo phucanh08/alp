@@ -740,8 +740,9 @@ export class ClientConnection {
     // so too (alpd keeps the mark for good), so alpd refuses it what only the user may do (t-e706).
     // An agent credential is marked whatever its client says (t-53aa): the mark is bound to the
     // credential, not declared. Once per connection, shared by hellos that overlap; every later
-    // hello, marked or not, waits for it.
-    if (this.#grant.agent === true || (Array.isArray(params.capabilities) && params.capabilities.includes(AGENT_CAPABILITY))) this.#agent ??= this.#call('daemon.hello', { protocolVersion: PROTOCOL_VERSION, client: { name: 'alp-gateway', version: '0' }, capabilities: [AGENT_CAPABILITY] });
+    // hello, marked or not, waits for it. A named agent credential's name goes with the mark (t-1c59),
+    // from the credential, never from the client; the client's own hello is not forwarded.
+    if (this.#grant.agent === true || (Array.isArray(params.capabilities) && params.capabilities.includes(AGENT_CAPABILITY))) this.#agent ??= this.#call('daemon.hello', { protocolVersion: PROTOCOL_VERSION, client: { name: 'alp-gateway', version: '0' }, capabilities: [AGENT_CAPABILITY], ...(this.#grant.agentName ? { principal: { agent: this.#grant.agentName } } : {}) });
     if (this.#agent) {
       try { await this.#agent; }
       catch {

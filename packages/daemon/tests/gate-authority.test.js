@@ -136,3 +136,34 @@ test('session.create from an agent connection drops spec.restore; the owner\'s r
   assert.deepEqual(threads.at(-1), { method: 'thread/resume', threadId: 'thread-of-the-owner' });
   assert.equal(resumed.session.threadId, 'thread-of-the-owner');
 });
+
+test('a hello that names an agent (principal.agent, t-1c59) marks the connection; a malformed name is refused unmarked', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alpd-gate-name-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const home = path.join(directory, 'home');
+  await mkdir(home, { mode: 0o700 });
+  const project = path.join(directory, 'project');
+  await initProject(project);
+  const runtime = createAlpRuntime({ transport: fakeTransport(), libraryDir: home });
+  const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', home });
+  await server.listen();
+  t.after(async () => { await server.close(); await runtime.shutdown(); });
+  const task = await createTask(project, { title: 'Release' }, 'main');
+  await addGate(project, task.id, { kind: 'human', note: 'Ship it?' }, 'main');
+  const refused = error => error.code === 1003 && error.data?.reason === 'user_only';
+
+  const bad = await connectAs(daemonPaths(directory).socket, false);
+  t.after(() => bad.close());
+  for (const name of ['Bad', '', 7, 'a-']) {
+    await assert.rejects(bad.request('daemon.hello', { protocolVersion: 1, principal: { agent: name } }), error => error.code === -32602, JSON.stringify(name));
+  }
+  const named = await connectAs(daemonPaths(directory).socket, false);
+  t.after(() => named.close());
+  await named.request('daemon.hello', { protocolVersion: 1, principal: { agent: 'reviewer' } });
+  await assert.rejects(named.request('task.gate.resolve', { projectRoot: project, id: task.id, gate: 'g1' }), refused);
+  // A later hello with no name, or another, never sheds the mark.
+  await named.request('daemon.hello', { protocolVersion: 1, principal: { agent: 'lead' } });
+  await named.request('daemon.hello', { protocolVersion: 1 });
+  await assert.rejects(named.request('task.gate.resolve', { projectRoot: project, id: task.id, gate: 'g1' }), refused);
+  assert.ok(!(await loadTasks(project)).tasks[0].gates[0].resolved);
+});

@@ -18,11 +18,11 @@ Usage:
   alp-gateway serve [--config FILE] [--host ADDR] [--port N] [--origin URL]... [--public-host HOST]...
                     [--trust-proxy ADDR]... [--tls-cert FILE --tls-key FILE] [--allow-insecure] [--socket PATH]
   alp-gateway credential create --label TEXT --workspace DIR [--workspace DIR]... [--permission P]...
-                                [--mode MODE]... [--agent] [--expires-in-days N] [--json]
+                                [--mode MODE]... [--agent NAME] [--expires-in-days N] [--json]
   alp-gateway credential list [--json]
   alp-gateway credential rotate ID [--json]
   alp-gateway credential reissue ID [--label TEXT] [--workspace DIR]... [--permission P]...
-                                  [--mode MODE]... [--agent] [--expires-in-days N] [--json]
+                                  [--mode MODE]... [--agent NAME] [--expires-in-days N] [--json]
     (alias: edit; named fields replace existing grants, omitted fields stay; issues a new token)
   alp-gateway credential revoke ID
 
@@ -40,9 +40,12 @@ or write, any program, the network) is never a default and implies nothing: name
 only picks where the shell starts; it is NOT a sandbox. alpd also needs its owner's own switch: alp terminal allow.
 session.write also forks and rewinds a root's conversation (session.fork needs session.read too); only the
 conversation changes, never a file. A token is printed once; only its hash is kept.
---agent makes a credential for an ALP agent: alpd treats every connection it opens as an agent's, whatever the client
-says, and refuses it what only you may do (human gates, answers, terminals). It only takes away; a credential stays an
-agent credential (reissue --agent adds the mark, nothing removes it). Without --agent a credential is a user's, as before.
+--agent NAME makes a credential for the ALP agent NAME (lower-case letters, digits, hyphens): alpd treats every
+connection it opens as that agent's, whatever the client says, logs its name, and refuses it what only you may do
+(human gates, answers, terminals). It only takes away; a credential stays an agent credential and keeps its name
+(reissue --agent NAME marks or names one, never renames it). Without --agent a credential is a user's, as before.
+Credentials never expire unless you pass --expires-in-days. Only you make, change and revoke them, with this CLI:
+it refuses to when run by an ALP agent (ALP_AGENT_SESSION is set).
 Files live in $ALP_GATEWAY_HOME, else $ALP_HOME/gateway. The gateway never starts alpd.`;
 
 const fail = (/** @type {string} */ message) => { console.error(message); process.exit(2); };
@@ -93,9 +96,17 @@ async function serve(/** @type {string[]} */ args) {
 
 async function credential(/** @type {string[]} */ args) {
   const [action, ...rest] = args;
+  // Only the user manages credentials (t-1c59): a process an ALP agent started is refused every change.
+  if (['create', 'rotate', 'reissue', 'edit', 'revoke'].includes(action) && typeof process.env.ALP_AGENT_SESSION === 'string' && process.env.ALP_AGENT_SESSION !== '') {
+    fail(`alp-gateway: credential ${action} is the user's; this process was started by an ALP agent (ALP_AGENT_SESSION is set)`);
+  }
+  if (['create', 'reissue', 'edit'].includes(action)) {
+    const at = rest.findIndex(arg => arg === '--agent');
+    if (at >= 0 && (at === rest.length - 1 || rest[at + 1].startsWith('-'))) fail('alp-gateway: --agent needs the agent\'s name, as in --agent reviewer; a bare --agent is no longer accepted');
+  }
   const home = gatewayHome();
   if (action === 'create') {
-    const { values } = parseArgs({ args: rest, options: { label: { type: 'string' }, workspace: { type: 'string', multiple: true }, permission: { type: 'string', multiple: true }, 'worktree-mapping': { type: 'string', multiple: true }, mode: { type: 'string', multiple: true }, agent: { type: 'boolean' }, 'expires-in-days': { type: 'string' }, json: { type: 'boolean' } } });
+    const { values } = parseArgs({ args: rest, options: { label: { type: 'string' }, workspace: { type: 'string', multiple: true }, permission: { type: 'string', multiple: true }, 'worktree-mapping': { type: 'string', multiple: true }, mode: { type: 'string', multiple: true }, agent: { type: 'string' }, 'expires-in-days': { type: 'string' }, json: { type: 'boolean' } } });
     if (!values.label || !values.workspace?.length) fail('credential create needs --label and at least one --workspace');
     const days = values['expires-in-days'] === undefined ? undefined : Number(values['expires-in-days']);
     if (days !== undefined && !(days > 0)) fail('--expires-in-days must be a positive number');
@@ -103,7 +114,7 @@ async function credential(/** @type {string[]} */ args) {
     const { credential: created, token } = await createCredential(home, {
       label: /** @type {string} */ (values.label), workspaces: /** @type {string[]} */ (values.workspace), permissions, worktreeMappings: values['worktree-mapping'] ?? [],
       ...(values.mode ? { modes: values.mode } : {}),
-      ...(values.agent ? { agent: true } : {}),
+      ...(values.agent !== undefined ? { agent: values.agent } : {}),
       ...(days ? { expiresAt: new Date(Date.now() + days * 86_400_000).toISOString() } : {}),
     });
     if (values.json) console.log(JSON.stringify({ credential: created, token }));
@@ -118,12 +129,12 @@ async function credential(/** @type {string[]} */ args) {
     if (!list.length) { console.log('No credentials.'); return; }
     for (const entry of list) {
       const state = entry.revokedAt ? `revoked ${entry.revokedAt}` : entry.expiresAt && Date.parse(entry.expiresAt) <= Date.now() ? `expired ${entry.expiresAt}` : 'active';
-      console.log(`${entry.id}  ${entry.label}  ${state}  ${entry.permissions.join(',')}  ${entry.workspaces.map(workspace => workspace.path).join(', ')}${entry.modes ? `  modes ${entry.modes.join(',')}` : ''}${entry.agent ? '  agent' : ''}`);
+      console.log(`${entry.id}  ${entry.label}  ${state}  ${entry.permissions.join(',')}  ${entry.workspaces.map(workspace => workspace.path).join(', ')}${entry.modes ? `  modes ${entry.modes.join(',')}` : ''}${entry.agent ? `  agent${entry.agentName ? ` ${entry.agentName}` : ''}` : ''}`);
     }
     return;
   }
   if (action === 'reissue' || action === 'edit') {
-    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { label: { type: 'string' }, workspace: { type: 'string', multiple: true }, permission: { type: 'string', multiple: true }, 'worktree-mapping': { type: 'string', multiple: true }, mode: { type: 'string', multiple: true }, agent: { type: 'boolean' }, 'expires-in-days': { type: 'string' }, json: { type: 'boolean' } } });
+    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { label: { type: 'string' }, workspace: { type: 'string', multiple: true }, permission: { type: 'string', multiple: true }, 'worktree-mapping': { type: 'string', multiple: true }, mode: { type: 'string', multiple: true }, agent: { type: 'string' }, 'expires-in-days': { type: 'string' }, json: { type: 'boolean' } } });
     if (positionals.length !== 1) fail(`credential ${action} needs one credential id`);
     const days = values['expires-in-days'] === undefined ? undefined : Number(values['expires-in-days']);
     if (days !== undefined && (!Number.isFinite(days) || !(days > 0))) fail('--expires-in-days must be a positive finite number');
@@ -133,7 +144,7 @@ async function credential(/** @type {string[]} */ args) {
       ...(values.workspace !== undefined ? { workspaces: values.workspace } : {}),
       ...(values.permission !== undefined ? { permissions: values.permission.flatMap(entry => entry.split(',')).map(entry => entry.trim()).filter(Boolean) } : {}),
       ...(values.mode !== undefined ? { modes: values.mode } : {}),
-      ...(values.agent ? { agent: true } : {}),
+      ...(values.agent !== undefined ? { agent: values.agent } : {}),
       ...(days !== undefined ? { expiresAt: new Date(Date.now() + days * 86_400_000).toISOString() } : {}),
     });
     if (values.json) console.log(JSON.stringify({ credential: issued, token }));
