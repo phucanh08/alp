@@ -1,13 +1,17 @@
 #!/bin/sh
-# Installs the ALP executable (t-1e02) from a GitHub release: macOS and Linux (glibc), arm64 and x64.
+# Installs ALP (t-1807) from a GitHub release: macOS and Linux (glibc), arm64 and x64. The release
+# archive is the ALP bundle (ALP with the Node release it runs on); it goes to <root>/app/<version>,
+# <root>/app/current points at it, and <bin>/alp links to <root>/app/current/bin/alp.
 #
 #   curl -fsSL https://github.com/phucanh08/alp/releases/latest/download/install.sh | sh
 #   curl -fsSL .../install.sh | sh -s -- --version 0.1.0 --system
 #
 # Options:
 #   --version <v>      install release v<v> instead of the latest
-#   --system           install to /usr/local/bin (uses sudo when needed) instead of ~/.alp/bin
-#   --dir <path>       install to <path>
+#   --system           install to /usr/local/lib/alp with the command in /usr/local/bin (uses sudo when needed)
+#                      instead of ~/.alp with the command in ~/.alp/bin
+#   --dir <path>       put the alp command in <path>
+#   --root <path>      put the bundle in <path>/app
 #   --no-modify-path   never edit a shell profile; only print the PATH line
 #   --base-url <url>   download from this release mirror (it holds SHA256SUMS and the archives)
 #   -h, --help
@@ -23,6 +27,7 @@ REPO="${ALP_INSTALL_REPO:-phucanh08/alp}"
 VERSION=""
 SYSTEM=0
 DIR=""
+ROOT=""
 MODIFY_PATH=1
 BASE_URL="${ALP_INSTALL_BASE_URL:-}"
 
@@ -30,9 +35,10 @@ say() { printf '%s\n' "alp-install: $*"; }
 die() { printf '%s\n' "alp-install: error: $*" >&2; exit 1; }
 usage() {
   cat <<'USAGE'
-Usage: install.sh [--version <v>] [--system | --dir <path>] [--no-modify-path] [--base-url <url>]
-Installs the ALP executable to ~/.alp/bin (or /usr/local/bin with --system) after checking it
-against the release's SHA256SUMS. ALP_INSTALL_BASE_URL and ALP_INSTALL_REPO override the source.
+Usage: install.sh [--version <v>] [--system] [--dir <path>] [--root <path>] [--no-modify-path] [--base-url <url>]
+Installs ALP to ~/.alp/app/<version> with the alp command in ~/.alp/bin (or /usr/local/lib/alp and
+/usr/local/bin with --system) after checking it against the release's SHA256SUMS. Rerun it to
+upgrade an ALP 0.0.1-beta.5/6 single-file install. ALP_INSTALL_BASE_URL and ALP_INSTALL_REPO override the source.
 USAGE
 }
 
@@ -43,6 +49,8 @@ while [ $# -gt 0 ]; do
     --system) SYSTEM=1; shift ;;
     --dir) [ $# -ge 2 ] || die "--dir needs a value"; DIR="$2"; shift 2 ;;
     --dir=*) DIR="${1#--dir=}"; shift ;;
+    --root) [ $# -ge 2 ] || die "--root needs a value"; ROOT="$2"; shift 2 ;;
+    --root=*) ROOT="${1#--root=}"; shift ;;
     --no-modify-path) MODIFY_PATH=0; shift ;;
     --base-url) [ $# -ge 2 ] || die "--base-url needs a value"; BASE_URL="$2"; shift 2 ;;
     --base-url=*) BASE_URL="${1#--base-url=}"; shift ;;
@@ -53,6 +61,7 @@ done
 
 # The install directory is written into a shell profile: keep it to plain path characters.
 case "$DIR" in *[!A-Za-z0-9._/@+\ -]*) die "unsupported characters in --dir: $DIR" ;; esac
+case "$ROOT" in *[!A-Za-z0-9._/@+\ -]*) die "unsupported characters in --root: $ROOT" ;; esac
 case "$VERSION" in
   ''|[0-9]*) ;;
   *) die "invalid version: $VERSION" ;;
@@ -65,7 +74,7 @@ arch=$(uname -m)
 case "$os" in
   Darwin) os=darwin ;;
   Linux) os=linux ;;
-  *) die "unsupported operating system: $os (ALP binaries exist for macOS and Linux; on Windows use npm)" ;;
+  *) die "unsupported operating system: $os (ALP builds exist for macOS and Linux; on Windows use install.ps1)" ;;
 esac
 case "$arch" in
   x86_64|amd64) arch=x64 ;;
@@ -112,6 +121,12 @@ case "$BASE_URL" in https://*|file://*) ;; *) die "the release mirror must be ht
 if [ -n "$DIR" ]; then :
 elif [ "$SYSTEM" = 1 ]; then DIR=/usr/local/bin
 else DIR="$HOME/.alp/bin"; fi
+if [ -n "$ROOT" ]; then :
+elif [ "$SYSTEM" = 1 ]; then ROOT=/usr/local/lib/alp
+else ROOT="$HOME/.alp"; fi
+case "$DIR" in /*) ;; *) DIR="$(pwd)/$DIR" ;; esac
+case "$ROOT" in /*) ;; *) ROOT="$(pwd)/$ROOT" ;; esac
+APP="$ROOT/app"
 
 tmp=$(mktemp -d 2>/dev/null || mktemp -d -t alp-install)
 trap 'rm -rf "$tmp"' EXIT
@@ -143,44 +158,63 @@ actual=$(sha256 "$tmp/$asset")
 [ "$actual" = "$expected" ] || die "checksum mismatch for $asset (expected $expected, got $actual)"
 say "checksum verified ($expected)"
 
-mkdir "$tmp/x"
-tar -xzf "$tmp/$asset" -C "$tmp/x"
 name="${asset%.tar.gz}"
-binary="$tmp/x/$name/alp"
-[ -f "$binary" ] || die "$asset does not contain $name/alp"
+version="${name#alp-}"
+version="${version%"-$os-$arch"}"
 
 # --- install --------------------------------------------------------------------------------
 SUDO=""
-if [ ! -d "$DIR" ]; then
-  mkdir -p "$DIR" 2>/dev/null || { [ "$SYSTEM" = 1 ] && SUDO=sudo; }
-fi
-if [ -z "$SUDO" ] && [ ! -w "$DIR" ]; then
-  [ "$SYSTEM" = 1 ] || die "$DIR is not writable"
+writable() { # $1 exists and is writable, or can be created
+  if [ -d "$1" ]; then [ -w "$1" ]; else mkdir -p "$1" 2>/dev/null; fi
+}
+if ! writable "$APP" || ! writable "$DIR"; then
+  [ "$SYSTEM" = 1 ] || die "$APP or $DIR is not writable"
+  command -v sudo >/dev/null 2>&1 || die "$APP or $DIR is not writable and sudo is unavailable"
   SUDO=sudo
+  say "installing to $APP and $DIR with sudo"
+  sudo mkdir -p "$APP" "$DIR"
 fi
-if [ -n "$SUDO" ]; then
-  command -v sudo >/dev/null 2>&1 || die "$DIR is not writable and sudo is unavailable"
-  say "installing to $DIR with sudo"
-  sudo mkdir -p "$DIR"
+[ ! -e "$APP/current" ] || [ -L "$APP/current" ] || die "$APP/current exists and is not a symlink; move it away and rerun"
+previous=$(readlink "$APP/current" 2>/dev/null || true)
+
+# Unpack beside the versions, then move into place: no half-written version is ever current.
+stage=$($SUDO mktemp -d "$APP/.alp-update-XXXXXX") || die "could not create a directory in $APP"
+cleanup_stage() { $SUDO rm -rf "$stage"; }
+if ! $SUDO tar -xzf "$tmp/$asset" -C "$stage"; then cleanup_stage; die "could not extract $asset"; fi
+if [ ! -f "$stage/$name/alp-bundle.json" ] || [ ! -x "$stage/$name/bin/alp" ]; then cleanup_stage; die "$asset does not contain an ALP bundle ($name/bin/alp)"; fi
+reported=$("$stage/$name/bin/alp" --version 2>/dev/null || true)
+if [ "$reported" != "$version" ]; then cleanup_stage; die "the downloaded ALP reports version '$reported', not $version"; fi
+if [ -e "$APP/$version" ]; then
+  if [ "$previous" = "$version" ]; then
+    # Reinstalling the running version: keep its files for the processes that use them.
+    aside="$APP/.alp-old-${stage##*.alp-update-}"
+    $SUDO mv "$APP/$version" "$aside" || { cleanup_stage; die "could not move $APP/$version aside"; }
+  else
+    $SUDO rm -rf "$APP/$version"
+  fi
 fi
-# Copy beside the target, then rename: a running alp keeps its old file, and no half-written binary is ever on PATH.
-staged=$($SUDO mktemp "$DIR/.alp.install.XXXXXX") || die "could not create a file in $DIR"
-if ! { $SUDO cp "$binary" "$staged" && $SUDO chmod 755 "$staged" && $SUDO mv -f "$staged" "$DIR/alp"; }; then
-  $SUDO rm -f "$staged"
+$SUDO mv "$stage/$name" "$APP/$version" || { cleanup_stage; die "could not install $APP/$version"; }
+cleanup_stage
+# A relative link, so the whole root can move. ln -n replaces the old link instead of entering it.
+$SUDO ln -sfn "$version" "$APP/current" || die "could not point $APP/current at $version"
+say "installed ALP $version in $APP/$version"
+
+# The alp command: a symlink renamed over the old one (a 0.0.1-beta.5/6 single-file alp included);
+# a running alp keeps its file.
+link="$DIR/.alp.install.$$"
+$SUDO rm -f "$link"
+if ! { $SUDO ln -s "$APP/current/bin/alp" "$link" && $SUDO mv -f "$link" "$DIR/alp"; }; then
+  $SUDO rm -f "$link"
   die "could not install $DIR/alp"
 fi
-# The licence files ride along under <prefix>/share/doc/alp (or ~/.alp/share/doc/alp).
-doc="$(dirname "$DIR")/share/doc/alp"
-docsudo="$SUDO"
-[ "$SYSTEM" = 1 ] && [ -z "$docsudo" ] && [ ! -w "$(dirname "$doc")" ] && [ ! -w "$doc" ] && command -v sudo >/dev/null 2>&1 && docsudo=sudo
-if $docsudo mkdir -p "$doc" 2>/dev/null; then
-  for file in LICENSE NOTICE THIRD-PARTY-NOTICES.txt; do
-    if [ -f "$tmp/x/$name/$file" ]; then $docsudo cp "$tmp/x/$name/$file" "$doc/$file" || say "warning: could not copy $file to $doc"; fi
-  done
-else
-  say "warning: could not create $doc; the licence files were not installed"
-fi
-say "installed $DIR/alp"
+say "installed $DIR/alp -> $APP/current/bin/alp"
+
+# Older versions go; the previous one stays until the next install, for an alpd still running it.
+for old in "$APP"/*; do
+  [ -d "$old" ] || continue
+  base=$(basename "$old")
+  case "$base" in current|"$version"|"$previous") continue ;; [0-9]*) $SUDO rm -rf "$old" ;; esac
+done
 
 # --- PATH -----------------------------------------------------------------------------------
 on_path=0

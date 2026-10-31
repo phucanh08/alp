@@ -1,9 +1,9 @@
 #!/bin/sh
-# The ALP executable on a machine without Node (t-1e02 P1): CI runs this in debian:bookworm-slim on
-# Linux and under `env -i PATH=/usr/bin:/bin` on macOS. scripts/binary-smoke.mjs (which needs Node
-# for its fake provider and WebSocket client) covers the rest on the same runner.
+# The ALP bundle on a machine without a system Node (t-1807): CI runs this in debian:bookworm-slim on
+# Linux and under `env -i PATH=/usr/bin:/bin` on macOS; the bundle's own Node runs ALP.
+# scripts/binary-smoke.mjs (which needs Node for its fake provider and WebSocket client) covers the rest.
 #
-#   sh scripts/binary-smoke-nodeless.sh path/to/alp
+#   sh scripts/binary-smoke-nodeless.sh path/to/alp-<version>-<platform>/bin/alp
 set -eu
 binary="$1"
 case "$binary" in /*) ;; *) binary="$(pwd)/$binary" ;; esac
@@ -26,15 +26,13 @@ log "ok: alp --version ($version)"
 
 mkdir "$work/project"
 "$binary" init "$work/project" >/dev/null
-{ [ -f "$work/project/.alp/ALP.md" ] || [ -f "$work/project/ALP.md" ]; } || fail "alp init did not write the embedded templates"
-log "ok: alp init writes the embedded templates"
+{ [ -f "$work/project/.alp/ALP.md" ] || [ -f "$work/project/ALP.md" ]; } || fail "alp init did not write its templates"
+log "ok: alp init writes its templates"
 
 "$binary" daemon start | grep -Eq 'running \(pid [0-9]+\)' || fail "alp daemon start"
 log "ok: alp daemon start"
 "$binary" daemon status | grep -q ready || fail "alp daemon status"
 log "ok: alp daemon status"
-[ -d "$ALP_HOME/cache/$version" ] || fail "the assets were not extracted to \$ALP_HOME/cache/$version"
-log "ok: assets extracted to the cache"
 
 url=$(cd "$work/project" && "$binary" web --print)
 case "$url" in http://127.0.0.1:*'#token='*) ;; *) fail "alp web --print printed '$url'" ;; esac

@@ -1,8 +1,8 @@
-# The ALP executable on Windows without Node (t-1e02 P2): CI runs this on windows-2022 with PATH cut
-# down to the Windows system directories, so neither node nor bun can be found. scripts/binary-smoke.mjs
-# (which needs Node for its fake provider and WebSocket client) covers the rest on the same runner.
+# The ALP bundle on Windows without a system Node (t-1807): CI runs this on windows-2022 with PATH cut
+# down to the Windows system directories, so no node can be found; the bundle's own node.exe runs ALP.
+# scripts/binary-smoke.mjs (which needs Node for its fake provider and WebSocket client) covers the rest.
 #
-#   powershell -NoProfile -File scripts/binary-smoke-nodeless.ps1 path\to\alp.exe
+#   powershell -NoProfile -File scripts/binary-smoke-nodeless.ps1 path\to\alp-<version>-windows-x64\bin\alp.cmd
 param([Parameter(Mandatory = $true)][string]$Binary)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -28,17 +28,16 @@ try {
 
   $project = Join-Path $work 'project'
   Alp init $project | Out-Null
-  if (-not ((Test-Path (Join-Path $project '.alp\ALP.md')) -or (Test-Path (Join-Path $project 'ALP.md')))) { Fail 'alp init did not write the embedded templates' }
-  Log 'ok: alp init writes the embedded templates'
+  if (-not ((Test-Path (Join-Path $project '.alp\ALP.md')) -or (Test-Path (Join-Path $project 'ALP.md')))) { Fail 'alp init did not write its templates' }
+  Log 'ok: alp init writes its templates'
 
   if ((Alp daemon start) -notmatch 'running \(pid [0-9]+\)') { Fail 'alp daemon start' }
   Log 'ok: alp daemon start'
   if ((Alp daemon status) -notmatch 'ready') { Fail 'alp daemon status' }
   Log 'ok: alp daemon status'
-  if (-not (Test-Path (Join-Path $env:ALP_HOME "cache\$version"))) { Fail "the assets were not extracted to ALP_HOME\cache\$version" }
-  Log 'ok: assets extracted to the cache'
-  if (-not (Test-Path (Join-Path $env:ALP_HOME "cache\$version\node-pty\prebuilds\win32-x64\conpty\OpenConsole.exe"))) { Fail 'node-pty (ConPTY) was not extracted' }
-  Log 'ok: node-pty with conpty.dll and OpenConsole.exe extracted'
+  $bundle = Split-Path -Parent (Split-Path -Parent $Binary)
+  if (-not (Test-Path (Join-Path $bundle 'lib\node_modules\node-pty\prebuilds\win32-x64'))) { Fail 'the bundle has no node-pty prebuild for win32-x64' }
+  Log 'ok: the bundle carries node-pty for win32-x64'
 
   Push-Location $project
   try { $url = Alp web --print } finally { Pop-Location }

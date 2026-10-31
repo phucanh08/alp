@@ -1,10 +1,10 @@
 import { createRequire } from 'node:module';
-import { isExecutableName, isPackaged, isSelf, ROLE_ARGS } from './packaged.js';
+import { isExecutableName } from './packaged.js';
 
 /**
  * The stdio MCP bridges an agent CLI starts to reach alpd's tools (ACP agents and Antigravity).
- * Under Node they run as `node -e <source>`; the ALP executable cannot evaluate `-e`, so it runs
- * them as `alp bridge acp|antigravity`, which calls runBridge (t-1e02).
+ * They run as `node -e <source>`; `alp bridge acp|antigravity` (which calls runBridge) remains for
+ * the MCP entries the single-file executable of 0.0.1-beta.5/6 wrote.
  */
 
 export const ACP_BRIDGE = `
@@ -87,20 +87,18 @@ export function runBridge(kind) {
 }
 
 /**
- * The command an agent CLI runs to start a bridge: `node -e <source>` under Node, the executable's
- * `bridge <kind>` subcommand when packaged.
+ * The command an agent CLI runs to start a bridge: `node -e <source>` under this Node.
  * @param {'acp' | 'antigravity'} kind
  * @returns {{ command: string, args: string[] }}
  */
 export function bridgeCommand(kind) {
   if (!Object.hasOwn(BRIDGES, kind)) throw new Error(`Unknown bridge: ${kind}; expected acp or antigravity`);
-  if (isPackaged()) return { command: process.execPath, args: [...ROLE_ARGS[kind === 'acp' ? 'bridge-acp' : 'bridge-antigravity']] };
   return { command: process.execPath, args: ['-e', BRIDGES[kind]] };
 }
 
 /**
- * Whether an MCP server entry is one of ALP's bridge launchers: the `-e` source, or the ALP
- * executable's `bridge <kind>` (only when its command is named alp, so another server is kept).
+ * Whether an MCP server entry is one of ALP's bridge launchers: the `-e` source, or `alp bridge <kind>`
+ * as the single-file executable of 0.0.1-beta.5/6 wrote it (only when its command is named alp, so another server is kept).
  * @param {'acp' | 'antigravity'} kind
  * @param {unknown} args
  * @param {unknown} [command]
@@ -109,5 +107,5 @@ export function isBridgeArgs(kind, args, command = undefined) {
   if (!Array.isArray(args)) return false;
   const marker = kind === 'antigravity' ? '// ALP Antigravity bridge v1' : undefined;
   if (marker && args.some(arg => typeof arg === 'string' && arg.startsWith(marker))) return true;
-  return typeof command === 'string' && (isExecutableName(command) || isSelf(command)) && args.length === 2 && args[0] === 'bridge' && args[1] === kind;
+  return typeof command === 'string' && isExecutableName(command) && args.length === 2 && args[0] === 'bridge' && args[1] === kind;
 }

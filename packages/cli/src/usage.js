@@ -3,7 +3,7 @@ import path from 'node:path';
 
 const USAGE = `Usage:
   alp <init|update-template> [directory]   create a project, or upgrade an older project's ALP template (upgrade is an alias)
-  alp update [--check] [--yes] [--version X]   update the ALP executable from GitHub Releases (checksum and provenance checked)
+  alp update [--check] [--yes] [--version X]   update ALP from GitHub Releases (checksum and provenance checked)
   alp --version
   alp setup [directory] [--runtime codex|claude|mix] [--prefer claude|codex]
             [--claude-model M] [--codex-model M] [--claude-supervisor M] [--codex-supervisor M]
@@ -11,7 +11,7 @@ const USAGE = `Usage:
   alp daemon <start|stop|restart>
   alp daemon status [--json]             liveness and readiness; exit 0 ready, 3 not running, 4 not ready
   alp daemon <install|uninstall>         run alpd as a login service that restarts after a crash
-  alp daemon run [--detach] [--service]  run alpd in this process (what services and the ALP executable start)
+  alp daemon run [--detach] [--service]  run alpd in this process (what services written by 0.0.1-beta.5/6 start)
   alp acp                                serve ALP to an editor (Zed, JetBrains) over the Agent Client Protocol on stdio
   alp web [--print]                      open the ALP web app on this machine (alp-web, loopback); --print only prints its address
   alp web serve [--service|--rotate] [--project DIR]   run alp-web in this process (what alp web starts)
