@@ -13,7 +13,7 @@
 #                    without -Dir the command goes to <path>\bin and the user PATH is left alone
 #                    unless -ModifyPath is given
 #   -NoModifyPath    leave the user PATH alone and only print the step [ALP_INSTALL_NO_MODIFY_PATH=1]
-#   -ModifyPath      add the command directory to the user PATH even with -Root
+#   -ModifyPath      add the command directory to the user PATH even with -Root alone [ALP_INSTALL_MODIFY_PATH=1]
 #   -BaseUrl <url>   read SHA256SUMS and the archive from a mirror     [ALP_INSTALL_BASE_URL]
 #                    (https://, file:// or an absolute directory)
 #   -Help
@@ -82,9 +82,13 @@ param(
   elseif ($BaseUrl -notmatch '^https://') { Die "the release mirror must be https://, file:// or an absolute directory ($BaseUrl)" }
 
   if ($NoModifyPath -and $ModifyPath) { Die '-NoModifyPath and -ModifyPath conflict' }
-  # -Root keeps the install self-contained: the command in <Root>\bin and no user PATH edit.
-  if ($Root -and -not $ModifyPath) { $NoModifyPath = $true }
-  if (-not $Dir -and $Root) { $Dir = Join-Path $Root 'bin' }
+  if ($env:ALP_INSTALL_MODIFY_PATH -eq '1') { $ModifyPath = $true }
+  # -Root alone (no -Dir) keeps the install self-contained: the command in <Root>\bin and no user
+  # PATH edit unless -ModifyPath.
+  if ($Root -and -not $Dir) {
+    $Dir = Join-Path $Root 'bin'
+    if (-not $ModifyPath) { $NoModifyPath = $true }
+  }
   if (-not $Dir) {
     if ($env:LOCALAPPDATA) { $Dir = Join-Path $env:LOCALAPPDATA 'Programs\alp' }
     else { $Dir = Join-Path $HOME '.alp\bin' }

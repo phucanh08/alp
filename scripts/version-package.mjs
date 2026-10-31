@@ -2,7 +2,8 @@
 import { spawnSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-// ALP_VERSION_PACKAGE_ROOT: a copy of the repository's manifests, for the test (t-37f1).
+// Test-only (t-37f1): ALP_VERSION_PACKAGE_ROOT points at a copy of the manifests and
+// ALP_VERSION_PACKAGE_SKIP_LOCK=1 skips the lockfile step. Never set them in a release job.
 const root = process.env.ALP_VERSION_PACKAGE_ROOT || path.resolve(import.meta.dirname, '..');
 const [workspace, version] = process.argv.slice(2);
 if (!workspace || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(version ?? '')) throw new Error('Usage: npm run version:package -- <package-name> <semver>');

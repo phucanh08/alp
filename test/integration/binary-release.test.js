@@ -39,7 +39,7 @@ async function mirror(t, versions = ['9.8.7']) {
 /** Runs install.sh with a private HOME and a PATH without the install directory. */
 function install(args, { home, shell = '/bin/sh', extraEnv = {} }) {
   return new Promise(resolve => execFile('/bin/sh', [INSTALL, ...args], {
-    env: { HOME: home, SHELL: shell, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', ...extraEnv }, timeout: 60_000,
+    env: { HOME: home, SHELL: shell, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}), ...extraEnv }, timeout: 60_000,
   }, (error, stdout, stderr) => resolve({ code: error ? error.code ?? 1 : 0, stdout, stderr })));
 }
 
@@ -128,6 +128,11 @@ test('install.sh --root alone puts the command in <root>/bin and leaves HOME and
   assert.equal(opted.code, 0, opted.stderr);
   assert.ok((await readFile(path.join(home, '.zshrc'), 'utf8')).includes(`export PATH="${path.join(root, 'bin')}:$PATH"`));
   assert.equal(existsSync(path.join(home, '.alp')), false);
+  // --root with an explicit --dir is not self-contained: the profile is edited as before.
+  const shell = await temp(t, 'alp-home-');
+  const both = await install(['--root', root, '--dir', path.join(root, 'cmd'), '--base-url', releases], { home: shell, shell: '/bin/zsh' });
+  assert.equal(both.code, 0, both.stderr);
+  assert.ok((await readFile(path.join(shell, '.zshrc'), 'utf8')).includes(`export PATH="${path.join(root, 'cmd')}:$PATH"`));
 });
 
 test('install.sh refuses a corrupted archive, a malformed SHA256SUMS, bad options and versions, and installs nothing', { skip: !posix }, async t => {
