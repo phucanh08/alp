@@ -71,6 +71,15 @@ try {
   check(r.code === 0 && /up to date/.test(r.stdout), `alp update --check reports ${version} up to date (${r.code} ${r.stdout}${r.stderr})`);
   r = await alp(['update', '.']);
   check(r.code === 1 && /did you mean `alp update-template`/.test(r.stderr), 'a template-style argument gets the update-template hint');
+  if (windows) {
+    // Windows cannot replace the directory a running node.exe comes from: refused, nothing changed.
+    const before = versions();
+    r = await alp(['update', '--yes', '--version', version, '--base-url', fileUrl]);
+    check(r.code !== 0 && /Windows cannot replace it in place/.test(r.stderr), `a reinstall of the running version is refused on Windows (${r.stderr.trim()})`);
+    check(JSON.stringify(versions()) === JSON.stringify(before), 'the refused reinstall changed nothing');
+    log('ok');
+    process.exit(0);
+  }
   r = await alp(['update', '--version', version, '--base-url', fileUrl]);
   check(r.code !== 0 && /pass --yes/.test(r.stderr), 'without a terminal, alp update needs --yes');
 
@@ -84,14 +93,6 @@ try {
   check(r.code !== 0 && /Checksum mismatch/.test(r.stderr), 'a checksum mismatch is refused');
   check(JSON.stringify(versions()) === JSON.stringify(before), `the refused update changed nothing in app/ (${versions().join(', ')})`);
 
-  if (windows) {
-    // Windows cannot replace the directory a running node.exe comes from: refused, nothing changed.
-    r = await alp(['update', '--yes', '--version', version, '--base-url', fileUrl]);
-    check(r.code !== 0 && /Windows cannot replace it in place/.test(r.stderr), `a reinstall of the running version is refused on Windows (${r.stderr.trim()})`);
-    check(JSON.stringify(versions()) === JSON.stringify(before), 'the refused reinstall changed nothing');
-    log('ok');
-    process.exit(0);
-  }
   // file:// mirror: a reinstall of the running version puts a fresh copy at app/<version>.
   r = await alp(['update', '--yes', '--version', version, '--base-url', fileUrl]);
   check(r.code === 0 && /Checksum verified/.test(r.stdout) && /Updated ALP/.test(r.stdout), `alp update --yes from a file:// mirror (${r.stderr.trim() || 'ok'})`);
