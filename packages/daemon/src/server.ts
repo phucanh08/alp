@@ -1957,20 +1957,21 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         if (params?.protocolVersion !== PROTOCOL_VERSION) throw new RpcError(ERROR.protocol, `ALP daemon speaks protocol ${PROTOCOL_VERSION}; restart it after upgrading (alp daemon restart)`, { reason: 'protocol_version', supported: [PROTOCOL_VERSION] });
         const issues = validateParams(method, params)!;
         if (issues.length) throw invalidParams(issues);
+        // Checked before the connection changes, so a refused hello changes nothing. Same pattern as AGENT_NAME in apps/gateway/src/credentials.js.
+        const named = params?.principal?.agent;
+        if (named !== undefined && (typeof named !== 'string' || !/^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){0,63}$/.test(named))) throw new RpcError(RPC_ERROR.invalidParams, 'principal.agent must be an agent name', { reason: 'invalid_params' });
         connection.helloed = true;
         // Sticky: a later hello never sheds it.
         connection.agent = connection.agent === true || (Array.isArray(params?.capabilities) && params.capabilities.includes(AGENT_CAPABILITY));
         if (typeof params?.client?.name === 'string') connection.client = params.client.name;
         // A named principal (t-1c59: the gateway sends a named agent credential's name) is an agent's
         // too: naming one only ever takes away. The name is a label for the logs, not a credential.
-        const named = params?.principal?.agent;
         if (named !== undefined) {
-          if (typeof named !== 'string' || !/^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){0,63}$/.test(named)) throw new RpcError(RPC_ERROR.invalidParams, 'principal.agent must be an agent name', { reason: 'invalid_params' });
           connection.agent = true;
           if (connection.agentName === undefined) {
             connection.agentName = named;
-            log.info('an agent connection named itself', { code: 'ALP_AGENT_CONNECTION', agent: named, client: connection.client });
-          }
+            log.info('an agent connection named itself', { code: 'ALP_AGENT_CONNECTION', agentName: named, client: connection.client });
+          } else if (connection.agentName !== named) log.warn('an agent connection gave a second name; the first stays', { code: 'ALP_AGENT_CONNECTION_RENAME', agentName: connection.agentName, refused: named });
         }
         // Terminals are listed only while the host's switch is on (and the PTY module loads).
         const terminalLimits = await terminals?.advertised();
