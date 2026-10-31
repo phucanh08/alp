@@ -97,6 +97,8 @@ test('gates (t-ccac): task.gate.resolve approves with a choice or rejects, recor
   for (let i = 0; i < 200 && !(await getTask(project, id)).gates[1].resolved?.notified; i++) await new Promise(resolve => setTimeout(resolve, 10));
   stored = await getTask(project, id);
   assert.deepEqual([stored.gates[1].resolved.by, stored.gates[1].resolved.channel], ['user', 'paseo']);
+  // The answered card goes when the runtime handles the answer, not when the task file is written (t-1861).
+  for (let i = 0; i < 200 && cards().length > 0; i++) await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(cards().length, 0);
 
   const approved = await call('task.gate.resolve', { projectRoot: project, id, gate: 'g1', choice: 'B', channel: 'paseo' });
