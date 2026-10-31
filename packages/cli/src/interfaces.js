@@ -8,6 +8,7 @@ import { UsageError } from './usage.js';
 import { built, start, running } from './daemon.js';
 import { DAEMON_ENTRY, distributionEntry } from './paths.js';
 import { entryCommand } from '@anhlp/alp-core/packaged';
+import { isAgentProcess } from '@anhlp/alp-core/tasks';
 import { runRole } from './roles.js';
 import { alpWebEntry, alpWebScript, isWebClaimed, isWebReady, refusal, stopPreRenamePaseo, stopWebService, webOwner } from './web-service.js';
 
@@ -186,6 +187,9 @@ async function serveWeb(home, entry) {
 }
 
 async function webCommand(args) {
+  // alp web prints, rotates and pairs with the user's own secrets (t-1c59): a process an ALP agent
+  // started is refused before anything is read, stopped or printed.
+  if (isAgentProcess()) throw new Error('alp web is the user\'s: it prints and rotates the user\'s credential; this process was started by an ALP agent (ALP_AGENT_SESSION is set)');
   if (args[0] === 'pair') return pairCommand(args.slice(1));
   if (args[0] === 'rotate') return rotateCommand(args.slice(1));
   // alp-web itself in this process; its own options (--service, --rotate, --project DIR) follow.
