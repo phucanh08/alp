@@ -11,8 +11,8 @@
 #   --system           install to /usr/local/lib/alp with the command in /usr/local/bin (uses sudo when needed)
 #                      instead of ~/.alp with the command in ~/.alp/bin
 #   --dir <path>       put the alp command in <path>
-#   --root <path>      put the bundle in <path>/app; without --dir the command goes to <path>/bin, and
-#                      no shell profile is edited unless --modify-path is given
+#   --root <path>      put the bundle in <path>/app; without --dir or --system the command goes to
+#                      <path>/bin, and no shell profile is edited unless --modify-path is given
 #   --no-modify-path   never edit a shell profile; only print the PATH line
 #   --modify-path      edit the shell profile even with --root
 #   --base-url <url>   download from this release mirror (it holds SHA256SUMS and the archives)
@@ -121,12 +121,15 @@ BASE_URL="${BASE_URL%/}"
 case "$BASE_URL" in /*) BASE_URL="file://$BASE_URL" ;; esac
 case "$BASE_URL" in https://*|file://*) ;; *) die "the release mirror must be https:// or file:// ($BASE_URL)" ;; esac
 
-# --root keeps the install self-contained: the command in <root>/bin and no shell profile edit.
+# --root alone (no --dir, no --system) keeps the install self-contained: the command in <root>/bin
+# and no shell profile edit unless --modify-path.
+SELF_CONTAINED=0
+if [ -n "$ROOT" ] && [ -z "$DIR" ] && [ "$SYSTEM" != 1 ]; then SELF_CONTAINED=1; fi
 if [ -z "$MODIFY_PATH" ]; then
-  if [ -n "$ROOT" ]; then MODIFY_PATH=0; else MODIFY_PATH=1; fi
+  if [ "$SELF_CONTAINED" = 1 ]; then MODIFY_PATH=0; else MODIFY_PATH=1; fi
 fi
 if [ -n "$DIR" ]; then :
-elif [ -n "$ROOT" ]; then DIR="$ROOT/bin"
+elif [ "$SELF_CONTAINED" = 1 ]; then DIR="$ROOT/bin"
 elif [ "$SYSTEM" = 1 ]; then DIR=/usr/local/bin
 else DIR="$HOME/.alp/bin"; fi
 if [ -n "$ROOT" ]; then :

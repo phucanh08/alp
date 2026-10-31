@@ -37,9 +37,9 @@ curl -fsSL https://github.com/phucanh08/alp/releases/latest/download/install.sh 
 | `--version <v>` | Installs that release (tag `v<v>`) instead of the latest. Releases up to 0.0.1-beta.6 are single files that this installer does not install. |
 | `--system` | Installs the bundle to `/usr/local/lib/alp/app` and the command to `/usr/local/bin`. It uses `sudo` only when a directory is not writable. |
 | `--dir <path>` | Puts the `alp` command in `<path>` (default `~/.alp/bin`, or `<root>/bin` with `--root`). |
-| `--root <path>` | Puts the bundle in `<path>/app` (default `~/.alp`). Without `--dir` the command goes to `<path>/bin`, and no shell profile is edited unless `--modify-path` is given, so a `--root` install writes nothing in `~/.alp` or your profile. |
+| `--root <path>` | Puts the bundle in `<path>/app` (default `~/.alp`). Without `--dir` (and without `--system`) the command goes to `<path>/bin`, and no shell profile is edited unless `--modify-path` is given, so such an install writes nothing in `~/.alp` or your profile. With `--dir` or `--system` as well, the profile is edited as before. |
 | `--no-modify-path` | Leaves your shell profile alone and only prints the PATH line. |
-| `--modify-path` | Edits the shell profile even with `--root`. |
+| `--modify-path` | Edits the shell profile even with `--root` alone. |
 | `--base-url <url or dir>` | Reads `SHA256SUMS` and the archives from a mirror (`file://` or an absolute directory works too). Same as `ALP_INSTALL_BASE_URL`. |
 
 What the installer does:
@@ -50,7 +50,7 @@ What the installer does:
 4. It unpacks the archive into a staging directory beside the versions (`<root>/app/.alp-update-*`), checks that the bundle's `bin/alp --version` reports the release's version, and moves it to `<root>/app/<version>`. Reinstalling the version in use (current, or the one a running alpd uses) first moves the old copy aside (`.alp-old-*`), so processes running from it keep their files. Then `app/current` points at the new version.
 5. It links `<dir>/alp` to `<root>/app/current/bin/alp`, renaming the link over the old command (a single-file `alp` from 0.0.1-beta.5/6 included), so a running `alp` keeps its file.
 6. It removes older versions and leftovers of earlier installs, keeping the one that was current before and the one a running alpd uses (from `alpd.lock`).
-7. If the directory is not on `PATH`, it adds (unless `--no-modify-path`, or `--root` without `--modify-path`) one line to your shell profile (`~/.zshrc`, `~/.bashrc`, `~/.bash_profile` on macOS, fish's `conf.d/alp.fish`, or `~/.profile`). It adds the line only once.
+7. If the directory is not on `PATH`, it adds (unless `--no-modify-path`, or `--root` alone without `--modify-path`) one line to your shell profile (`~/.zshrc`, `~/.bashrc`, `~/.bash_profile` on macOS, fish's `conf.d/alp.fish`, or `~/.profile`). It adds the line only once.
 8. It runs `alp --version`.
 
 **A pre-created `ALP_HOME`.** alpd keeps its socket in `ALP_HOME`, which must be yours with mode 0700. If you made the directory yourself (`mkdir`, `mktemp -d`) and it is still empty, ALP tightens it to 0700 on first start. One that already holds files is left alone and alpd stops with `ALP_HOME_UNUSABLE` and the exact command, such as `chmod 700 "/path/to/home"`.
@@ -63,7 +63,7 @@ What the installer does:
 irm https://github.com/phucanh08/alp/releases/latest/download/install.ps1 | iex
 ```
 
-`install.ps1` takes `-Version <v>`, `-Dir <path>`, `-Root <path>`, `-NoModifyPath`, `-ModifyPath` and `-BaseUrl <https://, file:// or an absolute directory>`. With `| iex`, set `ALP_INSTALL_VERSION`, `ALP_INSTALL_DIR`, `ALP_INSTALL_ROOT`, `ALP_INSTALL_NO_MODIFY_PATH=1` or `ALP_INSTALL_BASE_URL` instead, or run `& ([scriptblock]::Create((irm <url>/install.ps1))) -Version <v>`. It works in Windows PowerShell 5.1 and PowerShell 7. It reports an error by throwing, never with `exit`, so a failure does not close the shell you piped it into, and its body runs in a child scope, so it leaves no variables or preferences behind (only `$env:Path` gains the directory).
+`install.ps1` takes `-Version <v>`, `-Dir <path>`, `-Root <path>`, `-NoModifyPath`, `-ModifyPath` and `-BaseUrl <https://, file:// or an absolute directory>`. With `| iex`, set `ALP_INSTALL_VERSION`, `ALP_INSTALL_DIR`, `ALP_INSTALL_ROOT`, `ALP_INSTALL_NO_MODIFY_PATH=1`, `ALP_INSTALL_MODIFY_PATH=1` or `ALP_INSTALL_BASE_URL` instead, or run `& ([scriptblock]::Create((irm <url>/install.ps1))) -Version <v>`. It works in Windows PowerShell 5.1 and PowerShell 7. It reports an error by throwing, never with `exit`, so a failure does not close the shell you piped it into, and its body runs in a child scope, so it leaves no variables or preferences behind (only `$env:Path` gains the directory).
 
 1. It refuses anything but Windows. On arm64 Windows it warns and installs the x64 build, which runs under emulation.
 2. It downloads `SHA256SUMS` and takes `alp-<version>-windows-x64.zip` from it, with no GitHub API call.

@@ -73,16 +73,21 @@ export async function assertPrivateDirectory(directory, { create = false } = {})
   let info = await lstat(directory);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('IPC requires a private directory, not a symlink');
   if (process.platform === 'win32') return;
-  if (info.uid !== process.getuid?.()) throw new Error(`IPC directory ${directory} must be owned by the current user (it belongs to uid ${info.uid}); use a directory of your own`);
+  const shown = JSON.stringify(directory);
+  const mine = (/** @type {import('node:fs').Stats} */ entry) => entry.isDirectory() && !entry.isSymbolicLink() && entry.uid === process.getuid?.();
+  if (info.uid !== process.getuid?.()) throw new Error(`IPC directory ${shown} must be owned by the current user (it belongs to uid ${info.uid}); use a directory of your own`);
   if ((info.mode & 0o077) === 0) return;
   // t-37f1: a directory the user made for ALP (mkdir, mktemp) and left at 0755 is still empty:
   // ALP tightens it. One that holds anything is left alone, with the exact command to fix it.
   if (create && (await readdir(directory)).length === 0) {
-    await chmod(directory, 0o700);
-    info = await lstat(directory);
-    if (info.isDirectory() && !info.isSymbolicLink() && info.uid === process.getuid?.() && (info.mode & 0o077) === 0) return;
+    await chmod(directory, 0o700).catch(() => {});
   }
-  throw new Error(`IPC directory ${directory} must have private permissions (0700), not ${(info.mode & 0o777).toString(8).padStart(4, '0')}; fix it with: chmod 700 ${JSON.stringify(directory)}`);
+  // Re-read: another ALP process may have tightened it meanwhile (and filled it).
+  info = await lstat(directory);
+  if (mine(info) && (info.mode & 0o077) === 0) return;
+  // Single quotes, so the command is safe to paste into a POSIX shell.
+  const quoted = `'${directory.replaceAll("'", "'\\''")}'`;
+  throw new Error(`IPC directory ${shown} must have private permissions (0700), not ${(info.mode & 0o777).toString(8).padStart(4, '0')}; fix it with: chmod 700 ${quoted}`);
 }
 
 export async function assertPrivateSocket(socketPath) {

@@ -76,7 +76,7 @@ test('startup admission reports an unusable home before launching a child', { sk
     assert.equal(error.code, 'ALP_HOME_UNUSABLE');
     assert.match(error.message, /ALP_HOME_UNUSABLE.*preparing its home/);
     assert.match(error.cause.message, /private permissions/);
-    assert.ok(error.cause.message.includes(`fix it with: chmod 700 ${JSON.stringify(home)}`), error.cause.message);
+    assert.ok(error.cause.message.includes(`fix it with: chmod 700 '${home}'`), error.cause.message);
     return true;
   });
 });
@@ -95,6 +95,12 @@ test('an empty home the user pre-created at 0755 is tightened to 0700; one that 
   await writeFile(path.join(used, 'note'), 'x');
   await assert.rejects(assertPrivateDirectory(used, { create: true }), /not 0755; fix it with: chmod 700 /);
   assert.equal((await lstat(used)).mode & 0o777, 0o755, 'a directory that holds files keeps its mode');
+  // Two first starts at once: the one that finds the directory filled by the other still passes.
+  const raced = path.join(directory, 'raced');
+  await mkdir(raced, { mode: 0o755 });
+  await chmod(raced, 0o755);
+  await Promise.all([1, 2, 3].map(async n => { await assertPrivateDirectory(raced, { create: true }); await mkdir(path.join(raced, `s${n}`), { recursive: true }); }));
+  assert.equal((await lstat(raced)).mode & 0o777, 0o700);
   // Without create (a check, not ALP preparing its own directory) nothing is changed.
   const checked = path.join(directory, 'checked');
   await mkdir(checked, { mode: 0o755 });
