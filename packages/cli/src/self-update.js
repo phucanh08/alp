@@ -384,7 +384,9 @@ export async function selfUpdate(args, overrides = {}) {
     }
     try { retryBusy(() => nodeFs.renameSync(unpacked, target)); } catch (error) {
       // The running version goes back where it was, so app/current still points at files (t-1f14).
-      if (aside && !nodeFs.existsSync(target)) { try { nodeFs.renameSync(path.join(app, aside), target); aside = undefined; } catch {} }
+      if (aside && !nodeFs.existsSync(target)) {
+        try { nodeFs.renameSync(path.join(app, aside), target); aside = undefined; } catch { throw new Error(`${error.message}; the running ALP ${asset.version} is in ${path.join(app, aside)}: move it back to ${target}`, { cause: error }); }
+      }
       throw error;
     }
     switchCurrent(app, asset.version, { platform: deps.platform });
