@@ -4,6 +4,8 @@ export type AgentProfilesConfig = {
   /** "provider:model", "provider:*" for any model of that provider, or the earlier object form. */
   profiles?: Array<string | AgentModelConfig>;
   autocompact?: AutoCompact;
+  /** The runtime's own commands and skills the "/" list offers besides the agent's ALP skills; none by default (t-efa3). */
+  commands?: string[];
   claude?: AgentModelConfig;
   codex?: AgentModelConfig;
 } & AgentModelConfig;

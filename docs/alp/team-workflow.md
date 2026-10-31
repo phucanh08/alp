@@ -378,6 +378,13 @@ ALP does not multiply a Codex `autocompact` value by 90%. `"auto"` keeps the exi
 native/agent context defaults. Agent JSON may also set `autocompact`; a numeric
 project value takes precedence.
 
+The composer's "/" list (web app, Paseo) offers the agent's ALP skills only. To offer
+some of the runtime's own commands or skills as well, name them without the leading
+`/` in `commands`, as in `"team": {"pho": {"main": {"profiles": [...], "commands":
+["model", "context"]}}}`; the default is none. Claude's `/clear`, `/compact` and
+`/rewind` are never offered, because ALP does that work itself. The list hides
+commands only: a command you type is still sent as written.
+
 ## Doctor
 
 `alp doctor` checks what ALP needs on this machine and, inside an ALP project

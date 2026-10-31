@@ -19,7 +19,7 @@ export const oracleProfiles = config => config?.profiles ?? [config?.claude, con
 export const agentProfiles = (config, name) => {
   if (!config) return [];
   if (name === 'oracle') return oracleProfiles(config).map(parseProfile);
-  const { autocompact, ...legacy } = config;
+  const { autocompact, commands, ...legacy } = config;
   return (config.profiles ?? [legacy]).map(parseProfile);
 };
 
@@ -56,7 +56,7 @@ export function normalizeAgentProfiles(config, name) {
   if (config.profiles) return { ...config, profiles: config.profiles.map(profile => typeof profile === 'string' ? profile : profileString(profile)), autocompact: config.autocompact ?? 'auto' };
   const profiles = agentProfiles(config, name);
   if (!profiles.length || profiles.some(profile => !profile.model)) return config;
-  return { profiles: profiles.map(profile => profileString({ ...profile, provider: profile.provider ?? profile.model.split(':')[0] })), autocompact: config.autocompact ?? 'auto' };
+  return { profiles: profiles.map(profile => profileString({ ...profile, provider: profile.provider ?? profile.model.split(':')[0] })), autocompact: config.autocompact ?? 'auto', ...(config.commands ? { commands: config.commands } : {}) };
 }
 
 export const profileModel = config => config?.model ? config.model.includes(':') ? config.model : `${config.provider}:${config.model}` : undefined;
@@ -128,7 +128,7 @@ export async function syncTemplateProfiles(settings, options = {}) {
     for (const name of new Set([...Object.keys(previous[id] ?? {}), ...(options.replaceModels ? Object.keys(current) : []), ...Object.keys(desired)])) {
       const config = current[name];
       if (!options.replaceModels && config && profileFingerprint(config, name) !== previous[id]?.[name]) continue;
-      if (desired[name]) current[name] = { ...desired[name], autocompact: config?.autocompact ?? desired[name].autocompact };
+      if (desired[name]) current[name] = { ...desired[name], autocompact: config?.autocompact ?? desired[name].autocompact, ...(config?.commands ? { commands: config.commands } : {}) };
       else delete current[name];
     }
     if (Object.keys(current).length) next.team[id] = current;
