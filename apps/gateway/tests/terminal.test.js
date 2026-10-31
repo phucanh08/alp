@@ -262,3 +262,19 @@ test('reduced protection passes through the gateway without acknowledgment and k
   const { client: forbidden } = await sdk('writer');
   await assert.rejects(forbidden.request('terminal.create', params), error => error.code === 1003 && error.data.reason === 'grant');
 });
+
+test('an older alpd that still requires the root-only acknowledgment gets a specific, actionable refusal', async t => {
+  const { daemon, sdk } = await world(t);
+  const { client } = await sdk('exec');
+  // Exactly what alpd built from main between 131e545 and 96bc24f (never in a release tag) answered a
+  // terminal.create without protectionAcknowledgment on a Linux root-only host; this web never sends one.
+  daemon.state.handlers['terminal.create'] = () => { throw { code: 1005, message: 'This Linux host lacks terminal process protection. /private/host-secret', data: { reason: 'terminal_protection_ack_required', secret: 'must-not-leak' } }; };
+  await assert.rejects(client.request('terminal.create', { workspaceId: 'wks_a', cols: 80, rows: 24, requestId: 'old' }), error => {
+    assert.equal(error.code, 1005);
+    assert.deepEqual(error.data, { reason: 'terminal_protection_ack_required' });
+    assert.match(error.message, /older alpd/);
+    assert.match(error.message, /alp update/);
+    assert.doesNotMatch(JSON.stringify(error), /host-secret|must-not-leak/);
+    return true;
+  });
+});

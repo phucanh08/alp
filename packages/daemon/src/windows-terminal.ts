@@ -6,7 +6,8 @@
 import { createRequire } from 'node:module';
 import type { PtySpawn } from './terminals.js';
 
-type NodePty = { spawn(file: string, args: string[], options: Record<string, unknown>): {
+/** The node-pty surface the win32 owner uses. */
+export type NodePty = { spawn(file: string, args: string[], options: Record<string, unknown>): {
   pid: number; write(data: string): void; resize(cols: number, rows: number): void; kill(signal?: string): void;
   onData(listener: (data: string) => void): { dispose(): void }; onExit(listener: (event: { exitCode: number; signal?: number }) => void): { dispose(): void };
 } };
@@ -20,8 +21,9 @@ export function loadNodePty(): NodePty | undefined {
   return loaded ?? undefined;
 }
 
-export function windowsTerminalCapability(): { available: boolean; protection?: 'none'; reason?: string } {
-  return loadNodePty() ? { available: true, protection: 'none' } : { available: false, reason: 'node_pty_unavailable' };
+/** `load` is a test hook (tests/windows-terminal.test.js); production loads the installed node-pty. */
+export function windowsTerminalCapability(load: () => NodePty | undefined = loadNodePty): { available: boolean; protection?: 'none'; reason?: string } {
+  return load() ? { available: true, protection: 'none' } : { available: false, reason: 'node_pty_unavailable' };
 }
 
 /** The shell for a Windows terminal: COMSPEC when absolute, else cmd.exe. */
@@ -30,9 +32,10 @@ export function windowsShell(env: NodeJS.ProcessEnv = process.env): string {
   return candidate && /^[a-zA-Z]:[\\/]/.test(candidate) ? candidate : 'cmd.exe';
 }
 
-export const windowsPtySpawn: PtySpawn = (file, args, options) => {
+/** The win32 owner over `load`'s node-pty; `load` is a test hook, production uses {@link windowsPtySpawn}. */
+export const createWindowsPtySpawn = (load: () => NodePty | undefined = loadNodePty): PtySpawn => (file, args, options) => {
   if (options.signal?.aborted) throw new Error('Terminal startup cancelled');
-  const pty = loadNodePty();
+  const pty = load();
   if (!pty) throw new Error('node-pty is unavailable on this host');
   const child = pty.spawn(file, args, { name: options.name, cols: options.cols, rows: options.rows, cwd: options.cwd, env: options.env, useConpty: true });
   let killed = false;
@@ -47,3 +50,4 @@ export const windowsPtySpawn: PtySpawn = (file, args, options) => {
   };
 };
 
+export const windowsPtySpawn: PtySpawn = createWindowsPtySpawn();

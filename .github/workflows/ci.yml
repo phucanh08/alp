@@ -106,6 +106,8 @@ jobs:
       - run: node scripts/build-workspace.mjs paseo
       # The CLI discovery fixture creates a Unix symlink; all daemon lifecycle/session tests run.
       - run: node --test packages/client/tests/daemon-paths.test.js packages/daemon/tests/daemon.test.js packages/daemon/tests/ipc-security.test.js integrations/paseo/tests/daemon-git.test.js
+      # The win32 terminal owner: unit tests, then a real cmd.exe through node-pty/ConPTY (the "ConPTY:" tests run only here).
+      - run: node --test packages/daemon/tests/windows-terminal.test.js
       - run: npm test --workspace @anhlp/alp-gateway
       - run: node --test packages/cli/tests/alp-web.test.js
       # npm install -g of the packed wrapper into a throwaway prefix: npm's alp.cmd runs, and alpd is found through it (t-1f14).
