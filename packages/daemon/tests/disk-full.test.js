@@ -6,11 +6,11 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { closeSync, openSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { connect, readLock } from '@anhlp/alp-client';
+import { connect, daemonPaths, ensureDaemon, readLock } from '@anhlp/alp-client';
 import { initProject } from '@anhlp/alp-core/init';
 import { createDiskGuard, isDiskError } from '@anhlp/alp-daemon';
 
@@ -153,4 +153,63 @@ test('a real alpd on a full disk keeps running and answering, pauses its work, a
   await client.request('daemon.shutdown').catch(() => {});
   await exited;
   assert.equal(exit.code, 0);
+});
+
+test('a pause write the disk refuses holds work at once, not at the next disk check (t-e80a)', { skip: process.platform === 'win32' && 'POSIX file descriptors' }, async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alpd-disk-'));
+  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  const home = path.join(directory, 'home');
+  await mkdir(home, { mode: 0o700 });
+  const flag = path.join(directory, 'disk-full');
+  const logFile = path.join(directory, 'alpd.log');
+  const log = openSync(logFile, 'a');
+  // Only pause.json fails, and the disk check waits an hour: nothing but that write can hold work.
+  const child = spawn(process.execPath, ['--import', PRELOAD, ALPD], {
+    detached: true, stdio: ['ignore', log, log],
+    env: { ...process.env, ALP_HOME: home, ALP_MODEL_CATALOG: 'static', ALP_TEST_DISK_FULL: flag, ALP_TEST_DISK_FULL_ONLY: 'pause.json', ALP_DISK_CHECK_MS: '3600000' },
+  });
+  closeSync(log);
+  let exit;
+  const exited = once(child, 'exit').then(([code, signal]) => { exit = { code, signal }; });
+  t.after(async () => { if (!exit) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} await exited; } });
+  await until(async () => {
+    if (exit) assert.fail(`alpd exited (${JSON.stringify(exit)}):\n${await readFile(logFile, 'utf8')}`);
+    return (await readLock(home))?.ready;
+  }, 'alpd to be ready');
+  const client = await connect((await readLock(home)).socket, { name: 'disk-test', version: '0' });
+  t.after(() => client.close());
+  await writeFile(flag, '');
+  await client.request('daemon.pause', { runtime: 'codex' });
+  await until(async () => (await client.request('daemon.pauses')).all?.cause === 'disk', 'the disk pause');
+  const pauses = await client.request('daemon.pauses');
+  assert.deepEqual([pauses.all.by, pauses.all.reason], ['alpd', 'the disk is full']);
+  // The user's pause of Codex stays.
+  assert.equal(pauses.runtimes.codex.by, 'the user');
+  assert.match(await readFile(logFile, 'utf8'), /ALP_DISK_FULL/);
+  await client.request('daemon.shutdown').catch(() => {});
+  await exited;
+  assert.equal(exit.code, 0);
+});
+
+test('alpd that cannot write its lock on a full disk says so to the client that started it, and leaves no lock behind (t-e80a)', { skip: process.platform === 'win32' && 'POSIX file descriptors' }, async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alpd-disk-'));
+  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  const home = path.join(directory, 'home');
+  await mkdir(home, { mode: 0o700 });
+  const flag = path.join(directory, 'disk-full');
+  // The disk is full before alpd starts: its log, its lock and its state take no writes.
+  await writeFile(flag, '');
+  const env = { ...process.env, ALP_MODEL_CATALOG: 'static', ALP_TEST_DISK_FULL: flag, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${PRELOAD}`.trim() };
+  await assert.rejects(ensureDaemon({ home, entry: ALPD, env, timeoutMs: 15_000 }), error => {
+    assert.match(error.message, /ALP_DISK_FULL, alpd exited during startup \(1\): alpd failed to start while taking its lock: the disk is full \(ENOSPC\); free space on the disk that holds .*home, then start alpd again/);
+    return true;
+  });
+  // The exclusive create succeeded and its write failed: the empty lock is gone, so it cannot stop the next start.
+  await assert.rejects(lstat(daemonPaths(home).lock), { code: 'ENOENT' });
+  await unlink(flag);
+  const socket = await ensureDaemon({ home, entry: ALPD, env, timeoutMs: 15_000 });
+  const client = await connect(socket, { name: 'disk-test', version: '0' });
+  await client.request('daemon.shutdown').catch(() => {});
+  client.close();
+  await until(async () => !(await readLock(home)), 'alpd to stop');
 });

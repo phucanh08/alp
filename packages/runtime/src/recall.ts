@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import type { RuntimeKind } from './resolve.js';
+import { tell } from './live.js';
 
 /**
  * Finished assignments whose native threads alp_recall can question (ALPD §27).
@@ -37,8 +38,8 @@ const valid = (entry: any): entry is RecallEntry => !!entry && typeof entry === 
   ['assignmentId', 'rootId', 'agent', 'project', 'runtime', 'threadId', 'cwd', 'model', 'status', 'finishedAt'].every(key => typeof entry[key] === 'string') &&
   Array.isArray(entry.requesters);
 
-/** The record of recallable threads, kept in `file` when given, else in memory. */
-export function createRecallBook(file?: string) {
+/** The record of recallable threads, kept in `file` when given, else in memory; `onError` hears of each failed write. */
+export function createRecallBook(file?: string, onError: (error: unknown) => void = () => {}) {
   let entries: Promise<RecallEntry[]> | undefined;
   let writes = Promise.resolve();
   const load = () => entries ??= file
@@ -52,7 +53,7 @@ export function createRecallBook(file?: string) {
       const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
       await writeFile(temporary, body, { mode: 0o600 });
       await rename(temporary, file);
-    }).catch(() => {});
+    }).catch(error => tell(onError, error));
     return writes;
   };
   return {

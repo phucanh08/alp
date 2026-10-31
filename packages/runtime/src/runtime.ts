@@ -41,7 +41,7 @@ import { MAIL_BODY_CHARS, MAIL_HEADER, publicEvent, renderMail, takeBatch, USER,
 import type { AlpEvent, AssignmentSnapshot, Envelope, SessionSnapshot, TurnOrigin, UserQuestion } from './events.js';
 import { live, normalizePaths, overlapping, renderBoard, type Pin } from './board.js';
 import { verifyConfig } from '@anhlp/alp-core/verify';
-import { createLiveBook, type LiveEntry } from './live.js';
+import { createLiveBook, tell, type LiveEntry } from './live.js';
 import { promptSafe } from '@anhlp/alp-core/promptsafe';
 import { CHOICES, words, type Words } from './language.js';
 import { OWN_START, sameProcessAlive } from './process-info.js';
@@ -209,11 +209,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
   const listeners = new Set<(envelope: Envelope) => void>();
   const epoch = randomUUID();
+  /** A failed write of alpd's own state reaches the host's disk guard at once (t-e80a). */
+  const writeFailed = (error: unknown) => { options.onWriteError?.(error); };
   /** Finished assignments whose native threads alp_recall can question. */
-  const recalls = createRecallBook(options.recallFile);
-  const assignmentResults = createAssignmentResults(options.assignmentResultFile);
+  const recalls = createRecallBook(options.recallFile, writeFailed);
+  const assignmentResults = createAssignmentResults(options.assignmentResultFile, writeFailed);
   /** Running assignments, so the next alpd continues them (ALPD §31). */
-  const inFlight = createLiveBook(options.liveFile);
+  const inFlight = createLiveBook(options.liveFile, writeFailed);
   /** Those an earlier alpd left running; recover() takes them once their root is open again. */
   let inherited = inFlight.all().filter(entry => entry.epoch !== epoch);
   /** Pauses by runtime, or of everything; kept in pauseFile across restarts. */
@@ -1356,7 +1358,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       const temporary = `${file}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
       await writeFile(temporary, body, { mode: 0o600 });
       await moveFile(temporary, file);
-    }).catch(() => {});
+    }).catch(error => tell(writeFailed, error));
   }
 
   /** Tells every open root, or those of one project, and so the user in each viewer. */

@@ -266,6 +266,44 @@ and arrange audited adoption before mutating or deleting old targets.
 **An unreadable session record** (`alp doctor`: `state`). alpd skips the record and leaves
 it on disk. Restore it from a backup, or remove it once you no longer need it.
 
+**The disk is full.** alpd keeps running. It pauses all of ALP's work (`by: alpd`) and
+parks running assignments as soon as a write of its own fails with `ENOSPC`, `EDQUOT` or
+`EROFS`: its log, its store, and its pause, live-assignment, recall and result files. It
+does not wait for its next check. Every minute it checks free space, and once the disk
+takes writes again it lifts that pause and parked work continues. A pause you made stays
+until you lift it. alpd deletes nothing to make room.
+
+**alpd will not start: `ALP_DISK_FULL`.** The disk was already full when alpd started, so
+it could not write its lock, its marker or its state. The message names the step and the
+error code. alpd's log may be missing this line, because the log could not be written
+either; `alp daemon start` and the client that started alpd show it. A lock file alpd
+created but could not fill is removed, so the next start is not blocked. Free space, then
+start alpd again.
+
+**Leftover worktrees take the space** (`alp doctor`: `disk`). Old assignment worktrees in
+`$ALP_HOME/worktrees` and `alp-*` directories in the temp directory can grow large.
+Clean-up only reports. Neither alpd nor `alp doctor --fix` deletes them, because one may
+still belong to running work or hold the only copy of a change. `alp doctor` puts each
+one in a class, and only the first class gets a command, for you to run by hand:
+
+- *clean and pushed*: a git checkout of its own with no changes, no untracked files and
+  no merge or rebase in progress, whose HEAD a remote-tracking branch already holds. For a
+  standalone clone, every branch must be held that way and there must be no stash. The
+  command is `git -C <main worktree> worktree remove <path>` (git keeps the branch), or
+  `rm -rf <path>` for a clone. "Pushed" means pushed as of that clone's last fetch.
+- *dirty*: uncommitted or untracked changes, or a merge or rebase in progress. Keep it.
+- *unpushed*: commits or a stash that no remote-tracking branch holds. Keep it.
+- *in use*: the worktree of a running assignment (`state/live.json`), the checkout of a
+  result no one has handled yet (`state/assignment-results.json`), the directory you run
+  `alp doctor` from, a clone that other worktrees were made from, or a clean checkout
+  changed in the last day (a worktree someone just
+  made by hand looks clean and pushed, and ALP does not track it). Keep it.
+- *unknown*: not the top of a git checkout, git could not answer, or `alp doctor` ran out
+  of time (it spends at most 10 s on this). Check it by hand.
+
+The text output shows the first 20 commands. `alp doctor --json` lists every leftover in
+the check's `leftovers` field, with its class and its command, if it has one.
+
 **A new machine, or a lost disk.**
 
 1. Install ALP.
