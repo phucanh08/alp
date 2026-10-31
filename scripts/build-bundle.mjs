@@ -102,6 +102,13 @@ async function prune(modules, platform) {
     if (name !== `${npm.os}-${npm.cpu}`) await rm(path.join(prebuilds, name), { recursive: true, force: true });
   }
   for (const pdb of (await readdir(prebuilds, { recursive: true }).catch(() => [])).filter(name => name.endsWith('.pdb'))) await rm(path.join(prebuilds, pdb), { force: true });
+  // Nothing at run time reads type declarations or source maps (Node uses maps only with
+  // --enable-source-maps); third-party docs go too. ALP's own packages keep everything (templates are .md).
+  for (const file of await readdir(modules, { recursive: true })) {
+    const name = String(file);
+    const own = name.startsWith(`@anhlp${path.sep}`);
+    if (/\.(map|d\.[cm]?ts)$/.test(name) || (!own && /(^|[\\/])(README|CHANGELOG|HISTORY)(\.md|\.markdown)?$/i.test(name))) await rm(path.join(modules, name), { force: true });
+  }
   const helpers = path.join(modules, '@anhlp/alp-cli/dist/terminal-native/prebuilt');
   for (const name of await readdir(helpers).catch(() => [])) {
     if (!name.startsWith(`${npm.os}-${npm.cpu}`)) await rm(path.join(helpers, name), { recursive: true, force: true });
