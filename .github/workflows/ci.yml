@@ -90,6 +90,7 @@ jobs:
 
   windows-daemon:
     runs-on: windows-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
