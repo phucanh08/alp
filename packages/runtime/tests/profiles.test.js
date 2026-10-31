@@ -247,3 +247,9 @@ test('a team member may name the runtime commands its "/" list offers', () => {
     assert.throws(() => validateSettings({ team: { pho: { main: { profiles: ['claude:claude-haiku-4-5-20251001'], commands } } } }, 'settings'), /commands/);
   }
 });
+
+test('normalizing an agent\'s profiles keeps its "/" commands (t-efa3)', async () => {
+  const { normalizeAgentProfiles } = await import('@anhlp/alp-core/profiles');
+  assert.deepEqual(normalizeAgentProfiles({ profiles: ['claude:claude-haiku-4-5-20251001'], commands: ['model'] }, 'main').commands, ['model']);
+  assert.deepEqual(normalizeAgentProfiles({ provider: 'codex', model: 'gpt-5.6-sol', commands: ['model'] }, 'main'), { profiles: ['codex:gpt-5.6-sol'], autocompact: 'auto', commands: ['model'] });
+});

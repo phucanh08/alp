@@ -119,7 +119,7 @@ export function validateSettings(settings, source) {
         check(object(config), `${where} must be an object`);
         if (config.autocompact !== undefined) validateAutoCompact(config.autocompact, check, `${where}.autocompact`);
         // t-efa3: the runtime's own commands and skills its "/" list offers besides the agent's ALP skills.
-        if (config.commands !== undefined) check(Array.isArray(config.commands) && config.commands.every(name => typeof name === 'string' && /^[^\s/]{1,256}$/.test(name)), `${where}.commands must be a list of command names, without the leading /`);
+        if (config.commands !== undefined) check(Array.isArray(config.commands) && config.commands.every(name => typeof name === 'string' && /^[^\s/]{1,256}$/.test(name)), `${where}.commands must be a list of command names, without whitespace or /`);
         if (Object.hasOwn(config, 'profiles')) {
           check(Object.keys(config).every(key => ['profiles', 'autocompact', 'commands'].includes(key)), `${where}: use profiles, autocompact and commands`);
           check(Array.isArray(config.profiles) && config.profiles.length > 0, `${where}.profiles must be a nonempty list`);
