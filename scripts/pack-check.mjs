@@ -58,8 +58,7 @@ async function licenceProblems(location, pkg, files) {
   return problems;
 }
 
-// The workspaces and the npm launcher (npm/alp, outside the workspaces). The platform packages are
-// generated from the release archives when packing (npm-platform.mjs, release-pack --binaries).
+// The workspaces and the npm wrapper (npm/alp, outside the workspaces).
 for (const location of ['.', ...manifest.workspaces, LAUNCHER_LOCATION]) {
   const pkg = JSON.parse(await readFile(path.join(root, location, 'package.json'), 'utf8'));
   if (pkg.private) continue;

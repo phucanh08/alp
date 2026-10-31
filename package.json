@@ -2,7 +2,7 @@
   "name": "alp-monorepo",
   "private": true,
   "version": "0.0.1-beta.6",
-  "description": "ALP monorepo (private): the npm packages are its workspaces and npm/alp, the @anhlp/alp launcher",
+  "description": "ALP monorepo (private): the npm packages are its workspaces and npm/alp, the @anhlp/alp wrapper",
   "type": "module",
   "bin": {
     "alp": "packages/cli/dist/cli.js"

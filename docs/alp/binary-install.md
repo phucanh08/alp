@@ -129,38 +129,10 @@ node --test test/integration/binary-install-ps1.test.js  # changes your user Pat
 
 ## npm packages
 
-> Stale until the npm wrapper change (t-1807 part B): `@anhlp/alp` still installs the single-file platform packages described below.
+`@anhlp/alp` (source in `npm/alp`, outside the workspaces) is a thin wrapper for people who already have Node (22.12 or later). It holds only `bin/alp.js`, which imports `@anhlp/alp-cli/cli`, and it has exactly one dependency, `@anhlp/alp-cli`, pinned to its own version. It has no install scripts. `npm install -g @anhlp/alp@beta` therefore installs the same JavaScript CLI and alpd as the bundle, running on the user's Node. Outside the bundle, `alp update` prints the npm command (`npm install -g @anhlp/alp@beta`) and leaves the install to npm. Clients that look for alpd through `alp` on PATH, such as the Paseo plugin, follow npm's `bin/alp.js` to `@anhlp/alp-cli/dist/alpd.js` (`findDaemonEntry`). The per-platform packages `@anhlp/alp-<os>-<arch>` of t-cd7f are retired (t-1807) and are never published.
 
-`@anhlp/alp` (source in `npm/alp`, outside the workspaces) holds only `bin/alp.js` and `lib/launcher.js`. Its `optionalDependencies` pin the five platform packages to its own version:
+The libraries (`@anhlp/alp-protocol`, `-core`, `-runtime`, `-client`, `-daemon`, `-cli`) and the Paseo plugin `@anhlp/alp-paseo` are JavaScript packages too. No package imports `@anhlp/alp`. The repository root is the private `alp-monorepo`.
 
-| Package | `os` / `cpu` / `libc` | Contains |
-|---|---|---|
-| `@anhlp/alp-darwin-arm64` | darwin / arm64 | `bin/alp` |
-| `@anhlp/alp-darwin-x64` | darwin / x64 | `bin/alp` |
-| `@anhlp/alp-linux-x64` | linux / x64 / glibc | `bin/alp` |
-| `@anhlp/alp-linux-arm64` | linux / arm64 / glibc | `bin/alp` |
-| `@anhlp/alp-win32-x64` | win32 / x64 | `bin/alp.exe` |
+A release is 8 tarballs, packed once from a clean clone at the release tag with `npm run release:pack -- --out <dir>`, then `release:verify` and `release:consumer` on the saved files (`release-acceptance.yml` does this in CI). Publish order: the seven JavaScript packages, then `@anhlp/alp` last, so the wrapper never points at an `@anhlp/alp-cli` that is not on the registry. A5 (`release:verify`, `launcherProblems`) refuses a wrapper whose dependencies are not exactly `@anhlp/alp-cli@<version>`, one with optional dependencies or install scripts, or one that ships anything beyond `bin/alp.js` and its licence files.
 
-Each one also carries README.md, LICENSE, NOTICE and the executable's THIRD-PARTY-NOTICES.txt, and it has no `bin`, scripts or dependencies. npm installs only the package that matches the machine. `alp` resolves that package and runs its executable with the same arguments and stdio. It forwards signals to the executable and ends the way the executable ended, with the same exit code or the same signal. If no platform package is installed (`--omit=optional`, musl, an unsupported platform), it exits 1 and suggests `--include=optional`, `install.sh` or the GitHub Releases page. The executable knows that it was installed by npm (it runs from `node_modules/@anhlp/alp-<os>-<arch>/bin/`), so `alp update` prints the npm command and leaves the file to npm. Clients that look for alpd through `alp` on PATH, such as the Paseo plugin, follow the launcher to the platform executable (`findDaemonEntry`).
-
-The libraries (`@anhlp/alp-protocol`, `-core`, `-runtime`, `-client`, `-daemon`, `-cli`) and the Paseo plugin `@anhlp/alp-paseo` remain JavaScript packages. No package imports `@anhlp/alp`. The repository root is the private `alp-monorepo`.
-
-Platform packages are not stored in the repository. `scripts/npm-platform.mjs` generates them at release time from the GitHub release archives, which means npm and `install.sh` install byte-identical executables:
-
-1. `release-binaries.yml` (run name `Release binaries <sha>`) drafts the GitHub release. It keeps the archives and SHA256SUMS as the 90-day artifact `alp-release-binaries`.
-2. `release-acceptance.yml` is run with `sha` and `binaries_run` set to that run's id. It checks that the run is a successful release-binaries run of the same SHA on main, checks the archives against SHA256SUMS, and runs `release:pack --binaries <archives>`. Each platform package's executable is extracted from its archive. `release-manifest.json` records the executable's sha256 and size and the archive's name and sha256 under `binary`. A5 (`release:verify`) fails if a packed executable differs from that record.
-3. Before publishing to npm, compare the `archiveSha256` values in the manifest with the SHA256SUMS asset of the GitHub release.
-   For an already-published GitHub release, `release:pack --binaries-release v<version>` downloads the release's archives and SHA256SUMS with `gh` and refuses a draft or another version. The manifest records `pack.binariesRelease` (repo, tag, target commit), and that ties the platform packages to the release the same way `binariesRun` does. For a release `v<version>` (for example `v0.0.1-beta.6`, which is the first npm release; beta.5 was never published to npm), pack the 13 tarballs from a clean clone of the release commit. The tag `v<version>` belongs to the binary release, so `release:pack` needs a local tag at HEAD:
-
-   ```sh
-   git clone https://github.com/phucanh08/alp.git alp-npm && cd alp-npm && git checkout <release sha>
-   git tag npm-v0.0.1-beta.6            # local only, never pushed: release:pack packs a tagged commit
-   npm ci && npm run build:packages
-   npm run release:pack -- --out /tmp/alp-npm-0.0.1-beta.6 --binaries-release v0.0.1-beta.6
-   npm run release:verify -- /tmp/alp-npm-0.0.1-beta.6 --sha <release sha>
-   npm run release:consumer -- /tmp/alp-npm-0.0.1-beta.6
-   ```
-
-4. Publish order: the seven JavaScript packages, then the five platform packages, then `@anhlp/alp` last, so the launcher never points at a version that is not on the registry.
-
-`binary-build.yml` runs `scripts/npm-launcher-smoke.mjs` on all five runners. It packs that runner's platform package from its own archive, installs it and the launcher with `npm install -g` into a temporary prefix, and then runs `alp --version`, `alp init` and `alp update` through npm's `alp`. `test/integration/npm-wrapper.test.js` covers platform resolution, the missing-package messages, and passthrough of argv, stdio, exit codes and signals.
+`scripts/npm-wrapper-smoke.mjs` installs the wrapper as a user would: `npm install -g` of the 8 tarballs into a temporary prefix (with a throwaway HOME, ALP_HOME and npm cache), then npm's `alp --version`, `alp init` and `alp update`. `validate:packages` (CI `packages-and-web`) runs it on the rehearsal release; without an argument it packs the built workspaces itself. `test/integration/npm-wrapper.test.js` covers the wrapper's manifest and the passthrough of argv, stdio and exit codes.

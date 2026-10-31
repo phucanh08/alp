@@ -17,7 +17,7 @@
 // after checking them against its SHA256SUMS, instead of packing the workspaces.
 import { spawnSync } from 'node:child_process';
 import { spawnCommand } from './spawn-command.mjs';
-import { LAUNCHER, PLATFORM_NAMES, releaseArtifacts } from './release-lib.mjs';
+import { LAUNCHER, releaseArtifacts } from './release-lib.mjs';
 import { checkPaseoNpmSource, describe as describePaseoSource } from './paseo-source-check.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -89,8 +89,8 @@ try {
   const tarballs = new Map();
   const publicPackages = [];
   for (const artifact of savedPacks ? releaseArtifacts(savedPacks) : []) {
-    // The launcher and the platform packages hold no JavaScript API; package-smoke runs them.
-    if (artifact.name === LAUNCHER || PLATFORM_NAMES.includes(artifact.name)) continue;
+    // The npm wrapper holds no JavaScript API; package-smoke runs it.
+    if (artifact.name === LAUNCHER) continue;
     publicPackages.push(artifact.manifest);
     tarballs.set(artifact.name, artifact.file);
   }

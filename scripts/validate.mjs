@@ -63,8 +63,8 @@ if (scope === 'all' || scope === 'packages') {
   node('scripts/pack-check.mjs', '--ignore-scripts');
   // The release path (docs/alp/beta-scope.md §7.2): pack the tarballs once into a new
   // directory with SHA256SUMS and a manifest, then run A5 and every consumer check (installed
-  // integrity, tarball-consumer, package-smoke) on those saved files. A rehearsal: CI is untagged and
-  // has no release archives, so no platform packages (binary-build.yml smokes the npm launcher with them).
+  // integrity, tarball-consumer, package-smoke, npm-wrapper-smoke) on those saved files. A rehearsal:
+  // CI is untagged.
   const release = mkdtempSync(path.join(os.tmpdir(), 'alp-release-'));
   // paseo-checkout.mjs made the pinned Paseo checkout above: tarball-consumer must run Paseo's own
   // plugin compiler on the npm:-style install (scripts/paseo-source-check.mjs, #111), not skip it.
@@ -72,6 +72,8 @@ if (scope === 'all' || scope === 'packages') {
   node('scripts/release-check.mjs');
   node('scripts/release-pack.mjs', '--out', release, '--rehearsal', '--ignore-scripts');
   node('scripts/release-consumer.mjs', release, '--rehearsal');
+  // The npm wrapper as users install it: npm install -g of the saved tarballs, then npm's alp.
+  node('scripts/npm-wrapper-smoke.mjs', release);
   rmSync(release, { recursive: true, force: true });
   node('scripts/gateway-smoke.mjs');
 }

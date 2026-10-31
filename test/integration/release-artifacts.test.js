@@ -7,12 +7,10 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
-import { PLATFORMS, PLATFORM_NAMES, platformManifest, platformOf } from '../../scripts/npm-platform.mjs';
 import {
   GATE_PHASES, GATE_ROWS, MANIFEST_FILE, RELEASE_NAMES, RELEASE_PACKAGES, SUMS_FILE, createReleaseManifest, digests, evaluateGate,
-  formatSha256Sums, gateTemplate, hostPlatformName, installableArtifacts, installedProblems, parseSha256Sums, readTarball, releaseArtifacts, SAVED_INSTALL_FLAGS, shippedWebProblems, SHIPPED_WEB_FILES, sourceProblems, tarballFilename, verifyRelease,
+  formatSha256Sums, gateTemplate, installedProblems, parseSha256Sums, readTarball, releaseArtifacts, shippedWebProblems, SHIPPED_WEB_FILES, sourceProblems, tarballFilename, verifyRelease,
 } from '../../scripts/release-lib.mjs';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
@@ -65,14 +63,9 @@ function tarball(files, { pax = false } = {}) {
 
 /** The files of one fixture package, valid for A5 unless `change` says otherwise. */
 function packageFiles(name, version = VERSION) {
-  const platform = platformOf(name);
-  if (platform) return {
-    'package.json': JSON.stringify(platformManifest(platform, version)), LICENSE, NOTICE, 'README.md': '# platform\n',
-    'THIRD-PARTY-NOTICES.txt': 'Third-party software in the ALP executable\n', [`bin/${platform.executable}`]: `executable for ${platform.id}\n`,
-  };
   if (name === '@anhlp/alp') return {
-    'package.json': JSON.stringify({ name, version, license: 'Apache-2.0', bin: { alp: 'bin/alp.js' }, optionalDependencies: Object.fromEntries(PLATFORM_NAMES.map(entry => [entry, version])) }),
-    LICENSE, NOTICE, 'README.md': '# @anhlp/alp\n', 'bin/alp.js': 'import "../lib/launcher.js";\n', 'lib/launcher.js': 'export {};\n',
+    'package.json': JSON.stringify({ name, version, license: 'Apache-2.0', bin: { alp: 'bin/alp.js' }, dependencies: { '@anhlp/alp-cli': version } }),
+    LICENSE, NOTICE, 'README.md': '# @anhlp/alp\n', 'bin/alp.js': "import '@anhlp/alp-cli/cli';\n",
   };
   const internal = RELEASE_NAMES.indexOf(name) > 0 ? { '@anhlp/alp-protocol': version } : {};
   const pkg = { name, version, license: 'Apache-2.0', dependencies: { ...internal, ws: '^8.0.0' } };
@@ -85,17 +78,14 @@ function packageFiles(name, version = VERSION) {
 }
 
 /** A saved release directory as release-pack writes it; `change(name, files)` edits a package's files first. */
-function writeRelease(directory, { change, git = { sha: SHA, tag: `v${VERSION}`, dirty: false }, pack = { ignoreScripts: false, rehearsal: false, platforms: true, archiveSha256Sums: 'e'.repeat(64), binariesRun: '41000000001' } } = {}) {
+function writeRelease(directory, { change, git = { sha: SHA, tag: `v${VERSION}`, dirty: false }, pack = { ignoreScripts: false, rehearsal: false } } = {}) {
   const artifacts = RELEASE_PACKAGES.map(({ name }) => {
     const files = packageFiles(name);
     change?.(name, files);
     const buffer = tarball(files);
     const filename = tarballFilename(name, VERSION);
     writeFileSync(path.join(directory, filename), buffer);
-    const platform = platformOf(name);
-    // The executable as release-pack records it from the release archive (unchanged by `change`).
-    const binary = platform && { file: `bin/${platform.executable}`, sha256: createHash('sha256').update(packageFiles(name)[`bin/${platform.executable}`]).digest('hex'), archive: `alp-${VERSION}-${platform.release}.tar.gz` };
-    return { name, version: VERSION, filename, entryCount: Object.keys(files).length, ...digests(buffer), ...(binary ? { binary } : {}) };
+    return { name, version: VERSION, filename, entryCount: Object.keys(files).length, ...digests(buffer) };
   });
   const sums = formatSha256Sums(artifacts);
   writeFileSync(path.join(directory, SUMS_FILE), sums);
@@ -175,8 +165,9 @@ test('A5 passes on a saved release and binds it to the release SHA', () => withR
   assert.deepEqual(result.problems, []);
   assert.deepEqual(result.artifacts.map(artifact => artifact.name), RELEASE_NAMES);
   assert.equal(manifest.sha256sums, digests(readFileSync(path.join(directory, SUMS_FILE))).sha256);
-  assert.deepEqual(manifest.packages.map(entry => Object.keys(entry).sort()), RELEASE_NAMES.map(name => [...(PLATFORM_NAMES.includes(name) ? ['binary'] : []), 'entryCount', 'filename', 'integrity', 'name', 'sha256', 'shasum', 'size', 'version']));
-  assert.deepEqual(RELEASE_NAMES.slice(-6), [...PLATFORM_NAMES, '@anhlp/alp'], 'the platform packages publish before the launcher that depends on them');
+  assert.deepEqual(manifest.packages.map(entry => Object.keys(entry).sort()), RELEASE_NAMES.map(() => ['entryCount', 'filename', 'integrity', 'name', 'sha256', 'shasum', 'size', 'version']));
+  assert.equal(RELEASE_NAMES.length, 8);
+  assert.deepEqual(RELEASE_NAMES.slice(-2), ['@anhlp/alp-paseo', '@anhlp/alp'], 'the wrapper publishes last, after @anhlp/alp-cli it depends on');
   assert.match(verifyRelease(directory, { sha: 'b'.repeat(40) }).problems.join('\n'), /not the release SHA b{40}/);
   assert.match(verifyRelease(directory, { version: '42.17.9-fixture.315' }).problems.join('\n'), /version 42\.17\.9-fixture\.314, expected 42\.17\.9-fixture\.315/);
 }));
@@ -230,7 +221,7 @@ test('A5 reads the packed package.json: version, pinned internal dependencies, l
 });
 
 test('a dirty, untagged or script-less pack is a rehearsal, never gate evidence', () => {
-  withRelease({ git: { sha: SHA, tag: null, dirty: true }, pack: { ignoreScripts: true, rehearsal: true, platforms: true, archiveSha256Sums: 'e'.repeat(64), binariesRun: '41000000001' } }, directory => {
+  withRelease({ git: { sha: SHA, tag: null, dirty: true }, pack: { ignoreScripts: true, rehearsal: true } }, directory => {
     const strict = verifyRelease(directory).problems;
     assert.deepEqual(strict, [
       'release-manifest.json: packed from a checkout with uncommitted changes',
@@ -240,7 +231,7 @@ test('a dirty, untagged or script-less pack is a rehearsal, never gate evidence'
     const rehearsal = verifyRelease(directory, { rehearsal: true });
     assert.deepEqual(rehearsal.problems, []);
     assert.deepEqual(rehearsal.notes, strict);
-    assert.equal(releaseArtifacts(directory).length, 13);
+    assert.equal(releaseArtifacts(directory).length, 8);
     const cli = spawnSync(process.execPath, ['scripts/release-verify.mjs', directory, '--rehearsal', '--sha', SHA, '--record', path.join(directory, 'evidence.json')], { cwd: root, env: fixtureEnv(directory), encoding: 'utf8' });
     assert.notEqual(cli.status, 0);
     assert.match(cli.stderr, /--record needs --sha <RELEASE_SHA> and a non-rehearsal run/);
@@ -252,7 +243,7 @@ test('release-verify and release-gate run on a saved release; the gate stays ope
   const run = (...args) => spawnSync(process.execPath, args, { cwd: root, env: fixtureEnv(directory), encoding: 'utf8' });
   const verify = run('scripts/release-verify.mjs', directory, '--sha', SHA, '--record', evidence);
   assert.equal(verify.status, 0, verify.stdout + verify.stderr);
-  assert.match(verify.stdout, /A5 passed: 13 tarballs of 42\.17\.9-fixture\.314/);
+  assert.match(verify.stdout, /A5 passed: 8 tarballs of 42\.17\.9-fixture\.314/);
   const recorded = JSON.parse(readFileSync(evidence, 'utf8'));
   assert.equal(recorded.rows.A5.status, 'pass');
   assert.equal(recorded.rows.A5.artifacts, manifest.sha256sums);
@@ -327,10 +318,10 @@ test('the consumer lockfile must resolve every @anhlp package to the saved tarba
   ]);
 }));
 
-test('the CLI package must pack alp web: alp-web.js, its app and the notices; the launcher carries none', () => {
+test('the CLI package must pack alp web: alp-web.js, its app and the notices; the wrapper carries none', () => {
   const cli = ['dist/alp-web.js', 'dist/alp-web/index.html', 'dist/alp-web/THIRD-PARTY-NOTICES.txt', 'dist/THIRD-PARTY-NOTICES.txt'];
   assert.deepEqual(SHIPPED_WEB_FILES['@anhlp/alp-cli'], cli);
-  assert.deepEqual(Object.keys(SHIPPED_WEB_FILES), ['@anhlp/alp-cli'], 'the gateway is never a package of its own; the launcher has no JavaScript of ALP\'s');
+  assert.deepEqual(Object.keys(SHIPPED_WEB_FILES), ['@anhlp/alp-cli'], 'the gateway is never a package of its own; the wrapper has no JavaScript of ALP\'s');
   assert.deepEqual(shippedWebProblems('@anhlp/alp-cli', ['package.json', ...cli, 'dist/alp-web/assets/index.js']), []);
   const found = shippedWebProblems('@anhlp/alp-cli', [...cli, 'src/web/main.js']);
   assert.equal(found.length, 1);
@@ -345,109 +336,12 @@ test('the CLI package must pack alp web: alp-web.js, its app and the notices; th
   withRelease({}, directory => assert.deepEqual(verifyRelease(directory).problems, []));
 });
 
-test('A5 checks the launcher: no dependencies or install scripts, the five platform packages pinned, only its launcher files (t-cd7f)', () => {
+test('A5 checks the wrapper: exactly @anhlp/alp-cli pinned, no platform packages or install scripts, only bin/alp.js (t-1807)', () => {
   const problems = change => withRelease({ change }, directory => verifyRelease(directory).problems);
   const edit = edit => (name, files) => { if (name !== '@anhlp/alp') return; const pkg = JSON.parse(files['package.json']); edit(pkg, files); files['package.json'] = JSON.stringify(pkg); };
-  assert.match(problems(edit(pkg => { pkg.optionalDependencies['@anhlp/alp-linux-x64'] = '^' + VERSION; })).join('\n'), /optionalDependencies @anhlp\/alp-linux-x64@\^42\.17\.9-fixture\.314, not pinned[\s\S]*optionalDependencies must be exactly/);
-  assert.match(problems(edit(pkg => { delete pkg.optionalDependencies['@anhlp/alp-win32-x64']; })).join('\n'), /@anhlp\/alp: optionalDependencies must be exactly/);
-  assert.match(problems(edit(pkg => { pkg.dependencies = { '@anhlp/alp-cli': VERSION }; })).join('\n'), /the launcher must have no dependencies/);
+  assert.match(problems(edit(pkg => { pkg.dependencies['@anhlp/alp-cli'] = '^' + VERSION; })).join('\n'), /dependencies @anhlp\/alp-cli@\^42\.17\.9-fixture\.314, not pinned[\s\S]*dependencies must be exactly @anhlp\/alp-cli@42\.17\.9-fixture\.314/);
+  assert.match(problems(edit(pkg => { delete pkg.dependencies; })).join('\n'), /@anhlp\/alp: dependencies must be exactly/);
+  assert.match(problems(edit(pkg => { pkg.optionalDependencies = { '@anhlp/alp-linux-x64': VERSION }; })).join('\n'), /must have no optionalDependencies/);
   assert.match(problems(edit(pkg => { pkg.scripts = { postinstall: 'node install.js' }; })).join('\n'), /no postinstall script/);
-  assert.match(problems(edit((pkg, files) => { files['packages/cli/dist/cli.js'] = 'export {};'; })).join('\n'), /ships only bin\/alp\.js and lib\/launcher\.js, found packages\/cli\/dist\/cli\.js/);
-});
-
-test('A5 checks each platform package: os, cpu, libc, nothing to run but its executable, and the executable the release archive held (t-cd7f)', () => {
-  const problems = change => withRelease({ change }, directory => verifyRelease(directory).problems);
-  for (const platform of PLATFORMS) {
-    const files = packageFiles(platform.name);
-    const pkg = JSON.parse(files['package.json']);
-    assert.deepEqual([pkg.os, pkg.cpu, pkg.libc], [[platform.os], [platform.cpu], platform.os === 'linux' ? ['glibc'] : undefined]);
-  }
-  assert.deepEqual(problems((name, files) => { if (name === '@anhlp/alp-linux-arm64') files['bin/alp'] = 'another executable\n'; }),
-    ['@anhlp/alp-linux-arm64: bin/alp is not the executable release-manifest.json recorded from alp-42.17.9-fixture.314-linux-arm64.tar.gz']);
-  const edit = (target, change) => (name, files) => { if (name !== target) return; const pkg = JSON.parse(files['package.json']); change(pkg); files['package.json'] = JSON.stringify(pkg); };
-  assert.deepEqual(problems(edit('@anhlp/alp-linux-x64', pkg => { delete pkg.libc; })), ['@anhlp/alp-linux-x64: libc must be [glibc]']);
-  assert.deepEqual(problems(edit('@anhlp/alp-darwin-arm64', pkg => { pkg.cpu = ['x64']; })), ['@anhlp/alp-darwin-arm64: os/cpu must be [darwin]/[arm64]']);
-  assert.deepEqual(problems(edit('@anhlp/alp-win32-x64', pkg => { pkg.bin = { alp: 'bin/alp.exe' }; })), ['@anhlp/alp-win32-x64: must have no bin']);
-  assert.deepEqual(problems((name, files) => { if (name === '@anhlp/alp-darwin-x64') delete files['THIRD-PARTY-NOTICES.txt']; }), ['@anhlp/alp-darwin-x64: no THIRD-PARTY-NOTICES.txt']);
-  assert.deepEqual(problems((name, files) => { if (name === '@anhlp/alp-linux-x64') files['lib/extra.js'] = 'export {};\n'; }), ['@anhlp/alp-linux-x64: a platform package ships only its executable and licence files, found lib/extra.js']);
-});
-
-test('a rehearsal packed without release archives has no platform packages and is never gate evidence (t-cd7f)', () => {
-  const directory = mkdtempSync(path.join(os.tmpdir(), 'alp-release-test-'));
-  try {
-    const artifacts = RELEASE_PACKAGES.filter(entry => entry.kind !== 'platform').map(({ name }) => {
-      const buffer = tarball(packageFiles(name));
-      const filename = tarballFilename(name, VERSION);
-      writeFileSync(path.join(directory, filename), buffer);
-      return { name, version: VERSION, filename, entryCount: Object.keys(packageFiles(name)).length, ...digests(buffer) };
-    });
-    const sums = formatSha256Sums(artifacts);
-    writeFileSync(path.join(directory, SUMS_FILE), sums);
-    writeFileSync(path.join(directory, MANIFEST_FILE), JSON.stringify(createReleaseManifest({ version: VERSION, git: { sha: SHA, tag: `v${VERSION}`, dirty: false }, build: {}, pack: { ignoreScripts: false, rehearsal: true, platforms: false }, artifacts, sha256sums: digests(Buffer.from(sums)).sha256 })));
-    assert.deepEqual(verifyRelease(directory).problems, ['release-manifest.json: packed without the release archives: no platform packages, so the launcher has no executable']);
-    assert.deepEqual(verifyRelease(directory, { rehearsal: true }).problems, []);
-    assert.equal(releaseArtifacts(directory).length, 8);
-  } finally { rmSync(directory, { recursive: true, force: true }); }
-});
-
-test('a consumer installs only its own platform package, and the lockfile check expects only that one (t-cd7f)', () => withRelease({}, (directory, manifest) => {
-  const artifacts = releaseArtifacts(directory);
-  assert.equal(hostPlatformName({ platform: 'linux', arch: 'arm64' }), '@anhlp/alp-linux-arm64');
-  assert.equal(hostPlatformName({ platform: 'win32', arch: 'x64' }), '@anhlp/alp-win32-x64');
-  assert.equal(hostPlatformName({ platform: 'freebsd', arch: 'x64' }), undefined);
-  const installable = installableArtifacts(artifacts, '@anhlp/alp-darwin-arm64').map(artifact => artifact.name);
-  assert.deepEqual(installable, RELEASE_NAMES.filter(name => !PLATFORM_NAMES.includes(name) || name === '@anhlp/alp-darwin-arm64'));
-  const lock = { packages: Object.fromEntries(manifest.packages.filter(entry => installable.includes(entry.name)).map(entry => [`node_modules/${entry.name}`, { version: VERSION, integrity: entry.integrity, resolved: `file:${entry.filename}` }])) };
-  assert.deepEqual(installedProblems(lock, manifest, '@anhlp/alp-darwin-arm64'), []);
-  assert.deepEqual(installedProblems(lock, manifest, '@anhlp/alp-linux-x64'), ['@anhlp/alp-linux-x64: not installed']);
-  // Once the platform packages are on the registry, npm locks the other platforms' optional
-  // dependencies from there; they are never installed here and are not checked.
-  const published = structuredClone(lock);
-  published.packages['node_modules/@anhlp/alp-win32-x64'] = { version: VERSION, integrity: 'sha512-registry', resolved: 'https://registry.npmjs.org/@anhlp/alp-win32-x64/-/alp-win32-x64.tgz', optional: true };
-  assert.deepEqual(installedProblems(published, manifest, '@anhlp/alp-darwin-arm64'), []);
-}));
-
-test('a consumer of saved tarballs never takes a published platform package from the registry (t-cd7f)', () => withRelease({}, (directory, manifest) => {
-  const host = '@anhlp/alp-linux-x64';
-  const key = `node_modules/${host}`;
-  const resolved = `https://registry.npmjs.org/${host}/-/alp-linux-x64-${VERSION}.tgz`;
-  const saved = entry => [`node_modules/${entry.name}`, { version: VERSION, resolved: `file:${path.join(directory, entry.filename)}`, integrity: entry.integrity }];
-  // The saved tarballs are the consumer's own dependencies, so --omit=optional still installs them;
-  // what it leaves out is what only the launcher's optionalDependencies reach: the registry's platform packages.
-  assert.ok(SAVED_INSTALL_FLAGS.includes('--omit=optional'));
-  // A rehearsal packed without the release archives: npm still locks every platform package from the
-  // registry (optional), but installs none of them.
-  const rehearsal = { ...manifest, packages: manifest.packages.filter(entry => !PLATFORM_NAMES.includes(entry.name)) };
-  const lock = { packages: Object.fromEntries([...rehearsal.packages.map(saved), ...PLATFORM_NAMES.map(name => [`node_modules/${name}`, { version: VERSION, resolved: `https://registry.npmjs.org/${name}/-/x.tgz`, integrity: 'sha512-registry', optional: true }])]) };
-  lock.packages[key].resolved = resolved;
-  assert.deepEqual(installedProblems(lock, rehearsal, host, { installed: () => false }), []);
-  // Installed from the registry, the launcher would run a published executable instead of failing as packed.
-  const taken = [`${key}: ${host} is not part of the release (installed from ${resolved})`];
-  assert.deepEqual(installedProblems(lock, rehearsal, host, { installed: entry => entry === key }), taken);
-  assert.deepEqual(installedProblems(lock, rehearsal, host), taken, 'an entry counts as installed unless the caller shows it is not');
-  const required = structuredClone(lock);
-  delete required.packages[key].optional;
-  assert.deepEqual(installedProblems(required, rehearsal, host, { installed: () => false }), taken, 'only an optional entry can be left out');
-  // A release that carries the host's platform package must install that saved tarball, never the registry's.
-  const release = { packages: Object.fromEntries(manifest.packages.map(saved)) };
-  release.packages[key] = structuredClone(lock.packages[key]);
-  const carried = manifest.packages.find(entry => entry.name === host);
-  assert.deepEqual(installedProblems(release, manifest, host, { installed: () => false }), [
-    `${key}: integrity sha512-registry is not the saved tarball's ${carried.integrity}`,
-    `${key}: resolved from ${resolved}, not the saved ${carried.filename}`,
-  ]);
-}));
-
-test('platform packages count as gate evidence only when tied to a release-binaries run and its SHA256SUMS (t-cd7f)', () => {
-  for (const [pack, reason] of [
-    [{ ignoreScripts: false, rehearsal: false, platforms: true, archiveSha256Sums: 'e'.repeat(64) }, /not tied to a release-binaries run/],
-    [{ ignoreScripts: false, rehearsal: false, platforms: true, binariesRun: '41000000001' }, /no SHA256SUMS digest of the release archives/],
-  ]) withRelease({ pack }, directory => {
-    assert.match(verifyRelease(directory).problems.join('\n'), reason);
-    assert.deepEqual(verifyRelease(directory, { rehearsal: true }).problems, []);
-  });
-  // A published GitHub release (release-pack --binaries-release) ties them as well as a run does.
-  withRelease({ pack: { ignoreScripts: false, rehearsal: false, platforms: true, archiveSha256Sums: 'e'.repeat(64), binariesRelease: { repo: 'phucanh08/alp', tag: 'v42.17.9-fixture.314', targetCommitish: SHA } } }, directory => {
-    assert.deepEqual(verifyRelease(directory).problems, []);
-  });
+  assert.match(problems(edit((pkg, files) => { files['lib/launcher.js'] = 'export {};'; })).join('\n'), /ships only bin\/alp\.js, found lib\/launcher\.js/);
 });
