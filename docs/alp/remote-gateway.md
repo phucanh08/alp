@@ -210,7 +210,7 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
     được đặt tên cho credential agent chưa có tên (hoặc đánh dấu credential của người dùng), nhưng không
     đổi tên một credential đã có tên. `credential list` hiện `agent <tên>`.
   - Không tự cấp, không tự hết hạn: chỉ người dùng tạo credential bằng tay; alpd và gateway không bao giờ
-    tự phát credential cho agent. (`alp web` tạo credential người dùng cho trình duyệt trên máy này, nhưng từ chối khi `ALP_AGENT_SESSION` có giá trị.) Không có hạn mặc định; `--expires-in-days` vẫn tùy chọn như trước.
+    tự phát credential cho agent. (`alp web` tạo credential người dùng cho trình duyệt trên máy này, nhưng mọi lệnh `alp web` (in, `rotate`, `pair`) và chính dịch vụ đều từ chối khi `ALP_AGENT_SESSION` có giá trị.) Không có hạn mặc định; `--expires-in-days` vẫn tùy chọn như trước.
   - Chỉ người dùng quản lý credential: tạo, `rotate`, `reissue`/`edit`, `revoke` chỉ có ở CLI cục bộ;
     gateway và alpd không có RPC nào về credential (connection, agent hay không, gọi `credential.*` nhận
     -32601). CLI từ chối các lệnh đổi credential khi `ALP_AGENT_SESSION` có giá trị (tiến trình do ALP
