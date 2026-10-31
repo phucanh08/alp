@@ -14,7 +14,10 @@ const windows = process.platform === 'win32';
 const conpty = !windows && 'ConPTY exists only on Windows';
 const owner = { id: 'owner', epoch: 'e1' };
 const quiet = { info() {}, warn() {} };
-const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+// process.kill(0, 0) probes the current process on Windows (libuv), so a pid that is not positive is a test bug.
+const alive = pid => { assert.ok(Number.isInteger(pid) && pid > 0, `a real pid, not ${pid}`); try { process.kill(pid, 0); return true; } catch { return false; } };
+// ConPTY output is VT: the renderer may draw a run of spaces as a cursor-forward (CSI n C). Plain text for matching.
+const plain = text => text.replace(/\x1b\[(\d*)C/g, (_, n) => ' '.repeat(Number(n || 1))).replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]/g, '');
 async function until(check, what, ms = 15000) {
   const end = Date.now() + ms;
   while (Date.now() < end) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 25)); }
@@ -35,11 +38,13 @@ function fakeNodePty({ spawnError } = {}) {
     calls, resizeThrows: false, killThrows: false,
     emit(text) { data?.(text); },
     exit(event) { exit?.(event); },
+    /** Like node-pty on ConPTY: the pid is 0 until the output worker connects. */
+    connect() { fake.child.pid = 4242 + calls.spawn.length; },
     spawn(file, args, options) {
       calls.spawn.push({ file, args, options });
       if (spawnError) throw spawnError;
-      return {
-        pid: 4242 + calls.spawn.length,
+      return fake.child = {
+        pid: 0,
         write(text) { calls.write.push(text); },
         resize(cols, rows) { calls.resize.push([cols, rows]); if (fake.resizeThrows) throw new Error('Cannot resize a pty that has already exited'); },
         kill(...signal) { calls.kill.push(signal); if (fake.killThrows) throw new Error('already exited'); },
@@ -79,7 +84,9 @@ test('spawn: ConPTY with exactly the PTY options; no daemon-only option leaks to
   assert.equal(file, 'C:\\Windows\\system32\\cmd.exe');
   assert.deepEqual(args, ['/d']);
   assert.deepEqual(options, { name: 'xterm-256color', cols: 80, rows: 24, cwd: tmpdir(), env: { TERM: 'xterm-256color' }, useConpty: true });
-  assert.equal(pty.pid, 4243);
+  assert.equal(pty.pid, 0, 'node-pty has no ConPTY pid before it connects');
+  fake.connect();
+  assert.equal(pty.pid, 4243, 'the pid is read live once node-pty connects');
   assert.equal(pty.cleanup, undefined, 'no native cleanup: the service kills the pty (best-effort)');
 });
 
@@ -138,7 +145,7 @@ test('terminal.json on win32: POSIX mode bits are not checked; a directory or sy
   await rm(file, { recursive: true });
   await writeFile(path.join(dir, 'elsewhere.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }));
   try { await symlink(path.join(dir, 'elsewhere.json'), file); } catch (error) {
-    if (windows && error.code === 'EPERM') { t.diagnostic('symlink needs Developer Mode or admin on this runner; symlink case skipped'); return; }
+    if (windows && error.code === 'EPERM') { t.skip('symlink needs Developer Mode or admin on this runner'); return; }
     throw error;
   }
   assert.equal((await readTerminalConfig(dir, quiet, 'win32')).reason, 'not_private', 'a symlink is not the switch');
@@ -157,6 +164,8 @@ const create = (terminals, requestId = 'r1') => terminals.create(owner, { worksp
 test('service on win32: protection none, the Windows shell, no private ALP env; close kills the pty once', async t => {
   const { dir, fake, terminals } = await service(t);
   const { terminal } = await create(terminals);
+  fake.connect();
+  assert.deepEqual(terminals.pids(), [4243], 'the service reads the owner pid live, after node-pty connects');
   assert.equal(terminal.protection, 'none', 'clients disclose the best-effort limit');
   const { file, args, options } = fake.calls.spawn[0];
   assert.equal(file, windowsShell());
@@ -225,14 +234,17 @@ test('ConPTY: a real cmd.exe echoes, resizes and is killed by the owner', { skip
   pty.onData(text => { output += text; });
   let exit;
   pty.onExit(event => { exit = event; });
-  assert.ok(Number.isInteger(pty.pid) && pty.pid > 0);
+  // node-pty learns the shell's pid when the ConPTY output worker connects, after spawn returns.
+  await until(() => pty.pid > 0, 'the ConPTY shell pid');
+  assert.ok(Number.isInteger(pty.pid));
   assert.equal(alive(pty.pid), true, 'the shell runs');
   // The caret keeps the typed command (echoed by ConPTY) from matching: only cmd.exe's output does.
   pty.write('echo ALP_CON^PTY_OK\r');
   await until(() => output.includes('ALP_CONPTY_OK'), 'cmd.exe output');
   pty.resize(120, 40);
-  pty.write('mode con\r');
-  await until(() => /Columns:\s+120/.test(output), 'the resized console');
+  // Ask again until the resize is visible: the resize and the typed command take different paths to ConPTY.
+  let asked = 0;
+  await until(() => { if (/Columns:\s+120\b/.test(plain(output))) return true; if (asked++ % 40 === 0) pty.write('mode con\r'); return false; }, 'the resized console');
   pty.kill();
   await until(() => !alive(pty.pid), 'the shell to exit after kill');
   await until(() => exit !== undefined, 'the node-pty exit event');
@@ -249,6 +261,7 @@ test('ConPTY: the terminal service end to end on Windows (terminal.json, create,
   t.after(() => terminals.shutdown());
   const { terminal } = await create(terminals, 'conpty');
   assert.equal(terminal.protection, 'none');
+  await until(() => terminals.pids()[0] > 0, 'the ConPTY shell pid');
   const [pid] = terminals.pids();
   assert.equal(alive(pid), true);
   let output = '';
