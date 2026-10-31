@@ -25,6 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { resolveDelegation } from '@anhlp/alp-core/delegation';
 import { discoverAgents } from '@anhlp/alp-core/resolver';
+import { usersOf } from '@anhlp/alp-core/library-edit';
 
 import { acpDecision, acpWhat, type AcpPermission } from './acp-transport.js';
 
@@ -2064,6 +2065,87 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     return toolResult(true, { status: 'pending_approval', approvalId, file, next: 'Continue other work or end your turn. ALP sends the user\'s decision, and whether the skill was saved, by mail; do not resubmit this draft.' });
   }
 
+  /**
+   * alp_skill_retire: the only way an agent removes a library skill. Through the same
+   * approval as alp_skill, and only once the user approves, the skill directory moves to
+   * <library>/retired-skills/<name>-<time> (kept, never deleted) and leaves role-skills.json.
+   * A skill an agent.json still names stays, and the result says who uses it.
+   */
+  async function skillRetireTool(sessionId: string, session: Session, args: unknown) {
+    const cancellation = approvalCancellation.get(session) ?? 0;
+    args = structuredClone(args);
+    if (!plainObject(args, ['name', 'reason', 'requestId']) || typeof args.name !== 'string' || !/^[a-z0-9][a-z0-9-]{1,62}$/.test(args.name) || !text(args.reason, 300)) {
+      return toolResult(false, { error: 'Retiring a skill needs its name (lowercase letters, digits, hyphens) and a one-line reason of at most 300 characters' });
+    }
+    if (args.requestId !== undefined && !text(args.requestId, 100)) return toolResult(false, { error: 'requestId must be a nonempty string of at most 100 characters' });
+    const library = options.libraryDir;
+    if (!library) return toolResult(false, { error: 'This host keeps no user skill library' });
+    const directory = path.join(library, 'skills', args.name);
+    const file = path.join(directory, 'SKILL.md');
+    const reason = args.reason.replace(/\s+/g, ' ').trim();
+    const draftKey = JSON.stringify(['skill.retire', args.name, reason]);
+    const key = `skill.retire:${args.requestId ?? draftKey}`;
+    const approvals = approvalsOf(sessionId);
+    const previous = approvals.get(key);
+    if (previous && previous.draftKey !== draftKey) return toolResult(false, { error: 'requestId was already used for a different draft' });
+    if (previous) return toolResult(true, previous.result ?? { status: 'pending_approval', approvalId: previous.approvalId, file });
+    const content = await readFile(file, 'utf8').catch(() => undefined);
+    if (content === undefined) return toolResult(false, { error: `The library has no skill named ${args.name} (${file})` });
+    const rolesFile = path.join(library, 'role-skills.json');
+    const readRoles = async () => {
+      const roles = JSON.parse(await readFile(rolesFile, 'utf8').catch(() => '{}'));
+      if (!roles || typeof roles !== 'object' || Array.isArray(roles)) throw new Error(`${rolesFile} must be an object of role names to skill lists`);
+      return roles as Record<string, unknown>;
+    };
+    const holders = (roles: Record<string, unknown>) => Object.keys(roles).filter(role => Array.isArray(roles[role]) && (roles[role] as unknown[]).includes(args.name));
+    let given: string[];
+    try { given = holders(await readRoles()); } catch (error) { return toolResult(false, { error: errorData(error).message }); }
+    if (approvalCanceled(session, cancellation)) return toolResult(false, { error: 'Skill retirement canceled or session closed; no approval was created' });
+    if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId && !pending.gate)) return toolResult(false, { error: 'A question is already waiting for the user; finish it before proposing to retire a skill' });
+    const retired = path.join(library, 'retired-skills', `${args.name}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+    const approvalId = `q-${randomUUID()}`;
+    const record: { approvalId: string; draftKey: string; result?: Record<string, unknown> } = { approvalId, draftKey };
+    approvals.set(key, record);
+    const say = wordsFor(session);
+    const decision = confirm(sessionId, session,
+      say.skillRetire(session.mapping.agent.name, args.name, file, retired, given.join(', '), reason) +
+      `\n${say.answerLine(session.mapping.agent.name)}\n\n${content}`, { id: approvalId });
+    const retire = async (): Promise<Record<string, unknown>> => {
+      try {
+        if (await readFile(file, 'utf8').catch(() => undefined) !== content) {
+          return { approved: true, retired: false, error: `The skill ${args.name} changed or was removed since it was proposed; nothing was retired`, next: 'Read it again and propose again if it should still go.' };
+        }
+        const roles = await readRoles();
+        const lost = holders(roles);
+        for (const role of lost) roles[role] = (roles[role] as unknown[]).filter(name => name !== args.name);
+        // Users other than role-skills.json (an agent.json naming it) keep it in the library.
+        const others = await usersOf('skills', args.name, { root: session.mapping.agent.projectRoot, library, templates: options.templates })
+          .then(users => users.filter(user => !lost.some(role => user === `agent ${role}`)), () => []);
+        if (others.length) return { approved: true, retired: false, error: `The skill ${args.name} is still named by ${others.join(', ')}; nothing was retired`, next: 'Tell the user; they change those agents first.' };
+        await mkdir(path.dirname(retired), { recursive: true, mode: 0o700 });
+        await moveFile(directory, retired);
+        await writeFile(rolesFile, JSON.stringify(roles, null, 2) + '\n');
+        runLog(rootOf(sessionId), { event: 'skill.retire', agent: session.mapping.agent.name, name: args.name, roles: lost, retiredTo: retired });
+        return { approved: true, retired, roles: lost, next: 'New sessions no longer list the skill. To restore it, move the directory back into skills/.' };
+      } catch (error) {
+        return { approved: true, retired: false, error: errorData(error).message, next: 'Tell the user; nothing is retried automatically.' };
+      }
+    };
+    void (async () => {
+      const answer = await decision;
+      const canceled = approvalCanceled(session, cancellation);
+      const result = !answer.approved || canceled
+        ? { approved: false, retired: false, outcome: canceled ? 'canceled' : answer.outcome, ...(answer.feedback ? { feedback: answer.feedback } : {}), next: 'Nothing was retired. Revise from the feedback and propose again with a fresh requestId, or drop it.' }
+        : await retire();
+      record.result = { status: 'resolved', approvalId, name: args.name, ...result };
+      runLog(rootOf(sessionId), { event: 'skill.retire.approval', agent: session.mapping.agent.name, ...record.result });
+      if (!closed && !session.closed && sessions.get(sessionId) === session) {
+        post(sessionId, { kind: 'result', from: 'ALP', assignment: approvalId, body: `Skill retirement result: ${JSON.stringify(record.result)}` });
+      }
+    })();
+    return toolResult(true, { status: 'pending_approval', approvalId, file, next: 'Continue other work or end your turn. ALP sends the user\'s decision, and whether the skill was retired, by mail; do not resubmit this request.' });
+  }
+
   let scheduleHandler: ScheduleHandler | undefined;
 
   /**
@@ -2754,7 +2836,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
 
     if (
-      !['alp_delegate', 'alp_handoff', 'alp_wait', 'alp_cancel', 'alp_send', 'alp_ask', 'alp_merge', 'alp_discard', 'alp_resolve', 'alp_recall', 'alp_verify', 'alp_pin', 'alp_board', 'alp_unpin', 'alp_lesson', 'alp_lesson_curate', 'alp_skill', 'alp_issue', 'alp_task', 'alp_schedule'].includes(params.tool) ||
+      !['alp_delegate', 'alp_handoff', 'alp_wait', 'alp_cancel', 'alp_send', 'alp_ask', 'alp_merge', 'alp_discard', 'alp_resolve', 'alp_recall', 'alp_verify', 'alp_pin', 'alp_board', 'alp_unpin', 'alp_lesson', 'alp_lesson_curate', 'alp_skill', 'alp_skill_retire', 'alp_issue', 'alp_task', 'alp_schedule'].includes(params.tool) ||
       params.namespace != null ||
       typeof params.callId !== 'string'
     ) {
@@ -2772,12 +2854,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (oversized) return toolResult(false, { error: oversized });
     // The supervisor only reads the board and tasks, and writes to main.
     if (session.role === 'supervisor' && !['alp_send', 'alp_board', 'alp_task'].includes(params.tool)) return toolResult(false, { error: 'The supervisor only uses alp_send, alp_board and alp_task' });
-    if (['alp_lesson', 'alp_lesson_curate', 'alp_skill'].includes(params.tool) && !supervises(session)) return toolResult(false, { error: 'Only a supervised main records lessons and skills' });
+    if (['alp_lesson', 'alp_lesson_curate', 'alp_skill', 'alp_skill_retire'].includes(params.tool) && !supervises(session)) return toolResult(false, { error: 'Only a supervised main records lessons and skills' });
     if (params.tool === 'alp_issue' && (session.parent || session.mapping.agent.name !== mainOf(session.mapping))) return toolResult(false, { error: 'Only main files issues; report the problem to your requester' });
     const work =
       params.tool === 'alp_lesson' ? lessonTool(sessionId, session, args)
       : params.tool === 'alp_lesson_curate' ? lessonCurateTool(sessionId, session, args)
       : params.tool === 'alp_skill' ? skillTool(sessionId, session, args)
+      : params.tool === 'alp_skill_retire' ? skillRetireTool(sessionId, session, args)
       : params.tool === 'alp_issue' ? issueTool(sessionId, session, args)
       : params.tool === 'alp_schedule' ? scheduleTool(sessionId, session, args)
       : params.tool === 'alp_task' ? taskToolCall(sessionId, session, args)

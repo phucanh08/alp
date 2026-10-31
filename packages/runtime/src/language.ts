@@ -18,6 +18,9 @@ const en = {
     `${agent} wants to ${create ? `open an issue in ${where}` : `comment on issue #${issue} in ${where}`}. ` +
     'It is posted with your GitHub account, and anyone who can see the repository can read it.',
   issueTitle: 'Title',
+  skillRetire: (agent: string, name: string, file: string, retired: string, roles: string, reason: string) =>
+    `${agent} proposes to retire the skill ${name} (${file}): ${reason}\n` +
+    `Approve to move it to ${retired}, where it is kept and can be restored, and remove it from ${roles ? `the roles that have it: ${roles}` : 'role-skills.json (no role has it)'}. Nothing else changes.`,
   lessonCurate: (agent: string, changes: string) =>
     `${agent} proposes to curate the lessons files. Approve to apply every change below at once; nothing else changes.\n\n${changes}`,
   lessonRemove: 'Remove',
@@ -67,6 +70,9 @@ const vi: Words = {
     `${agent} muốn ${create ? `mở một issue trong ${where}` : `bình luận vào issue #${issue} trong ${where}`}. ` +
     'Nội dung được đăng bằng tài khoản GitHub của bạn, ai xem được repository đều đọc được.',
   issueTitle: 'Tiêu đề',
+  skillRetire: (agent, name, file, retired, roles, reason) =>
+    `${agent} đề xuất cho skill ${name} (${file}) nghỉ: ${reason}\n` +
+    `Duyệt để chuyển nó sang ${retired}, nơi nó vẫn được giữ và có thể khôi phục, và bỏ nó khỏi ${roles ? `các vai đang dùng: ${roles}` : 'role-skills.json (không vai nào dùng)'}. Không thay đổi gì khác.`,
   lessonCurate: (agent, changes) =>
     `${agent} đề xuất rà soát file bài học. Duyệt để áp dụng cùng lúc mọi thay đổi dưới đây; không thay đổi gì khác.\n\n${changes}`,
   lessonRemove: 'Bỏ',

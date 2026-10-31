@@ -213,7 +213,7 @@ async function approvedSkill(runtime, pending, reply) {
     else runtime.answer(question.id, { text: reply });
     let terminal;
     await until(() => { terminal = events.find(e => e.event.type === 'mail' && e.event.mail.assignment === result.approvalId); return terminal; });
-    return { question, pending: result, result: JSON.parse(terminal.event.mail.body.slice('Skill approval result: '.length)) };
+    return { question, pending: result, result: JSON.parse(terminal.event.mail.body.slice(terminal.event.mail.body.indexOf('{'))) };
   } finally { off(); }
 }
 
@@ -675,6 +675,56 @@ test('main merges, shortens and removes lessons only after one user approval', a
   runtime.answer(pending.approvalId, { dismiss: true, reason: 'Not now' });
   await until(async () => (await main.call('alp_lesson_curate', { changes: [{ scope: 'project', remove: ['Keep this rule.'] }] })).status === 'resolved');
   assert.equal(await readFile(project, 'utf8'), kept);
+});
+
+test('main retires a library skill only after the user approves; it is kept in retired-skills and leaves role-skills.json', async t => {
+  const { root, library, runtime, runtimes, prompt } = await setup(t);
+  await runtime.open('root', { cwd: root });
+  await until(() => runtimes.length === 2);
+  const main = runtimes[0];
+  assert.ok(main.config.dynamicTools.some(tool => tool.name === 'alp_skill_retire'));
+  await prompt('m1', 'Work');
+  await until(() => main.turnId);
+  const skillFile = path.join(library, 'skills/xia/SKILL.md');
+  const before = await readFile(skillFile, 'utf8');
+  assert.ok(JSON.parse(await readFile(path.join(library, 'role-skills.json'), 'utf8')).main.includes('xia'));
+  assert.match((await main.call('alp_skill_retire', { name: 'no-such-skill', reason: 'Old' })).error, /no skill named no-such-skill/);
+  assert.match((await main.call('alp_skill_retire', { name: '../xia', reason: 'Old' })).error, /needs its name/);
+  assert.equal(runtime.questions().length, 0);
+
+  // Rejected, dismissed: nothing moves.
+  const rejected = await approvedSkill(runtime, main.call('alp_skill_retire', { name: 'xia', reason: 'Covered by another skill.' }), 'Keep it');
+  assert.deepEqual(rejected.question.options, ['Approve', 'Reject']);
+  assert.match(rejected.question.body, /retire the skill xia[\s\S]*Covered by another skill\.[\s\S]*retired-skills[\s\S]*main/);
+  assert.deepEqual([rejected.result.approved, rejected.result.retired, rejected.result.feedback], [false, false, 'Keep it']);
+  assert.equal(await readFile(skillFile, 'utf8'), before);
+  const replayed = await main.call('alp_skill_retire', { name: 'xia', reason: 'Covered by another skill.' });
+  assert.deepEqual([replayed.status, replayed.retired], ['resolved', false], 'a replay returns the decision, not a new approval');
+  const dismissed = await approvedSkill(runtime, main.call('alp_skill_retire', { name: 'xia', reason: 'Covered by another skill.', requestId: 'again' }), null);
+  assert.deepEqual([dismissed.result.approved, dismissed.result.outcome], [false, 'dismissed']);
+  assert.equal(await readFile(skillFile, 'utf8'), before);
+  assert.ok(JSON.parse(await readFile(path.join(library, 'role-skills.json'), 'utf8')).main.includes('xia'));
+
+  const { result } = await approvedSkill(runtime, main.call('alp_skill_retire', { name: 'xia', reason: 'Covered by another skill.', requestId: 'yes' }), 'Approve');
+  assert.equal(result.approved, true, JSON.stringify(result));
+  assert.ok(result.retired.startsWith(path.join(library, 'retired-skills', 'xia-')));
+  assert.ok(result.roles.includes('main'));
+  await assert.rejects(readFile(skillFile, 'utf8'), { code: 'ENOENT' });
+  assert.equal(await readFile(path.join(result.retired, 'SKILL.md'), 'utf8'), before, 'the retired skill is kept whole');
+  const roles = JSON.parse(await readFile(path.join(library, 'role-skills.json'), 'utf8'));
+  assert.ok(Object.values(roles).every(list => !list.includes('xia')));
+  assert.equal((await main.call('alp_skill_retire', { name: 'xia', reason: 'Covered by another skill.', requestId: 'yes' })).retired, result.retired, 'a replay does not retire twice');
+});
+
+test('only a supervised main retires skills', async t => {
+  const { root, library, runtime, runtimes, prompt } = await setup(t, { workflow: { mode: 'cafe', supervisor: false } });
+  await runtime.open('root', { cwd: root });
+  await prompt('m1', 'Work');
+  await until(() => runtimes[0]?.turnId);
+  assert.equal(runtimes[0].config.dynamicTools.some(tool => tool.name === 'alp_skill_retire'), false);
+  assert.match((await runtimes[0].call('alp_skill_retire', { name: 'xia', reason: 'Old' })).error, /Only a supervised main/);
+  assert.ok(await readFile(path.join(library, 'skills/xia/SKILL.md'), 'utf8'));
+  assert.equal(runtime.questions().length, 0);
 });
 
 test('only a supervised main curates lessons', async t => {

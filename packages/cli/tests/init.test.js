@@ -9,6 +9,17 @@ import { spawnSync } from 'node:child_process';
 import { initProject } from '@anhlp/alp-core/init';
 import { resolveAgent, discoverAgents } from '@anhlp/alp-core/resolver';
 import { seedLibrary } from '@anhlp/alp-core/library';
+import { mkdtempSync, rmSync } from 'node:fs';
+
+// Hermetic: initProject and the resolver read the user's library (ALP_HOME, else ~/.alp), whose
+// teams may pick providers installed on this machine (an opencode on PATH makes main acp:opencode).
+// Every test in this file sees an empty home, no ALP_HOME of the developer's, and only system PATH.
+const isolatedHome = mkdtempSync(path.join(tmpdir(), 'alp-init-home-'));
+process.env.HOME = isolatedHome;
+process.env.USERPROFILE = isolatedHome;
+process.env.ALP_HOME = path.join(isolatedHome, '.alp');
+process.env.PATH = process.platform === 'win32' ? process.env.PATH : [path.dirname(process.execPath), '/usr/bin', '/bin'].join(path.delimiter);
+test.after(() => rmSync(isolatedHome, { recursive: true, force: true }));
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-init-'));

@@ -91,6 +91,11 @@ export const toolShapes: Record<string, Record<string, z.ZodType>> = {
     replace: z.boolean().optional(),
     requestId: z.string().min(1).max(100).optional(),
   },
+  alp_skill_retire: {
+    name: z.string().min(1).max(64),
+    reason: z.string().min(1).max(300),
+    requestId: z.string().min(1).max(100).optional(),
+  },
   alp_issue: {
     action: z.enum(['search', 'create', 'comment']),
     target: z.enum(['project', 'alp']),

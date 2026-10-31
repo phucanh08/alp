@@ -2670,6 +2670,9 @@
         },
         "lastError": {
           "$ref": "#/$defs/scheduleError"
+        },
+        "keepsSession": {
+          "const": false
         }
       },
       "required": [
