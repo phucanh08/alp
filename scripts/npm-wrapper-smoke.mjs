@@ -39,7 +39,7 @@ function installGlobal(args) {
     } catch (error) {
       if (attempt >= INSTALL_ATTEMPTS) throw error;
       console.warn(`[npm-wrapper-smoke] npm install -g attempt ${attempt}/${INSTALL_ATTEMPTS} failed, retrying:\n${String(error.message).slice(0, 2000)}`);
-      rmSync(prefix, { recursive: true, force: true });
+      try { rmSync(prefix, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch (cleanup) { console.warn(`[npm-wrapper-smoke] could not clear ${prefix}: ${cleanup}`); }
     }
   }
 }
