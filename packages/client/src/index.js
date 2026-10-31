@@ -485,12 +485,29 @@ export async function withDaemonLifecycle(home, action, run, { joinStart = false
   }
 }
 
+/** How long a start waits for alpd to be ready by default: generous, as a loaded host can take a while. */
+export const DAEMON_START_TIMEOUT_MS = 60_000;
+/** The largest wait ALP_DAEMON_START_TIMEOUT_MS may ask for (one hour; setTimeout's own bound is about 24 days). */
+const DAEMON_START_TIMEOUT_MAX_MS = 3_600_000;
+
+/**
+ * The time a start of alpd waits for it to become ready, in ms: ALP_DAEMON_START_TIMEOUT_MS when it
+ * is a positive whole number of at most one hour, else DAEMON_START_TIMEOUT_MS.
+ * @param {NodeJS.ProcessEnv} [env]
+ */
+export function daemonStartTimeoutMs(env = process.env) {
+  const raw = env.ALP_DAEMON_START_TIMEOUT_MS?.trim();
+  if (!raw || !/^[0-9]+$/.test(raw)) return DAEMON_START_TIMEOUT_MS;
+  const value = Number(raw);
+  return value > 0 && value <= DAEMON_START_TIMEOUT_MAX_MS ? value : DAEMON_START_TIMEOUT_MS;
+}
+
 /**
  * Returns the socket of a ready daemon, starting one when none runs.
  * `entry` is the daemon script; it is started through its own detaching launcher so the
  * daemon outlives the client that started it.
  */
-export async function ensureDaemon({ home = alpHome(), entry = /** @type {string | undefined} */ (undefined), env = process.env, execPath = process.execPath, timeoutMs = 15_000, lifecycleLocked = false, signal = /** @type {AbortSignal | undefined} */ (undefined) } = {}) {
+export async function ensureDaemon({ home = alpHome(), entry = /** @type {string | undefined} */ (undefined), env = process.env, execPath = process.execPath, timeoutMs = daemonStartTimeoutMs(env), lifecycleLocked = false, signal = /** @type {AbortSignal | undefined} */ (undefined) } = {}) {
   signal?.throwIfAborted();
   if (!lifecycleLocked) return withDaemonLifecycle(home, 'start', () => ensureDaemon({ home, entry, env, execPath, timeoutMs, lifecycleLocked: true, signal }), { signal });
   const ready = async () => {
