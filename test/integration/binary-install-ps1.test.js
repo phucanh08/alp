@@ -207,24 +207,28 @@ test('install.ps1: reinstalling the current version puts the running copy back w
   // its working directory in) the unpacked copy, so Windows refuses to move that copy into
   // app\9.8.7 after the running copy was moved aside. install.ps1 must move the running copy back.
   const holder = path.join(await temp(t, 'alp-ps-hold-'), 'pid');
+  // Start-Process creates it without inheriting handles: a child of node holding install.ps1's
+  // `--version` pipe would make install.ps1 wait for it to exit.
   const holding = await mirror(t, ['9.8.7'], bundle => writeFile(path.join(bundle, CLI), [
-    "const { spawn } = require('node:child_process');",
-    "const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'], { cwd: require('node:path').dirname(process.execPath), detached: true, stdio: 'ignore', windowsHide: true });",
-    `require('node:fs').writeFileSync(${JSON.stringify(holder)}, String(child.pid));`,
-    'child.unref();',
+    "const { execFileSync } = require('node:child_process');",
+    "const start = \"Start-Process -FilePath $env:ALP_TEST_NODE -ArgumentList '-e','setTimeout(()=>{},60000)' -WorkingDirectory $env:ALP_TEST_CWD -WindowStyle Hidden -PassThru | ForEach-Object { $_.Id }\";",
+    "const pid = execFileSync('powershell.exe', ['-NoProfile', '-Command', start], { encoding: 'utf8', env: { ...process.env, ALP_TEST_NODE: process.execPath, ALP_TEST_CWD: require('node:path').dirname(process.execPath) } }).trim();",
+    `require('node:fs').writeFileSync(${JSON.stringify(holder)}, pid);`,
     "console.log('9.8.7');",
     '',
   ].join('\n')));
   let failed;
+  const started = Date.now();
   try {
     failed = await install(['-Dir', dir, '-NoModifyPath', '-BaseUrl', holding], { localAppData });
-    assert.ok(existsSync(holder), 'the holding process started');
+    assert.match(readFileSync(holder, 'utf8'), /^[0-9]+$/, 'the holding process started');
+    assert.ok(Date.now() - started < 45_000, `install.ps1 returned while the holder still runs (${Date.now() - started} ms)`);
   } finally {
     // Before the temporary directories go: the holder's working directory is in one of them.
     try { process.kill(Number(readFileSync(holder, 'utf8'))); } catch {}
   }
   assert.notEqual(failed.code, 0, failed.stdout);
-  assert.match(failed.stderr, /could not install .*9\.8\.7/);
+  assert.match(failed.stderr, /could not install .*9\.8\.7/, failed.stdout + failed.stderr);
   assert.equal(existsSync(marker), true, 'app\\9.8.7 is the running copy again');
   assert.equal(resolvedCurrent(dir), path.join(dir, 'app', '9.8.7').toLowerCase());
   assert.equal(version(command), '9.8.7');
