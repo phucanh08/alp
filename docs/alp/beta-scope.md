@@ -2,7 +2,7 @@
 
 > **Beta.6 (`0.0.1-beta.6`, t-693e):** sửa lỗi của beta.5: file thực thi không nhúng Claude Agent SDK, nên mọi phiên Claude đều lỗi `Cannot find package '@anthropic-ai/claude-agent-sdk'`. npm bỏ qua beta.5; beta.6 phát hành cả npm lẫn GitHub release từ cùng một SHA của main. Chưa phát hành (t-36f6). Xem [beta-release-notes.md](beta-release-notes.md).
 
-> **Beta.5 (`0.0.1-beta.5`, t-1e02):** cùng version cho npm (dist-tag `beta`) và binary GitHub release (release thường, không prerelease); xem [beta-release-notes.md](beta-release-notes.md) và [binary-install.md](binary-install.md). GitHub release đã publish (từ `2b63a7a`). Trên npm (t-cd7f), `@anhlp/alp` là launcher, đi cùng 5 package platform (13 tarball, thứ tự ở §7.4). File thực thi trong các package platform lấy từ asset của release `v0.0.1-beta.5`, pack bằng `release:pack --binaries-release v0.0.1-beta.5` ([binary-install.md](binary-install.md#npm-packages)). **Đã thay thế:** npm không bao giờ publish beta.5; npm phát hành từ beta.6 (`--binaries-release v0.0.1-beta.6`), xem dòng Beta.6 ở trên.
+> **Beta.5 (`0.0.1-beta.5`, t-1e02):** cùng version cho npm (dist-tag `beta`) và binary GitHub release (release thường, không prerelease); xem [beta-release-notes.md](beta-release-notes.md) và [binary-install.md](binary-install.md). GitHub release đã publish (từ `2b63a7a`). Trên npm (t-cd7f), `@anhlp/alp` là launcher, đi cùng 5 package platform (13 tarball, thứ tự ở §7.4). File thực thi trong các package platform lấy từ asset của release `v0.0.1-beta.5`, pack bằng `release:pack --binaries-release v0.0.1-beta.5` ([binary-install.md](binary-install.md#npm-packages)). **Đã thay thế:** npm không bao giờ publish beta.5; npm phát hành từ beta.6, xem dòng Beta.6 ở trên. **t-1807:** launcher và 5 package platform đã bỏ; `@anhlp/alp` là wrapper của `@anhlp/alp-cli` (8 tarball).
 >
 > **Beta.4 (`0.0.1-beta.4`):** phạm vi và gate ở **§13**; chưa publish.
 
@@ -125,7 +125,7 @@ khớp các bản cũ, không khớp `0.0.0-beta.1`. Bỏ deprecate nhầm: `npm
 
 | Package | Beta | Ghi chú |
 |---|---|---|
-| `@anhlp/alp` | Phát hành | Từ t-cd7f chỉ là launcher (`npm/alp`: `bin/alp.js`, `lib/launcher.js`, không dependency, không postinstall). Chạy file thực thi ALP trong `@anhlp/alp-<os>-<arch>`, khai báo trong `optionalDependencies` với version chính xác. Không chứa Paseo ([binary-install.md](binary-install.md#npm-packages)). Repo root là package private `alp-monorepo` |
+| `@anhlp/alp` | Phát hành | Từ t-1807 là wrapper mỏng (`npm/alp`: chỉ `bin/alp.js`, không postinstall), phụ thuộc đúng `@anhlp/alp-cli` cùng version và chạy CLI đó trên Node của người dùng; 5 package platform `@anhlp/alp-<os>-<arch>` của t-cd7f đã bỏ. Không chứa Paseo ([binary-install.md](binary-install.md#npm-packages)). Repo root là package private `alp-monorepo` |
 | `@anhlp/alp-darwin-arm64`, `-darwin-x64`, `-linux-x64`, `-linux-arm64` (glibc), `-win32-x64` | Phát hành | Mỗi package chỉ chứa file thực thi lấy từ archive của GitHub release cùng SHA, có `os`/`cpu`/`libc`. Sinh ra lúc pack (`release:pack --binaries`), không nằm trong repo |
 | `@anhlp/alp-protocol`, `-core`, `-runtime`, `-client`, `-daemon`, `-cli` | Phát hành (bắt buộc) | Vẫn là package JS; plugin pin đúng version. `-cli` mang `alp web` (`dist/alp-web.js`, `dist/alp-web/`, `THIRD-PARTY-NOTICES.txt`) |
 | `@anhlp/alp-paseo` | Phát hành | plugin Paseo, web của Paseo (bản fork, Apache-2.0; tới `0.0.1-beta.3` là `alp web`), `alp-paseo-integration` (`alp-web-integration` là alias trong một bản phát hành) |
@@ -133,7 +133,7 @@ khớp các bản cũ, không khớp `0.0.0-beta.1`. Bỏ deprecate nhầm: `npm
 | `@anhlp/alp-web` (`apps/web`) | Không phát hành riêng | private; từ bản sau `0.0.1-beta.3`, bản build nằm trong CLI và mở bằng `alp web` ([web.md](web.md) §3.1) |
 | `@anhlp/alp-tui` | Không phát hành | private, rỗng |
 
-Thứ tự publish: protocol → core → runtime → client → daemon → cli → plugin → 5 package platform → `@anhlp/alp` (launcher, cuối cùng) (§7.4). Tổng cộng 13 tarball.
+Thứ tự publish: protocol → core → runtime → client → daemon → cli → plugin → `@anhlp/alp` (wrapper, cuối cùng) (§7.4). Tổng cộng 8 tarball (t-1807 bỏ 5 package platform).
 
 ## 3. Nền tảng
 
@@ -218,7 +218,7 @@ Thứ tự publish: protocol → core → runtime → client → daemon → cli 
 
 ## 6. Acceptance
 
-Mọi dòng chạy trên **cùng release SHA** và, với các dòng cài đặt, trên **đúng các tarball đã lưu** (13 tarball của beta.6 trên npm — beta.5 không lên npm; mỗi máy cài 9: 7 package JS, package platform của máy đó và launcher)
+Mọi dòng chạy trên **cùng release SHA** và, với các dòng cài đặt, trên **đúng các tarball đã lưu** (8 tarball từ t-1807 — beta.5 không lên npm; mỗi máy cài cả 8)
 (§7.2). Ghi SHA, link CI, SHA-256 tarball đã dùng và kết quả vào bảng §6.4.
 
 ### 6.1 Pre-publish gate
@@ -235,11 +235,11 @@ Mọi dòng chạy trên **cùng release SHA** và, với các dòng cài đặt
 | L1 | License, trường `license`, metadata repo trỏ `phucanh08/alp` | — | task T4 | Có |
 | S1 | Phân loại `npm audit` mức high/critical trong dependency runtime của 8 package | — | task T6 | Có |
 
-**Artifact** (trên các tarball đã lưu, 13 tarball của beta.6 trên npm — beta.5 không lên npm):
+**Artifact** (trên các tarball đã lưu, 8 tarball từ t-1807 — beta.5 không lên npm):
 
 | # | Kiểm tra | Môi trường | Người chạy | Chặn |
 |---|---|---|---|---|
-| A5 | `npm run release:verify -- "$OUT" --sha "$RELEASE_SHA" --record release-evidence.json` (`release:pack` cũng tự chạy A5). Kiểm: checksum khớp `SHA256SUMS`; đúng 13 tarball (8 nếu là bản rehearsal không có archive), không có tgz thừa (gateway); version `0.0.0-beta.1`; `entryCount` khớp số file trong tgz; dependency nội bộ trong `package.json` **đã pack** pin đúng version và chỉ trỏ tới 8 package; LICENSE mọi tarball giống tarball root; NOTICE; THIRD-PARTY-NOTICES liệt kê mọi module esbuild đã inline; plugin có `LICENSE.paseo.txt` (đến t-55ce.3: `web-app/LICENSE.paseo.txt` và `NOTICE.txt` của web Paseo, đã gỡ), và NOTICE = NOTICE root + Paseo; core không có đường dẫn hay dependency Paseo | máy build | người build (§7.2) | Có |
+| A5 | `npm run release:verify -- "$OUT" --sha "$RELEASE_SHA" --record release-evidence.json` (`release:pack` cũng tự chạy A5). Kiểm: checksum khớp `SHA256SUMS`; đúng 8 tarball, không có tgz thừa (gateway); version `0.0.0-beta.1`; `entryCount` khớp số file trong tgz; dependency nội bộ trong `package.json` **đã pack** pin đúng version và chỉ trỏ tới 8 package; LICENSE mọi tarball giống tarball root; NOTICE; THIRD-PARTY-NOTICES liệt kê mọi module esbuild đã inline; plugin có `LICENSE.paseo.txt` (đến t-55ce.3: `web-app/LICENSE.paseo.txt` và `NOTICE.txt` của web Paseo, đã gỡ), và NOTICE = NOTICE root + Paseo; core không có đường dẫn hay dependency Paseo | máy build | người build (§7.2) | Có |
 
 **Provider thật trên tarball** (checklist §6.3). Đề xuất chia Node để cả hai major đều có smoke thật:
 macOS Node 24, Linux Node 22.12+.
@@ -286,11 +286,11 @@ macOS Node 24, Linux Node 22.12+.
   Mở terminal riêng cho acceptance, dùng **cả `PASEO_HOME` mới và `ALP_HOME` mới, tách nhau**;
   chỉ đổi `PASEO_HOME` vẫn có thể trỏ plugin về alpd đang điều khiển release. Không dừng/copy
   home mặc định để chuẩn bị gate. User OS riêng cũng phải dùng các home dành riêng cho lần chạy.
-- Chép nguyên thư mục `$OUT` của §7.2 (13 tarball, `SHA256SUMS`, `release-manifest.json`) sang
+- Chép nguyên thư mục `$OUT` của §7.2 (8 tarball, `SHA256SUMS`, `release-manifest.json`) sang
   `/tmp/alp-beta/packs`, rồi kiểm: `shasum -a 256 -c SHA256SUMS` (macOS) hoặc `sha256sum -c SHA256SUMS`
   (Linux).
 - Kiểm hermetic, không gọi provider, trong một checkout ở `RELEASE_SHA`:
-  `npm run release:consumer -- /tmp/alp-beta/packs`. Script cài đúng các tarball đã lưu (9 trên mỗi máy: 7 package JS, package platform của máy đó và launcher), so
+  `npm run release:consumer -- /tmp/alp-beta/packs`. Script cài đúng các tarball đã lưu (cả 8), so
   `integrity`/`resolved` (`file:`) trong lockfile với manifest, chạy `tarball-consumer` và
   `package-smoke` với `--packs`, rồi kiểm lại SHA-256 sau khi chạy. Bước này không thay các dòng R.
 
@@ -593,7 +593,7 @@ npm run release:pack -- --out "$OUT"
 
 ### 7.4 Publish
 
-Thứ tự theo dependency: protocol → core → runtime → client → daemon → cli → plugin → darwin-arm64 → darwin-x64 → linux-x64 → linux-arm64 → win32-x64 → `@anhlp/alp` (launcher). Launcher đi cuối để không bao giờ trỏ tới version platform chưa có trên registry. Từ t-cd7f bộ release có 13 tarball (thứ tự trên trong `release-manifest.json`). Trước khi publish, so `binary.archiveSha256` của từng package platform với asset SHA256SUMS của GitHub release.
+Thứ tự theo dependency: protocol → core → runtime → client → daemon → cli → plugin → `@anhlp/alp` (wrapper). Wrapper đi cuối để không bao giờ trỏ tới `@anhlp/alp-cli` chưa có trên registry. Từ t-1807 bộ release có 8 tarball (thứ tự trên trong `release-manifest.json`); 5 package platform của t-cd7f đã bỏ.
 
 ```sh
 cd /tmp/alp-release/v0.0.0-beta.1
@@ -614,7 +614,7 @@ done
 ```sh
 npm publish ./anhlp-alp-protocol-0.0.0-beta.1.tgz --tag beta --access public
 npm view @anhlp/alp-protocol@0.0.0-beta.1 dist.integrity   # phải bằng integrity trong release-manifest.json
-# … lặp lại cho core, runtime, client, daemon, cli, alp-paseo, 5 package platform, rồi alp (launcher)
+# … lặp lại cho core, runtime, client, daemon, cli, alp-paseo, rồi alp (wrapper)
 ```
 
 - Ghi thời điểm và kết quả từng package vào §6.4.

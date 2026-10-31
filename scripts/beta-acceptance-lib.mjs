@@ -20,7 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
-import { RELEASE_NAMES, installableArtifacts, releaseArtifacts } from './release-lib.mjs';
+import { RELEASE_NAMES, releaseArtifacts } from './release-lib.mjs';
 import { spawnCommand } from './spawn-command.mjs';
 
 export const ROOT = path.resolve(import.meta.dirname, '..');
@@ -144,7 +144,7 @@ export function install(run, { packs, rehearsal }) {
     mkdirSync(consumer, { recursive: true });
     writeFileSync(path.join(consumer, 'package.json'), `${JSON.stringify({ name: 'alp-beta-consumer', private: true }, null, 2)}\n`);
   }
-  const installed = run.exec('install', 'npm', ['install', '--save-exact', '--no-audit', '--no-fund', ...installableArtifacts(artifacts).map(artifact => artifact.file)], { cwd: consumer });
+  const installed = run.exec('install', 'npm', ['install', '--save-exact', '--no-audit', '--no-fund', ...artifacts.map(artifact => artifact.file)], { cwd: consumer });
   if (installed.status !== 0) throw new Error(`npm install of the tarballs failed; see ${run.logs}/install.log`);
   const listed = run.exec('install', 'npm', ['ls', '--all', '--json'], { cwd: consumer });
   const versions = new Map();
@@ -156,7 +156,7 @@ export function install(run, { packs, rehearsal }) {
   })(JSON.parse(listed.stdout || '{}'));
   const stray = [...versions.keys()].filter(entry => !entry.endsWith(`@${VERSION}`));
   if (stray.length) throw new Error(`the install resolves @anhlp packages at other versions: ${stray.join(', ')}`);
-  run.record('install', 'pass', `${installableArtifacts(artifacts).length} of ${artifacts.length} tarballs (this machine's platform package only; SHA256SUMS ${manifest.sha256sums?.slice(0, 12)}…, release SHA ${manifest.git?.sha?.slice(0, 12) ?? '?'}) installed in ${consumer}; every @anhlp/* is ${VERSION}`, { sha256sums: manifest.sha256sums, releaseSha: manifest.git?.sha });
+  run.record('install', 'pass', `${artifacts.length} tarballs (SHA256SUMS ${manifest.sha256sums?.slice(0, 12)}…, release SHA ${manifest.git?.sha?.slice(0, 12) ?? '?'}) installed in ${consumer}; every @anhlp/* is ${VERSION}`, { sha256sums: manifest.sha256sums, releaseSha: manifest.git?.sha });
   return { manifest, consumer, bin: path.join(consumer, 'node_modules', '.bin') };
 }
 
@@ -172,7 +172,7 @@ export function environment({ bin, home, fake }) {
 
 /**
  * The ALP CLI the consumer installed, run by this Node so Windows needs no shell shim: @anhlp/alp-cli's
- * JavaScript (@anhlp/alp is the launcher of the executable since t-cd7f; binary-build.yml smokes that).
+ * JavaScript (@anhlp/alp is a thin wrapper around it since t-1807).
  */
 export function alpCommand(consumer) {
   return path.join(consumer, 'node_modules', '@anhlp', 'alp-cli', 'dist', 'cli.js');

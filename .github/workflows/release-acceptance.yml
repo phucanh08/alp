@@ -1,8 +1,6 @@
 # Release acceptance (docs/alp/beta-scope.md §6–§7, decisions D6 and D7). CI is the build machine:
 # one run packs the release once at the given SHA (P2–P3, tag created on the runner only, never
-# pushed) and keeps the thirteen tarballs as the artifact every acceptance row uses, macOS included.
-# The five npm platform packages carry the executables of the GitHub release drafted by the
-# release-binaries run `binaries_run` at the same SHA (its alp-release-binaries artifact, t-cd7f).
+# pushed) and keeps the eight tarballs as the artifact every acceptance row uses, macOS included.
 # Then, on those exact files and with the repository's fake Codex and fake Claude only (no secrets,
 # no cost): release-consumer, CLI C1–C9 per provider, and W6's token gate, on Linux, macOS and
 # Windows. Fake runs are rehearsals, never gate evidence: the gate's real-provider rows run on
@@ -16,12 +14,6 @@ on:
       sha:
         description: Release SHA (a commit on main)
         required: true
-      binaries_run:
-        description: Run id of the release-binaries run (same SHA) whose archives the npm platform packages carry
-        required: false
-      binaries_release:
-        description: Or a published GitHub release (v<version>) whose archives they carry, e.g. v0.0.1-beta.5 built from an earlier SHA
-        required: false
       packs_run:
         description: Run id whose alp-release artifact to reuse instead of packing again
         required: false
@@ -52,14 +44,9 @@ jobs:
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA" || { echo "inputs.sha must be a full commit SHA"; exit 1; }
           git merge-base --is-ancestor "$RELEASE_SHA" origin/main || { echo "$RELEASE_SHA is not on main"; exit 1; }
       - name: Tag on this runner only (P1; the owner pushes the tag at P5)
-        env:
-          BINARIES_RELEASE: ${{ inputs.binaries_release }}
         run: |
           tag="v$(node -p "require('./package.json').version")"
           echo "OUT=$RUNNER_TEMP/release/$tag" >> "$GITHUB_ENV"
-          # With binaries_release the tag v<version> is the binary release's (an earlier SHA): tag this
-          # SHA on the runner as npm-v<version> instead (release:pack packs a tagged commit).
-          if [ -n "$BINARIES_RELEASE" ] && [ "$(git rev-list -n 1 "$tag" 2>/dev/null)" != "$RELEASE_SHA" ]; then tag="npm-$tag"; fi
           if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
             test "$(git rev-list -n 1 "$tag")" = "$RELEASE_SHA" || { echo "$tag exists and is not $RELEASE_SHA"; exit 1; }
           else
@@ -70,33 +57,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: The release-binaries run built this SHA and drafted its release
-        if: inputs.binaries_release == ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BINARIES_RUN: ${{ inputs.binaries_run }}
-        run: |
-          test -n "$BINARIES_RUN" || { echo "binaries_run or binaries_release is required: the archives the npm platform packages carry"; exit 1; }
-          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BINARIES_RUN" --jq '[.path, .conclusion, .head_branch, .display_title] | join("|")')
-          echo "$run"
-          # release-binaries names each run after the SHA it built (run-name), and runs only from main.
-          test "$run" = ".github/workflows/release-binaries.yml|success|main|Release binaries $RELEASE_SHA" \
-            || { echo "run $BINARIES_RUN is not a successful release-binaries run of $RELEASE_SHA on main"; exit 1; }
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        if: inputs.binaries_release == ''
-        with:
-          name: alp-release-binaries
-          path: ${{ runner.temp }}/binaries
-          run-id: ${{ inputs.binaries_run }}
-          github-token: ${{ github.token }}
-      # The artifact is the release directory the draft job attached to the GitHub release: the
-      # archives and the SHA256SUMS asset. Compare with the published release's SHA256SUMS before publishing to npm.
-      - name: The archives match their SHA256SUMS
-        if: inputs.binaries_release == ''
-        working-directory: ${{ runner.temp }}/binaries
-        run: |
-          sha256sum -c SHA256SUMS
-          ls -l
       - run: npm ci
       # The CLI's build includes alp-web (`alp web`): packages/cli/dist/alp-web.js with the private
       # gateway inlined, and the apps/web files in packages/cli/dist/alp-web/ with their notices.
@@ -104,16 +64,8 @@ jobs:
       # release:pack refuses a dirty checkout or an untagged commit, runs prepack, writes SHA256SUMS
       # and release-manifest.json, and runs A5 itself, then checks that @anhlp/alp and @anhlp/alp-cli
       # carry alp-web.js, alp-web/index.html and the notices; verify again against the SHA asked for.
-      # release-pack checks every archive against their SHA256SUMS and records the run in the manifest.
-      # --binaries-release downloads a published release's archives and SHA256SUMS with gh and checks them the same way.
       - name: release:pack
-        env:
-          ALP_BINARIES_RUN: ${{ inputs.binaries_run }}
-          BINARIES_RELEASE: ${{ inputs.binaries_release }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if [ -n "$BINARIES_RELEASE" ]; then source=(--binaries-release "$BINARIES_RELEASE"); unset ALP_BINARIES_RUN; else source=(--binaries "$RUNNER_TEMP/binaries"); fi
-          npm run release:pack -- --out "$OUT" "${source[@]}"
+        run: npm run release:pack -- --out "$OUT"
       - run: npm run release:verify -- "$OUT" --sha "$RELEASE_SHA"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -24,6 +24,12 @@ Prepared 2026-10-31 (task t-1807). Not published; the version bump and publishin
   then `alp daemon restart`. Services and MCP entries written by the single-file build keep working;
   `<ALP_HOME>/cache/` and `~/.alp/share/doc/alp` may be deleted.
 - **Sizes:** an archive is about 50 MB (darwin-arm64 51.8 MB), about 210 MB unpacked, most of it Node.
+- **npm: `@anhlp/alp` is now a thin wrapper around `@anhlp/alp-cli`** (pinned to the same
+  version) and runs on your Node (22.12 or later): `npm install -g @anhlp/alp@beta`. The five
+  platform packages `@anhlp/alp-<os>-<arch>` are retired and will not be published; a release is 8
+  tarballs. `release:pack` no longer takes `--binaries`/`--binaries-release`, and
+  `release-acceptance.yml` no longer takes `binaries_run`/`binaries_release`. CI smokes the wrapper
+  with `npm install -g` (`scripts/npm-wrapper-smoke.mjs`). See [binary-install.md](binary-install.md#npm-packages).
 
 # ALP 0.0.1-beta.6 — release notes
 

@@ -1,6 +1,6 @@
 # Modular ALP monorepo
 
-ALP uses npm workspaces inspired by [Paseo's package layout](https://github.com/getpaseo/paseo/blob/main/package.json). The root is the private `alp-monorepo` (t-cd7f); the npm package `@anhlp/alp` is the launcher in `npm/alp` that runs the ALP executable from `@anhlp/alp-<os>-<arch>` ([binary-install.md](alp/binary-install.md#npm-packages)). Root source shims and legacy checkout directories have been removed.
+ALP uses npm workspaces inspired by [Paseo's package layout](https://github.com/getpaseo/paseo/blob/main/package.json). The root is the private `alp-monorepo` (t-cd7f); the npm package `@anhlp/alp` is the thin wrapper in `npm/alp` that runs `@anhlp/alp-cli`'s CLI (t-1807) ([binary-install.md](alp/binary-install.md#npm-packages)). Root source shims and legacy checkout directories have been removed.
 
 ## Repository layout
 
@@ -91,7 +91,7 @@ npm run release:pack-check
 npm run test:packages:smoke
 ```
 
-Plugin prepack builds the plugin; core prepack runs only the core build. The daemon distribution carries `alpd.js`; the CLI carries `alpd.js`, `acp.js` and `alp web`'s service with ALP's own app (`dist/alp-web.js`, `dist/alp-web/`); the plugin ships the bridge and the integration entry (`server/dist/main.js`) with Paseo's licence (`LICENSE.paseo.txt`), and no web app since Paseo's web app (`paseo-web/`) was removed (t-55ce.3); `@anhlp/alp` ships only its launcher (`bin/alp.js`, `lib/launcher.js`). The existing Claude SDK external dependency remains declared in the executable distributions.
+Plugin prepack builds the plugin; core prepack runs only the core build. The daemon distribution carries `alpd.js`; the CLI carries `alpd.js`, `acp.js` and `alp web`'s service with ALP's own app (`dist/alp-web.js`, `dist/alp-web/`); the plugin ships the bridge and the integration entry (`server/dist/main.js`) with Paseo's licence (`LICENSE.paseo.txt`), and no web app since Paseo's web app (`paseo-web/`) was removed (t-55ce.3); `@anhlp/alp` ships only `bin/alp.js`, which imports `@anhlp/alp-cli/cli`. The existing Claude SDK external dependency remains declared in the executable distributions.
 
 ### Breaking migration: the daemon no longer serves the web app
 

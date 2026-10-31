@@ -1,27 +1,22 @@
 {
   "name": "@anhlp/alp",
   "version": "0.0.1-beta.6",
-  "description": "ALP command line: installs the ALP executable for this machine (@anhlp/alp-<os>-<arch>) and runs it",
+  "description": "ALP command line for npm: runs the CLI of @anhlp/alp-cli on your Node (22.12 or later)",
   "type": "module",
   "bin": {
     "alp": "bin/alp.js"
   },
   "files": [
     "bin/alp.js",
-    "lib/launcher.js",
     "README.md",
     "LICENSE",
     "NOTICE"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22.12"
   },
-  "optionalDependencies": {
-    "@anhlp/alp-darwin-arm64": "0.0.1-beta.6",
-    "@anhlp/alp-darwin-x64": "0.0.1-beta.6",
-    "@anhlp/alp-linux-x64": "0.0.1-beta.6",
-    "@anhlp/alp-linux-arm64": "0.0.1-beta.6",
-    "@anhlp/alp-win32-x64": "0.0.1-beta.6"
+  "dependencies": {
+    "@anhlp/alp-cli": "0.0.1-beta.6"
   },
   "license": "Apache-2.0",
   "repository": {

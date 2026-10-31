@@ -4,7 +4,7 @@
 # DRAFT (non-prerelease) GitHub release v<version> with the archives, SHA256SUMS and install.sh. It never publishes:
 # the owner reviews the draft and publishes it by hand (which is when the tag is created).
 name: Release binaries
-# release-acceptance finds the run that built a SHA by this title (binaries_run, t-cd7f).
+# Names each run after the SHA it built.
 run-name: Release binaries ${{ inputs.sha }}
 
 on:
@@ -84,8 +84,8 @@ jobs:
           cp install.ps1 release/install.ps1
           node scripts/package-binary.mjs sums release
           ls -l release
-      # release-acceptance packs the npm platform packages from exactly these archives (t-cd7f): keep
-      # them, with their SHA256SUMS, as this run's artifact for longer than binary-build's 7 days.
+      # The release directory attached to the GitHub release (archives, installers, SHA256SUMS): kept
+      # as this run's artifact for longer than binary-build's 7 days.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: alp-release-binaries

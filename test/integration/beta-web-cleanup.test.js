@@ -85,14 +85,11 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
       entry = path.join(scripts, 'package-smoke.mjs');
       await writeFile(entry, source);
       await copyFile(path.join(root, 'scripts/beta-web-lifecycle.mjs'), path.join(scripts, 'beta-web-lifecycle.mjs'));
-      await writeFile(path.join(base, 'package.json'), JSON.stringify({ name: '@anhlp/alp', workspaces: [] }));
+      await writeFile(path.join(base, 'package.json'), JSON.stringify({ name: '@anhlp/alp', version: '0.0.0-fixture', workspaces: [] }));
       await writeFile(path.join(scripts, 'release-lib.mjs'), `export const LAUNCHER = '@anhlp/alp';
       export const LAUNCHER_LOCATION = 'npm/alp';
-      export const PLATFORM_NAMES = [];
-      export const SAVED_INSTALL_FLAGS = ['--omit=optional'];
-      export const hostPlatformName = () => undefined;
       export const releaseArtifacts = () => [
-        { name: '@anhlp/alp', file: 'unused.tgz', files: new Map(['package.json', 'bin/alp.js', 'lib/launcher.js'].map(p => [p, ''])) },
+        { name: '@anhlp/alp', file: 'unused.tgz', files: new Map(['package.json', 'bin/alp.js'].map(p => [p, ''])) },
         { name: '@anhlp/alp-paseo', file: 'unused-plugin.tgz', manifest: { peerDependencies: {} } }
       ];`);
       await writeFile(path.join(scripts, 'spawn-command.mjs'), `export const spawnCommand = (command, args) => [command, args];`);
@@ -100,7 +97,7 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
         import { spawnSync as realSpawnSync } from 'node:child_process'; import fs from 'node:fs'; import path from 'node:path';
         export function spawnSync(command, args, options) {
           // The launcher without a platform package: exit 1 with the install hints.
-          if (String(args[0]).endsWith('alp.js') && args[1] === '--version') return { status: 1, stdout: '', stderr: 'alp: not installed; install.sh' };
+          if (String(args[0]).endsWith('alp.js') && args[1] === '--version') return { status: 0, stdout: '0.0.0-fixture\\n', stderr: '' };
           if (args[1] === 'web' && args[2] === '--print') {
             for (const role of ['daemon', 'web']) {
               const result = realSpawnSync(process.execPath, [path.join(process.env.FIXTURE_BASE, 'launch.mjs'), role, options.env.ALP_HOME], { env: options.env });
