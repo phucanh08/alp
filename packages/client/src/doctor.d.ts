@@ -13,5 +13,5 @@ export function diagnose(options?: { home?: string; project?: string; env?: Node
 export type LeftoverState = 'clean-pushed' | 'dirty' | 'unpushed' | 'in-use' | 'unknown';
 export type Leftover = { path: string; state: LeftoverState; reason?: string; command?: string };
 export const LEFTOVER_STATES: Record<LeftoverState, string>;
-export function diskCheck(home: string, options?: { run?: CommandRunner; env?: NodeJS.ProcessEnv; free?: number; tempDirs?: string[]; cwd?: string; classifyMs?: number; recentMs?: number }): Promise<DoctorCheck & { leftovers?: Leftover[] }>;
+export function diskCheck(home: string, options?: { run?: CommandRunner; env?: NodeJS.ProcessEnv; free?: number; tempDirs?: string[]; cwd?: string; classifyMs?: number; recentMs?: number; platform?: NodeJS.Platform }): Promise<DoctorCheck & { leftovers?: Leftover[] }>;
 export function repair(checks: DoctorCheck[]): Promise<Array<{ id: string; result: string }>>;

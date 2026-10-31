@@ -286,20 +286,30 @@ Clean-up only reports. Neither alpd nor `alp doctor --fix` deletes them, because
 still belong to running work or hold the only copy of a change. `alp doctor` puts each
 one in a class, and only the first class gets a command, for you to run by hand:
 
-- *clean and pushed*: a git checkout of its own with no changes, no untracked files and
-  no merge or rebase in progress, whose HEAD a remote-tracking branch already holds. For a
-  standalone clone, every branch must be held that way and there must be no stash. The
-  command is `git -C <main worktree> worktree remove <path>` (git keeps the branch), or
-  `rm -rf <path>` for a clone. "Pushed" means pushed as of that clone's last fetch.
-- *dirty*: uncommitted or untracked changes, or a merge or rebase in progress. Keep it.
-- *unpushed*: commits or a stash that no remote-tracking branch holds. Keep it.
+- *clean and pushed*: a git checkout of its own with no changes, no untracked files, no
+  ignored files other than `node_modules` (which npm installs again), no files marked
+  assume-unchanged or skip-worktree, no submodules, and no merge or rebase in progress,
+  whose HEAD a remote-tracking branch already holds. For a standalone clone, every ref
+  (branches, tags, notes and the stash) must be held that way. The command is
+  `git -C <main worktree> worktree remove <path>` (git keeps the branch), or `rm -rf <path>`
+  for a clone (on Windows, `Remove-Item -Recurse -Force <path>`, for PowerShell). Removing
+  it still deletes its `node_modules`, and "pushed" means pushed as of that clone's last
+  fetch: a branch deleted on the remote since then still counts. An annotated tag's own
+  message is not compared, only the commit it names. Look before you run the command.
+- *dirty*: uncommitted changes, untracked files, ignored files such as `.env` or local
+  config (git status alone does not show them, and they exist nowhere else), or a merge or
+  rebase in progress. Keep it.
+- *unpushed*: commits, tags, other refs or a stash that no remote-tracking branch holds.
+  Keep it.
 - *in use*: the worktree of a running assignment (`state/live.json`), the checkout of a
   result no one has handled yet (`state/assignment-results.json`), the directory you run
   `alp doctor` from, a clone that other worktrees were made from, or a clean checkout
   changed in the last day (a worktree someone just
   made by hand looks clean and pushed, and ALP does not track it). Keep it.
-- *unknown*: not the top of a git checkout, git could not answer, or `alp doctor` ran out
-  of time (it spends at most 10 s on this). Check it by hand.
+- *unknown*: not the top of a git checkout, git could not answer, it has assume-unchanged,
+  skip-worktree or submodule entries git status cannot vouch for, or `alp doctor` ran out
+  of time. Classifying has a hard 10 s deadline: each git command is cut off when it comes,
+  and whatever was not finished by then is unknown. Check it by hand.
 
 The text output shows the first 20 commands. `alp doctor --json` lists every leftover in
 the check's `leftovers` field, with its class and its command, if it has one.
