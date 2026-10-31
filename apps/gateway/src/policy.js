@@ -187,6 +187,9 @@ export const TERMINAL_REFUSALS = Object.freeze({
   not_found: 'No such terminal',
   terminal_disabled: 'The daemon host has not allowed remote terminals (its owner runs alp terminal allow)',
   terminal_unsupported: 'Terminals are not available on the daemon host',
+  // Only an older alpd (Linux root-only hosts, before terminals opened with a non-blocking notice)
+  // refuses this way; current clients never send the acknowledgment it wants.
+  terminal_protection_ack_required: 'The daemon host runs an older alpd that asks for a terminal protection acknowledgment this version no longer sends. Update ALP on the daemon host (alp update), restart alpd, then retry.',
   terminal_limit: 'Too many terminals are open',
   not_attached: 'Attach the terminal on this connection first',
   terminal_exited: 'The terminal has ended',

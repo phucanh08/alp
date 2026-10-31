@@ -196,6 +196,7 @@ runs before all of them pass**:
 | `team_not_found` | 1001 | `session.configure`: no team of that id for the project (§12.9) |
 | `terminal_disabled` | 1005 | `terminal.*`: the host has not opted in (`<ALP_HOME>/terminal.json` `allowRemoteTerminal`), or turned it off (§12.10) |
 | `terminal_unsupported` | 1005 | `terminal.*` where the native owner (macOS/Linux) or node-pty (Windows) is unavailable (§12.10) |
+| `terminal_protection_ack_required` | 1005 | Legacy, never sent by current alpd: `terminal.create` on a Linux root-only host without `protectionAcknowledgment`, from alpd built from main between the root-only warning and its non-blocking notice (no release tag). The gateway answers it with a fixed text telling the user to update ALP on the daemon host (§12.10) |
 | `terminal_limit` | 1005 | `terminal.create` over `maxPerPrincipal` or `maxPerDaemon`; `data.limit` names it (§12.10) |
 | `not_attached` | 1004 | `terminal.input`/`terminal.resize` from a connection that has not attached the terminal (§12.10) |
 | `terminal_exited` | 1004 | `terminal.input`/`terminal.resize` to a terminal whose shell ended (§12.10) |
