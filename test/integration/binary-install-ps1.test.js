@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync, spawn } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -25,9 +25,13 @@ async function temp(t, prefix) {
 }
 
 /** A mirror with alp-<version>-windows-x64.zip (the fake bundle), SHA256SUMS and install.ps1. */
-async function mirror(t, versions = ['9.8.7']) {
+async function mirror(t, versions = ['9.8.7'], tweak = async () => {}) {
   const out = await temp(t, 'alp-ps-mirror-');
-  for (const version of versions) await pack({ bundle: await fakeBundle(await temp(t, 'alp-ps-bundle-'), version, 'windows-x64'), out });
+  for (const version of versions) {
+    const bundle = await fakeBundle(await temp(t, 'alp-ps-bundle-'), version, 'windows-x64');
+    await tweak(bundle, version);
+    await pack({ bundle, out });
+  }
   await copyFile(INSTALL, path.join(out, 'install.ps1'));
   await sums(out);
   return out;
@@ -169,4 +173,60 @@ test('install.ps1 refuses a -Dir with a PATH separator or a %', { skip: !windows
   const percent = await install(['-Dir', `${localAppData}\\a%TEMP%b`, '-BaseUrl', releases], { localAppData });
   assert.notEqual(percent.code, 0);
   assert.match(percent.stderr, /cannot contain '%'/);
+});
+
+const CLI = path.join('lib', 'node_modules', '@anhlp', 'alp-cli', 'dist', 'cli.js');
+const resolvedCurrent = dir => realpathSync.native(path.join(dir, 'app', 'current')).toLowerCase();
+const version = command => execFileSync(command, ['--version'], { encoding: 'utf8', shell: true }).trim();
+
+test('install.ps1: a failed upgrade leaves the previous version current and the alp command running it (t-598d)', { skip: !windows }, async t => {
+  const localAppData = await temp(t, 'alp-ps-lad-');
+  const dir = path.join(localAppData, 'alp');
+  const command = path.join(dir, 'alp.cmd');
+  const first = await install(['-Dir', dir, '-NoModifyPath', '-BaseUrl', await mirror(t, ['1.0.0'])], { localAppData });
+  assert.equal(first.code, 0, first.stderr);
+  // 2.0.0 is a valid archive whose ALP reports another version: refused after it is unpacked.
+  const broken = await mirror(t, ['2.0.0'], bundle => writeFile(path.join(bundle, CLI), "console.log('6.6.6');\n"));
+  const failed = await install(['-Dir', dir, '-NoModifyPath', '-BaseUrl', broken], { localAppData });
+  assert.notEqual(failed.code, 0);
+  assert.match(failed.stderr, /the downloaded ALP reports version '6\.6\.6', not 2\.0\.0/);
+  assert.equal(resolvedCurrent(dir), path.join(dir, 'app', '1.0.0').toLowerCase(), 'app\\current still points at 1.0.0');
+  assert.equal(version(command), '1.0.0');
+  assert.deepEqual((await readdir(path.join(dir, 'app'))).sort(), ['1.0.0', 'current'], 'no 2.0.0 and no .alp-update-* staging left');
+});
+
+test('install.ps1: reinstalling the current version puts the running copy back when the new one cannot be moved in (t-598d, t-1f14)', { skip: !windows }, async t => {
+  const localAppData = await temp(t, 'alp-ps-lad-');
+  const dir = path.join(localAppData, 'alp');
+  const command = path.join(dir, 'alp.cmd');
+  const first = await install(['-Dir', dir, '-NoModifyPath', '-BaseUrl', await mirror(t)], { localAppData });
+  assert.equal(first.code, 0, first.stderr);
+  const marker = path.join(dir, 'app', '9.8.7', 'installed-first');
+  await writeFile(marker, 'the running copy\n');
+  // The reinstalled 9.8.7 passes its --version check but leaves a process running from (and with
+  // its working directory in) the unpacked copy, so Windows refuses to move that copy into
+  // app\9.8.7 after the running copy was moved aside. install.ps1 must move the running copy back.
+  const holder = path.join(await temp(t, 'alp-ps-hold-'), 'pid');
+  const holding = await mirror(t, ['9.8.7'], bundle => writeFile(path.join(bundle, CLI), [
+    "const { spawn } = require('node:child_process');",
+    "const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120000)'], { cwd: require('node:path').dirname(process.execPath), detached: true, stdio: 'ignore', windowsHide: true });",
+    `require('node:fs').writeFileSync(${JSON.stringify(holder)}, String(child.pid));`,
+    'child.unref();',
+    "console.log('9.8.7');",
+    '',
+  ].join('\n')));
+  let failed;
+  try {
+    failed = await install(['-Dir', dir, '-NoModifyPath', '-BaseUrl', holding], { localAppData });
+    assert.ok(existsSync(holder), 'the holding process started');
+  } finally {
+    // Before the temporary directories go: the holder's working directory is in one of them.
+    try { process.kill(Number(readFileSync(holder, 'utf8'))); } catch {}
+  }
+  assert.notEqual(failed.code, 0, failed.stdout);
+  assert.match(failed.stderr, /could not install .*9\.8\.7/);
+  assert.equal(existsSync(marker), true, 'app\\9.8.7 is the running copy again');
+  assert.equal(resolvedCurrent(dir), path.join(dir, 'app', '9.8.7').toLowerCase());
+  assert.equal(version(command), '9.8.7');
+  assert.deepEqual((await readdir(path.join(dir, 'app'))).filter(name => name.startsWith('.alp-old-')), [], 'no copy left aside');
 });
