@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import type { RuntimeKind } from './resolve.js';
-import { tell } from './live.js';
+import { tell } from './write-error.js';
 
 /**
  * Finished assignments whose native threads alp_recall can question (ALPD §27).

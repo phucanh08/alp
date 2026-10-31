@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createLogger } from '@anhlp/alp-core/log';
 import type { RuntimeKind, SessionSpec } from './resolve.js';
 import type { Worktree } from './workspace.js';
+import { tell } from './write-error.js';
 
 /**
  * Assignments that are running, kept on disk so the next alpd can continue them
@@ -87,8 +88,3 @@ export function createLiveBook(file?: string, onError: (error: unknown) => void 
 }
 
 export type LiveBook = ReturnType<typeof createLiveBook>;
-
-/** Tells `onError` of a failed write; what it throws must not change how the write failed. */
-export function tell(onError: (error: unknown) => void, error: unknown) {
-  try { onError(error); } catch {}
-}

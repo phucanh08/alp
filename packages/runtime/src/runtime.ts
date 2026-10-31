@@ -41,7 +41,8 @@ import { MAIL_BODY_CHARS, MAIL_HEADER, publicEvent, renderMail, takeBatch, USER,
 import type { AlpEvent, AssignmentSnapshot, Envelope, SessionSnapshot, TurnOrigin, UserQuestion } from './events.js';
 import { live, normalizePaths, overlapping, renderBoard, type Pin } from './board.js';
 import { verifyConfig } from '@anhlp/alp-core/verify';
-import { createLiveBook, tell, type LiveEntry } from './live.js';
+import { createLiveBook, type LiveEntry } from './live.js';
+import { tell } from './write-error.js';
 import { promptSafe } from '@anhlp/alp-core/promptsafe';
 import { CHOICES, words, type Words } from './language.js';
 import { OWN_START, sameProcessAlive } from './process-info.js';

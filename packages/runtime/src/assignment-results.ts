@@ -1,7 +1,7 @@
 import { readFile, readdir, mkdir, writeFile, open, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { writeAtomic } from '@anhlp/alp-core/atomic';
-import { tell } from './live.js';
+import { tell } from './write-error.js';
 
 /** What a finished writer outside a worktree left in its checkout, kept until its requester handles it (recall entries expire, this does not). */
 export type AssignmentResultEvidence = { agent: string; status: string; finishedAt: string; project: string; requesters: string[]; taskId?: string; brief: string; summary: string };

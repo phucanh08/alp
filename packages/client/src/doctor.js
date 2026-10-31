@@ -574,14 +574,16 @@ async function entries(directory, prefix = '') {
   return names.filter(name => name.startsWith(prefix)).map(name => path.join(directory, name));
 }
 
-/** A path quoted for a POSIX shell, so a suggested command can be pasted as it is. */
-const shellQuote = text => `'${String(text).replaceAll("'", `'\\''`)}'`;
+/** A path quoted for the user's shell (POSIX sh, or PowerShell on Windows), so a suggested command can be pasted as it is. */
+const shellQuote = (text, platform = process.platform) => platform === 'win32'
+  ? `'${String(text).replaceAll("'", "''")}'`
+  : `'${String(text).replaceAll("'", `'\\''`)}'`;
 
 /** What each leftover state means, in the order alp doctor lists them. */
 export const LEFTOVER_STATES = {
-  'clean-pushed': 'clean and pushed (nothing would be lost; remove by hand with the command shown)',
-  dirty: 'dirty (uncommitted or untracked changes, or a merge or rebase in progress; keep)',
-  unpushed: 'unpushed (commits or a stash no remote-tracking branch has; keep)',
+  'clean-pushed': 'clean and pushed (no changes, untracked or ignored files other than node_modules, and every commit on a remote it last fetched; remove by hand with the command shown)',
+  dirty: 'dirty (uncommitted changes, untracked or ignored files such as .env, or a merge or rebase in progress; keep)',
+  unpushed: 'unpushed (commits, tags, other refs or a stash no remote-tracking branch has; keep)',
   'in-use': 'in use (a running assignment, a retained result, this shell, or changed in the last day; keep)',
   unknown: 'unknown (not a git checkout of its own, or git could not tell; check by hand)',
 };
@@ -600,17 +602,39 @@ async function ownedPaths(home) {
   return owned;
 }
 
+/** Why a leftover alp doctor had no time left for is unknown. */
+const NOT_CHECKED = 'not checked: alp doctor ran out of time; run it again, or check by hand';
+
+/** Thrown when the classifying deadline passed: the leftover is unknown, not checked. */
+class OutOfTime extends Error {}
+
+/**
+ * Ignored entries that removing a checkout may lose for good. Only node_modules is left out: npm
+ * installs it again from the tracked lockfile, and git lists an ignored directory as one entry.
+ * Everything else ignored (.env, local config, build output someone may still want) keeps it.
+ */
+const keptIgnored = entries => entries.filter(entry => path.posix.basename(entry.replace(/\/$/, '')) !== 'node_modules');
+
 /**
  * Classifies one leftover directory (t-e80a) without changing it: clean-pushed when it is a git
- * checkout of its own with no changes, no untracked files, no operation in progress, and a HEAD
- * (for a standalone clone: every branch, and no stash) that a remote-tracking branch already
- * holds. "Pushed" is what this clone last fetched. Anything git cannot answer is unknown.
+ * checkout of its own with no changes, no untracked files, no ignored files but node_modules, no
+ * hidden index state or submodules, no operation in progress, and a HEAD (for a standalone clone:
+ * every ref, including tags and a stash) that a remote-tracking branch already holds. "Pushed" is
+ * what this clone last fetched. Anything git cannot answer is unknown. Each git command ends by
+ * `deadline`; past it the leftover is unknown, not checked.
  */
-async function classifyLeftover(directory, { run, env, owned, here, recentMs }) {
+async function classifyLeftover(directory, { run, env, owned, here, recentMs, deadline, platform }) {
   const real = realpathOr(directory);
   const inside = (outer, inner) => inner === outer || inner.startsWith(outer.endsWith(path.sep) ? outer : outer + path.sep);
   if ([...owned].some(owner => inside(real, owner) || inside(owner, real)) || inside(real, here)) return { path: directory, state: 'in-use' };
-  const git = args => run('git', ['-C', directory, ...args], { env, timeoutMs: 10_000 });
+  const git = async args => {
+    const left = deadline - Date.now();
+    if (left <= 0) throw new OutOfTime();
+    const result = await run('git', ['-C', directory, ...args], { env, timeoutMs: Math.min(10_000, left) });
+    // A command cut off by the deadline says nothing about the leftover.
+    if (Date.now() >= deadline) throw new OutOfTime();
+    return result;
+  };
   const unknown = reason => ({ path: directory, state: 'unknown', reason });
   // The top of every git checkout holds .git (a directory, or a file in a linked worktree): without it, no git is needed.
   if (!await lstat(path.join(directory, '.git')).then(() => true, () => false)) return unknown('not a git checkout');
@@ -619,9 +643,20 @@ async function classifyLeftover(directory, { run, env, owned, here, recentMs }) 
   const [top, gitDir, common] = where.stdout.trim().split('\n');
   if (!top || !gitDir || !common || realpathOr(top) !== real) return unknown('not the top of a git checkout');
   const commonDir = realpathOr(path.resolve(top, common));
-  const status = await git(['status', '--porcelain']);
+  // Untracked files are listed one by one whatever status.showUntrackedFiles says, and ignored ones
+  // too: git status alone does not show an ignored .env, which exists nowhere else.
+  const status = await git(['-c', 'status.showUntrackedFiles=all', 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=matching']);
   if (status.code !== 0) return unknown('git status failed');
-  if (status.stdout.trim()) return { path: directory, state: 'dirty' };
+  const rows = status.stdout.split('\0').filter(Boolean);
+  if (rows.some(row => !row.startsWith('!! '))) return { path: directory, state: 'dirty' };
+  const ignored = keptIgnored(rows.map(row => row.slice(3)));
+  if (ignored.length) return { path: directory, state: 'dirty', reason: `ignored files: ${ignored.slice(0, 3).join(', ')}${ignored.length > 3 ? `, … ${ignored.length - 3} more` : ''}` };
+  // git status cannot see a change to a file marked assume-unchanged or skip-worktree, nor inside a submodule.
+  const index = await git(['ls-files', '-z', '-v', '--stage']);
+  if (index.code !== 0) return unknown('git could not list its index');
+  const tracked = index.stdout.split('\0').filter(Boolean);
+  if (tracked.some(row => row[0] === 'S' || /[a-z]/.test(row[0]))) return unknown('some files are marked assume-unchanged or skip-worktree, which git status does not check');
+  if (tracked.some(row => row.slice(2).startsWith('160000 '))) return unknown('it has submodules, whose own changes and commits this check does not read');
   for (const name of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply']) {
     if (await lstat(path.join(gitDir, name)).then(() => true, () => false)) return { path: directory, state: 'dirty' };
   }
@@ -629,40 +664,49 @@ async function classifyLeftover(directory, { run, env, owned, here, recentMs }) 
   const touched = Math.max(...await Promise.all([directory, path.join(gitDir, 'index'), path.join(gitDir, 'HEAD')].map(file => lstat(file).then(info => info.mtimeMs, () => 0))));
   if (Date.now() - touched < recentMs) return { path: directory, state: 'in-use', reason: 'changed in the last day' };
   const linked = realpathOr(gitDir) !== commonDir;
-  // A linked worktree's branches live in its main repository and stay there when it goes; a clone holds its own.
-  const ahead = await git(['rev-list', '-n', '1', 'HEAD', ...(linked ? [] : ['--branches']), '--not', '--remotes']);
+  // A linked worktree's branches live in its main repository and stay there when it goes; a clone
+  // holds its own refs: every branch, tag, note and stash (--all), all of which must be on a remote.
+  const ahead = await git(['rev-list', '-n', '1', ...(linked ? ['HEAD'] : ['HEAD', '--all']), '--not', '--remotes']);
   if (ahead.code !== 0) return unknown('git could not compare HEAD with the remotes');
   if (ahead.stdout.trim()) return { path: directory, state: 'unpushed' };
   const list = await git(['worktree', 'list', '--porcelain']);
   if (list.code !== 0) return unknown('git could not list its worktrees');
   if (!linked) {
-    const stash = await git(['rev-parse', '-q', '--verify', 'refs/stash']);
-    if (stash.code === 0) return { path: directory, state: 'unpushed' };
     // Removing a clone removes the repository of every worktree made from it.
     if ((list.stdout.match(/^worktree /gm) ?? []).length > 1) return { path: directory, state: 'in-use', reason: 'other worktrees use its repository' };
-    return { path: directory, state: 'clean-pushed', command: `rm -rf ${shellQuote(directory)}` };
+    const remove = platform === 'win32' ? `Remove-Item -Recurse -Force ${shellQuote(directory, platform)}` : `rm -rf ${shellQuote(directory, platform)}`;
+    return { path: directory, state: 'clean-pushed', command: remove };
   }
   const main = list.stdout.match(/^worktree (.*)$/m)?.[1];
   if (!main) return unknown('git could not name its main worktree');
-  return { path: directory, state: 'clean-pushed', command: `git -C ${shellQuote(main)} worktree remove ${shellQuote(directory)}` };
+  return { path: directory, state: 'clean-pushed', command: `git -C ${shellQuote(main, platform)} worktree remove ${shellQuote(directory, platform)}` };
 }
-
-/** Why a leftover alp doctor had no time left for is unknown. */
-const NOT_CHECKED = 'not checked: alp doctor ran out of time; run it again, or check by hand';
 
 /**
  * Classifies leftovers eight at a time, within `budgetMs` in all: a machine can hold thousands
- * (old test homes in the temp directory), and doctor must still answer. Those it does not
- * reach are unknown.
+ * (old test homes in the temp directory), and doctor must still answer. The deadline is hard:
+ * each git command is cut off when it comes, and doctor stops waiting then. Those not finished
+ * by then are unknown.
  */
 async function classifyLeftovers(paths, { budgetMs, ...options }) {
   const results = paths.map(directory => ({ path: directory, state: 'unknown', reason: NOT_CHECKED }));
   const deadline = Date.now() + budgetMs;
-  let next = 0;
+  let next = 0, done = false;
   const worker = async () => {
-    while (next < paths.length && Date.now() < deadline) { const index = next++; results[index] = await classifyLeftover(paths[index], options); }
+    while (!done && next < paths.length && Date.now() < deadline) {
+      const index = next++;
+      try {
+        const result = await classifyLeftover(paths[index], { ...options, deadline });
+        if (!done && Date.now() < deadline) results[index] = result;
+      } catch (error) { if (!(error instanceof OutOfTime)) results[index] = { path: paths[index], state: 'unknown', reason: `could not check: ${error?.message ?? error}` }; }
+    }
   };
-  await Promise.all(Array.from({ length: Math.min(8, paths.length) }, worker));
+  // A file system call that hangs (a stale network mount) is not cut off by a command timeout: stop waiting at the deadline.
+  let timer;
+  const expired = new Promise(resolve => { timer = setTimeout(resolve, Math.max(0, budgetMs)); });
+  await Promise.race([Promise.all(Array.from({ length: Math.min(8, paths.length) }, worker)), expired]);
+  clearTimeout(timer);
+  done = true;
   return results;
 }
 
@@ -679,7 +723,7 @@ const SHOWN_COMMANDS = 20;
  * Classifying stops after `classifyMs` (10 s); what it did not reach is unknown. A clean one
  * changed within `recentMs` (a day) is in use: someone may have just started in it.
  */
-export async function diskCheck(home, { run = runCommand, env = process.env, free, tempDirs = [...new Set([os.tmpdir(), ...(process.platform === 'win32' ? [] : ['/tmp'])])], cwd = process.cwd(), classifyMs = 10_000, recentMs = 24 * 60 * 60 * 1000 } = {}) {
+export async function diskCheck(home, { run = runCommand, env = process.env, free, tempDirs = [...new Set([os.tmpdir(), ...(process.platform === 'win32' ? [] : ['/tmp'])])], cwd = process.cwd(), classifyMs = 10_000, recentMs = 24 * 60 * 60 * 1000, platform = process.platform } = {}) {
   let bytes = free;
   if (bytes === undefined) {
     try { const info = await statfs(home); bytes = Number(info.bavail) * Number(info.bsize); } catch {}
@@ -708,7 +752,7 @@ export async function diskCheck(home, { run = runCommand, env = process.env, fre
   // Sizing and classifying run side by side: du alone can take many seconds over thousands of leftovers.
   const [sizes, leftovers] = await Promise.all([
     Promise.all(groups.map(([, paths]) => size(paths))),
-    ownedPaths(home).then(owned => classifyLeftovers([...new Set([...worktrees, ...temp])], { run, env: gitEnv, owned, here: realpathOr(cwd), budgetMs: classifyMs, recentMs })),
+    ownedPaths(home).then(owned => classifyLeftovers([...new Set([...worktrees, ...temp])], { run, env: gitEnv, owned, here: realpathOr(cwd), budgetMs: classifyMs, recentMs, platform })),
   ]);
   const details = groups.map(([label, paths], index) => `${paths.length} left in ${label}${sizes[index] === undefined ? '' : `, ${formatSize(sizes[index])}`}`);
   for (const [state, meaning] of Object.entries(LEFTOVER_STATES)) {
@@ -716,7 +760,7 @@ export async function diskCheck(home, { run = runCommand, env = process.env, fre
     if (count) details.push(`${count} ${meaning}`);
   }
   const unchecked = leftovers.filter(entry => entry.reason === NOT_CHECKED).length;
-  if (unchecked) details.push(`  ${unchecked} of the unknown were not checked within ${Math.round(classifyMs / 1000)} s`);
+  if (unchecked) details.push(`  ${unchecked} of the unknown were not checked within ${classifyMs < 1000 ? `${classifyMs} ms` : `${Math.round(classifyMs / 1000)} s`}`);
   const commands = leftovers.filter(entry => entry.command).map(entry => entry.command);
   for (const command of commands.slice(0, SHOWN_COMMANDS)) details.push(`  ${command}`);
   if (commands.length > SHOWN_COMMANDS) details.push(`  … ${commands.length - SHOWN_COMMANDS} more; alp doctor --json lists every one`);
