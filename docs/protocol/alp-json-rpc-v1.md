@@ -179,6 +179,7 @@ runs before all of them pass**:
 | `quota_exceeded` | 1005 | `attachment.begin` over the active uploads, principal or daemon quota; `data.limit` names it (§12.6) |
 | `attachment_unavailable` | 1005 | the attachment store cannot be used, or a referenced object's bytes cannot be read now (§12.6) |
 | `attachment_unsupported` | 1005 | `session.prompt` with attachments to a session whose runtime cannot read them (today's runtimes), or an alpd without the store; nothing was sent or recorded (§12.6) |
+| `native_command_unsupported` | -32602 | `session.prompt` to a Claude session whose text starts with `/clear`, `/reset` or `/new`: Claude would start a new conversation the session does not follow; nothing was sent or recorded (t-e906) |
 | `session_busy` | 1004 | `session.rewind`, `session.reload`, a live `session.configure`: the root's tree is not idle (a turn, prompt delivery, child, assignment, question, mail or parked work) (§12.7–§12.9) |
 | `stale_generation` | 1004 | `session.fork`/`session.rewind`: `ifGeneration` is not the root's current history generation (§12.7) |
 | `turn_not_found` | 1001 | `session.fork`/`session.rewind`: no such turn in this generation (or branch) (§12.7) |

@@ -58,6 +58,8 @@ export type ErrorReason =
   | 'outside' | 'changed'
   // workspace.git.status and workspace.git.diff (§12.5).
   | 'not_repository' | 'unknown_ref' | 'invalid_compare' | 'stale_snapshot' | 'git_unavailable' | 'git_failed'
+  // session.prompt: a Claude command ALP does not follow (t-e906).
+  | 'native_command_unsupported'
   // Attachments (§12.6).
   | 'invalid_name' | 'invalid_data' | 'attachment_too_large' | 'offset_mismatch' | 'chunk_conflict' | 'upload_incomplete'
   | 'hash_mismatch' | 'upload_expired' | 'quota_exceeded' | 'attachment_referenced' | 'attachment_limit'

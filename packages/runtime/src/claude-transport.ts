@@ -224,18 +224,23 @@ type NativeConfig = {
 /** The plugin name ALP's skills are loaded under, so Claude Code calls them alp:<name>. */
 export const SKILL_PLUGIN = 'alp';
 /** Claude's own commands the composer does not offer: ALP does their work its own way (t-efa3). */
-const ALP_HANDLED_COMMANDS = new Set(['clear', 'compact', 'rewind']);
+/** Claude's /clear and its aliases (supportedCommands reports `clear [reset, new]`): each starts a new conversation. */
+const NEW_CONVERSATION_COMMANDS = ['clear', 'reset', 'new'];
+const NEW_CONVERSATION = new RegExp(`^\\s*\\/(?:${NEW_CONVERSATION_COMMANDS.join('|')})(?:\\s|$)`);
+const ALP_HANDLED_COMMANDS = new Set([...NEW_CONVERSATION_COMMANDS, 'compact', 'rewind']);
 
 /**
  * t-e906: Claude's /clear moves it to a new conversation under a new session id while ALP keeps the
  * old thread, so resume, fork and rewind would point at the conversation from before. ALP refuses it
- * rather than follow: its timeline, turn ids and rewinds belong to the old conversation.
+ * rather than follow: its timeline, turn ids and rewinds belong to the old conversation. /reset and /new are
+ * the same command.
  */
 export function nativeCommandRefusal(runtimeKind: string, content: ReadonlyArray<{ type: string; text?: string }>) {
   if (runtimeKind !== 'claude') return undefined;
-  const first = content.find(part => part.type === 'text');
-  if (!first || !/^\s*\/clear(?:\s|$)/.test(first.text ?? '')) return undefined;
-  return 'ALP does not pass /clear to Claude: Claude would start a new conversation that this session does not follow. Start a new session in ALP for a fresh conversation, or compact this one (alp compact, or Compact in the app).';
+  // The text Claude gets: every text part, joined as startPrompt joins them.
+  const typed = content.filter(part => part.type === 'text').map(part => part.text ?? '').join('\n');
+  if (!NEW_CONVERSATION.test(typed)) return undefined;
+  return 'ALP does not pass /clear (or /new, /reset) to Claude: Claude would start a new conversation that this session does not follow. Start a new session in ALP for a fresh conversation, or compact this one (alp compact, or Compact in the app).';
 }
 
 /**
@@ -477,7 +482,7 @@ export class ClaudeTransport {
   }
   /**
    * Claude's slash commands, skills included, for the composer (t-f628); none before the session starts.
-   * Not the ones whose work ALP does itself (t-efa3): /clear moves Claude to a new conversation ALP does not
+   * Not the ones whose work ALP does itself (t-efa3): /clear (/reset, /new) moves Claude to a new conversation ALP does not
    * follow, and /compact and /rewind skip ALP's checkpoint and its rewind of the timeline.
    */
   async commands() {

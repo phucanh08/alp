@@ -10,11 +10,14 @@ import { fakeTransport, until } from '../../../test/support/fake-agent.js';
 
 const text = value => [{ type: 'text', text: value }];
 
-test('nativeCommandRefusal: /clear on Claude only, as the first text', () => {
-  for (const value of ['/clear', '  /clear', '/clear now', '/clear\nplease']) assert.match(nativeCommandRefusal('claude', text(value)), /does not pass \/clear to Claude[\s\S]*new session[\s\S]*compact/, value);
-  for (const value of ['/clearly', 'please /clear', '/compact', 'clear', '/CLEARx']) assert.equal(nativeCommandRefusal('claude', text(value)), undefined, value);
+test('nativeCommandRefusal: /clear, /reset and /new on Claude only, at the start of the text', () => {
+  for (const value of ['/clear', '  /clear', '/clear now', '/clear\nplease', '/new', '/reset', '/new idea']) assert.match(nativeCommandRefusal('claude', text(value)), /does not pass \/clear \(or \/new, \/reset\) to Claude[\s\S]*new session[\s\S]*compact/, value);
+  for (const value of ['/clearly', 'please /clear', '/compact', 'clear', '/CLEARx', '/newline', '/resets']) assert.equal(nativeCommandRefusal('claude', text(value)), undefined, value);
   assert.equal(nativeCommandRefusal('codex', text('/clear')), undefined);
   assert.equal(nativeCommandRefusal('claude', [{ type: 'image', mimeType: 'image/png', data: '' }]), undefined);
+  // The text parts as Claude gets them, joined: an empty first part does not hide it.
+  assert.ok(nativeCommandRefusal('claude', [{ type: 'text', text: '' }, { type: 'text', text: '/clear' }]));
+  assert.ok(nativeCommandRefusal('claude', [{ type: 'image', mimeType: 'image/png', data: '' }, { type: 'text', text: '/new' }]));
 });
 
 async function open(t, model) {
