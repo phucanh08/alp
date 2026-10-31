@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Source check before packing (docs/alp/beta-scope.md §1, §2): exactly the release packages (the
-// platform packages are generated when packing) are public, every one at the release version, internal dependencies pinned to it, and
+// Source check before packing (docs/alp/beta-scope.md §1, §2): exactly the release packages are public, every one at the release version, internal dependencies pinned to it, and
 // package-lock.json in step. Usage: release-check.mjs [--version <semver>] (default: root version).
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -19,4 +18,4 @@ if (problems.length) {
   console.error(`Release source check failed for ${version}:\n- ${problems.join('\n- ')}`);
   process.exit(1);
 }
-console.log(`Release source check passed: ${RELEASE_PACKAGES.filter(pkg => pkg.kind !== 'platform').length} public packages (and ${RELEASE_PACKAGES.filter(pkg => pkg.kind === 'platform').length} generated platform packages) at ${version}, internal dependencies pinned, lockfile in step; every other workspace private.`);
+console.log(`Release source check passed: ${RELEASE_PACKAGES.length} public packages at ${version}, internal dependencies pinned, lockfile in step; every other workspace private.`);

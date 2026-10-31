@@ -345,10 +345,10 @@ export const GATE_ROWS = [
   { id: 'R5', title: 'macOS, Codex and Claude, plugin in Paseo 0.11.x + alp web W1–W6 on the tarballs', blocking: true, binds: 'artifacts' },
   { id: 'R6', title: 'Linux, Codex or Claude, plugin in Paseo 0.11.x + alp web W1–W6 on the tarballs', blocking: false, binds: 'artifacts' },
   { id: 'R7', title: 'macOS (Linux when possible), Codex and Claude, test/e2e/worktree-e2e.mjs at the release SHA', blocking: true, binds: 'sha' },
-  { id: 'Q1', title: 'Registry: beta dist-tag and integrity of all 13 match the manifest', blocking: true, binds: 'artifacts', phase: 'post' },
+  { id: 'Q1', title: 'Registry: beta dist-tag and integrity of all 8 match the manifest', blocking: true, binds: 'artifacts', phase: 'post' },
   { id: 'Q2', title: 'Clean install from the registry on macOS (Linux when possible); lockfile integrity matches', blocking: true, binds: 'artifacts', phase: 'post' },
   { id: 'Q3', title: 'Smoke on the registry install: C1, C2, C4, W2, W6', blocking: true, binds: 'artifacts', phase: 'post' },
-  { id: 'Q4', title: 'latest moved to the release for all 13 (D2: only after Q1–Q3)', blocking: true, binds: 'artifacts', phase: 'post' },
+  { id: 'Q4', title: 'latest moved to the release for all 8 (D2: only after Q1–Q3)', blocking: true, binds: 'artifacts', phase: 'post' },
   { id: 'Q5', title: 'Untagged install resolves every @anhlp/* to the release', blocking: true, binds: 'artifacts', phase: 'post' },
 ];
 

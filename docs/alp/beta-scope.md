@@ -126,7 +126,7 @@ khớp các bản cũ, không khớp `0.0.0-beta.1`. Bỏ deprecate nhầm: `npm
 | Package | Beta | Ghi chú |
 |---|---|---|
 | `@anhlp/alp` | Phát hành | Từ t-1807 là wrapper mỏng (`npm/alp`: chỉ `bin/alp.js`, không postinstall), phụ thuộc đúng `@anhlp/alp-cli` cùng version và chạy CLI đó trên Node của người dùng; 5 package platform `@anhlp/alp-<os>-<arch>` của t-cd7f đã bỏ. Không chứa Paseo ([binary-install.md](binary-install.md#npm-packages)). Repo root là package private `alp-monorepo` |
-| `@anhlp/alp-darwin-arm64`, `-darwin-x64`, `-linux-x64`, `-linux-arm64` (glibc), `-win32-x64` | Phát hành | Mỗi package chỉ chứa file thực thi lấy từ archive của GitHub release cùng SHA, có `os`/`cpu`/`libc`. Sinh ra lúc pack (`release:pack --binaries`), không nằm trong repo |
+| `@anhlp/alp-darwin-arm64`, `-darwin-x64`, `-linux-x64`, `-linux-arm64` (glibc), `-win32-x64` | **Đã bỏ** (t-1807) | Từng là package chứa file thực thi một file (t-cd7f); không phát hành nữa |
 | `@anhlp/alp-protocol`, `-core`, `-runtime`, `-client`, `-daemon`, `-cli` | Phát hành (bắt buộc) | Vẫn là package JS; plugin pin đúng version. `-cli` mang `alp web` (`dist/alp-web.js`, `dist/alp-web/`, `THIRD-PARTY-NOTICES.txt`) |
 | `@anhlp/alp-paseo` | Phát hành | plugin Paseo, web của Paseo (bản fork, Apache-2.0; tới `0.0.1-beta.3` là `alp web`), `alp-paseo-integration` (`alp-web-integration` là alias trong một bản phát hành) |
 | `@anhlp/alp-gateway` | **Không phát hành** (deferred) | workspace private (`apps/gateway`); từ bản sau `0.0.1-beta.3` được bundle vào `dist/alp-web.js` của CLI, nên không thêm tarball nào |
@@ -600,7 +600,6 @@ cd /tmp/alp-release/v0.0.0-beta.1
 shasum -a 256 -c SHA256SUMS
 for f in anhlp-alp-protocol anhlp-alp-core anhlp-alp-runtime anhlp-alp-client \
          anhlp-alp-daemon anhlp-alp-cli anhlp-alp-paseo \
-         anhlp-alp-darwin-arm64 anhlp-alp-darwin-x64 anhlp-alp-linux-x64 anhlp-alp-linux-arm64 anhlp-alp-win32-x64 \
          anhlp-alp; do
   npm publish "./$f-0.0.0-beta.1.tgz" --tag beta --access public --dry-run
 done
