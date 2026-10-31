@@ -4,11 +4,11 @@ Provider-neutral filesystem agent resolution with a server-side Paseo provider. 
 
 ## Install
 
-The current release is the beta `0.0.1-beta.3` (until it is on npm, `@beta` installs
-`0.0.0-beta.2`; check with `npm view @anhlp/alp dist-tags`): see the
+The current release is the beta `0.0.1-beta.7` (npm's `beta` and `latest` tags; check with
+`npm view @anhlp/alp dist-tags`): see the
 [release notes](docs/alp/beta-release-notes.md) for what it includes and its known issues, and
 [installing, upgrading and removing the beta](docs/alp/beta-install.md) for every step. Name the
-beta when you install (`@beta`, or exactly `@0.0.1-beta.3`); a plain `npm install -g @anhlp/alp`
+beta when you install (`@beta`, or exactly `@0.0.1-beta.7`); a plain `npm install -g @anhlp/alp`
 installs whatever npm's `latest` tag points at, which moves to a new beta only after that
 beta's post-publish checks.
 
@@ -336,7 +336,7 @@ Details: [ALPD §60](plans/reference/ALPD.md#60-alp-as-an-acp-agent-2026-10-10).
 
 ## Paseo
 
-To use the published plugin, follow [the plugin's README](integrations/paseo/README.md) or [beta-install.md](docs/alp/beta-install.md#paseo-plugin): `paseo plugin add npm:@anhlp/alp-paseo@beta` (from `0.0.0-beta.2`; in beta.1 the `npm:` source fails, [#111](https://github.com/phucanh08/alp/issues/111), so there run `npm install -g @anhlp/alp-paseo@beta`, then `paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"`). The plugin on `main` declares Paseo `>=0.11.1 <1.0.0`; the published `0.0.1-beta.3` declares `>=0.11.1 <0.13.0`, and `0.0.0-beta.2` and earlier `<0.12.0` (so Paseo 0.12 needs `0.0.1-beta.3` or later, and Paseo 0.13 needs a release after `0.0.1-beta.3`). See [installation and runtime behavior](docs/alp/paseo-plugin.md) and the historical [phase acceptance evidence](docs/alp/phase-2-5-results.md). The plugin was verified with Paseo 0.11.1 and live Codex and Claude Code permission changes before the beta; the beta's own runs are in [beta-scope.md](docs/alp/beta-scope.md) §6.
+To use the published plugin, follow [the plugin's README](integrations/paseo/README.md) or [beta-install.md](docs/alp/beta-install.md#paseo-plugin): `paseo plugin add npm:@anhlp/alp-paseo@beta` (from `0.0.0-beta.2`; in beta.1 the `npm:` source fails, [#111](https://github.com/phucanh08/alp/issues/111), so there run `npm install -g @anhlp/alp-paseo@beta`, then `paseo plugin add "$(npm root -g)/@anhlp/alp-paseo"`). The plugin declares Paseo `>=0.11.1 <1.0.0` from `0.0.1-beta.4` (the current `0.0.1-beta.7` included); `0.0.1-beta.3` declares `>=0.11.1 <0.13.0`, and `0.0.0-beta.2` and earlier `<0.12.0` (so Paseo 0.12 needs `0.0.1-beta.3` or later, and Paseo 0.13 or later needs `0.0.1-beta.4` or later). See [installation and runtime behavior](docs/alp/paseo-plugin.md) and the historical [phase acceptance evidence](docs/alp/phase-2-5-results.md). The plugin was verified with Paseo 0.11.1 and live Codex and Claude Code permission changes before the beta; the beta's own runs are in [beta-scope.md](docs/alp/beta-scope.md) §6.
 
 **Settings → ALP** manages your library of teams, agents, skills, MCP servers, hooks and ACP providers, and the **ALP project** workspace panel manages a project's overrides ([settings screen](docs/alp/paseo-plugin.md#alp-settings-and-the-project-panel)).
 

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { existsSync, readdirSync, readFileSync, readlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -76,6 +77,25 @@ test('every redirect hop of a download must be https; only an explicit loopback 
   await assert.rejects(fetchBytes('https://a.test/loop', { fetch: fakeFetch({ 'https://a.test/loop': [302, 'https://a.test/loop'] }) }), /more than 10 times/);
   await assert.rejects(fetchBytes('https://a.test/big', { max: 4, fetch: fakeFetch({ 'https://a.test/big': 'too large' }) }), /larger than 4 bytes/);
   await assert.rejects(fetchBytes('https://a.test/none', { fetch: fakeFetch({}) }), /HTTP 404/);
+});
+
+test('a download that stalls before its headers or in its body fails at timeoutMs (t-598d)', async t => {
+  // A loopback http mirror (allowed for an explicit loopback start) that never answers /headers and
+  // sends the start of /body and then nothing more.
+  const sockets = new Set();
+  const server = createServer((request, response) => {
+    if (request.url === '/body') { response.writeHead(200, { 'content-length': '1000' }); response.write('partial'); }
+  });
+  server.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { for (const socket of sockets) socket.destroy(); server.close(); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  for (const route of ['/headers', '/body']) {
+    const started = Date.now();
+    await assert.rejects(fetchBytes(`${base}${route}`, { timeoutMs: 200 }), error => error.name === 'TimeoutError' || error.cause?.name === 'TimeoutError', route);
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed >= 150 && elapsed < 5000, `${route} gave up after ${elapsed} ms`);
+  }
 });
 
 test('a checksum mismatch is refused', () => {
