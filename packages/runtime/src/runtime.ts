@@ -19,13 +19,12 @@ import { nativeEnvironment, createTransport } from './providers.js';
 import { nativeMode, codexApproval, profileEfforts, nativeSessionConfig } from './session-config.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync, watch as watchFiles, type FSWatcher } from 'node:fs';
-import { appendFile, mkdir, open, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
-import { moveFile } from '@anhlp/alp-core/atomic';
+import { appendFile, mkdir, open, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { moveFile, writeAtomic } from '@anhlp/alp-core/atomic';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveDelegation } from '@anhlp/alp-core/delegation';
-import { discoverAgents } from '@anhlp/alp-core/resolver';
-import { usersOf } from '@anhlp/alp-core/library-edit';
+import { agentSources, builtinText, discoverAgents } from '@anhlp/alp-core/resolver';
 
 import { acpDecision, acpWhat, type AcpPermission } from './acp-transport.js';
 
@@ -2097,38 +2096,87 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (!roles || typeof roles !== 'object' || Array.isArray(roles)) throw new Error(`${rolesFile} must be an object of role names to skill lists`);
       return roles as Record<string, unknown>;
     };
-    const holders = (roles: Record<string, unknown>) => Object.keys(roles).filter(role => Array.isArray(roles[role]) && (roles[role] as unknown[]).includes(args.name));
+    const holders = (roles: Record<string, unknown>) => Object.keys(roles).filter(role => Array.isArray(roles[role]) && (roles[role] as unknown[]).includes(args.name)).sort();
+    // Agents naming the skill in their own agent.json, read directly (not merged with
+    // role-skills.json). An unreadable agent.json throws, so the check fails closed.
+    const namedBy = async () => {
+      const found: string[] = [];
+      for (const [agent, source] of await agentSources(session.mapping.agent.projectRoot, { library, templates: options.templates })) {
+        const where = source.directory ? path.join(source.directory, 'agent.json') : `built-in agents/${agent}/agent.json`;
+        const body = source.directory
+          ? await readFile(path.join(source.directory, 'agent.json'), 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; })
+          : await builtinText(`agents/${agent}/agent.json`, options.templates);
+        if (body === undefined) continue;
+        let config: unknown;
+        try { config = JSON.parse(body); } catch (error) { throw new Error(`${where}: ${errorData(error).message}`); }
+        const skills = config && typeof config === 'object' ? (config as { skills?: unknown }).skills : undefined;
+        if (Array.isArray(skills) && skills.includes(args.name)) found.push(`agent ${agent}`);
+      }
+      return found.sort();
+    };
+    // The whole skill directory, so a change to any file in it is seen at approval time.
+    const digest = async () => {
+      const hash = createHash('sha256');
+      const walk = async (dir: string, rel: string): Promise<void> => {
+        for (const entry of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+          const name = rel ? `${rel}/${entry.name}` : entry.name;
+          if (entry.isDirectory()) { hash.update(`d:${name}\0`); await walk(path.join(dir, entry.name), name); }
+          else { hash.update(`f:${name}\0`); hash.update(await readFile(path.join(dir, entry.name))); hash.update('\0'); }
+        }
+      };
+      await walk(directory, '');
+      return hash.digest('hex');
+    };
     let given: string[];
-    try { given = holders(await readRoles()); } catch (error) { return toolResult(false, { error: errorData(error).message }); }
+    let users: string[];
+    let tree: string;
+    try { given = holders(await readRoles()); users = await namedBy(); tree = await digest(); } catch (error) { return toolResult(false, { error: errorData(error).message }); }
     if (approvalCanceled(session, cancellation)) return toolResult(false, { error: 'Skill retirement canceled or session closed; no approval was created' });
     if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId && !pending.gate)) return toolResult(false, { error: 'A question is already waiting for the user; finish it before proposing to retire a skill' });
     const retired = path.join(library, 'retired-skills', `${args.name}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+    const restore = `To restore it, move ${retired} back to ${directory} and add it to the roles again in role-skills.json.`;
     const approvalId = `q-${randomUUID()}`;
     const record: { approvalId: string; draftKey: string; result?: Record<string, unknown> } = { approvalId, draftKey };
     approvals.set(key, record);
     const say = wordsFor(session);
     const decision = confirm(sessionId, session,
-      say.skillRetire(session.mapping.agent.name, args.name, file, retired, given.join(', '), reason) +
+      say.skillRetire(session.mapping.agent.name, args.name, file, retired, given.join(', '), users.join(', '), reason) +
       `\n${say.answerLine(session.mapping.agent.name)}\n\n${content}`, { id: approvalId });
     const retire = async (): Promise<Record<string, unknown>> => {
+      const refuse = (error: string, next: string) => ({ approved: true, retired: false, error, next });
+      let before: string | undefined;
       try {
-        if (await readFile(file, 'utf8').catch(() => undefined) !== content) {
-          return { approved: true, retired: false, error: `The skill ${args.name} changed or was removed since it was proposed; nothing was retired`, next: 'Read it again and propose again if it should still go.' };
+        if (await digest().catch(() => undefined) !== tree) {
+          return refuse(`The skill ${args.name} changed or was removed since it was proposed; nothing was retired`, 'Read it again and propose again if it should still go.');
         }
+        const now = await namedBy();
+        if (now.length) return refuse(`The skill ${args.name} is still named by ${now.join(', ')}; nothing was retired`, 'Tell the user; they change those agents first.');
+        // Re-read just before writing, so the write starts from the current file.
+        before = await readFile(rolesFile, 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return undefined; throw error; });
         const roles = await readRoles();
         const lost = holders(roles);
-        for (const role of lost) roles[role] = (roles[role] as unknown[]).filter(name => name !== args.name);
-        // Users other than role-skills.json (an agent.json naming it) keep it in the library.
-        const others = await usersOf('skills', args.name, { root: session.mapping.agent.projectRoot, library, templates: options.templates })
-          .then(users => users.filter(user => !lost.some(role => user === `agent ${role}`)), () => []);
-        if (others.length) return { approved: true, retired: false, error: `The skill ${args.name} is still named by ${others.join(', ')}; nothing was retired`, next: 'Tell the user; they change those agents first.' };
+        if (JSON.stringify(lost) !== JSON.stringify(given)) {
+          return refuse(`The roles that have ${args.name} changed since it was proposed (proposed: ${given.join(', ') || 'none'}; now: ${lost.join(', ') || 'none'}); nothing was retired`, 'Propose again so the user sees the current roles.');
+        }
         await mkdir(path.dirname(retired), { recursive: true, mode: 0o700 });
-        await moveFile(directory, retired);
-        await writeFile(rolesFile, JSON.stringify(roles, null, 2) + '\n');
+        if (lost.length) {
+          for (const role of lost) roles[role] = (roles[role] as unknown[]).filter(name => name !== args.name);
+          await writeAtomic(rolesFile, JSON.stringify(roles, null, 2) + '\n');
+        }
+        try {
+          await moveFile(directory, retired);
+        } catch (error) {
+          // Put role-skills.json back as it was, so a failed move changes nothing.
+          if (lost.length) {
+            try { if (before === undefined) await rm(rolesFile, { force: true }); else await writeAtomic(rolesFile, before); }
+            catch (undo) { return refuse(`${errorData(error).message}; restoring ${rolesFile} also failed: ${errorData(undo).message}`, `Tell the user: the skill is still in ${directory} but ${rolesFile} lost it for ${lost.join(', ')}.`); }
+          }
+          return refuse(`${errorData(error).message}; nothing was retired`, 'Tell the user; nothing is retried automatically.');
+        }
         runLog(rootOf(sessionId), { event: 'skill.retire', agent: session.mapping.agent.name, name: args.name, roles: lost, retiredTo: retired });
-        return { approved: true, retired, roles: lost, next: 'New sessions no longer list the skill. To restore it, move the directory back into skills/.' };
+        return { approved: true, retired, roles: lost, next: `New sessions no longer list the skill. ${restore}` };
       } catch (error) {
-        return { approved: true, retired: false, error: errorData(error).message, next: 'Tell the user; nothing is retried automatically.' };
+        return refuse(`${errorData(error).message}; nothing was retired`, 'Tell the user; nothing is retried automatically.');
       }
     };
     void (async () => {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -714,6 +714,97 @@ test('main retires a library skill only after the user approves; it is kept in r
   const roles = JSON.parse(await readFile(path.join(library, 'role-skills.json'), 'utf8'));
   assert.ok(Object.values(roles).every(list => !list.includes('xia')));
   assert.equal((await main.call('alp_skill_retire', { name: 'xia', reason: 'Covered by another skill.', requestId: 'yes' })).retired, result.retired, 'a replay does not retire twice');
+});
+
+// Proposes retiring xia, runs `meanwhile` before the user approves, and returns the mailed result.
+async function retireAfter(runtime, main, requestId, meanwhile) {
+  const events = []; const off = runtime.onEvent(e => events.push(e));
+  try {
+    const pending = await main.call('alp_skill_retire', { name: 'xia', reason: 'Covered by another skill.', requestId });
+    assert.equal(pending.status, 'pending_approval', JSON.stringify(pending));
+    const question = runtime.questions().find(q => q.id === pending.approvalId);
+    await meanwhile?.();
+    runtime.answer(question.id, { text: 'Approve' });
+    let terminal;
+    await until(() => { terminal = events.find(e => e.event.type === 'mail' && e.event.mail.assignment === pending.approvalId); return terminal; });
+    return { question, result: JSON.parse(terminal.event.mail.body.slice(terminal.event.mail.body.indexOf('{'))) };
+  } finally { off(); }
+}
+
+test('an approved retirement is refused when the skill, its roles or its agent.json users changed, and a failed move restores role-skills.json', async t => {
+  const { root, library, runtime, runtimes, prompt } = await setup(t);
+  await runtime.open('root', { cwd: root });
+  await until(() => runtimes.length === 2);
+  const [main, supervisor] = runtimes;
+  await prompt('m1', 'Work');
+  await until(() => main.turnId);
+  const skillDir = path.join(library, 'skills/xia');
+  const rolesFile = path.join(library, 'role-skills.json');
+  const rolesBefore = await readFile(rolesFile, 'utf8');
+  const unchanged = async () => {
+    assert.ok(await readFile(path.join(skillDir, 'SKILL.md'), 'utf8'));
+    assert.equal(await readFile(rolesFile, 'utf8'), rolesBefore);
+  };
+
+  // Any file in the skill directory changing after the proposal refuses it.
+  const edited = await retireAfter(runtime, main, 'toctou-file', () => writeFile(path.join(skillDir, 'notes.md'), 'new\n'));
+  assert.deepEqual([edited.result.approved, edited.result.retired], [true, false]);
+  assert.match(edited.result.error, /changed or was removed/);
+  await rm(path.join(skillDir, 'notes.md'));
+  await unchanged();
+
+  // The roles that have it changing after the proposal refuses it.
+  const roles = await retireAfter(runtime, main, 'toctou-roles', async () => {
+    const value = JSON.parse(rolesBefore); value.extra = ['xia'];
+    await writeFile(rolesFile, JSON.stringify(value, null, 2) + '\n');
+  });
+  assert.equal(roles.result.retired, false);
+  assert.match(roles.result.error, /roles that have xia changed/);
+  await writeFile(rolesFile, rolesBefore);
+  await unchanged();
+
+  // A failed move puts role-skills.json back and leaves the skill where it was.
+  const retiredDir = path.join(library, 'retired-skills');
+  await mkdir(retiredDir, { recursive: true });
+  await chmod(retiredDir, 0o500);
+  t.after(() => chmod(retiredDir, 0o700).catch(() => {}));
+  const failed = await retireAfter(runtime, main, 'move-fails');
+  await chmod(retiredDir, 0o700);
+  assert.equal(failed.result.retired, false, JSON.stringify(failed.result));
+  assert.match(failed.result.error, /nothing was retired/);
+  await unchanged();
+  assert.deepEqual(await readdir(retiredDir), []);
+
+  // An agent naming it in its own agent.json, even one role-skills.json also lists, keeps it.
+  const helper = path.join(library, 'agents/helper');
+  await mkdir(helper, { recursive: true });
+  await writeFile(path.join(helper, 'AGENT.md'), '# Helper\n');
+  await writeFile(path.join(helper, 'agent.json'), JSON.stringify({ skills: ['xia'] }));
+  const dual = JSON.parse(rolesBefore); dual.helper = ['xia'];
+  await writeFile(rolesFile, JSON.stringify(dual, null, 2) + '\n');
+  const named = await retireAfter(runtime, main, 'in-use');
+  assert.match(named.question.body, /named in agent\.json by agent helper/);
+  assert.equal(named.result.retired, false);
+  assert.match(named.result.error, /still named by agent helper/);
+  assert.ok(await readFile(path.join(skillDir, 'SKILL.md'), 'utf8'));
+  assert.deepEqual(JSON.parse(await readFile(rolesFile, 'utf8')), dual);
+
+  // An unreadable agent.json fails closed: no approval is created.
+  await writeFile(path.join(helper, 'agent.json'), '{ not json');
+  const broken = await main.call('alp_skill_retire', { name: 'xia', reason: 'Old', requestId: 'broken' });
+  assert.match(broken.error, /agent\.json/);
+  await writeFile(path.join(helper, 'agent.json'), JSON.stringify({ skills: [] }));
+  await writeFile(rolesFile, rolesBefore);
+
+  // A session that is not main cannot retire it.
+  const questions = runtime.questions().length;
+  assert.ok((await supervisor.call('alp_skill_retire', { name: 'xia', reason: 'Old' })).error);
+  assert.equal(runtime.questions().length, questions);
+
+  // The restore hint names skills/<name>.
+  const done = await retireAfter(runtime, main, 'ok');
+  assert.ok(done.result.retired, JSON.stringify(done.result));
+  assert.ok(done.result.next.includes(`back to ${skillDir}`));
 });
 
 test('only a supervised main retires skills', async t => {
