@@ -238,3 +238,12 @@ test('legacy profile settings still resolve and upgrade to team without losing c
   assert.equal(after.model, before.model);
   assert.equal(after.thinking, before.thinking);
 });
+
+// t-efa3: team.<team>.<agent>.commands names the runtime's own commands and skills the "/" list offers.
+test('a team member may name the runtime commands its "/" list offers', () => {
+  validateSettings({ team: { pho: { main: { profiles: ['claude:claude-haiku-4-5-20251001'], autocompact: 'auto', commands: ['model', 'dataviz', 'plugin:skill'] } } } }, 'settings');
+  validateSettings({ team: { pho: { main: { profiles: ['claude:claude-haiku-4-5-20251001'], commands: [] } } } }, 'settings');
+  for (const commands of ['model', ['/model'], ['two words'], [''], [3]]) {
+    assert.throws(() => validateSettings({ team: { pho: { main: { profiles: ['claude:claude-haiku-4-5-20251001'], commands } } } }, 'settings'), /commands/);
+  }
+});

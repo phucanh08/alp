@@ -118,8 +118,10 @@ export function validateSettings(settings, source) {
         const where = `${key}.${team}.${agent}`;
         check(object(config), `${where} must be an object`);
         if (config.autocompact !== undefined) validateAutoCompact(config.autocompact, check, `${where}.autocompact`);
+        // t-efa3: the runtime's own commands and skills its "/" list offers besides the agent's ALP skills.
+        if (config.commands !== undefined) check(Array.isArray(config.commands) && config.commands.every(name => typeof name === 'string' && /^[^\s/]{1,256}$/.test(name)), `${where}.commands must be a list of command names, without the leading /`);
         if (Object.hasOwn(config, 'profiles')) {
-          check(Object.keys(config).every(key => ['profiles', 'autocompact'].includes(key)), `${where}: use profiles and autocompact`);
+          check(Object.keys(config).every(key => ['profiles', 'autocompact', 'commands'].includes(key)), `${where}: use profiles, autocompact and commands`);
           check(Array.isArray(config.profiles) && config.profiles.length > 0, `${where}.profiles must be a nonempty list`);
           const models = [];
           for (const [index, entry] of config.profiles.entries()) {
@@ -143,14 +145,14 @@ export function validateSettings(settings, source) {
           check(new Set(models).size === models.length, `${where}.profiles must not repeat the same model`);
           check(agent !== 'main' || config.profiles.length === 1, `${where}.profiles: main runs on exactly one model`);
         } else if (agent === 'oracle') {
-          const entries = Object.entries(config).filter(([key]) => key !== 'autocompact');
+          const entries = Object.entries(config).filter(([key]) => key !== 'autocompact' && key !== 'commands');
           check(entries.length > 0 && entries.every(([provider]) => ['claude', 'codex'].includes(provider)), `${where} must define profiles or claude/codex lenses`);
           for (const [provider, lens] of entries) {
             validateChoice(lens, `${where}.${provider}`);
             check(lens.provider === provider && nonempty(lens.model), `${where}.${provider}: specify matching provider and model`);
           }
         } else {
-          const { autocompact, ...legacy } = config;
+          const { autocompact, commands, ...legacy } = config;
           validateChoice(legacy, where);
         }
       }

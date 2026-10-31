@@ -1538,20 +1538,33 @@ for (const [restart, state] of [[false, 'applied'], [true, 'applied'], [true, 'p
 
 // ---- session.commands (t-f628)
 
-test('session.commands: the runtime\'s commands, then the agent\'s ALP skills, deduplicated and validated', async t => {
+test('session.commands: the runtime\'s commands its team settings name, then the agent\'s ALP skills, deduplicated and validated', async t => {
   const world = await setup(t);
   const libraryDir = path.join(world.directory, 'home');
   await seedLibrary(libraryDir);
   const d = { ...await world.start({ libraryDir }), ...world };
   const hello = await d.request('daemon.hello', { protocolVersion: 1 });
   assert.ok(hello.capabilities.includes('session.commands'));
-  await d.request('session.create', { sessionId: 'sc', spec: { cwd: d.project, persist: true } });
-  const transport = d.transports.at(-1);
-  transport.commands = async () => [
+  const runtimeCommands = async () => [
     { name: 'compact', description: 'Clear history', argumentHint: '<what>', kind: 'command' },
     { name: 'compact', description: 'again', kind: 'command' },
     { name: 'bad name', description: 'refused', kind: 'command' },
+    { name: 'model', description: 'not named in the settings', kind: 'command' },
+    { name: 'alp:xia', description: 'Research, as Claude lists it', kind: 'skill' },
   ];
+  // t-efa3: by default only the agent's ALP skills; none of the runtime's own commands.
+  await d.request('session.create', { sessionId: 'sd', spec: { cwd: d.project, persist: true } });
+  d.transports.at(-1).commands = runtimeCommands;
+  const plain = (await d.request('session.commands', { sessionId: 'sd' })).commands;
+  assert.deepEqual(plain.map(command => command.name), ['alp:xia', ...['bug-loop', 'compact', 'curate', 'goal-griller', 'prompt-leverage', 'sequence-execution-plan', 'smart-commits'].map(name => `alp:${name}`)]);
+  // team.<team>.main.commands in .alp/settings.json names the runtime's commands the list offers too.
+  const settingsFile = path.join(d.project, '.alp', 'settings.json');
+  const settings = JSON.parse(await readFile(settingsFile, 'utf8'));
+  for (const team of Object.values(settings.team)) if (team.main) team.main.commands = ['compact'];
+  await writeFile(settingsFile, JSON.stringify(settings));
+  await d.request('session.create', { sessionId: 'sc', spec: { cwd: d.project, persist: true } });
+  const transport = d.transports.at(-1);
+  transport.commands = async () => (await runtimeCommands()).filter(command => command.name !== 'alp:xia');
   const { commands } = await d.request('session.commands', { sessionId: 'sc' });
   validateResult('session.commands', { commands });
   assert.deepEqual(commands[0], { name: 'compact', description: 'Clear history', argumentHint: '<what>', kind: 'command' });

@@ -223,6 +223,8 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
     mcp, env: { ...spec.env }, persist: spec.persist ?? false, keepThread: spec.keepThread ?? false,
     // ALPD §57: the window the agent works in before its runtime compacts; absent, the model's.
     ...(agent.context ? { context: agent.context } : {}),
+    // t-efa3: the runtime's own commands and skills the "/" list offers; its ALP skills always.
+    commands: Array.isArray(profile?.commands) ? profile.commands.filter((name: unknown): name is string => typeof name === 'string') : [] as string[],
     autocompact: typeof profile?.autocompact === 'number' ? profile.autocompact as number : typeof agent.autocompact === 'number' ? agent.autocompact : undefined,
     // t-0e56: when main's context is compacted at a turn boundary.
     compact: compactSettings(projectSettings.compact),

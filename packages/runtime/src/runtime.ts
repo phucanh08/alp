@@ -1799,15 +1799,16 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   }
 
   /**
-   * The composer's "/" list for a live session (t-f628): its runtime's slash commands and skills,
-   * then each ALP skill of its agent the runtime did not list, as Claude names them (`alp:<name>`).
+   * The composer's "/" list for a live session (t-f628): the agent's ALP skills, as Claude names them
+   * (`alp:<name>`), and only the runtime's own commands and skills its team settings name (t-efa3).
    */
   async function listCommands(sessionId: string): Promise<RuntimeCommand[]> {
     const session = sessions.get(sessionId);
     if (!session || session.closed) throw new ConversationError('session_busy', 'The session is not open');
-    const listed = session.runtime.commands ? await session.runtime.commands().catch(() => [] as RuntimeCommand[]) : [];
-    const seen = new Set(listed.map(command => command.name));
     const prefix = session.runtimeKind === 'claude' ? `${SKILL_PLUGIN}:` : '';
+    const offered = new Set([...session.mapping.commands ?? [], ...session.mapping.agent.skills.map(skill => prefix + skill.name)]);
+    const listed = (session.runtime.commands ? await session.runtime.commands().catch(() => [] as RuntimeCommand[]) : []).filter(command => offered.has(command.name));
+    const seen = new Set(listed.map(command => command.name));
     const skills = await Promise.all(session.mapping.agent.skills.filter(skill => !seen.has(prefix + skill.name))
       .map(async skill => ({ name: prefix + skill.name, description: await skillDescription(skill.path), kind: 'skill' as const })));
     return [...listed, ...skills];
