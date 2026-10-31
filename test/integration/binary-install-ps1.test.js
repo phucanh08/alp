@@ -1,7 +1,7 @@
-// t-1e02 P2: install.ps1 against a local mirror on Windows: the windows-x64 .zip, the SHA256SUMS check
-// with Get-FileHash, Unblock-File, the atomic install (a running alp.exe is renamed aside), the user
-// PATH entry added once, and its refusals. The archive's alp.exe is a copy of this Node, so the
-// installer's closing `alp --version` prints process.version. Windows only; POSIX uses install.sh.
+// t-1807: install.ps1 against a local mirror on Windows: the windows-x64 .zip of the bundle, the
+// SHA256SUMS check with Get-FileHash, Unblock-File, app\<version> with the app\current junction,
+// alp.cmd (a running 0.0.1-beta.5/6 alp.exe is renamed aside), the user PATH entry added once, and
+// its refusals. The archive's node.exe is a copy of this Node. Windows only; POSIX uses install.sh.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync, spawn } from 'node:child_process';
@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { archiveName, pack, sums } from '../../scripts/package-binary.mjs';
+import { fakeBundle } from '../support/fake-bundle.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const INSTALL = path.join(ROOT, 'install.ps1');
@@ -23,22 +24,10 @@ async function temp(t, prefix) {
   return directory;
 }
 
-/** A mirror with alp-<version>-windows-x64.zip (alp.exe = this Node), SHA256SUMS and install.ps1. */
+/** A mirror with alp-<version>-windows-x64.zip (the fake bundle), SHA256SUMS and install.ps1. */
 async function mirror(t, versions = ['9.8.7']) {
   const out = await temp(t, 'alp-ps-mirror-');
-  for (const version of versions) {
-    const root = await temp(t, 'alp-ps-root-');
-    await writeFile(path.join(root, 'LICENSE'), 'Apache License\n');
-    await writeFile(path.join(root, 'NOTICE'), 'ALP NOTICE\n');
-    for (const file of ['dist/THIRD-PARTY-NOTICES.txt', 'packages/cli/dist/THIRD-PARTY-NOTICES.txt', 'packages/cli/dist/alp-web/THIRD-PARTY-NOTICES.txt']) {
-      await mkdir(path.dirname(path.join(root, file)), { recursive: true });
-      await writeFile(path.join(root, file), `notices of ${file}\n`);
-    }
-    await mkdir(path.join(root, 'node_modules/node-pty'), { recursive: true });
-    await writeFile(path.join(root, 'node_modules/node-pty/LICENSE'), 'node-pty licence\n');
-    await writeFile(path.join(root, 'node_modules/node-pty/package.json'), '{"version":"1.2.3-test"}\n');
-    await pack({ binary: process.execPath, target: 'bun-windows-x64', out, version, root });
-  }
+  for (const version of versions) await pack({ bundle: await fakeBundle(await temp(t, 'alp-ps-bundle-'), version, 'windows-x64'), out });
   await copyFile(INSTALL, path.join(out, 'install.ps1'));
   await sums(out);
   return out;
@@ -55,13 +44,13 @@ const restoreUserPath = saved => execFileSync('powershell.exe', ['-NoProfile', '
 /** Runs install.ps1 with Windows PowerShell 5.1 (as a file), with a private LOCALAPPDATA. */
 function install(args, { localAppData, extraEnv = {} }) {
   return new Promise(resolve => execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', INSTALL, ...args], {
-    env: { ...process.env, LOCALAPPDATA: localAppData, ALP_INSTALL_BASE_URL: '', ALP_INSTALL_VERSION: '', ALP_INSTALL_DIR: '', ALP_INSTALL_NO_MODIFY_PATH: '', ...extraEnv }, timeout: 120_000,
+    env: { ...process.env, LOCALAPPDATA: localAppData, ALP_INSTALL_BASE_URL: '', ALP_INSTALL_VERSION: '', ALP_INSTALL_DIR: '', ALP_INSTALL_ROOT: '', ALP_INSTALL_NO_MODIFY_PATH: '', ...extraEnv }, timeout: 120_000,
   }, (error, stdout, stderr) => resolve({ code: error ? error.code ?? 1 : 0, stdout, stderr })));
 }
 
-test('the Windows release archive is alp-<version>-windows-x64.zip holding alp.exe and the licences', { skip: !windows }, async t => {
+test('the Windows release archive is alp-<version>-windows-x64.zip holding the bundle', { skip: !windows }, async t => {
   const releases = await mirror(t, ['1.2.3']);
-  assert.equal(archiveName('1.2.3', 'bun-windows-x64'), 'alp-1.2.3-windows-x64');
+  assert.equal(archiveName('1.2.3', 'windows-x64'), 'alp-1.2.3-windows-x64');
   const listing = (await readdir(releases)).sort();
   assert.deepEqual(listing, ['SHA256SUMS', 'alp-1.2.3-windows-x64.zip', 'install.ps1']);
   const sumsText = await readFile(path.join(releases, 'SHA256SUMS'), 'utf8');
@@ -69,9 +58,7 @@ test('the Windows release archive is alp-<version>-windows-x64.zip holding alp.e
   assert.match(sumsText, /^[0-9a-f]{64} {2}install\.ps1$/m);
   const x = await temp(t, 'alp-ps-x-');
   execFileSync(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), ['-xf', path.join(releases, 'alp-1.2.3-windows-x64.zip'), '-C', x]);
-  for (const file of ['alp.exe', 'LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.txt']) assert.ok(existsSync(path.join(x, 'alp-1.2.3-windows-x64', file)), file);
-  const notices = await readFile(path.join(x, 'alp-1.2.3-windows-x64', 'THIRD-PARTY-NOTICES.txt'), 'utf8');
-  for (const part of ['node-pty@1.2.3-test', 'node-pty licence', 'github.com/microsoft/terminal', 'Copyright (c) Microsoft Corporation']) assert.ok(notices.includes(part), part);
+  for (const file of ['bin\\alp.cmd', 'node\\node.exe', 'alp-bundle.json', 'LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.txt']) assert.ok(existsSync(path.join(x, 'alp-1.2.3-windows-x64', file)), file);
 });
 
 test('install.ps1 installs to %LOCALAPPDATA%\\Programs\\alp after checking SHA256SUMS, unblocks it, and adds the user PATH once', { skip: !windows }, async t => {
@@ -82,24 +69,31 @@ test('install.ps1 installs to %LOCALAPPDATA%\\Programs\\alp after checking SHA25
   await writeFile(path.join(releases, 'alp-9.8.7-windows-x64.zip:Zone.Identifier'), '[ZoneTransfer]\r\nZoneId=3\r\n');
   const localAppData = await temp(t, 'alp-ps-lad-');
   const dir = path.join(localAppData, 'Programs', 'alp');
+  // An ALP 0.0.1-beta.5/6 single-file install, still running: install.ps1 moves its alp.exe aside.
+  await mkdir(dir, { recursive: true });
+  const exe = path.join(dir, 'alp.exe');
+  await copyFile(process.execPath, exe);
+  const running = spawn(exe, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+  t.after(() => running.kill());
   const first = await install(['-BaseUrl', pathToFileURL(releases).href], { localAppData });
   assert.equal(first.code, 0, first.stderr);
   assert.match(first.stdout, /checksum verified/);
-  assert.ok(first.stdout.trim().endsWith(process.version), first.stdout);
-  const exe = path.join(dir, 'alp.exe');
-  assert.deepEqual(await readFile(exe), await readFile(process.execPath));
-  for (const file of ['LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.txt']) assert.ok(existsSync(path.join(dir, file)), file);
-  assert.equal(existsSync(`${exe}:Zone.Identifier`), false, 'no Mark of the Web');
+  assert.ok(first.stdout.trim().endsWith('9.8.7'), first.stdout);
+  assert.equal(existsSync(exe), false, 'the old alp.exe no longer shadows alp.cmd');
+  assert.ok((await readdir(dir)).some(name => name.startsWith('alp.exe.old-')), 'the running alp.exe was moved aside');
+  const command = path.join(dir, 'alp.cmd');
+  assert.equal(execFileSync(command, ['--version'], { encoding: 'utf8', shell: true }).trim(), '9.8.7');
+  assert.ok(existsSync(path.join(dir, 'app', '9.8.7', 'alp-bundle.json')));
+  assert.equal(realpathSync.native(path.join(dir, 'app', 'current')).toLowerCase(), path.join(dir, 'app', '9.8.7').toLowerCase(), 'app\\current is a junction to the version');
+  assert.equal(existsSync(path.join(dir, 'app', '9.8.7', 'node', 'node.exe:Zone.Identifier')), false, 'no Mark of the Web');
   assert.equal(userPath().split(';').filter(entry => entry.toLowerCase() === dir.toLowerCase()).length, 1, `${dir} in ${userPath()}\n${first.stdout}`);
   assert.equal(readUserPath().kind, saved.has ? saved.kind : 'ExpandString', 'the user Path keeps its registry kind');
-  // Reinstall while the old alp.exe is running: it is renamed aside, and PATH gains no second entry.
-  const running = spawn(exe, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
-  t.after(() => running.kill());
+  // Reinstall: PATH gains no second entry, and current still runs.
   const again = await install([], { localAppData, extraEnv: { ALP_INSTALL_BASE_URL: releases } });
   assert.equal(again.code, 0, again.stderr);
   assert.match(again.stdout, /already on your user PATH/);
   assert.equal(userPath().split(';').filter(entry => entry.toLowerCase() === dir.toLowerCase()).length, 1);
-  assert.ok((await readdir(dir)).some(name => name.startsWith('alp.exe.old-')), 'the running alp.exe was moved aside');
+  assert.equal(execFileSync(command, ['--version'], { encoding: 'utf8', shell: true }).trim(), '9.8.7');
 });
 
 test('install.ps1 -Version picks that release, -Dir installs elsewhere, -NoModifyPath leaves PATH alone', { skip: !windows }, async t => {
@@ -110,7 +104,8 @@ test('install.ps1 -Version picks that release, -Dir installs elsewhere, -NoModif
   const dir = path.join(localAppData, 'tools', 'bin');
   const result = await install(['-Version', 'v1.1.0-beta.2', '-Dir', dir, '-NoModifyPath', '-BaseUrl', releases], { localAppData });
   assert.equal(result.code, 0, result.stderr);
-  assert.ok(existsSync(path.join(dir, 'alp.exe')));
+  assert.ok(existsSync(path.join(dir, 'alp.cmd')));
+  assert.ok(existsSync(path.join(dir, 'app', '1.1.0-beta.2')), 'the bundle goes beside -Dir by default');
   assert.match(result.stdout, /is not on your user PATH; add it in Settings/);
   assert.equal(userPath(), saved.value, '-NoModifyPath edits no PATH');
   const ambiguous = await install(['-NoModifyPath', '-BaseUrl', releases], { localAppData });
@@ -124,7 +119,7 @@ test('install.ps1 -Version picks that release, -Dir installs elsewhere, -NoModif
 test('install.ps1 refuses a corrupted archive, a malformed SHA256SUMS, bad versions and mirrors, and installs nothing', { skip: !windows }, async t => {
   const releases = await mirror(t);
   const localAppData = await temp(t, 'alp-ps-lad-');
-  const exe = path.join(localAppData, 'Programs', 'alp', 'alp.exe');
+  const exe = path.join(localAppData, 'Programs', 'alp', 'alp.cmd');
   await writeFile(path.join(releases, 'alp-9.8.7-windows-x64.zip'), 'corrupted');
   const corrupted = await install(['-NoModifyPath', '-BaseUrl', releases], { localAppData });
   assert.notEqual(corrupted.code, 0);
@@ -160,7 +155,7 @@ test('install.ps1 piped to Invoke-Expression leaves the session usable: no exit,
     assert.match(out, /leaked False/, shell);
     // And a successful one through Invoke-Expression installs.
     const ok = execFileSync(shell, ['-NoProfile', '-Command', 'Get-Content -Raw -LiteralPath $env:ALP_TEST_SCRIPT | Invoke-Expression'], { encoding: 'utf8', env: { ...process.env, LOCALAPPDATA: localAppData, ALP_TEST_SCRIPT: INSTALL, ALP_INSTALL_BASE_URL: releases, ALP_INSTALL_VERSION: '', ALP_INSTALL_NO_MODIFY_PATH: '1', ALP_INSTALL_DIR: path.join(localAppData, shell) } });
-    assert.ok(ok.trim().endsWith(process.version), `${shell}: ${ok}`);
+    assert.ok(ok.trim().endsWith('9.8.7'), `${shell}: ${ok}`);
   }
 });
 

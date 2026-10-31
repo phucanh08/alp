@@ -11,15 +11,12 @@ import { inputLimitError, POUR_VARS, VAR_NAME, type InputLimits } from './input-
 import { claudeToolDetail, resultText } from './tool-detail.js';
 import { CLOSE_REASONS, GATE_KINDS, TASK_STATUSES, TASK_TYPES } from '@anhlp/alp-core/tasks';
 import { commandDecision } from '@anhlp/alp-core/permissions';
-import { packagedInfo } from '@anhlp/alp-core/packaged';
 
 // Keep the Claude SDK behind the runtime boundary. Paseo inspects static
 // imports while compiling plugin entrypoints, including their declaration
 // graph; the SDK is a daemon-only optional runtime dependency.
 const CLAUDE_SDK = ['@anthropic-ai', 'claude-agent-sdk'].join('/');
-// The ALP executable has no node_modules to resolve CLAUDE_SDK from: its entry embeds the SDK and
-// registers the import under the package name (scripts/build-binary.mjs).
-const claudeSdk = (): Promise<any> => packagedInfo()?.modules?.[CLAUDE_SDK]?.() ?? import(CLAUDE_SDK);
+const claudeSdk = (): Promise<any> => import(CLAUDE_SDK);
 
 type SDKUserMessage = any;
 type SDKMessage = any;

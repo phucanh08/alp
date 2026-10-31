@@ -54,7 +54,7 @@ test('the service keeps alpd up after a crash but not after a clean stop, with t
   }
 });
 
-test('a service for the ALP executable runs `alp daemon run --service`, and alpd is found as the executable (t-1e02)', async t => {
+test('a service naming the alp command runs `alp daemon run --service`, and alpd is found behind the bundle launcher (t-1807)', async t => {
   const home = '/tmp/alp-binary-home';
   const env = { PATH: '/usr/bin' };
   const plist = serviceDefinition(serviceFor({ home, env, platform: 'darwin', uid: 501 }), { home, entry: '/Users/u/.alp/bin/alp', execPath: '/opt/node', env });
@@ -63,32 +63,41 @@ test('a service for the ALP executable runs `alp daemon run --service`, and alpd
   const unit = serviceDefinition(serviceFor({ home, env, platform: 'linux' }), { home, entry: '/home/u/.alp/bin/alp', execPath: '/opt/node', env });
   assert.match(unit, /^ExecStart="\/home\/u\/\.alp\/bin\/alp" "daemon" "run" "--service"$/m);
 
-  // findDaemonEntry: an install record naming the executable, else the executable on PATH (not a shell wrapper named alp).
-  const directory = await (await import('node:fs/promises')).realpath(await mkdtemp(path.join(tmpdir(), 'alp-find-binary-')));
+  // findDaemonEntry: an install record naming `alp` (a 0.0.1-beta.5/6 single-file install), else the bundle's launcher on PATH.
+  const fsp = await import('node:fs/promises');
+  const directory = await fsp.realpath(await mkdtemp(path.join(tmpdir(), 'alp-find-bundle-')));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const { findDaemonEntry } = await import('../../packages/client/src/index.js');
   const bin = path.join(directory, 'bin');
-  const alp = path.join(bin, process.platform === 'win32' ? 'alp.exe' : 'alp');
-  await (await import('node:fs/promises')).mkdir(bin);
-  await writeFile(alp, '#!/bin/sh\nexec node /somewhere/cli.js "$@"\n');
+  const launcher = process.platform === 'win32' ? 'alp.cmd' : 'alp';
+  await fsp.mkdir(bin);
+  await writeFile(path.join(bin, launcher), '#!/bin/sh\nexec node /somewhere/cli.js "$@"\n');
   const empty = path.join(directory, 'home');
-  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), undefined, 'a shell wrapper is not the ALP executable');
-  const { EXECUTABLE_MARKER } = await import('../../packages/core/src/packaged.js');
-  // An unrelated native tool called alp is not ALP: no marker.
-  await writeFile(alp, Buffer.concat([Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.alloc(3 << 20)]));
-  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), undefined, 'a foreign native alp is not ALP');
-  // The marker is found anywhere, including across the scan's 1 MiB chunk boundary.
-  const split = (1 << 20) - 10;
-  await writeFile(alp, Buffer.concat([Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.alloc(split - 4), Buffer.from(EXECUTABLE_MARKER), Buffer.alloc(64)]));
-  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), alp, 'a Mach-O ALP executable on PATH');
-  await writeFile(alp, Buffer.concat([Buffer.from('\x7fELF', 'latin1'), Buffer.alloc(64), Buffer.from(EXECUTABLE_MARKER)]));
-  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), alp, 'an ELF ALP executable on PATH');
-  await writeFile(alp, Buffer.concat([Buffer.from('#!/bin/sh\n'), Buffer.from(EXECUTABLE_MARKER)]));
-  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), undefined, 'a script mentioning the marker is not native');
+  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), undefined, 'a shell wrapper outside a bundle is not ALP');
+  // <app>/1.0.0/{bin/alp, alp-bundle.json, lib/…/alpd.js}, app/current → 1.0.0, ~/.alp/bin/alp → app/current/bin/alp.
+  const app = path.join(directory, 'app');
+  const root = path.join(app, '1.0.0');
+  const alpd = path.join(root, 'lib', 'node_modules', '@anhlp', 'alp-cli', 'dist', 'alpd.js');
+  await fsp.mkdir(path.dirname(alpd), { recursive: true });
+  await fsp.mkdir(path.join(root, 'bin'));
+  await writeFile(alpd, '');
+  await writeFile(path.join(root, 'bin', launcher), '#!/bin/sh\n');
+  await writeFile(path.join(root, 'alp-bundle.json'), JSON.stringify({ name: 'alp', version: '1.0.0' }));
+  const userBin = path.join(directory, 'user-bin');
+  await fsp.mkdir(userBin);
+  if (process.platform !== 'win32') {
+    await fsp.symlink(path.join(root, 'bin', launcher), path.join(userBin, launcher));
+    assert.equal(await findDaemonEntry({ home: empty, env: { PATH: userBin } }), alpd, 'without current, the bundle\'s own alpd.js');
+    await fsp.symlink('1.0.0', path.join(app, 'current'));
+    await fsp.rm(path.join(userBin, launcher));
+    await fsp.symlink(path.join(app, 'current', 'bin', launcher), path.join(userBin, launcher));
+    assert.equal(await findDaemonEntry({ home: empty, env: { PATH: userBin } }), path.join(app, 'current', 'lib', 'node_modules', '@anhlp', 'alp-cli', 'dist', 'alpd.js'), 'through app/current');
+  }
   const recorded = path.join(directory, 'recorded');
-  await (await import('node:fs/promises')).mkdir(recorded, { mode: 0o700 });
-  await writeFile(path.join(recorded, 'alpd.json'), JSON.stringify({ entry: alp, version: '1' }));
-  assert.equal(await findDaemonEntry({ home: recorded, env: { PATH: '' } }), alp, 'the install record may name the executable');
+  await fsp.mkdir(recorded, { mode: 0o700 });
+  const legacy = path.join(bin, launcher);
+  await writeFile(path.join(recorded, 'alpd.json'), JSON.stringify({ entry: legacy, version: '1' }));
+  assert.equal(await findDaemonEntry({ home: recorded, env: { PATH: '' } }), legacy, 'the install record may name the alp command');
 });
 
 test('alp daemon install runs alpd under its service until uninstall', { timeout: 30_000, skip: process.platform === 'win32' && 'Windows has no service manager here (serviceFor is undefined) and the stand-in manager is an sh script' }, async t => {

@@ -1,0 +1,11 @@
+{
+  "comment": "The official Node release the ALP bundle ships (scripts/build-bundle.mjs, t-1807). sha256 values are from https://nodejs.org/dist/<version>/SHASUMS256.txt; change version and every sha256 together.",
+  "version": "24.22.2",
+  "archives": {
+    "darwin-arm64": { "file": "node-v24.22.2-darwin-arm64.tar.gz", "sha256": "aa9549349e47dffaa42dcf95d6e06ade8c4bdafc980979883b88767670df385a" },
+    "darwin-x64": { "file": "node-v24.22.2-darwin-x64.tar.gz", "sha256": "d5e336d588c45be0c37dbd52cc29895593009ca4997a77a1fd02815131ed0e52" },
+    "linux-arm64": { "file": "node-v24.22.2-linux-arm64.tar.gz", "sha256": "95c264150aceb7f3437a29fd6984924f5f8d1511ea3cbd6c508b83f6c555dae2" },
+    "linux-x64": { "file": "node-v24.22.2-linux-x64.tar.gz", "sha256": "361718c444e49af2ca5a110c83ba6a8901143f23ab285ebbef0341f391f482a9" },
+    "windows-x64": { "file": "node-v24.22.2-win-x64.zip", "sha256": "ca1bff5d8ead13c9f2ea404a176db46bd430704d5b5113734049fa365e7799e2" }
+  }
+}

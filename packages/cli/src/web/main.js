@@ -31,7 +31,7 @@ import { CredentialStore, createGateway, createGatewayLogger, parseToken, rename
 import { TERMINAL_EXEC_WARNING } from '@anhlp/alp-gateway/policy';
 import { createGrant, grantPermissions, webGatewayHome } from './grant.js';
 import { createStaticServer } from './serve.js';
-import { assetDir, selfEntry } from '@anhlp/alp-core/packaged';
+import { selfEntry } from '@anhlp/alp-core/packaged';
 
 // __ALP_VERSION__ is replaced at build time (esbuild define); a run from source reports a placeholder.
 // @ts-ignore -- a build-time constant, not a declared global
@@ -45,8 +45,7 @@ const REFRESH_MS = Number(process.env.ALP_WEB_GRANT_REFRESH_MS) > 0 ? Number(pro
 const WEB_FILE_VERSION = 2;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-// The ALP executable extracts its embedded app and runs alpd as itself (t-1e02).
-const appDir = () => { const assets = assetDir(); return path.resolve(process.env.ALP_WEB_APP || (assets ? path.join(assets, 'alp-web') : path.join(here, 'alp-web'))); };
+const appDir = () => path.resolve(process.env.ALP_WEB_APP || path.join(here, 'alp-web'));
 const daemonEntry = () => process.env.ALP_DAEMON_ENTRY ?? selfEntry(path.join(here, 'alpd.js'));
 const webFile = (/** @type {string} */ home) => path.join(home, 'web.json');
 

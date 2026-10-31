@@ -12,11 +12,8 @@ const sha = (value: Buffer) => createHash('sha256').update(value).digest('hex');
 function binary() {
   const libc = process.platform === 'linux' ? (process.report?.getReport() as { header?: { glibcVersionRuntime?: string } })?.header?.glibcVersionRuntime ? 'glibc' : 'musl' : undefined;
   const slot = [process.platform, process.arch, libc].filter(Boolean).join('-');
-  // The ALP executable (t-1e02) extracts its helper; registerPackaged in @anhlp/alp-core/packaged publishes assetDir here.
-  // Read through globalThis so this shipped adapter stays free of package imports.
-  const assets = (globalThis as { [key: symbol]: { assetDir?: () => string | undefined } | undefined })[Symbol.for('alp.packaged')]?.assetDir?.();
-  const adjacent = assets ? path.join(assets, 'terminal-native') : path.join(path.dirname(fileURLToPath(import.meta.url)), 'terminal-native');
-  const dir = assets || existsSync(adjacent) ? adjacent : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../native');
+  const adjacent = path.join(path.dirname(fileURLToPath(import.meta.url)), 'terminal-native');
+  const dir = existsSync(adjacent) ? adjacent : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../native');
   const file = path.join(dir, 'prebuilt', slot, 'terminal-owner');
   const manifest = JSON.parse(readFileSync(path.join(path.dirname(file), 'manifest.json'), 'utf8'));
   if (!statSync(file).isFile() || manifest.protocol !== 1 || manifest.slot !== slot || manifest.source !== sha(readFileSync(path.join(dir, 'terminal-owner.c'))) || manifest.sha256 !== sha(readFileSync(file))) throw new Error('Native helper manifest mismatch');

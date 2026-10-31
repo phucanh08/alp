@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile, chmod } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { readdirSync, readFileSync, readlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
-  allowedHop, cleanupOldExecutable, isNpmExecutable, retryBusy, compareVersions, fetchBytes, npmMessage, oldPath, releaseBaseUrl, releasePlatform, replaceExecutable,
-  selectAsset, selfUpdate, sha256, verifyChecksum, verifyProvenance,
+  allowedHop, bundleCommand, retryBusy, compareVersions, fetchBytes, npmMessage, pruneVersions, releaseBaseUrl, releasePlatform,
+  selectAsset, selfUpdate, sha256, switchCurrent, verifyChecksum, verifyProvenance,
 } from '../src/self-update.js';
 
 const H = c => c.repeat(64);
@@ -25,12 +25,12 @@ test('asset selection picks this os/arch from SHA256SUMS and reads the version f
   assert.equal(releasePlatform('darwin', 'arm64'), 'darwin-arm64');
   assert.equal(releasePlatform('linux', 'x64'), 'linux-x64');
   assert.equal(releasePlatform('win32', 'x64'), 'windows-x64');
-  assert.throws(() => releasePlatform('win32', 'arm64'), /no executable/);
-  assert.throws(() => releasePlatform('freebsd', 'x64'), /no executable/);
+  assert.throws(() => releasePlatform('win32', 'arm64'), /no build/);
+  assert.throws(() => releasePlatform('freebsd', 'x64'), /no build/);
   assert.deepEqual(selectAsset(SUMS, 'linux-x64'), { sha256: H('c'), name: 'alp-1.2.0-linux-x64.tar.gz', version: '1.2.0' });
   assert.deepEqual(selectAsset(SUMS, 'windows-x64'), { sha256: H('e'), name: 'alp-1.2.0-windows-x64.zip', version: '1.2.0' });
   assert.equal(selectAsset(SUMS, 'darwin-arm64', '1.2.0').sha256, H('a'));
-  assert.throws(() => selectAsset(SUMS, 'darwin-arm64', '1.3.0'), /no ALP executable for darwin-arm64 at version 1.3.0/);
+  assert.throws(() => selectAsset(SUMS, 'darwin-arm64', '1.3.0'), /no ALP build for darwin-arm64 at version 1.3.0/);
   assert.throws(() => selectAsset(`${SUMS}\n${H('9')}  alp-1.1.0-linux-x64.tar.gz`, 'linux-x64'), /more than one/);
   assert.throws(() => selectAsset('nonsense', 'linux-x64'), /Malformed/);
   assert.equal(compareVersions('1.2.0', '1.2.0'), 0);
@@ -93,135 +93,51 @@ test('provenance: gh absent warns, gh present runs attestation verify with the r
   assert.throws(() => verifyProvenance('/x.tar.gz', { repo: 'o/r', env: {}, find: () => '/bin/gh', run: () => ({ status: 1, stderr: 'no attestations' }) }), /gh attestation verify refused x.tar.gz: no attestations/);
 });
 
-/** An in-memory filesystem with the calls it saw. */
-function memoryFs(files, { failRename, locked = new Set() } = {}) {
-  const calls = [];
-  return {
-    calls, files,
-    existsSync: f => files.has(f),
-    readdirSync: dir => [...files.keys()].filter(f => path.win32.dirname(f) === dir).map(f => path.win32.basename(f)),
-    rmSync: f => { calls.push(['rm', f]); if (locked.has(f)) throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); files.delete(f); },
-    renameSync: (from, to) => {
-      calls.push(['rename', from, to]);
-      if (failRename?.(from, to) || (locked.has(from) && failRename === 'locked')) throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
-      if (!files.has(from)) throw Object.assign(new Error(`ENOENT ${from}`), { code: 'ENOENT' });
-      files.set(to, files.get(from)); files.delete(from);
-    },
-  };
-}
-
-test('Windows: the running alp.exe becomes alp.old.exe, the new one takes its name, .old goes on the next start', () => {
-  const target = path.win32.join('C:\\Users\\u\\.alp\\bin', 'alp.exe');
-  const staged = 'C:\\Users\\u\\.alp\\bin\\.alp.update.1.exe';
-  const old = oldPath(target, 'win32');
-  assert.equal(path.win32.basename(old), 'alp.old.exe');
-  const fs = memoryFs(new Map([[target, 'v1'], [staged, 'v2'], [old, 'v0']]));
-  assert.deepEqual(replaceExecutable(staged, target, { platform: 'win32', fs, sleep: () => {} }), { old });
-  assert.deepEqual(fs.calls, [['rm', old], ['rename', target, old], ['rename', staged, target]]);
-  assert.equal(fs.files.get(target), 'v2');
-  assert.equal(fs.files.get(old), 'v1');
-  assert.equal(cleanupOldExecutable(target, { platform: 'win32', fs }), true);
-  assert.equal(fs.files.has(old), false);
-  assert.equal(cleanupOldExecutable(target, { platform: 'win32', fs }), false);
-  assert.equal(cleanupOldExecutable(target, { platform: 'darwin', fs }), false);
-});
-
-test('Windows: a failed second rename puts the old executable back', () => {
-  const target = 'C:\\bin\\alp.exe', staged = 'C:\\bin\\.alp.update.2.exe';
-  const fs = memoryFs(new Map([[target, 'v1'], [staged, 'v2']]), { failRename: (from) => from === staged });
-  assert.throws(() => replaceExecutable(staged, target, { platform: 'win32', fs, sleep: () => {} }), /EBUSY/);
-  assert.equal(fs.files.get(target), 'v1');
-  assert.equal(fs.files.has(oldPath(target, 'win32')), false);
-});
-
-test('Windows: a locked alp.old.exe (an alpd not restarted) is moved aside and swept on the next start', () => {
-  const target = 'C:\\bin\\alp.exe', staged = 'C:\\bin\\.alp.update.3.exe', old = oldPath(target, 'win32');
-  const fs = memoryFs(new Map([[target, 'v2'], [staged, 'v3'], [old, 'v1']]), { locked: new Set([old]) });
-  replaceExecutable(staged, target, { platform: 'win32', fs, unique: () => 'ab12' });
-  assert.equal(fs.files.get(target), 'v3');
-  assert.equal(fs.files.get(old), 'v2');
-  assert.equal(fs.files.get('C:\\bin\\alp.old.ab12.exe'), 'v1');
-  fs.files.set('C:\\bin\\alp.other.exe', 'keep');
-  assert.equal(cleanupOldExecutable(target, { platform: 'win32', fs: memoryFs(fs.files) }), true);
-  assert.deepEqual([...fs.files.keys()].sort(), ['C:\\bin\\alp.exe', 'C:\\bin\\alp.other.exe']);
-  // Locked and not even movable: a clear error before anything moved.
-  const stuck = memoryFs(new Map([[target, 'v2'], [staged, 'v3'], [old, 'v1']]), { locked: new Set([old]), failRename: 'locked' });
-  assert.throws(() => replaceExecutable(staged, target, { platform: 'win32', fs: stuck, sleep: () => {} }), /alp\.old\.exe is in use.*alp daemon stop/);
-  assert.equal(stuck.files.get(target), 'v2');
-});
-
-test('Windows: a failed rollback says how to recover', () => {
-  const target = 'C:\\bin\\alp.exe', staged = 'C:\\bin\\.alp.update.4.exe';
-  const fs = memoryFs(new Map([[target, 'v1'], [staged, 'v2']]), { failRename: from => from === staged || from === oldPath(target, 'win32') });
-  assert.throws(() => replaceExecutable(staged, target, { platform: 'win32', fs, sleep: () => {} }), /rename C:\\bin\\alp\.old\.exe to C:\\bin\\alp\.exe yourself/);
-});
-
-test('Windows: a briefly busy staged file (a virus scan after its --version run) is retried, a lasting one is not hidden', () => {
-  const target = 'C:\\bin\\alp.exe', staged = 'C:\\bin\\.alp.update.5.exe';
-  let busy = 3;
-  const sleeps = [];
-  const fs = memoryFs(new Map([[target, 'v1'], [staged, 'v2']]), { failRename: from => from === staged && busy-- > 0 });
-  replaceExecutable(staged, target, { platform: 'win32', fs, sleep: ms => sleeps.push(ms) });
-  assert.equal(fs.files.get(target), 'v2');
-  assert.deepEqual(sleeps, [50, 100, 150]);
+test('a briefly busy file (a virus scan after its --version run) is retried, a lasting one is not hidden', () => {
   let calls = 0;
-  assert.throws(() => retryBusy(() => { calls++; throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); }, () => {}, 4), /EBUSY/);
+  const sleeps = [];
+  assert.throws(() => retryBusy(() => { calls++; throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); }, ms => sleeps.push(ms), 4), /EBUSY/);
   assert.equal(calls, 4);
+  assert.deepEqual(sleeps, [50, 100, 150]);
   calls = 0;
   assert.throws(() => retryBusy(() => { calls++; throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }, () => {}), /ENOENT/);
   assert.equal(calls, 1, 'only busy errors are retried');
 });
 
-test('Unix: one rename over the running file', () => {
-  const fs = memoryFs(new Map([['/b/alp', 'v1'], ['/b/.s', 'v2']]));
-  replaceExecutable('/b/.s', '/b/alp', { platform: 'linux', fs });
-  assert.deepEqual(fs.calls, [['rename', '/b/.s', '/b/alp']]);
-});
-
-test('npm mode prints how to update with npm and exits 0; template arguments get a hint', async () => {
+test('outside the ALP bundle (npm) it prints how to update with npm and exits 0; template arguments get a hint', async () => {
   for (const args of [[], ['--check'], ['--yes']]) {
     const out = [];
-    assert.equal(await selfUpdate(args, { packaged: false, log: l => out.push(l), warn: l => out.push(l) }), 0);
+    assert.equal(await selfUpdate(args, { bundle: undefined, log: l => out.push(l), warn: l => out.push(l) }), 0);
     assert.match(out.join('\n'), /npm install -g @anhlp\/alp@beta/);
     assert.doesNotMatch(out.join('\n'), /did you mean/);
   }
   const out = [];
-  assert.equal(await selfUpdate(['/some/project'], { packaged: false, log: l => out.push(l), warn: l => out.push(l) }), 0);
+  assert.equal(await selfUpdate(['/some/project'], { bundle: undefined, log: l => out.push(l), warn: l => out.push(l) }), 0);
   assert.match(out.join('\n'), /did you mean `alp update-template`\?/);
   assert.match(npmMessage(['.']), /did you mean `alp update-template`/);
   const unknown = [];
-  assert.equal(await selfUpdate(['--force'], { packaged: false, log: l => unknown.push(l), warn: l => unknown.push(l) }), 0);
+  assert.equal(await selfUpdate(['--force'], { bundle: undefined, log: l => unknown.push(l), warn: l => unknown.push(l) }), 0);
   assert.match(unknown.join('\n'), /did you mean `alp update-template`/);
-  const packaged = [];
-  assert.equal(await selfUpdate(['.'], { packaged: true, log: l => packaged.push(l), warn: l => packaged.push(l) }), 1);
-  assert.match(packaged.join('\n'), /did you mean `alp update-template`/);
+  const bundled = [];
+  assert.equal(await selfUpdate(['.'], { bundle: { root: '/a/app/1.0.0', app: '/a/app', version: '1.0.0', platform: 'x', current: '/a/app/current' }, log: l => bundled.push(l), warn: l => bundled.push(l) }), 1);
+  assert.match(bundled.join('\n'), /did you mean `alp update-template`/);
 });
 
-test('the executable npm installed (@anhlp/alp-<os>-<arch>) is updated with npm, never in place (t-cd7f)', async () => {
-  for (const execPath of [
-    '/usr/local/lib/node_modules/@anhlp/alp-darwin-arm64/bin/alp',
-    '/home/u/.npm-global/lib/node_modules/@anhlp/alp-linux-x64/bin/alp',
-    'C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules\\@anhlp\\alp-win32-x64\\bin\\alp.exe',
-  ]) {
-    assert.equal(isNpmExecutable(execPath), true, execPath);
-    const out = [];
-    const fetched = [];
-    assert.equal(await selfUpdate(['--yes'], { packaged: true, execPath, fetchBytes: async url => { fetched.push(url); throw new Error('no fetch'); }, log: l => out.push(l), warn: l => out.push(l) }), 0);
-    assert.match(out.join('\n'), /installed with npm; update it with npm:\n {2}npm install -g @anhlp\/alp@beta/);
-    assert.deepEqual(fetched, []);
-  }
-  for (const execPath of ['/Users/u/.alp/bin/alp', '/opt/node_modules/@anhlp/alp-cli/bin/alp', '/x/node_modules/@anhlp/alp-darwin-arm64/alp', '']) assert.equal(isNpmExecutable(execPath), false, execPath);
+test('a bundle that install.sh did not install (no app/current) is not updated in place', async () => {
+  const out = [];
+  assert.equal(await selfUpdate(['--yes'], { bundle: { root: '/tmp/alp-1.0.0-x', app: '/tmp', version: '1.0.0', platform: 'x' }, fetchBytes: async () => assert.fail('no download'), log: l => out.push(l), warn: l => out.push(l) }), 1);
+  assert.match(out.join('\n'), /not an installed ALP.*install\.sh/s);
 });
 
-/** A file:// mirror with one real archive for this host holding a fake executable. */
-async function mirror(t, { version = '9.9.9', corrupt = false } = {}) {
+/** An installed bundle (<app>/1.0.0, current → it) and a file:// mirror with one archive for this host. */
+async function mirror(t, { version = '9.9.9', corrupt = false, bundleVersion = version } = {}) {
   const work = await mkdtemp(path.join(tmpdir(), 'alp-self-update-'));
   t.after(() => rm(work, { recursive: true, force: true }));
   const platform = releasePlatform();
   const windows = process.platform === 'win32';
   const name = `alp-${version}-${platform}`;
   await mkdir(path.join(work, 'src', name), { recursive: true });
-  await writeFile(path.join(work, 'src', name, windows ? 'alp.exe' : 'alp'), `new ${version}`);
+  await writeFile(path.join(work, 'src', name, 'alp-bundle.json'), JSON.stringify({ name: 'alp', version: bundleVersion, platform }));
   const mirrorDir = path.join(work, 'mirror');
   await mkdir(mirrorDir);
   const archive = path.join(mirrorDir, `${name}${windows ? '.zip' : '.tar.gz'}`);
@@ -229,36 +145,40 @@ async function mirror(t, { version = '9.9.9', corrupt = false } = {}) {
   assert.equal(tar.status, 0, String(tar.stderr));
   const digest = corrupt ? H('0') : sha256(await readFile(archive));
   await writeFile(path.join(mirrorDir, 'SHA256SUMS'), `${digest}  ${path.basename(archive)}\n`);
-  const bin = path.join(work, 'bin');
-  await mkdir(bin);
-  const exe = path.join(bin, windows ? 'alp.exe' : 'alp');
-  await writeFile(exe, 'old');
-  await chmod(exe, 0o755);
-  return { work, mirrorDir, exe, version };
+  const app = await realpath(await mkdir(path.join(work, 'app'), { recursive: true }).then(() => path.join(work, 'app')));
+  const root = path.join(app, '1.0.0');
+  await mkdir(root);
+  await writeFile(path.join(root, 'alp-bundle.json'), JSON.stringify({ name: 'alp', version: '1.0.0', platform }));
+  await mkdir(path.join(app, '0.9.0'));
+  await mkdir(path.join(app, '.alp-update-0123ab'));
+  switchCurrent(app, '1.0.0');
+  return { work, mirrorDir, app, root, version, bundle: { root, app, version: '1.0.0', platform, current: path.join(app, 'current') } };
 }
 
+const currentVersion = async m => JSON.parse(await readFile(path.join(m.app, 'current', 'alp-bundle.json'), 'utf8')).version;
+
 const baseDeps = (m, out) => ({
-  packaged: true, version: '1.0.0', execPath: m.exe, env: { ALP_UPDATE_BASE_URL: pathToFileURL(m.mirrorDir).href },
+  bundle: m.bundle, version: '1.0.0', env: { ALP_UPDATE_BASE_URL: pathToFileURL(m.mirrorDir).href },
   log: l => out.push(l), warn: l => out.push(l), interactive: false, provenance: () => 'unavailable',
-  runVersion: file => (spawnSync(process.execPath, ['-e', 'process.stdout.write(require("fs").readFileSync(process.argv[1], "utf8").replace(/^new /, ""))', file], { encoding: 'utf8' }).stdout),
+  runVersion: root => JSON.parse(readFileSync(path.join(root, 'alp-bundle.json'), 'utf8')).version,
 });
 
-test('packaged: --check reports only; --yes replaces the executable from a file:// mirror and warns without gh', async t => {
+test('bundle: --check reports only; --yes installs app/<version> from a file:// mirror, switches current and prunes', async t => {
   const m = await mirror(t);
   const out = [];
   assert.equal(await selfUpdate(['--check'], baseDeps(m, out)), 0);
   assert.match(out.join('\n'), /1\.0\.0 → 9\.9\.9 available/);
-  assert.equal(await readFile(m.exe, 'utf8'), 'old');
+  assert.equal(await currentVersion(m), '1.0.0');
   await assert.rejects(selfUpdate([], baseDeps(m, [])), /pass --yes/);
   const out2 = [];
   assert.equal(await selfUpdate(['--yes'], { ...baseDeps(m, out2), daemon: async () => ({ version: '1.0.0', sessions: 2 }), restartDaemon: () => assert.fail('never restarts on its own') }), 0);
-  assert.equal(await readFile(m.exe, 'utf8'), 'new 9.9.9');
+  assert.equal(await currentVersion(m), '9.9.9');
+  // The running version stays (this process and alpd still use it); older versions and staging go.
+  assert.deepEqual(readdirSync(m.app).sort(), ['1.0.0', '9.9.9', 'current']);
+  if (process.platform !== 'win32') assert.equal(readlinkSync(path.join(m.app, 'current')), '9.9.9', 'a relative link: the app directory can move');
   const text = out2.join('\n');
   assert.match(text, /only the SHA256SUMS checksum was verified/);
   assert.match(text, /alpd 1\.0\.0 is still running with 2 live sessions; .*alp daemon restart/);
-  const unknown = [];
-  assert.equal(await selfUpdate(['--version', '9.9.9'], { ...baseDeps(m, unknown), interactive: true, daemon: async () => ({ version: '1.0.0' }), confirm: async q => /^Replace/.test(q) || assert.fail('no restart offer when the sessions are unknown') }), 0);
-  assert.match(unknown.join('\n'), /its live sessions could not be read/);
   const older = [];
   assert.equal(await selfUpdate(['--check'], { ...baseDeps(m, older), version: '10.0.0' }), 0);
   assert.match(older.join('\n'), /10\.0\.0 is newer than the latest release 9\.9\.9/);
@@ -267,21 +187,55 @@ test('packaged: --check reports only; --yes replaces the executable from a file:
   assert.match(out3.join('\n'), /up to date/);
 });
 
-test('packaged: a checksum mismatch replaces nothing', async t => {
-  const m = await mirror(t, { corrupt: true });
-  await assert.rejects(selfUpdate(['--yes'], baseDeps(m, [])), /Checksum mismatch/);
-  assert.equal(await readFile(m.exe, 'utf8'), 'old');
-  const leftovers = (await import('node:fs')).readdirSync(path.dirname(m.exe));
-  assert.deepEqual(leftovers, [path.basename(m.exe)]);
+test('bundle: --version of the running version reinstalls it and keeps the running copy aside', async t => {
+  const m = await mirror(t, { version: '1.0.0' });
+  const unknown = [];
+  assert.equal(await selfUpdate(['--version', '1.0.0'], { ...baseDeps(m, unknown), interactive: true, daemon: async () => ({ version: '0.9.0' }), confirm: async q => /^Install/.test(q) || assert.fail('no restart offer when the sessions are unknown') }), 0);
+  assert.match(unknown.join('\n'), /its live sessions could not be read/);
+  const names = readdirSync(m.app).sort();
+  assert.ok(names.includes('1.0.0') && names.includes('current') && names.some(name => /^\.alp-old-[0-9a-f]+$/.test(name)), names.join(','));
 });
 
-test('packaged: a failed provenance check or a wrong reported version replaces nothing', async t => {
-  const m = await mirror(t);
-  await assert.rejects(selfUpdate(['--yes'], { ...baseDeps(m, []), provenance: () => { throw new Error('gh attestation verify refused'); } }), /refused/);
-  assert.equal(await readFile(m.exe, 'utf8'), 'old');
-  await assert.rejects(selfUpdate(['--yes'], { ...baseDeps(m, []), runVersion: () => '6.6.6' }), /reports version "6.6.6", not 9.9.9/);
-  assert.equal(await readFile(m.exe, 'utf8'), 'old');
-  assert.ok(existsSync(m.exe));
+test('bundle: a checksum mismatch, a failed provenance check or a wrong version changes nothing', async t => {
+  for (const [options, deps, error] of [
+    [{ corrupt: true }, {}, /Checksum mismatch/],
+    [{}, { provenance: () => { throw new Error('gh attestation verify refused'); } }, /refused/],
+    [{}, { runVersion: () => '6.6.6' }, /reports version "6.6.6", not 9.9.9/],
+    [{ bundleVersion: '9.9.8' }, {}, /holds ALP 9\.9\.8/],
+  ]) {
+    const m = await mirror(t, options);
+    const before = readdirSync(m.app).sort();
+    await assert.rejects(selfUpdate(['--yes'], { ...baseDeps(m, []), ...deps }), error);
+    assert.equal(await currentVersion(m), '1.0.0');
+    assert.deepEqual(readdirSync(m.app).sort(), before, 'no staging left behind, nothing pruned');
+  }
+});
+
+test('switchCurrent on Windows replaces the junction and puts the old one back on failure', () => {
+  const links = new Map([['C:\\a\\current', 'C:\\a\\1.0.0']]);
+  const calls = [];
+  const fs = {
+    readlinkSync: file => { if (!links.has(file)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); return links.get(file); },
+    unlinkSync: file => { calls.push(['unlink', file]); links.delete(file); },
+    symlinkSync: (target, file, type) => { calls.push(['link', target, file, type]); if (target.endsWith('bad')) throw new Error('EPERM'); links.set(file, target); },
+  };
+  switchCurrent('C:\\a', '2.0.0', { platform: 'win32', fs });
+  assert.equal(links.get('C:\\a\\current'), 'C:\\a\\2.0.0');
+  assert.throws(() => switchCurrent('C:\\a', 'bad', { platform: 'win32', fs }), /EPERM/);
+  assert.equal(links.get('C:\\a\\current'), 'C:\\a\\2.0.0', 'the previous junction is back');
+});
+
+test('pruneVersions removes only other versions and staging directories', async t => {
+  const app = await mkdtemp(path.join(tmpdir(), 'alp-prune-'));
+  t.after(() => rm(app, { recursive: true, force: true }));
+  for (const name of ['1.0.0', '2.0.0', '3.0.0', '.alp-update-ab', '.alp-old-cd', 'notes', 'current']) await mkdir(path.join(app, name));
+  assert.deepEqual(pruneVersions(app, ['3.0.0', '2.0.0']).sort(), ['.alp-old-cd', '.alp-update-ab', '1.0.0']);
+  assert.deepEqual(readdirSync(app).sort(), ['2.0.0', '3.0.0', 'current', 'notes']);
+});
+
+test('bundleCommand runs the bundle\'s own Node and CLI', () => {
+  assert.deepEqual(bundleCommand('/a/app/1.0.0', 'linux'), { command: path.join('/a/app/1.0.0', 'node', 'bin', 'node'), args: [path.join('/a/app/1.0.0', 'lib', 'node_modules', '@anhlp', 'alp-cli', 'dist', 'cli.js')] });
+  assert.equal(bundleCommand('C:\\a', 'win32').command, path.join('C:\\a', 'node', 'node.exe'));
 });
 
 test('the CLI routes update-template to the template upgrade and update to the self-update', () => {

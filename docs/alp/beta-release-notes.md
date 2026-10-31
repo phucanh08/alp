@@ -1,3 +1,30 @@
+# ALP — next beta after 0.0.1-beta.6 (unreleased) — release notes
+
+Prepared 2026-10-31 (task t-1807). Not published; the version bump and publishing are the owner's steps.
+
+- **Breaking: the release is the ALP bundle, not one executable.** The GitHub release archives
+  (`alp-<version>-<os>-<arch>.tar.gz`, `alp-<version>-windows-x64.zip`) now hold ALP's npm install
+  (`@anhlp/alp-cli` and its dependencies) beside the official Node release it runs on (Node 24 LTS,
+  checksum-pinned), with a launcher, as Paseo ships its daemon on Electron's Node. It still needs no
+  Node on the machine. `bun build --compile` is gone, and with it every Bun-only special case: the
+  embedded-asset cache `<ALP_HOME>/cache/<version>/`, the script-path guard, `BUN_BE_BUN`, the
+  Windows fd writer and embedded `conpty.dll`, and the Claude SDK registration of beta.6. The Claude
+  Agent SDK loads from `node_modules`; its native `claude` packages are not shipped, since ALP runs
+  your own `claude`. See [binary-install.md](binary-install.md).
+- **Layout:** `install.sh` puts the bundle in `~/.alp/app/<version>/`, points `~/.alp/app/current`
+  at it and links `~/.alp/bin/alp` to `~/.alp/app/current/bin/alp` (`--system`:
+  `/usr/local/lib/alp/app` and `/usr/local/bin/alp`; new `--root`). On Windows, `install.ps1` uses
+  `%LOCALAPPDATA%\Programs\alp\app\<version>`, a junction `app\current` and `alp.cmd` (new `-Root`).
+- **`alp update`** installs the new version beside the running one and switches `app/current`
+  atomically; the previous version stays until the next update. Services (`alp daemon install`)
+  and alpd's install record name `app/current`, never a version directory.
+- **Upgrading from 0.0.1-beta.5/6 (single file): rerun the installer once.** Their `alp update`
+  replaces one file and cannot install the bundle. `curl -fsSL
+  https://github.com/phucanh08/alp/releases/latest/download/install.sh | sh` (Windows: `install.ps1`),
+  then `alp daemon restart`. Services and MCP entries written by the single-file build keep working;
+  `<ALP_HOME>/cache/` and `~/.alp/share/doc/alp` may be deleted.
+- **Sizes:** an archive is about 50 MB (darwin-arm64 51.8 MB), about 210 MB unpacked, most of it Node.
+
 # ALP 0.0.1-beta.6 — release notes
 
 Prepared 2026-10-30 (task t-693e). Not published yet; publishing is the owner's step (t-36f6).

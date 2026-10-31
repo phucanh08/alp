@@ -6,12 +6,13 @@ import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { executablePath } from '@anhlp/alp-core/packaged';
+import { bundleInfo, samePath } from '@anhlp/alp-core/packaged';
 
 /**
- * `alp update` (t-1e02 P3): replaces the ALP executable with a release from GitHub Releases, after
- * checking the archive against the release's SHA256SUMS and, when `gh` is installed, its build
- * provenance. The project template upgrade that `alp update` used to run is `alp update-template`.
+ * `alp update` (t-1807): installs a release of the ALP bundle from GitHub Releases beside the running
+ * one (<app>/<version>, see @anhlp/alp-core/packaged) and points <app>/current at it, after checking
+ * the archive against the release's SHA256SUMS and, when `gh` is installed, its build provenance.
+ * The project template upgrade that `alp update` used to run is `alp update-template`.
  *
  * Everything that touches the network, the filesystem or child processes comes in through `deps`
  * so the tests can drive each step.
@@ -20,12 +21,12 @@ import { executablePath } from '@anhlp/alp-core/packaged';
 export const DEFAULT_REPO = 'phucanh08/alp';
 export const SIGNER_WORKFLOW = '.github/workflows/release-binaries.yml';
 export const NPM_PACKAGE = '@anhlp/alp';
-const TEMPLATE_HINT = 'did you mean `alp update-template`? (`alp update` now updates the ALP executable; the project template upgrade is `alp update-template [directory]`)';
+const TEMPLATE_HINT = 'did you mean `alp update-template`? (`alp update` now updates ALP itself; the project template upgrade is `alp update-template [directory]`)';
 
 const OPTIONS = { check: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' }, version: { type: 'string' }, 'base-url': { type: 'string' }, help: { type: 'boolean', short: 'h' } };
 
 export const UPDATE_USAGE = `Usage: alp update [--check] [--yes] [--version X] [--base-url URL]
-Replaces this ALP executable with the latest release (or release X) from GitHub Releases, after checking
+Installs the latest ALP release (or release X) from GitHub Releases beside this one and switches to it, after checking
 it against SHA256SUMS and, when gh is installed, its build provenance. --check only reports.
 ALP_UPDATE_BASE_URL (as --base-url, an https:// or file:// mirror) and ALP_INSTALL_REPO (owner/name) override the source.
 The project template upgrade is \`alp update-template [directory]\`.`;
@@ -34,7 +35,7 @@ The project template upgrade is \`alp update-template [directory]\`.`;
 export function releasePlatform(platform = process.platform, arch = process.arch) {
   const osName = { darwin: 'darwin', linux: 'linux', win32: 'windows' }[platform];
   const archName = { x64: 'x64', arm64: 'arm64' }[arch];
-  if (!osName || !archName || (osName === 'windows' && archName !== 'x64')) throw new Error(`ALP publishes no executable for ${platform}-${arch}`);
+  if (!osName || !archName || (osName === 'windows' && archName !== 'x64')) throw new Error(`ALP publishes no build for ${platform}-${arch}`);
   return `${osName}-${archName}`;
 }
 
@@ -62,7 +63,7 @@ export function parseSums(text) {
 export function selectAsset(sumsText, platform, version) {
   const suffix = `-${platform}${archiveExtension(platform)}`;
   const matches = parseSums(sumsText).filter(({ name }) => name.endsWith(suffix) && /^alp-[0-9]/.test(name) && (!version || name === `alp-${version}${suffix}`));
-  if (matches.length === 0) throw new Error(`This release has no ALP executable for ${platform}${version ? ` at version ${version}` : ''}`);
+  if (matches.length === 0) throw new Error(`This release has no ALP build for ${platform}${version ? ` at version ${version}` : ''}`);
   if (matches.length > 1) throw new Error(`SHA256SUMS lists more than one ${platform} archive: ${matches.map(m => m.name).join(', ')}`);
   const [match] = matches;
   if (/[^0-9A-Za-z.+_-]/.test(match.name)) throw new Error(`Unexpected archive name in SHA256SUMS: ${match.name}`);
@@ -109,7 +110,7 @@ export function releaseBaseUrl({ repo, version, baseUrl }) {
   return base;
 }
 
-/** The largest file alp update downloads: the executable is about 100 MB. */
+/** The largest file alp update downloads: an archive of the bundle is about 70 MB. */
 export const MAX_DOWNLOAD = 512 * 1024 * 1024;
 
 const LOOPBACK = ['127.0.0.1', 'localhost', '[::1]'];
@@ -188,18 +189,12 @@ export function verifyProvenance(file, { repo, env = process.env, run = spawnSyn
   return 'verified';
 }
 
-/** The previous executable Windows keeps beside the new one until the next start. @param {string} target @param {string} [platform] */
-export const oldPath = (target, platform = process.platform) => {
-  const p = platform === 'win32' ? path.win32 : path;
-  return p.join(p.dirname(target), `${p.basename(target, p.extname(target))}.old${p.extname(target) || '.exe'}`);
-};
-
-const TRANSIENT = new Set(['EBUSY', 'EPERM', 'EACCES']);
+const TRANSIENT = new Set(['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY']);
 const pause = (/** @type {number} */ ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 /**
  * Runs `action`, again after a pause while Windows reports the file busy: a virus scanner holds an
- * executable it just saw run (the staged file's --version) for a moment. About 6 s in all.
+ * executable it just saw run (the staged bundle's --version) for a moment. About 6 s in all.
  * @template T @param {() => T} action @param {(ms: number) => void} [sleep]
  */
 export function retryBusy(action, sleep = pause, attempts = 25) {
@@ -211,64 +206,7 @@ export function retryBusy(action, sleep = pause, attempts = 25) {
   }
 }
 
-/**
- * Puts `staged` in place of `target`. Unix: rename over the running file. Windows: the running
- * alp.exe cannot be overwritten but can be renamed, so it becomes alp.old.exe (deleted on the next
- * start) and the new file takes its name; a failure puts the old one back.
- * @param {string} staged @param {string} target @param {{ platform?: string, fs?: Pick<typeof nodeFs, 'renameSync' | 'rmSync' | 'existsSync'>, unique?: () => string, sleep?: (ms: number) => void }} [options]
- */
-export function replaceExecutable(staged, target, { platform = process.platform, fs = nodeFs, unique = () => randomBytes(4).toString('hex'), sleep = pause } = {}) {
-  if (platform !== 'win32') { fs.renameSync(staged, target); return { old: undefined }; }
-  const old = oldPath(target, platform);
-  if (fs.existsSync(old)) {
-    // A process started from the previous update's file (an alpd not restarted yet) keeps it locked:
-    // it cannot be deleted, but it can be moved aside for a later start to delete.
-    try { fs.rmSync(old, { force: true }); } catch {
-      const aside = old.replace(/\.exe$/i, `.${unique()}.exe`);
-      try { fs.renameSync(old, aside); } catch (error) {
-        throw new Error(`${old} is in use and could not be moved (${error.code ?? error.message}); stop the ALP processes started from it (alp daemon stop) and run alp update again`);
-      }
-    }
-  }
-  retryBusy(() => fs.renameSync(target, old), sleep);
-  try {
-    retryBusy(() => fs.renameSync(staged, target), sleep);
-  } catch (error) {
-    try { retryBusy(() => fs.renameSync(old, target), sleep); } catch (restore) {
-      throw new Error(`Could not put the new executable at ${target} (${error.code ?? error.message}), and could not move the previous one back (${restore.code ?? restore.message}): rename ${old} to ${target} yourself`);
-    }
-    throw error;
-  }
-  return { old };
-}
-
-/** Deletes the alp.old.exe (and alp.old.<hex>.exe) a Windows update left behind; called on every packaged start. @param {string} target @param {{ platform?: string, fs?: Pick<typeof nodeFs, 'rmSync' | 'readdirSync'> }} [options] */
-export function cleanupOldExecutable(target, { platform = process.platform, fs = nodeFs } = {}) {
-  if (platform !== 'win32') return false;
-  const old = path.win32.basename(oldPath(target, platform));
-  const stem = old.slice(0, -'.exe'.length).toLowerCase();
-  let names;
-  try { names = fs.readdirSync(path.win32.dirname(target)); } catch { return false; }
-  let removed = false;
-  // alp.old.exe, and the alp.old.<hex>.exe a locked one was moved aside to.
-  for (const name of names) {
-    const lower = name.toLowerCase();
-    if (lower !== `${stem}.exe` && !(lower.startsWith(`${stem}.`) && /^[0-9a-f]+\.exe$/.test(lower.slice(stem.length + 1)))) continue;
-    try { fs.rmSync(path.win32.join(path.win32.dirname(target), name), { force: true }); removed = true; } catch {}
-  }
-  return removed;
-}
-
-/**
- * Whether the executable is the one npm installed for @anhlp/alp (t-cd7f): it lives in a platform
- * package, node_modules/@anhlp/alp-<os>-<arch>/bin/. npm owns that file; updating it in place would
- * leave npm's records behind, so npm updates it. @param {string} execPath
- */
-export function isNpmExecutable(execPath) {
-  return /[\\/]node_modules[\\/]@anhlp[\\/]alp-(?:darwin|linux|win32)-(?:arm64|x64)[\\/]bin[\\/]alp(?:\.exe)?$/i.test(execPath ?? '');
-}
-
-/** What to say outside the executable (an npm install). @param {string[]} positionals */
+/** What to say outside the ALP bundle (an npm install). @param {string[]} positionals */
 export function npmMessage(positionals = []) {
   const lines = [];
   if (positionals.length) lines.push(`alp: ${TEMPLATE_HINT}`);
@@ -276,18 +214,67 @@ export function npmMessage(positionals = []) {
   return lines.join('\n');
 }
 
-/** Extracts the archive and returns the executable inside it. @param {string} archive @param {string} directory @param {{ name: string }} asset @param {string} platform */
+/** Why this bundle cannot update itself: it was not installed by install.sh / install.ps1. @param {string} root */
+export const notInstalledMessage = root => `alp: ${root} is not an installed ALP (no app/current points at it); install the release with install.sh (Windows: install.ps1), which alp update can then keep up to date:\n  curl -fsSL https://github.com/${DEFAULT_REPO}/releases/latest/download/install.sh | sh`;
+
+const systemTar = () => process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+
+/** Extracts the archive into `directory` and returns the bundle inside it. @param {string} archive @param {string} directory @param {{ name: string }} asset @param {string} platform */
 function extract(archive, directory, asset, platform, run = spawnSync) {
   const windows = platform.startsWith('windows-');
   // tar reads both: GNU/bsd tar for .tar.gz, Windows' bsdtar (tar.exe) for .zip.
   // On Windows, Git's GNU tar (which reads no zip) may come first on PATH: use the system's bsdtar.
-  const tar = process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
-  const result = run(tar, [windows ? '-xf' : '-xzf', archive, '-C', directory], { encoding: 'utf8', windowsHide: true });
+  const result = run(systemTar(), [windows ? '-xf' : '-xzf', archive, '-C', directory], { encoding: 'utf8', windowsHide: true });
   if (result.status !== 0) throw new Error(`Could not extract ${asset.name}: ${(result.stderr || result.error?.message || '').trim()}`);
-  const name = asset.name.slice(0, -archiveExtension(platform).length);
-  const binary = path.join(directory, name, windows ? 'alp.exe' : 'alp');
-  if (!nodeFs.existsSync(binary)) throw new Error(`${asset.name} does not contain ${name}/${windows ? 'alp.exe' : 'alp'}`);
-  return binary;
+  const root = path.join(directory, asset.name.slice(0, -archiveExtension(platform).length));
+  if (!nodeFs.existsSync(path.join(root, 'alp-bundle.json'))) throw new Error(`${asset.name} does not contain an ALP bundle (${path.basename(root)}/alp-bundle.json)`);
+  return root;
+}
+
+/** The bundle's own Node and CLI: run without its launcher, so Windows needs no shell for alp.cmd. @param {string} root @param {string} platform */
+export function bundleCommand(root, platform = process.platform) {
+  const node = platform === 'win32' ? path.join(root, 'node', 'node.exe') : path.join(root, 'node', 'bin', 'node');
+  return { command: node, args: [path.join(root, 'lib', 'node_modules', '@anhlp', 'alp-cli', 'dist', 'cli.js')] };
+}
+
+/**
+ * Points `<app>/current` at `<app>/<version>`. Unix: a relative symlink renamed over the old one, in
+ * one step. Windows: the junction is replaced (removed, then made again; put back on failure).
+ * @param {string} app @param {string} version @param {{ platform?: string, fs?: typeof nodeFs, unique?: () => string }} [options]
+ */
+export function switchCurrent(app, version, { platform = process.platform, fs = nodeFs, unique = () => randomBytes(6).toString('hex') } = {}) {
+  const p = platform === 'win32' ? path.win32 : path;
+  const current = p.join(app, 'current');
+  if (platform !== 'win32') {
+    const link = p.join(app, `.current-${unique()}`);
+    fs.symlinkSync(version, link);
+    try { fs.renameSync(link, current); } catch (error) { try { fs.unlinkSync(link); } catch {} throw error; }
+    return;
+  }
+  let previous;
+  try { previous = fs.readlinkSync(current); } catch {}
+  if (previous !== undefined) retryBusy(() => fs.unlinkSync(current));
+  try { fs.symlinkSync(p.join(app, version), current, 'junction'); } catch (error) {
+    if (previous !== undefined) try { fs.symlinkSync(previous, current, 'junction'); } catch {}
+    throw error;
+  }
+}
+
+/**
+ * Removes what earlier updates left in `<app>`: versions other than `keep`, and staging directories.
+ * A failure (a file still in use on Windows) leaves that entry for the next update.
+ * @param {string} app @param {string[]} keep
+ */
+export function pruneVersions(app, keep, fs = nodeFs) {
+  let names;
+  try { names = fs.readdirSync(app); } catch { return []; }
+  const removed = [];
+  for (const name of names) {
+    if (name === 'current' || keep.includes(name)) continue;
+    if (!/^[0-9][0-9A-Za-z.+-]*$/.test(name) && !/^\.alp-(update|old)-[0-9A-Za-z]+$/.test(name) && !/^\.current-[0-9a-f]+$/.test(name)) continue;
+    try { fs.rmSync(path.join(app, name), { recursive: true, force: true }); removed.push(name); } catch {}
+  }
+  return removed;
 }
 
 /** Asks a yes/no question on the terminal. @param {string} question */
@@ -298,12 +285,12 @@ async function confirm(question) {
 
 /**
  * @typedef {{
- *   packaged: boolean, version: string, execPath: string, env: NodeJS.ProcessEnv, platform: string, arch: string,
+ *   bundle: import('@anhlp/alp-core/packaged').BundleInfo | undefined, version: string, env: NodeJS.ProcessEnv, platform: string, arch: string,
  *   log: (line: string) => void, warn: (line: string) => void, interactive: boolean,
  *   fetchBytes: (url: string) => Promise<Uint8Array>, confirm: (question: string) => Promise<boolean>,
  *   provenance: (file: string, repo: string) => string, extract: typeof extract,
- *   daemon: () => Promise<{ version: string, sessions?: number } | undefined>, restartDaemon: (binary: string) => number,
- *   runVersion: (binary: string) => string,
+ *   daemon: () => Promise<{ version: string, sessions?: number } | undefined>, restartDaemon: (root: string) => number,
+ *   runVersion: (root: string) => string,
  * }} UpdateDeps
  */
 
@@ -311,26 +298,29 @@ async function confirm(question) {
 export async function selfUpdate(args, overrides = {}) {
   /** @type {UpdateDeps} */
   const deps = {
-    packaged: false, version: '0.0.0', execPath: executablePath() ?? '', env: process.env, platform: process.platform, arch: process.arch,
+    bundle: bundleInfo(), version: '0.0.0', env: process.env, platform: process.platform, arch: process.arch,
     log: line => console.log(line), warn: line => console.error(line), interactive: !!(process.stdin.isTTY && process.stdout.isTTY),
     fetchBytes, confirm, extract,
     provenance: (file, repo) => verifyProvenance(file, { repo }),
-    daemon: async () => undefined, restartDaemon: binary => spawnSync(binary, ['daemon', 'restart'], { stdio: 'inherit', windowsHide: true }).status ?? 1,
-    runVersion: binary => spawnSync(binary, ['--version'], { encoding: 'utf8', windowsHide: true, timeout: 60_000 }).stdout?.trim() ?? '',
+    daemon: async () => undefined,
+    restartDaemon: root => { const run = bundleCommand(root); return spawnSync(run.command, [...run.args, 'daemon', 'restart'], { stdio: 'inherit', windowsHide: true }).status ?? 1; },
+    runVersion: root => { const run = bundleCommand(root); return spawnSync(run.command, [...run.args, '--version'], { encoding: 'utf8', windowsHide: true, timeout: 60_000 }).stdout?.trim() ?? ''; },
     ...overrides,
   };
+  const { bundle } = deps;
   let parsed;
   try {
     parsed = parseArgs({ args, allowPositionals: true, options: OPTIONS, strict: true });
   } catch (error) {
     deps.warn(`alp: ${error.message}`);
     deps.warn(`alp: ${TEMPLATE_HINT}`);
-    return deps.packaged ? 1 : 0;
+    return bundle ? 1 : 0;
   }
   const { values, positionals } = parsed;
   if (values.help) { deps.log(UPDATE_USAGE); return 0; }
-  if (!deps.packaged || isNpmExecutable(deps.execPath)) { deps.log(npmMessage(positionals)); return 0; }
+  if (!bundle) { deps.log(npmMessage(positionals)); return 0; }
   if (positionals.length) { deps.warn(`alp: ${TEMPLATE_HINT}`); return 1; }
+  if (!bundle.current) { deps.warn(notInstalledMessage(bundle.root)); return 1; }
 
   const wanted = values.version?.replace(/^v/, '');
   if (wanted !== undefined && !/^[0-9][0-9A-Za-z.+-]*$/.test(wanted)) throw new Error(`Invalid version: ${values.version}`);
@@ -352,18 +342,20 @@ export async function selfUpdate(args, overrides = {}) {
   if (order === 0 && !wanted) { deps.log(`alp ${deps.version} is up to date (${platform})`); return 0; }
   if (order < 0 && !wanted) { deps.log(`alp ${deps.version} is newer than the latest release ${asset.version}; nothing to do (pass --version ${asset.version} to go back)`); return 0; }
 
-  let target;
-  try { target = nodeFs.realpathSync(deps.execPath); } catch { target = deps.execPath; }
-  const dir = path.dirname(target);
-  try { nodeFs.accessSync(dir, nodeFs.constants.W_OK); } catch { throw new Error(`${dir} is not writable; run alp update with the permissions that installed ${target}`); }
+  const { app, current } = bundle;
+  try { nodeFs.accessSync(app, nodeFs.constants.W_OK); } catch { throw new Error(`${app} is not writable; run alp update with the permissions that installed ALP there`); }
+  const target = path.join(app, asset.version);
 
   if (!values.yes) {
-    if (!deps.interactive) throw new Error(`alp update would replace ${target} (${deps.version} → ${asset.version}); pass --yes to do it without a terminal`);
-    if (!await deps.confirm(`Replace ${target} (${deps.version} → ${asset.version})?`)) { deps.log('Not updated.'); return 1; }
+    if (!deps.interactive) throw new Error(`alp update would install ${target} and switch ${current} to it (${deps.version} → ${asset.version}); pass --yes to do it without a terminal`);
+    if (!await deps.confirm(`Install ALP ${asset.version} in ${target} and switch to it (from ${deps.version})?`)) { deps.log('Not updated.'); return 1; }
   }
 
   const work = nodeFs.mkdtempSync(path.join(os.tmpdir(), 'alp-update-'));
-  let staged;
+  // Unpacked beside the versions, so moving it into place stays on one filesystem.
+  const staging = path.join(app, `.alp-update-${randomBytes(6).toString('hex')}`);
+  /** @type {string | undefined} the running version, moved aside by a reinstall */
+  let aside;
   try {
     deps.log(`Downloading ${asset.name} from ${base}`);
     const bytes = await deps.fetchBytes(`${base}/${asset.name}`);
@@ -374,23 +366,27 @@ export async function selfUpdate(args, overrides = {}) {
     const provenance = deps.provenance(archive, repo);
     if (provenance === 'verified') deps.log(`Provenance verified by gh attestation (${repo}, refs/heads/main, release-binaries.yml)`);
     else deps.warn('alp: warning: gh is not available, so only the SHA256SUMS checksum was verified, not the build provenance (install gh to verify it)');
-    const unpacked = path.join(work, 'x');
-    nodeFs.mkdirSync(unpacked);
-    const binary = deps.extract(archive, unpacked, asset, platform);
-    // Stage beside the target so the rename stays on one filesystem; no half-written file is ever alp.
-    staged = path.join(dir, `.alp.update.${randomBytes(6).toString('hex')}${deps.platform === 'win32' ? '.exe' : ''}`);
-    nodeFs.copyFileSync(binary, staged);
-    if (deps.platform !== 'win32') nodeFs.chmodSync(staged, 0o755);
-    const reported = deps.runVersion(staged);
-    if (reported !== asset.version) throw new Error(`The downloaded executable reports version ${JSON.stringify(reported)}, not ${asset.version}; nothing was replaced`);
-    replaceExecutable(staged, target, { platform: deps.platform });
-    staged = undefined;
+    nodeFs.mkdirSync(staging);
+    const unpacked = deps.extract(archive, staging, asset, platform);
+    const manifest = JSON.parse(nodeFs.readFileSync(path.join(unpacked, 'alp-bundle.json'), 'utf8'));
+    if (manifest.version !== asset.version || (manifest.platform && manifest.platform !== platform)) throw new Error(`${asset.name} holds ALP ${manifest.version} for ${manifest.platform}, not ${asset.version} for ${platform}; nothing was changed`);
+    const reported = deps.runVersion(unpacked);
+    if (reported !== asset.version) throw new Error(`The downloaded ALP reports version ${JSON.stringify(reported)}, not ${asset.version}; nothing was changed`);
+    if (nodeFs.existsSync(target)) {
+      // A reinstall of the running version moves it aside (its processes keep their files); any other copy is stale.
+      if (samePath(target, bundle.root)) { aside = `.alp-old-${randomBytes(6).toString('hex')}`; retryBusy(() => nodeFs.renameSync(target, path.join(app, aside))); }
+      else nodeFs.rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    }
+    retryBusy(() => nodeFs.renameSync(unpacked, target));
+    switchCurrent(app, asset.version, { platform: deps.platform });
   } finally {
-    // A cleanup failure must not hide why the update failed; a leftover .alp.update.* is harmless.
-    if (staged) try { nodeFs.rmSync(staged, { force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
+    // A cleanup failure must not hide why the update failed; a leftover staging directory goes with the next update.
+    try { nodeFs.rmSync(staging, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
     try { nodeFs.rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
   }
-  deps.log(`Updated ${target}: ${deps.version} → ${asset.version}`);
+  // The version this process (and maybe alpd) runs stays until the next update.
+  pruneVersions(app, [asset.version, path.basename(bundle.root), ...(aside ? [aside] : [])]);
+  deps.log(`Updated ALP ${deps.version} → ${asset.version} (${current} → ${target})`);
 
   const running = await deps.daemon().catch(() => undefined);
   if (running && running.version !== asset.version) {

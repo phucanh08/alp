@@ -14,5 +14,5 @@ export function distributionEntry(name) {
   return candidates.find(candidate => existsSync(candidate)) ?? candidates[0];
 }
 
-/** What starts alpd: alpd.js under Node, or the ALP executable itself (`alp daemon run`). */
+/** What starts alpd: alpd.js under Node (named through app/current in the ALP bundle). */
 export const DAEMON_ENTRY = selfEntry(fileURLToPath(distributionEntry('alpd.js')));

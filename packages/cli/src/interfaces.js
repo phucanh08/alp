@@ -7,7 +7,7 @@ import { alpHome, connect, daemonPaths, discoverIntegration, startIntegration } 
 import { UsageError } from './usage.js';
 import { built, start, running } from './daemon.js';
 import { DAEMON_ENTRY, distributionEntry } from './paths.js';
-import { entryCommand, packagedInfo } from '@anhlp/alp-core/packaged';
+import { entryCommand } from '@anhlp/alp-core/packaged';
 import { runRole } from './roles.js';
 import { alpWebEntry, alpWebScript, isWebClaimed, isWebReady, refusal, stopPreRenamePaseo, stopWebService, webOwner } from './web-service.js';
 
@@ -287,8 +287,7 @@ async function pairCommand(args) {
 async function acpCommand(args) {
   if (args.length) throw new UsageError();
   await built();
-  const acp = packagedInfo()?.roles?.acp;
-  const { runAcp } = /** @type {{ runAcp: (options: { daemonEntry: string }) => Promise<void> }} */ (acp ? await acp() : await import(distributionEntry('acp.js').href));
+  const { runAcp } = /** @type {{ runAcp: (options: { daemonEntry: string }) => Promise<void> }} */ (await import(distributionEntry('acp.js').href));
   await runAcp({ daemonEntry: DAEMON_ENTRY });
 }
 
