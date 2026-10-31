@@ -1533,6 +1533,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     async 'session.prompt'(_connection, { sessionId, clientMessageId, delivery = 'auto', content, ...context }) {
       if (typeof clientMessageId !== 'string' || !Array.isArray(content)) throw new RpcError(-32602, 'clientMessageId and content are required');
       if (delivery !== 'auto' && delivery !== 'steer') throw new RpcError(-32602, 'delivery must be auto or steer');
+      // t-e906: a native command ALP cannot follow (Claude's /clear) is refused here, never sent.
+      const refused = runtime.refusesPrompt?.(sessionId, content);
+      if (refused) throw new RpcError(-32602, refused, { reason: 'native_command_unsupported' });
       // Images are inline only (the schema refuses a path or URL); here their number and decoded size.
       const images = content.filter((part: { type?: string }) => part?.type === 'image');
       if (images.length > PROMPT_IMAGES.maxCount) throw new RpcError(-32602, `A prompt takes at most ${PROMPT_IMAGES.maxCount} images`);

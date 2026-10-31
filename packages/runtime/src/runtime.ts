@@ -47,7 +47,7 @@ import { CHOICES, words, type Words } from './language.js';
 import { OWN_START, sameProcessAlive } from './process-info.js';
 import { createRecallBook, recallPrompt, RECALL_KEEP_MS, RECALL_QUESTION_CHARS, RECALL_TIMEOUT_MS, type RecallEntry } from './recall.js';
 import { branchExists, checkoutFingerprint, checkoutKey, createCopy, createWorktree, reattachWorktree, removeCopy, removeWorktree } from './workspace.js';
-import { claudeSandboxAvailable, SKILL_PLUGIN } from './claude-transport.js';
+import { claudeSandboxAvailable, nativeCommandRefusal, SKILL_PLUGIN } from './claude-transport.js';
 import { boundDetail, codexToolCall, toolError } from './tool-detail.js';
 import { ALP_REPO, gh, projectRepo } from './github.js';
 import { optionalRead, usageAllows, COMPACT_SHARE } from './runtime-context.js';
@@ -4719,6 +4719,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (prompt.content.some(content => content.type !== 'text' && content.type !== 'image' && content.type !== 'attachment')) {
       throw new Error('Only text, image and attachment prompts are supported');
     }
+    const refusal = origin === 'user' ? nativeCommandRefusal(session.runtimeKind, prompt.content) : undefined;
+    if (refusal) throw new Error(refusal);
     // Inline images only, never a path or URL: the native input gets a data URL ALP builds itself.
     const images = prompt.content.filter(content => content.type === 'image') as Array<{ type: 'image'; mimeType: string; data: string }>;
     if (images.length) {
@@ -5043,6 +5045,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }, ADOPTION),
     bindSchedules(handler: ScheduleHandler | undefined) { scheduleHandler = handler; },
     bindAttachments(reader: AttachmentReader | undefined) { attachmentReader = reader; },
+    refusesPrompt(sessionId: string, content: PromptContent) {
+      const session = sessions.get(sessionId);
+      return session ? nativeCommandRefusal(session.runtimeKind, content) : undefined;
+    },
     takesAttachments(sessionId: string) {
       const session = sessions.get(sessionId);
       return !!session && !session.closed && attachmentRoutes(session).includes('file.path');

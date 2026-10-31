@@ -134,6 +134,8 @@ export type AlpRuntime = {
   bindAttachments?: (reader: AttachmentReader | undefined) => void;
   /** Whether this live session's runtime takes `{ type: 'attachment' }` parts (RuntimeAttachment) now. */
   takesAttachments?: (sessionId: string) => boolean;
+  /** Why this live session's runtime refuses this prompt before it is sent (t-e906), or undefined. */
+  refusesPrompt?: (sessionId: string, content: PromptContent) => string | undefined;
   /** Removes the staged copy of an attachment alpd no longer keeps. */
   dropAttachment?: (attachmentId: string) => Promise<void>;
   onEvent(listener: (envelope: Envelope) => void): () => void;

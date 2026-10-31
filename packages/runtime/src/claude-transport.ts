@@ -227,6 +227,18 @@ export const SKILL_PLUGIN = 'alp';
 const ALP_HANDLED_COMMANDS = new Set(['clear', 'compact', 'rewind']);
 
 /**
+ * t-e906: Claude's /clear moves it to a new conversation under a new session id while ALP keeps the
+ * old thread, so resume, fork and rewind would point at the conversation from before. ALP refuses it
+ * rather than follow: its timeline, turn ids and rewinds belong to the old conversation.
+ */
+export function nativeCommandRefusal(runtimeKind: string, content: ReadonlyArray<{ type: string; text?: string }>) {
+  if (runtimeKind !== 'claude') return undefined;
+  const first = content.find(part => part.type === 'text');
+  if (!first || !/^\s*\/clear(?:\s|$)/.test(first.text ?? '')) return undefined;
+  return 'ALP does not pass /clear to Claude: Claude would start a new conversation that this session does not follow. Start a new session in ALP for a fresh conversation, or compact this one (alp compact, or Compact in the app).';
+}
+
+/**
  * A Claude Code plugin in `directory` holding the given skills, linked to their own
  * directories so an edit to a skill reaches the next session (ALPD §59).
  */
