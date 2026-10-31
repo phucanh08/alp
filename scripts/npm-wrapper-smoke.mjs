@@ -62,7 +62,8 @@ try {
   // on Windows that is the alp.cmd shim (t-1f14). No alpd.json exists in this throwaway ALP_HOME.
   const { findDaemonEntry } = await import('@anhlp/alp-client');
   const entry = await findDaemonEntry({ home: env.ALP_HOME, env: { PATH: path.dirname(bin) } });
-  if (!entry || !realpathSync(entry).startsWith(realpathSync(prefix)) || !entry.endsWith(path.join('alp-cli', 'dist', 'alpd.js'))) throw new Error(`findDaemonEntry found ${entry}, not the installed @anhlp/alp-cli's dist/alpd.js under ${prefix}`);
+  const inside = entry && !path.relative(realpathSync.native(prefix), realpathSync.native(entry)).startsWith('..');
+  if (!inside || !entry.endsWith(path.join('alp-cli', 'dist', 'alpd.js'))) throw new Error(`findDaemonEntry found ${entry}, not the installed @anhlp/alp-cli's dist/alpd.js under ${prefix}`);
   console.log(`[npm-wrapper-smoke] npm install -g ${LAUNCHER}@${version} (${tarballs.length} tarballs): alp --version, alp init, alp update and finding alpd through alp on PATH work`);
 } finally {
   rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

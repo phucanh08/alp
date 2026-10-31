@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { readdirSync, readFileSync, readlinkSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, readlinkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -203,6 +203,7 @@ test('bundle: a reinstall whose final move fails puts the running copy back (t-1
   await assert.rejects(selfUpdate(['--version', '1.0.0', '--yes'], { ...baseDeps(m, []), runVersion }), /ENOENT/);
   assert.equal(await currentVersion(m), '1.0.0');
   assert.ok(!readdirSync(m.app).some(name => name.startsWith('.alp-old-')), readdirSync(m.app).join(','));
+  assert.ok(existsSync(path.join(m.app, '1.0.0', 'alp-bundle.json')), 'the running copy is back in app/1.0.0');
 });
 
 test('bundle: a checksum mismatch, a failed provenance check or a wrong version changes nothing', async t => {

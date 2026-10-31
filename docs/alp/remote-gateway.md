@@ -883,7 +883,7 @@ Contract: docs/protocol/alp-json-rpc-v1.md §12.10.
   file thường của chính user chạy alpd, không có quyền group/other (không thì coi như tắt). Ghi bằng
   `alp terminal allow --yes` (in rõ quyền mà nó cấp), tắt bằng `alp terminal deny`; `alp terminal status`.
   Không RPC nào sửa nó, backup không mang nó. alpd đọc lại ít nhất mỗi 5 giây: tắt → mọi terminal bị
-  kết thúc (`exit` reason `disabled`). Chỉ khi bật (macOS, Linux, module `node-pty` nạp được) alpd mới
+  kết thúc (`exit` reason `disabled`). Chỉ khi bật (macOS, Linux qua native owner; Windows best-effort qua `node-pty`/ConPTY khi module nạp được) alpd mới
   liệt kê capability `terminal` và `terminalLimits`; gateway chuyển tiếp chúng.
 - **Quyền**: mọi method `terminal.*` cần `terminal.exec` (thiếu → `1003 grant`, trước alpd).
   `terminal.create` và `terminal.list { workspaceId }` cần workspace registry mà grant nêu chính xác (tra
