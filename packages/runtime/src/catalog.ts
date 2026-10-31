@@ -1,5 +1,5 @@
 /** Models, modes and thinking options the runtime accepts; viewers render them as-is. */
-import { MODELS } from '@anhlp/alp-core/models';
+import { MODELS, useLiveModels } from '@anhlp/alp-core/models';
 
 export const DEFAULT_MODEL = 'gpt-5.6-sol';
 export const DEFAULT_CLAUDE_MODEL = 'sonnet';
@@ -34,6 +34,8 @@ export const models = entries.map(toModel);
 export function applyCatalog(next: CatalogEntry[]) {
   entries.splice(0, entries.length, ...next);
   models.splice(0, models.length, ...next.map(toModel));
+  // Core's effort checks and fitting (validation.js, profiles.js) consult the same rows (t-086c).
+  useLiveModels(next);
 }
 
 export function thinkingOptionsFor(runtime: 'codex' | 'claude' | 'antigravity', nativeModel: string) {

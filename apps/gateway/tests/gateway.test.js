@@ -22,7 +22,7 @@ async function workspaces(t) {
 async function setup(t, { config, sessions = [], fixture = {} } = {}) {
   const { a, b } = await workspaces(t);
   const daemon = fakeDaemon({ sessions: sessions.map(([id, where, extra]) => summary(id, where === 'a' ? a : b, extra)), ...fixture });
-  const gw = await startGateway(t, { daemon, config, credentials: { alice: { workspaces: [a] }, reader: { workspaces: [a], permissions: ['session.read'] }, bob: { workspaces: [b] } } });
+  const gw = await startGateway(t, { daemon, config, credentials: { alice: { workspaces: [a] }, reader: { workspaces: [a], permissions: ['session.read'] }, projects: { workspaces: [a], permissions: ['project.read'] }, bob: { workspaces: [b] } } });
   return { daemon, a, b, ...gw };
 }
 
@@ -157,6 +157,27 @@ test('catalog.get through the gateway keeps each provider\'s status but drops it
   const { result } = frames.find(frame => frame.id === 'c');
   assert.deepEqual(result.providers, { codex: { status: 'failed', fetchedAt: 'then' }, claude: { status: 'ok' } });
   assert.equal(JSON.stringify(result).includes('/home/me'), false);
+});
+
+test('catalog.updated reaches clients that may read the catalog, fetchedAt only; catalog.refresh stays denied (t-086c)', async t => {
+  const { daemon, rawSession } = await setup(t);
+  const open = async name => {
+    const session = await rawSession(name);
+    session.socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'h', method: 'daemon.hello', params: { protocolVersion: 1 } }));
+    await until(() => session.frames.some(frame => frame.id === 'h'), 'hello');
+    return session;
+  };
+  const reader = await open('reader');
+  const writer = await open('projects');
+  for (const link of daemon.state.links) link.send({ jsonrpc: '2.0', method: 'catalog.updated', params: { fetchedAt: '2026-10-31T00:00:00.000Z', providers: { codex: { error: '/home/me/bin/codex' } } } });
+  await until(() => reader.frames.some(frame => frame.method === 'catalog.updated'), 'catalog.updated');
+  assert.deepEqual(reader.frames.find(frame => frame.method === 'catalog.updated').params, { fetchedAt: '2026-10-31T00:00:00.000Z' });
+  const mark = daemon.calls().length;
+  reader.socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'r', method: 'catalog.refresh' }));
+  await until(() => reader.frames.some(frame => frame.id === 'r'), 'refresh answer');
+  assert.equal(reader.frames.find(frame => frame.id === 'r').error.code, -32601);
+  assert.deepEqual(daemon.calls().slice(mark), [], 'catalog.refresh never reached alpd');
+  assert.equal(writer.frames.some(frame => frame.method === 'catalog.updated'), false, 'no session.read, no catalog news');
 });
 
 test('a client that never says hello is closed with 4408', async t => {

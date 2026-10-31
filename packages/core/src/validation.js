@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { AlpError } from './errors.js';
-import { MODELS } from './models.js';
+import { EFFORTS, knownModel } from './models.js';
 import { validatePermissions } from './permissions.js';
 import { validateVerify } from './verify.js';
 
@@ -11,8 +11,6 @@ function requireValue(condition, code, source, message) {
   if (!condition) throw new AlpError(code, `${source}: ${message}`);
 }
 
-/** Efforts a profile may name; a model ALP knows takes only its own (src/core/models.js). */
-const EFFORTS = ['none', 'off', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode'];
 /** Top-level keys of a project's .alp/settings.json. */
 export const PROJECT_SETTINGS = ['$schema', 'defaultAgent', 'workflow', 'runtime', 'permissions', 'verify', 'delegation', 'team', 'profile', 'templateDefaults', 'compact', 'curate'];
 /** Top-level keys of the user's $ALP_HOME/settings.json. */
@@ -131,7 +129,8 @@ export function validateSettings(settings, source) {
               const [provider, model, effort] = entry.split(':');
               check(model !== '*' || (agent !== 'oracle' && agent !== 'main'), `${at}: ${agent} runs on a named model, not any model`);
               if (effort !== undefined) {
-                const known = MODELS.find(candidate => candidate.runtime === provider && candidate.id === model);
+                // The live catalog when this process has one (knownModels), else MODELS; never beyond EFFORTS.
+                const known = knownModel(`${provider}:${model}`);
                 check(EFFORTS.includes(effort), `${at}: effort ${effort} is unsupported`);
                 check(!known?.efforts.length || known.efforts.includes(effort), `${at}: ${provider}:${model} takes effort ${known?.efforts.join(', ')}`);
               }

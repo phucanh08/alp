@@ -92,7 +92,7 @@ export function createPaseoBridge({ clientFactory, version, token, serverId, hom
     ...(clientFactory ? { connect: () => clientFactory(() => {}) } : {}),
   });
   const relay = createRelay({ home, serverId, attach: socket => gateway.attach(socket), initial: relaySettings, log: message => log?.(message) });
-  const providers = createProviders({ home, broadcast, alpEntry: cwd => agents.providerEntry(cwd), log: message => log?.(message) });
+  const providers = createProviders({ home, broadcast, alpEntry: cwd => agents.providerEntry(cwd), refreshCatalog: () => agents.request('catalog.refresh', {}), log: message => log?.(message) });
   const daemonConfig = createDaemonConfig({ relay, providers, serverId, broadcast, inDevelopment, version, listen, startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString() });
   Object.assign(handlers, quietHandlers, daemonConfig.handlers, providers.handlers, agents.handlers, workspaces.handlers, plugins.handlers, usage.handlers, checkouts.handlers, terminals.handlers, { directory_suggestions_request: (message: Parameters<typeof directorySuggestions>[0]) => directorySuggestions(message, (method, params) => agents.request(method, params)), file_explorer_request: (message: Parameters<typeof fileExplorer>[0]) => fileExplorer(message, (method, params) => agents.request(method, params)) });
   Object.assign(features, ENTRY_POINTS, daemonConfig.features, providers.features, agents.features, workspaces.features, plugins.features, usage.features, checkouts.features, terminals.features);

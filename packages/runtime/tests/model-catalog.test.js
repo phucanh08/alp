@@ -6,6 +6,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MODELS, catalogModels } from '@anhlp/alp-core/models';
+import { fitEffort, modelEfforts } from '@anhlp/alp-core/profiles';
 import { ModelCatalog, catalogEntries, codexProbe, feedCatalog, liveFromContext, mergeCatalog, models, parseAgyModels, setActiveCatalog, thinkingOptionsFor } from '@anhlp/alp-runtime';
 
 const home = async t => { const directory = await mkdtemp(path.join(tmpdir(), 'alp-catalog-')); t.after(() => rm(directory, { recursive: true, force: true })); return directory; };
@@ -170,4 +171,12 @@ createInterface({ input: process.stdin }).on('line', line => {
   const result = await codexProbe(fake)(new AbortController().signal);
   assert.deepEqual(result.map(model => model.id), ['gpt-6.1-sol', 'gpt-6.1-terra']);
   assert.deepEqual(result[1].efforts, ['low']);
+});
+
+test('core effort checks follow the live catalog the daemon applied (t-086c)', async t => {
+  reset(t);
+  assert.equal(modelEfforts('codex:gpt-live-core'), undefined);
+  await new ModelCatalog({ probes: { codex: async () => [{ id: 'gpt-live-core', efforts: ['low', 'high', 'warp'], effort: 'high' }] }, refreshMs: 0 }).refresh();
+  assert.deepEqual(modelEfforts('codex:gpt-live-core'), ['low', 'high']);
+  assert.equal(fitEffort('codex:gpt-live-core', 'max'), 'high');
 });

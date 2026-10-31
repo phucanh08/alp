@@ -90,6 +90,30 @@ export function mergeCatalog(base, live) {
   });
 }
 
+/** Every effort ALP knows; no catalog widens a model beyond these. */
+export const EFFORTS = ['none', 'off', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode'];
+
+/** @type {typeof MODELS | undefined} */
+let liveRows;
+/**
+ * The rows effort checks consult in this process (t-086c): alpd's runtime installs its live catalog
+ * here as it changes, and alp setup the cached one it read. Nothing here reads the network; without
+ * rows, MODELS serve. @param {typeof MODELS | undefined} rows
+ */
+export function useLiveModels(rows) { liveRows = Array.isArray(rows) && rows.length ? rows : undefined; }
+/** The live rows when this process has them, else MODELS. */
+export const knownModels = () => liveRows ?? MODELS;
+/**
+ * The row for a runtime-prefixed model id, its efforts kept to EFFORTS; undefined for a model no
+ * catalog lists (any effort in EFFORTS stays accepted for it). @param {string} id
+ */
+export function knownModel(id) {
+  const row = knownModels().find(model => `${model.runtime}:${model.id}` === id);
+  if (!row) return undefined;
+  const efforts = (row.efforts ?? []).filter(effort => EFFORTS.includes(effort));
+  return { ...row, efforts, ...(row.effort && efforts.includes(row.effort) ? { effort: row.effort } : { effort: undefined }) };
+}
+
 /** Where alpd caches the live catalog: ALP_HOME/cache/models.json. @param {string} home */
 export const catalogCacheFile = home => path.join(home, 'cache', 'models.json');
 
