@@ -2,7 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { open, readFile, writeFile, realpath, stat, lstat, mkdir, readlink, unlink, readdir, rename, rmdir, link } from 'node:fs/promises';
+import { open, readFile, writeFile, realpath, stat, lstat, mkdir, readlink, unlink, readdir, chmod, rename, rmdir, link } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -70,11 +70,19 @@ async function assertSafeAncestors(directory) {
 export async function assertPrivateDirectory(directory, { create = false } = {}) {
   await assertSafeAncestors(directory);
   if (create) await mkdir(directory, { recursive: true, mode: 0o700 });
-  const info = await lstat(directory);
+  let info = await lstat(directory);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('IPC requires a private directory, not a symlink');
-  if (process.platform !== 'win32' && (info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0)) {
-    throw new Error('IPC directory must be owned by the current user with private permissions (0700)');
+  if (process.platform === 'win32') return;
+  if (info.uid !== process.getuid?.()) throw new Error(`IPC directory ${directory} must be owned by the current user (it belongs to uid ${info.uid}); use a directory of your own`);
+  if ((info.mode & 0o077) === 0) return;
+  // t-37f1: a directory the user made for ALP (mkdir, mktemp) and left at 0755 is still empty:
+  // ALP tightens it. One that holds anything is left alone, with the exact command to fix it.
+  if (create && (await readdir(directory)).length === 0) {
+    await chmod(directory, 0o700);
+    info = await lstat(directory);
+    if (info.isDirectory() && !info.isSymbolicLink() && info.uid === process.getuid?.() && (info.mode & 0o077) === 0) return;
   }
+  throw new Error(`IPC directory ${directory} must have private permissions (0700), not ${(info.mode & 0o777).toString(8).padStart(4, '0')}; fix it with: chmod 700 ${JSON.stringify(directory)}`);
 }
 
 export async function assertPrivateSocket(socketPath) {

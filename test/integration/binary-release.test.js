@@ -114,6 +114,22 @@ test('install.sh --version picks that release, --dir/--root install elsewhere, -
   assert.match(missing.stderr, /no build for/);
 });
 
+test('install.sh --root alone puts the command in <root>/bin and leaves HOME and its profiles untouched; --modify-path opts back in (t-37f1)', { skip: !posix }, async t => {
+  const releases = await mirror(t);
+  const home = await temp(t, 'alp-home-');
+  const root = path.join(await temp(t, 'alp-root-'), 'alp');
+  const result = await install(['--root', root, '--base-url', releases], { home, shell: '/bin/zsh' });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(await readlink(path.join(root, 'bin/alp')), path.join(root, 'app/current/bin/alp'));
+  assert.equal(execFileSync(path.join(root, 'bin/alp'), ['--version'], { encoding: 'utf8' }).trim(), '9.8.7');
+  assert.deepEqual(await readdir(home), [], 'nothing in HOME: no ~/.alp/bin, no .zshrc');
+  assert.match(result.stdout, /is not on PATH; add it with:/);
+  const opted = await install(['--root', root, '--modify-path', '--base-url', releases], { home, shell: '/bin/zsh' });
+  assert.equal(opted.code, 0, opted.stderr);
+  assert.ok((await readFile(path.join(home, '.zshrc'), 'utf8')).includes(`export PATH="${path.join(root, 'bin')}:$PATH"`));
+  assert.equal(existsSync(path.join(home, '.alp')), false);
+});
+
 test('install.sh refuses a corrupted archive, a malformed SHA256SUMS, bad options and versions, and installs nothing', { skip: !posix }, async t => {
   const releases = await mirror(t);
   const home = await temp(t, 'alp-home-');

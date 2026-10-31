@@ -1,4 +1,4 @@
-# Phạm vi beta (`0.0.0-beta.1`, `0.0.0-beta.2`, `0.0.1-beta.3`, `0.0.1-beta.4`)
+# Phạm vi beta (`0.0.0-beta.1` đến `0.0.1-beta.7`)
 
 > **Beta.7 (`0.0.1-beta.7`, t-7933):** bản đầu tiên phát hành dạng bundle Node (GitHub release) và npm 8 gói (`@anhlp/alp` là wrapper của `@anhlp/alp-cli`). Người dùng beta.5/6 phải chạy lại `install.sh`/`install.ps1` rồi `alp daemon restart`. Xem [beta-release-notes.md](beta-release-notes.md).
 

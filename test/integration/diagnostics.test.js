@@ -5,12 +5,12 @@ import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { closeSync, openSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { bootTime, daemonPaths, ensureDaemon } from '../../packages/client/src/index.js';
+import { assertPrivateDirectory, bootTime, daemonPaths, ensureDaemon } from '../../packages/client/src/index.js';
 import { diagnose, diskCheck } from '../../packages/client/src/doctor.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createDaemonServer, createStore } from '../../dist/daemon/index.js';
@@ -63,6 +63,8 @@ test('a start that cannot open its IPC endpoint says so in the log and doctor re
 test('a launcher that fails at once reports why, in its error and not only in a log', { skip }, async t => {
   const { directory, home } = await privateHome(t);
   // Admission accepts the home; the real launcher fails while preparing its log directory.
+  // Not empty, so alpd does not tighten it (t-37f1).
+  await writeFile(path.join(home, 'logs', 'old.log'), '');
   await chmod(path.join(home, 'logs'), 0o755);
   await assert.rejects(ensureDaemon({ home, entry: ALPD, timeoutMs: 2000 }), error => /launcher exited \(1\): ALP_HOME_UNUSABLE, alpd failed to start while preparing its home/.test(error.message) && !error.message.includes(SECRET));
 });
@@ -74,8 +76,31 @@ test('startup admission reports an unusable home before launching a child', { sk
     assert.equal(error.code, 'ALP_HOME_UNUSABLE');
     assert.match(error.message, /ALP_HOME_UNUSABLE.*preparing its home/);
     assert.match(error.cause.message, /private permissions/);
+    assert.ok(error.cause.message.includes(`fix it with: chmod 700 ${JSON.stringify(home)}`), error.cause.message);
     return true;
   });
+});
+
+test('an empty home the user pre-created at 0755 is tightened to 0700; one that holds files is not (t-37f1)', { skip }, async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-diag-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const empty = path.join(directory, 'empty');
+  await mkdir(empty, { mode: 0o755 });
+  await chmod(empty, 0o755);
+  await assertPrivateDirectory(empty, { create: true });
+  assert.equal((await lstat(empty)).mode & 0o777, 0o700);
+  const used = path.join(directory, 'used');
+  await mkdir(used, { mode: 0o755 });
+  await chmod(used, 0o755);
+  await writeFile(path.join(used, 'note'), 'x');
+  await assert.rejects(assertPrivateDirectory(used, { create: true }), /not 0755; fix it with: chmod 700 /);
+  assert.equal((await lstat(used)).mode & 0o777, 0o755, 'a directory that holds files keeps its mode');
+  // Without create (a check, not ALP preparing its own directory) nothing is changed.
+  const checked = path.join(directory, 'checked');
+  await mkdir(checked, { mode: 0o755 });
+  await chmod(checked, 0o755);
+  await assert.rejects(assertPrivateDirectory(checked), /chmod 700/);
+  assert.equal((await lstat(checked)).mode & 0o777, 0o755);
 });
 
 test('doctor and alp daemon status tell a ready alpd, one that is not ready, and one that is gone', { skip }, async t => {
