@@ -114,7 +114,8 @@ jobs:
             --notes "Draft binary release built from $RELEASE_SHA by run $GITHUB_RUN_ID. Install: curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/install.sh | sh -s -- --version $VERSION (Windows: install.ps1 -Version $VERSION). Verify provenance: gh attestation verify <archive> --repo $GITHUB_REPOSITORY --source-ref refs/heads/main --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release-binaries.yml."
           # A normal release (not a prerelease) so install.sh's releases/latest resolves to it once published;
           # npm keeps betas on the beta dist-tag (docs/alp/binary-install.md, version policy).
-          gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,tagName,targetCommitish,assets \
-            --jq '{isDraft, isPrerelease, tagName, targetCommitish, assets: [.assets[].name]}'
-          test "$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" = false \
+          release=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,tagName,targetCommitish,assets \
+            --jq '{isDraft, isPrerelease, tagName, targetCommitish, assets: [.assets[].name]}')
+          echo "$release"
+          test "$(echo "$release" | jq -r .isPrerelease)" = false \
             || { echo "draft $tag is marked as a prerelease"; exit 1; }

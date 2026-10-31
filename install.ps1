@@ -81,8 +81,8 @@ param(
   elseif ([System.IO.Path]::IsPathRooted($BaseUrl) -and $BaseUrl -notmatch '^[a-zA-Z][a-zA-Z0-9+.-]+://') { $localMirror = $BaseUrl }
   elseif ($BaseUrl -notmatch '^https://') { Die "the release mirror must be https://, file:// or an absolute directory ($BaseUrl)" }
 
-  if ($NoModifyPath -and $ModifyPath) { Die '-NoModifyPath and -ModifyPath conflict' }
   if ($env:ALP_INSTALL_MODIFY_PATH -eq '1') { $ModifyPath = $true }
+  if ($NoModifyPath -and $ModifyPath) { Die '-NoModifyPath and -ModifyPath conflict' }
   # -Root alone (no -Dir) keeps the install self-contained: the command in <Root>\bin and no user
   # PATH edit unless -ModifyPath.
   if ($Root -and -not $Dir) {
@@ -94,6 +94,8 @@ param(
     else { $Dir = Join-Path $HOME '.alp\bin' }
   }
   if ($Dir.Contains(';')) { Die "-Dir cannot contain ';' (it would split PATH): $Dir" }
+  # The user Path is REG_EXPAND_SZ: a '%' would be read as a variable reference.
+  if ($Dir.Contains('%')) { Die "-Dir cannot contain '%' (the user Path would expand it): $Dir" }
   $Dir = [System.IO.Path]::GetFullPath($Dir)
   if (-not $Root) { $Root = $Dir }
   $Root = [System.IO.Path]::GetFullPath($Root)
