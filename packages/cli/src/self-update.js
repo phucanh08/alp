@@ -382,7 +382,11 @@ export async function selfUpdate(args, overrides = {}) {
       if (samePath(target, bundle.root) || running?.version === asset.version) { aside = `.alp-old-${randomBytes(6).toString('hex')}`; retryBusy(() => nodeFs.renameSync(target, path.join(app, aside))); }
       else nodeFs.rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
-    retryBusy(() => nodeFs.renameSync(unpacked, target));
+    try { retryBusy(() => nodeFs.renameSync(unpacked, target)); } catch (error) {
+      // The running version goes back where it was, so app/current still points at files (t-1f14).
+      if (aside && !nodeFs.existsSync(target)) { try { nodeFs.renameSync(path.join(app, aside), target); aside = undefined; } catch {} }
+      throw error;
+    }
     switchCurrent(app, asset.version, { platform: deps.platform });
   } finally {
     // A cleanup failure must not hide why the update failed; a leftover staging directory goes with the next update.

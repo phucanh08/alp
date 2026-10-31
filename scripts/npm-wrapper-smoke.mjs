@@ -58,7 +58,12 @@ try {
   if (!existsSync(path.join(project, '.alp'))) throw new Error(`alp init made no ${path.join(project, '.alp')}`);
   const update = alp('update');
   if (!update.includes(`npm install -g ${LAUNCHER}@beta`)) throw new Error(`alp update outside the bundle must say to update with npm; printed:\n${update}`);
-  console.log(`[npm-wrapper-smoke] npm install -g ${LAUNCHER}@${version} (${tarballs.length} tarballs): alp --version, alp init and alp update work`);
+  // A client that cannot find alpd beside itself (the Paseo plugin) finds it through npm's alp on PATH;
+  // on Windows that is the alp.cmd shim (t-1f14). No alpd.json exists in this throwaway ALP_HOME.
+  const { findDaemonEntry } = await import('@anhlp/alp-client');
+  const entry = await findDaemonEntry({ home: env.ALP_HOME, env: { PATH: path.dirname(bin) } });
+  if (!entry || !realpathSync(entry).startsWith(realpathSync(prefix)) || !entry.endsWith(path.join('alp-cli', 'dist', 'alpd.js'))) throw new Error(`findDaemonEntry found ${entry}, not the installed @anhlp/alp-cli's dist/alpd.js under ${prefix}`);
+  console.log(`[npm-wrapper-smoke] npm install -g ${LAUNCHER}@${version} (${tarballs.length} tarballs): alp --version, alp init, alp update and finding alpd through alp on PATH work`);
 } finally {
   rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

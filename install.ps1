@@ -178,6 +178,8 @@ param(
       Move-Item -LiteralPath $unpacked -Destination $target
     } catch {
       $reason = $_.Exception.Message
+      # The running version goes back where it was, so app\current still points at files (t-1f14).
+      if ($aside -and -not (Test-Path -LiteralPath $target)) { Move-Item -LiteralPath (Join-Path $App $aside) -Destination $target -ErrorAction SilentlyContinue }
       Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
       if ($reason -like 'alp-install:*') { throw }
       Die "could not install $App\$newVersion ($reason)"

@@ -313,6 +313,36 @@ test('finds alpd.js behind the npm wrapper @anhlp/alp, in its alp-cli dependency
   assert.equal(await findDaemonEntry({ home, env }), undefined);
 });
 
+test('Windows: finds alpd.js behind the alp.cmd shims of npm and install.ps1 (t-1f14)', { skip: process.platform !== 'win32' }, async t => {
+  const directory = await realpathOf(await mkdtemp(path.join(tmpdir(), 'alp-cmd-')));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const home = path.join(directory, 'home');
+  // npm -g on Windows: <prefix>\alp.cmd runs "%dp0%\node_modules\@anhlp\alp\bin\alp.js".
+  const prefix = path.join(directory, 'npm');
+  const scope = path.join(prefix, 'node_modules', '@anhlp');
+  await mkdir(path.join(scope, 'alp', 'bin'), { recursive: true });
+  await mkdir(path.join(scope, 'alp-cli', 'dist'), { recursive: true });
+  await writeFile(path.join(scope, 'alp', 'package.json'), JSON.stringify({ name: '@anhlp/alp' }));
+  await writeFile(path.join(scope, 'alp', 'bin', 'alp.js'), '');
+  await writeFile(path.join(scope, 'alp-cli', 'dist', 'alpd.js'), '');
+  await writeFile(path.join(prefix, 'alp.cmd'), '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@anhlp\\alp\\bin\\alp.js" %*\r\n');
+  assert.equal(await findDaemonEntry({ home, env: { PATH: prefix } }), path.join(scope, 'alp-cli', 'dist', 'alpd.js'));
+  // install.ps1: <Dir>\alp.cmd runs "<Root>\app\current\node\node.exe" "<Root>\app\current\lib\...\cli.js".
+  const cli = path.join(directory, 'root', 'app', 'current', 'lib', 'node_modules', '@anhlp', 'alp-cli');
+  await mkdir(path.join(cli, 'dist'), { recursive: true });
+  await writeFile(path.join(cli, 'package.json'), JSON.stringify({ name: '@anhlp/alp-cli' }));
+  await writeFile(path.join(cli, 'dist', 'cli.js'), '');
+  await writeFile(path.join(cli, 'dist', 'alpd.js'), '');
+  const bin = path.join(directory, 'bin');
+  await mkdir(bin);
+  await writeFile(path.join(bin, 'alp.cmd'), `@echo off\r\nrem ALP (install.ps1)\r\n"${path.join(directory, 'root', 'app', 'current', 'node', 'node.exe')}" "${path.join(cli, 'dist', 'cli.js')}" %*\r\n`);
+  assert.equal(await findDaemonEntry({ home, env: { PATH: bin } }), path.join(cli, 'dist', 'alpd.js'));
+  // A shim that runs some other script is not ALP.
+  await writeFile(path.join(bin, 'alp.cmd'), `@echo off\r\n"${path.join(directory, 'other.js')}" %*\r\n`);
+  await writeFile(path.join(directory, 'other.js'), '');
+  assert.equal(await findDaemonEntry({ home, env: { PATH: bin } }), undefined);
+});
+
 test('findDaemonEntry ignores corrupt package.json without throwing SyntaxError (t-e69f)', { skip: process.platform === 'win32' }, async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-corrupt-pkg-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
