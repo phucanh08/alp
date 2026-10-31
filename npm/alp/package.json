@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp",
-  "version": "0.0.1-beta.6",
+  "version": "0.0.1-beta.7",
   "description": "ALP command line for npm: runs the CLI of @anhlp/alp-cli on your Node (22.12 or later)",
   "type": "module",
   "bin": {
@@ -16,7 +16,7 @@
     "node": ">=22.12"
   },
   "dependencies": {
-    "@anhlp/alp-cli": "0.0.1-beta.6"
+    "@anhlp/alp-cli": "0.0.1-beta.7"
   },
   "license": "Apache-2.0",
   "repository": {

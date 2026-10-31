@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp-daemon",
-  "version": "0.0.1-beta.6",
+  "version": "0.0.1-beta.7",
   "type": "module",
   "description": "ALP daemon module",
   "files": [
@@ -129,10 +129,10 @@
     "node": ">=22.12"
   },
   "dependencies": {
-    "@anhlp/alp-core": "0.0.1-beta.6",
-    "@anhlp/alp-runtime": "0.0.1-beta.6",
-    "@anhlp/alp-client": "0.0.1-beta.6",
-    "@anhlp/alp-protocol": "0.0.1-beta.6",
+    "@anhlp/alp-core": "0.0.1-beta.7",
+    "@anhlp/alp-runtime": "0.0.1-beta.7",
+    "@anhlp/alp-client": "0.0.1-beta.7",
+    "@anhlp/alp-protocol": "0.0.1-beta.7",
     "@anthropic-ai/sdk": "^0.131.0",
     "ws": "^8.22.0",
     "zod": "4.4.3",

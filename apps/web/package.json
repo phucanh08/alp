@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp-web",
-  "version": "0.0.1-beta.6",
+  "version": "0.0.1-beta.7",
   "private": true,
   "type": "module",
   "description": "ALP web: a browser client for alpd through the ALP remote gateway, on the portable client SDK",
@@ -17,8 +17,8 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@anhlp/alp-client": "0.0.1-beta.6",
-    "@anhlp/alp-protocol": "0.0.1-beta.6",
+    "@anhlp/alp-client": "0.0.1-beta.7",
+    "@anhlp/alp-protocol": "0.0.1-beta.7",
     "@codemirror/language": "6.12.4",
     "@codemirror/legacy-modes": "6.5.3",
     "@lezer/common": "1.5.0",
