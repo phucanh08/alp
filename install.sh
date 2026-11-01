@@ -139,7 +139,8 @@ case "$DIR" in /*) ;; *) DIR="$(pwd)/$DIR" ;; esac
 case "$ROOT" in /*) ;; *) ROOT="$(pwd)/$ROOT" ;; esac
 APP="$ROOT/app"
 
-tmp=$(mktemp -d 2>/dev/null || mktemp -d -t alp-install)
+# An explicit template: macOS mktemp -d without one ignores TMPDIR (it uses the per-user /var/folders).
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/alp-install.XXXXXX") || die "could not create a temporary directory in ${TMPDIR:-/tmp}"
 trap 'rm -rf "$tmp"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
