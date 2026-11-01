@@ -22,7 +22,7 @@ type SDKUserMessage = any;
 type SDKMessage = any;
 type ClaudeQuery = AsyncGenerator<SDKMessage, void> & {
   supportedModels(): Promise<Array<{ value: string; displayName: string; description: string; supportedEffortLevels?: string[] }>>;
-  supportedCommands(): Promise<Array<{ name: string; description: string; argumentHint?: string }>>;
+  supportedCommands(): Promise<Array<{ name: string; description: string; argumentHint?: string; builtin?: boolean }>>;
   usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(options: { skipBehaviors: boolean }): Promise<any>;
   getContextUsage(options: { detail: 'summary' | 'full' }): Promise<any>;
   interrupt(): Promise<unknown>;
@@ -228,23 +228,45 @@ type NativeConfig = {
 
 /** The plugin name ALP's skills are loaded under, so Claude Code calls them alp:<name>. */
 export const SKILL_PLUGIN = 'alp';
-/** Claude's own commands the composer does not offer: ALP does their work its own way (t-efa3). */
 /** Claude's /clear and its aliases (supportedCommands reports `clear [reset, new]`): each starts a new conversation. */
 const NEW_CONVERSATION_COMMANDS = ['clear', 'reset', 'new'];
-const NEW_CONVERSATION = new RegExp(`^\\s*\\/(?:${NEW_CONVERSATION_COMMANDS.join('|')})(?:\\s|$)`);
+const NEW_CONVERSATION = new RegExp(`^\\s*\\/(${NEW_CONVERSATION_COMMANDS.join('|')})(?:\\s|$)`);
+/** Claude's own commands the composer does not offer: ALP does their work its own way (t-efa3). */
 const ALP_HANDLED_COMMANDS = new Set([...NEW_CONVERSATION_COMMANDS, 'compact', 'rewind']);
+/** The aliases of /clear a command of the user's may take as its own name. */
+const CLEAR_ALIASES = new Set(['reset', 'new']);
+
+type ListedCommand = { name?: unknown; builtin?: unknown };
+/**
+ * t-5ac5: the aliases of /clear (new, reset) that, in this listing, run a command of the user's,
+ * project, plugin or MCP server rather than Claude's /clear. The SDK marks Claude's own rows
+ * `builtin: true`; a marked row wins its name, and an alias runs a command that has it as its name
+ * (SlashCommand.builtin). So /new is the user's when an unmarked row is named new and no marked row is.
+ * A listing without the marker (an older Claude Code) cannot tell the two apart: nothing is the
+ * user's then, and ALP keeps refusing /new and /reset, since letting Claude's /clear through loses the
+ * conversation while refusing a custom command only costs the user its name. /clear itself is always
+ * Claude's: a marked row is named clear.
+ */
+export function customClearAliases(listed: ReadonlyArray<ListedCommand> | undefined): Set<string> {
+  const rows = Array.isArray(listed) ? listed : [];
+  if (!rows.some(row => typeof row?.builtin === 'boolean')) return new Set();
+  const builtin = new Set(rows.filter(row => row?.builtin === true).map(row => row.name));
+  return new Set(rows.filter(row => row?.builtin !== true && typeof row?.name === 'string' && CLEAR_ALIASES.has(row.name) && !builtin.has(row.name)).map(row => row.name as string));
+}
 
 /**
  * t-e906: Claude's /clear moves it to a new conversation under a new session id while ALP keeps the
  * old thread, so resume, fork and rewind would point at the conversation from before. ALP refuses it
  * rather than follow: its timeline, turn ids and rewinds belong to the old conversation. /reset and /new are
- * the same command.
+ * the same command, unless the session lists a command of the user's under that name (`custom`,
+ * from customClearAliases).
  */
-export function nativeCommandRefusal(runtimeKind: string, content: ReadonlyArray<{ type: string; text?: string }>) {
+export function nativeCommandRefusal(runtimeKind: string, content: ReadonlyArray<{ type: string; text?: string }>, custom?: ReadonlySet<string>) {
   if (runtimeKind !== 'claude') return undefined;
   // The text Claude gets: every text part, joined as startPrompt joins them.
   const typed = content.filter(part => part.type === 'text').map(part => part.text ?? '').join('\n');
-  if (!NEW_CONVERSATION.test(typed)) return undefined;
+  const named = NEW_CONVERSATION.exec(typed)?.[1];
+  if (!named || custom?.has(named)) return undefined;
   return 'ALP does not pass /clear (or /new, /reset) to Claude: Claude would start a new conversation that this session does not follow. Start a new session in ALP for a fresh conversation, or compact this one (alp compact, or Compact in the app).';
 }
 
@@ -488,15 +510,26 @@ export class ClaudeTransport {
   /**
    * Claude's slash commands, skills included, for the composer (t-f628); none before the session starts.
    * Not the ones whose work ALP does itself (t-efa3): /clear (/reset, /new) moves Claude to a new conversation ALP does not
-   * follow, and /compact and /rewind skip ALP's checkpoint and its rewind of the timeline.
+   * follow, and /compact and /rewind skip ALP's checkpoint and its rewind of the timeline. A command of the user's
+   * named new or reset is offered (t-5ac5, customClearAliases); one named clear, compact or rewind never runs, Claude's wins.
    */
   async commands() {
-    const listed = this.query ? await optionalRead(async () => this.query!.supportedCommands(), 10_000) : undefined;
-    return (Array.isArray(listed) ? listed : []).filter(command => typeof command?.name === 'string' && command.name && !ALP_HANDLED_COMMANDS.has(command.name)).map(command => ({
+    const listed = await this.listCommands();
+    const custom = customClearAliases(listed);
+    return (Array.isArray(listed) ? listed : []).filter(command => typeof command?.name === 'string' && command.name
+      && (!ALP_HANDLED_COMMANDS.has(command.name) || (command.builtin !== true && custom.has(command.name)))).map(command => ({
       name: command.name, description: typeof command.description === 'string' ? command.description : '',
       ...(command.argumentHint ? { argumentHint: command.argumentHint } : {}),
       kind: command.name.startsWith(`${SKILL_PLUGIN}:`) ? 'skill' as const : 'command' as const,
     }));
+  }
+  /** The aliases of /clear that run a command of the user's, as the last listing said (t-5ac5); none before one. */
+  customCommands(): ReadonlySet<string> { return this.customAliases; }
+  private customAliases: ReadonlySet<string> = new Set();
+  private async listCommands() {
+    const listed = this.query ? await optionalRead(async () => this.query!.supportedCommands(), 10_000) : undefined;
+    if (Array.isArray(listed)) this.customAliases = customClearAliases(listed);
+    return listed;
   }
   async initialize() {}
 
@@ -776,6 +809,8 @@ export class ClaudeTransport {
     this.query = query({ prompt: this.input, options }) as ClaudeQuery;
     this.pump = this.consume(this.query).catch((error) => this.fail(error));
     void this.measureContext();
+    // The listing says which of /new and /reset are the user's own, before the first prompt is checked.
+    void this.listCommands();
   }
 
   /** Reads the window and the compaction threshold Claude resolved for this session, before any turn. */

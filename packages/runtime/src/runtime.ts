@@ -4853,7 +4853,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (prompt.content.some(content => content.type !== 'text' && content.type !== 'image' && content.type !== 'attachment')) {
       throw new Error('Only text, image and attachment prompts are supported');
     }
-    const refusal = origin === 'user' ? nativeCommandRefusal(session.runtimeKind, prompt.content) : undefined;
+    const refusal = origin === 'user' ? nativeCommandRefusal(session.runtimeKind, prompt.content, session.runtime.customCommands?.()) : undefined;
     if (refusal) throw new Error(refusal);
     // Inline images only, never a path or URL: the native input gets a data URL ALP builds itself.
     const images = prompt.content.filter(content => content.type === 'image') as Array<{ type: 'image'; mimeType: string; data: string }>;
@@ -5181,7 +5181,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     bindAttachments(reader: AttachmentReader | undefined) { attachmentReader = reader; },
     refusesPrompt(sessionId: string, content: PromptContent) {
       const session = sessions.get(sessionId);
-      return session ? nativeCommandRefusal(session.runtimeKind, content) : undefined;
+      return session ? nativeCommandRefusal(session.runtimeKind, content, session.runtime.customCommands?.()) : undefined;
     },
     takesAttachments(sessionId: string) {
       const session = sessions.get(sessionId);

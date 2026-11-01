@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
-import { ClaudeTransport, createAlpRuntime } from '@anhlp/alp-runtime';
+import { ClaudeTransport, createAlpRuntime, customClearAliases, nativeCommandRefusal } from '@anhlp/alp-runtime';
 
 const text = text => ({ type: 'text', text });
 const start = id => ({ type: 'message_start', message: { id, content: [] } });
@@ -220,4 +220,36 @@ test('Claude\'s commands for the composer leave out /clear, /compact and /rewind
   assert.deepEqual(await transport.commands(), [], 'none before the session starts');
   transport.query = { supportedCommands: async () => ['clear', 'compact', 'rewind', 'model', 'alp:xia'].map(name => ({ name, description: name, argumentHint: '' })) };
   assert.deepEqual(await transport.commands(), [{ name: 'model', description: 'model', kind: 'command' }, { name: 'alp:xia', description: 'alp:xia', kind: 'skill' }]);
+});
+
+// t-5ac5: a command of the user's named new or reset is not Claude's /clear: it is offered and passes.
+test('a custom command named new or reset is offered and not refused; Claude\'s own aliases still are', async () => {
+  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env);
+  const rows = [
+    { name: 'clear', description: 'Clear', argumentHint: '', aliases: ['reset', 'new'], builtin: true },
+    { name: 'compact', description: 'Compact', argumentHint: '', builtin: true },
+    { name: 'model', description: 'Model', argumentHint: '', builtin: true },
+    { name: 'new', description: 'My new', argumentHint: '<what>' },
+    // A user's command named clear never runs: Claude's own row wins the name.
+    { name: 'clear', description: 'My clear', argumentHint: '' },
+  ];
+  transport.query = { supportedCommands: async () => rows };
+  assert.deepEqual(await transport.commands(), [
+    { name: 'model', description: 'Model', kind: 'command' },
+    { name: 'new', description: 'My new', argumentHint: '<what>', kind: 'command' },
+  ]);
+  const custom = transport.customCommands();
+  assert.deepEqual([...custom], ['new']);
+  const text = value => [{ type: 'text', text: value }];
+  assert.equal(nativeCommandRefusal('claude', text('/new idea'), custom), undefined, 'the user\'s /new passes');
+  assert.ok(nativeCommandRefusal('claude', text('/reset'), custom), '/reset is still Claude\'s /clear');
+  assert.ok(nativeCommandRefusal('claude', text('/clear'), custom), '/clear is always Claude\'s');
+  // A row marked builtin named new wins over the user's.
+  assert.deepEqual([...customClearAliases([...rows, { name: 'new', description: '', argumentHint: '', builtin: true }])], []);
+  // A listing without the marker cannot tell them apart: /new stays refused and hidden.
+  const unmarked = rows.map(({ builtin, ...row }) => row);
+  assert.deepEqual([...customClearAliases(unmarked)], []);
+  transport.query = { supportedCommands: async () => unmarked };
+  assert.deepEqual((await transport.commands()).map(row => row.name), ['model']);
+  assert.deepEqual([...transport.customCommands()], []);
 });
