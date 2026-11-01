@@ -120,6 +120,34 @@ test('install.ps1 -Version picks that release, -Dir installs elsewhere, -NoModif
   assert.match(missing.stderr, /no build for windows-x64/);
 });
 
+test('install.ps1 -Root alone is self-contained (<Root>\\bin, no PATH edit); -ModifyPath adds <Root>\\bin once; both switches conflict (t-bf7f)', { skip: !windows }, async t => {
+  const saved = readUserPath();
+  t.after(() => restoreUserPath(saved));
+  const releases = await mirror(t);
+  const localAppData = await temp(t, 'alp-ps-lad-');
+  const root = path.join(localAppData, 'alp-root');
+  const bin = path.join(root, 'bin');
+  const onPath = () => userPath().split(';').filter(entry => entry.toLowerCase() === bin.toLowerCase()).length;
+  const alone = await install(['-Root', root, '-BaseUrl', releases], { localAppData });
+  assert.equal(alone.code, 0, alone.stderr);
+  assert.ok(existsSync(path.join(bin, 'alp.cmd')), 'the command goes to <Root>\\bin');
+  assert.ok(existsSync(path.join(root, 'app', '9.8.7', 'alp-bundle.json')), 'the bundle goes to <Root>\\app');
+  assert.equal(existsSync(path.join(localAppData, 'Programs', 'alp')), false, 'nothing in the default directory');
+  assert.equal(execFileSync(path.join(bin, 'alp.cmd'), ['--version'], { encoding: 'utf8', shell: true }).trim(), '9.8.7');
+  assert.equal(userPath(), saved.value, '-Root alone edits no PATH');
+  assert.match(alone.stdout, /is not on your user PATH/);
+  const modify = await install(['-Root', root, '-ModifyPath', '-BaseUrl', releases], { localAppData });
+  assert.equal(modify.code, 0, modify.stderr);
+  assert.equal(onPath(), 1, `${bin} in ${userPath()}\n${modify.stdout}`);
+  const again = await install(['-Root', root, '-BaseUrl', releases], { localAppData, extraEnv: { ALP_INSTALL_MODIFY_PATH: '1' } });
+  assert.equal(again.code, 0, again.stderr);
+  assert.match(again.stdout, /already on your user PATH/);
+  assert.equal(onPath(), 1, 'ALP_INSTALL_MODIFY_PATH=1 adds no second entry');
+  const conflict = await install(['-Root', root, '-ModifyPath', '-NoModifyPath', '-BaseUrl', releases], { localAppData });
+  assert.notEqual(conflict.code, 0);
+  assert.match(conflict.stderr, /-NoModifyPath and -ModifyPath conflict/);
+});
+
 test('install.ps1 refuses a corrupted archive, a malformed SHA256SUMS, bad versions and mirrors, and installs nothing', { skip: !windows }, async t => {
   const releases = await mirror(t);
   const localAppData = await temp(t, 'alp-ps-lad-');
