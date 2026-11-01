@@ -39,6 +39,8 @@ async function tree(root) {
     for (const entry of await readdir(path.join(root, relative), { withFileTypes: true }).catch(() => [])) {
       const name = relative ? `${relative}/${entry.name}` : entry.name;
       if (['logs', 'backups', 'alpd.lock', 'alpd.sock', 'alpd.json', 'state/alpd.running', 'state/alpd.held'].includes(name)) continue;
+      // The running alpd's disk guard writes and removes this probe; it may vanish between readdir and readFile (t-bf7f).
+      if (/(^|\/)\.alpd-disk-probe-\d+$/.test(name)) continue;
       if (entry.isDirectory()) { found[name] = 'dir'; await walk(name); }
       else found[name] = createHash('sha256').update(await readFile(path.join(root, name))).digest('hex').slice(0, 16);
     }
