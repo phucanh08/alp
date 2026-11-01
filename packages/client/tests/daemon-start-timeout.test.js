@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { DAEMON_START_TIMEOUT_MS, acquireDaemonLock, daemonPaths, daemonStartTimeoutMs, releaseDaemonLock } from '@anhlp/alp-client/index';
+import { DAEMON_START_TIMEOUT_MS, acquireDaemonLock, daemonPaths, daemonStartTimeoutMs, ensureDaemon, releaseDaemonLock } from '@anhlp/alp-client/index';
 import { startDaemon } from '@anhlp/alp-client/supervise';
 
 async function startingHome(t) {
@@ -48,4 +48,26 @@ test('startDaemon returns once a slow alpd becomes ready within the wait', async
   t.after(() => clearTimeout(ready));
   const socket = await startDaemon({ home, env: { ...process.env, ALP_DAEMON_START_TIMEOUT_MS: '10000' } });
   assert.equal(socket, daemonPaths(home).socket);
+});
+
+test('an explicit timeoutMs overrides ALP_DAEMON_START_TIMEOUT_MS (t-6147)', async t => {
+  const home = await startingHome(t);
+  const env = { ...process.env, ALP_DAEMON_START_TIMEOUT_MS: '600000' };
+  const started = Date.now();
+  await assert.rejects(startDaemon({ home, env, timeoutMs: 300 }), /did not become ready within 0\.3 s/);
+  await assert.rejects(ensureDaemon({ home, env, timeoutMs: 300 }), /did not become ready within 300 ms/);
+  assert.ok(Date.now() - started < 10_000, 'neither waited the env var\'s ten minutes');
+});
+
+test('ensureDaemon waits ALP_DAEMON_START_TIMEOUT_MS by default, else 60 s (t-6147)', async t => {
+  const home = await startingHome(t);
+  await assert.rejects(ensureDaemon({ home, env: { ...process.env, ALP_DAEMON_START_TIMEOUT_MS: '300' } }), /did not become ready within 300 ms/);
+  // Without the variable the wait is 60 s: a clock that runs 10 s per read shows it without waiting.
+  const env = { ...process.env };
+  delete env.ALP_DAEMON_START_TIMEOUT_MS;
+  const now = Date.now;
+  let clock = now();
+  Date.now = () => (clock += 10_000);
+  t.after(() => { Date.now = now; });
+  await assert.rejects(ensureDaemon({ home, env, lifecycleLocked: true }), /did not become ready within 60000 ms/);
 });

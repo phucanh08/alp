@@ -590,3 +590,25 @@ test('renameWithRetry unit contract: backoff schedule, bounds and error filterin
   assert.deepEqual(delays, [10, 20, 30]);
   assert.equal(await readFile(dst, 'utf8'), 'test content');
 });
+
+test('a credential with a malformed agent mark is skipped and the gateway logs which one, once per load (t-6147)', async t => {
+  const { home: gatewayHome, workspace } = await home(t);
+  const good = await createCredential(gatewayHome, { label: 'u', workspaces: [workspace], permissions: ['session.read'] });
+  const bad = await createCredential(gatewayHome, { label: 'a', workspaces: [workspace], permissions: ['session.read'], agent: 'peer' });
+  const file = credentialsFile(gatewayHome);
+  const data = JSON.parse(await readFile(file, 'utf8'));
+  const stored = data.credentials.find(entry => entry.id === bad.credential.id);
+  stored.agent = 'yes';
+  await writeFile(file, JSON.stringify(data), { mode: 0o600 });
+  const lines = [];
+  const store = new CredentialStore({ home: gatewayHome, pollMs: 0, logger: createGatewayLogger({ write: line => lines.push(line) }) });
+  t.after(() => store.close());
+  await store.reload();
+  store.expire();
+  assert.equal(store.verify(bad.token), undefined, 'skipped');
+  assert.ok(store.verify(good.token), 'the others still work');
+  const warned = lines.filter(line => line.includes('ALP_GATEWAY_CREDENTIAL_MALFORMED_AGENT'));
+  assert.equal(warned.length, 1, lines.join('\n'));
+  assert.ok(warned[0].includes(bad.credential.id) && warned[0].includes('agent is not true'), warned[0]);
+  assert.ok(!warned[0].includes(parseToken(bad.token).secret));
+});
