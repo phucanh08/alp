@@ -71,7 +71,10 @@ export function runNodeTests(files, { extra = [] } = {}) {
     const result = spawnSync(process.execPath, ['--test', '--test-timeout=300000', ...extra, ...files], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...hermeticEnv(), ALP_HOME: home, TMPDIR: scratch, TMP: scratch, TEMP: scratch } });
     return result.status ?? 1;
   } finally {
-    rmSync(home, { recursive: true, force: true });
-    rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    // A directory a lingering child still holds must not turn a passing run into a failure.
+    for (const dir of [home, scratch]) {
+      try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+      catch (error) { console.warn(`warning: could not remove ${dir}: ${error.message}`); }
+    }
   }
 }
