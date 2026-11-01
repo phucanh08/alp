@@ -251,6 +251,12 @@ export function createScheduler({ store, runtime, deliver, ready, session, settl
     opening.delete(current.id);
     if (snapshot.parentId) return fail(current, 'The session this job continues is not a root session', 'not_a_root');
     if (projectKey(snapshot.projectRoot) !== projectKey(current.projectRoot)) return fail(current, 'The session this job continues belongs to another project', 'other_project');
+    // t-5ac5: the delivered text starts with ALP's own preamble, so the runtime's check of the
+    // whole message never sees a native command the job's prompt opens with (Claude's /clear,
+    // /new, /reset). The job's own words are checked: such a job fails with the reason instead
+    // of being recorded as delivered while the command it asked for never runs.
+    const refused = runtime.refusesPrompt?.(current.sessionId, [{ type: 'text', text: current.prompt }]);
+    if (refused) return fail(current, refused, 'native_command_unsupported');
     const waitBusy = async (): Promise<'waiting' | 'failed'> => {
       // The session is working. The wait is bounded from the moment it began: how
       // late the job is says nothing about how long a running turn takes to end.
