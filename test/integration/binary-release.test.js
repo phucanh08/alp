@@ -135,6 +135,19 @@ test('install.sh --root alone puts the command in <root>/bin and leaves HOME and
   assert.ok((await readFile(path.join(shell, '.zshrc'), 'utf8')).includes(`export PATH="${path.join(root, 'cmd')}:$PATH"`));
 });
 
+test('install.sh downloads into $TMPDIR and removes its directory there (t-bf7f)', { skip: !posix }, async t => {
+  const releases = await mirror(t);
+  const tmp = await temp(t, 'alp-tmpdir-');
+  const ok = await install(['--root', path.join(tmp, 'root'), '--base-url', releases], { home: await temp(t, 'alp-home-'), extraEnv: { TMPDIR: path.join(tmp, 'scratch') } });
+  // A TMPDIR that does not exist is used, not replaced by the system default: the install stops there.
+  assert.notEqual(ok.code, 0, ok.stdout);
+  assert.match(ok.stderr, /could not create a temporary directory in .*alp-tmpdir-.*\/scratch/);
+  await mkdir(path.join(tmp, 'scratch'));
+  const done = await install(['--root', path.join(tmp, 'root'), '--base-url', releases], { home: await temp(t, 'alp-home-'), extraEnv: { TMPDIR: path.join(tmp, 'scratch') } });
+  assert.equal(done.code, 0, done.stderr);
+  assert.deepEqual(await readdir(path.join(tmp, 'scratch')), [], 'its download directory is gone');
+});
+
 test('install.sh refuses a corrupted archive, a malformed SHA256SUMS, bad options and versions, and installs nothing', { skip: !posix }, async t => {
   const releases = await mirror(t);
   const home = await temp(t, 'alp-home-');
