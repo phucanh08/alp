@@ -223,6 +223,13 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
     agent chạy cùng OS user có thể xóa biến đó, sửa trực tiếp `credentials.json`, hay đọc token người
     dùng từ nơi client lưu, và vào như người dùng. Socket alpd cục bộ cũng tin `principal.agent` client
     tự khai (chỉ làm bớt quyền). Chỉ tách OS user hoặc sandbox mới chặn được những việc đó.
+  - Rủi ro với alpd cũ (trước t-53aa): gateway gửi hello đánh dấu `principal.agent`, nhưng alpd cũ
+    không biết capability đó, có thể vẫn trả lời hello bình thường và **không áp dụng dấu**: connection của
+    credential agent khi ấy làm được mọi việc của người dùng (human gate, `question.answer`, terminal).
+    Gateway không phân biệt được alpd cũ bỏ qua dấu với alpd mới đã nhận dấu. Khi cấp credential
+    `--agent`, hãy chắc gateway và alpd chạy cùng bản ALP (nâng cấp alpd rồi `alp daemon restart`).
+  - Credential có dấu agent sai dạng bị bỏ qua và gateway ghi log cảnh báo
+    `ALP_GATEWAY_CREDENTIAL_MALFORMED_AGENT` (kèm id và lý do, không kèm secret) mỗi lần nạp lại file.
 - Thu hồi khẩn cấp: `credential revoke`. Nếu file credentials hỏng hoặc bị lộ: dừng gateway
   (`systemctl --user stop alp-gateway`). alpd vẫn chạy bình thường.
 

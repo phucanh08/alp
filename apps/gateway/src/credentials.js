@@ -331,6 +331,18 @@ export async function listCredentials(home) {
   return (await readCredentials(home)).credentials.map(describeCredential);
 }
 
+/**
+ * Why a stored credential's agent mark is not one the CLI could have written, or undefined.
+ * Anything but `true` in `agent` is refused, not read as a user's; a name only on an agent
+ * credential, and only one the CLI could have written. @param {StoredCredential} stored
+ */
+function malformedAgent(stored) {
+  if (stored.agent !== undefined && stored.agent !== true) return 'agent is not true';
+  if (stored.agentName !== undefined && stored.agent !== true) return 'agentName on a credential that is not an agent\'s';
+  if (stored.agentName !== undefined && (typeof stored.agentName !== 'string' || !AGENT_NAME.test(stored.agentName))) return 'agentName is not a valid agent name';
+  return undefined;
+}
+
 /** A grant from a stored credential, or undefined when it can no longer be used. @param {StoredCredential} stored @param {number} now */
 function grantOf(stored, now) {
   if (stored.revokedAt) return undefined;
@@ -341,11 +353,8 @@ function grantOf(stored, now) {
   if (!workspaces.length || !permissions.length || typeof stored.hash !== 'string' || !/^[a-f0-9]{64}$/.test(stored.hash)) return undefined;
   let mappingIds; try { mappingIds = checkMappings(stored.worktreeMappings ?? []); } catch { return undefined; }
   if (stored.scopeId !== undefined && (typeof stored.scopeId !== 'string' || !/^[a-f0-9]{32}$/.test(stored.scopeId))) return undefined;
-  // Anything but `true` in `agent` is not a credential the CLI wrote: refused, not read as a user's.
-  if (stored.agent !== undefined && stored.agent !== true) return undefined;
+  if (malformedAgent(stored)) return undefined;
   const agent = stored.agent === true;
-  // A name only on an agent credential, and only one the CLI could have written.
-  if (stored.agentName !== undefined && (!agent || typeof stored.agentName !== 'string' || !AGENT_NAME.test(stored.agentName))) return undefined;
   const agentName = stored.agentName;
   return /** @type {Grant} */ ({
     id: stored.id,
@@ -403,6 +412,11 @@ export class CredentialStore {
       this.#log?.error('the credentials file cannot be used; every credential is refused until it is fixed', { code: 'ALP_GATEWAY_CREDENTIALS_UNREADABLE', error });
     }
     this.#stored = new Map(list.filter(entry => typeof entry?.id === 'string').map(entry => [entry.id, entry]));
+    // Logged once per load (the file changed), not on every expiry pass; the values are not logged.
+    for (const [id, stored] of this.#stored) {
+      const reason = malformedAgent(stored);
+      if (reason) this.#log?.warn('a credential with a malformed agent mark is skipped; every connection with it is refused', { code: 'ALP_GATEWAY_CREDENTIAL_MALFORMED_AGENT', id, reason });
+    }
     this.#refresh();
   }
 
