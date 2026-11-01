@@ -307,9 +307,12 @@ export async function acquireDaemonLock(home, contents) {
         // The write failed (a full disk): the file this call created exclusively holds no lock, and
         // a lock no one can read would stop every later start. Nobody else removes an unreadable
         // lock (below), so this one is still ours; remove it, unless another file took its place.
+        // When the fstat itself failed there is no identity to compare, but the file this call
+        // created holds nothing yet, and nobody else removes an unreadable lock, so the path still
+        // names it: remove it too, or an empty lock would stop every later start.
         await handle.close().catch(() => {});
         const there = await lstat(file).catch(() => undefined);
-        if (ours && there && ours.ino === there.ino && ours.dev === there.dev) await unlink(file).catch(() => {});
+        if (there && (!ours || (ours.ino === there.ino && ours.dev === there.dev))) await unlink(file).catch(() => {});
         throw error;
       }
       await handle.close();
