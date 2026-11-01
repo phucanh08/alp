@@ -242,10 +242,15 @@ test('ConPTY: a real cmd.exe echoes, resizes and is killed by the owner', { skip
   // The caret keeps the typed command (echoed by ConPTY) from matching: only cmd.exe's output does.
   pty.write('echo ALP_CON^PTY_OK\r');
   await until(() => output.includes('ALP_CONPTY_OK'), 'cmd.exe output');
+  // Only output after the resize counts: an earlier screen cannot satisfy the check below.
+  output = '';
   pty.resize(120, 40);
-  // Ask again until the resize is visible: the resize and the typed command take different paths to ConPTY.
+  // Ask again until the resize is visible: the resize and the typed command take different paths to
+  // ConPTY. The width comes from .NET, not `mode con`, whose labels follow the runner's language; the
+  // quotes split the marker in the typed command, so only PowerShell's output matches.
   let asked = 0;
-  await until(() => { if (/Columns:\s+120\b/.test(plain(output))) return true; if (asked++ % 40 === 0) pty.write('mode con\r'); return false; }, 'the resized console');
+  const askWidth = 'powershell -NoProfile -NonInteractive -Command "Write-Output (\'ALP_COLS=\' + [Console]::WindowWidth)"\r';
+  await until(() => { if (/ALP_COLS=120\b/.test(plain(output))) return true; if (asked++ % 120 === 0) pty.write(askWidth); return false; }, 'the resized console', 30000);
   pty.kill();
   await until(() => !alive(pty.pid), 'the shell to exit after kill');
   await until(() => exit !== undefined, 'the node-pty exit event');
