@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { existsSync, readdirSync, readFileSync, readlinkSync, rmSync } from 'node:fs';
+import fs, { existsSync, readdirSync, readFileSync, readlinkSync, rmSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -224,6 +225,29 @@ test('bundle: a reinstall whose final move fails puts the running copy back (t-1
   assert.equal(await currentVersion(m), '1.0.0');
   assert.ok(!readdirSync(m.app).some(name => name.startsWith('.alp-old-')), readdirSync(m.app).join(','));
   assert.ok(existsSync(path.join(m.app, '1.0.0', 'alp-bundle.json')), 'the running copy is back in app/1.0.0');
+});
+
+test('bundle: when the running copy cannot be put back either, the error says where it is (t-bf7f)', async t => {
+  const m = await mirror(t, { version: '1.0.0' });
+  const runVersion = root => { const version = JSON.parse(readFileSync(path.join(root, 'alp-bundle.json'), 'utf8')).version; rmSync(root, { recursive: true, force: true }); return version; };
+  // Moving the aside copy back into app/1.0.0 fails too (self-update.js uses the node:fs namespace).
+  const original = fs.renameSync;
+  fs.renameSync = (from, to) => {
+    if (path.basename(String(from)).startsWith('.alp-old-') && path.basename(String(to)) === '1.0.0') throw Object.assign(new Error(`EACCES: permission denied, rename '${from}' -> '${to}'`), { code: 'EACCES' });
+    return original(from, to);
+  };
+  syncBuiltinESMExports();
+  t.after(() => { fs.renameSync = original; syncBuiltinESMExports(); });
+  const error = await selfUpdate(['--version', '1.0.0', '--yes'], { ...baseDeps(m, []), runVersion }).then(() => assert.fail('the update must fail'), caught => caught);
+  fs.renameSync = original;
+  syncBuiltinESMExports();
+  const aside = readdirSync(m.app).find(name => /^\.alp-old-[0-9a-f]+$/.test(name));
+  assert.ok(aside, `the running copy stays aside: ${readdirSync(m.app).join(',')}`);
+  assert.match(error.message, /ENOENT/, 'the first failure is kept');
+  assert.ok(error.message.includes(`the running ALP 1.0.0 is in ${path.join(m.app, aside)}: move it back to ${path.join(m.app, '1.0.0')}`), error.message);
+  assert.equal(error.cause?.code, 'ENOENT');
+  assert.ok(existsSync(path.join(m.app, aside, 'alp-bundle.json')), 'the aside copy is intact');
+  assert.ok(!existsSync(path.join(m.app, '1.0.0')), 'nothing half-moved in its place');
 });
 
 test('bundle: a checksum mismatch, a failed provenance check or a wrong version changes nothing', async t => {
