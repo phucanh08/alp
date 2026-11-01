@@ -886,3 +886,34 @@ test('a job created with keepsSession false does not keep its session open, surv
   assert.equal(scheduler.holds('loose'), false);
   assert.equal(scheduler.holds('kept'), true);
 });
+
+test('a job whose prompt opens with a native command the session refuses fails with the reason, and is not delivered', async t => {
+  const { directory, project } = await setup(t);
+  const store = createScheduleStore(path.join(directory, 'refused-jobs'));
+  const refused = 'ALP does not pass /clear (or /new, /reset) to Claude';
+  const seen = [];
+  const runtime = {
+    snapshot: () => ({ projectRoot: project }),
+    // A Claude session: the runtime refuses the job's own words, which start with /clear.
+    refusesPrompt: (_id, content) => { seen.push(content); return /^\s*\/(clear|new|reset)(\s|$)/.test(content[0].text) ? refused : undefined; },
+  };
+  let sends = 0;
+  const scheduler = createScheduler({ store, runtime, deliver: async () => { sends++; return { outcome: 'accepted' }; } });
+  const job = await store.create({ projectRoot: project, sessionId: 'root', dueAt: inMs(-1), prompt: '/clear and start over' });
+  assert.deepEqual(await scheduler.tick(), { delivered: 0, failed: 1, waiting: 0 });
+  const after = await store.get(job.id);
+  assert.equal(after.status, 'failed');
+  assert.equal(after.lastError.code, 'native_command_unsupported');
+  assert.equal(after.lastError.message, refused);
+  assert.equal(after.deliveredAt, undefined);
+  assert.equal(sends, 0, 'nothing was sent');
+  assert.equal(seen[0][0].text, '/clear and start over', 'the job prompt itself is checked, not the preamble');
+});
+
+test('a Claude runtime refuses the job prompt that the rendered preamble would hide', async () => {
+  const { nativeCommandRefusal } = await import('@anhlp/alp-runtime');
+  const { renderPrompt } = await import('@anhlp/alp-daemon');
+  const job = { id: 'j', dueAt: new Date().toISOString(), prompt: '/new' };
+  assert.equal(nativeCommandRefusal('claude', [{ type: 'text', text: renderPrompt(job) }]), undefined);
+  assert.ok(nativeCommandRefusal('claude', [{ type: 'text', text: job.prompt }]));
+});
