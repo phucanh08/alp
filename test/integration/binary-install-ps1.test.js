@@ -201,6 +201,32 @@ test('install.ps1 refuses a -Dir with a PATH separator or a %', { skip: !windows
   const percent = await install(['-Dir', `${localAppData}\\a%TEMP%b`, '-BaseUrl', releases], { localAppData });
   assert.notEqual(percent.code, 0);
   assert.match(percent.stderr, /cannot contain '%'/);
+  // t-5ac5: -Root with -Dir is checked too: alp.cmd names <Root>\\app\\current, and cmd.exe expands a '%'.
+  const root = await install(['-Dir', `${localAppData}\\bin`, '-Root', `${localAppData}\\r%TEMP%x`, '-NoModifyPath', '-BaseUrl', releases], { localAppData });
+  assert.notEqual(root.code, 0);
+  assert.match(root.stderr, /-Root cannot contain '%'/);
+  assert.equal(existsSync(path.join(localAppData, 'bin', 'alp.cmd')), false, 'nothing installed');
+});
+
+// t-5ac5: the header says each option has an environment variable that also works with `| iex` (which
+// passes no parameters). Static: runs everywhere.
+test('install.ps1 documents an environment variable for every option, and reads each one it documents', () => {
+  const source = readFileSync(INSTALL, 'utf8');
+  const header = source.slice(0, source.indexOf('[CmdletBinding()]'));
+  assert.match(header, /environment variables in brackets, which also work with `\| iex`/);
+  const documented = new Map([...header.matchAll(/^#\s+-(\w+)\b.*\[(ALP_INSTALL_\w+)(=1)?\]\s*$/gm)].map(match => [match[1], match[2]]));
+  const params = source.slice(source.indexOf('param('), source.indexOf('\n)\n') + 3);
+  const declared = [...params.matchAll(/\[(string|switch)\]\$(\w+)(?:\s*=\s*\$env:(\w+))?/g)].map(match => ({ kind: match[1], name: match[2], env: match[3] }));
+  assert.ok(declared.length >= 7, 'the param block was read');
+  for (const { kind, name, env } of declared) {
+    if (name === 'Help') { assert.equal(documented.has(name), false); continue; }
+    assert.ok(documented.has(name), `-${name} names its environment variable`);
+    const variable = documented.get(name);
+    // A string defaults to its variable; a switch is set when its variable is 1.
+    if (kind === 'string') assert.equal(env, variable, `-${name} defaults to $env:${variable}`);
+    else assert.match(source, new RegExp(`\\$env:${variable} -eq '1'\\) \\{ \\$${name} = \\$true \\}`), `-${name} is set by ${variable}=1`);
+  }
+  assert.equal(documented.size, declared.length - 1, 'every documented option is a parameter');
 });
 
 const CLI = path.join('lib', 'node_modules', '@anhlp', 'alp-cli', 'dist', 'cli.js');

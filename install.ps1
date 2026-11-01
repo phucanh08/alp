@@ -96,6 +96,9 @@ param(
   if ($Dir.Contains(';')) { Die "-Dir cannot contain ';' (it would split PATH): $Dir" }
   # The user Path is REG_EXPAND_SZ: a '%' would be read as a variable reference.
   if ($Dir.Contains('%')) { Die "-Dir cannot contain '%' (the user Path would expand it): $Dir" }
+  # t-5ac5: with -Dir, -Root is not checked through -Dir, yet alp.cmd names <Root>\app\current and
+  # cmd.exe would expand a '%' in it.
+  if ($Root -and $Root.Contains('%')) { Die "-Root cannot contain '%' (alp.cmd would expand it): $Root" }
   $Dir = [System.IO.Path]::GetFullPath($Dir)
   if (-not $Root) { $Root = $Dir }
   $Root = [System.IO.Path]::GetFullPath($Root)
