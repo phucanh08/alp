@@ -25,7 +25,8 @@ async function until(check, what, ms = 15000) {
 }
 async function home(t, config = { version: 1, allowRemoteTerminal: true }) {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-win-term-')));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  // A ConPTY shell that was just killed may hold the directory a moment longer: EBUSY on Windows (t-bf7f).
+  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
   if (config) await writeFile(path.join(dir, 'terminal.json'), JSON.stringify(config), { mode: 0o600 });
   return dir;
 }

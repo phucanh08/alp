@@ -234,7 +234,8 @@ test('summaries: forkedFrom only when its source is in the grant, branches and c
   const { client } = await sdk('writer');
   const fx = (await client.request('session.get', { sessionId: 'fx' })).session;
   assert.equal(Object.hasOwn(fx, 'forkedFrom'), false, 'the source sb is outside the grant');
-  assert.equal(JSON.stringify(fx).includes('sb'), false);
+  // The id as a JSON string: the bare letters also occur in the mkdtemp workspace path (t-bf7f).
+  assert.equal(JSON.stringify(fx).includes('"sb"'), false, 'the source id sb is not named');
   const fy = (await client.request('session.get', { sessionId: 'fy' })).session;
   assert.deepEqual(fy.forkedFrom, { sessionId: 'sa', boundary: 'whole', branchId: BRANCH.branchId, at: AT });
   assert.deepEqual(fy.branches, [BRANCH], 'extra fields and a malformed branch dropped');
