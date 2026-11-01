@@ -593,8 +593,12 @@ export function shellQuote(text, platform = process.platform) {
   return absolute && QUOTABLE.test(value) ? `'${value}'` : undefined;
 }
 
-/** A path as alp doctor prints it: control, format and unusual space characters escaped, so it stays one line and reads as it is. */
-const printable = text => String(text).replace(/[\p{C}\p{Zl}\p{Zp}]|(?! )\p{Zs}/gu, char => `\\u{${char.codePointAt(0).toString(16)}}`);
+/**
+ * A path as alp doctor prints it: control, format and unusual space characters escaped as \u{hex},
+ * so it stays one line and reads as it is. A backslash is doubled, so the escaping is injective:
+ * a path that holds the text \u{a} prints as \\u{a}, never as a path with a newline would.
+ */
+export const printable = text => String(text).replace(/\\|[\p{C}\p{Zl}\p{Zp}]|(?! )\p{Zs}/gu, char => char === '\\' ? '\\\\' : `\\u{${char.codePointAt(0).toString(16)}}`);
 
 /** Why a clean and pushed leftover has no command. */
 const UNQUOTABLE = 'no command: its path holds characters other than ASCII letters, digits, space and . _ - / \\ :, which a pasted command might not carry safely; check it and remove it by hand';
@@ -693,11 +697,19 @@ async function classifyLeftover(directory, { run, env, owned, here, recentMs, de
     const refs = await git(['for-each-ref', '--format=%(objectname) %(refname)']);
     if (refs.code !== 0) return unknown('git could not list its refs');
     const all = refs.stdout.split('\n').filter(Boolean).map(line => { const at = line.indexOf(' '); return [line.slice(at + 1), line.slice(0, at)]; });
-    const mirrors = all.filter(([name]) => name.startsWith('refs/remotes/'));
+    // Matched by full ref name, refs/remotes/<remote>/<name> for a configured remote, so a branch
+    // x is not taken for origin/feature/x (nor for a remote named feature's x unless feature is one).
+    const remotes = await git(['remote']);
+    if (remotes.code !== 0) return unknown('git could not list its remotes');
+    const remoteNames = remotes.stdout.split('\n').map(line => line.trim()).filter(Boolean);
+    const mirrors = new Map(all.filter(([name]) => name.startsWith('refs/remotes/')));
     const mirrored = ([name, object]) => {
       const branch = name.startsWith('refs/heads/');
-      const suffix = `/${branch ? name.slice('refs/heads/'.length) : name.slice('refs/'.length)}`;
-      return mirrors.some(([remote, target]) => remote.endsWith(suffix) && remote.length > 'refs/remotes/'.length + suffix.length && (branch || target === object));
+      const rest = branch ? name.slice('refs/heads/'.length) : name.slice('refs/'.length);
+      return remoteNames.some(remote => {
+        const target = mirrors.get(`refs/remotes/${remote}/${rest}`);
+        return target !== undefined && (branch || target === object);
+      });
     };
     const local = all.filter(entry => !entry[0].startsWith('refs/remotes/') && !mirrored(entry));
     if (local.length) return { path: directory, state: 'unpushed', reason: `local refs no remote-tracking ref mirrors: ${local.slice(0, 3).map(([name]) => name).join(', ')}${local.length > 3 ? `, … ${local.length - 3} more` : ''}` };

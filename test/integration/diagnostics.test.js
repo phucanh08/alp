@@ -440,6 +440,10 @@ test('alp doctor counts a clone with local tags or refs no remote-tracking ref m
   await git(await clone('alp-annotated-tag'), 'tag', '-a', '-m', 'only here', 'v-annotated');
   // A branch whose commits are pushed but whose name no remote has.
   await git(await clone('alp-local-branch'), 'branch', 'only-here');
+  // A branch x whose name only ends a remote branch (origin/feature/x) is not mirrored by it (t-6147).
+  await git(seed, 'branch', 'feature/suffix');
+  await git(seed, 'push', '-q', origin, 'feature/suffix');
+  await git(await clone('alp-suffix-branch'), 'branch', 'suffix');
   // A note: a ref outside branches and tags.
   await git(await clone('alp-note'), 'notes', 'add', '-m', 'only here', 'HEAD');
   // A tag the remote does have: offline, git cannot tell, so it is not clean either.
@@ -463,6 +467,7 @@ test('alp doctor counts a clone with local tags or refs no remote-tracking ref m
     'alp-light-tag': unpushed('refs/tags/v-light'),
     'alp-annotated-tag': unpushed('refs/tags/v-annotated'),
     'alp-local-branch': unpushed('refs/heads/only-here'),
+    'alp-suffix-branch': unpushed('refs/heads/suffix'),
     'alp-note': ['unpushed', undefined, false],
     'alp-remote-tag': unpushed('refs/tags/v-remote'),
     'alp-mirrored-tags': ['clean-pushed', undefined, true],

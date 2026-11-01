@@ -15,5 +15,7 @@ export type Leftover = { path: string; state: LeftoverState; reason?: string; co
 export const LEFTOVER_STATES: Record<LeftoverState, string>;
 /** An absolute path of ASCII letters, digits, space and . _ - / \ : in single quotes, for sh or PowerShell; undefined for any other path. */
 export function shellQuote(text: string, platform?: NodeJS.Platform): string | undefined;
+/** A path as alp doctor prints it in a comment line: escaped injectively, on one line. */
+export function printable(text: unknown): string;
 export function diskCheck(home: string, options?: { run?: CommandRunner; env?: NodeJS.ProcessEnv; free?: number; tempDirs?: string[]; cwd?: string; classifyMs?: number; recentMs?: number; platform?: NodeJS.Platform }): Promise<DoctorCheck & { leftovers?: Leftover[] }>;
 export function repair(checks: DoctorCheck[]): Promise<Array<{ id: string; result: string }>>;
