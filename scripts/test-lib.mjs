@@ -40,7 +40,6 @@ export function buildAll() {
   buildWorkspace('gateway');
 }
 
-/** Runs the files with `node --test` against a throwaway ALP_HOME, so no run touches the user's ~/.alp. */
 /**
  * Variables an ALP agent's shell (or an installed ALP) sets that would change what the code under
  * test does: a test run started from an agent's terminal must behave as one started by the user
@@ -55,13 +54,24 @@ export function hermeticEnv(env = process.env) {
   return result;
 }
 
+/**
+ * Runs the files with `node --test` against a throwaway ALP_HOME and TMPDIR, without the caller's
+ * ALP session variables, so no run touches the user's ~/.alp or leaves directories in the temp dir.
+ */
 export function runNodeTests(files, { extra = [] } = {}) {
   if (!files.length) throw new Error('no test files selected');
   const home = mkdtempSync(path.join(os.tmpdir(), 'alp-test-'));
+  // Every temporary directory the tests (and alpd, providers and Node under them) make goes in one
+  // scratch directory that is removed afterwards, also when a test forgets its own (t-bf7f). Short:
+  // Unix socket paths under it must stay below 104 bytes on macOS.
+  const scratch = mkdtempSync(path.join(os.tmpdir(), 'alpt-'));
   try {
     // alpd under test never asks the real providers for models (t-e5ee); a test that wants it unsets this.
     // A hung test fails after 5 minutes instead of stalling the CI job until its timeout (t-ffbd).
-    const result = spawnSync(process.execPath, ['--test', '--test-timeout=300000', ...extra, ...files], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...hermeticEnv(), ALP_HOME: home } });
+    const result = spawnSync(process.execPath, ['--test', '--test-timeout=300000', ...extra, ...files], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...hermeticEnv(), ALP_HOME: home, TMPDIR: scratch, TMP: scratch, TEMP: scratch } });
     return result.status ?? 1;
-  } finally { rmSync(home, { recursive: true, force: true }); }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  }
 }
