@@ -150,15 +150,16 @@ async function cliDaemonEntry(cli, depth = 0) {
 /**
  * Finds alpd.js for a client that cannot locate it beside itself, such as the Paseo
  * plugin, which Paseo re-bundles: the first existing candidate, then where alpd last
- * recorded itself ($ALP_HOME/alpd.json), then the ALP CLI (`alp`) on PATH.
+ * recorded itself ($ALP_HOME/alpd.json), then the ALP CLI (`alp`) on PATH and in the usual install
+ * directories (`binDirectories`; a test passes [] so the caller's own install is not found).
  */
-export async function findDaemonEntry({ home = alpHome(), env = process.env, candidates = /** @type {Array<string | undefined>} */ ([]) } = {}) {
+export async function findDaemonEntry({ home = alpHome(), env = process.env, candidates = /** @type {Array<string | undefined>} */ ([]), binDirectories = BIN_DIRECTORIES } = {}) {
   for (const candidate of candidates) if (candidate && await isFile(candidate)) return candidate;
   try {
     const { entry } = JSON.parse(await readFile(daemonPaths(home).install, 'utf8'));
     if (typeof entry === 'string' && await isFile(entry)) return entry;
   } catch {}
-  for (const directory of [...(env.PATH ?? '').split(path.delimiter).filter(Boolean), ...BIN_DIRECTORIES]) {
+  for (const directory of [...(env.PATH ?? '').split(path.delimiter).filter(Boolean), ...binDirectories]) {
     for (const name of process.platform === 'win32' ? ['alp.cmd', 'alp'] : ['alp']) {
       const cli = await realpath(path.join(directory, name)).catch(() => undefined);
       const entry = cli && await cliDaemonEntry(cli);
