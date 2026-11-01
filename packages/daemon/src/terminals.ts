@@ -27,7 +27,11 @@ export type TerminalSink = { send(message: unknown): void; socket?: { writableLe
 type Disposable = { dispose(): void };
 /** Native owner interface; injected owners are used only by tests. */
 export type PtyProcess = {
-  pid: number;
+  /**
+   * The shell's pid, read live on every access: never copy it at spawn. The win32 owner reports 0
+   * until node-pty's ConPTY output worker connects, then the real pid (windows-terminal.ts).
+   */
+  readonly pid: number;
   /** The PTY's device (node-pty's UnixTerminal), such as /dev/ttys004 or /dev/pts/3. */
   readonly ptsName?: string;
   write(data: string): void;
