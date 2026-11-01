@@ -18,6 +18,8 @@ export type RuntimeTransport = {
   orchestrationContext?: () => Promise<unknown>;
   /** The runtime's own slash commands and skills for the composer (t-f628); omitted, the runtime offers none. */
   commands?: () => Promise<RuntimeCommand[]>;
+  /** Claude: the aliases of /clear (new, reset) that run a command of the user's, so they are not refused (t-5ac5). */
+  customCommands?: () => ReadonlySet<string>;
   onNotification(listener: (method: string, params: any) => void): void;
   onFailure(listener: (error: unknown) => void): void;
   close(): Promise<void>;
