@@ -11,7 +11,10 @@ import { buildWorkspace, packageTests, packages, runNodeTests } from './test-lib
  */
 const testSupport = { client: ['runtime'] };
 
-const name = process.argv[2] === 'paseo-plugin' ? 'paseo' : process.argv[2];
+// --private-home: also no ALP_*_BIN and a throwaway HOME/USERPROFILE (runNodeTests, t-bfbd).
+const privateHome = process.argv.includes('--private-home');
+const [argument] = process.argv.slice(2).filter(arg => arg !== '--private-home');
+const name = argument === 'paseo-plugin' ? 'paseo' : argument;
 if (!packages.includes(name)) throw new Error(`Usage: test-package.mjs <${packages.join('|')}>`);
 const files = packageTests(name);
 if (!files.length) {
@@ -20,4 +23,4 @@ if (!files.length) {
 }
 buildWorkspace(name);
 for (const support of testSupport[name] ?? []) buildWorkspace(support);
-process.exitCode = runNodeTests(files);
+process.exitCode = runNodeTests(files, { privateHome });

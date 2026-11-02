@@ -54,13 +54,31 @@ export function hermeticEnv(env = process.env) {
   return result;
 }
 
+/** ALP_CODEX_BIN, ALP_CLAUDE_BIN, ALP_GH_BIN, ...: the caller's provider and tool executables. */
+export const isCallerBinary = name => /^ALP_[A-Z0-9_]+_BIN$/i.test(name);
+
+/**
+ * `env` that also cannot reach the caller's own installation (t-bfbd): no ALP_*_BIN overrides and a
+ * private home, so the code under test does not find the caller's providers or ~/.alp/bin through
+ * os.homedir(), which is USERPROFILE on Windows and HOME elsewhere.
+ */
+export function homelessEnv(env, home) {
+  const result = { ...env };
+  // Windows names are case-insensitive: drop every spelling so the child sees only the private one.
+  for (const name of Object.keys(result)) if (isCallerBinary(name) || /^(HOME|USERPROFILE)$/i.test(name)) delete result[name];
+  return { ...result, HOME: home, USERPROFILE: home };
+}
+
 /**
  * Runs the files with `node --test` against a throwaway ALP_HOME and TMPDIR, without the caller's
  * ALP session variables, so no run touches the user's ~/.alp or leaves directories in the temp dir.
+ * `privateHome` also removes ALP_*_BIN and gives the run a throwaway HOME/USERPROFILE (homelessEnv):
+ * the windows-daemon CI lane runs that way (t-bfbd).
  */
-export function runNodeTests(files, { extra = [] } = {}) {
+export function runNodeTests(files, { extra = [], privateHome = false } = {}) {
   if (!files.length) throw new Error('no test files selected');
   const home = mkdtempSync(path.join(os.tmpdir(), 'alp-test-'));
+  const user = privateHome ? mkdtempSync(path.join(os.tmpdir(), 'alpu-')) : undefined;
   // Every temporary directory the tests (and alpd, providers and Node under them) make goes in one
   // scratch directory that is removed afterwards, also when a test forgets its own (t-bf7f). Short:
   // Unix socket paths under it must stay below 104 bytes on macOS.
@@ -68,11 +86,12 @@ export function runNodeTests(files, { extra = [] } = {}) {
   try {
     // alpd under test never asks the real providers for models (t-e5ee); a test that wants it unsets this.
     // A hung test fails after 5 minutes instead of stalling the CI job until its timeout (t-ffbd).
-    const result = spawnSync(process.execPath, ['--test', '--test-timeout=300000', ...extra, ...files], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...hermeticEnv(), ALP_HOME: home, TMPDIR: scratch, TMP: scratch, TEMP: scratch } });
+    const base = user ? homelessEnv(hermeticEnv(), user) : hermeticEnv();
+    const result = spawnSync(process.execPath, ['--test', '--test-timeout=300000', ...extra, ...files], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...base, ALP_HOME: home, TMPDIR: scratch, TMP: scratch, TEMP: scratch } });
     return result.status ?? 1;
   } finally {
     // A directory a lingering child still holds must not turn a passing run into a failure.
-    for (const dir of [home, scratch]) {
+    for (const dir of [home, scratch, user].filter(Boolean)) {
       try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
       catch (error) { console.warn(`warning: could not remove ${dir}: ${error.message}`); }
     }
