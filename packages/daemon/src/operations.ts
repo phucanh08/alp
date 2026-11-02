@@ -29,6 +29,10 @@ export type OperationsOptions = {
   knownProjects?: () => Iterable<string>;
   /** A gate changed through task.gate.resolve: the runtime syncs the project's gate cards and mail. */
   onGateChange?: (projectRoot: string) => Promise<void> | void;
+  /** A provider file was written or removed; `enabled` when this save turned it from off to on (t-d0b0). */
+  onProviderSaved?: (id: string, enabled: boolean) => void;
+  /** The models alpd's catalog learned or probed for an ACP provider (t-d0b0). */
+  learnedModels?: (id: string) => Array<{ id: string; label?: string }>;
 };
 
 /** `caller.agent`: the connection said in daemon.hello that an ALP agent started it (t-ca1f). */
@@ -124,7 +128,7 @@ function unredact(kind: string, content: Record<string, unknown>, previous: Reco
   return next;
 }
 
-export function createOperations({ home, templates, knownProjects = () => [], onGateChange }: OperationsOptions = {}) {
+export function createOperations({ home, templates, knownProjects = () => [], onGateChange, onProviderSaved, learnedModels }: OperationsOptions = {}) {
   /** Revisions on the wire are keyed per alpd process, so they never carry a hash of secret content. */
   const revisionKey = randomBytes(32);
   const toWire = (revision: string | null | undefined) => revision == null ? null : `r${createHmac('sha256', revisionKey).update(revision).digest('base64url').slice(0, 22)}`;
@@ -256,6 +260,8 @@ export function createOperations({ home, templates, knownProjects = () => [], on
       const next = unredact(kind, content, previous);
       // Core checks the revision again as it writes, against writers outside alpd.
       const saved = await saveEntry(kind, name, next, { ...options, scope, policy, ...(revision !== undefined ? { revision: current?.revision ?? null } : {}) });
+      // Enabled is the change from off to on, never a save of a provider that was on already (t-d0b0).
+      if (kind === 'providers') { try { onProviderSaved?.(name, (previous as any)?.provider?.enabled === false && (next as any)?.provider?.enabled !== false); } catch { /* the catalog is best effort */ } }
       if (kind !== 'teams' || sync !== 'known-projects') return { revision: toWire(saved.revision) };
       const roots = new Set<string>(options.root ? [options.root] : []);
       if (scope === 'library') for (const root of knownProjects()) if (typeof root === 'string' && path.isAbsolute(root)) roots.add(path.resolve(root));
@@ -273,7 +279,9 @@ export function createOperations({ home, templates, knownProjects = () => [], on
       const current = await layer(kind, name, options, scope);
       if (!current) throw failure(ERROR.notFound, 'not_found', `No ${kind} entry '${name}' in the ${scope}`);
       if (revision !== undefined && revision !== toWire(current.revision)) throw failure(ERROR.conflict, 'revision_conflict', `${kind} '${name}' changed in the ${scope} since you opened it`);
-      return deleteEntry(kind, name, { ...options, scope, policy, ...(revision !== undefined ? { revision: current.revision } : {}) });
+      const deleted = await deleteEntry(kind, name, { ...options, scope, policy, ...(revision !== undefined ? { revision: current.revision } : {}) });
+      if (kind === 'providers') { try { onProviderSaved?.(name, false); } catch { /* best effort */ } }
+      return deleted;
     })),
 
     'library.duplicate': guard(({ kind, from, to, scope, projectRoot, policy }) => serial(async () => {
@@ -285,7 +293,9 @@ export function createOperations({ home, templates, knownProjects = () => [], on
 
     'library.rename': guard(({ kind, from, to, scope, projectRoot, policy }) => serial(async () => {
       const options = await where(projectRoot, scope);
-      return { revision: toWire((await renameEntry(kind, from, to, { ...options, scope, policy })).revision) };
+      const renamed = await renameEntry(kind, from, to, { ...options, scope, policy });
+      if (kind === 'providers') { try { onProviderSaved?.(to, false); } catch { /* best effort */ } }
+      return { revision: toWire(renamed.revision) };
     })),
 
     'library.skills.set': guard(({ agent, skills }) => serial(() => setGivenSkills(agent, skills, { library: home })), { notFound: 'invalid_entry' }),
@@ -295,7 +305,8 @@ export function createOperations({ home, templates, knownProjects = () => [], on
       for (const provider of await listProviders(home)) {
         if (provider.enabled === false || provider.kind === 'antigravity') continue;
         models.push({ id: `acp:${provider.id}`, label: `${provider.label} · Provider default`, efforts: [] });
-        for (const model of [...(provider.models ?? []), ...(provider.additionalModels ?? [])]) models.push({ id: `acp:${provider.id}/${model.id}`, label: `${provider.label} · ${model.label ?? model.id}`, efforts: [] });
+        // The file's models replace what a session or probe taught alpd's catalog (t-d0b0); additionalModels add.
+        for (const model of [...(provider.models ?? learnedModels?.(provider.id) ?? []), ...(provider.additionalModels ?? [])]) models.push({ id: `acp:${provider.id}/${model.id}`, label: `${provider.label} · ${model.label ?? model.id}`, efforts: [] });
       }
       return { models: [...new Map(models.map(model => [model.id, model])).values()] };
     }),

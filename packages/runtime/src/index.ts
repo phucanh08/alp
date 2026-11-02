@@ -8,8 +8,8 @@ export { resolveSession, InstructionsAdapter, skillDescription } from './resolve
 export type { SessionSpec, HostMcpServer, ResolvedSession, RuntimeKind } from './resolve.js';
 export { DEFAULT_MODEL, DEFAULT_CLAUDE_MODEL, entries as catalogEntries, models, modes, thinkingOptions, thinkingOptionsFor } from './catalog.js';
 export type { CatalogEntry } from './catalog.js';
-export { ModelCatalog, mergeCatalog, liveFromContext, feedCatalog, setActiveCatalog, activeCatalog, POLICY as CATALOG_POLICY, REFRESH_MS as CATALOG_REFRESH_MS } from './model-catalog.js';
-export type { CatalogSnapshot, CatalogRuntime, LiveModel, Probe as CatalogProbe } from './model-catalog.js';
+export { ModelCatalog, mergeCatalog, liveFromContext, feedCatalog, feedAcpSession, acpSessionModels, setActiveCatalog, activeCatalog, POLICY as CATALOG_POLICY, REFRESH_MS as CATALOG_REFRESH_MS } from './model-catalog.js';
+export type { CatalogSnapshot, CatalogRuntime, LiveModel, Probe as CatalogProbe, AcpProviderConfig, AcpProbe, AcpRow, AcpState } from './model-catalog.js';
 export { liveProbes, codexProbe, claudeProbe, antigravityProbe, parseAgyModels } from './model-probes.js';
 export { CodexTransport } from './transport.js';
 export { ATTACHMENT_HEADER, ATTACHMENT_ROUTES, attachmentStageDir, createAttachmentStager, stagingExposure } from './attachments.js';
