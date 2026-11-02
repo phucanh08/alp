@@ -4,6 +4,7 @@ import { lstat, readFile, realpath, rename, stat, writeFile, chmod, unlink } fro
 import { setTimeout as sleep } from 'node:timers/promises';
 import path from 'node:path';
 import { alpHome, assertPrivateDirectory } from '@anhlp/alp-client';
+import { AGENT_NAME } from '@anhlp/alp-protocol';
 import { PERMISSIONS } from './policy.js';
 
 /**
@@ -70,8 +71,8 @@ export async function renameWithRetry(temporary, destination, {
 const TOKEN = /^alpgw1\.([a-f0-9]{16})\.([A-Za-z0-9_-]{43})$/;
 const FILE_VERSION = 1;
 const MODE = /^[a-z][a-z0-9-]{0,63}$/;
-/** An agent's name on a credential: lower-case letters, digits and single hyphens, 1 to 64 characters. */
-export const AGENT_NAME = /^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){0,63}$/;
+/** An agent's name on a credential: the protocol's AGENT_NAME, the pattern alpd checks principal.agent with. */
+export { AGENT_NAME };
 
 /**
  * @typedef {{ path: string, canonical: string }} Workspace

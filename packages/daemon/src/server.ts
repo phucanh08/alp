@@ -9,7 +9,7 @@ import os from 'node:os';
 import { assertPrivateDirectory, assertPrivateSocket } from '@anhlp/alp-client/index';
 import path from 'node:path';
 import { createLogger } from '@anhlp/alp-core/log';
-import { AlpRpcError, CAPABILITY, MAX_FRAME, PROMPT_IMAGES, PROTOCOL_VERSION, ERROR, RPC_ERROR, RPC_METHODS, base64Bytes, encodeFrame } from '@anhlp/alp-protocol';
+import { AGENT_NAME, AlpRpcError, CAPABILITY, MAX_FRAME, PROMPT_IMAGES, PROTOCOL_VERSION, ERROR, RPC_ERROR, RPC_METHODS, base64Bytes, encodeFrame } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 export { ERROR } from '@anhlp/alp-protocol';
 import { DEFAULT_MODEL, models, modes, type ModelCatalog, thinkingOptions, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '@anhlp/alp-runtime/index';
@@ -1963,9 +1963,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         if (params?.protocolVersion !== PROTOCOL_VERSION) throw new RpcError(ERROR.protocol, `ALP daemon speaks protocol ${PROTOCOL_VERSION}; restart it after upgrading (alp daemon restart)`, { reason: 'protocol_version', supported: [PROTOCOL_VERSION] });
         const issues = validateParams(method, params)!;
         if (issues.length) throw invalidParams(issues);
-        // Checked before the connection changes, so a refused hello changes nothing. Same pattern as AGENT_NAME in apps/gateway/src/credentials.js.
+        // Checked before the connection changes, so a refused hello changes nothing. The gateway checks a credential's agent with the same AGENT_NAME.
         const named = params?.principal?.agent;
-        if (named !== undefined && (typeof named !== 'string' || !/^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){0,63}$/.test(named))) throw new RpcError(RPC_ERROR.invalidParams, 'principal.agent must be an agent name', { reason: 'invalid_params' });
+        if (named !== undefined && (typeof named !== 'string' || !AGENT_NAME.test(named))) throw new RpcError(RPC_ERROR.invalidParams, 'principal.agent must be an agent name', { reason: 'invalid_params' });
         connection.helloed = true;
         // Sticky: a later hello never sheds it.
         connection.agent = connection.agent === true || (Array.isArray(params?.capabilities) && params.capabilities.includes(AGENT_CAPABILITY));
