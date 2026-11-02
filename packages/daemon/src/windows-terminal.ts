@@ -39,10 +39,15 @@ export const createWindowsPtySpawn = (load: () => NodePty | undefined = loadNode
   if (!pty) throw new Error('node-pty is unavailable on this host');
   const child = pty.spawn(file, args, { name: options.name, cols: options.cols, rows: options.rows, cwd: options.cwd, env: options.env, useConpty: true });
   let killed = false;
-  // node-pty's exit comes from its wait on the shell's process handle: once it fires Windows has closed
-  // the shell's handles, its working directory among them. process.kill(pid, 0) is not that point: it
-  // reports the shell gone as soon as its exit code is set, while the directory may still be open
-  // (rmdir EBUSY right after a TerminateProcess, t-bfbd). Subscribed here, before any service listener.
+  // Waited for after kill so that a closed terminal no longer holds its working directory (t-bfbd).
+  // process.kill(pid, 0) is not that point: libuv reads the exit code, which Windows sets before it
+  // closes the shell's handles, the cwd among them (rmdir right after a TerminateProcess: EBUSY).
+  // node-pty emits exit when its output socket closes (after kill: ClosePseudoConsole, then the conout
+  // drain); the exit code it carries is set only by its native WaitForSingleObject on the shell's process
+  // handle, which returns once those handles are closed. A numeric exit code therefore means the
+  // directory was released; the order of the two is what node-pty does, not something it promises
+  // (every exit after a kill carried a numeric code here, 200 of 200 on Windows 10). Best-effort, like
+  // the rest of the Windows owner. Subscribed here, before any service listener.
   let exit = false;
   const exited = new Promise<void>(resolve => { child.onExit(() => { exit = true; resolve(); }); });
   return {
@@ -53,7 +58,8 @@ export const createWindowsPtySpawn = (load: () => NodePty | undefined = loadNode
     resize(cols: number, rows: number) { if (!killed) try { child.resize(cols, rows); } catch { /* exited */ } },
     // Best-effort: node-pty ends the ConPTY session and its shell; descendants are not guaranteed.
     kill() { if (killed) return; killed = true; try { child.kill(); } catch { /* already exited */ } },
-    // Bounded: a shell node-pty never reports (a kill before ConPTY connected) does not hold up close.
+    // Bounded: node-pty defers a kill until the terminal is ready (its first output) and may never report
+    // an exit (a terminal that never becomes ready, a lost callback); that does not hold up close.
     async exited(ms: number) {
       if (exit) return;
       let timer: NodeJS.Timeout | undefined;

@@ -39,9 +39,9 @@ export type PtyProcess = {
   kill(signal?: string): void;
   cleanup?: () => Promise<CleanupResult>;
   /**
-   * The win32 owner (no native cleanup): resolves once the killed shell has really exited, or after
-   * `ms`. `kill` only asks node-pty to end the shell; until Windows has closed the shell's handles, its
-   * working directory (the workspace) stays open and cannot be removed (EBUSY, t-bfbd).
+   * The win32 owner (no native cleanup): resolves once node-pty reports the killed shell's exit, or
+   * after `ms`. `kill` only asks node-pty to end the shell; until Windows has closed the shell's
+   * handles, its working directory (the workspace) stays open and cannot be removed (EBUSY, t-bfbd).
    */
   exited?: (ms: number) => Promise<void>;
   onData(listener: (data: string) => void): Disposable;
@@ -267,7 +267,8 @@ export function createTerminalService(options: TerminalServiceOptions) {
   const refused = (reason: string) => new RpcError(ERROR.unavailable, 'Terminal startup was cancelled or its native owner is unavailable', { reason });
   async function cleanup(owner: PtyProcess, id?: string) {
     // Test owners and the win32 node-pty owner (best-effort): the win32 owner is waited for, so a
-    // closed terminal no longer holds its directory.
+    // closed terminal no longer holds its directory. No retry here: cleanup removes nothing; whoever
+    // removes the workspace afterwards (a worktree removal) reports its own failure.
     if (!owner.cleanup) { owner.kill(); await owner.exited?.(killGraceMs); return; }
     const result = await owner.cleanup();
     if (result.coverage === 'root-only') log.info('terminal shell cleanup has reduced coverage; descendants are unmanaged', { code: 'ALPD_TERMINAL_ROOT_ONLY_CLEANUP', terminalId: id, outputOpen: result.outputOpen === true });
