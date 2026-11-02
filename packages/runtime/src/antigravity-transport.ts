@@ -39,9 +39,11 @@ const MODES = ['read-only', 'workspace-write', 'full-access'];
  * `git status` refreshes the index), as are rg (`--pre`) and find (`-delete`).
  * A prefix rule cannot check a path or a flag, so no command that reads file contents
  * is allowed: cat, head, grep and wc read files outside the workspace, and tail -f or a
- * read of a FIFO hangs the turn. agy's own file reading and search tools remain.
+ * read of a FIFO hangs the turn. ls is left out too: a prefix rule cannot keep its path
+ * argument inside the workspace (`ls /`, `ls ~/.ssh`). agy's own file reading, listing and
+ * search tools remain.
  */
-const READ_ONLY_COMMANDS = ['pwd', 'ls'];
+const READ_ONLY_COMMANDS = ['pwd'];
 /** Shell syntax that makes a command line more than one allowed command. */
 const SHELL_SYNTAX = /[;&|<>`$(){}\\\n\r]/;
 /**
