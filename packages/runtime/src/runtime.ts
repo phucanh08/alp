@@ -95,6 +95,12 @@ function promptOrigin(clientMessageId: string, session: { parent?: string }): Tu
   if (/^alp-(resume|recover)-/.test(clientMessageId)) return session.parent ? 'assignment' : 'wake';
   return 'user';
 }
+/**
+ * ALP's own compaction prompts (the checkpoint request and a fresh conversation's seed): they reach
+ * the model but are not user messages, so the timeline shows notices instead (t-b3cd #6).
+ */
+const COMPACT_PROMPT = 'alp-wake-compact-';
+const isCompactPrompt = (clientMessageId: string | undefined) => !!clientMessageId?.startsWith(COMPACT_PROMPT);
 const MAX_WAKES = 8;
 /** How long the user may wait for main's first words before its tool results remind it. */
 const USER_REPLY_MS = 60_000;
@@ -436,6 +442,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     if (item.type === 'userMessage') {
       const { text, clientMessageId, origin, attachments } = nativePrompt(item, session);
+      if (isCompactPrompt(clientMessageId)) return;
       const images = (item.content ?? []).filter((c: any) => c.type === 'image' || c.type === 'localImage').length;
       emit(sessionId, { type: 'item', item: { kind: 'user_message', id: item.id, text, ...(clientMessageId ? { clientMessageId } : {}), ...(origin ? { origin } : {}), ...(images ? { images } : {}), ...(attachments ? { attachments } : {}) } });
       return;
@@ -1703,7 +1710,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         return;
       }
       compacting.turn = true;
-      await startPrompt(sessionId, { clientMessageId: `alp-wake-compact-${randomUUID()}`, delivery: 'auto', content: [{ type: 'text', text: checkpointPrompt(trigger, session.contextFill) }] }, 'wake');
+      emit(sessionId, { type: 'item', item: { kind: 'notice', id: `notice-${randomUUID().slice(0, 8)}`, level: 'info', text: wordsFor(session).compacting() } });
+      await startPrompt(sessionId, { clientMessageId: `${COMPACT_PROMPT}${randomUUID()}`, delivery: 'auto', content: [{ type: 'text', text: checkpointPrompt(trigger, session.contextFill) }] }, 'wake');
     }).catch(error => compactFailed(sessionId, session, errorData(error).message));
     queue = work.catch(() => {});
   }
@@ -1738,7 +1746,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (refusal && refusal !== MAIL_WAITS && refusal !== REVIEWING) { compactFailed(sessionId, session, `a fresh conversation cannot start now: ${refusal}`); return; }
       await restartNative(sessionId, session, undefined);
       emit(sessionId, { type: 'session.updated', session: snapshot(sessionId, session) });
-      await startPrompt(sessionId, { clientMessageId: `alp-wake-compact-${randomUUID()}`, delivery: 'auto', content: [{ type: 'text', text: seedPrompt(checkpoint, session.lastUserText) }] }, 'wake');
+      await startPrompt(sessionId, { clientMessageId: `${COMPACT_PROMPT}${randomUUID()}`, delivery: 'auto', content: [{ type: 'text', text: seedPrompt(checkpoint, session.lastUserText) }] }, 'wake');
       compactFinished(sessionId, session, 'fresh');
     }).catch(error => compactFailed(sessionId, session, errorData(error).message));
     queue = work.catch(() => {});
@@ -4932,7 +4940,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     ) {
       session.text.clear();
       session.toolCalls.clear();
-      if (!/^alp-wake-compact-/.test(prompt.clientMessageId)) session.compactCooling = false;
+      if (!isCompactPrompt(prompt.clientMessageId)) session.compactCooling = false;
       session.supervisorWake = !!wake?.length && wake.every(event => event.defer);
 
       // A wake continues the same assignment: keep its handoff and limits.
@@ -5034,7 +5042,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         prompt.clientMessageId,
       );
 
-      emit(sessionId, {
+      if (!isCompactPrompt(prompt.clientMessageId)) emit(sessionId, {
         type: 'item',
         item: {
           kind: 'user_message',
