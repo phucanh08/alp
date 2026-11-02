@@ -148,7 +148,6 @@ test('lifecycle: open, prompt, steering, cancellation, persistence/reload preser
   assert.equal(persistence.version, 2);
   assert.deepEqual(persistence.data, { alpdSessionId: 's', agent: 'main', cwd: root });
   await conn.send({ type: 'session.close', sessionId: 's', requestId: 'close' });
-  console.log('DBG', runtimes.map(r => [r.closed, r.calls.map(c => c.method + ':' + (c.params?.developerInstructions ?? '').slice(0, 60))]));
   assert.equal(runtimes[0].closed, true);
   await writeFile(path.join(root, 'ALP.md'), 'Updated project');
   await conn.send({ type: 'session.open', sessionId: 's', requestId: 'resume', config: config(root), persistence, history: 'replay' });
