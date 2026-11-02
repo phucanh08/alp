@@ -40,6 +40,8 @@ async function open(t, { settings, model, transport } = {}) {
 }
 
 const notices = events => events.filter(event => event.type === 'item' && event.item.kind === 'notice').map(event => event.item.text);
+/** User messages in the timeline that are ALP's compact prompts: there are none (t-b3cd #6). */
+const compactPrompts = events => events.filter(event => event.type === 'item' && event.item.kind === 'user_message' && (String(event.item.clientMessageId ?? '').startsWith('alp-wake-compact-') || /ALP compact checkpoint|Your context was compacted/.test(event.item.text))).map(event => event.item.text);
 
 test('compact settings, fill and the decision', () => {
   assert.deepEqual(compactSettings(undefined), { auto: true, threshold: 0.7 });
@@ -89,7 +91,9 @@ test('auto compaction: deferred while main holds its turn, checkpoint at the bou
   assert.equal(entry.trigger, 'auto');
   assert.equal(entry.via, 'native');
   assert.deepEqual((await log('compact.started')).map(started => [started.trigger, started.fill]), [['auto', 0.75]]);
-  assert.equal(notices(events).filter(text => /compact/.test(text)).length, 1);
+  assert.equal(notices(events).filter(text => /compact/.test(text)).length, 2, 'one notice as the checkpoint starts, one when compacted');
+  assert.match(notices(events)[0], /writes a checkpoint|viết checkpoint/);
+  assert.deepEqual(compactPrompts(events), [], 'the checkpoint prompt is not a user message');
   // What ALP holds after it carries the checkpoint.
   await until(() => main.calls.some(call => (call.method === 'turn/start' || call.method === 'turn/steer') && promptText(call).includes(CHECKPOINT)) || events.some(event => event.type === 'mail' && String(event.mail.body ?? '').includes(CHECKPOINT)), 'the checkpoint after the compaction');
 });
@@ -144,7 +148,7 @@ test('without native compaction, a fresh conversation is seeded with the checkpo
     };
     return agent;
   };
-  const { runtimes, log } = await open(t, { transport });
+  const { runtimes, log, events } = await open(t, { transport });
   const main = runtimes[0];
   main.usage(90_000);
   main.finish('ok');
@@ -160,6 +164,8 @@ test('without native compaction, a fresh conversation is seeded with the checkpo
   await until(async () => (await log('compact')).length === 1);
   assert.equal((await log('compact'))[0].via, 'fresh');
   assert.equal((await log('compact.native_failed')).length, 1);
+  assert.deepEqual(compactPrompts(events), [], 'neither the checkpoint prompt nor the seed is a user message');
+  assert.match(notices(events)[0], /writes a checkpoint|viết checkpoint/);
 });
 
 test('manual trigger: now when idle, deferred while a turn runs; user words during it wait for its end', async t => {
