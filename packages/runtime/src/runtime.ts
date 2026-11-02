@@ -2022,7 +2022,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
           if (!list.includes(args.name)) list.push(args.name);
           roles[role] = list;
         }
-        await writeFile(rolesFile, JSON.stringify(roles, null, 2) + '\n');
+        // Atomic, as alp_skill_retire writes it: a reader never sees a half-written role-skills.json.
+        await writeAtomic(rolesFile, JSON.stringify(roles, null, 2) + '\n');
       } catch (error) {
         return { approved: true, saved: false, error: errorData(error).message, next: 'Tell the user; nothing is retried automatically.' };
       }
