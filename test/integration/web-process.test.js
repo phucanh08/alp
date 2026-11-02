@@ -608,6 +608,12 @@ test('a restarted daemon is re-registered by the surviving Paseo integration', a
   const pairing = await waitFor(async () => await callDaemon(daemon2.socket, 'web.pairing', {}), 'web.pairing after the daemon restarted');
   assert.equal(typeof pairing.relayEnabled, 'boolean');
   assert.equal((await paseoJson(home)).pid, info.pid, 'the integration survives the daemon restart');
+  // web.pairing is the user's (t-d08b): alpd marks the caller, and the integration refuses an agent's.
+  const saved = process.env.ALP_AGENT_SESSION;
+  process.env.ALP_AGENT_SESSION = '1';
+  try { await assert.rejects(callDaemon(daemon2.socket, 'web.pairing', { enable: true }), error => error.code === 1003 && error.data?.reason === 'user_only'); }
+  finally { if (saved === undefined) delete process.env.ALP_AGENT_SESSION; else process.env.ALP_AGENT_SESSION = saved; }
+  assert.equal((await callDaemon(daemon2.socket, 'web.pairing', {})).relayEnabled, pairing.relayEnabled, 'the refused call changed nothing');
 });
 
 test('stale paseo.json from a dead process is replaced by a live Paseo integration', async t => {

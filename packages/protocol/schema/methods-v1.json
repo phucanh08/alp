@@ -17,7 +17,7 @@
   "capabilities": {
     "attach.after": "session.attach accepts `after` and answers `cursor`/`reset`; envelopes kept in a tree timeline carry `cursor`.",
     "prompt.receipts": "session.prompt is answered at most once per (sessionId, clientMessageId) from a durable receipt; repeats answer the first outcome or outcome_unknown.",
-    "extension.methods": "extension.register/unregister, and the daemon sends extension.invoke requests to the owning connection.",
+    "extension.methods": "extension.register/unregister (refused to an agent-marked connection, user_only), and the daemon sends extension.invoke requests to the owning connection, with a `caller: { agent, agentName? }` the daemon sets itself from the calling connection, never from the caller's params.",
     "team": "team.list: the teams a project can use, from the daemon host's built-ins, library and project.",
     "task": "task.list, task.create, task.update and task.gate.resolve on a project's .alp/tasks, written by the daemon under the task lock.",
     "library": "library.list/get/save/delete/duplicate/rename, library.skills.set and library.models on the daemon user's library and a project's .alp overrides; secrets are redacted on read.",

@@ -85,3 +85,19 @@ test('compact: an agent-marked credential is refused as user-only and never reac
   assert.equal(error.data?.reason, 'user_only');
   assert.ok(!daemon.calls().some(call => call.method === 'session.compact'), 'alpd was not asked to compact');
 });
+
+test('fork, rewind and reload: an agent-marked credential is refused as user-only and never reaches alpd (t-d08b)', async t => {
+  const { daemon, sdk } = await world(t);
+  const { client } = await sdk('agent');
+  const asked = {
+    'session.fork': { sessionId: 'sa', requestId: 'r1', ifGeneration: 'a'.repeat(32) },
+    'session.rewind': { sessionId: 'sa', requestId: 'r2', ifGeneration: 'a'.repeat(32), beforeTurnId: 't1' },
+    'session.reload': { sessionId: 'sa', requestId: 'r3', ifGeneration: 'a'.repeat(32) },
+  };
+  for (const [method, params] of Object.entries(asked)) {
+    const error = await client.request(method, params).catch(failure => failure);
+    assert.equal(error.code, 1003, `${method}: ${error.message}`);
+    assert.equal(error.data?.reason, 'user_only', method);
+  }
+  assert.ok(!daemon.calls().some(call => call.method in asked), 'alpd was not asked');
+});

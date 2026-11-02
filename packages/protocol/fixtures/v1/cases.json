@@ -101,7 +101,28 @@
     "method": "extension.invoke",
     "params": {
      "method": "web.pairing",
-     "params": {}
+     "params": {},
+     "caller": {
+      "agent": false
+     }
+    }
+   }
+  },
+  {
+   "name": "extension.invoke request from an agent caller",
+   "check": "message",
+   "valid": true,
+   "value": {
+    "jsonrpc": "2.0",
+    "id": 4,
+    "method": "extension.invoke",
+    "params": {
+     "method": "web.pairing",
+     "params": {},
+     "caller": {
+      "agent": true,
+      "agentName": "lead"
+     }
     }
    }
   },
