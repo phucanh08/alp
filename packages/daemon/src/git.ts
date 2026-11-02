@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { lstatSync } from 'node:fs';
+import { lstatSync, type Stats } from 'node:fs';
 import { lstat, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -587,31 +587,51 @@ export type GitReaderOptions = {
   log?: (message: string, fields: Record<string, unknown>) => void;
   /** Tests only: called after a window's contents were scanned and before Git writes their patch, where a racing writer could change a file. */
   probe?: (step: 'scanned') => Promise<void> | void;
+  /** Tests only: how an untracked path's ancestor directories are inspected (default lstatSync), to inject its failures. */
+  inspect?: (file: string) => Stats;
 };
 
 type DiffParams = { workspaceId: string; compare: GitCompare; path?: string; cursor?: string };
+
+/** What one ancestor directory of an untracked path is, as lstat saw it once in a listing. */
+type Ancestor = 'directory' | 'link' | 'uninspectable';
 
 /**
  * An untracked path Git listed, cut at its first linked directory: Git for Windows descends
  * into an untracked junction (or directory symlink) as a folder and lists what lies behind it,
  * even outside the work tree. As on POSIX, the link itself is the entry; nothing behind it is.
- * `links` caches each directory's answer for one listing.
+ *
+ * Fails closed: an ancestor lstat cannot inspect, or that is neither a directory nor a link
+ * (changed since Git listed it), answers `undefined` and the caller omits the entry, as it
+ * omits everything else under that ancestor. Only a directory lstat saw is passed through.
+ *
+ * `ancestors` caches each ancestor's answer for one listing, so a directory replaced by a
+ * junction during that listing keeps its earlier answer. That race is inherent (Git itself
+ * may have listed before or after the swap), it only concerns the names Git listed in that
+ * window, and every content read still goes through readConfinedFile, which refuses a path
+ * whose directories are linked at read time.
  */
-function untrackedEntry(root: string, name: string, links: Map<string, boolean>): string {
+function untrackedEntry(root: string, name: string, ancestors: Map<string, Ancestor>, inspect: (file: string) => Stats): string | undefined {
   const segments = name.split('/');
   for (let count = 1; count < segments.length; count++) {
     const prefix = segments.slice(0, count).join('/');
-    let linked = links.get(prefix);
-    if (linked === undefined) {
-      try { linked = lstatSync(path.join(root, ...segments.slice(0, count))).isSymbolicLink(); } catch { linked = false; }
-      links.set(prefix, linked);
+    let ancestor = ancestors.get(prefix);
+    if (ancestor === undefined) {
+      try {
+        const info = inspect(path.join(root, ...segments.slice(0, count)));
+        ancestor = info.isSymbolicLink() ? 'link' : info.isDirectory() ? 'directory' : 'uninspectable';
+      } catch {
+        ancestor = 'uninspectable';
+      }
+      ancestors.set(prefix, ancestor);
     }
-    if (linked) return prefix;
+    if (ancestor === 'link') return prefix;
+    if (ancestor === 'uninspectable') return undefined;
   }
   return name;
 }
 
-export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ.timeoutMs, log = () => {}, probe }: GitReaderOptions) {
+export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ.timeoutMs, log = () => {}, probe, inspect = lstatSync }: GitReaderOptions) {
   const key = randomBytes(32);
   const mac = (scope: string) => createHmac('sha256', key).update(scope).digest('base64url').slice(0, 32);
 
@@ -691,7 +711,7 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
     const digest = createHash('sha256');
     let pending = '';
     let pendingRename: string[] | undefined;
-    const links = new Map<string, boolean>();
+    const ancestors = new Map<string, Ancestor>();
     const collapsed = new Set<string>();
     const take = (row: GitStatusFile) => {
       dirty = true;
@@ -731,7 +751,9 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
       if (kind === '?') {
         const listed = field.slice(2).replace(/\/$/, '');
         if (!listed) return false;
-        const rowPath = untrackedEntry(repo.root, listed, links);
+        const rowPath = untrackedEntry(repo.root, listed, ancestors, inspect);
+        // Behind an ancestor that cannot be inspected: something is untracked, nothing is listed.
+        if (rowPath === undefined) { dirty = true; return false; }
         if (rowPath !== listed) { if (collapsed.has(rowPath)) return false; collapsed.add(rowPath); }
         return take({ path: rowPath, change: 'untracked', staged: false, unstaged: true });
       }
@@ -855,7 +877,7 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
     let hidden = 0;
     let more = false;
     let pending = '';
-    const links = new Map<string, boolean>();
+    const ancestors = new Map<string, Ancestor>();
     const collapsed = new Set<string>();
     const { stopped } = await runGit(repo, ['ls-files', '-z', '--others', '--exclude-standard', '--', ...(relative ? [relative] : [])], {
       onData: chunk => {
@@ -864,7 +886,9 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
         for (const listed of fields) {
           // A nested repository is listed as its directory: not a file.
           if (!listed || listed.endsWith('/')) continue;
-          const name = untrackedEntry(repo.root, listed, links);
+          const name = untrackedEntry(repo.root, listed, ancestors, inspect);
+          // Behind an ancestor that cannot be inspected: omitted, also when asked for by path.
+          if (name === undefined) continue;
           if (name !== listed) { if (collapsed.has(name)) continue; collapsed.add(name); }
           if (relative && name !== relative) continue;
           if (blockedFilePath(name) || [...name].length > 4096) { hidden++; continue; }

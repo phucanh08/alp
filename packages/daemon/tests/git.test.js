@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync } from 'node:fs';
 import { chmod, link, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, unlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -742,4 +742,65 @@ test('an untracked directory link (a Windows junction) is listed as itself: noth
   const behind = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' }, path: 'outside/note.txt' }), base);
   assert.ok(!JSON.stringify(behind).includes('OUTSIDE_SECRET'));
   assert.deepEqual(behind.files, []);
+});
+
+for (const failure of ['EACCES', 'ENOENT']) {
+  test(`an untracked path whose ancestor cannot be inspected (${failure}) is omitted, never passed through: status, diff, diff by path`, { skip: !hasGit && 'git is not installed' }, async t => {
+    const base = await sandbox(t);
+    const root = path.join(base, 'work');
+    const git = await repository(root);
+    await put(path.join(root, 'kept.txt'), 'kept\n');
+    git('add', '.');
+    git('commit', '-q', '-m', 'first');
+    // A plain directory Git lists on every platform; only its inspection fails.
+    await put(path.join(root, 'outside', 'note.txt'), 'OUTSIDE_SECRET\n');
+    await put(path.join(root, 'outside', 'deep', 'more.txt'), 'OUTSIDE_DEEP\n');
+    await put(path.join(root, 'plain', 'ok.txt'), 'plain\n');
+    const blocked = path.join(root, 'outside');
+    const inspected = [];
+    const inspect = file => {
+      inspected.push(file);
+      if (file === blocked) throw Object.assign(new Error(`${failure}: injected`), { code: failure });
+      return lstatSync(file);
+    };
+    const reader = readerFor({ w: root }, { inspect });
+
+    const status = checked('workspace.git.status', await reader.status('w'), base);
+    assert.deepEqual(status.files.map(file => file.path).sort(), ['plain/ok.txt']);
+    assert.equal(status.dirty, true);
+    for (const mode of ['uncommitted', 'unstaged']) {
+      const pages = await allPages(reader, { workspaceId: 'w', compare: { mode } }, base);
+      assert.deepEqual(pages.flatMap(page => page.files).map(file => file.path).sort(), ['plain/ok.txt'], mode);
+      const text = JSON.stringify(pages);
+      for (const secret of ['OUTSIDE_SECRET', 'OUTSIDE_DEEP', 'note.txt', 'more.txt']) assert.ok(!text.includes(secret), `${mode}: ${secret} never shown`);
+    }
+    for (const asked of ['outside/note.txt', 'outside/deep/more.txt']) {
+      const one = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' }, path: asked }), base);
+      assert.deepEqual(one.files, [], asked);
+      assert.ok(!JSON.stringify(one).includes('OUTSIDE_'), asked);
+    }
+    // The injected failure was really hit (the seam is in use).
+    assert.ok(inspected.includes(blocked));
+  });
+}
+
+test('an untracked path whose ancestor is no longer a directory (changed since Git listed it) is omitted', { skip: !hasGit && 'git is not installed' }, async t => {
+  const base = await sandbox(t);
+  const root = path.join(base, 'work');
+  const git = await repository(root);
+  await put(path.join(root, 'kept.txt'), 'kept\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'first');
+  await put(path.join(root, 'outside', 'note.txt'), 'OUTSIDE_SECRET\n');
+  await put(path.join(root, 'plain', 'ok.txt'), 'plain\n');
+  const blocked = path.join(root, 'outside');
+  const fileStats = lstatSync(path.join(root, 'kept.txt'));
+  const reader = readerFor({ w: root }, { inspect: file => (file === blocked ? fileStats : lstatSync(file)) });
+
+  const status = checked('workspace.git.status', await reader.status('w'), base);
+  assert.deepEqual(status.files.map(file => file.path).sort(), ['plain/ok.txt']);
+  const page = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' } }), base);
+  assert.deepEqual(page.files.map(file => file.path), ['plain/ok.txt']);
+  const one = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' }, path: 'outside/note.txt' }), base);
+  assert.deepEqual(one.files, []);
 });
