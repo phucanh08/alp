@@ -16,6 +16,8 @@ import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { clearRestoredMarker, readRestoredMarker, recoverInterruptedRestore } from '@anhlp/alp-core/backup';
 import { migrateState } from '@anhlp/alp-core/migrations';
 import { createLogger } from '@anhlp/alp-core/log';
+import { listProviders } from '@anhlp/alp-core/providers';
+import { probeAcp } from '@anhlp/alp-client/acp-probe';
 import { selfCommand, selfEntry } from '@anhlp/alp-core/packaged';
 
 declare const __ALP_VERSION__: string;
@@ -282,7 +284,11 @@ async function run(home: string) {
   for (const problem of attachmentConfig.problems) log.warn(problem, { code: 'ALP_ATTACHMENT_CONFIG' });
   // The live model catalog (t-e5ee): static rows at once, provider lists in the background, every 6 h.
   // ALP_MODEL_CATALOG=static keeps the static rows only (tests, offline hosts).
-  const modelCatalog = process.env.ALP_MODEL_CATALOG === 'static' ? undefined : new ModelCatalog({ home, probes: liveProbes() });
+  // ACP providers (t-d0b0) are listed from providers/<id>.json without starting any; one is probed only on
+  // catalog.refresh or when the user enables it, and learns its models from its first session otherwise.
+  const modelCatalog = process.env.ALP_MODEL_CATALOG === 'static' ? undefined : new ModelCatalog({ home, probes: liveProbes(),
+    acpProviders: () => listProviders(home),
+    acpProbe: async provider => (await probeAcp(provider as Parameters<typeof probeAcp>[0], { cwd: home, discover: true, timeoutMs: 15_000 })).models ?? [] });
   setActiveCatalog(modelCatalog);
   void modelCatalog?.start().catch(() => {});
   const server = createDaemonServer({ runtime, socketPath: socket, version: VERSION, store, runLogDir, previousExit: exit, home, templates, attachmentOptions: { limits: attachmentConfig.limits }, modelCatalog, onShutdown: () => void shutdown() });

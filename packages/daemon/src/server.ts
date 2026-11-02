@@ -242,8 +242,15 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   const connections = new Set<Connection>();
   const catalogResult = () => {
     const state = modelCatalog?.state();
-    return { models, modes, thinkingOptions, defaultModel: `codex:${DEFAULT_MODEL}`,
-      ...(state ? { fetchedAt: state.fetchedAt, providers: Object.fromEntries(Object.entries(state.providers).map(([runtime, provider]) => [runtime, { status: provider!.status, fetchedAt: provider!.fetchedAt, ...(provider!.error ? { error: provider!.error } : {}) }])) } : {}) };
+    // ACP providers' rows (t-d0b0), from their files and what sessions or an explicit probe taught.
+    const acpRows = modelCatalog?.acpRows() ?? [];
+    const acpModels = acpRows.map(row => ({ id: `acp:${row.id}`, label: row.label, description: row.description, thinkingOptions: [], runtime: 'acp', provider: row.provider, source: row.source, enabled: row.enabled, status: row.status }));
+    const acpProviders = Object.fromEntries([...new Set(acpRows.map(row => row.provider))].map(id => {
+      const acp = state?.acp?.[id];
+      return [`acp:${id}`, { status: acp?.status ?? 'unprobed', ...(acp?.fetchedAt ? { fetchedAt: acp.fetchedAt } : {}), ...(acp?.error ? { error: acp.error } : {}) }];
+    }));
+    return { models: [...models, ...acpModels], modes, thinkingOptions, defaultModel: `codex:${DEFAULT_MODEL}`,
+      ...(state ? { fetchedAt: state.fetchedAt, providers: { ...Object.fromEntries(Object.entries(state.providers).map(([runtime, provider]) => [runtime, { status: provider!.status, fetchedAt: provider!.fetchedAt, ...(provider!.error ? { error: provider!.error } : {}) }])), ...acpProviders } } : {}) };
   };
   // Every helloed connection learns that the catalog changed, and re-reads it (catalog.updated).
   const unsubscribeCatalog = modelCatalog?.onUpdated(snapshot => {
@@ -1119,7 +1126,10 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     if (!gitReader) throw new RpcError(ERROR.unavailable, 'Registry needs ALP_HOME');
     return run(gitReader);
   };
-  const operations = createOperations({ home, templates, knownProjects: () => new Set([...records.values()].flatMap(record => record.session?.projectRoot ? [record.session.projectRoot] : [])), onGateChange: root => runtime.syncGates?.(root) });
+  const operations = createOperations({ home, templates, knownProjects: () => new Set([...records.values()].flatMap(record => record.session?.projectRoot ? [record.session.projectRoot] : [])), onGateChange: root => runtime.syncGates?.(root),
+    // A provider file saved: reread the ACP rows; one the user just enabled is probed for its models (t-d0b0).
+    learnedModels: id => modelCatalog?.acpModels(id) ?? [],
+    onProviderSaved: (id, enabled) => { if (!modelCatalog) return; void (enabled ? modelCatalog.refreshAcp([id]) : modelCatalog.loadAcp()).catch(() => {}); } });
   const extensionOwners = new Map<string, Connection>();
   /** workspace.files.find's snapshots, each for the connection that asked. */
   const findPages = createFindPages();
@@ -1351,7 +1361,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     'catalog.get': () => catalogResult(),
     'catalog.refresh': async () => {
       if (!modelCatalog) throw new RpcError(ERROR.unavailable, 'The live model catalog is not available');
-      await modelCatalog.refresh();
+      // The one place, with a provider's enabling, where ALP starts ACP providers to list their models.
+      await Promise.all([modelCatalog.refresh(), modelCatalog.refreshAcp()]);
       return catalogResult();
     },
     // attachment.* (§12.6): each call acts for its principal context; without the store (no home or

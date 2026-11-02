@@ -13,8 +13,18 @@ export type CatalogRuntime = 'codex' | 'claude' | 'antigravity';
 /** A model as a provider reports it. */
 export type LiveModel = { id: string; label?: string; description?: string; efforts?: string[]; effort?: string };
 export type ProviderState = { status: 'ok' | 'failed' | 'static'; fetchedAt?: string; error?: string; models: LiveModel[] };
-export type CatalogSnapshot = { fetchedAt?: string; providers: Partial<Record<CatalogRuntime, ProviderState>> };
+/** What ALP learned of an ACP provider's models (t-d0b0): nothing until a session or an explicit probe tells it. */
+export type AcpStatus = 'unprobed' | 'ok' | 'failed';
+export type AcpState = { status: AcpStatus; fetchedAt?: string; error?: string; models: LiveModel[] };
+export type CatalogSnapshot = { fetchedAt?: string; providers: Partial<Record<CatalogRuntime, ProviderState>>; acp?: Record<string, AcpState> };
 export type Probe = (signal: AbortSignal) => Promise<LiveModel[]>;
+/** A provider of the library (providers/<id>.json), as loadProvider reads it. */
+export type AcpProviderConfig = { id: string; kind?: string; label?: string; description?: string; enabled?: boolean;
+  models?: Array<{ id: string; label?: string; description?: string }>; additionalModels?: Array<{ id: string; label?: string; description?: string }> };
+export type AcpProbe = (provider: AcpProviderConfig, signal: AbortSignal) => Promise<LiveModel[]>;
+/** An ACP row of the catalog: `acp:<provider>` (the agent's own default) and `acp:<provider>/<model>`. */
+export type AcpRow = { runtime: 'acp'; provider: string; id: string; label: string; description: string; efforts: string[];
+  source: 'configured' | 'live'; enabled: boolean; status: AcpStatus };
 
 const RUNTIMES: CatalogRuntime[] = ['codex', 'claude', 'antigravity'];
 export const REFRESH_MS = 6 * 60 * 60 * 1000;
@@ -54,7 +64,20 @@ function sanitize(value: any): CatalogSnapshot {
     if (!state || typeof state !== 'object') continue;
     providers[runtime] = { status: state.status === 'ok' ? 'ok' : 'failed', ...(typeof state.fetchedAt === 'string' ? { fetchedAt: state.fetchedAt } : {}), models: sanitizeModels(state.models) };
   }
-  return { ...(typeof value?.fetchedAt === 'string' ? { fetchedAt: value.fetchedAt } : {}), providers };
+  const acp: Record<string, AcpState> = {};
+  if (value?.acp && typeof value.acp === 'object') for (const [id, state] of Object.entries<any>(value.acp)) {
+    if (!/^[\w.-]+$/.test(id) || !state || typeof state !== 'object') continue;
+    acp[id] = { status: state.status === 'ok' ? 'ok' : state.status === 'failed' ? 'failed' : 'unprobed', ...(typeof state.fetchedAt === 'string' ? { fetchedAt: state.fetchedAt } : {}), ...(typeof state.error === 'string' ? { error: state.error } : {}), models: sanitizeModels(state.models) };
+  }
+  return { ...(typeof value?.fetchedAt === 'string' ? { fetchedAt: value.fetchedAt } : {}), providers, ...(Object.keys(acp).length ? { acp } : {}) };
+}
+
+/** The models a `session/new` answer offers (ACP `models.availableModels`, or a model select config option). */
+export function acpSessionModels(result: any): LiveModel[] {
+  const config = Array.isArray(result?.configOptions) ? result.configOptions.find((option: any) => option?.category === 'model' && option?.type === 'select') : undefined;
+  const listed = Array.isArray(result?.models?.availableModels) ? result.models.availableModels
+    : config ? (config.options ?? []).flatMap((option: any) => option?.options ?? [option]).map((option: any) => ({ modelId: option?.value, name: option?.name, description: option?.description })) : [];
+  return sanitizeModels(listed.map((model: any) => ({ id: model?.modelId ?? model?.id, ...(typeof model?.name === 'string' && model.name ? { label: model.name } : {}), ...(typeof model?.description === 'string' && model.description ? { description: model.description } : {}) })));
 }
 
 type Listener = (snapshot: CatalogSnapshot, entries: CatalogEntry[]) => void;
@@ -66,8 +89,16 @@ export class ModelCatalog {
   private timer?: NodeJS.Timeout;
   private running?: Promise<CatalogSnapshot>;
   private readonly file?: string;
+  private acpConfigs: AcpProviderConfig[] = [];
+  private acpRunning?: Promise<CatalogSnapshot>;
 
-  constructor(private readonly options: { home?: string; probes: Partial<Record<CatalogRuntime, Probe>>; timeoutMs?: number; refreshMs?: number; now?: () => Date; apply?: boolean }) {
+  /**
+   * ACP providers (t-d0b0) come from `acpProviders` (the library's providers/<id>.json) without starting
+   * them; their models are learned from sessions (learnAcp) and probed (acpProbe) only by refreshAcp,
+   * which alpd calls on catalog.refresh and when the user enables a provider. Never at start or on the timer.
+   */
+  constructor(private readonly options: { home?: string; probes: Partial<Record<CatalogRuntime, Probe>>; timeoutMs?: number; refreshMs?: number; now?: () => Date; apply?: boolean;
+    acpProviders?: () => Promise<AcpProviderConfig[]>; acpProbe?: AcpProbe }) {
     this.file = options.home ? catalogCacheFile(options.home) : undefined;
   }
 
@@ -78,6 +109,7 @@ export class ModelCatalog {
   /** Loads the cache, then refreshes in the background and every refreshMs. Never blocks on a provider. */
   async start() {
     await this.load();
+    await this.loadAcp().catch(() => {});
     void this.refresh().catch(() => {});
     const every = this.options.refreshMs ?? REFRESH_MS;
     if (every > 0) { this.timer = setInterval(() => { void this.refresh().catch(() => {}); }, every); this.timer.unref?.(); }
@@ -131,6 +163,78 @@ export class ModelCatalog {
     return true;
   }
 
+  /** Rereads the ACP providers' files; starts none of them. */
+  async loadAcp() {
+    if (!this.options.acpProviders) return;
+    this.acpConfigs = (await this.options.acpProviders()).filter(provider => provider.kind !== 'antigravity');
+  }
+
+  /** The ACP rows: each provider's default, then its models (the file's `models` replace learned ones; `additionalModels` add). */
+  acpRows(): AcpRow[] {
+    const rows: AcpRow[] = [];
+    for (const provider of this.acpConfigs) {
+      const state = this.snapshot.acp?.[provider.id];
+      const status = state?.status ?? 'unprobed';
+      const enabled = provider.enabled !== false;
+      const label = provider.label ?? provider.id;
+      const row = (id: string, text: string, description: string, source: AcpRow['source']): AcpRow => ({ runtime: 'acp', provider: provider.id, id, label: text, description, efforts: [], source, enabled, status });
+      rows.push(row(provider.id, `${label} · agent default`, provider.description ?? '', 'configured'));
+      const seen = new Set<string>();
+      const add = (models: Array<{ id: string; label?: string; description?: string }>, source: AcpRow['source']) => {
+        for (const model of models) if (!seen.has(model.id)) { seen.add(model.id); rows.push(row(`${provider.id}/${model.id}`, `${label} · ${model.label ?? model.id}`, model.description ?? '', source)); }
+      };
+      add(provider.models ?? state?.models ?? [], provider.models ? 'configured' : 'live');
+      add(provider.additionalModels ?? [], 'configured');
+    }
+    return rows;
+  }
+  /** The models ALP learned or probed for one ACP provider. */
+  acpModels(provider: string): LiveModel[] { return this.snapshot.acp?.[provider]?.models ?? []; }
+
+  /**
+   * A list an ACP session's `session/new` reported (t-d0b0). Additive, as ingest: it never removes a model
+   * a probe answered; a list with nothing new changes nothing.
+   */
+  async learnAcp(provider: string, models: LiveModel[]) {
+    if (!/^[\w.-]+$/.test(provider)) return false;
+    const prior = this.snapshot.acp?.[provider];
+    const known = new Set((prior?.models ?? []).map(model => model.id));
+    const added = sanitizeModels(models).filter(model => !known.has(model.id));
+    if (!added.length) return false;
+    this.snapshot.acp = { ...this.snapshot.acp, [provider]: { status: 'ok', fetchedAt: (this.options.now?.() ?? new Date()).toISOString(), models: [...(prior?.models ?? []), ...added] } };
+    await this.publish(true);
+    return true;
+  }
+
+  /**
+   * Starts each enabled ACP provider (or the named ones) once to read its models: only on an explicit
+   * catalog.refresh or when the user enables a provider. A failure keeps what ALP knew and records why.
+   */
+  refreshAcp(ids?: string[]): Promise<CatalogSnapshot> {
+    if (this.acpRunning) return this.acpRunning.then(() => this.refreshAcp(ids));
+    this.acpRunning = (async () => {
+      await this.loadAcp();
+      const probe = this.options.acpProbe;
+      const targets = this.acpConfigs.filter(provider => provider.enabled !== false && (!ids || ids.includes(provider.id)));
+      if (!probe || !targets.length) return this.snapshot;
+      const now = () => (this.options.now?.() ?? new Date()).toISOString();
+      const results = await Promise.all(targets.map(async provider => {
+        const prior = this.snapshot.acp?.[provider.id];
+        try {
+          const models = sanitizeModels(await bounded(signal => probe(provider, signal), this.options.timeoutMs ?? PROBE_TIMEOUT_MS));
+          // An agent that offers no choice of model is answered; what ALP learned before stays.
+          return [provider.id, { status: 'ok', fetchedAt: now(), models: models.length ? models : prior?.models ?? [] }] as const;
+        } catch (error) {
+          return [provider.id, { status: 'failed', ...(prior?.fetchedAt ? { fetchedAt: prior.fetchedAt } : {}), error: error instanceof Error ? error.message : String(error), models: prior?.models ?? [] }] as const;
+        }
+      }));
+      this.snapshot.acp = { ...this.snapshot.acp, ...Object.fromEntries(results) as Record<string, AcpState> };
+      await this.publish(true);
+      return this.snapshot;
+    })().finally(() => { this.acpRunning = undefined; });
+    return this.acpRunning;
+  }
+
   private async publish(save: boolean) {
     const next = mergeCatalog(staticRows(), Object.fromEntries(Object.entries(this.snapshot.providers).map(([runtime, state]) => [runtime, state?.models])));
     const changed = JSON.stringify(next) !== JSON.stringify(this.current);
@@ -163,4 +267,9 @@ export function activeCatalog() { return active; }
 export function feedCatalog(context: unknown) {
   const live = liveFromContext(context);
   if (live && active) void active.ingest(live.runtime, live.models).catch(() => {});
+}
+/** An ACP session's `session/new` answer teaches the daemon's catalog that provider's models (t-d0b0). */
+export function feedAcpSession(provider: string, result: unknown) {
+  const models = acpSessionModels(result);
+  if (models.length && active) void active.learnAcp(provider, models).catch(() => {});
 }

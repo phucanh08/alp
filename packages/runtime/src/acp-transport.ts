@@ -10,6 +10,7 @@ import { commandDecision, unwrapShell, type PermissionProfile } from '@anhlp/alp
 import { launchCommand } from '@anhlp/alp-core/providers';
 import { bridgeCommand } from '@anhlp/alp-core/bridges';
 import { acpText, acpToolDetail, type AcpCall } from './tool-detail.js';
+import { feedAcpSession } from './model-catalog.js';
 
 /**
  * ACP agents (ALPD §46): a generic transport for any agent that speaks the Agent Client
@@ -197,6 +198,8 @@ export class AcpTransport {
       } else {
         const result = await this.call('session/new', { cwd: params.cwd, mcpServers }, 120_000);
         this.sessionId = result.sessionId;
+        // The first real session tells the catalog which models this provider offers (t-d0b0).
+        feedAcpSession(this.provider.id, result);
         await this.chooseModel(result.models, result.configOptions);
       }
       return { thread: { id: this.sessionId, turns: [] }, cwd: params.cwd, model: params.model, reasoningEffort: params.thinking };

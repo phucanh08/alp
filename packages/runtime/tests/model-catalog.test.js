@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MODELS, catalogModels } from '@anhlp/alp-core/models';
 import { fitEffort, modelEfforts } from '@anhlp/alp-core/profiles';
-import { ModelCatalog, catalogEntries, codexProbe, feedCatalog, liveFromContext, mergeCatalog, models, parseAgyModels, setActiveCatalog, thinkingOptionsFor } from '@anhlp/alp-runtime';
+import { ModelCatalog, acpSessionModels, catalogEntries, codexProbe, feedAcpSession, feedCatalog, liveFromContext, mergeCatalog, models, parseAgyModels, setActiveCatalog, thinkingOptionsFor } from '@anhlp/alp-runtime';
 
 const home = async t => { const directory = await mkdtemp(path.join(tmpdir(), 'alp-catalog-')); t.after(() => rm(directory, { recursive: true, force: true })); return directory; };
 // Each test leaves the process-wide catalog static again.
@@ -179,4 +179,75 @@ test('core effort checks follow the live catalog the daemon applied (t-086c)', a
   await new ModelCatalog({ probes: { codex: async () => [{ id: 'gpt-live-core', efforts: ['low', 'high', 'warp'], effort: 'high' }] }, refreshMs: 0 }).refresh();
   assert.deepEqual(modelEfforts('codex:gpt-live-core'), ['low', 'high']);
   assert.equal(fitEffort('codex:gpt-live-core', 'max'), 'high');
+});
+
+// ACP providers in the catalog (t-d0b0): rows from providers/<id>.json, models learned from session/new,
+// a probe only on an explicit refreshAcp (catalog.refresh, or the user enabling a provider).
+const acpConfigs = [
+  { id: 'opencode', kind: 'acp', label: 'OpenCode', enabled: true },
+  { id: 'gemini', kind: 'acp', label: 'Gemini', models: [{ id: 'gemini-pro', label: 'Pro' }], additionalModels: [{ id: 'gemini-flash' }] },
+  { id: 'off', kind: 'acp', label: 'Off', enabled: false },
+  { id: 'antigravity', kind: 'antigravity', label: 'Antigravity' },
+];
+
+test('ACP: start lists configured providers as unprobed rows and starts none of them', async t => {
+  reset(t);
+  const probed = [];
+  const catalog = new ModelCatalog({ home: await home(t), probes: {}, refreshMs: 0, acpProviders: async () => acpConfigs, acpProbe: async provider => { probed.push(provider.id); return []; } });
+  await catalog.start();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(probed, [], 'no ACP probe at start');
+  const rows = catalog.acpRows();
+  assert.deepEqual(rows.map(row => row.id), ['opencode', 'gemini', 'gemini/gemini-pro', 'gemini/gemini-flash', 'off']);
+  assert.deepEqual(rows[0], { runtime: 'acp', provider: 'opencode', id: 'opencode', label: 'OpenCode · agent default', description: '', efforts: [], source: 'configured', enabled: true, status: 'unprobed' });
+  assert.equal(rows.find(row => row.id === 'gemini/gemini-pro').source, 'configured');
+  assert.equal(rows.find(row => row.id === 'off').enabled, false);
+  assert.ok(!rows.some(row => row.provider === 'antigravity'), 'Antigravity keeps its own runtime rows');
+  catalog.stop();
+});
+
+test('ACP: a session/new answer teaches the active catalog the provider\'s models, additively', async t => {
+  reset(t);
+  const directory = await home(t);
+  const catalog = new ModelCatalog({ home: directory, probes: {}, refreshMs: 0, acpProviders: async () => acpConfigs });
+  await catalog.loadAcp();
+  const updates = [];
+  catalog.onUpdated(snapshot => updates.push(snapshot));
+  setActiveCatalog(catalog);
+  t.after(() => setActiveCatalog(undefined));
+  assert.deepEqual(acpSessionModels({ configOptions: [{ category: 'model', type: 'select', options: [{ value: 'small', name: 'Small' }, { options: [{ value: 'large' }] }] }] }), [{ id: 'small', label: 'Small' }, { id: 'large' }]);
+  feedAcpSession('opencode', { sessionId: 's', models: { currentModelId: 'a', availableModels: [{ modelId: 'a', name: 'Model A' }, { modelId: 'b' }, { name: 'no id' }] } });
+  for (let i = 0; i < 50 && !updates.length; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(updates.length, 1);
+  assert.deepEqual(catalog.acpRows().filter(row => row.provider === 'opencode').map(row => [row.id, row.label, row.source, row.status]),
+    [['opencode', 'OpenCode · agent default', 'configured', 'ok'], ['opencode/a', 'OpenCode · Model A', 'live', 'ok'], ['opencode/b', 'OpenCode · b', 'live', 'ok']]);
+  // Nothing new changes nothing; a provider whose file lists models keeps the file's list.
+  assert.equal(await catalog.learnAcp('opencode', [{ id: 'a' }]), false);
+  await catalog.learnAcp('gemini', [{ id: 'other' }]);
+  assert.ok(!catalog.acpRows().some(row => row.id === 'gemini/other'));
+  // What was learned is cached for the next start.
+  const next = new ModelCatalog({ home: directory, probes: {}, refreshMs: 0, apply: false, acpProviders: async () => acpConfigs });
+  await next.load(); await next.loadAcp();
+  assert.ok(next.acpRows().some(row => row.id === 'opencode/b'));
+});
+
+test('ACP: refreshAcp probes enabled providers only (or the named one), and a failure keeps what was known', async t => {
+  reset(t);
+  const probed = [];
+  let fail = false;
+  const catalog = new ModelCatalog({ probes: {}, refreshMs: 0, timeoutMs: 50, acpProviders: async () => acpConfigs, acpProbe: async provider => {
+    probed.push(provider.id);
+    if (fail) throw new Error('needs login');
+    return [{ id: `${provider.id}-m1`, label: 'M1' }];
+  } });
+  await catalog.refreshAcp();
+  assert.deepEqual(probed.sort(), ['gemini', 'opencode'], 'disabled and Antigravity providers are not started');
+  assert.ok(catalog.acpRows().some(row => row.id === 'opencode/opencode-m1' && row.source === 'live' && row.status === 'ok'));
+  probed.length = 0;
+  fail = true;
+  await catalog.refreshAcp(['opencode']);
+  assert.deepEqual(probed, ['opencode']);
+  assert.equal(catalog.state().acp.opencode.status, 'failed');
+  assert.match(catalog.state().acp.opencode.error, /needs login/);
+  assert.ok(catalog.acpRows().some(row => row.id === 'opencode/opencode-m1'), 'the previous list stays');
 });

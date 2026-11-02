@@ -8,7 +8,8 @@ import { initProject } from '../../packages/core/src/init.js';
 import { getEntry, listEntries, saveEntry } from '../../packages/core/src/library-edit.js';
 import { testEntry } from '../../packages/client/src/library-test.js';
 import { diagnose } from '../../packages/client/src/doctor.js';
-import { acpDecision, acpPermission, createAlpRuntime } from '../../dist/runtime/index.js';
+import { ModelCatalog, acpDecision, acpPermission, createAlpRuntime, setActiveCatalog } from '../../dist/runtime/index.js';
+import { listProviders } from '../../packages/core/src/providers.js';
 
 const FAKE = fileURLToPath(new URL('../support/fake-acp.js', import.meta.url));
 
@@ -235,3 +236,17 @@ test('models, resuming, and what an ACP session cannot do', async t => {
   await runtime.open('root', { cwd: root, model: 'acp:fake/large' });
   assert.deepEqual((await received()).filter(m => m.method === 'session/set_config_option').map(m => m.params), [{ sessionId: 'fake-session-1001', configId: 'model', value: 'large' }]);
  });
+
+test('t-d0b0: the first session/new teaches alpd\'s catalog the ACP provider\'s models; nothing is probed', async t => {
+  const { root, home, runtime } = await setup(t, { env: { FAKE_ACP_MODELS: 'small,large' } });
+  const probed = [];
+  const catalog = new ModelCatalog({ home, probes: {}, refreshMs: 0, apply: false, acpProviders: () => listProviders(home), acpProbe: async provider => { probed.push(provider.id); return []; } });
+  await catalog.start();
+  setActiveCatalog(catalog);
+  t.after(() => { setActiveCatalog(undefined); catalog.stop(); });
+  assert.deepEqual(catalog.acpRows().map(row => [row.id, row.status]), [['fake', 'unprobed']]);
+  await runtime.open('root', { cwd: root, model: 'acp:fake' });
+  await until(() => catalog.acpRows().some(row => row.id === 'fake/large'), 'the learned models');
+  assert.deepEqual(catalog.acpRows().map(row => [row.id, row.source, row.status]), [['fake', 'configured', 'ok'], ['fake/small', 'live', 'ok'], ['fake/large', 'live', 'ok']]);
+  assert.deepEqual(probed, []);
+});
