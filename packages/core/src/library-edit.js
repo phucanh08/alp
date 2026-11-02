@@ -238,9 +238,12 @@ export async function listRetiredSkills({ library } = {}) {
     const match = entry.isDirectory() && RETIRED_FOLDER.exec(entry.name);
     if (!match) continue;
     const directory = path.join(root, entry.name);
-    const meta = await retiredMetadata(directory);
+    // A corrupt retired.json must not hide the other retired skills: list the copy
+    // without roles, and restore then asks for --roles or --no-roles.
+    let meta, invalid;
+    try { meta = await retiredMetadata(directory); } catch (error) { if (error?.code !== 'INVALID_LIBRARY') throw error; invalid = error.message; }
     const stamp = match[2].replace(/T(\d\d)-(\d\d)-(\d\d)-(\d{3})Z$/, 'T$1:$2:$3.$4Z');
-    rows.push({ name: match[1], directory, retiredAt: typeof meta?.retiredAt === 'string' ? meta.retiredAt : stamp, roles: meta ? meta.roles : null, agent: typeof meta?.agent === 'string' ? meta.agent : null });
+    rows.push({ name: match[1], directory, retiredAt: typeof meta?.retiredAt === 'string' ? meta.retiredAt : stamp, roles: meta ? meta.roles : null, agent: typeof meta?.agent === 'string' ? meta.agent : null, ...(invalid ? { invalid } : {}) });
   }
   return rows.sort((a, b) => b.retiredAt.localeCompare(a.retiredAt) || b.directory.localeCompare(a.directory));
 }
@@ -259,7 +262,9 @@ export async function restoreSkill(name, { library, from, roles } = {}) {
   let source;
   if (from !== undefined) {
     source = path.resolve(from);
-    if (!(await stat(source).then(info => info.isDirectory(), () => false))) fail('NOT_FOUND', `${source} is not a directory`);
+    const info = await lstat(source).catch(() => undefined);
+    if (info?.isSymbolicLink()) fail('INVALID_ENTRY', `${source} is a symbolic link; pass the directory itself`);
+    if (!info?.isDirectory()) fail('NOT_FOUND', `${source} is not a directory`);
   } else {
     const found = (await listRetiredSkills({ library })).find(row => row.name === name);
     if (!found) fail('NOT_FOUND', `No retired skill '${name}' in ${path.join(library, RETIRED_SKILLS)}`);
@@ -270,7 +275,8 @@ export async function restoreSkill(name, { library, from, roles } = {}) {
   if (await lstat(target).then(() => true, () => false)) fail('ALREADY_EXISTS', `The library already has a skill '${name}' (${target}); nothing was restored`);
   const metaFile = path.join(source, RETIRED_METADATA);
   const metaText = await optionalText(metaFile);
-  const meta = await retiredMetadata(source);
+  let meta;
+  try { meta = await retiredMetadata(source); } catch (error) { if (error?.code !== 'INVALID_LIBRARY' || roles === undefined) throw error; }
   if (meta && meta.name !== undefined && meta.name !== name) fail('INVALID_ENTRY', `${metaFile} is for the skill '${meta.name}', not '${name}'`);
   const given = roles ?? meta?.roles;
   if (!given) fail('ROLES_REQUIRED', `${source} does not record the roles that had '${name}'; pass --roles a,b or --no-roles`);
