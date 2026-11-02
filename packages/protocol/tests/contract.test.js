@@ -200,3 +200,9 @@ test('terminal limits: the schema bounds are TERMINAL\'s, hello limits are valid
   assert.ok(isTerminalId(`term_${'a'.repeat(32)}`));
   for (const id of ['term_', `term_${'A'.repeat(32)}`, '../term', 42]) assert.ok(!isTerminalId(id), String(id));
 });
+
+test('AGENT_NAME: one pattern for principal.agent in daemon.hello and a gateway credential\'s agent', async () => {
+  const { AGENT_NAME } = await import('@anhlp/alp-protocol');
+  for (const name of ['a', 'main', 'code-reviewer', 'agent2', 'a'.repeat(64)]) assert.ok(AGENT_NAME.test(name), name);
+  for (const name of ['', 'Main', '2agent', '-a', 'a-', 'a--b', 'a_b', 'a.b', 'a'.repeat(65), 'a b']) assert.ok(!AGENT_NAME.test(name), name);
+});

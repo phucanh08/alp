@@ -81,6 +81,13 @@ Paseo uses a bespoke `*_request`/`*_response` envelope with three error channels
 
 Capabilities are negotiated by intersection, reusing Paseo provider capability names where they mean the same thing (`session.persistence`, `session.subsession`, `prompt.steer`, `session.list`). Any compatibility shim is tagged `COMPAT(name): added vX, remove after <date>` (Paseo's discipline). Start with one protocol version and few capabilities.
 
+**Agent connections (`principal.agent`, t-ca1f, t-1c59).** A hello may mark its connection as an ALP agent's, in two ways:
+
+- `capabilities` includes `principal.agent`. The client handshake sends it when `ALP_AGENT_SESSION` is set, so a process an agent started (an `alp` command in its shell) announces itself.
+- `principal: { agent: <name> }` names the agent. The gateway sends it for a credential bound to a named agent. The name must match `AGENT_NAME` from `@anhlp/alp-protocol` (lower-case letters, digits and single hyphens, starting with a letter, 1 to 64 characters), the same pattern the gateway checks a credential's agent with. Any other value fails the hello with `invalid_params`, and the connection is left unchanged.
+
+Either way the mark only takes away: methods that are the user's (terminals, `workspace.git.facts`, `session.compact`) refuse such a connection with `forbidden` / `user_only`. The name is a label for the logs and grants nothing. Both are sticky: a later hello never drops the mark, and the first name stays (a different second name is logged and ignored). The mark is self-declared: it keeps honest agent processes off user-only methods, and is not an authentication boundary against a process that omits it.
+
 ### 3.3 Connections
 
 Each connection is independent. A client that reconnects re-subscribes with its last cursor (§4.3) and the daemon replays what it missed — this closes the gap Paseo leaves to clients. No session grace period is needed because subscriptions are cheap to recreate and no state lives on the connection, except subscriptions.
