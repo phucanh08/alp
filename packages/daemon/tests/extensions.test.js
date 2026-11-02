@@ -92,7 +92,7 @@ test('an owner registers a method and a caller invokes it over the socket', asyn
   const caller = await connect(socketPath);
   t.after(() => caller.close());
   assert.deepEqual(await caller.request('ext.echo', { value: 42 }), { echo: 42 });
-  assert.deepEqual(seen, [['extension.invoke', { method: 'ext.echo', params: { value: 42 } }]]);
+  assert.deepEqual(seen, [['extension.invoke', { method: 'ext.echo', params: { value: 42 }, caller: { agent: false } }]]);
   void daemon;
 });
 
@@ -321,4 +321,41 @@ test('security: oversized UTF-8 extension payload is rejected before invoking ha
   // Below 16 Mi characters, above the 16 MiB wire limit.
   await assert.rejects(caller.request('ext.payload', { text: '界'.repeat(6 * 1024 * 1024) }), /size limit/);
   assert.equal(invoked, false);
+});
+
+async function connectAs(socketPath, agent) {
+  const saved = process.env.ALP_AGENT_SESSION;
+  if (agent) process.env.ALP_AGENT_SESSION = agent; else delete process.env.ALP_AGENT_SESSION;
+  try { return await connect(socketPath, { name: 'extensions-test', version: '0' }); }
+  finally { if (saved === undefined) delete process.env.ALP_AGENT_SESSION; else process.env.ALP_AGENT_SESSION = saved; }
+}
+
+test('security: an agent connection may not register an extension method (user_only, t-d08b)', async t => {
+  const { socketPath } = await start(t);
+  const agent = await connectAs(socketPath, '1');
+  t.after(() => agent.close());
+  await agent.request('daemon.hello', { protocolVersion: PROTOCOL_VERSION }).catch(() => {});
+  await assert.rejects(agent.request('extension.register', { method: 'web.pairing' }), error => error.code === ERROR.forbidden && error.data?.reason === 'user_only');
+  const owner = await connectAs(socketPath, undefined);
+  t.after(() => owner.close());
+  assert.deepEqual(await owner.request('extension.register', { method: 'web.pairing' }), { registered: 'web.pairing' });
+});
+
+test('security: alpd sets extension.invoke caller itself; a client-supplied caller is never forwarded (t-d08b)', async t => {
+  const { socketPath } = await start(t);
+  const owner = await connectAs(socketPath, undefined);
+  t.after(() => owner.close());
+  const seen = [];
+  owner.onRequest(async (method, params) => { seen.push(params); return {}; });
+  await owner.request('extension.register', { method: 'ext.who' });
+  const user = await connectAs(socketPath, undefined);
+  t.after(() => user.close());
+  await user.request('ext.who', { caller: { agent: false, agentName: 'forged' } });
+  const agent = await connectAs(socketPath, 'lead');
+  t.after(() => agent.close());
+  await agent.request('daemon.hello', { protocolVersion: PROTOCOL_VERSION, principal: { agent: 'lead' } });
+  await agent.request('ext.who', { caller: { agent: false } });
+  assert.deepEqual(seen[0].caller, { agent: false });
+  assert.equal(seen[1].caller.agent, true);
+  assert.equal(seen[1].caller.agentName, 'lead');
 });

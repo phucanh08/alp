@@ -19,7 +19,8 @@ add('message', 'success response', { jsonrpc: '2.0', id: 1, result: { protocolVe
 add('message', 'error response', { jsonrpc: '2.0', id: 2, error: { code: 1001, message: 'No session ses_fixture' } });
 add('message', 'error response with id null', { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
 add('message', 'event notification', { jsonrpc: '2.0', method: 'event', params: env({ type: 'session.ready' }) });
-add('message', 'extension.invoke request to an owner', { jsonrpc: '2.0', id: 3, method: 'extension.invoke', params: { method: 'web.pairing', params: {} } });
+add('message', 'extension.invoke request to an owner', { jsonrpc: '2.0', id: 3, method: 'extension.invoke', params: { method: 'web.pairing', params: {}, caller: { agent: false } } });
+add('message', 'extension.invoke request from an agent caller', { jsonrpc: '2.0', id: 4, method: 'extension.invoke', params: { method: 'web.pairing', params: {}, caller: { agent: true, agentName: 'lead' } } });
 add('message', 'request without jsonrpc', { id: 1, method: 'daemon.status' }, false);
 add('message', 'request with a fractional id', { jsonrpc: '2.0', id: 1.5, method: 'daemon.status' }, false);
 add('message', 'request with an id beyond 2^53-1', { jsonrpc: '2.0', id: 9007199254740992, method: 'daemon.status' }, false);

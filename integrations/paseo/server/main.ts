@@ -114,6 +114,8 @@ async function run(home: string) {
           client.onRequest(async (method: string, params: any) => {
             if (method !== 'extension.invoke') return undefined;
             if (params?.method !== 'web.pairing') return undefined;
+            // alpd sets caller itself (t-d08b); an agent may neither read the link nor open the relay.
+            if (params?.caller?.agent !== false) throw Object.assign(new Error("web.pairing is the user's; this connection was opened by an ALP agent"), { code: 1003, data: { reason: 'user_only' } });
             return await pairingHandler(params?.params ?? {});
           });
           try {

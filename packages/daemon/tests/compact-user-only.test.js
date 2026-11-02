@@ -37,4 +37,16 @@ test('alpd: session.compact answers the owner and refuses an agent connection 10
   await agent.request('daemon.hello', { protocolVersion: 1 }).catch(() => {});
   await assert.rejects(agent.request('session.compact', { sessionId: 'sb' }), error => error.code === 1003 && error.data?.reason === 'user_only');
   assert.deepEqual(compacted, ['sa']);
+  // fork, rewind and reload are the user's too (t-d08b): the agent is refused before anything else,
+  // while the owner reaches the method (here refused only because this alpd lists no conversation capability).
+  const ifGeneration = 'a'.repeat(32);
+  const asked = {
+    'session.fork': { sessionId: 'sa', requestId: 'r1', ifGeneration },
+    'session.rewind': { sessionId: 'sa', requestId: 'r2', ifGeneration, beforeTurnId: 't1' },
+    'session.reload': { sessionId: 'sa', requestId: 'r3', ifGeneration },
+  };
+  for (const [method, params] of Object.entries(asked)) {
+    await assert.rejects(agent.request(method, params), error => error.code === 1003 && error.data?.reason === 'user_only', method);
+    await assert.rejects(owner.request(method, params), error => error.code === -32601 && error.data?.reason !== 'user_only', method);
+  }
 });

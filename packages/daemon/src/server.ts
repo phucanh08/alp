@@ -1125,6 +1125,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   const findPages = createFindPages();
   const handlers: Record<string, (connection: Connection, params: any) => Promise<unknown> | unknown> = {
     'extension.register': async (connection, params) => {
+      // An agent could claim a user's method (web.pairing) while its owner is down (t-d08b).
+      agentRefused(connection, 'extension.register');
       const method = params?.method;
       if (typeof method !== 'string' || !/^[a-zA-Z][a-zA-Z0-9._-]*$/.test(method) || method === '__proto__' || method === 'constructor' || method === 'toString') throw new RpcError(ERROR.protocol, 'extension.register requires a safe method name');
       if (method.length > 128 || (reservedNamespaces.has(method.split('.')[0]) && !originalMethods.has(method))) throw new RpcError(ERROR.protocol, 'extension.register requires an extension namespace and a name of at most 128 characters');
@@ -1580,19 +1582,22 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     },
 
     /** A new root from a root's conversation cut at a turn, or from a branch a rewind set aside (§12.7). */
-    async 'session.fork'(_connection, params) {
+    async 'session.fork'(connection, params) {
+      agentRefused(connection, 'session.fork');
       if (!conversation?.enabled) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd does not fork conversations (capability session.fork is not listed)');
       return conversation.fork({ ...params, principal: principalOf(params) });
     },
 
     /** The root's conversation from before a turn on, same id; the later turns stay a recoverable branch, files untouched (§12.7). */
-    async 'session.rewind'(_connection, params) {
+    async 'session.rewind'(connection, params) {
+      agentRefused(connection, 'session.rewind');
       if (!conversation?.enabled) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd does not rewind conversations (capability session.rewind is not listed)');
       return conversation.rewind(params);
     },
 
     /** Restarts a live root's native process on its own conversation at the idle barrier (§12.8). */
-    async 'session.reload'(_connection, params) {
+    async 'session.reload'(connection, params) {
+      agentRefused(connection, 'session.reload');
       if (!conversation?.reloads) throw new RpcError(RPC_ERROR.methodNotFound, 'This alpd does not reload sessions (capability session.reload is not listed)');
       return conversation.reload(params);
     },
@@ -1864,7 +1869,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   async function invokeExtended(owner: Connection, caller: Connection, method: string, params: any) {
     if (owner.pending.size >= 128) throw new RpcError(ERROR.conflict, 'too many pending extension calls');
     const id = ++owner.nextId;
-    const invocation = { jsonrpc: '2.0', id, method: 'extension.invoke', params: { method, params } };
+    const invocation = { jsonrpc: '2.0', id, method: 'extension.invoke', params: { method, params, caller: { agent: caller.agent === true, ...(caller.agentName !== undefined ? { agentName: caller.agentName } : {}) } } };
     if (Buffer.byteLength(encodeFrame(invocation), 'utf8') > MAX_FRAME) throw new RpcError(-32600, 'ALP daemon frame exceeds size limit');
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {

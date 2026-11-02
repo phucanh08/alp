@@ -1567,6 +1567,7 @@ export class ClientConnection {
     // up afresh; requestIds are this credential's own (namespaced, as registry mutations), so another
     // credential's request is never answered as a duplicate of it; alpd's errors leave as fixed text.
     'session.rewind': async params => {
+      if (this.#grant.agent === true) throw forbidden('session.rewind is the user\'s; this credential is an agent\'s', 'user_only');
       await this.#conversationRoot(params.sessionId);
       const result = await this.#call('session.rewind', { ...params, requestId: this.#registryRequestId(params.requestId) }).catch(error => { throw this.#conversationError(error); });
       const session = result?.session;
@@ -1579,6 +1580,7 @@ export class ClientConnection {
     // Reload (§12.8, issue #121 G2): the root's native process restarts on its own conversation. A
     // root in the grant, looked up afresh, driven within the grant's modes as session.prompt is.
     'session.reload': async params => {
+      if (this.#grant.agent === true) throw forbidden('session.reload is the user\'s; this credential is an agent\'s', 'user_only');
       await this.#conversationRoot(params.sessionId, RELOAD_REFUSALS);
       const result = await this.#call('session.reload', { ...params, requestId: this.#registryRequestId(params.requestId) }).catch(error => { throw this.#conversationError(error, RELOAD_REFUSALS); });
       const session = result?.session;
@@ -1628,6 +1630,7 @@ export class ClientConnection {
     // registry workspace the grant names exactly; alpd gets this credential's principal context and
     // re-authorizes the source's attachments for it. The created root is checked before it is answered.
     'session.fork': async params => {
+      if (this.#grant.agent === true) throw forbidden('session.fork is the user\'s; this credential is an agent\'s', 'user_only');
       const scoped = await this.#conversationRoot(params.sessionId);
       /** @type {import('./credentials.js').Workspace} */
       let destination;
