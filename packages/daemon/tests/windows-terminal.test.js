@@ -35,9 +35,11 @@ function defer(t, fn) {
 }
 async function home(t, config = { version: 1, allowRemoteTerminal: true }) {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-win-term-')));
-  // No retry: a shell that ran here is gone first (service shutdown is deferred later, so runs earlier,
-  // and close/shutdown wait for the ConPTY shell's real exit, t-bfbd).
-  defer(t, () => rm(dir, { recursive: true, force: true }));
+  // A shell that ran here is gone first: service shutdown is deferred later, so runs earlier, and
+  // close/shutdown wait for node-pty to report the ConPTY shell's exit (t-bfbd). The short retry stays as
+  // a defense: that wait is bounded (killGraceMs) and node-pty does not promise the exit comes after
+  // Windows released the directory (it did every time here).
+  defer(t, () => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   if (config) await writeFile(path.join(dir, 'terminal.json'), JSON.stringify(config), { mode: 0o600 });
   return dir;
 }
@@ -240,6 +242,24 @@ test('service on win32: close resolves only once node-pty reports the exit of th
   assert.deepEqual((await terminals.list(owner, {})).terminals, []);
 });
 
+for (const [how, end] of [['shutdown', terminals => terminals.shutdown()], ['revoke', terminals => terminals.revoke(owner.id)]]) {
+  test(`service on win32: ${how} resolves only once node-pty reports the exit of the killed shell`, async t => {
+    const fake = fakeNodePty();
+    const dir = await home(t);
+    const terminals = createTerminalService({ home: dir, resolveWorkspace: async () => dir, log: quiet, platform: 'win32', spawn: createWindowsPtySpawn(() => fake), capability: () => windowsTerminalCapability(() => fake), processes: async () => [], sweepMs: 60000, killGraceMs: 60000 });
+    defer(t, () => terminals.shutdown());
+    await create(terminals);
+    fake.connect();
+    let done = false;
+    const ending = end(terminals).then(() => { done = true; });
+    await until(() => fake.calls.kill.length === 1, 'the kill');
+    await new Promise(resolve => setTimeout(resolve, 50));
+    assert.equal(done, false, 'still waiting for the shell to exit');
+    fake.exit({ exitCode: -1073741510 });
+    await ending;
+  });
+}
+
 test('service on win32: a shell that exits on its own ends the terminal; shutdown kills the rest', async t => {
   const { fake, terminals } = await service(t);
   const { terminal } = await create(terminals, 'self');
@@ -321,11 +341,15 @@ test('ConPTY: the terminal service end to end on Windows (terminal.json, create,
   await terminals.attach(owner, sink, { terminalId: terminal.terminalId });
   await terminals.input(owner, sink, { terminalId: terminal.terminalId, data: 'echo %ALP_TERMINAL%_SERVICE^_OK\r' });
   await until(() => output.includes('1_SERVICE_OK'), 'service terminal output with the terminal environment');
+  const closing = performance.now();
   await terminals.close(owner, { terminalId: terminal.terminalId });
-  // close waited for the shell's real exit: it is gone and no longer holds its working directory, so
-  // the directory goes at once, without a retry (it was rmdir EBUSY when close returned at kill, t-bfbd).
+  const closeMs = Math.round(performance.now() - closing);
+  // close waited for node-pty to report the shell's exit (it returned at kill and the rm after it was
+  // EBUSY, t-bfbd): the shell is gone when close resolves.
   assert.equal(alive(pid), false, 'the service shell exited before close resolved');
   assert.deepEqual(terminals.pids(), []);
-  await rm(dir, { recursive: true });
-  t.diagnostic(`ConPTY service terminal pid ${pid} ended on close; its directory was removed at once`);
+  // One removal at once, no retry: evidence on each runner that close waited long enough. Not asserted
+  // (the release order is node-pty's behaviour, not its promise); the deferred removal retries.
+  const removal = await rm(dir, { recursive: true }).then(() => 'removed', error => error.code);
+  t.diagnostic(`ConPTY service terminal pid ${pid} ended on close after ${closeMs} ms; its directory right after close: ${removal}`);
 });
