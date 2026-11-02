@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -278,8 +278,12 @@ test('main distills lessons into a skill scoped to the roles it picks, saved onl
   const dismissed = await approvedSkill(runtime, main.call('alp_skill', { ...skill, requestId: 'again' }), null);
   assert.deepEqual([dismissed.result.approved, dismissed.result.outcome], [false, 'dismissed']);
 
+  const rolesBefore = await stat(path.join(library, 'role-skills.json'));
   const { result, question } = await approvedSkill(runtime, main.call('alp_skill', { ...skill, requestId: 'approve' }), 'Approve');
   assert.equal(question.body, rejected.question.body, 'the user sees the whole skill each time');
+  // role-skills.json is replaced through a temporary file (a new inode), not rewritten in place, and none is left behind.
+  if (process.platform !== 'win32') assert.notEqual((await stat(path.join(library, 'role-skills.json'))).ino, rolesBefore.ino);
+  assert.deepEqual((await readdir(library)).filter(name => name.endsWith('.tmp')), []);
   assert.deepEqual([result.status, result.approved, result.saved], ['resolved', true, path.join(library, 'skills', 'verify-claims', 'SKILL.md')]);
   assert.deepEqual(result.lessonsRemoved.sort(), lessons.slice(0, 2).sort());
   assert.equal(result.lessonsNotFound, undefined, 'duplicate representations do not report missing lessons');
