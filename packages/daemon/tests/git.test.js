@@ -744,6 +744,45 @@ test('an untracked directory link (a Windows junction) is listed as itself: noth
   assert.deepEqual(behind.files, []);
 });
 
+test('an untracked directory inspected as a link is collapsed to itself on every platform (the Windows junction branch): status, diff, diff by path', { skip: !hasGit && 'git is not installed' }, async t => {
+  const base = await sandbox(t);
+  const root = path.join(base, 'work');
+  const git = await repository(root);
+  await put(path.join(root, 'kept.txt'), 'kept\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'first');
+  // A plain directory, so Git lists what is inside it on every platform, as Git for Windows does behind a junction.
+  await put(path.join(root, 'outside', 'note.txt'), 'OUTSIDE_SECRET\n');
+  await put(path.join(root, 'outside', 'deep', 'more.txt'), 'OUTSIDE_DEEP\n');
+  await put(path.join(root, 'plain', 'ok.txt'), 'plain\n');
+  const linked = path.join(root, 'outside');
+  const inspected = [];
+  const inspect = file => {
+    inspected.push(file);
+    const info = lstatSync(file);
+    return file === linked ? Object.assign(Object.create(Object.getPrototypeOf(info)), info, { isSymbolicLink: () => true, isDirectory: () => false }) : info;
+  };
+  const reader = readerFor({ w: root }, { inspect });
+
+  const status = checked('workspace.git.status', await reader.status('w'), base);
+  assert.deepEqual(status.files.map(file => file.path).sort(), ['outside', 'plain/ok.txt']);
+  for (const mode of ['uncommitted', 'unstaged']) {
+    const pages = await allPages(reader, { workspaceId: 'w', compare: { mode } }, base);
+    // The listing collapses to `outside`; its content read lstats the real path (a plain directory here, no link), so
+    // the diff shows no entry for it. On Windows, behind a real junction, it is a 'symlink' entry (the junction test above).
+    assert.deepEqual(pages.flatMap(page => page.files).map(file => file.path).sort(), ['plain/ok.txt'], mode);
+    const text = JSON.stringify(pages);
+    for (const secret of ['OUTSIDE_SECRET', 'OUTSIDE_DEEP', 'note.txt', 'more.txt']) assert.ok(!text.includes(secret), `${mode}: ${secret} never shown`);
+  }
+  for (const asked of ['outside', 'outside/note.txt', 'outside/deep/more.txt']) {
+    const behind = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' }, path: asked }), base);
+    assert.deepEqual(behind.files, [], asked);
+    assert.ok(!JSON.stringify(behind).includes('OUTSIDE_'), asked);
+  }
+  // The injected link was really inspected (the seam is in use).
+  assert.ok(inspected.includes(linked));
+});
+
 for (const failure of ['EACCES', 'ENOENT']) {
   test(`an untracked path whose ancestor cannot be inspected (${failure}) is omitted, never passed through: status, diff, diff by path`, { skip: !hasGit && 'git is not installed' }, async t => {
     const base = await sandbox(t);

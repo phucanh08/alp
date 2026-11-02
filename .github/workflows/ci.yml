@@ -108,6 +108,8 @@ jobs:
       # TMPDIR and HOME/USERPROFILE, without ALP_*_BIN or the caller's ALP session variables.
       # The CLI discovery fixture creates a Unix symlink; all daemon lifecycle/session tests run.
       - run: node scripts/run-tests.mjs --private-home packages/client/tests/daemon-paths.test.js packages/daemon/tests/daemon.test.js packages/daemon/tests/ipc-security.test.js integrations/paseo/tests/daemon-git.test.js
+      # workspace.git over real repositories, including a real untracked junction (t-8f37); the POSIX shell-trap tests skip on win32.
+      - run: node scripts/run-tests.mjs --private-home packages/daemon/tests/git.test.js
       # The win32 terminal owner: unit tests, then a real cmd.exe through node-pty/ConPTY (the "ConPTY:" tests run only here).
       - run: node scripts/run-tests.mjs --private-home packages/daemon/tests/windows-terminal.test.js
       - run: node scripts/test-package.mjs gateway --private-home
