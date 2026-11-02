@@ -23,10 +23,21 @@ async function until(check, what, ms = 15000) {
   while (Date.now() < end) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 25)); }
   assert.fail(`timed out waiting for ${what}`);
 }
+/**
+ * Runs `fn` after the test, before everything deferred earlier (LIFO; t.after runs in registration
+ * order): a terminal service is shut down, and its shells killed, before the home they ran in is removed.
+ */
+const deferred = new WeakMap();
+function defer(t, fn) {
+  let list = deferred.get(t);
+  if (!list) { deferred.set(t, list = []); t.after(async () => { while (list.length) await list.pop()(); }); }
+  list.push(fn);
+}
 async function home(t, config = { version: 1, allowRemoteTerminal: true }) {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-win-term-')));
-  // A ConPTY shell that was just killed may hold the directory a moment longer: EBUSY on Windows (t-bf7f).
-  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
+  // No retry: a shell that ran here is gone first (service shutdown is deferred later, so runs earlier,
+  // and close/shutdown wait for the ConPTY shell's real exit, t-bfbd).
+  defer(t, () => rm(dir, { recursive: true, force: true }));
   if (config) await writeFile(path.join(dir, 'terminal.json'), JSON.stringify(config), { mode: 0o600 });
   return dir;
 }
@@ -34,11 +45,11 @@ async function home(t, config = { version: 1, allowRemoteTerminal: true }) {
 /** A node-pty module double that records what the owner asks of it. */
 function fakeNodePty({ spawnError } = {}) {
   const calls = { spawn: [], write: [], resize: [], kill: [] };
-  let data; let exit;
+  let data; const exits = new Set();
   const fake = {
     calls, resizeThrows: false, killThrows: false,
     emit(text) { data?.(text); },
-    exit(event) { exit?.(event); },
+    exit(event) { for (const listener of [...exits]) listener(event); },
     /** Like node-pty on ConPTY: the pid is 0 until the output worker connects. */
     connect() { fake.child.pid = 4242 + calls.spawn.length; },
     spawn(file, args, options) {
@@ -50,7 +61,7 @@ function fakeNodePty({ spawnError } = {}) {
         resize(cols, rows) { calls.resize.push([cols, rows]); if (fake.resizeThrows) throw new Error('Cannot resize a pty that has already exited'); },
         kill(...signal) { calls.kill.push(signal); if (fake.killThrows) throw new Error('already exited'); },
         onData(listener) { data = listener; return { dispose() { data = undefined; } }; },
-        onExit(listener) { exit = listener; return { dispose() { exit = undefined; } }; },
+        onExit(listener) { exits.add(listener); return { dispose() { exits.delete(listener); } }; },
       };
     },
   };
@@ -118,6 +129,24 @@ test('kill: once, without a signal (node-pty refuses signals on Windows); later 
   assert.deepEqual(fake.calls.kill, [[]], 'one kill, no signal argument');
 });
 
+test('exited: resolves at the node-pty exit, or after the bound when node-pty never reports one', async () => {
+  const fake = fakeNodePty();
+  const pty = createWindowsPtySpawn(() => fake)('cmd.exe', [], spawnOptions());
+  pty.kill();
+  let settled = false;
+  const waiting = pty.exited(60000).then(() => { settled = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false, 'kill alone is not the exit');
+  fake.exit({ exitCode: 1 });
+  await waiting;
+  await pty.exited(60000);
+  const silent = createWindowsPtySpawn(() => fakeNodePty())('cmd.exe', [], spawnOptions());
+  silent.kill();
+  const started = Date.now();
+  await silent.exited(30);
+  assert.ok(Date.now() - started < 5000, 'bounded by its argument');
+});
+
 test('data and exit listeners: output passes through; exit carries only exitCode and signal', () => {
   const fake = fakeNodePty();
   const pty = createWindowsPtySpawn(() => fake)('cmd.exe', [], spawnOptions());
@@ -157,7 +186,7 @@ async function service(t, { fake = fakeNodePty(), config, load } = {}) {
   const dir = await home(t, config);
   const loader = load ?? (() => fake);
   const terminals = createTerminalService({ home: dir, resolveWorkspace: async () => dir, log: quiet, platform: 'win32', spawn: createWindowsPtySpawn(loader), capability: () => windowsTerminalCapability(loader), processes: async () => [], sweepMs: 60000, killGraceMs: 1 });
-  t.after(() => terminals.shutdown());
+  defer(t, () => terminals.shutdown());
   return { dir, fake, terminals };
 }
 const create = (terminals, requestId = 'r1') => terminals.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId });
@@ -191,6 +220,23 @@ test('service on win32: protection none, the Windows shell, no private ALP env; 
   assert.equal(events.at(-1).reason, 'closed');
   fake.exit({ exitCode: 1 });
   assert.equal(events.filter(event => event.type === 'exit').length, 1, 'a late node-pty exit adds no second exit event');
+  assert.deepEqual((await terminals.list(owner, {})).terminals, []);
+});
+
+test('service on win32: close resolves only once node-pty reports the exit of the killed shell (bounded by killGraceMs)', async t => {
+  const fake = fakeNodePty();
+  const dir = await home(t);
+  const terminals = createTerminalService({ home: dir, resolveWorkspace: async () => dir, log: quiet, platform: 'win32', spawn: createWindowsPtySpawn(() => fake), capability: () => windowsTerminalCapability(() => fake), processes: async () => [], sweepMs: 60000, killGraceMs: 60000 });
+  defer(t, () => terminals.shutdown());
+  const { terminal } = await create(terminals);
+  fake.connect();
+  let closed = false;
+  const closing = terminals.close(owner, { terminalId: terminal.terminalId }).then(() => { closed = true; });
+  await until(() => fake.calls.kill.length === 1, 'the kill');
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(closed, false, 'still waiting for the shell to exit');
+  fake.exit({ exitCode: -1073741510 });
+  await closing;
   assert.deepEqual((await terminals.list(owner, {})).terminals, []);
 });
 
@@ -264,7 +310,7 @@ test('ConPTY: the terminal service end to end on Windows (terminal.json, create,
   await writeFile(path.join(dir, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
   assert.equal((await readTerminalConfig(dir, quiet)).enabled, true, 'a regular file of this user in ALP_HOME turns terminals on');
   const terminals = createTerminalService({ home: dir, resolveWorkspace: async () => dir, log: quiet, sweepMs: 60000 });
-  t.after(() => terminals.shutdown());
+  defer(t, () => terminals.shutdown());
   const { terminal } = await create(terminals, 'conpty');
   assert.equal(terminal.protection, 'none');
   await until(() => terminals.pids()[0] > 0, 'the ConPTY shell pid');
@@ -276,7 +322,10 @@ test('ConPTY: the terminal service end to end on Windows (terminal.json, create,
   await terminals.input(owner, sink, { terminalId: terminal.terminalId, data: 'echo %ALP_TERMINAL%_SERVICE^_OK\r' });
   await until(() => output.includes('1_SERVICE_OK'), 'service terminal output with the terminal environment');
   await terminals.close(owner, { terminalId: terminal.terminalId });
-  await until(() => !alive(pid), 'the service shell to exit after close');
-  t.diagnostic(`ConPTY service terminal pid ${pid} ended on close`);
+  // close waited for the shell's real exit: it is gone and no longer holds its working directory, so
+  // the directory goes at once, without a retry (it was rmdir EBUSY when close returned at kill, t-bfbd).
+  assert.equal(alive(pid), false, 'the service shell exited before close resolved');
   assert.deepEqual(terminals.pids(), []);
+  await rm(dir, { recursive: true });
+  t.diagnostic(`ConPTY service terminal pid ${pid} ended on close; its directory was removed at once`);
 });
