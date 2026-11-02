@@ -39,6 +39,12 @@ export const createWindowsPtySpawn = (load: () => NodePty | undefined = loadNode
   if (!pty) throw new Error('node-pty is unavailable on this host');
   const child = pty.spawn(file, args, { name: options.name, cols: options.cols, rows: options.rows, cwd: options.cwd, env: options.env, useConpty: true });
   let killed = false;
+  // node-pty's exit comes from its wait on the shell's process handle: once it fires Windows has closed
+  // the shell's handles, its working directory among them. process.kill(pid, 0) is not that point: it
+  // reports the shell gone as soon as its exit code is set, while the directory may still be open
+  // (rmdir EBUSY right after a TerminateProcess, t-bfbd). Subscribed here, before any service listener.
+  let exit = false;
+  const exited = new Promise<void>(resolve => { child.onExit(() => { exit = true; resolve(); }); });
   return {
     // node-pty reports the ConPTY shell's pid only once its output worker connects (0 until then), so
     // the pid is read live rather than copied at spawn.
@@ -47,6 +53,13 @@ export const createWindowsPtySpawn = (load: () => NodePty | undefined = loadNode
     resize(cols: number, rows: number) { if (!killed) try { child.resize(cols, rows); } catch { /* exited */ } },
     // Best-effort: node-pty ends the ConPTY session and its shell; descendants are not guaranteed.
     kill() { if (killed) return; killed = true; try { child.kill(); } catch { /* already exited */ } },
+    // Bounded: a shell node-pty never reports (a kill before ConPTY connected) does not hold up close.
+    async exited(ms: number) {
+      if (exit) return;
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([exited, new Promise<void>(resolve => { timer = setTimeout(resolve, ms); })]);
+      clearTimeout(timer);
+    },
     onData: listener => child.onData(listener),
     onExit: listener => child.onExit(({ exitCode, signal }) => listener({ exitCode, signal })),
   };
