@@ -2143,7 +2143,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (approvalCanceled(session, cancellation)) return toolResult(false, { error: 'Skill retirement canceled or session closed; no approval was created' });
     if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId && !pending.gate)) return toolResult(false, { error: 'A question is already waiting for the user; finish it before proposing to retire a skill' });
     const retired = path.join(library, 'retired-skills', `${args.name}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
-    const restore = `To restore it, move ${retired} back to ${directory} and add it to the roles again in role-skills.json.`;
+    const restore = `The user restores it with: alp skill restore ${args.name} (or by moving ${retired} back to ${directory} and adding it to the roles again in role-skills.json).`;
     const approvalId = `q-${randomUUID()}`;
     const record: { approvalId: string; draftKey: string; result?: Record<string, unknown> } = { approvalId, draftKey };
     approvals.set(key, record);
@@ -2182,8 +2182,14 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
           }
           return refuse(`${errorData(error).message}; nothing was retired`, 'Tell the user; nothing is retried automatically.');
         }
-        runLog(rootOf(sessionId), { event: 'skill.retire', agent: session.mapping.agent.name, name: args.name, roles: lost, retiredTo: retired });
-        return { approved: true, retired, roles: lost, next: `New sessions no longer list the skill. ${restore}` };
+        // What `alp skill restore` reads to give the skill back to the same roles. The skill is
+        // retired either way; without the file a restore needs --roles.
+        let metadata: string | undefined;
+        try {
+          await writeAtomic(path.join(retired, 'retired.json'), JSON.stringify({ name: args.name, roles: lost, retiredAt: new Date().toISOString(), agent: session.mapping.agent.name, path: directory }, null, 2) + '\n');
+        } catch (error) { metadata = errorData(error).message; }
+        runLog(rootOf(sessionId), { event: 'skill.retire', agent: session.mapping.agent.name, name: args.name, roles: lost, retiredTo: retired, ...(metadata ? { metadataError: metadata } : {}) });
+        return { approved: true, retired, roles: lost, ...(metadata ? { metadataError: metadata } : {}), next: `New sessions no longer list the skill. ${restore}` };
       } catch (error) {
         return refuse(`${errorData(error).message}; nothing was retired`, 'Tell the user; nothing is retried automatically.');
       }
