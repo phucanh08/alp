@@ -340,8 +340,8 @@ test('secrets: blocked paths on either side of a rename, deleted keys, private k
   await put(path.join(root, 'untracked-key.pem.txt'), PEM);
   await put(path.join(root, 'id_ed25519'), PEM);
   await symlink('/etc/passwd', path.join(root, 'untracked-link'));
-  await put(path.join(base, 'outside-secret.txt'), 'OUTSIDE_SECRET\n');
-  await link(path.join(base, 'outside-secret.txt'), path.join(root, 'hardlink.txt'));
+  await put(path.join(base, 'outside-note.txt'), 'OUTSIDE_SECRET\n');
+  await link(path.join(base, 'outside-note.txt'), path.join(root, 'hardlink.txt'));
   const reader = readerFor({ w: root });
 
   const status = checked('workspace.git.status', await reader.status('w'), base);
@@ -709,4 +709,37 @@ test('alpd answers workspace.git.status and workspace.git.diff by registry works
   assert.equal((await code(client.request('workspace.git.status', { workspaceId, projectRoot: root })))[0], -32602, 'no host path parameter');
   assert.equal((await code(client.request('workspace.git.diff', { workspaceId, compare: { mode: 'uncommitted', args: ['--ext-diff'] } })))[0], -32602);
   assert.deepEqual(await code(client.request('workspace.git.diff', { workspaceId, compare: { mode: 'base', baseRef: '--output=x' } })), [-32602, 'invalid_compare']);
+});
+
+test('an untracked directory link (a Windows junction) is listed as itself: nothing behind it, inside or outside the checkout', { skip: !hasGit && 'git is not installed' }, async t => {
+  const base = await sandbox(t);
+  const root = path.join(base, 'work');
+  const git = await repository(root);
+  await put(path.join(root, 'kept.txt'), 'kept\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'first');
+  await put(path.join(base, 'elsewhere', 'note.txt'), 'OUTSIDE_SECRET\n');
+  await put(path.join(base, 'elsewhere', 'deep', 'more.txt'), 'OUTSIDE_DEEP\n');
+  await put(path.join(root, 'inner', 'own.txt'), 'inner\n');
+  const kind = process.platform === 'win32' ? 'junction' : 'dir';
+  await symlink(path.join(base, 'elsewhere'), path.join(root, 'outside'), kind);
+  await symlink(path.join(root, 'inner'), path.join(root, 'loop'), kind);
+  const reader = readerFor({ w: root });
+
+  const status = checked('workspace.git.status', await reader.status('w'), base);
+  assert.deepEqual(status.files.map(file => file.path).sort(), ['inner/own.txt', 'loop', 'outside']);
+  for (const mode of ['uncommitted', 'unstaged']) {
+    const pages = await allPages(reader, { workspaceId: 'w', compare: { mode } }, base);
+    const files = pages.flatMap(page => page.files);
+    assert.deepEqual(files.map(file => file.path).sort(), ['inner/own.txt', 'loop', 'outside'], mode);
+    const text = JSON.stringify(pages);
+    for (const secret of ['OUTSIDE_SECRET', 'OUTSIDE_DEEP', 'note.txt', 'more.txt']) assert.ok(!text.includes(secret), `${mode}: ${secret} never shown`);
+    assert.equal(byPath(files).outside.kind, 'symlink');
+  }
+  // Asked for by path: the link is the entry; a path behind it is no untracked file of this checkout.
+  const one = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' }, path: 'outside' }), base);
+  assert.deepEqual(one.files.map(file => [file.path, file.kind]), [['outside', 'symlink']]);
+  const behind = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' }, path: 'outside/note.txt' }), base);
+  assert.ok(!JSON.stringify(behind).includes('OUTSIDE_SECRET'));
+  assert.deepEqual(behind.files, []);
 });

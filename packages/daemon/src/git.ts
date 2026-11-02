@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { lstatSync } from 'node:fs';
 import { lstat, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -590,6 +591,26 @@ export type GitReaderOptions = {
 
 type DiffParams = { workspaceId: string; compare: GitCompare; path?: string; cursor?: string };
 
+/**
+ * An untracked path Git listed, cut at its first linked directory: Git for Windows descends
+ * into an untracked junction (or directory symlink) as a folder and lists what lies behind it,
+ * even outside the work tree. As on POSIX, the link itself is the entry; nothing behind it is.
+ * `links` caches each directory's answer for one listing.
+ */
+function untrackedEntry(root: string, name: string, links: Map<string, boolean>): string {
+  const segments = name.split('/');
+  for (let count = 1; count < segments.length; count++) {
+    const prefix = segments.slice(0, count).join('/');
+    let linked = links.get(prefix);
+    if (linked === undefined) {
+      try { linked = lstatSync(path.join(root, ...segments.slice(0, count))).isSymbolicLink(); } catch { linked = false; }
+      links.set(prefix, linked);
+    }
+    if (linked) return prefix;
+  }
+  return name;
+}
+
 export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ.timeoutMs, log = () => {}, probe }: GitReaderOptions) {
   const key = randomBytes(32);
   const mac = (scope: string) => createHmac('sha256', key).update(scope).digest('base64url').slice(0, 32);
@@ -670,6 +691,8 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
     const digest = createHash('sha256');
     let pending = '';
     let pendingRename: string[] | undefined;
+    const links = new Map<string, boolean>();
+    const collapsed = new Set<string>();
     const take = (row: GitStatusFile) => {
       dirty = true;
       if (blockedFilePath(row.path) || (row.oldPath && blockedFilePath(row.oldPath)) || [...row.path].length > 4096 || [...(row.oldPath ?? '')].length > 4096) { hiddenCount++; return false; }
@@ -705,7 +728,13 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
         const change: GitChange = x === 'A' ? 'added' : x === 'D' || y === 'D' ? 'deleted' : x === 'T' || y === 'T' ? 'typechange' : 'modified';
         return take({ path: rowPath, change, staged: x !== '.', unstaged: y !== '.' });
       }
-      if (kind === '?') { const rowPath = field.slice(2).replace(/\/$/, ''); return rowPath ? take({ path: rowPath, change: 'untracked', staged: false, unstaged: true }) : false; }
+      if (kind === '?') {
+        const listed = field.slice(2).replace(/\/$/, '');
+        if (!listed) return false;
+        const rowPath = untrackedEntry(repo.root, listed, links);
+        if (rowPath !== listed) { if (collapsed.has(rowPath)) return false; collapsed.add(rowPath); }
+        return take({ path: rowPath, change: 'untracked', staged: false, unstaged: true });
+      }
       if (kind === '!') return false;
       failed('unexpected status');
       return false;
@@ -826,13 +855,17 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
     let hidden = 0;
     let more = false;
     let pending = '';
+    const links = new Map<string, boolean>();
+    const collapsed = new Set<string>();
     const { stopped } = await runGit(repo, ['ls-files', '-z', '--others', '--exclude-standard', '--', ...(relative ? [relative] : [])], {
       onData: chunk => {
         const fields = (pending + chunk.toString('utf8')).split('\0');
         pending = fields.pop()!;
-        for (const name of fields) {
+        for (const listed of fields) {
           // A nested repository is listed as its directory: not a file.
-          if (!name || name.endsWith('/')) continue;
+          if (!listed || listed.endsWith('/')) continue;
+          const name = untrackedEntry(repo.root, listed, links);
+          if (name !== listed) { if (collapsed.has(name)) continue; collapsed.add(name); }
           if (relative && name !== relative) continue;
           if (blockedFilePath(name) || [...name].length > 4096) { hidden++; continue; }
           if (found.length >= limit) { more = true; return true; }
