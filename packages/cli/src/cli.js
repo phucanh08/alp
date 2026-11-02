@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { setup } from '@anhlp/alp-client/setup';
 import { alpHome } from '@anhlp/alp-client/index';
 import { scrubText } from '@anhlp/alp-core/log';
+import { catalogModels, useLiveModels } from '@anhlp/alp-core/models';
 import { USAGE, UsageError } from './usage.js';
 import { project, permissionsCommand, trustCommand, language, verify, doctor } from './projects.js';
 import { daemon } from './daemon.js';
@@ -54,6 +55,9 @@ try {
     console.log(alpVersion());
   } else {
     if (!Object.hasOwn(commands, command)) throw new UsageError();
+    // Effort checks read the catalog alpd last cached, the rows alpd itself checks with (t-086c), so
+    // the CLI and alpd agree on a model only live rows list (t-b3cd #8). No provider is asked.
+    useLiveModels(catalogModels(alpHome()));
     await commands[command](args);
   }
 } catch (error) {

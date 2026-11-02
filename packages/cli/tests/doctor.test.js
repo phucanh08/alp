@@ -141,6 +141,27 @@ test('alp doctor --json prints the checks and exits 0 when nothing fails', async
   assert.ok(report.checks.every(check => check.status !== 'fail'), JSON.stringify(report.checks));
 });
 
+test('alp doctor checks efforts against the catalog alpd cached, as alpd does: a model only live rows list (t-b3cd #8)', async t => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-doctor-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const home = path.join(directory, 'home');
+  await mkdir(path.join(home, 'cache'), { recursive: true, mode: 0o700 });
+  await chmod(home, 0o700);
+  // What alpd last saw from Codex: a model the static rows do not list, at low and medium only.
+  await writeFile(path.join(home, 'cache', 'models.json'), JSON.stringify({ providers: { codex: { models: [{ id: 'gpt-live-only', label: 'Live only', efforts: ['low', 'medium'] }] } } }));
+  const project = path.join(directory, 'project');
+  await initProject(project);
+  const file = path.join(project, '.alp', 'settings.json');
+  await writeFile(file, JSON.stringify({ ...JSON.parse(await readFile(file, 'utf8')), team: { default: { peer: { profiles: ['codex:gpt-live-only:high'] } } } }));
+  let output;
+  try {
+    output = execFileSync(process.execPath, [fileURLToPath(new URL('../src/cli.js', import.meta.url)), 'doctor', '--json', '--project', project], { env: { ...process.env, ALP_HOME: home, PATH: path.join(directory, 'empty') } }).toString();
+  } catch (error) { output = error.stdout.toString(); }
+  const settings = JSON.parse(output).checks.find(check => check.id === 'settings');
+  assert.equal(settings.status, 'fail', JSON.stringify(settings));
+  assert.match(settings.summary, /codex:gpt-live-only takes effort low, medium/);
+});
+
 const SECRET = 'sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
 const jsonLine = record => JSON.stringify({ time: '2026-10-15T01:00:00.000Z', component: 'alpd', ...record });
 
