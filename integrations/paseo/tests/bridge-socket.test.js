@@ -526,12 +526,16 @@ test("a checkout's branch, its changes as the Changes panel shows them, and its 
 
   // Against the base branch: what the branch committed since it left main.
   run('checkout', '-q', '-b', 'feature');
+  // Git for Windows cannot commit a junction (it would add what lies behind it): there the link
+  // stays an ignored, untracked entry, and the base comparison does not list it.
+  const committedLink = process.platform !== 'win32';
+  if (!committedLink) await writeFile(path.join(repo, '.git', 'info', 'exclude'), '/outside\n', { flag: 'a' });
   run('add', '.');
   run('commit', '-q', '-m', 'second');
   const branch = (await ask(client, { type: 'checkout_status_request', requestId: 'c3', cwd: repo })).payload;
   assert.deepEqual([branch.currentBranch, branch.baseRef, branch.aheadBehind, branch.isDirty], ['feature', 'main', { ahead: 1, behind: 0 }, false]);
   const base = (await ask(client, { type: 'subscribe_checkout_diff_request', requestId: 'd2', subscriptionId: 'legacy:2', cwd: repo, compare: { mode: 'base', baseRef: 'main' } })).payload;
-  assert.deepEqual(base.files.map(file => file.path).sort(), ['README.md', 'blob.bin', 'dot.png', 'moved.txt', 'new.txt', 'outside']);
+  assert.deepEqual(base.files.map(file => file.path).sort(), ['README.md', 'blob.bin', 'dot.png', 'moved.txt', 'new.txt', ...(committedLink ? ['outside'] : [])]);
   client.send({ type: 'session', message: { type: 'unsubscribe_checkout_diff_request', subscriptionId: 'legacy:2' } });
 
   // The Files panel, as alpd answers it (t-bb87): entries with their kind, text, images, binaries;
