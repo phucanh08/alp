@@ -49,7 +49,7 @@
     "session.interrupt.turn": "session.interrupt accepts turnId and atomically cancels only that active turn, including its subtree. Conditional requests answer interrupted:true when canceled, false when the named turn is no longer active; false changes nothing. Without this capability clients must not send turnId or infer targeted cancellation from a legacy interrupt.",
     "terminal.capture": "terminal.capture: bounded daemon-owned rendered text, inclusive zero-based/negative line ranges; same terminal principal/host opt-in. Exceeding resource/result limits is an explicit refusal.",
     "terminal.watch": "terminal.watch/unwatch and terminal.changed: atomic scoped snapshot/subscription. Opaque per-subscription cursor, latest snapshot replaces invalidation history on reconnect/reset; older hosts use explicit polling fallback.",
-    "catalog.live": "catalog.get answers the live model catalog (provider lists merged over ALP's static rows) with fetchedAt and per-provider status; catalog.refresh asks the providers again; alpd sends catalog.updated to every helloed connection when the catalog changes."
+    "catalog.live": "catalog.get answers the live model catalog (provider lists merged over ALP's static rows) with fetchedAt and per-provider status; catalog.refresh asks the providers again and probes enabled ACP providers. ACP providers (library providers/<id>.json) add rows acp:<id> and acp:<id>/<model> with runtime, provider, source, enabled and status, and a providers key acp:<id> whose status is unprobed, ok or failed; alpd sends catalog.updated to every helloed connection when the catalog changes."
   },
   "methods": {
     "assignment.recall": {

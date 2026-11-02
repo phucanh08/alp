@@ -288,7 +288,9 @@ export function createOperations({ home, templates, knownProjects = () => [], on
       const options = await where(projectRoot, scope);
       try { await getEntry(kind, from, options); }
       catch (error) { throw fromCore(error, { notFound: 'not_found' }); }
-      return { revision: toWire((await duplicateEntry(kind, from, to, { ...options, scope, policy })).revision) };
+      const result = { revision: toWire((await duplicateEntry(kind, from, to, { ...options, scope, policy })).revision) };
+      if (kind === 'providers') { try { onProviderSaved?.(to, false); } catch { /* best effort */ } }
+      return result;
     }), { notFound: 'invalid_entry' }),
 
     'library.rename': guard(({ kind, from, to, scope, projectRoot, policy }) => serial(async () => {

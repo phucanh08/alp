@@ -1362,7 +1362,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     'catalog.refresh': async () => {
       if (!modelCatalog) throw new RpcError(ERROR.unavailable, 'The live model catalog is not available');
       // The one place, with a provider's enabling, where ALP starts ACP providers to list their models.
-      await Promise.all([modelCatalog.refresh(), modelCatalog.refreshAcp()]);
+      // An ACP failure must not hide the providers' refresh: each records its own error.
+      await Promise.all([modelCatalog.refresh(), modelCatalog.refreshAcp().catch(() => {})]);
       return catalogResult();
     },
     // attachment.* (§12.6): each call acts for its principal context; without the store (no home or
