@@ -229,3 +229,34 @@ test('a retired skill is listed and restored to its recorded roles, or to --role
   await assert.rejects(restoreSkill('nope', { library }), error => error.code === 'NOT_FOUND');
   await assert.rejects(restoreSkill('../x', { library, roles: [] }), error => error.code === 'INVALID_NAME');
 });
+
+test('a corrupt retired.json does not block other retired skills, a symlink --from is refused, and a restore that fails changes nothing', async t => {
+  const library = await fixture(t);
+  const retired = path.join(library, 'retired-skills');
+  const write = async (folder, metaText) => {
+    await mkdir(path.join(retired, folder), { recursive: true });
+    await writeFile(path.join(retired, folder, 'SKILL.md'), `# ${folder}\n`);
+    if (metaText !== undefined) await writeFile(path.join(retired, folder, 'retired.json'), metaText);
+  };
+  await write('bad-2026-10-01T00-00-00-000Z', '{not json');
+  await write('good-2026-10-02T00-00-00-000Z', JSON.stringify({ name: 'good', roles: ['peer'] }));
+
+  const rows = await listRetiredSkills({ library });
+  assert.deepEqual(rows.map(row => [row.name, row.roles, Boolean(row.invalid)]), [['good', ['peer'], false], ['bad', null, true]]);
+  // The corrupt copy needs explicit roles; with them it restores.
+  await assert.rejects(restoreSkill('bad', { library }), error => error.code === 'INVALID_LIBRARY');
+  assert.deepEqual((await restoreSkill('bad', { library, roles: [] })).roles, []);
+
+  // --from must not be a symlink.
+  const link = path.join(library, 'link');
+  await symlink(path.join(retired, 'good-2026-10-02T00-00-00-000Z'), link);
+  await assert.rejects(restoreSkill('good', { library, from: link }), error => error.code === 'INVALID_ENTRY');
+
+  // role-skills.json is unreadable (a directory in its place): nothing moves.
+  await rm(path.join(library, 'role-skills.json'), { force: true });
+  await mkdir(path.join(library, 'role-skills.json'));
+  await assert.rejects(restoreSkill('good', { library }));
+  assert.ok(await readFile(path.join(retired, 'good-2026-10-02T00-00-00-000Z/SKILL.md'), 'utf8'));
+  assert.ok(await readFile(path.join(retired, 'good-2026-10-02T00-00-00-000Z/retired.json'), 'utf8'));
+  assert.equal((await readdir(path.join(library, 'skills'))).includes('good'), false);
+});
