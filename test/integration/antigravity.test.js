@@ -246,7 +246,7 @@ test('antigravity never reports an edit as done in read-only mode, even when agy
 });
 
 test('antigravity records a refused terminal command as failed in read-only mode, even when agy says DONE', async t => {
-  const lines = { 'ls -la src': 'completed', 'pwd': 'completed', 'cat /etc/passwd': 'failed', 'tail -f log': 'failed', 'ls; rm -rf x': 'failed', 'ls $(whoami)': 'failed', 'rm x': 'failed', [undefined]: 'failed' };
+  const lines = { 'ls -la src': 'failed', 'pwd': 'completed', 'cat /etc/passwd': 'failed', 'tail -f log': 'failed', 'ls; rm -rf x': 'failed', 'ls $(whoami)': 'failed', 'rm x': 'failed', [undefined]: 'failed' };
   for (const mode of ['read-only', 'workspace-write']) {
     const transport = new AntigravityTransport();
     t.after(() => transport.close());
@@ -434,7 +434,7 @@ test('Antigravity runs each ALP mode with the agy flags that enforce it', async 
   const { root, runtime, turn, dir } = await setup(t);
   const log = path.join(dir, 'agy.jsonl');
   const expected = {
-    'read-only': { mode: undefined, permission: 'request-review', allow: ['mcp(alp/*)', 'command(pwd)', 'command(ls)'] },
+    'read-only': { mode: undefined, permission: 'request-review', allow: ['mcp(alp/*)', 'command(pwd)'] },
     'workspace-write': { mode: 'accept-edits', permission: 'proceed-in-sandbox', allow: ['mcp(alp/*)'] },
   };
   for (const [mode, want] of Object.entries(expected)) {
