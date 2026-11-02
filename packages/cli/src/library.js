@@ -4,15 +4,24 @@ import { parseArgs } from 'node:util';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { libraryEntries } from '@anhlp/alp-core/resolver';
 import { listTeams, resolveTeam } from '@anhlp/alp-core/teams';
-import { deleteEntry, duplicateEntry, getEntry, renameEntry, saveEntry } from '@anhlp/alp-core/library-edit';
+import { deleteEntry, duplicateEntry, getEntry, listRetiredSkills, renameEntry, restoreSkill, saveEntry } from '@anhlp/alp-core/library-edit';
 import { testEntry } from '@anhlp/alp-client/library-test';
 import { alpHome } from '@anhlp/alp-client/index';
 import { UsageError } from './usage.js';
 import { taskProject } from './tasks.js';
 
 async function libraryCommand(kind, args) {
-  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, json: { type: 'boolean' } } });
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, json: { type: 'boolean' }, ...(kind === 'skills' ? { retired: { type: 'boolean' } } : {}) } });
   if (positionals.length) throw new UsageError();
+  if (values.retired) {
+    if (values.project !== undefined) throw new UsageError();
+    const rows = await listRetiredSkills({ library: alpHome() });
+    if (values.json) { console.log(JSON.stringify(rows)); return; }
+    if (!rows.length) { console.log(`No retired skills in ${path.join(alpHome(), 'retired-skills')}`); return; }
+    const width = Math.max(...rows.map(row => row.name.length));
+    for (const row of rows) console.log(`${row.name.padEnd(width)}  ${row.retiredAt}  ${row.roles === null ? 'roles not recorded' : `roles: ${row.roles.join(', ') || 'none'}`}${row.agent ? `; by ${row.agent}` : ''}  ${row.directory}`);
+    return;
+  }
   if (kind === 'providers') await seedLibrary(alpHome());
   // Outside a project only the built-ins and the library apply.
   const root = path.resolve(values.project ?? process.cwd());
@@ -57,7 +66,7 @@ const EDIT_OPTIONS = {
   'member-thinking': { type: 'string', multiple: true }, delegate: { type: 'string', multiple: true }, 'max-peers': { type: 'string' },
   supervisor: { type: 'string' }, 'supervisor-model': { type: 'string' }, 'supervisor-thinking': { type: 'string' }, 'no-supervisor': { type: 'boolean' }, rules: { type: 'string' },
   // skill, mcp, hook
-  file: { type: 'string' }, command: { type: 'string' }, arg: { type: 'string', multiple: true }, env: { type: 'string', multiple: true }, cwd: { type: 'string' },
+  file: { type: 'string' }, roles: { type: 'string' }, 'no-roles': { type: 'boolean' }, command: { type: 'string' }, arg: { type: 'string', multiple: true }, env: { type: 'string', multiple: true }, cwd: { type: 'string' },
   url: { type: 'string' }, header: { type: 'string', multiple: true }, event: { type: 'string' }, blocking: { type: 'boolean' }, timeout: { type: 'string' },
   'match-agent': { type: 'string' }, 'match-label': { type: 'string' },
   // provider
@@ -166,6 +175,13 @@ async function edited(kind, name, current, values) {
 async function editCommand(kind, args) {
   const { values, positionals } = parseArgs({ args: projectFlag(args), allowPositionals: true, options: EDIT_OPTIONS });
   const [action, name, target] = positionals;
+  if (kind === 'skills' && action === 'restore') {
+    if (!name || positionals.length > 2 || values.project !== undefined || (values.roles !== undefined && values['no-roles'])) throw new UsageError();
+    const roles = values['no-roles'] ? [] : names(values.roles);
+    const result = await restoreSkill(name, { library: alpHome(), from: values.from, roles });
+    console.log(values.json ? JSON.stringify(result) : `Restored ${name} to ${result.restored} from ${result.from}; ${result.roles.length ? `given to ${result.roles.join(', ')}` : 'given to no role'}.`);
+    return;
+  }
   if (kind === 'providers' && action !== 'add') await seedLibrary(alpHome());
   const creates = { agents: 'new', teams: 'new', skills: 'new', mcp: 'add', hooks: 'add', providers: 'add' }[kind];
   if (!name || positionals.length > (['cp', 'mv'].includes(action) ? 3 : 2) || (['cp', 'mv'].includes(action) && !target)) throw new UsageError();

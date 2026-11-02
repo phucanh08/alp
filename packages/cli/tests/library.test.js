@@ -133,3 +133,34 @@ test('alp agents, skills, mcp and hooks list each entry with its source', async 
   assert.match(run('hooks').stdout, /^No hooks in /);
   assert.equal(run('skills', 'extra').status, 1);
 });
+
+test('alp skills --retired lists retired skills and alp skill restore brings one back', async t => {
+  const home = await fixture(t);
+  await files(home, {
+    'retired-skills/style-2026-11-01T00-00-00-000Z/SKILL.md': '# Style\n',
+    'retired-skills/style-2026-11-01T00-00-00-000Z/retired.json': { name: 'style', roles: ['main'], retiredAt: '2026-11-01T00:00:00.000Z', agent: 'lead', path: '/old' },
+    'retired-skills/old-2026-09-01T00-00-00-000Z/SKILL.md': '# Old\n',
+  });
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const run = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', cwd: home, env: { ...process.env, ALP_HOME: home } });
+  const list = run('skills', '--retired');
+  assert.equal(list.status, 0, list.stderr);
+  assert.match(list.stdout, /^style\s+2026-11-01T00:00:00.000Z\s+roles: main; by lead\s/m);
+  assert.match(list.stdout, /^old\s+2026-09-01T00:00:00.000Z\s+roles not recorded\s/m);
+  assert.equal(JSON.parse(run('skills', '--retired', '--json').stdout).length, 2);
+  assert.equal(run('agents', '--retired').status, 1, 'only skills are retired');
+
+  const restored = run('skill', 'restore', 'style');
+  assert.equal(restored.status, 0, restored.stderr);
+  assert.match(restored.stdout, /Restored style .* given to main\./);
+  assert.equal(await readFile(path.join(home, 'skills/style/SKILL.md'), 'utf8'), '# Style\n');
+  assert.deepEqual(JSON.parse(await readFile(path.join(home, 'role-skills.json'), 'utf8')), { main: ['style'] });
+
+  const refused = run('skill', 'restore', 'old');
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /--roles a,b or --no-roles/);
+  assert.equal(run('skill', 'restore', 'old', '--roles', 'peer', '--no-roles').status, 1);
+  assert.equal(run('skill', 'restore', 'old', '--roles', 'peer,lead').status, 0);
+  assert.deepEqual(JSON.parse(await readFile(path.join(home, 'role-skills.json'), 'utf8')), { main: ['style'], peer: ['old'], lead: ['old'] });
+  assert.match(run('skills', '--retired').stdout, /^No retired skills/);
+});

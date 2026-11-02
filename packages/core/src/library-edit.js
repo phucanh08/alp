@@ -209,6 +209,96 @@ export async function setGivenSkills(agent, skills, { library } = {}) {
   return { skills: unique };
 }
 
+/** Where alp_skill_retire keeps retired skills, and the metadata file it writes in each. */
+export const RETIRED_SKILLS = 'retired-skills';
+export const RETIRED_METADATA = 'retired.json';
+// <name>-<ISO time with ':' and '.' replaced by '-'>, as alp_skill_retire names the folder.
+const RETIRED_FOLDER = /^(.+)-(\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}Z)$/;
+
+async function retiredMetadata(directory) {
+  const text = await optionalText(path.join(directory, RETIRED_METADATA));
+  if (text === undefined) return undefined;
+  let data;
+  try { data = JSON.parse(text); } catch (cause) { throw new AlpError('INVALID_LIBRARY', `${path.join(directory, RETIRED_METADATA)}: ${cause.message}`, { cause }); }
+  if (!object(data) || !Array.isArray(data.roles) || !data.roles.every(validName)) fail('INVALID_LIBRARY', `${path.join(directory, RETIRED_METADATA)}: expected { name, roles: [...] }`);
+  return data;
+}
+
+/**
+ * The library's retired skills, newest first. `roles` is what retired.json recorded,
+ * or null for a skill retired before ALP wrote it.
+ * @returns {Promise<{ name: string, directory: string, retiredAt: string, roles: string[] | null, agent: string | null }[]>}
+ */
+export async function listRetiredSkills({ library } = {}) {
+  if (!library) fail('INVALID_SCOPE', 'No library: ALP_HOME is not set');
+  const root = path.join(library, RETIRED_SKILLS);
+  const entries = await readdir(root, { withFileTypes: true }).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
+  const rows = [];
+  for (const entry of entries) {
+    const match = entry.isDirectory() && RETIRED_FOLDER.exec(entry.name);
+    if (!match) continue;
+    const directory = path.join(root, entry.name);
+    const meta = await retiredMetadata(directory);
+    const stamp = match[2].replace(/T(\d\d)-(\d\d)-(\d\d)-(\d{3})Z$/, 'T$1:$2:$3.$4Z');
+    rows.push({ name: match[1], directory, retiredAt: typeof meta?.retiredAt === 'string' ? meta.retiredAt : stamp, roles: meta ? meta.roles : null, agent: typeof meta?.agent === 'string' ? meta.agent : null });
+  }
+  return rows.sort((a, b) => b.retiredAt.localeCompare(a.retiredAt) || b.directory.localeCompare(a.directory));
+}
+
+/**
+ * Moves a retired skill back to <library>/skills/<name> and gives it to roles again in
+ * role-skills.json: `roles` when given ([] for none), else the roles retired.json recorded.
+ * Takes `from` when given, else the newest retired copy of the name. Refuses when the
+ * library already has the skill, or when neither `roles` nor retired.json says the roles.
+ * @returns {Promise<{ name: string, restored: string, from: string, roles: string[] }>}
+ */
+export async function restoreSkill(name, { library, from, roles } = {}) {
+  nameOf(name);
+  if (!library) fail('INVALID_SCOPE', 'No library: ALP_HOME is not set');
+  if (roles !== undefined && (!Array.isArray(roles) || !roles.every(validName))) fail('INVALID_ENTRY', 'Roles must be a list of agent names');
+  let source;
+  if (from !== undefined) {
+    source = path.resolve(from);
+    if (!(await stat(source).then(info => info.isDirectory(), () => false))) fail('NOT_FOUND', `${source} is not a directory`);
+  } else {
+    const found = (await listRetiredSkills({ library })).find(row => row.name === name);
+    if (!found) fail('NOT_FOUND', `No retired skill '${name}' in ${path.join(library, RETIRED_SKILLS)}`);
+    source = found.directory;
+  }
+  if (!(await exists(path.join(source, 'SKILL.md')))) fail('NOT_FOUND', `${source} has no SKILL.md`);
+  const target = path.join(library, 'skills', name);
+  if (await lstat(target).then(() => true, () => false)) fail('ALREADY_EXISTS', `The library already has a skill '${name}' (${target}); nothing was restored`);
+  const metaFile = path.join(source, RETIRED_METADATA);
+  const metaText = await optionalText(metaFile);
+  const meta = await retiredMetadata(source);
+  if (meta && meta.name !== undefined && meta.name !== name) fail('INVALID_ENTRY', `${metaFile} is for the skill '${meta.name}', not '${name}'`);
+  const given = roles ?? meta?.roles;
+  if (!given) fail('ROLES_REQUIRED', `${source} does not record the roles that had '${name}'; pass --roles a,b or --no-roles`);
+  const unique = [...new Set(given)];
+  const { file: rolesFile, roles: current } = await readGiven(library);
+  const before = await optionalText(rolesFile);
+  await mkdir(path.dirname(target), { recursive: true });
+  await moveFile(source, target);
+  try {
+    if (metaText !== undefined) await rm(path.join(target, RETIRED_METADATA), { force: true });
+    if (unique.length) {
+      for (const role of unique) {
+        const list = Array.isArray(current[role]) ? current[role] : [];
+        if (!list.includes(name)) list.push(name);
+        current[role] = list;
+      }
+      await writeAtomic(rolesFile, JSON.stringify(current, null, 2) + '\n');
+    }
+  } catch (error) {
+    // Put everything back, so a failed restore changes nothing.
+    if (before !== undefined) await writeAtomic(rolesFile, before).catch(() => {});
+    if (metaText !== undefined) await writeFile(path.join(target, RETIRED_METADATA), metaText).catch(() => {});
+    await moveFile(target, source).catch(() => {});
+    throw error;
+  }
+  return { name, restored: target, from: source, roles: unique };
+}
+
 /** Every entry of a kind with its source and users, as `alp <kind>` lists them. */
 export async function listEntries(kind, { root, library, templates } = {}) {
   kindOf(kind);

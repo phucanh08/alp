@@ -253,6 +253,14 @@ alp mcp rm docs
 - **Removing or renaming:** refused while an agent, a team or the project's settings
   use the entry, and the error lists them. Removing an override is always allowed:
   the entry below it applies again.
+- **Retired skills:** an agent retires a library skill only through `alp_skill_retire`
+  and your approval. ALP moves it to `~/.alp/retired-skills/<name>-<time>/`, writes
+  `retired.json` there (name, roles, `retiredAt`, agent, original path), and drops it from
+  `role-skills.json`. `alp skills --retired` lists them. `alp skill restore <name>` moves
+  the newest copy back and gives it to the recorded roles again; `--from DIR` picks a copy,
+  and `--roles a,b` or `--no-roles` replaces the recorded roles. A skill retired before
+  ALP wrote `retired.json` needs `--roles` or `--no-roles`. Restore refuses while the
+  library already has a skill of that name.
 - **Testing:**
   - `alp mcp test <name>` starts the server, lists its tools, and stops it;
   - `alp provider test <id>` starts an ACP agent, runs `initialize`, and stops it;

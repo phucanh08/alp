@@ -6,7 +6,7 @@ import path from 'node:path';
 import { initProject } from '../src/init.js';
 import { resolveAgent } from '../src/resolver.js';
 import { resolveTeam } from '../src/teams.js';
-import { deleteEntry, duplicateEntry, getEntry, listEntries, renameEntry, saveEntry, setGivenSkills } from '../src/library-edit.js';
+import { deleteEntry, duplicateEntry, getEntry, listEntries, listRetiredSkills, renameEntry, restoreSkill, saveEntry, setGivenSkills } from '../src/library-edit.js';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-edit-'));
@@ -178,4 +178,54 @@ test('project-data rejects host writes, execution references, sidecars and fallb
   await saveEntry('agents', 'safe-source', { instructions: 'pure' }, safe);
   await denied(duplicateEntry('agents', 'safe-source', 'host-agent', safe));
   await denied(renameEntry('agents', 'safe-source', 'main', safe));
+});
+
+test('a retired skill is listed and restored to its recorded roles, or to --roles for an old retirement', async t => {
+  const library = await fixture(t);
+  const retired = path.join(library, 'retired-skills');
+  const write = async (folder, meta) => {
+    await mkdir(path.join(retired, folder), { recursive: true });
+    await writeFile(path.join(retired, folder, 'SKILL.md'), `# ${folder}\n`);
+    if (meta) await writeFile(path.join(retired, folder, 'retired.json'), JSON.stringify(meta));
+  };
+  await write('style-2026-10-01T00-00-00-000Z', { name: 'style', roles: ['peer'], retiredAt: '2026-10-01T00:00:00.000Z', agent: 'main', path: '/x' });
+  await write('style-2026-11-01T00-00-00-000Z', { name: 'style', roles: ['main', 'lead'], retiredAt: '2026-11-01T00:00:00.000Z', agent: 'lead', path: '/x' });
+  await write('old-2026-09-01T10-20-30-400Z');
+  await mkdir(path.join(retired, 'not-a-retirement'));
+  await writeFile(path.join(library, 'role-skills.json'), JSON.stringify({ main: ['xia'] }));
+
+  const rows = await listRetiredSkills({ library });
+  assert.deepEqual(rows.map(row => [row.name, row.retiredAt, row.roles, row.agent]), [
+    ['style', '2026-11-01T00:00:00.000Z', ['main', 'lead'], 'lead'],
+    ['style', '2026-10-01T00:00:00.000Z', ['peer'], 'main'],
+    ['old', '2026-09-01T10:20:30.400Z', null, null],
+  ]);
+  assert.deepEqual(await listRetiredSkills({ library: await fixture(t) }), []);
+
+  // The newest copy, back to its recorded roles; retired.json does not come along.
+  const restored = await restoreSkill('style', { library });
+  assert.deepEqual(restored.roles, ['main', 'lead']);
+  assert.equal(restored.from, path.join(retired, 'style-2026-11-01T00-00-00-000Z'));
+  assert.equal(await readFile(path.join(library, 'skills/style/SKILL.md'), 'utf8'), '# style-2026-11-01T00-00-00-000Z\n');
+  assert.deepEqual(await readdir(path.join(library, 'skills/style')), ['SKILL.md']);
+  assert.deepEqual(JSON.parse(await readFile(path.join(library, 'role-skills.json'), 'utf8')), { main: ['xia', 'style'], lead: ['style'] });
+
+  // The library already has it: refused, nothing moves.
+  await assert.rejects(restoreSkill('style', { library }), error => error.code === 'ALREADY_EXISTS');
+  assert.equal(rows.length, 3);
+  assert.equal((await listRetiredSkills({ library })).length, 2);
+
+  // An old retirement records no roles: --roles or --no-roles is required.
+  await assert.rejects(restoreSkill('old', { library }), error => error.code === 'ROLES_REQUIRED' && /--roles/.test(error.message));
+  assert.ok(await readFile(path.join(retired, 'old-2026-09-01T10-20-30-400Z/SKILL.md'), 'utf8'));
+  assert.deepEqual((await restoreSkill('old', { library, roles: [] })).roles, []);
+  assert.deepEqual(JSON.parse(await readFile(path.join(library, 'role-skills.json'), 'utf8')), { main: ['xia', 'style'], lead: ['style'] });
+
+  // --from picks a copy; --roles replaces the recorded roles.
+  await rm(path.join(library, 'skills/style'), { recursive: true });
+  const older = path.join(retired, 'style-2026-10-01T00-00-00-000Z');
+  assert.deepEqual((await restoreSkill('style', { library, from: older, roles: ['reviewer'] })).roles, ['reviewer']);
+  assert.equal(await readFile(path.join(library, 'skills/style/SKILL.md'), 'utf8'), '# style-2026-10-01T00-00-00-000Z\n');
+  await assert.rejects(restoreSkill('nope', { library }), error => error.code === 'NOT_FOUND');
+  await assert.rejects(restoreSkill('../x', { library, roles: [] }), error => error.code === 'INVALID_NAME');
 });

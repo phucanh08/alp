@@ -715,6 +715,10 @@ test('main retires a library skill only after the user approves; it is kept in r
   assert.ok(result.roles.includes('main'));
   await assert.rejects(readFile(skillFile, 'utf8'), { code: 'ENOENT' });
   assert.equal(await readFile(path.join(result.retired, 'SKILL.md'), 'utf8'), before, 'the retired skill is kept whole');
+  const metadata = JSON.parse(await readFile(path.join(result.retired, 'retired.json'), 'utf8'));
+  assert.deepEqual([metadata.name, metadata.roles, metadata.agent, metadata.path], ['xia', result.roles, 'main', path.dirname(skillFile)]);
+  assert.ok(!Number.isNaN(Date.parse(metadata.retiredAt)));
+  assert.match(result.next, /alp skill restore xia/);
   const roles = JSON.parse(await readFile(path.join(library, 'role-skills.json'), 'utf8'));
   assert.ok(Object.values(roles).every(list => !list.includes('xia')));
   assert.equal((await main.call('alp_skill_retire', { name: 'xia', reason: 'Covered by another skill.', requestId: 'yes' })).retired, result.retired, 'a replay does not retire twice');

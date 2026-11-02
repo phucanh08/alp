@@ -38,6 +38,7 @@ const USAGE = `Usage:
   alp log <session> [--json]
   alp board [--project DIR] [--json]
   alp <agents|skills|mcp|hooks> [--project DIR] [--json]   the library: built-in, ~/.alp and project entries
+  alp skills --retired [--json]             skills alp_skill_retire moved to ~/.alp/retired-skills
   alp providers [--json]                    ACP and Antigravity providers in your library
   alp teams [--project DIR] [--json]         teams sessions run in: members, delegation, house rules
   alp agent <new|edit> <name> [--project [DIR]] [--from A] [-d text] [--provider P] [--model M] [--thinking T] [--mode M]
@@ -46,6 +47,7 @@ const USAGE = `Usage:
             [--member-model name=M]... [--member-thinking name=T]... [--delegate owner=a,b]... [--max-peers N]
             [--supervisor A] [--supervisor-model M] [--supervisor-thinking T] [--no-supervisor] [--rules FILE]
   alp skill new <name> [--project [DIR]] [--from S] [--file FILE]
+  alp skill restore <name> [--from DIR] [--roles a,b | --no-roles]   bring back a retired skill; --roles needed if it was retired without retired.json
   alp mcp add <name> [--project [DIR]] (--command C [--arg A]... [--env K=V]... [--cwd D] | --url U [--header K=V]...)
   alp hook add <name> [--project [DIR]] --event E --command C [--blocking] [--timeout SEC] [--match-agent A] [--match-label L]
   alp provider add <id> --command C [--arg A]... [--env K=V]... [--label L] [-d text] [--models a,b]   an ACP agent; use id antigravity for native agy
