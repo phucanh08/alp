@@ -11,6 +11,7 @@ import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { createLogger } from '@anhlp/alp-core/log';
 import { createWebServer } from './web.js';
 import { createShutdown } from './shutdown.js';
+import { assertPairingCaller, isUserOnlyRefusal, USER_ONLY_REGISTER_HINT } from './pairing-guard.js';
 import { createIntegrationLock } from '@anhlp/alp-client/integration-lock';
 import { createPaseoBridge } from './paseo/index.js';
 
@@ -115,7 +116,7 @@ async function run(home: string) {
             if (method !== 'extension.invoke') return undefined;
             if (params?.method !== 'web.pairing') return undefined;
             // alpd sets caller itself (t-d08b); an agent may neither read the link nor open the relay.
-            if (params?.caller?.agent !== false) throw Object.assign(new Error("web.pairing is the user's; this connection was opened by an ALP agent"), { code: 1003, data: { reason: 'user_only' } });
+            assertPairingCaller(params);
             return await pairingHandler(params?.params ?? {});
           });
           try {
@@ -135,6 +136,12 @@ async function run(home: string) {
           return;
         } catch (error: any) {
           if (extensionClient) { try { extensionClient.close(); } catch {} extensionClient = null; }
+          // Deterministic: alpd marks this process's connection as an agent's, so every retry fails the same way.
+          if (isUserOnlyRefusal(error)) {
+            log.error(USER_ONLY_REGISTER_HINT, { code: 'ALP_PAIRING_USER_ONLY' });
+            void shutdown(1);
+            return;
+          }
           webLog(`waiting to register web.pairing: ${error?.message ?? error}`);
           await new Promise(resolve => setTimeout(resolve, 300));
           registrationPending = true;

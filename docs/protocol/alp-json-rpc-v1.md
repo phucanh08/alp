@@ -55,8 +55,10 @@ Every message is one JSON object of JSON-RPC 2.0.
   connection; the daemon does not check this.
 - **Batches** (a JSON array) are not supported: the daemon answers one `-32600` with
   `data.reason: "batch_unsupported"` and `id: null`, and runs none of the batched requests.
-- **Daemon-to-client requests**: the only one is `extension.invoke { method, params }`, sent to the
-  connection that registered an extension method (capability `extension.methods`). Its ids are
+- **Daemon-to-client requests**: the only one is `extension.invoke { method, params, caller }`, sent to the
+  connection that registered an extension method (capability `extension.methods`). `caller: { agent, agentName? }`
+  is set by alpd from the calling connection (never from the caller's params): `agent` is true when that
+  connection is agent-marked, and `agentName` names the agent when known. Its ids are
   positive integers chosen by the daemon. The client answers with a response; a client that does not
   serve requests answers `-32601`. A frame without `method` from a client is a response to such a
   request: an unknown id, a missing id, or a frame with both or neither of `result`/`error` is dropped
