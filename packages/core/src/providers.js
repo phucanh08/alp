@@ -74,13 +74,15 @@ export async function loadProvider(library, id) {
 }
 
 /** Every provider of the library, by id. */
-export async function listProviders(library) {
+export async function listProviders(library, { onError } = {}) {
   if (!library) return [];
   let names = [];
   try { names = await readdir(path.join(library, 'providers')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
   const providers = [];
   for (const name of names.filter(name => name.endsWith('.json')).sort()) {
-    const provider = await loadProvider(library, name.slice(0, -5));
+    let provider;
+    // With onError, one invalid file is reported and skipped instead of failing the whole list.
+    try { provider = await loadProvider(library, name.slice(0, -5)); } catch (error) { if (!onError) throw error; onError(error, name); continue; }
     if (provider) providers.push(provider);
   }
   return providers;

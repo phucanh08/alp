@@ -376,6 +376,8 @@ export const isGeneration = value => typeof value === 'string' && GENERATION.tes
 export const LIBRARY_ROW_FIELDS = Object.freeze(['name', 'source', 'overrides', 'description', 'usedBy']);
 export const TEAM_ROW_FIELDS = Object.freeze(['id', 'label', 'description', 'source', 'overrides', 'error']);
 export const MODEL_ROW_FIELDS = Object.freeze(['id', 'label', 'efforts', 'effort']);
+/** catalog.get's model rows remote clients receive (t-d0b0): disabled ACP rows are dropped. */
+export const CATALOG_MODEL_FIELDS = Object.freeze(['id', 'label', 'description', 'thinkingOptions', 'defaultThinkingOptionId', 'runtime', 'provider', 'source', 'status']);
 /** Fields of a library.get answer passed on; `content` and `secrets` are the gateway's own (projectLibraryContent). */
 export const LIBRARY_ENTRY_FIELDS = Object.freeze(['kind', 'name', 'source', 'overrides', 'revision', 'usedBy', 'librarySkills']);
 
@@ -620,7 +622,7 @@ export function isModelId(value) {
 export const EXPOSURE = Object.freeze({
   'daemon.hello': { status: 'gateway', scope: 'connection', reason: 'Answered by the gateway after its own hello to alpd: capabilities are alpd\'s intersected with FORWARDED_CAPABILITIES; alpd\'s hostname when hostLabel accepts it; no pid.', tests: ['handshake'] },
 
-  'catalog.get': { status: 'exposed', permission: 'session.read', scope: 'none: the model and mode catalogue (live provider lists merged over static rows, t-e5ee)', params: [], tests: ['permission'] },
+  'catalog.get': { status: 'exposed', permission: 'session.read', scope: 'none: the model and mode catalogue (live provider lists merged over static rows, t-e5ee; enabled acp:* rows, t-d0b0); CATALOG_MODEL_FIELDS only, provider errors dropped', params: [], tests: ['permission'] },
   'catalog.refresh': { status: 'denied', scope: 'host: runs each provider CLI on the daemon host to list its models', reason: 'Starts provider processes on the host; remote clients read the catalog alpd refreshes on start, every 6 h and from turns (catalog.get); the gateway forwards catalog.updated (fetchedAt only) to clients holding session.read.' },
   'session.list': { status: 'exposed', permission: 'session.read', scope: 'result: sessions whose tree lies in a granted workspace; projectRoot must name one; with limit, alpd pages are read until the filtered page is full', params: ['projectRoot', 'rootsOnly', 'includeClosed', 'includeArchived', 'limit', 'cursor', 'query'], tests: ['permission', 'workspace-param', 'result-filter', 'paging'] },
   'session.get': { status: 'exposed', permission: 'session.read', scope: 'session: its tree\'s root and itself in a granted workspace', params: ['sessionId'], tests: ['permission', 'session-scope'] },

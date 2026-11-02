@@ -251,3 +251,36 @@ test('ACP: refreshAcp probes enabled providers only (or the named one), and a fa
   assert.match(catalog.state().acp.opencode.error, /needs login/);
   assert.ok(catalog.acpRows().some(row => row.id === 'opencode/opencode-m1'), 'the previous list stays');
 });
+
+test('ACP: a failing provider listing keeps the known rows and records why, and refreshAcp still resolves', async t => {
+  reset(t);
+  let fail = false;
+  const catalog = new ModelCatalog({ probes: {}, refreshMs: 0, acpProviders: async () => { if (fail) throw new Error('providers/bad.json: Unexpected token'); return acpConfigs; }, acpProbe: async () => [] });
+  await catalog.loadAcp();
+  const before = catalog.acpRows().length;
+  assert.ok(before > 0);
+  fail = true;
+  await catalog.refreshAcp();
+  assert.equal(catalog.acpRows().length, before, 'the previous ACP rows stay');
+  assert.match(catalog.acpLoadError(), /bad\.json/);
+  fail = false;
+  await catalog.loadAcp();
+  assert.equal(catalog.acpLoadError(), undefined);
+});
+
+test('ACP: a model learnAcp adds while a probe runs is kept (success unions, failure keeps current)', async t => {
+  reset(t);
+  let catalog;
+  catalog = new ModelCatalog({ probes: {}, refreshMs: 0, timeoutMs: 1000, acpProviders: async () => acpConfigs, acpProbe: async provider => {
+    await catalog.learnAcp(provider.id, [{ id: `${provider.id}-learned` }]);
+    return [{ id: `${provider.id}-probed` }];
+  } });
+  await catalog.refreshAcp(['opencode']);
+  assert.deepEqual(catalog.acpModels('opencode').map(model => model.id).sort(), ['opencode-learned', 'opencode-probed']);
+  const late = new ModelCatalog({ probes: {}, refreshMs: 0, timeoutMs: 1000, acpProviders: async () => acpConfigs, acpProbe: async provider => {
+    await late.learnAcp(provider.id, [{ id: 'mid' }]); throw new Error('down');
+  } });
+  await late.refreshAcp(['gemini']);
+  assert.equal(late.state().acp.gemini.status, 'failed');
+  assert.ok(late.acpModels('gemini').some(model => model.id === 'mid'));
+});

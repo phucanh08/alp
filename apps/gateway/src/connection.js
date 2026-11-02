@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { CAPABILITY, ERROR, PROTOCOL_VERSION, RPC_ERROR, TERMINAL, WORKSPACE_FILES, base64Bytes, blockedFilePath, resumeCommandOf } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 import { AGENT_CAPABILITY, isAlpClientError } from '@anhlp/alp-client/portable';
-import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.js';
+import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, CATALOG_MODEL_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.js';
 import { projectGitDiff, projectGitStatus, gatewayAttachmentLimits, projectAttachment, projectUploadBegun } from './policy.js';
 import { CONFIGURE_REASONS, isGeneration, projectBranch, projectConfigured, projectConfigurePreview, projectConversation, projectForkedFrom } from './policy.js';
 import { TERMINAL_REFUSALS, gatewayTerminalLimits, projectTerminal, projectTerminalEvent } from './policy.js';
@@ -1373,7 +1373,9 @@ export class ClientConnection {
     },
     // Provider errors can name host paths and exit codes: remote clients get each provider's status only (t-e5ee).
     'catalog.get': async () => {
-      const { providers, ...catalog } = await this.#call('catalog.get', {});
+      const { providers, models, ...rest } = await this.#call('catalog.get', {});
+      // A disabled ACP provider's rows stay on the host; every row is projected to known fields.
+      const catalog = { ...rest, models: (Array.isArray(models) ? models : []).filter((/** @type {any} */ model) => !(model?.runtime === 'acp' && model?.enabled === false)).map((/** @type {any} */ model) => pick(model, CATALOG_MODEL_FIELDS)) };
       return providers && typeof providers === 'object'
         ? { ...catalog, providers: Object.fromEntries(Object.entries(providers).map(([runtime, state]) => [runtime, { status: state?.status, ...(typeof state?.fetchedAt === 'string' ? { fetchedAt: state.fetchedAt } : {}) }])) }
         : catalog;

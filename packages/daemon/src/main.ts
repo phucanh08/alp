@@ -287,7 +287,7 @@ async function run(home: string) {
   // ACP providers (t-d0b0) are listed from providers/<id>.json without starting any; one is probed only on
   // catalog.refresh or when the user enables it, and learns its models from its first session otherwise.
   const modelCatalog = process.env.ALP_MODEL_CATALOG === 'static' ? undefined : new ModelCatalog({ home, probes: liveProbes(),
-    acpProviders: () => listProviders(home),
+    acpProviders: () => listProviders(home, { onError: (error: unknown, name: string) => console.error(`alpd: skipping provider ${name}: ${error instanceof Error ? error.message : String(error)}`) }),
     acpProbe: async provider => (await probeAcp(provider as Parameters<typeof probeAcp>[0], { cwd: home, discover: true, timeoutMs: 15_000 })).models ?? [] });
   setActiveCatalog(modelCatalog);
   void modelCatalog?.start().catch(() => {});

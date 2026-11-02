@@ -159,6 +159,24 @@ test('catalog.get through the gateway keeps each provider\'s status but drops it
   assert.equal(JSON.stringify(result).includes('/home/me'), false);
 });
 
+test('catalog.get through the gateway drops disabled ACP rows and unknown row fields (t-d0b0)', async t => {
+  const { daemon, rawSession } = await setup(t);
+  daemon.state.handlers['catalog.get'] = () => ({ models: [
+    { id: 'codex:x', label: 'X', description: '', thinkingOptions: [], secret: '/home/me' },
+    { id: 'acp:on', label: 'On', description: '', thinkingOptions: [], runtime: 'acp', provider: 'on', source: 'configured', enabled: true, status: 'unprobed' },
+    { id: 'acp:off', label: 'Off', description: '', thinkingOptions: [], runtime: 'acp', provider: 'off', source: 'configured', enabled: false, status: 'unprobed' },
+  ], modes: [], defaultModel: 'codex:x' });
+  const { socket, frames } = await rawSession('alice');
+  socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'h', method: 'daemon.hello', params: { protocolVersion: 1 } }));
+  await until(() => frames.some(frame => frame.id === 'h'), 'hello');
+  socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'c', method: 'catalog.get' }));
+  await until(() => frames.some(frame => frame.id === 'c'), 'catalog');
+  const { result } = frames.find(frame => frame.id === 'c');
+  assert.deepEqual(result.models.map(model => model.id), ['codex:x', 'acp:on']);
+  assert.equal(JSON.stringify(result).includes('/home/me'), false);
+  assert.deepEqual(result.models[1], { id: 'acp:on', label: 'On', description: '', thinkingOptions: [], runtime: 'acp', provider: 'on', source: 'configured', status: 'unprobed' });
+});
+
 test('catalog.updated reaches clients that may read the catalog, fetchedAt only; catalog.refresh stays denied (t-086c)', async t => {
   const { daemon, rawSession } = await setup(t);
   const open = async name => {

@@ -229,6 +229,9 @@ All methods except `daemon.*` take the session id the client got from `session.c
 | `daemon.status` | → `{ version, pid, startedAt, sessions: { running, idle, total } }` |
 | `daemon.shutdown` | `{ force? }` → `{}`; refused with running sessions unless `force` |
 | `catalog.get` | `{ projectRoot? }` → `{ runtimes, models, modes, thinking, agents? }` (agents listed when a project is given) |
+| `catalog.refresh` | → as `catalog.get`; asks the providers again and probes enabled ACP providers. An ACP failure is recorded per provider and never fails the call (t-d0b0) |
+
+ACP providers (t-d0b0): each library `providers/<id>.json` (not Antigravity) adds a row `acp:<id>` (the agent's default) and `acp:<id>/<model>` rows, with `runtime: 'acp'`, `provider`, `source` (`configured` or `live`), `enabled` and `status`. `providers` gains a key `acp:<id>` per provider with `status` `unprobed` (never started), `ok` or `failed`, plus `fetchedAt` and `error`. alpd starts an ACP provider only on `catalog.refresh` or when the user enables it; models a session's `session/new` reports are added. An invalid provider file is skipped. Through the gateway, disabled ACP rows are dropped and rows keep `CATALOG_MODEL_FIELDS` only.
 
 ### 6.2 Sessions
 

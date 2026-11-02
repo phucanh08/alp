@@ -91,6 +91,7 @@ export class ModelCatalog {
   private readonly file?: string;
   private acpConfigs: AcpProviderConfig[] = [];
   private acpRunning?: Promise<CatalogSnapshot>;
+  private acpError?: string;
 
   /**
    * ACP providers (t-d0b0) come from `acpProviders` (the library's providers/<id>.json) without starting
@@ -166,8 +167,14 @@ export class ModelCatalog {
   /** Rereads the ACP providers' files; starts none of them. */
   async loadAcp() {
     if (!this.options.acpProviders) return;
-    this.acpConfigs = (await this.options.acpProviders()).filter(provider => provider.kind !== 'antigravity');
+    // A listing that fails (an unreadable providers directory) keeps the rows ALP had and records why.
+    try {
+      this.acpConfigs = (await this.options.acpProviders()).filter(provider => provider.kind !== 'antigravity');
+      this.acpError = undefined;
+    } catch (error) { this.acpError = error instanceof Error ? error.message : String(error); }
   }
+  /** Why the last reading of the ACP providers failed, if it did. */
+  acpLoadError(): string | undefined { return this.acpError; }
 
   /** The ACP rows: each provider's default, then its models (the file's `models` replace learned ones; `additionalModels` add). */
   acpRows(): AcpRow[] {
@@ -218,17 +225,21 @@ export class ModelCatalog {
       const targets = this.acpConfigs.filter(provider => provider.enabled !== false && (!ids || ids.includes(provider.id)));
       if (!probe || !targets.length) return this.snapshot;
       const now = () => (this.options.now?.() ?? new Date()).toISOString();
-      const results = await Promise.all(targets.map(async provider => {
-        const prior = this.snapshot.acp?.[provider.id];
-        try {
-          const models = sanitizeModels(await bounded(signal => probe(provider, signal), this.options.timeoutMs ?? PROBE_TIMEOUT_MS));
-          // An agent that offers no choice of model is answered; what ALP learned before stays.
-          return [provider.id, { status: 'ok', fetchedAt: now(), models: models.length ? models : prior?.models ?? [] }] as const;
-        } catch (error) {
-          return [provider.id, { status: 'failed', ...(prior?.fetchedAt ? { fetchedAt: prior.fetchedAt } : {}), error: error instanceof Error ? error.message : String(error), models: prior?.models ?? [] }] as const;
-        }
+      await Promise.all(targets.map(async provider => {
+        let outcome: { ok: true; models: LiveModel[] } | { ok: false; error: string };
+        try { outcome = { ok: true, models: sanitizeModels(await bounded(signal => probe(provider, signal), this.options.timeoutMs ?? PROBE_TIMEOUT_MS)) }; }
+        catch (error) { outcome = { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+        // Read at write time: what a session's learnAcp added during the probe stays.
+        const current = this.snapshot.acp?.[provider.id];
+        const known = current?.models ?? [];
+        let next: AcpState;
+        if (outcome.ok) {
+          const ids = new Set(outcome.models.map(model => model.id));
+          // An agent that offers no choice of model is answered; what ALP learned before stays (a union, as learnAcp).
+          next = { status: 'ok', fetchedAt: now(), models: [...outcome.models, ...known.filter(model => !ids.has(model.id))] };
+        } else next = { status: 'failed', ...(current?.fetchedAt ? { fetchedAt: current.fetchedAt } : {}), error: outcome.error, models: known };
+        this.snapshot.acp = { ...this.snapshot.acp, [provider.id]: next };
       }));
-      this.snapshot.acp = { ...this.snapshot.acp, ...Object.fromEntries(results) as Record<string, AcpState> };
       await this.publish(true);
       return this.snapshot;
     })().finally(() => { this.acpRunning = undefined; });
