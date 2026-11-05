@@ -104,6 +104,11 @@ jobs:
       - run: npm ci
       - run: node scripts/build-workspace.mjs cli
       - run: node scripts/build-workspace.mjs paseo
+      # t-fa1b: run the catalog/compact/probe/migration regressions on both Windows Node versions.
+      - run: node scripts/run-tests.mjs --private-home packages/daemon/tests/model-catalog.test.js packages/runtime/tests/model-catalog.test.js packages/runtime/tests/compact.test.js packages/runtime/tests/antigravity-mode.test.js packages/client/tests/acp-probe.test.js packages/core/tests/providers.test.js
+      # Select recovery/CLI regressions without the older Unix-symlink library fixtures.
+      - run: >-
+          node -e "import('./scripts/test-lib.mjs').then(({runNodeTests})=>{process.exitCode=runNodeTests(['packages/core/tests/library-edit.test.js','packages/cli/tests/library.test.js'],{privateHome:true,extra:['--test-name-pattern=retired metadata IO|own role key|AFTER moving|retired text lists']})})"
       # Every test step runs through runNodeTests with --private-home (t-bfbd): a throwaway ALP_HOME,
       # TMPDIR and HOME/USERPROFILE, without ALP_*_BIN or the caller's ALP session variables.
       # The CLI discovery fixture creates a Unix symlink; all daemon lifecycle/session tests run.
