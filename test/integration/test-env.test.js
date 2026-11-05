@@ -98,7 +98,7 @@ test('hard timeout names the leaking file, returns boundedly, retains scratch an
 });
 
 test('abnormal coordinator exit retains all runner scratch', {timeout:15000}, async t => {
-  const {mkdtemp,writeFile,readFile,access,rm} = await import('node:fs/promises');
+  const {mkdtemp,writeFile,access,rm} = await import('node:fs/promises');
   const {tmpdir} = await import('node:os');
   const path = await import('node:path');
   const {execFile} = await import('node:child_process');
@@ -109,26 +109,20 @@ test('abnormal coordinator exit retains all runner scratch', {timeout:15000}, as
     for(const dir of retained) await rm(dir,{recursive:true,force:true});
     await rm(directory,{recursive:true,force:true});
   });
-  const info=path.join(directory,'root.json');
   const file=path.join(directory,'coordinator.test.mjs');
-  // --import runs in the held node:test root before its test child. Exclusive
-  // creation records the immediate coordinator relationship without a PID scan.
-  const preload='data:text/javascript,'+encodeURIComponent(`import {writeFileSync} from 'node:fs';try {writeFileSync(${JSON.stringify(info)},JSON.stringify({coordinator:process.ppid,root:process.pid}),{flag:'wx'});} catch(error) {if(error.code!=='EEXIST') throw error;}`);
-  await writeFile(file, `import {readFileSync} from 'node:fs';
-    process.kill(JSON.parse(readFileSync(${JSON.stringify(info)},'utf8')).coordinator,'SIGKILL');`);
+  await writeFile(file, '');
+  // Target the coordinator itself, independently of which node:test process
+  // executes --import on a given Node version. runNodeTests creates its scratch
+  // marker before spawning this process, so an abrupt exit must retain it.
+  const watchdog=new URL('../../scripts/test-file-watchdog.mjs',import.meta.url);
+  const {fileURLToPath}=await import('node:url');
+  const preload='data:text/javascript,'+encodeURIComponent(`if(process.argv[1]===${JSON.stringify(fileURLToPath(watchdog))}) process.kill(process.pid,'SIGKILL');`);
   const runner=new URL('../../scripts/test-lib.mjs',import.meta.url).href;
-  const env={...process.env};delete env.NODE_TEST_CONTEXT;
+  const env={...process.env,NODE_OPTIONS:`--import=${preload}`};delete env.NODE_TEST_CONTEXT;
   const result=await promisify(execFile)(process.execPath,['--input-type=module','-e',
-    `import {runNodeTests} from ${JSON.stringify(runner)};process.exitCode=runNodeTests([${JSON.stringify(file)}],{privateHome:true,extra:['--import',${JSON.stringify(preload)}]});`],{env,timeout:10000}).catch(error=>error);
+    `import {runNodeTests} from ${JSON.stringify(runner)};process.exitCode=runNodeTests([${JSON.stringify(file)}],{privateHome:true});`],{env,timeout:10000}).catch(error=>error);
   assert.equal(result.code,1,result.stderr);
   retained=result.stderr.match(/warning: cleanup unconfirmed; retained (.+)/)?.[1].split(', ') || [];
   assert.equal(retained.length,3,result.stderr);
   for(const dir of retained) await access(dir);
-  const {root}=JSON.parse(await readFile(info,'utf8'));
-  const until=Date.now()+5000;
-  while(true) {
-    try {process.kill(root,0);} catch(error) {if(error.code==='ESRCH') break;throw error;}
-    assert.ok(Date.now()<until,'held fixture root must exit before scratch cleanup');
-    await new Promise(resolve=>setTimeout(resolve,30));
-  }
 });
