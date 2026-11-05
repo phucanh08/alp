@@ -22,19 +22,59 @@ test('hermeticEnv then homelessEnv: neither the caller session nor its executabl
 });
 
 test('runNodeTests removes caller sessions and kills leaked file processes with named progress (t-50af)', { timeout: 30_000 }, async t => {
-  const { mkdtemp, writeFile, readFile, rm } = await import('node:fs/promises');
+  const { mkdtemp, writeFile, readFile, rm, access } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
-  const { execFile } = await import('node:child_process');
+  const { execFile, spawn } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const path = await import('node:path');
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-watchdog-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  // A bounded fallback in the detached fixture prevents a failing old watchdog
+  // from leaving a long-lived process. Retain scratch until it has exited.
+  t.after(async () => {
+    for (const file of [detachedPidFile, grandchildPidFile]) {
+      try { detachedPids.push(Number(await readFile(file, 'utf8'))); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
+    for (const pid of new Set(detachedPids)) await waitGone(pid, 16_000);
+    await rm(directory, { recursive: true, force: true });
+  });
+  const detachedPids = [];
+  async function waitGone(pid, limit = 1000) {
+    const until = Date.now() + limit;
+    while (Date.now() < until) {
+      try { process.kill(pid, 0); } catch (error) {
+        assert.equal(error.code, 'ESRCH');
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.fail(`leaked test process ${pid} is still alive`);
+  }
   const pidFile = path.join(directory, 'pid');
+  const detachedPidFile = path.join(directory, 'detached-pid');
+  const grandchildPidFile = path.join(directory, 'grandchild-pid');
+  const rootPidFile = path.join(directory, 'root-pid');
   const leak = path.join(directory, 'leak.test.mjs');
+  const blocked = path.join(directory, 'blocked.test.mjs');
+  const sentinel = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 25000)'], { stdio: 'ignore' });
+  t.after(() => sentinel.kill('SIGKILL'));
+  const grandchildCode = `const {spawn} = require('node:child_process');
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 12000)'], {detached:true, stdio:'ignore'});
+    require('node:fs').writeFileSync(${JSON.stringify(grandchildPidFile)}, String(child.pid));
+    child.unref(); setTimeout(() => {}, 12000);`;
   const good = path.join(directory, 'good.test.mjs');
-  await writeFile(leak, `import { writeFileSync } from 'node:fs';
+  const fixture = `import { writeFileSync } from 'node:fs';
+    import { spawn } from 'node:child_process';
+    const detached = spawn(process.execPath, ['-e', ${JSON.stringify(grandchildCode)}], {
+      detached: true, stdio: 'ignore'
+    });
+    writeFileSync(${JSON.stringify(detachedPidFile)}, String(detached.pid));
+    detached.unref();
     writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
-    setInterval(() => {}, 50);`);
+    writeFileSync(${JSON.stringify(rootPidFile)}, String(process.ppid));
+    setInterval(() => {}, 50);`;
+  await writeFile(leak, fixture);
+  await writeFile(blocked, fixture + '\nAtomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);');
   await writeFile(good, `import assert from 'node:assert/strict';
     assert.equal(process.env.ALP_AGENT_SESSION, undefined);
     assert.equal(process.env.ALP_BRIDGE_TOKEN, undefined);`);
@@ -59,11 +99,28 @@ test('runNodeTests removes caller sessions and kills leaked file processes with 
   assert.ok(result.stderr.includes(`[test-file] TIMEOUT ${leak}`), result.stderr);
   assert.ok(result.stderr.includes(`[test-file] FAIL ${leak}`), result.stderr);
   const pid = Number(await readFile(pidFile, 'utf8'));
-  // The --test child as well as its parent must have been killed. On POSIX the
-  // orphan may briefly be a zombie, so allow the OS reaper a short turn.
-  for (let attempt = 0; attempt < 50; attempt++) {
-    try { process.kill(pid, 0); } catch (error) { assert.equal(error.code, 'ESRCH'); return; }
-    await new Promise(resolve => setTimeout(resolve, 20));
-  }
-  assert.fail(`leaked test process ${pid} is still alive`);
+  const detachedPid = Number(await readFile(detachedPidFile, 'utf8'));
+  const grandchildPid = Number(await readFile(grandchildPidFile, 'utf8'));
+  detachedPids.push(detachedPid, grandchildPid);
+  await waitGone(pid);
+  await waitGone(Number(await readFile(rootPidFile, 'utf8')));
+  await waitGone(detachedPid);
+  await waitGone(grandchildPid);
+  assert.ok(!result.stderr.includes('CLEANUP-UNCONFIRMED'), result.stderr);
+  const blockedStarted = Date.now();
+  const blockedRun = await invoke([blocked]);
+  assert.equal(blockedRun.code, 1, blockedRun.stderr);
+  assert.ok(Date.now() - blockedStarted < 10000, 'unresponsive owner cleanup is bounded');
+  assert.ok(blockedRun.stderr.includes('CLEANUP-UNCONFIRMED'), blockedRun.stderr);
+  const retained = blockedRun.stderr.match(/warning: cleanup unconfirmed; retained (.+)/)?.[1].split(', ');
+  assert.ok(retained?.length >= 2, blockedRun.stderr);
+  for (const dir of retained) await access(dir);
+  const blockedPids = await Promise.all([detachedPidFile, grandchildPidFile].map(async file => Number(await readFile(file, 'utf8'))));
+  detachedPids.push(...blockedPids);
+  assert.equal(sentinel.exitCode, null, 'unrelated sentinel survives cleanup');
+  process.kill(sentinel.pid, 0);
+  // Only remove this invocation's retained scratch after fallback exits are
+  // confirmed. A failing wait leaves it for diagnosis.
+  for (const pid of blockedPids) await waitGone(pid, 16000);
+  for (const dir of retained) await rm(dir, {recursive:true, force:true});
 });

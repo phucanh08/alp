@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -75,7 +75,10 @@ export function homelessEnv(env, home) {
  * `privateHome` also removes ALP_*_BIN and gives the run a throwaway HOME/USERPROFILE (homelessEnv):
  * the windows-daemon CI lane runs that way (t-bfbd).
  * Each file reports START/PASS/FAIL and has a hard `fileTimeoutMs` (default five
- * minutes), including leaked handles after tests finish. A timeout kills its process tree.
+ * minutes), including leaked handles after tests finish. Responsive instrumented Node
+ * owners reap detached children through retained ChildProcess handles. Cleanup has a
+ * fixed grace; missing ACKs fail the run and retain scratch. This is test-only
+ * cooperation, not containment of native/stripped-preload or hostile descendants.
  */
 export function runNodeTests(files, { extra = [], privateHome = false, fileTimeoutMs = 300_000 } = {}) {
   if (!files.length) throw new Error('no test files selected');
@@ -86,15 +89,21 @@ export function runNodeTests(files, { extra = [], privateHome = false, fileTimeo
   // scratch directory that is removed afterwards, also when a test forgets its own (t-bf7f). Short:
   // Unix socket paths under it must stay below 104 bytes on macOS.
   const scratch = mkdtempSync(path.join(os.tmpdir(), 'alpt-'));
+  const retain = path.join(scratch, 'cleanup-unconfirmed');
+  // Fail closed if the coordinator crashes or is interrupted before ACKs.
+  writeFileSync(retain, 'cleanup pending\n');
   try {
     // alpd under test never asks the real providers for models (t-e5ee); a test that wants it unsets this.
     // A per-file process-tree watchdog also cuts off leaked handles after five minutes.
     const base = user ? homelessEnv(hermeticEnv(), user) : hermeticEnv();
-    const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts/test-file-watchdog.mjs'), JSON.stringify({ files, extra, fileTimeoutMs })], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...base, ALP_HOME: home, TMPDIR: scratch, TMP: scratch, TEMP: scratch } });
+    const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts/test-file-watchdog.mjs'), JSON.stringify({ files, extra, fileTimeoutMs })], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...base, ALP_TEST_RETAIN: retain, ALP_HOME: home, TMPDIR: scratch, TMP: scratch, TEMP: scratch } });
     return result.status ?? 1;
   } finally {
+    if (existsSync(retain)) {
+      console.warn(`warning: cleanup unconfirmed; retained ${[home, scratch, user].filter(Boolean).join(', ')}`);
+    }
     // A directory a lingering child still holds must not turn a passing run into a failure.
-    for (const dir of [home, scratch, user].filter(Boolean)) {
+    for (const dir of (existsSync(retain) ? [] : [home, scratch, user].filter(Boolean))) {
       try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
       catch (error) { console.warn(`warning: could not remove ${dir}: ${error.message}`); }
     }
