@@ -94,6 +94,9 @@ export function renderLog(rootId, entries) {
           ? `✦ ${entry.agent} saved skill ${entry.name} for ${entry.roles.join(', ')}`
           : `✦ ${entry.agent} uses skill ${entry.skill}${entry.via === 'skill' ? ' (Skill tool)' : ''}`;
         break;
+      case 'skill-resource':
+        text = `✦ ${entry.agent} opens ${entry.skill}/${entry.resource}${entry.via === 'command' ? ' (command)' : ''}`;
+        break;
       case 'compacted':
         text = entry.failed
           ? `✗ ${entry.agent}'s context could not be compacted${entry.error ? `: ${entry.error}` : ''}`

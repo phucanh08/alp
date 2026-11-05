@@ -20,6 +20,7 @@ import { nativeMode, codexApproval, profileEfforts, nativeSessionConfig } from '
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync, watch as watchFiles, type FSWatcher } from 'node:fs';
 import { appendFile, mkdir, open, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { checkFrontmatter, skillReferences, splitSkill } from '@anhlp/alp-core/skill-validate';
 import { moveFile, writeAtomic } from '@anhlp/alp-core/atomic';
 import os from 'node:os';
 import path from 'node:path';
@@ -1622,6 +1623,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const skills = session.mapping.agent.skills;
     if (!skills.length || item.type === 'agentMessage' || item.type === 'reasoning') return;
     const text = typeof item.command === 'string' ? item.command : JSON.stringify(item).slice(0, 20_000);
+    skillResources(sessionId, session, item, text);
     if (!text.includes('SKILL.md') && !text.includes('Skill')) return;
     for (const skill of skills) {
       if (session.skillsUsed?.has(skill.name)) continue;
@@ -1631,6 +1633,26 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       (session.skillsUsed ??= new Set()).add(skill.name);
       runLog(rootOf(sessionId), { event: 'skill', sessionId, agent: session.mapping.agent.name, skill: skill.name, via: called ? 'skill' : 'read' });
       if (session.supervisor) session.journal.push(stamp(`${session.mapping.agent.name} used skill ${skill.name}`));
+    }
+  }
+
+  /**
+   * Progressive disclosure evidence: the first time a session's tool call or command names a file of
+   * one of its skills beyond SKILL.md (references/, scripts/, assets/, templates/, data/), by the
+   * skill's own path or Claude's plugin link to it. Logged once per session and file, so the run log
+   * shows which resources were opened on demand and that the rest were not.
+   */
+  function skillResources(sessionId: string, session: Session, item: any, text: string) {
+    if (!text.includes('/skills/') && !session.mapping.agent.skills.some(skill => text.includes(path.dirname(skill.path)))) return;
+    const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    for (const skill of session.mapping.agent.skills) {
+      const pattern = new RegExp(`(?:${escape(path.dirname(skill.path).split(path.sep).join('/'))}|/skills/${escape(skill.name)})/((?:references|scripts|assets|templates|data)/[\\w.@+-]+(?:/[\\w.@+-]+)*)`, 'g');
+      for (const match of text.split(path.sep).join('/').matchAll(pattern)) {
+        const key = `${skill.name}/${match[1]}`;
+        if (session.skillResourcesUsed?.has(key)) continue;
+        (session.skillResourcesUsed ??= new Set()).add(key);
+        runLog(rootOf(sessionId), { event: 'skill-resource', sessionId, agent: session.mapping.agent.name, skill: skill.name, resource: match[1], via: typeof item.command === 'string' ? 'command' : 'tool' });
+      }
     }
   }
 
@@ -1998,6 +2020,16 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (previous) return toolResult(true, previous.result ?? { status: 'pending_approval', approvalId: previous.approvalId, file });
     const existing = await readFile(file, 'utf8').catch(() => undefined);
     if (existing !== undefined && !args.replace) return toolResult(false, { error: `The library already has a skill named ${args.name} (${file}); read it, then pass replace: true to propose a new version, or choose another name` });
+    // A new skill meets the Agent Skills format strictly (skill-validate.js). alp_skill writes only SKILL.md,
+    // so the body may point only at files the skill's directory already holds (a replaced skill's references).
+    const invalid = checkFrontmatter(splitSkill(content).frontmatter, args.name, { strict: true }).findings.filter(finding => finding.level === 'error');
+    if (invalid.length) return toolResult(false, { error: `The skill does not meet the skill format: ${invalid.map(finding => finding.message).join('; ')}` });
+    const missing: string[] = [];
+    for (const target of skillReferences(args.body)) {
+      const resolved = path.resolve(path.dirname(file), target);
+      if (path.isAbsolute(target) || path.relative(path.dirname(file), resolved).startsWith('..') || !(await stat(resolved).then(() => true, () => false))) missing.push(target);
+    }
+    if (missing.length) return toolResult(false, { error: `The body points to ${missing.join(', ')}, which the skill would not have: alp_skill saves only SKILL.md. Put that content in the body, or ask the user to add the files to ${path.dirname(file)} first` });
     const rolesFile = path.join(library, 'role-skills.json');
     const readRoles = async () => {
       const raw = await readFile(rolesFile, 'utf8').catch(() => '{}');

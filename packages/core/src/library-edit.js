@@ -1,4 +1,4 @@
-import { lstat, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { moveFile } from './atomic.js';
@@ -467,8 +467,30 @@ export async function duplicateEntry(kind, from, to, { scope, root, library, tem
     await projectDataEntry(kind, from, { scope, root, library, templates });
     await projectDataEntry(kind, to, { scope, root, library, templates });
   }
-  const { content } = await getEntry(kind, from, { root, library, templates });
-  return saveEntry(kind, to, structuredClone(content), { scope, root, library, templates, revision: null, policy });
+  const entry = await getEntry(kind, from, { root, library, templates });
+  // A skill is its directory: its references, scripts and assets go with SKILL.md, bytes and modes kept.
+  const resources = kind === 'skills' && policy !== 'project-data' ? await skillResources(entry.source === 'project' ? path.join(path.resolve(root), '.alp', 'skills', from) : path.join(library, 'skills', from)) : [];
+  const saved = await saveEntry(kind, to, structuredClone(entry.content), { scope, root, library, templates, revision: null, policy });
+  if (resources.length) {
+    const target = path.join(base(scope, { root, library }, kind), kind, to);
+    for (const [source, relative] of resources) await cp(source, path.join(target, relative), { recursive: true, errorOnExist: true, force: false });
+  }
+  return saved;
+}
+
+/** A skill directory's entries besides SKILL.md, as [absolute, relative]; refused when it holds a link. */
+async function skillResources(directory) {
+  const found = [];
+  const walk = async relative => {
+    for (const item of await readdir(path.join(directory, relative), { withFileTypes: true }).catch(error => { if (error.code === 'ENOENT') return []; throw error; })) {
+      const rel = path.join(relative, item.name);
+      if (item.isSymbolicLink()) fail('UNSAFE_LIBRARY_WRITE', `${path.join(directory, rel)} is a symbolic link; copy the skill by hand`);
+      if (item.isDirectory()) await walk(rel);
+      else if (item.isFile() && rel !== 'SKILL.md') found.push([path.join(directory, rel), rel]);
+    }
+  };
+  await walk('');
+  return found;
 }
 
 /** Renames an entry within a scope; refused while others refer to it by its old name. */

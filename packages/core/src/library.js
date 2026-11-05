@@ -1,5 +1,5 @@
 import { shippedTemplateRoot } from './template-path.js';
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { moveFile } from './atomic.js';
 import { createHash, randomUUID } from 'node:crypto';
 import os from 'node:os';
@@ -60,6 +60,8 @@ export const SHIPPED_ROLE_SKILLS = Object.freeze({
   'b12b52102c358119cf834e5f3be54e6a69aa4c9f388fe889dffbb529755292dc': { main: ['goal-griller', 'xia', 'sequence-execution-plan', 'prompt-leverage', 'bug-loop', 'smart-commits', 'compact'], lead: ['xia', 'sequence-execution-plan', 'prompt-leverage', 'bug-loop', 'smart-commits'], peer: ['xia', 'bug-loop', 'smart-commits'] },
   // f4d7986 (2026-10-29): curate for main
   'a84b035d0058cbfcda7e32dc1706b9e83e67764eed24e2e121bdfcd60f924e46': { main: ['goal-griller', 'xia', 'sequence-execution-plan', 'prompt-leverage', 'bug-loop', 'smart-commits', 'compact', 'curate'], lead: ['xia', 'sequence-execution-plan', 'prompt-leverage', 'bug-loop', 'smart-commits'], peer: ['xia', 'bug-loop', 'smart-commits'] },
+  // Skill system v2 (2026-11-05): engineering core skills; reviewer gets its first two
+  'e60be7eec8d9b5180866c9b5a2c14cf0d95a9f1331ed771e93791f7b524af9b1': { main: ['goal-griller', 'xia', 'sequence-execution-plan', 'prompt-leverage', 'bug-loop', 'smart-commits', 'compact', 'curate', 'skill-authoring', 'architecture-docs', 'feature-architecture', 'test-strategy', 'safe-refactor', 'security-review', 'release-readiness'], lead: ['xia', 'sequence-execution-plan', 'prompt-leverage', 'bug-loop', 'smart-commits', 'architecture-docs', 'feature-architecture', 'test-strategy', 'safe-refactor', 'security-review', 'release-readiness'], peer: ['xia', 'bug-loop', 'smart-commits', 'feature-architecture', 'test-strategy', 'safe-refactor'], reviewer: ['security-review', 'release-readiness'] },
 });
 
 /** A role → skills object's pairs as `role/skill` strings; anything else gives none. @param {unknown} roles */
@@ -137,11 +139,13 @@ export async function seedLibrary(home, options = {}) {
       // A file the user made under a shipped name stays theirs.
       if (current !== undefined) continue;
       await mkdir(path.dirname(target), { recursive: true });
-      await writeFile(target, content, { flag: 'wx' }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+      const wrote = await writeFile(target, content, { flag: 'wx' }).then(() => true, error => { if (error.code !== 'EEXIST') throw error; return false; });
+      if (wrote) await keepExecutable(name, target, content);
       manifest.files[name] = sha(content);
       created.push(name);
     } else if (current !== undefined && sha(current) === seeded && seeded !== sha(content)) {
       await writeFile(target, content);
+      await keepExecutable(name, target, content);
       manifest.files[name] = sha(content);
       updated.push(name);
     }
@@ -157,6 +161,16 @@ export async function seedLibrary(home, options = {}) {
     await moveFile(temporary, manifestPath);
   }
   return { created, updated, ...(options.offerRoleSkills ? { offered: offer?.added ?? [] } : {}) };
+}
+
+/**
+ * Bundles carry shipped templates as text, so a script's executable bit cannot travel with it: a
+ * shipped skill script that starts with `#!` is made executable where ALP writes it (Level 3
+ * resources; the validator holds shipped skills to UTF-8 text). Nothing runs it.
+ */
+async function keepExecutable(name, target, content) {
+  if (process.platform === 'win32' || !/^skills\/[^/]+\/scripts\//.test(name) || !content.startsWith('#!')) return;
+  await chmod(target, 0o755);
 }
 
 const seeding = new Map();

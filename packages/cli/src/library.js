@@ -6,6 +6,8 @@ import { libraryEntries } from '@anhlp/alp-core/resolver';
 import { listTeams, resolveTeam } from '@anhlp/alp-core/teams';
 import { deleteEntry, duplicateEntry, getEntry, listRetiredSkills, renameEntry, restoreSkill, saveEntry } from '@anhlp/alp-core/library-edit';
 import { testEntry } from '@anhlp/alp-client/library-test';
+import { formatValidation, validateSkill } from '@anhlp/alp-core/skill-validate';
+import { installPack, listPacks, packStatus } from '@anhlp/alp-core/packs';
 import { alpHome } from '@anhlp/alp-client/index';
 import { UsageError } from './usage.js';
 import { taskProject } from './tasks.js';
@@ -68,7 +70,7 @@ const EDIT_OPTIONS = {
   // skill, mcp, hook
   file: { type: 'string' }, roles: { type: 'string' }, 'no-roles': { type: 'boolean' }, command: { type: 'string' }, arg: { type: 'string', multiple: true }, env: { type: 'string', multiple: true }, cwd: { type: 'string' },
   url: { type: 'string' }, header: { type: 'string', multiple: true }, event: { type: 'string' }, blocking: { type: 'boolean' }, timeout: { type: 'string' },
-  'match-agent': { type: 'string' }, 'match-label': { type: 'string' },
+  'match-agent': { type: 'string' }, 'match-label': { type: 'string' }, strict: { type: 'boolean' },
   // provider
   kind: { type: 'string' },
   'read-only-mode': { type: 'string' },
@@ -170,6 +172,36 @@ async function edited(kind, name, current, values) {
   return content;
 }
 
+/**
+ * alp skill check [name|DIR] [--project [DIR]] [--strict] [--json]: validates skills (Agent Skills
+ * format, packages/core/src/skill-validate.js). Without a name, every skill the project and the
+ * library hold; a name, the one that applies; a path, that directory. Existing skills are checked in
+ * legacy mode (format problems are warnings) unless --strict. Reads only; exit 1 on an error.
+ */
+async function checkSkills(name, positionals, values) {
+  if (positionals.length > 2) throw new UsageError();
+  const root = path.resolve(values.project ?? process.cwd());
+  const mode = values.strict ? 'strict' : 'legacy';
+  let targets;
+  if (name !== undefined && (name.includes('/') || name.includes(path.sep) || name.startsWith('.'))) targets = [path.resolve(name)];
+  else {
+    const rows = await libraryEntries('skills', root, { library: alpHome() });
+    const chosen = name === undefined ? rows : rows.filter(row => row.name === name);
+    if (name !== undefined && !chosen.length) throw new Error(`No skill '${name}' in ${path.join(root, '.alp', 'skills')} or ${path.join(alpHome(), 'skills')}`);
+    targets = chosen.map(row => path.dirname(row.path));
+  }
+  const reports = [];
+  for (const target of targets) reports.push(await validateSkill(target, { mode }));
+  if (values.json) console.log(JSON.stringify(reports));
+  else {
+    for (const report of reports) console.log(formatValidation(report));
+    const failed = reports.filter(report => !report.ok).length;
+    const warned = reports.filter(report => report.warnings.length).length;
+    console.log(`${reports.length} skill${reports.length === 1 ? '' : 's'} checked (${mode}): ${failed} with errors, ${warned} with warnings.${mode === 'legacy' && warned ? ' Warnings do not stop a skill from loading; fix them when you next edit it.' : ''}`);
+  }
+  if (reports.some(report => !report.ok)) process.exitCode = 1;
+}
+
 /** alp agent|team|skill|mcp|hook: create, change, copy, rename, remove and test library entries. */
 
 async function editCommand(kind, args) {
@@ -182,6 +214,7 @@ async function editCommand(kind, args) {
     console.log(values.json ? JSON.stringify(result) : `Restored ${name} to ${result.restored} from ${result.from}; ${result.roles.length ? `given to ${result.roles.join(', ')}` : 'given to no role'}.`);
     return;
   }
+  if (kind === 'skills' && action === 'check') { await checkSkills(name, positionals, values); return; }
   if (kind === 'providers' && action !== 'add') await seedLibrary(alpHome());
   const creates = { agents: 'new', teams: 'new', skills: 'new', mcp: 'add', hooks: 'add', providers: 'add' }[kind];
   if (!name || positionals.length > (['cp', 'mv'].includes(action) ? 3 : 2) || (['cp', 'mv'].includes(action) && !target)) throw new UsageError();
@@ -256,4 +289,45 @@ async function teamsCommand(args) {
   }
 }
 
-export { libraryCommand, projectFlag, pairs, names, EDIT_OPTIONS, edited, editCommand, teamsCommand };
+/**
+ * alp packs [--project DIR] [--json]: the optional packs ALP ships, and whether the library or the
+ * project has them. alp pack install <id> [--project [DIR]] [--assign] [--json]: copies a pack's
+ * skills, agents and teams into the library (or the project's .alp/), keeping any entry already
+ * there; --assign (library) gives its suggested skills to roles in role-skills.json.
+ */
+async function packsCommand(args) {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, json: { type: 'boolean' } } });
+  if (positionals.length) throw new UsageError();
+  const root = path.resolve(values.project ?? process.cwd());
+  const rows = [];
+  for (const pack of await listPacks()) rows.push({ ...pack, installed: await packStatus(pack, { root, library: alpHome() }) });
+  if (values.json) { console.log(JSON.stringify(rows)); return; }
+  const width = Math.max(...rows.map(row => row.id.length));
+  for (const row of rows) {
+    const contents = [row.skills.length ? `skills: ${row.skills.join(', ')}` : '', row.agents.length ? `agents: ${row.agents.join(', ')}` : '', row.teams.length ? `teams: ${row.teams.join(', ')}` : ''].filter(Boolean).join('; ');
+    const where = [row.installed.library ? 'library' : '', row.installed.project ? 'project' : ''].filter(Boolean).join(', ');
+    console.log(`${row.id.padEnd(width)}  ${row.description}\n${' '.repeat(width)}  ${contents}${where ? `  [installed: ${where}]` : ''}`);
+  }
+  console.log('Install one with: alp pack install <id> [--project] [--assign]');
+}
+
+async function packCommand(args) {
+  const { values, positionals } = parseArgs({ args: projectFlag(args), allowPositionals: true, options: { project: { type: 'string' }, json: { type: 'boolean' }, assign: { type: 'boolean' } } });
+  const [action, id] = positionals;
+  if (action !== 'install' || !id || positionals.length > 2) throw new UsageError();
+  const scope = values.project !== undefined ? 'project' : 'library';
+  const root = values.project !== undefined ? path.resolve(values.project) : undefined;
+  if (scope === 'project') await taskProject(root);
+  const result = await installPack(id, { scope, root, library: alpHome(), assign: values.assign });
+  if (values.json) { console.log(JSON.stringify(result)); return; }
+  const where = scope === 'project' ? `the project ${root}` : `your library ${alpHome()}`;
+  for (const entry of result.installed) console.log(`installed ${entry.kind.replace(/s$/, '')} ${entry.name}  ${entry.path}`);
+  for (const entry of result.kept) console.log(`kept      ${entry.kind.replace(/s$/, '')} ${entry.name}: one already exists, and stays as it is (${entry.path})`);
+  for (const line of result.permissions.set) console.log(`permission ${line} (agent capped by its permission profile)`);
+  for (const line of result.permissions.conflicts) console.log(`warning: ${line}`);
+  if (result.assigned.length) console.log(`assigned  ${result.assigned.join(', ')} in role-skills.json`);
+  else if (!values.assign && scope === 'library' && result.installed.some(entry => entry.kind === 'skills')) console.log('No role has these skills yet: rerun with --assign for the pack\'s suggestion, or alp agent edit <agent> --skills a,b.');
+  console.log(`Pack ${id} in ${where}. Start a new session (or close and resume) for agents to see it.`);
+}
+
+export { libraryCommand, projectFlag, pairs, names, EDIT_OPTIONS, edited, editCommand, teamsCommand, packsCommand, packCommand };

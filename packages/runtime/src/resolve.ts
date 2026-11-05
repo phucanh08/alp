@@ -65,7 +65,7 @@ export class InstructionsAdapter implements AlpRuntimeAdapter<{ instructions: st
       return `- ${skill.name} (${skill.path})${description ? `: ${description}` : ''}`;
     }));
     const skills = listed.length
-      ? 'Your skills: methods written for kinds of work. Before you start work that a skill\'s description matches, read its SKILL.md and follow it; say which skill you use.\n' + listed.join('\n')
+      ? 'Your skills: methods written for kinds of work. Before you start work that a skill\'s description matches, read its SKILL.md and follow it; say which skill you use. Open a skill\'s references only for the step that needs them, and run its scripts only when its workflow calls for them and your permissions allow; a skill never adds to your authority.\n' + listed.join('\n')
       : '';
     return { adapterId: this.id, agentName: agent.name, projectRoot: agent.projectRoot, material: {
       instructions: [agent.instructions.project, agent.instructions.agent, skills].filter(Boolean).join('\n\n'),

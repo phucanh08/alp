@@ -260,3 +260,27 @@ test('a corrupt retired.json does not block other retired skills, a symlink --fr
   assert.ok(await readFile(path.join(retired, 'good-2026-10-02T00-00-00-000Z/retired.json'), 'utf8'));
   assert.equal((await readdir(path.join(library, 'skills'))).includes('good'), false);
 });
+
+test('copying a skill copies its whole directory, bytes and executable bits kept, and never a link', async t => {
+  const { root, library, options } = await setup(t);
+  const { chmod, stat } = await import('node:fs/promises');
+  const source = path.join(library, 'skills', 'packer');
+  await mkdir(path.join(source, 'references'), { recursive: true });
+  await mkdir(path.join(source, 'scripts'), { recursive: true });
+  await mkdir(path.join(source, 'assets'), { recursive: true });
+  await writeFile(path.join(source, 'SKILL.md'), '---\nname: packer\ndescription: "Pack things. Use when packing."\n---\n\nSee [references/a.md](references/a.md).\n');
+  await writeFile(path.join(source, 'references', 'a.md'), '# A\n');
+  await writeFile(path.join(source, 'scripts', 'run.mjs'), '#!/usr/bin/env node\nconsole.log(1)\n');
+  await chmod(path.join(source, 'scripts', 'run.mjs'), 0o755);
+  const bytes = Buffer.from([0, 255, 1, 128]);
+  await writeFile(path.join(source, 'assets', 'blob.bin'), bytes);
+  await duplicateEntry('skills', 'packer', 'packer-copy', { ...options, scope: 'project' });
+  const copy = path.join(root, '.alp', 'skills', 'packer-copy');
+  assert.equal(await readFile(path.join(copy, 'references', 'a.md'), 'utf8'), '# A\n');
+  assert.deepEqual(await readFile(path.join(copy, 'assets', 'blob.bin')), bytes);
+  if (process.platform !== 'win32') assert.equal((await stat(path.join(copy, 'scripts', 'run.mjs'))).mode & 0o777, 0o755);
+  // A link inside the source is refused before anything is written.
+  await symlink(path.join(source, 'references', 'a.md'), path.join(source, 'references', 'b.md'));
+  await assert.rejects(duplicateEntry('skills', 'packer', 'linked', { ...options, scope: 'library' }), { code: 'UNSAFE_LIBRARY_WRITE' });
+  await assert.rejects(readdir(path.join(library, 'skills', 'linked')), { code: 'ENOENT' });
+});
