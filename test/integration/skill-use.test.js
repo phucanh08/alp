@@ -51,6 +51,8 @@ test('a skill\'s references and scripts are logged when opened, once per file, a
   assert.ok(!instructions.includes(reference.trim().split('\n')[0]));
   assert.deepEqual((await runLog()).filter(entry => entry.event === 'skill-resource'), []);
   const started = item => main.notification('item/started', { threadId: main.threadId, item });
+  // Output that names a file is not an opening of it.
+  main.notification('item/completed', { threadId: main.threadId, item: { type: 'commandExecution', id: 'r0', command: 'grep -rl proof ~/.alp', cwd: '/tmp', status: 'completed', exitCode: 0, aggregatedOutput: `${bugLoop}/references/test-proof.md\n` } });
   started({ type: 'commandExecution', id: 'r1', command: `cat ${bugLoop}/references/test-proof.md`, cwd: '/tmp', status: 'inProgress' });
   started({ type: 'commandExecution', id: 'r2', command: `sed -n 1,9p ${bugLoop}/references/test-proof.md`, cwd: '/tmp', status: 'inProgress' });
   // Claude reads through its plugin link: <plugin>/skills/<name>/...

@@ -473,7 +473,12 @@ export async function duplicateEntry(kind, from, to, { scope, root, library, tem
   const saved = await saveEntry(kind, to, structuredClone(entry.content), { scope, root, library, templates, revision: null, policy });
   if (resources.length) {
     const target = path.join(base(scope, { root, library }, kind), kind, to);
-    for (const [source, relative] of resources) await cp(source, path.join(target, relative), { recursive: true, errorOnExist: true, force: false });
+    try { for (const [source, relative] of resources) await cp(source, path.join(target, relative), { recursive: true, errorOnExist: true, force: false }); }
+    catch (error) {
+      // Half a copy is no skill: the new entry (made just above, so nobody else's) goes again.
+      await rm(target, { recursive: true, force: true });
+      throw error;
+    }
   }
   return saved;
 }
@@ -484,6 +489,7 @@ async function skillResources(directory) {
   const walk = async relative => {
     for (const item of await readdir(path.join(directory, relative), { withFileTypes: true }).catch(error => { if (error.code === 'ENOENT') return []; throw error; })) {
       const rel = path.join(relative, item.name);
+      if (item.name === '.git' || item.name === 'node_modules') continue;
       if (item.isSymbolicLink()) fail('UNSAFE_LIBRARY_WRITE', `${path.join(directory, rel)} is a symbolic link; copy the skill by hand`);
       if (item.isDirectory()) await walk(rel);
       else if (item.isFile() && rel !== 'SKILL.md') found.push([path.join(directory, rel), rel]);

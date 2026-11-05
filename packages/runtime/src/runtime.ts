@@ -1623,7 +1623,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const skills = session.mapping.agent.skills;
     if (!skills.length || item.type === 'agentMessage' || item.type === 'reasoning') return;
     const text = typeof item.command === 'string' ? item.command : JSON.stringify(item).slice(0, 20_000);
-    skillResources(sessionId, session, item, text);
+    skillResources(sessionId, session, item);
     if (!text.includes('SKILL.md') && !text.includes('Skill')) return;
     for (const skill of skills) {
       if (session.skillsUsed?.has(skill.name)) continue;
@@ -1642,12 +1642,17 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
    * skill's own path or Claude's plugin link to it. Logged once per session and file, so the run log
    * shows which resources were opened on demand and that the rest were not.
    */
-  function skillResources(sessionId: string, session: Session, item: any, text: string) {
-    if (!text.includes('/skills/') && !session.mapping.agent.skills.some(skill => text.includes(path.dirname(skill.path)))) return;
+  function skillResources(sessionId: string, session: Session, item: any) {
+    // What the agent asked for, not what came back: a listing or a grep result naming a file is no opening.
+    const asked = typeof item.command === 'string' ? item.command
+      : JSON.stringify(item, (key, value) => ['aggregatedOutput', 'output', 'result', 'results', 'content', 'contentItems', 'stdout', 'stderr', 'detail'].includes(key) ? undefined : value)?.slice(0, 20_000) ?? '';
+    // One separator on every platform (JSON doubles Windows backslashes).
+    const text = asked.replace(/\\\\/g, '/').replace(/\\/g, '/');
+    if (!text.includes('/skills/')) return;
     const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     for (const skill of session.mapping.agent.skills) {
-      const pattern = new RegExp(`(?:${escape(path.dirname(skill.path).split(path.sep).join('/'))}|/skills/${escape(skill.name)})/((?:references|scripts|assets|templates|data)/[\\w.@+-]+(?:/[\\w.@+-]+)*)`, 'g');
-      for (const match of text.split(path.sep).join('/').matchAll(pattern)) {
+      const pattern = new RegExp(`(?:${escape(path.dirname(skill.path).replace(/\\/g, '/'))}|/skills/${escape(skill.name)})/((?:references|scripts|assets|templates|data)/[\\w.@+-]+(?:/[\\w.@+-]+)*)`, 'g');
+      for (const match of text.matchAll(pattern)) {
         const key = `${skill.name}/${match[1]}`;
         if (session.skillResourcesUsed?.has(key)) continue;
         (session.skillResourcesUsed ??= new Set()).add(key);

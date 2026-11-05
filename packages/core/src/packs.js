@@ -175,6 +175,8 @@ export async function installPack(id, { scope, root, library, assign = false, te
     const agents = object(current.agents) ? current.agents : {};
     let changed = false;
     for (const [agent, required] of Object.entries(pack.permissions)) {
+      // An agent of that name that was already there is the user's: its permissions are theirs to set.
+      if (!installed.some(entry => entry.kind === 'agents' && entry.name === agent)) { if (!Object.hasOwn(agents, agent) || agents[agent] !== required) permissions.conflicts.push(`${agent}: your own ${agent} agent was kept, so its permissions were left as they are; the pack's ${agent} expects '${required}'`); continue; }
       if (!Object.hasOwn(agents, agent)) { agents[agent] = required; permissions.set.push(`${agent}: ${required}`); changed = true; }
       else if (agents[agent] === required) permissions.kept.push(`${agent}: ${required}`);
       else permissions.conflicts.push(`${agent}: ${file} gives '${agents[agent]}', the pack expects '${required}'; left as it is`);
@@ -189,7 +191,9 @@ export async function installPack(id, { scope, root, library, assign = false, te
   const assigned = [];
   if (assign && Object.keys(pack.assign).length) {
     const file = path.join(library, 'role-skills.json');
-    const roles = JSON.parse(await readFile(file, 'utf8').catch(() => '{}'));
+    const text = await readFile(file, 'utf8').catch(error => { if (error.code === 'ENOENT') return '{}'; throw error; });
+    let roles;
+    try { roles = JSON.parse(text); } catch (cause) { throw new AlpError('INVALID_LIBRARY', `${file}: ${cause.message}; the pack was installed but no role was given its skills`, { cause }); }
     if (!object(roles)) fail('INVALID_LIBRARY', `${file}: expected an object of role names to skill lists`);
     for (const [role, skills] of Object.entries(pack.assign)) {
       const list = Array.isArray(roles[role]) ? roles[role] : (roles[role] = []);

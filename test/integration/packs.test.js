@@ -83,6 +83,17 @@ test('the architecture pack adds a read-only architect, a docs-maintainer peer a
   const conflict = await installPack('architecture', { scope: 'library', library: other.library });
   assert.equal(conflict.permissions.conflicts.length, 1);
   assert.equal(JSON.parse(await readFile(path.join(other.library, 'settings.json'), 'utf8')).permissions.agents.architect, 'workspace-write');
+  // A user's own architect agent is kept, and no permission is written for it.
+  const own = await dirs(t);
+  await seedLibrary(own.library);
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(path.join(own.library, 'agents/architect'), { recursive: true });
+  await writeFile(path.join(own.library, 'agents/architect/AGENT.md'), '# My architect, who writes\n');
+  const kept = await installPack('architecture', { scope: 'library', library: own.library });
+  assert.deepEqual(kept.kept.map(entry => entry.name), ['architect']);
+  assert.deepEqual(kept.permissions.set, []);
+  assert.match(kept.permissions.conflicts[0], /your own architect agent was kept/);
+  await assert.rejects(readFile(path.join(own.library, 'settings.json'), 'utf8'), { code: 'ENOENT' });
 });
 
 test('in the Blueprint team, main delegating to the architect gets a read-only advisor even when asking for writes', async t => {
