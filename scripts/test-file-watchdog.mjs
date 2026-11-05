@@ -1,109 +1,31 @@
-// Internal coordinator for test-lib: each file gets a hard wall-clock limit, including
-// time after its tests finish when leaked handles can keep Node's test child alive.
+// Hard per-file wall-clock limit, including leaked handles after tests finish.
+// Normal files run without process instrumentation. This is not containment:
+// detached descendants may survive a timeout, so shared scratch is retained.
 import { spawn, spawnSync } from 'node:child_process';
-import { availableParallelism, tmpdir } from 'node:os';
-import { createServer } from 'node:net';
-import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
-import { unlinkSync, writeFileSync } from 'node:fs';
-const tracker = join(import.meta.dirname, 'test-process-tracker.cjs');
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-let cleanupUnconfirmed = false;
-function unconfirmed(file) {
-  cleanupUnconfirmed = true;
-  console.error(`[test-file] CLEANUP-UNCONFIRMED ${file}; retaining runner scratch`);
-  if (process.env.ALP_TEST_RETAIN) writeFileSync(process.env.ALP_TEST_RETAIN, 'cleanup unconfirmed\n');
-}
-async function control() {
-  const secret = randomUUID();
-  const root = randomUUID();
-  const endpoint = process.platform === 'win32' ? ['', '', '.', 'pipe', `alp-test-${root}`].join(String.fromCharCode(92)) : join(tmpdir(), `at-${root.slice(0, 8)}.sock`);
-  const peers = new Map();
-  let collision = false;
-  const edges = new Map();
-  const sockets = new Set();
-  const server = createServer(socket => {
-    sockets.add(socket);
-    socket.on('error', () => {});
-    socket.on('close', () => sockets.delete(socket));
-    let peer;
-    let input = '';
-    socket.on('data', data => {
-      input += data;
-      let end;
-      while ((end = input.indexOf('\n')) >= 0) {
-        const line = input.slice(0, end); input = input.slice(end + 1);
-        let message;
-        try { message = JSON.parse(line); } catch { socket.destroy(); return; }
-        if (!peer) {
-          if (message.type !== 'hello' || message.token !== secret) { socket.destroy(); return; }
-          // Never replace a registered owner, even after disconnection: a
-          // second socket cannot inherit its ACK authority. Latch uncertainty
-          // for the entire file, rather than accepting a later apparent ACK.
-          if (peers.has(message.id)) { collision = true; socket.destroy(); return; }
-          peer = { id: message.id, slot: message.slot, socket, ack: false };
-          peers.set(peer.id, peer);
-        } else if (message.type === 'spawn') edges.set(message.id, { owner: peer.id });
-        else if (message.type === 'exit' && edges.get(message.id)?.owner === peer.id) edges.delete(message.id);
-        else if (message.type === 'ack') peer.ack = true;
-      }
-    });
-  });
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(endpoint, resolve); });
-  return {
-    env: { ALP_TEST_CONTROL: endpoint, ALP_TEST_SECRET: secret, ALP_TEST_PROCESS: root, ALP_TEST_SLOT: '',
-      NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --require=${JSON.stringify(tracker)}` },
-    async cleanup() {
-      // Bottom-up ACKs ensure a parent is never killed before its detached
-      // descendants have been handled by their actual spawning owners.
-      const deadline = Date.now() + 1500;
-      const requested = new Set();
-      // One shell call slot can contain several process owners. Only a socket
-      // owns ACK authority; slot membership never replaces that identity.
-      const slotPeers = id => [...peers.values()].filter(peer => peer.slot === id);
-      const uncertain = !peers.has(root) || [...edges.keys()].some(id => slotPeers(id).length === 0);
-      while (Date.now() < deadline) {
-        for (const peer of peers.values()) {
-          if (requested.has(peer.id) || peer.socket.destroyed) continue;
-          const waiting = [...edges].some(([id, edge]) => edge.owner === peer.id && slotPeers(id).some(child => !child.socket.destroyed && !child.ack));
-          if (!waiting) { requested.add(peer.id); peer.socket.write('{"type":"cleanup"}\n'); }
-        }
-        if (edges.size === 0 && [...peers.values()].filter(peer => !peer.socket.destroyed).every(peer => peer.ack)) return !uncertain && !collision;
-        await delay(20);
-      }
-      return false;
-    },
-    close() { for (const socket of sockets) socket.destroy(); server.close(); },
-  };
-}
+import { availableParallelism } from 'node:os';
+import { unlinkSync } from 'node:fs';
 
 const { files, extra, fileTimeoutMs } = JSON.parse(process.argv[2]);
 let next = 0;
 let failed = false;
+let retainScratch = false;
 const active = new Set();
-function stop(child, group = true) {
-  if (!child.pid) return false;
-  if (child.exitCode !== null || child.signalCode !== null) return true;
-  let confirmed = true;
-  if (group && process.platform === 'win32') {
+function stop(child) {
+  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === 'win32') {
     const result = spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', timeout: 3000 });
-    if (result.error || result.status !== 0) {
-      console.error(`[test-file] taskkill failed: ${result.error?.message || `status ${result.status}`}`);
-      confirmed = false;
-    }
-  } else if (group) {
-    try { process.kill(-child.pid, 'SIGKILL'); } catch (error) {
-      if (error.code !== 'ESRCH') {
-        confirmed = false;
-        console.error(`[test-file] process-group kill failed: ${error.message}`);
-      }
-    }
+    if (result.error || result.status !== 0) console.error(`[test-file] taskkill failed: ${result.error?.message || `status ${result.status}`}`);
+  } else {
+    // The still-held root is its own process-group leader. Never enumerate or
+    // signal stored descendant PIDs after their spawning handles have gone.
+    try { process.kill(-child.pid, 'SIGKILL'); }
+    catch (error) { if (error.code !== 'ESRCH') console.error(`[test-file] process-group kill failed: ${error.message}`); }
   }
   child.kill('SIGKILL');
-  return confirmed;
 }
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => {
-  for (const child of active) { unconfirmed('interrupted run'); stop(child); }
+  console.error('[test-file] interrupted; retaining scratch; detached descendants may survive');
+  for (const child of active) stop(child);
   process.exit(signal === 'SIGINT' ? 130 : 143);
 });
 async function worker() {
@@ -111,40 +33,43 @@ async function worker() {
     const file = files[next++];
     const started = Date.now();
     console.error(`[test-file] START ${file}`);
-    const registry = await control();
     const child = spawn(process.execPath, ['--test', '--test-timeout=300000', ...extra, file], {
-      stdio: 'inherit', detached: process.platform !== 'win32',
-      env: { ...process.env, ...registry.env },
+      stdio: ['inherit', 'pipe', 'pipe'], detached: process.platform !== 'win32',
     });
+    child.stdout.pipe(process.stdout, { end: false });
+    child.stderr.pipe(process.stderr, { end: false });
     active.add(child);
     let timedOut = false;
-    let cleanup;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      console.error(`[test-file] TIMEOUT ${file} after ${fileTimeoutMs} ms; killing its process tree`);
-      cleanup = (async () => {
-        const confirmed = await registry.cleanup();
-        if (!confirmed) unconfirmed(file);
-        // Confirmed owners have already reaped every registered child. Only
-        // the root handle remains; avoid signaling a now-empty/recycled PGID.
-        if (!stop(child, !confirmed)) unconfirmed(file);
-      })();
-    }, fileTimeoutMs);
+    // A detached process may retain output after the root exits. Pipe through
+    // this coordinator so the deadline can close its local read handles too.
     const status = await new Promise(resolve => {
-      child.once('error', error => { console.error(`[test-file] ${file}: ${error.message}`); resolve(1); });
-      child.once('close', code => resolve(code ?? 1));
+      const timer = setTimeout(() => {
+        timedOut = true;
+        retainScratch = true;
+        console.error(`[test-file] TIMEOUT ${file} after ${fileTimeoutMs} ms; retaining scratch; detached descendants may survive`);
+        stop(child);
+        // A failed kill must not defeat the deadline.
+        child.stdout.destroy();
+        child.stderr.destroy();
+        child.unref();
+        resolve(1);
+      }, fileTimeoutMs);
+      child.once('error', error => {
+        retainScratch = true;
+        console.error(`[test-file] ${file}: ${error.message}`);
+        clearTimeout(timer); resolve(1);
+      });
+      child.once('close', (code, signal) => {
+        if (signal) retainScratch = true;
+        clearTimeout(timer); resolve(code ?? 1);
+      });
     });
-    clearTimeout(timer);
-    let confirmed = true;
-    if (cleanup) await cleanup;
-    else if (!await registry.cleanup()) { confirmed = false; unconfirmed(file); }
-    registry.close();
     active.delete(child);
-    const ok = status === 0 && !timedOut && confirmed;
+    const ok = status === 0 && !timedOut;
     if (!ok) failed = true;
     console.error(`[test-file] ${ok ? 'PASS' : 'FAIL'} ${file} (${Date.now() - started} ms)`);
   }
 }
 await Promise.all(Array.from({ length: Math.min(files.length, Math.max(1, availableParallelism() - 1)) }, worker));
-if (!cleanupUnconfirmed && process.env.ALP_TEST_RETAIN) unlinkSync(process.env.ALP_TEST_RETAIN);
-process.exitCode = failed || cleanupUnconfirmed ? 1 : 0;
+if (!retainScratch && process.env.ALP_TEST_RETAIN) unlinkSync(process.env.ALP_TEST_RETAIN);
+process.exitCode = failed ? 1 : 0;

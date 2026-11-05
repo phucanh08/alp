@@ -21,224 +21,114 @@ test('hermeticEnv then homelessEnv: neither the caller session nor its executabl
   assert.deepEqual(env, { KEEP: 'k', HOME: 'u', USERPROFILE: 'u' });
 });
 
-test('runNodeTests removes caller sessions and kills leaked file processes with named progress (t-50af)', { timeout: 30_000 }, async t => {
-  const { mkdtemp, writeFile, readFile, rm, access } = await import('node:fs/promises');
-  const { tmpdir } = await import('node:os');
-  const { execFile, spawn } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const path = await import('node:path');
-  const directory = await mkdtemp(path.join(tmpdir(), 'alp-watchdog-'));
-  // A bounded fallback in the detached fixture prevents a failing old watchdog
-  // from leaving a long-lived process. Retain scratch until it has exited.
-  t.after(async () => {
-    for (const file of [detachedPidFile, grandchildPidFile]) {
-      try { detachedPids.push(Number(await readFile(file, 'utf8'))); }
-      catch (error) { if (error.code !== 'ENOENT') throw error; }
-    }
-    for (const pid of new Set(detachedPids)) await waitGone(pid, 16_000);
-    await rm(directory, { recursive: true, force: true });
-  });
-  const detachedPids = [];
-  async function waitGone(pid, limit = 1000) {
-    const until = Date.now() + limit;
-    while (Date.now() < until) {
-      try { process.kill(pid, 0); } catch (error) {
-        assert.equal(error.code, 'ESRCH');
-        return;
-      }
-      await new Promise(resolve => setTimeout(resolve, 20));
-    }
-    assert.fail(`leaked test process ${pid} is still alive`);
-  }
-  const pidFile = path.join(directory, 'pid');
-  const detachedPidFile = path.join(directory, 'detached-pid');
-  const grandchildPidFile = path.join(directory, 'grandchild-pid');
-  const rootPidFile = path.join(directory, 'root-pid');
-  const leak = path.join(directory, 'leak.test.mjs');
-  const blocked = path.join(directory, 'blocked.test.mjs');
-  const sentinel = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 25000)'], { stdio: 'ignore' });
-  t.after(() => sentinel.kill('SIGKILL'));
-  const grandchildCode = `const {spawn} = require('node:child_process');
-    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 12000)'], {detached:true, stdio:'ignore'});
-    require('node:fs').writeFileSync(${JSON.stringify(grandchildPidFile)}, String(child.pid));
-    child.unref(); setTimeout(() => {}, 12000);`;
-  const good = path.join(directory, 'good.test.mjs');
-  const fixture = `import { writeFileSync } from 'node:fs';
-    import { spawn } from 'node:child_process';
-    const detached = spawn(process.execPath, ['-e', ${JSON.stringify(grandchildCode)}], {
-      detached: true, stdio: 'ignore'
-    });
-    writeFileSync(${JSON.stringify(detachedPidFile)}, String(detached.pid));
-    detached.unref();
-    writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
-    writeFileSync(${JSON.stringify(rootPidFile)}, String(process.ppid));
-    setInterval(() => {}, 50);`;
-  await writeFile(leak, fixture);
-  await writeFile(blocked, fixture + '\nAtomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10000);');
-  await writeFile(good, `import assert from 'node:assert/strict';
-    assert.equal(process.env.ALP_AGENT_SESSION, undefined);
-    assert.equal(process.env.ALP_BRIDGE_TOKEN, undefined);`);
-  const runner = new URL('../../scripts/test-lib.mjs', import.meta.url).href;
-  const env = { ...process.env, ALP_AGENT_SESSION: 'injected-session', ALP_BRIDGE_TOKEN: 'injected-token' };
-  delete env.NODE_TEST_CONTEXT; // this deliberately starts a new runner, not a nested node:test context
-  const invoke = async files => {
-    try {
-      const output = await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
-        `import {runNodeTests} from ${JSON.stringify(runner)};
-         process.exitCode = runNodeTests(${JSON.stringify(files)}, {fileTimeoutMs: 4000, privateHome: true});`],
-      { env, timeout: 15_000 });
-      return { ...output, code: 0 };
-    } catch (error) { return error; }
-  };
-  const goodRun = await invoke([good]);
-  assert.equal(goodRun.code, 0, goodRun.stderr);
-  assert.ok(goodRun.stderr.includes(`[test-file] START ${good}`));
-  assert.ok(goodRun.stderr.includes(`[test-file] PASS ${good}`));
-  const result = await invoke([leak]);
-  assert.equal(result.code, 1, result.stderr);
-  assert.ok(result.stderr.includes(`[test-file] TIMEOUT ${leak}`), result.stderr);
-  assert.ok(result.stderr.includes(`[test-file] FAIL ${leak}`), result.stderr);
-  const pid = Number(await readFile(pidFile, 'utf8'));
-  const detachedPid = Number(await readFile(detachedPidFile, 'utf8'));
-  const grandchildPid = Number(await readFile(grandchildPidFile, 'utf8'));
-  detachedPids.push(detachedPid, grandchildPid);
-  await waitGone(pid);
-  await waitGone(Number(await readFile(rootPidFile, 'utf8')));
-  await waitGone(detachedPid);
-  await waitGone(grandchildPid);
-  assert.ok(!result.stderr.includes('CLEANUP-UNCONFIRMED'), result.stderr);
-  const blockedStarted = Date.now();
-  const blockedRun = await invoke([blocked]);
-  assert.equal(blockedRun.code, 1, blockedRun.stderr);
-  assert.ok(Date.now() - blockedStarted < 10000, 'unresponsive owner cleanup is bounded');
-  assert.ok(blockedRun.stderr.includes('CLEANUP-UNCONFIRMED'), blockedRun.stderr);
-  const retained = blockedRun.stderr.match(/warning: cleanup unconfirmed; retained (.+)/)?.[1].split(', ');
-  assert.ok(retained?.length >= 2, blockedRun.stderr);
-  for (const dir of retained) await access(dir);
-  const blockedPids = await Promise.all([detachedPidFile, grandchildPidFile].map(async file => Number(await readFile(file, 'utf8'))));
-  detachedPids.push(...blockedPids);
-  assert.equal(sentinel.exitCode, null, 'unrelated sentinel survives cleanup');
-  process.kill(sentinel.pid, 0);
-  // Only remove this invocation's retained scratch after fallback exits are
-  // confirmed. A failing wait leaves it for diagnosis.
-  for (const pid of blockedPids) await waitGone(pid, 16000);
-  for (const dir of retained) await rm(dir, {recursive:true, force:true});
-});
-
-for (const method of ['spawnSync', 'execFileSync']) {
-  test(`watchdog keeps scratch when detached ${method} blocks its owner; completed sync passes`, {timeout: 25000}, async t => {
-    const {mkdtemp, writeFile, readFile, access, rm} = await import('node:fs/promises');
-    const {tmpdir} = await import('node:os');
-    const {join} = await import('node:path');
-    const {execFile} = await import('node:child_process');
-    const {promisify} = await import('node:util');
-    const dir = await mkdtemp(join(tmpdir(), 'alp-sync-watchdog-'));
-    const pidFile = join(dir, 'pid');
-    const good = join(dir, 'good.mjs');
-    const blocked = join(dir, 'blocked.mjs');
-    const runner = new URL('../../scripts/test-lib.mjs', import.meta.url).href;
-    const env = {...process.env};
-    delete env.NODE_TEST_CONTEXT;
-    const invoke = async file => {
-      try {
-        return {...await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
-          `import {runNodeTests} from ${JSON.stringify(runner)}; process.exitCode = runNodeTests([${JSON.stringify(file)}], {fileTimeoutMs:2000, privateHome:true});`], {env, timeout:10000}), code:0};
-      } catch (error) { return error; }
-    };
-    // The detached child is responsive but its spawning owner is synchronously
-    // blocked. Only the child's own bounded timer proves its eventual exit.
-    const childCode = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 6500);`;
-    await writeFile(good, `import {${method}} from 'node:child_process'; ${method}(process.execPath, ['-e', ''], {stdio:'ignore'});`);
-    await writeFile(blocked, `import {${method}} from 'node:child_process'; ${method}(process.execPath, ['-e', ${JSON.stringify(childCode)}], {detached:true, stdio:'ignore'});`);
-    let retained = [];
-    t.after(async () => {
-      let pid;
-      try { pid = Number(await readFile(pidFile, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-      if (pid) {
-        const until = Date.now() + 10000;
-        while (true) {
-          try { process.kill(pid, 0); } catch (error) { assert.equal(error.code, 'ESRCH'); break; }
-          assert.ok(Date.now() < until, 'sync fixture must exit before scratch removal');
-          await new Promise(resolve => setTimeout(resolve, 25));
-        }
-      }
-      for (const path of [...retained, dir]) await rm(path, {recursive:true, force:true});
-    });
-    const normal = await invoke(good);
-    assert.equal(normal.code, 0, normal.stderr);
-    const started = Date.now();
-    const result = await invoke(blocked);
-    retained = result.stderr.match(/warning: cleanup unconfirmed; retained (.+)/)?.[1].split(', ') || [];
-    assert.equal(result.code, 1, result.stderr);
-    assert.ok(Date.now() - started < 6000, 'cleanup is bounded while synchronous owner blocks');
-    assert.ok(result.stderr.includes('CLEANUP-UNCONFIRMED'), result.stderr);
-    process.kill(Number(await readFile(pidFile, 'utf8')), 0); // still live; retention is necessary
-    assert.ok(retained.length >= 2, result.stderr);
-    for (const path of retained) await access(path);
-  });
-}
-
-test('duplicate control registration cannot replace an owner or clear cleanup uncertainty', {timeout:10000}, async t => {
-  const {mkdtemp, writeFile, access, rm} = await import('node:fs/promises');
+test('normal runner isolates sessions and permits an unreferenced esbuild service', {timeout:15000}, async t => {
+  const {mkdtemp,writeFile,access,rm} = await import('node:fs/promises');
   const {tmpdir} = await import('node:os');
-  const {join} = await import('node:path');
+  const path = await import('node:path');
   const {execFile} = await import('node:child_process');
   const {promisify} = await import('node:util');
-  const dir = await mkdtemp(join(tmpdir(), 'alp-duplicate-watchdog-'));
-  const file = join(dir, 'duplicate.mjs');
-  let retained = [];
-  t.after(async () => {
-    for (const path of [...retained, dir]) await rm(path, {recursive:true, force:true});
-  });
-  await writeFile(file, `import {createConnection} from 'node:net';
-    const socket = createConnection(process.env.ALP_TEST_CONTROL);
-    socket.on('error', () => {});
-    socket.on('connect', () => socket.end(JSON.stringify({type:'hello', id:process.env.ALP_TEST_PROCESS, token:process.env.ALP_TEST_SECRET})+'\\n'+JSON.stringify({type:'ack'})+'\\n'));
-    setTimeout(() => {}, 100);`);
-  const env = {...process.env}; delete env.NODE_TEST_CONTEXT;
-  const runner = new URL('../../scripts/test-lib.mjs', import.meta.url).href;
-  let result;
-  try {
-    result = {...await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
-      `import {runNodeTests} from ${JSON.stringify(runner)}; process.exitCode = runNodeTests([${JSON.stringify(file)}], {fileTimeoutMs:2000, privateHome:true});`], {env, timeout:7000}), code:0};
-  } catch (error) { result = error; }
-  retained = result.stderr.match(/warning: cleanup unconfirmed; retained (.+)/)?.[1].split(', ') || [];
-  assert.equal(result.code, 1, result.stderr);
-  assert.ok(result.stderr.includes('CLEANUP-UNCONFIRMED'), result.stderr);
-  assert.ok(retained.length >= 2, result.stderr);
-  for (const path of retained) await access(path);
+  const directory = await mkdtemp(path.join(tmpdir(),'alp-normal-file-'));
+  t.after(()=>rm(directory,{recursive:true,force:true}));
+  const file = path.join(directory,'normal.test.mjs');
+  await writeFile(file, `import assert from 'node:assert/strict';
+    import {build} from ${JSON.stringify(new URL('../../node_modules/esbuild/lib/main.js',import.meta.url).href)};
+    assert.equal(process.env.ALP_AGENT_SESSION,undefined);
+    assert.equal(process.env.ALP_BRIDGE_TOKEN,undefined);
+    await build({stdin:{contents:'export const value=1'},write:false});
+    console.log('scratch='+JSON.stringify([process.env.ALP_HOME,process.env.TMPDIR,process.env.HOME]));`);
+  const runner = new URL('../../scripts/test-lib.mjs',import.meta.url).href;
+  const env = {...process.env,ALP_AGENT_SESSION:'injected-session',ALP_BRIDGE_TOKEN:'injected-token'};
+  delete env.NODE_TEST_CONTEXT;
+  const output = await promisify(execFile)(process.execPath,['--input-type=module','-e',
+    `import {runNodeTests} from ${JSON.stringify(runner)};process.exitCode=runNodeTests([${JSON.stringify(file)}],{privateHome:true,fileTimeoutMs:5000});`],{env,timeout:10000});
+  assert.ok(output.stderr.includes(`[test-file] START ${file}`));
+  assert.ok(output.stderr.includes(`[test-file] PASS ${file}`));
+  assert.ok(!output.stderr.includes('retained'),output.stderr);
+  const scratch = JSON.parse(output.stdout.match(/scratch=(\[.+\])/)?.[1] || 'null');
+  assert.equal(scratch.length,3);
+  for(const dir of scratch) await assert.rejects(access(dir),{code:'ENOENT'});
 });
 
-for (const method of ['execSync', 'exec']) {
-  test(`watchdog accepts completed multi-Node ${method} shell calls`, {timeout:15000}, async t => {
-    const {mkdtemp, writeFile, access, rm} = await import('node:fs/promises');
-    const {tmpdir} = await import('node:os');
-    const {join} = await import('node:path');
-    const {execFile} = await import('node:child_process');
-    const {promisify} = await import('node:util');
-    const dir = await mkdtemp(join(tmpdir(), 'alp-shell-watchdog-'));
-    t.after(() => rm(dir, {recursive:true, force:true}));
-    const file = join(dir, 'shell.mjs');
-    const command = `"${process.execPath}" -e "console.log(process.env.ALP_TEST_PROCESS)"`;
-    const shell = `${command}; ${command}`;
-    // cmd.exe uses & for sequential commands; the Node commands themselves match.
-    const platformShell = process.platform === 'win32' ? `${command} & ${command}` : shell;
-    await writeFile(file, `console.log('scratch:' + JSON.stringify([process.env.ALP_HOME, process.env.TMPDIR, process.env.HOME])); import {${method}} from 'node:child_process';
-      ${method === 'execSync' ? `execSync(${JSON.stringify(platformShell)}, {stdio:'inherit'});` : `await new Promise((resolve,reject) => exec(${JSON.stringify(platformShell)}, (error, stdout) => {process.stdout.write(stdout); error ? reject(error) : resolve();}));`}`);
-    const env = {...process.env}; delete env.NODE_TEST_CONTEXT;
-    const runner = new URL('../../scripts/test-lib.mjs', import.meta.url).href;
-    let result;
-    try { result = {...await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
-      `import {runNodeTests} from ${JSON.stringify(runner)}; process.exitCode = runNodeTests([${JSON.stringify(file)}], {fileTimeoutMs:4000, privateHome:true});`], {env, timeout:10000}), code:0}; }
-    catch (error) { result = error; }
-    // Preserve retained runner scratch on failure for diagnosis.
-    assert.equal(result.code, 0, result.stderr);
-    assert.ok(result.stderr.includes('[test-file] PASS'), result.stderr);
-    assert.ok(!result.stderr.includes('CLEANUP-UNCONFIRMED'), result.stderr);
-    const scratch = JSON.parse(result.stdout.match(/scratch:(\[[^\n]+\])/)[1]);
-    for (const path of scratch) await assert.rejects(access(path), {code:'ENOENT'});
-    const identities = result.stdout.match(/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}/g);
-    assert.equal(identities?.length, 2, result.stdout);
-    assert.notEqual(identities[0], identities[1]);
+test('hard timeout names the leaking file, returns boundedly, retains scratch and leaves a sentinel alone', {timeout:20000}, async t => {
+  const {mkdtemp,writeFile,readFile,access,rm} = await import('node:fs/promises');
+  const {tmpdir} = await import('node:os');
+  const path = await import('node:path');
+  const {execFile,spawn} = await import('node:child_process');
+  const {promisify} = await import('node:util');
+  const directory = await mkdtemp(path.join(tmpdir(),'alp-file-timeout-'));
+  const pidFile = path.join(directory,'detached-pid');
+  let retained = [];
+  t.after(async()=>{
+    // The watchdog promises a deadline, not detached-tree containment. The
+    // fixture has its own short fallback; wait for it before deleting scratch.
+    try {
+      const pid=Number(await readFile(pidFile,'utf8'));
+      const until=Date.now()+10000;
+      while(true) {
+        try {process.kill(pid,0);} catch(error) {if(error.code==='ESRCH') break;throw error;}
+        assert.ok(Date.now()<until,'fixture fallback must exit before cleanup');
+        await new Promise(resolve=>setTimeout(resolve,30));
+      }
+    } catch(error) {if(error.code!=='ENOENT') throw error;}
+    for(const dir of retained) await rm(dir,{recursive:true,force:true});
+    await rm(directory,{recursive:true,force:true});
   });
-}
+  const sentinel=spawn(process.execPath,['-e','setTimeout(()=>{},20000)'],{stdio:'ignore'});
+  t.after(()=>sentinel.kill('SIGKILL'));
+  const file=path.join(directory,'leak.test.mjs');
+  await writeFile(file, `import {spawn} from 'node:child_process';
+    import {writeFileSync} from 'node:fs';
+    const child=spawn(process.execPath,['-e','setTimeout(()=>{},8000)'],{detached:true,stdio:'inherit'});
+    writeFileSync(${JSON.stringify(pidFile)},String(child.pid));child.unref();setInterval(()=>{},50);`);
+  const runner=new URL('../../scripts/test-lib.mjs',import.meta.url).href;
+  const env={...process.env};delete env.NODE_TEST_CONTEXT;
+  const started=Date.now();
+  const result=await promisify(execFile)(process.execPath,['--input-type=module','-e',
+    `import {runNodeTests} from ${JSON.stringify(runner)};process.exitCode=runNodeTests([${JSON.stringify(file)}],{privateHome:true,fileTimeoutMs:1500});`],{env,timeout:8000}).catch(error=>error);
+  assert.equal(result.code,1,result.stderr);
+  assert.ok(Date.now()-started<7000,'hard watchdog must return before the detached fallback');
+  assert.ok(result.stderr.includes(`[test-file] TIMEOUT ${file} after 1500 ms`),result.stderr);
+  assert.ok(result.stderr.includes(`[test-file] FAIL ${file}`),result.stderr);
+  assert.ok(result.stderr.includes('detached descendants may survive'),result.stderr);
+  retained=result.stderr.match(/warning: cleanup unconfirmed; retained (.+)/)?.[1].split(', ') || [];
+  assert.equal(retained.length,3,result.stderr);
+  for(const dir of retained) await access(dir);
+  assert.equal(sentinel.exitCode,null);
+  process.kill(sentinel.pid,0);
+});
+
+test('abnormal coordinator exit retains all runner scratch', {timeout:15000}, async t => {
+  const {mkdtemp,writeFile,readFile,access,rm} = await import('node:fs/promises');
+  const {tmpdir} = await import('node:os');
+  const path = await import('node:path');
+  const {execFile} = await import('node:child_process');
+  const {promisify} = await import('node:util');
+  const directory=await mkdtemp(path.join(tmpdir(),'alp-coordinator-exit-'));
+  let retained=[];
+  t.after(async()=>{
+    for(const dir of retained) await rm(dir,{recursive:true,force:true});
+    await rm(directory,{recursive:true,force:true});
+  });
+  const info=path.join(directory,'root.json');
+  const file=path.join(directory,'coordinator.test.mjs');
+  // --import runs in the held node:test root before its test child. Exclusive
+  // creation records the immediate coordinator relationship without a PID scan.
+  const preload='data:text/javascript,'+encodeURIComponent(`import {writeFileSync} from 'node:fs';try {writeFileSync(${JSON.stringify(info)},JSON.stringify({coordinator:process.ppid,root:process.pid}),{flag:'wx'});} catch(error) {if(error.code!=='EEXIST') throw error;}`);
+  await writeFile(file, `import {readFileSync} from 'node:fs';
+    process.kill(JSON.parse(readFileSync(${JSON.stringify(info)},'utf8')).coordinator,'SIGKILL');`);
+  const runner=new URL('../../scripts/test-lib.mjs',import.meta.url).href;
+  const env={...process.env};delete env.NODE_TEST_CONTEXT;
+  const result=await promisify(execFile)(process.execPath,['--input-type=module','-e',
+    `import {runNodeTests} from ${JSON.stringify(runner)};process.exitCode=runNodeTests([${JSON.stringify(file)}],{privateHome:true,extra:['--import',${JSON.stringify(preload)}]});`],{env,timeout:10000}).catch(error=>error);
+  assert.equal(result.code,1,result.stderr);
+  retained=result.stderr.match(/warning: cleanup unconfirmed; retained (.+)/)?.[1].split(', ') || [];
+  assert.equal(retained.length,3,result.stderr);
+  for(const dir of retained) await access(dir);
+  const {root}=JSON.parse(await readFile(info,'utf8'));
+  const until=Date.now()+5000;
+  while(true) {
+    try {process.kill(root,0);} catch(error) {if(error.code==='ESRCH') break;throw error;}
+    assert.ok(Date.now()<until,'held fixture root must exit before scratch cleanup');
+    await new Promise(resolve=>setTimeout(resolve,30));
+  }
+});
