@@ -13,6 +13,13 @@ import { skillDescription } from '@anhlp/alp-runtime';
 import { legacyProject } from '../../../test/support/legacy.js';
 
 const expected = {
+  main: ['architecture-docs', 'bug-loop', 'compact', 'curate', 'feature-architecture', 'goal-griller', 'prompt-leverage', 'release-readiness', 'safe-refactor', 'security-review', 'sequence-execution-plan', 'skill-authoring', 'smart-commits', 'test-strategy', 'xia'],
+  lead: ['architecture-docs', 'bug-loop', 'feature-architecture', 'prompt-leverage', 'release-readiness', 'safe-refactor', 'security-review', 'sequence-execution-plan', 'smart-commits', 'test-strategy', 'xia'],
+  peer: ['bug-loop', 'feature-architecture', 'safe-refactor', 'smart-commits', 'test-strategy', 'xia'],
+  reviewer: ['release-readiness', 'security-review'],
+};
+/** What 0.3 projects copied into each role: the original skill set, which upgrades archive. */
+const LEGACY = {
   main: ['bug-loop', 'compact', 'curate', 'goal-griller', 'prompt-leverage', 'sequence-execution-plan', 'smart-commits', 'xia'],
   lead: ['bug-loop', 'prompt-leverage', 'sequence-execution-plan', 'smart-commits', 'xia'],
   peer: ['bug-loop', 'smart-commits', 'xia'],
@@ -43,7 +50,7 @@ test('the user library is seeded with the intended role skills and their referen
       }
     }
   }
-  for (const agent of ['oracle', 'reviewer', 'supervisor']) assert.deepEqual((await resolveAgent(root, { agent, library })).skills, []);
+  for (const agent of ['oracle', 'supervisor']) assert.deepEqual((await resolveAgent(root, { agent, library })).skills, []);
   assert.deepEqual(await seedLibrary(library), { created: [], updated: [] });
 });
 
@@ -129,7 +136,7 @@ test('upgrade archives project skill copies that match the shipped skills and ke
   const root = await fixture(t);
   await legacyProject(root);
   // Projects from 0.3 carry a copy of each role's skills.
-  for (const [role, names] of Object.entries(expected)) {
+  for (const [role, names] of Object.entries(LEGACY)) {
     for (const name of names) await cp(new URL(`skills/${name}`, shippedTemplateRoot()), path.join(root, `.alp/agents/${role}/skills/${name}`), { recursive: true });
   }
   const custom = path.join(root, '.alp/agents/peer/skills/xia/SKILL.md');
@@ -149,14 +156,14 @@ test('upgrade recognizes shipped team-v1 instructions and backs up each role', a
   const [root, library] = [await fixture(t), await fixture(t)];
   await legacyProject(root);
   await seedLibrary(library);
-  for (const role of Object.keys(expected)) {
+  for (const role of Object.keys(LEGACY)) {
     await cp(new URL(`./fixtures/team-v1/${role}/AGENT.md`, import.meta.url), path.join(root, `.alp/agents/${role}/AGENT.md`));
   }
   // Copies as ALP shipped them, old or current, are put away: the project uses the built-ins.
   const result = await upgradeProject(root);
   assert.deepEqual(result.updated, []);
   assert.deepEqual(result.removed, ['main', 'lead', 'peer', 'oracle', 'reviewer', 'supervisor'].map(name => `.alp/agents/${name}`));
-  for (const role of Object.keys(expected)) {
+  for (const role of Object.keys(LEGACY)) {
     const old = await readFile(new URL(`./fixtures/team-v1/${role}/AGENT.md`, import.meta.url), 'utf8');
     assert.equal(await readFile(path.join(result.backup, `.alp/agents/${role}/AGENT.md`), 'utf8'), old);
     const resolved = await resolveAgent(root, { agent: role, library });
@@ -185,7 +192,7 @@ test('upgrade archives the retired router from each role and does not reinstall 
   const root = await fixture(t);
   await legacyProject(root);
   const original = await readFile(new URL('./fixtures/retired-ask-alp.md', import.meta.url), 'utf8');
-  for (const role of Object.keys(expected)) {
+  for (const role of Object.keys(LEGACY)) {
     const directory = path.join(root, `.alp/agents/${role}/skills/ask-alp`);
     await mkdir(directory);
     await writeFile(path.join(directory, 'SKILL.md'), original);
@@ -193,7 +200,7 @@ test('upgrade archives the retired router from each role and does not reinstall 
   const result = await upgradeProject(root);
   // The three routers, then the six agent copies they leave as shipped.
   assert.equal(result.removed.length, 9);
-  for (const role of Object.keys(expected)) {
+  for (const role of Object.keys(LEGACY)) {
     assert.deepEqual((await resolveAgent(root, { agent: role })).skills, []);
     assert.equal(await readFile(path.join(result.backup, `.alp/agents/${role}/skills/ask-alp/SKILL.md`), 'utf8'), original);
   }

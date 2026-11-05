@@ -1556,7 +1556,7 @@ test('session.commands: the runtime\'s commands its team settings name, then the
   await d.request('session.create', { sessionId: 'sd', spec: { cwd: d.project, persist: true } });
   d.transports.at(-1).commands = runtimeCommands;
   const plain = (await d.request('session.commands', { sessionId: 'sd' })).commands;
-  assert.deepEqual(plain.map(command => command.name), ['alp:xia', ...['bug-loop', 'compact', 'curate', 'goal-griller', 'prompt-leverage', 'sequence-execution-plan', 'smart-commits'].map(name => `alp:${name}`)]);
+  assert.deepEqual(plain.map(command => command.name), ['alp:xia', ...['architecture-docs', 'bug-loop', 'compact', 'curate', 'feature-architecture', 'goal-griller', 'prompt-leverage', 'release-readiness', 'safe-refactor', 'security-review', 'sequence-execution-plan', 'skill-authoring', 'smart-commits', 'test-strategy'].map(name => `alp:${name}`)]);
   // team.<team>.main.commands in .alp/settings.json names the runtime's commands the list offers too.
   const settingsFile = path.join(d.project, '.alp', 'settings.json');
   const settings = JSON.parse(await readFile(settingsFile, 'utf8'));
@@ -1571,7 +1571,7 @@ test('session.commands: the runtime\'s commands its team settings name, then the
   assert.equal(commands.filter(command => command.name === 'compact').length, 1);
   assert.ok(!commands.some(command => command.name === 'bad name'));
   const skills = commands.slice(1);
-  assert.deepEqual(skills.map(command => command.name), ['bug-loop', 'compact', 'curate', 'goal-griller', 'prompt-leverage', 'sequence-execution-plan', 'smart-commits', 'xia'].map(name => `alp:${name}`), 'main\'s ALP skills, as Claude names them');
+  assert.deepEqual(skills.map(command => command.name), ['architecture-docs', 'bug-loop', 'compact', 'curate', 'feature-architecture', 'goal-griller', 'prompt-leverage', 'release-readiness', 'safe-refactor', 'security-review', 'sequence-execution-plan', 'skill-authoring', 'smart-commits', 'test-strategy', 'xia'].map(name => `alp:${name}`), 'main\'s ALP skills, as Claude names them');
   assert.ok(skills.every(command => command.description.length > 0));
   assert.ok(skills.every(command => command.kind === 'skill' && !command.description.includes('/SKILL.md')));
   transport.commands = async () => { throw new Error('runtime gone'); };

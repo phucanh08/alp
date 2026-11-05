@@ -9,7 +9,7 @@ let world;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
-const MAIN_SKILLS = ['bug-loop', 'compact', 'curate', 'goal-griller', 'prompt-leverage', 'sequence-execution-plan', 'smart-commits', 'xia'];
+const MAIN_SKILLS = ['architecture-docs', 'bug-loop', 'compact', 'curate', 'feature-architecture', 'goal-griller', 'prompt-leverage', 'release-readiness', 'safe-refactor', 'security-review', 'sequence-execution-plan', 'skill-authoring', 'smart-commits', 'test-strategy', 'xia'];
 
 test('"/" suggests every command and skill of main, filters as it is typed, and inserts the chosen one', async ({ page }) => {
   await connect(page, world);

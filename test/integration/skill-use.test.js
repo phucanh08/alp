@@ -10,7 +10,7 @@ import { tree, until } from '../support/fake-agent.js';
 test('Claude gets the agent\'s skills to load as its own; Codex finds them in its instructions', async t => {
   const claude = await tree(t, { prefix: 'alp-skill-', open: { model: 'claude:claude-opus-5-5' } });
   const config = claude.main.config;
-  assert.deepEqual(config.skills.map(skill => skill.name), ['bug-loop', 'compact', 'curate', 'goal-griller', 'prompt-leverage', 'sequence-execution-plan', 'smart-commits', 'xia']);
+  assert.deepEqual(config.skills.map(skill => skill.name), ['architecture-docs', 'bug-loop', 'compact', 'curate', 'feature-architecture', 'goal-griller', 'prompt-leverage', 'release-readiness', 'safe-refactor', 'security-review', 'sequence-execution-plan', 'skill-authoring', 'smart-commits', 'test-strategy', 'xia']);
   assert.match(config.developerInstructions, /- curate \([^)]+[\\/]skills[\\/]curate[\\/]SKILL\.md\): Rà soát toàn bộ bài học/);
   assert.ok(config.skills.every(skill => skill.path.endsWith(path.join('/skills', skill.name, 'SKILL.md'))));
   assert.match(config.developerInstructions, /Your skills are also Claude Code skills named alp:<name>: run one with the Skill tool/);
@@ -38,6 +38,30 @@ test('an agent using a skill is logged once per skill: by the Skill tool, or by 
   assert.deepEqual(used.map(entry => [entry.agent, entry.skill, entry.via]), [['main', 'xia', 'read'], ['main', 'smart-commits', 'skill']]);
   assert.deepEqual(renderLog('root', used.map(entry => ({ ...entry, ts: '2026-01-01T10:00:00.000Z' }))), ['10:00:00  ✦ main uses skill xia', '10:00:00  ✦ main uses skill smart-commits (Skill tool)']);
   assert.equal(agents.length, 1);
+});
+
+test('a skill\'s references and scripts are logged when opened, once per file, and never preloaded', async t => {
+  const { main, runLog } = await tree(t, { prefix: 'alp-skill-', open: { model: 'codex:gpt-5.6-sol' } });
+  const instructions = main.config.developerInstructions;
+  const bugLoop = path.dirname(instructions.match(/- bug-loop \(([^)]+)\)/)[1]);
+  // Level 0 only: no body or reference text is in the instructions.
+  const body = await readFile(path.join(bugLoop, 'SKILL.md'), 'utf8');
+  const reference = await readFile(path.join(bugLoop, 'references', 'test-proof.md'), 'utf8');
+  assert.ok(!instructions.includes(body.split('\n---\n')[1].trim().split('\n')[0]));
+  assert.ok(!instructions.includes(reference.trim().split('\n')[0]));
+  assert.deepEqual((await runLog()).filter(entry => entry.event === 'skill-resource'), []);
+  const started = item => main.notification('item/started', { threadId: main.threadId, item });
+  started({ type: 'commandExecution', id: 'r1', command: `cat ${bugLoop}/references/test-proof.md`, cwd: '/tmp', status: 'inProgress' });
+  started({ type: 'commandExecution', id: 'r2', command: `sed -n 1,9p ${bugLoop}/references/test-proof.md`, cwd: '/tmp', status: 'inProgress' });
+  // Claude reads through its plugin link: <plugin>/skills/<name>/...
+  started({ type: 'commandExecution', id: 'r3', command: 'node /tmp/alp-skills/x/skills/bug-loop/scripts/check.mjs', cwd: '/tmp', status: 'inProgress' });
+  // Another role's skill directory is not this agent's.
+  started({ type: 'commandExecution', id: 'r4', command: 'cat ~/.alp/skills/unknown-skill/references/a.md', cwd: '/tmp', status: 'inProgress' });
+  await until(async () => (await runLog()).filter(entry => entry.event === 'skill-resource').length === 2, 'two resource entries');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  const opened = (await runLog()).filter(entry => entry.event === 'skill-resource');
+  assert.deepEqual(opened.map(entry => [entry.skill, entry.resource, entry.via]), [['bug-loop', 'references/test-proof.md', 'command'], ['bug-loop', 'scripts/check.mjs', 'command']]);
+  assert.deepEqual(renderLog('root', [{ ...opened[0], ts: '2026-01-01T10:00:00.000Z' }]), ['10:00:00  ✦ main opens bug-loop/references/test-proof.md (command)']);
 });
 
 test('the skill plugin links each skill\'s own directory under the plugin name alp', async t => {
