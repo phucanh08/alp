@@ -300,13 +300,9 @@ alp provider test antigravity
 alp run --model antigravity:gemini-3.8-flash-high --mode full-access "Describe this project"
 ```
 
-A main profile can select `antigravity:gemini-3.8-flash-high` too. By default this adapter supports full access only. To run oracle, reviewer and supervisor on Antigravity, explicitly enable instruction-based read-only behavior:
+A main profile can select `antigravity:gemini-3.8-flash-high` too. Sessions support `read-only`, `workspace-write` and `full-access`. Read-only uses agy's sandbox and permission settings: terminal access allows only `pwd`; native file reading, listing and search remain available. Workspace-write uses `--sandbox --mode accept-edits`; full-access runs without approval. Custom permission rules remain unsupported. Native file reads are not guaranteed to stay inside the workspace.
 
-```sh
-alp provider edit antigravity --read-only-mode instructions
-```
-
-This stores `"readOnlyMode": "instructions"` in your library's provider configuration. ALP keeps advisory sessions read-only for its own tools and tells the agent to avoid changing files or external state, while the native agy process still runs with full access. This is a prompt constraint, not an OS sandbox or filesystem protection. It applies to new sessions; ALP does not downgrade an existing full-access AGY process to read-only. Use `--read-only-mode reject` to restore the default rejection. Workspace-write, review copies and custom permission rules remain unsupported.
+The legacy provider setting `readOnlyMode` and CLI flag `--read-only-mode` have been removed. Delete `readOnlyMode` from old provider JSON; ALP tolerates it on load with a migration warning and omits it from the loaded definition. Select permissions with the session's `--mode read-only|workspace-write|full-access` or the agent permission profile. This does not change an existing native session's mode.
 
 MCP tools supplied by the project or editor are connected separately for each AGY session over stdio or streamable HTTP, then exposed through ALP's MCP bridge. The tool aliases and descriptions identify their original server. Commands, environment variables and HTTP authorization headers stay out of agy's global configuration. MCP resources and prompts are not forwarded through this tool bridge; configure a server directly in agy if you need those capabilities.
 

@@ -23,7 +23,7 @@ type Inbound<T extends SessionInboundMessage['type']> = Extract<SessionInboundMe
 type Model = { id: string; label?: string; description?: string };
 type Found = { status: 'loading' | 'ready' | 'error' | 'unavailable'; models?: Model[]; currentModel?: string; modes?: Model[]; currentMode?: string; error?: string; at?: string };
 type Entry = Record<string, unknown>;
-type ProviderFile = { kind: 'acp' | 'antigravity'; label?: string; description?: string; command: string; args?: string[]; env?: Record<string, string>; models?: Model[]; additionalModels?: Model[]; enabled?: boolean; params?: Record<string, unknown>; readOnlyMode?: 'instructions' | 'reject' };
+type ProviderFile = { kind: 'acp' | 'antigravity'; label?: string; description?: string; command: string; args?: string[]; env?: Record<string, string>; models?: Model[]; additionalModels?: Model[]; enabled?: boolean; params?: Record<string, unknown> };
 
 /** Paseo's ids: the catalog's and the ones its app makes. */
 const PASEO_ID = /^[a-z][a-z0-9-]*$/;

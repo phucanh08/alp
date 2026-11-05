@@ -585,7 +585,7 @@ như paseo-web (patch 0015). `project.read` chỉ đọc; project instruction ed
   | `mcp` | `server.command` nếu không có khoảng trắng | `server.args[*]`, giá trị `server.env.*`, `server.headers.*` (giữ tên key), `server.url`, `server.cwd`; `command` có khoảng trắng |
   | `hooks` | `hook`: `description`, `event`, `blocking`, `timeoutSec`, `match.agent`, `match.label` | `hook.command` (dòng shell) |
   | `teams` | `team`: `label`, `description`, `main`, `members.*.{role,model,thinking}`, `delegation`, `maxPeers`, `supervisor` (`false` hoặc `{agent,model,thinking}`), `oracleModels`, `oracleThinking`, `modelSetup.{mode,preset}`; `houseRules` | — |
-  | `providers` | `provider`: `kind`, `label`, `description`, `enabled`, `readOnlyMode`, `models[*]`/`additionalModels[*]` `{id,label,description}`; `command` nếu không có khoảng trắng | `provider.args[*]`, giá trị `provider.env.*`, `provider.params`; `command` có khoảng trắng |
+  | `providers` | `provider`: `kind`, `label`, `description`, `enabled`, `models[*]`/`additionalModels[*]` `{id,label,description}`; `command` nếu không có khoảng trắng | `provider.args[*]`, giá trị `provider.env.*`, `provider.params`; `command` có khoảng trắng |
 
   Kind gateway không biết trả `content: {}`. `$schema` luôn bị bỏ. URL MCP ẩn cả, vì token có thể
   nằm ở userinfo, query hoặc path (ví dụ URL MCP kiểu `/s/<secret>/mcp`).

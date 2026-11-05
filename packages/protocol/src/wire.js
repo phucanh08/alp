@@ -98,12 +98,12 @@ export const TERMINAL = Object.freeze({
 });
 /** The TERMINAL limits a daemon.hello `terminalLimits` carries (the size bounds are fixed). */
 export const TERMINAL_LIMIT_KEYS = Object.freeze(['maxPerPrincipal', 'maxPerDaemon', 'maxInputBytes', 'maxOutputFrameBytes', 'replayBytes', 'idleMs', 'maxLifetimeMs', 'reconnectMs']);
-/** An opaque terminal id (§12.10). @param {unknown} id */
 /**
  * An agent's name: lower-case letters, digits and single hyphens, starting with a letter, 1 to 64
  * characters. One pattern for `principal.agent` in daemon.hello and a gateway credential's agent.
  */
 export const AGENT_NAME = /^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){0,63}$/;
+/** An opaque terminal id (§12.10). @param {unknown} id */
 export const isTerminalId = id => typeof id === 'string' && /^term_[0-9a-f]{32}$/.test(id);
 /** Room an attachment.chunk request needs besides its base64 data. */
 export const ATTACHMENT_CHUNK_OVERHEAD = 64 * 1024;

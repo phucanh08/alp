@@ -5,6 +5,8 @@ import { AlpError } from './errors.js';
 import { settingsKeys, unknownMessage } from './validation.js';
 import { scriptCommand } from './packaged.js';
 
+const legacyWarnings = new Set();
+
 /**
  * ACP providers (ALPD §46): agents that speak the Agent Client Protocol, such as Gemini
  * CLI or opencode, defined in the user's library as providers/<id>.json. An agent runs
@@ -20,7 +22,7 @@ import { scriptCommand } from './packaged.js';
  * Paseo's catalog carries and ALP keeps without using.
  */
 
-export const PROVIDER_SETTINGS = ['$schema', 'kind', 'label', 'description', 'command', 'args', 'env', 'models', 'additionalModels', 'enabled', 'params', 'readOnlyMode'];
+export const PROVIDER_SETTINGS = ['$schema', 'kind', 'label', 'description', 'command', 'args', 'env', 'models', 'additionalModels', 'enabled', 'params'];
 /** Runtimes ALP has built in; no provider takes their names. */
 export const BUILTIN_RUNTIMES = ['codex', 'claude', 'acp', 'antigravity'];
 /** Names no provider takes: the runtimes, and `alp`, which the web app lists ALP's teams under. */
@@ -35,11 +37,12 @@ export function validateProvider(config, source, id) {
   const check = (ok, message) => { if (!ok) throw new AlpError('INVALID_PROVIDER', `${source}: ${message}`); };
   if (id !== undefined) check(validId(id) && (!RESERVED_PROVIDERS.includes(id) || (id === 'antigravity' && config?.kind === 'antigravity')), `'${id}' cannot name a provider: ${RESERVED_PROVIDERS.join(', ')} are taken`);
   check(object(config), 'expected an object');
+  check(!Object.hasOwn(config, 'readOnlyMode'), 'readOnlyMode was removed; delete it and choose the session mode (read-only, workspace-write or full-access). Existing native sessions keep their mode');
   const { unknown } = settingsKeys(config, PROVIDER_SETTINGS);
   check(!unknown.length, unknown.length ? unknownMessage(unknown[0], PROVIDER_SETTINGS) : '');
   check(['acp', 'antigravity'].includes(config.kind), 'kind must be "acp" or "antigravity"');
   if (config.kind === 'antigravity' && id !== undefined) check(id === 'antigravity', 'Antigravity must use provider ID antigravity');
-  if (config.readOnlyMode !== undefined) check(config.kind === 'antigravity' && ['instructions', 'reject'].includes(config.readOnlyMode), 'readOnlyMode is only for Antigravity and must be "instructions" or "reject"');
+
   for (const key of ['label', 'description']) if (config[key] !== undefined) check(typeof config[key] === 'string', `${key} must be a string`);
   check(nonempty(config.command), 'command must be a nonempty string');
   if (config.args !== undefined) check(Array.isArray(config.args) && config.args.every(arg => typeof arg === 'string'), 'args must be a list of strings');
@@ -58,7 +61,7 @@ export function validateProvider(config, source, id) {
 
 /**
  * A provider of the library, with its id; undefined when there is none.
- * @returns {Promise<{ id: string, kind: 'acp' | 'antigravity', label: string, description?: string, command: string, args: string[], env: Record<string, string>, models?: Array<{ id: string, label?: string, description?: string }>, additionalModels?: Array<{ id: string, label?: string, description?: string }>, enabled?: boolean, params?: Record<string, unknown>, readOnlyMode?: 'instructions' | 'reject' } | undefined>}
+ * @returns {Promise<{ id: string, kind: 'acp' | 'antigravity', label: string, description?: string, command: string, args: string[], env: Record<string, string>, models?: Array<{ id: string, label?: string, description?: string }>, additionalModels?: Array<{ id: string, label?: string, description?: string }>, enabled?: boolean, params?: Record<string, unknown> } | undefined>}
  */
 export async function loadProvider(library, id) {
   if (!library || !validId(id) || (RESERVED_PROVIDERS.includes(id) && id !== 'antigravity')) return undefined;
@@ -67,6 +70,16 @@ export async function loadProvider(library, id) {
   try { text = await readFile(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
   let config;
   try { config = JSON.parse(text); } catch (cause) { throw new AlpError('INVALID_PROVIDER', `${file}: ${cause.message}`, { cause }); }
+  // Compatibility for old provider files: this setting never controlled native permissions.
+  // Normalize only the loaded copy; no existing native session or file is changed.
+  if (config?.kind === 'antigravity' && Object.hasOwn(config, 'readOnlyMode')) {
+    config = { ...config };
+    delete config.readOnlyMode;
+    if (!legacyWarnings.has(file)) {
+      legacyWarnings.add(file);
+      console.warn(`${file}: readOnlyMode was removed; delete it and select a session mode (read-only, workspace-write or full-access). Existing sessions keep their mode.`);
+    }
+  }
   validateProvider(config, file, id);
   // A relative command path is the provider file's; a bare name is looked up on PATH.
   const command = /[\\/]/.test(config.command) ? path.resolve(path.dirname(file), config.command) : config.command;

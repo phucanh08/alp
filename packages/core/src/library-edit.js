@@ -198,12 +198,12 @@ export async function getEntry(kind, name, { root, library, templates, scope } =
 async function readGiven(library) {
   const file = path.join(library, 'role-skills.json');
   const text = await optionalText(file);
-  if (text === undefined) return { file, roles: {} };
+  if (text === undefined) return { file, roles: Object.create(null) };
   let roles;
   try { roles = JSON.parse(text); }
   catch (cause) { throw new AlpError('INVALID_LIBRARY', `${file}: ${cause.message}`, { cause }); }
   if (!object(roles)) fail('INVALID_LIBRARY', `${file}: expected an object of agent names to skill lists`);
-  return { file, roles };
+  return { file, roles: Object.assign(Object.create(null), roles) };
 }
 
 /** The skills the library gives `agent`, as role-skills.json lists them. */
@@ -261,7 +261,7 @@ export async function listRetiredSkills({ library } = {}) {
     // A corrupt retired.json must not hide the other retired skills: list the copy
     // without roles, and restore then asks for --roles or --no-roles.
     let meta, invalid;
-    try { meta = await retiredMetadata(directory); } catch (error) { if (error?.code !== 'INVALID_LIBRARY') throw error; invalid = error.message; }
+    try { meta = await retiredMetadata(directory); } catch (error) { invalid = error.message; }
     const stamp = match[2].replace(/T(\d\d)-(\d\d)-(\d\d)-(\d{3})Z$/, 'T$1:$2:$3.$4Z');
     rows.push({ name: match[1], directory, retiredAt: typeof meta?.retiredAt === 'string' ? meta.retiredAt : stamp, roles: meta ? meta.roles : null, agent: typeof meta?.agent === 'string' ? meta.agent : null, ...(invalid ? { invalid } : {}) });
   }

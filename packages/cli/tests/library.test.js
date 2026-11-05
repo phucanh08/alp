@@ -193,3 +193,19 @@ test('alp skill new is strict for new skills; cp, mv and --from keep the frontma
   assert.equal(edited.status, 0, edited.stderr);
   assert.match(edited.stdout, /note: SKILL\.md has no YAML frontmatter/);
 });
+
+test('retired text lists warn about unreadable metadata; removed provider flag gives migration instructions', async t => {
+  const home = await fixture(t);
+  const bad = path.join(home, 'retired-skills/bad-2026-11-01T00-00-00-000Z');
+  await mkdir(path.join(bad, 'retired.json'), { recursive: true });
+  await writeFile(path.join(bad, 'SKILL.md'), 'bad');
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const run = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', cwd: home, env: { ...process.env, ALP_HOME: home } });
+  const listed = run('skills', '--retired');
+  assert.equal(listed.status, 0, listed.stderr);
+  assert.match(listed.stdout, /warning: invalid retired metadata:/);
+  assert.ok(JSON.parse(run('skills', '--retired', '--json').stdout)[0].invalid);
+  const legacy = run('provider', 'edit', 'antigravity', '--read-only-mode', 'reject');
+  assert.equal(legacy.status, 1);
+  assert.match(legacy.stderr, /removed.*session --mode.*Existing native sessions keep their mode/);
+});

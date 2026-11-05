@@ -22,8 +22,6 @@ export type AntigravityProvider = {
   models?: Array<{ id: string; label?: string; description?: string }>;
   additionalModels?: Array<{ id: string; label?: string; description?: string }>;
   enabled?: boolean;
-  /** Explicit opt-in: read-only is a prompt constraint, never a native sandbox. */
-  readOnlyMode?: 'instructions' | 'reject';
 };
 
 type Listener = (method: string, params: any) => void;
@@ -95,7 +93,7 @@ export function antigravityEffortArgs(thinking: unknown): string[] {
 /** What each mode lets an Antigravity agent do, for its instructions. */
 export function antigravityModeText(sandbox: unknown): string {
   const mode = modeOf(sandbox);
-  if (mode === 'read-only') return 'agy enforces read-only: its own file reading and search tools work, and ALP\'s tools; it allows only the terminal commands pwd and ls, with no redirection or chaining (read files with its own tools), and denies every file edit and other command. A denied tool ends your turn, so do not attempt one: report work that needs changes to your requester.';
+  if (mode === 'read-only') return 'agy enforces read-only: its own file reading and search tools work, and ALP\'s tools; it allows only the terminal command pwd, with no redirection or chaining (read files with its own tools), and denies every file edit and other command. A denied tool ends your turn, so do not attempt one: report work that needs changes to your requester.';
   if (mode === 'workspace-write') return 'agy accepts file edits and runs terminal commands in its sandbox, which writes only inside your workspace; anything outside the workspace or the sandbox is denied, and a denied tool ends your turn. Report work that needs more to your requester.';
   return 'Antigravity runs with full access: every tool runs without asking.';
 }
