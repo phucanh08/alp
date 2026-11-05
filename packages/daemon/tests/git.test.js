@@ -884,7 +884,7 @@ test('a multi-chunk listing with slow ancestor checks keeps one consumer, every 
   const root = path.join(base, 'repo');
   await repository(root);
   const directory = lstatSync(root);
-  // Over 64 KB of porcelain so the listing spans several stdout chunks and Git
+  // Over 128 KB of porcelain so the listing spans several stdout chunks and Git
   // exits while an earlier chunk's ancestor check is still pending.
   const rows = 900;
   const names = Array.from({ length: rows }, (_, i) => `d${String(i).padStart(4, '0')}${'x'.repeat(150)}/file.txt`);
