@@ -11,7 +11,7 @@ import type { AcpProvider } from './acp-transport.js';
 import type { AntigravityProvider } from './antigravity-transport.js';
 import { ensureLibrary } from '@anhlp/alp-core/library';
 import { compileAgent } from '@anhlp/alp-core/adapter';
-import { capMode, profileFor } from '@anhlp/alp-core/permissions';
+import { capMode, profileFor, READ_ONLY_ROLES } from '@anhlp/alp-core/permissions';
 import { compactSettings } from './compact.js';
 import { userLanguage } from '@anhlp/alp-core/user-settings';
 import { claudeSandboxAvailable } from './claude-transport.js';
@@ -165,7 +165,8 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
   }
   // Main has full access unless the caller limits it; a permission profile caps the mode at its base.
   // agy enforces each mode itself (antigravityModeArgs): it denies what the mode does not allow.
-  const permissions = await profileFor(agent.projectRoot, options.library, agent.name);
+  // A member serving as the team's advisor or reviewer is read-only, whatever its name, mode or profile.
+  const permissions = await profileFor(agent.projectRoot, options.library, agent.name, { readOnly: READ_ONLY_ROLES.includes(team?.members[agent.name]?.role ?? '') });
   const requested = spec.mode ?? agent.mode ?? (agent.name === main ? 'full-access' : 'read-only');
   const mode = permissions ? capMode(requested, permissions.base) : requested;
   if (runtimeKind === 'antigravity') {

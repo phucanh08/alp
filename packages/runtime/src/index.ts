@@ -5,6 +5,7 @@ export { ConversationError } from './contracts.js';
 export type { RuntimeCommand, BranchRequest, ConversationErrorReason, NativeBase, NativeBinding, ConfigureChanges, ConfigureResult, ConfigurePreview, EffectiveConfig } from './contracts.js';
 export type { AlpEvent, AlpError, Envelope, SessionSnapshot, TimelineItem, TurnOrigin, AssignmentSnapshot, UserQuestion, TreeStatus, SessionState } from './events.js';
 export { resolveSession, InstructionsAdapter, skillDescription } from './resolve.js';
+export { resourceUses, pathActions } from './skill-resources.js';
 export type { SessionSpec, HostMcpServer, ResolvedSession, RuntimeKind } from './resolve.js';
 export { DEFAULT_MODEL, DEFAULT_CLAUDE_MODEL, entries as catalogEntries, models, modes, thinkingOptions, thinkingOptionsFor } from './catalog.js';
 export type { CatalogEntry } from './catalog.js';

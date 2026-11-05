@@ -1,5 +1,6 @@
 import { CLOSE_REASONS, GATE_KINDS, TASK_STATUSES, TASK_TYPES, TASKS_DIR, type Task } from '@anhlp/alp-core/tasks';
 import { READ_ONLY_AGENTS, type ResolvedSession } from './resolve.js';
+import { READ_ONLY_ROLES } from '@anhlp/alp-core/permissions';
 
 import { PIN_KINDS, PIN_PATH_CHARS, PIN_PATHS } from './board.js';
 import { POUR_VARS } from './input-limits.js';
@@ -367,11 +368,15 @@ export const mainOf = (mapping: Pick<ResolvedSession, 'team'>) => mapping.team?.
 export const roleOf = (mapping: Pick<ResolvedSession, 'team'>, agent: string) =>
   mapping.team ? mapping.team.members[agent]?.role : ({ lead: 'lead', peer: 'peer', oracle: 'advisor', reviewer: 'reviewer' } as Record<string, string>)[agent];
 
+/** Whether an agent is read-only in this session's team: a built-in advisor, or a member serving as advisor or reviewer. */
+export const readOnlyMember = (mapping: Pick<ResolvedSession, 'team'>, agent: string) =>
+  READ_ONLY_AGENTS.includes(agent) || READ_ONLY_ROLES.includes(roleOf(mapping, agent) ?? '');
+
 /** What each role may do with the task graph: main changes it, the others read it. */
 export function taskActions(mapping: Pick<ResolvedSession, 'agent' | 'team'>, parentAgent?: string, role?: 'supervisor'): TaskAction[] {
   if (role === 'supervisor') return ['show', 'list'];
   if (!parentAgent && mapping.agent.name === mainOf(mapping)) return [...TASK_ACTIONS];
-  return READ_ONLY_AGENTS.includes(mapping.agent.name) ? ['show'] : ['show', 'ready'];
+  return readOnlyMember(mapping, mapping.agent.name) ? ['show'] : ['show', 'ready'];
 }
 
 export const taskLinks = (description: string) => ({

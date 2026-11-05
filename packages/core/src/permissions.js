@@ -27,6 +27,11 @@ export const BASES = ['read-only', 'workspace-write', 'full-access'];
 const RANK = { 'read-only': 0, 'workspace-write': 1, 'full-access': 2 };
 /** Agents that advise, review or watch: their profiles stay read-only. */
 export const ADVISORS = ['oracle', 'reviewer', 'supervisor'];
+/**
+ * Team roles that advise or review. A member serving in one is read-only whatever its name, its
+ * agent.json mode or a profile settings give it: callers pass `readOnly` for such a member.
+ */
+export const READ_ONLY_ROLES = ['advisor', 'reviewer'];
 export const MAX_RULES = 200;
 const NAME = /^[\w.-]{1,64}$/;
 const RULE = /^([A-Za-z][\w-]*)(?:\((.*)\))?$/s;
@@ -101,14 +106,18 @@ async function settingsPermissions(file) {
  * keeps the runtime's defaults. Advisors without a profile get a read-only one.
  * `workdir: 'copy'` runs the agent in a disposable copy of its requester's tree,
  * where it may write, build and test; the requester's tree stays untouched.
+ * `readOnly` (a member serving as a team advisor or reviewer, READ_ONLY_ROLES): the profile is
+ * capped at read-only, and a profile settings give it with a higher base is capped, not obeyed;
+ * its rules still apply, as they do for the built-in advisors.
+ * @param {{ readOnly?: boolean }} [options]
  * @returns {Promise<{ name: string, base: string, allow: string[], ask: string[], deny: string[], beyondMode: 'refuse' | 'ask', workdir?: 'copy' } | null>}
  */
-export async function profileFor(projectRoot, home, agent) {
+export async function profileFor(projectRoot, home, agent, { readOnly = false } = {}) {
   const project = await settingsPermissions(path.join(projectRoot, '.alp', 'settings.json'));
   const user = home ? await settingsPermissions(path.join(home, 'settings.json')) : { profiles: {}, agents: {} };
   const name = own(project.agents, agent) ?? own(user.agents, agent);
   const advisor = ADVISORS.includes(agent);
-  if (!name) return advisor ? { name: 'read-only', base: 'read-only', allow: [], ask: [], deny: [], beyondMode: 'refuse' } : null;
+  if (!name) return advisor || readOnly ? { name: 'read-only', base: 'read-only', allow: [], ask: [], deny: [], beyondMode: 'refuse' } : null;
   const defined = [own(project.profiles, name), own(user.profiles, name)].filter(Boolean);
   if (!defined.length && !BASES.includes(name)) {
     throw new AlpError('INVALID_SETTINGS', `permissions.agents.${agent} names profile '${name}', which no settings file defines`);
@@ -119,7 +128,8 @@ export async function profileFor(projectRoot, home, agent) {
   if (copy && base !== 'read-only') throw new AlpError('INVALID_SETTINGS', `Profile '${name}' has workdir copy, which needs base read-only`);
   if (advisor && base !== 'read-only') throw new AlpError('INVALID_SETTINGS', `${agent} is an advisor; its profile '${name}' must have base read-only`);
   return {
-    name, base,
+    name, base: readOnly ? 'read-only' : base,
+    ...(readOnly && base !== 'read-only' ? { cappedFrom: base } : {}),
     allow: [...new Set(defined.flatMap(profile => profile.allow ?? []))],
     ask: [...new Set(defined.flatMap(profile => profile.ask ?? []))],
     deny: [...new Set(defined.flatMap(profile => profile.deny ?? []))],

@@ -95,7 +95,7 @@ export function renderLog(rootId, entries) {
           : `✦ ${entry.agent} uses skill ${entry.skill}${entry.via === 'skill' ? ' (Skill tool)' : ''}`;
         break;
       case 'skill-resource':
-        text = `✦ ${entry.agent} opens ${entry.skill}/${entry.resource}${entry.via === 'command' ? ' (command)' : ''}`;
+        text = `✦ ${entry.agent} ${entry.action === 'run' ? 'runs' : 'reads'} ${entry.skill}/${entry.resource}`;
         break;
       case 'compacted':
         text = entry.failed
