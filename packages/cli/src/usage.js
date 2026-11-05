@@ -41,12 +41,15 @@ const USAGE = `Usage:
   alp skills --retired [--json]             skills alp_skill_retire moved to ~/.alp/retired-skills
   alp providers [--json]                    ACP and Antigravity providers in your library
   alp teams [--project DIR] [--json]         teams sessions run in: members, delegation, house rules
+  alp packs [--project DIR] [--json]         optional skill packs ALP ships (backend, frontend, architecture, ...)
+  alp pack install <id> [--project [DIR]] [--assign] [--json]   copy a pack's skills, agents and teams; existing entries are kept
   alp agent <new|edit> <name> [--project [DIR]] [--from A] [-d text] [--provider P] [--model M] [--thinking T] [--mode M]
             [--skills a,b] [--mcp a,b] [--hooks a,b] [--instructions FILE]
   alp team <new|edit> <id> [--project [DIR]] [--from ID] [--label L] [-d text] [--main A] [--member name=role]...
             [--member-model name=M]... [--member-thinking name=T]... [--delegate owner=a,b]... [--max-peers N]
             [--supervisor A] [--supervisor-model M] [--supervisor-thinking T] [--no-supervisor] [--rules FILE]
-  alp skill new <name> [--project [DIR]] [--from S] [--file FILE]
+  alp skill <new|edit> <name> [--project [DIR]] [--from S] [--file FILE]
+  alp skill check [name|DIR] [--project [DIR]] [--strict] [--json]   validate skills (format, references, links); exit 1 on errors
   alp skill restore <name> [--from DIR] [--roles a,b | --no-roles]   bring back a retired skill; --roles needed if it was retired without retired.json
   alp mcp add <name> [--project [DIR]] (--command C [--arg A]... [--env K=V]... [--cwd D] | --url U [--header K=V]...)
   alp hook add <name> [--project [DIR]] --event E --command C [--blocking] [--timeout SEC] [--match-agent A] [--match-label L]

@@ -294,6 +294,22 @@
       },
       "types": "./dist/packaged.d.ts",
       "default": "./src/packaged.js"
+    },
+    "./skill-validate": {
+      "alp-source": {
+        "types": "./src/skill-validate.js",
+        "default": "./src/skill-validate.js"
+      },
+      "types": "./dist/skill-validate.d.ts",
+      "default": "./src/skill-validate.js"
+    },
+    "./packs": {
+      "alp-source": {
+        "types": "./src/packs.js",
+        "default": "./src/packs.js"
+      },
+      "types": "./dist/packs.d.ts",
+      "default": "./src/packs.js"
     }
   },
   "engines": {
