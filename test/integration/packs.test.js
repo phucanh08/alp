@@ -115,3 +115,53 @@ test('in the Blueprint team, main delegating to the architect gets a read-only a
   // Main itself never delegates to docs-maintainer in Blueprint: that is lead's member.
   assert.match((await main.call('alp_delegate', { agent: 'docs-maintainer', task: 'Docs', wait: false })).error ?? '', /unauthorized target/);
 });
+
+test('pack install refuses links in its scope and never writes through one (P0)', async t => {
+  const { symlink, mkdir, readdir: list } = await import('node:fs/promises');
+  // .alp/skills of a project is a link to somewhere else.
+  const linked = await dirs(t);
+  const outside = path.join(linked.directory, 'outside');
+  await mkdir(outside, { recursive: true });
+  await symlink(outside, path.join(linked.root, '.alp', 'skills'));
+  await assert.rejects(installPack('backend', { scope: 'project', root: linked.root, library: linked.library }), { code: 'UNSAFE_PATH' });
+  assert.deepEqual(await list(outside), []);
+  // .alp itself is a link.
+  const whole = await dirs(t);
+  const elsewhere = path.join(whole.directory, 'elsewhere');
+  await mkdir(elsewhere, { recursive: true });
+  await rm(path.join(whole.root, '.alp'), { recursive: true });
+  await symlink(elsewhere, path.join(whole.root, '.alp'));
+  await assert.rejects(installPack('frontend', { scope: 'project', root: whole.root, library: whole.library }), { code: 'UNSAFE_PATH' });
+  assert.deepEqual(await list(elsewhere), []);
+  // settings.json is a link to a file of the user's: refused before any entry is written.
+  const settings = await dirs(t);
+  const victim = path.join(settings.directory, 'victim.json');
+  await writeFile(victim, '{"keep":true}\n');
+  await rm(path.join(settings.root, '.alp', 'settings.json'), { force: true });
+  await symlink(victim, path.join(settings.root, '.alp', 'settings.json'));
+  await assert.rejects(installPack('architecture', { scope: 'project', root: settings.root, library: settings.library }), { code: 'UNSAFE_PATH' });
+  assert.equal(await readFile(victim, 'utf8'), '{"keep":true}\n');
+  await assert.rejects(list(path.join(settings.root, '.alp', 'agents')), { code: 'ENOENT' });
+  // A skill that is a link (the user's own, kept elsewhere) is kept, not written through.
+  const own = await dirs(t);
+  await seedLibrary(own.library);
+  const mine = path.join(own.directory, 'my-backend');
+  await mkdir(mine, { recursive: true });
+  await symlink(mine, path.join(own.library, 'skills', 'backend-development'));
+  const result = await installPack('backend', { scope: 'library', library: own.library });
+  assert.deepEqual(result.kept.map(entry => entry.name), ['backend-development']);
+  assert.deepEqual(await list(mine), []);
+  // No staging directory is left behind.
+  assert.ok(!(await list(own.library)).some(name => name.startsWith('.alp-pack-')));
+});
+
+test('a pack whose file paths are not plain relative names is refused', async t => {
+  const { library } = await dirs(t);
+  const templates = {
+    'packs/evil/pack.json': JSON.stringify({ label: 'Evil', description: 'Escapes', skills: ['a'] }),
+    'packs/evil/skills/a/SKILL.md': '---\nname: a\ndescription: "A. Use when testing."\n---\n\nBody.\n',
+    'packs/evil/skills/a/../../../../escape.txt': 'pwned',
+  };
+  await assert.rejects(installPack('evil', { scope: 'library', library, templates }), { code: 'INVALID_PACK' });
+  await assert.rejects(readFile(path.join(library, '..', 'escape.txt')), { code: 'ENOENT' });
+});

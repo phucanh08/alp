@@ -1,8 +1,9 @@
-import { chmod, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { moveFile } from './atomic.js';
 import { AlpError } from './errors.js';
+import { assertNoSymlinks } from './safe-path.js';
 import { seedLibrary } from './library.js';
 import { BASES, validatePermissions } from './permissions.js';
 import { validateSkill } from './skill-validate.js';
@@ -121,24 +122,45 @@ export async function installPack(id, { scope, root, library, assign = false, te
   if (assign && scope !== 'library') fail('INVALID_SCOPE', 'Only the library assigns skills to roles (role-skills.json); in a project, name the skills in a project agent: alp agent edit <role> --project --skills a,b');
   // The core skills a pack's agents name live in the library.
   if (library) await seedLibrary(library, templates ? { templates } : {});
-  const base = scope === 'library' ? library : path.join(path.resolve(root), '.alp');
+  // Everything is written below the scope's real directory, through no symbolic link: a project's .alp
+  // comes with its repository, and a link there (to the user's home, say) must not redirect a write.
+  const scopeRoot = await realpath(scope === 'library' ? library : path.resolve(root));
+  const inScope = scope === 'library' ? '' : '.alp';
+  const base = path.join(scopeRoot, inScope);
+  const guard = relative => assertNoSymlinks(scopeRoot, path.join(inScope, relative));
+  await guard('.');
+  // Preflight every file this install may write, so a refused link stops it before anything is written.
+  for (const kind of KINDS) if (pack[kind].length) await guard(kind);
+  if (Object.keys(pack.permissions).length) await guard('settings.json');
+  if (assign) await guard('role-skills.json');
+  await mkdir(base, { recursive: true, ...(scope === 'library' ? { mode: 0o700 } : {}) });
   const files = await shippedPackFiles({ templates });
+  for (const file of Object.keys(files)) {
+    const parts = file.split('/');
+    if (parts.some(part => !part || part === '.' || part === '..' || !/^[\w.@+-]+$/.test(part))) fail('INVALID_PACK', `${file}: a pack file path must be plain relative names`);
+  }
   const installed = [];
   const kept = [];
   for (const kind of KINDS) {
     for (const name of pack[kind]) {
       const target = path.join(base, kind, name);
+      await guard(kind);
+      // An entry there already, a link included, is the user's: never written through.
       if (await present(target)) { kept.push({ kind, name, path: target }); continue; }
       const prefix = `packs/${id}/${kind}/${name}/`;
       // Staged outside the kind's directory, under the entry's own name, so no listing sees it half-written.
-      const stagingRoot = path.join(base, `.alp-pack-${randomUUID().slice(0, 8)}.tmp`);
+      const stagingName = `.alp-pack-${randomUUID().slice(0, 8)}.tmp`;
+      const stagingRoot = path.join(base, stagingName);
       const staging = path.join(stagingRoot, name);
+      await guard(stagingName);
       try {
+        await mkdir(stagingRoot, { recursive: false, ...(scope === 'library' ? { mode: 0o700 } : {}) });
         for (const [file, content] of Object.entries(files).filter(([file]) => file.startsWith(prefix))) {
           const relative = file.slice(prefix.length);
           const destination = path.join(staging, ...relative.split('/'));
           await mkdir(path.dirname(destination), { recursive: true, ...(scope === 'library' ? { mode: 0o700 } : {}) });
-          await writeFile(destination, content);
+          // A new file in a directory made just now: never one that exists, or a link.
+          await writeFile(destination, content, { flag: 'wx' });
           // Bundles carry templates as text; a script's executable bit follows its #! line.
           if (process.platform !== 'win32' && relative.startsWith('scripts/') && content.startsWith('#!')) await chmod(destination, 0o755);
         }
@@ -151,9 +173,12 @@ export async function installPack(id, { scope, root, library, assign = false, te
           validateAgentConfig(config, `${prefix}agent.json`);
         }
         if (kind === 'teams') validateTeam(JSON.parse(await readFile(path.join(staging, 'team.json'), 'utf8')), `${prefix}team.json`);
-        // Made meanwhile by someone else: theirs is kept.
+        // Checked again just before the move: made meanwhile by someone else, theirs is kept.
+        await guard(kind);
+        await guard(path.join(stagingName, name));
         if (await present(target)) { kept.push({ kind, name, path: target }); continue; }
         await mkdir(path.dirname(target), { recursive: true });
+        await guard(kind);
         await rename(staging, target);
         installed.push({ kind, name, path: target });
       } finally {
@@ -164,7 +189,8 @@ export async function installPack(id, { scope, root, library, assign = false, te
 
   const permissions = { set: [], kept: [], conflicts: [] };
   if (Object.keys(pack.permissions).length) {
-    const file = scope === 'library' ? path.join(library, 'settings.json') : path.join(base, 'settings.json');
+    const file = path.join(base, 'settings.json');
+    await guard('settings.json');
     const text = await readFile(file, 'utf8').catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
     let settings = {};
     if (text !== undefined) {
@@ -184,13 +210,15 @@ export async function installPack(id, { scope, root, library, assign = false, te
     if (changed) {
       const next = { ...settings, permissions: { ...current, agents } };
       validatePermissions(next.permissions, file);
+      await guard('settings.json');
       await writeJsonAtomic(file, next);
     }
   }
 
   const assigned = [];
   if (assign && Object.keys(pack.assign).length) {
-    const file = path.join(library, 'role-skills.json');
+    const file = path.join(base, 'role-skills.json');
+    await guard('role-skills.json');
     const text = await readFile(file, 'utf8').catch(error => { if (error.code === 'ENOENT') return '{}'; throw error; });
     let roles;
     try { roles = JSON.parse(text); } catch (cause) { throw new AlpError('INVALID_LIBRARY', `${file}: ${cause.message}; the pack was installed but no role was given its skills`, { cause }); }
