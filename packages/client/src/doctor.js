@@ -8,6 +8,7 @@ import { installedProgram, serviceFor } from './service.js';
 import { jsonObject, agentSources, resolveAgent } from '@anhlp/alp-core/resolver';
 import { loadHooks } from '@anhlp/alp-core/hooks';
 import { isTrusted } from '@anhlp/alp-core/trust';
+import { validateSkill } from '@anhlp/alp-core/skill-validate';
 import { listProviders } from '@anhlp/alp-core/providers';
 import { settingsWarnings, validateSettings, validateUserSettings } from '@anhlp/alp-core/validation';
 import { readLogTail, scrubText } from '@anhlp/alp-core/log';
@@ -401,6 +402,27 @@ async function providersCheck(home, env) {
       'ALP has no sandbox around an ACP agent: it holds the session\'s mode only by answering the permission requests the agent sends, so a command the agent runs without asking runs unchecked',
       'ALP cannot steer an ACP agent mid-turn (mail waits for the turn to end), resumes its sessions only when it supports session/load, and cannot recall them or give them review copies'],
   };
+}
+
+/**
+ * The library's skills against the skill format, in legacy mode: a format problem is a warning
+ * (the skill still loads), an unsafe reference or link an error. Nothing is rewritten.
+ */
+async function skillFormatCheck(home) {
+  const directory = path.join(home, 'skills');
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+  const failed = [];
+  const warned = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    const report = await validateSkill(path.join(directory, entry.name));
+    if (!report.ok) failed.push(`${entry.name}: ${report.errors.map(finding => finding.code).join(', ')}`);
+    else if (report.warnings.length) warned.push(`${entry.name}: ${report.warnings.map(finding => finding.code).join(', ')}`);
+  }
+  if (!entries.length) return undefined;
+  if (failed.length) return { id: 'skill-format', status: 'fail', summary: `${failed.length} library skill${failed.length > 1 ? 's point' : ' points'} outside itself or has a broken link; run alp skill check`, details: [...failed, ...warned] };
+  if (warned.length) return { id: 'skill-format', status: 'warn', summary: `${warned.length} library skill${warned.length > 1 ? 's do' : ' does'} not fully meet the skill format; they still load (alp skill check <name> explains)`, details: warned };
+  return { id: 'skill-format', status: 'ok', summary: `the library's skills meet the skill format (${directory})` };
 }
 
 async function librarySkillsCheck(home) {
@@ -857,6 +879,8 @@ export async function diagnose({ home, project, env = process.env, run = runComm
   checks.push(await userSettingsCheck(home));
   const skills = await librarySkillsCheck(home);
   if (skills) checks.push(skills);
+  const skillFormat = await skillFormatCheck(home);
+  if (skillFormat) checks.push(skillFormat);
   const providers = await providersCheck(home, env);
   if (providers) checks.push(providers);
   const live = await liveCheck(home, running);
