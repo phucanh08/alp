@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
@@ -114,6 +114,19 @@ test('in the Blueprint team, main delegating to the architect gets a read-only a
   assert.match(agents[1].config.developerInstructions, /- feature-architecture \(/);
   // Main itself never delegates to docs-maintainer in Blueprint: that is lead's member.
   assert.match((await main.call('alp_delegate', { agent: 'docs-maintainer', task: 'Docs', wait: false })).error ?? '', /unauthorized target/);
+});
+
+test('a project reached through a linked directory installs there and is reported by the path given (macOS /var)', async t => {
+  const { directory, root, library } = await dirs(t);
+  // Like macOS's /var -> /private/var: the link is above the project, so it is not refused.
+  const alias = path.join(directory, 'alias');
+  await symlink(directory, alias, 'dir');
+  const given = path.join(alias, 'project');
+  const result = await installPack('frontend', { scope: 'project', root: given, library });
+  assert.deepEqual(result.installed.map(entry => entry.path), [path.join(given, '.alp/skills/frontend-development')]);
+  assert.ok((await stat(path.join(await realpath(root), '.alp/skills/frontend-development/SKILL.md'))).isFile());
+  const again = await installPack('frontend', { scope: 'project', root: given, library });
+  assert.deepEqual(again.kept.map(entry => entry.path), [path.join(given, '.alp/skills/frontend-development')]);
 });
 
 test('pack install refuses links in its scope and never writes through one (P0)', async t => {

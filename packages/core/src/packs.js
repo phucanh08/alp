@@ -124,9 +124,12 @@ export async function installPack(id, { scope, root, library, assign = false, te
   if (library) await seedLibrary(library, templates ? { templates } : {});
   // Everything is written below the scope's real directory, through no symbolic link: a project's .alp
   // comes with its repository, and a link there (to the user's home, say) must not redirect a write.
-  const scopeRoot = await realpath(scope === 'library' ? library : path.resolve(root));
+  const given = scope === 'library' ? library : path.resolve(root);
+  const scopeRoot = await realpath(given);
   const inScope = scope === 'library' ? '' : '.alp';
   const base = path.join(scopeRoot, inScope);
+  // Paths are reported below the directory the caller named (macOS's /var, not /private/var).
+  const shown = (kind, name) => path.join(given, inScope, kind, name);
   const guard = relative => assertNoSymlinks(scopeRoot, path.join(inScope, relative));
   await guard('.');
   // Preflight every file this install may write, so a refused link stops it before anything is written.
@@ -146,7 +149,7 @@ export async function installPack(id, { scope, root, library, assign = false, te
       const target = path.join(base, kind, name);
       await guard(kind);
       // An entry there already, a link included, is the user's: never written through.
-      if (await present(target)) { kept.push({ kind, name, path: target }); continue; }
+      if (await present(target)) { kept.push({ kind, name, path: shown(kind, name) }); continue; }
       const prefix = `packs/${id}/${kind}/${name}/`;
       // Staged outside the kind's directory, under the entry's own name, so no listing sees it half-written.
       const stagingName = `.alp-pack-${randomUUID().slice(0, 8)}.tmp`;
@@ -176,11 +179,11 @@ export async function installPack(id, { scope, root, library, assign = false, te
         // Checked again just before the move: made meanwhile by someone else, theirs is kept.
         await guard(kind);
         await guard(path.join(stagingName, name));
-        if (await present(target)) { kept.push({ kind, name, path: target }); continue; }
+        if (await present(target)) { kept.push({ kind, name, path: shown(kind, name) }); continue; }
         await mkdir(path.dirname(target), { recursive: true });
         await guard(kind);
         await rename(staging, target);
-        installed.push({ kind, name, path: target });
+        installed.push({ kind, name, path: shown(kind, name) });
       } finally {
         await rm(stagingRoot, { recursive: true, force: true });
       }
