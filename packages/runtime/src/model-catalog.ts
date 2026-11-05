@@ -92,6 +92,7 @@ export class ModelCatalog {
   private acpConfigs: AcpProviderConfig[] = [];
   private acpRunning?: Promise<CatalogSnapshot>;
   private acpError?: string;
+  private acpLearning = new Map<string, Set<string>>();
 
   /**
    * ACP providers (t-d0b0) come from `acpProviders` (the library's providers/<id>.json) without starting
@@ -99,7 +100,7 @@ export class ModelCatalog {
    * which alpd calls on catalog.refresh and when the user enables a provider. Never at start or on the timer.
    */
   constructor(private readonly options: { home?: string; probes: Partial<Record<CatalogRuntime, Probe>>; timeoutMs?: number; refreshMs?: number; now?: () => Date; apply?: boolean;
-    acpProviders?: () => Promise<AcpProviderConfig[]>; acpProbe?: AcpProbe }) {
+    acpProviders?: () => Promise<AcpProviderConfig[] | { providers: AcpProviderConfig[]; error?: string }>; acpProbe?: AcpProbe }) {
     this.file = options.home ? catalogCacheFile(options.home) : undefined;
   }
 
@@ -169,8 +170,9 @@ export class ModelCatalog {
     if (!this.options.acpProviders) return;
     // A listing that fails (an unreadable providers directory) keeps the rows ALP had and records why.
     try {
-      this.acpConfigs = (await this.options.acpProviders()).filter(provider => provider.kind !== 'antigravity');
-      this.acpError = undefined;
+      const loaded = await this.options.acpProviders();
+      this.acpConfigs = (Array.isArray(loaded) ? loaded : loaded.providers).filter(provider => provider.kind !== 'antigravity');
+      this.acpError = Array.isArray(loaded) ? undefined : loaded.error;
     } catch (error) { this.acpError = error instanceof Error ? error.message : String(error); }
   }
   /** Why the last reading of the ACP providers failed, if it did. */
@@ -204,9 +206,11 @@ export class ModelCatalog {
    */
   async learnAcp(provider: string, models: LiveModel[]) {
     if (!/^[\w.-]+$/.test(provider)) return false;
+    const reported = sanitizeModels(models);
+    for (const model of reported) this.acpLearning.get(provider)?.add(model.id);
     const prior = this.snapshot.acp?.[provider];
     const known = new Set((prior?.models ?? []).map(model => model.id));
-    const added = sanitizeModels(models).filter(model => !known.has(model.id));
+    const added = reported.filter(model => !known.has(model.id));
     if (!added.length) return false;
     this.snapshot.acp = { ...this.snapshot.acp, [provider]: { status: 'ok', fetchedAt: (this.options.now?.() ?? new Date()).toISOString(), models: [...(prior?.models ?? []), ...added] } };
     await this.publish(true);
@@ -226,17 +230,20 @@ export class ModelCatalog {
       if (!probe || !targets.length) return this.snapshot;
       const now = () => (this.options.now?.() ?? new Date()).toISOString();
       await Promise.all(targets.map(async provider => {
+        const learned = new Set<string>();
+        this.acpLearning.set(provider.id, learned);
         let outcome: { ok: true; models: LiveModel[] } | { ok: false; error: string };
         try { outcome = { ok: true, models: sanitizeModels(await bounded(signal => probe(provider, signal), this.options.timeoutMs ?? PROBE_TIMEOUT_MS)) }; }
         catch (error) { outcome = { ok: false, error: error instanceof Error ? error.message : String(error) }; }
-        // Read at write time: what a session's learnAcp added during the probe stays.
+        this.acpLearning.delete(provider.id);
+        // Read at write time: what a session's learnAcp reported during the probe stays.
         const current = this.snapshot.acp?.[provider.id];
         const known = current?.models ?? [];
         let next: AcpState;
         if (outcome.ok) {
           const ids = new Set(outcome.models.map(model => model.id));
-          // An agent that offers no choice of model is answered; what ALP learned before stays (a union, as learnAcp).
-          next = { status: 'ok', fetchedAt: now(), models: [...outcome.models, ...known.filter(model => !ids.has(model.id))] };
+          // A successful probe replaces old choices, retaining only learning concurrent with this probe.
+          next = { status: 'ok', fetchedAt: now(), models: [...outcome.models, ...known.filter(model => learned.has(model.id) && !ids.has(model.id))] };
         } else next = { status: 'failed', ...(current?.fetchedAt ? { fetchedAt: current.fetchedAt } : {}), error: outcome.error, models: known };
         this.snapshot.acp = { ...this.snapshot.acp, [provider.id]: next };
       }));

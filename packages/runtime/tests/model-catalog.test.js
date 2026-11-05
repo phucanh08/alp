@@ -284,3 +284,29 @@ test('ACP: a model learnAcp adds while a probe runs is kept (success unions, fai
   assert.equal(late.state().acp.gemini.status, 'failed');
   assert.ok(late.acpModels('gemini').some(model => model.id === 'mid'));
 });
+
+test('successful ACP refresh drops stale models but preserves learning during that probe', async () => {
+  let catalog;
+  catalog = new ModelCatalog({ probes: {}, apply: false, acpProviders: async () => [{ id: 'fake' }], acpProbe: async () => {
+    await catalog.learnAcp('fake', [{ id: 'concurrent' }]);
+    return [{ id: 'current' }];
+  } });
+  await catalog.learnAcp('fake', [{ id: 'retired' }]);
+  await catalog.refreshAcp();
+  assert.deepEqual(catalog.acpModels('fake').map(model => model.id), ['current', 'concurrent']);
+});
+
+test('ACP probe retains a previously known choice re-reported concurrently, but empty success retires old choices', async () => {
+  let catalog;
+  let learn = true;
+  catalog = new ModelCatalog({ probes: {}, apply: false, acpProviders: async () => [{ id: 'fake' }], acpProbe: async () => {
+    if (learn) await catalog.learnAcp('fake', [{ id: 'known' }]);
+    return [];
+  } });
+  await catalog.learnAcp('fake', [{ id: 'known' }, { id: 'removed' }]);
+  await catalog.refreshAcp();
+  assert.deepEqual(catalog.acpModels('fake').map(model => model.id), ['known']);
+  learn = false;
+  await catalog.refreshAcp();
+  assert.deepEqual(catalog.acpModels('fake'), []);
+});

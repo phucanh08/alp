@@ -250,7 +250,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       return [`acp:${id}`, { status: acp?.status ?? 'unprobed', ...(acp?.fetchedAt ? { fetchedAt: acp.fetchedAt } : {}), ...(acp?.error ? { error: acp.error } : {}) }];
     }));
     return { models: [...models, ...acpModels], modes, thinkingOptions, defaultModel: `codex:${DEFAULT_MODEL}`,
-      ...(state ? { fetchedAt: state.fetchedAt, providers: { ...Object.fromEntries(Object.entries(state.providers).map(([runtime, provider]) => [runtime, { status: provider!.status, fetchedAt: provider!.fetchedAt, ...(provider!.error ? { error: provider!.error } : {}) }])), ...acpProviders } } : {}) };
+      ...(state ? { fetchedAt: state.fetchedAt, providers: { ...Object.fromEntries(Object.entries(state.providers).map(([runtime, provider]) => [runtime, { status: provider!.status, fetchedAt: provider!.fetchedAt, ...(provider!.error ? { error: provider!.error } : {}) }])), ...acpProviders, ...(modelCatalog?.acpLoadError() ? { acp: { status: 'failed', error: modelCatalog.acpLoadError() } } : {}) } } : {}) };
   };
   // Every helloed connection learns that the catalog changed, and re-reads it (catalog.updated).
   const unsubscribeCatalog = modelCatalog?.onUpdated(snapshot => {

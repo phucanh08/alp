@@ -104,3 +104,79 @@ test('ACP rows in catalog.get without a probe; catalog.refresh and enabling a pr
   assert.ok(after.models.some(model => model.id === 'acp:later/later-big'));
   assert.equal(after.models.find(model => model.id === 'acp:opencode').label, 'OpenCode 2 · agent default');
 });
+
+test('production daemon catalog wiring isolates malformed providers, exposes errors and cleans disposable probe cwd', async t => {
+  const { spawn } = await import('node:child_process');
+  const { writeFile, readFile, stat } = await import('node:fs/promises');
+  const { fileURLToPath } = await import('node:url');
+  const directory = await mkdtemp(path.join(tmpdir(), 'alpd-catalog-wiring-'));
+  const home = path.join(directory, 'home');
+  await mkdir(path.join(home, 'providers'), { recursive: true, mode: 0o700 });
+  // chmod home itself: mkdir recursive's mode is subject to the parent creation sequence.
+  const { chmod } = await import('node:fs/promises');
+  await chmod(home, 0o700);
+  const log = path.join(directory, 'acp.jsonl');
+  const agyLog = path.join(directory, 'agy.jsonl');
+  const agy = path.join(directory, 'agy.cjs');
+  await writeFile(agy, `require('fs').appendFileSync(process.env.FAKE_AGY_LOG, JSON.stringify(process.argv.slice(2))+'\\n'); console.log('configured-model\\tConfigured');`);
+  const providerFile = path.join(home, 'providers/antigravity.json');
+  const native = { kind: 'antigravity', command: process.execPath, args: [agy, 'configured-arg'], env: { FAKE_AGY_LOG: agyLog } };
+  await writeFile(providerFile, JSON.stringify(native));
+  await writeFile(path.join(home, 'providers/bad.json'), '{bad');
+  await writeFile(path.join(home, 'providers/good.json'), JSON.stringify({ kind: 'acp', command: process.execPath,
+    args: [fileURLToPath(new URL('../../../test/support/fake-acp.js', import.meta.url))], env: { FAKE_ACP_LOG: log, FAKE_ACP_MODELS: 'current' } }));
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/alpd.js', import.meta.url))], {
+    cwd: directory, env: { ...process.env, ALP_HOME: home, ALP_MODEL_CATALOG: 'live', ALP_CODEX_BIN: path.join(directory, 'missing-codex'), ALP_CLAUDE_BIN: path.join(directory, 'missing-claude') }, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
+  const exited = new Promise(resolve => child.once('exit', resolve));
+  t.after(async () => { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGTERM'); await exited; } await rm(directory, { recursive: true, force: true }); });
+  let client;
+  for (let i = 0; i < 500; i++) {
+    try { client = await connect(daemonPaths(home).socket, { name: 'catalog-wiring', version: '0' }); break; } catch { await new Promise(resolve => setTimeout(resolve, 10)); }
+  }
+  assert.ok(client, output);
+  t.after(() => client.close());
+  let result = await client.request('catalog.refresh', {});
+  assert.deepEqual(validateResult('catalog.refresh', result), []);
+  assert.ok(result.models.some(row => row.id === 'acp:good/current'));
+  assert.match(result.providers.acp.error, /bad.json/);
+  assert.equal(result.providers.acp.status, 'failed');
+  assert.ok(result.models.some(row => row.id === 'antigravity:configured-model'));
+  const launches = (await readFile(agyLog, 'utf8')).trim().split('\n');
+  assert.ok(launches.every(line => JSON.stringify(JSON.parse(line)) === JSON.stringify(['configured-arg', 'models'])));
+  await writeFile(providerFile, JSON.stringify({ ...native, enabled: false }));
+  await client.request('catalog.refresh', {});
+  assert.equal((await readFile(agyLog, 'utf8')).trim().split('\n').length, launches.length, 'disabled native provider is never launched');
+  const requests = (await readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  const cwd = requests.filter(row => row.method === 'session/new').map(row => row.params.cwd);
+  assert.ok(cwd.length >= 2);
+  for (const dir of cwd) {
+    assert.notEqual(dir, home);
+    assert.match(path.basename(dir), /^alp-model-probe-/);
+    await assert.rejects(stat(dir), { code: 'ENOENT' });
+  }
+  await rm(path.join(home, 'providers/bad.json'));
+  result = await client.request('catalog.refresh', {});
+  assert.equal(result.providers.acp, undefined, 'fixed configuration clears the diagnostic');
+});
+
+test('production provider loader deduplicates unchanged errors and reports them again after recovery', async t => {
+  const { createModelCatalog } = await import('../dist/model-catalog.js');
+  const { writeFile } = await import('node:fs/promises');
+  const home = await mkdtemp(path.join(tmpdir(), 'alpd-catalog-errors-'));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  await mkdir(path.join(home, 'providers'));
+  const bad = path.join(home, 'providers/bad.json');
+  await writeFile(bad, '{bad');
+  const warnings = [];
+  const catalog = createModelCatalog(home, message => warnings.push(message));
+  await catalog.loadAcp(); await catalog.loadAcp();
+  assert.equal(warnings.length, 1);
+  assert.match(catalog.acpLoadError(), /bad.json/);
+  await rm(bad); await catalog.loadAcp();
+  assert.equal(catalog.acpLoadError(), undefined);
+  await writeFile(bad, '{bad'); await catalog.loadAcp();
+  assert.equal(warnings.length, 2);
+});

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import templates from 'alp:templates';
 import { alpHome, daemonPaths, assertPrivateDirectory, PROTOCOL_VERSION, withDaemonLifecycle } from '@anhlp/alp-client/index';
-import { attachmentStageDir, createAlpRuntime, liveProbes, ModelCatalog, reclaimCopies, reclaimWorktrees, setActiveCatalog } from '@anhlp/alp-runtime/index';
+import { attachmentStageDir, createAlpRuntime, reclaimCopies, reclaimWorktrees, setActiveCatalog } from '@anhlp/alp-runtime/index';
 import type { LeftWorktree } from '@anhlp/alp-runtime/index';
 import { createDaemonServer } from './server.js';
 import { acquireLock, heartbeat, releaseLock, updateLock } from './lock.js';
@@ -16,8 +16,7 @@ import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { clearRestoredMarker, readRestoredMarker, recoverInterruptedRestore } from '@anhlp/alp-core/backup';
 import { migrateState } from '@anhlp/alp-core/migrations';
 import { createLogger } from '@anhlp/alp-core/log';
-import { listProviders } from '@anhlp/alp-core/providers';
-import { probeAcp } from '@anhlp/alp-client/acp-probe';
+import { createModelCatalog } from './model-catalog.js';
 import { selfCommand, selfEntry } from '@anhlp/alp-core/packaged';
 
 declare const __ALP_VERSION__: string;
@@ -286,9 +285,7 @@ async function run(home: string) {
   // ALP_MODEL_CATALOG=static keeps the static rows only (tests, offline hosts).
   // ACP providers (t-d0b0) are listed from providers/<id>.json without starting any; one is probed only on
   // catalog.refresh or when the user enables it, and learns its models from its first session otherwise.
-  const modelCatalog = process.env.ALP_MODEL_CATALOG === 'static' ? undefined : new ModelCatalog({ home, probes: liveProbes(),
-    acpProviders: () => listProviders(home, { onError: (error: unknown, name: string) => console.error(`alpd: skipping provider ${name}: ${error instanceof Error ? error.message : String(error)}`) }),
-    acpProbe: async provider => (await probeAcp(provider as Parameters<typeof probeAcp>[0], { cwd: home, discover: true, timeoutMs: 15_000 })).models ?? [] });
+  const modelCatalog = process.env.ALP_MODEL_CATALOG === 'static' ? undefined : createModelCatalog(home);
   setActiveCatalog(modelCatalog);
   void modelCatalog?.start().catch(() => {});
   const server = createDaemonServer({ runtime, socketPath: socket, version: VERSION, store, runLogDir, previousExit: exit, home, templates, attachmentOptions: { limits: attachmentConfig.limits }, modelCatalog, onShutdown: () => void shutdown() });
