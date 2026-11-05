@@ -21,7 +21,7 @@ async function libraryCommand(kind, args) {
     if (values.json) { console.log(JSON.stringify(rows)); return; }
     if (!rows.length) { console.log(`No retired skills in ${path.join(alpHome(), 'retired-skills')}`); return; }
     const width = Math.max(...rows.map(row => row.name.length));
-    for (const row of rows) console.log(`${row.name.padEnd(width)}  ${row.retiredAt}  ${row.roles === null ? 'roles not recorded' : `roles: ${row.roles.join(', ') || 'none'}`}${row.agent ? `; by ${row.agent}` : ''}  ${row.directory}`);
+    for (const row of rows) console.log(`${row.name.padEnd(width)}  ${row.retiredAt}  ${row.roles === null ? 'roles not recorded' : `roles: ${row.roles.join(', ') || 'none'}`}${row.agent ? `; by ${row.agent}` : ''}${row.invalid ? `; warning: invalid retired metadata: ${row.invalid}` : ''}  ${row.directory}`);
     return;
   }
   if (kind === 'providers') await seedLibrary(alpHome());
@@ -73,7 +73,6 @@ const EDIT_OPTIONS = {
   'match-agent': { type: 'string' }, 'match-label': { type: 'string' }, strict: { type: 'boolean' },
   // provider
   kind: { type: 'string' },
-  'read-only-mode': { type: 'string' },
   models: { type: 'string' },
 };
 
@@ -162,7 +161,7 @@ async function edited(kind, name, current, values) {
     set(provider, 'label', values.label);
     set(provider, 'description', values.description);
     set(provider, 'command', values.command);
-    set(provider, 'readOnlyMode', values['read-only-mode']);
+    delete provider.readOnlyMode; // Drop the retired no-op setting when saving an existing definition.
     if (values.arg?.length) provider.args = values.arg;
     if (values.env?.length) provider.env = pairs(values.env, '--env');
     const models = names(values.models);
@@ -205,6 +204,7 @@ async function checkSkills(name, positionals, values) {
 /** alp agent|team|skill|mcp|hook: create, change, copy, rename, remove and test library entries. */
 
 async function editCommand(kind, args) {
+  if (kind === 'providers' && args.some(arg => arg === '--read-only-mode' || arg.startsWith('--read-only-mode='))) throw new Error('--read-only-mode was removed; delete readOnlyMode from provider JSON and choose the session --mode read-only, workspace-write or full-access. Existing native sessions keep their mode.');
   const { values, positionals } = parseArgs({ args: projectFlag(args), allowPositionals: true, options: EDIT_OPTIONS });
   const [action, name, target] = positionals;
   if (kind === 'skills' && action === 'restore') {

@@ -427,7 +427,7 @@ const LIBRARY_CONTENT = Object.freeze({
   },
   providers: {
     provider: {
-      kind: isString, label: isString, description: isString, enabled: isBoolean, readOnlyMode: isString,
+      kind: isString, label: isString, description: isString, enabled: isBoolean,
       command: 'program', args: 'secretItems', env: 'secretValues', params: 'secret',
       models: { $list: MODEL_ENTRY }, additionalModels: { $list: MODEL_ENTRY },
     },

@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { antigravityModeArgs, antigravityReadOnlyCommandAllowed } from '@anhlp/alp-runtime/antigravity-transport';
+import { antigravityModeArgs, antigravityModeText, antigravityReadOnlyCommandAllowed } from '@anhlp/alp-runtime/antigravity-transport';
 
 test('agy read-only allows pwd only; ls cannot be scoped to the workspace by a prefix rule', () => {
+  assert.match(antigravityModeText('read-only'), /terminal command pwd/);
+  assert.doesNotMatch(antigravityModeText('read-only'), /pwd and ls/);
   assert.equal(antigravityReadOnlyCommandAllowed('pwd'), true);
   for (const line of ['ls', 'ls /', 'ls ~/.ssh', 'ls ../..', 'ls -la src', 'cat x', 'pwd; ls', 'pwd && ls', 'pwd $(id)', undefined, 3]) {
     assert.equal(antigravityReadOnlyCommandAllowed(line), false, String(line));

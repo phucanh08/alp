@@ -33,7 +33,7 @@ Use `npm install`, not `npm update`, to move to the beta: by semver, `0.0.1-beta
 |---|---|---|---|
 | OS | macOS, Linux (see below) | Windows: CLI and a local alpd; no `alp daemon install` | — |
 | Node.js | 22 (22.12 or later), 24 | 26 (local evidence only) | 20 (end of life) |
-| Provider | Codex CLI, Claude Code | ACP (OpenCode, Gemini CLI), Antigravity (full access; its read-only is only an instruction in the prompt) | — |
+| Provider | Codex CLI, Claude Code | ACP (OpenCode, Gemini CLI), Antigravity (native session modes; read-only terminal: pwd only; native reads may leave workspace) | — |
 | Paseo (for the plugin) | `>=0.11.1 <1.0.0` from the release after `0.0.1-beta.3`; `0.0.1-beta.3`: `<0.13.0` (0.11.x and 0.12.x); `0.0.0-beta.2` and earlier: `<0.12.0` | — | 1.0 and later; 0.13 and later with `0.0.1-beta.3` |
 
 macOS is the primary test platform: this beta is accepted there with real Codex and Claude.

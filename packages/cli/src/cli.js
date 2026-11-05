@@ -57,7 +57,7 @@ try {
     if (!Object.hasOwn(commands, command)) throw new UsageError();
     // Effort checks read the catalog alpd last cached, the rows alpd itself checks with (t-086c), so
     // the CLI and alpd agree on a model only live rows list (t-b3cd #8). No provider is asked.
-    useLiveModels(catalogModels(alpHome()));
+    if (command !== 'setup') useLiveModels(catalogModels(alpHome()));
     await commands[command](args);
   }
 } catch (error) {

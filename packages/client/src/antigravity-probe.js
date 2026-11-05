@@ -64,7 +64,7 @@ function runCommand(command, args, { env = process.env, cwd, timeoutMs = 20_000 
 
 /**
  * Probes Antigravity CLI for version, status and available models.
- * @param {{ command?: string, args?: string[], env?: Record<string, string>, label?: string, id?: string}} [provider] readOnlyMode, if set, is a legacy setting with no effect: agy enforces read-only itself.
+ * @param {{ command?: string, args?: string[], env?: Record<string, string>, label?: string, id?: string}} [provider]
  * @param {{ cwd?: string, timeoutMs?: number }} [options]
  */
 export async function probeAntigravity(provider = {}, { cwd, timeoutMs = 20_000 } = {}) {

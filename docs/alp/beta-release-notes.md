@@ -492,7 +492,7 @@ All at `0.0.0-beta.1`, on the npm tag `beta`; internal dependencies are pinned t
 |---|---|---|---|
 | OS | Linux, macOS | Windows: CLI and a local alpd; no `alp daemon install`; CI runs only a daemon/IPC subset | — |
 | Node.js | 22 (22.12 or later), 24 | 26 (local evidence only) | 20 (end of life 2026-04-30) |
-| Provider | Codex CLI, Claude Code | ACP (OpenCode, Gemini CLI), Antigravity (full access; its read-only is only an instruction in the prompt) | — |
+| Provider | Codex CLI, Claude Code | ACP (OpenCode, Gemini CLI), Antigravity (historical: prompt-only read-only; current native session modes are described in README) | — |
 | Paseo host | `>=0.11.1 <0.12.0` | — | 0.12 and later |
 
 ### What is in the beta

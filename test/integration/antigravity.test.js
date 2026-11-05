@@ -538,11 +538,10 @@ test('a complete Antigravity Cafe team runs its supervisor and delegates to lead
   assert.doesNotMatch(log, /Read-only is emulated by instructions/);
 });
 
-test('instruction read-only never relaxes custom rules and is not allowed for ACP providers', async t => {
-  assert.throws(() => validateProvider({ kind: 'acp', command: 'opencode', readOnlyMode: 'instructions' }, 'test', 'opencode'), /only for Antigravity/);
+test('removed readOnlyMode is rejected on new writes and native modes never relax custom rules', async t => {
+  assert.throws(() => validateProvider({ kind: 'acp', command: 'opencode', readOnlyMode: 'instructions' }, 'test', 'opencode'), /readOnlyMode was removed/);
   assert.throws(() => validateProvider({ kind: 'antigravity', command: 'agy', readOnlyMode: true }, 'test', 'antigravity'), /readOnlyMode/);
   const { root, home } = await setup(t, {
-    provider: { readOnlyMode: 'instructions' },
     settings: { permissions: { profiles: { restricted: { base: 'read-only', deny: ['Bash'] } }, agents: { main: 'restricted' } } },
   });
   await assert.rejects(resolveSession({ cwd: root, model: 'antigravity:gemini-3.8-flash-high' }, { library: home }), /custom permission rules/);

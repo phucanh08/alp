@@ -331,3 +331,62 @@ test('a new skill saved strictly (the CLI) meets the format; editing an existing
   await saveEntry('skills', 'legacy', { body: 'Edited legacy body\n' }, { ...scope, revision: entry.revision, strict: true });
   assert.equal(await readFile(path.join(library, 'skills', 'legacy', 'SKILL.md'), 'utf8'), 'Edited legacy body\n');
 });
+
+test('retired metadata IO errors stay isolated to their entry', async t => {
+  const library = await fixture(t);
+  for (const name of ['bad', 'good']) {
+    const directory = path.join(library, 'retired-skills', `${name}-2026-10-01T00-00-00-000Z`);
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, 'SKILL.md'), name);
+    if (name === 'bad') await mkdir(path.join(directory, 'retired.json'));
+    else await writeFile(path.join(directory, 'retired.json'), JSON.stringify({ name, roles: [] }));
+  }
+  const rows = await listRetiredSkills({ library });
+  assert.equal(rows.length, 2);
+  assert.match(rows.find(row => row.name === 'bad').invalid, /EISDIR|illegal operation/i);
+  assert.deepEqual(rows.find(row => row.name === 'good').roles, []);
+  await assert.rejects(restoreSkill('bad', { library }), { code: 'EISDIR' });
+});
+
+test('restore serializes __proto__ as an own role key', async t => {
+  const library = await fixture(t);
+  const directory = path.join(library, 'retired-skills', 'safe-2026-10-01T00-00-00-000Z');
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, 'SKILL.md'), 'safe');
+  await restoreSkill('safe', { library, roles: ['__proto__'] });
+  const roles = JSON.parse(await readFile(path.join(library, 'role-skills.json'), 'utf8'));
+  assert.equal(Object.hasOwn(roles, '__proto__'), true);
+  assert.deepEqual(roles.__proto__, ['safe']);
+});
+
+test('restore rolls back an atomic roles write failure AFTER moving the skill', async t => {
+  const fs = await import('node:fs');
+  const { syncBuiltinESMExports } = await import('node:module');
+  const library = await fixture(t);
+  const directory = path.join(library, 'retired-skills', 'safe-2026-10-01T00-00-00-000Z');
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, 'SKILL.md'), 'safe');
+  const metadata = JSON.stringify({ name: 'safe', roles: ['peer'] });
+  await writeFile(path.join(directory, 'retired.json'), metadata);
+  const rolesFile = path.join(library, 'role-skills.json');
+  await writeFile(rolesFile, '{"main":["existing"]}\n');
+  const rename = fs.promises.rename;
+  let moved = false, failed = false;
+  fs.promises.rename = async (from, to) => {
+    if (from === directory) moved = true;
+    if (to === rolesFile && !failed) {
+      assert.equal(moved, true);
+      failed = true;
+      throw Object.assign(new Error('injected post-move write failure'), { code: 'EIO' });
+    }
+    return rename(from, to);
+  };
+  syncBuiltinESMExports();
+  try { await assert.rejects(restoreSkill('safe', { library }), /injected post-move/); }
+  finally { fs.promises.rename = rename; syncBuiltinESMExports(); }
+  assert.equal(failed, true);
+  assert.equal(await readFile(path.join(directory, 'SKILL.md'), 'utf8'), 'safe');
+  assert.equal(await readFile(path.join(directory, 'retired.json'), 'utf8'), metadata);
+  assert.equal(await readFile(rolesFile, 'utf8'), '{"main":["existing"]}\n');
+  await assert.rejects(readFile(path.join(library, 'skills/safe/SKILL.md')), { code: 'ENOENT' });
+});
