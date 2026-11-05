@@ -879,6 +879,41 @@ test('slow async ancestor checks yield, deduplicate and remain fail-closed in st
   console.log(`async ancestor elapsed=${Date.now() - started}ms, heartbeat ticks=${ticks}, max gap=${maxGap}ms, peak checks=${peak}`);
 });
 
+test('a multi-chunk listing with slow ancestor checks keeps one consumer, every row and Git order', { skip }, async t => {
+  const base = await sandbox(t);
+  const root = path.join(base, 'repo');
+  await repository(root);
+  const directory = lstatSync(root);
+  // Over 64 KB of porcelain so the listing spans several stdout chunks and Git
+  // exits while an earlier chunk's ancestor check is still pending.
+  const rows = 900;
+  const names = Array.from({ length: rows }, (_, i) => `d${String(i).padStart(4, '0')}${'x'.repeat(150)}/file.txt`);
+  const fields = names.map(name => `? ${name}\0`).join('');
+  assert.ok(fields.length > 128 * 1024);
+  const fake = path.join(base, 'chunk-git');
+  await writeFile(fake, `#!${process.execPath}\nif(process.argv.includes('status')) process.stdout.write(${JSON.stringify(fields)}); else {const r=require('node:child_process').spawnSync('git',process.argv.slice(2),{stdio:'inherit'});process.exit(r.status ?? 1);}`);
+  await chmod(fake, 0o755);
+  const slow = new Set([100, 300, 600].map(i => path.join(root, names[i].split('/')[0])));
+  const calls = new Map();
+  let active = 0, peak = 0, pending = 0;
+  const reader = readerFor({ w: root }, { binary: fake, timeoutMs: 20_000, inspect: async file => {
+    calls.set(file, (calls.get(file) || 0) + 1);
+    peak = Math.max(peak, ++active);
+    pending++;
+    await new Promise(resolve => setTimeout(resolve, slow.has(file) ? 500 : 2));
+    active--;
+    pending--;
+    return directory;
+  } });
+  const status = checked('workspace.git.status', await reader.status('w'), base);
+  assert.equal(pending, 0, 'no inspection outlives the read');
+  assert.equal(gitReadsRunning(), 0);
+  assert.equal(peak, 1, 'one ancestor check at a time');
+  assert.equal(status.files.length, rows);
+  assert.deepEqual(status.files.map(file => file.path), names);
+  assert.ok([...calls.values()].every(count => count === 1), 'one stat per ancestor');
+});
+
 test('ancestor cache budget fails closed without evicting earlier answers', { skip }, async t => {
   const base = await sandbox(t);
   const root = path.join(base, 'repo');
