@@ -211,6 +211,31 @@ test('blocking hooks refuse a handoff, a task close and a merge, with their outp
   assert.match(renderLog('root', (await log()).filter(entry => entry.event === 'hook')).join('\n'), /⛔ peer's handoff hook handoff-gate exit 1 in .*, refused it: handoff: tests failed/);
 });
 
+test('an architecture contract hook refuses a peer\'s handoff that breaks a boundary, with the violation as the reason (skill system v2)', async t => {
+  const { root, home, runtimes, start, scope } = await setup(t);
+  await trustProject(home, root, 'test');
+  // The boilerplate fixture, with the contract checker copied into the repository as its reference says.
+  const { cp } = await import('node:fs/promises');
+  await cp(fileURLToPath(new URL('../fixtures/architecture-app/', import.meta.url)), root, { recursive: true });
+  await mkdir(path.join(root, 'tools'), { recursive: true });
+  await cp(fileURLToPath(new URL('../../templates/skills/feature-architecture/scripts/check-boundaries.mjs', import.meta.url)), path.join(root, 'tools/check-boundaries.mjs'));
+  await saveEntry('hooks', 'architecture', { hook: { event: 'handoff', command: 'node tools/check-boundaries.mjs', blocking: true, timeoutSec: 60 } }, { ...scope, scope: 'project' });
+  await saveEntry('agents', 'peer', { instructions: '# Peer\n', config: { hooks: ['architecture'] } }, { ...scope, scope: 'project' });
+  const runtime = start();
+  await runtime.open('root', { cwd: root });
+  await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Add invoices' }] });
+  const started = await runtimes[0].call('alp_delegate', { agent: 'peer', task: 'Add the invoice feature', mode: 'workspace-write', wait: false });
+  assert.ok(started.assignmentId, JSON.stringify(started));
+  await until(() => runtimes.length > 1 && runtimes.at(-1).started.length === 1, 'the peer');
+  const peer = runtimes.at(-1);
+  await writeFile(path.join(root, 'src/domain/invoice.ts'), "import { postOrder } from '../api/orders.js';\nexport const invoice = postOrder;\n");
+  const refused = await peer.call('alp_handoff', { outcome: 'complete', summary: 'Added invoices' });
+  assert.match(refused.error, /^A handoff hook refused it:\narchitecture exited 1:\n[\s\S]*src\/domain\/invoice\.ts:1 {2}domain -> api \(\.\.\/api\/orders\.js\): domain may import only shared/);
+  // Fixed the way the feature-architecture skill says (the dependency points inward), the handoff goes through.
+  await writeFile(path.join(root, 'src/domain/invoice.ts'), "import { id } from '../shared/id.js';\nexport const invoice = () => ({ id: id() });\n");
+  assert.equal((await peer.call('alp_handoff', { outcome: 'complete', summary: 'Added invoices' })).recorded, true);
+});
+
 test('an agent\'s close of a task with an open human gate is refused before any task.close hook runs (t-f438, t-e706)', async t => {
   const { root, home, runtimes, start, scope } = await setup(t);
   await trustProject(home, root, 'test');

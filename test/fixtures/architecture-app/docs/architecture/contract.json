@@ -1,0 +1,17 @@
+{
+  "description": "Orders service layers",
+  "modules": {
+    "api": ["src/api/**"],
+    "app": ["src/app/**"],
+    "domain": ["src/domain/**"],
+    "shared": ["src/shared/**"]
+  },
+  "allow": {
+    "api": ["app", "shared"],
+    "app": ["domain", "shared"],
+    "domain": ["shared"],
+    "shared": []
+  },
+  "denyPackages": { "domain": ["express", "pg"] },
+  "ignore": ["**/*.test.ts"]
+}
