@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { lstatSync, type Stats } from 'node:fs';
+import type { Stats } from 'node:fs';
 import { lstat, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -54,6 +54,8 @@ export const GIT_READ = Object.freeze({
   maxErrorBytes: 16 * 1024,
   /** Configuration, change list and untracked list output, at most. */
   maxListBytes: 16 * 1024 * 1024,
+  /** Ancestors retained per listing; exceeding the budget fails the read closed. */
+  maxAncestors: 16_384,
   /** One patch stream, at most (its files are at most a window's worth of content). */
   maxPatchStreamBytes: 32 * 1024 * 1024,
   /** One side of a file scanned for a private key; a larger side is `too_large`. */
@@ -135,7 +137,7 @@ type RunOptions = {
   /** Collect at most this much stdout; more fails (GitReadFailed). */
   maxBytes?: number;
   /** Stream stdout instead: return true to stop Git (killed; the result says `stopped`). */
-  onData?: (chunk: Buffer) => boolean | void;
+  onData?: (chunk: Buffer) => boolean | void | Promise<boolean | void>;
 };
 
 function runGit(box: Box, args: string[], { stdin, okCodes = [0], maxBytes = GIT_READ.maxListBytes, onData }: RunOptions = {}): Promise<{ code: number; stdout: Buffer; stopped: boolean }> {
@@ -151,13 +153,18 @@ function runGit(box: Box, args: string[], { stdin, okCodes = [0], maxBytes = GIT
       } catch {
         // already gone
       }
+      child.stdout?.resume();
     };
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let consuming: Promise<void> = Promise.resolve();
     const finish = (outcome: () => void) => {
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
-      release();
+      // An issued lstat cannot be cancelled. Retain this read's slot until its
+      // consumer settles, even when the caller's deadline has already returned,
+      // so repeated timeouts cannot accumulate unlimited filesystem requests.
+      void consuming.then(release);
       outcome();
     };
     try {
@@ -172,23 +179,32 @@ function runGit(box: Box, args: string[], { stdin, okCodes = [0], maxBytes = GIT
     const out: Buffer[] = [];
     let outBytes = 0;
     let err = '';
+    // Pause before awaiting each consumer. At most one chunk/check is active; pipe
+    // backpressure bounds queued stdout even on a slow filesystem.
     child.stdout!.on('data', (chunk: Buffer) => {
       if (settled || stopped) return;
-      if (onData) {
-        if (onData(chunk)) { stopped = true; kill(); }
-        return;
-      }
-      outBytes += chunk.length;
-      if (outBytes > maxBytes) finish(() => { kill(); reject(new GitReadFailed('output over its bound')); });
-      else out.push(chunk);
+      child.stdout!.pause();
+      consuming = (async () => {
+        if (onData) {
+          if (await onData(chunk)) { stopped = true; kill(); }
+        } else {
+          outBytes += chunk.length;
+          if (outBytes > maxBytes) throw new GitReadFailed('output over its bound');
+          out.push(chunk);
+        }
+      })().then(() => {
+        if (!settled && !stopped) child.stdout!.resume();
+      }, error => finish(() => { kill(); reject(error); }));
     });
     child.stderr!.on('data', (chunk: Buffer) => { if (err.length < GIT_READ.maxErrorBytes) err += chunk.toString('utf8'); });
     child.on('error', error => finish(() => reject(new GitReadFailed(`spawn: ${error.message}`))));
-    child.on('close', code => finish(() => {
-      if (stopped) { resolve({ code: code ?? -1, stdout: Buffer.alloc(0), stopped: true }); return; }
-      if (code === null || !okCodes.includes(code)) { reject(new GitReadFailed(`${args[0]} exit ${code}: ${err.trim().slice(0, 1000)}`)); return; }
-      resolve({ code, stdout: Buffer.concat(out), stopped: false });
-    }));
+    child.on('close', code => {
+      void consuming.then(() => finish(() => {
+        if (stopped) { resolve({ code: code ?? -1, stdout: Buffer.alloc(0), stopped: true }); return; }
+        if (code === null || !okCodes.includes(code)) { reject(new GitReadFailed(`${args[0]} exit ${code}: ${err.trim().slice(0, 1000)}`)); return; }
+        resolve({ code, stdout: Buffer.concat(out), stopped: false });
+      }));
+    });
     if (stdin !== undefined) {
       child.stdin!.on('error', () => {});
       child.stdin!.end(stdin);
@@ -587,8 +603,8 @@ export type GitReaderOptions = {
   log?: (message: string, fields: Record<string, unknown>) => void;
   /** Tests only: called after a window's contents were scanned and before Git writes their patch, where a racing writer could change a file. */
   probe?: (step: 'scanned') => Promise<void> | void;
-  /** Tests only: how an untracked path's ancestor directories are inspected (default lstatSync), to inject its failures. */
-  inspect?: (file: string) => Stats;
+  /** Tests only: how an untracked path's ancestor directories are inspected (default async lstat), to inject its failures. */
+  inspect?: (file: string) => Stats | Promise<Stats>;
 };
 
 type DiffParams = { workspaceId: string; compare: GitCompare; path?: string; cursor?: string };
@@ -611,18 +627,22 @@ type Ancestor = 'directory' | 'link' | 'uninspectable';
  * window, and every content read still goes through readConfinedFile, which refuses a path
  * whose directories are linked at read time.
  */
-function untrackedEntry(root: string, name: string, ancestors: Map<string, Ancestor>, inspect: (file: string) => Stats): string | undefined {
+async function untrackedEntry(root: string, name: string, ancestors: Map<string, Ancestor>, inspect: (file: string) => Stats | Promise<Stats>, deadline: number): Promise<string | undefined> {
   const segments = name.split('/');
   for (let count = 1; count < segments.length; count++) {
+    if (Date.now() >= deadline) throw new GitReadFailed('timed out');
     const prefix = segments.slice(0, count).join('/');
     let ancestor = ancestors.get(prefix);
     if (ancestor === undefined) {
+      // Keep earlier answers stable; do not evict and re-inspect a swapped link.
+      if (ancestors.size >= GIT_READ.maxAncestors) throw new GitReadFailed('ancestor cache over its bound');
       try {
-        const info = inspect(path.join(root, ...segments.slice(0, count)));
+        const info = await inspect(path.join(root, ...segments.slice(0, count)));
         ancestor = info.isSymbolicLink() ? 'link' : info.isDirectory() ? 'directory' : 'uninspectable';
       } catch {
         ancestor = 'uninspectable';
       }
+      if (Date.now() >= deadline) throw new GitReadFailed('timed out');
       ancestors.set(prefix, ancestor);
     }
     if (ancestor === 'link') return prefix;
@@ -631,7 +651,7 @@ function untrackedEntry(root: string, name: string, ancestors: Map<string, Ances
   return name;
 }
 
-export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ.timeoutMs, log = () => {}, probe, inspect = lstatSync }: GitReaderOptions) {
+export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ.timeoutMs, log = () => {}, probe, inspect = lstat }: GitReaderOptions) {
   const key = randomBytes(32);
   const mac = (scope: string) => createHmac('sha256', key).update(scope).digest('base64url').slice(0, 32);
 
@@ -720,7 +740,7 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
       files.push(row);
       return false;
     };
-    const record = (field: string): boolean => {
+    const record = async (field: string): Promise<boolean> => {
       if (pendingRename) {
         const [kind, xy] = pendingRename;
         pendingRename = undefined;
@@ -751,7 +771,7 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
       if (kind === '?') {
         const listed = field.slice(2).replace(/\/$/, '');
         if (!listed) return false;
-        const rowPath = untrackedEntry(repo.root, listed, ancestors, inspect);
+        const rowPath = await untrackedEntry(repo.root, listed, ancestors, inspect, repo.deadline);
         // Behind an ancestor that cannot be inspected: something is untracked, nothing is listed.
         if (rowPath === undefined) { dirty = true; return false; }
         if (rowPath !== listed) { if (collapsed.has(rowPath)) return false; collapsed.add(rowPath); }
@@ -763,12 +783,12 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
     };
     let seen = 0;
     const { stopped } = await runGit(repo, ['status', '--porcelain=v2', '-z', '--branch', '--ahead-behind', '--untracked-files=all', '--ignored=no', '--ignore-submodules=dirty', '--find-renames'], {
-      onData: chunk => {
+      onData: async chunk => {
         seen += chunk.length;
         digest.update(chunk);
         const fields = (pending + chunk.toString('utf8')).split('\0');
         pending = fields.pop()!;
-        for (const field of fields) if (field && record(field)) return true;
+        for (const field of fields) if (field && await record(field)) return true;
         if (seen > GIT_READ.maxListBytes) { truncated = true; return true; }
         return false;
       },
@@ -880,13 +900,13 @@ export function createGitReader({ registry, binary = 'git', timeoutMs = GIT_READ
     const ancestors = new Map<string, Ancestor>();
     const collapsed = new Set<string>();
     const { stopped } = await runGit(repo, ['ls-files', '-z', '--others', '--exclude-standard', '--', ...(relative ? [relative] : [])], {
-      onData: chunk => {
+      onData: async chunk => {
         const fields = (pending + chunk.toString('utf8')).split('\0');
         pending = fields.pop()!;
         for (const listed of fields) {
           // A nested repository is listed as its directory: not a file.
           if (!listed || listed.endsWith('/')) continue;
-          const name = untrackedEntry(repo.root, listed, ancestors, inspect);
+          const name = await untrackedEntry(repo.root, listed, ancestors, inspect, repo.deadline);
           // Behind an ancestor that cannot be inspected: omitted, also when asked for by path.
           if (name === undefined) continue;
           if (name !== listed) { if (collapsed.has(name)) continue; collapsed.add(name); }

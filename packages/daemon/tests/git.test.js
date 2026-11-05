@@ -757,7 +757,7 @@ test('an untracked directory inspected as a link is collapsed to itself on every
   await put(path.join(root, 'plain', 'ok.txt'), 'plain\n');
   const linked = path.join(root, 'outside');
   const inspected = [];
-  const inspect = file => {
+  const inspect = async file => {
     inspected.push(file);
     const info = lstatSync(file);
     return file === linked ? Object.assign(Object.create(Object.getPrototypeOf(info)), info, { isSymbolicLink: () => true, isDirectory: () => false }) : info;
@@ -797,7 +797,7 @@ for (const failure of ['EACCES', 'ENOENT']) {
     await put(path.join(root, 'plain', 'ok.txt'), 'plain\n');
     const blocked = path.join(root, 'outside');
     const inspected = [];
-    const inspect = file => {
+    const inspect = async file => {
       inspected.push(file);
       if (file === blocked) throw Object.assign(new Error(`${failure}: injected`), { code: failure });
       return lstatSync(file);
@@ -842,4 +842,86 @@ test('an untracked path whose ancestor is no longer a directory (changed since G
   assert.deepEqual(page.files.map(file => file.path), ['plain/ok.txt']);
   const one = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' }, path: 'outside/note.txt' }), base);
   assert.deepEqual(one.files, []);
+});
+
+test('slow async ancestor checks yield, deduplicate and remain fail-closed in status and diff', { skip: !hasGit && 'git is not installed' }, async t => {
+  const base = await sandbox(t);
+  const root = path.join(base, 'repo');
+  await repository(root);
+  for (let i = 0; i < 40; i++) await put(path.join(root, `dir${i}`, 'nested', 'a.txt'), 'new\n');
+  await put(path.join(root, 'dir0', 'nested', 'b.txt'), 'new\n');
+  let calls = new Map();
+  let active = 0, peak = 0, ticks = 0, maxGap = 0;
+  let previous = Date.now();
+  const started = previous;
+  const yielded = [];
+  const reader = readerFor({ w: root }, { inspect: async file => {
+    calls.set(file, (calls.get(file) || 0) + 1);
+    peak = Math.max(peak, ++active);
+    const before = ticks;
+    await new Promise(resolve => setTimeout(resolve, 3));
+    yielded.push(ticks > before);
+    active--;
+    if (file === path.join(root, 'dir1')) throw new Error('injected inaccessible ancestor');
+    return lstatSync(file);
+  } });
+  const heartbeat = setInterval(() => { const now = Date.now(); maxGap = Math.max(maxGap, now - previous); previous = now; ticks++; }, 1);
+  t.after(() => clearInterval(heartbeat));
+  for (const read of [() => reader.status('w'), () => reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' } })]) {
+    calls = new Map();
+    const result = await read();
+    assert.ok(result.files.some(file => file.path === 'dir0/nested/a.txt'));
+    assert.ok(!result.files.some(file => file.path.startsWith('dir1/')));
+    assert.ok([...calls.values()].every(count => count === 1), 'one stat per ancestor per listing');
+  }
+  assert.ok(yielded.length > 0 && yielded.every(Boolean), 'heartbeat runs during every filesystem wait');
+  assert.equal(peak, 1, 'no filesystem fanout');
+  console.log(`async ancestor elapsed=${Date.now() - started}ms, heartbeat ticks=${ticks}, max gap=${maxGap}ms, peak checks=${peak}`);
+});
+
+test('ancestor cache budget fails closed without evicting earlier answers', { skip }, async t => {
+  const base = await sandbox(t);
+  const root = path.join(base, 'repo');
+  await repository(root);
+  const directory = lstatSync(root);
+  // Synthetic Git output exercises the real stream/cache boundary without making
+  // 16,384 directories. Other Git operations use the real local Git.
+  const fake = path.join(base, 'budget-git');
+  const fields = Array.from({ length: Math.ceil(GIT_READ.maxAncestors / 30) + 1 }, (_, i) =>
+    '? ' + [String(i), ...Array(29).fill('d'), 'file.txt'].join('/') + '\0').join('');
+  await writeFile(fake, `#!${process.execPath}\nif(process.argv.includes('status')) process.stdout.write(${JSON.stringify(fields)}); else {const r=require('node:child_process').spawnSync('git',process.argv.slice(2),{stdio:'inherit'});process.exit(r.status ?? 1);}`);
+  await chmod(fake, 0o755);
+  const logged = [];
+  let calls = 0;
+  const reader = readerFor({ w: root }, { binary: fake,
+    inspect: async () => { calls++; return directory; },
+    log: (message, data) => logged.push([message, data]) });
+  assert.deepEqual(await refusal(reader.status('w'), base), { code: 1000, reason: 'git_failed' });
+  assert.match(JSON.stringify(logged), /ancestor cache over its bound/);
+  assert.equal(calls, GIT_READ.maxAncestors);
+  assert.equal(gitReadsRunning(), 0);
+});
+
+test('a pending async ancestor check cannot extend the Git deadline', { skip: !hasGit && 'git is not installed' }, async t => {
+  const base = await sandbox(t);
+  const root = path.join(base, 'repo');
+  await repository(root);
+  await put(path.join(root, 'dir', 'nested', 'file.txt'), 'new\n');
+  const directory = lstatSync(root);
+  let release;
+  let calls = 0;
+  const reader = readerFor({ w: root }, { timeoutMs: 3000, inspect: () => {
+    calls++;
+    return new Promise(resolve => { release = () => resolve(directory); });
+  } });
+  const started = Date.now();
+  try {
+    assert.deepEqual(await refusal(reader.status('w'), base), { code: 1000, reason: 'git_failed' });
+    assert.equal(calls, 1, 'the delayed filesystem seam was reached');
+    assert.ok(Date.now() - started < 6000);
+    assert.equal(gitReadsRunning(), 1, 'pending filesystem work retains its concurrency slot');
+  } finally { release?.(); }
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 1, 'no new checks start after the deadline');
+  assert.equal(gitReadsRunning(), 0, 'slot released once pending filesystem work settles');
 });
