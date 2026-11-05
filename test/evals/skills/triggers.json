@@ -1,0 +1,20 @@
+{
+  "description": "Skill trigger scenarios: which skills an agent of a role should open for a task, from its Level 0 index alone. expect: must be chosen; forbid: must not be; kind: positive | negative | ambiguous | role | multi. Checked statically by test/integration/skill-eval.test.js; run against a model with node scripts/skill-eval.mjs triggers --live.",
+  "scenarios": [
+    { "id": "p-feature-boilerplate", "kind": "positive", "role": "peer", "task": "Add an invoices feature to this service. docs/architecture/ describes layers and templates/features/ has the boilerplate.", "expect": ["feature-architecture"], "forbid": ["safe-refactor", "bug-loop"] },
+    { "id": "p-adr-docs", "kind": "positive", "role": "lead", "task": "Write the architecture overview and module boundaries for this repository, with an ADR for the queue choice we made last week.", "expect": ["architecture-docs"], "forbid": ["feature-architecture"] },
+    { "id": "p-test-plan", "kind": "positive", "role": "lead", "task": "Before peers start on the new payment retry logic, decide which unit, integration and contract tests it needs.", "expect": ["test-strategy"], "forbid": ["bug-loop"] },
+    { "id": "p-refactor", "kind": "positive", "role": "peer", "task": "Split the 900-line config loader into smaller modules without changing behavior or its public API.", "expect": ["safe-refactor"], "forbid": ["feature-architecture"] },
+    { "id": "p-security", "kind": "positive", "role": "reviewer", "task": "Review this diff that adds a file upload endpoint and a shell call to an image converter.", "expect": ["security-review"], "forbid": [] },
+    { "id": "p-release", "kind": "positive", "role": "main", "task": "Is 0.0.1-beta.8 ready to publish? Give a verdict with evidence.", "expect": ["release-readiness"], "forbid": ["smart-commits"] },
+    { "id": "p-skill", "kind": "positive", "role": "main", "task": "Turn our three lessons about verifying migrations into a reusable skill for lead and peer.", "expect": ["skill-authoring"], "forbid": [] },
+    { "id": "n-typo", "kind": "negative", "role": "peer", "task": "Fix the typo 'recieve' in README.md.", "expect": [], "forbid": ["feature-architecture", "safe-refactor", "test-strategy", "architecture-docs"] },
+    { "id": "n-question", "kind": "negative", "role": "main", "task": "What does the --json flag of alp skills print?", "expect": [], "forbid": ["skill-authoring", "release-readiness", "architecture-docs", "security-review"] },
+    { "id": "n-regression", "kind": "negative", "role": "peer", "task": "The login test started failing after yesterday's merge; find out why and fix it.", "expect": ["bug-loop"], "forbid": ["safe-refactor", "feature-architecture"] },
+    { "id": "a-refactor-or-feature", "kind": "ambiguous", "role": "peer", "task": "Move the email sending out of the orders handler into its own module so we can add SMS later.", "expect": ["safe-refactor"], "forbid": ["skill-authoring"] },
+    { "id": "a-review-docs", "kind": "ambiguous", "role": "lead", "task": "The API docs disagree with the routes; check which is right and fix the docs.", "expect": ["architecture-docs"], "forbid": ["release-readiness"] },
+    { "id": "r-peer-no-release", "kind": "role", "role": "peer", "task": "Check whether this branch is ready to release.", "expect": [], "forbid": ["release-readiness", "skill-authoring"] },
+    { "id": "r-reviewer-no-write", "kind": "role", "role": "reviewer", "task": "Add an ADR documenting the database choice.", "expect": [], "forbid": ["architecture-docs", "feature-architecture"] },
+    { "id": "m-feature-tests", "kind": "multi", "role": "lead", "task": "Plan and deliver a webhook retry feature that fits the layering, with the tests it needs.", "expect": ["feature-architecture", "test-strategy"], "forbid": ["skill-authoring"] }
+  ]
+}
