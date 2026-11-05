@@ -208,3 +208,37 @@ test('duplicate control registration cannot replace an owner or clear cleanup un
   assert.ok(retained.length >= 2, result.stderr);
   for (const path of retained) await access(path);
 });
+
+for (const method of ['execSync', 'exec']) {
+  test(`watchdog accepts completed multi-Node ${method} shell calls`, {timeout:15000}, async t => {
+    const {mkdtemp, writeFile, access, rm} = await import('node:fs/promises');
+    const {tmpdir} = await import('node:os');
+    const {join} = await import('node:path');
+    const {execFile} = await import('node:child_process');
+    const {promisify} = await import('node:util');
+    const dir = await mkdtemp(join(tmpdir(), 'alp-shell-watchdog-'));
+    t.after(() => rm(dir, {recursive:true, force:true}));
+    const file = join(dir, 'shell.mjs');
+    const command = `"${process.execPath}" -e "console.log(process.env.ALP_TEST_PROCESS)"`;
+    const shell = `${command}; ${command}`;
+    // cmd.exe uses & for sequential commands; the Node commands themselves match.
+    const platformShell = process.platform === 'win32' ? `${command} & ${command}` : shell;
+    await writeFile(file, `console.log('scratch:' + JSON.stringify([process.env.ALP_HOME, process.env.TMPDIR, process.env.HOME])); import {${method}} from 'node:child_process';
+      ${method === 'execSync' ? `execSync(${JSON.stringify(platformShell)}, {stdio:'inherit'});` : `await new Promise((resolve,reject) => exec(${JSON.stringify(platformShell)}, (error, stdout) => {process.stdout.write(stdout); error ? reject(error) : resolve();}));`}`);
+    const env = {...process.env}; delete env.NODE_TEST_CONTEXT;
+    const runner = new URL('../../scripts/test-lib.mjs', import.meta.url).href;
+    let result;
+    try { result = {...await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
+      `import {runNodeTests} from ${JSON.stringify(runner)}; process.exitCode = runNodeTests([${JSON.stringify(file)}], {fileTimeoutMs:4000, privateHome:true});`], {env, timeout:10000}), code:0}; }
+    catch (error) { result = error; }
+    // Preserve retained runner scratch on failure for diagnosis.
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(result.stderr.includes('[test-file] PASS'), result.stderr);
+    assert.ok(!result.stderr.includes('CLEANUP-UNCONFIRMED'), result.stderr);
+    const scratch = JSON.parse(result.stdout.match(/scratch:(\[[^\n]+\])/)[1]);
+    for (const path of scratch) await assert.rejects(access(path), {code:'ENOENT'});
+    const identities = result.stdout.match(/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}/g);
+    assert.equal(identities?.length, 2, result.stdout);
+    assert.notEqual(identities[0], identities[1]);
+  });
+}
