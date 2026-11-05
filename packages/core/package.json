@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp-core",
-  "version": "0.0.1-beta.7",
+  "version": "0.0.1-beta.8",
   "type": "module",
   "description": "ALP core module",
   "files": [
@@ -316,7 +316,7 @@
     "node": ">=22.12"
   },
   "dependencies": {
-    "@anhlp/alp-protocol": "0.0.1-beta.7"
+    "@anhlp/alp-protocol": "0.0.1-beta.8"
   },
   "scripts": {
     "build": "node ../../scripts/build-workspace.mjs core",
