@@ -8,6 +8,26 @@ import { agentSources, builtinText, jsonObject, libraryEntries, optionalText } f
 import { teamSources, validateTeam } from './teams.js';
 import { normalizeMcp, validateAgentConfig, validateHook } from './validation.js';
 import { validateProvider } from './providers.js';
+import { checkFrontmatter, skillReferences, specName, splitSkill } from './skill-validate.js';
+
+/**
+ * A SKILL.md with its frontmatter `name` set to `name`, so a copied or renamed skill stays valid:
+ * the name must equal the skill's directory. A SKILL.md without frontmatter is left as it is.
+ */
+export function withSkillName(body, name) {
+  const match = /^(\uFEFF?---(\r?\n))([\s\S]*?)(\r?\n---[ \t]*(?:\r?\n|$))/.exec(body);
+  if (!match) return body;
+  const lines = match[3].split(/\r?\n/);
+  const at = lines.findIndex(line => /^name[ \t]*:/.test(line));
+  if (at >= 0) lines[at] = `name: ${name}`;
+  else lines.unshift(`name: ${name}`);
+  return match[1] + lines.join(match[2]) + match[4] + body.slice(match[0].length);
+}
+
+/** A skill's new name, when it carries the format's name into its frontmatter: the format's rules. */
+function skillTarget(body, name) {
+  if (splitSkill(body).frontmatter !== undefined && !specName(name)) fail('INVALID_NAME', `'${name}' is not a skill name: use 1-64 lowercase letters, digits and single hyphens`);
+}
 
 /**
  * Editing the library (ALPD §43): agents, skills, MCP servers, hooks and teams, in the
@@ -408,10 +428,24 @@ const exists = target => stat(target).then(() => true, () => false);
 /**
  * Creates or replaces an entry in a scope. `revision` is what getEntry returned for
  * that scope (null to create); a different current revision refuses the save.
- * @returns {Promise<{ revision: string | null }>}
+ * `strict` (the CLI creating a skill): a new skill must meet the skill format; `warnings` names
+ * files its SKILL.md points to that are not there yet. Edits and other callers are unchanged.
+ * @param {string} kind
+ * @param {string} name
+ * @param {any} content
+ * @param {{ scope?: any, root?: string, library?: string, templates?: Record<string, string>, revision?: string | null, policy?: string, strict?: boolean }} [options]
+ * @returns {Promise<{ revision: string | null, warnings?: string[] }>}
  */
-export async function saveEntry(kind, name, content, { scope, root, library, templates, revision, policy } = {}) {
+export async function saveEntry(kind, name, content, { scope, root, library, templates, revision, policy, strict = false } = {}) {
   kindOf(kind); nameOf(name);
+  // A new skill made by the CLI (strict) meets the skill format; existing skills are saved as before.
+  const warnings = [];
+  if (strict && kind === 'skills' && revision === null && typeof content?.body === 'string') {
+    const errors = checkFrontmatter(splitSkill(content.body).frontmatter, name, { strict: true }).findings.filter(finding => finding.level === 'error');
+    if (errors.length) fail('INVALID_ENTRY', `skills '${name}' does not meet the skill format: ${errors.map(finding => finding.message).join('; ')}`);
+    const links = skillReferences(splitSkill(content.body).body);
+    if (links.length) warnings.push(`SKILL.md points to ${links.join(', ')}: add ${links.length > 1 ? 'those files' : 'that file'} beside it, in the skill's directory`);
+  }
   if (policy === 'project-data') {
     assertProjectDataContent(kind, content);
     await projectDataEntry(kind, name, { scope, root, library, templates });
@@ -432,7 +466,7 @@ export async function saveEntry(kind, name, content, { scope, root, library, tem
     if (empty) { await rm(target, { force: true }); continue; }
     await writeAtomic(target, type === 'json' ? JSON.stringify(value, null, 2) + '\n' : value.endsWith('\n') ? value : `${value}\n`);
   }
-  return { revision: revisionOf(await readLayer(kind, name, directory)) };
+  return { revision: revisionOf(await readLayer(kind, name, directory)), ...(warnings.length ? { warnings } : {}) };
 }
 
 /**
@@ -468,6 +502,7 @@ export async function duplicateEntry(kind, from, to, { scope, root, library, tem
     await projectDataEntry(kind, to, { scope, root, library, templates });
   }
   const entry = await getEntry(kind, from, { root, library, templates });
+  if (kind === 'skills') { skillTarget(entry.content.body, to); entry.content.body = withSkillName(entry.content.body, to); }
   // A skill is its directory: its references, scripts and assets go with SKILL.md, bytes and modes kept.
   const resources = kind === 'skills' && policy !== 'project-data' ? await skillResources(entry.source === 'project' ? path.join(path.resolve(root), '.alp', 'skills', from) : path.join(library, 'skills', from)) : [];
   const saved = await saveEntry(kind, to, structuredClone(entry.content), { scope, root, library, templates, revision: null, policy });
@@ -513,9 +548,12 @@ export async function renameEntry(kind, from, to, { scope, root, library, templa
   const users = await usersOf(kind, from, { root, library, templates });
   if (users.length) fail('IN_USE', `${kind} '${from}' is used by ${users.join(', ')}; change them first`);
   await check(kind, to, content, { scope, root, library, templates });
+  if (kind === 'skills') skillTarget(content.body, to);
   if (ownDirectory(kind)) {
     if (await exists(path.join(directory, kind, to))) fail('REVISION_CONFLICT', `${path.join(directory, kind, to)} already exists`);
     await rename(path.join(directory, kind, from), path.join(directory, kind, to));
+    // The moved skill's frontmatter names its new directory.
+    if (kind === 'skills' && withSkillName(content.body, to) !== content.body) await writeAtomic(path.join(directory, kind, to, 'SKILL.md'), withSkillName(content.body, to));
   } else {
     await rename(path.join(directory, kind, `${from}.json`), path.join(directory, kind, `${to}.json`));
   }
