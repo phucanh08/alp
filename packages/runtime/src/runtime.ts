@@ -197,6 +197,9 @@ export class WorkspaceMutationError extends Error {
 
 export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   const sessions = new Map<string, Session>();
+  // No-clientId history is suppressible only for exact compact inputs this runtime actually sent.
+  const compactEchoes = new Map<string, string>();
+  const inputDigest = (parts: string[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
   /** Queue slots preparing a scheduled prompt, before its native turn/start. */
   const admittedPrompts = new Set<string>();
   /** What ALP writes for the user of a session, in their language (ALPD §54). */
@@ -430,6 +433,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     session: Session,
     item: any,
     done = false,
+    turnId?: string,
   ) {
     if (item.type === 'agentMessage') {
       // The first words main shows after the user wrote: how long the user waited.
@@ -445,6 +449,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (item.type === 'userMessage') {
       const { text, clientMessageId, origin, attachments } = nativePrompt(item, session);
       if (isCompactPrompt(clientMessageId)) return;
+      if (!clientMessageId && turnId && compactEchoes.get(`${session.threadId}:${turnId}`) === inputDigest((item.content ?? []).filter((part: any) => part.type === 'text').map((part: any) => String(part.text ?? '')))) return;
       const images = (item.content ?? []).filter((c: any) => c.type === 'image' || c.type === 'localImage').length;
       emit(sessionId, { type: 'item', item: { kind: 'user_message', id: item.id, text, ...(clientMessageId ? { clientMessageId } : {}), ...(origin ? { origin } : {}), ...(images ? { images } : {}), ...(attachments ? { attachments } : {}) } });
       return;
@@ -683,6 +688,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       // parent's membership and the event that tells viewers it is no longer live.
       if (sessions.get(sessionId) !== session) return;
       sessions.delete(sessionId);
+      for (const key of compactEchoes.keys()) if (key.startsWith(`${session.threadId}:`)) compactEchoes.delete(key);
       if (session.parent && parent && sessions.get(session.parent) === parent) {
         parent.children.delete(sessionId);
         if (parent.supervisor === sessionId) parent.supervisor = undefined;
@@ -1729,8 +1735,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         return;
       }
       compacting.turn = true;
-      emit(sessionId, { type: 'item', item: { kind: 'notice', id: `notice-${randomUUID().slice(0, 8)}`, level: 'info', text: wordsFor(session).compacting() } });
       await startPrompt(sessionId, { clientMessageId: `${COMPACT_PROMPT}${randomUUID()}`, delivery: 'auto', content: [{ type: 'text', text: checkpointPrompt(trigger, session.contextFill) }] }, 'wake');
+      emit(sessionId, { type: 'item', item: { kind: 'notice', id: `notice-${randomUUID().slice(0, 8)}`, level: 'info', text: wordsFor(session).compacting() } });
     }).catch(error => compactFailed(sessionId, session, errorData(error).message));
     queue = work.catch(() => {});
   }
@@ -4002,6 +4008,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
               sessionId,
               session,
               item,
+              false,
+              turn.id,
             );
           }
         }
@@ -5065,6 +5073,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
           ? session.active!
           : result.turn.id;
 
+      if (isCompactPrompt(prompt.clientMessageId)) compactEchoes.set(`${session.threadId}:${turnId}`, inputDigest(nativeInput.flatMap(part => 'text' in part ? [String(part.text)] : [])));
+
       for (const event of mail) event.deliveredTurn = turnId;
 
       // Only transport-accepted user input renews the root-tree budgets.
@@ -5532,6 +5542,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     },
 
     async shutdown() {
+      compactEchoes.clear();
       closed = true;
 
       await queue;
