@@ -1,0 +1,106 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { initProject } from '@anhlp/alp-core/init';
+import { seedLibrary } from '@anhlp/alp-core/library';
+import { installPack, listPacks, packStatus } from '@anhlp/alp-core/packs';
+import { profileFor } from '@anhlp/alp-core/permissions';
+import { resolveAgent } from '@anhlp/alp-core/resolver';
+import { resolveTeam } from '@anhlp/alp-core/teams';
+import { createAlpRuntime } from '@anhlp/alp-runtime';
+import { fakeTransport, until } from '../support/fake-agent.js';
+
+async function dirs(t) {
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-packs-'));
+  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  const root = path.join(directory, 'project');
+  await initProject(root);
+  return { directory, root, library: path.join(directory, 'home') };
+}
+
+test('ALP ships its optional packs valid, and seeding a library installs none of them', async t => {
+  const packs = await listPacks();
+  assert.deepEqual(packs.map(pack => pack.id), ['architecture', 'backend', 'design', 'frontend', 'integration', 'operations', 'quality']);
+  const { root, library } = await dirs(t);
+  await seedLibrary(library);
+  const seeded = await readdir(path.join(library, 'skills'));
+  for (const pack of packs) {
+    for (const skill of pack.skills) assert.ok(!seeded.includes(skill), `${skill} is optional`);
+    assert.deepEqual(await packStatus(pack, { root, library }), { library: false, project: false });
+  }
+  await assert.rejects(readdir(path.join(library, 'agents')), { code: 'ENOENT' });
+});
+
+test('a pack skill reaches a role only when assigned, and a reinstall never overwrites the user\'s copy', async t => {
+  const { root, library } = await dirs(t);
+  const installed = await installPack('backend', { scope: 'library', library });
+  assert.deepEqual(installed.installed.map(entry => entry.name), ['backend-development', 'databases']);
+  assert.deepEqual(installed.assigned, []);
+  const peerSkills = async () => (await resolveAgent(root, { agent: 'peer', library })).skills.map(skill => skill.name);
+  assert.ok(!(await peerSkills()).includes('backend-development'), 'installed but not assigned: not in peer\'s index');
+  // The user edits a skill; installing again, with --assign, keeps the edit and assigns once.
+  const skillFile = path.join(library, 'skills/backend-development/SKILL.md');
+  await writeFile(skillFile, (await readFile(skillFile, 'utf8')) + '\nOur house rule: every endpoint has an OpenAPI entry.\n');
+  const edited = await readFile(skillFile, 'utf8');
+  const again = await installPack('backend', { scope: 'library', library, assign: true });
+  assert.deepEqual(again.installed, []);
+  assert.deepEqual(again.kept.map(entry => entry.name), ['backend-development', 'databases']);
+  assert.deepEqual(again.assigned, ['lead/backend-development', 'lead/databases', 'peer/backend-development', 'peer/databases']);
+  assert.equal(await readFile(skillFile, 'utf8'), edited);
+  assert.ok((await peerSkills()).includes('backend-development'));
+  assert.ok(!(await resolveAgent(root, { agent: 'main', library })).skills.some(skill => skill.name === 'backend-development'), 'main gets no specialist skill');
+  assert.deepEqual((await installPack('backend', { scope: 'library', library, assign: true })).assigned, [], 'assigned once');
+  // An ALP update leaves the pack's skills alone: they are the user's files now.
+  assert.deepEqual((await seedLibrary(library)).updated.filter(name => name.includes('backend')), []);
+  // Projects take packs too, but assign only through their own agents.
+  await assert.rejects(installPack('frontend', { scope: 'project', root, library, assign: true }), { code: 'INVALID_SCOPE' });
+  const project = await installPack('frontend', { scope: 'project', root, library });
+  assert.equal(project.installed[0].path, path.join(root, '.alp/skills/frontend-development'));
+  await assert.rejects(installPack('nope', { scope: 'library', library }), { code: 'NOT_FOUND' });
+});
+
+test('the architecture pack adds a read-only architect, a docs-maintainer peer and the Blueprint team', async t => {
+  const { root, library } = await dirs(t);
+  const result = await installPack('architecture', { scope: 'library', library });
+  assert.deepEqual(result.installed.map(entry => `${entry.kind}/${entry.name}`), ['agents/architect', 'agents/docs-maintainer', 'teams/blueprint']);
+  assert.deepEqual(result.permissions, { set: ['architect: read-only'], kept: [], conflicts: [] });
+  const architect = await resolveAgent(root, { agent: 'architect', library });
+  assert.deepEqual(architect.skills.map(skill => skill.name), ['architecture-docs', 'feature-architecture']);
+  assert.equal(architect.mode, 'read-only');
+  assert.equal((await profileFor(root, library, 'architect')).base, 'read-only');
+  assert.deepEqual((await resolveAgent(root, { agent: 'docs-maintainer', library })).skills.map(skill => skill.name), ['architecture-docs']);
+  const team = await resolveTeam(root, 'blueprint', { library });
+  assert.equal(team.members.architect.role, 'advisor');
+  assert.equal(team.members['docs-maintainer'].role, 'peer');
+  // The feature-architecture checker the architect may run is executable where the library holds it.
+  if (process.platform !== 'win32') assert.ok((await stat(path.join(library, 'skills/feature-architecture/scripts/check-boundaries.mjs'))).mode & 0o100);
+  // A user's own permission entry for the agent is never changed, only reported.
+  const other = await dirs(t);
+  await seedLibrary(other.library);
+  await writeFile(path.join(other.library, 'settings.json'), JSON.stringify({ permissions: { agents: { architect: 'workspace-write' } } }));
+  const conflict = await installPack('architecture', { scope: 'library', library: other.library });
+  assert.equal(conflict.permissions.conflicts.length, 1);
+  assert.equal(JSON.parse(await readFile(path.join(other.library, 'settings.json'), 'utf8')).permissions.agents.architect, 'workspace-write');
+});
+
+test('in the Blueprint team, main delegating to the architect gets a read-only advisor even when asking for writes', async t => {
+  const { directory, root, library } = await dirs(t);
+  await installPack('architecture', { scope: 'library', library });
+  const agents = [];
+  const runtime = createAlpRuntime({ transport: fakeTransport(agents), supervisor: false, libraryDir: library, runLogDir: path.join(directory, 'runs') });
+  t.after(() => runtime.shutdown());
+  await runtime.open('root', { cwd: root, workflow: 'blueprint' });
+  await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Does invoicing fit?' }] });
+  const main = agents[0];
+  const advice = await main.call('alp_delegate', { agent: 'architect', task: 'Does an invoices module fit the layering?', mode: 'workspace-write', wait: false });
+  assert.ok(advice.assignmentId, JSON.stringify(advice));
+  assert.equal(advice.mode, 'read-only');
+  assert.match(advice.modeNote, /architect runs read-only: its permission profile read-only caps it/);
+  await until(() => agents.length === 2, 'the architect');
+  assert.match(agents[1].config.developerInstructions, /# Architect — read-only architecture advisor/);
+  assert.match(agents[1].config.developerInstructions, /- feature-architecture \(/);
+  // Main itself never delegates to docs-maintainer in Blueprint: that is lead's member.
+  assert.match((await main.call('alp_delegate', { agent: 'docs-maintainer', task: 'Docs', wait: false })).error ?? '', /unauthorized target/);
+});

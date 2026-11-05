@@ -1,0 +1,6 @@
+{
+  "label": "Operations",
+  "description": "Containers, CI/CD pipelines, deployment and rollback strategies, infrastructure changes and observability.",
+  "skills": ["devops"],
+  "assign": { "lead": ["devops"], "peer": ["devops"] }
+}

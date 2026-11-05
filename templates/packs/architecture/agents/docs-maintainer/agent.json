@@ -1,0 +1,4 @@
+{
+  "description": "Documentation peer: keeps architecture docs, API docs, migration guides and ADRs in sync with code",
+  "skills": ["architecture-docs"]
+}

@@ -1,0 +1,6 @@
+{
+  "label": "Integration",
+  "description": "Model Context Protocol servers and clients: tool design, transports, testing, and wiring a server into ALP.",
+  "skills": ["mcp-integration"],
+  "assign": { "lead": ["mcp-integration"], "peer": ["mcp-integration"] }
+}

@@ -1,0 +1,6 @@
+{
+  "label": "Frontend",
+  "description": "UI features in component frameworks: structure, state, data fetching, SSR frameworks, performance and accessibility.",
+  "skills": ["frontend-development"],
+  "assign": { "lead": ["frontend-development"], "peer": ["frontend-development"] }
+}
