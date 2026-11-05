@@ -284,3 +284,50 @@ test('copying a skill copies its whole directory, bytes and executable bits kept
   await assert.rejects(duplicateEntry('skills', 'packer', 'linked', { ...options, scope: 'library' }), { code: 'UNSAFE_LIBRARY_WRITE' });
   await assert.rejects(readdir(path.join(library, 'skills', 'linked')), { code: 'ENOENT' });
 });
+
+test('copying or renaming a skill sets its frontmatter name to the new directory (P0)', async t => {
+  const { withSkillName } = await import('../src/library-edit.js');
+  assert.equal(withSkillName('---\nname: "old"\ndescription: "D. Use when x."\n---\nBody\n', 'new'), '---\nname: new\ndescription: "D. Use when x."\n---\nBody\n');
+  assert.equal(withSkillName('---\r\ndescription: x\r\n---\r\nBody\r\n', 'new'), '---\r\nname: new\r\ndescription: x\r\n---\r\nBody\r\n', 'a missing name is added, line endings kept');
+  assert.equal(withSkillName('# No frontmatter\n', 'new'), '# No frontmatter\n', 'a legacy skill is left as it is');
+  const { root, library, options } = await setup(t);
+  const { validateSkill } = await import('../src/skill-validate.js');
+  const source = path.join(library, 'skills', 'review-api');
+  await mkdir(path.join(source, 'references'), { recursive: true });
+  await writeFile(path.join(source, 'SKILL.md'), '---\nname: review-api\ndescription: "Review an API change. Use when an endpoint changes."\n---\n\nSee [references/a.md](references/a.md).\n');
+  await writeFile(path.join(source, 'references', 'a.md'), '# A\n');
+  await duplicateEntry('skills', 'review-api', 'review-api-v2', { ...options, scope: 'library' });
+  const copy = path.join(library, 'skills', 'review-api-v2');
+  assert.match(await readFile(path.join(copy, 'SKILL.md'), 'utf8'), /^---\nname: review-api-v2\n/);
+  assert.deepEqual((await validateSkill(copy, { mode: 'strict' })).errors, []);
+  assert.match(await readFile(path.join(source, 'SKILL.md'), 'utf8'), /^---\nname: review-api\n/, 'the source is unchanged');
+  await renameEntry('skills', 'review-api-v2', 'api-review', { ...options, scope: 'library' });
+  const moved = path.join(library, 'skills', 'api-review');
+  assert.match(await readFile(path.join(moved, 'SKILL.md'), 'utf8'), /^---\nname: api-review\n/);
+  assert.deepEqual((await validateSkill(moved, { mode: 'strict' })).errors, []);
+  assert.equal(await readFile(path.join(moved, 'references', 'a.md'), 'utf8'), '# A\n');
+  // A name the format refuses is refused for a skill in the format, and nothing is written.
+  await assert.rejects(duplicateEntry('skills', 'api-review', 'Api_Review', { ...options, scope: 'project' }), { code: 'INVALID_NAME' });
+  await assert.rejects(renameEntry('skills', 'api-review', 'API', { ...options, scope: 'library' }), { code: 'INVALID_NAME' });
+  await assert.rejects(readdir(path.join(root, '.alp', 'skills', 'Api_Review')), { code: 'ENOENT' });
+  // A legacy skill without frontmatter still copies under any valid entry name.
+  await mkdir(path.join(library, 'skills', 'Old_Notes'), { recursive: true });
+  await writeFile(path.join(library, 'skills', 'Old_Notes', 'SKILL.md'), 'Just notes.\n');
+  await duplicateEntry('skills', 'Old_Notes', 'Old_Notes_2', { ...options, scope: 'library' });
+  assert.equal(await readFile(path.join(library, 'skills', 'Old_Notes_2', 'SKILL.md'), 'utf8'), 'Just notes.\n');
+});
+
+test('a new skill saved strictly (the CLI) meets the format; editing an existing legacy skill still works (P1)', async t => {
+  const { library, options } = await setup(t);
+  const scope = { ...options, scope: 'library' };
+  await assert.rejects(saveEntry('skills', 'plain', { body: 'No frontmatter\n' }, { ...scope, revision: null, strict: true }), { code: 'INVALID_ENTRY', message: /no YAML frontmatter/ });
+  await assert.rejects(saveEntry('skills', 'named', { body: '---\nname: other\ndescription: "D. Use when x."\n---\nB\n' }, { ...scope, revision: null, strict: true }), { message: /differs from its directory/ });
+  await assert.rejects(saveEntry('skills', 'keys', { body: '---\nname: keys\ndescription: "D. Use when x."\ncolor: red\n---\nB\n' }, { ...scope, revision: null, strict: true }), { message: /unknown frontmatter key 'color'/ });
+  const saved = await saveEntry('skills', 'linked', { body: '---\nname: linked\ndescription: "Linked. Use when testing links."\n---\nSee [references/x.md](references/x.md).\n' }, { ...scope, revision: null, strict: true });
+  assert.match(saved.warnings[0], /SKILL\.md points to references\/x\.md: add that file beside it/);
+  // Without strict (programmatic callers, the settings screen) and for edits, nothing changes.
+  await saveEntry('skills', 'legacy', { body: 'Legacy body\n' }, { ...scope, revision: null });
+  const entry = await getEntry('skills', 'legacy', scope);
+  await saveEntry('skills', 'legacy', { body: 'Edited legacy body\n' }, { ...scope, revision: entry.revision, strict: true });
+  assert.equal(await readFile(path.join(library, 'skills', 'legacy', 'SKILL.md'), 'utf8'), 'Edited legacy body\n');
+});

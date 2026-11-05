@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { libraryEntries } from '@anhlp/alp-core/resolver';
 import { listTeams, resolveTeam } from '@anhlp/alp-core/teams';
-import { deleteEntry, duplicateEntry, getEntry, listRetiredSkills, renameEntry, restoreSkill, saveEntry } from '@anhlp/alp-core/library-edit';
+import { deleteEntry, duplicateEntry, getEntry, listRetiredSkills, renameEntry, restoreSkill, saveEntry, withSkillName } from '@anhlp/alp-core/library-edit';
 import { testEntry } from '@anhlp/alp-client/library-test';
 import { formatValidation, validateSkill } from '@anhlp/alp-core/skill-validate';
 import { installPack, listPacks, packStatus } from '@anhlp/alp-core/packs';
@@ -126,7 +126,7 @@ async function edited(kind, name, current, values) {
     if (values.rules !== undefined) content.houseRules = await readFile(values.rules, 'utf8');
   } else if (kind === 'skills') {
     if (values.file !== undefined) content.body = await readFile(values.file, 'utf8');
-    content.body ??= `---\nname: ${name}\ndescription: When to use this skill.\n---\n\n# ${name}\n\nSteps and checks.\n`;
+    content.body ??= `---\nname: ${name}\ndescription: ${JSON.stringify(values.description ?? `What ${name} does. Use when the work it is for comes up.`)}\n---\n\n# ${name}\n\n## When to use\n\n## Workflow\n\n## Verification\n`;
   } else if (kind === 'mcp') {
     if (values.command !== undefined || values.url !== undefined) content.server = {};
     const server = content.server ?? {};
@@ -257,6 +257,8 @@ async function editCommand(kind, args) {
   let revision = null;
   if (action === creates) {
     if (values.from !== undefined) current = (await getEntry(kind, values.from, { root, library: alpHome() })).content;
+    // A skill made from another names itself, as its directory does.
+    if (kind === 'skills' && current?.body !== undefined) current = { ...current, body: withSkillName(current.body, name) };
   } else {
     // Editing an entry that only a lower layer has makes this scope's copy of it.
     const entry = await getEntry(kind, name, { root, library: alpHome() }).catch(error => { if (error.code === 'NOT_FOUND') throw new Error(`No ${kind} entry '${name}'; create it with alp ${kind.replace(/s$/, '')} ${creates}`); throw error; });
@@ -264,8 +266,15 @@ async function editCommand(kind, args) {
     current = (own ?? entry).content;
     revision = own ? own.revision : null;
   }
-  const result = await saveEntry(kind, name, await edited(kind, name, current, values), { ...options, revision });
+  // A new skill meets the skill format strictly; an edit of an existing one is saved as before, and told what to fix.
+  const result = await saveEntry(kind, name, await edited(kind, name, current, values), { ...options, revision, strict: kind === 'skills' && action === creates });
   done(result, `${action === 'edit' ? 'Saved' : 'Created'} ${name} in ${where}.`);
+  if (kind === 'skills' && !values.json) {
+    const directory = path.join(scope === 'project' ? path.join(root, '.alp') : alpHome(), 'skills', name);
+    const report = await validateSkill(directory);
+    const notes = [...(result.warnings ?? []), ...report.errors.map(finding => finding.message), ...report.warnings.map(finding => finding.message)];
+    for (const note of [...new Set(notes)]) console.log(`note: ${note}`);
+  }
 }
 
 /** alp trust: the workspaces whose hooks run without asking (ALPD §45). */

@@ -164,3 +164,32 @@ test('alp skills --retired lists retired skills and alp skill restore brings one
   assert.deepEqual(JSON.parse(await readFile(path.join(home, 'role-skills.json'), 'utf8')), { main: ['style'], peer: ['old'], lead: ['old'] });
   assert.match(run('skills', '--retired').stdout, /^No retired skills/);
 });
+
+test('alp skill new is strict for new skills; cp, mv and --from keep the frontmatter name in step (skill system v2)', async t => {
+  const home = await fixture(t);
+  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const run = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', cwd: home, env: { ...process.env, ALP_HOME: home } });
+  const plain = path.join(home, 'plain.md');
+  await writeFile(plain, 'Just text, no frontmatter\n');
+  const refused = run('skill', 'new', 'plain', '--file', plain);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /does not meet the skill format: SKILL\.md has no YAML frontmatter/);
+  assert.equal(run('skill', 'new', 'Bad_Name').status, 1);
+  const made = run('skill', 'new', 'api-review', '-d', 'Review an HTTP API change. Use when an endpoint or schema changes.');
+  assert.equal(made.status, 0, made.stderr);
+  assert.match(await readFile(path.join(home, 'skills/api-review/SKILL.md'), 'utf8'), /^---\nname: api-review\ndescription: "Review an HTTP API change\. Use when an endpoint or schema changes\."\n---/);
+  assert.equal(run('skill', 'cp', 'api-review', 'api-review-2').status, 0);
+  assert.match(await readFile(path.join(home, 'skills/api-review-2/SKILL.md'), 'utf8'), /^---\nname: api-review-2\n/);
+  assert.equal(run('skill', 'mv', 'api-review-2', 'contract-review').status, 0);
+  assert.match(await readFile(path.join(home, 'skills/contract-review/SKILL.md'), 'utf8'), /^---\nname: contract-review\n/);
+  assert.equal(run('skill', 'new', 'derived', '--from', 'contract-review').status, 0);
+  assert.match(await readFile(path.join(home, 'skills/derived/SKILL.md'), 'utf8'), /^---\nname: derived\n/);
+  const check = run('skill', 'check', 'derived', '--strict');
+  assert.equal(check.status, 0, check.stdout);
+  // A legacy skill still edits: format notes are printed, not enforced.
+  await mkdir(path.join(home, 'skills/old'), { recursive: true });
+  await writeFile(path.join(home, 'skills/old/SKILL.md'), 'Old notes\n');
+  const edited = run('skill', 'edit', 'old', '--file', plain);
+  assert.equal(edited.status, 0, edited.stderr);
+  assert.match(edited.stdout, /note: SKILL\.md has no YAML frontmatter/);
+});
