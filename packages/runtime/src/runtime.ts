@@ -102,7 +102,6 @@ function promptOrigin(clientMessageId: string, session: { parent?: string }): Tu
  * the model but are not user messages, so the timeline shows notices instead (t-b3cd #6).
  */
 const COMPACT_PROMPT = 'alp-wake-compact-';
-const isCompactPrompt = (clientMessageId: string | undefined) => !!clientMessageId?.startsWith(COMPACT_PROMPT);
 const MAX_WAKES = 8;
 /** How long the user may wait for main's first words before its tool results remind it. */
 const USER_REPLY_MS = 60_000;
@@ -197,8 +196,9 @@ export class WorkspaceMutationError extends Error {
 
 export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   const sessions = new Map<string, Session>();
-  // No-clientId history is suppressible only for exact compact inputs this runtime actually sent.
-  const compactEchoes = new Map<string, string>();
+  // Only internally initiated, accepted compact inputs may be hidden on replay.
+  // Keep ownership across native thread restarts; closing an owner releases all its records.
+  const compactEchoes = new Map<Session, Map<string, string>>();
   const inputDigest = (parts: string[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
   /** Queue slots preparing a scheduled prompt, before its native turn/start. */
   const admittedPrompts = new Set<string>();
@@ -448,8 +448,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     if (item.type === 'userMessage') {
       const { text, clientMessageId, origin, attachments } = nativePrompt(item, session);
-      if (isCompactPrompt(clientMessageId)) return;
-      if (!clientMessageId && turnId && compactEchoes.get(`${session.threadId}:${turnId}`) === inputDigest((item.content ?? []).filter((part: any) => part.type === 'text').map((part: any) => String(part.text ?? '')))) return;
+      if (turnId) {
+        const digest = inputDigest((item.content ?? []).filter((part: any) => part.type === 'text').map((part: any) => String(part.text ?? '')));
+        for (const echoes of compactEchoes.values()) if (echoes.get(`${session.threadId}:${turnId}`) === digest) return;
+      }
       const images = (item.content ?? []).filter((c: any) => c.type === 'image' || c.type === 'localImage').length;
       emit(sessionId, { type: 'item', item: { kind: 'user_message', id: item.id, text, ...(clientMessageId ? { clientMessageId } : {}), ...(origin ? { origin } : {}), ...(images ? { images } : {}), ...(attachments ? { attachments } : {}) } });
       return;
@@ -684,11 +686,12 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       }
       session.worktrees.clear();
 
+      compactEchoes.delete(session);
+
       // Every id-based side effect belongs to this incarnation, including the
       // parent's membership and the event that tells viewers it is no longer live.
       if (sessions.get(sessionId) !== session) return;
       sessions.delete(sessionId);
-      for (const key of compactEchoes.keys()) if (key.startsWith(`${session.threadId}:`)) compactEchoes.delete(key);
       if (session.parent && parent && sessions.get(session.parent) === parent) {
         parent.children.delete(sessionId);
         if (parent.supervisor === sessionId) parent.supervisor = undefined;
@@ -1735,7 +1738,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         return;
       }
       compacting.turn = true;
-      await startPrompt(sessionId, { clientMessageId: `${COMPACT_PROMPT}${randomUUID()}`, delivery: 'auto', content: [{ type: 'text', text: checkpointPrompt(trigger, session.contextFill) }] }, 'wake');
+      await startPrompt(sessionId, { clientMessageId: `${COMPACT_PROMPT}${randomUUID()}`, delivery: 'auto', content: [{ type: 'text', text: checkpointPrompt(trigger, session.contextFill) }] }, 'wake', undefined, true);
       emit(sessionId, { type: 'item', item: { kind: 'notice', id: `notice-${randomUUID().slice(0, 8)}`, level: 'info', text: wordsFor(session).compacting() } });
     }).catch(error => compactFailed(sessionId, session, errorData(error).message));
     queue = work.catch(() => {});
@@ -1771,7 +1774,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (refusal && refusal !== MAIL_WAITS && refusal !== REVIEWING) { compactFailed(sessionId, session, `a fresh conversation cannot start now: ${refusal}`); return; }
       await restartNative(sessionId, session, undefined);
       emit(sessionId, { type: 'session.updated', session: snapshot(sessionId, session) });
-      await startPrompt(sessionId, { clientMessageId: `${COMPACT_PROMPT}${randomUUID()}`, delivery: 'auto', content: [{ type: 'text', text: seedPrompt(checkpoint, session.lastUserText) }] }, 'wake');
+      await startPrompt(sessionId, { clientMessageId: `${COMPACT_PROMPT}${randomUUID()}`, delivery: 'auto', content: [{ type: 'text', text: seedPrompt(checkpoint, session.lastUserText) }] }, 'wake', undefined, true);
       compactFinished(sessionId, session, 'fresh');
     }).catch(error => compactFailed(sessionId, session, errorData(error).message));
     queue = work.catch(() => {});
@@ -4891,7 +4894,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   }
 
   /** Starts a turn or steers the running one; throws when the prompt was not delivered. */
-  async function startPrompt(sessionId: string, prompt: PromptInput, origin: TurnOrigin, wake?: MailEvent[]) {
+  async function startPrompt(sessionId: string, prompt: PromptInput, origin: TurnOrigin, wake?: MailEvent[], internalCompact = false) {
     const session = openOf(sessionId);
 
     if (
@@ -4983,7 +4986,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     ) {
       session.text.clear();
       session.toolCalls.clear();
-      if (!isCompactPrompt(prompt.clientMessageId)) session.compactCooling = false;
+      if (!internalCompact) session.compactCooling = false;
       session.supervisorWake = !!wake?.length && wake.every(event => event.defer);
 
       // A wake continues the same assignment: keep its handoff and limits.
@@ -5073,7 +5076,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
           ? session.active!
           : result.turn.id;
 
-      if (isCompactPrompt(prompt.clientMessageId)) compactEchoes.set(`${session.threadId}:${turnId}`, inputDigest(nativeInput.flatMap(part => 'text' in part ? [String(part.text)] : [])));
+      if (internalCompact) {
+        const echoes = compactEchoes.get(session) ?? new Map<string, string>();
+        echoes.set(`${session.threadId}:${turnId}`, inputDigest(nativeInput.flatMap(part => 'text' in part ? [String(part.text)] : [])));
+        compactEchoes.set(session, echoes);
+      }
 
       for (const event of mail) event.deliveredTurn = turnId;
 
@@ -5087,7 +5094,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         prompt.clientMessageId,
       );
 
-      if (!isCompactPrompt(prompt.clientMessageId)) emit(sessionId, {
+      if (!internalCompact) emit(sessionId, {
         type: 'item',
         item: {
           kind: 'user_message',
