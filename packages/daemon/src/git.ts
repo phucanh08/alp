@@ -179,12 +179,15 @@ function runGit(box: Box, args: string[], { stdin, okCodes = [0], maxBytes = GIT
     const out: Buffer[] = [];
     let outBytes = 0;
     let err = '';
-    // Pause before awaiting each consumer. At most one chunk/check is active; pipe
-    // backpressure bounds queued stdout even on a slow filesystem.
+    // Chunks are consumed strictly one after another: each consumer is chained after
+    // the previous one, so close/finish/release wait for every pending check. pause()
+    // is backpressure only; Node resumes stdout itself when the child exits
+    // (flushStdio), so it cannot provide mutual exclusion.
     child.stdout!.on('data', (chunk: Buffer) => {
       if (settled || stopped) return;
       child.stdout!.pause();
-      consuming = (async () => {
+      consuming = consuming.then(async () => {
+        if (settled || stopped) return;
         if (onData) {
           if (await onData(chunk)) { stopped = true; kill(); }
         } else {
@@ -192,7 +195,7 @@ function runGit(box: Box, args: string[], { stdin, okCodes = [0], maxBytes = GIT
           if (outBytes > maxBytes) throw new GitReadFailed('output over its bound');
           out.push(chunk);
         }
-      })().then(() => {
+      }).then(() => {
         if (!settled && !stopped) child.stdout!.resume();
       }, error => finish(() => { kill(); reject(error); }));
     });
