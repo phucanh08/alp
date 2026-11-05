@@ -7,7 +7,11 @@ const { randomUUID } = require('node:crypto');
 const { syncBuiltinESMExports } = require('node:module');
 const endpoint = process.env.ALP_TEST_CONTROL;
 if (endpoint) {
-  const owner = process.env.ALP_TEST_PROCESS;
+  // A spawning call may run a shell containing several Node processes. Its
+  // slot tracks the call's lifetime; each actual process owns a unique socket.
+  const slot = process.env.ALP_TEST_SLOT || undefined;
+  const owner = slot ? randomUUID() : process.env.ALP_TEST_PROCESS;
+  process.env.ALP_TEST_PROCESS = owner;
   const children = new Map();
   const pending = [];
   let connected = false;
@@ -19,7 +23,7 @@ if (endpoint) {
   };
   socket.on('connect', () => {
     connected = true;
-    socket.write(JSON.stringify({ type: 'hello', id: owner, token: process.env.ALP_TEST_SECRET }) + '\n');
+    socket.write(JSON.stringify({ type: 'hello', id: owner, slot, token: process.env.ALP_TEST_SECRET }) + '\n');
     for (const line of pending) socket.write(line);
     socket.unref();
   });
@@ -29,8 +33,8 @@ if (endpoint) {
     if (cleaning) throw new Error('test runner cleanup has started');
     const id = randomUUID();
     if (options.envPairs.includes(`ALP_TEST_CONTROL=${endpoint}`)) {
-      options = { ...options, envPairs: options.envPairs.filter(pair => !pair.startsWith('ALP_TEST_PROCESS=')) };
-      options.envPairs.push(`ALP_TEST_PROCESS=${id}`);
+      options = { ...options, envPairs: options.envPairs.filter(pair => !pair.startsWith('ALP_TEST_SLOT=')) };
+      options.envPairs.push(`ALP_TEST_SLOT=${id}`);
     }
     children.set(id, this);
     send({ type: 'spawn', id, owner });
@@ -44,7 +48,7 @@ if (endpoint) {
     catch (error) { exited(); throw error; }
   };
   // Synchronous APIs bypass ChildProcess.prototype.spawn. Give their children
-  // distinct slots too: an inherited owner ID must never let a child ACK for
+  // distinct call slots too: an inherited owner ID must never let a child ACK for
   // its blocked parent. Return/throw from Node's sync call observes child exit;
   // while blocked there is no owned async handle, so cleanup must retain scratch.
   for (const method of ['spawnSync', 'execFileSync', 'execSync']) {
@@ -56,7 +60,7 @@ if (endpoint) {
       const options = args[index] || {};
       const env = options.env || process.env;
       if (env.ALP_TEST_CONTROL === endpoint) {
-        args[index] = {...options, env: {...env, ALP_TEST_PROCESS: id}};
+        args[index] = {...options, env: {...env, ALP_TEST_SLOT: id}};
       }
       send({type: 'spawn', id, owner});
       try { return originalSync.call(this, command, ...args); }

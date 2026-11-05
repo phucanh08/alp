@@ -41,7 +41,7 @@ async function control() {
           // second socket cannot inherit its ACK authority. Latch uncertainty
           // for the entire file, rather than accepting a later apparent ACK.
           if (peers.has(message.id)) { collision = true; socket.destroy(); return; }
-          peer = { id: message.id, socket, ack: false };
+          peer = { id: message.id, slot: message.slot, socket, ack: false };
           peers.set(peer.id, peer);
         } else if (message.type === 'spawn') edges.set(message.id, { owner: peer.id });
         else if (message.type === 'exit' && edges.get(message.id)?.owner === peer.id) edges.delete(message.id);
@@ -51,18 +51,21 @@ async function control() {
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(endpoint, resolve); });
   return {
-    env: { ALP_TEST_CONTROL: endpoint, ALP_TEST_SECRET: secret, ALP_TEST_PROCESS: root,
+    env: { ALP_TEST_CONTROL: endpoint, ALP_TEST_SECRET: secret, ALP_TEST_PROCESS: root, ALP_TEST_SLOT: '',
       NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --require=${JSON.stringify(tracker)}` },
     async cleanup() {
       // Bottom-up ACKs ensure a parent is never killed before its detached
       // descendants have been handled by their actual spawning owners.
       const deadline = Date.now() + 1500;
       const requested = new Set();
-      const uncertain = !peers.has(root) || [...edges.keys()].some(id => !peers.has(id));
+      // One shell call slot can contain several process owners. Only a socket
+      // owns ACK authority; slot membership never replaces that identity.
+      const slotPeers = id => [...peers.values()].filter(peer => peer.slot === id);
+      const uncertain = !peers.has(root) || [...edges.keys()].some(id => slotPeers(id).length === 0);
       while (Date.now() < deadline) {
         for (const peer of peers.values()) {
           if (requested.has(peer.id) || peer.socket.destroyed) continue;
-          const waiting = [...edges].some(([id, edge]) => edge.owner === peer.id && peers.has(id) && !peers.get(id).ack);
+          const waiting = [...edges].some(([id, edge]) => edge.owner === peer.id && slotPeers(id).some(child => !child.socket.destroyed && !child.ack));
           if (!waiting) { requested.add(peer.id); peer.socket.write('{"type":"cleanup"}\n'); }
         }
         if (edges.size === 0 && [...peers.values()].filter(peer => !peer.socket.destroyed).every(peer => peer.ack)) return !uncertain && !collision;
