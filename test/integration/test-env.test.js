@@ -124,3 +124,87 @@ test('runNodeTests removes caller sessions and kills leaked file processes with 
   for (const pid of blockedPids) await waitGone(pid, 16000);
   for (const dir of retained) await rm(dir, {recursive:true, force:true});
 });
+
+for (const method of ['spawnSync', 'execFileSync']) {
+  test(`watchdog keeps scratch when detached ${method} blocks its owner; completed sync passes`, {timeout: 25000}, async t => {
+    const {mkdtemp, writeFile, readFile, access, rm} = await import('node:fs/promises');
+    const {tmpdir} = await import('node:os');
+    const {join} = await import('node:path');
+    const {execFile} = await import('node:child_process');
+    const {promisify} = await import('node:util');
+    const dir = await mkdtemp(join(tmpdir(), 'alp-sync-watchdog-'));
+    const pidFile = join(dir, 'pid');
+    const good = join(dir, 'good.mjs');
+    const blocked = join(dir, 'blocked.mjs');
+    const runner = new URL('../../scripts/test-lib.mjs', import.meta.url).href;
+    const env = {...process.env};
+    delete env.NODE_TEST_CONTEXT;
+    const invoke = async file => {
+      try {
+        return {...await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
+          `import {runNodeTests} from ${JSON.stringify(runner)}; process.exitCode = runNodeTests([${JSON.stringify(file)}], {fileTimeoutMs:2000, privateHome:true});`], {env, timeout:10000}), code:0};
+      } catch (error) { return error; }
+    };
+    // The detached child is responsive but its spawning owner is synchronously
+    // blocked. Only the child's own bounded timer proves its eventual exit.
+    const childCode = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 6500);`;
+    await writeFile(good, `import {${method}} from 'node:child_process'; ${method}(process.execPath, ['-e', ''], {stdio:'ignore'});`);
+    await writeFile(blocked, `import {${method}} from 'node:child_process'; ${method}(process.execPath, ['-e', ${JSON.stringify(childCode)}], {detached:true, stdio:'ignore'});`);
+    let retained = [];
+    t.after(async () => {
+      let pid;
+      try { pid = Number(await readFile(pidFile, 'utf8')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      if (pid) {
+        const until = Date.now() + 10000;
+        while (true) {
+          try { process.kill(pid, 0); } catch (error) { assert.equal(error.code, 'ESRCH'); break; }
+          assert.ok(Date.now() < until, 'sync fixture must exit before scratch removal');
+          await new Promise(resolve => setTimeout(resolve, 25));
+        }
+      }
+      for (const path of [...retained, dir]) await rm(path, {recursive:true, force:true});
+    });
+    const normal = await invoke(good);
+    assert.equal(normal.code, 0, normal.stderr);
+    const started = Date.now();
+    const result = await invoke(blocked);
+    retained = result.stderr.match(/warning: cleanup unconfirmed; retained (.+)/)?.[1].split(', ') || [];
+    assert.equal(result.code, 1, result.stderr);
+    assert.ok(Date.now() - started < 6000, 'cleanup is bounded while synchronous owner blocks');
+    assert.ok(result.stderr.includes('CLEANUP-UNCONFIRMED'), result.stderr);
+    process.kill(Number(await readFile(pidFile, 'utf8')), 0); // still live; retention is necessary
+    assert.ok(retained.length >= 2, result.stderr);
+    for (const path of retained) await access(path);
+  });
+}
+
+test('duplicate control registration cannot replace an owner or clear cleanup uncertainty', {timeout:10000}, async t => {
+  const {mkdtemp, writeFile, access, rm} = await import('node:fs/promises');
+  const {tmpdir} = await import('node:os');
+  const {join} = await import('node:path');
+  const {execFile} = await import('node:child_process');
+  const {promisify} = await import('node:util');
+  const dir = await mkdtemp(join(tmpdir(), 'alp-duplicate-watchdog-'));
+  const file = join(dir, 'duplicate.mjs');
+  let retained = [];
+  t.after(async () => {
+    for (const path of [...retained, dir]) await rm(path, {recursive:true, force:true});
+  });
+  await writeFile(file, `import {createConnection} from 'node:net';
+    const socket = createConnection(process.env.ALP_TEST_CONTROL);
+    socket.on('error', () => {});
+    socket.on('connect', () => socket.end(JSON.stringify({type:'hello', id:process.env.ALP_TEST_PROCESS, token:process.env.ALP_TEST_SECRET})+'\\n'+JSON.stringify({type:'ack'})+'\\n'));
+    setTimeout(() => {}, 100);`);
+  const env = {...process.env}; delete env.NODE_TEST_CONTEXT;
+  const runner = new URL('../../scripts/test-lib.mjs', import.meta.url).href;
+  let result;
+  try {
+    result = {...await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
+      `import {runNodeTests} from ${JSON.stringify(runner)}; process.exitCode = runNodeTests([${JSON.stringify(file)}], {fileTimeoutMs:2000, privateHome:true});`], {env, timeout:7000}), code:0};
+  } catch (error) { result = error; }
+  retained = result.stderr.match(/warning: cleanup unconfirmed; retained (.+)/)?.[1].split(', ') || [];
+  assert.equal(result.code, 1, result.stderr);
+  assert.ok(result.stderr.includes('CLEANUP-UNCONFIRMED'), result.stderr);
+  assert.ok(retained.length >= 2, result.stderr);
+  for (const path of retained) await access(path);
+});

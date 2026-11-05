@@ -19,6 +19,7 @@ async function control() {
   const root = randomUUID();
   const endpoint = process.platform === 'win32' ? ['', '', '.', 'pipe', `alp-test-${root}`].join(String.fromCharCode(92)) : join(tmpdir(), `at-${root.slice(0, 8)}.sock`);
   const peers = new Map();
+  let collision = false;
   const edges = new Map();
   const sockets = new Set();
   const server = createServer(socket => {
@@ -36,6 +37,10 @@ async function control() {
         try { message = JSON.parse(line); } catch { socket.destroy(); return; }
         if (!peer) {
           if (message.type !== 'hello' || message.token !== secret) { socket.destroy(); return; }
+          // Never replace a registered owner, even after disconnection: a
+          // second socket cannot inherit its ACK authority. Latch uncertainty
+          // for the entire file, rather than accepting a later apparent ACK.
+          if (peers.has(message.id)) { collision = true; socket.destroy(); return; }
           peer = { id: message.id, socket, ack: false };
           peers.set(peer.id, peer);
         } else if (message.type === 'spawn') edges.set(message.id, { owner: peer.id });
@@ -60,7 +65,7 @@ async function control() {
           const waiting = [...edges].some(([id, edge]) => edge.owner === peer.id && peers.has(id) && !peers.get(id).ack);
           if (!waiting) { requested.add(peer.id); peer.socket.write('{"type":"cleanup"}\n'); }
         }
-        if (edges.size === 0 && [...peers.values()].filter(peer => !peer.socket.destroyed).every(peer => peer.ack)) return !uncertain;
+        if (edges.size === 0 && [...peers.values()].filter(peer => !peer.socket.destroyed).every(peer => peer.ack)) return !uncertain && !collision;
         await delay(20);
       }
       return false;
