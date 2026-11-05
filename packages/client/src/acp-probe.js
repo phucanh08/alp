@@ -7,12 +7,17 @@ import { stdioSession } from './mcp-probe.js';
  * it also opens a session in `cwd`, as Paseo does, to read the models and modes the agent
  * offers (ALPD §65); an agent that offers none leaves them out.
  * @param {{ command: string, args?: string[], env?: Record<string, string>, label?: string, id?: string }} provider
- * @param {{ cwd?: string, timeoutMs?: number, discover?: boolean }} [options]
+ * @param {{ cwd?: string, timeoutMs?: number, discover?: boolean, signal?: AbortSignal }} [options]
  * @returns {Promise<{ protocolVersion: number, agent?: { name?: string, title?: string, version?: string }, loadSession: boolean, mcpHttp: boolean, authMethods: string[],
  *   models?: Array<{ id: string, label: string, description?: string }>, currentModel?: string, modes?: Array<{ id: string, label: string, description?: string }>, currentMode?: string }>}
  */
-export async function probeAcp(provider, { cwd, timeoutMs = 20_000, discover = false } = {}) {
+export async function probeAcp(provider, { cwd, timeoutMs = 20_000, discover = false, signal } = {}) {
+  signal?.throwIfAborted();
   const session = stdioSession({ command: provider.command, args: provider.args ?? [], env: provider.env ?? {} }, cwd, timeoutMs);
+  let closing;
+  const abort = () => { closing ??= session.close(); };
+  signal?.addEventListener('abort', abort, { once: true });
+  if (signal?.aborted) abort();
   try {
     const result = await session.request('initialize', {
       protocolVersion: 1,
@@ -41,6 +46,8 @@ export async function probeAcp(provider, { cwd, timeoutMs = 20_000, discover = f
       authMethods: (result.authMethods ?? []).map(method => method?.name ?? method?.id).filter(Boolean),
     };
   } finally {
-    await session.close();
+    signal?.removeEventListener('abort', abort);
+    await (closing ?? session.close());
+    signal?.throwIfAborted();
   }
 }

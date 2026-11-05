@@ -42,9 +42,9 @@ export function parseAgyModels(stdout: string): LiveModel[] {
   }).filter(model => model.id && /^[A-Za-z0-9][\w.:\-\[\]/]*$/.test(model.id));
 }
 
-export function antigravityProbe(command = process.env.ALP_ANTIGRAVITY_BIN ?? 'agy', env: NodeJS.ProcessEnv = process.env): Probe {
+export function antigravityProbe(command = process.env.ALP_ANTIGRAVITY_BIN ?? 'agy', env: NodeJS.ProcessEnv = process.env, args: string[] = []): Probe {
   return signal => new Promise((resolve, reject) => {
-    const child = spawn(command, ['models'], { cwd: os.tmpdir(), env, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, signal });
+    const child = spawn(command, [...args, 'models'], { cwd: os.tmpdir(), env, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, signal });
     let stdout = '';
     // A model list is small; more than this is not one.
     child.stdout.on('data', chunk => { stdout += chunk; if (stdout.length > 256 * 1024) child.kill('SIGKILL'); });
