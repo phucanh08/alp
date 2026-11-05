@@ -210,6 +210,10 @@ the same id replaces one whole.
   powers: full access by default, the task graph, issues, lessons and a supervisor.
 - Every other member has a `role`: `lead`, `peer`, `advisor` or `reviewer`. Members
   with role `peer` count toward `maxPeers`; peers and advisors may run in parallel.
+- A member serving as `advisor` or `reviewer` is read-only, whatever its name: its
+  sessions are capped at read-only even when the caller, its `agent.json` mode or a
+  permission profile asks for more (a profile's rules still apply), and it takes no tasks.
+  The same agent serving as `lead` or `peer` in another team keeps its own permissions.
 - `model` and `thinking` on a member come before the agent's own `agent.json`.
   Settings' `runtime` and the caller still come first.
 - `delegation` says who may assign work to whom. It names only members, never

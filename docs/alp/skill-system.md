@@ -33,9 +33,11 @@ An agent's context holds only what it needs to choose a skill. The rest stays in
   Skills of other roles are not listed.
 - A skill never adds authority: the session's mode and permission profile decide what an
   agent may do, whatever a skill or its `allowed-tools` says.
-- Each first read of a skill is logged (`✦ peer uses skill bug-loop`), and so is each
-  first opening of one of its resources (`✦ peer opens bug-loop/references/test-proof.md`),
-  so `alp log` shows what was loaded on demand.
+- Each first read of a skill is logged (`✦ peer uses skill bug-loop`), and so is the first
+  read of each of its resources (`✦ peer reads bug-loop/references/test-proof.md`) and the
+  first run of each script (`✦ peer runs feature-architecture/scripts/check-boundaries.mjs`),
+  so `alp log` shows what was loaded on demand. Only what a call asks for counts: a file a
+  tool printed, listed, copied, edited or merely named is not logged.
 
 How each runtime gets skills:
 
@@ -112,7 +114,12 @@ strict validation or whose body links files the skill would not have.
   (the validator enforces it). A shipped script starting with `#!` is made executable
   where ALP writes it.
 - `alp skill cp` copies the whole skill directory (bytes and modes kept) and refuses a
-  source that contains a symlink.
+  source that contains a symlink; `cp`, `mv` and `alp skill new --from` set the copy's
+  frontmatter `name` to its new directory, and refuse a destination name the format does
+  not allow.
+- `alp skill new` holds a new skill to the format strictly (frontmatter, name, keys) and
+  notes links to files it does not have yet; `alp skill edit` saves existing skills as
+  before and prints what does not meet the format.
 - Library and project skills are used in place: Claude's plugin links the directory, other
   runtimes read the files, so your bytes and permissions are what agents see.
 
@@ -151,8 +158,11 @@ alp pack install frontend --project   # into this project's .alp/
 | operations | devops | lead, peer |
 | architecture | agents architect and docs-maintainer, team blueprint | — |
 
-- An entry that already exists (yours, or installed before) is kept, never overwritten;
-  updates of ALP never touch installed pack skills.
+- An entry that already exists (yours, or installed before, a symbolic link included) is
+  kept, never overwritten; updates of ALP never touch installed pack skills.
+- Installation writes only below the scope's real directory and through no symbolic link:
+  a link in `.alp/`, its `skills/`, `agents/`, `teams/` or `settings.json` refuses the install
+  before anything is written.
 - Nothing is installed besides files, and no dependency is fetched.
 - `--assign` appends to `role-skills.json` in the library; in a project, name skills in a
   project agent (`alp agent edit lead --project --skills backend-development`).
@@ -166,9 +176,11 @@ built-in ones:
 
 - **architect** — team role `advisor`, read-only: architecture fit, boilerplate
   compliance, dependency direction, ADR recommendations. It recommends; main (and the user)
-  decide. Installing the pack adds `"architect": "read-only"` to `permissions.agents` in the
-  same scope's settings when the agent has no entry; an existing entry is reported, never
-  changed. Delegations to it are capped read-only even when the caller asks for writes.
+  decide. As an advisor it is read-only by its role in the team, whatever a profile or the
+  caller asks ([teams](agent-library.md#teams)). Installing the pack also adds
+  `"architect": "read-only"` to `permissions.agents` when the pack installed the agent and
+  it has no entry, so it stays read-only in teams where it has another role; an existing
+  entry, or an architect of your own, is reported, never changed.
 - **docs-maintainer** — team role `peer`: architecture docs, API docs, migration guides,
   ADRs, links and examples, inside the paths its brief or task assigns.
 - **blueprint** team — main accepts; lead runs execution with peer and docs-maintainer;
@@ -197,13 +209,14 @@ For projects with architecture docs or boilerplate:
 4. Gate on it with a blocking hook that the agents doing the work name:
 
 ```sh
-alp hook add architecture --project --event handoff --command "node tools/check-boundaries.mjs" --blocking
+alp hook add architecture --project --event handoff --command "node tools/check-boundaries.mjs --base main" --blocking
 alp agent edit peer --project --hooks architecture
 ```
 
 A violation refuses the handoff with `file:line  from -> to: rule` as the reason. An
-exception is a recorded decision in the contract (`reason`, `approvedBy`), never a silent
-edit. `test/fixtures/architecture-app` and `test/integration/architecture-contract.test.js`
+exception is a recorded decision in the contract (one file, `reason`, `approvedBy`,
+optional `expires`), never a silent edit; with `--base`, any loosening of the contract since
+that ref also refuses until a reviewer runs the check with `--approved-by`. `test/fixtures/architecture-app` and `test/integration/architecture-contract.test.js`
 show a valid feature passing and a deliberate violation caught, both by the checker and as
 a refused peer handoff (`test/integration/hooks.test.js`).
 
