@@ -26,7 +26,7 @@ test('"/" suggests every command and skill of main, filters as it is typed, and 
   await expect(options.filter({ hasText: '/xia' })).toContainText('skill');
   await page.screenshot({ path: process.env.ALP_SLASH_SCREENSHOT ?? test.info().outputPath('slash.png') });
 
-  await composer.pressSequentially('se');
+  await composer.pressSequentially('seq');
   await expect(options).toHaveCount(1);
   await expect(options.first()).toContainText('/sequence-execution-plan');
   await composer.press('Enter');
