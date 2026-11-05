@@ -1,0 +1,19 @@
+{
+  "label": "Blueprint",
+  "description": "Architecture-heavy work: main accepts, lead runs execution with peers, a read-only architect advises, a docs maintainer keeps docs in sync, a reviewer checks independently.",
+  "main": "main",
+  "members": {
+    "main": { "model": "claude:claude-opus-5-5", "thinking": "high" },
+    "lead": { "role": "lead" },
+    "architect": { "role": "advisor" },
+    "peer": { "role": "peer" },
+    "docs-maintainer": { "role": "peer" },
+    "reviewer": { "role": "reviewer" }
+  },
+  "delegation": {
+    "main": ["lead", "architect", "reviewer"],
+    "lead": ["peer", "docs-maintainer", "architect", "reviewer"]
+  },
+  "maxPeers": 2,
+  "supervisor": { "agent": "supervisor", "model": "claude:claude-sonnet-5", "thinking": "medium" }
+}

@@ -1,0 +1,7 @@
+{
+  "label": "Architecture",
+  "description": "A read-only architect advisor, a docs-maintainer peer and the Blueprint team for architecture-heavy work; they use the core skills feature-architecture and architecture-docs.",
+  "agents": ["architect", "docs-maintainer"],
+  "teams": ["blueprint"],
+  "permissions": { "architect": "read-only" }
+}

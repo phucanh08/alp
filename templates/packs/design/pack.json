@@ -1,0 +1,6 @@
+{
+  "label": "Design",
+  "description": "UI and UX decisions: layout, typography, tokens, interaction states, and review against usability and accessibility guidelines.",
+  "skills": ["ui-design"],
+  "assign": { "lead": ["ui-design"], "peer": ["ui-design"] }
+}

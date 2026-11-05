@@ -1,0 +1,5 @@
+{
+  "description": "Read-only architecture advisor: boilerplate fit, dependency direction, ADR recommendations",
+  "mode": "read-only",
+  "skills": ["feature-architecture", "architecture-docs"]
+}
