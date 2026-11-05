@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -58,15 +58,24 @@ export function hermeticEnv(env = process.env) {
 export const isCallerBinary = name => /^ALP_[A-Z0-9_]+_BIN$/i.test(name);
 
 /**
- * `env` that also cannot reach the caller's own installation (t-bfbd): no ALP_*_BIN overrides and a
- * private home, so the code under test does not find the caller's providers or ~/.alp/bin through
- * os.homedir(), which is USERPROFILE on Windows and HOME elsewhere.
+ * Redirect home/profile-based discovery to the private home (t-bfbd), removing
+ * caller ALP_*_BIN overrides. PATH stays available for normal tool execution.
+ * This is test environment isolation, not a filesystem sandbox.
  */
 export function homelessEnv(env, home) {
   const result = { ...env };
   // Windows names are case-insensitive: drop every spelling so the child sees only the private one.
-  for (const name of Object.keys(result)) if (isCallerBinary(name) || /^(HOME|USERPROFILE)$/i.test(name)) delete result[name];
-  return { ...result, HOME: home, USERPROFILE: home };
+  for (const name of Object.keys(result)) if (isCallerBinary(name) || /^(HOME|USERPROFILE|APPDATA|LOCALAPPDATA|HOMEDRIVE|HOMEPATH)$/i.test(name)) delete result[name];
+  // Use the private profile for Windows consumers that bypass os.homedir().
+  // A drive/UNC home also defines the legacy HOMEDRIVE + HOMEPATH pair.
+  const windowsRoot = path.win32.parse(home).root;
+  const drive = windowsRoot.includes('\\') ? windowsRoot.replace(/[\\/]$/, '') : '';
+  const profilePath = drive ? path.win32 : path;
+  return { ...result, HOME: home, USERPROFILE: home,
+    APPDATA: profilePath.join(home, 'AppData', 'Roaming'),
+    LOCALAPPDATA: profilePath.join(home, 'AppData', 'Local'),
+    ...(drive ? { HOMEDRIVE: drive, HOMEPATH: home.slice(drive.length) || '\\' } : {}),
+  };
 }
 
 /**
@@ -95,6 +104,7 @@ export function runNodeTests(files, { extra = [], privateHome = false, fileTimeo
     // alpd under test never asks the real providers for models (t-e5ee); a test that wants it unsets this.
     // A per-file hard watchdog also cuts off leaked handles after five minutes.
     const base = user ? homelessEnv(hermeticEnv(), user) : hermeticEnv();
+    if (user) for (const directory of [base.APPDATA, base.LOCALAPPDATA]) mkdirSync(directory, { recursive: true });
     const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts/test-file-watchdog.mjs'), JSON.stringify({ files, extra, fileTimeoutMs })], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...base, ALP_TEST_RETAIN: retain, ALP_HOME: home, TMPDIR: scratch, TMP: scratch, TEMP: scratch } });
     if (result.error || result.signal || result.status === null) writeFileSync(retain, 'coordinator failed\n');
     return result.status ?? 1;

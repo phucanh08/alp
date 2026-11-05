@@ -2,6 +2,7 @@
 // privateHome no caller executables or home either.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { hermeticEnv, homelessEnv, isCallerBinary } from '../../scripts/test-lib.mjs';
 
 test('isCallerBinary: ALP_<NAME>_BIN in any case, nothing else', () => {
@@ -9,16 +10,31 @@ test('isCallerBinary: ALP_<NAME>_BIN in any case, nothing else', () => {
   for (const name of ['ALP_BIN', 'ALP_HOME', 'ALP_BINARY', 'ALP_CODEX_BIN_DIR', 'MY_ALP_CODEX_BIN', 'PATH']) assert.equal(isCallerBinary(name), false, name);
 });
 
-test('homelessEnv: drops ALP_*_BIN and every spelling of HOME/USERPROFILE; keeps the rest', () => {
+test('homelessEnv: drops ALP_*_BIN and every spelling of private profile variables; keeps tools', () => {
   const caller = { PATH: 'p', ALP_HOME: 'h', ALP_CODEX_BIN: 'c', alp_gh_bin: 'g', HOME: '/home/me', UserProfile: 'C:\Users\me', home: 'x', ALP_TERMINAL: '1' };
   const env = homelessEnv(caller, '/tmp/u');
-  assert.deepEqual(env, { PATH: 'p', ALP_HOME: 'h', ALP_TERMINAL: '1', HOME: '/tmp/u', USERPROFILE: '/tmp/u' });
+  assert.deepEqual(env, { PATH: 'p', ALP_HOME: 'h', ALP_TERMINAL: '1', HOME: '/tmp/u', USERPROFILE: '/tmp/u', APPDATA: path.join('/tmp/u', 'AppData', 'Roaming'), LOCALAPPDATA: path.join('/tmp/u', 'AppData', 'Local') });
   assert.equal(caller.ALP_CODEX_BIN, 'c', 'the caller env is not changed');
+});
+
+test('homelessEnv isolates Windows profile variables case-insensitively', () => {
+  const caller = { PATH: 'tools', AppData: 'host-roaming', LOCALAPPDATA: 'host-local',
+    HomeDrive: 'Z:', HOMEPATH: '\\Users\\host', appdata: 'other-host' };
+  const env = homelessEnv(caller, 'C:\\private\\user');
+  assert.equal(env.APPDATA, 'C:\\private\\user\\AppData\\Roaming');
+  assert.equal(env.LOCALAPPDATA, 'C:\\private\\user\\AppData\\Local');
+  assert.equal(env.HOMEDRIVE + env.HOMEPATH, 'C:\\private\\user');
+  for (const name of ['AppData', 'HomeDrive', 'appdata']) assert.equal(env[name], undefined);
+  assert.equal(env.PATH, 'tools');
+  assert.equal(caller.AppData, 'host-roaming');
+  const unc = homelessEnv(caller, '\\\\server\\share\\private');
+  assert.equal(unc.HOMEDRIVE + unc.HOMEPATH, unc.USERPROFILE);
+  assert.equal(unc.APPDATA, '\\\\server\\share\\private\\AppData\\Roaming');
 });
 
 test('hermeticEnv then homelessEnv: neither the caller session nor its executables reach the run', () => {
   const env = homelessEnv(hermeticEnv({ ALP_AGENT_SESSION: 's', ALP_BRIDGE_TOKEN: 't', ALP_CLAUDE_BIN: 'c', KEEP: 'k' }), 'u');
-  assert.deepEqual(env, { KEEP: 'k', HOME: 'u', USERPROFILE: 'u' });
+  assert.deepEqual(env, { KEEP: 'k', HOME: 'u', USERPROFILE: 'u', APPDATA: path.join('u', 'AppData', 'Roaming'), LOCALAPPDATA: path.join('u', 'AppData', 'Local') });
 });
 
 test('normal runner isolates sessions and permits an unreferenced esbuild service', {timeout:15000}, async t => {
@@ -31,9 +47,16 @@ test('normal runner isolates sessions and permits an unreferenced esbuild servic
   t.after(()=>rm(directory,{recursive:true,force:true}));
   const file = path.join(directory,'normal.test.mjs');
   await writeFile(file, `import assert from 'node:assert/strict';
+    import path from 'node:path';
     import {build} from ${JSON.stringify(new URL('../../node_modules/esbuild/lib/main.js',import.meta.url).href)};
     assert.equal(process.env.ALP_AGENT_SESSION,undefined);
     assert.equal(process.env.ALP_BRIDGE_TOKEN,undefined);
+    const {existsSync} = await import('node:fs');
+    for(const name of ['APPDATA','LOCALAPPDATA']) {
+      assert.ok(existsSync(process.env[name]),name+' exists');
+      assert.ok(path.relative(process.env.HOME,process.env[name]).startsWith('AppData'),name+' is private');
+    }
+    if(process.platform==='win32') assert.equal(process.env.HOMEDRIVE+process.env.HOMEPATH,process.env.USERPROFILE);
     await build({stdin:{contents:'export const value=1'},write:false});
     console.log('scratch='+JSON.stringify([process.env.ALP_HOME,process.env.TMPDIR,process.env.HOME]));`);
   const runner = new URL('../../scripts/test-lib.mjs',import.meta.url).href;
