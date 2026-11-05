@@ -352,16 +352,85 @@ test('old Codex compact echoes require actual accepted turn and exact input; spo
   metadata.clientMessageId = main.started[1].params.clientUserMessageId;
   spoof[0].text = spoof[0].text.slice(0, spoof[0].text.indexOf('{')) + JSON.stringify(metadata);
   turns = [
-    { id: main.turnId, items: [{ type: 'userMessage', id: 'old-compact-echo', content: echo }] },
+    { id: main.turnId, items: [
+      { type: 'userMessage', id: 'old-compact-echo', content: echo },
+      { type: 'userMessage', id: 'new-compact-echo', clientId: main.started[1].params.clientUserMessageId, content: echo },
+    ] },
     { id: main.turnId, items: [{ type: 'userMessage', id: 'spoofed-layout', content: spoof }] },
     { id: 'real-user-turn', items: [{ type: 'userMessage', id: 'copied-envelope', content: echo },
       { type: 'userMessage', id: 'real-user', content: [{ type: 'text', text: 'ALP compact checkpoint: please explain these words' }] },
-      { type: 'userMessage', id: 'historical', content: main.started[0].params.input }] },
+      { type: 'userMessage', id: 'historical', content: main.started[0].params.input },
+      { type: 'userMessage', id: 'unknown-prefixed-history', clientId: 'alp-wake-compact-unknown', content: [{ type: 'text', text: 'Historical user words' }] }] },
   ];
   await runtime.open('replay', { cwd: root, restore: { agent: 'main', threadId: main.threadId, runtime: 'codex', model: 'gpt-5.6-sol' } }, { history: 'replay' });
-  assert.equal(events.some(event => event.type === 'item' && event.item.id === 'old-compact-echo'), false);
-  for (const id of ['real-user', 'historical', 'spoofed-layout', 'copied-envelope']) assert.ok(events.some(event => event.type === 'item' && event.item.id === id), id);
+  for (const id of ['old-compact-echo', 'new-compact-echo']) assert.equal(events.some(event => event.type === 'item' && event.item.id === id), false, id);
+  for (const id of ['real-user', 'historical', 'spoofed-layout', 'copied-envelope', 'unknown-prefixed-history']) assert.ok(events.some(event => event.type === 'item' && event.item.id === id), id);
 
+});
+
+test('public compact-prefixed IDs remain user messages, including exact old Codex replays', async t => {
+  let turns = [];
+  const { root, runtime, main, events } = await open(t, { model: 'codex:gpt-5.6-sol', transport: agent => {
+    const request = agent.request.bind(agent);
+    agent.request = async (method, params) => {
+      const result = await request(method, params);
+      if (method.startsWith('thread/') && result.thread) result.thread.turns = turns;
+      return result;
+    };
+    return agent;
+  } });
+  main.finish('done');
+  await settle();
+  const clientMessageId = 'alp-wake-compact-user-chosen';
+  await runtime.prompt('root', { clientMessageId, delivery: 'auto', content: [{ type: 'text', text: 'Ordinary user text' }] });
+  turns = [{ id: main.turnId, items: [
+    { type: 'userMessage', id: 'public-no-id', content: main.started.at(-1).params.input },
+    { type: 'userMessage', id: 'public-with-id', clientId: clientMessageId, content: main.started.at(-1).params.input },
+  ] }];
+  await runtime.open('public-replay', { cwd: root, restore: { agent: 'main', threadId: main.threadId, runtime: 'codex', model: 'gpt-5.6-sol' } }, { history: 'replay' });
+  for (const id of ['public-no-id', 'public-with-id']) assert.ok(events.some(event => event.type === 'item' && event.item.id === id && event.item.text === 'Ordinary user text'), id);
+  assert.ok(events.some(event => event.type === 'item' && event.item.kind === 'user_message' && event.item.clientMessageId === clientMessageId && event.item.origin === 'user'), 'accepted public prompt visible immediately');
+});
+
+test('closing a compact owner releases its old threads after restart, preserving other owners', async t => {
+  const histories = new Map();
+  const { root, runtime, main, runtimes, events } = await open(t, { model: 'codex:gpt-5.6-sol', transport: agent => {
+    const request = agent.request.bind(agent);
+    agent.request = async (method, params) => {
+      if (method === 'thread/compact/start') throw new Error('unsupported');
+      const result = await request(method, params);
+      if (method.startsWith('thread/') && result.thread) result.thread.turns = histories.get(params?.threadId) ?? [];
+      return result;
+    };
+    return agent;
+  } });
+  main.usage(80_000);
+  main.finish('done');
+  await until(() => main.started.length === 2);
+  await settle();
+  histories.set(main.threadId, [{ id: main.turnId, items: [{ type: 'userMessage', id: 'owner-A', content: main.started[1].params.input }] }]);
+  main.finish(CHECKPOINT);
+  await until(() => runtimes.length === 2 && runtimes[1].started.length === 1);
+  const fresh = runtimes[1];
+  await settle();
+  histories.set(fresh.threadId, [{ id: fresh.turnId, items: [{ type: 'userMessage', id: 'owner-B', content: fresh.started[0].params.input }] }]);
+  // A second live session owns its own compact record, even while replaying the same old thread.
+  await runtime.open('other', { cwd: root, restore: { agent: 'main', threadId: main.threadId, runtime: 'codex', model: 'gpt-5.6-sol' } }, { history: 'replay' });
+  assert.equal(events.some(event => event.type === 'item' && event.item.id === 'owner-A'), false, 'shared replay works while owner lives');
+  const other = runtimes.at(-1);
+  runtime.compact('other');
+  await until(() => other.started.length === 1);
+  await settle();
+  const otherItem = { type: 'userMessage', id: 'other-owner', content: other.started[0].params.input };
+  const otherTurn = other.turnId;
+  await runtime.close('root');
+  for (const [threadId, id] of [[main.threadId, 'owner-A'], [fresh.threadId, 'owner-B']]) {
+    await runtime.open(`after-${id}`, { cwd: root, restore: { agent: 'main', threadId, runtime: 'codex', model: 'gpt-5.6-sol' } }, { history: 'replay' });
+    assert.ok(events.some(event => event.type === 'item' && event.item.id === id), `${id} no longer retained`);
+  }
+  histories.set(other.threadId, [{ id: otherTurn, items: [otherItem] }]);
+  await runtime.open('other-replay', { cwd: root, restore: { agent: 'main', threadId: other.threadId, runtime: 'codex', model: 'gpt-5.6-sol' } }, { history: 'replay' });
+  assert.equal(events.some(event => event.type === 'item' && event.item.id === 'other-owner'), false, 'unrelated owner record retained');
 });
 
 test('failed checkpoint start reports failure without claiming checkpoint started', async t => {
