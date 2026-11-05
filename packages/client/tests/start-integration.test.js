@@ -18,7 +18,9 @@ after(async () => {
     if (/started-[^/\\]+\.json$/.test(file)) pids.push(JSON.parse(await readFile(path.join(outer, file), 'utf8')).pid);
   }
   for (const pid of pids) { try { process.kill(pid, 'SIGKILL'); } catch {} }
-  await rm(outer, { recursive: true, force: true });
+  // Windows may release a killed service's cwd handle asynchronously. Retry only
+  // removal of this fixture's own directory, with a bounded filesystem wait.
+  await rm(outer, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
 });
 
 /** A service entry: records how it was started, then publishes its ready lock and <name>.json and stays up. */
