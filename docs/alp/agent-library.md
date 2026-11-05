@@ -274,6 +274,14 @@ alp mcp rm docs
 The Paseo plugin offers the same operations to its settings screen as `alp.library.*`
 RPC.
 
+## Packs and skill checks
+
+Optional packs ship specialist skills, the `architect` and `docs-maintainer` agents and
+the Blueprint team without seeding them: `alp packs` lists them, `alp pack install <id>
+[--project] [--assign]` copies one in and keeps any entry you already have. `alp skill
+check [name|DIR] [--strict]` validates skills against the Agent Skills format, and `alp
+skill cp` copies a skill's whole directory. See [skill system](skill-system.md).
+
 ## Listing
 
 ```sh
