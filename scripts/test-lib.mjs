@@ -74,9 +74,12 @@ export function homelessEnv(env, home) {
  * ALP session variables, so no run touches the user's ~/.alp or leaves directories in the temp dir.
  * `privateHome` also removes ALP_*_BIN and gives the run a throwaway HOME/USERPROFILE (homelessEnv):
  * the windows-daemon CI lane runs that way (t-bfbd).
+ * Each file reports START/PASS/FAIL and has a hard `fileTimeoutMs` (default five
+ * minutes), including leaked handles after tests finish. A timeout kills its process tree.
  */
-export function runNodeTests(files, { extra = [], privateHome = false } = {}) {
+export function runNodeTests(files, { extra = [], privateHome = false, fileTimeoutMs = 300_000 } = {}) {
   if (!files.length) throw new Error('no test files selected');
+  if (!Number.isSafeInteger(fileTimeoutMs) || fileTimeoutMs <= 0 || fileTimeoutMs > 2_147_483_647) throw new Error('fileTimeoutMs must be a positive timer interval');
   const home = mkdtempSync(path.join(os.tmpdir(), 'alp-test-'));
   const user = privateHome ? mkdtempSync(path.join(os.tmpdir(), 'alpu-')) : undefined;
   // Every temporary directory the tests (and alpd, providers and Node under them) make goes in one
@@ -85,9 +88,9 @@ export function runNodeTests(files, { extra = [], privateHome = false } = {}) {
   const scratch = mkdtempSync(path.join(os.tmpdir(), 'alpt-'));
   try {
     // alpd under test never asks the real providers for models (t-e5ee); a test that wants it unsets this.
-    // A hung test fails after 5 minutes instead of stalling the CI job until its timeout (t-ffbd).
+    // A per-file process-tree watchdog also cuts off leaked handles after five minutes.
     const base = user ? homelessEnv(hermeticEnv(), user) : hermeticEnv();
-    const result = spawnSync(process.execPath, ['--test', '--test-timeout=300000', ...extra, ...files], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...base, ALP_HOME: home, TMPDIR: scratch, TMP: scratch, TEMP: scratch } });
+    const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts/test-file-watchdog.mjs'), JSON.stringify({ files, extra, fileTimeoutMs })], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...base, ALP_HOME: home, TMPDIR: scratch, TMP: scratch, TEMP: scratch } });
     return result.status ?? 1;
   } finally {
     // A directory a lingering child still holds must not turn a passing run into a failure.

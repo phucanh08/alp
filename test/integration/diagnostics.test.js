@@ -435,6 +435,7 @@ test('alp doctor counts a clone with local tags or refs no remote-tracking ref m
   await git(seed, 'push', '-q', origin, 'main');
   const clone = async name => { const target = path.join(temp, name); await run('git', ['clone', '-q', origin, target], { env }); return target; };
   await clone('alp-plain-clone');
+  await git(await clone('alp-slash-remote'), 'remote', 'rename', 'origin', 'group/origin');
   // Tags on a commit the remote already has: the commit is pushed, the tag may not be.
   await git(await clone('alp-light-tag'), 'tag', 'v-light');
   await git(await clone('alp-annotated-tag'), 'tag', '-a', '-m', 'only here', 'v-annotated');
@@ -464,6 +465,7 @@ test('alp doctor counts a clone with local tags or refs no remote-tracking ref m
   const unpushed = ref => ['unpushed', `local refs no remote-tracking ref mirrors: ${ref}`, false];
   assert.deepEqual(found, {
     'alp-plain-clone': ['clean-pushed', undefined, true],
+    'alp-slash-remote': ['clean-pushed', undefined, true],
     'alp-light-tag': unpushed('refs/tags/v-light'),
     'alp-annotated-tag': unpushed('refs/tags/v-annotated'),
     'alp-local-branch': unpushed('refs/heads/only-here'),
@@ -479,12 +481,16 @@ test('alp doctor stops classifying leftovers at its deadline, even with git comm
   const { directory, home } = await privateHome(t);
   const temp = path.join(directory, 'tmp');
   for (let index = 0; index < 20; index++) await mkdir(path.join(temp, `alp-${index}`, '.git'), { recursive: true });
-  // A git that never answers on its own: each command ends only when its timeout cuts it off.
+  // Keep git pending until doctor returns. A setTimeout(timeoutMs) stub can fire a
+  // millisecond early: its failed command is then legitimately classified before the
+  // deadline. That tests timer rounding, not doctor's hard deadline.
   const timeouts = [];
+  const releases = [];
+  t.after(() => { for (const release of releases) release(); });
   const run = (command, args, { timeoutMs }) => {
     if (command !== 'git') return Promise.resolve({ code: 0, stdout: '', stderr: '' });
     timeouts.push(timeoutMs);
-    return new Promise(resolve => setTimeout(() => resolve({ code: -1, stdout: '', stderr: 'killed' }), timeoutMs));
+    return new Promise(resolve => releases.push(() => resolve({ code: -1, stdout: '', stderr: 'killed' })));
   };
   const started = Date.now();
   const check = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], cwd: directory, run, classifyMs: 300, recentMs: 0 });

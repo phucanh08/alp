@@ -20,3 +20,50 @@ test('hermeticEnv then homelessEnv: neither the caller session nor its executabl
   const env = homelessEnv(hermeticEnv({ ALP_AGENT_SESSION: 's', ALP_BRIDGE_TOKEN: 't', ALP_CLAUDE_BIN: 'c', KEEP: 'k' }), 'u');
   assert.deepEqual(env, { KEEP: 'k', HOME: 'u', USERPROFILE: 'u' });
 });
+
+test('runNodeTests removes caller sessions and kills leaked file processes with named progress (t-50af)', { timeout: 30_000 }, async t => {
+  const { mkdtemp, writeFile, readFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const path = await import('node:path');
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-watchdog-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const pidFile = path.join(directory, 'pid');
+  const leak = path.join(directory, 'leak.test.mjs');
+  const good = path.join(directory, 'good.test.mjs');
+  await writeFile(leak, `import { writeFileSync } from 'node:fs';
+    writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+    setInterval(() => {}, 50);`);
+  await writeFile(good, `import assert from 'node:assert/strict';
+    assert.equal(process.env.ALP_AGENT_SESSION, undefined);
+    assert.equal(process.env.ALP_BRIDGE_TOKEN, undefined);`);
+  const runner = new URL('../../scripts/test-lib.mjs', import.meta.url).href;
+  const env = { ...process.env, ALP_AGENT_SESSION: 'injected-session', ALP_BRIDGE_TOKEN: 'injected-token' };
+  delete env.NODE_TEST_CONTEXT; // this deliberately starts a new runner, not a nested node:test context
+  const invoke = async files => {
+    try {
+      const output = await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
+        `import {runNodeTests} from ${JSON.stringify(runner)};
+         process.exitCode = runNodeTests(${JSON.stringify(files)}, {fileTimeoutMs: 4000, privateHome: true});`],
+      { env, timeout: 15_000 });
+      return { ...output, code: 0 };
+    } catch (error) { return error; }
+  };
+  const goodRun = await invoke([good]);
+  assert.equal(goodRun.code, 0, goodRun.stderr);
+  assert.ok(goodRun.stderr.includes(`[test-file] START ${good}`));
+  assert.ok(goodRun.stderr.includes(`[test-file] PASS ${good}`));
+  const result = await invoke([leak]);
+  assert.equal(result.code, 1, result.stderr);
+  assert.ok(result.stderr.includes(`[test-file] TIMEOUT ${leak}`), result.stderr);
+  assert.ok(result.stderr.includes(`[test-file] FAIL ${leak}`), result.stderr);
+  const pid = Number(await readFile(pidFile, 'utf8'));
+  // The --test child as well as its parent must have been killed. On POSIX the
+  // orphan may briefly be a zombie, so allow the OS reaper a short turn.
+  for (let attempt = 0; attempt < 50; attempt++) {
+    try { process.kill(pid, 0); } catch (error) { assert.equal(error.code, 'ESRCH'); return; }
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert.fail(`leaked test process ${pid} is still alive`);
+});
