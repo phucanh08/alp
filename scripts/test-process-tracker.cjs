@@ -43,6 +43,26 @@ if (endpoint) {
     try { return original.call(this, options); }
     catch (error) { exited(); throw error; }
   };
+  // Synchronous APIs bypass ChildProcess.prototype.spawn. Give their children
+  // distinct slots too: an inherited owner ID must never let a child ACK for
+  // its blocked parent. Return/throw from Node's sync call observes child exit;
+  // while blocked there is no owned async handle, so cleanup must retain scratch.
+  for (const method of ['spawnSync', 'execFileSync', 'execSync']) {
+    const originalSync = cp[method];
+    cp[method] = function(command, ...args) {
+      if (cleaning) throw new Error('test runner cleanup has started');
+      const id = randomUUID();
+      const index = method !== 'execSync' && (Array.isArray(args[0]) || (args[0] == null && args.length > 1)) ? 1 : 0;
+      const options = args[index] || {};
+      const env = options.env || process.env;
+      if (env.ALP_TEST_CONTROL === endpoint) {
+        args[index] = {...options, env: {...env, ALP_TEST_PROCESS: id}};
+      }
+      send({type: 'spawn', id, owner});
+      try { return originalSync.call(this, command, ...args); }
+      finally { send({type: 'exit', id}); }
+    };
+  }
   syncBuiltinESMExports();
   let input = '';
   socket.on('data', data => {
