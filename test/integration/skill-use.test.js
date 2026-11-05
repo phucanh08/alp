@@ -40,7 +40,7 @@ test('an agent using a skill is logged once per skill: by the Skill tool, or by 
   assert.equal(agents.length, 1);
 });
 
-test('a skill\'s references and scripts are logged when opened, once per file, and never preloaded', async t => {
+test('a skill\'s references are logged when read and its scripts when run, once each, never preloaded; edits and output do not count', async t => {
   const { main, runLog } = await tree(t, { prefix: 'alp-skill-', open: { model: 'codex:gpt-5.6-sol' } });
   const instructions = main.config.developerInstructions;
   const bugLoop = path.dirname(instructions.match(/- bug-loop \(([^)]+)\)/)[1]);
@@ -57,13 +57,14 @@ test('a skill\'s references and scripts are logged when opened, once per file, a
   started({ type: 'commandExecution', id: 'r2', command: `sed -n 1,9p ${bugLoop}/references/test-proof.md`, cwd: '/tmp', status: 'inProgress' });
   // Claude reads through its plugin link: <plugin>/skills/<name>/...
   started({ type: 'commandExecution', id: 'r3', command: 'node /tmp/alp-skills/x/skills/bug-loop/scripts/check.mjs', cwd: '/tmp', status: 'inProgress' });
-  // Another role's skill directory is not this agent's.
+  // Another role's skill directory is not this agent's, and editing a reference is not reading it.
   started({ type: 'commandExecution', id: 'r4', command: 'cat ~/.alp/skills/unknown-skill/references/a.md', cwd: '/tmp', status: 'inProgress' });
+  started({ type: 'commandExecution', id: 'r5', command: `Edit ${JSON.stringify({ file_path: `${bugLoop}/references/other.md`, old_string: 'a', new_string: 'b' })}`, cwd: '/tmp', status: 'inProgress' });
   await until(async () => (await runLog()).filter(entry => entry.event === 'skill-resource').length === 2, 'two resource entries');
   await new Promise(resolve => setTimeout(resolve, 30));
   const opened = (await runLog()).filter(entry => entry.event === 'skill-resource');
-  assert.deepEqual(opened.map(entry => [entry.skill, entry.resource, entry.via]), [['bug-loop', 'references/test-proof.md', 'command'], ['bug-loop', 'scripts/check.mjs', 'command']]);
-  assert.deepEqual(renderLog('root', [{ ...opened[0], ts: '2026-01-01T10:00:00.000Z' }]), ['10:00:00  ✦ main opens bug-loop/references/test-proof.md (command)']);
+  assert.deepEqual(opened.map(entry => [entry.skill, entry.resource, entry.action]), [['bug-loop', 'references/test-proof.md', 'read'], ['bug-loop', 'scripts/check.mjs', 'run']]);
+  assert.deepEqual(renderLog('root', opened.map(entry => ({ ...entry, ts: '2026-01-01T10:00:00.000Z' }))), ['10:00:00  ✦ main reads bug-loop/references/test-proof.md', '10:00:00  ✦ main runs bug-loop/scripts/check.mjs']);
 });
 
 test('the skill plugin links each skill\'s own directory under the plugin name alp', async t => {

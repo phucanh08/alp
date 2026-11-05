@@ -14,13 +14,14 @@ import { claudeCut, codexForkEnd, codexForkRefusal, pendingChain, type ChainEntr
 export type { RuntimeTransport, RuntimeOptions, OpenOptions, PromptContent, PromptInput, AlpRuntime, SessionPreview, RecoveryOutcome, Pause, PauseState, RecallAnswer } from './contracts.js';
 export { DEFAULT_TEAM } from './contracts.js';
 import { verdictLine, parseHandoff, type Handoff } from './handoff.js';
-import { TASK_ACTIONS, TASK_PAST, TASK_FIELDS, mainOf, roleOf, taskActions, taskBrief, type TaskAction } from './tools.js';
+import { TASK_ACTIONS, TASK_PAST, TASK_FIELDS, mainOf, readOnlyMember, roleOf, taskActions, taskBrief, type TaskAction } from './tools.js';
 import { nativeEnvironment, createTransport } from './providers.js';
 import { nativeMode, codexApproval, profileEfforts, nativeSessionConfig } from './session-config.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync, watch as watchFiles, type FSWatcher } from 'node:fs';
 import { appendFile, mkdir, open, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { checkFrontmatter, skillReferences, splitSkill } from '@anhlp/alp-core/skill-validate';
+import { resourceUses } from './skill-resources.js';
 import { moveFile, writeAtomic } from '@anhlp/alp-core/atomic';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,7 +38,7 @@ import { isTrusted, trustProject } from '@anhlp/alp-core/trust';
 import { listTeams, teamOf } from '@anhlp/alp-core/teams';
 import { CONFIGURABLE, changesOf, effectiveOf, executablesOf, nativeModelOf, offered, type ConfigureChange, type ConfigureChanges, type EffectiveConfig } from './configure.js';
 import { anyModel, offers, profileModel, selectedProfile } from '@anhlp/alp-core/profiles';
-import { LESSONS_FILE, READ_ONLY_AGENTS, resolveSession, skillDescription, type ResolvedSession, type RuntimeKind, type SessionSpec } from './resolve.js';
+import { LESSONS_FILE, resolveSession, skillDescription, type ResolvedSession, type RuntimeKind, type SessionSpec } from './resolve.js';
 import { MAIL_BODY_CHARS, MAIL_HEADER, publicEvent, renderMail, takeBatch, USER, type MailEvent } from './mailbox.js';
 import type { AlpEvent, AssignmentSnapshot, Envelope, SessionSnapshot, TurnOrigin, UserQuestion } from './events.js';
 import { live, normalizePaths, overlapping, renderBoard, type Pin } from './board.js';
@@ -1637,27 +1638,18 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   }
 
   /**
-   * Progressive disclosure evidence: the first time a session's tool call or command names a file of
-   * one of its skills beyond SKILL.md (references/, scripts/, assets/, templates/, data/), by the
-   * skill's own path or Claude's plugin link to it. Logged once per session and file, so the run log
-   * shows which resources were opened on demand and that the rest were not.
+   * Progressive disclosure evidence (skill-resources.ts): the first time a session's tool call reads or
+   * runs one of its skills' files beyond SKILL.md, by what the call asked for (never by a tool's output;
+   * writing, listing or merely naming a file is no opening). Logged once per session, file and action,
+   * so the run log shows which resources were loaded on demand and that the rest were not.
    */
   function skillResources(sessionId: string, session: Session, item: any) {
-    // What the agent asked for, not what came back: a listing or a grep result naming a file is no opening.
-    const asked = typeof item.command === 'string' ? item.command
-      : JSON.stringify(item, (key, value) => ['aggregatedOutput', 'output', 'result', 'results', 'content', 'contentItems', 'stdout', 'stderr', 'detail'].includes(key) ? undefined : value)?.slice(0, 20_000) ?? '';
-    // One separator on every platform (JSON doubles Windows backslashes).
-    const text = asked.replace(/\\\\/g, '/').replace(/\\/g, '/');
-    if (!text.includes('/skills/')) return;
-    const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    for (const skill of session.mapping.agent.skills) {
-      const pattern = new RegExp(`(?:${escape(path.dirname(skill.path).replace(/\\/g, '/'))}|/skills/${escape(skill.name)})/((?:references|scripts|assets|templates|data)/[\\w.@+-]+(?:/[\\w.@+-]+)*)`, 'g');
-      for (const match of text.matchAll(pattern)) {
-        const key = `${skill.name}/${match[1]}`;
-        if (session.skillResourcesUsed?.has(key)) continue;
-        (session.skillResourcesUsed ??= new Set()).add(key);
-        runLog(rootOf(sessionId), { event: 'skill-resource', sessionId, agent: session.mapping.agent.name, skill: skill.name, resource: match[1], via: typeof item.command === 'string' ? 'command' : 'tool' });
-      }
+    if (typeof item.command !== 'string') return;
+    for (const use of resourceUses(item.command, session.mapping.agent.skills)) {
+      const key = `${use.action}:${use.skill}/${use.resource}`;
+      if (session.skillResourcesUsed?.has(key)) continue;
+      (session.skillResourcesUsed ??= new Set()).add(key);
+      runLog(rootOf(sessionId), { event: 'skill-resource', sessionId, agent: session.mapping.agent.name, skill: use.skill, resource: use.resource, action: use.action });
     }
   }
 
@@ -3476,7 +3468,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
     // The child's permission profile caps its mode, as resolving its session will.
     let childProfile;
-    try { childProfile = await profileFor(session.mapping.agent.projectRoot, options.libraryDir, args.agent); }
+    try { childProfile = await profileFor(session.mapping.agent.projectRoot, options.libraryDir, args.agent, { readOnly: readOnlyMember(session.mapping, args.agent) }); }
     catch (error) { return toolResult(false, { error: errorData(error).message }); }
     const childMode = childProfile ? capMode(args.mode ?? session.mapping.mode, childProfile.base) : args.mode ?? session.mapping.mode;
     const capped = {
@@ -3521,7 +3513,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     let task: Task | undefined;
     if (args.taskId !== undefined) {
       if (session.parent || session.mapping.agent.name !== mainOf(session.mapping)) return toolResult(false, { error: 'Only main gives tasks to assignments' });
-      if (READ_ONLY_AGENTS.includes(args.agent)) return toolResult(false, { error: 'taskId gives a task to lead or peer; for advice about a task, name it in the brief' });
+      if (readOnlyMember(session.mapping, args.agent)) return toolResult(false, { error: 'taskId gives a task to lead or peer; for advice about a task, name it in the brief' });
       if (typeof args.taskId !== 'string') return toolResult(false, { error: 'taskId must be a task id' });
       // Checked here for a clear refusal; the start below checks again under the task lock.
       try {
@@ -4100,7 +4092,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       session.role,
       supervises(session),
       lessonFiles(mapping),
-      Object.fromEntries(await Promise.all(targets.map(async target => [target, await profileFor(mapping.agent.projectRoot, options.libraryDir, target).catch(() => null)] as const))),
+      Object.fromEntries(await Promise.all(targets.map(async target => [target, await profileFor(mapping.agent.projectRoot, options.libraryDir, target, { readOnly: readOnlyMember(mapping, target) }).catch(() => null)] as const))),
     );
     if (session.spec.writeRoot && session.runtimeKind === 'claude' && mapping.mode === 'workspace-write' && claudeSandboxAvailable()) Object.assign(config, { floor: 'workspace-write' });
     if (session.spec.writeRoot) config.developerInstructions += `\nWrite scope: change files only under ${session.spec.writeRoot}. Your working directory is there; the ALP project, tasks and board remain ${mapping.agent.projectRoot}. Board paths are project-relative or absolute; use absolute paths for this write root. This scope does not grant permission to write outside your mode.`;
@@ -4379,9 +4371,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (mapping.agent.name !== session.mapping.agent.name) return refused('agent_mismatch', 'A session keeps its agent; start a new session for another agent');
     const agent = session.mapping.agent.name;
     if (teamChanged && agent === mainOf(session.mapping) && agent !== mainOf(mapping)) return refused('agent_mismatch', `Team ${mapping.team?.label ?? team}'s main agent is ${mainOf(mapping)}, not ${agent}; start a new session with that team`);
-    // Never more permissions: the mode asked for stays within the profile and READ_ONLY_AGENTS, and a
+    // Never more permissions: the mode asked for stays within the profile and read-only members (readOnlyMember), and a
     // team or effort change never raises the mode the session runs with.
-    if (changes.mode !== undefined && mapping.mode !== changes.mode) return refused('permission_escalation', READ_ONLY_AGENTS.includes(agent) ? 'Advisors and the supervisor must remain read-only' : `Permission profile ${mapping.permissions?.name ?? ''} allows at most ${mapping.permissions?.base ?? mapping.mode}`.replace('profile  allows', 'profile allows'));
+    if (changes.mode !== undefined && mapping.mode !== changes.mode) return refused('permission_escalation', readOnlyMember(mapping, agent) ? 'Advisors and the supervisor must remain read-only' : `Permission profile ${mapping.permissions?.name ?? ''} allows at most ${mapping.permissions?.base ?? mapping.mode}`.replace('profile  allows', 'profile allows'));
     if (changes.mode === undefined && !withinMode(mapping.mode, session.mapping.mode)) return refused('permission_escalation', `The change would run the session in ${mapping.mode}, beyond its ${session.mapping.mode}`);
     const before = executablesOf(session.mapping);
     const added = [...executablesOf(mapping)].filter(entry => !before.has(entry));
@@ -4801,7 +4793,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (!modes.some(candidate => candidate.id === mode)) throw new Error(`Unsupported mode '${mode}'`);
     const profile = session.mapping.permissions;
     if (profile && !withinMode(mode, profile.base)) {
-      throw new Error(READ_ONLY_AGENTS.includes(session.mapping.agent.name) ? 'Advisors and the supervisor must remain read-only' : `Permission profile ${profile.name} allows at most ${profile.base}`);
+      throw new Error(readOnlyMember(session.mapping, session.mapping.agent.name) ? 'Advisors and the supervisor must remain read-only' : `Permission profile ${profile.name} allows at most ${profile.base}`);
     }
     const parent = session.parent ? sessions.get(session.parent) : undefined;
     if (parent && !withinMode(mode, parent.mapping.mode)) throw new Error('Child cannot exceed parent permissions');

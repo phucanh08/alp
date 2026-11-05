@@ -88,7 +88,7 @@ export type Session = {
   brief?: string;
   /** The skills it has used, each logged once (ALPD §59). */
   skillsUsed?: Set<string>;
-  /** Skill files beyond SKILL.md the session has opened, as `<skill>/<relative path>` (skill-resource events). */
+  /** Skill files beyond SKILL.md the session has read or run, as `<read|run>:<skill>/<relative path>` (skill-resource events). */
   skillResourcesUsed?: Set<string>;
   /** Why the running turn is being stopped, so its end parks the assignment instead of ending it. */
   parkReason?: string;
