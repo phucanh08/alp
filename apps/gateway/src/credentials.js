@@ -386,6 +386,7 @@ export class CredentialStore {
   /** @type {Set<(changes: Map<string, 'revoked' | 'changed'>) => void>} */ #listeners = new Set();
   /** @type {ReturnType<typeof setInterval> | undefined} */ #timer;
   #signature = '';
+  /** @type {Map<string, string>} */ #malformed = new Map();
   #home;
   #log;
   #now;
@@ -413,11 +414,17 @@ export class CredentialStore {
       this.#log?.error('the credentials file cannot be used; every credential is refused until it is fixed', { code: 'ALP_GATEWAY_CREDENTIALS_UNREADABLE', error });
     }
     this.#stored = new Map(list.filter(entry => typeof entry?.id === 'string').map(entry => [entry.id, entry]));
-    // Logged once per load (the file changed), not on every expiry pass; the values are not logged.
+    // Remember only currently malformed marks: unchanged reloads stay quiet, but a
+    // changed mark or a mark that was fixed and then broken again warns anew.
+    const malformed = new Map();
     for (const [id, stored] of this.#stored) {
       const reason = malformedAgent(stored);
-      if (reason) this.#log?.warn('a credential with a malformed agent mark is skipped; every connection with it is refused', { code: 'ALP_GATEWAY_CREDENTIAL_MALFORMED_AGENT', id, reason });
+      if (!reason) continue;
+      const mark = createHash('sha256').update(JSON.stringify([stored.agent, stored.agentName])).digest('hex');
+      malformed.set(id, mark);
+      if (this.#malformed.get(id) !== mark) this.#log?.warn('a credential with a malformed agent mark is skipped; every connection with it is refused', { code: 'ALP_GATEWAY_CREDENTIAL_MALFORMED_AGENT', id, reason });
     }
+    this.#malformed = malformed;
     this.#refresh();
   }
 

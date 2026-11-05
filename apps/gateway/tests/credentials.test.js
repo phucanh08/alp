@@ -591,7 +591,7 @@ test('renameWithRetry unit contract: backoff schedule, bounds and error filterin
   assert.equal(await readFile(dst, 'utf8'), 'test content');
 });
 
-test('a credential with a malformed agent mark is skipped and the gateway logs which one, once per load (t-6147)', async t => {
+test('a credential with a malformed agent mark is skipped and the gateway logs which one, once until its malformed mark changes (t-50af)', async t => {
   const { home: gatewayHome, workspace } = await home(t);
   const good = await createCredential(gatewayHome, { label: 'u', workspaces: [workspace], permissions: ['session.read'] });
   const bad = await createCredential(gatewayHome, { label: 'a', workspaces: [workspace], permissions: ['session.read'], agent: 'peer' });
@@ -605,10 +605,25 @@ test('a credential with a malformed agent mark is skipped and the gateway logs w
   t.after(() => store.close());
   await store.reload();
   store.expire();
+  await store.reload();
+  await store.reload();
   assert.equal(store.verify(bad.token), undefined, 'skipped');
   assert.ok(store.verify(good.token), 'the others still work');
   const warned = lines.filter(line => line.includes('ALP_GATEWAY_CREDENTIAL_MALFORMED_AGENT'));
   assert.equal(warned.length, 1, lines.join('\n'));
   assert.ok(warned[0].includes(bad.credential.id) && warned[0].includes('agent is not true'), warned[0]);
   assert.ok(!warned[0].includes(parseToken(bad.token).secret));
+  stored.agent = 'different malformed value';
+  await writeFile(file, JSON.stringify(data), { mode: 0o600 });
+  await store.reload();
+  assert.equal(lines.filter(line => line.includes('ALP_GATEWAY_CREDENTIAL_MALFORMED_AGENT')).length, 2);
+  stored.agent = true;
+  await writeFile(file, JSON.stringify(data), { mode: 0o600 });
+  await store.reload();
+  assert.ok(store.verify(bad.token));
+  stored.agent = 'yes';
+  await writeFile(file, JSON.stringify(data), { mode: 0o600 });
+  await store.reload();
+  assert.equal(lines.filter(line => line.includes('ALP_GATEWAY_CREDENTIAL_MALFORMED_AGENT')).length, 3, 'fixed then malformed again warns anew');
+
 });
