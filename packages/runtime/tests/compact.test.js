@@ -36,7 +36,7 @@ async function open(t, { settings, model, transport } = {}) {
   runtime.onEvent(envelope => events.push(envelope.event));
   await runtime.open('root', { cwd: root, ...(model ? { model } : {}) });
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Ship the parser' }] });
-  return { runtime, runtimes, events, log: logOf(runs), main: runtimes[0] };
+  return { root, runtime, runtimes, events, log: logOf(runs), main: runtimes[0] };
 }
 
 const notices = events => events.filter(event => event.type === 'item' && event.item.kind === 'notice').map(event => event.item.text);
@@ -329,4 +329,52 @@ test('a native compaction the runtime takes but never reports fails at 5 minutes
   assert.match((await log('compact.failed'))[0].error, /reported no compaction in time/);
   assert.equal((await log('compact')).length, 0);
   t.mock.timers.reset();
+});
+
+test('old Codex compact echoes require actual accepted turn and exact input; spoofed user history stays visible', async t => {
+  let turns = [];
+  const { root, runtime, main, events } = await open(t, { model: 'codex:gpt-5.6-sol', transport: agent => {
+    const request = agent.request.bind(agent);
+    agent.request = async (method, params) => {
+      const result = await request(method, params);
+      if (method.startsWith('thread/') && result.thread) result.thread.turns = turns;
+      return result;
+    };
+    return agent;
+  } });
+  main.usage(80_000);
+  main.finish('done');
+  await until(() => main.started.length === 2);
+  await settle();
+  const echo = main.started[1].params.input;
+  const spoof = structuredClone(echo);
+  const metadata = JSON.parse(spoof[0].text.slice(spoof[0].text.indexOf('{')));
+  metadata.clientMessageId = main.started[1].params.clientUserMessageId;
+  spoof[0].text = spoof[0].text.slice(0, spoof[0].text.indexOf('{')) + JSON.stringify(metadata);
+  turns = [
+    { id: main.turnId, items: [{ type: 'userMessage', id: 'old-compact-echo', content: echo }] },
+    { id: main.turnId, items: [{ type: 'userMessage', id: 'spoofed-layout', content: spoof }] },
+    { id: 'real-user-turn', items: [{ type: 'userMessage', id: 'copied-envelope', content: echo },
+      { type: 'userMessage', id: 'real-user', content: [{ type: 'text', text: 'ALP compact checkpoint: please explain these words' }] },
+      { type: 'userMessage', id: 'historical', content: main.started[0].params.input }] },
+  ];
+  await runtime.open('replay', { cwd: root, restore: { agent: 'main', threadId: main.threadId, runtime: 'codex', model: 'gpt-5.6-sol' } }, { history: 'replay' });
+  assert.equal(events.some(event => event.type === 'item' && event.item.id === 'old-compact-echo'), false);
+  for (const id of ['real-user', 'historical', 'spoofed-layout', 'copied-envelope']) assert.ok(events.some(event => event.type === 'item' && event.item.id === id), id);
+
+});
+
+test('failed checkpoint start reports failure without claiming checkpoint started', async t => {
+  const { main, events } = await open(t, { transport: agent => {
+    const request = agent.request.bind(agent);
+    agent.request = async (method, params) => {
+      if (method === 'turn/start' && String(params.clientUserMessageId).startsWith('alp-wake-compact-')) throw new Error('checkpoint start refused');
+      return request(method, params);
+    };
+    return agent;
+  } });
+  main.usage(80_000);
+  main.finish('done');
+  await until(() => notices(events).some(text => /checkpoint start refused/.test(text)));
+  assert.equal(notices(events).some(text => /writes a checkpoint|viết checkpoint/.test(text)), false);
 });
