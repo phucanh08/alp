@@ -107,7 +107,7 @@ jobs:
       # Every test step runs through runNodeTests with --private-home (t-bfbd): a throwaway ALP_HOME,
       # TMPDIR and HOME/USERPROFILE, without ALP_*_BIN or the caller's ALP session variables.
       # The CLI discovery fixture creates a Unix symlink; all daemon lifecycle/session tests run.
-      - run: node scripts/run-tests.mjs --private-home packages/client/tests/daemon-paths.test.js packages/daemon/tests/daemon.test.js packages/daemon/tests/ipc-security.test.js integrations/paseo/tests/daemon-git.test.js
+      - run: node scripts/run-tests.mjs --private-home packages/client/tests/daemon-paths.test.js packages/daemon/tests/daemon.test.js packages/daemon/tests/ipc-security.test.js integrations/paseo/tests/daemon-git.test.js test/integration/test-env.test.js packages/client/tests/lock-fstat.test.js packages/client/tests/start-integration.test.js
       # workspace.git over real repositories, including a real untracked junction (t-8f37); the POSIX shell-trap tests skip on win32.
       - run: node scripts/run-tests.mjs --private-home packages/daemon/tests/git.test.js
       # The win32 terminal owner: unit tests, then a real cmd.exe through node-pty/ConPTY (the "ConPTY:" tests run only here).
