@@ -5,16 +5,30 @@ Six workflow skills are adapted from the
 The instructions are rewritten for the active-main ALP model and its actual runtime,
 with no Claude-only tools or automatic commit/approval gates.
 
-| Skill | Purpose | Main | Lead | Peer |
-|---|---|---|---|---|
-| goal-griller | Clarify material gaps in the user's desired outcome | Yes | — | — |
-| xia | Research local reuse and version-appropriate primary sources | Yes | Yes | Yes |
-| sequence-execution-plan | Order dependent work and writer ownership | Yes | Yes | — |
-| prompt-leverage | Prepare a self-contained delegation brief | Yes | Yes | — |
-| bug-loop | Reproduce, diagnose, fix, and verify a regression | Yes | Yes | Yes |
-| smart-commits | Package owned changes when local commits are requested | Yes | Yes | Yes |
+| Skill | Purpose | Main | Lead | Peer | Reviewer |
+|---|---|---|---|---|---|
+| goal-griller | Clarify material gaps in the user's desired outcome | Yes | — | — | — |
+| xia | Research local reuse and version-appropriate primary sources | Yes | Yes | Yes | — |
+| sequence-execution-plan | Order dependent work and writer ownership | Yes | Yes | — | — |
+| prompt-leverage | Prepare a self-contained delegation brief | Yes | Yes | — | — |
+| bug-loop | Reproduce, diagnose, fix, and verify a regression | Yes | Yes | Yes | — |
+| smart-commits | Package owned changes when local commits are requested | Yes | Yes | Yes | — |
+| compact | Compact main's context at a turn boundary | Yes | — | — | — |
+| curate | Review lessons and skills; merge, shorten, retire | Yes | — | — | — |
+| skill-authoring | Design, validate and evaluate one skill | Yes | — | — | — |
+| architecture-docs | Architecture docs and ADRs from repository evidence | Yes | Yes | — | — |
+| feature-architecture | Implement a feature within the project's architecture and boilerplate | Yes | Yes | Yes | — |
+| test-strategy | Choose tests by behavior and risk | Yes | Yes | Yes | — |
+| safe-refactor | Refactor while preserving behavior and invariants | Yes | Yes | Yes | — |
+| security-review | Review auth, permissions, secrets, inputs, supply chain, filesystem, execution | Yes | Yes | — | Yes |
+| release-readiness | GO / CONDITIONAL / NO-GO verdict with evidence | Yes | Yes | — | Yes |
 
-Main has six skills, lead five, peer three. Each agent selects directly from its
+Main has fifteen skills, lead eleven, peer six, reviewer two; oracle and supervisor none.
+The last seven arrived with skill system v2 ([skill system](skill-system.md)): mapped by
+role authority (peer gets the implementation methods, reviewer only the read-only review
+methods, main alone authors skills), at a measured cost of about 780 extra index tokens
+for main. Specialist skills (backend, frontend, testing tools, design, MCP, operations)
+are optional packs, assigned only when you install them. Each agent selects directly from its
 own skill scope; there is no separate router skill. A skill's availability does not grant
 write or delegation authority. Read-only diagnosis stops before changes. Lead routes
 missing user decisions to main; peer routes them to lead. Main retains responsibility
@@ -50,8 +64,9 @@ Skills and the skills each role gets live in the user's library in `$ALP_HOME`
 
 alpd seeds the library from its templates the first time it opens a session, and
 `alp init` / `alp update-template` seed it too. The canonical source is `templates/skills/`,
-with the starter assignments in `templates/role-skills.json`; oracle, reviewer and
-supervisor get no skills by default.
+with the starter assignments in `templates/role-skills.json`; reviewer gets
+security-review and release-readiness, oracle and supervisor get none by default.
+Optional packs (`templates/packs/`) are never seeded; see [skill system](skill-system.md#optional-packs).
 
 The library belongs to the user. Edit a skill, add your own under `skills/`, or change
 which skills a role gets in `role-skills.json`. `library.json` records the hash of
