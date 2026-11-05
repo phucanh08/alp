@@ -47,17 +47,17 @@ How each runtime gets skills:
 | Codex | instructions index | reading `SKILL.md` and its files |
 | ACP agents (OpenCode, Gemini CLI, …) and Antigravity | the same index, sent with the first prompt | reading the files with the agent's own tools; no Skill tool is emulated |
 
-Measured with `node scripts/skill-eval.mjs disclosure` (characters measured, tokens
-estimated as characters / 4):
+Measured with `node scripts/skill-eval.mjs disclosure` (characters measured with the home
+written as `~/.alp`, tokens estimated as characters / 4):
 
 | Role | Skills before / after v2 | Index chars before / after | Bodies + resources not loaded, after |
 |---|---|---|---|
-| main | 8 / 15 | 2751 / 5873 | 109 KB |
-| lead | 5 / 11 | 1847 / 4546 | 88 KB |
-| peer | 3 / 6 | 1247 / 2589 | 51 KB |
-| reviewer | 0 / 2 | 0 / 1264 | 19 KB |
+| main | 8 / 15 | 2551 / 5498 | 114 KB |
+| lead | 5 / 11 | 1722 / 4271 | 93 KB |
+| peer | 3 / 6 | 1172 / 2439 | 57 KB |
+| reviewer | 0 / 2 | 0 / 1214 | 19 KB |
 
-Main's index grew by about 780 tokens (estimate); oracle and supervisor have none.
+Main's index grew by about 740 tokens (estimate); oracle and supervisor have none.
 
 ## Skill format
 

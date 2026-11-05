@@ -13,7 +13,7 @@
 //     the role's; every forbidden one names a real skill). With --live it asks a model, given only a
 //     role's Level 0 index and a task, which skills it would open, and scores the answers. --live calls
 //     the Claude API (it costs money and needs credentials), so it never runs by default.
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -36,6 +36,9 @@ async function sizeOf(directory) {
 }
 
 /** The roles of a templates directory, each with the skills its session indexes and what stays unread. */
+/** Writes each of `homes` in `text` as `~/.alp`. @param {string} text @param {string[]} homes */
+const homeAsAlp = (text, homes) => homes.reduce((out, home) => out.split(home).join('~/.alp'), text);
+
 export async function disclosure(templates = path.join(ROOT, 'templates')) {
   const work = await mkdtemp(path.join(tmpdir(), 'alp-skill-eval-'));
   try {
@@ -43,13 +46,16 @@ export async function disclosure(templates = path.join(ROOT, 'templates')) {
     const project = path.join(work, 'project');
     await seedLibrary(library, { templateRoot: pathToFileURL(templates + path.sep) });
     await initProject(project);
+    const homes = [...new Set([library, await realpath(library)])].sort((a, b) => b.length - a.length);
     const roles = JSON.parse(await readFile(path.join(templates, 'role-skills.json'), 'utf8'));
     const rows = [];
     for (const role of Object.keys(roles)) {
       const agent = await resolveAgent(project, { agent: role, library });
       const compiled = await new InstructionsAdapter().compile(agent);
       const instructions = compiled.material.instructions;
-      const index = agent.skills.length ? instructions.slice(instructions.indexOf('Your skills:')) : '';
+      // Measured with the temporary home written as ~/.alp, so the size does not depend on where the
+      // OS keeps temporary directories (macOS's are about 60 characters longer than Linux's).
+      const index = agent.skills.length ? homeAsAlp(instructions.slice(instructions.indexOf('Your skills:')), homes) : '';
       let bodies = 0, resources = 0, leaked = 0;
       for (const skill of agent.skills) {
         const body = await readFile(skill.path, 'utf8');
