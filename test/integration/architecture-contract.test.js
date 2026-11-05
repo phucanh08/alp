@@ -111,3 +111,84 @@ test('checkBoundaries is usable as a library on an in-memory contract', async t 
   assert.deepEqual(result.violations, []);
   assert.equal(result.files, 3);
 });
+
+test('an exception is narrow and dated: one file, a named import, and it stops excusing once expired (P1)', async t => {
+  const root = await project(t);
+  await writeFile(path.join(root, 'src/domain/legacy.ts'), "import { postOrder } from '../api/orders.js';\nexport const legacy = postOrder;\n");
+  const contractFile = path.join(root, 'docs/architecture/contract.json');
+  const contract = JSON.parse(await readFile(contractFile, 'utf8'));
+  const withException = exception => writeFile(contractFile, JSON.stringify({ ...contract, exceptions: [{ reason: 'predates layering', approvedBy: 'main', ...exception }] }));
+  await withException({ file: 'src/domain/*.ts', import: 'src/api/**' });
+  assert.match((await check(root)).stderr, /exceptions\[0\]\.file must name one file/);
+  await withException({ file: 'src/domain/legacy.ts', import: '**' });
+  assert.match((await check(root)).stderr, /exceptions\[0\]\.import must name what may be imported/);
+  await withException({ file: 'src/domain/legacy.ts', import: 'src/api/**', scope: 'all' });
+  assert.equal((await check(root)).code, 2, 'unknown exception keys are refused');
+  await withException({ file: 'src/domain/legacy.ts', import: 'src/api/**', expires: 'soon' });
+  assert.match((await check(root)).stderr, /expires must be a date/);
+  await withException({ file: 'src/domain/legacy.ts', import: 'src/api/**', expires: '2000-01-01' });
+  const expired = await check(root);
+  assert.equal(expired.code, 1);
+  assert.match(expired.stdout, /src\/domain\/legacy\.ts:1 {2}domain -> api .*its exception expired on 2000-01-01; approved by main/);
+  await withException({ file: 'src/domain/legacy.ts', import: 'src/api/**', expires: '2999-01-01' });
+  const valid = await check(root);
+  assert.equal(valid.code, 0, valid.stdout);
+  assert.match(valid.stdout, /allowed by exception \(predates layering; approved by main; expires 2999-01-01\)/);
+  // An exception nothing needs is listed for removal, without failing the check.
+  await rm(path.join(root, 'src/domain/legacy.ts'));
+  const stale = await check(root);
+  assert.equal(stale.code, 0);
+  assert.match(stale.stdout, /unused exception: src\/domain\/legacy\.ts -> src\/api\/\*\* \(predates layering; approved by main\): nothing needs it; remove it/);
+});
+
+test('with --base, a contract loosened since the base fails until a reviewer is named; tightening passes (P1)', async t => {
+  const root = await project(t);
+  const git = (...args) => run('git', ['-C', root, ...args], { env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+  await git('init', '-q', '-b', 'main');
+  await git('add', '-A');
+  await git('commit', '-q', '-m', 'base');
+  const contractFile = path.join(root, 'docs/architecture/contract.json');
+  const base = JSON.parse(await readFile(contractFile, 'utf8'));
+  assert.equal((await check(root, '--base', 'HEAD')).code, 0, 'unchanged contract');
+  // The cheap way to make a violation pass: widen the rules. It is caught and named.
+  await writeFile(path.join(root, 'src/domain/invoice.ts'), "import { postOrder } from '../api/orders.js';\nexport const i = postOrder;\n");
+  await writeFile(contractFile, JSON.stringify({ ...base, allow: { ...base.allow, domain: ['shared', 'api'] }, denyPackages: {}, ignore: [...base.ignore, 'src/domain/**'], exceptions: [{ file: 'src/domain/invoice.ts', import: 'src/api/**', reason: 'quick fix', approvedBy: 'peer' }] }));
+  const loosened = await check(root, '--base', 'HEAD');
+  assert.equal(loosened.code, 1, 'no violation is left, but the contract change is unreviewed');
+  for (const change of ['allow.domain adds api', 'denyPackages.domain no longer denies express', 'denyPackages.domain no longer denies pg', 'ignore adds src/domain/**', 'exception added: src/domain/invoice.ts -> src/api/** (quick fix; approved by peer)']) {
+    assert.ok(loosened.stdout.includes(`contract change since HEAD, needs review: ${change}`), change);
+  }
+  assert.match(loosened.stdout, /Do not edit the contract to make a check pass/);
+  const json = JSON.parse((await check(root, '--base', 'HEAD', '--json')).stdout);
+  assert.equal(json.contractChanges.length, 5);
+  // Named as reviewed, the run passes and records who approved it.
+  const approved = await check(root, '--base', 'HEAD', '--approved-by', 'main, 2026-11-05');
+  assert.equal(approved.code, 0, approved.stdout);
+  assert.match(approved.stdout, /contract change since HEAD, approved by main, 2026-11-05: allow\.domain adds api/);
+  // Tightening needs no review; removing a module's rule entirely does.
+  await rm(path.join(root, 'src/domain/invoice.ts'));
+  await writeFile(contractFile, JSON.stringify({ ...base, denyPackages: { ...base.denyPackages, app: ['express'] } }));
+  assert.equal((await check(root, '--base', 'HEAD')).code, 0);
+  const { domain, ...rest } = base.allow;
+  await writeFile(contractFile, JSON.stringify({ ...base, allow: rest }));
+  assert.match((await check(root, '--base', 'HEAD')).stdout, /allow\.domain was removed: domain may now import any module/);
+  // A bad base is an error, not a pass.
+  assert.equal((await check(root, '--base', 'no-such-ref')).code, 2);
+});
+
+test('as a blocking hook with --base, a loosened contract refuses the handoff (P1)', async t => {
+  const root = await project(t);
+  const git = (...args) => run('git', ['-C', root, ...args], { env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+  await mkdir(path.join(root, 'tools'));
+  await cp(CHECKER, path.join(root, 'tools/check-boundaries.mjs'));
+  await git('init', '-q', '-b', 'main');
+  await git('add', '-A');
+  await git('commit', '-q', '-m', 'base');
+  const hook = { event: 'handoff', command: 'node tools/check-boundaries.mjs --base main', blocking: true, timeoutSec: 60 };
+  const contractFile = path.join(root, 'docs/architecture/contract.json');
+  const base = JSON.parse(await readFile(contractFile, 'utf8'));
+  await writeFile(contractFile, JSON.stringify({ ...base, allow: { ...base.allow, app: ['domain', 'shared', 'api'] } }));
+  const refused = await runHook(hook, { event: 'handoff' }, { cwd: root });
+  assert.equal(refused.exitCode, 1);
+  assert.match(refused.stdout, /contract change since main, needs review: allow\.app adds api/);
+});
