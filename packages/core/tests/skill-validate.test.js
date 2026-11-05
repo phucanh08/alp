@@ -62,16 +62,20 @@ test('format problems are errors in strict mode and warnings with hints in legac
   assert.deepEqual(codes((await validateSkill(await skill(t, 'empty', { 'skill.md': good }))).errors), ['SKILL_MD_MISSING']);
 });
 
-test('references and links that leave the skill are errors in every mode', async t => {
+test('a symlink leaving the skill is an error in every mode; a path leaving it, only for new skills', async t => {
   const dir = await skill(t, 'escape', { 'SKILL.md': good.replace('references/rules.md)', '../outside.md)').replace('api-review', 'escape') + '\nAlso [abs](/etc/passwd).\n' });
   await writeFile(path.join(path.dirname(dir), 'outside.md'), 'secret');
   await mkdir(path.join(dir, 'references'), { recursive: true });
   await symlink(path.join(path.dirname(dir), 'outside.md'), path.join(dir, 'references', 'leak.md'));
   await symlink(path.join(dir, 'nowhere'), path.join(dir, 'references', 'dangling.md'));
   const legacy = await validateSkill(dir);
-  assert.deepEqual(codes(legacy.errors), ['BROKEN_SYMLINK', 'REFERENCE_OUTSIDE', 'UNSAFE_SYMLINK']);
-  assert.deepEqual(codes(legacy.warnings), ['ABSOLUTE_REFERENCE']);
-  assert.ok(codes((await validateSkill(dir, { mode: 'strict' })).errors).includes('ABSOLUTE_REFERENCE'));
+  assert.deepEqual(codes(legacy.errors), ['BROKEN_SYMLINK', 'UNSAFE_SYMLINK']);
+  assert.deepEqual(codes(legacy.warnings), ['ABSOLUTE_REFERENCE', 'REFERENCE_OUTSIDE']);
+  const strict = codes((await validateSkill(dir, { mode: 'strict' })).errors);
+  for (const code of ['ABSOLUTE_REFERENCE', 'REFERENCE_OUTSIDE', 'BROKEN_SYMLINK', 'UNSAFE_SYMLINK']) assert.ok(strict.includes(code), code);
+  // A link through a symlink that leaves the skill is an error even in legacy mode.
+  await writeFile(path.join(dir, 'SKILL.md'), '---\nname: escape\ndescription: "Escape. Use when testing."\n---\n\nSee [leak](references/leak.md).\n');
+  assert.ok(codes((await validateSkill(dir)).errors).includes('REFERENCE_OUTSIDE'));
 });
 
 test('shipped skills must be text; a script with #! should be executable', async t => {
@@ -104,4 +108,10 @@ test('every skill ALP ships, core and optional packs, passes strict validation',
     const report = await validateSkill(dir, { mode: 'strict', shipped: true });
     assert.deepEqual(report.errors, [], `${dir}: ${JSON.stringify(report.errors)}`);
   }
+});
+
+test('odd input becomes a finding, never a crash: a malformed % in a link, an indentation indicator', async t => {
+  const dir = await skill(t, 'odd', { 'SKILL.md': '---\nname: odd\ndescription: |2\n  Use when odd.\n---\n\nSee [100%](100%) and [ok](references/a%20b.md).\n', 'references/a b.md': '# A\n' });
+  const report = await validateSkill(dir, { mode: 'strict' });
+  assert.deepEqual(codes(report.errors), ['BROKEN_REFERENCE', 'YAML']);
 });

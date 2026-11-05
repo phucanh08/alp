@@ -93,7 +93,10 @@ alp doctor                           # reports library skills that do not meet t
   are errors.
 - **Legacy** (default for existing skills): format problems are warnings with a hint, and
   the skill keeps loading. ALP never rewrites a skill to fit the format.
-- Always errors: a reference or symlink leaving the skill directory, a broken symlink.
+- Always errors: a symlink (or a link through one) leaving the skill directory, a broken
+  symlink, an unreadable file. A plain path leaving the skill (`../other/SKILL.md`, an
+  absolute path) is an error for new skills and a warning for existing ones, since it does
+  not travel with the skill.
 - Checked: SKILL.md exists, YAML frontmatter parses (the subset skills use), name rules and
   name = directory, description present, length and trigger wording, unknown or
   runtime-specific keys, every relative link and `references/` path resolves inside the

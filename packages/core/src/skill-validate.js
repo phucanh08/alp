@@ -9,8 +9,8 @@ import path from 'node:path';
  * Two modes. `strict` is for skills ALP ships, packs and new skills: format problems are errors.
  * `legacy` (the default) is for skills already in a user's library or project: format problems
  * are warnings with a migration hint, since ALP never rewrites them and the runtime keeps loading
- * them. Safety problems (a reference or symlink leaving the skill, a broken symlink) are errors in
- * both modes. Validation only reads; it never runs a script or follows a link outside the skill.
+ * them. A symlink leaving the skill, a broken symlink or an unreadable file is an error in both
+ * modes; a plain path leaving the skill is an error in strict mode and a warning in legacy mode. Validation only reads; it never runs a script or follows a link outside the skill.
  */
 
 /** Frontmatter keys of the Agent Skills specification. */
@@ -78,7 +78,8 @@ export function parseFrontmatter(text) {
       if (!end) { problems.push(`${key}: unterminated or multi-line single-quoted value`); return undefined; }
       return end[1].replaceAll("''", "'");
     }
-    const block = /^([|>])([+-]?)\s*(?:#.*)?$/.exec(value);
+    const block = /^([|>])([+-]?)([1-9]?)([+-]?)\s*(?:#.*)?$/.exec(value);
+    if (block?.[3]) problems.push(`${key}: block scalar indentation indicators are not supported; indent the text instead`);
     if (block) {
       const body = [];
       while (i < lines.length && (lines[i].trim() === '' || indent(lines[i]) > baseIndent)) body.push(lines[i++]);
@@ -86,7 +87,7 @@ export function parseFrontmatter(text) {
       const width = Math.min(...body.filter(line => line.trim()).map(indent));
       const content = body.map(line => line.slice(Number.isFinite(width) ? width : 0));
       const joined = block[1] === '|' ? content.join('\n') : content.join('\n').replace(/([^\n])\n(?=[^\n])/g, '$1 ');
-      return block[2] === '-' ? joined : `${joined}\n`;
+      return (block[2] || block[4]) === '-' ? joined : `${joined}\n`;
     }
     if (/^[[{&*!%@`]/.test(value) || value.startsWith('- ')) {
       problems.push(`${key}: unsupported YAML value '${value.slice(0, 40)}' (use a plain or quoted string)`);
@@ -131,7 +132,7 @@ export function skillReferences(markdown) {
     if (/^(?:\.\/)?references\/[^*<>{}$]+\.[a-z0-9]+$/i.test(match[1])) found.add(match[1]);
   }
   return [...found].filter(target => !/^[a-z][\w+.-]*:/i.test(target) && !target.startsWith('#') && !target.startsWith('//'))
-    .map(target => decodeURI(target.split('#')[0])).filter(Boolean);
+    .map(target => { const plain = target.split('#')[0]; try { return decodeURI(plain); } catch { return plain; } }).filter(Boolean);
 }
 
 const inside = (root, target) => { const relative = path.relative(root, target); return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative)); };
@@ -211,12 +212,16 @@ export async function validateSkill(directory, { mode = 'legacy', shipped = fals
 
   // Every file under the skill: symlinks must stay inside it; shipped skills must be text.
   const markdown = [];
+  let stopped = false;
   const walk = async relative => {
-    const entries = await readdir(path.join(real, relative), { withFileTypes: true });
+    let entries;
+    try { entries = await readdir(path.join(real, relative), { withFileTypes: true }); }
+    catch (error) { add('error', 'UNREADABLE', `${relative || '.'} cannot be read: ${error.code ?? error.message}`, relative || undefined); return; }
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (stopped) return;
       const rel = path.join(relative, entry.name);
       const full = path.join(real, rel);
-      if (++files > MAX_FILES) { add('error', 'TOO_MANY_FILES', `more than ${MAX_FILES} files; a skill should hold instructions and small resources`); return; }
+      if (++files > MAX_FILES) { stopped = true; add('error', 'TOO_MANY_FILES', `more than ${MAX_FILES} files; a skill should hold instructions and small resources`); return; }
       if (entry.name === 'node_modules' || entry.name === '.git') { add('warning', 'BUNDLED_DEPENDENCIES', `${rel} is bundled; skills must not carry installed dependencies or repositories`, rel); continue; }
       if (entry.isSymbolicLink()) {
         const target = await realpath(full).catch(() => undefined);
@@ -229,7 +234,9 @@ export async function validateSkill(directory, { mode = 'legacy', shipped = fals
       if (!entry.isFile()) { add('error', 'SPECIAL_FILE', `${rel} is not a regular file`, rel); continue; }
       const posix = rel.split(path.sep).join('/');
       if (shipped || posix.endsWith('.md') || posix.startsWith('scripts/')) {
-        const buffer = await readFile(full);
+        let buffer;
+        try { buffer = await readFile(full); }
+        catch (error) { add('error', 'UNREADABLE', `${rel} cannot be read: ${error.code ?? error.message}`, rel); continue; }
         if (shipped && !isText(buffer)) add('error', 'SHIPPED_BINARY', `${rel} is not UTF-8 text; ALP bundles carry shipped skills as text`, rel);
         if (posix.endsWith('.md')) markdown.push([posix, buffer.toString('utf8')]);
         if (posix.startsWith('scripts/') && !shipped && process.platform !== 'win32' && buffer.subarray(0, 2).toString() === '#!' && !((await stat(full)).mode & 0o111)) {
@@ -256,9 +263,11 @@ export async function validateSkill(directory, { mode = 'legacy', shipped = fals
   for (const [file, text] of markdown) {
     const content = file === 'SKILL.md' ? body : text;
     for (const target of skillReferences(content)) {
+      // A path leaving the skill does not travel with it: an error for new skills, a warning for existing
+      // ones (a link to a sibling skill still works where it is). A symlink leaving it is always an error.
       if (path.isAbsolute(target) || /^[a-z]:[\\/]/i.test(target) || target.startsWith('~')) { format('ABSOLUTE_REFERENCE', `${file} names the absolute path ${target}; use a path relative to the skill`, file); continue; }
       const resolved = path.resolve(real, path.dirname(file), target);
-      if (!inside(real, resolved)) { add('error', 'REFERENCE_OUTSIDE', `${file} points outside the skill: ${target}`, file); continue; }
+      if (!inside(real, resolved)) { format('REFERENCE_OUTSIDE', `${file} points outside the skill: ${target}`, file); continue; }
       const linked = await lstat(resolved).catch(() => undefined);
       if (!linked) { format('BROKEN_REFERENCE', `${file} points to ${target}, which does not exist`, file); continue; }
       if (linked.isSymbolicLink()) {

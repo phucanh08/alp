@@ -413,14 +413,20 @@ async function skillFormatCheck(home) {
   const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
   const failed = [];
   const warned = [];
+  let checked = 0;
   for (const entry of entries) {
-    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
-    const report = await validateSkill(path.join(directory, entry.name));
-    if (!report.ok) failed.push(`${entry.name}: ${report.errors.map(finding => finding.code).join(', ')}`);
-    else if (report.warnings.length) warned.push(`${entry.name}: ${report.warnings.map(finding => finding.code).join(', ')}`);
+    // The skills the resolver loads: a plain directory name holding SKILL.md (not .git or notes).
+    if ((!entry.isDirectory() && !entry.isSymbolicLink()) || !/^[\w.-]+$/.test(entry.name) || entry.name.startsWith('.')) continue;
+    if (!(await lstat(path.join(directory, entry.name, 'SKILL.md')).then(() => true, () => false))) continue;
+    checked++;
+    try {
+      const report = await validateSkill(path.join(directory, entry.name));
+      if (!report.ok) failed.push(`${entry.name}: ${report.errors.map(finding => finding.message).join('; ')}`);
+      else if (report.warnings.length) warned.push(`${entry.name}: ${report.warnings.map(finding => finding.code).join(', ')}`);
+    } catch (error) { failed.push(`${entry.name}: could not be checked: ${error.message}`); }
   }
-  if (!entries.length) return undefined;
-  if (failed.length) return { id: 'skill-format', status: 'fail', summary: `${failed.length} library skill${failed.length > 1 ? 's point' : ' points'} outside itself or has a broken link; run alp skill check`, details: [...failed, ...warned] };
+  if (!checked) return undefined;
+  if (failed.length) return { id: 'skill-format', status: 'fail', summary: `${failed.length} library skill${failed.length > 1 ? 's have' : ' has'} an unsafe link or an unreadable file (alp skill check <name> explains)`, details: [...failed, ...warned] };
   if (warned.length) return { id: 'skill-format', status: 'warn', summary: `${warned.length} library skill${warned.length > 1 ? 's do' : ' does'} not fully meet the skill format; they still load (alp skill check <name> explains)`, details: warned };
   return { id: 'skill-format', status: 'ok', summary: `the library's skills meet the skill format (${directory})` };
 }
