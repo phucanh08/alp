@@ -73,7 +73,7 @@ test('a service naming the alp command runs `alp daemon run --service`, and alpd
   await fsp.mkdir(bin);
   await writeFile(path.join(bin, launcher), '#!/bin/sh\nexec node /somewhere/cli.js "$@"\n');
   const empty = path.join(directory, 'home');
-  assert.equal(await findDaemonEntry({ home: empty, env: { PATH: bin } }), undefined, 'a shell wrapper outside a bundle is not ALP');
+  assert.equal(await findDaemonEntry({ binDirectories: [], home: empty, env: { PATH: bin } }), undefined, 'a shell wrapper outside a bundle is not ALP');
   // <app>/1.0.0/{bin/alp, alp-bundle.json, lib/…/alpd.js}, app/current → 1.0.0, ~/.alp/bin/alp → app/current/bin/alp.
   const app = path.join(directory, 'app');
   const root = path.join(app, '1.0.0');
@@ -87,17 +87,17 @@ test('a service naming the alp command runs `alp daemon run --service`, and alpd
   await fsp.mkdir(userBin);
   if (process.platform !== 'win32') {
     await fsp.symlink(path.join(root, 'bin', launcher), path.join(userBin, launcher));
-    assert.equal(await findDaemonEntry({ home: empty, env: { PATH: userBin } }), alpd, 'without current, the bundle\'s own alpd.js');
+    assert.equal(await findDaemonEntry({ binDirectories: [], home: empty, env: { PATH: userBin } }), alpd, 'without current, the bundle\'s own alpd.js');
     await fsp.symlink('1.0.0', path.join(app, 'current'));
     await fsp.rm(path.join(userBin, launcher));
     await fsp.symlink(path.join(app, 'current', 'bin', launcher), path.join(userBin, launcher));
-    assert.equal(await findDaemonEntry({ home: empty, env: { PATH: userBin } }), path.join(app, 'current', 'lib', 'node_modules', '@anhlp', 'alp-cli', 'dist', 'alpd.js'), 'through app/current');
+    assert.equal(await findDaemonEntry({ binDirectories: [], home: empty, env: { PATH: userBin } }), path.join(app, 'current', 'lib', 'node_modules', '@anhlp', 'alp-cli', 'dist', 'alpd.js'), 'through app/current');
   }
   const recorded = path.join(directory, 'recorded');
   await fsp.mkdir(recorded, { mode: 0o700 });
   const legacy = path.join(bin, launcher);
   await writeFile(path.join(recorded, 'alpd.json'), JSON.stringify({ entry: legacy, version: '1' }));
-  assert.equal(await findDaemonEntry({ home: recorded, env: { PATH: '' } }), legacy, 'the install record may name the alp command');
+  assert.equal(await findDaemonEntry({ binDirectories: [], home: recorded, env: { PATH: '' } }), legacy, 'the install record may name the alp command');
 });
 
 test('alp daemon install runs alpd under its service until uninstall', { timeout: 30_000, skip: process.platform === 'win32' && 'Windows has no service manager here (serviceFor is undefined) and the stand-in manager is an sh script' }, async t => {

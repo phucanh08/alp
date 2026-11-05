@@ -1,7 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { fstatSync, readFileSync } from 'node:fs';
 import { open, readFile, writeFile, realpath, stat, lstat, mkdir, readlink, unlink, readdir, chmod, rename, rmdir, link } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
@@ -304,15 +304,13 @@ export async function acquireDaemonLock(home, contents) {
         ours = await handle.stat();
         await handle.writeFile(JSON.stringify(lock));
       } catch (error) {
-        // The write failed (a full disk): the file this call created exclusively holds no lock, and
-        // a lock no one can read would stop every later start. Nobody else removes an unreadable
-        // lock (below), so this one is still ours; remove it, unless another file took its place.
-        // When the fstat itself failed there is no identity to compare, but the file this call
-        // created holds nothing yet, and nobody else removes an unreadable lock, so the path still
-        // names it: remove it too, or an empty lock would stop every later start.
+        // Recover the descriptor identity if async fstat failed. Never infer ownership from
+        // the pathname: another process may already have replaced it. If both stats fail,
+        // leave the unreadable lock for explicit recovery rather than unlinking a successor.
+        if (!ours) { try { ours = fstatSync(handle.fd); } catch {} }
         await handle.close().catch(() => {});
         const there = await lstat(file).catch(() => undefined);
-        if (there && (!ours || (ours.ino === there.ino && ours.dev === there.dev))) await unlink(file).catch(() => {});
+        if (ours && there && ours.ino === there.ino && ours.dev === there.dev) await unlink(file).catch(() => {});
         throw error;
       }
       await handle.close();
@@ -639,17 +637,18 @@ async function distributionRoots() {
  * rename to `paseo`, which must never run under the web lock. `ALP_WEB_INTEGRATION` is read for
  * `paseo` only, after `ALP_PASEO_INTEGRATION`, for one release (like the alp-web-integration alias).
  * @param {string} [name]
- * @param {{ home?: string }} [options]
+ * @param {{ home?: string, env?: NodeJS.ProcessEnv, binDirectories?: string[], roots?: string[] }} [options]
  */
 export async function discoverIntegration(name = 'web', options = {}) {
   // The name becomes a descriptor path under <home>/integrations, so it must stay one safe segment.
   assertIntegrationName(name);
   if (name === 'web') return undefined;
+  const { env = process.env, binDirectories = BIN_DIRECTORIES, roots } = options;
   // Explicit environment override always wins: the integration's own, then the generic one.
   const envCandidates = [
-    process.env[`ALP_${name.toUpperCase()}_INTEGRATION`],
-    name === 'paseo' ? process.env.ALP_WEB_INTEGRATION : undefined,
-    process.env.ALP_INTEGRATION_ENTRY,
+    env[`ALP_${name.toUpperCase()}_INTEGRATION`],
+    name === 'paseo' ? env.ALP_WEB_INTEGRATION : undefined,
+    env.ALP_INTEGRATION_ENTRY,
   ].filter(Boolean);
   for (const candidate of envCandidates) if (await isFile(candidate)) return candidate;
 
@@ -658,7 +657,7 @@ export async function discoverIntegration(name = 'web', options = {}) {
   if (fromHome) return fromHome;
 
   // A full distribution may describe a bundled integration relative to its own root.
-  for (const root of await distributionRoots()) {
+  for (const root of roots ?? await distributionRoots()) {
     for (const descriptorPath of [path.join(root, 'integrations', `${name}.json`), path.join(root, 'integrations', name, 'integration.json')]) {
       const entry = await readIntegrationDescriptor(descriptorPath, [root]);
       if (entry) return entry;
@@ -667,7 +666,7 @@ export async function discoverIntegration(name = 'web', options = {}) {
 
   // Installed integration packages announce themselves on PATH.
   const binary = integrationBinaryName(name);
-  for (const directory of [...(process.env.PATH ?? '').split(path.delimiter).filter(Boolean), ...BIN_DIRECTORIES]) {
+  for (const directory of [...(env.PATH ?? '').split(path.delimiter).filter(Boolean), ...binDirectories]) {
     const candidate = await realpath(path.join(directory, binary)).catch(() => undefined);
     if (candidate && await isFile(candidate)) return candidate;
   }

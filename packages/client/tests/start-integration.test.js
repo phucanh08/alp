@@ -5,7 +5,7 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { discoverIntegration, startIntegration } from '@anhlp/alp-client/index';
@@ -296,4 +296,24 @@ test('web is never discovered; ALP_WEB_INTEGRATION names the Paseo integration o
   // And it never applies to another name.
   delete process.env.ALP_PASEO_INTEGRATION;
   assert.equal(await discoverIntegration('sample', { home: f.home }), undefined);
+});
+
+test('discoverIntegration isolates env, bin directories and distribution roots (t-50af)', async t => {
+  const f = await fixture('isolated');
+  const bin = path.join(f.directory, 'bin');
+  await mkdir(bin);
+  const binary = path.join(bin, 'alp-isolated-integration');
+  await writeFile(binary, 'fixture');
+  const previous = process.env.ALP_ISOLATED_INTEGRATION;
+  process.env.ALP_ISOLATED_INTEGRATION = binary;
+  t.after(() => { if (previous === undefined) delete process.env.ALP_ISOLATED_INTEGRATION; else process.env.ALP_ISOLATED_INTEGRATION = previous; });
+  const isolated = { home: f.home, env: {}, binDirectories: [], roots: [] };
+  assert.equal(await discoverIntegration(f.name, isolated), undefined);
+  assert.equal(await discoverIntegration(f.name, { ...isolated, env: { PATH: bin } }), await realpath(binary));
+  assert.equal(await discoverIntegration(f.name, { ...isolated, binDirectories: [bin] }), await realpath(binary));
+  assert.equal(await discoverIntegration(f.name, { ...isolated, env: { ALP_ISOLATED_INTEGRATION: binary } }), binary);
+  assert.equal(await discoverIntegration(f.name, { home: f.home }), binary, 'normal env discovery retained');
+  await mkdir(path.join(f.directory, 'integrations'));
+  await writeFile(path.join(f.directory, 'integrations', 'isolated.json'), JSON.stringify({ entry: path.relative(f.directory, binary) }));
+  assert.equal(await discoverIntegration(f.name, { ...isolated, roots: [f.directory] }), binary);
 });
