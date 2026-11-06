@@ -9,26 +9,12 @@ import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime, ModelCatalog } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { validateResult } from '@anhlp/alp-protocol/contract';
+import { teardown } from '../../../test/support/teardown.js';
 
 const transport = () => () => ({ async initialize() {}, onNotification() {}, onFailure() {}, onRequest() {}, async close() {}, async request() { return {}; } });
 
-/**
- * Teardown in the reverse order of setup: every step runs even when one throws, and the first failure
- * still fails the test (t-5294.2). node:test runs t.after hooks in the order they were added and stops
- * at the first that throws: with the directory removed first, a failed rm (ENOTEMPTY while the catalog
- * still wrote its cache for a refreshAcp alpd fired) skipped the server and client closes, and their
- * sockets kept the file alive until the 300 s watchdog.
- */
-function teardown(t) {
-  const steps = [];
-  t.after(async () => {
-    const errors = [];
-    for (const step of steps.reverse()) { try { await step(); } catch (error) { errors.push(error); } }
-    if (errors.length === 1) throw errors[0];
-    if (errors.length) throw new AggregateError(errors, 'teardown failed');
-  });
-  return step => { steps.push(step); };
-}
+// Teardown in the reverse order of setup, through the one shared helper (t-5294.2, t-5294.6).
+// In this file a failed rm (ENOTEMPTY while the catalog still wrote its cache for a refreshAcp alpd fired) skipped the server and client closes, and their sockets kept it alive until the 300 s watchdog.
 
 async function setup(t, probes) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-catalog-'));
