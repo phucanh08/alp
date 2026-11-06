@@ -8,6 +8,7 @@ const USAGE = `Usage:
   alp setup [directory] [--runtime codex|claude|mix] [--prefer claude|codex]
             [--claude-model M] [--codex-model M] [--claude-supervisor M] [--codex-supervisor M]
             [--claude-oracle M] [--codex-oracle M]   write Phở/Cafe's agent profiles to .alp/settings.json
+            (keeps profiles written by hand; names other teams and the keys to edit)
   alp daemon <start|stop|restart>
   alp daemon status [--json]             liveness and readiness; exit 0 ready, 3 not running, 4 not ready
   alp daemon <install|uninstall>         run alpd as a login service that restarts after a crash
