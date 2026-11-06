@@ -224,8 +224,8 @@ export async function installPack(id, { scope, root, library, assign = false, te
     await guard('role-skills.json');
     const text = await readFile(file, 'utf8').catch(error => { if (error.code === 'ENOENT') return '{}'; throw error; });
     let roles;
-    try { roles = JSON.parse(text); } catch (cause) { throw new AlpError('INVALID_LIBRARY', `${file}: ${cause.message}; the pack was installed but no role was given its skills`, { cause }); }
-    if (!object(roles)) fail('INVALID_LIBRARY', `${file}: expected an object of role names to skill lists`);
+    try { roles = JSON.parse(text); } catch (cause) { throw new AlpError('INVALID_LIBRARY', `${file}: ${cause.message}; the pack was installed but no agent was given its skills`, { cause }); }
+    if (!object(roles)) fail('INVALID_LIBRARY', `${file}: expected an object of agent names to skill lists`);
     for (const [role, skills] of Object.entries(pack.assign)) {
       const list = Array.isArray(roles[role]) ? roles[role] : (roles[role] = []);
       for (const skill of skills) if (!list.includes(skill)) { list.push(skill); assigned.push(`${role}/${skill}`); }

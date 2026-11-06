@@ -9,7 +9,7 @@ see [role skills](role-skills.md); for agents, teams and hooks, the
 
 | Kind | Where | Who gets it |
 |---|---|---|
-| Core | shipped in `templates/skills/`, seeded into `~/.alp/skills/` | the roles `role-skills.json` lists |
+| Core | shipped in `templates/skills/`, seeded into `~/.alp/skills/` | the agents `role-skills.json` lists, by agent name |
 | Optional pack | shipped in `templates/packs/<pack>/`, **never seeded** | nobody until you install it and assign it |
 | Project | `<project>/.alp/skills/<name>/` | replaces a library skill of the same name; custom agents name it in `agent.json` |
 

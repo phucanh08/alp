@@ -170,7 +170,7 @@ export async function resolveAgent(projectRoot, { agent, library, templates } = 
   }
   validateAgentConfig(config, configPath);
 
-  // The role's library skills; a project skill of the same name in .alp/skills replaces one.
+  // The library skills role-skills.json lists under this agent's name (not its role); a project skill of the same name in .alp/skills replaces one.
   const skills = [];
   for (const skill of library ? await librarySkills(library, name) : []) {
     skills.push({ name: skill.name, path: (await namedEntry(root, undefined, 'skills', skill.name, entry => path.join(entry, 'SKILL.md'))) ?? skill.path });
