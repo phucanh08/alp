@@ -2,7 +2,7 @@
 // and that every in-process consumer (models, thinkingOptionsFor) reads the live rows. Mocked providers.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MODELS, catalogModels } from '@anhlp/alp-core/models';
@@ -203,7 +203,33 @@ test('ACP: start lists configured providers as unprobed rows and starts none of 
   assert.equal(rows.find(row => row.id === 'gemini/gemini-pro').source, 'configured');
   assert.equal(rows.find(row => row.id === 'off').enabled, false);
   assert.ok(!rows.some(row => row.provider === 'antigravity'), 'Antigravity keeps its own runtime rows');
-  catalog.stop();
+  // start() wrote the cache in the background; the home this test removes next must be done with.
+  await catalog.stop();
+});
+
+// t-5294.2: the catalog writes its cache from work nobody awaits (start's refresh, the refreshAcp a saved
+// provider fires, a session's learned models). A test removing the home raced it: hookFailed ENOTEMPTY
+// rmdir <home>/cache on Windows; on macOS the failed first hook skipped the daemon's closes and the file hung.
+test('stop waits for the cache writes already under way, so the home can be removed (t-5294.2)', async t => {
+  reset(t);
+  const directory = await home(t);
+  const cache = path.join(directory, 'cache');
+  const catalog = new ModelCatalog({ home: directory, probes: { codex: async () => codexLive }, refreshMs: 0, acpProviders: async () => acpConfigs, acpProbe: async provider => [{ id: `${provider.id}-m1` }] });
+  setActiveCatalog(catalog);
+  t.after(() => setActiveCatalog(undefined));
+  await catalog.start();
+  // Fired and forgotten, as alpd does on library.save (server.ts) and on each ACP session/new.
+  void catalog.refreshAcp(['opencode']);
+  feedAcpSession('gemini', { models: { availableModels: [{ modelId: 'learned' }] } });
+  await catalog.stop();
+  assert.deepEqual(await readdir(cache), ['models.json'], 'no temporary file left behind, none still to come');
+  const cached = JSON.parse(await readFile(path.join(cache, 'models.json'), 'utf8'));
+  assert.deepEqual(cached.providers.codex.models, codexLive, 'start\'s background refresh');
+  assert.deepEqual(cached.acp.opencode.models, [{ id: 'opencode-m1' }], 'the fired refreshAcp');
+  assert.deepEqual(cached.acp.gemini.models, [{ id: 'learned' }], 'the learned models');
+  await rm(directory, { recursive: true });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  await assert.rejects(readdir(directory), { code: 'ENOENT' }, 'nothing recreates the removed home');
 });
 
 test('ACP: a session/new answer teaches the active catalog the provider\'s models, additively', async t => {
