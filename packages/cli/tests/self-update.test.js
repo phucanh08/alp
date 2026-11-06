@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   allowedHop, bundleCommand, retryBusy, compareVersions, fetchBytes, npmMessage, pruneVersions, releaseBaseUrl, releasePlatform,
-  selectAsset, selfUpdate, sha256, switchCurrent, verifyChecksum, verifyProvenance,
+  selectAsset, selfUpdate, sha256, switchCurrent, systemTar, verifyChecksum, verifyProvenance,
 } from '../src/self-update.js';
 
 const H = c => c.repeat(64);
@@ -162,7 +162,9 @@ async function mirror(t, { version = '9.9.9', corrupt = false, bundleVersion = v
   const mirrorDir = path.join(work, 'mirror');
   await mkdir(mirrorDir);
   const archive = path.join(mirrorDir, `${name}${windows ? '.zip' : '.tar.gz'}`);
-  const tar = spawnSync('tar', windows ? ['--format', 'zip', '-cf', archive, '-C', path.join(work, 'src'), name] : ['-czf', archive, '-C', path.join(work, 'src'), name]);
+  // systemTar, the same helper the code under test uses (t-ffe4.6): on Windows this fixture writes a
+  // zip, which Git Bash's GNU tar — first on PATH there — cannot do at all. 'tar' on macOS and Linux.
+  const tar = spawnSync(systemTar(), windows ? ['--format', 'zip', '-cf', archive, '-C', path.join(work, 'src'), name] : ['-czf', archive, '-C', path.join(work, 'src'), name]);
   assert.equal(tar.status, 0, String(tar.stderr));
   const digest = corrupt ? H('0') : sha256(await readFile(archive));
   await writeFile(path.join(mirrorDir, 'SHA256SUMS'), `${digest}  ${path.basename(archive)}\n`);

@@ -11,6 +11,7 @@ import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
 import { archiveName, pack, sums } from '../../scripts/package-binary.mjs';
 import { namesExecPath } from '../../scripts/execpath-lint.mjs';
+import { spawnCommand } from '../../scripts/spawn-command.mjs';
 import { fakeBundle } from '../support/fake-bundle.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
@@ -48,7 +49,10 @@ test('the release archive holds the bundle directory alp-<version>-<os>-<arch>/'
   const out = await temp(t, 'alp-pack-');
   const archive = await pack({ bundle, out });
   assert.equal(path.basename(archive), 'alp-1.2.3-linux-arm64.tar.gz');
-  const listing = execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n').map(line => line.replace(/\/$/, ''));
+  // Through spawnCommand (t-ffe4.6): unchanged 'tar' on macOS and Linux, which is all this
+  // POSIX-only test runs on, and already right if the skip above is ever lifted.
+  const [tar, listArgs] = spawnCommand('tar', ['-tzf', archive]);
+  const listing = execFileSync(tar, listArgs, { encoding: 'utf8' }).trim().split('\n').map(line => line.replace(/\/$/, ''));
   for (const name of ['alp-bundle.json', 'bin/alp', 'node/bin/node', 'lib/node_modules/@anhlp/alp-cli/dist/cli.js', 'LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.txt']) assert.ok(listing.includes(`alp-1.2.3-linux-arm64/${name}`), name);
   assert.throws(() => archiveName('1.0.0', 'windows-arm64'), /No release archive/);
   assert.equal(archiveName('1.0.0', 'windows-x64'), 'alp-1.0.0-windows-x64');

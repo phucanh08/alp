@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { archiveName, pack, sums } from '../../scripts/package-binary.mjs';
+import { windowsTar } from '../../scripts/spawn-command.mjs';
 import { fakeBundle } from '../support/fake-bundle.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
@@ -81,7 +82,8 @@ test('the Windows release archive is alp-<version>-windows-x64.zip holding the b
   assert.match(sumsText, /^[0-9a-f]{64} {2}alp-1\.2\.3-windows-x64\.zip$/m);
   assert.match(sumsText, /^[0-9a-f]{64} {2}install\.ps1$/m);
   const x = await temp(t, 'alp-ps-x-');
-  execFileSync(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), ['-xf', path.join(releases, 'alp-1.2.3-windows-x64.zip'), '-C', x]);
+  // windowsTar, not a fourth copy of the System32 path (t-ffe4.6); a zip needs the system's bsdtar.
+  execFileSync(windowsTar(), ['-xf', path.join(releases, 'alp-1.2.3-windows-x64.zip'), '-C', x]);
   for (const file of ['bin\\alp.cmd', 'node\\node.exe', 'alp-bundle.json', 'LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.txt']) assert.ok(existsSync(path.join(x, 'alp-1.2.3-windows-x64', file)), file);
 });
 
