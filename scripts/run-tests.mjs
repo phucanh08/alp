@@ -4,7 +4,8 @@
 // `node --test` (t-bfbd). Builds nothing: the lane builds first.
 //   node scripts/run-tests.mjs [--private-home] <file.test.js>...
 // Direct node --test calls bypass this session isolation; CI and agent shells should use this entry.
-// Files report their progress and time out after five minutes even with leaked handles.
+// Files report their progress and time out after five minutes even with leaked handles; a file that times
+// out first dumps its subtests (and on POSIX its processes and handles; on Windows ALP_WATCHDOG_WIN_PROCS=1).
 // --private-home also removes ALP_*_BIN and gives the run a throwaway HOME/USERPROFILE.
 import { runNodeTests } from './test-lib.mjs';
 

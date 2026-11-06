@@ -155,9 +155,9 @@ test('a file stopped at the deadline first dumps its subtests, failures, process
   assert.match(dump,/subtests: 1 passed, 1 failed, 0 in flight/);
   assert.match(dump,/not ok: leaves a server open \(\d+ ms, hookFailed\)\n\s+simulated ENOTEMPTY in the first hook/);
   assert.match(dump,/in flight: none; every subtest finished and the file's process stayed alive/);
-  // Windows lists processes through WMI, which can answer too late for the 2.5 s it gets (best effort there).
+  // Windows lists processes only on request (WMI can take seconds, more than the deadline's bound allows).
   if (process.platform === 'win32') {
-    assert.match(dump,/ processes:\n  (pid \d+|process list unavailable: no answer within 2500 ms)/);
+    assert.match(dump,/ processes:\n  not collected on Windows \(ALP_WATCHDOG_WIN_PROCS=1/);
     assert.match(dump,/open handles: not available on Windows/);
   } else assert.match(dump,/ processes:\n  pid \d+/);
   // The file's own process names the server it never closed.

@@ -5,9 +5,9 @@
 // failed (with their errors) or are still in flight, the file's processes, and (not on Windows) each
 // one's open libuv handles from a Node diagnostic report. A passing or failing file costs one extra
 // reporter writing a line per subtest to scratch, and a report signal handler nothing triggers.
-// The dump adds at most about 5.2 s to the deadline (POSIX: a 3 s ps, 2.2 s of reports; Windows: a 2.5 s
-// listing, no reports), and never blocks the other files' workers. On Windows the listing is best effort:
-// a cold WMI query took over 4 s on windows-daemon (24), so it may come back as "no answer".
+// The dump adds at most about 5.2 s to the deadline (a 3 s ps, 2.2 s of reports), and never blocks the
+// other files' workers. On Windows it lists no processes and has no reports: a cold WMI query took over
+// 4 s on windows-daemon (24) and broke the deadline's own bound, so it runs only with ALP_WATCHDOG_WIN_PROCS=1.
 import { spawn, spawnSync } from 'node:child_process';
 import { availableParallelism, tmpdir } from 'node:os';
 import { mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
@@ -88,6 +88,7 @@ function capture(command, args, ms) {
 /** The file's processes: its group and descendants (POSIX), or its process tree (Windows). Listed, never signalled. */
 async function processSummary(root) {
   if (windows) {
+    if (process.env.ALP_WATCHDOG_WIN_PROCS !== '1') return ['  not collected on Windows (ALP_WATCHDOG_WIN_PROCS=1 lists them through WMI, up to 2.5 s more)'];
     const script = 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)" }';
     const result = await capture('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], 2500);
     if (result.error) return [`  process list unavailable: ${result.error}`];
