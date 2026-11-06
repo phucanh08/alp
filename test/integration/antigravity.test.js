@@ -12,6 +12,7 @@ import { diagnose } from '../../packages/client/src/doctor.js';
 import { probeAntigravity } from '../../packages/client/src/antigravity-probe.js';
 import { validateProvider } from '../../packages/core/src/providers.js';
 import { createAlpRuntime, resolveSession, AntigravityTransport } from '../../dist/runtime/index.js';
+import { teardown } from '../support/teardown.js';
 
 const FAKE_AGY = fileURLToPath(new URL('../support/fake-agy.js', import.meta.url));
 
@@ -24,7 +25,11 @@ async function until(check, what = 'Expected condition') {
 }
 
 async function setup(t, { env = {}, settings = {}, provider = {}, supervisor = false } = {}) {
+  const defer = teardown(t);
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-'));
+  // Undone LAST: teardown runs the steps in reverse, so the runtime (and any agy child it started)
+  // has stopped before this runs. Windows cannot remove a directory a process still holds.
+  defer(() => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(dir, 'project');
   const home = path.join(dir, 'home');
   const logFile = path.join(dir, 'agy.jsonl');
@@ -55,10 +60,7 @@ async function setup(t, { env = {}, settings = {}, provider = {}, supervisor = f
 
   const events = [];
   runtime.onEvent(envelope => events.push(envelope));
-  t.after(async () => {
-    await runtime.shutdown();
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-  });
+  defer(() => runtime.shutdown());
 
   let prompts = 0;
   const turn = async (text, sessionId = 'root') => {
@@ -76,8 +78,9 @@ async function setup(t, { env = {}, settings = {}, provider = {}, supervisor = f
 }
 
 test('antigravity provider validation and id checks', async t => {
+  const defer = teardown(t);
   const home = await mkdtemp(path.join(tmpdir(), 'alp-agy-val-'));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  defer(() => rm(home, { recursive: true, force: true }));
 
   // Valid antigravity provider
   const valid = { kind: 'antigravity', command: 'agy', label: 'Antigravity' };
@@ -118,9 +121,10 @@ test('antigravity fallback models when models command fails', async () => {
 });
 
 test('resolveSession resolves antigravity models without elevating permissions', async t => {
+  const defer = teardown(t);
   const home = await mkdtemp(path.join(tmpdir(), 'alp-agy-res-'));
   const root = await mkdtemp(path.join(tmpdir(), 'alp-agy-root-'));
-  t.after(() => Promise.all([rm(home, { recursive: true, force: true }), rm(root, { recursive: true, force: true })]));
+  defer(() => Promise.all([rm(home, { recursive: true, force: true }), rm(root, { recursive: true, force: true })]));
   await initProject(root);
 
   // 1. antigravity:gemini-3.8-flash-high
@@ -161,9 +165,10 @@ test('antigravity doctor check reports ok', async () => {
 });
 
 test('antigravity library entry test', async t => {
+  const defer = teardown(t);
   const home = await mkdtemp(path.join(tmpdir(), 'alp-agy-lib-'));
   const root = await mkdtemp(path.join(tmpdir(), 'alp-agy-proj-'));
-  t.after(() => Promise.all([rm(home, { recursive: true, force: true }), rm(root, { recursive: true, force: true })]));
+  defer(() => Promise.all([rm(home, { recursive: true, force: true }), rm(root, { recursive: true, force: true })]));
   await initProject(root);
 
   await saveEntry('providers', 'antigravity', {
@@ -209,8 +214,9 @@ test('antigravity rejects constrained permission profiles and review copies', as
 });
 
 test('antigravity keeps separate assistant messages within a turn', async t => {
+  const defer = teardown(t);
   const transport = new AntigravityTransport();
-  t.after(() => transport.close());
+  defer(() => transport.close());
   const completed = [];
   transport.onNotification((method, params) => { if (method === 'item/completed') completed.push(params.item.text); });
   transport.activeTurn = 'test-turn';
@@ -223,9 +229,10 @@ test('antigravity keeps separate assistant messages within a turn', async t => {
 
 test('antigravity never reports an edit as done in read-only mode, even when agy says DONE', async t => {
   // agy 1.4.10 sometimes marks a denied write_file DONE with no error and writes nothing.
+  const defer = teardown(t);
   for (const [mode, want] of [['read-only', 'failed'], ['workspace-write', 'completed']]) {
     const transport = new AntigravityTransport();
-    t.after(() => transport.close());
+    defer(() => transport.close());
     transport.config = { sandbox: mode };
     const completed = [];
     transport.onNotification((method, params) => { if (method === 'item/completed') completed.push(params.item); });
@@ -246,10 +253,11 @@ test('antigravity never reports an edit as done in read-only mode, even when agy
 });
 
 test('antigravity records a refused terminal command as failed in read-only mode, even when agy says DONE', async t => {
+  const defer = teardown(t);
   const lines = { 'ls -la src': 'failed', 'pwd': 'completed', 'cat /etc/passwd': 'failed', 'tail -f log': 'failed', 'ls; rm -rf x': 'failed', 'ls $(whoami)': 'failed', 'rm x': 'failed', [undefined]: 'failed' };
   for (const mode of ['read-only', 'workspace-write']) {
     const transport = new AntigravityTransport();
-    t.after(() => transport.close());
+    defer(() => transport.close());
     transport.config = { sandbox: mode };
     const completed = [];
     transport.onNotification((method, params) => { if (method === 'item/completed') completed.push(params.item); });
@@ -263,16 +271,19 @@ test('antigravity records a refused terminal command as failed in read-only mode
 });
 
 /**
- * Removes `dir` after the test's other cleanups, which stop the child processes using it: hooks run in the
- * order registered, and Windows cannot remove a directory a process still holds (nor at once after it ends).
+ * Removes `dir` last, after the cleanups that stop the child processes using it: Windows cannot
+ * remove a directory a process still holds (nor at once after it ends). It used to register a hook
+ * that registered the removal, to reach the back of a FIFO queue; teardown(t) reverses the list for
+ * it, and unlike that trick it still runs the removal when an earlier step throws (t-5294.6).
  */
-const removeLast = (t, dir) => t.after(() => { t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })); });
+const removeLast = (t, dir) => teardown(t)(() => rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
 
 async function transportFixture(t, directory, tools, mcpServers = {}) {
+  const defer = teardown(t);
   const configFile = path.join(directory, 'mcp_config.json');
   const transport = new AntigravityTransport(process.execPath, directory,
     { ...process.env, ALP_AGY_MCP_CONFIG: configFile }, { id: 'antigravity', label: 'fake', command: process.execPath, args: [FAKE_AGY] });
-  t.after(() => transport.close());
+  defer(() => transport.close());
   const events = [];
   transport.onNotification((method, params) => events.push({ method, params }));
   await transport.request('thread/start', { cwd: directory, sandbox: 'full-access', mcpServers, dynamicTools: tools.map(name => ({ name, description: name })) });
@@ -326,6 +337,7 @@ test('Antigravity bridges session MCP tools without persisting external server c
 });
 
 test('Antigravity forwards HTTP MCP authentication and preserves rich tool results', async t => {
+  const defer = teardown(t);
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-http-mcp-'));
   removeLast(t, dir);
   const server = http.createServer(async (req, res) => {
@@ -342,7 +354,7 @@ test('Antigravity forwards HTTP MCP authentication and preserves rich tool resul
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
+  defer(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
   const port = server.address().port;
   const { turn, configFile } = await transportFixture(t, dir, [], { docs: { url: `http://127.0.0.1:${port}/mcp`, http_headers: { Authorization: 'Bearer session-private-token' } } });
   const search = (await turn('tools')).slice('tools: '.length).split(',').find(name => name.includes('search'));
@@ -368,6 +380,7 @@ test('failed external MCP startup closes servers already opened and names do not
 });
 
 test('closing while the MCP config is locked cannot launch a late AGY process', async t => {
+  const defer = teardown(t);
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-mcp-startup-close-'));
   removeLast(t, dir);
   const configFile = path.join(dir, 'mcp_config.json');
@@ -377,7 +390,7 @@ test('closing while the MCP config is locked cannot launch a late AGY process', 
   const transport = new AntigravityTransport(process.execPath, dir, {
     ...process.env, ALP_AGY_MCP_CONFIG: configFile, FAKE_AGY_LOG: logFile,
   }, { id: 'antigravity', label: 'fake', command: process.execPath, args: [FAKE_AGY] });
-  t.after(() => transport.close());
+  defer(() => transport.close());
   const opening = transport.request('thread/start', { cwd: dir, sandbox: 'full-access', mcpServers: {
     docs: { command: process.execPath, args: [path.resolve('test/support/fake-mcp.js')], env: { FAKE_MCP_PID_FILE: pidFile } },
   } }).then(() => null, error => error);
@@ -391,11 +404,12 @@ test('closing while the MCP config is locked cannot launch a late AGY process', 
 });
 
 test('closing during a stalled external MCP handshake aborts and cleans its process promptly', async t => {
+  const defer = teardown(t);
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-mcp-abort-'));
   removeLast(t, dir);
   const pidFile = path.join(dir, 'mcp.pid');
   const transport = new AntigravityTransport(process.execPath, dir, process.env, { id: 'antigravity', label: 'fake', command: process.execPath, args: [FAKE_AGY] });
-  t.after(() => transport.close());
+  defer(() => transport.close());
   const opening = transport.request('thread/start', { cwd: dir, sandbox: 'full-access', mcpServers: {
     docs: { command: process.execPath, args: [path.resolve('test/support/fake-mcp.js')], env: { FAKE_MCP_PID_FILE: pidFile, FAKE_MCP_HANG_INITIALIZE: '1' } },
   } }).then(() => null, error => error);

@@ -7,10 +7,12 @@ import { initProject } from '@anhlp/alp-core/init';
 import { validateAgentConfig } from '@anhlp/alp-core/validation';
 import { ClaudeTransport, createAlpRuntime } from '@anhlp/alp-runtime';
 import { fakeTransport, until } from '../../../test/support/fake-agent.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 async function project(t) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-context-'));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(directory, 'project');
   await initProject(root);
   return { directory, root, runs: path.join(directory, 'runs') };
@@ -19,11 +21,12 @@ async function project(t) {
 const logOf = runs => async event => (await readFile(path.join(runs, 'root.jsonl'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.event === event);
 
 test('an assignment hears once that its context nears compaction, with no push to hand off, and gets its brief again after it', async t => {
+  const defer = teardown(t);
   const { directory, root, runs } = await project(t);
   const runtimes = [];
   const events = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: runs });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   runtime.onEvent(envelope => events.push([envelope.sessionId, envelope.event]));
   await runtime.open('root', { cwd: root });
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Go' }] });
@@ -70,10 +73,11 @@ test('an assignment hears once that its context nears compaction, with no push t
 });
 
 test('main is told between turns without a turn, and after a compaction gets its open assignments and tasks again', async t => {
+  const defer = teardown(t);
   const { directory, root, runs } = await project(t);
   const runtimes = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: runs });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root });
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Go' }] });
   const main = runtimes[0];
@@ -159,11 +163,12 @@ test('Claude reports the window and compaction point it resolved, and no guessed
 
 // t-7679.12: each token report becomes the session's usage, sent as a usage event and kept in its snapshot.
 test('a token report becomes the session\'s usage: sent when it changes and kept in the snapshot', async t => {
+  const defer = teardown(t);
   const { directory, root } = await project(t);
   const runtimes = [];
   const usages = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home') });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   runtime.onEvent(envelope => envelope.event.type === 'usage' && usages.push([envelope.sessionId, envelope.event.usage]));
   await runtime.open('root', { cwd: root });
   assert.equal(runtime.snapshot('root').usage, undefined);

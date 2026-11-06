@@ -9,6 +9,7 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { createProvider } from '@anhlp/alp-paseo';
 import { PROVIDER_CAPABILITIES, ProviderEventSchema } from '@getpaseo/plugin/server/provider';
+import { teardown } from '../../../test/support/teardown.js';
 
 async function until(check) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
@@ -44,8 +45,9 @@ function fakeTransport(runtimes) {
 }
 
 async function project(t) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-human-'));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(directory, 'project');
   await initProject(root);
   await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['peer'] } }));
@@ -53,10 +55,11 @@ async function project(t) {
 }
 
 async function setup(t, options = {}) {
+  const defer = teardown(t);
   const { directory, root } = await project(t);
   const runtimes = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(directory, 'runs'), silentForMs: 40, ...options });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   const envelopes = [];
   runtime.onEvent(envelope => envelopes.push(envelope));
   await runtime.open('root', { cwd: root, mode: 'workspace-write' });
@@ -156,14 +159,15 @@ test('the user can mail an assignment directly; it arrives as a user instruction
 });
 
 test('alpd lists and answers questions by id prefix, reports tree status and the log, and re-announces pending questions', async t => {
+  const defer = teardown(t);
   const { directory, root } = await project(t);
   const runtimes = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(directory, 'runs') });
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', runLogDir: path.join(directory, 'runs') });
   await server.listen();
-  t.after(async () => { await server.close(); await runtime.shutdown(); });
+  defer(async () => { await server.close(); await runtime.shutdown(); });
   const client = await connect(daemonPaths(directory).socket);
-  t.after(() => client.close());
+  defer(() => client.close());
   await client.request('session.create', { sessionId: 'root', spec: { cwd: root, mode: 'workspace-write' } });
   await client.request('session.prompt', { sessionId: 'root', clientMessageId: 'm1', content: [{ type: 'text', text: 'Go' }] });
   await until(() => runtimes[0]?.calls.some(call => call.method === 'turn/start'));
@@ -177,7 +181,7 @@ test('alpd lists and answers questions by id prefix, reports tree status and the
 
   // A second viewer attaching to the tree learns about the open question.
   const viewer = await connect(daemonPaths(directory).socket);
-  t.after(() => viewer.close());
+  defer(() => viewer.close());
   const seen = [];
   viewer.onEvent(envelope => seen.push(envelope.event));
   await viewer.request('session.attach', { sessionId: 'root', replay: false });
@@ -194,11 +198,12 @@ test('alpd lists and answers questions by id prefix, reports tree status and the
 });
 
 test('Paseo shows main\'s question to the user as a question prompt and returns the answer, or the dismissal', async t => {
+  const defer = teardown(t);
   const { root } = await project(t);
   const runtimes = [];
   const provider = createProvider({ transport: fakeTransport(runtimes) });
   const connection = await provider.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
-  t.after(() => connection.close());
+  defer(() => connection.close());
   const events = [];
   connection.onEvent(event => { ProviderEventSchema.parse(event); events.push(event); });
   await connection.send({ type: 'session.open', requestId: 'open', sessionId: 'paseo-root', history: 'skip', config: { cwd: root, env: {}, mcpServers: {}, settings: {}, persist: true, mode: 'workspace-write' } });
@@ -224,6 +229,7 @@ test('Paseo shows main\'s question to the user as a question prompt and returns 
 });
 
 test('Paseo shows an open human gate as an approval card; picking an option approves it as paseo (t-ccac)', async t => {
+  const defer = teardown(t);
   const { root } = await project(t);
   const { createTask, addGate, getTask } = await import('@anhlp/alp-core/tasks');
   const task = await createTask(root, { title: 'Release' }, 'user');
@@ -231,7 +237,7 @@ test('Paseo shows an open human gate as an approval card; picking an option appr
   const runtimes = [];
   const provider = createProvider({ transport: fakeTransport(runtimes) });
   const connection = await provider.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
-  t.after(() => connection.close());
+  defer(() => connection.close());
   const events = [];
   connection.onEvent(event => { ProviderEventSchema.parse(event); events.push(event); });
   await connection.send({ type: 'session.open', requestId: 'open', sessionId: 'paseo-root', history: 'skip', config: { cwd: root, env: {}, mcpServers: {}, settings: {}, persist: true, mode: 'workspace-write' } });

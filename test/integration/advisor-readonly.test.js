@@ -8,14 +8,16 @@ import { seedLibrary } from '@anhlp/alp-core/library';
 import { profileFor } from '@anhlp/alp-core/permissions';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { fakeTransport, until } from '../support/fake-agent.js';
+import { teardown } from '../support/teardown.js';
 
 /**
  * A custom agent serving as a team's advisor or reviewer is read-only, whatever its name, its
  * agent.json mode, or a permission profile that gives it more (P0: no name-based exemption).
  */
 async function setup(t, members) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-advisor-'));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(directory, 'project');
   const library = path.join(directory, 'home');
   await initProject(root);
@@ -36,7 +38,7 @@ async function setup(t, members) {
   await writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify({ defaultAgent: 'main', workflow: { mode: 'squad', supervisor: false }, permissions: { agents: { auditor: 'full-access', checker: 'workspace-write' } } }));
   const agents = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(agents), supervisor: false, libraryDir: library, runLogDir: path.join(directory, 'runs') });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, workflow: 'squad' });
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Go' }] });
   return { root, library, runtime, agents, main: agents[0] };

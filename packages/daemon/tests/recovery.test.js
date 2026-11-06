@@ -15,10 +15,12 @@ import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { connect, daemonPaths, bootTime, readLock } from '@anhlp/alp-client';
 
 import { fakeTransport, until, git, workspace } from '../../../test/support/recovery.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 const runLog = async (directory, rootId) => (await readFile(path.join(directory, 'runs', `${rootId}.jsonl`), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
 
 test('a worktree assignment alpd stopped under continues in the next alpd: same thread, worktree, task and requester', async t => {
+  const defer = teardown(t);
   const { directory, root, options } = await workspace(t);
   const runtimes = [];
   const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
@@ -44,7 +46,7 @@ test('a worktree assignment alpd stopped under continues in the next alpd: same 
   assert.deepEqual(await reclaimWorktrees(options.worktreeDir), { kept: [`alp/${id}`], left: [] });
 
   const second = createAlpRuntime({ ...options, transport: fakeTransport(runtimes), previousExit: { kind: 'crash', at: '2026-10-09T03:00:00.000Z' } });
-  t.after(() => second.shutdown());
+  defer(() => second.shutdown());
   const events = [];
   second.onEvent(envelope => events.push(envelope));
   assert.deepEqual(second.recoverable().map(entry => entry.assignmentId), [id]);
@@ -80,10 +82,11 @@ test('a worktree assignment alpd stopped under continues in the next alpd: same 
 });
 
 test('a runtime process that dies mid-turn is restarted and its assignment continues; repeated deaths without progress fail it', async t => {
+  const defer = teardown(t);
   const { directory, root, options } = await workspace(t);
   const runtimes = [];
   const runtime = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root });
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Go' }] });
   const main = runtimes[0];
@@ -127,6 +130,7 @@ test('a runtime process that dies mid-turn is restarted and its assignment conti
 });
 
 test('assignments the next alpd cannot continue end with their task reopened; parked recovery needs an explicit session prompt', async t => {
+  const defer = teardown(t);
   const { directory, root, options } = await workspace(t);
   const runtimes = [];
   const start = async () => {
@@ -155,7 +159,7 @@ test('assignments the next alpd cannot continue end with their task reopened; pa
 
   const parked = await start();
   const third = createAlpRuntime({ ...options, transport: fakeTransport(runtimes), recoveryResume: false });
-  t.after(() => third.shutdown());
+  defer(() => third.shutdown());
   const events = [];
   third.onEvent(envelope => events.push(envelope));
   await third.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: parked.snapshot.threadId, runtime: parked.snapshot.runtime, model: parked.snapshot.model, workflow: parked.snapshot.workflow } });
@@ -178,6 +182,7 @@ test('assignments the next alpd cannot continue end with their task reopened; pa
 });
 
 test('alpd reopens a tree by itself after a restart and its assignment continues with no client attached', async t => {
+  const defer = teardown(t);
   const { directory, root, options } = await workspace(t);
   await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'] } }));
   const runtimes = [];
@@ -188,7 +193,7 @@ test('alpd reopens a tree by itself after a restart and its assignment continues
     const server = createDaemonServer({ runtime, socketPath, version: 'test', store, runLogDir: options.runLogDir });
     await server.listen();
     const stop = async () => { await server.close(); await runtime.shutdown(); await store.flush(); };
-    t.after(stop);
+    defer(stop);
     return { runtime, socketPath, store, stop };
   };
   const first = await daemon();
@@ -225,6 +230,7 @@ test('alpd reopens a tree by itself after a restart and its assignment continues
 
 
 test('an external shared writer recovers its write root, inspection scope and repository lease', async t => {
+  const defer = teardown(t);
   const { directory, root, options } = await workspace(t);
   const core = path.join(directory, 'core');
   await mkdir(core);
@@ -236,7 +242,7 @@ test('an external shared writer recovers its write root, inspection scope and re
   const canonicalCore = await realpath(core);
   const runtimes = [];
   const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
-  t.after(() => first.shutdown());
+  defer(() => first.shutdown());
   await first.open('root', { cwd: root, persist: true });
   await first.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Work in core' }] });
   const delegated = await runtimes[0].call('alp_delegate', { agent: 'peer', task: 'Write only core', mode: 'workspace-write', writeRoot: '../core' });
@@ -246,7 +252,7 @@ test('an external shared writer recovers its write root, inspection scope and re
   const live = JSON.parse(await readFile(options.liveFile, 'utf8'));
   assert.deepEqual([live[0].spec.writeRoot, live[0].spec.workdir, live[0].lease], [canonicalCore, canonicalCore, canonicalCore]);
   const second = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
-  t.after(() => second.shutdown());
+  defer(() => second.shutdown());
   await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot.threadId, runtime: snapshot.runtime, model: snapshot.model, workflow: snapshot.workflow } });
   assert.equal((await second.recover('root', { continueRoot: true }))[0].outcome, 'resumed');
   const main = runtimes[2];
@@ -261,10 +267,11 @@ test('an external shared writer recovers its write root, inspection scope and re
 });
 
 test('recovery migrates an old thinking level and persists the resolved effort', async t => {
+  const defer = teardown(t);
   const { root, options } = await workspace(t);
   const runtimes = [];
   const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
-  t.after(() => first.shutdown());
+  defer(() => first.shutdown());
   await first.open('root', { cwd: root, persist: true });
   await first.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Work' }] });
   const main = runtimes[0];
@@ -282,7 +289,7 @@ test('recovery migrates an old thinking level and persists the resolved effort',
   live[0].spec.thinking = 'high';
   await writeFile(options.liveFile, JSON.stringify(live));
   const second = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
-  t.after(() => second.shutdown());
+  defer(() => second.shutdown());
   await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot.threadId, runtime: snapshot.runtime, model: snapshot.model, workflow: snapshot.workflow } });
   assert.deepEqual(await second.recover('root'), [{ assignmentId: started.assignmentId, agent: 'peer', outcome: 'resumed' }]);
   const resumed = runtimes.at(-1);
@@ -294,10 +301,11 @@ test('recovery migrates an old thinking level and persists the resolved effort',
 });
 
 test('finished shared assignments remain continuable after a daemon restart', async t => {
+  const defer = teardown(t);
   const { root, options } = await workspace(t);
   const runtimes = [];
   const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
-  t.after(() => first.shutdown());
+  defer(() => first.shutdown());
   await first.open('root', { cwd: root, persist: true });
   await first.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Work' }] });
   const main = runtimes[0];
@@ -311,7 +319,7 @@ test('finished shared assignments remain continuable after a daemon restart', as
   const snapshot = first.snapshot('root');
   await first.shutdown();
   const second = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
-  t.after(() => second.shutdown());
+  defer(() => second.shutdown());
   await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot.threadId, runtime: snapshot.runtime, model: snapshot.model, workflow: snapshot.workflow } });
   await second.prompt('root', { clientMessageId: 'm2', content: [{ type: 'text', text: 'Continue' }] });
   const continued = await runtimes.at(-1).call('alp_delegate', { agent: 'peer', task: 'Explain the parser', mode: 'read-only', continueFrom: started.assignmentId });
@@ -326,6 +334,7 @@ test('finished shared assignments remain continuable after a daemon restart', as
 
 for (const mode of ['poll after restart', 'reset before restart', 'autoResume false', 'manual pause', 'global pause', 'failed start']) {
   test(`an isolated legacy usage-stopped root waits for an explicit prompt after daemon restart: ${mode}`, async t => {
+    const defer = teardown(t);
     const { directory, root, options } = await workspace(t);
     const runtimes = [];
     let used = 100;
@@ -354,7 +363,7 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
       await server.listen();
       let stopped = false;
       const stop = async () => { if (stopped) return; stopped = true; await server.close(); await runtime.shutdown(); await store.flush(); };
-      t.after(stop);
+      defer(stop);
       return { runtime, store, socketPath, stop };
     };
     const first = await daemon();
@@ -463,6 +472,7 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
 }
 
 test('t-eae4: a recovery that fails to reopen a worktree assignment never deletes its uncommitted work', async t => {
+  const defer = teardown(t);
   const { root, options } = await workspace(t);
   const runtimes = [];
   const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
@@ -483,7 +493,7 @@ test('t-eae4: a recovery that fails to reopen a worktree assignment never delete
   const failing = fakeTransport(runtimes);
   const transport = (...args) => { const r = failing(...args); if (runtimes.length > 3) r.initialize = async () => { throw new Error('ENOSPC: no space left on device'); }; return r; };
   const second = createAlpRuntime({ ...options, transport, previousExit: { kind: 'crash', at: '2026-10-29T03:00:00.000Z' } });
-  t.after(() => second.shutdown());
+  defer(() => second.shutdown());
   await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot.threadId, runtime: snapshot.runtime, model: snapshot.model, workflow: snapshot.workflow } });
   const outcomes = await second.recover('root', { continueRoot: true });
   assert.notEqual(outcomes[0].outcome, 'resumed');
@@ -494,8 +504,9 @@ test('t-eae4: a recovery that fails to reopen a worktree assignment never delete
 });
 
 test('t-22be: alpd logs each worktree it leaves in place at start, with the reason', async t => {
+  const defer = teardown(t);
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-reclaim-')));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
   await writeFile(path.join(home, 'settings.json'), '{}');
@@ -509,7 +520,7 @@ test('t-22be: alpd logs each worktree it leaves in place at start, with the reas
   const child = spawn(process.execPath, [alpd], { stdio: ['ignore', output, output], env: { ...process.env, ALP_HOME: home, ALP_MODEL_CATALOG: 'static' } });
   closeSync(output);
   const exited = once(child, 'exit');
-  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
+  defer(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
   let gone = false;
   void exited.then(() => { gone = true; });
   for (let i = 0; ; i++) {

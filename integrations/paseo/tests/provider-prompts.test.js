@@ -5,6 +5,7 @@ import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
 import { createAlpProvider } from '../server/dist/provider-core.js';
 
 async function fixture(t, { backend = ['prompt.images'], offered = PROVIDER_CAPABILITIES, error, hello = {}, helloError, commands } = {}) {
+  const defer = teardown(t);
   const calls = [], events = [];
   let onClose, deliver;
   const client = {
@@ -14,7 +15,7 @@ async function fixture(t, { backend = ['prompt.images'], offered = PROVIDER_CAPA
   };
   const provider = createAlpProvider({ description: 'test', open: async () => ({ client, async shutdown() {} }), teams: async () => [], spec: () => ({ spec: { cwd: '/w' } }), projectRoot: cwd => cwd, modes: () => ({ modes: [], defaultMode: 'read-only' }), cursors: false, repeatAfterRelink: false });
   const connection = await provider.connect({ versions: [1], capabilities: offered });
-  t.after(() => connection.close());
+  defer(() => connection.close());
   connection.onEvent(event => events.push(event));
   const send = input => connection.send({ type: 'session.prompt', sessionId: 's', prompt: { clientMessageId: 'p', delivery: 'auto', input } });
   return { connection, calls, events, send, envelope: (sessionId, event) => deliver({ sessionId, epoch: 'e', seq: 1, ts: '2026-10-30T00:00:00.000Z', event }), disconnect() { client.closed = true; onClose?.(new Error('backend dropped')); } };
@@ -103,10 +104,12 @@ import { initProject } from '@anhlp/alp-core/init';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
+import { teardown } from '../../../test/support/teardown.js';
 
 for (const socket of [false, true]) test(`real ${socket ? 'socket' : 'embedded'} daemon takes rendered user context and images`, async t => {
+  const defer = teardown(t);
   const directory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'alp-provider-prompt-')));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const home = path.join(directory, 'home'), project = path.join(directory, 'project');
   await mkdir(home, { mode: 0o700 });
   await initProject(project);
@@ -126,12 +129,12 @@ for (const socket of [false, true]) test(`real ${socket ? 'socket' : 'embedded'}
   }) });
   const socketPath = daemonPaths(home).socket;
   const server = createDaemonServer({ runtime, socketPath, version: 'test', home });
-  t.after(async () => { await server.close(); await runtime.shutdown(); });
+  defer(async () => { await server.close(); await runtime.shutdown(); });
   if (socket) await server.listen();
   const client = socket ? await connect(socketPath) : server.local();
   const provider = createAlpProvider({ description: 'test', open: async () => ({ client, async shutdown() { client.close(); } }), teams: async () => [], spec: () => ({ spec: { cwd: project } }), projectRoot: cwd => cwd, modes: () => ({ modes: [], defaultMode: 'read-only' }), cursors: false, repeatAfterRelink: false });
   const c = await provider.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
-  t.after(() => c.close());
+  defer(() => c.close());
   const events = [];
   c.onEvent(event => events.push(event));
   assert.ok(c.capabilities.includes('prompt.image'));

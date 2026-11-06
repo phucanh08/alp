@@ -12,14 +12,16 @@ import path from 'node:path';
 import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
 import { createUploadReader, paseoHome } from '../server/dist/uploads.js';
 import { createAlpProvider } from '../server/dist/provider-core.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const posix = process.platform !== 'win32';
 
 /** A Paseo home with one upload written as Paseo writes it, and a directory outside it. */
 async function paseoFixture(t) {
+  const defer = teardown(t);
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-paseo-uploads-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  defer(() => rm(root, { recursive: true, force: true }));
   const home = path.join(root, 'paseo-home');
   const outside = path.join(root, 'outside');
   await mkdir(outside, { recursive: true });
@@ -179,6 +181,7 @@ function fakeAlpd({ limits = {}, capabilities = ['attachments', 'prompt.images']
 
 /** The ALP provider over `alpd`, with one root `s` open and Paseo's uploads at `home`. */
 async function providerOver(t, alpd, { home, reader = true } = {}) {
+  const defer = teardown(t);
   const registration = createAlpProvider({
     description: 'test',
     open: async () => ({ client: alpd, async shutdown() {} }),
@@ -191,7 +194,7 @@ async function providerOver(t, alpd, { home, reader = true } = {}) {
     ...(reader ? { readUpload: createUploadReader({ home: () => home }) } : {}),
   });
   const connection = await registration.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
-  t.after(() => connection.close());
+  defer(() => connection.close());
   const events = [];
   connection.onEvent(event => events.push(event));
   await connection.send({ type: 'session.open', requestId: 'open', sessionId: 's', config: { cwd: '/w', model: 'pho', mode: 'full-access', settings: {}, env: {}, mcpServers: {}, persist: true }, history: 'skip' });

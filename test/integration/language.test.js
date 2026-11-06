@@ -7,14 +7,16 @@ import { DEFAULT_LANGUAGE, languageSetting, setLanguage, userLanguage } from '..
 import { initProject } from '../../packages/core/src/init.js';
 import { CHOICES, createAlpRuntime, isVietnamese, words } from '../../dist/runtime/index.js';
 import { fakeTransport, tree, until } from '../support/fake-agent.js';
+import { teardown } from '../support/teardown.js';
 
 /**
  * The user's language (ALPD §54): set in $ALP_HOME/settings.json, Vietnamese when unset.
  * Agents write what the user reads in it, and ALP writes its approvals and notices in it.
  */
 async function home(t) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-language-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }
 
@@ -60,6 +62,7 @@ test('main writes for the user in Vietnamese by default; an assignment asks the 
 });
 
 test('the user\'s setting picks the language of main\'s instructions', async t => {
+  const defer = teardown(t);
   const directory = await home(t);
   const root = path.join(directory, 'project');
   const library = path.join(directory, 'home');
@@ -67,7 +70,7 @@ test('the user\'s setting picks the language of main\'s instructions', async t =
   await setLanguage(library, 'English');
   const agents = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(agents), supervisor: false, libraryDir: library });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root });
   assert.match(agents[0].config.developerInstructions, /The user reads English\. Write in English everything the user reads/);
   // A later session reads the setting again.

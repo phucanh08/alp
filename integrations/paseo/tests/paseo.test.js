@@ -8,10 +8,12 @@ import { createProvider, mapSession, sessionTasks, default as contribute } from 
 import { ProviderEventSchema, PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
 import { connect, readLock } from '@anhlp/alp-client';
 import { createTask } from '@anhlp/alp-core/tasks';
+import { teardown } from '../../../test/support/teardown.js';
 
 async function fixture(t) {
+  const defer = teardown(t);
   const root = await mkdtemp(path.join(tmpdir(), 'alp-paseo-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  defer(() => rm(root, { recursive: true, force: true }));
   for (const name of ['main', 'custom']) {
     const dir = path.join(root, '.alp', 'agents', name);
     await mkdir(dir, { recursive: true }); await writeFile(path.join(dir, 'AGENT.md'), `Agent ${name}`);
@@ -39,10 +41,11 @@ function fakeRuntime() {
   };
 }
 async function connection(t, root) {
+  const defer = teardown(t);
   const runtimes = []; const environments = [];
   const registration = createProvider({ environment: { PATH: 'baseline', PASEO_TOKEN: 'removed', CODEX_THREAD_ID: 'removed' }, transport: (cwd, env) => { environments.push(env); const r = fakeRuntime(); runtimes.push(r); return r; } });
   const conn = await registration.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
-  t.after(() => conn.close());
+  defer(() => conn.close());
   const events = []; conn.onEvent(e => { ProviderEventSchema.parse(e); events.push(e); });
   await conn.send({ type: 'session.open', requestId: 'open', sessionId: 's', config: config(root), history: 'skip' });
   assert.ok(events.some(e => e.type === 'session.ready'), JSON.stringify(events));
@@ -52,11 +55,12 @@ const prompt = (id, delivery = 'auto') => ({ type: 'session.prompt', sessionId: 
 
 test('plugin registers ALP with public SDK contract', async t => {
   // The registered provider starts the user's alpd; keep it in a throwaway home.
+  const defer = teardown(t);
   const home = await mkdtemp(path.join(tmpdir(), 'alp-home-'));
   const previous = process.env.ALP_HOME;
   process.env.ALP_HOME = home;
   let dispose = () => {};
-  t.after(async () => {
+  defer(async () => {
     // The plugin keeps alpd up while it is loaded; unload it first.
     await dispose();
     // An alpd the plugin was still starting when it was unloaded must come up before it can be stopped.
@@ -87,8 +91,9 @@ test('plugin registers ALP with public SDK contract', async t => {
   await conn.close();
 });
 test('opening the first session in an empty repository installs the ALP starter', async t => {
+  const defer = teardown(t);
   const root = await mkdtemp(path.join(tmpdir(), 'alp-paseo-new-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  defer(() => rm(root, { recursive: true, force: true }));
   const result = await mapSession(config(root));
   assert.equal(result.agent.name, 'main');
   assert.match(result.instructions, /ALP/);
@@ -99,8 +104,9 @@ test('opening the first session in an empty repository installs the ALP starter'
   assert.ok((await readFile(path.join(root, 'ALP.md'), 'utf8')).length > 0);
 });
 test('opening a session repairs a partial ALP directory without replacing user files', async t => {
+  const defer = teardown(t);
   const root = await mkdtemp(path.join(tmpdir(), 'alp-paseo-partial-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  defer(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, '.alp'), { recursive: true });
   await writeFile(path.join(root, '.alp', 'custom.txt'), 'keep me');
   const result = await mapSession(config(root));
@@ -171,6 +177,7 @@ test('runtime notifications publish complete snapshots and exactly one terminal 
   assert.equal(events.find(e => e.type === 'session.prompt_result' && e.clientMessageId === 'm2').result.type, 'failed');
 });
 test('early completion is buffered until turn acknowledgement; failed opens release runtime', async t => {
+  const defer = teardown(t);
   const root = await fixture(t);
   const runtime = fakeRuntime(); const original = runtime.request.bind(runtime);
   runtime.request = async (method, params) => {
@@ -179,7 +186,7 @@ test('early completion is buffered until turn acknowledgement; failed opens rele
     return result;
   };
   const conn = await createProvider({ transport: () => runtime }).connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
-  t.after(() => conn.close()); const events = []; conn.onEvent(e => events.push(e));
+  defer(() => conn.close()); const events = []; conn.onEvent(e => events.push(e));
   await conn.send({ type: 'session.open', sessionId: 's', requestId: 'o', config: config(root), history: 'skip' });
   await conn.send(prompt('m1'));
   assert.deepEqual(events.filter(e => e.type === 'session.turn').map(e => e.state), ['started', 'completed']);
@@ -216,10 +223,11 @@ test('invalid permission changes leave the session mode unchanged', async t => {
 });
 
 test('Claude permission changes reach the runtime and failed changes are not published', async t => {
+  const defer = teardown(t);
   const root = await fixture(t);
   const runtime = fakeRuntime();
   const conn = await createProvider({ transport: () => runtime }).connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
-  t.after(() => conn.close());
+  defer(() => conn.close());
   const events = []; conn.onEvent(e => { ProviderEventSchema.parse(e); events.push(e); });
   await conn.send({ type: 'session.open', requestId: 'open', sessionId: 's', config: { ...config(root), model: 'claude:sonnet' }, history: 'skip' });
   await conn.send({ type: 'session.configure', requestId: 'write', sessionId: 's', changes: { mode: 'workspace-write' } });
@@ -264,12 +272,13 @@ test('Paseo lists alpd roots for import and reopens one under its own id', async
 });
 
 test('a team session shows its team, and main starts its supervisor as a child on Sonnet 5', async t => {
+  const defer = teardown(t);
   const root = await mkdtemp(path.join(tmpdir(), 'alp-paseo-profile-'));
+  // Undone LAST: teardown runs the steps in reverse, so everything living in here is released first.
+  defer(() => rm(root, { recursive: true, force: true }));
   const runtimes = [];
   const conn = await createProvider({ transport: () => { const r = fakeRuntime(); r.onRequest = fn => { r.serverRequest = fn; }; runtimes.push(r); return r; } }).connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
-  t.after(() => conn.close());
-  // After hooks run in the order they are added: remove the files only once that has stopped.
-  t.after(() => rm(root, { recursive: true, force: true }));
+  defer(() => conn.close());
   const events = []; conn.onEvent(e => { ProviderEventSchema.parse(e); events.push(e); });
   await conn.send({ type: 'session.open', requestId: 'open', sessionId: 's', config: { ...config(root), model: 'cafe' }, history: 'skip' });
   assert.ok(events.some(e => e.type === 'session.ready' && e.sessionId === 's'), JSON.stringify(events));
@@ -336,9 +345,10 @@ test("the session's usage reaches Paseo as session.usage, the whole latest repor
 });
 
 test('the plugin loads where import.meta.url is no URL, as when Paseo bundles it', async t => {
+  const defer = teardown(t);
   const { build } = await import('esbuild');
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-paseo-bundle-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const outfile = path.join(directory, 'index.mjs');
   // Paseo re-bundles plugin code; there import.meta.url does not resolve. Nothing may need it while loading.
   await build({ entryPoints: [fileURLToPath(new URL('../server/dist/index.js', import.meta.url))], outfile, bundle: true, format: 'esm', platform: 'node', target: 'node20', external: ['@anthropic-ai/claude-agent-sdk'], define: { 'import.meta.url': 'undefined' }, logLevel: 'silent' });

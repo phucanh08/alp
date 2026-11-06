@@ -7,6 +7,7 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { createAlpRuntime, nativeCommandRefusal } from '@anhlp/alp-runtime';
 import { fakeTransport, until } from '../../../test/support/fake-agent.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 const text = value => [{ type: 'text', text: value }];
 
@@ -21,14 +22,15 @@ test('nativeCommandRefusal: /clear, /reset and /new on Claude only, at the start
 });
 
 async function open(t, model) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-native-'));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(directory, 'project');
   await initProject(root);
   const runtimes = [];
   const events = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: path.join(directory, 'runs') });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   runtime.onEvent(envelope => events.push(envelope.event));
   await runtime.open('root', { cwd: root, model });
   return { runtime, runtimes, events };

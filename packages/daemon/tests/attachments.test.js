@@ -15,6 +15,7 @@ import { validateResult } from '@anhlp/alp-protocol/contract';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { attachmentLimits, attachmentName, createAttachmentStore, readAttachmentConfig, sniffMimeType } from '@anhlp/alp-daemon/attachments';
+import { teardown } from '../../../test/support/teardown.js';
 
 const skip = process.platform === 'win32' && 'attachments are not served on Windows (no O_NOFOLLOW, no POSIX modes)';
 const sha = data => createHash('sha256').update(data).digest('hex');
@@ -75,6 +76,7 @@ async function until(check, what = 'condition') {
 
 /** A home, a project and alpd in process; `start` again is a restart on the same home. */
 async function setup(t, { accepts = true, limits, io } = {}) {
+  const defer = teardown(t);
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-attach-')));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
@@ -87,7 +89,7 @@ async function setup(t, { accepts = true, limits, io } = {}) {
   const clock = { now: Date.now() };
   const control = { accepts, delivered: [], reader: undefined, failNext: false };
   const stops = [];
-  t.after(async () => { for (const stop of stops.reverse()) await stop(); await rm(directory, { recursive: true, force: true }); });
+  defer(async () => { for (const stop of stops.reverse()) await stop(); await rm(directory, { recursive: true, force: true }); });
   let count = 0;
   async function start() {
     const runtimes = [];
@@ -134,6 +136,7 @@ const unknownUpload = `upl_${'0'.repeat(32)}`;
 const unknownAttachment = `att_${'0'.repeat(32)}`;
 
 test('helpers: display names, sniffing and lower-only limits', { skip }, async t => {
+  const defer = teardown(t);
   assert.equal(attachmentName('../x'), '..x');
   assert.equal(attachmentName('a/b\\c'), 'abc');
   assert.equal(attachmentName('a\0b'), 'ab');
@@ -154,7 +157,7 @@ test('helpers: display names, sniffing and lower-only limits', { skip }, async t
   assert.equal(lowered.uploadTimeoutMs, ATTACHMENTS.uploadTimeoutMs);
   assert.equal(attachmentLimits({}, 256 * 1024).maxChunkBytes, Math.floor((256 - 64) * 1024 * 3 / 4), 'lowered to fit the frame');
   const home = await mkdtemp(path.join(tmpdir(), 'alpd-attach-config-'));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  defer(() => rm(home, { recursive: true, force: true }));
   assert.deepEqual(await readAttachmentConfig(home), { limits: {}, problems: [] });
   await writeFile(path.join(home, 'attachments.json'), JSON.stringify({ limits: { maxObjectBytes: 1000, maxPerPrompt: 100, nope: 1, maxDaemonBytes: -1 } }));
   const config = await readAttachmentConfig(home);
@@ -597,12 +600,13 @@ test('restart recovery: a corrupt reference index keeps every object, leftovers 
 });
 
 test('the store alone: release by session (the deletion seam) starts the grace period; a fork holder (the C seam) keeps an object', { skip }, async t => {
+  const defer = teardown(t);
   const root = path.join(await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-attach-store-'))), 'attachments');
-  t.after(() => rm(path.dirname(root), { recursive: true, force: true }));
+  defer(() => rm(path.dirname(root), { recursive: true, force: true }));
   const project = path.dirname(root);
   const clock = { now: Date.now() };
   const store = createAttachmentStore({ root, sessionProject: () => project, now: () => clock.now, sweepMs: 0 });
-  t.after(() => store.close());
+  defer(() => store.close());
   const owner = { id: 'owner', epoch: 'owner' };
   const begun = await store.begin(owner, { sessionId: 's1', name: 'a.txt', size: 3, mimeType: 'text/plain', requestId: 'a' });
   await store.chunk(owner, { uploadId: begun.uploadId, offset: 0, data: b64('abc') });
@@ -625,10 +629,11 @@ test('the store alone: release by session (the deletion seam) starts the grace p
 
 /** A store alone on a fresh root (the session's project is the root's parent), closed after the test. */
 async function bareStore(t, options = {}) {
+  const defer = teardown(t);
   const root = options.root ?? path.join(await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-attach-store-'))), 'attachments');
-  if (!options.root) t.after(() => rm(path.dirname(root), { recursive: true, force: true }));
+  if (!options.root) defer(() => rm(path.dirname(root), { recursive: true, force: true }));
   const store = createAttachmentStore({ root, sessionProject: () => path.dirname(root), sweepMs: 0, ...options, ...{ root } });
-  t.after(() => store.close());
+  defer(() => store.close());
   return { root, store };
 }
 
@@ -750,8 +755,9 @@ test('close drains a begin paused before it enters an object queue', { skip }, a
 });
 
 test('close drains startup recovery before returning', { skip }, async t => {
+  const defer = teardown(t);
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'attach-close-recover-')));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const root = path.join(directory, 'attachments');
   const entered = gate(), resume = gate();
   const original = fsPromises.mkdir;

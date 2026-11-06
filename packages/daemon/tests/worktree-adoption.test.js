@@ -7,6 +7,7 @@ import path from 'node:path';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createRegistry } from '@anhlp/alp-daemon/registry';
 import { createWorkspaceWorktrees } from '@anhlp/alp-daemon/worktrees';
+import { teardown } from '../../../test/support/teardown.js';
 
 // t-c1ba: owner-audited adoption of managed worktrees made before birth certification existed.
 const git = (cwd, ...args) =>
@@ -17,8 +18,9 @@ const git = (cwd, ...args) =>
   }).trim();
 
 async function fixture(t) {
+  const defer = teardown(t);
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'alp-adopt-')));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  defer(() => rm(root, { recursive: true, force: true }));
   const home = path.join(root, 'home'),
     source = path.join(root, 'repo'),
     parent = path.join(root, 'dest');
@@ -51,7 +53,7 @@ async function fixture(t) {
   await writeFile(ledgerFile, JSON.stringify({ version: 1, workspaces: [], results: [] }));
   await writeFile(ledgerFile + '.initialized', '1\n');
   const runtime = createAlpRuntime({ assignmentResultFile: ledgerFile, liveFile: path.join(home, 'state', 'live.json'), recallFile: path.join(home, 'state', 'recall.json') });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   const service = createWorkspaceWorktrees(
     home,
     registry,

@@ -15,6 +15,7 @@ import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
 import { createUploadReader } from '../server/dist/uploads.js';
 import { createAlpProvider } from '../server/dist/provider-core.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const skip = process.platform === 'win32' && 'attachments are macOS and Linux only';
@@ -48,8 +49,9 @@ function fakeTransport(transports) {
 }
 
 test('a Paseo upload becomes one alpd object the runtime reads from a staged copy; a repeat sends nothing again', { skip }, async t => {
+  const defer = teardown(t);
   const directory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'alp-paseo-alpd-')));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const home = path.join(directory, 'alp-home');
   await mkdir(home, { mode: 0o700 });
   const project = path.join(directory, 'project');
@@ -59,7 +61,7 @@ test('a Paseo upload becomes one alpd object the runtime reads from a staged cop
   const runtime = createAlpRuntime({ supervisor: false, transport: fakeTransport(transports), runLogDir: path.join(directory, 'runs'), attachmentStageDir: attachmentStageDir(home) });
   const store = createStore(path.join(home, 'state'));
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(path.join(directory, 'd')).socket, version: 'test', store, home });
-  t.after(async () => { await store.flush().catch(() => {}); await server.close().catch(() => {}); await runtime.shutdown(); });
+  defer(async () => { await store.flush().catch(() => {}); await server.close().catch(() => {}); await runtime.shutdown(); });
   const alpd = server.local();
   await alpd.request('daemon.status');
 
@@ -84,7 +86,7 @@ test('a Paseo upload becomes one alpd object the runtime reads from a staged cop
     readUpload: createUploadReader({ home: () => paseoHome }),
   });
   const connection = await registration.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
-  t.after(() => connection.close());
+  defer(() => connection.close());
   const events = [];
   connection.onEvent(event => events.push(event));
   await connection.send({ type: 'session.open', requestId: 'open', sessionId: 's', config: { cwd: project, model: 'pho', mode: 'full-access', settings: {}, env: {}, mcpServers: {}, persist: true }, history: 'skip' });

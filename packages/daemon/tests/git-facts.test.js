@@ -9,6 +9,7 @@ import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { createGitReader } from '@anhlp/alp-daemon/git';
+import { teardown } from '../../../test/support/teardown.js';
 
 /**
  * workspace.git.facts (docs/protocol/alp-json-rpc-v1.md §12.5): the owner's checkout facts of a
@@ -27,8 +28,9 @@ const cleanEnv = () => {
 };
 
 async function sandbox(t) {
+  const defer = teardown(t);
   const base = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-git-facts-')));
-  t.after(() => rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  defer(() => rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   return base;
 }
 
@@ -142,8 +144,9 @@ test('a link is read at its real path: repoRoot names the real directory', { ski
 });
 
 test('paths: not absolute, not normalised, traversal, missing and not a directory are refused, each with its code', async t => {
+  const defer = teardown(t);
   const base = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-git-facts-')));
-  t.after(() => rm(base, { recursive: true, force: true }));
+  defer(() => rm(base, { recursive: true, force: true }));
   await writeFile(path.join(base, 'file.txt'), 'x');
   const reader = createGitReader({});
   for (const directory of [undefined, null, 7, '', 'relative/dir', './dir', `${base}/`, `${base}//x`, `${base}/./x`, `${base}/../x`, `${base}/x/..`, `${base}\0x`, `/${'a'.repeat(4096)}`]) {
@@ -174,6 +177,7 @@ test('Git errors are explicit: no Git, an unusable .git; status and diff need a 
 });
 
 test('nothing the repository names runs, at the top level or for a nested folder', { skip }, async t => {
+  const defer = teardown(t);
   const base = await sandbox(t);
   const root = path.join(base, 'repo');
   const traps = path.join(base, 'traps');
@@ -206,7 +210,7 @@ test('nothing the repository names runs, at the top level or for a nested folder
   await writeFile(path.join(root, '.git', 'info', 'exclude'), 'tools/\n');
   const savedPath = process.env.PATH;
   process.env.PATH = [nested, savedPath].join(path.delimiter);
-  t.after(() => { process.env.PATH = savedPath; });
+  defer(() => { process.env.PATH = savedPath; });
   const indexBefore = await readFile(path.join(root, '.git', 'index'));
   const reader = createGitReader({});
   assert.deepEqual([(await reader.facts(root)).kind, (await reader.facts(root)).dirty], ['ok', false]);
@@ -234,6 +238,7 @@ async function connectAs(socket, agent) {
 }
 
 test('alpd: listed without a home, the owner\'s connection answers, an agent\'s is refused 1003 user_only, extra params -32602', { skip }, async t => {
+  const defer = teardown(t);
   const base = await sandbox(t);
   const root = path.join(base, 'repo');
   await committed(root);
@@ -243,9 +248,9 @@ test('alpd: listed without a home, the owner\'s connection answers, an agent\'s 
   // No home: no registry, so no workspace.git; the facts need none.
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(base).socket, version: 'test' });
   await server.listen();
-  t.after(async () => { await server.close(); await runtime.shutdown(); });
+  defer(async () => { await server.close(); await runtime.shutdown(); });
   const owner = await connectAs(daemonPaths(base).socket, false);
-  t.after(() => owner.close());
+  defer(() => owner.close());
   const hello = await owner.request('daemon.hello', { protocolVersion: 1 });
   assert.ok(hello.capabilities.includes('workspace.git.facts'));
   assert.ok(!hello.capabilities.includes('workspace.git'));
@@ -255,6 +260,6 @@ test('alpd: listed without a home, the owner\'s connection answers, an agent\'s 
   await assert.rejects(owner.request('workspace.git.facts', { directory: 'repo' }), error => error.code === -32602 && error.data?.reason === 'invalid_path');
   await assert.rejects(owner.request('workspace.git.status', { workspaceId: 'w' }), error => error.code === 1005);
   const agent = await connectAs(daemonPaths(base).socket, true);
-  t.after(() => agent.close());
+  defer(() => agent.close());
   await assert.rejects(agent.request('workspace.git.facts', { directory: root }), error => error.code === 1003 && error.data?.reason === 'user_only');
 });

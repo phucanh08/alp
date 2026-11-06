@@ -7,6 +7,7 @@ import { initProject } from '@anhlp/alp-core/init';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
+import { teardown } from '../../../test/support/teardown.js';
 
 async function until(check) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
@@ -41,7 +42,10 @@ function fakeTransport(runtimes) {
 }
 
 async function setup(t, options = {}) {
+  const defer = teardown(t);
   const directory = options.directory ?? await mkdtemp(path.join(tmpdir(), 'alp-board-'));
+  // Undone LAST: teardown runs the steps in reverse, so everything living in here is released first.
+  if (!options.directory) defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5 }));
   const root = path.join(directory, 'project');
   if (!options.directory) {
     await initProject(root);
@@ -50,8 +54,7 @@ async function setup(t, options = {}) {
   const runtimes = [];
   const boardDir = options.boardDir ?? path.join(directory, 'boards');
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(directory, 'runs'), boardDir });
-  t.after(() => runtime.shutdown());
-  if (!options.directory) t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5 }));
+  defer(() => runtime.shutdown());
   const envelopes = [];
   runtime.onEvent(envelope => envelopes.push(envelope));
   const start = async (id, mode = 'workspace-write') => {
@@ -183,12 +186,13 @@ test('a board outlives the daemon: decisions and findings stay, claims end with 
 });
 
 test('alpd serves the board by project, and status shows a tree\'s claims', async t => {
+  const defer = teardown(t);
   const { directory, root, runtime, start } = await setup(t);
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test' });
   await server.listen();
-  t.after(() => server.close());
+  defer(() => server.close());
   const client = await connect(daemonPaths(directory).socket);
-  t.after(() => client.close());
+  defer(() => client.close());
   const main = await start('root');
   const claim = await main.call('alp_pin', { kind: 'claim', body: 'API', paths: ['src/api'] });
   const { pins } = await client.request('board.list', { projectRoot: root });
