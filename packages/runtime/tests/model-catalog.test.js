@@ -228,6 +228,10 @@ test('stop waits for the cache writes already under way, so the home can be remo
   assert.deepEqual(cached.acp.opencode.models, [{ id: 'opencode-m1' }], 'the fired refreshAcp');
   assert.deepEqual(cached.acp.gemini.models, [{ id: 'learned' }], 'the learned models');
   await rm(directory, { recursive: true });
+  // A session still running reports models after alpd stopped the catalog: nothing is written any more.
+  feedAcpSession('gemini', { models: { availableModels: [{ modelId: 'late' }] } });
+  assert.equal(await catalog.ingest('codex', [{ id: 'gpt-late' }]), true, 'the stopped catalog still learns in memory');
+  assert.ok(catalog.acpRows().some(row => row.id === 'gemini/late') || catalog.acpModels('gemini').some(model => model.id === 'late'));
   await new Promise(resolve => setTimeout(resolve, 50));
   await assert.rejects(readdir(directory), { code: 'ENOENT' }, 'nothing recreates the removed home');
 });

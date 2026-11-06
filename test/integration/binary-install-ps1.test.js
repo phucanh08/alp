@@ -346,7 +346,7 @@ test('install.ps1: a reinstall waits out a short hold on the current version, an
   assert.notEqual(refused.code, 0, refused.stdout);
   // Windows PowerShell may wrap a long error record: compare with runs of whitespace collapsed.
   const refusal = refused.stderr.replace(/\s+/g, ' ');
-  assert.match(refusal, /ALP 9\.8\.7 is in use \(Windows cannot move a running version\)/, refused.stderr);
+  assert.match(refusal, /ALP 9\.8\.7 is in use: a process works in .*9\.8\.7 or holds a file there open; /, refused.stderr);
   assert.ok(refusal.includes(`node.exe (pid ${running.pid})`), refused.stderr);
   running.kill();
   assert.equal(version(path.join(dir, 'alp.cmd')), '9.8.7', 'the refused reinstall left the current version running');

@@ -95,6 +95,8 @@ export class ModelCatalog {
   private acpLearning = new Map<string, Set<string>>();
   /** Cache writes under way: stop() waits for them, so whoever stopped the catalog may remove its home. */
   private writes = new Set<Promise<void>>();
+  /** Set once stop() has drained: a late answer (a session's models, an ingest) still updates memory but writes nothing. */
+  private stopped = false;
 
   /**
    * ACP providers (t-d0b0) come from `acpProviders` (the library's providers/<id>.json) without starting
@@ -112,6 +114,7 @@ export class ModelCatalog {
 
   /** Loads the cache, then refreshes in the background and every refreshMs. Never blocks on a provider. */
   async start() {
+    this.stopped = false;
     await this.load();
     await this.loadAcp().catch(() => {});
     void this.refresh().catch(() => {});
@@ -121,7 +124,8 @@ export class ModelCatalog {
   /**
    * Stops the timer and the listeners, then waits for what already started (a background refresh, a
    * refreshAcp a saved provider asked for, a learned model's cache write) to finish writing the cache
-   * (t-5294.2). A caller that only stops may ignore the promise; one that removes the home awaits it.
+   * (t-5294.2). After that it writes the cache no more, until start() again. A caller that only stops may
+   * ignore the promise; one that removes the home awaits it.
    */
   async stop() {
     if (this.timer) clearInterval(this.timer);
@@ -129,6 +133,7 @@ export class ModelCatalog {
     this.listeners.clear();
     // A refreshAcp queued behind a running one starts when it ends: wait until nothing runs.
     while (this.running || this.acpRunning || this.writes.size) await Promise.allSettled([this.running, this.acpRunning, ...this.writes]);
+    this.stopped = true;
   }
 
   async load() {
@@ -271,7 +276,7 @@ export class ModelCatalog {
     const changed = JSON.stringify(next) !== JSON.stringify(this.current);
     this.current = next;
     if (this.options.apply !== false) applyCatalog(next);
-    if (save && this.file) {
+    if (save && this.file && !this.stopped) {
       const file = this.file;
       const write = (async () => {
         try { await mkdir(path.dirname(file), { recursive: true }); await writeAtomic(file, JSON.stringify(this.snapshot, null, 2)); } catch { /* the cache is best effort */ }
