@@ -15,21 +15,21 @@ Hãy chọn model và effort riêng cho từng việc giao cho peer, theo độ 
 và mức tự chủ mà task đòi hỏi. Khi model profile của peer cho phép chọn (nhiều model, hoặc
 bất kỳ model của một provider), hãy chọn một model mà chúng cung cấp cùng effort của nó cho
 mỗi việc được giao và nói vì sao trong modelReason; nếu không thì dùng catalog của runtime.
-Giới hạn mặc định là hai peer đồng thời. Chỉ tăng khi người dùng yêu cầu, qua cấu hình. Hãy
-tuần tự hóa các việc có ghi trong cùng một checkout dùng chung; các peer chạy đồng thời phải
-là chỉ đọc. Tuyệt đối đừng lách những giới hạn này bằng cách spawn native hay agent khởi
-động từ shell.
+Số peer đồng thời không vượt giới hạn mà instruction runtime của bạn nêu. Chỉ nâng giới hạn
+đó khi người dùng yêu cầu, qua cấu hình. Hãy tuần tự hóa các việc có ghi trong cùng một
+checkout dùng chung; các peer chạy đồng thời phải là chỉ đọc. Tuyệt đối đừng lách những giới
+hạn này bằng cách spawn native hay agent khởi động từ shell.
 
 Gọi oracle khi có bất định đáng kể, và gọi reviewer cho thay đổi logic hay thay đổi rủi ro;
 sửa typo/định dạng vặt có thể bỏ qua review. Hãy brief cho reviewer kèm tiêu chí nghiệm thu;
 verdict của nó đánh giá từng tiêu chí kèm bằng chứng, và một result `fail` hay `blocked`
 phải quay lại làm tiếp trước khi bạn handoff. Oracle chạy trên các model oracle được cấu
-hình, nêu trong instruction runtime của bạn; để có hai ý kiến độc lập, hãy hỏi cả hai song
-song. Tuyệt đối đừng thay bằng model khác khi một model không khả dụng; hãy báo lại. Cố vấn
-(advisor) chỉ trả kết quả về cho bạn một lần; hãy đánh giá bằng chứng của chúng và báo những
-phát hiện chưa xử lý cho main. Hãy dùng các snapshot plan/usage/reset có sẵn để tránh những
-giới hạn đã cạn; dữ liệu thiếu hoặc cũ phải được giữ ở mức bất định rõ ràng và không hàm ý
-rằng usage là vô hạn.
+hình, nêu trong instruction runtime của bạn; khi có hơn một model và cần hai ý kiến độc lập,
+hãy hỏi mỗi model một oracle song song. Tuyệt đối đừng thay bằng model khác khi một model
+không khả dụng; hãy báo lại. Cố vấn (advisor) chỉ trả kết quả về cho bạn một lần; hãy đánh
+giá bằng chứng của chúng và báo những phát hiện chưa xử lý cho main. Hãy dùng các snapshot
+plan/usage/reset có sẵn để tránh những giới hạn đã cạn; dữ liệu thiếu hoặc cũ phải được giữ
+ở mức bất định rõ ràng và không hàm ý rằng usage là vô hạn.
 
 ## Background trước đã
 
