@@ -32,7 +32,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import ts from 'typescript';
-import { spawnCommand } from './spawn-command.mjs';
+import { exitDescription, spawnCommand } from './spawn-command.mjs';
 import { PASEO_COMPILER_DIRECTORY, paseoSource } from './paseo-checkout.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -114,29 +114,17 @@ async function paseoCompile(packageDirectory) {
   return { server: bundles.serverBundle?.length ?? 0, client: bundles.clientBundle?.length ?? 0 };
 }
 
-/** How a finished spawnSync failed: its error (not started, timed out, output too large), signal or exit status. */
-export function exitDescription(result) {
-  if (result.error) return `could not run to completion: ${result.error.message}`;
-  return result.signal ? `was killed by ${result.signal}` : `exited ${result.status}`;
-}
-
-// On Windows, Git's GNU tar comes first on PATH under Git Bash (the release workflows' `shell: bash`)
-// and reads a drive-letter path such as `D:\a\…\plugin.tgz` as a remote `host:file` archive
-// ("tar (child): Cannot connect to D: resolve failed"). The system's bsdtar takes such paths, as in
-// build-bundle.mjs and package-binary.mjs. `--force-local` would fix GNU tar only: bsdtar (macOS,
-// and Windows' tar.exe when it comes first) rejects it as an unsupported option.
-const TAR = process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
-
 /** The `package/package.json` inside a packed tarball, read with `tar`; a tar failure reports its own cause. */
 export function packedManifest(tarball) {
-  const args = ['-xOzf', tarball, 'package/package.json'];
-  const result = spawnSync(TAR, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  // spawnCommand runs the system's bsdtar on Windows: Git Bash's GNU tar misreads `D:\…` paths.
+  const [tar, args] = spawnCommand('tar', ['-xOzf', tarball, 'package/package.json']);
+  const result = spawnSync(tar, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
   const stderr = result.stderr?.trim() ? `\n${result.stderr.trim()}` : '';
-  if (result.error || result.status !== 0) throw new Error(`${TAR} ${args.join(' ')} ${exitDescription(result)}${stderr}`);
+  if (result.error || result.status !== 0) throw new Error(`${tar} ${args.join(' ')} ${exitDescription(result)}${stderr}`);
   try {
     return JSON.parse(result.stdout);
   } catch (error) {
-    throw new Error(`${TAR} ${args.join(' ')} printed no package.json (${error.message}): ${JSON.stringify(result.stdout.slice(0, 200))}${stderr}`);
+    throw new Error(`${tar} ${args.join(' ')} printed no package.json (${error.message}): ${JSON.stringify(result.stdout.slice(0, 200))}${stderr}`);
   }
 }
 

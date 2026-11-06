@@ -16,9 +16,9 @@
 // `--packs <release directory>` (scripts/release-pack.mjs) installs that release's saved tarballs,
 // after checking them against its SHA256SUMS, instead of packing the workspaces.
 import { spawnSync } from 'node:child_process';
-import { spawnCommand } from './spawn-command.mjs';
+import { exitDescription, spawnCommand } from './spawn-command.mjs';
 import { LAUNCHER, releaseArtifacts } from './release-lib.mjs';
-import { checkPaseoNpmSource, describe as describePaseoSource, exitDescription } from './paseo-source-check.mjs';
+import { checkPaseoNpmSource, describe as describePaseoSource } from './paseo-source-check.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -35,7 +35,7 @@ function run(command, args, options = {}) {
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
   // A start error or signal leaves status null: callers must not read that as a command's own failure.
   if (options.allowFailure) return { status: result.status, output, failure: exitDescription(result) };
-  if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} ${exitDescription(result)}${output ? `\n${output}` : ''}`);
+  if (result.error || result.status !== 0) throw new Error(`${command} ${args.join(' ')} ${exitDescription(result)}${output ? `\n${output}` : ''}`);
   return output;
 }
 
