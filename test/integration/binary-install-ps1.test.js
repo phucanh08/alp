@@ -45,11 +45,31 @@ const restoreUserPath = saved => execFileSync('powershell.exe', ['-NoProfile', '
   "$k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment'); if ($env:ALP_TEST_HAS -eq '1') { $k.SetValue('Path', $env:ALP_TEST_PATH, $env:ALP_TEST_KIND) } else { $k.DeleteValue('Path', $false) }; $k.Close()"],
   { env: { ...process.env, ALP_TEST_HAS: saved.has ? '1' : '0', ALP_TEST_PATH: saved.value, ALP_TEST_KIND: saved.kind || 'ExpandString' } });
 
+const installEnv = (localAppData, extraEnv) => ({ ...process.env, LOCALAPPDATA: localAppData, ALP_INSTALL_BASE_URL: '', ALP_INSTALL_VERSION: '', ALP_INSTALL_DIR: '', ALP_INSTALL_ROOT: '', ALP_INSTALL_NO_MODIFY_PATH: '', ALP_INSTALL_MODIFY_PATH: '', ...extraEnv });
+// t-5294.5: how often, and how long, a version stays held after it ran shows in the lane's log.
+const noteWaits = stdout => { for (const line of stdout.match(/^alp-install: .*(is in use; waiting|was released after \d+ ms).*$/gm) ?? []) process.stderr.write(`[install.ps1 waited] ${line}\n`); };
+
 /** Runs install.ps1 with Windows PowerShell 5.1 (as a file), with a private LOCALAPPDATA. */
 function install(args, { localAppData, extraEnv = {} }) {
   return new Promise(resolve => execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', INSTALL, ...args], {
-    env: { ...process.env, LOCALAPPDATA: localAppData, ALP_INSTALL_BASE_URL: '', ALP_INSTALL_VERSION: '', ALP_INSTALL_DIR: '', ALP_INSTALL_ROOT: '', ALP_INSTALL_NO_MODIFY_PATH: '', ALP_INSTALL_MODIFY_PATH: '', ...extraEnv }, timeout: 120_000,
-  }, (error, stdout, stderr) => resolve({ code: error ? error.code ?? 1 : 0, stdout, stderr })));
+    env: installEnv(localAppData, extraEnv), timeout: 120_000,
+  }, (error, stdout, stderr) => { noteWaits(stdout); resolve({ code: error ? error.code ?? 1 : 0, stdout, stderr }); }));
+}
+
+/** install(), calling onLine with each line install.ps1 prints as it prints it. */
+function installWatching(args, { localAppData, extraEnv = {} }, onLine) {
+  return new Promise(resolve => {
+    const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', INSTALL, ...args], { env: installEnv(localAppData, extraEnv), windowsHide: true });
+    let stdout = '', stderr = '', pending = '';
+    const timer = setTimeout(() => child.kill(), 120_000);
+    child.stdout.setEncoding('utf8').on('data', chunk => {
+      stdout += chunk; pending += chunk;
+      const lines = pending.split(/\r?\n/); pending = lines.pop();
+      for (const line of lines) onLine(line);
+    });
+    child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+    child.on('close', code => { clearTimeout(timer); noteWaits(stdout); resolve({ code: code ?? 1, stdout, stderr }); });
+  });
 }
 
 test('the Windows release archive is alp-<version>-windows-x64.zip holding the bundle', { skip: !windows }, async t => {
@@ -287,4 +307,42 @@ test('install.ps1: reinstalling the current version puts the running copy back w
   assert.equal(resolvedCurrent(dir), path.join(dir, 'app', '9.8.7').toLowerCase());
   assert.equal(version(command), '9.8.7');
   assert.deepEqual((await readdir(path.join(dir, 'app'))).filter(name => name.startsWith('.alp-old-')), [], 'no copy left aside');
+});
+
+// t-5294.5: `alp --version` and then a reinstall failed once on CI with "ALP 9.8.7 is in use": the version
+// that just ran was still held when install.ps1 moved it aside, and a rerun passed. A user doing the same
+// met the same refusal. A process run from app\9.8.7 stands in for that hold, deterministically: the
+// install ends it once install.ps1 says it waits (a short hold), or never (a version really running).
+test('install.ps1: a reinstall waits out a short hold on the current version, and names what still runs from it after the wait (t-5294.5)', { skip: !windows }, async t => {
+  const releases = await mirror(t);
+  const localAppData = await temp(t, 'alp-ps-lad-');
+  const dir = path.join(localAppData, 'alp');
+  const first = await install(['-Dir', dir, '-NoModifyPath', '-BaseUrl', releases], { localAppData });
+  assert.equal(first.code, 0, first.stderr);
+  const node = path.join(dir, 'app', '9.8.7', 'node', 'node.exe');
+  const hold = () => {
+    const holder = spawn(node, ['-e', 'setTimeout(() => {}, 120000)'], { stdio: 'ignore', cwd: localAppData });
+    t.after(() => holder.kill());
+    return holder;
+  };
+
+  // A short hold: released while install.ps1 waits, and the reinstall goes through.
+  const brief = hold();
+  let released = false;
+  const waited = await installWatching(['-Dir', dir, '-NoModifyPath', '-BaseUrl', releases], { localAppData }, line => {
+    if (!released && /is in use; waiting up to 10 s/.test(line)) { released = true; brief.kill(); }
+  });
+  assert.equal(waited.code, 0, waited.stdout + waited.stderr);
+  assert.ok(released, `install.ps1 said it waits: ${waited.stdout}`);
+  assert.match(waited.stdout, /was released after \d+ ms/);
+  assert.equal(version(path.join(dir, 'alp.cmd')), '9.8.7');
+
+  // A version still running when the wait ends: refused, naming the process.
+  const running = hold();
+  await new Promise(resolve => setTimeout(resolve, 500));
+  const refused = await install(['-Dir', dir, '-NoModifyPath', '-BaseUrl', releases], { localAppData });
+  assert.notEqual(refused.code, 0, refused.stdout);
+  assert.match(refused.stderr, new RegExp(`ALP 9\\.8\\.7 is in use \\(Windows cannot move a running version\\): node\\.exe \\(pid ${running.pid}\\)`), refused.stderr);
+  running.kill();
+  assert.equal(version(path.join(dir, 'alp.cmd')), '9.8.7', 'the refused reinstall left the current version running');
 });

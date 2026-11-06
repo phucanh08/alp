@@ -46,6 +46,34 @@ param(
   # (powershell -File install.ps1) an uncaught throw still ends with exit code 1.
   function Die([string]$Message) { throw "alp-install: error: $Message" }
 
+  # Windows refuses to move a directory while a file in it is open or running. A version that just ran
+  # (`alp --version`, or the check below of a copy just unpacked) can stay held for a moment after its
+  # process ended: the exiting process itself, or an antivirus scan of the new executable (t-5294.5). So
+  # a move is tried again for about 10 s, saying so once; a process that keeps running from the
+  # directory still holds it then, and the move fails as before.
+  $MoveDelaysMs = @(100, 200, 400, 800, 1500, 2500, 2500, 2500)
+  function Move-Directory([string]$From, [string]$To) {
+    $started = [DateTime]::UtcNow
+    for ($attempt = 0; ; $attempt++) {
+      try {
+        Move-Item -LiteralPath $From -Destination $To
+        if ($attempt -gt 0) { Say "$From was released after $([int]([DateTime]::UtcNow - $started).TotalMilliseconds) ms" }
+        return
+      } catch {
+        if ($attempt -ge $MoveDelaysMs.Count) { throw }
+        if ($attempt -eq 0) { Say "$From is in use; waiting up to 10 s for it to be released ($($_.Exception.Message))" }
+        Start-Sleep -Milliseconds $MoveDelaysMs[$attempt]
+      }
+    }
+  }
+  # The processes running an executable from under one of $Directories, as "node.exe (pid 1234)".
+  function Get-RunningFrom([string[]]$Directories) {
+    $prefixes = @($Directories | Where-Object { $_ } | ForEach-Object { $_.TrimEnd('\') + '\' })
+    try {
+      @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $path = $_.ExecutablePath; $path -and @($prefixes | Where-Object { $path.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count } | ForEach-Object { "$($_.Name) (pid $($_.ProcessId))" })
+    } catch { @() }
+  }
+
   if ($Help) {
     Write-Host 'Usage: install.ps1 [-Version <v>] [-Dir <path>] [-Root <path>] [-NoModifyPath | -ModifyPath] [-BaseUrl <url or dir>]'
     return
@@ -189,10 +217,17 @@ param(
         if ($previous -eq $newVersion -or $alpdVersion -eq $newVersion) {
           # Reinstalling the running version: keep its files for the processes that use them.
           $aside = ".alp-old-" + [System.Guid]::NewGuid().ToString('N').Substring(0, 12)
-          try { Move-Item -LiteralPath $target -Destination (Join-Path $App $aside) } catch { Die "ALP $newVersion is in use (Windows cannot move a running version); close ALP (alp daemon stop) and rerun" }
+          try { Move-Directory $target (Join-Path $App $aside) } catch {
+            $reason = $_.Exception.Message
+            # alp.cmd starts node.exe through the app\current junction, so its path may name either.
+            $running = @(Get-RunningFrom @($target, $(if ($previous -eq $newVersion) { $current })))
+            if ($running.Count) { Die "ALP $newVersion is in use (Windows cannot move a running version): $($running -join ', ') runs from $target; close ALP (alp daemon stop) and rerun" }
+            Die "ALP $newVersion is still in use after 10 s, though no process runs from $target (another program, such as an antivirus scan, has a file in it open: $reason); rerun in a moment"
+          }
         } else { Remove-Item -LiteralPath $target -Recurse -Force }
       }
-      Move-Item -LiteralPath $unpacked -Destination $target
+      # The copy just ran its --version check above: the same short hold can follow.
+      Move-Directory $unpacked $target
     } catch {
       $reason = $_.Exception.Message
       # The running version goes back where it was, so app\current still points at files (t-1f14).
