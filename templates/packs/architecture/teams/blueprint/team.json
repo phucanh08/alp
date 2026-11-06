@@ -1,6 +1,6 @@
 {
   "label": "Blueprint",
-  "description": "Architecture-heavy work: main accepts, lead runs execution with peers, a read-only architect advises, a docs maintainer keeps docs in sync, a reviewer checks independently.",
+  "description": "Việc nặng về kiến trúc: main nghiệm thu, lead điều phối thực thi cùng các peer, một architect chỉ đọc tư vấn, một docs-maintainer giữ tài liệu khớp với code, một reviewer kiểm độc lập.",
   "main": "main",
   "members": {
     "main": { "model": "claude:claude-opus-5-5", "thinking": "high" },

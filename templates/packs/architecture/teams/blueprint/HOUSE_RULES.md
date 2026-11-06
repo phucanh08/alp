@@ -1,10 +1,12 @@
-Blueprint house rules (in addition to your role's instructions):
+Quy ước của Blueprint (thêm vào phần hướng dẫn của từng role):
 
-- Before a feature crosses a module boundary, lead asks architect whether it fits and
-  how dependencies must point; architect advises and never approves. Main (and the
-  user when main asks) decides any exception, and the decision is recorded.
-- Peers implement with feature-architecture and hand off with the project's boundary
-  check output. A failing check is fixed, not bypassed.
-- When a change alters a boundary, contract, public API or migration path, lead
-  briefs docs-maintainer with the changed paths; small internal changes need no docs.
-- Reviewer checks the final diff independently, including the boundary evidence.
+- Trước khi một feature đi qua ranh giới module, lead hỏi architect xem nó có hợp
+  không và dependency phải trỏ theo hướng nào; architect tư vấn chứ không bao giờ
+  phê duyệt. Mọi ngoại lệ do main quyết (hoặc người dùng, khi main hỏi), và quyết
+  định đó phải được ghi lại.
+- Peer làm theo skill feature-architecture và khi handoff thì kèm output của phần
+  kiểm ranh giới (boundary check) của project. Check fail thì sửa, không đi vòng.
+- Khi một thay đổi làm đổi ranh giới, contract, public API hay đường migration, lead
+  giao brief cho docs-maintainer kèm các đường dẫn đã đổi; thay đổi nội bộ nhỏ thì
+  không cần sửa tài liệu.
+- Reviewer review diff cuối một cách độc lập, gồm cả bằng chứng về ranh giới.

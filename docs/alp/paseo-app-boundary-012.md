@@ -111,6 +111,12 @@ In `@getpaseo/server`:
   ```
 *Conclusion:* Paseo.app CLI 0.12 connects, discovers custom provider models, and runs agent sessions normally when `alpd` is active.
 
+> The transcript above is what the probe printed on the day it ran, and is left as captured. Since
+> t-9043 translated `templates/`, the DESCRIPTION cells read the Vietnamese text instead — today
+> `pho` is "Main tự làm hoặc giao việc cho peer; một supervisor review quy trình." and `cafe` is
+> "Main giám sát lead, lead tự làm hoặc giao việc cho peer; một supervisor review quy trình." What
+> the probe establishes (Paseo discovers the provider's models) is unaffected; only the text differs.
+
 ---
 
 ## 5. Source Hardening in `integrations/paseo/`

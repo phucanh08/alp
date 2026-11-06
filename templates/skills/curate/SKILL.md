@@ -11,7 +11,7 @@ description: "Rà soát toàn bộ bài học (lesson) và skill: gộp lesson t
 
 Không làm khi đang giữ một gate hay câu hỏi khác với người dùng; trả lời việc đó trước.
 
-## Phương pháp
+## Quy trình
 1. **Đọc hết, không nhớ lại.** Đọc `.alp/lessons.md` của project và `~/.alp/lessons.md` của người dùng; đọc mọi SKILL.md trong `~/.alp/skills`, `.alp/skills` và danh sách skill của từng role (`role-skills.json`).
 2. **Lập đề xuất, mỗi mục một dòng lý do:**
    - **Gộp:** các lesson cùng ý thành một rule.
@@ -28,7 +28,7 @@ Không làm khi đang giữ một gate hay câu hỏi khác với người dùng
    - Issue: `alp_issue` action search target alp trước; chưa có thì create, đã có thì comment. Người dùng duyệt từng bản nháp.
 5. Báo kết quả một đoạn ngắn: đã gộp, rút gọn, xóa bao nhiêu; skill nào được cho nghỉ; issue nào đã tạo.
 
-## Kiểm tra
+## Kiểm chứng
 - Không sửa hay xóa lesson nào ngoài `alp_lesson_curate`; không sửa file lesson trực tiếp.
 - Mỗi rule sau gộp vẫn giữ đủ ý của các lesson gốc.
 - Mỗi lesson bị xóa vì skill đều nêu đúng tên skill thay nó.

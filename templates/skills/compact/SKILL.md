@@ -12,7 +12,7 @@ description: "Viết checkpoint có cấu trúc trước khi compact context c�
 
 Không compact khi đang giữ lượt (alp_wait, alp_ask, delegate wait), hoặc khi đang viết dở câu trả lời. Phải trả lời người dùng trước.
 
-## Phương pháp
+## Quy trình
 1. **Kiểm thực tế, không chép trí nhớ.** Đọc alp_task ready/list và alp_board. Với PR/CI liên quan, chạy gh pr view/checks ngay trong lượt.
 2. **Viết checkpoint theo đúng các mục sau** (ngắn, có ID, có giờ):
    - **Người dùng và ngôn ngữ:** profile (Phở/Cafe), ngôn ngữ trả lời.
@@ -26,7 +26,7 @@ Không compact khi đang giữ lượt (alp_wait, alp_ask, delegate wait), hoặ
 3. **Không đưa vào checkpoint:** bài học, skill, nội dung task đầy đủ (đã lưu ngoài context), log dài, secret.
 4. Gửi checkpoint cho runtime theo yêu cầu, hoặc ghi alp_pin/task note nếu compact thủ công. Sau đó báo người dùng một dòng: "Em đã compact context; checkpoint giữ X assignment, Y gate, Z quyết định."
 
-## Kiểm tra
+## Kiểm chứng
 - Mọi assignment đang chạy đều có ID.
 - Mọi gate mở và mọi câu hỏi đang chờ đều có trong checkpoint.
 - Quyết định của người dùng được trích nguyên văn, không diễn giải.
