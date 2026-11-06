@@ -24,7 +24,14 @@ import { RELEASE_NAMES, releaseArtifacts } from './release-lib.mjs';
 import { spawnCommand } from './spawn-command.mjs';
 
 export const ROOT = path.resolve(import.meta.dirname, '..');
-export const VERSION = '0.0.1-beta.8';
+/**
+ * The release this checkout is: the root package.json's version, the one source release:pack tags
+ * (`v<version>`) and release-acceptance.yml locates the packs by. Not the release manifest under test:
+ * the check in install() exists to catch a manifest of another release, so it cannot read its own
+ * answer from that manifest. Never a constant here: a bump that forgot one made every row fail.
+ */
+export const releaseVersion = (root = ROOT) => JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+export const VERSION = releaseVersion();
 export const FAKE_CODEX = path.join(ROOT, 'packages/daemon/tests/support/fake-codex.js');
 export const FAKE_CLAUDE = path.join(ROOT, 'packages/daemon/tests/support/fake-claude.js');
 /** The choices of a permission question, in either language alpd may ask in (ALPD §54). */
@@ -137,7 +144,7 @@ export function install(run, { packs, rehearsal }) {
   const artifacts = releaseArtifacts(directory, { rehearsal });
   if (artifacts.length !== RELEASE_NAMES.length && !rehearsal) throw new Error(`expected ${RELEASE_NAMES.length} release tarballs, found ${artifacts.length}`);
   const manifest = JSON.parse(readFileSync(path.join(directory, 'release-manifest.json'), 'utf8'));
-  if (manifest.version !== VERSION) throw new Error(`release is ${manifest.version}, expected ${VERSION}`);
+  if (manifest.version !== VERSION) throw new Error(`release is ${manifest.version}, expected ${VERSION} (the version in ${path.join(ROOT, 'package.json')}): --packs names another release than this checkout`);
   run.manifest = manifest;
   const consumer = path.join(run.work, 'consumer');
   if (!existsSync(path.join(consumer, 'package.json'))) {
