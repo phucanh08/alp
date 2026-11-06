@@ -492,6 +492,25 @@ test('writeCredentials retries transient EPERM/EACCES/EBUSY on atomic rename and
   assert.notEqual(rotated.token, token);
 });
 
+// t-5294.1: on Windows a rename onto a file another handle holds open (the gateway's own CredentialStore
+// polls and reads credentials.json) fails with EPERM instead of replacing it, as Unix does. Not mocked:
+// a real handle on the real file, so the Windows lanes check the platform behaviour renameWithRetry exists for.
+test('Windows: replacing credentials.json while a reader holds it fails once, and renameWithRetry outlasts the reader', { skip: process.platform !== 'win32' }, async t => {
+  const { home: gatewayHome, workspace } = await home(t);
+  await createCredential(gatewayHome, { label: 'held', workspaces: [workspace], permissions: ['session.read'] });
+  const file = credentialsFile(gatewayHome);
+  const temporary = `${file}.held.tmp`;
+  await writeFile(temporary, 'replacement', { mode: 0o600 });
+  const reader = await nodeFs.promises.open(file, 'r');
+  let closed = false;
+  t.after(() => closed || reader.close());
+  await assert.rejects(nodeFs.promises.rename(temporary, file), error => credentials.RETRIABLE_RENAME_ERRORS.has(/** @type {any} */ (error)?.code), 'a plain rename onto a held file');
+  // The reader lets go within the retry budget (10, 20, 40, 80, 80... ms), as a poll's read does.
+  setTimeout(() => { closed = true; void reader.close(); }, 60);
+  await credentials.renameWithRetry(temporary, file);
+  assert.equal(await readFile(file, 'utf8'), 'replacement');
+});
+
 test('writeCredentials rethrows and cleans up temp files when rename retries are exhausted', async t => {
   const { home: gatewayHome, workspace } = await home(t);
   const originalRename = nodeFs.promises.rename;

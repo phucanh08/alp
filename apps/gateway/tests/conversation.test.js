@@ -8,11 +8,11 @@
 // native fork, attachment re-authorization) is tested in packages/daemon.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, PERMISSIONS, projectBranch, projectForkedFrom } from '../src/policy.js';
-import { credentialsFile } from '../src/credentials.js';
+import { credentialsFile, renameWithRetry } from '../src/credentials.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway, until } from './support/harness.js';
 
@@ -122,7 +122,9 @@ test('permissions: 1003 grant naming what is missing, before alpd hears of the m
   data.credentials.find(entry => entry.id === ids.noread).permissions = ['session.write'];
   await writeFile(`${file}.tmp`, JSON.stringify(data), { mode: 0o600 });
   await chmod(`${file}.tmp`, 0o600);
-  await rename(`${file}.tmp`, file);
+  // The running gateway's CredentialStore reads this file every 25 ms (harness pollMs); on Windows a plain
+  // rename onto it fails with EPERM while that read holds it (t-5294.1), so replace it as the CLI does.
+  await renameWithRetry(`${file}.tmp`, file);
   await until(() => store.grant(ids.noread) && !store.grant(ids.noread).permissions.has('session.read'), 'the edited grant to load');
   const { client: noread } = await sdk('noread');
   const mark = daemon.calls().length;
