@@ -2,7 +2,7 @@
 // hand: it calls ALP tools, reports usage, finishes, stalls, crashes or hits a
 // usage limit, as Codex and Claude do through their transports.
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
@@ -81,13 +81,28 @@ export async function until(check, what = 'condition') {
 }
 
 /**
- * A project with a root session `root` that has started a turn. Returns the runtime,
+ * Sets the model profiles of agents of a team in a project's settings. A target's profiles are
+ * the models a coordinator may pass for it (P2), and `alp init` gives each agent one Claude
+ * profile, so a test that delegates on another model must say so here.
+ * @param {string} root @param {Record<string, string[]>} profiles @param {string} [team]
+ */
+export async function setProfiles(root, profiles, team = 'pho') {
+  const file = path.join(root, '.alp', 'settings.json');
+  const settings = JSON.parse(await readFile(file, 'utf8'));
+  for (const [agent, list] of Object.entries(profiles)) settings.team[team][agent] = { ...settings.team[team][agent], profiles: list };
+  await writeFile(file, JSON.stringify(settings, null, 2));
+}
+
+/**
+ * A project with a root session `root` that has started a turn. `profiles`: model profiles for
+ * Phở's agents (setProfiles). Returns the runtime,
  * its agents (main first), and the run log reader.
  */
-export async function tree(t, { prefix = 'alp-fake-', open = {}, options = () => ({}) } = {}) {
+export async function tree(t, { prefix = 'alp-fake-', open = {}, options = () => ({}), profiles } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), prefix));
   const root = path.join(directory, 'project');
   await initProject(root);
+  if (profiles) await setProfiles(root, profiles);
   const runs = path.join(directory, 'runs');
   const agents = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(agents), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: runs, ...options(directory) });

@@ -9,6 +9,7 @@ import { initProject } from '../../packages/core/src/init.js';
 import { addAllowRule, commandDecision, parseRule, profileFor, simpleCommands, unwrapShell, validatePermissions } from '../../packages/core/src/permissions.js';
 import { claudePermissions, createAlpRuntime, createCopy, reclaimCopies, removeCopy, resolveSession } from '../../dist/runtime/index.js';
 import { teardown } from '../support/teardown.js';
+import { setProfiles } from '../support/fake-agent.js';
 
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
 
@@ -108,6 +109,8 @@ test('Codex asks ALP before leaving its sandbox, and ALP answers by the profile'
     agents: { reviewer: 'review', main: 'lead', peer: 'builder' },
   });
   const runtimes = [];
+  // Its reviewer and peer run on Codex too: a target's profiles are the models it takes.
+  await setProfiles(root, { reviewer: ['codex:gpt-6.1-sol'], peer: ['codex:gpt-6.1-sol'] });
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: home, runLogDir: path.join(directory, 'runs') });
   defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, model: 'codex:gpt-6.1-sol' });
@@ -188,7 +191,7 @@ test('a Claude session carries its profile to the transport', async t => {
   const [main, supervisor] = runtimes;
   assert.deepEqual([main.config.runtime, main.config.permissions, supervisor.config.permissions], ['claude', null, { name: 'read-only', base: 'read-only', allow: [], ask: [], deny: [], beyondMode: 'refuse' }]);
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Review' }] });
-  await main.call('alp_delegate', { agent: 'reviewer', task: 'Review', model: 'claude:claude-sonnet-5-5', wait: false });
+  await main.call('alp_delegate', { agent: 'reviewer', task: 'Review', model: 'claude:claude-opus-5-5', wait: false });
   await until(() => runtimes.length === 3);
   assert.deepEqual(runtimes[2].config.permissions, { name: 'review', base: 'read-only', allow: ['Bash(npm test:*)'], ask: [], deny: [], beyondMode: 'refuse' });
 });
@@ -526,7 +529,7 @@ test('an assignment with workdir copy writes, builds and tests in its copy, whic
   await assert.rejects(readdir(copy));
 
   // Claude: Bash sandboxed to the copy.
-  await main.call('alp_delegate', { agent: 'reviewer', task: 'Review again', model: 'claude:claude-sonnet-5-5', wait: false });
+  await main.call('alp_delegate', { agent: 'reviewer', task: 'Review again', model: 'claude:claude-opus-5-5', wait: false });
   await until(() => runtimes.length === 4 && runtimes[3].started.length === 1);
   const claude = runtimes[3];
   assert.deepEqual([claude.config.sandbox, claude.config.floor], ['workspace-write', 'workspace-write']);
@@ -538,7 +541,7 @@ test('an assignment with workdir copy writes, builds and tests in its copy, whic
 
   // Without the sandbox, a Claude reviewer cannot get a copy.
   process.env.ALP_CLAUDE_SANDBOX = '0';
-  assert.match((await main.call('alp_delegate', { agent: 'reviewer', task: 'Once more', model: 'claude:claude-sonnet-5-5' })).error, /A review copy on Claude needs its Bash sandbox/);
+  assert.match((await main.call('alp_delegate', { agent: 'reviewer', task: 'Once more', model: 'claude:claude-opus-5-5' })).error, /A review copy on Claude needs its Bash sandbox/);
   main.finish('Done');
   await until(async () => (await readdir(path.join(directory, 'copies')).catch(() => [])).length === 0);
   const copies = async () => (await readFile(path.join(directory, 'runs', 'root.jsonl'), 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line).event).filter(event => event.startsWith('copy.'));

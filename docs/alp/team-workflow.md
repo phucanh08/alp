@@ -370,7 +370,9 @@ the effort may be left out, and `provider:*` stands for any model of that provid
 Main runs on exactly one named model. An agent that runs by itself starts on its first
 named model. An agent assigned work with several profiles or a
 `provider:*` runs on the model and effort its requester picks for that task (with a
-`modelReason`), never a default. `autocompact` is `"auto"` or 100000–1000000 tokens,
+`modelReason`), never a default. The profiles that name a model are the agent's
+allowlist when work is assigned to it: one named profile means exactly that model, and a
+requester that passes another is refused with the allowed models named. `autocompact` is `"auto"` or 100000–1000000 tokens,
 shared by the agent's model choices. A numeric value goes directly to Codex's
 compaction token limit or Claude's auto-compact window; Claude reserves response
 space and may compact before that window fills. Unlike the older `context` option,
@@ -977,10 +979,17 @@ worktree events, board pins, and questions to the user with their answers.
 
 `alp_delegate` accepts `agent`, `task`, and optional `mode` (`read-only`,
 `workspace-write` or `full-access`), `model`, `thinking`, and `modelReason`. Model IDs
-are runtime-prefixed (`codex:…` or `claude:…`). Main chooses peer model/effort in
-Phở; lead chooses them in Cafe. Omitted peer choices inherit the parent model/effort;
-specifying a different model without an effort uses that model's configured/default
-effort. Invalid choices fail explicitly.
+are runtime-prefixed (`codex:…`, `claude:…`, `antigravity:…`, `acp:…`). Main chooses peer
+model/effort in Phở; lead chooses them in Cafe. A target's model profiles are the models
+that may be passed for it: one named profile is used when `model` is omitted and is the only
+model accepted; several, or a `provider:*`, require a model and an effort for each assignment.
+A target with no model profiles (a custom delegation graph) runs on the parent's model unless
+one is passed. An effort the model does not take is refused; an effort ALP cannot check is
+passed on, and the answer's `thinkingNote` says so. A refused model is answered with the
+allowed ones and the remedy: add the model, or `provider:*`, to
+`team.<team>.<agent>.profiles` in `.alp/settings.json` (or, for Phở and Cafe, run
+`alp setup --runtime mix`, which rewrites their profiles with both providers). Invalid choices
+fail explicitly.
 
 Oracle runs on Fable (`claude:claude-fable-5-1`) or Astra (`codex:gpt-6-astra`); any
 other model, or none, is refused. Its effort defaults to `high`; `modelReason` is

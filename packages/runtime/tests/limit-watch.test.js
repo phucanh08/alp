@@ -99,7 +99,7 @@ test('while a limit pauses Codex, alpd asks it every interval and resumes it onc
 
 test('a delegation to a paused runtime asks it first, and goes ahead when the limit lifted', async t => {
   // Main on Claude; its Codex peer hits the limit. The interval check is an hour off.
-  const { runtime, agents, main } = await tree(t, { prefix: 'alp-limit-', open: { model: 'claude:claude-opus-5-5' }, options: () => ({ language: 'English', limitCheckMs: 3_600_000 }) });
+  const { runtime, agents, main } = await tree(t, { prefix: 'alp-limit-', open: { model: 'claude:claude-opus-5-5' }, options: () => ({ language: 'English', limitCheckMs: 3_600_000 }), profiles: { peer: ['codex:gpt-5.6-sol'], reviewer: ['codex:gpt-5.6-sol'] } });
   await main.call('alp_delegate', { agent: 'peer', task: 'Long job', mode: 'read-only', model: 'codex:gpt-5.6-sol', wait: false });
   await until(() => agents[1]?.started.length === 1);
   const peer = agents[1];

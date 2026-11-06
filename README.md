@@ -130,9 +130,12 @@ effort or else its team's. When main or lead assigns work to an agent with sever
 profiles or a `provider:*`, such as a peer, it picks a model they offer and an effort
 that model takes for each task, by its difficulty, risk and the autonomy it needs, and
 says why; a listed effort is only the usual one. ALP refuses an assignment without both
-or with a model they do not offer. An agent with one named profile runs on it. A list
-does not enable automatic fallback. Oracle still requires an explicit lens selection.
-An effort a model does not take is refused (GPT-6 Astra takes only low). The earlier
+or with a model they do not offer. An agent's profiles are its allowlist: with one named
+profile it runs on exactly that model, and an assignment that passes another is refused,
+naming the allowed ones. A list does not enable automatic fallback. Oracle still requires
+an explicit lens selection. An effort a model does not take is refused (GPT-6 Astra takes
+only low); an effort ALP cannot check (a model it lists without efforts, `antigravity:`,
+`acp:`) is passed on, and the assignment's answer says it was not checked. The earlier
 form, `{ "provider", "model", "effort" }`, still works; `alp update-template` rewrites it as
 `"provider:model:effort"`.
 
@@ -145,7 +148,7 @@ keeps the agent's existing native/context defaults. The same field is supported 
 not a shipped default. New and upgraded configurations use `"auto"`.
 
 Unspecified agents keep the team's choices. Explicit session/delegation model and
-effort win, then project team choices, then the older `runtime` settings, then
+effort win (a delegation only among the target's profiles), then project team choices, then the older `runtime` settings, then
 team and agent defaults. Run `alp setup` again to rewrite Phở and Cafe's profiles, or
 edit the file to change one agent. Only configured oracle lenses are available, and an
 unavailable lens is reported rather than substituted.
