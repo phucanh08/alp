@@ -220,10 +220,15 @@ param(
           $aside = ".alp-old-" + [System.Guid]::NewGuid().ToString('N').Substring(0, 12)
           try { Move-Directory $target (Join-Path $App $aside) } catch {
             $reason = $_.Exception.Message
+            # What blocks the move (t-5294.5, seen on the windows-x64 lane): a process whose working directory
+            # is inside the version, or a file in it open without delete sharing. A process merely running an
+            # executable from it does not; the processes that run from it are named as the likely holders.
             # alp.cmd starts node.exe through the app\current junction, so its path may name either.
+            # The junction counts only when it points at this version ($previous): otherwise what runs
+            # through it is another version, which holds nothing here.
             $running = @(Get-RunningFrom @($target, $(if ($previous -eq $newVersion) { $current })))
-            if ($running.Count) { Die "ALP $newVersion is in use (Windows cannot move a running version): $($running -join ', ') runs from $target; close ALP (alp daemon stop) and rerun" }
-            Die "ALP $newVersion is still in use after 10 s, though no process runs from $target (another program, such as an antivirus scan, has a file in it open: $reason); rerun in a moment"
+            if ($running.Count) { Die "ALP $newVersion is in use: a process works in $target or holds a file there open; $($running -join ', ') runs from it; close ALP (alp daemon stop) and rerun" }
+            Die "ALP $newVersion is in use: a process works in $target or holds a file there open, and none runs from it (a shell in that directory, or an antivirus scan?); close it and rerun ($reason)"
           }
         } else { Remove-Item -LiteralPath $target -Recurse -Force }
       }

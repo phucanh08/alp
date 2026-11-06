@@ -266,10 +266,15 @@ async function run(home: string) {
       force.unref();
       clearInterval(beat);
       disk.stop();
-      modelCatalog?.stop();
+      // Stops the timer and listeners now; its promise settles once the cache writes under way are done.
+      const catalogStopped = modelCatalog?.stop().catch(() => {});
       await server.close().catch(() => {});
       await runtime.shutdown().catch(() => {});
       await store.flush();
+      // Before the lock goes, so the next alpd never writes the cache beside this one (t-5294.2). Bounded:
+      // stop() also waits for a provider probe under way. Past 2 s alpd stops anyway; the write is a
+      // temporary file and a rename, so the cache keeps its previous content and a stray .tmp may remain.
+      if (catalogStopped) await Promise.race([catalogStopped, new Promise(resolve => setTimeout(resolve, 2_000).unref())]);
       // Last: what remains is a clean stop.
       await unlink(marker).catch(() => {});
       await releaseLock(home);
