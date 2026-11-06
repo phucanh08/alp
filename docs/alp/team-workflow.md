@@ -1006,12 +1006,17 @@ entry that matches setup's defaults for some runtime counts as setup's; setup ne
 to run over the record. An entry you wrote, or one
 whose model a library or project override of Phở or Cafe names in its `team.json`, is kept,
 with a line such as `Kept team.cafe.reviewer.profiles (claude:sonnet:high): written by hand,
-not by ALP. Delete the entry from the file and run alp setup again to replace it.` A team
+not by ALP. Delete the entry from the file and run alp setup again to replace it.` (an override
+that sets an agent's model or effort is named instead: `the cafe team's team.json sets it
+(claude:sonnet, effort high)`; in a project with no record, an entry an earlier setup wrote with
+a model chosen by flag cannot be told from a hand edit, and the line says that ALP cannot tell
+whether an earlier alp setup or you wrote it). A team
 other than Phở and Cafe is never written, because its `team.json` chooses its models; setup
 names it: `Team agy (project) is not Phở or Cafe, so alp setup leaves its profiles as they
 are: its team.json chooses its models. To change them, edit team.agy.<agent>.profiles in
-<root>/.alp/settings.json (agents: main, peer, reviewer).` A replaced file is backed up to
-`.alp/settings.json.bak`.
+<root>/.alp/settings.json (agents: main, peer, reviewer).` When setup replaces an entry already
+in the file, it first backs the file up to `.alp/settings.json.bak`. A file that does not
+validate is reported and left as it is.
 
 Oracle runs on Fable (`claude:claude-fable-5-1`) or Astra (`codex:gpt-6-astra`); any
 other model, or none, is refused. Its effort defaults to `high`; `modelReason` is

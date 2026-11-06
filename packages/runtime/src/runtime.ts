@@ -3465,7 +3465,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       // alp setup writes only Phở's and Cafe's profiles, and only Claude and Codex models: offer it where it can help.
       const provider = args.model.slice(0, args.model.indexOf(':'));
       const setup = ['pho', 'cafe'].includes(team) && ['claude', 'codex'].includes(provider)
-        ? `, or run alp setup ${session.mapping.agent.projectRoot} --runtime mix, which gives Phở's and Cafe's members both Claude and Codex profiles (it keeps profiles written by hand)`
+        ? `, or run alp setup ${session.mapping.agent.projectRoot} --runtime mix, which gives Phở's and Cafe's members both Claude and Codex profiles (it keeps profiles written by hand or set in a team.json)`
         : '';
       return toolResult(false, {
         error: `${args.model} is not one of ${args.agent}'s model profiles in team ${team}; pass ${allowed}${choosing ? '' : ', or omit model to run on it'}. ` +

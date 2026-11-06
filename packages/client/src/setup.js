@@ -71,12 +71,14 @@ export async function setup(args, home) {
       for (const [seat, choices] of Object.entries(seats)) console.log(`  ${SEAT_LABEL[seat]}: ${choices.map(describe).join(', ')}`);
       console.log(`  peer: ${peers.join(', ')} (any model: whoever assigns a peer picks its model and effort for the task)`);
     };
+    // Checked as it is first: reading its entries' owners assumes well-formed settings.
+    if (settings) validateSettings(settings, file);
     console.log(`Profiles for Phở and Cafe in ${file}:`);
     show();
     // Which existing entries are ALP's to rewrite, and which are the user's (p-47ce54f6): decided before any prompt.
     const owners = await ownership(root, home, settings);
     const replaced = BUILTIN_TEAMS.filter(id => Object.keys(currentTeams(settings)?.[id] ?? {}).some(name => owners.rewrites(id, name)));
-    if (replaced.length) console.log(`These replace the ${replaced.join(' and ')} profiles ALP or an earlier alp setup wrote; a backup is kept in ${file}.bak.`);
+    if (replaced.length) console.log(`These replace the ${replaced.join(' and ')} profiles ALP or an earlier alp setup wrote; saving backs the file up to ${file}.bak first.`);
     for (const line of owners.kept) console.log(line);
     for (const line of owners.others) console.log(line);
     if (interactive) {
@@ -238,11 +240,22 @@ async function ownership(root, home, existing) {
     // A library or project override of Phở or Cafe that names a member's model itself made that choice on purpose.
     pinned[id] = {};
     if (team.source !== 'builtin') {
+      /** What an override sets for one agent beyond the built-in's, as "model" and/or "effort X"; undefined when nothing. */
+      const choice = (own, base) => {
+        const parts = [own?.model && own.model !== base?.model ? own.model : undefined, own?.thinking && own.thinking !== base?.thinking ? `effort ${own.thinking}` : undefined].filter(Boolean);
+        return parts.length ? parts.join(', ') : undefined;
+      };
       for (const [name, member] of Object.entries(team.members)) {
-        if (name !== 'oracle' && member.model && member.model !== builtin.members[name]?.model) pinned[id][name] = member.model;
+        const set = name === 'oracle' ? undefined : choice(member, builtin.members[name]);
+        if (set) pinned[id][name] = set;
       }
-      if (team.supervisor && team.supervisor.model && team.supervisor.model !== (builtin.supervisor && builtin.supervisor.agent === team.supervisor.agent ? builtin.supervisor.model : undefined)) pinned[id][team.supervisor.agent] = team.supervisor.model;
-      if (team.members.oracle && team.oracleModels && JSON.stringify(team.oracleModels) !== JSON.stringify(builtin.oracleModels)) pinned[id].oracle = team.oracleModels.join(', ');
+      if (team.supervisor) {
+        const set = choice(team.supervisor, builtin.supervisor && builtin.supervisor.agent === team.supervisor.agent ? builtin.supervisor : undefined);
+        if (set) pinned[id][team.supervisor.agent] = set;
+      }
+      if (team.members.oracle && ((team.oracleModels && JSON.stringify(team.oracleModels) !== JSON.stringify(builtin.oracleModels)) || (team.oracleThinking && JSON.stringify(team.oracleThinking) !== JSON.stringify(builtin.oracleThinking)))) {
+        pinned[id].oracle = [team.oracleModels?.join(', '), team.oracleThinking ? `efforts ${Object.entries(team.oracleThinking).map(([lens, effort]) => `${lens} ${effort}`).join(', ')}` : undefined].filter(Boolean).join('; ');
+      }
     }
   }
   const rewrites = (id, name) => {
@@ -253,13 +266,16 @@ async function ownership(root, home, existing) {
     return settings?.templateDefaults?.[id]?.[name] === fingerprint && !pinned[id]?.[name];
   };
   const kept = [];
+  const recorded = Object.values(record).some(agents => Object.keys(agents).length);
   for (const id of BUILTIN_TEAMS) {
     for (const [name, config] of Object.entries(teams[id] ?? {})) {
       if (rewrites(id, name)) continue;
       const list = (config.profiles ?? []).map(profile => typeof profile === 'string' ? profile : describe(profile)).join(', ');
       kept.push(pinned[id]?.[name] && settings?.templateDefaults?.[id]?.[name] === profileFingerprint(config, name)
-        ? `Kept team.${id}.${name}.profiles (${list}): the ${id} team's team.json names its model (${pinned[id][name]}). Delete the entry from the file and run alp setup again to replace it.`
-        : `Kept team.${id}.${name}.profiles (${list}): written by hand, not by ALP. Delete the entry from the file and run alp setup again to replace it.`);
+        ? `Kept team.${id}.${name}.profiles (${list}): the ${id} team's team.json sets it (${pinned[id][name]}). Delete the entry from the file and run alp setup again to replace it.`
+        : recorded
+          ? `Kept team.${id}.${name}.profiles (${list}): written by hand, not by ALP. Delete the entry from the file and run alp setup again to replace it.`
+          : `Kept team.${id}.${name}.profiles (${list}): ALP cannot tell whether an earlier alp setup or you wrote it (it is none of setup's defaults, and no setup record names it), so it is kept as yours. Delete the entry from the file and run alp setup again to replace it.`);
     }
   }
   const others = [];
