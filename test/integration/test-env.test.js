@@ -267,41 +267,73 @@ test('every verification entry point that drives a user-facing CLI isolates the 
     'scripts/package-smoke.mjs': 'npm run test:packages:smoke',
     'scripts/binary-smoke.mjs': 'the binary-build CI lane, and by hand on a built bundle',
   };
+  const STARTERS = /^(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork|run|npm|node)$/;
+  const callee = node => { const c = node.expression; return ts.isIdentifier(c) ? c.text : ts.isPropertyAccessExpression(c) ? c.name.text : ''; };
+  const isFunction = node => ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node);
+
   /**
-   * Does this subtree start a child process? Only that: `await mkdtemp(...)` is not work whose
-   * environment matters, and demanding the clear come before it would be a rule about tidiness
-   * rather than about the defect. The limit of the check is an imported module that spawns while
-   * being imported, which none of these five does.
+   * Where a script clears the caller session, and where it first starts a child process, as indexes
+   * into its top-level statements. A function or class DECLARATION only defines something, so a
+   * `spawnSync` inside one is not work this file has done yet — which is why reading offsets out of
+   * the text is not enough: scripts/package-smoke.mjs declares its `run()` wrapper above the
+   * isolation and calls it below. But a CALL to such a wrapper IS work, and looking only at the
+   * callee's NAME missed it: validate.mjs printed its banner through `commit()`, a local function
+   * that spawns git through an arrow it declares inside itself, and this check reported nothing —
+   * `work` came out as 5 instead of 2, so the ordering assertion could never have caught the defect
+   * its own comment describes (review finding on t-5294.3). The limit is an imported module that
+   * spawns while being imported, which none of these five does.
    */
-  const startsWork = node => {
-    let found = false;
-    const walk = child => {
-      if (found) return;
-      if (ts.isCallExpression(child)) {
-        const callee = child.expression;
-        const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : '';
-        if (/^(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork|run|npm|node)$/.test(name)) found = true;
-      }
-      ts.forEachChild(child, walk);
-    };
-    walk(node);
-    return found;
-  };
-  for (const [relative, how] of Object.entries(entries)) {
-    const source = await readFile(new URL(`../../${relative}`, import.meta.url), 'utf8');
+  const analyse = (source, relative) => {
     const parsed = ts.createSourceFile(relative, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-    // Top-level statements in order. A function or class DECLARATION only defines something, so a
-    // `spawnSync` inside one is not work this file has done yet — which is why reading offsets out
-    // of the text is not enough: scripts/package-smoke.mjs declares its `run()` wrapper above the
-    // isolation and calls it below.
+    const wrappers = new Map();
+    for (const statement of parsed.statements) {
+      if (ts.isFunctionDeclaration(statement) && statement.name && statement.body) wrappers.set(statement.name.text, statement.body);
+      if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name) && declaration.initializer && isFunction(declaration.initializer)) wrappers.set(declaration.name.text, declaration.initializer);
+      }
+    }
+    /**
+     * Calls in this subtree. `deep` false stops at a function this subtree merely DEFINES (the call
+     * has not happened yet); `deep` true is used once a wrapper has been called, because then its
+     * whole body runs — including a helper it declares inside itself, which is exactly how
+     * validate.mjs's `commit()` reached git: through a local arrow `git = (...a) => spawnSync(...)`.
+     */
+    const calls = (node, visit, deep) => {
+      let found = false;
+      const walk = child => {
+        if (found || !child || (!deep && child !== node && isFunction(child))) return;
+        if (ts.isCallExpression(child) && visit(callee(child), child)) found = true;
+        if (!found) ts.forEachChild(child, walk);
+      };
+      walk(node);
+      return found;
+    };
+    const startsWork = (node, seen = new Set(), deep = false) => calls(node, name =>
+      STARTERS.test(name) || (wrappers.has(name) && !seen.has(name) && (seen.add(name), startsWork(wrappers.get(name), seen, true))), deep);
     const statements = parsed.statements.filter(statement =>
       !ts.isImportDeclaration(statement) && !ts.isFunctionDeclaration(statement) && !ts.isClassDeclaration(statement));
-    const cleared = statements.findIndex(statement => /\bclearCallerSession\s*\(/.test(statement.getText()));
+    return {
+      statements,
+      cleared: statements.findIndex(statement => calls(statement, name => name === 'clearCallerSession', false)),
+      work: statements.findIndex(statement => startsWork(statement)),
+    };
+  };
+
+  // The shape validate.mjs had at a4093a5: a banner printed through a local `commit()` that spawns
+  // git, BEFORE the clear. The check must report it, or it is not checking anything.
+  const old = analyse(`import { clearCallerSession } from './test-lib.mjs';
+function commit() { return spawnSync('git', ['rev-parse', 'HEAD']).stdout.trim(); }
+console.log(\`[validate] \${commit()}\`);
+const cleared = clearCallerSession();`, 'old-validate.mjs');
+  assert.ok(old.work >= 0 && old.cleared > old.work, `the check does not see work started through a local wrapper: ${JSON.stringify(old.cleared)} vs ${JSON.stringify(old.work)}`);
+
+  for (const [relative, how] of Object.entries(entries)) {
+    const source = await readFile(new URL(`../../${relative}`, import.meta.url), 'utf8');
+    const { statements, cleared, work } = analyse(source, relative);
     assert.ok(cleared >= 0, `${relative} (${how}) must clear the caller's ALP session variables at the top level: an agent running it otherwise hits a user-only refusal that has nothing to do with what it checks`);
     // And it must come first. The point is the CHILD's environment, so a clear after the first child
     // has started changes nothing for that child: validate.mjs printed its banner — two `git` calls —
     // before clearing, until this assertion said so.
-    const work = statements.findIndex(startsWork);
     assert.ok(work < 0 || cleared < work,
       `${relative} (${how}) clears the caller session in top-level statement ${cleared}, after statement ${work} already started a child process:\n  ${statements[work].getText().split('\n')[0]}`);
   }
