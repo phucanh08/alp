@@ -144,9 +144,9 @@ changes still have the fresh-session requirement documented in team-workflow.md.
 - Main can use execution skills; it is not the reference's observer-only supervisor.
 - User intake belongs to main. Lead receives a brief from main and peers receive a
   brief from lead, so lower roles do not start independent user interviews.
-- Briefs fit the exposed alp_delegate arguments: agent, task, optional mode. Model
-  and reasoning inherit; parallel worker control and live upstream mailboxes are
-  not available in the current synchronous adapter.
+- Briefs fit the delegation tool the runtime actually exposes. Model and effort follow
+  the target's model profiles as the runtime instruction states them; assignments run in
+  the background unless the coordinator waits for one.
 - Research and verification stay proportional to the task. Skills do not invent
   dependencies, mandatory full-repository audits, extra approvals, or missing tools.
 - Non-Git projects can hand off file artifacts. Merely editing a file does not invoke

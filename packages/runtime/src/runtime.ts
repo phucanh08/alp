@@ -3453,14 +3453,32 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (args.agent === 'oracle' && !session.mapping.oracleModels.includes(args.model)) return toolResult(false, { error: `Oracle runs on ${session.mapping.oracleModels.join(' or ')}; pass one as model. For two opinions, start one on each with wait: false` });
     const configuredModels = args.agent === 'oracle' ? [] : session.mapping.modelProfiles[args.agent] ?? [];
     const listed = configuredModels.map(profileModel).filter((id): id is string => Boolean(id));
+    const allowed = listed.map(id => id.endsWith(':*') ? `any ${id.slice(0, -1)} model` : id).join(' or ');
     // The requester picks a model and effort for each task among several profiles, or any model of a provider:*; one named profile needs no choice.
     const choosing = configuredModels.length > 1 || configuredModels.some(anyModel);
-    if (choosing && (args.model === undefined || args.thinking === undefined)) return toolResult(false, { error: `${args.agent} has several model profiles: choose one for this task as model, its effort as thinking, and say why in modelReason`, models: listed });
-    if (choosing && !offers(configuredModels, args.model)) return toolResult(false, { error: `${args.model} is not one of ${args.agent}'s model profiles`, models: listed });
-    const efforts = choosing ? profileEfforts(args.model) : [];
-    if (efforts.length && !efforts.includes(args.thinking)) return toolResult(false, { error: `${args.model} takes effort ${efforts.join(', ')}`, efforts });
+    if (choosing && (args.model === undefined || args.thinking === undefined)) return toolResult(false, { error: `${args.agent} has several model profiles: choose one for this task as model, its effort as thinking, and say why in modelReason. Pass ${allowed}`, models: listed });
+    // The profiles that name a model are the target's allowlist, one as much as several (P2): one named profile means exactly that model.
+    if (args.model !== undefined && listed.length && !offers(configuredModels, args.model)) {
+      // Actionable in one step: what may be passed now, and where the user widens the list.
+      const team = session.mapping.workflow.mode;
+      const settingsFile = path.join(session.mapping.agent.projectRoot, '.alp', 'settings.json');
+      const setup = ['pho', 'cafe'].includes(team) ? `, or run alp setup ${session.mapping.agent.projectRoot} --runtime mix, which rewrites Phở's and Cafe's profiles with both providers` : '';
+      return toolResult(false, {
+        error: `${args.model} is not one of ${args.agent}'s model profiles in team ${team}; pass ${allowed}${choosing ? '' : ', or omit model to run on it'}. ` +
+          `The user can allow it by adding it to team.${team}.${args.agent}.profiles in ${settingsFile} ("provider:model" or "provider:model:effort", or "${args.model.slice(0, args.model.indexOf(':'))}:*" for any model of that provider, which makes you choose model and effort per assignment)${setup}.`,
+        models: listed,
+      });
+    }
     const configuredDefault = !choosing && listed.length === 1 ? listed[0] : undefined;
     const delegatedModel = args.model ?? configuredDefault ?? `${session.runtimeKind}:${session.mapping.model}`;
+    // An effort is checked against the model's wherever the target has profiles; where ALP cannot check it
+    // (a model the catalog lists without efforts, antigravity:, acp:, or a target without profiles) it is
+    // passed on, and the answer says so instead of staying silent.
+    const efforts = args.thinking !== undefined && listed.length ? profileEfforts(delegatedModel) : [];
+    if (efforts.length && !efforts.includes(args.thinking)) return toolResult(false, { error: `${delegatedModel} takes effort ${efforts.join(', ')}`, efforts });
+    const thinkingNote = args.thinking !== undefined && !efforts.length
+      ? (listed.length ? `effort ${args.thinking} was not checked: ALP does not know which efforts ${delegatedModel} takes` : `effort ${args.thinking} was not checked: no model profile of ${args.agent} names a model`)
+      : undefined;
     const delegatedThinking = args.thinking ?? selectedProfile(configuredModels, delegatedModel)?.effort ?? (args.model || configuredDefault ? undefined : session.mapping.thinking);
     // A paused runtime takes no new assignments; another runtime may.
     const childRuntime = delegatedModel.split(':')[0] as RuntimeKind;
@@ -3470,8 +3488,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (hold) {
       const other = RUNTIMES.find(kind => kind !== childRuntime && !pauseOf(kind));
       const instead = listed.filter(id => other && id.startsWith(`${other}:`)).map(id => id.endsWith(':*') ? `any ${id.slice(0, -1)} model` : id);
+      // Only a model the target's profiles allow can move it: a target without profiles takes any.
       const next = !other ? 'Wait until the user resumes ALP'
-        : !choosing ? `Pass a model of ${other}: from the catalog to run it on ${label(other)}, or wait`
+        : !listed.length ? `Pass a model of ${other}: from the catalog to run it on ${label(other)}, or wait`
         : instead.length ? `Pass ${instead.join(' or ')} to run it on ${label(other)}, or wait` : `None of ${args.agent}'s model profiles runs on ${label(other)}: wait`;
       return toolResult(false, { error: describePause(hold, paused.all ? undefined : childRuntime), next });
     }
@@ -3483,6 +3502,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const capped = {
       ...(childProfile && childMode !== (args.mode ?? session.mapping.mode) ? { mode: childMode, modeNote: `${args.agent} runs ${childMode}: its permission profile ${childProfile.name} caps it` } : {}),
       ...(childProfile?.workdir === 'copy' && isolationOf(args) === 'shared' ? { workdirNote: `${args.agent} works in a disposable copy of your tree; nothing it changes reaches yours` } : {}),
+      ...(thinkingNote ? { thinkingNote } : {}),
     };
     let sharedContinuation: RecallEntry | undefined;
     if (args.continueFrom !== undefined) {

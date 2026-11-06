@@ -15,6 +15,7 @@ import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { connect, daemonPaths, bootTime, readLock } from '@anhlp/alp-client';
 
 import { fakeTransport, until, git, workspace } from '../../../test/support/recovery.js';
+import { setProfiles } from '../../../test/support/fake-agent.js';
 import { teardown } from '../../../test/support/teardown.js';
 
 const runLog = async (directory, rootId) => (await readFile(path.join(directory, 'runs', `${rootId}.jsonl`), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
@@ -269,6 +270,7 @@ test('an external shared writer recovers its write root, inspection scope and re
 test('recovery migrates an old thinking level and persists the resolved effort', async t => {
   const defer = teardown(t);
   const { root, options } = await workspace(t);
+  await setProfiles(root, { peer: ['codex:gpt-6-astra'] });
   const runtimes = [];
   const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
   defer(() => first.shutdown());
