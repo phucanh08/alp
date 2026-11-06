@@ -11,10 +11,14 @@ import { resolveAgent } from '@anhlp/alp-core/resolver';
 import { resolveTeam } from '@anhlp/alp-core/teams';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { fakeTransport, until } from '../support/fake-agent.js';
+import { teardown } from '../support/teardown.js';
 
 async function dirs(t) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-packs-'));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  // Registered right after the mkdtemp it undoes, so it runs LAST: a runtime a test starts later is
+  // shut down first, instead of being skipped when the removal throws.
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(directory, 'project');
   await initProject(root);
   return { directory, root, library: path.join(directory, 'home') };
@@ -101,7 +105,7 @@ test('in the Blueprint team, main delegating to the architect gets a read-only a
   await installPack('architecture', { scope: 'library', library });
   const agents = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(agents), supervisor: false, libraryDir: library, runLogDir: path.join(directory, 'runs') });
-  t.after(() => runtime.shutdown());
+  teardown(t)(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, workflow: 'blueprint' });
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Does invoicing fit?' }] });
   const main = agents[0];

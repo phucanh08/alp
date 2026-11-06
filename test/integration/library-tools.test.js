@@ -11,13 +11,17 @@ import { runHook } from '../../packages/core/src/hook-run.js';
 import { probeMcp } from '../../packages/client/src/mcp-probe.js';
 import { saveEntry } from '../../packages/core/src/library-edit.js';
 import contribute from '../../integrations/paseo/server/dist/index.js';
+import { teardown } from '../support/teardown.js';
 
 const fakeMcp = fileURLToPath(new URL('../support/fake-mcp.js', import.meta.url));
 const cli = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
 
 async function fixture(t) {
+  const defer = teardown(t);
   const root = await mkdtemp(path.join(tmpdir(), 'alp-tools-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  // Registered right after the mkdtemp it undoes, so it runs LAST: the HTTP server a test opens
+  // later is closed first, instead of being skipped when the removal throws ENOTEMPTY.
+  defer(() => rm(root, { recursive: true, force: true }));
   return root;
 }
 
@@ -73,7 +77,7 @@ test('an MCP server is started, asked for its tools over stdio or HTTP, and stop
     }
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => server.close());
+  teardown(t)(() => server.close());
   const url = `http://127.0.0.1:${server.address().port}/mcp`;
   assert.deepEqual(await probeMcp({ url, headers: { Authorization: 'Bearer t' } }), { server: { name: 'http-mcp', version: undefined }, tools: [{ name: 'remote' }] });
   assert.deepEqual(seen, [['POST', null, 'Bearer t'], ['POST', 'abc', 'Bearer t'], ['POST', 'abc', 'Bearer t'], ['DELETE', 'abc', 'Bearer t']]);
@@ -88,10 +92,11 @@ test('the settings screen edits the library and the project through alp.library 
   process.env.ALP_SUPERVISE = '0';
   const handlers = new Map();
   const dispose = contribute({ registerProvider() {}, handle: (contract, handler) => handlers.set(contract.name, { contract, handler }) });
-  t.after(async () => {
-    await dispose();
-    for (const [key, value] of [['ALP_HOME', previous.home], ['ALP_SUPERVISE', previous.supervise]]) if (value === undefined) delete process.env[key]; else process.env[key] = value;
-  });
+  // Two steps, each its own: a dispose() that throws must not leave this file's ALP_HOME pointing at
+  // a scratch directory for every test after it.
+  const defer = teardown(t);
+  defer(() => { for (const [key, value] of [['ALP_HOME', previous.home], ['ALP_SUPERVISE', previous.supervise]]) if (value === undefined) delete process.env[key]; else process.env[key] = value; });
+  defer(() => dispose());
   // Like the SDK's callPluginRpc: input and output are checked against the shared contract.
   const call = async (name, input) => {
     const { contract, handler } = handlers.get(`alp.library.${name}`);
