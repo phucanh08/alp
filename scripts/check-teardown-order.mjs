@@ -269,12 +269,17 @@ export function teardownProblems(relative, source, allowed = ALLOWED, load = () 
     for (const [index, entry] of order.entries()) {
       // A removal that cannot be reached past: every hook after it is skipped when it throws.
       //
-      // KNOWN LIMITATION, measured and deliberate. `releasesFirst` — one bare hook that does
-      // `await close(); await rm(dir)` — is skipped here, and that is NOT the same as safe: if its
-      // rm throws, every LATER hook is still stranded. Lifting the exemption reports 132 pairs over
-      // 54 sites in 45 files on this tree, a family the size of the one t-5294.6 was opened for and
-      // far outside one assignment, so it is tracked as discovered work instead: a lint that fails
-      // the build on 45 files nobody is converting gets switched off, and then it protects nothing.
+      // KNOWN LIMITATION, measured and deliberate (t-5294.8). `releasesFirst` — one bare hook that
+      // does `await close(); await rm(dir)` — is skipped here, and that is NOT the same as safe: if
+      // its rm throws, every LATER hook is still stranded. Lifting the exemption reports 97 pairs
+      // over 36 sites in 31 files on this tree, a family far outside one assignment, so it is
+      // tracked as its own task instead: a lint that fails the build on 31 files nobody is
+      // converting gets switched off, and then it protects nothing.
+      //
+      // The live one worth knowing: packages/daemon/tests/model-catalog.test.js:155 kills a real
+      // alpd child and THEN removes its directory, registered before the `client.close()` at :161 —
+      // in the same file that hung core-paseo-macos twice on 2026-11-06, in the `core` lane that
+      // runs today. If that rm throws, the IPC socket stays open and the file sits to the watchdog.
       if (entry.removes && !entry.releasesFirst) {
         const later = order.slice(index + 1).find(other => other.releases);
         if (later) add({ site: at(entry), skips: at(later),
