@@ -134,8 +134,9 @@ test('setup keeps profiles written by hand and rewrites only what ALP or setup w
   const after = await read(f.file);
   assert.deepEqual(after.team.pho.peer.profiles, ['codex:gpt-6-sol:low'], 'the user\'s own list stays');
   assert.deepEqual(after.team.cafe.reviewer.profiles, ['claude:claude-sonnet-5:high', 'claude:sonnet']);
-  assert.match(result.stdout, /Kept team\.pho\.peer\.profiles \(codex:gpt-6-sol:low\): written by hand/);
-  assert.match(result.stdout, /Kept team\.cafe\.reviewer\.profiles \(claude:claude-sonnet-5:high, claude:sonnet\): written by hand/);
+  // setup's record names both entries, and they changed since: that much is known.
+  assert.match(result.stdout, /Kept team\.pho\.peer\.profiles \(codex:gpt-6-sol:low\): changed since alp setup wrote it, so it is kept as yours\. Delete the entry from the file and run alp setup again to replace it\./);
+  assert.match(result.stdout, /Kept team\.cafe\.reviewer\.profiles \(claude:claude-sonnet-5:high, claude:sonnet\): changed since alp setup wrote it/);
   // What the claude-only setup wrote is setup's, so mix replaces it with both providers.
   assert.deepEqual(after.team.cafe.peer.profiles, ['claude:*', 'codex:*']);
   assert.deepEqual(after.team.pho.reviewer.profiles, ['claude:claude-opus-5-5:high', 'codex:gpt-6.1-sol:high']);
@@ -227,6 +228,11 @@ test('without a record, a model an earlier setup chose by flag is kept and the l
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Kept team\.cafe\.lead\.profiles \(claude:claude-opus-5-5:high, codex:gpt-6-sol:high\): ALP cannot tell whether an earlier alp setup or you wrote it \(it is none of setup's defaults, and no setup record names it\), so it is kept as yours\. Delete the entry from the file and run alp setup again to replace it\./);
   assert.deepEqual((await read(f.file)).team.cafe.peer.profiles, ['claude:*'], 'entries matching setup\'s defaults are still replaced');
+  // That run recorded what it replaced, not what it kept: the next run still cannot tell, and says so.
+  const again = cli(f, '--runtime', 'claude');
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(again.stdout, /Kept team\.cafe\.lead\.profiles \(claude:claude-opus-5-5:high, codex:gpt-6-sol:high\): ALP cannot tell whether an earlier alp setup or you wrote it/);
+  assert.doesNotMatch(again.stdout, /changed since|written by hand/);
 });
 
 test('a malformed entry already in the file is reported by its path, and nothing is written', async t => {
