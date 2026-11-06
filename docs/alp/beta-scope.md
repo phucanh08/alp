@@ -849,7 +849,10 @@ Soạn ngày 2026-10-17 (task t-4393.2), trên nhánh `release/beta.2` từ `ori
 - Cùng 8 package, cùng dist-tag `beta`, cùng nền tảng và mức hỗ trợ như §2–§4. Mọi manifest (8
   package phát hành và 3 workspace private) ở `0.0.0-beta.2`; dependency nội bộ pin đúng version
   (`npm run version:package` cho 7 workspace phát hành, root và 3 workspace private sửa tay như
-  T1, rồi `npm install --package-lock-only`). `scripts/beta-acceptance-lib.mjs` `VERSION` đổi theo.
+  T1, rồi `npm install --package-lock-only`). `scripts/beta-acceptance-lib.mjs` `VERSION` khi đó
+  còn là hằng số viết thẳng trong script nên phải sửa tay theo. **Nay không còn đúng:** từ t-ffe4.1,
+  `releaseVersion()` đọc version từ `package.json` ở root, nên bump version không phải sửa gì trong
+  `beta-acceptance-lib.mjs` — đừng sửa tay `VERSION` ở đó nữa.
 - Thay đổi so với beta.1: PR #113, #123, #124 (danh sách: `beta-release-notes.md`, mục "What
   changed since 0.0.0-beta.1"). Phần vào package phát hành: plugin cài được từ `npm:` (#111,
   T14), bridge Paseo không stream lại cả message, chi tiết tool có kiểu trong Paseo, các RPC
@@ -1017,7 +1020,8 @@ Soạn ngày 2026-10-20 (task t-3627), trên nhánh `release/0.0.1-beta.3` từ 
   trợ như §2–§4, trừ Paseo. Mọi manifest (8 package phát hành và 3 workspace private) ở
   `0.0.1-beta.3`, dependency nội bộ pin đúng version (`npm run version:package` cho 7 workspace phát
   hành, root và 3 workspace private sửa tay, rồi `npm install --package-lock-only`; lockfile chỉ đổi
-  chuỗi version). `scripts/beta-acceptance-lib.mjs` `VERSION` đổi theo.
+  chuỗi version). `scripts/beta-acceptance-lib.mjs` `VERSION` khi đó phải sửa tay theo; từ t-ffe4.1
+  thì không, nó đọc từ `package.json` ở root (xem ghi chú §11.1).
 - **Lý do chính: Paseo 0.12.** Plugin `0.0.0-beta.2` (và cũ hơn) khai `requirements.paseo`
   `>=0.11.1 <0.12.0`; host Paseo 0.12.0 từ chối nạp (`assertPluginCompatibility`). PR #166 (t-e5dc)
   mở thành `>=0.11.1 <0.13.0` ở manifest và peer `@getpaseo/*`. Hỗ trợ: **Paseo 0.11.x và 0.12.x**.
