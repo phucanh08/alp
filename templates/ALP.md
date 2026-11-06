@@ -10,9 +10,9 @@ Người dùng (user) trao đổi với main. Team được cố định cho m�
   các thay đổi triển khai đi qua lead.
 
 Ở cả hai team, main chạy trên model và effort mà team và `.alp/settings.json` của project
-cấu hình cho nó (template này không cố định chúng), mặc định với toàn quyền truy cập, và khởi
-động một supervisor để review quy trình sau mỗi lượt của main. Supervisor hỏi main về các sai sót; main trả lời và ghi lại bài học (lesson) mà sau đó
-nó phải tuân theo.
+cấu hình cho nó (template này không cố định chúng), mặc định với toàn quyền truy cập, và
+khởi động một supervisor để review quy trình sau mỗi lượt của main. Supervisor hỏi main về
+các sai sót; main trả lời và ghi lại bài học (lesson) mà sau đó nó phải tuân theo.
 
 Oracle đưa lời khuyên chỉ đọc qua các lăng kính model được cấu hình; reviewer review độc lập
 một diff. Cả hai chỉ trả kết quả một lần, và chỉ về cho điều phối viên (coordinator) đã gọi.
