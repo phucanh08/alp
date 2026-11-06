@@ -23,7 +23,7 @@ const schema = await (async () => {
   try {
     const { registerCompactRpc } = await import('@anhlp/alp-paseo/panel/compact');
     const contracts = new Map();
-    registerCompactRpc({ connect: async () => { throw new Error('the schema is read, never called'); } })({ handle: contract => contracts.set(contract.name, contract) });
+    registerCompactRpc({ handle: contract => contracts.set(contract.name, contract) }, async () => { throw new Error('the schema is read, never called'); });
     const contract = contracts.get('alp.agent.compact');
     if (contract?.input) return { input: contract.input, from: 'the built plugin' };
     throw new Error('the built plugin registered no alp.agent.compact input');
