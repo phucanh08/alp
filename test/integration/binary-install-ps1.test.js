@@ -13,15 +13,21 @@ import { pathToFileURL } from 'node:url';
 import { archiveName, pack, sums } from '../../scripts/package-binary.mjs';
 import { windowsTar } from '../../scripts/spawn-command.mjs';
 import { fakeBundle } from '../support/fake-bundle.mjs';
+import { teardown } from '../support/teardown.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const INSTALL = path.join(ROOT, 'install.ps1');
 const windows = process.platform === 'win32';
 
 async function temp(t, prefix) {
+  const defer = teardown(t);
   // The long form: the runner's TEMP is an 8.3 short path (RUNNER~1), and the installer writes the long one.
   const directory = realpathSync.native(await mkdtemp(path.join(os.tmpdir(), prefix)));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }));
+  // Registered right after the mkdtemp it undoes, so it runs LAST. These tests hold a node.exe from
+  // inside the installed tree on purpose, and on Windows a removal of a directory a process still
+  // holds throws: as a bare t.after it would have skipped every kill registered after it and left
+  // the file to the per-file watchdog, with the holder running for its full 60-120 s.
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }));
   return directory;
 }
 
@@ -89,7 +95,7 @@ test('the Windows release archive is alp-<version>-windows-x64.zip holding the b
 
 test('install.ps1 installs to %LOCALAPPDATA%\\Programs\\alp after checking SHA256SUMS, unblocks it, and adds the user PATH once', { skip: !windows }, async t => {
   const saved = readUserPath();
-  t.after(() => restoreUserPath(saved));
+  teardown(t)(() => restoreUserPath(saved));
   const releases = await mirror(t);
   // The downloaded zip carries the Mark of the Web, as a browser or Invoke-WebRequest leaves it.
   await writeFile(path.join(releases, 'alp-9.8.7-windows-x64.zip:Zone.Identifier'), '[ZoneTransfer]\r\nZoneId=3\r\n');
@@ -100,7 +106,7 @@ test('install.ps1 installs to %LOCALAPPDATA%\\Programs\\alp after checking SHA25
   const exe = path.join(dir, 'alp.exe');
   await copyFile(process.execPath, exe);
   const running = spawn(exe, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
-  t.after(() => running.kill());
+  teardown(t)(() => running.kill());
   const first = await install(['-BaseUrl', pathToFileURL(releases).href], { localAppData });
   assert.equal(first.code, 0, first.stderr);
   assert.match(first.stdout, /checksum verified/);
@@ -124,7 +130,7 @@ test('install.ps1 installs to %LOCALAPPDATA%\\Programs\\alp after checking SHA25
 
 test('install.ps1 -Version picks that release, -Dir installs elsewhere, -NoModifyPath leaves PATH alone', { skip: !windows }, async t => {
   const saved = readUserPath();
-  t.after(() => restoreUserPath(saved));
+  teardown(t)(() => restoreUserPath(saved));
   const releases = await mirror(t, ['1.0.0', '1.1.0-beta.2']);
   const localAppData = await temp(t, 'alp-ps-lad-');
   const dir = path.join(localAppData, 'tools', 'bin');
@@ -144,7 +150,7 @@ test('install.ps1 -Version picks that release, -Dir installs elsewhere, -NoModif
 
 test('install.ps1 -Root alone is self-contained (<Root>\\bin, no PATH edit); -ModifyPath adds <Root>\\bin once; both switches conflict (t-bf7f)', { skip: !windows }, async t => {
   const saved = readUserPath();
-  t.after(() => restoreUserPath(saved));
+  teardown(t)(() => restoreUserPath(saved));
   const releases = await mirror(t);
   const localAppData = await temp(t, 'alp-ps-lad-');
   const root = path.join(localAppData, 'alp-root');
@@ -326,7 +332,7 @@ test('install.ps1: a reinstall waits out a short hold on the current version, an
   const node = path.join(dir, 'app', '9.8.7', 'node', 'node.exe');
   const hold = () => {
     const holder = spawn(node, ['-e', 'setTimeout(() => {}, 120000)'], { stdio: 'ignore', cwd: path.dirname(node) });
-    t.after(() => holder.kill());
+    teardown(t)(() => holder.kill());
     return holder;
   };
 

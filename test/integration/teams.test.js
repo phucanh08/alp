@@ -10,6 +10,7 @@ import { listTeams, resolveTeam } from '../../packages/core/src/teams.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createProvider } from '../../integrations/paseo/server/dist/index.js';
 import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
+import { teardown } from '../support/teardown.js';
 
 // The user library is $ALP_HOME (default ~/.alp), read when a session resolves its team and
 // providers. Give this file an empty library of its own, so it never reads the user's real one
@@ -26,7 +27,9 @@ after(async () => {
 const BEFORE_TEAMS = mode => `Profile: ${mode}; fixed for this session. Ở Phở (pho), main tự làm hoặc giao việc trực tiếp cho peer; đừng tạo lead. Ở Cafe (cafe), main giám sát lead; lead có thể tự làm hoặc giao việc cho peer. Điều phối viên kỹ thuật (coordinator) chọn model và effort cho từng peer. Dùng oracle khi có bất định đáng kể; dùng reviewer cho thay đổi logic và thay đổi rủi ro, không bắt buộc với sửa typo/định dạng. Cố vấn (advisor) chỉ trả kết quả về cho điều phối viên đã gọi mình.`;
 
 async function fixture(t) {
+  const defer = teardown(t);
   const root = await mkdtemp(path.join(tmpdir(), 'alp-teams-'));
+  defer(() => rm(root, { recursive: true, force: true }));
   return root;
 }
 async function files(root, entries) {
@@ -63,9 +66,7 @@ function fakeTransport(runtimes) {
 async function session(t, root, spec, options = {}) {
   const runtimes = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(root, '.runs'), ...options });
-  t.after(() => runtime.shutdown());
-  // After hooks run in the order they are added: remove the files only once that has stopped.
-  t.after(() => rm(root, { recursive: true, force: true }));
+  teardown(t)(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, ...spec });
   return { runtime, runtimes };
 }
@@ -106,8 +107,7 @@ test('session.preview names the team, main and model session.create runs, from o
     await files(root, entries);
     const runtimes = [];
     const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(root, '.runs'), supervisor: false });
-    t.after(() => runtime.shutdown());
-    t.after(() => rm(root, { recursive: true, force: true }));
+    teardown(t)(() => runtime.shutdown());
     const settingsBefore = await readFile(path.join(root, '.alp/settings.json'), 'utf8').catch(() => undefined);
     const { teams, ...preview } = await runtime.preview({ cwd: root, ...spec });
     // A preview writes nothing.
@@ -128,8 +128,7 @@ test('session.preview names the team, main and model session.create runs, from o
   const root = await fixture(t);
   await files(root, { '.alp/settings.json': { workflow: { mode: 'pho' } } });
   const runtime = createAlpRuntime({ transport: fakeTransport([]), runLogDir: path.join(root, '.runs'), supervisor: false });
-  t.after(() => runtime.shutdown());
-  t.after(() => rm(root, { recursive: true, force: true }));
+  teardown(t)(() => runtime.shutdown());
   await assert.rejects(runtime.preview({ cwd: root, workflow: 'custom' }), /Choose a team/);
   await assert.rejects(runtime.open('root', { cwd: root, workflow: 'custom' }), /Choose a team/);
 });
@@ -206,9 +205,10 @@ test('Paseo offers every team the project can use, and alp teams lists them', as
   await files(root, { '.alp/teams/docs/team.json': docsTeam, '.alp/teams/broken/team.json': '{' });
   const previous = process.env.ALP_HOME;
   process.env.ALP_HOME = home;
-  t.after(() => { if (previous === undefined) delete process.env.ALP_HOME; else process.env.ALP_HOME = previous; });
+  const defer = teardown(t);
+  defer(() => { if (previous === undefined) delete process.env.ALP_HOME; else process.env.ALP_HOME = previous; });
   const conn = await createProvider({ transport: fakeTransport([]) }).connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
-  t.after(() => conn.close());
+  defer(() => conn.close());
   const events = [];
   conn.onEvent(event => events.push(event));
   await conn.send({ type: 'catalog', requestId: 'c', cwd: root });

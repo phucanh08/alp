@@ -59,13 +59,9 @@ const RELEASES = /\.(?:close|closeAllConnections|shutdown|stop|kill|destroy|disc
  * owned by another agent's branch in the same wave of work; each one goes when that branch lands.
  */
 export const ALLOWED = {
-  // Group D (board p-bfea7464 / p-c479d708, tasks t-5294.7 + t-9043): these four files are edited by
-  // that branch in the same wave, so converting them here would only make a conflict. Real defects.
-  'test/integration/binary-install-ps1.test.js:23': 'group D (t-5294.7, claim p-c479d708) converts this with the rest of its binary-install work; delete this entry when that branch lands',
-  'test/integration/library-tools.test.js:20': 'group D via t-9043 (claim p-c479d708, decision p-a5af690e edits this same file); delete this entry when that branch lands',
-  'test/integration/packs.test.js:17': 'group D via t-9043 (claim p-c479d708, decision p-a5af690e edits this same file); delete this entry when that branch lands',
-  'test/integration/teams.test.js:68': 'group D via t-9043 (claim p-c479d708, decision p-a5af690e edits this same file); delete this entry when that branch lands',
-  'test/integration/teams.test.js:110': 'group D via t-9043 (claim p-c479d708); this is the one site of lead\'s original 29 that group C does not own; delete this entry when that branch lands',
+  // Empty, and meant to stay that way. Group D's five sites (binary-install-ps1, library-tools,
+  // packs and teams x2) were the last entries; they are converted now, so the entries are gone.
+  // Anything added here must name the branch that owns it and be deleted when that branch lands.
 };
 
 const functionLike = node => ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node);
