@@ -120,16 +120,23 @@ export function exitDescription(result) {
   return result.signal ? `was killed by ${result.signal}` : `exited ${result.status}`;
 }
 
+// On Windows, Git's GNU tar comes first on PATH under Git Bash (the release workflows' `shell: bash`)
+// and reads a drive-letter path such as `D:\a\…\plugin.tgz` as a remote `host:file` archive
+// ("tar (child): Cannot connect to D: resolve failed"). The system's bsdtar takes such paths, as in
+// build-bundle.mjs and package-binary.mjs. `--force-local` would fix GNU tar only: bsdtar (macOS,
+// and Windows' tar.exe when it comes first) rejects it as an unsupported option.
+const TAR = process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+
 /** The `package/package.json` inside a packed tarball, read with `tar`; a tar failure reports its own cause. */
 export function packedManifest(tarball) {
   const args = ['-xOzf', tarball, 'package/package.json'];
-  const result = spawnSync('tar', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  const result = spawnSync(TAR, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
   const stderr = result.stderr?.trim() ? `\n${result.stderr.trim()}` : '';
-  if (result.error || result.status !== 0) throw new Error(`tar ${args.join(' ')} ${exitDescription(result)}${stderr}`);
+  if (result.error || result.status !== 0) throw new Error(`${TAR} ${args.join(' ')} ${exitDescription(result)}${stderr}`);
   try {
     return JSON.parse(result.stdout);
   } catch (error) {
-    throw new Error(`tar ${args.join(' ')} printed no package.json (${error.message}): ${JSON.stringify(result.stdout.slice(0, 200))}${stderr}`);
+    throw new Error(`${TAR} ${args.join(' ')} printed no package.json (${error.message}): ${JSON.stringify(result.stdout.slice(0, 200))}${stderr}`);
   }
 }
 
