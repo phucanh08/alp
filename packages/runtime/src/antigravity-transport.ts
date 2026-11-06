@@ -56,8 +56,10 @@ export function antigravityReadOnlyCommandAllowed(commandLine: unknown): boolean
   return READ_ONLY_COMMANDS.some(prefix => line === prefix || line.startsWith(`${prefix} `));
 }
 const COMMAND_TOOLS = new Set(['run_command']);
-/** agy's file-editing tools, which read-only always denies. */
-const EDIT_TOOLS = new Set(['write_file', 'write_to_file', 'replace_file_content', 'multi_replace_file_content', 'sed_file', 'notebook_edit']);
+/** agy's file-editing tools, which read-only always denies. `edit_file` is the name agy 1.5.2
+ * reports for an accepted edit, seen live in a workspace-write session; without it a denied edit
+ * marked DONE would be reported as a completed edit (t-faa1). */
+const EDIT_TOOLS = new Set(['write_file', 'write_to_file', 'edit_file', 'replace_file_content', 'multi_replace_file_content', 'sed_file', 'notebook_edit']);
 const modeOf = (sandbox: unknown) => sandbox === 'danger-full-access' ? 'full-access' : String(sandbox);
 
 /**
