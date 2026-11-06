@@ -1003,14 +1003,14 @@ which it records in `.alp/state/setup-profiles.json` (this checkout's state: the
 ignores itself in Git, and settings.json gains no key, since an ALP that does not know a key
 refuses the file). Without that record, or with one that is damaged or from a newer ALP, an
 entry that matches setup's defaults for some runtime counts as setup's; setup never refuses
-to run over the record. An entry you wrote, or one
-whose model a library or project override of Phở or Cafe names in its `team.json`, is kept,
-with a line such as `Kept team.cafe.reviewer.profiles (claude:sonnet:high): written by hand,
-not by ALP. Delete the entry from the file and run alp setup again to replace it.` (an override
-that sets an agent's model or effort is named instead: `the cafe team's team.json sets it
-(claude:sonnet, effort high)`; in a project with no record, an entry an earlier setup wrote with
-a model chosen by flag cannot be told from a hand edit, and the line says that ALP cannot tell
-whether an earlier alp setup or you wrote it). A team
+to run over the record. Any other entry is kept and named, with the reason setup knows. An entry
+the record names that has changed since: `Kept team.cafe.reviewer.profiles (claude:sonnet:high):
+changed since alp setup wrote it, so it is kept as yours. Delete the entry from the file and run
+alp setup again to replace it.` One whose model or effort a library or project override of Phở or
+Cafe sets in its `team.json`: `… the cafe team's team.json sets it (claude:sonnet, effort high).`
+Any other, such as a list you wrote before setup ran or one an older setup wrote with a model
+chosen by flag: `… ALP cannot tell whether an earlier alp setup or you wrote it (it is none of
+setup's defaults, and no setup record names it), so it is kept as yours.` A team
 other than Phở and Cafe is never written, because its `team.json` chooses its models; setup
 names it: `Team agy (project) is not Phở or Cafe, so alp setup leaves its profiles as they
 are: its team.json chooses its models. To change them, edit team.agy.<agent>.profiles in
