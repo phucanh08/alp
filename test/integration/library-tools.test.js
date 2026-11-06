@@ -141,7 +141,7 @@ test('alp agent, team, skill, mcp and hook create, change, copy, rename, test an
   assert.match(ok('hook', 'test', 'gate'), /gate: exit 0 in \d+ ms/);
   ok('team', 'new', 'docs', '--project', '--from', 'pho', '--label', 'Docs', '--main', 'writer', '--member', 'reviewer=reviewer', '--member-model', 'writer=claude:claude-opus-5-5', '--delegate', 'writer=reviewer', '--no-supervisor', '--rules', 'rules.md');
   const team = JSON.parse(ok('team', 'show', 'docs', '--json'));
-  assert.deepEqual(team.content.team, { label: 'Docs', description: 'Main implements or delegates to peer; a supervisor reviews the process.', main: 'writer', members: { writer: { model: 'claude:claude-opus-5-5' }, reviewer: { role: 'reviewer' } }, delegation: { writer: ['reviewer'] }, maxPeers: 2, supervisor: false });
+  assert.deepEqual(team.content.team, { label: 'Docs', description: 'Main tự làm hoặc giao việc cho peer; một supervisor review quy trình.', main: 'writer', members: { writer: { model: 'claude:claude-opus-5-5' }, reviewer: { role: 'reviewer' } }, delegation: { writer: ['reviewer'] }, maxPeers: 2, supervisor: false });
   assert.equal(team.content.houseRules, 'Every page gets a review.\n');
   // The library's writer is the last of its name below the project, and team docs uses it.
   const used = run('agent', 'rm', 'writer');

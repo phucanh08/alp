@@ -1,105 +1,105 @@
 ---
 name: frontend-development
-description: "Build UI features in the project's component framework (React-first examples, also Vue or Svelte): component structure, state, data fetching, routing and SSR, performance, and accessibility. Use when adding or changing screens, components, forms, or client data flows. Not for visual design decisions (ui-design) or test tooling (web-testing)."
+description: "Dựng tính năng UI trong framework component của dự án (ví dụ ưu tiên React, cũng dùng cho Vue hay Svelte): cấu trúc component, state, lấy dữ liệu, routing và SSR, hiệu năng, và accessibility. Dùng khi thêm hoặc sửa màn hình, component, form, hay luồng dữ liệu phía client. Không dùng cho quyết định thiết kế thị giác (ui-design) hay công cụ test (web-testing)."
 ---
 
-# Frontend Development
+# Phát triển frontend
 
-## When to use
+## Khi nào dùng
 
-- Adding or changing a page, route, component, form, or client-side data flow.
-- Deciding where state lives or how a screen loads, caches, and refreshes data.
-- Fixing a measured rendering, bundle, or loading performance problem.
-- Making a UI keyboard and screen-reader usable.
-- A read-only advisor or reviewer is asked to assess frontend code (advice only).
+- Thêm hoặc sửa một trang, route, component, form, hay luồng dữ liệu phía client.
+- Quyết định state nằm ở đâu, hoặc một màn hình tải, cache và làm mới dữ liệu thế nào.
+- Sửa một vấn đề hiệu năng đã đo được về render, bundle, hoặc tải trang.
+- Làm cho một UI dùng được bằng bàn phím và trình đọc màn hình.
+- Một cố vấn (advisor) hay reviewer chỉ đọc được nhờ đánh giá code frontend (chỉ tư vấn).
 
-## Not for
+## Không dùng cho
 
-- Layout, color, typography, or visual design choices: use ui-design.
-- Test runners, e2e, visual, or load tooling: use web-testing.
-- Deciding what to test across a change: use test-strategy.
-- A failing test or UI regression with unknown cause: use bug-loop.
-- Server endpoints behind the UI: use backend-development.
-- Choosing a new framework, state library, or styling system: owner decision.
+- Lựa chọn về layout, màu, typography, hay thiết kế thị giác: dùng ui-design.
+- Test runner, e2e, công cụ kiểm thị giác hay tải: dùng web-testing.
+- Quyết định test những gì cho một thay đổi: dùng test-strategy.
+- Một test fail hay UI bị hồi quy mà chưa rõ nguyên nhân: dùng bug-loop.
+- Endpoint phía server nằm sau UI: dùng backend-development.
+- Chọn framework, thư viện state, hay hệ thống styling mới: quyết định của chủ sở hữu.
 
-## Prerequisites
+## Điều kiện tiên quyết
 
-- The brief's owned paths and acceptance criteria; ALP.md and project instructions.
-- The actual framework and version, router, data-fetching and state libraries,
-  styling approach, and build tool, read from `package.json`, the lockfile, and
-  config files. Do not infer from folder names.
-- One or two existing screens or components similar to the task. They define the
-  conventions for file layout, naming, data loading, styling, and tests.
-- The design or acceptance spec for the UI, if one exists, and the project's
-  existing design-system components.
-- The project's dev, lint, typecheck, and test commands.
+- Đường dẫn sở hữu và tiêu chí nghiệm thu trong brief; ALP.md và chỉ dẫn của dự án.
+- Framework và phiên bản thực tế, router, thư viện lấy dữ liệu và state, cách
+  styling, và công cụ build, đọc từ `package.json`, lockfile, và các
+  file config. Không suy ra từ tên thư mục.
+- Một hoặc hai màn hình hay component đang có, tương tự việc này. Chúng định ra
+  quy ước về bố trí file, đặt tên, tải dữ liệu, styling, và test.
+- Spec thiết kế hoặc spec nghiệm thu cho UI, nếu có, và các component
+  design-system đang có của dự án.
+- Các lệnh dev, lint, typecheck, và test của dự án.
 
-## Workflow
+## Quy trình
 
-1. Restate the feature as user-visible states: loading, empty, error, success,
-   partial, and permission-denied. Unspecified states go upward; do not invent copy
-   or product behavior.
-2. Find existing components, hooks, and utilities to reuse before writing new ones.
-3. Sketch the component tree and decide where each piece of state lives. Read
+1. Diễn đạt lại tính năng thành các trạng thái người dùng thấy được: loading, rỗng, lỗi,
+   thành công, một phần, và bị từ chối quyền. Trạng thái chưa được đặc tả thì chuyển lên; không
+   tự nghĩ ra câu chữ hay hành vi sản phẩm.
+2. Tìm component, hook, và hàm tiện ích đang có để dùng lại trước khi viết cái mới.
+3. Phác cây component và quyết định từng phần state nằm ở đâu. Đọc
    components-and-state.md.
-4. Define data needs: which endpoint, when it loads, how it caches and refreshes,
-   and what happens on failure or a stale response. Read data-fetching.md.
-5. Place the work in the framework's model (server or client component, route
-   loader, page, island). Read frameworks.md; check the docs for the version the
-   project uses.
-6. Build with semantic HTML and existing design-system components; wire keyboard
-   and focus behavior as you go. Read accessibility.md.
-7. Handle every state from step 1 in the UI, including disabled and pending states
-   for actions and protection against double submit.
-8. Check performance only where it matters: large lists, heavy components, new
-   dependencies, images. Measure before optimizing. Read performance.md.
-9. Add or update tests with the project's tooling (see web-testing for tool use).
-10. Run lint, typecheck, and tests; open the page in the dev server and exercise
-    each state, with keyboard only at least once.
-11. Hand off: files changed, states covered, screenshots or notes if the project
-    uses them, commands run with results, open design or product questions.
+4. Xác định nhu cầu dữ liệu: endpoint nào, tải khi nào, cache và làm mới thế nào,
+   và chuyện gì xảy ra khi lỗi hoặc khi phản hồi đã cũ. Đọc data-fetching.md.
+5. Đặt phần việc vào đúng mô hình của framework (server hay client component, route
+   loader, page, island). Đọc frameworks.md; xem tài liệu cho đúng phiên bản mà
+   dự án đang dùng.
+6. Dựng bằng HTML semantic và các component design-system đang có; nối hành vi bàn phím
+   và focus ngay khi làm. Đọc accessibility.md.
+7. Xử lý mọi trạng thái từ bước 1 trong UI, gồm cả trạng thái disabled và đang chờ
+   cho các hành động, và chống submit hai lần.
+8. Chỉ kiểm hiệu năng ở nơi nó đáng: danh sách lớn, component nặng, phụ thuộc mới,
+   ảnh. Đo trước khi tối ưu. Đọc performance.md.
+9. Thêm hoặc cập nhật test bằng công cụ của dự án (xem web-testing về cách dùng công cụ).
+10. Chạy lint, typecheck, và test; mở trang trên dev server và thử
+    từng trạng thái, ít nhất một lần chỉ bằng bàn phím.
+11. Handoff: file đã đổi, trạng thái đã bao phủ, ảnh chụp hoặc ghi chú nếu dự án
+    dùng chúng, lệnh đã chạy kèm kết quả, câu hỏi còn mở về thiết kế hay sản phẩm.
 
-A read-only agent reviews steps 1-8 against the code or proposal and reports
-findings and recommended changes instead of editing.
+Agent chỉ đọc thì review bước 1-8 dựa trên code hoặc đề xuất và báo lại các
+phát hiện cùng thay đổi khuyến nghị, thay vì sửa file.
 
-## Constraints
+## Ràng buộc
 
-- Follow the project's existing framework, version, and conventions first. React,
-  Next.js, Vue, Nuxt, Svelte, SvelteKit, Angular, or plain web components are
-  examples, not recommendations.
-- Do not add dependencies, UI kits, state or fetching libraries, or frameworks
-  without the owner's decision. No auto-install.
-- Use the project's design tokens and components; do not invent new visual styles.
-  Visual gaps go to ui-design or upward.
-- Never put secrets in client code or public env variables; anything shipped to the
-  browser is public.
-- Treat user content as untrusted: no raw HTML injection without the project's
-  sanitizer.
-- Stay inside owned paths. The skill grants no authority to deploy or release.
+- Trước hết hãy theo framework, phiên bản, và quy ước đang có của dự án. React,
+  Next.js, Vue, Nuxt, Svelte, SvelteKit, Angular, hay web component thuần chỉ là
+  ví dụ, không phải khuyến nghị.
+- Không thêm phụ thuộc, bộ UI kit, thư viện state hay thư viện fetch, hay framework
+  mà không có quyết định của chủ sở hữu. Không tự động cài.
+- Dùng token và component design-system của dự án; không tự nghĩ ra kiểu thị giác mới.
+  Khoảng trống về thị giác thì chuyển cho ui-design hoặc chuyển lên.
+- Không bao giờ đặt secret vào code client hay biến env công khai; mọi thứ gửi tới
+  browser đều là công khai.
+- Coi nội dung do người dùng nhập là không tin được: không chèn HTML thô mà không qua
+  bộ sanitizer của dự án.
+- Ở trong đường dẫn sở hữu. Skill này không cấp thẩm quyền deploy hay release.
 
-## Verification
+## Kiểm chứng
 
-- Lint, typecheck, and tests pass; the production build succeeds if the change
-  touches routing, config, or imports.
-- Each state from step 1 was seen in the running app or covered by a test.
-- Keyboard-only use reaches and operates every new control; focus is visible.
-- No new console errors or warnings in the dev server for the changed screens.
-- Performance claims include before and after measurements.
+- Lint, typecheck, và test đều pass; build production thành công nếu thay đổi
+  có chạm tới routing, config, hoặc import.
+- Mỗi trạng thái từ bước 1 đã được nhìn thấy trong app đang chạy hoặc đã có test bao phủ.
+- Chỉ dùng bàn phím vẫn tới được và điều khiển được mọi control mới; focus thấy được.
+- Không có lỗi hay cảnh báo console mới trên dev server cho các màn hình đã đổi.
+- Mọi khẳng định về hiệu năng đều kèm số đo trước và sau.
 
-## Failure handling
+## Xử lý khi thất bại
 
-- The dev server or build cannot run here: report the exact error and what was
-  verified instead; do not claim visual checks that were not done.
-- Missing design or copy: use existing patterns as placeholders, mark them, and
-  route the decision upward.
-- Hydration or SSR mismatch, or a flaky render: switch to bug-loop.
-- The API does not provide what the UI needs: report the gap to the owner of the
-  backend; do not work around it with client-side data scraping.
+- Dev server hay build không chạy được ở đây: báo đúng lỗi đó và những gì đã
+  kiểm chứng để thay thế; không khẳng định những kiểm tra thị giác chưa thực sự làm.
+- Thiếu thiết kế hay câu chữ: dùng pattern đang có làm chỗ tạm, đánh dấu nó, và
+  chuyển quyết định lên trên.
+- Lệch hydration hay SSR, hoặc render chập chờn: chuyển sang bug-loop.
+- API không cung cấp thứ UI cần: báo khoảng trống đó cho chủ sở hữu phần
+  backend; không lách bằng cách tự bóc dữ liệu ở client.
 
-## References
+## Tài liệu tham chiếu
 
-- [references/components-and-state.md](references/components-and-state.md) — read when splitting components, choosing where state lives, or handling forms (step 3).
-- [references/data-fetching.md](references/data-fetching.md) — read when loading, caching, mutating, or refreshing server data, or handling races (step 4).
-- [references/frameworks.md](references/frameworks.md) — read when choosing SSR, SSG, or CSR, server or client components, or routing placement (step 5).
-- [references/accessibility.md](references/accessibility.md) — read when building interactive controls, forms, dialogs, or custom widgets (step 6).
-- [references/performance.md](references/performance.md) — read when a screen is slow, a bundle grows, or images and lists are heavy (step 8).
+- [references/components-and-state.md](references/components-and-state.md) — đọc khi chia component, chọn chỗ đặt state, hoặc xử lý form (bước 3).
+- [references/data-fetching.md](references/data-fetching.md) — đọc khi tải, cache, thay đổi, hoặc làm mới dữ liệu server, hoặc xử lý tranh chấp (bước 4).
+- [references/frameworks.md](references/frameworks.md) — đọc khi chọn SSR, SSG, hay CSR, server hay client component, hoặc chỗ đặt routing (bước 5).
+- [references/accessibility.md](references/accessibility.md) — đọc khi dựng control tương tác, form, dialog, hay widget tự tạo (bước 6).
+- [references/performance.md](references/performance.md) — đọc khi một màn hình chậm, bundle phình ra, hoặc ảnh và danh sách quá nặng (bước 8).

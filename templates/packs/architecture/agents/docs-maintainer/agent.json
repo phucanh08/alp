@@ -1,4 +1,4 @@
 {
-  "description": "Documentation peer: keeps architecture docs, API docs, migration guides and ADRs in sync with code",
+  "description": "Peer tài liệu: giữ docs kiến trúc, docs API, hướng dẫn migration và ADR đồng bộ với code",
   "skills": ["architecture-docs"]
 }

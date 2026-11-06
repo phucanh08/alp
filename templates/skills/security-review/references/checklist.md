@@ -1,71 +1,74 @@
-# Security Review Checklist
+# Checklist review bảo mật
 
-Read when walking the review categories; check only the categories the target touches.
+Đọc khi đi qua các hạng mục review; chỉ kiểm những hạng mục mà mục tiêu có chạm tới.
 
-## Authentication
+## Xác thực
 
-- Every entry point that should require identity checks it, including new routes,
-  RPC handlers, websocket upgrades, CLI daemons, and admin or debug endpoints.
-- Tokens and sessions: signature verified, expiry enforced, revocation honored,
-  algorithm fixed (no "none" or caller-chosen algorithm).
-- Credential comparison is constant-time; password storage uses a slow salted hash.
-- Login, reset, and token endpoints resist enumeration and brute force.
+- Mọi entry point đáng lẽ phải đòi danh tính thì đều kiểm nó, kể cả route mới,
+  RPC handler, lần nâng cấp websocket, daemon CLI, và các endpoint admin hay debug.
+- Token và session: chữ ký được xác minh, hạn dùng được thực thi, việc thu hồi được tôn trọng,
+  thuật toán được cố định (không có "none" hay thuật toán do bên gọi chọn).
+- So sánh credential là thời gian hằng; lưu mật khẩu dùng một hàm băm chậm có salt.
+- Các endpoint đăng nhập, đặt lại mật khẩu và cấp token chống được dò danh sách và thử vét cạn.
 
-## Authorization and permission boundaries
+## Phân quyền và ranh giới quyền
 
-- Checks happen server-side on every request, not only in the UI or client.
-- Object-level checks: the caller owns or may access the specific record ID.
-- Role or scope checks cannot be bypassed by alternate routes, batch endpoints,
-  or parameter tampering (mass assignment of `role`, `owner`, `isAdmin`).
-- Privileged operations (delete, export, impersonate, config change) are gated.
-- Default is deny; new features do not inherit broad permissions by accident.
+- Các phép kiểm diễn ra ở phía server trên mọi request, không chỉ ở UI hay client.
+- Kiểm ở mức đối tượng: bên gọi sở hữu hoặc được phép truy cập đúng ID bản ghi đó.
+- Các phép kiểm role hay scope không thể bị lách bằng route khác, endpoint xử lý theo lô,
+  hay bằng cách can thiệp tham số (gán hàng loạt vào `role`, `owner`, `isAdmin`).
+- Các thao tác đặc quyền (xoá, xuất dữ liệu, mạo danh, đổi config) đều có cổng kiểm.
+- Mặc định là từ chối; feature mới không vô tình thừa hưởng quyền rộng.
 
-## Secrets exposure
+## Lộ secret
 
-- No credentials, keys, or tokens committed in code, config, fixtures, or docs.
-  Report path:line only; do not reproduce the value.
-- Secrets not returned in API responses, error messages, or client bundles.
-- Secrets come from the project's established mechanism (env, vault, keychain).
+- Không có credential, key hay token nào bị commit vào code, config, fixture hay tài liệu.
+  Chỉ báo path:line; đừng tái hiện giá trị.
+- Secret không được trả về trong response API, thông điệp lỗi, hay bundle phía client.
+- Secret đến từ cơ chế đã được project thiết lập (biến môi trường, vault, keychain).
 
-## Input validation and injection
+## Kiểm tra input và injection
 
-- SQL/NoSQL: parameterized queries; no string-built queries from input.
-- Command injection: no shell strings built from input; argument arrays used.
-- Template, HTML, and markdown output escaped by context (XSS).
-- Path, URL, header, regex (ReDoS), XML (XXE), and LDAP inputs validated.
-- Validation at the trust boundary, with allowlists over denylists.
+- SQL/NoSQL: dùng truy vấn tham số hoá; không dựng truy vấn bằng chuỗi từ input.
+- Command injection: không dựng chuỗi shell từ input; dùng mảng tham số.
+- Output template, HTML và markdown được escape theo ngữ cảnh (XSS).
+- Input dạng path, URL, header, regex (ReDoS), XML (XXE) và LDAP đều được kiểm tra.
+- Kiểm tra ngay tại ranh giới tin cậy, ưu tiên danh sách cho phép hơn danh sách cấm.
 
-## Dependency and supply-chain risk
+## Rủi ro về dependency và chuỗi cung ứng
 
-- New dependencies: necessary, maintained, reputable, license-compatible.
-- Install scripts (`preinstall`, `postinstall`, build hooks) in new or updated deps.
-- Lockfile changes match the manifest change; no unexplained registry or source URL.
-- Versions pinned or ranged per project policy; no git or tarball URLs without reason.
-- Existing audit tool output for the changed packages, if allowed to run.
+- Dependency mới: cần thiết, còn được bảo trì, có uy tín, tương thích giấy phép.
+- Các script cài đặt (`preinstall`, `postinstall`, hook build) trong dep mới hoặc vừa cập nhật.
+- Thay đổi lockfile khớp với thay đổi manifest; không có URL registry hay URL nguồn nào không
+  giải thích được.
+- Version được ghim hay cho khoảng theo chính sách của project; không dùng URL git hay tarball
+  mà không có lý do.
+- Output của công cụ audit đang có cho các package đã đổi, nếu được phép chạy.
 
-## Unsafe filesystem operations
+## Thao tác filesystem không an toàn
 
-- Path traversal: user-controlled paths normalized and confined to a base dir.
-- Symlinks: following a link cannot escape the base dir or overwrite targets.
-- Temp files created with unique names and restrictive permissions; cleaned up.
-- File modes on written secrets and configs are not world-readable.
-- Archive extraction checks entry paths (zip slip) and sizes.
+- Path traversal: các đường dẫn do người dùng kiểm soát được chuẩn hoá và giam trong một thư
+  mục gốc.
+- Symlink: lần theo một link không được thoát khỏi thư mục gốc hay ghi đè đích.
+- File tạm được tạo với tên độc nhất và quyền hạn chế; được dọn sau khi dùng.
+- Mode file của các secret và config được ghi ra không phải là ai cũng đọc được.
+- Lúc giải nén, kiểm đường dẫn từng mục (zip slip) và kích thước.
 
-## Remote execution boundaries
+## Ranh giới thực thi từ xa
 
-- Spawned processes: fixed executable, argument array, no shell unless required,
-  controlled env and cwd.
-- No `eval`, `Function`, dynamic `require`/`import` of input-derived names.
-- Deserialization of untrusted data uses a safe format or schema validation.
-- SSRF: outbound URLs from input are allowlisted; internal and metadata addresses
-  blocked; redirects re-checked.
-- Plugins, hooks, or scripts loaded from user-writable locations are trusted
-  explicitly, not implicitly.
+- Process được sinh ra: executable cố định, mảng tham số, không dùng shell trừ khi bắt buộc,
+  env và cwd được kiểm soát.
+- Không dùng `eval`, `Function`, hay `require`/`import` động với tên suy ra từ input.
+- Việc deserialize dữ liệu không đáng tin dùng một định dạng an toàn hoặc có kiểm tra schema.
+- SSRF: các URL đi ra suy từ input phải nằm trong danh sách cho phép; các địa chỉ nội bộ và
+  địa chỉ metadata bị chặn; các lần redirect được kiểm lại.
+- Plugin, hook hay script nạp từ những nơi người dùng ghi được thì phải được tin một cách
+  rõ ràng, không phải mặc nhiên.
 
-## Logging of sensitive data
+## Ghi log dữ liệu nhạy cảm
 
-- Logs, traces, and error reports omit passwords, tokens, keys, session IDs,
-  and personal data, or redact them.
-- Request/response dumps and debug modes are off by default and not enabled in
-  production config.
-- Log injection: newline and control characters from input are escaped.
+- Log, trace và báo cáo lỗi bỏ qua mật khẩu, token, key, session ID
+  và dữ liệu cá nhân, hoặc che chúng đi.
+- Các bản dump request/response và chế độ debug mặc định tắt và không được bật trong
+  config production.
+- Log injection: các ký tự xuống dòng và ký tự điều khiển đến từ input đều được escape.

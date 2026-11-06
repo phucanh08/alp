@@ -1,71 +1,71 @@
-# Layout and typography
+# Layout và typography
 
-Read when choosing grids, spacing, type scale, line length or responsive breakpoints.
+Đọc khi chọn grid, khoảng cách, thang chữ, độ dài dòng hoặc breakpoint responsive.
 
-## Spacing scale
+## Thang khoảng cách
 
-- One base unit, usually 4px or 8px. Scale example: 4, 8, 12, 16, 24, 32, 48, 64, 96.
-- Use the existing scale. Off-scale values (13px, 22px) are a review finding unless they
-  come from an optical correction that is documented.
-- Proximity shows grouping: space inside a group is smaller than space between groups.
-  A common ratio is 1:2 (e.g. 8 inside, 16 between; 16 inside, 32 between sections).
-- Prefer layout gap on containers over margins on children; it avoids collapsed or doubled space.
+- Một đơn vị cơ sở, thường là 4px hoặc 8px. Ví dụ thang: 4, 8, 12, 16, 24, 32, 48, 64, 96.
+- Dùng thang đang có. Giá trị lệch thang (13px, 22px) là một phát hiện (finding) khi review, trừ khi
+  nó đến từ một chỉnh sửa thị giác đã được ghi lại.
+- Sự gần nhau thể hiện việc nhóm: khoảng cách trong một nhóm nhỏ hơn khoảng cách giữa các nhóm.
+  Tỉ lệ thường dùng là 1:2 (ví dụ 8 bên trong, 16 ở giữa; 16 bên trong, 32 giữa các mục lớn).
+- Ưu tiên gap của layout trên container hơn margin trên phần tử con; nó tránh khoảng cách bị gộp hay nhân đôi.
 
-## Grids
+## Grid
 
-- Content pages: a centered column with a max width, or a 12-column grid with fixed gutters
-  (16-32px) and outer margins that shrink on small screens (16px is a common minimum).
-- App shells: fixed-width navigation, fluid main area, optional detail pane. Decide which
-  pane collapses first as width shrinks.
-- Align to a small number of vertical edges. Every extra edge adds visual noise.
-- Dense data (tables, dashboards) can use a tighter scale, but keep it consistent within a view.
+- Trang nội dung: một cột căn giữa có chiều rộng tối đa, hoặc grid 12 cột với gutter cố định
+  (16-32px) và lề ngoài co lại trên màn hình nhỏ (16px là mức tối thiểu thường dùng).
+- Khung ứng dụng: thanh điều hướng rộng cố định, vùng chính linh động, pane chi tiết tùy chọn. Hãy quyết
+  pane nào co lại trước khi chiều rộng hẹp dần.
+- Căn theo một số ít đường biên dọc. Mỗi đường biên thêm vào là thêm nhiễu thị giác.
+- Dữ liệu dày (bảng, dashboard) có thể dùng thang chặt hơn, nhưng giữ nó nhất quán trong một view.
 
-## Type scale
+## Thang chữ
 
-- Use a modular scale (ratio around 1.2-1.25 for apps, up to 1.333 for editorial) or the
-  project's existing steps. 5-7 sizes cover most products.
-- Body text: 16px default on the web; never below 14px for body copy, 12px only for
-  secondary labels with sufficient contrast.
-- Use `rem` (or the platform's scalable unit) so text follows user font-size settings.
-- Line height: about 1.4-1.6 for body, 1.1-1.3 for headings. Larger text needs less.
-- Weights: two or three (regular, medium or semibold, bold). Hierarchy comes from size,
-  weight and color together, not from many weights.
-- Limit families to one or two, preferably already loaded by the project; adding a font
-  is a dependency decision for the owner.
-- Use tabular numerals for columns of numbers and timers.
+- Dùng thang theo module (tỉ lệ khoảng 1.2-1.25 cho ứng dụng, tới 1.333 cho dạng báo chí) hoặc
+  các bậc đã có của dự án. 5-7 cỡ là đủ cho phần lớn sản phẩm.
+- Chữ nội dung: mặc định 16px trên web; không bao giờ dưới 14px cho chữ nội dung, 12px chỉ dành cho
+  nhãn phụ với tương phản đủ.
+- Dùng `rem` (hoặc đơn vị co giãn được của nền tảng) để chữ đi theo thiết lập cỡ chữ của người dùng.
+- Chiều cao dòng: khoảng 1.4-1.6 cho nội dung, 1.1-1.3 cho tiêu đề. Chữ lớn hơn cần ít hơn.
+- Độ dày: hai hoặc ba mức (regular, medium hoặc semibold, bold). Thứ bậc đến từ cỡ,
+  độ dày và màu cùng nhau, không phải từ nhiều độ dày.
+- Giới hạn một hoặc hai họ chữ, tốt nhất là họ dự án đã tải sẵn; thêm một font
+  là một quyết định về phụ thuộc, thuộc về chủ sở hữu.
+- Dùng chữ số dạng bảng cho các cột số và bộ đếm thời gian.
 
-## Line length and readability
+## Độ dài dòng và tính dễ đọc
 
-- Body text measure: about 45-75 characters per line; cap prose containers (e.g. `max-width: 65ch`).
-- Left-align body text in left-to-right languages; avoid justified text on the web.
-- Paragraph spacing roughly equal to the line height.
-- Plan for text expansion: translations can be 30-40% longer; avoid fixed-width labels.
-- Support right-to-left by using logical properties (start/end) where the stack allows.
+- Chiều dài dòng nội dung: khoảng 45-75 ký tự mỗi dòng; chặn container văn bản (ví dụ `max-width: 65ch`).
+- Căn lề trái cho chữ nội dung ở ngôn ngữ viết trái sang phải; tránh chữ căn đều hai bên trên web.
+- Khoảng cách giữa các đoạn xấp xỉ bằng chiều cao dòng.
+- Tính trước việc chữ dài ra: bản dịch có thể dài hơn 30-40%; tránh nhãn có chiều rộng cố định.
+- Hỗ trợ viết phải sang trái bằng các thuộc tính logic (start/end) ở nơi stack cho phép.
 
-## Hierarchy checklist per view
+## Checklist thứ bậc cho mỗi view
 
-- One clear primary action; secondary actions visually weaker; destructive actions separated.
-- The page title is the largest text in the content area.
-- Related controls sit together; labels sit next to their inputs (above for forms on narrow screens).
-- Scanning path: headings and key values readable when skimming without reading body text.
+- Một hành động chính rõ ràng; hành động phụ yếu hơn về thị giác; hành động phá hủy để tách riêng.
+- Tiêu đề trang là chữ lớn nhất trong vùng nội dung.
+- Các control liên quan đặt cạnh nhau; nhãn đặt cạnh input của nó (đặt trên với form trên màn hình hẹp).
+- Đường quét mắt: tiêu đề và giá trị quan trọng đọc được khi nhìn nhanh mà không đọc phần nội dung.
 
-## Responsive behavior
+## Hành vi responsive
 
-- Use the project's breakpoints. If none exist, start content-first: add a breakpoint where the
-  layout breaks, not at device widths. Common reference points: ~640, ~768, ~1024, ~1280px.
-- Design small-screen first; enhance for wider screens.
-- For each component decide: reflow, stack, collapse (into menu or disclosure), truncate
-  (with full value available), or hide (only if non-essential and available elsewhere).
-- Prefer container-relative rules for components reused in panes of different widths, when the
-  stack supports them.
-- Reflow: at 320 CSS px wide (equivalent to 1280px at 400% zoom), content must not need
-  two-dimensional scrolling, except for data tables, maps and similar.
-- Touch: targets at least 24x24 CSS px (WCAG 2.2 AA), 44x44 recommended for primary touch actions,
-  with spacing between adjacent targets.
-- Do not rely on hover for essential information on touch devices.
-- Respect safe areas and on-screen keyboards on mobile; keep primary actions reachable.
+- Dùng breakpoint của dự án. Nếu chưa có, hãy bắt đầu từ nội dung: thêm breakpoint ở nơi
+  layout bị vỡ, không phải ở các chiều rộng thiết bị. Các mốc tham chiếu thường gặp: ~640, ~768, ~1024, ~1280px.
+- Thiết kế cho màn hình nhỏ trước; rồi nâng cấp cho màn hình rộng hơn.
+- Với mỗi component hãy quyết: reflow, xếp dọc, co lại (vào menu hoặc phần mở ra), cắt bớt
+  (vẫn truy cập được giá trị đầy đủ), hoặc ẩn (chỉ khi không thiết yếu và có ở nơi khác).
+- Ưu tiên quy tắc theo container cho những component dùng lại trong các pane rộng khác nhau, khi
+  stack hỗ trợ.
+- Reflow: ở chiều rộng 320 CSS px (tương đương 1280px ở zoom 400%), nội dung không được cần
+  cuộn theo hai chiều, trừ bảng dữ liệu, bản đồ và những thứ tương tự.
+- Cảm ứng: đích ít nhất 24x24 CSS px (WCAG 2.2 AA), khuyến nghị 44x44 cho hành động cảm ứng chính,
+  và có khoảng cách giữa các đích kề nhau.
+- Không dựa vào hover cho thông tin thiết yếu trên thiết bị cảm ứng.
+- Tôn trọng vùng an toàn và bàn phím trên màn hình ở mobile; giữ các hành động chính trong tầm với.
 
-## Spec output
+## Spec đầu ra
 
-For each breakpoint: grid/columns, which regions show, ordering changes, type sizes that change,
-and components that switch form. Note behavior at 200% zoom and in the narrowest supported width.
+Với mỗi breakpoint: grid/số cột, những vùng nào hiện ra, thay đổi thứ tự, các cỡ chữ thay đổi,
+và những component đổi hình thức. Ghi chú hành vi ở zoom 200% và ở chiều rộng hẹp nhất được hỗ trợ.

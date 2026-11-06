@@ -1,40 +1,41 @@
 ---
 name: smart-commits
-description: Package existing owned changes into focused local Git commits with verification evidence. Use when commits are requested or part of the assigned handoff; do not activate merely because a file was edited.
+description: Gói các thay đổi đã sở hữu thành những commit Git cục bộ gọn và tập trung, kèm bằng chứng kiểm chứng. Dùng khi commit được yêu cầu hoặc là một phần của handoff được giao; đừng kích hoạt chỉ vì vừa sửa một file.
 ---
 
-# Package the authorized changes
+# Gói các thay đổi đã được cấp quyền
 
-Confirm this is a Git repository and that local commits belong to the requested
-deliverable. A non-Git task returns file artifacts; do not initialize Git merely to
-produce a SHA. A read-only task cannot commit. Existing user authorization remains
-valid; the skill adds no confirmation gate or permission to push.
+Xác nhận đây là một repository Git và rằng các commit cục bộ thuộc về sản phẩm được
+yêu cầu giao. Một task không dùng Git thì trả về artifact dạng file; đừng khởi tạo Git chỉ để
+sinh ra một SHA. Một task chỉ đọc không được commit. Thẩm quyền người dùng đã cấp vẫn còn
+hiệu lực; skill này không thêm cổng xác nhận nào và cũng không cấp quyền push.
 
-Inspect the root, branch, status, unresolved merges, staged paths, and staged/unstaged
-diffs with Git commands. Verify any supplied base revision. Preserve work outside
-the assignment. If unrelated staged changes would enter the commit, stop packaging
-and report the conflict without resetting or unstaging someone else's work.
+Hãy xem xét root, nhánh, status, các lần merge chưa giải quyết, các đường dẫn đã stage, và diff
+đã stage/chưa stage bằng các câu lệnh Git. Kiểm chứng mọi base revision được cấp. Giữ nguyên
+phần việc nằm ngoài việc được giao. Nếu có các thay đổi đã stage không liên quan sẽ lọt vào
+commit, hãy dừng việc đóng gói và báo xung đột đó, đừng reset hay bỏ stage phần việc của người
+khác.
 
-Group changes by behavior and intent. Keep implementation and its direct tests
-together where useful. Read each included diff and stage only the owned paths or
-hunks. Avoid whole-tree staging in a shared checkout. Do not add unrelated fixes or
-formatting to make a commit easier.
+Nhóm các thay đổi theo hành vi và theo ý định. Giữ phần hiện thực cùng với test trực tiếp của
+nó ở chỗ điều đó hữu ích. Đọc từng diff được đưa vào và chỉ stage các đường dẫn hay hunk mình
+sở hữu. Tránh stage toàn bộ cây trong một checkout dùng chung. Đừng thêm các bản sửa hay chỉnh
+format không liên quan để commit cho dễ.
 
-Run the relevant checks from the project/brief, reusing recent results when still
-applicable. State failures and omissions accurately. If hooks may cause external
-side effects, inspect their configured behavior before invoking them and stay within
-the task's authorization. Do not bypass hooks or protections to get a green commit.
+Chạy các phép kiểm liên quan theo project/brief, dùng lại các kết quả gần đây khi chúng còn áp
+dụng được. Nêu các chỗ fail và các chỗ bỏ sót cho chính xác. Nếu hook có thể gây tác dụng phụ
+ra bên ngoài, hãy xem hành vi đã cấu hình của chúng trước khi gọi, và ở trong phạm vi thẩm
+quyền của task. Đừng lách hook hay các cơ chế bảo vệ để lấy một commit xanh.
 
-Create focused messages explaining the change and its purpose, following the
-repository's convention. Check commit success before reading the candidate SHA.
-Verify that the candidate contains only the intended scope and that the base
-relationship is valid when a base was supplied. A failed commit produces no new
-candidate, and an already-clean tree needs no empty commit.
+Soạn các thông điệp gọn và tập trung, giải thích thay đổi và mục đích của nó, theo
+quy ước của repository. Kiểm xem commit có thành công trước khi đọc SHA ứng viên.
+Xác minh rằng bản ứng viên chỉ chứa đúng phạm vi dự kiến, và quan hệ với base là
+hợp lệ khi có cấp một base. Một lần commit fail thì không sinh ra bản ứng viên mới nào,
+và một cây vốn đã sạch thì không cần một commit rỗng.
 
-Do not rewrite a candidate already handed off for review. Corrections should be
-new commits unless rewriting was specifically agreed. Push requires existing explicit
-authorization for the intended remote/branch; a configured remote does not provide it.
+Đừng viết lại một bản ứng viên đã được handoff để review. Các bản sửa nên là những
+commit mới, trừ khi việc viết lại đã được thống nhất riêng. Push đòi phải có thẩm quyền rõ ràng
+đã cấp sẵn cho đúng remote/nhánh dự kiến; một remote đã cấu hình không hề cấp thẩm quyền đó.
 
-Return root, branch, actual base/candidate SHAs, commit summary, owned scope, checks
-and results, remaining work, and push status. Lead/main still review the artifact;
-the writer does not self-accept its work.
+Trả về root, nhánh, các SHA base/candidate thật, tóm tắt commit, phạm vi sở hữu, các phép kiểm
+và kết quả, phần việc còn lại, và trạng thái push. Lead/main vẫn review artifact;
+người ghi không tự nghiệm thu công việc của chính mình.

@@ -1,26 +1,27 @@
-# Architecture decision records
+# Bản ghi quyết định kiến trúc (ADR)
 
-Read when judging whether a change warrants an ADR, writing one, or changing an ADR's status.
+Đọc khi phán xét một thay đổi có đáng viết ADR, khi viết ADR, hoặc khi đổi status của một ADR.
 
-## When an ADR is warranted
-Write one when at least one holds:
-- The choice is costly to reverse: data store, protocol, public API style, runtime,
-  framework, deployment model.
-- It changes a module boundary or the allowed dependency direction.
-- It affects compatibility for consumers, stored data or supported platforms.
-- Reasonable alternatives were seriously considered and rejected.
-- The team will otherwise relitigate it.
+## Khi nào nên viết ADR
+Viết khi có ít nhất một điều sau đúng:
+- Lựa chọn đó đắt khi phải đảo ngược: nơi lưu dữ liệu, protocol, kiểu public API, runtime,
+  framework, mô hình triển khai.
+- Nó làm đổi một ranh giới module hoặc hướng phụ thuộc được cho phép.
+- Nó ảnh hưởng tới tính tương thích với bên tiêu thụ, dữ liệu đã lưu hoặc các nền tảng được hỗ
+  trợ.
+- Đã có các phương án khác hợp lý được cân nhắc nghiêm túc rồi loại bỏ.
+- Nếu không ghi lại thì cả team sẽ tranh lại chuyện đó.
 
-Skip an ADR for: refactors inside one module, dependency patch updates, naming, local
-helpers, bug fixes that restore the documented contract, and choices fully dictated by
-an existing ADR. A sentence in the relevant doc is enough.
+Bỏ qua ADR với: refactor trong một module, cập nhật patch của dependency, chuyện đặt tên,
+helper cục bộ, bản sửa lỗi đưa hành vi về đúng contract đã ghi, và các lựa chọn đã bị một ADR
+hiện có quy định hoàn toàn. Một câu trong tài liệu liên quan là đủ.
 
-## File and numbering
-- Follow the project's existing ADR location and numbering. Default:
-  `docs/architecture/decisions/NNNN-short-title.md`, four digits, next free number.
-- Never renumber or delete an ADR; supersede it.
+## File và cách đánh số
+- Theo vị trí và cách đánh số ADR project đang dùng. Mặc định:
+  `docs/architecture/decisions/NNNN-short-title.md`, bốn chữ số, lấy số trống kế tiếp.
+- Không bao giờ đánh số lại hay xoá một ADR; hãy thay thế nó bằng ADR mới (supersede).
 
-## Template
+## Mẫu
 ```markdown
 # NNNN. Short decision title
 
@@ -44,13 +45,14 @@ What gets easier, what gets harder, follow-up work, and what to watch.
 Files, tests, benchmarks or discussions that support the context and decision.
 ```
 
-## Status lifecycle
-| Status | Meaning | Who moves it |
+## Vòng đời của status
+| Status | Ý nghĩa | Ai chuyển |
 |---|---|---|
-| Proposed | Drafted, not yet confirmed | Any writer; route to main for a decision |
-| Accepted | Confirmed by whoever owns the decision | Main, after the user or authorised owner confirms |
-| Superseded by NNNN | Replaced; keep text, link the new ADR | The writer of the new ADR |
-| Deprecated | No longer applies, nothing replaces it | Main, with the reason in a dated note |
+| Proposed | Đã soạn, chưa được xác nhận | Bất kỳ người ghi; chuyển cho main để ra quyết định |
+| Accepted | Đã được người sở hữu quyết định xác nhận | Main, sau khi người dùng hoặc người sở hữu có thẩm quyền xác nhận |
+| Superseded by NNNN | Đã bị thay; giữ nguyên nội dung, link sang ADR mới | Người viết ADR mới |
+| Deprecated | Không còn áp dụng, không có gì thay thế | Main, kèm lý do trong một ghi chú có ngày |
 
-- An agent never marks its own proposal Accepted without that confirmation.
-- Editing an Accepted ADR is limited to typos and links; a changed decision is a new ADR.
+- Một agent không bao giờ tự đánh đề xuất của mình là Accepted khi chưa có xác nhận đó.
+- Sửa một ADR đã Accepted chỉ được giới hạn ở lỗi chính tả và link; quyết định thay đổi là một
+  ADR mới.

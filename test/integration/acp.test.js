@@ -129,8 +129,8 @@ test('a session on an ACP agent: instructions in its first prompt, its answer st
   assert.match(prompts[0][0].text, /ALP's tools \(alp_\*\) come from the MCP server named alp\. ALP answers your permission requests by your full-access mode/);
   // Skills on ACP: the same Level 0 index as Codex (no native Skill tool is pretended); bodies stay in their files.
   assert.match(prompts[0][0].text, /Your skills: [^\n]*Open a skill's references only for the step that needs them/);
-  assert.match(prompts[0][0].text, /\n- feature-architecture \([^)]+SKILL\.md\): Implement a new feature/);
-  assert.doesNotMatch(prompts[0][0].text, /Map the modules touched and the direction of every new dependency|Claude Code skills named alp/);
+  assert.match(prompts[0][0].text, /\n- feature-architecture \([^)]+SKILL\.md\): Hiện thực một feature mới/);
+  assert.doesNotMatch(prompts[0][0].text, /Vẽ ra các module bị chạm và hướng của từng phụ thuộc mới|Claude Code skills named alp/);
 
   // The agent lists and calls ALP's tools through the MCP server ALP gave it.
   const tools = await turn('fake:tools');

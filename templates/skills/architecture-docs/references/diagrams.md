@@ -1,19 +1,20 @@
-# Diagrams
+# Sơ đồ
 
-Read when adding or updating a Mermaid diagram in architecture docs.
+Đọc khi thêm hoặc cập nhật một sơ đồ Mermaid trong tài liệu kiến trúc.
 
-## Rules
-- Every node maps to a real module, package, service or path; put the path in the
-  label or a note below the diagram.
-- Every arrow maps to an import, call, message, route or config entry you can cite.
-- At most about 12 nodes; split by boundary rather than shrinking labels.
-- One diagram, one question: structure, a request path, or deployment. Not all three.
-- Label arrows with the protocol or verb when it is not obvious.
-- No styling, colours or icons unless the project's docs already use them.
-- Regenerate from code when the boundary changes; delete a diagram nobody maintains.
-- Unverified edges use a dotted arrow and an "Unverified" note.
+## Quy tắc
+- Mỗi node ứng với một module, package, service hay đường dẫn thật; đặt đường dẫn vào
+  nhãn hoặc vào một ghi chú bên dưới sơ đồ.
+- Mỗi mũi nối ứng với một import, lời gọi, message, route hay mục config mà bạn dẫn nguồn được.
+- Nhiều nhất khoảng 12 node; hãy tách theo ranh giới chứ đừng thu nhỏ nhãn.
+- Một sơ đồ, một câu hỏi: cấu trúc, đường đi của một request, hoặc cách triển khai. Không gộp
+  cả ba.
+- Ghi nhãn mũi nối bằng protocol hoặc động từ khi điều đó không hiển nhiên.
+- Không tô kiểu, màu hay icon trừ khi tài liệu của project đã dùng chúng.
+- Sinh lại từ code khi ranh giới đổi; xoá sơ đồ không ai bảo trì.
+- Các cạnh chưa kiểm chứng dùng mũi nối nét đứt kèm ghi chú "Unverified".
 
-## Flowchart: module dependencies
+## Flowchart: phụ thuộc giữa các module
 ```mermaid
 flowchart LR
   cli["cli (packages/cli)"] --> core["core (packages/core)"]
@@ -21,9 +22,9 @@ flowchart LR
   daemon --> runtime["runtime (packages/runtime)"]
   runtime -.-> core
 ```
-Note: the dotted edge marks an import seen only in tests (Unverified for runtime code).
+Ghi chú: cạnh nét đứt đánh dấu một import chỉ thấy trong test (Unverified với code runtime).
 
-## Sequence: one request path
+## Sequence: đường đi của một request
 ```mermaid
 sequenceDiagram
   participant C as Client
@@ -38,7 +39,7 @@ sequenceDiagram
   R-->>C: 201 Created
 ```
 
-## Container view (C4-like, using a flowchart)
+## Góc nhìn container (kiểu C4, vẽ bằng flowchart)
 ```mermaid
 flowchart TB
   user([User])
@@ -52,8 +53,8 @@ flowchart TB
   api -->|HTTPS| pay
 ```
 
-## Checking a diagram
-- For each node, confirm the path exists.
-- For each edge, find the import, call or config line; cite it in the surrounding text.
-- Render it with the project's docs tooling if available; otherwise check syntax by eye
-  against these examples and keep it simple.
+## Kiểm một sơ đồ
+- Với mỗi node, xác nhận đường dẫn tồn tại.
+- Với mỗi cạnh, tìm dòng import, lời gọi hay config; dẫn nó trong phần chữ xung quanh.
+- Render bằng công cụ tài liệu của project nếu có; nếu không thì soi cú pháp bằng mắt dựa trên
+  các ví dụ này và giữ sơ đồ đơn giản.

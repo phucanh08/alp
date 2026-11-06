@@ -1,6 +1,6 @@
 {
   "label": "Design",
-  "description": "UI and UX decisions: layout, typography, tokens, interaction states, and review against usability and accessibility guidelines.",
+  "description": "Quyết định UI và UX: layout, typography, token, trạng thái tương tác, và review theo các hướng dẫn về khả năng dùng và khả năng tiếp cận.",
   "skills": ["ui-design"],
   "assign": { "lead": ["ui-design"], "peer": ["ui-design"] }
 }

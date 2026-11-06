@@ -1,6 +1,6 @@
 {
   "label": "Cafe",
-  "description": "Main supervises lead, who implements or delegates to peer; a supervisor reviews the process.",
+  "description": "Main giám sát lead, lead tự làm hoặc giao việc cho peer; một supervisor review quy trình.",
   "main": "main",
   "members": {
     "main": { "model": "claude:claude-opus-5-5", "thinking": "high" },

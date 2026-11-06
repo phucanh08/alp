@@ -1,78 +1,78 @@
-# Frontend Performance
+# Hiệu năng frontend
 
-Read when a screen is slow, a bundle grows, or images and lists are heavy.
+Đọc khi một màn hình chậm, bundle phình ra, hoặc ảnh và danh sách quá nặng.
 
-Measure first, then change one thing, then measure again under the same conditions
-(same build mode, device or throttling profile, data size). Development builds are
-slower and noisier than production builds; profile a production build for claims.
+Đo trước, rồi đổi một thứ, rồi đo lại trong cùng điều kiện
+(cùng chế độ build, cùng thiết bị hay cấu hình giới hạn, cùng lượng dữ liệu). Bản build dev
+chậm hơn và nhiễu hơn bản production; muốn khẳng định điều gì thì hãy profile bản production.
 
-## What to measure
+## Đo cái gì
 
-- Core Web Vitals for page experience: Largest Contentful Paint (loading),
-  Interaction to Next Paint (responsiveness), Cumulative Layout Shift (stability).
-  Use the project's existing tooling (Lighthouse, browser performance panel, a RUM
-  dashboard) and report the conditions.
-- Render cost: the framework's profiler (React DevTools Profiler, Vue DevTools) to
-  see which components render, how often, and how long.
-- Bundle size: the build's analyzer or stats output for the affected routes.
-- Network: the waterfall for the route; look for serial requests and large payloads.
+- Core Web Vitals cho trải nghiệm trang: Largest Contentful Paint (tải),
+  Interaction to Next Paint (độ đáp ứng), Cumulative Layout Shift (độ ổn định).
+  Dùng công cụ đang có của dự án (Lighthouse, panel performance của browser, một dashboard
+  RUM) và báo lại điều kiện đo.
+- Chi phí render: profiler của framework (React DevTools Profiler, Vue DevTools) để
+  thấy component nào render, bao nhiêu lần, và mất bao lâu.
+- Kích thước bundle: công cụ phân tích hoặc output thống kê của build cho các route bị ảnh hưởng.
+- Mạng: biểu đồ thác nước của route; tìm những request nối tiếp nhau và payload lớn.
 
-Use budgets the project already defines. Do not invent a fixed threshold; report
-before and after numbers instead.
+Dùng ngân sách mà dự án đã định ra. Đừng tự nghĩ ra một ngưỡng cố định; hãy báo
+các con số trước và sau.
 
-## Render cost
+## Chi phí render
 
-- First remove unnecessary work: state stored too high causing wide re-renders,
-  derived data recomputed in render on large inputs, effects that set state on
-  every render, and context values recreated each render.
-- Move state down to where it is used, or split components so fast-changing state
-  re-renders a small subtree.
-- Memoization (`memo`, `useMemo`, `useCallback`, computed values) only where the
-  profiler shows a measurable cost, or where the project's compiler or lint rules
-  already handle it. Unmeasured memoization adds complexity and can hide bugs from
-  stale dependencies.
-- Virtualize long lists (hundreds of rows or more) with the project's existing
-  approach; paginate when virtualization is not justified.
-- Keep heavy computation off the main thread (a web worker) only when measured.
-- Defer non-urgent updates with the framework's transition or scheduling API when
-  typing feels laggy.
+- Trước hết hãy bỏ những việc không cần: state đặt quá cao làm render lại cả vùng rộng,
+  dữ liệu suy ra bị tính lại trong lúc render trên dữ liệu nhập lớn, effect đặt state ở
+  mỗi lần render, và giá trị context bị tạo lại mỗi lần render.
+- Đưa state xuống đúng chỗ nó được dùng, hoặc chia component ra để state đổi nhanh
+  chỉ render lại một nhánh nhỏ.
+- Chỉ ghi nhớ (`memo`, `useMemo`, `useCallback`, giá trị computed) ở nơi
+  profiler cho thấy một chi phí đo được, hoặc ở nơi compiler hay luật lint của dự án
+  đã xử lý giúp. Ghi nhớ mà không đo thì thêm phức tạp và có thể che bug do
+  phụ thuộc đã cũ.
+- Virtual hóa danh sách dài (hàng trăm dòng hoặc hơn) theo cách đang có của
+  dự án; phân trang khi chưa đáng để virtual hóa.
+- Chỉ đưa phần tính toán nặng ra khỏi luồng chính (một web worker) khi đã đo.
+- Hoãn các cập nhật không gấp bằng API transition hay lập lịch của framework khi
+  gõ chữ thấy có cảm giác trễ.
 
-## Bundle and loading
+## Bundle và tải
 
-- Split by route; lazy-load heavy, rarely used components (editors, charts, maps)
-  behind the interaction or view that needs them.
-- Check what a new dependency costs before proposing it; prefer platform APIs and
-  existing dependencies. Adding one is the owner's decision.
-- Import only what you use; avoid barrel imports that defeat tree shaking when the
-  bundler struggles with them.
-- Do not ship server-only code, large data files, or source maps to clients
-  unintentionally.
-- Preload critical resources (the LCP image, key fonts) when measurement shows a
-  delay; do not preload everything.
-- Server rendering or static generation helps first paint for content pages; see
+- Chia theo route; lazy-load những component nặng, ít dùng (editor, biểu đồ, bản đồ)
+  đặt sau tương tác hoặc view thực sự cần chúng.
+- Kiểm tra một phụ thuộc mới tốn bao nhiêu trước khi đề xuất nó; ưu tiên API của nền tảng và
+  các phụ thuộc đang có. Thêm một cái là quyết định của chủ sở hữu.
+- Chỉ import những gì bạn dùng; tránh import kiểu barrel làm mất tác dụng tree shaking khi
+  bundler xử lý chúng không tốt.
+- Đừng vô tình gửi code chỉ dành cho server, file dữ liệu lớn, hay source map
+  xuống client.
+- Preload các tài nguyên quan trọng (ảnh LCP, font chính) khi số đo cho thấy có
+  độ trễ; đừng preload mọi thứ.
+- Render ở server hay sinh tĩnh giúp cải thiện first paint cho các trang nội dung; xem
   frameworks.md.
 
-## Images and media
+## Ảnh và media
 
-- Serve sized, compressed images in modern formats through the project's image
-  pipeline or component.
-- Always set width and height (or aspect ratio) to prevent layout shift.
-- Lazy-load below-the-fold images; do not lazy-load the LCP image.
-- Use responsive `srcset` and `sizes` so small screens download small files.
-- Prefer CSS or SVG for icons and simple graphics.
+- Phục vụ ảnh đã đúng kích thước, đã nén, ở các định dạng hiện đại, qua pipeline hay
+  component ảnh của dự án.
+- Luôn đặt width và height (hoặc tỉ lệ khung) để tránh dịch layout.
+- Lazy-load các ảnh nằm dưới màn hình đầu; không lazy-load ảnh LCP.
+- Dùng `srcset` và `sizes` responsive để màn hình nhỏ tải file nhỏ.
+- Ưu tiên CSS hoặc SVG cho icon và hình đơn giản.
 
-## Layout stability and responsiveness
+## Độ ổn định layout và độ đáp ứng
 
-- Reserve space for async content, ads, and embeds.
-- Avoid inserting content above existing content after load.
-- Load fonts with a display strategy that avoids invisible text, using the project's
-  font setup.
-- Keep input handlers short; break long tasks; avoid layout thrashing (reading
-  layout then writing styles in a loop).
+- Dành sẵn chỗ cho nội dung bất đồng bộ, quảng cáo, và nội dung nhúng.
+- Tránh chèn nội dung lên phía trên nội dung đang có sau khi tải xong.
+- Tải font với một chiến lược hiển thị tránh chữ vô hình, dùng thiết lập font
+  của dự án.
+- Giữ các handler nhập liệu ngắn gọn; chia nhỏ task dài; tránh giật layout (đọc
+  layout rồi ghi style trong một vòng lặp).
 
-## Reporting
+## Báo cáo
 
-- State the metric, tool, build mode, device or throttling profile, data size, and
-  before and after values.
-- If a change does not move the measured metric, revert it rather than keeping it
-  as a precaution.
+- Nêu rõ chỉ số, công cụ, chế độ build, thiết bị hay cấu hình giới hạn, lượng dữ liệu, và
+  giá trị trước và sau.
+- Nếu một thay đổi không làm chỉ số đo được nhúc nhích, hãy hoàn tác nó chứ đừng giữ lại
+  cho chắc.

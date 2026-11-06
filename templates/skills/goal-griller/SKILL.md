@@ -1,36 +1,36 @@
 ---
 name: goal-griller
-description: Turn an underspecified user request into a verifiable task contract. Use at Main intake when missing outcomes, scope, or acceptance evidence would materially change execution; skip when the request is already clear.
+description: Biến một yêu cầu chưa đủ rõ của người dùng thành một task contract kiểm chứng được. Dùng khi main tiếp nhận yêu cầu mà việc thiếu kết quả mong muốn, phạm vi hay bằng chứng nghiệm thu sẽ làm đổi cách thực thi một cách đáng kể; bỏ qua khi yêu cầu đã rõ.
 ---
 
-# Clarify the outcome
+# Làm rõ kết quả cần đạt
 
-This skill serves the user-facing owner. In the starter workflow that is main;
-lead and peer return missing decisions to their assigning agent instead of opening
-an independent user conversation.
+Skill này phục vụ người sở hữu đầu tiếp xúc với người dùng. Trong quy trình khởi đầu đó
+là main; lead và peer trả các quyết định còn thiếu về cho agent giao việc chứ không tự mở
+một cuộc trao đổi riêng với người dùng.
 
-Read the request, existing decisions, ALP.md, and the few relevant local artifacts.
-Separate the desired result from a suggested implementation. Establish:
+Đọc yêu cầu, các quyết định đã có, ALP.md, và vài artifact cục bộ liên quan. Tách kết quả
+mong muốn ra khỏi implementation được gợi ý. Hãy xác lập:
 
-- Outcome: the observable state the user wants.
-- Evidence: a check, artifact, or measurement showing that result.
-- Scope: what may change and what the user requires to remain unchanged.
-- Context: the sources needed to make the first decision.
-- Verification: a fast feedback loop and any final checks.
-- Completion/blockers: when the work is done and what requires a user decision.
+- Outcome: trạng thái quan sát được mà người dùng muốn.
+- Evidence: một phép kiểm, artifact hay phép đo cho thấy kết quả đó.
+- Scope: cái gì được phép đổi và cái gì người dùng yêu cầu giữ nguyên.
+- Context: các nguồn cần có để ra quyết định đầu tiên.
+- Verification: một vòng phản hồi nhanh và các phép kiểm cuối nếu có.
+- Completion/blockers: khi nào công việc xong và cái gì cần một quyết định của người dùng.
 
-Infer routine details from the repository and existing authorization. Ask only
-questions whose answers change scope, behavior, cost, or a consequential decision.
-Bundle independent questions concisely and offer a reasonable default where useful.
-Continue independent authorized work while waiting; a required answer is not
-supplied by elapsed time.
+Hãy suy ra các chi tiết thường lệ từ repository và từ thẩm quy���n đã có. Chỉ hỏi những câu
+mà câu trả lời làm đổi phạm vi, hành vi, chi phí, hay một quyết định có hệ quả.
+Gộp các câu hỏi độc lập lại cho gọn và đưa ra một mặc định hợp lý ở chỗ hữu ích.
+Vẫn tiếp tục công việc độc lập đã được cấp quyền trong lúc chờ; thời gian trôi qua không
+sinh ra câu trả lời bắt buộc.
 
-Do not send a researcher to invent the meaning of words such as "better" or
-"production-ready" when the outcome itself needs the user's judgment. Conversely,
-do not ask the user to identify a build command or file path that local evidence
-can establish.
+Đừng cử một người đi nghiên cứu để tự bịa ra nghĩa của những chữ như "tốt hơn" hay
+"sẵn sàng cho production" khi chính kết quả cần đạt phải do người dùng phán xét. Ngược lại,
+đừng bắt người dùng chỉ ra một câu lệnh build hay một đường dẫn file mà bằng chứng cục bộ
+xác lập được.
 
-Produce a proportional contract, for example:
+Hãy làm ra một contract tương xứng, ví dụ:
 
 ```text
 Outcome: observable result
@@ -43,7 +43,7 @@ Done: completion condition
 Blocked if: material missing decision or prerequisite
 ```
 
-For an already-authorized task, a clear contract is enough to proceed; this skill
-adds no approval gate. If asked only to draft a contract, return it without starting
-implementation. Route a multi-item task to sequence-execution-plan, or a single
-assignment to prompt-leverage, reading the next skill only when needed.
+Với một task đã được cấp quyền, một contract rõ ràng là đủ để tiến hành; skill này không
+thêm cổng duyệt nào. Nếu chỉ được yêu cầu soạn một contract, hãy trả nó về mà không bắt
+đầu hiện thực. Chuyển một task nhiều mục sang sequence-execution-plan, hoặc một việc được
+giao đơn lẻ sang prompt-leverage, và chỉ đọc skill kế tiếp khi cần.

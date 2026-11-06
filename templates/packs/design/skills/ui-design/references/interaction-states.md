@@ -1,73 +1,73 @@
-# Interaction states and motion
+# Trạng thái tương tác và chuyển động
 
-Read when specifying states for interactive elements or views, or defining motion.
+Đọc khi đặc tả trạng thái cho các phần tử tương tác được hoặc cho view, hoặc khi định nghĩa chuyển động.
 
-## Control states
+## Trạng thái của control
 
-Specify each applicable state for every interactive element. A state table per component
-is the expected output.
+Đặc tả từng trạng thái áp dụng được cho mọi phần tử tương tác được. Đầu ra mong đợi là một
+bảng trạng thái cho mỗi component.
 
-| State | Purpose | Requirements |
+| Trạng thái | Mục đích | Yêu cầu |
 |---|---|---|
-| Default | Resting appearance | Recognizable as interactive without hover |
-| Hover | Pointer affordance | Subtle change; never the only cue; not required on touch |
-| Focus-visible | Keyboard location | Visible indicator, 3:1 against adjacent colors, not obscured by sticky content |
-| Active / pressed | Feedback on press | Immediate; distinct from hover |
-| Selected / checked | Persistent choice | Not color alone; use check, fill, weight or text |
-| Disabled | Not available now | Explain why when possible; consider enabled-with-message instead |
-| Read-only | Visible, not editable | Still focusable and copyable |
-| Loading / busy | Action in progress | Prevent double submit; keep size stable; announce to assistive tech |
-| Invalid / error | Input rejected | Message next to field, text plus icon, tells how to fix |
-| Success | Action confirmed | Brief, non-blocking, announced |
+| Default | Hình thức khi nghỉ | Nhận ra được là tương tác được mà không cần hover |
+| Hover | Gợi ý cho con trỏ | Thay đổi nhẹ; không bao giờ là tín hiệu duy nhất; không cần trên cảm ứng |
+| Focus-visible | Vị trí bàn phím | Chỉ báo thấy được, 3:1 so với màu kề, không bị nội dung sticky che |
+| Active / được nhấn | Phản hồi khi nhấn | Tức thì; khác biệt với hover |
+| Selected / checked | Lựa chọn còn lưu lại | Không chỉ bằng màu; dùng dấu check, tô nền, độ dày hoặc chữ |
+| Disabled | Hiện không dùng được | Giải thích vì sao nếu có thể; cân nhắc bật kèm thông báo |
+| Chỉ đọc | Thấy được, không sửa được | Vẫn focus được và copy được |
+| Loading / đang xử lý | Hành động đang diễn ra | Chặn submit hai lần; giữ kích thước ổn định; thông báo cho công nghệ trợ giúp |
+| Invalid / lỗi | Dữ liệu nhập bị từ chối | Thông báo cạnh field, chữ kèm icon, chỉ ra cách sửa |
+| Success | Hành động đã được xác nhận | Ngắn, không chặn, có thông báo |
 
-Notes:
+Ghi chú:
 
-- Never remove focus outlines without a visible replacement.
-- Focus order follows reading order; modals trap focus and return it on close.
-- Disabled buttons cannot be focused in many stacks, so users cannot discover why they are
-  disabled. Prefer explaining the missing requirement next to the control.
-- Keep hit areas stable across states; a spinner must not resize the button.
+- Không bao giờ bỏ viền focus mà không có thứ thay thế thấy được.
+- Thứ tự focus theo thứ tự đọc; modal giữ focus bên trong và trả nó lại khi đóng.
+- Nút disabled không focus được trên nhiều stack, nên người dùng không thể biết vì sao nó bị
+  disabled. Nên giải thích yêu cầu còn thiếu ngay cạnh control.
+- Giữ vùng bấm ổn định qua các trạng thái; một spinner không được làm nút đổi kích thước.
 
-## View states
+## Trạng thái của view
 
-Every data-backed view needs these designed, not only the populated one:
+Mọi view dựa trên dữ liệu đều cần thiết kế những trạng thái sau, không chỉ trạng thái có dữ liệu:
 
-- **Initial loading:** skeleton matching final layout for short waits; spinner with label for
-  unknown shapes. Avoid flashing a loader for very fast responses (delay showing it briefly).
-- **Empty (first use):** explain what will appear and offer the primary action to create it.
-- **Empty (no results):** say the filter or query produced nothing; offer to clear it.
-- **Partial:** some data loaded, some failed; show what is available and mark the gap.
-- **Error:** plain-language cause, what the user can do (retry, check connection, contact),
-  and preserved user input. Do not show raw stack traces.
-- **Offline / stale:** indicate data age and when it will refresh, if the product supports it.
-- **Permission denied:** say access is missing and who can grant it, without leaking content.
-- **Overflow:** long names, many items, large numbers, missing images.
+- **Loading lần đầu:** skeleton khớp layout cuối cho các chờ ngắn; spinner kèm nhãn cho những
+  hình dạng chưa biết. Tránh nháy loader với phản hồi rất nhanh (hoãn hiện nó một chút).
+- **Rỗng (lần dùng đầu):** giải thích cái gì sẽ xuất hiện và mời hành động chính để tạo nó.
+- **Rỗng (không có kết quả):** nói rõ filter hay truy vấn không ra gì; mời xóa nó đi.
+- **Một phần:** một phần dữ liệu đã tải, một phần lỗi; hiện cái có và đánh dấu phần thiếu.
+- **Lỗi:** nguyên nhân bằng lời thường, người dùng có thể làm gì (thử lại, kiểm tra kết nối, liên hệ),
+  và giữ lại dữ liệu người dùng đã nhập. Không hiện stack trace thô.
+- **Offline / dữ liệu cũ:** cho biết dữ liệu cũ cỡ nào và khi nào sẽ làm mới, nếu sản phẩm hỗ trợ.
+- **Bị từ chối quyền:** nói rõ là thiếu quyền truy cập và ai có thể cấp, mà không để lộ nội dung.
+- **Tràn:** tên dài, nhiều mục, số lớn, ảnh bị thiếu.
 
-## Feedback timing
+## Thời điểm phản hồi
 
-- Under ~100ms: feels instant, no indicator needed.
-- ~100ms to 1s: show a lightweight indicator on the control.
-- Over ~1s: show progress or a loading state for the region.
-- Over ~10s: show determinate progress if possible and allow cancel or background.
-- Optimistic updates need a visible, reversible failure path.
+- Dưới ~100ms: cảm giác tức thì, không cần chỉ báo.
+- ~100ms đến 1s: hiện một chỉ báo nhẹ trên chính control đó.
+- Trên ~1s: hiện tiến trình hoặc trạng thái loading cho cả vùng.
+- Trên ~10s: hiện tiến trình xác định nếu có thể và cho phép hủy hoặc chạy nền.
+- Cập nhật lạc quan cần một đường thoát khi lỗi, thấy được và đảo lại được.
 
-## Motion
+## Chuyển động
 
-- Purpose first: motion explains spatial change, continuity or feedback. Remove decorative motion
-  that serves none of these.
-- Durations: about 100-200ms for small controls, 200-300ms for panels and overlays, rarely
-  above 400ms. Exits slightly faster than entrances.
-- Easing: ease-out for entering, ease-in for leaving, standard ease-in-out for moving on screen.
-  Use the project's motion tokens.
-- Animate opacity and transform; avoid animating layout properties that cause reflow.
-- **Reduced motion:** when the user requests reduced motion (`prefers-reduced-motion` or the
-  native setting), replace movement, parallax, zoom and auto-playing animation with an instant
-  change or a short crossfade. State the reduced variant in the spec for each animation.
-- No content flashes more than three times per second.
-- Auto-playing or moving content lasting over 5 seconds needs pause, stop or hide.
+- Mục đích trước đã: chuyển động giải thích thay đổi không gian, tính liên tục hoặc phản hồi. Bỏ các
+  chuyển động trang trí không phục vụ điều nào trong số đó.
+- Thời lượng: khoảng 100-200ms cho control nhỏ, 200-300ms cho panel và overlay, ít khi
+  trên 400ms. Lúc ra hơi nhanh hơn lúc vào.
+- Easing: ease-out khi vào, ease-in khi ra, ease-in-out chuẩn khi di chuyển trên màn hình.
+  Dùng token chuyển động của dự án.
+- Hoạt họa opacity và transform; tránh hoạt họa các thuộc tính layout gây reflow.
+- **Giảm chuyển động:** khi người dùng yêu cầu giảm chuyển động (`prefers-reduced-motion` hoặc
+  thiết lập native), hãy thay chuyển động, parallax, zoom và hoạt họa tự chạy bằng một thay đổi
+  tức thì hoặc một crossfade ngắn. Nêu biến thể giảm đó trong spec cho từng hoạt họa.
+- Không nội dung nào nháy quá ba lần mỗi giây.
+- Nội dung tự chạy hoặc đang chuyển động kéo dài trên 5 giây cần có pause, stop hoặc hide.
 
-## Announcements
+## Thông báo
 
-- Status changes (saved, loading done, errors after submit) are announced through the stack's
-  live-region or accessibility announcement mechanism, politely unless urgent.
-- After a form submit with errors, move focus to the error summary or the first invalid field.
+- Thay đổi trạng thái (đã lưu, loading xong, lỗi sau khi submit) được thông báo qua cơ chế live-region
+  hoặc cơ chế thông báo accessibility của stack, ở mức lịch sự trừ khi gấp.
+- Sau khi submit form mà có lỗi, chuyển focus tới bản tóm tắt lỗi hoặc field không hợp lệ đầu tiên.

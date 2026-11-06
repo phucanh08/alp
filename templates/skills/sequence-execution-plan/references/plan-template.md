@@ -1,6 +1,6 @@
-# Proportional plan format
+# Định dạng kế hoạch tương xứng
 
-Use the relevant fields; a plan is a decision aid, not a form-completion exercise.
+Dùng các field liên quan; một kế hoạch là thứ giúp ra quyết định, không phải bài tập điền mẫu.
 
 ```text
 Outcome and acceptance evidence:
@@ -17,6 +17,6 @@ Open decisions and blockers:
 Replan reason, when applicable:
 ```
 
-States can be ready, blocked, running, candidate, accepted, or rejected. An item is
-accepted based on artifacts and verification; a successful process exit is not an
-acceptance criterion by itself. Omit branch/SHA fields in non-Git projects.
+Trạng thái có thể là ready, blocked, running, candidate, accepted hay rejected. Một hạng mục
+được accepted dựa trên artifact và kiểm chứng; riêng việc một process thoát thành công không
+phải là một tiêu chí nghiệm thu. Bỏ các field branch/SHA ở những project không dùng Git.

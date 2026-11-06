@@ -24,7 +24,7 @@ test('upgrade backs up original scaffold, enables routing, and preserves runtime
   assert.equal(await readFile(path.join(result.backup, '.alp/agents/main/AGENT.md'), 'utf8'), '# Main agent\n\nHelp with tasks in this project.\n');
   const main = await resolveAgent(root);
   assert.equal(main.source, 'builtin');
-  assert.match(main.instructions.agent, /active supervisor/);
+  assert.match(main.instructions.agent, /người giám sát chủ động/);
   assert.equal(await readFile(path.join(result.backup, '.alp/settings.json'), 'utf8'), '{"defaultAgent":"main","runtime":{"model":"my-model"}}');
   const settings = JSON.parse(await readFile(path.join(root, '.alp/settings.json'), 'utf8'));
   assert.equal(settings.runtime.model, 'my-model');

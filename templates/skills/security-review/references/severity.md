@@ -1,30 +1,31 @@
-# Severity Rubric and Report Template
+# Khung mức nghiêm trọng và mẫu báo cáo
 
-Read when rating findings and writing the security review report.
+Đọc khi xếp mức các phát hiện và viết báo cáo review bảo mật.
 
-## Rating
+## Xếp mức
 
-Rate by impact if exploited and by how reachable the issue is. Start from impact,
-then move one level down if exploitation needs rare preconditions, or up if it is
-trivially reachable by an unauthenticated attacker.
+Xếp theo tác động nếu bị khai thác và theo mức dễ với tới của vấn đề. Bắt đầu từ tác động, rồi
+hạ một mức nếu việc khai thác cần những điều kiện tiên quyết hiếm gặp, hoặc nâng một mức nếu
+một kẻ tấn công chưa xác thực với tới nó một cách dễ dàng.
 
-| Severity | Typical impact | Typical reachability |
+| Mức nghiêm trọng | Tác động điển hình | Mức dễ với tới điển hình |
 | --- | --- | --- |
-| critical | Remote code execution, full auth bypass, mass data exposure, live secret leaked | Unauthenticated or any user, no special conditions |
-| high | Privilege escalation, access to other users' data, injection into a privileged sink | Authenticated user or a common configuration |
-| medium | Limited data exposure, stored or reflected XSS, SSRF to limited targets, DoS of a component | Needs user interaction, specific config, or insider position |
-| low | Information disclosure with little value, missing hardening, defense-in-depth gap | Hard to reach or no direct exploit path |
+| critical | Thực thi code từ xa, lách hoàn toàn xác thực, lộ dữ liệu hàng loạt, rò một secret đang dùng thật | Chưa xác thực hoặc người dùng nào cũng được, không cần điều kiện đặc biệt |
+| high | Leo thang đặc quyền, truy cập dữ liệu của người dùng khác, injection vào một điểm tiêu có đặc quyền | Người dùng đã xác thực hoặc một cấu hình phổ biến |
+| medium | Lộ dữ liệu có giới hạn, XSS dạng lưu trữ hay phản chiếu, SSRF tới các đích hạn chế, DoS một thành phần | Cần người dùng tương tác, cần config cụ thể, hay cần ở vị trí nội bộ |
+| low | Tiết lộ thông tin ít giá trị, thiếu biện pháp làm cứng, khoảng trống phòng thủ theo lớp | Khó với tới hoặc không có đường khai thác trực tiếp |
 
-Confidence is separate from severity:
+Độ tự tin là chuyện tách riêng với mức nghiêm trọng:
 
-- confirmed: the path from untrusted input to sink is traced in code or shown by a
-  local test, and no control blocks it.
-- suspected: a plausible path with one or more unverified links; state which.
+- confirmed: đường từ input không đáng tin tới điểm tiêu đã được truy vết trong code hoặc được
+  chứng minh bằng một test cục bộ, và không có cơ chế kiểm soát nào chặn nó.
+- suspected: một đường hợp lý nhưng còn một hay nhiều mắt nối chưa kiểm chứng; hãy nêu rõ mắt
+  nào.
 
-Do not rate style issues or theoretical weaknesses with no path as findings; list
-them under hardening notes.
+Đừng xếp các vấn đề về phong cách hay các điểm yếu lý thuyết không có đường đi nào thành phát
+hiện; hãy liệt kê chúng dưới phần ghi chú làm cứng.
 
-## Report template
+## Mẫu báo cáo
 
 ```text
 Security review: <target (diff range, PR, component)>
@@ -53,4 +54,4 @@ Checked and clean
 Summary: <counts by severity>; blocking: <yes/no, which>
 ```
 
-Secrets are cited as path:line and type only ("AWS-style key"), never the value.
+Secret chỉ được dẫn bằng path:line và loại của nó ("AWS-style key"), không bao giờ dẫn giá trị.

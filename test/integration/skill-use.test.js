@@ -14,12 +14,12 @@ test('Claude gets the agent\'s skills to load as its own; Codex finds them in it
   assert.match(config.developerInstructions, /- curate \([^)]+[\\/]skills[\\/]curate[\\/]SKILL\.md\): Rà soát toàn bộ bài học/);
   assert.ok(config.skills.every(skill => skill.path.endsWith(path.join('/skills', skill.name, 'SKILL.md'))));
   assert.match(config.developerInstructions, /Your skills are also Claude Code skills named alp:<name>: run one with the Skill tool/);
-  assert.match(config.developerInstructions, /- xia \([^)]+[\\/]skills[\\/]xia[\\/]SKILL\.md\): Research an unfamiliar implementation/);
+  assert.match(config.developerInstructions, /- xia \([^)]+[\\/]skills[\\/]xia[\\/]SKILL\.md\): Nghiên cứu một implementation chưa quen/);
 
   const codex = await tree(t, { prefix: 'alp-skill-', open: { model: 'codex:gpt-5.6-sol' } });
   assert.equal(codex.main.config.skills, undefined);
   assert.doesNotMatch(codex.main.config.developerInstructions, /Claude Code skills/);
-  assert.match(codex.main.config.developerInstructions, /- smart-commits \([^)]+\): Package existing owned changes/);
+  assert.match(codex.main.config.developerInstructions, /- smart-commits \([^)]+\): Gói các thay đổi đã sở hữu/);
 });
 
 test('an agent using a skill is logged once per skill: by the Skill tool, or by reading its SKILL.md', async t => {

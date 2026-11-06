@@ -1,6 +1,6 @@
 {
   "label": "Backend",
-  "description": "Server-side features: API endpoints, service logic, auth integration, error handling, and database schema, migrations and queries.",
+  "description": "Tính năng phía server: API endpoint, logic service, tích hợp auth, xử lý lỗi, cùng schema database, migration và query.",
   "skills": ["backend-development", "databases"],
   "assign": { "lead": ["backend-development", "databases"], "peer": ["backend-development", "databases"] }
 }

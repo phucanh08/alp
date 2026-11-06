@@ -1,56 +1,56 @@
-# Compatibility Checklist
+# Danh sách kiểm tương thích
 
-Read when a refactor touches anything visible outside the module being changed.
+Đọc khi một lần refactor chạm tới bất cứ thứ gì thấy được từ bên ngoài module đang bị đổi.
 
-For each item that applies, record: what is exposed, who consumes it, how you
-checked, and the result (unchanged / changed with approved decision / shimmed).
+Với mỗi mục có áp dụng, hãy ghi lại: cái gì lộ ra, ai tiêu thụ nó, bạn kiểm bằng cách
+nào, và kết quả (không đổi / đã đổi kèm quyết định đã duyệt / đã đặt shim).
 
-## Public API and exported symbols
+## Public API và các symbol được export
 
-- Names, signatures, parameter order, defaults, optional vs required arguments.
-- Return types and shapes, including null/undefined and empty cases.
-- Thrown error types, codes, and messages that callers match on.
-- Sync vs async, callback vs promise, iteration order, laziness.
-- Re-exports and package entry points (`exports` maps, index files, public headers).
-- Type declarations shipped to consumers.
+- Tên, chữ ký, thứ tự tham số, giá trị mặc định, tham số tuỳ chọn so với bắt buộc.
+- Kiểu và hình dạng giá trị trả về, kể cả các ca null/undefined và rỗng.
+- Kiểu lỗi được ném ra, mã lỗi, và các thông điệp mà bên gọi đối sánh.
+- Sync so với async, callback so với promise, thứ tự lặp, tính lười.
+- Các lần re-export và entry point của package (map `exports`, file index, public header).
+- Các khai báo type giao cho bên tiêu thụ.
 
-## Config formats
+## Định dạng config
 
-- Keys, nesting, types, defaults, and precedence between sources.
-- Environment variable names and parsing.
-- Behavior for unknown or missing keys; old keys still accepted.
+- Khoá, mức lồng, kiểu, giá trị mặc định, và thứ tự ưu tiên giữa các nguồn.
+- Tên biến môi trường và cách phân tích chúng.
+- Hành vi với khoá lạ hay khoá thiếu; các khoá cũ có còn được nhận.
 
-## Persisted data
+## Dữ liệu đã lưu
 
-- On-disk files, database schemas, caches, and their serialization formats.
-- Field names, enum values, IDs, and ordering that readers depend on.
-- Data written by the old code must still be readable by the new code, and, if a
-  rollback is possible, the reverse.
+- File trên đĩa, schema cơ sở dữ liệu, cache, và định dạng serialize của chúng.
+- Tên field, giá trị enum, ID, và thứ tự mà bên đọc dựa vào.
+- Dữ liệu do code cũ ghi phải vẫn đọc được bằng code mới, và nếu có khả năng
+  rollback thì cả chiều ngược lại.
 
-## CLI flags and output
+## Cờ CLI và output
 
-- Flag names, aliases, short forms, argument order, exit codes.
-- Machine-readable output (JSON, tab-separated) that scripts parse.
-- Help text only if tests or docs assert it.
+- Tên cờ, bí danh, dạng ngắn, thứ tự tham số, mã thoát.
+- Output máy đọc được (JSON, phân cách bằng tab) mà script phân tích.
+- Chữ trợ giúp chỉ tính khi có test hay tài liệu khẳng định nó.
 
-## Protocol and wire formats
+## Protocol và định dạng trên đường truyền
 
-- Message types, field names, versions, and negotiation.
-- HTTP routes, methods, status codes, headers, and payloads.
-- Events and their names, payloads, and ordering guarantees.
+- Kiểu message, tên field, version, và cách thương lượng.
+- Route HTTP, method, mã trạng thái, header, và payload.
+- Event cùng tên, payload, và các bảo đảm về thứ tự của chúng.
 
-## Finding consumers
+## Tìm bên tiêu thụ
 
-- Search for symbol names, string keys, file names, and route paths across the repo,
-  including tests, scripts, docs, examples, and generated code.
-- Check dynamic access: reflection, string-built imports, routing tables, plugin
-  registries, serialization by field name.
-- Consumers outside the repo (published packages, other services, user configs)
-  cannot be searched: treat their surface as frozen unless a decision says otherwise.
+- Tìm tên symbol, khoá chuỗi, tên file và đường dẫn route trên toàn repo,
+  kể cả test, script, tài liệu, ví dụ, và code sinh ra.
+- Kiểm các lần truy cập động: reflection, import dựng bằng chuỗi, bảng định tuyến, sổ
+  đăng ký plugin, serialize theo tên field.
+- Bên tiêu thụ ngoài repo (package đã publish, service khác, config của người dùng)
+  không tìm được: hãy coi bề mặt của họ là đã đóng băng, trừ khi có quyết định nói khác.
 
-## When something must change
+## Khi buộc phải đổi một thứ
 
-- Prefer an additive change: keep the old name or format as a shim that delegates
-  to the new one, with a deprecation note.
-- If removal is required, stop and route the decision upward with the consumer list
-  and a migration path. Record the approved decision in an ADR or task note.
+- Ưu tiên một thay đổi dạng thêm vào: giữ tên hay định dạng cũ như một shim chuyển tiếp
+  sang cái mới, kèm một ghi chú khai tử dần.
+- Nếu buộc phải xoá, hãy dừng và chuyển quyết định lên trên kèm danh sách bên tiêu thụ
+  và một đường migration. Ghi lại quyết định đã duyệt vào một ADR hay note của task.

@@ -1,86 +1,86 @@
-# Data Fetching
+# Lấy dữ liệu
 
-Read when loading, caching, mutating, or refreshing server data, or handling races.
+Đọc khi tải, cache, thay đổi, hoặc làm mới dữ liệu server, hoặc khi xử lý tranh chấp.
 
-Use the project's existing mechanism: framework loaders or server components, a
-query-cache library (TanStack Query, SWR, Apollo, RTK Query are examples), or plain
-fetch wrapped in a shared client. Do not add a second one.
+Dùng cơ chế đang có của dự án: loader hay server component của framework, một thư viện
+query-cache (TanStack Query, SWR, Apollo, RTK Query là các ví dụ), hoặc fetch thuần
+gói trong một client dùng chung. Không thêm cơ chế thứ hai.
 
-## Every request has four states
+## Mọi request đều có bốn trạng thái
 
-- Loading: show a skeleton or spinner sized like the final content to avoid layout
-  shift. For quick loads, delay the indicator briefly to avoid flashing.
-- Error: show a useful message and a retry action. Distinguish "not found",
-  "not allowed", "offline", and "server error" when the API allows. Do not show raw
-  error objects or stack traces.
-- Empty: a distinct state with guidance or an action, not a blank area.
-- Success: render data; keep previous data visible during background refresh rather
-  than flashing back to loading.
+- Loading: hiện skeleton hoặc spinner có kích thước như nội dung cuối để tránh dịch
+  layout. Với lần tải nhanh, hoãn chỉ báo một chút để nó không nháy.
+- Lỗi: hiện một thông báo có ích và một hành động thử lại. Phân biệt "không tìm thấy",
+  "không được phép", "offline", và "lỗi server" khi API cho phép. Không hiện object
+  lỗi thô hay stack trace.
+- Rỗng: một trạng thái riêng kèm hướng dẫn hoặc một hành động, không phải một vùng trắng.
+- Thành công: render dữ liệu; giữ dữ liệu trước đó hiển thị trong lúc làm mới ở nền thay vì
+  nháy trở về trạng thái loading.
 
-Also consider partial data (some sections failed) and stale data (shown while
-refreshing).
+Cũng hãy tính tới dữ liệu một phần (một số mục bị lỗi) và dữ liệu cũ (hiện ra trong lúc
+đang làm mới).
 
-## Where to fetch
+## Fetch ở đâu
 
-- Prefer route-level or server-side loading when the framework supports it, so data
-  starts loading with navigation and waterfalls are avoided.
-- Start independent requests in parallel; do not chain them in nested components
-  unless one depends on another.
-- Do not fetch in render. In client components use the cache library or an effect
-  with cleanup.
-- Keep the API client in one module: base URL, auth headers or cookies, JSON
-  parsing, and error normalization.
+- Ưu tiên tải ở cấp route hoặc phía server khi framework hỗ trợ, để dữ liệu
+  bắt đầu tải cùng lúc với điều hướng và tránh được thác nước request.
+- Khởi động các request độc lập song song; không xâu chúng lại trong các component lồng nhau
+  trừ khi cái này phụ thuộc cái kia.
+- Không fetch trong lúc render. Ở client component hãy dùng thư viện cache hoặc một effect
+  có dọn dẹp.
+- Giữ API client trong một module: base URL, header hay cookie auth, parse JSON,
+  và chuẩn hóa lỗi.
 
-## Caching
+## Cache
 
-- Key cached data by everything that affects the response (resource, ID, filters,
-  page, user or tenant).
-- Decide freshness per resource: how long data counts as fresh, and when to refetch
-  (focus, reconnect, interval, explicit invalidation).
-- Invalidate or update affected keys after a mutation; do not leave lists stale
-  after a create or delete.
-- Clear user-specific cache on logout or account switch.
-- Respect HTTP caching headers the backend already sets; do not cache personalized
-  responses in shared caches.
+- Đặt key cho dữ liệu cache theo mọi thứ ảnh hưởng tới phản hồi (tài nguyên, ID, filter,
+  trang, người dùng hay tenant).
+- Quyết định độ tươi cho từng tài nguyên: dữ liệu được coi là tươi trong bao lâu, và khi nào fetch lại
+  (khi focus, khi kết nối lại, theo chu kỳ, hoặc khi vô hiệu tường minh).
+- Vô hiệu hoặc cập nhật các key bị ảnh hưởng sau một mutation; không để danh sách còn cũ
+  sau khi tạo hay xóa.
+- Xóa cache riêng của người dùng khi logout hoặc đổi tài khoản.
+- Tôn trọng các header cache HTTP mà backend đã đặt; không cache những phản hồi mang tính
+  cá nhân vào cache dùng chung.
 
-## Race conditions
+## Tranh chấp (race condition)
 
-- A slower earlier response must not overwrite a newer one. Cancel the previous
-  request (AbortController or the library's cancellation) or ignore results whose
-  key no longer matches the current input.
-- Debounce search-as-you-type and cancel in-flight requests on new input.
-- Ignore results after unmount; clean up subscriptions and abort in-flight requests.
-- Guard against double submission of mutations: disable while pending, and send an
-  idempotency key if the API supports it.
+- Một phản hồi đến trước nhưng chậm hơn không được ghi đè lên phản hồi mới hơn. Hãy hủy request
+  trước đó (AbortController hoặc cơ chế hủy của thư viện) hoặc bỏ qua kết quả có key
+  không còn khớp với dữ liệu nhập hiện tại.
+- Debounce việc tìm kiếm khi đang gõ và hủy các request đang bay khi có dữ liệu nhập mới.
+- Bỏ qua kết quả sau khi unmount; dọn subscription và abort các request đang bay.
+- Chặn việc submit mutation hai lần: vô hiệu hóa khi đang chờ, và gửi một
+  idempotency key nếu API hỗ trợ.
 
-## Mutations
+## Mutation
 
-- Show pending state on the control that triggered the mutation.
-- Optimistic updates only when failure is rare and reversible; roll back on error
-  and tell the user.
-- On validation errors from the server, map them to fields.
-- After success, update or invalidate the cache, then move focus or announce the
-  result for assistive technology.
+- Hiện trạng thái đang chờ trên chính control đã khởi động mutation đó.
+- Chỉ cập nhật lạc quan khi thất bại là hiếm và đảo lại được; hoàn tác khi lỗi
+  và nói cho người dùng biết.
+- Khi server trả lỗi validate, hãy map chúng về từng field.
+- Sau khi thành công, cập nhật hoặc vô hiệu cache, rồi chuyển focus hoặc thông báo
+  kết quả cho công nghệ trợ giúp.
 
-## Errors and retries
+## Lỗi và thử lại
 
-- Retry automatically only idempotent reads, with a small bound and backoff. Do not
-  auto-retry mutations unless they are idempotent.
-- Handle 401 in one place (refresh or redirect to login per project convention).
-- Use the framework's error boundary or error route for unexpected failures so one
-  broken widget does not blank the page.
-- Report errors through the project's existing monitoring, without personal data or
-  tokens.
+- Chỉ tự động thử lại các lần đọc idempotent, với giới hạn nhỏ và có backoff. Không
+  tự động thử lại mutation trừ khi chúng idempotent.
+- Xử lý 401 ở một chỗ duy nhất (refresh hoặc chuyển tới trang login theo quy ước của dự án).
+- Dùng error boundary hoặc route lỗi của framework cho những lỗi bất ngờ, để một
+  widget vỡ không làm trắng cả trang.
+- Báo lỗi qua hệ thống giám sát đang có của dự án, không kèm dữ liệu cá nhân hay
+  token.
 
-## Security
+## Bảo mật
 
-- Never embed secrets or private API keys in client code; route through the
+- Không bao giờ nhúng secret hay API key riêng vào code client; hãy đi qua
   backend.
-- Send credentials only to the project's own origins.
-- Do not trust client-side checks for authorization; the server enforces it.
+- Chỉ gửi thông tin đăng nhập tới các origin của chính dự án.
+- Không tin các kiểm tra phía client về phân quyền; server mới là nơi thực thi.
 
-## Testing notes
+## Ghi chú về test
 
-- Mock the network at the HTTP layer (the project's request-mocking tool) rather
-  than mocking the cache library internals.
-- Test each of the four states and a slow-then-fast race for search inputs.
+- Mock mạng ở tầng HTTP (công cụ mock request của dự án) chứ không
+  mock phần bên trong của thư viện cache.
+- Test cả bốn trạng thái và một tình huống chậm-rồi-nhanh cho các input tìm kiếm.

@@ -110,7 +110,7 @@ test('in the Blueprint team, main delegating to the architect gets a read-only a
   assert.equal(advice.mode, 'read-only');
   assert.match(advice.modeNote, /architect runs read-only: its permission profile read-only caps it/);
   await until(() => agents.length === 2, 'the architect');
-  assert.match(agents[1].config.developerInstructions, /# Architect — read-only architecture advisor/);
+  assert.match(agents[1].config.developerInstructions, /# Architect — cố vấn kiến trúc chỉ đọc/);
   assert.match(agents[1].config.developerInstructions, /- feature-architecture \(/);
   // Main itself never delegates to docs-maintainer in Blueprint: that is lead's member.
   assert.match((await main.call('alp_delegate', { agent: 'docs-maintainer', task: 'Docs', wait: false })).error ?? '', /unauthorized target/);

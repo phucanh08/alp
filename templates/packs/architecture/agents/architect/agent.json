@@ -1,5 +1,5 @@
 {
-  "description": "Read-only architecture advisor: boilerplate fit, dependency direction, ADR recommendations",
+  "description": "Cố vấn kiến trúc chỉ đọc: độ phù hợp với boilerplate, hướng phụ thuộc, khuyến nghị ADR",
   "mode": "read-only",
   "skills": ["feature-architecture", "architecture-docs"]
 }

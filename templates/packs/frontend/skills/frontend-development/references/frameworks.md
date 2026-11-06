@@ -1,77 +1,77 @@
-# Frameworks, Rendering, and Routing
+# Framework, render, và routing
 
-Read when choosing SSR, SSG, or CSR, server or client components, or routing
-placement.
+Đọc khi chọn SSR, SSG, hay CSR, server hay client component, hoặc chỗ đặt
+routing.
 
-Framework conventions change between major versions. Identify the exact framework
-and version from `package.json` and the lockfile, follow the conventions that
-version uses, and check its official docs (or the installed package's docs and
-types) before relying on an API. If the project mixes old and new conventions (for
-example a pages router and an app router), follow the one used by the area you are
-changing and do not migrate it unasked.
+Quy ước của framework đổi giữa các bản major. Hãy xác định đúng framework
+và phiên bản từ `package.json` và lockfile, theo quy ước của chính
+phiên bản đó, và xem tài liệu chính thức của nó (hoặc tài liệu và type của package đã
+cài) trước khi dựa vào một API. Nếu dự án trộn quy ước cũ và mới (ví
+dụ vừa pages router vừa app router), hãy theo cái đang dùng ở vùng bạn
+đang sửa và không tự ý chuyển đổi nó.
 
-## Rendering modes
+## Các chế độ render
 
-| Mode | Renders | Good for | Costs |
+| Chế độ | Render ở đâu | Phù hợp cho | Cái giá |
 | --- | --- | --- | --- |
-| CSR (client-side) | in the browser | app-like screens behind login | slower first paint, SEO depends on crawler |
-| SSR (per request) | on the server each request | personalized or fresh content, SEO | server cost, latency per request |
-| SSG (build time) | once at build | stable content, docs, marketing | rebuild or revalidate to update |
-| Incremental / revalidated static | at build, refreshed on a schedule or trigger | mostly static content that changes | staleness window |
-| Streaming / partial | server streams parts as ready | slow sections on fast shells | more complex loading states |
+| CSR (phía client) | trong browser | màn hình dạng app sau khi đăng nhập | first paint chậm hơn, SEO tùy crawler |
+| SSR (mỗi request) | trên server mỗi request | nội dung cá nhân hóa hay tươi mới, SEO | tốn server, có độ trễ mỗi request |
+| SSG (lúc build) | một lần khi build | nội dung ổn định, tài liệu, marketing | phải build lại hoặc revalidate để cập nhật |
+| Static tăng dần / có revalidate | khi build, làm mới theo chu kỳ hay theo trigger | nội dung phần lớn tĩnh nhưng có đổi | có khoảng thời gian dữ liệu cũ |
+| Streaming / một phần | server stream từng phần khi sẵn sàng | phần chậm trên bộ khung nhanh | trạng thái loading phức tạp hơn |
 
-- Match the mode the surrounding routes use unless the brief requires a change.
-- Changing the rendering mode of a route affects caching, hosting, and SEO; route
-  that decision upward.
+- Theo đúng chế độ mà các route xung quanh đang dùng, trừ khi brief yêu cầu đổi.
+- Đổi chế độ render của một route ảnh hưởng tới cache, hosting, và SEO; hãy chuyển
+  quyết định đó lên trên.
 
-## Server and client components
+## Server component và client component
 
-Applies to frameworks with a server/client split (React Server Components in
-Next.js app router and similar; analogous concepts in Nuxt, SvelteKit, Astro islands).
+Áp dụng cho framework có tách server/client (React Server Component trong
+app router của Next.js và tương tự; khái niệm tương đương ở Nuxt, SvelteKit, island của Astro).
 
-- Server components: fetch data, read server-only config, render static markup,
-  ship no component JS. They cannot use client state, effects, or browser APIs.
-- Client components: interactivity, state, effects, browser APIs. Mark them as the
-  framework requires (for example a `"use client"` directive) as low in the tree as
-  possible so most markup stays server-rendered.
-- Props passed from server to client must be serializable; do not pass functions or
-  class instances.
-- Never import server-only modules (database clients, secrets) into client code.
-  Use the framework's server-only guard if it has one.
-- Server actions or form actions are public endpoints: validate input and check
-  authorization in them as in any API.
+- Server component: fetch dữ liệu, đọc config chỉ có ở server, render markup tĩnh,
+  không gửi JS của component. Chúng không dùng được state client, effect, hay API browser.
+- Client component: tính tương tác, state, effect, API browser. Đánh dấu chúng theo
+  cách framework yêu cầu (ví dụ chỉ thị `"use client"`) ở vị trí càng thấp trong cây càng
+  tốt, để phần lớn markup vẫn được render ở server.
+- Props truyền từ server sang client phải serialize được; không truyền hàm hay
+  instance của class.
+- Không bao giờ import module chỉ dành cho server (client database, secret) vào code client.
+  Dùng cơ chế chặn server-only của framework nếu nó có.
+- Server action hay form action là endpoint công khai: hãy validate dữ liệu nhập và kiểm tra
+  phân quyền trong chúng như với bất kỳ API nào.
 
 ## Hydration
 
-- Server and client must render the same initial markup. Avoid render-time use of
-  `Date.now()`, random values, `window`, or locale-dependent formatting without a
-  stable input.
-- Read browser-only values after mount, or render them only on the client through
-  the framework's mechanism.
-- Treat hydration warnings as bugs.
+- Server và client phải render ra cùng một markup ban đầu. Tránh dùng khi render các thứ như
+  `Date.now()`, giá trị ngẫu nhiên, `window`, hay định dạng phụ thuộc locale mà không có
+  dữ liệu nhập ổn định.
+- Đọc các giá trị chỉ có ở browser sau khi mount, hoặc chỉ render chúng ở client qua
+  cơ chế của framework.
+- Coi cảnh báo hydration là bug.
 
-## Routing conventions
+## Quy ước routing
 
-- Follow the project's routing system: file-based (Next.js, Nuxt, SvelteKit, Remix
-  or React Router framework mode) or config-based (React Router, Vue Router).
-- Put data loading where the framework expects it (loaders, server components,
-  `load` functions, route guards) to avoid client waterfalls.
-- Use the framework's link component for internal navigation so prefetching and
-  client transitions work.
-- Use route-level loading, error, and not-found handling that the framework provides.
-- Keep URL state (filters, pagination, tabs) in params or query strings.
-- Protect routes on the server (middleware, loaders) as well as in the UI; client
-  redirects alone do not secure data.
+- Theo hệ thống routing của dự án: dựa trên file (Next.js, Nuxt, SvelteKit, Remix
+  hay React Router ở chế độ framework) hoặc dựa trên config (React Router, Vue Router).
+- Đặt phần tải dữ liệu ở nơi framework mong đợi (loader, server component,
+  hàm `load`, route guard) để tránh thác nước request ở client.
+- Dùng component link của framework cho điều hướng nội bộ, để prefetch và
+  chuyển trang ở client hoạt động.
+- Dùng cơ chế xử lý loading, lỗi, và không-tìm-thấy ở cấp route mà framework cung cấp.
+- Giữ state thuộc URL (filter, phân trang, tab) trong tham số hoặc query string.
+- Bảo vệ route ở server (middleware, loader) chứ không chỉ ở UI; chỉ redirect
+  ở client thì không bảo vệ được dữ liệu.
 
-## Environment and config
+## Môi trường và config
 
-- Public env variables (prefixes such as `NEXT_PUBLIC_` or `VITE_`) are embedded in
-  the client bundle; never put secrets in them.
-- Respect the project's build output (static export, Node server, edge runtime);
-  runtime APIs differ between them.
+- Biến env công khai (tiền tố như `NEXT_PUBLIC_` hay `VITE_`) được nhúng vào
+  bundle client; không bao giờ đặt secret vào chúng.
+- Tôn trọng dạng output build của dự án (static export, Node server, edge runtime);
+  API lúc chạy khác nhau giữa chúng.
 
-## When unsure
+## Khi không chắc
 
-- Find the closest existing route that does the same kind of thing and mirror it.
-- If docs for the installed version contradict memory or examples, follow the docs
-  and note the difference in the handoff.
+- Tìm route đang có gần nhất làm cùng loại việc đó và làm theo nó.
+- Nếu tài liệu của phiên bản đã cài trái với ký ức hay với ví dụ, hãy theo tài liệu
+  và ghi lại khác biệt đó trong handoff.

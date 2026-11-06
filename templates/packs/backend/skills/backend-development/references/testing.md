@@ -1,81 +1,81 @@
-# Backend Testing
+# Test backend
 
-Read when choosing handler, service, integration, or contract tests for a backend
-change. What to test overall belongs to test-strategy; this covers how at each seam.
+Đọc khi chọn test handler, service, integration, hay contract cho một thay đổi
+backend. Việc cần test những gì nói chung thuộc test-strategy; đây nói về cách làm ở từng seam.
 
-Use the project's existing test runner, fixtures, and helpers (for example Jest or
-Vitest for Node/TypeScript, pytest for Python, `go test` for Go). Do not add a test
-framework or container tool without the owner's decision.
+Dùng test runner, fixture và helper hiện có của dự án (ví dụ Jest hay Vitest cho
+Node/TypeScript, pytest cho Python, `go test` cho Go). Đừng thêm framework test hay
+công cụ container mà không có quyết định của owner.
 
-## Choose the seam
+## Chọn seam
 
-| Seam | Proves | Substitute |
+| Seam | Chứng minh | Thay thế bằng |
 | --- | --- | --- |
-| Service / domain unit | business rules, edge cases, error mapping | fakes for store, clock, clients |
-| Handler / route | parsing, validation, status codes, auth wiring, error shape | in-process server; service real or faked |
-| Integration | queries, transactions, constraints, migrations | real database of the same engine |
-| Contract | request and response shape agreed with a consumer or provider | recorded or schema-based contract |
-| End to end | a critical flow across processes | test environment only |
+| Unit service / nghiệp vụ | quy tắc nghiệp vụ, ca biên, map lỗi | fake cho store, clock, client |
+| Handler / route | parsing, validation, status code, nối auth, hình dạng lỗi | server in-process; service thật hoặc fake |
+| Integration | truy vấn, transaction, constraint, migration | database thật cùng engine |
+| Contract | hình dạng request và response đã thống nhất với bên tiêu thụ hoặc bên cung cấp | contract đã ghi lại hoặc dựa trên schema |
+| Đầu-cuối | một luồng quan trọng xuyên nhiều process | chỉ trong môi trường test |
 
-Put most cases at the cheapest seam that still exercises the real cause. A query
-bug needs the real database engine; a validation rule does not.
+Đặt phần lớn các ca ở seam rẻ nhất mà vẫn chạy qua nguyên nhân thật. Một bug truy vấn
+cần engine database thật; một quy tắc validation thì không.
 
-## Service tests
+## Test service
 
-- Inject dependencies (store, clock, ID generator, outbound clients) so tests control
-  them. A hand-written fake with real behavior beats a mock that only records calls.
-- Cover each contract case: success, each domain error, boundary values, and
-  idempotent replay.
-- Freeze time and randomness rather than sleeping or asserting ranges.
+- Tiêm dependency (store, clock, bộ sinh ID, client gọi ra ngoài) để test kiểm soát
+  được chúng. Một fake viết tay có hành vi thật hơn một mock chỉ ghi lại lời gọi.
+- Phủ từng ca của contract: thành công, từng lỗi nghiệp vụ, giá trị biên, và việc
+  chạy lại idempotent.
+- Đóng băng thời gian và ngẫu nhiên thay vì sleep hay assert theo khoảng.
 
-## Handler tests
+## Test handler
 
-- Drive the handler through the framework's in-process test client (for example
-  supertest-style requests, FastAPI or Django test clients, `httptest` in Go).
-- Assert status, the error code, and the important body fields; avoid asserting the
-  whole body when only a few fields are contractual.
-- Test authentication and authorization paths: missing credentials, wrong user,
-  wrong tenant, sufficient role.
-- Test validation failures, including oversized and unknown fields.
+- Chạy handler qua test client in-process của framework (ví dụ request kiểu
+  supertest, test client của FastAPI hay Django, `httptest` trong Go).
+- Assert status, code lỗi, và các field body quan trọng; tránh assert toàn bộ body
+  khi chỉ vài field là thuộc contract.
+- Test các đường authentication và authorization: thiếu credential, sai user, sai
+  tenant, role đủ quyền.
+- Test các ca validation thất bại, kể cả field quá lớn và field không biết.
 
-## Integration tests with a real database
+## Test integration với database thật
 
-- Use the same engine and major version as production. SQLite does not stand in for
-  PostgreSQL or MySQL behavior (types, locking, constraint errors).
-- Run it the way the project already does: a test container, a local service, or a
-  CI service. If none exists, propose one; do not install it.
-- Apply the real migrations to the test database, not a hand-written schema.
-- Isolate tests: a transaction rolled back per test, a fresh schema per worker, or
-  truncation between tests. Do not depend on test order.
-- Seed only the data a test needs, via factories or builders, inside the test.
-- Never point tests at a shared or production database.
+- Dùng cùng engine và cùng major version như production. SQLite không thay được cho
+  hành vi của PostgreSQL hay MySQL (kiểu dữ liệu, locking, lỗi constraint).
+- Chạy nó theo cách dự án đã làm: một test container, một service local, hay một
+  service trong CI. Nếu chưa có, hãy đề xuất; đừng tự cài.
+- Áp migration thật lên database test, không dùng schema viết tay.
+- Cô lập các test: một transaction được rollback mỗi test, một schema mới mỗi worker,
+  hay truncate giữa các test. Đừng phụ thuộc thứ tự test.
+- Chỉ seed dữ liệu mà một test cần, qua factory hoặc builder, ngay trong test đó.
+- Đừng bao giờ trỏ test vào database dùng chung hay production.
 
-## Outbound dependencies
+## Dependency gọi ra ngoài
 
-- Fake third-party HTTP at the client boundary (a local stub server or the
-  project's HTTP mocking tool). Do not call real external services in tests.
-- Test timeout and error responses from the dependency, not only success.
-- Use test credentials or dummy values; never real keys.
+- Fake HTTP của bên thứ ba ở biên client (một stub server local hoặc công cụ mock
+  HTTP của dự án). Đừng gọi service bên ngoài thật trong test.
+- Test cả response timeout và lỗi từ dependency, không chỉ thành công.
+- Dùng credential test hoặc giá trị giả; đừng bao giờ dùng key thật.
 
-## Background jobs
+## Background job
 
-- Run the handler directly with a message; assert the effect.
-- Run it twice with the same message; assert no duplicate effect.
-- Make the handler fail; assert the retry count and the terminal failure state.
+- Chạy handler trực tiếp với một message; assert hiệu ứng.
+- Chạy nó hai lần với cùng message; assert không có hiệu ứng lặp.
+- Làm handler fail; assert số lần retry và trạng thái thất bại cuối.
 
-## Contract tests
+## Test contract
 
-- When another team or service consumes the API, verify the shape against the
-  agreed schema (OpenAPI, protobuf, JSON Schema) or consumer contracts, using the
-  project's existing tool.
-- A contract test failing on your change means a breaking change; route the
-  decision upward rather than updating the contract to pass.
+- Khi một team hay service khác tiêu thụ API, hãy kiểm tra hình dạng đối chiếu với
+  schema đã thống nhất (OpenAPI, protobuf, JSON Schema) hoặc consumer contract, dùng
+  công cụ hiện có của dự án.
+- Một test contract fail vì thay đổi của bạn nghĩa là một thay đổi phá vỡ; hãy chuyển
+  quyết định lên thay vì sửa contract cho pass.
 
-## Hygiene
+## Vệ sinh
 
-- No sleeps for synchronization; wait on a condition or use a controllable clock.
-- No real secrets, personal data, or production dumps in fixtures.
-- A new test must fail without the change. If it passes before the fix, it does not
-  prove the change (see bug-loop).
-- Keep test runtime proportional; mark slow integration tests the way the project
-  already does.
+- Không sleep để đồng bộ; hãy chờ một điều kiện hoặc dùng clock điều khiển được.
+- Không secret thật, dữ liệu cá nhân, hay dump production trong fixture.
+- Một test mới phải fail khi chưa có thay đổi. Nếu nó pass trước khi sửa, nó không
+  chứng minh được thay đổi (xem bug-loop).
+- Giữ thời gian chạy test tương xứng; đánh dấu các test integration chậm theo cách dự
+  án đã làm.

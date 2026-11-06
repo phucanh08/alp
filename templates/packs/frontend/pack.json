@@ -1,6 +1,6 @@
 {
   "label": "Frontend",
-  "description": "UI features in component frameworks: structure, state, data fetching, SSR frameworks, performance and accessibility.",
+  "description": "Tính năng UI trong các framework component: cấu trúc, state, lấy dữ liệu, framework SSR, hiệu năng và khả năng tiếp cận.",
   "skills": ["frontend-development"],
   "assign": { "lead": ["frontend-development"], "peer": ["frontend-development"] }
 }
