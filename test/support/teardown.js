@@ -47,7 +47,12 @@ export function teardown(t) {
       try { await steps.pop()(); } catch (error) { errors.push(error); }
     }
     if (errors.length === 1) throw errors[0];
-    if (errors.length) throw new AggregateError(errors, 'teardown failed');
+    // Name every failure in the message itself: Node 22's reporter prints an AggregateError's
+    // message but not its .errors, so otherwise only the newer reporters show which steps failed.
+    if (errors.length) {
+      const messages = errors.map(error => (error instanceof Error ? error.message : String(error)));
+      throw new AggregateError(errors, `teardown failed: ${messages.join('; ')}`);
+    }
   });
   const defer = step => { steps.push(step); };
   handles.set(t, defer);
