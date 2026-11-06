@@ -18,7 +18,7 @@
 import { spawnSync } from 'node:child_process';
 import { spawnCommand } from './spawn-command.mjs';
 import { LAUNCHER, releaseArtifacts } from './release-lib.mjs';
-import { checkPaseoNpmSource, describe as describePaseoSource } from './paseo-source-check.mjs';
+import { checkPaseoNpmSource, describe as describePaseoSource, exitDescription } from './paseo-source-check.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -34,7 +34,7 @@ function run(command, args, options = {}) {
   const result = spawnSync(...spawnCommand(command, args), { cwd: options.cwd ?? root, encoding: 'utf8', stdio: options.capture ? 'pipe' : 'inherit', maxBuffer: 128 * 1024 * 1024 });
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
   if (options.allowFailure) return { status: result.status, output };
-  if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} exited ${result.status}${output ? `\n${output}` : ''}`);
+  if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} ${exitDescription(result)}${output ? `\n${output}` : ''}`);
   return output;
 }
 
@@ -197,7 +197,7 @@ console.log('plugin runtime imports ok');
     cwd: pluginDir, stdio: 'inherit', timeout: 180_000,
     env: { ...process.env, ALP_HOME: path.join(pluginDir, 'home'), NODE_PATH: '' },
   });
-  if (regression.status !== 0) throw new Error(`installed plugin regressions failed: ${regression.status}`);
+  if (regression.status !== 0) throw new Error(`installed plugin regressions failed: ${exitDescription(regression)}`);
 
   // 3. The plugin as Paseo installs an npm: source: no peers, so no shipped type import may need one.
   console.log(describePaseoSource(await checkPaseoNpmSource({ plugin: tarballs.get('@anhlp/alp-paseo'), dependencies: coreTarballs, work })));

@@ -18,6 +18,8 @@ import { spawnCommand } from './spawn-command.mjs';
 import { installedProblems, shippedWebProblems, verifyRelease } from './release-lib.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
+// The start error, signal or exit status of a finished spawnSync (its output went to this terminal).
+const exitDescription = result => result.error ? `failed to start: ${result.error.message}` : result.signal ? `was killed by ${result.signal}` : `exited ${result.status}`;
 const args = process.argv.slice(2);
 const flag = name => { const index = args.indexOf(name); if (index >= 0) args.splice(index, 1); return index >= 0; };
 const rehearsal = flag('--rehearsal');
@@ -39,7 +41,7 @@ const work = mkdtempSync(path.join(os.tmpdir(), 'alp-release-consumer-'));
 try {
   writeFileSync(path.join(work, 'package.json'), `${JSON.stringify({ name: 'alp-release-consumer', private: true, version: '0.0.0', type: 'module' }, null, 2)}\n`);
   const install = spawnSync(...spawnCommand('npm', ['install', '--save-exact', '--ignore-scripts', '--no-audit', '--no-fund', '--legacy-peer-deps', ...before.artifacts.map(artifact => artifact.file)]), { cwd: work, stdio: 'inherit' });
-  if (install.status !== 0) throw new Error(`npm install of the saved tarballs exited ${install.status}`);
+  if (install.status !== 0) throw new Error(`npm install of the saved tarballs ${exitDescription(install)}`);
   const problems = installedProblems(JSON.parse(readFileSync(path.join(work, 'package-lock.json'), 'utf8')), before.manifest);
   if (problems.length) throw new Error(`the consumer did not install the saved tarballs:\n- ${problems.join('\n- ')}`);
   console.log(`[release-consumer] installed the ${before.artifacts.length} saved tarballs; lockfile integrity matches ${path.basename(directory)}/release-manifest.json`);
@@ -50,7 +52,7 @@ if (!installOnly) {
   for (const script of ['tarball-consumer.mjs', 'package-smoke.mjs']) {
     console.log(`\n[release-consumer] ${script} --packs ${directory}`);
     const result = spawnSync(process.execPath, [path.join(root, 'scripts', script), '--packs', directory], { cwd: root, stdio: 'inherit' });
-    if (result.status !== 0) throw new Error(`${script} on the saved tarballs exited ${result.status}`);
+    if (result.status !== 0) throw new Error(`${script} on the saved tarballs ${exitDescription(result)}`);
   }
 }
 const after = verified('after the consumer checks');
