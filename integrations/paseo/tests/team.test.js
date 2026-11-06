@@ -6,6 +6,7 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { createProvider } from '@anhlp/alp-paseo';
 import { PROVIDER_CAPABILITIES, ProviderEventSchema } from '@getpaseo/plugin/server/provider';
+import { teardown } from '../../../test/support/teardown.js';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 async function until(check) {
@@ -14,9 +15,12 @@ async function until(check) {
 }
 async function setup(t, options = {}) {
   // The runtime's watchdog is unref'd; keep the loop alive while a test waits on it (Node 22 cancels otherwise).
+  const defer = teardown(t);
   const alive = setInterval(() => {}, 1000);
-  t.after(() => clearInterval(alive));
+  defer(() => clearInterval(alive));
   const root = await mkdtemp(path.join(tmpdir(), 'alp-team-'));
+  // Undone LAST: teardown runs the steps in reverse, so everything living in here is released first.
+  defer(() => rm(root, { recursive: true, force: true }));
   await initProject(root);
   await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify(options.workflow ? { workflow: { mode: options.workflow, maxPeers: options.maxPeers ?? 2, supervisor: options.supervisor ?? false } } : { delegation: options.delegation ?? { main: ['lead'], lead: ['peer'] } }));
   const runtimes = [];
@@ -54,9 +58,7 @@ async function setup(t, options = {}) {
     runtimes.push(runtime); return runtime;
   } });
   const connection = await provider.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
-  t.after(() => connection.close());
-  // After hooks run in the order they are added: remove the files only once that has stopped.
-  t.after(() => rm(root, { recursive: true, force: true }));
+  defer(() => connection.close());
   const events = [];
   connection.onEvent(event => { ProviderEventSchema.parse(event); events.push(event); });
   const config = { cwd: root, env: {}, mcpServers: {}, settings: {}, persist: true, mode: options.mode ?? 'read-only' };
@@ -311,8 +313,9 @@ test('interrupt closes both concurrent peers and releases their handoffs', async
 });
 
 test('child files a structured handoff; parent gets it with only the final message', async t => {
+  const defer = teardown(t);
   const runLogDir = await mkdtemp(path.join(tmpdir(), 'alp-runs-'));
-  t.after(() => rm(runLogDir, { recursive: true, force: true }));
+  defer(() => rm(runLogDir, { recursive: true, force: true }));
   const { runtimes, root } = await setup(t, { workflow: 'pho', runLogDir });
   const result = runtimes[0].tool('peer', 'Read proof.txt', {}, 'peer-call');
   await until(() => runtimes[1]?.calls.some(c => c.method === 'turn/start'));
@@ -440,8 +443,9 @@ test('mail reaches a busy parent by steering its running turn', async t => {
 });
 
 test('an idle parent is woken by mail, without resetting its per-turn limits', async t => {
+  const defer = teardown(t);
   const runLogDir = await mkdtemp(path.join(tmpdir(), 'alp-runs-'));
-  t.after(() => rm(runLogDir, { recursive: true, force: true }));
+  defer(() => rm(runLogDir, { recursive: true, force: true }));
   const { runtimes, events } = await setup(t, { workflow: 'pho', runLogDir });
   decode(await runtimes[0].tool('peer', 'Work', { wait: false }, 'async'));
   await started(runtimes, 1);

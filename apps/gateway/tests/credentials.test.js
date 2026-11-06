@@ -12,22 +12,25 @@ import * as credentials from '../src/credentials.js';
 import { fakeDaemon } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
 import { CredentialStore, TicketBook, createCredential, createGatewayLogger, credentialsFile, listCredentials, parseToken, revokeCredential, rotateCredential, scrubGatewaySecrets } from '../src/index.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 async function home(t) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-cred-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const workspace = path.join(directory, 'project');
   await mkdir(workspace);
   return { directory, home: path.join(directory, 'gateway'), workspace };
 }
 
 test('reissue replaces grants and secret, preserving device identity and invalidating the old grant', async t => {
+  const defer = teardown(t);
   const { home: gatewayHome, workspace, directory } = await home(t);
   const second = path.join(directory, 'second');
   await mkdir(second);
   const original = await createCredential(gatewayHome, { label: 'phone', workspaces: [workspace], permissions: ['session.write'], modes: ['cafe'] });
   const store = new CredentialStore({ home: gatewayHome, pollMs: 0 });
-  t.after(() => store.close());
+  defer(() => store.close());
   await store.reload();
   const notices = [];
   store.onChange(change => notices.push(Object.fromEntries(change)));
@@ -44,7 +47,7 @@ test('reissue replaces grants and secret, preserving device identity and invalid
   const disk = await readFile(credentialsFile(gatewayHome), 'utf8');
   assert.ok(!disk.includes(parseToken(issued.token).secret));
   const restarted = new CredentialStore({ home: gatewayHome, pollMs: 0 });
-  t.after(() => restarted.close());
+  defer(() => restarted.close());
   await restarted.reload();
   assert.equal(restarted.verify(original.token), undefined);
   assert.deepEqual([...restarted.verify(issued.token).permissions], ['files.read']);
@@ -57,6 +60,7 @@ test('reissue replaces grants and secret, preserving device identity and invalid
 });
 
 test('CLI edit/reissue replaces named grants, retains omitted fields, and rejects invalid edits', async t => {
+  const defer = teardown(t);
   const { home: gatewayHome, workspace, directory } = await home(t);
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
@@ -70,7 +74,7 @@ test('CLI edit/reissue replaces named grants, retains omitted fields, and reject
   assert.deepEqual(edited.credential.permissions, ['files.read']);
   assert.notEqual(edited.token, original.token);
   const store = new CredentialStore({ home: gatewayHome, pollMs: 0 });
-  t.after(() => store.close());
+  defer(() => store.close());
   await store.reload();
   assert.equal(store.verify(original.token), undefined);
   assert.ok(store.verify(edited.token));
@@ -86,6 +90,7 @@ test('CLI edit/reissue replaces named grants, retains omitted fields, and reject
 });
 
 test('an agent credential keeps its mark through rotate, update and reissue; a user credential is unchanged (t-53aa)', async t => {
+  const defer = teardown(t);
   const { home: gatewayHome, workspace } = await home(t);
   const user = await createCredential(gatewayHome, { label: 'phone', workspaces: [workspace], permissions: ['session.write'] });
   assert.equal(user.credential.agent, undefined, 'a credential is a user\'s unless --agent');
@@ -93,7 +98,7 @@ test('an agent credential keeps its mark through rotate, update and reissue; a u
   assert.equal(agent.credential.agent, true);
   await assert.rejects(createCredential(gatewayHome, { label: 'odd', workspaces: [workspace], permissions: ['session.write'], agent: 'Yes!' }), /agent must be true, false or an agent name/);
   const store = new CredentialStore({ home: gatewayHome, pollMs: 0 });
-  t.after(() => store.close());
+  defer(() => store.close());
   await store.reload();
   const userGrant = store.verify(user.token);
   assert.equal(userGrant.agent, undefined);
@@ -125,10 +130,11 @@ test('an agent credential keeps its mark through rotate, update and reissue; a u
 });
 
 test('a hand-edited agent mark that is not true leaves the credential unusable; true marks it (t-53aa)', async t => {
+  const defer = teardown(t);
   const { home: gatewayHome, workspace } = await home(t);
   const { credential, token } = await createCredential(gatewayHome, { label: 'phone', workspaces: [workspace], permissions: ['session.write'] });
   const store = new CredentialStore({ home: gatewayHome, pollMs: 0 });
-  t.after(() => store.close());
+  defer(() => store.close());
   await store.reload();
   const before = store.verify(token);
   const notices = [];
@@ -196,6 +202,7 @@ test('a process an ALP agent started may not create, rotate, reissue or revoke c
 });
 
 test('a named agent credential keeps its name through rotate, update and reissue, and a bad name is refused (t-1c59)', async t => {
+  const defer = teardown(t);
   const { home: gatewayHome, workspace } = await home(t);
   for (const bad of ['', 'true', 'false', 'Bot', '-bot', 'bot-', 'bo--t', 'bot_1', 'a'.repeat(65), 'bot name', 7]) {
     await assert.rejects(createCredential(gatewayHome, { label: 'bot', workspaces: [workspace], permissions: ['session.write'], agent: bad }), /agent must be/, JSON.stringify(bad));
@@ -206,7 +213,7 @@ test('a named agent credential keeps its name through rotate, update and reissue
   const bot = await createCredential(gatewayHome, { label: 'bot', workspaces: [workspace], permissions: ['session.write'], agent: 'reviewer' });
   assert.deepEqual([bot.credential.agent, bot.credential.agentName, bot.credential.expiresAt], [true, 'reviewer', undefined]);
   const store = new CredentialStore({ home: gatewayHome, pollMs: 0 });
-  t.after(() => store.close());
+  defer(() => store.close());
   await store.reload();
   const userGrant = store.verify(user.token);
   assert.equal(userGrant.agentName, undefined);
@@ -224,10 +231,11 @@ test('a named agent credential keeps its name through rotate, update and reissue
 });
 
 test('a hand-edited agent name that is malformed or without the mark leaves the credential unusable (t-1c59)', async t => {
+  const defer = teardown(t);
   const { home: gatewayHome, workspace } = await home(t);
   const { credential, token } = await createCredential(gatewayHome, { label: 'bot', workspaces: [workspace], permissions: ['session.write'], agent: 'reviewer' });
   const store = new CredentialStore({ home: gatewayHome, pollMs: 0 });
-  t.after(() => store.close());
+  defer(() => store.close());
   const edit = async change => {
     const data = JSON.parse(await readFile(credentialsFile(gatewayHome), 'utf8'));
     Object.assign(data.credentials[0], change);
@@ -305,12 +313,13 @@ test('files.read is held only when named: never by default, implied by nothing, 
 });
 
 test('the store verifies tokens, and rotation, revocation and expiry end them with a change notice', async t => {
+  const defer = teardown(t);
   const { home: gatewayHome, workspace } = await home(t);
   const { credential, token } = await createCredential(gatewayHome, { label: 'a', workspaces: [workspace], permissions: ['session.read'] });
   let now = Date.now();
   const short = await createCredential(gatewayHome, { label: 'b', workspaces: [workspace], permissions: ['session.read'], expiresAt: new Date(now + 60_000).toISOString() });
   const store = new CredentialStore({ home: gatewayHome, pollMs: 0, now: () => now });
-  t.after(() => store.close());
+  defer(() => store.close());
   await store.reload();
   const changes = [];
   store.onChange(change => changes.push(Object.fromEntries(change)));
@@ -337,12 +346,13 @@ test('the store verifies tokens, and rotation, revocation and expiry end them wi
 });
 
 test('a credentials file other users can read is refused: the store fails closed', { skip: process.platform === 'win32' && 'mode bits' }, async t => {
+  const defer = teardown(t);
   const { home: gatewayHome, workspace } = await home(t);
   const { token } = await createCredential(gatewayHome, { label: 'a', workspaces: [workspace], permissions: ['session.read'] });
   await chmod(credentialsFile(gatewayHome), 0o644);
   const lines = [];
   const store = new CredentialStore({ home: gatewayHome, pollMs: 0, logger: createGatewayLogger({ write: line => lines.push(line) }) });
-  t.after(() => store.close());
+  defer(() => store.close());
   await store.reload();
   assert.equal(store.verify(token), undefined);
   assert.ok(lines.some(line => line.includes('ALP_GATEWAY_CREDENTIALS_UNREADABLE')));
@@ -422,6 +432,7 @@ test('update replaces workspaces and permissions in place: the token stays valid
 });
 
 test('update rejects invalid input and revoked credentials without touching the file', async t => {
+  const defer = teardown(t);
   const { home: gatewayHome, workspace } = await home(t);
   const { credential, token } = await createCredential(gatewayHome, { label: 'phone', workspaces: [workspace], permissions: ['session.read'] });
   const disk = await readFile(credentialsFile(gatewayHome), 'utf8');
@@ -436,12 +447,13 @@ test('update rejects invalid input and revoked credentials without touching the 
   await assert.rejects(credentials.updateCredential(gatewayHome, credential.id, { permissions: ['session.write'] }), /revoked/);
   assert.equal(await readFile(credentialsFile(gatewayHome), 'utf8'), revoked);
   const store = new CredentialStore({ home: gatewayHome, pollMs: 0 });
-  t.after(() => store.close());
+  defer(() => store.close());
   await store.reload();
   assert.equal(store.verify(token), undefined, 'a revoked credential stays revoked');
 });
 
 test('writeCredentials retries transient EPERM/EACCES/EBUSY on atomic rename and recovers', async t => {
+  const defer = teardown(t);
   const { home: gatewayHome, workspace } = await home(t);
   const originalRename = nodeFs.promises.rename;
   let calls = 0;
@@ -456,7 +468,7 @@ test('writeCredentials retries transient EPERM/EACCES/EBUSY on atomic rename and
     return originalRename.call(this, from, to);
   };
   syncBuiltinESMExports();
-  t.after(() => {
+  defer(() => {
     nodeFs.promises.rename = originalRename;
     syncBuiltinESMExports();
   });
@@ -496,6 +508,7 @@ test('writeCredentials retries transient EPERM/EACCES/EBUSY on atomic rename and
 // polls and reads credentials.json) fails with EPERM instead of replacing it, as Unix does. Not mocked:
 // a real handle on the real file, so the Windows lanes check the platform behaviour renameWithRetry exists for.
 test('Windows: replacing credentials.json while a reader holds it fails once, and renameWithRetry outlasts the reader', { skip: process.platform !== 'win32' }, async t => {
+  const defer = teardown(t);
   const { home: gatewayHome, workspace } = await home(t);
   await createCredential(gatewayHome, { label: 'held', workspaces: [workspace], permissions: ['session.read'] });
   const file = credentialsFile(gatewayHome);
@@ -503,7 +516,7 @@ test('Windows: replacing credentials.json while a reader holds it fails once, an
   await writeFile(temporary, 'replacement', { mode: 0o600 });
   const reader = await nodeFs.promises.open(file, 'r');
   let closed = false;
-  t.after(() => closed || reader.close());
+  defer(() => closed || reader.close());
   await assert.rejects(nodeFs.promises.rename(temporary, file), error => credentials.RETRIABLE_RENAME_ERRORS.has(/** @type {any} */ (error)?.code), 'a plain rename onto a held file');
   // The reader lets go within the retry budget (10, 20, 40, 80, 80... ms), as a poll's read does.
   setTimeout(() => { closed = true; void reader.close(); }, 60);
@@ -512,6 +525,7 @@ test('Windows: replacing credentials.json while a reader holds it fails once, an
 });
 
 test('writeCredentials rethrows and cleans up temp files when rename retries are exhausted', async t => {
+  const defer = teardown(t);
   const { home: gatewayHome, workspace } = await home(t);
   const originalRename = nodeFs.promises.rename;
   let calls = 0;
@@ -523,7 +537,7 @@ test('writeCredentials rethrows and cleans up temp files when rename retries are
     throw err;
   };
   syncBuiltinESMExports();
-  t.after(() => {
+  defer(() => {
     nodeFs.promises.rename = originalRename;
     syncBuiltinESMExports();
   });
@@ -541,6 +555,7 @@ test('writeCredentials rethrows and cleans up temp files when rename retries are
 });
 
 test('writeCredentials fails immediately on non-retriable rename errors without retrying', async t => {
+  const defer = teardown(t);
   const { home: gatewayHome, workspace } = await home(t);
   const originalRename = nodeFs.promises.rename;
   let calls = 0;
@@ -552,7 +567,7 @@ test('writeCredentials fails immediately on non-retriable rename errors without 
     throw err;
   };
   syncBuiltinESMExports();
-  t.after(() => {
+  defer(() => {
     nodeFs.promises.rename = originalRename;
     syncBuiltinESMExports();
   });
@@ -569,6 +584,7 @@ test('writeCredentials fails immediately on non-retriable rename errors without 
 });
 
 test('renameWithRetry unit contract: backoff schedule, bounds and error filtering', async t => {
+  const defer = teardown(t);
   const delays = [];
   const sleepMock = async ms => { delays.push(ms); };
   let attempts = 0;
@@ -598,7 +614,7 @@ test('renameWithRetry unit contract: backoff schedule, bounds and error filterin
     return originalRename.call(this, from, to);
   };
   syncBuiltinESMExports();
-  t.after(() => {
+  defer(() => {
     nodeFs.promises.rename = originalRename;
     syncBuiltinESMExports();
   });
@@ -611,6 +627,7 @@ test('renameWithRetry unit contract: backoff schedule, bounds and error filterin
 });
 
 test('a credential with a malformed agent mark is skipped and the gateway logs which one, once until its malformed mark changes (t-50af)', async t => {
+  const defer = teardown(t);
   const { home: gatewayHome, workspace } = await home(t);
   const good = await createCredential(gatewayHome, { label: 'u', workspaces: [workspace], permissions: ['session.read'] });
   const bad = await createCredential(gatewayHome, { label: 'a', workspaces: [workspace], permissions: ['session.read'], agent: 'peer' });
@@ -621,7 +638,7 @@ test('a credential with a malformed agent mark is skipped and the gateway logs w
   await writeFile(file, JSON.stringify(data), { mode: 0o600 });
   const lines = [];
   const store = new CredentialStore({ home: gatewayHome, pollMs: 0, logger: createGatewayLogger({ write: line => lines.push(line) }) });
-  t.after(() => store.close());
+  defer(() => store.close());
   await store.reload();
   store.expire();
   await store.reload();

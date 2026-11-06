@@ -10,6 +10,7 @@ import { createTask } from '@anhlp/alp-core/tasks';
 import { connect, daemonPaths, ensureDaemon, findDaemonEntry, readLock, PROTOCOL_VERSION } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
+import { teardown } from '../../../test/support/teardown.js';
 
 async function until(check) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
@@ -46,7 +47,10 @@ function fakeTransport(runtimes, { turns } = {}) {
 }
 
 async function setup(t) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-'));
+  // Undone LAST: teardown runs the steps in reverse, so everything living in here is released first.
+  defer(() => rm(directory, { recursive: true, force: true }));
   const project = path.join(directory, 'project');
   await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'] } }));
@@ -55,9 +59,7 @@ async function setup(t) {
   const socketPath = daemonPaths(directory).socket;
   const server = createDaemonServer({ runtime, socketPath, version: 'test' });
   await server.listen();
-  t.after(async () => { await server.close(); await runtime.shutdown(); });
-  // After hooks run in the order they are added: remove the files only once that has stopped.
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(async () => { await server.close(); await runtime.shutdown(); });
   const clients = [];
   const open = async () => {
     const client = await connect(socketPath, { name: 'test', version: '0' });
@@ -66,7 +68,7 @@ async function setup(t) {
     clients.push(client);
     return { client, events };
   };
-  t.after(() => clients.forEach(client => client.close()));
+  defer(() => clients.forEach(client => client.close()));
   return { project, runtimes, runtime, socketPath, server, open };
 }
 
@@ -74,11 +76,12 @@ const types = (events, sessionId) => events.filter(e => !sessionId || e.sessionI
 const text = body => [{ type: 'text', text: body }];
 
 test('handshake is required and versioned', async t => {
+  const defer = teardown(t);
   const { socketPath } = await setup(t);
   const { AlpClient } = await import('@anhlp/alp-client');
   const net = await import('node:net');
   const raw = new AlpClient(net.createConnection(socketPath));
-  t.after(() => raw.close());
+  defer(() => raw.close());
   await assert.rejects(raw.request('session.list'), { code: 1006 });
   await assert.rejects(raw.request('daemon.hello', { protocolVersion: PROTOCOL_VERSION + 1 }), { code: 1006 });
   const hello = await raw.request('daemon.hello', { protocolVersion: PROTOCOL_VERSION });
@@ -210,8 +213,9 @@ test('session.prompt takes inline images within the limits and passes them to th
 });
 
 test('alpd starts detached, publishes its socket in the lock, and shuts down cleanly', async t => {
+  const defer = teardown(t);
   const home = await mkdtemp(path.join(tmpdir(), 'alp-home-'));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  defer(() => rm(home, { recursive: true, force: true }));
   const entry = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
   const socket = await ensureDaemon({ home, entry });
   const lock = await readLock(home);
@@ -238,8 +242,9 @@ test('alpd starts detached, publishes its socket in the lock, and shuts down cle
 });
 
 test('alpd tells a clean stop from a crash by the marker it keeps while running', async t => {
+  const defer = teardown(t);
   const home = await mkdtemp(path.join(tmpdir(), 'alp-home-'));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  defer(() => rm(home, { recursive: true, force: true }));
   const entry = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
   const marker = path.join(home, 'state', 'alpd.running');
   const status = async () => {
@@ -270,8 +275,9 @@ test('alpd tells a clean stop from a crash by the marker it keeps while running'
 });
 
 test('finds alpd through the ALP CLI on PATH', { skip: process.platform === 'win32' }, async t => {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-path-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const root = path.join(directory, 'lib', 'alp');
   await mkdir(path.join(root, 'src'), { recursive: true });
   await mkdir(path.join(root, 'dist'));
@@ -286,8 +292,9 @@ test('finds alpd through the ALP CLI on PATH', { skip: process.platform === 'win
 });
 
 test('finds alpd.js behind the npm wrapper @anhlp/alp, in its alp-cli dependency (t-1807)', { skip: process.platform === 'win32' }, async t => {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-npm-wrapper-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const scope = path.join(directory, 'lib', 'node_modules', '@anhlp');
   const wrapper = path.join(scope, 'alp');
   await mkdir(path.join(wrapper, 'bin'), { recursive: true });
@@ -314,8 +321,9 @@ test('finds alpd.js behind the npm wrapper @anhlp/alp, in its alp-cli dependency
 });
 
 test('Windows: finds alpd.js behind the alp.cmd shims of npm and install.ps1 (t-1f14)', { skip: process.platform !== 'win32' }, async t => {
+  const defer = teardown(t);
   const directory = await realpathOf(await mkdtemp(path.join(tmpdir(), 'alp-cmd-')));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const home = path.join(directory, 'home');
   // npm -g on Windows: <prefix>\alp.cmd runs "%dp0%\node_modules\@anhlp\alp\bin\alp.js".
   const prefix = path.join(directory, 'npm');
@@ -344,8 +352,9 @@ test('Windows: finds alpd.js behind the alp.cmd shims of npm and install.ps1 (t-
 });
 
 test('findDaemonEntry ignores corrupt package.json without throwing SyntaxError (t-e69f)', { skip: process.platform === 'win32' }, async t => {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-corrupt-pkg-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const root = path.join(directory, 'lib', 'alp');
   await mkdir(path.join(root, 'src'), { recursive: true });
   await mkdir(path.join(root, 'dist'));
@@ -384,9 +393,10 @@ async function durable(t, directory, project, runtimes, { turns } = {}) {
 /** Teardown in reverse order, so daemons stop before their directory is removed. */
 const cleanups = new WeakMap();
 const cleanupsOf = t => {
+  const defer = teardown(t);
   if (!cleanups.has(t)) {
     cleanups.set(t, []);
-    t.after(async () => { for (const cleanup of cleanups.get(t).reverse()) await cleanup(); });
+    defer(async () => { for (const cleanup of cleanups.get(t).reverse()) await cleanup(); });
   }
   return cleanups.get(t);
 };
@@ -1030,11 +1040,12 @@ test('alpd keeps a root\'s attention for every client: a reconnecting client rea
 });
 
 test('workspace.files.search lists matching files inside the directory only, never through a link', async t => {
+  const defer = teardown(t);
   const { project, open } = await setup(t);
   const { client } = await open();
   assert.ok((await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('workspace.files'));
   const outside = await mkdtemp(path.join(tmpdir(), 'alpd-outside-'));
-  t.after(() => rm(outside, { recursive: true, force: true }));
+  defer(() => rm(outside, { recursive: true, force: true }));
   await writeFile(path.join(outside, 'secret-server.ts'), 'x');
   await mkdir(path.join(project, 'src', 'deep'), { recursive: true });
   await mkdir(path.join(project, 'node_modules', 'pkg'), { recursive: true });
@@ -1067,11 +1078,12 @@ test('workspace.files.search lists matching files inside the directory only, nev
 });
 
 test('workspace.files.list and read over the socket: capability, confined answers, refusals with a reason and no host path', async t => {
+  const defer = teardown(t);
   const { project, open } = await setup(t);
   const { client } = await open();
   assert.ok((await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('workspace.files.read'));
   const outside = await mkdtemp(path.join(tmpdir(), 'alpd-outside-'));
-  t.after(() => rm(outside, { recursive: true, force: true }));
+  defer(() => rm(outside, { recursive: true, force: true }));
   await writeFile(path.join(outside, 'secret.txt'), 'SENTINEL-outside');
   await mkdir(path.join(project, 'src'), { recursive: true });
   await writeFile(path.join(project, 'src', 'server.ts'), 'export {};\n');

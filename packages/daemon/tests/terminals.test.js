@@ -17,6 +17,7 @@ import { createSocketTransport } from '@anhlp/alp-client/ipc';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { createTerminalService, frames, readTerminalConfig } from '@anhlp/alp-daemon/terminals';
+import { teardown } from '../../../test/support/teardown.js';
 
 const skip = !['darwin', 'linux'].includes(process.platform) && 'terminals are served on macOS and Linux only';
 // A predictable shell: alpd picks $SHELL when /etc/shells lists it, else /bin/sh.
@@ -65,6 +66,7 @@ function idleTransport() {
  * pid a terminal ran is remembered; after the test none may be alive.
  */
 async function setup(t, { allow = true, mode = 0o600, terminalOptions = {}, config = {} } = {}) {
+  const defer = teardown(t);
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-term-')));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
@@ -106,7 +108,7 @@ async function setup(t, { allow = true, mode = 0o600, terminalOptions = {}, conf
   }
   let closed = false;
   const stop = async () => { if (closed) return; closed = true; owner.close(); await server.close().catch(() => {}); await runtime.shutdown?.(); };
-  t.after(async () => {
+  defer(async () => {
     // Remember every process of every terminal before stopping, then prove none survived.
     for (const pid of [...seen]) if (alive(pid)) for (const child of treeOf(pid)) seen.add(child);
     await stop();
@@ -127,12 +129,13 @@ async function open(world, as = alice, { cols = 80, rows = 24, workspaceId = wor
 }
 
 test('helpers: frames never split a character; the switch is a private file of this user', { skip }, async t => {
+  const defer = teardown(t);
   assert.deepEqual(frames('abc', 10), ['abc']);
   const split = frames('é'.repeat(10), 5);
   assert.ok(split.every(piece => Buffer.byteLength(piece) <= 5));
   assert.equal(split.join(''), 'é'.repeat(10));
   const home = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-term-config-')));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  defer(() => rm(home, { recursive: true, force: true }));
   assert.equal((await readTerminalConfig(home)).enabled, false, 'missing: off');
   const file = path.join(home, 'terminal.json');
   await writeFile(file, JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o644 });
@@ -332,12 +335,13 @@ test('alpd shutdown ends every terminal with no process left; idle and lifetime 
 });
 
 test('lifetime, slow consumers and an audit log without keystrokes (the service on its own)', { skip }, async t => {
+  const defer = teardown(t);
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-term-svc-')));
   await writeFile(path.join(directory, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
   const lines = [];
   const log = { info: (message, fields) => lines.push(JSON.stringify({ message, ...fields })), warn: (message, fields) => lines.push(JSON.stringify({ message, ...fields })) };
   const service = createTerminalService({ home: directory, resolveWorkspace: async () => directory, log, sweepMs: 50, killGraceMs: 200, limits: { maxLifetimeMs: 1500 }, maxBufferedBytes: 1024 });
-  t.after(async () => { await service.shutdown(); await rm(directory, { recursive: true, force: true }); });
+  defer(async () => { await service.shutdown(); await rm(directory, { recursive: true, force: true }); });
   const sent = [];
   const slow = { send: message => sent.push(message), socket: { writableLength: 0 } };
   const owner = { id: 'owner', epoch: 'owner' };
@@ -360,6 +364,7 @@ test('lifetime, slow consumers and an audit log without keystrokes (the service 
 });
 
 test('a socket client: the stream survives a disconnect only for the same principal', { skip }, async t => {
+  const defer = teardown(t);
   const world = await setup(t);
   const socketPath = path.join(world.directory, 's', 'alpd.sock');
   const open_ = async () => {
@@ -372,13 +377,13 @@ test('a socket client: the stream survives a disconnect only for the same princi
     return { client, events, text: () => events.filter(event => event.type === 'output').map(event => event.data).join('') };
   };
   const first = await open_();
-  t.after(() => first.client.close());
+  defer(() => first.client.close());
   const { terminal } = await first.client.request('terminal.create', { workspaceId: world.ws, cols: 80, rows: 24, requestId: 'sock', ...alice });
   await first.client.request('terminal.attach', { terminalId: terminal.terminalId, ...alice });
   await until(() => /PROMPT\$ $/.test(first.text()), 'prompt over the socket');
   first.client.close();
   const second = await open_();
-  t.after(() => second.client.close());
+  defer(() => second.client.close());
   assert.equal((await refusal(second.client.request('terminal.attach', { terminalId: terminal.terminalId, ...bob }))).code, 1001);
   const resumed = await second.client.request('terminal.attach', { terminalId: terminal.terminalId, after: 0, ...alice });
   assert.equal(resumed.terminal.state, 'running');
@@ -402,17 +407,18 @@ function fakePty({ ptsName } = {}) {
 }
 
 test('native cleanup is delegated once; spoofed process rows never authorize JS numeric signals', { skip }, async t => {
+  const defer = teardown(t);
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-term-ids-')));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   await writeFile(path.join(directory, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
   const fake = fakePty(); let snapshots = 0, cleanups = 0;
   const service = createTerminalService({ home: directory, resolveWorkspace: async () => directory, log: { info() {}, warn() {} },
     spawn: (...args) => { const pty = fake.spawn(...args); pty.cleanup = async () => { cleanups++; pty.kill(); return { observed: 1, live: 0, uncertain: 0 }; }; return pty; },
     processes: async () => { snapshots++; return [{ pid: 80001, ppid: 1, pgid: 80001, sid: fake.made[0].pid, elapsedMs: 0, markers: [fake.made[0].env.ALP_TERMINAL_ID] }]; }, sweepMs: 60000 });
-  t.after(() => service.shutdown());
+  defer(() => service.shutdown());
   const original = process.kill, signals = [];
   process.kill = (pid, signal) => { signals.push([pid, signal]); return true; };
-  t.after(() => { process.kill = original; });
+  defer(() => { process.kill = original; });
   const owner = { id: 'owner', epoch: 'e' };
   const { terminal } = await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'one' });
   await Promise.all([service.close(owner, { terminalId: terminal.terminalId }), service.revoke(owner.id)]);
@@ -420,12 +426,13 @@ test('native cleanup is delegated once; spoofed process rows never authorize JS 
 });
 
 test('concurrent creates cannot pass the limits or duplicate a requestId', { skip }, async t => {
+  const defer = teardown(t);
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-term-race-')));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   await writeFile(path.join(directory, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true, limits: { maxPerPrincipal: 1 } }), { mode: 0o600 });
   const { spawn, made } = fakePty();
   const service = createTerminalService({ home: directory, resolveWorkspace: async () => { await new Promise(resolve => setTimeout(resolve, 5)); return directory; }, log: { info() {}, warn() {} }, spawn, processes: async () => [], sweepMs: 60_000, killGraceMs: 10, platform: 'darwin' });
-  t.after(() => service.shutdown());
+  defer(() => service.shutdown());
   const owner = { id: 'owner', epoch: 'owner' };
   const outcomes = await Promise.allSettled(Array.from({ length: 5 }, (_, i) => service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: `r${i}` })));
   assert.equal(outcomes.filter(outcome => outcome.status === 'fulfilled').length, 1);
@@ -446,9 +453,10 @@ test('a job started just before the shell exits on its own is killed, with no sw
 });
 
 test('the process table parser: commands with spaces, a marker in the environment only, escaped newlines (macOS ps)', { skip: process.platform !== 'darwin' && 'the macOS ps format' }, async t => {
+  const defer = teardown(t);
   const { psProcesses } = await import('@anhlp/alp-daemon/terminals');
   const bin = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-fake-ps-')));
-  t.after(() => rm(bin, { recursive: true, force: true }));
+  defer(() => rm(bin, { recursive: true, force: true }));
   const marker = `atm_${'a'.repeat(32)}`;
   // Two passes: with -E (command line, then the environment) and the command line alone.
   const withEnv = [
@@ -462,7 +470,7 @@ test('the process table parser: commands with spaces, a marker in the environmen
   await writeFile(path.join(bin, 'ps'), `#!${process.execPath}\nprocess.stdout.write(process.argv.includes('-E') ? ${JSON.stringify(withEnv)} : ${JSON.stringify(plain)});\n`, { mode: 0o755 });
   const saved = process.env.PATH;
   process.env.PATH = `${bin}:${saved}`;
-  t.after(() => { process.env.PATH = saved; });
+  defer(() => { process.env.PATH = saved; });
   const rows = await psProcesses('darwin')();
   const byPid = new Map(rows.map(row => [row.pid, row]));
   assert.deepEqual(byPid.get(101).markers, [marker]);
@@ -478,14 +486,15 @@ test('the process table parser: commands with spaces, a marker in the environmen
 
 
 test('simultaneous same-principal revokes count each terminal once while exit is pending', async t => {
+  const defer = teardown(t);
   const home = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-revoke-race-')));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  defer(() => rm(home, { recursive: true, force: true }));
   await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
   const fake = fakePty();
   const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} },
     spawn: (...args) => { const pty = fake.spawn(...args); pty.kill = () => {}; return pty; },
     processes: async () => [], sweepMs: 60000, killGraceMs: 10, platform: 'darwin' });
-  t.after(() => service.shutdown());
+  defer(() => service.shutdown());
   await service.create({ id: 'owner', epoch: 'owner' }, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r' });
   const results = await Promise.all([service.revoke('owner'), service.revoke('owner')]);
   assert.equal(results.reduce((sum, result) => sum + result.closed, 0), 1);
@@ -494,14 +503,15 @@ test('simultaneous same-principal revokes count each terminal once while exit is
 
 
 test('Linux environ reads yield to the event loop and fail closed on permission, disappearance and races', async t => {
+  const defer = teardown(t);
   const { psProcesses } = await import('@anhlp/alp-daemon/terminals');
   const bin = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-linux-proc-')));
-  t.after(() => rm(bin, { recursive: true, force: true }));
+  defer(() => rm(bin, { recursive: true, force: true }));
   const output = [101, 102, 103, 104].map(pid => `${pid} 1 ${pid} ${pid} pts/1 00:01`).join('\n');
   await writeFile(path.join(bin, 'ps'), `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(output)});\n`, { mode: 0o755 });
   const saved = process.env.PATH;
   process.env.PATH = `${bin}:${saved}`;
-  t.after(() => { process.env.PATH = saved; });
+  defer(() => { process.env.PATH = saved; });
   const marker = `atm_${'b'.repeat(32)}`;
   const read = [];
   let yielded = false;
@@ -519,12 +529,13 @@ test('Linux environ reads yield to the event loop and fail closed on permission,
 });
 
 test('terminal watch atomically snapshots, scopes cursors, resets after reconnect and releases subscriptions', async t => {
+  const defer = teardown(t);
   const home = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-watch-')));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  defer(() => rm(home, { recursive: true, force: true }));
   await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
   const fake = fakePty();
   const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} }, spawn: fake.spawn, processes: async () => [], sweepMs: 60000, killGraceMs: 1, platform: 'darwin' });
-  t.after(() => service.shutdown());
+  defer(() => service.shutdown());
   const alice = { id: 'alice', epoch: 'a', roots: [home] }, bob = { id: 'bob', epoch: 'b' };
   const events = [], others = [], outside = [];
   const sink = { send: value => events.push(value) }, other = { send: value => others.push(value) }, excluded = { send: value => outside.push(value) };
@@ -553,14 +564,15 @@ test('terminal watch atomically snapshots, scopes cursors, resets after reconnec
 });
 
 test('daemon capture retains rendered state across detach and bounds exited emulators as well as running ones', async t => {
+  const defer = teardown(t);
   const home = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-capture-')));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  defer(() => rm(home, { recursive: true, force: true }));
   await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
   const fake = fakePty();
   const outputs = [];
   const spawn = (...args) => { const pty = fake.spawn(...args); pty.onData = listener => { outputs.push(listener); return { dispose() {} }; }; return pty; };
   const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} }, spawn, processes: async () => [], sweepMs: 60000, killGraceMs: 1, platform: 'darwin' });
-  t.after(() => service.shutdown());
+  defer(() => service.shutdown());
   const principal = { id: 'owner', epoch: 'owner' };
   const first = (await service.create(principal, { workspaceId: 'w', cols: 20, rows: 3, requestId: 'a' })).terminal.terminalId;
   outputs[0]('secret-old\r\x1b[2Knew\r\nsecond');
@@ -584,15 +596,16 @@ test('daemon capture retains rendered state across detach and bounds exited emul
 });
 
 test('historical L5: an unresponsive ps executable is killed at the existing ten-second deadline', { timeout: 15000 }, async t => {
+  const defer = teardown(t);
   const { psProcesses } = await import('@anhlp/alp-daemon/terminals');
   const { readFile } = await import('node:fs/promises');
   const bin = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-ps-deadline-')));
-  t.after(() => rm(bin, { recursive: true, force: true }));
+  defer(() => rm(bin, { recursive: true, force: true }));
   const pidFile = path.join(bin, 'children');
   await writeFile(path.join(bin, 'ps'), `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(pidFile)}, process.pid+'\\n');\nsetInterval(() => {}, 1000);\n`, { mode: 0o755 });
   const saved = process.env.PATH;
   process.env.PATH = `${bin}:${saved}`;
-  t.after(() => { process.env.PATH = saved; });
+  defer(() => { process.env.PATH = saved; });
   const before = Date.now();
   assert.deepEqual(await psProcesses('darwin')(), []);
   assert.ok(Date.now() - before >= 9900 && Date.now() - before < 14000);
@@ -602,13 +615,14 @@ test('historical L5: an unresponsive ps executable is killed at the existing ten
 });
 
 test('historical L4 replacement: an exit racing close still invokes the native owner cleanup once', async t => {
+  const defer = teardown(t);
   const home = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-running-snapshot-')));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  defer(() => rm(home, { recursive: true, force: true }));
   await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
   const fake = fakePty(); let cleanups = 0;
   const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} },
     spawn: (...args) => { const pty = fake.spawn(...args); pty.cleanup = async () => { cleanups++; pty.kill(); await Promise.resolve(); return { observed: 1, live: 0, uncertain: 0 }; }; return pty; }, sweepMs: 60000 });
-  t.after(() => service.shutdown());
+  defer(() => service.shutdown());
   const principal = { id: 'owner', epoch: 'owner' };
   const { terminal } = await service.create(principal, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'snapshot' });
   fake.made[0].kill();

@@ -14,6 +14,7 @@ import { assertPrivateDirectory, bootTime, daemonPaths, ensureDaemon } from '../
 import { diagnose, diskCheck, shellQuote } from '../../packages/client/src/doctor.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createDaemonServer, createStore } from '../../dist/daemon/index.js';
+import { teardown } from '../support/teardown.js';
 
 const ALPD = fileURLToPath(new URL('../../dist/alpd.js', import.meta.url));
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
@@ -23,8 +24,9 @@ const realpathOf = file => realpath(file);
 const SECRET = 'sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
 
 async function privateHome(t) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-diag-'));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const home = path.join(directory, 'home');
   await mkdir(path.join(home, 'logs'), { recursive: true, mode: 0o700 });
   await chmod(home, 0o700);
@@ -83,8 +85,9 @@ test('startup admission reports an unusable home before launching a child', { sk
 });
 
 test('an empty home the user pre-created at 0755 is tightened to 0700; one that holds files is not (t-37f1)', { skip }, async t => {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-diag-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const empty = path.join(directory, 'empty');
   await mkdir(empty, { mode: 0o755 });
   await chmod(empty, 0o755);
@@ -111,6 +114,7 @@ test('an empty home the user pre-created at 0755 is tightened to 0700; one that 
 });
 
 test('doctor and alp daemon status tell a ready alpd, one that is not ready, and one that is gone', { skip }, async t => {
+  const defer = teardown(t);
   const { directory, home } = await privateHome(t);
   const state = path.join(home, 'state');
   const runtime = createAlpRuntime({ runLogDir: path.join(directory, 'runs'), libraryDir: home });
@@ -118,7 +122,7 @@ test('doctor and alp daemon status tell a ready alpd, one that is not ready, and
   const { socket } = daemonPaths(home);
   const server = createDaemonServer({ runtime, socketPath: socket, version: 'test', store });
   await server.listen();
-  t.after(async () => { await server.close().catch(() => {}); await runtime.shutdown(); });
+  defer(async () => { await server.close().catch(() => {}); await runtime.shutdown(); });
   const env = { ...process.env, ALP_HOME: home, PATH: path.join(directory, 'empty') };
   const status = async () => {
     try { const { stdout } = await run(process.execPath, [CLI, 'daemon', 'status', '--json'], { env }); return { code: 0, report: JSON.parse(stdout) }; }
@@ -478,6 +482,7 @@ test('alp doctor counts a clone with local tags or refs no remote-tracking ref m
 });
 
 test('alp doctor stops classifying leftovers at its deadline, even with git commands still running (t-e80a)', { skip }, async t => {
+  const defer = teardown(t);
   const { directory, home } = await privateHome(t);
   const temp = path.join(directory, 'tmp');
   for (let index = 0; index < 20; index++) await mkdir(path.join(temp, `alp-${index}`, '.git'), { recursive: true });
@@ -486,7 +491,7 @@ test('alp doctor stops classifying leftovers at its deadline, even with git comm
   // deadline. That tests timer rounding, not doctor's hard deadline.
   const timeouts = [];
   const releases = [];
-  t.after(() => { for (const release of releases) release(); });
+  defer(() => { for (const release of releases) release(); });
   const run = (command, args, { timeoutMs }) => {
     if (command !== 'git') return Promise.resolve({ code: 0, stdout: '', stderr: '' });
     timeouts.push(timeoutMs);

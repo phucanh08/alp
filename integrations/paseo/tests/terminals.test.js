@@ -12,6 +12,7 @@ import { validateWSOutboundMessage } from '@getpaseo/protocol/validation/ws-outb
 import { decodeBinaryFrame, TerminalStreamOpcode } from '@getpaseo/protocol/binary-frames/index';
 import { TerminalInputModeTracker } from '@getpaseo/protocol/terminal-input-mode';
 import { createTerminals, TERMINALS_OFF } from '@anhlp/alp-paseo/paseo/terminals';
+import { teardown } from '../../../test/support/teardown.js';
 
 const decoder = new TextDecoder();
 const text = bytes => decoder.decode(bytes);
@@ -25,8 +26,9 @@ const tick = (ms = 20) => new Promise(resolve => setTimeout(resolve, ms));
 
 /** A home whose terminal.json (owner-private) says what the owner allowed; none when `config` is null. */
 async function homeWith(t, config = { version: 1, allowRemoteTerminal: true, allowPaseoTerminal: true }) {
+  const defer = teardown(t);
   const home = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-paseo-term-')));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  defer(() => rm(home, { recursive: true, force: true }));
   if (config) await writeFile(path.join(home, 'terminal.json'), JSON.stringify(config), { mode: 0o600 });
   return home;
 }
@@ -166,11 +168,12 @@ function fakeClient(name = 'c1') {
 
 /** The bridge's terminals on a fake alpd; `call` answers like the gateway (a returned reply is emitted). */
 async function setup(t, { protection, config, capabilities, timing, replayBytes, maxInputBytes, archiveAgent } = {}) {
+  const defer = teardown(t);
   const home = await homeWith(t, config);
   const alpd = fakeAlpd({ protection, capabilities, replayBytes, maxInputBytes });
   const logs = [];
   const terminals = createTerminals({ home, connect: alpd.connect, log: message => logs.push(message), archiveAgent, timing: { retryMs: 10, drainMs: 10, ...timing } });
-  t.after(() => terminals.close());
+  defer(() => terminals.close());
   const call = async (client, message) => {
     const reply = await terminals.handlers[message.type](message, client);
     if (reply) client.emit(reply);
@@ -607,6 +610,7 @@ const realSkip = process.platform !== 'darwin' ? 'the real terminal check runs o
   : await import('node-pty').then(() => false, () => 'node-pty is not installed');
 
 test('real: create, type, see the output; a new client gets a Restore holding it; kill ends it and every process', { skip: realSkip }, async t => {
+  const defer = teardown(t);
   process.env.SHELL = '/bin/sh';
   process.env.PS1 = 'PROMPT$ ';
   process.env.ENV = '';
@@ -645,7 +649,7 @@ test('real: create, type, see the output; a new client gets a Restore holding it
   };
   const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
   const seen = new Set();
-  t.after(async () => {
+  defer(async () => {
     try {
       for (const pid of tree()) seen.add(pid);
       bridge.close();

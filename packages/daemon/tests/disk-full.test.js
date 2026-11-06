@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { connect, daemonPaths, ensureDaemon, readLock } from '@anhlp/alp-client';
 import { initProject } from '@anhlp/alp-core/init';
 import { createDiskGuard, isDiskError } from '@anhlp/alp-daemon';
+import { teardown } from '../../../test/support/teardown.js';
 
 const ALPD = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
 const FAKE_CODEX = fileURLToPath(new URL('./support/fake-codex.js', import.meta.url));
@@ -110,8 +111,9 @@ test('the disk guard warns once when space runs low and holds before it runs out
 });
 
 test('a real alpd on a full disk keeps running and answering, pauses its work, and resumes when space returns', { skip: process.platform === 'win32' && 'POSIX file descriptors' }, async t => {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-disk-'));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
   const flag = path.join(directory, 'disk-full');
@@ -127,13 +129,13 @@ test('a real alpd on a full disk keeps running and answering, pauses its work, a
   closeSync(log);
   let exit;
   const exited = once(child, 'exit').then(([code, signal]) => { exit = { code, signal }; });
-  t.after(async () => { if (!exit) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} await exited; } });
+  defer(async () => { if (!exit) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} await exited; } });
   await until(async () => {
     if (exit) assert.fail(`alpd exited (${JSON.stringify(exit)}):\n${await readFile(logFile, 'utf8')}`);
     return (await readLock(home))?.ready;
   }, 'alpd to be ready');
   const client = await connect((await readLock(home)).socket, { name: 'disk-test', version: '0' });
-  t.after(() => client.close());
+  defer(() => client.close());
   // The disk fills while alpd runs.
   await writeFile(flag, '');
   // A session whose record cannot be written: on the old alpd the failed log line of that write ended the process.
@@ -156,8 +158,9 @@ test('a real alpd on a full disk keeps running and answering, pauses its work, a
 });
 
 test('a pause write the disk refuses holds work at once, not at the next disk check (t-e80a)', { skip: process.platform === 'win32' && 'POSIX file descriptors' }, async t => {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-disk-'));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
   const flag = path.join(directory, 'disk-full');
@@ -171,13 +174,13 @@ test('a pause write the disk refuses holds work at once, not at the next disk ch
   closeSync(log);
   let exit;
   const exited = once(child, 'exit').then(([code, signal]) => { exit = { code, signal }; });
-  t.after(async () => { if (!exit) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} await exited; } });
+  defer(async () => { if (!exit) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} await exited; } });
   await until(async () => {
     if (exit) assert.fail(`alpd exited (${JSON.stringify(exit)}):\n${await readFile(logFile, 'utf8')}`);
     return (await readLock(home))?.ready;
   }, 'alpd to be ready');
   const client = await connect((await readLock(home)).socket, { name: 'disk-test', version: '0' });
-  t.after(() => client.close());
+  defer(() => client.close());
   await writeFile(flag, '');
   await client.request('daemon.pause', { runtime: 'codex' });
   await until(async () => (await client.request('daemon.pauses')).all?.cause === 'disk', 'the disk pause');
@@ -192,8 +195,9 @@ test('a pause write the disk refuses holds work at once, not at the next disk ch
 });
 
 test('alpd that cannot write its lock on a full disk says so to the client that started it, and leaves no lock behind (t-e80a)', { skip: process.platform === 'win32' && 'POSIX file descriptors' }, async t => {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-disk-'));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
   const flag = path.join(directory, 'disk-full');

@@ -15,6 +15,7 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { validateResult } from '@anhlp/alp-protocol/contract';
 import { defaultForkTitle, turnsOf } from '@anhlp/alp-daemon/conversation';
+import { teardown } from '../../../test/support/teardown.js';
 
 async function until(check, what = 'condition') {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
@@ -51,12 +52,13 @@ function fakeTransport(transports) {
 
 /** A daemon with a real store; `start()` again on the same directory is a restart. The runtime's native fork is scripted. */
 async function setup(t) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-conversation-'));
   const project = path.join(directory, 'project');
   await initProject(project);
   const transports = [];
   const stops = [];
-  t.after(async () => { for (const stop of stops.reverse()) await stop(); await rm(directory, { recursive: true, force: true }); });
+  defer(async () => { for (const stop of stops.reverse()) await stop(); await rm(directory, { recursive: true, force: true }); });
   const state = path.join(directory, 'state');
   const native = { branches: [], rebinds: [], reloads: [], next: 0, branch: undefined, rebind: undefined, reload: undefined };
   let count = 0;
@@ -380,17 +382,18 @@ test('fork: a new closed root with the cut conversation and provenance; resumabl
 });
 
 test('a runtime without native forks lists neither capability and refuses both methods', async t => {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-noconv-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const runtime = createAlpRuntime({ transport: fakeTransport([]) });
   delete runtime.branch;
   delete runtime.rebind;
   const socketPath = daemonPaths(path.join(directory, 'd')).socket;
   const server = createDaemonServer({ runtime, socketPath, version: 'test', store: createStore(path.join(directory, 'state')) });
   await server.listen();
-  t.after(async () => { await server.close(); await runtime.shutdown(); });
+  defer(async () => { await server.close(); await runtime.shutdown(); });
   const client = await connect(socketPath, { name: 'test', version: '0' });
-  t.after(() => client.close());
+  defer(() => client.close());
   const hello = await client.request('daemon.hello', { protocolVersion: 1 });
   assert.ok(!hello.capabilities.includes('session.fork') && !hello.capabilities.includes('session.rewind'));
   await assert.rejects(client.request('session.rewind', { sessionId: 's', requestId: 'r', ifGeneration: 'a'.repeat(32), beforeTurnId: 't' }), error => error.code === -32601);
@@ -465,8 +468,9 @@ test('a whole fork holds the live source: a prompt waits until the runtime read 
 });
 
 test('store.rewind keeps the lines after the marker in cursor order', async t => {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-rewind-store-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const store = createStore(directory);
   const e = (cursor, event, sessionId = 'root') => ({ sessionId, epoch: 'e', seq: cursor, ts: 't', cursor, event });
   for (const envelope of [
@@ -1013,6 +1017,7 @@ for (const operation of ['fork', 'rewind', 'reload']) {
 
 for (const replay of [false, true]) {
   test(`rewind attach handover holds a generation-less attach during marker commit (replay=${replay})`, async t => {
+    const defer = teardown(t);
     const world = await setup(t);
     const d = { ...await world.start(), ...world };
     const [, second] = await conversation(d, 'handover', ['one', 'two']);
@@ -1021,7 +1026,7 @@ for (const replay of [false, true]) {
     await before.request('session.attach', { sessionId: 'handover', replay: false, generation });
     let release;
     const gate = new Promise(resolve => { release = resolve; });
-    t.after(release);
+    defer(release);
     let entered = false;
     const rewind = d.store.rewind;
     // commitRewind has journaled/allocated the marker cursor, but has not published it.
@@ -1063,6 +1068,7 @@ for (const replay of [false, true]) {
 
 
 test('rewind attach handover rereads history if a rewind finishes during the attach history read', async t => {
+  const defer = teardown(t);
   const world = await setup(t);
   const d = { ...await world.start(), ...world };
   const [, second] = await conversation(d, 'read-race', ['one', 'two']);
@@ -1071,7 +1077,7 @@ test('rewind attach handover rereads history if a rewind finishes during the att
   await d.request('session.close', { sessionId: 'read-race' });
   let release;
   const gate = new Promise(resolve => { release = resolve; });
-  t.after(release);
+  defer(release);
   let entered = false;
   const timeline = d.store.timeline;
   d.store.timeline = async (...args) => {
@@ -1092,13 +1098,14 @@ test('rewind attach handover rereads history if a rewind finishes during the att
 });
 
 test('rewind attach handover releases queued attaches on commit failure and replay after restart keeps one marker', async t => {
+  const defer = teardown(t);
   const world = await setup(t);
   const d = { ...await world.start(), ...world };
   const [, second] = await conversation(d, 'failed-handover', ['one', 'two']);
   const generation = await generationOf(d, 'failed-handover');
   let release;
   const gate = new Promise(resolve => { release = resolve; });
-  t.after(release);
+  defer(release);
   let entered = false;
   const rewind = d.store.rewind;
   d.store.rewind = async () => { entered = true; await gate; throw new Error('commit blocked'); };
@@ -1126,13 +1133,14 @@ test('rewind attach handover releases queued attaches on commit failure and repl
 
 
 test('rewind attach handover revalidates generation if rewind finishes during the checkpoint read', async t => {
+  const defer = teardown(t);
   const world = await setup(t);
   const d = { ...await world.start(), ...world };
   const [, second] = await conversation(d, 'checkpoint-race', ['one', 'two']);
   const generation = await generationOf(d, 'checkpoint-race');
   let release;
   const gate = new Promise(resolve => { release = resolve; });
-  t.after(release);
+  defer(release);
   let entered = false;
   const history = d.store.history;
   d.store.history = async (...args) => {
@@ -1185,6 +1193,7 @@ for (const retryBeforeRestart of [false, true]) {
 }
 
 test('fork marker loss replays continuation without replacing later target history or title', async t => {
+  const defer = teardown(t);
   const world = await setup(t);
   const d = { ...await world.start(), ...world };
   const [first] = await conversation(d, 'fork-marker-source', ['one', 'two']);
@@ -1204,14 +1213,14 @@ test('fork marker loss replays continuation without replacing later target histo
   // pre-close flush. Otherwise server.close can win and suppress the close event.
   let releaseClose;
   const closeGate = new Promise(resolve => { releaseClose = resolve; });
-  t.after(releaseClose);
+  defer(releaseClose);
   const close = transport.close;
   transport.close = async () => { await closeGate; await close.call(transport); };
   let closed = false;
   const off = d.runtime.onEvent(({ sessionId, event }) => {
     if (sessionId === params.newSessionId && event.type === 'session.closed') closed = true;
   });
-  t.after(off);
+  defer(off);
   const flush = d.store.flush;
   d.store.flush = async () => {
     releaseClose();

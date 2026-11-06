@@ -7,13 +7,15 @@ import path from 'node:path';
 import { createServer } from 'node:http';
 import { bootId, bootTime } from '@anhlp/alp-client/index';
 import { isWebClaimed, isWebReady, refusal, webOwner } from '../src/web-service.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 test('webOwner accepts live integration across clock jumps when bootId matches', async (t) => {
+  const defer = teardown(t);
   const curId = bootId();
   if (!curId) return;
 
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-web-owner-'));
-  t.after(async () => {
+  defer(async () => {
     await rm(home, { recursive: true, force: true });
   });
 
@@ -23,7 +25,7 @@ test('webOwner accepts live integration across clock jumps when bootId matches',
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
     stdio: 'ignore',
   });
-  t.after(() => {
+  defer(() => {
     try {
       child.kill('SIGKILL');
     } catch {}
@@ -61,8 +63,9 @@ test('webOwner accepts live integration across clock jumps when bootId matches',
 });
 
 test('webOwner refuses lock from another boot as foreign (cross-boot PID reuse protection)', async (t) => {
+  const defer = teardown(t);
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-web-owner-cross-'));
-  t.after(async () => {
+  defer(async () => {
     await rm(home, { recursive: true, force: true });
   });
 
@@ -71,7 +74,7 @@ test('webOwner refuses lock from another boot as foreign (cross-boot PID reuse p
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
     stdio: 'ignore',
   });
-  t.after(() => {
+  defer(() => {
     try {
       child.kill('SIGKILL');
     } catch {}
@@ -110,11 +113,12 @@ test('webOwner refuses lock from another boot as foreign (cross-boot PID reuse p
 });
 
 test('webOwner detects reused PID via startedUptime even if wall clock stepped backward', async (t) => {
+  const defer = teardown(t);
   const curId = bootId();
   if (!curId) return;
 
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-web-owner-reuse-'));
-  t.after(async () => {
+  defer(async () => {
     await rm(home, { recursive: true, force: true });
   });
 
@@ -123,7 +127,7 @@ test('webOwner detects reused PID via startedUptime even if wall clock stepped b
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
     stdio: 'ignore',
   });
-  t.after(() => {
+  defer(() => {
     try {
       child.kill('SIGKILL');
     } catch {}
@@ -166,6 +170,7 @@ test('webOwner detects reused PID via startedUptime even if wall clock stepped b
 });
 
 test('isWebReady verifies reachable loopback HTTP endpoints and rejects closed or invalid endpoints', async (t) => {
+  const defer = teardown(t);
   assert.equal(await isWebReady(undefined), false);
   assert.equal(await isWebReady(''), false);
   assert.equal(await isWebReady('not-a-url'), false);
@@ -182,7 +187,7 @@ test('isWebReady verifies reachable loopback HTTP endpoints and rejects closed o
     res.end('ok');
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
+  defer(() => new Promise((resolve) => server.close(resolve)));
 
   const addr = server.address();
   const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
@@ -193,12 +198,13 @@ test('isWebReady verifies reachable loopback HTTP endpoints and rejects closed o
 });
 
 test('isWebClaimed rejects stale metadata on reused PID, cross-boot, or unreachable service', async (t) => {
+  const defer = teardown(t);
   const server = createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => new Promise((resolve) => server.close(resolve)));
+  defer(() => new Promise((resolve) => server.close(resolve)));
 
   const addr = server.address();
   const port = typeof addr === 'object' && addr !== null ? addr.port : 0;

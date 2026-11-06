@@ -6,10 +6,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { createWorkspaces } from '../server/dist/paseo/workspaces.js';
 import { directorySuggestions, fileExplorer } from '../server/dist/paseo/files.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 const registry = { projects: [{ id: 'p', root: '/registered', addedAt: 'old' }], workspaces: [{ id: 'w', projectId: 'p', directory: '/registered', labels: [], createdAt: 'old' }], sessions: {}, labels: { generation: 'g', seq: 0, catalog: [] } };
 const state = { state: 'repository', branch: 'from-daemon', remoteUrl: 'https://host/repo', dirty: true };
 function facade(t, status, { facts = () => { throw new Error('unexpected workspace.git.facts'); }, owned = registry } = {}) {
+  const defer = teardown(t);
   const calls = [];
   const workspaces = createWorkspaces({ rpc: async (method, params) => {
     calls.push([method, params]);
@@ -18,7 +20,7 @@ function facade(t, status, { facts = () => { throw new Error('unexpected workspa
     if (method === 'workspace.git.facts') return facts(params);
     throw new Error(`unexpected ${method}`);
   }, broadcast() {}, agents: () => ({ roots: () => [] }), inDevelopment: async () => 'unsupported' });
-  t.after(() => workspaces.close());
+  defer(() => workspaces.close());
   return { workspaces, calls };
 }
 
@@ -51,8 +53,9 @@ const emptyProject = async workspaces => (await workspaces.handlers.fetch_worksp
 
 test('a project-only root is read by alpd\'s workspace.git.facts, each kind as it answers, never by the bridge', async t => {
   // A real repository: a bridge Git read would call it git; alpd's answer is what counts.
+  const defer = teardown(t);
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-adapter-facts-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  defer(() => rm(root, { recursive: true, force: true }));
   execFileSync('git', ['init', '-q', root], { stdio: 'ignore' });
   for (const [answer, kind] of [[facts({ repoRoot: root }), 'git'], [facts({ kind: 'not_repository_root', repoRoot: path.dirname(root) }), 'git'], [{ kind: 'unknown' }, 'non_git']]) {
     const { workspaces, calls } = facade(t, () => assert.fail('no registered workspace'), { owned: projectOnly(root), facts: () => answer });
@@ -65,8 +68,9 @@ test('a project-only root is read by alpd\'s workspace.git.facts, each kind as i
 });
 
 test('a facts refusal propagates; only -32601 (an older alpd) falls back to the bridge\'s own read', async t => {
+  const defer = teardown(t);
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-adapter-facts-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  defer(() => rm(root, { recursive: true, force: true }));
   execFileSync('git', ['init', '-q', root], { stdio: 'ignore' });
   for (const refusal of [Object.assign(new Error('git_failed'), { code: 1000 }), Object.assign(new Error('user_only'), { code: 1003 }), Object.assign(new Error('git_unavailable'), { code: 1005 })]) {
     const { workspaces } = facade(t, () => assert.fail('no registered workspace'), { owned: projectOnly(root), facts: () => { throw refusal; } });
@@ -88,8 +92,9 @@ test('a registered nested folder takes its enclosing repository\'s facts from al
 });
 
 test('normal search ranks every page alpd answers; a refusal never reads local files', async t => {
+  const defer = teardown(t);
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-adapter-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  defer(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, 'docs'));
   await writeFile(path.join(root, 'local-secret.txt'), 'local');
   const request = { type: 'directory_suggestions_request', requestId: 'f', cwd: root, query: 'intro', includeFiles: true, includeDirectories: false };
@@ -110,8 +115,9 @@ test('normal search ranks every page alpd answers; a refusal never reads local f
 });
 
 test('truncated answers, suffix, directory and empty-query modes are alpd\'s only: no local fallback', async t => {
+  const defer = teardown(t);
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-adapter-large-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  defer(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, 'docs'));
   await writeFile(path.join(root, 'docs', 'intro.md'), 'legacy');
   const request = { type: 'directory_suggestions_request', requestId: 'f', cwd: root, query: 'intro', includeFiles: true, includeDirectories: false };
@@ -139,8 +145,9 @@ test('truncated answers, suffix, directory and empty-query modes are alpd\'s onl
 });
 
 test('the Files panel reads only through alpd: a refusal or a lost daemon is the error, never a local read', async t => {
+  const defer = teardown(t);
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-adapter-explorer-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  defer(() => rm(root, { recursive: true, force: true }));
   await writeFile(path.join(root, 'README.md'), 'LOCAL-ONLY');
   const explore = (message, rpc) => fileExplorer({ type: 'file_explorer_request', requestId: 'e', cwd: root, ...message }, rpc);
   for (const [error, shown] of [

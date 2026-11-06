@@ -7,12 +7,14 @@ import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary, librarySkills } from '@anhlp/alp-core/library';
 import { ClaudeTransport, createAlpRuntime, checkpointPrompt, compactDue, compactSettings, contextFill, seedPrompt } from '@anhlp/alp-runtime';
 import { fakeTransport, until } from '../../../test/support/fake-agent.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 const CHECKPOINT = '**Assignment đang chạy:** none\n**Bước tiếp theo:** review PR #9';
 
 async function project(t, settings) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-compact-'));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(directory, 'project');
   await initProject(root);
   if (settings) {
@@ -27,12 +29,13 @@ const promptText = call => call.params.input.map(part => part.text ?? '').join('
 const settle = () => new Promise(resolve => setTimeout(resolve, 40));
 
 async function open(t, { settings, model, transport } = {}) {
+  const defer = teardown(t);
   const { directory, root, runs } = await project(t, settings);
   const runtimes = [];
   const events = [];
   const factory = fakeTransport(runtimes);
   const runtime = createAlpRuntime({ transport: transport ? (...args) => transport(factory(...args), runtimes.length - 1) : factory, supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: runs });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   runtime.onEvent(envelope => events.push(envelope.event));
   await runtime.open('root', { cwd: root, ...(model ? { model } : {}) });
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Ship the parser' }] });
@@ -59,8 +62,9 @@ test('compact settings, fill and the decision', () => {
 });
 
 test('the bundled compact skill is installed and given to main', async t => {
+  const defer = teardown(t);
   const home = await mkdtemp(path.join(tmpdir(), 'alp-compact-home-'));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  defer(() => rm(home, { recursive: true, force: true }));
   const { created } = await seedLibrary(home);
   assert.ok(created.includes('skills/compact/SKILL.md'));
   assert.match(await readFile(path.join(home, 'skills/compact/SKILL.md'), 'utf8'), /^---\nname: compact\n/);
@@ -189,10 +193,11 @@ test('manual trigger: now when idle, deferred while a turn runs; user words duri
 });
 
 test('with the supervisor on, its review neither stops nor stalls the compaction, and the user\'s words reach main after', async t => {
+  const defer = teardown(t);
   const { directory, root, runs } = await project(t);
   const runtimes = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), libraryDir: path.join(directory, 'home'), runLogDir: runs });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, model: 'codex:gpt-5.6-sol' });
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Ship the parser' }] });
   const main = runtimes[0];
@@ -238,6 +243,7 @@ test('a runtime that takes the native request but reports nothing, or a fresh co
 });
 
 test('with the supervisor on, a failed native compaction still falls back to a fresh conversation', async t => {
+  const defer = teardown(t);
   const { directory, root, runs } = await project(t);
   const runtimes = [];
   const factory = fakeTransport(runtimes);
@@ -251,7 +257,7 @@ test('with the supervisor on, a failed native compaction still falls back to a f
     return agent;
   };
   const runtime = createAlpRuntime({ transport, libraryDir: path.join(directory, 'home'), runLogDir: runs });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, model: 'codex:gpt-5.6-sol' });
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Ship the parser' }] });
   const main = runtimes[0];
@@ -274,6 +280,7 @@ async function untilReal(check, what) {
 }
 
 test('a checkpoint held past 5 minutes (a user question in the tree) fails the compaction and releases main', async t => {
+  const defer = teardown(t);
   const { runtime, runtimes, main, log, events } = await open(t);
   // An assignment the user has written to, so it may ask the user.
   const delegated = await main.call('alp_delegate', { agent: 'peer', task: 'Look into the parser', wait: false });
@@ -293,7 +300,7 @@ test('a checkpoint held past 5 minutes (a user question in the tree) fails the c
   void peer.call('alp_ask', { question: 'Keep the parser branch?', to: 'user' }).catch(() => undefined);
   await until(() => events.some(event => event.type === 'question'), 'the open question');
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  t.after(() => t.mock.timers.reset());
+  defer(() => t.mock.timers.reset());
   main.finish(CHECKPOINT);
   for (let i = 0; i < 50; i++) await new Promise(resolve => setImmediate(resolve));
   assert.equal(main.calls.filter(call => call.method === 'thread/compact/start').length, 0, 'held: no compaction yet');
@@ -312,13 +319,14 @@ test('a checkpoint held past 5 minutes (a user question in the tree) fails the c
 });
 
 test('a native compaction the runtime takes but never reports fails at 5 minutes, not before', async t => {
+  const defer = teardown(t);
   const { main, log } = await open(t);
   main.usage(80_000);
   main.finish('turn done');
   await until(() => main.started.length === 2, 'the checkpoint turn');
   t.mock.timers.enable({ apis: ['setTimeout'] });
   main.finish(CHECKPOINT);
-  t.after(() => t.mock.timers.reset());
+  defer(() => t.mock.timers.reset());
   await untilReal(() => main.calls.some(call => call.method === 'thread/compact/start'), 'the native request');
   for (let i = 0; i < 20; i++) await new Promise(resolve => setImmediate(resolve));
   t.mock.timers.tick(FIVE_MINUTES - 1);

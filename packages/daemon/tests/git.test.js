@@ -9,6 +9,7 @@ import { WORKSPACE_GIT } from '@anhlp/alp-protocol';
 import { validateResult } from '@anhlp/alp-protocol/contract';
 import { GIT_READ, createGitReader, gitReadsRunning, scrubRemoteUrl, validBranchName } from '@anhlp/alp-daemon/git';
 import { RegistryError } from '@anhlp/alp-daemon/registry';
+import { teardown } from '../../../test/support/teardown.js';
 
 /**
  * workspace.git.status and workspace.git.diff (docs/protocol/alp-json-rpc-v1.md §12.5) over real,
@@ -27,8 +28,9 @@ const cleanEnv = () => {
 };
 
 async function sandbox(t) {
+  const defer = teardown(t);
   const base = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-git-')));
-  t.after(() => rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  defer(() => rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   return base;
 }
 
@@ -81,6 +83,7 @@ const byPath = files => Object.fromEntries(files.map(file => [file.path, file]))
 const PEM = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACDsecretsecretsecretsecretsecretsecretsecretsecretAAAA\n-----END OPENSSH PRIVATE KEY-----\n';
 
 test('no program the repository or alpd\'s environment names runs: planted git, drivers, filters, fsmonitor, pager, hooks, GIT_* variables', { skip }, async t => {
+  const defer = teardown(t);
   const base = await sandbox(t);
   const root = path.join(base, 'work');
   const traps = path.join(base, 'traps');
@@ -145,7 +148,7 @@ test('no program the repository or alpd\'s environment names runs: planted git, 
   decoyGit('add', '.');
   decoyGit('commit', '-q', '-m', 'decoy');
   const saved = { ...process.env };
-  t.after(() => { for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; Object.assign(process.env, saved); });
+  defer(() => { for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; Object.assign(process.env, saved); });
   Object.assign(process.env, {
     PATH: [root, path.join(root, 'node_modules', '.bin'), '.', '', saved.PATH].join(path.delimiter),
     GIT_DIR: path.join(decoy, '.git'), GIT_WORK_TREE: decoy, GIT_INDEX_FILE: path.join(decoy, '.git', 'index'),
@@ -680,6 +683,7 @@ test('a linked worktree is read through its checked .git; a forged .git link is 
 });
 
 test('alpd answers workspace.git.status and workspace.git.diff by registry workspaceId and lists workspace.git', { skip }, async t => {
+  const defer = teardown(t);
   const { createAlpRuntime } = await import('@anhlp/alp-runtime');
   const { createDaemonServer } = await import('@anhlp/alp-daemon');
   const { seedLibrary } = await import('@anhlp/alp-core/library');
@@ -696,7 +700,7 @@ test('alpd answers workspace.git.status and workspace.git.diff by registry works
   const runtime = createAlpRuntime({ libraryDir: home, supervisor: false, transport: fakeTransport([]) });
   const daemon = createDaemonServer({ runtime, home, socketPath: '', version: 'test' });
   const client = daemon.local();
-  t.after(async () => { client.close(); await daemon.close(); await runtime.shutdown(); });
+  defer(async () => { client.close(); await daemon.close(); await runtime.shutdown(); });
   assert.ok((await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('workspace.git'));
   await client.request('project.register', { directory: root, ifRevision: 0, requestId: 'r1' });
   const workspaceId = (await client.request('workspace.list', {})).workspaces.find(entry => entry.directory === root).id;
@@ -845,6 +849,7 @@ test('an untracked path whose ancestor is no longer a directory (changed since G
 });
 
 test('slow async ancestor checks yield, deduplicate and remain fail-closed in status and diff', { skip: !hasGit && 'git is not installed' }, async t => {
+  const defer = teardown(t);
   const base = await sandbox(t);
   const root = path.join(base, 'repo');
   await repository(root);
@@ -866,7 +871,7 @@ test('slow async ancestor checks yield, deduplicate and remain fail-closed in st
     return lstatSync(file);
   } });
   const heartbeat = setInterval(() => { const now = Date.now(); maxGap = Math.max(maxGap, now - previous); previous = now; ticks++; }, 1);
-  t.after(() => clearInterval(heartbeat));
+  defer(() => clearInterval(heartbeat));
   for (const read of [() => reader.status('w'), () => reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' } })]) {
     calls = new Map();
     const result = await read();

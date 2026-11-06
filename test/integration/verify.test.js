@@ -10,6 +10,7 @@ import { closeTask, createTask, getTask, loadTasks, recordVerification, startTas
 import { describeVerification, runVerify, validateVerify, verifyConfig } from '../../packages/core/src/verify.js';
 import { validateSettings } from '../../packages/core/src/validation.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
+import { teardown } from '../support/teardown.js';
 
 // Verify commands are sh; Windows runs them under cmd.exe, whose echo ends its lines with CRLF and which has no sleep.
 const windows = process.platform === 'win32';
@@ -19,8 +20,9 @@ const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8',
 const exists = file => lstat(file).then(() => true, () => false);
 
 async function directory(t, prefix) {
+  const defer = teardown(t);
   const dir = await mkdtemp(path.join(tmpdir(), prefix));
-  t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  defer(() => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   return dir;
 }
 
@@ -124,6 +126,7 @@ async function until(check) {
 const CHECK = "require('dep'); if (require('fs').existsSync('bad.txt')) { console.error('bad.txt is not allowed'); process.exit(1); } console.log('ok');\n";
 
 async function setup(t, verify = { test: 'node check.js' }) {
+  const defer = teardown(t);
   const dir = await directory(t, 'alp-verify-flow-');
   const root = path.join(dir, 'project');
   await initProject(root);
@@ -138,7 +141,7 @@ async function setup(t, verify = { test: 'node check.js' }) {
   git(root, '-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'init');
   const runtimes = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, worktreeDir: path.join(dir, 'worktrees'), libraryDir: path.join(dir, 'home'), runLogDir: path.join(dir, 'runs'), boardDir: path.join(dir, 'boards') });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root });
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Work' }] });
   return { dir, root, runtime, runtimes, main: runtimes[0] };

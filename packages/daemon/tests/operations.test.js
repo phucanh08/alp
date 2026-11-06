@@ -14,6 +14,7 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { CAPABILITY } from '@anhlp/alp-protocol';
 import { validateResult } from '@anhlp/alp-protocol/contract';
+import { teardown } from '../../../test/support/teardown.js';
 
 /** Agents whose turns complete by themselves, so mail they take counts as taken. */
 function fakeTransport() {
@@ -35,7 +36,10 @@ function fakeTransport() {
 }
 
 async function setup(t, { home: withHome = true, runtimeOptions = {} } = {}) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-ops-'));
+  // Undone LAST: teardown runs the steps in reverse, so everything living in here is released first.
+  defer(() => rm(directory, { recursive: true, force: true }));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
   const project = path.join(directory, 'project');
@@ -43,11 +47,9 @@ async function setup(t, { home: withHome = true, runtimeOptions = {} } = {}) {
   const runtime = createAlpRuntime({ transport: fakeTransport(), libraryDir: home, ...runtimeOptions });
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', ...(withHome ? { home } : {}) });
   await server.listen();
-  t.after(async () => { await server.close(); await runtime.shutdown(); });
-  // After hooks run in the order they are added: remove the files only once that has stopped.
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(async () => { await server.close(); await runtime.shutdown(); });
   const client = await connect(daemonPaths(directory).socket, { name: 'operations-test', version: '0' });
-  t.after(() => client.close());
+  defer(() => client.close());
   /** A request whose result must match the method's v1 result schema. */
   const call = async (method, params) => {
     const result = await client.request(method, params);
@@ -63,13 +65,14 @@ async function setup(t, { home: withHome = true, runtimeOptions = {} } = {}) {
 }
 
 test('gates (t-ccac): task.gate.resolve approves with a choice or rejects, records the channel, and settles the live main\'s card', async t => {
+  const defer = teardown(t);
   const { project, call, fails, runtime, socket } = await setup(t);
   const { id } = await call('task.create', { projectRoot: project, title: 'Ship' });
   await addGate(project, id, { kind: 'human', note: 'Which?', options: ['A', 'B'] }, 'main');
   await addGate(project, id, { kind: 'human', note: 'Plain?' }, 'main');
   // A viewer attaches a main root: the project's open human gates show on it as cards.
   const { client } = { client: await connect(socket, { name: 'alp-web-test', version: '1' }) };
-  t.after(() => client.close());
+  defer(() => client.close());
   const { session } = await client.request('session.create', { spec: { cwd: project } });
   await client.request('session.attach', { sessionId: session.id });
   const cards = () => runtime.questions().filter(question => question.gate);
@@ -92,7 +95,7 @@ test('gates (t-ccac): task.gate.resolve approves with a choice or rejects, recor
 
   // Answered from Paseo: the card's channel comes from the client's hello.
   const paseo = await connect(socket, { name: 'alp-paseo', version: '1' });
-  t.after(() => paseo.close());
+  defer(() => paseo.close());
   await paseo.request('question.answer', { questionId: `gate-${id}-g2`, text: 'Duyệt' });
   for (let i = 0; i < 200 && !(await getTask(project, id)).gates[1].resolved?.notified; i++) await new Promise(resolve => setTimeout(resolve, 10));
   stored = await getTask(project, id);
@@ -111,13 +114,14 @@ test('gates (t-ccac): task.gate.resolve approves with a choice or rejects, recor
 
 test('question.answer refuses a gate card answer that decides nothing, with the reason (t-595d)', async t => {
   // No file watch or timer: the card stays up after a decision made behind alpd's back.
+  const defer = teardown(t);
   const { project, call, socket } = await setup(t, { runtimeOptions: { gateSyncMs: 0 } });
   const { id } = await call('task.create', { projectRoot: project, title: 'Ship' });
   const { id: other } = await call('task.create', { projectRoot: project, title: 'Broken' });
   await addGate(project, id, { kind: 'human', note: 'Go?' }, 'main');
   await addGate(project, other, { kind: 'human', note: 'Fix?' }, 'main');
   const viewer = await connect(socket, { name: 'alp-web-test', version: '1' });
-  t.after(() => viewer.close());
+  defer(() => viewer.close());
   const { session } = await viewer.request('session.create', { spec: { cwd: project } });
   await viewer.request('session.attach', { sessionId: session.id });
   const open = async () => (await viewer.request('question.list', {})).questions.map(question => question.id);

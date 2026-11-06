@@ -62,22 +62,43 @@ const testCallName = node => {
   return name === 'test' || name === 'it' ? name : undefined;
 };
 
+/** What a hook or step body does, from its source text. */
+function classify(body) {
+  return {
+    removes: REMOVES.test(body), releases: RELEASES.test(body),
+    // One step that releases and then removes, in that order, is already correct on its own.
+    releasesFirst: RELEASES.test(body) && REMOVES.test(body) && body.search(RELEASES) < body.search(REMOVES),
+  };
+}
+
 /**
- * The `.after` registrations and helper calls inside `fn`, in textual order (which is the order they
+ * The teardown registrations and helper calls inside `fn`, in textual order (which is the order they
  * run in), skipping anything inside a nested test body — that is a context of its own.
+ *
+ * Two kinds of registration are tracked, because they have OPPOSITE correct orders:
+ *   `hook`, a bare `t.after(...)`, which node:test runs in registration order, and
+ *   `step`, a `defer(...)` from test/support/teardown.js, which runs in REVERSE registration order.
+ * `deferNames` maps a name bound to `teardown(X)` onto the context X it tears down.
  */
-function sequenceOf(fn, parsed) {
+function sequenceOf(fn, parsed, deferNames = new Map()) {
   const events = [];
   const walk = node => {
     if (node !== fn && functionLike(node) && node.parent && testCallName(node.parent)) return;
+    // `const defer = teardown(t)`: remember which context this name registers steps for.
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer
+        && ts.isCallExpression(node.initializer) && ts.isIdentifier(node.initializer.expression)
+        && node.initializer.expression.text === 'teardown' && ts.isIdentifier(node.initializer.arguments[0])) {
+      deferNames.set(node.name.text, node.initializer.arguments[0].text);
+    }
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
         && node.expression.name.text === 'after' && ts.isIdentifier(node.expression.expression)) {
-      const body = node.arguments.map(a => a.getText()).join('\n');
       events.push({ kind: 'hook', context: node.expression.expression.text, position: node.getStart(),
         line: parsed.getLineAndCharacterOfPosition(node.getStart()).line + 1,
-        removes: REMOVES.test(body), releases: RELEASES.test(body),
-        // A single hook that releases and then removes, in that order, is already correct.
-        releasesFirst: RELEASES.test(body) && REMOVES.test(body) && body.search(RELEASES) < body.search(REMOVES) });
+        ...classify(node.arguments.map(a => a.getText()).join('\n')) });
+    } else if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && deferNames.has(node.expression.text)) {
+      events.push({ kind: 'step', context: deferNames.get(node.expression.text), position: node.getStart(),
+        line: parsed.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+        ...classify(node.arguments.map(a => a.getText()).join('\n')) });
     } else if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
       events.push({ kind: 'call', name: node.expression.text, position: node.getStart(),
         arguments: node.arguments.map(a => (ts.isIdentifier(a) ? a.text : undefined)) });
@@ -106,16 +127,19 @@ function namedFunctions(parsed) {
  * The hooks one test registers on its own context, in order: its body's own `t.after` calls with the
  * hooks of every fixture helper it passes `t` to spliced in where the call happens.
  */
-function hooksOf(fn, context, parsed, helpers, seen = new Set()) {
+function hooksOf(fn, context, parsed, helpers, seen = new Set(), deferNames = new Map(), frame = 'test') {
   const hooks = [];
-  for (const event of sequenceOf(fn, parsed)) {
-    if (event.kind === 'hook') { if (event.context === context) hooks.push(event); continue; }
+  for (const event of sequenceOf(fn, parsed, deferNames)) {
+    if (event.kind !== 'call') { if (event.context === context) hooks.push({ ...event, frame }); continue; }
     const helper = helpers.get(event.name);
     const index = event.arguments.indexOf(context);
     if (!helper || index < 0 || seen.has(event.name)) continue;
-    // The helper's own name for the context it was handed.
+    // The helper's own name for the context it was handed. `teardown(t)` inside it returns the very
+    // same defer, so its steps belong to this list, spliced in where the helper is called.
+    // Each invocation is its own frame: a test that calls the same fixture twice gets two sets of
+    // steps, and the second fixture's removal must not be read as skipping the first's release.
     const inner = parameterNames(helper)[index];
-    if (inner) hooks.push(...hooksOf(helper, inner, parsed, helpers, new Set([...seen, event.name])));
+    if (inner) hooks.push(...hooksOf(helper, inner, parsed, helpers, new Set([...seen, event.name]), new Map(deferNames), `${frame}>${event.name}@${event.position}`));
   }
   return hooks;
 }
@@ -143,16 +167,29 @@ export function teardownProblems(relative, source) {
   walk(parsed);
 
   const problems = [];
-  for (const hooks of [...contexts, fileLevel]) {
-    for (const [index, hook] of hooks.entries()) {
-      if (!hook.removes || hook.releasesFirst) continue;
-      const later = hooks.slice(index + 1).find(other => other.releases);
-      if (!later) continue;
-      const site = `${relative}:${hook.line}`;
-      if (Object.hasOwn(ALLOWED, site)) continue;
-      if (problems.some(problem => problem.site === site && problem.skips === `${relative}:${later.line}`)) continue;
-      problems.push({ site, skips: `${relative}:${later.line}`,
-        detail: `${relative}:${hook.line} removes a path in an after hook registered before ${relative}:${later.line}, which releases a resource: if the removal throws, node:test never runs the release and the file hangs to the watchdog` });
+  const add = problem => {
+    if (Object.hasOwn(ALLOWED, problem.site)) return;
+    if (problems.some(seen => seen.site === problem.site && seen.skips === problem.skips)) return;
+    problems.push(problem);
+  };
+  for (const registrations of [...contexts, fileLevel]) {
+    for (const [index, entry] of registrations.entries()) {
+      if (entry.releasesFirst) continue;
+      // A bare `t.after` runs in registration order: a removal must come after every release.
+      if (entry.kind === 'hook' && entry.removes) {
+        const later = registrations.slice(index + 1).find(other => other.kind === 'hook' && other.releases);
+        if (later) add({ site: `${relative}:${entry.line}`, skips: `${relative}:${later.line}`,
+          detail: `${relative}:${entry.line} removes a path in an after hook registered before ${relative}:${later.line}, which releases a resource: if the removal throws, node:test never runs the release and the file hangs to the watchdog` });
+      }
+      // A `defer` step runs in REVERSE registration order, so the rule inverts: register each step
+      // right after the setup it undoes, which puts the removal FIRST and the release after it.
+      // Only within one frame: across two invocations of the same fixture, the second's removal
+      // legitimately follows the first's release, and each pair is undone correctly on its own.
+      if (entry.kind === 'step' && entry.releases && !entry.removes) {
+        const later = registrations.slice(index + 1).find(other => other.kind === 'step' && other.removes && !other.releases && other.frame === entry.frame);
+        if (later) add({ site: `${relative}:${entry.line}`, skips: `${relative}:${later.line}`,
+          detail: `${relative}:${entry.line} releases a resource in a defer step registered before the removal at ${relative}:${later.line}; defer runs in reverse, so the path would be removed FIRST. Register each step right after the setup it undoes` });
+      }
     }
   }
   return problems;

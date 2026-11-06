@@ -36,6 +36,10 @@ function tests(files) {
 }
 if (scope === 'all' || scope === 'core') {
   node('scripts/check-boundaries.mjs');
+  // t-5294.6: a t.after that removes a directory, registered before the one closing what lives in
+  // it, hangs the whole file to the per-file watchdog when the removal throws. Static, so it runs
+  // before the long steps.
+  node('scripts/check-teardown-order.mjs');
   node('node_modules/typescript/bin/tsc', '-p', 'tsconfig.core.json');
   node('node_modules/typescript/bin/tsc', '-p', 'tsconfig.gateway.json');
   buildWorkspace('daemon');

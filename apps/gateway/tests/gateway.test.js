@@ -12,10 +12,12 @@ import path from 'node:path';
 import { revokeCredential, rotateCredential, resolveConfig } from '../src/index.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { ORIGIN, startGateway, until } from './support/harness.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 async function workspaces(t) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-ws-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   return { a: path.join(directory, 'a'), b: path.join(directory, 'b') };
 }
 
@@ -461,11 +463,12 @@ test('an unparsable request target is a 400, in a request or an upgrade, and the
 });
 
 test('a throw in a request or upgrade handler is a logged 500, and the gateway keeps serving', async t => {
+  const defer = teardown(t);
   const daemon = fakeDaemon();
   const { a } = await workspaces(t);
   const gw = await startGateway(t, { daemon, credentials: { alice: { workspaces: [a] } } });
   const { verify, grant } = gw.store;
-  t.after(() => { gw.store.verify = verify; gw.store.grant = grant; });
+  defer(() => { gw.store.verify = verify; gw.store.grant = grant; });
   // The ticket route throws while it checks the token.
   gw.store.verify = () => { throw new Error('broken store'); };
   const ticket = await gw.ticket(gw.tokens.alice);
@@ -485,6 +488,7 @@ test('a throw in a request or upgrade handler is a logged 500, and the gateway k
 });
 
 test('socket closing before upgrade cleans up perPrincipal entry without memory leak (t-7eb7)', async t => {
+  const defer = teardown(t);
   const { ticket, tokens, ids, gateway, base, rawSession } = await setup(t);
   const { body } = await ticket(tokens.alice);
   const port = Number(new URL(base).port);
@@ -506,7 +510,7 @@ test('socket closing before upgrade cleans up perPrincipal entry without memory 
     '',
   ].join('\r\n');
 
-  t.after(() => clientSocket.destroy());
+  defer(() => clientSocket.destroy());
   clientSocket.on('error', () => {});
   clientSocket.write(req);
   await until(() => reservedSocket !== undefined, 'upgrade reached after reservation');
