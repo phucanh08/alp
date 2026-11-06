@@ -5,6 +5,8 @@
 // failed (with their errors) or are still in flight, the file's processes, and (not on Windows) each
 // one's open libuv handles from a Node diagnostic report. A passing or failing file costs one extra
 // reporter writing a line per subtest to scratch, and a report signal handler nothing triggers.
+// The dump adds at most about 6.5 s to the deadline (a 4 s process listing, 2.2 s of reports), and
+// never blocks the other files' workers.
 import { spawn, spawnSync } from 'node:child_process';
 import { availableParallelism, tmpdir } from 'node:os';
 import { mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
@@ -67,19 +69,33 @@ function progressSummary(file) {
   return out;
 }
 
+/** A command's stdout, or why there is none; asynchronous, and killed after `ms`. */
+function capture(command, args, ms) {
+  return new Promise(resolve => {
+    let stdout = '';
+    let child;
+    try { child = spawn(command, args, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }); }
+    catch (error) { resolve({ error: error.message }); return; }
+    const timer = setTimeout(() => { child.kill('SIGKILL'); resolve({ error: `no answer within ${ms} ms` }); }, ms);
+    child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+    child.once('error', error => { clearTimeout(timer); resolve({ error: error.message }); });
+    child.once('close', code => { clearTimeout(timer); resolve(code === 0 ? { stdout } : { error: `status ${code}` }); });
+  });
+}
+
 /** The file's processes: its group and descendants (POSIX), or its process tree (Windows). Listed, never signalled. */
-function processSummary(root) {
+async function processSummary(root) {
   if (windows) {
     const script = 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)" }';
-    const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: 15000, windowsHide: true });
-    if (result.error || result.status !== 0) return [`  process list unavailable: ${result.error?.message || `status ${result.status}`}`];
+    const result = await capture('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], 4000);
+    if (result.error) return [`  process list unavailable: ${result.error}`];
     const rows = result.stdout.split(/\r?\n/).filter(Boolean).map(line => { const [pid, ppid, ...command] = line.split('\t'); return { pid: Number(pid), ppid: Number(ppid), command: command.join('\t') }; });
     const tree = new Set([root]);
     for (let grew = true; grew;) { grew = false; for (const row of rows) if (!tree.has(row.pid) && tree.has(row.ppid)) { tree.add(row.pid); grew = true; } }
     return rows.filter(row => tree.has(row.pid)).map(row => `  pid ${row.pid} ppid ${row.ppid}: ${row.command}`);
   }
-  const result = spawnSync('ps', ['-A', '-o', 'pid=,ppid=,pgid=,stat=,etime=,command='], { encoding: 'utf8', timeout: 10000 });
-  if (result.error || result.status !== 0) return [`  process list unavailable: ${result.error?.message || `status ${result.status}`}`];
+  const result = await capture('ps', ['-A', '-o', 'pid=,ppid=,pgid=,stat=,etime=,command='], 3000);
+  if (result.error) return [`  process list unavailable: ${result.error}`];
   const rows = result.stdout.split('\n').filter(Boolean).map(line => { const [pid, ppid, pgid, stat, etime, ...command] = line.trim().split(/\s+/); return { pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), stat, etime, command: command.join(' ') }; });
   const tree = new Set([root]);
   for (let grew = true; grew;) { grew = false; for (const row of rows) if (!tree.has(row.pid) && (tree.has(row.ppid) || row.pgid === root)) { tree.add(row.pid); grew = true; } }
@@ -131,7 +147,7 @@ async function handleSummary(root, directory) {
 }
 
 async function dump(file, child, progress, reports) {
-  const out = [`[test-file] HANG DUMP ${file} (pid ${child.pid})`, ' subtests:', ...progressSummary(progress), ' processes:', ...processSummary(child.pid)];
+  const out = [`[test-file] HANG DUMP ${file} (pid ${child.pid})`, ' subtests:', ...progressSummary(progress), ' processes:', ...await processSummary(child.pid)];
   out.push(' referenced active handles (what keeps each process alive):', ...await handleSummary(child.pid, reports));
   out.push(`[test-file] END HANG DUMP ${file}`);
   console.error(out.join('\n'));
@@ -164,7 +180,7 @@ async function worker() {
         timedOut = true;
         retainScratch = true;
         console.error(`[test-file] TIMEOUT ${file} after ${fileTimeoutMs} ms; retaining scratch; detached descendants may survive`);
-        // The dump is bounded (a few seconds at most) and must not defeat the deadline if it fails.
+        // The dump is bounded (about 6.5 s at most) and must not defeat the deadline if it fails.
         try { await dump(file, child, progress, reports); } catch (error) { console.error(`[test-file] hang dump failed: ${error.message}`); }
         stop(child);
         // A failed kill must not defeat the deadline.

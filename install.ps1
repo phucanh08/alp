@@ -46,7 +46,8 @@ param(
   # (powershell -File install.ps1) an uncaught throw still ends with exit code 1.
   function Die([string]$Message) { throw "alp-install: error: $Message" }
 
-  # Windows refuses to move a directory while a file in it is open or running. A version that just ran
+  # Windows refuses to move a directory while a file in it is open without delete sharing, or while it is
+  # a process's working directory (a running executable alone does not stop it). A version that just ran
   # (`alp --version`, or the check below of a copy just unpacked) can stay held for a moment after its
   # process ended: the exiting process itself, or an antivirus scan of the new executable (t-5294.5). So
   # a move is tried again for about 10 s, saying so once; a process that keeps running from the
