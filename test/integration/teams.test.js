@@ -187,6 +187,51 @@ test('a team of your own: its main leads with the team graph, models and house r
   assert.match(watcher.developerInstructions, /Watcher[\s\S]*supervisor of architect/);
 });
 
+// R5/E3 of docs/alp/architecture-review-templates-scopes-model-routing.md: the oracle paragraph is
+// printed only to an agent that can delegate to oracle, and "two independent opinions" only when the
+// team has more than one oracle model. The usage sentence that shared the line stays for everyone.
+test('the oracle paragraph appears only where oracle is a delegation target, and two opinions only with two models', async t => {
+  const oracleLine = /Oracle runs on /;
+  const twoOpinions = /For two independent opinions/;
+  const usage = /Usage context is advisory, may be unavailable or stale/;
+  // A team without an oracle member (like the architecture pack's Blueprint).
+  const root = await fixture(t);
+  await initProject(root);
+  await files(root, {
+    '.alp/teams/docs/team.json': docsTeam,
+    '.alp/agents/architect/AGENT.md': 'Architect',
+    '.alp/agents/writer/AGENT.md': 'Writer',
+    '.alp/agents/watcher/AGENT.md': 'Watcher',
+  });
+  let { runtimes } = await session(t, root, { workflow: 'docs', agent: 'architect' }, { supervisor: false });
+  let config = runtimes[0].config;
+  assert.doesNotMatch(config.developerInstructions, oracleLine);
+  assert.match(config.developerInstructions, usage);
+  assert.doesNotMatch(config.dynamicTools.find(tool => tool.name === 'alp_delegate').inputSchema.properties.model.description, /Oracle:/);
+  // The same team with an oracle and one oracle model: the line, without the two-opinions advice.
+  const single = await fixture(t);
+  await initProject(single);
+  await files(single, {
+    '.alp/teams/docs/team.json': { ...docsTeam, members: { ...docsTeam.members, oracle: { role: 'advisor' } }, delegation: { architect: ['writer', 'oracle', 'reviewer'] }, oracleModels: ['codex:gpt-6-astra'] },
+    '.alp/agents/architect/AGENT.md': 'Architect',
+    '.alp/agents/writer/AGENT.md': 'Writer',
+  });
+  ({ runtimes } = await session(t, single, { workflow: 'docs', agent: 'architect' }, { supervisor: false }));
+  config = runtimes[0].config;
+  assert.match(config.developerInstructions, /Oracle runs on codex:gpt-6-astra; pass one as model/);
+  assert.doesNotMatch(config.developerInstructions, twoOpinions);
+  assert.match(config.developerInstructions, usage);
+  // Phở's main delegates to oracle on two models: both sentences, as before.
+  const pho = await fixture(t);
+  await initProject(pho);
+  ({ runtimes } = await session(t, pho, { workflow: 'pho' }, { supervisor: false }));
+  config = runtimes[0].config;
+  assert.match(config.developerInstructions, oracleLine);
+  assert.match(config.developerInstructions, twoOpinions);
+  assert.match(config.developerInstructions, usage);
+  assert.match(config.dynamicTools.find(tool => tool.name === 'alp_delegate').inputSchema.properties.model.description, /Oracle: /);
+});
+
 test('settings.json runtime still comes before a team, and the caller before both', async t => {
   const root = await fixture(t);
   await initProject(root);

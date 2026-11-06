@@ -193,7 +193,15 @@ export function nativeSessionConfig(
       ...modelProfileNote(mapping, targets),
       // The team's house rules (ALPD §42); Phở and Cafe's are the text this line held before teams.
       `Profile: ${mapping.workflow.mode}; fixed for this session.${mapping.houseRules ? ` ${mapping.houseRules}` : ''}`,
-      `Oracle runs on ${mapping.oracleModels.join(' or ')}; pass one as model (effort follows the team's oracle settings, otherwise high). For two independent opinions, start one oracle on each model with wait: false and compare their advice. If the model you need is unavailable, say so rather than choosing another. Usage context is advisory, may be unavailable or stale; never infer quota from token counts. Respect known exhausted limits and report them.`,
+      // Only an agent that can delegate to oracle is told how to; two opinions need two oracle models.
+      [
+        ...(targets.includes('oracle')
+          ? [`Oracle runs on ${mapping.oracleModels.join(' or ')}; pass one as model (effort follows the team's oracle settings, otherwise high).` +
+            (mapping.oracleModels.length > 1 ? ' For two independent opinions, start one oracle on each model with wait: false and compare their advice.' : '') +
+            ' If the model you need is unavailable, say so rather than choosing another.']
+          : []),
+        'Usage context is advisory, may be unavailable or stale; never infer quota from token counts. Respect known exhausted limits and report them.',
+      ].join(' '),
       ...(supervised
         ? ['A supervisor reviews your process after each turn. Its notes ask about process mistakes: answer them in your reply, then record each lesson with alp_lesson (scope project for this project, user for every project). Do not argue a note away; when it is wrong, say why in one line. ' +
           'When three or more lessons cover one theme, or a lesson recurs, distill them into a skill with alp_skill: a method with steps and checks, listing the lessons it replaces. Scope it to the roles whose work it guides: yourself, lead, peer, oracle, reviewer, supervisor, or a custom agent; a lesson about briefing peers is yours, a lesson about verifying a change belongs to whoever makes it. The user approves it first. To merge, shorten or remove lessons use alp_lesson_curate (the curate skill), never a file edit.']
@@ -266,7 +274,7 @@ export function nativeSessionConfig(
                   description:
                     'Complete brief: objective, scope, constraints, verification, handoff.',
                 },
-                model: { type: 'string', description: `Explicit runtime-prefixed model ID from the available catalog. Oracle: ${mapping.oracleModels.join(' or ')}.` },
+                model: { type: 'string', description: `Explicit runtime-prefixed model ID from the available catalog.${targets.includes('oracle') ? ` Oracle: ${mapping.oracleModels.join(' or ')}.` : ''}` },
                 thinking: { type: 'string', description: 'Effort supported by the selected model.' },
                 modelReason: { type: 'string', description: 'Why this model suits the task.' },
                 mode: {
