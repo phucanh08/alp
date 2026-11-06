@@ -22,7 +22,9 @@
 // `defer` is not a `.after` call, so a converted file reports nothing here by construction.
 //
 // Usage: node scripts/check-teardown-order.mjs [--root <dir>] [--json]
-// Exit 0 when clean, 1 with a report when not. Run by test/integration/teardown-order.test.js.
+// Exit 0 when clean, 1 with a report when not. Run by scripts/validate.mjs (scope all|core, so the
+// CI lanes `core` and `core-paseo-macos`), as `npm run check:teardown-order`, and by
+// test/integration/teardown-order.test.js, which also fails on a STALE entry in ALLOWED below.
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -47,10 +49,23 @@ const REMOVES = /\b(?:rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync)\s*\(/;
 const RELEASES = /\.(?:close|closeAllConnections|shutdown|stop|kill|destroy|disconnect|terminate|flush)\s*\(/;
 
 /**
- * Sites to leave alone, each with the reason it is safe. A file-level `test.after` already runs after
- * every per-test hook, so it never needs an entry. Key: `<repo-relative path>:<line>`.
+ * Sites to leave alone, each with the reason. A file-level `test.after` already runs after every
+ * per-test hook, so it never needs an entry. Key: `<repo-relative path>:<line>`.
+ *
+ * This list is NOT a baseline: test/integration/teardown-order.test.js fails when an entry here is
+ * no longer reported by a scan that ignores the list, so a site that has been fixed (or a line that
+ * has moved) must be deleted from it rather than left to rot. Every entry below is a real defect
+ * owned by another agent's branch in the same wave of work; each one goes when that branch lands.
  */
-export const ALLOWED = {};
+export const ALLOWED = {
+  // Group D (board p-bfea7464 / p-c479d708, tasks t-5294.7 + t-9043): these four files are edited by
+  // that branch in the same wave, so converting them here would only make a conflict. Real defects.
+  'test/integration/binary-install-ps1.test.js:23': 'group D (t-5294.7, claim p-c479d708) converts this with the rest of its binary-install work; delete this entry when that branch lands',
+  'test/integration/library-tools.test.js:20': 'group D via t-9043 (claim p-c479d708, decision p-a5af690e edits this same file); delete this entry when that branch lands',
+  'test/integration/packs.test.js:17': 'group D via t-9043 (claim p-c479d708, decision p-a5af690e edits this same file); delete this entry when that branch lands',
+  'test/integration/teams.test.js:68': 'group D via t-9043 (claim p-c479d708, decision p-a5af690e edits this same file); delete this entry when that branch lands',
+  'test/integration/teams.test.js:110': 'group D via t-9043 (claim p-c479d708); this is the one site of lead\'s original 29 that group C does not own; delete this entry when that branch lands',
+};
 
 const functionLike = node => ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node);
 const parameterNames = node => node.parameters.map(p => (ts.isIdentifier(p.name) ? p.name.text : undefined));
@@ -144,8 +159,11 @@ function hooksOf(fn, context, parsed, helpers, seen = new Set(), deferNames = ne
   return hooks;
 }
 
-/** The order problems in one file's source. */
-export function teardownProblems(relative, source) {
+/**
+ * The order problems in one file's source. `allowed` defaults to ALLOWED; pass `{}` to see the
+ * excused sites too, which is how the test checks that no entry has gone stale.
+ */
+export function teardownProblems(relative, source, allowed = ALLOWED) {
   const parsed = ts.createSourceFile(relative, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const helpers = namedFunctions(parsed);
   /** One ordered hook list per test, plus one for the file-level `test.after` hooks. */
@@ -168,7 +186,7 @@ export function teardownProblems(relative, source) {
 
   const problems = [];
   const add = problem => {
-    if (Object.hasOwn(ALLOWED, problem.site)) return;
+    if (Object.hasOwn(allowed, problem.site)) return;
     if (problems.some(seen => seen.site === problem.site && seen.skips === problem.skips)) return;
     problems.push(problem);
   };
@@ -203,12 +221,12 @@ async function testFiles(directory) {
   } catch { return []; }
 }
 
-/** Every problem in the tree at `root`. */
-export async function scan() {
+/** Every problem in the tree at `root`. Pass `{ allowed: {} }` to include the excused sites. */
+export async function scan({ allowed = ALLOWED } = {}) {
   const problems = [];
   for (const directory of TEST_DIRECTORIES) {
     for (const relative of await testFiles(directory)) {
-      problems.push(...teardownProblems(relative, await readFile(path.join(root, relative), 'utf8')));
+      problems.push(...teardownProblems(relative, await readFile(path.join(root, relative), 'utf8'), allowed));
     }
   }
   return problems;
@@ -224,6 +242,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     console.error('node:test stops at the first after hook that throws, so the release never runs and the file hangs to the per-file watchdog.');
     console.error('Fix: register both through test/support/teardown.js (defer), each step right after the setup it undoes.\n');
     for (const problem of problems) console.error(`  ${problem.detail}`);
-  } else console.log(`teardown order: no problems in ${TEST_DIRECTORIES.length} test directories`);
+  } else {
+    const excused = Object.keys(ALLOWED).length;
+    console.log(`teardown order: no problems in ${TEST_DIRECTORIES.length} test directories`
+      + (excused ? `, ${excused} site${excused === 1 ? '' : 's'} allowlisted (open on another branch; see ALLOWED)` : ''));
+  }
   process.exitCode = problems.length ? 1 : 0;
 }
