@@ -1,91 +1,90 @@
 ---
 name: feature-architecture
-description: "Implement a new feature so it fits the project's existing architecture rules, boilerplate, and dependency direction, with a short design first and boundary checks after. Use when adding a feature to a codebase with architecture docs, ADRs, templates, or a boundary contract. Not for behavior-preserving restructuring (safe-refactor) or fixing a regression (bug-loop)."
+description: "Hiện thực một feature mới sao cho nó khớp với các quy tắc kiến trúc, boilerplate và hướng phụ thuộc đang có của project, với một bản thiết kế ngắn trước và các phép kiểm ranh giới sau. Dùng khi thêm feature vào một codebase có tài liệu kiến trúc, ADR, template hoặc một contract về ranh giới. Không dùng cho việc cấu trúc lại mà giữ nguyên hành vi (safe-refactor) hay sửa một regression (bug-loop)."
 ---
 
-# Feature Architecture
+# Kiến trúc feature
 
-## When to use
+## Khi dùng
 
-- A new feature, endpoint, module, or command must land in a project that has
-  architecture docs, ADRs, layer or package rules, or feature boilerplate.
-- A read-only architect or reviewer is asked whether a planned feature fits the
-  project's architecture (advice only).
+- Một feature, endpoint, module hay câu lệnh mới phải đưa được vào một project đã có
+  tài liệu kiến trúc, ADR, quy tắc về lớp hoặc package, hay boilerplate cho feature.
+- Một architect hoặc reviewer chỉ đọc được hỏi xem một feature đã lên kế hoạch có khớp
+  với kiến trúc của project hay không (chỉ tư vấn).
 
-## Not for
+## Không dùng cho
 
-- Restructuring existing code without behavior change: use safe-refactor.
-- Reproducing and fixing a bug or regression: use bug-loop.
-- Writing or reorganizing architecture documentation itself: use architecture-docs.
-- Choosing a new architecture style for the project: that is a user decision.
+- Cấu trúc lại code đang có mà không đổi hành vi: dùng safe-refactor.
+- Tái lập và sửa một bug hay regression: dùng bug-loop.
+- Viết hay sắp xếp lại chính tài liệu kiến trúc: dùng architecture-docs.
+- Chọn một phong cách kiến trúc mới cho project: đó là quyết định của người dùng.
 
-## Prerequisites
+## Điều kiện tiên quyết
 
-- An assigned scope (paths or modules) and acceptance criteria from the brief.
-- Read access to ALP.md, project instructions, and architecture docs if present.
+- Một phạm vi được giao (đường dẫn hoặc module) và tiêu chí nghiệm thu lấy từ brief.
+- Quyền đọc ALP.md, hướng dẫn của project, và tài liệu kiến trúc nếu có.
 
-## Workflow
+## Quy trình
 
-1. Read ALP.md and the project's own instructions; note commands for build, test,
-   lint, and boundary checks.
-2. Read the relevant architecture docs (for example `docs/architecture/`, ADRs,
-   package READMEs). Read only what bears on the modules this feature touches.
-3. List the rules in two groups. Hard constraints: dependency rules, file placement,
-   public API compatibility, required interfaces or registration points. Soft
-   conventions: naming, folder shape, test style. Cite the source of each rule.
-4. Find the boilerplate or template (for example `templates/features/`) and the
-   most similar existing feature. Mirror its structure, wiring, and tests.
-5. Map the modules touched and the direction of every new dependency. A new edge
-   must point the way existing edges of that kind already point.
-6. Write a short feature design: files to add or change, owning module, public
-   surface, tests. Put it in the lead/peer brief or the task notes.
-7. Implement following existing conventions. Stay inside owned paths.
-8. Run architecture checks. Use the project's own lint and boundary tools first. If
-   the project adopted ALP's contract file, also run
-   `node <this skill dir>/scripts/check-boundaries.mjs --root <repo>`; it reads
-   `docs/architecture/contract.json` by default and exits 1 on violations. See
+1. Đọc ALP.md và hướng dẫn riêng của project; ghi lại câu lệnh build, test, lint và
+   kiểm ranh giới.
+2. Đọc các tài liệu kiến trúc liên quan (ví dụ `docs/architecture/`, các ADR, README của
+   package). Chỉ đọc phần dính tới các module mà feature này chạm vào.
+3. Liệt kê các quy tắc thành hai nhóm. Ràng buộc cứng: quy tắc phụ thuộc, chỗ đặt file,
+   tương thích public API, interface hay điểm đăng ký bắt buộc. Quy ước mềm: cách đặt tên,
+   hình dạng thư mục, phong cách test. Dẫn nguồn của từng quy tắc.
+4. Tìm boilerplate hoặc template (ví dụ `templates/features/`) và feature đang có giống
+   nhất. Lặp lại cấu trúc, cách nối dây và test của nó.
+5. Vẽ ra các module bị chạm và hướng của từng phụ thuộc mới. Một cạnh mới phải chỉ cùng
+   hướng với các cạnh cùng loại đang có.
+6. Viết một bản thiết kế feature ngắn: file sẽ thêm hoặc sửa, module sở hữu, bề mặt public,
+   test. Đặt nó vào brief của lead/peer hoặc vào note của task.
+7. Hiện thực theo các quy ước đang có. Ở trong các đường dẫn sở hữu.
+8. Chạy các phép kiểm kiến trúc. Dùng công cụ lint và kiểm ranh giới của chính project
+   trước. Nếu project đã nhận file contract của ALP, hãy chạy thêm
+   `node <this skill dir>/scripts/check-boundaries.mjs --root <repo>`; mặc định nó đọc
+   `docs/architecture/contract.json` và thoát với mã 1 khi có vi phạm. Xem
    [scripts/check-boundaries.mjs](scripts/check-boundaries.mjs).
-9. Review the diff against the design. Update architecture docs or the contract
-   only if a boundary or contract actually changed.
+9. Review diff đối chiếu với bản thiết kế. Chỉ cập nhật tài liệu kiến trúc hoặc contract
+   nếu một ranh giới hay contract thật sự đã đổi.
 
-A read-only architect or reviewer runs steps 1-6 and 8 against the proposal or
-current tree, then reports findings and a recommended design instead of editing.
+Một architect hoặc reviewer chỉ đọc chạy bước 1-6 và 8 trên bản đề xuất hoặc trên cây hiện
+tại, rồi báo phát hiện và một bản thiết kế được khuyến nghị, thay vì sửa file.
 
-## Constraints
+## Ràng buộc
 
-- Never impose Clean Architecture, DDD, Hexagonal, or any framework or pattern the
-  project does not already use.
-- Do not add an abstraction, layer, or interface only to satisfy a generic pattern.
-- If the architecture cannot satisfy the requirement, stop. State the conflict,
-  the trade-off, and the options, and route the decision upward
-  (peer -> lead -> main -> user).
-- An exception to a hard rule needs an explicit recorded decision (an ADR or a
-  task note naming who approved it). Never bypass a rule silently, and never
-  edit the contract or a lint config to make a violation pass.
-- Read-only agents (architect, reviewer) report findings; they do not edit.
-- The skill grants no authority to install tools, widen scope, or write outside
-  owned paths.
+- Đừng bao giờ áp đặt Clean Architecture, DDD, Hexagonal, hay bất kỳ framework hoặc mẫu nào
+  mà project chưa dùng.
+- Đừng thêm một abstraction, lớp hay interface chỉ để thoả một mẫu chung chung.
+- Nếu kiến trúc không thể thoả yêu cầu, hãy dừng. Nêu rõ xung đột, cái được cái mất, và các
+  phương án, rồi chuyển quyết định lên trên
+  (peer -> lead -> main -> người dùng).
+- Một ngoại lệ với quy tắc cứng cần một quyết định được ghi lại rõ ràng (một ADR hoặc một
+  note trong task nêu tên người đã duyệt). Đừng bao giờ lách một quy tắc trong im lặng, và
+  đừng sửa contract hay config lint để một vi phạm lọt qua.
+- Các agent chỉ đọc (architect, reviewer) báo phát hiện; họ không sửa file.
+- Skill này không cấp quyền cài công cụ, mở rộng phạm vi, hay ghi ra ngoài các đường dẫn
+  sở hữu.
 
-## Verification
+## Kiểm chứng
 
-- Project lint, type check, tests, and boundary tools pass on the final tree.
-- `check-boundaries.mjs` exits 0 when the project uses the contract file.
-- Every new dependency edge matches the mapped direction from step 5.
-- Hand off: checker commands with output, files changed grouped by module, and
-  any approved exception with its record location and approver.
+- Lint, type check, test và công cụ kiểm ranh giới của project đều pass trên cây cuối cùng.
+- `check-boundaries.mjs` thoát với mã 0 khi project dùng file contract.
+- Mọi cạnh phụ thuộc mới khớp với hướng đã vẽ ở bước 5.
+- Handoff: câu lệnh kiểm kèm output, các file đã đổi nhóm theo module, và mọi ngoại lệ đã
+  được duyệt kèm nơi ghi nó và người duyệt.
 
-## Failure handling
+## Xử lý khi thất bại
 
-- Boundary violation: move the code or invert the dependency the way the analogous
-  feature does; re-run the checker. Do not weaken the rule.
-- No analogous feature or template: say so, propose the closest fit, and ask the
-  assigning agent before inventing a new structure.
-- Conflicting docs and code: follow the code that the checks enforce, record the
-  discrepancy, and report it upward.
-- Checker missing or failing to run: report the exact command and error; do not
-  claim the boundaries were verified.
+- Vi phạm ranh giới: di chuyển code hoặc đảo hướng phụ thuộc theo cách feature tương tự đã
+  làm; chạy lại bộ kiểm. Đừng làm yếu quy tắc.
+- Không có feature hay template tương tự: hãy nói thẳng, đề xuất phương án gần nhất, và hỏi
+  agent giao việc trước khi tự dựng một cấu trúc mới.
+- Tài liệu và code xung đột: theo code mà các phép kiểm thực thi, ghi lại chỗ lệch, và báo lên.
+- Bộ kiểm thiếu hoặc chạy không được: báo đúng câu lệnh và lỗi; đừng tuyên bố là đã kiểm
+  chứng được các ranh giới.
 
-## References
+## Tài liệu tham chiếu
 
-- [references/feature-design.md](references/feature-design.md) — read when writing the feature design (step 6), choosing the analogous feature (step 4), or checking dependency direction (step 5).
-- [references/architecture-contract.md](references/architecture-contract.md) — read when the project has or wants a machine-checkable architecture contract.
+- [references/feature-design.md](references/feature-design.md) — đọc khi viết bản thiết kế feature (bước 6), khi chọn feature tương tự (bước 4), hoặc khi kiểm hướng phụ thuộc (bước 5).
+- [references/architecture-contract.md](references/architecture-contract.md) — đọc khi project đã có hoặc muốn có một contract kiến trúc máy kiểm được.

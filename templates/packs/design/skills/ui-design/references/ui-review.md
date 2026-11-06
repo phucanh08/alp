@@ -1,67 +1,67 @@
-# UI review
+# Review UI
 
-Read when reviewing an existing screen, component or design spec for usability,
-accessibility and design-system consistency.
+Đọc khi review một màn hình, component hay spec thiết kế đang có về mức khả dụng,
+accessibility và tính nhất quán với design system.
 
-## Scope and method
+## Phạm vi và cách làm
 
-- Review the surface named in the assignment. Do not expand to the whole application.
-- Use available evidence: source (markup, styles, tokens), screenshots, design files in the repo,
-  and running the app locally if the project's run command is available and permitted.
-- Check with keyboard only, at narrow width, at 200% zoom, and in each supported theme when you
-  can run the UI. If you cannot run it, say so and review from source; mark runtime-only items
-  as unverified.
-- Read-only reviewers report findings; they do not change files.
+- Review bề mặt được nêu trong việc được giao (assignment). Không mở rộng ra toàn bộ ứng dụng.
+- Dùng bằng chứng có sẵn: source (markup, style, token), ảnh chụp, file thiết kế trong repo,
+  và chạy ứng dụng cục bộ nếu lệnh chạy của dự án có sẵn và được phép.
+- Kiểm tra chỉ bằng bàn phím, ở chiều rộng hẹp, ở zoom 200%, và trong từng theme được hỗ trợ khi bạn
+  chạy được UI. Nếu không chạy được, hãy nói rõ và review từ source; đánh dấu những mục chỉ kiểm được
+  khi chạy là chưa kiểm chứng.
+- Reviewer chỉ đọc thì báo các phát hiện; họ không sửa file.
 
 ## Checklist
 
-Hierarchy and layout
-- One primary action per view; destructive actions separated and confirmed or undoable.
-- Spacing and sizes come from the project's scales; no stray off-scale values.
-- Alignment to a small set of edges; consistent density within a view.
+Thứ bậc và layout
+- Một hành động chính cho mỗi view; hành động phá hủy tách riêng và có xác nhận hoặc hoàn tác được.
+- Khoảng cách và kích thước lấy từ thang đo của dự án; không có giá trị lệch thang lạc vào.
+- Căn theo một tập nhỏ các đường biên; mật độ nhất quán trong một view.
 
 Typography
-- Body text readable (size, line height, measure); text scales with user settings.
-- Heading levels follow structure, not visual size alone.
+- Chữ nội dung đọc được (cỡ, chiều cao dòng, chiều dài dòng); chữ co giãn theo thiết lập người dùng.
+- Cấp tiêu đề theo cấu trúc, không chỉ theo cỡ thị giác.
 
-Color and tokens
-- Components use semantic tokens, not raw values.
-- Text and UI contrast meet thresholds in every theme and on every surface used.
-- No meaning conveyed by color alone.
+Màu và token
+- Component dùng token semantic, không dùng giá trị thô.
+- Tương phản của chữ và UI đạt ngưỡng trong mọi theme và trên mọi surface được dùng.
+- Không có ý nghĩa nào chỉ truyền tải bằng màu.
 
-States
-- Hover, focus-visible, active, disabled, loading, error, empty states present where applicable.
-- Focus visible on every interactive element; logical focus order; focus returned after overlays.
+Trạng thái
+- Có hover, focus-visible, active, disabled, loading, lỗi, rỗng ở nơi áp dụng được.
+- Focus thấy được trên mọi phần tử tương tác được; thứ tự focus hợp lý; focus được trả lại sau overlay.
 
-Forms
-- Every input has a visible, programmatically associated label; placeholders are not labels.
-- Errors are specific, next to the field, and keep user input.
-- Required fields marked; input types and autocomplete hints suit the data.
+Form
+- Mọi input đều có nhãn thấy được và gắn kết được bằng chương trình; placeholder không phải là nhãn.
+- Lỗi phải cụ thể, nằm cạnh field, và giữ lại dữ liệu người dùng đã nhập.
+- Field bắt buộc được đánh dấu; loại input và gợi ý autocomplete phù hợp với dữ liệu.
 
-Accessibility semantics
-- Native elements used for their roles (button, link, input) before custom roles.
-- Images have meaningful alternative text or are marked decorative.
-- Icon-only controls have accessible names.
-- Target size at least 24x24 CSS px; content usable at 320 CSS px width.
-- Reduced-motion preference respected.
+Ngữ nghĩa accessibility
+- Dùng phần tử native theo đúng vai trò của chúng (button, link, input) trước khi dùng vai trò tự tạo.
+- Ảnh có chữ thay thế mang nghĩa hoặc được đánh dấu là trang trí.
+- Control chỉ có icon thì có tên truy cập được.
+- Kích thước đích ít nhất 24x24 CSS px; nội dung dùng được ở chiều rộng 320 CSS px.
+- Tùy chọn giảm chuyển động được tôn trọng.
 
-Consistency
-- Same pattern for the same job across the product (dialogs, toasts, tables, empty states).
-- Reuses existing components instead of near-duplicates.
-- Copy and terminology consistent with the rest of the product.
+Tính nhất quán
+- Cùng một pattern cho cùng một việc trên khắp sản phẩm (dialog, toast, bảng, trạng thái rỗng).
+- Dùng lại component đang có thay vì tạo bản gần giống.
+- Câu chữ và thuật ngữ nhất quán với phần còn lại của sản phẩm.
 
-## Severity
+## Mức nghiêm trọng
 
-| Level | Meaning | Examples |
+| Mức | Nghĩa | Ví dụ |
 |---|---|---|
-| Blocker | A user cannot complete the task, or a legal accessibility requirement fails | Keyboard trap, unlabeled required field, text contrast 2:1 |
-| Major | Task possible but error-prone or slow for many users | Missing error state, no focus indicator, primary action hidden on mobile |
-| Minor | Inconsistency or friction with a workaround | Off-scale spacing, duplicate button style, weak empty state |
-| Nit | Polish | Slight misalignment, icon weight mismatch |
+| Blocker | Người dùng không hoàn thành được tác vụ, hoặc vi phạm một yêu cầu accessibility pháp lý | Bẫy bàn phím, field bắt buộc không nhãn, tương phản chữ 2:1 |
+| Major | Làm được tác vụ nhưng dễ sai hoặc chậm với nhiều người dùng | Thiếu trạng thái lỗi, không có chỉ báo focus, hành động chính bị ẩn trên mobile |
+| Minor | Không nhất quán hoặc gây vướng nhưng có cách lách | Khoảng cách lệch thang, kiểu nút trùng lặp, trạng thái rỗng yếu |
+| Nit | Tinh chỉnh | Lệch căn chút ít, độ dày icon không khớp |
 
-Rank by user impact, not by effort to fix.
+Xếp hạng theo tác động tới người dùng, không theo công sức sửa.
 
-## Finding format
+## Định dạng một phát hiện
 
 ```text
 [Major] Settings > Save button has no visible focus state
@@ -72,12 +72,12 @@ Fix: add focus-visible ring using token color-focus-ring (exists in tokens.css:4
 Verified: yes (keyboard, local run) | no (source only)
 ```
 
-- One finding per issue; group repeats of the same issue with a list of locations.
-- Evidence is concrete: file and line, measured contrast ratio, screenshot path, or the exact
-  steps used. "Looks off" is not evidence.
-- Fix suggestions reuse existing tokens and components where possible.
+- Một phát hiện cho mỗi vấn đề; gom các lần lặp của cùng vấn đề thành một danh sách vị trí.
+- Bằng chứng phải cụ thể: file và dòng, tỉ lệ tương phản đo được, đường dẫn ảnh chụp, hoặc đúng
+  các bước đã làm. "Trông không ổn" không phải bằng chứng.
+- Gợi ý sửa nên dùng lại token và component đang có khi có thể.
 
-## Report shape
+## Hình thức báo cáo
 
-Summary (surface reviewed, how it was checked, what could not be checked), findings ordered by
-severity, then positives worth keeping and open questions for the owner.
+Tóm tắt (bề mặt đã review, đã kiểm thế nào, cái gì không kiểm được), các phát hiện xếp theo
+mức nghiêm trọng, rồi những điểm tốt nên giữ và các câu hỏi còn mở cho chủ sở hữu.

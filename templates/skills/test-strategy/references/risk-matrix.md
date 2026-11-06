@@ -1,52 +1,53 @@
-# Risk matrix and edge cases
+# Bảng rủi ro và các ca biên
 
-Read when turning behaviours into risks, choosing the test level for each, or listing edge cases.
+Đọc khi biến hành vi thành rủi ro, khi chọn mức test cho từng rủi ro, hoặc khi liệt kê các ca biên.
 
-## Risk to test level
-| Risk | Cheapest proving level | Notes |
+## Từ rủi ro sang mức test
+| Rủi ro | Mức rẻ nhất mà chứng minh được | Ghi chú |
 |---|---|---|
-| Wrong calculation, parsing, branching | Unit | Table-driven cases over inputs |
-| Invalid input accepted or valid input rejected | Unit, plus one integration at the boundary | Validate where input enters |
-| Wiring: config, dependency injection, routing | Integration | Real module graph, fake externals |
-| Storage: queries, migrations, transactions | Integration with real or embedded store | Use the project's existing test DB setup |
-| Shape change breaks a consumer | Contract | See contract-tests reference |
-| Critical user journey broken end to end | End-to-end, one path | Only when lower levels cannot see it |
-| Previously fixed bug returns | Regression at the seam of the original bug | Keep the original reproducer |
-| Dependency down, slow or erroring | Integration with a fault-injecting fake | Assert timeout, retry, error message |
-| Permission or authorisation bypass | Integration through the real check | Test both allowed and denied |
-| Concurrency: race, double submit, lost update | Integration with controlled interleaving | Deterministic scheduling, not sleeps |
-| Performance regression on a known hot path | Benchmark or budget check if the project has one | Compare equivalent workloads |
+| Tính toán, phân tích cú pháp, rẽ nhánh sai | Unit | Các ca theo bảng trên nhiều input |
+| Input không hợp lệ bị nhận hoặc input hợp lệ bị từ chối | Unit, cộng một integration tại biên | Kiểm tra ngay tại chỗ input đi vào |
+| Nối dây: config, dependency injection, định tuyến | Integration | Đồ thị module thật, bên ngoài là fake |
+| Lưu trữ: truy vấn, migration, transaction | Integration với store thật hoặc nhúng | Dùng chỗ dựng DB test đang có của project |
+| Đổi hình dạng làm vỡ một bên tiêu thụ | Contract | Xem reference contract-tests |
+| Một hành trình người dùng tối quan trọng vỡ từ đầu tới cuối | End-to-end, một đường | Chỉ khi các mức thấp hơn không thấy được |
+| Một bug đã sửa trước đây quay lại | Regression tại đường ráp của bug gốc | Giữ lại bản tái lập gốc |
+| Dependency chết, chậm hay báo lỗi | Integration với một fake biết chèn lỗi | Khẳng định timeout, retry, thông điệp lỗi |
+| Lách quyền hay lách phân quyền | Integration xuyên qua chính phép kiểm thật | Test cả ca được phép và ca bị từ chối |
+| Đồng thời: race, gửi hai lần, mất bản cập nhật | Integration với cách xen kẽ được kiểm soát | Lập lịch tất định, không dùng sleep |
+| Regression hiệu năng trên một đường nóng đã biết | Benchmark hay phép kiểm ngân sách nếu project có | So các khối việc tương đương |
 
-Prioritise by likelihood times cost. Low-likelihood, low-cost risks may be accepted
-untested; say so in the plan.
+Ưu tiên theo khả năng xảy ra nhân với chi phí. Các rủi ro ít khả năng và ít tốn kém có thể được
+chấp nhận mà không test; hãy nói rõ điều đó trong kế hoạch.
 
-## Edge-case checklist by input type
-**Strings:** empty, whitespace only, very long, Unicode (combining marks, emoji, RTL),
-case differences, leading or trailing spaces, embedded newlines or NUL, injection
-characters for the sink in use (SQL, shell, HTML, path separators).
+## Checklist ca biên theo loại input
+**Chuỗi:** rỗng, chỉ có khoảng trắng, rất dài, Unicode (dấu kết hợp, emoji, RTL), khác nhau về
+chữ hoa chữ thường, khoảng trắng ở đầu hay ở cuối, có ngắt dòng hay NUL bên trong, các ký tự
+injection ứng với điểm tiêu đang dùng (SQL, shell, HTML, dấu phân cách đường dẫn).
 
-**Numbers:** zero, negative, one, maximum and minimum of the type, just past each limit,
-non-integers where integers are expected, NaN and infinity, rounding and currency
-precision, string-encoded numbers.
+**Số:** không, số âm, số một, giá trị lớn nhất và nhỏ nhất của kiểu, vừa vượt mỗi giới hạn,
+số không nguyên ở chỗ mong đợi số nguyên, NaN và vô cực, làm tròn và độ chính xác
+tiền tệ, số được mã hoá dưới dạng chuỗi.
 
-**Collections:** empty, one element, duplicates, very large, unsorted, nested empty,
-null elements, pagination boundaries (first, last, past the end).
+**Tập hợp:** rỗng, một phần tử, có trùng, rất lớn, chưa sắp xếp, lồng nhau mà rỗng,
+phần tử null, các biên phân trang (trang đầu, trang cuối, vượt quá cuối).
 
-**Time:** time zones and DST transitions, leap day, end of month and year, clock skew,
-timestamps in the past or far future, durations of zero, expiry exactly at the boundary.
-Freeze or inject the clock.
+**Thời gian:** múi giờ và các lần chuyển DST, ngày nhuận, cuối tháng và cuối năm, lệch đồng hồ,
+timestamp ở quá khứ hay tương lai xa, khoảng thời gian bằng không, hết hạn đúng tại biên.
+Hãy đóng băng hoặc chèn đồng hồ vào.
 
-**Concurrency:** two writers on one record, retry after partial success, duplicate
-delivery of the same message, cancellation mid-operation, ordering assumptions.
+**Đồng thời:** hai người ghi trên một bản ghi, retry sau khi thành công một phần, cùng một
+message được giao trùng, hủy giữa lúc đang xử lý, các giả định về thứ tự.
 
-**I/O and external services:** missing file, permission denied, disk full, partial
-read or write, malformed response, timeout, slow response, connection reset, retries
-exhausted, non-UTF-8 content, symlinks and path traversal.
+**I/O và service bên ngoài:** thiếu file, bị từ chối quyền, đĩa đầy, đọc hay ghi
+một phần, response sai dạng, timeout, response chậm, kết nối bị reset, hết lượt
+retry, nội dung không phải UTF-8, symlink và path traversal.
 
-**Permissions and identity:** anonymous, authenticated without the role, owner versus
-other user, revoked or expired credentials, admin-only actions from a normal user.
+**Quyền và danh tính:** ẩn danh, đã xác thực nhưng không có role, chủ sở hữu so với người dùng
+khác, credential bị thu hồi hay hết hạn, các hành động chỉ dành cho admin bị gọi từ người dùng
+thường.
 
-**State and lifecycle:** first run with no data, upgrade from previous version's data,
-repeated calls (idempotency), operations after delete or close.
+**Trạng thái và vòng đời:** lần chạy đầu khi chưa có dữ liệu, nâng cấp từ dữ liệu của version
+trước, gọi lặp lại (tính idempotent), các thao tác sau khi đã xoá hay đã đóng.
 
-Pick the items the change can actually reach; do not test every row by default.
+Hãy chọn những mục mà thay đổi thực sự với tới được; đừng mặc định test mọi dòng.

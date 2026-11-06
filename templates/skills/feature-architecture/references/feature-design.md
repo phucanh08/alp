@@ -1,26 +1,26 @@
-# Feature Design
+# Thiết kế feature
 
-Read when writing the feature design, picking the analogous feature, or checking new dependency direction.
+Đọc khi viết bản thiết kế feature, khi chọn feature tương tự, hoặc khi kiểm hướng của phụ thuộc mới.
 
-## Picking the analogous feature
+## Chọn feature tương tự
 
-Rank candidates by how many of these they share with the new feature:
+Xếp hạng các ứng viên theo số điểm sau mà chúng chia sẻ với feature mới:
 
-1. Same kind of entry point (HTTP route, CLI command, job, UI screen, event handler).
-2. Same owning module or layer, and the same set of modules it depends on.
-3. Same persistence or integration shape (reads/writes the same store or service).
-4. Recently written or recently touched, so it reflects current conventions.
-5. Has tests in the style the project expects.
+1. Cùng loại entry point (route HTTP, câu lệnh CLI, job, màn hình UI, event handler).
+2. Cùng module hay lớp sở hữu, và cùng tập module mà nó phụ thuộc vào.
+3. Cùng hình dạng lưu trữ hay tích hợp (đọc/ghi cùng một store hay service).
+4. Mới được viết hoặc mới bị chạm tới, nên nó phản ánh quy ước hiện hành.
+5. Có test theo phong cách project mong đợi.
 
-Prefer the project's boilerplate or generator when one exists; use the analogous
-feature to fill what the template leaves out. If two candidates disagree, follow the
-one the architecture docs or checks endorse and note the other as drift.
+Ưu tiên boilerplate hay generator của project khi có; dùng feature tương tự để bù phần
+template bỏ sót. Nếu hai ứng viên mâu thuẫn nhau, hãy theo cái mà tài liệu kiến trúc hoặc
+các phép kiểm hậu thuẫn, và ghi lại cái kia như một chỗ lệch.
 
-Record the choice in the design: "Mirrors `<path>` because <shared traits>."
+Ghi lại lựa chọn đó trong bản thiết kế: "Mirrors `<path>` because <shared traits>."
 
-## Design template
+## Mẫu thiết kế
 
-Keep it to what a reviewer needs to check the implementation. Omit empty sections.
+Giữ nó vừa đủ cho những gì một reviewer cần để kiểm implementation. Bỏ các mục trống.
 
 ```text
 Feature: <one-line purpose>
@@ -48,21 +48,22 @@ Open decisions / exceptions:
 - <question or rule exception, who must decide>
 ```
 
-## Dependency-direction checklist
+## Danh sách kiểm hướng phụ thuộc
 
-Answer each for every new import, call, or registration:
+Trả lời từng câu cho mỗi import, lời gọi hay lần đăng ký mới:
 
-- Does an existing edge of the same kind already point this way? Cite one.
-- Does the edge cross a layer or package boundary the docs or contract restrict?
-- Would it create a cycle between modules? Check both directions.
-- Does a lower or shared module now import from a feature or app module?
-- Does domain or core code now import a framework, transport, or storage detail
-  the analogous feature keeps outside it?
-- Is a test-only or dev-only dependency reachable from production code?
-- Does the feature reach into another module's internals instead of its public
-  entry point?
-- Is a new registration (router, plugin list, DI container, manifest) placed where
-  the analogous feature registers?
+- Đã có một cạnh cùng loại chỉ theo hướng này chưa? Dẫn ra một cạnh.
+- Cạnh đó có vượt một ranh giới lớp hay package mà tài liệu hoặc contract hạn chế không?
+- Nó có tạo ra một vòng lặp giữa các module không? Kiểm cả hai hướng.
+- Một module thấp hơn hoặc dùng chung bây giờ có import từ một module feature hay app không?
+- Code domain hay core bây giờ có import một chi tiết framework, transport hay lưu trữ mà
+  feature tương tự vẫn giữ ở ngoài không?
+- Một dependency chỉ dùng cho test hay chỉ dùng khi dev có thể chạm tới được từ code production
+  không?
+- Feature có thò vào phần nội bộ của module khác thay vì vào entry point public của nó không?
+- Một lần đăng ký mới (router, danh sách plugin, DI container, manifest) có được đặt đúng chỗ
+  mà feature tương tự đăng ký không?
 
-Any "yes" to a restricted crossing, cycle, or internals access is a hard-constraint
-issue: fix the placement or route an exception decision upward before implementing.
+Bất kỳ câu "có" nào về một lần vượt ranh giới bị hạn chế, một vòng lặp, hay một lần truy cập
+phần nội bộ đều là vấn đề ràng buộc cứng: hãy sửa chỗ đặt, hoặc chuyển một quyết định ngoại lệ
+lên trên trước khi hiện thực.

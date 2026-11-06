@@ -1,85 +1,85 @@
-# Performance and Load Testing
+# Test hiệu năng và test tải
 
-Read when running performance baselines, budgets, or load tests.
+Đọc khi chạy mốc hiệu năng cơ sở, ngân sách, hay test tải.
 
-Examples use k6-style scripts for load and Lighthouse-style audits for page
-performance; Artillery, Gatling, Locust, or WebPageTest are equivalents. Use the
-tools the project already has.
+Ví dụ dùng script kiểu k6 cho phần tải và audit kiểu Lighthouse cho hiệu năng
+trang; Artillery, Gatling, Locust, hay WebPageTest là tương đương. Hãy dùng
+những công cụ dự án đã có.
 
-## Authorization first
+## Xin phép trước đã
 
-- Never load-test or stress production, a shared staging environment, or any
-  third-party API without explicit authorization from the owner, naming the target,
-  time window, and maximum load.
-- Load against third-party services (payment, email, maps) can breach their terms
-  and cost money; stub them or use their sandbox with its limits.
-- A load test can look like an attack to the hosting provider; the owner coordinates
-  notice if required.
-- Default target: a local build or a dedicated test environment you control.
-- Stop immediately if errors spike on a shared environment or other users are
-  affected, and report.
+- Không bao giờ test tải hay gây áp lực lên production, một môi trường staging dùng chung, hay bất kỳ
+  API bên thứ ba nào mà không có phép tường minh của chủ sở hữu, nêu rõ đích,
+  khung thời gian, và mức tải tối đa.
+- Dồn tải lên dịch vụ bên thứ ba (thanh toán, email, bản đồ) có thể vi phạm điều khoản của họ
+  và tốn tiền; hãy stub chúng hoặc dùng sandbox của họ với các giới hạn của nó.
+- Một test tải có thể trông như một cuộc tấn công với nhà cung cấp hosting; chủ sở hữu là người lo
+  việc thông báo nếu cần.
+- Đích mặc định: một bản build cục bộ hoặc một môi trường test riêng mà bạn kiểm soát.
+- Dừng ngay nếu lỗi vọt lên trên một môi trường dùng chung hoặc có người dùng khác bị
+  ảnh hưởng, và báo lại.
 
-## Define the question
+## Xác định câu hỏi
 
-- State what you are measuring and why: a regression check, capacity estimate,
-  latency under expected load, or a soak for leaks.
-- Pick the test type: smoke (tiny load, checks the script), load (expected traffic),
-  stress (beyond expected, find the breaking point), spike (sudden burst), soak
-  (steady load for a long time).
-- Use realistic scenarios: the mix of endpoints and user journeys that real traffic
-  has, think time between steps, realistic payloads and data sizes.
+- Nêu rõ bạn đang đo cái gì và vì sao: kiểm hồi quy, ước lượng năng lực,
+  độ trễ dưới mức tải dự kiến, hay chạy dài để tìm rò rỉ.
+- Chọn loại test: smoke (tải rất nhỏ, kiểm chính script), load (lưu lượng dự kiến),
+  stress (vượt mức dự kiến, tìm điểm vỡ), spike (bùng lên đột ngột), soak
+  (tải đều trong thời gian dài).
+- Dùng tình huống thực tế: đúng tỉ lệ pha trộn endpoint và hành trình người dùng mà lưu lượng thật
+  có, thời gian nghĩ giữa các bước, payload và lượng dữ liệu thực tế.
 
-## Baselines
+## Mốc cơ sở
 
-- Measure a baseline on the current main or release build in the same environment
-  before testing a change.
-- Keep conditions identical between runs: environment size, data volume, build
-  mode, network profile, warm or cold cache, test duration.
-- Run more than once; report the spread, not a single best run.
-- Record conditions with every result so it can be reproduced.
+- Đo một mốc cơ sở trên bản main hay bản release hiện tại, trong cùng môi trường,
+  trước khi test một thay đổi.
+- Giữ điều kiện giống nhau giữa các lần chạy: cỡ môi trường, lượng dữ liệu, chế độ
+  build, cấu hình mạng, cache nóng hay nguội, thời lượng test.
+- Chạy nhiều hơn một lần; báo cả độ phân tán, không chỉ một lần chạy tốt nhất.
+- Ghi lại điều kiện cùng với mỗi kết quả để có thể tái hiện.
 
-## Metrics
+## Chỉ số
 
-- Server and API: latency percentiles (p50, p95, p99) rather than averages,
-  throughput, error rate, and saturation (CPU, memory, connections, queue depth) if
-  observable.
-- Page performance: Core Web Vitals (LCP, INP, CLS), time to first byte, total
-  transfer size, and long tasks, under a stated device and network profile.
-- Separate client-side tool limits from server limits; a load generator at 100% CPU
-  produces meaningless numbers.
+- Server và API: các phân vị độ trễ (p50, p95, p99) thay vì giá trị trung bình,
+  thông lượng, tỉ lệ lỗi, và độ bão hòa (CPU, bộ nhớ, kết nối, độ sâu hàng đợi) nếu
+  quan sát được.
+- Hiệu năng trang: Core Web Vitals (LCP, INP, CLS), thời gian tới byte đầu tiên, tổng
+  kích thước truyền, và các task dài, dưới một cấu hình thiết bị và mạng đã nêu rõ.
+- Tách giới hạn của công cụ phía client khỏi giới hạn của server; một máy phát tải đang 100% CPU
+  cho ra những con số vô nghĩa.
 
-## Budgets and thresholds
+## Ngân sách và ngưỡng
 
-- Use budgets the project defines (bundle size, LCP, p95 latency, error rate).
-- If none exist, report measured values and propose budgets to the owner; do not
-  invent pass/fail thresholds and present them as requirements.
-- Encode agreed thresholds in the tool's threshold mechanism so a run fails
-  objectively.
+- Dùng ngân sách mà dự án đã định ra (kích thước bundle, LCP, độ trễ p95, tỉ lệ lỗi).
+- Nếu chưa có, hãy báo các giá trị đo được và đề xuất ngân sách cho chủ sở hữu; đừng
+  tự nghĩ ra ngưỡng pass/fail rồi trình bày chúng như yêu cầu.
+- Mã hóa các ngưỡng đã thống nhất vào cơ chế threshold của công cụ, để một lần chạy fail
+  một cách khách quan.
 
-## Scripts
+## Script
 
-- Keep scripts in the project's test directory with the project's conventions.
-- Parameterize target URL, users, and duration through environment variables;
-  default to the local or test target, never production.
-- Use test accounts and synthetic data; never real credentials. Create and clean up
-  test data the run needs.
-- Check responses (status, a key field), not only that a request returned; fast
-  errors look like good latency.
-- Ramp up gradually; include a short smoke stage before full load.
+- Giữ script trong thư mục test của dự án, theo quy ước của dự án.
+- Tham số hóa URL đích, số người dùng, và thời lượng qua biến môi trường;
+  mặc định trỏ tới đích cục bộ hay đích test, không bao giờ production.
+- Dùng tài khoản test và dữ liệu tổng hợp; không bao giờ dùng thông tin đăng nhập thật. Tạo và dọn
+  dữ liệu test mà lần chạy đó cần.
+- Kiểm cả phản hồi (status, một field quan trọng), không chỉ kiểm là request đã trả về;
+  lỗi nhanh trông giống như độ trễ tốt.
+- Tăng tải dần dần; có một chặng smoke ngắn trước khi vào tải đầy.
 
-## Interpreting results
+## Đọc hiểu kết quả
 
-- Compare against the baseline with the same conditions; treat differences within
-  run-to-run spread as noise.
-- Look for where latency bends upward as load rises; that is the capacity limit.
-- Correlate with server metrics and logs where available to locate the bottleneck,
-  then hand diagnosis to bug-loop or the owning skill (databases,
+- So với mốc cơ sở trong cùng điều kiện; coi những chênh lệch nằm trong
+  độ phân tán giữa các lần chạy là nhiễu.
+- Tìm chỗ độ trễ bắt đầu bật lên khi tải tăng; đó là giới hạn năng lực.
+- Đối chiếu với chỉ số và log của server ở nơi có, để xác định điểm nghẽn,
+  rồi giao việc chẩn đoán cho bug-loop hoặc cho skill phụ trách (databases,
   backend-development, frontend-development).
 
-## Reporting
+## Báo cáo
 
-- Target environment and authorization reference, tool and version, scenario, load
-  profile, duration, data volume.
-- Baseline and new results with percentiles, error rate, and spread.
-- Bottleneck observations labeled as evidence or inference.
-- Anything not run and why.
+- Môi trường đích và tham chiếu tới việc cho phép, công cụ và phiên b��n, tình huống, cấu hình
+  tải, thời lượng, lượng dữ liệu.
+- Kết quả mốc cơ sở và kết quả mới kèm các phân vị, tỉ lệ lỗi, và độ phân tán.
+- Các quan sát về điểm nghẽn, có ghi rõ là bằng chứng hay là suy luận.
+- Những gì chưa chạy và vì sao.

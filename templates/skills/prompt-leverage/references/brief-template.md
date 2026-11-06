@@ -1,8 +1,8 @@
-# Brief and handoff format
+# Định dạng brief và handoff
 
-Use enough detail to make an independent worker effective, without prescribing an
-unverified solution. Available context includes ALP.md and the selected agent's own
-instructions; the parent's full transcript is not automatically available.
+Dùng đủ chi tiết để một người làm độc lập có thể làm việc hiệu quả, mà không áp đặt một giải
+pháp chưa được kiểm chứng. Context có sẵn gồm ALP.md và hướng dẫn riêng của agent được chọn;
+toàn bộ transcript của agent cha thì không tự động có.
 
 ```text
 Task and recipient:
@@ -20,8 +20,8 @@ Candidate/base revision, if applicable:
 Return: outcome, artifact, scope, actual checks/results, risks, ownership status.
 ```
 
-For read-only review, supply the candidate/artifact and independent acceptance
-criteria. For a correction, include the concrete finding and prior evidence. For
-a resumed assignment, include the findings needed from the previous handoff because
-the next child is a new session. A blocked recipient should return its blocker and
-completed independent work rather than waiting for a nonexistent mailbox.
+Với review chỉ đọc, hãy cấp bản ứng viên/artifact và các tiêu chí nghiệm thu độc lập. Với một
+bản sửa, hãy đưa kèm phát hiện cụ thể và bằng chứng trước đó. Với một việc được giao làm tiếp,
+hãy đưa kèm các phát hiện cần thiết từ handoff trước, vì agent con kế tiếp là một phiên mới.
+Người nhận bị chặn thì nên trả về chỗ chặn của mình cùng phần việc độc lập đã làm xong, chứ
+đừng ngồi chờ một hộp thư không tồn tại.

@@ -1,44 +1,45 @@
 ---
 name: bug-loop
-description: Diagnose a bug or regression through a reproducible feedback loop, competing explanations, and verified correction. Use for failing tests, incorrect behavior, or performance regressions; read-only assignments stop before modifying project artifacts.
+description: Chẩn đoán một bug hay regression bằng một vòng lặp phản hồi tái lập được, các cách giải thích cạnh tranh nhau, và bản sửa đã được kiểm chứng. Dùng khi test fail, khi hành vi sai, hoặc khi có regression về hiệu năng; việc được giao ở dạng chỉ đọc thì dừng trước khi sửa artifact của project.
 ---
 
-# Establish a failing loop, then fix the cause
+# Dựng một vòng lặp fail trước, rồi sửa nguyên nhân
 
-Start from the reported behavior and the assigned scope. Find the smallest useful
-command, request, replay, or test that distinguishes the bug from correct behavior.
-Run it and record the actual result before claiming reproduction. For intermittent
-failures, record conditions, seed when applicable, and observed failure frequency.
+Bắt đầu từ hành vi được báo và phạm vi được giao. Tìm câu lệnh, request, bản replay
+hay test nhỏ nhất mà vẫn hữu ích để phân biệt bug với hành vi đúng. Chạy nó và ghi lại
+kết quả thực tế trước khi tuyên bố đã tái lập được. Với lỗi chập chờn, hãy ghi lại điều
+kiện, seed khi có, và tần suất fail quan sát được.
 
-If reproduction needs unavailable credentials, hardware, data, or a user action,
-report the specific gap to the assigning agent; main handles user communication.
-Continue useful in-scope investigation, but label an unconfirmed hypothesis as such.
-Do not claim a fix was verified without a meaningful observable check.
+Nếu việc tái lập cần credential, phần cứng, dữ liệu hay một hành động của người dùng mà
+bạn không có, hãy báo đúng chỗ thiếu đó cho agent giao việc; main lo phần giao tiếp với
+người dùng. Vẫn tiếp tục điều tra hữu ích trong phạm vi, nhưng hãy ghi rõ giả thuyết nào
+chưa được xác nhận. Đừng tuyên bố một bản sửa đã được kiểm chứng khi chưa có một phép
+kiểm quan sát được và có ý nghĩa.
 
-Reduce the reproducer without removing the failure. Form competing explanations
-where the cause is uncertain, each with an observable prediction. Probe the few
-points that distinguish them; change one variable at a time. Prefer measured
-evidence over accumulating workarounds for the same unexplained symptom.
+Thu nhỏ bản tái lập mà không làm mất lỗi. Ở chỗ nguyên nhân còn chưa chắc, hãy dựng các
+cách giải thích cạnh tranh nhau, mỗi cách kèm một dự đoán quan sát được. Thăm dò vài điểm
+phân biệt được chúng; đổi mỗi lần một biến. Ưu tiên bằng chứng đo được hơn là chồng thêm
+các cách lách cho cùng một triệu chứng chưa giải thích được.
 
-Use isolated scratch space for disposable experiments. A read-only assignment can
-inspect and diagnose; it does not authorize instrumentation edits to project code.
-For performance work, compare equivalent workloads and record relevant conditions
-so that a timing difference is not mistaken for a causal improvement.
+Dùng không gian scratch riêng biệt cho các thí nghiệm dùng một lần. Việc được giao ở dạng
+chỉ đọc có thể xem xét và chẩn đoán; nó không cho phép sửa code của project để chèn công
+cụ đo. Với việc về hiệu năng, hãy so các khối việc tương đương và ghi lại các điều kiện
+liên quan, để một chênh lệch thời gian không bị hiểu nhầm thành cải thiện có nhân quả.
 
-Once a cause is established and writing is authorized:
+Khi nguyên nhân đã được xác lập và bạn đã được cấp quyền ghi:
 
-1. Put a regression check at the seam that reproduces the actual failure.
-2. Confirm that the check fails for the reported reason on the broken behavior.
-3. Make the smallest correction consistent with the intended contract.
-4. Run the check again, then relevant surrounding checks and the original scenario.
-5. Remove temporary instrumentation and restore any deliberate fault injection.
+1. Đặt một phép kiểm regression ngay tại đường ráp tái lập được lỗi thực tế.
+2. Xác nhận phép kiểm đó fail đúng vì lý do đã báo trên hành vi bị lỗi.
+3. Làm bản sửa nhỏ nhất mà vẫn nhất quán với contract dự kiến.
+4. Chạy lại phép kiểm đó, rồi các phép kiểm liên quan xung quanh và tình huống ban đầu.
+5. Bỏ công cụ đo tạm thời và hoàn lại mọi chỗ cố tình chèn lỗi.
 
-Read [test proof](references/test-proof.md) when designing/reviewing the regression
-test or when it passes before the fix. Do not weaken expectations, skip failing
-checks, or mock away the behavior to manufacture a pass. A changed requirement must
-be established independently of what the implementation currently returns.
+Đọc [test proof](references/test-proof.md) khi thiết kế/review test regression, hoặc khi
+nó pass ngay trước lúc sửa. Đừng làm yếu kỳ vọng, đừng bỏ qua phép kiểm đang fail, và đừng
+mock cho hành vi biến đi để tạo ra một lần pass. Một yêu cầu đã thay đổi phải được xác lập
+độc lập với cái mà implementation hiện trả về.
 
-Return the reproduction command and result, established cause or remaining
-hypotheses, changed artifacts, before/after checks, limits, and unresolved risks.
-A peer returns to lead; lead returns to main. Read-only investigation returns
-diagnostic evidence and a proposed correction, not an imaginary code change.
+Trả về câu lệnh tái lập và kết quả, nguyên nhân đã xác lập hoặc các giả thuyết còn lại,
+artifact đã thay đổi, phép kiểm trước/sau, các giới hạn, và rủi ro chưa xử lý.
+Peer trả về cho lead; lead trả về cho main. Điều tra ở dạng chỉ đọc trả về bằng chứng
+chẩn đoán và một bản sửa đề xuất, không phải một thay đổi code tưởng tượng.

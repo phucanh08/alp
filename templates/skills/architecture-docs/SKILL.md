@@ -1,78 +1,81 @@
 ---
 name: architecture-docs
-description: "Create and maintain architecture docs from repository evidence: overview, boundaries, module dependencies, data flow, API contracts, decisions, ADRs, Mermaid diagrams and conventions. Use when docs are missing, stale, or a change alters a boundary or contract. Not for designing a new feature (use feature-architecture) or researching reuse (use xia)."
+description: "Tạo và bảo trì tài liệu kiến trúc dựa trên bằng chứng trong repository: tổng quan, ranh giới, phụ thuộc giữa các module, luồng dữ liệu, API contract, quyết định, ADR, sơ đồ Mermaid và quy ước. Dùng khi tài liệu còn thiếu, đã lỗi thời, hoặc khi một thay đổi làm đổi ranh giới hay contract. Không dùng để thiết kế feature mới (dùng feature-architecture) hay nghiên cứu khả năng tái dùng (dùng xia)."
 ---
 
-# Document the architecture the code proves
+# Ghi lại kiến trúc mà code chứng minh được
 
-## When to use
-- A project has no architecture overview, or the existing one contradicts the code.
-- A change adds, removes or moves a module boundary, public API, schema or data flow.
-- A technology or structural decision was confirmed and needs an ADR.
-- A docs-maintainer or reviewer is asked to check architecture docs for drift.
+## Khi dùng
+- Project chưa có tổng quan kiến trúc, hoặc bản đang có mâu thuẫn với code.
+- Một thay đổi thêm, bỏ hoặc di chuyển ranh giới module, public API, schema hay luồng dữ liệu.
+- Một quyết định về công nghệ hoặc cấu trúc đã được xác nhận và cần một ADR.
+- Người bảo trì tài liệu hoặc reviewer được yêu cầu kiểm tra tài liệu kiến trúc xem có lệch.
 
-## Not for
-- Designing how a new feature should be built: use feature-architecture.
-- Comparing libraries or finding reusable code: use xia.
-- User guides, READMEs and changelogs unrelated to structure.
-- Guessing intent for code nobody can explain: record an open question instead.
+## Không dùng cho
+- Thiết kế cách xây một feature mới: dùng feature-architecture.
+- So sánh thư viện hay tìm code tái dùng được: dùng xia.
+- Hướng dẫn người dùng, README và changelog không liên quan tới cấu trúc.
+- Đoán ý định của code mà không ai giải thích được: hãy ghi lại một câu hỏi mở.
 
-## Prerequisites
-- Read ALP.md and any existing docs index, `docs/` tree or contributing guide.
-- Know the owned paths: writers edit only assigned doc files; read-only roles report.
-- Identify the change or question that triggered the work; scope docs to it.
+## Điều kiện tiên quyết
+- Đọc ALP.md và mọi index tài liệu, cây `docs/` hoặc hướng dẫn đóng góp đang có.
+- Biết rõ các đường dẫn sở hữu (owned paths): người ghi chỉ sửa các file tài liệu được giao;
+  role chỉ đọc thì báo cáo.
+- Xác định thay đổi hoặc câu hỏi đã kích hoạt công việc này; giới hạn phạm vi tài liệu theo đó.
 
-## Workflow
-1. **Find the layout.** Follow the project's existing docs layout. If none exists,
-   propose `docs/architecture/overview.md`, `boundaries.md`, `conventions.md` and
-   `decisions/NNNN-title.md`, and confirm before creating new top-level structure.
-2. **Collect evidence.** Read manifests, entry points, build and deploy config, route
-   files, schemas, the import graph and tests for the area in scope. Record each fact
-   with the file path that proves it.
-3. **Overview.** Purpose, runtime units (processes, packages, services), how they start
-   and talk, and external systems. One short page.
-4. **Boundaries and dependencies.** Each module's responsibility, what it may import,
-   what imports it, and the public surface others rely on. Note cycles and leaks found.
-5. **Data flow and contracts.** Trace the main request or job path end to end. For each
-   API, event or schema, cite its definition file and versioning rule.
-6. **Decisions.** Record confirmed technology and structural choices with the evidence
-   or the person who confirmed them. Write an ADR only when the criteria in the ADR
-   reference are met; otherwise one line in the overview is enough.
-7. **Diagrams.** Add a Mermaid diagram only where text is harder to follow. Keep it
-   small and derived from code: every node maps to a real path.
-8. **Conventions.** Document naming, layering, error handling, logging and testing
-   patterns that the code already follows consistently, with an example path each.
-9. **Unknowns.** Mark anything not proven as "Unverified" and list open questions with
-   who can answer them. Route decisions upward; do not invent them.
-10. **Check.** Verify links, paths and examples (see Verification), then hand off with
-    the evidence list.
+## Quy trình
+1. **Tìm bố cục.** Theo bố cục tài liệu project đang dùng. Nếu chưa có, hãy đề xuất
+   `docs/architecture/overview.md`, `boundaries.md`, `conventions.md` và
+   `decisions/NNNN-title.md`, và xác nhận trước khi tạo cấu trúc cấp cao mới.
+2. **Thu bằng chứng.** Đọc manifest, entry point, config build và deploy, file khai báo
+   route, schema, đồ thị import và test của khu vực trong phạm vi. Ghi mỗi dữ kiện kèm
+   đường dẫn file chứng minh nó.
+3. **Tổng quan.** Mục đích, các đơn vị runtime (process, package, service), chúng khởi động
+   và nói chuyện với nhau ra sao, và các hệ thống bên ngoài. Một trang ngắn.
+4. **Ranh giới và phụ thuộc.** Trách nhiệm của từng module, nó được import gì, ai import nó,
+   và bề mặt public mà người khác dựa vào. Ghi lại các vòng lặp và chỗ rò rỉ phát hiện được.
+5. **Luồng dữ liệu và contract.** Truy vết đường đi chính của request hoặc job từ đầu tới cuối.
+   Với mỗi API, event hay schema, dẫn file định nghĩa và quy tắc đánh version của nó.
+6. **Quyết định.** Ghi lại các lựa chọn công nghệ và cấu trúc đã được xác nhận, kèm bằng chứng
+   hoặc người đã xác nhận. Chỉ viết ADR khi đạt tiêu chí trong tài liệu tham chiếu về ADR;
+   nếu không thì một dòng trong phần tổng quan là đủ.
+7. **Sơ đồ.** Chỉ thêm sơ đồ Mermaid ở chỗ chữ khó theo dõi hơn. Giữ sơ đồ nhỏ và suy ra từ
+   code: mỗi node ứng với một đường dẫn thật.
+8. **Quy ước.** Ghi lại các mẫu đặt tên, phân lớp, xử lý lỗi, logging và test mà code đã theo
+   một cách nhất quán, mỗi mẫu kèm một đường dẫn ví dụ.
+9. **Điều chưa biết.** Đánh dấu mọi thứ chưa chứng minh được là "Unverified" và liệt kê các câu
+   hỏi mở kèm người có thể trả lời. Chuyển quyết định lên trên; đừng tự bịa ra.
+10. **Kiểm tra.** Xác minh link, đường dẫn và ví dụ (xem Kiểm chứng), rồi handoff kèm danh sách
+    bằng chứng.
 
-## Constraints
-- Describe only what code, config, tests or confirmed decisions prove. No aspirational
-  architecture presented as current.
-- Cite evidence as relative file paths, with a symbol or line range when helpful.
-- Keep docs in sync: a change that alters a boundary or contract updates its doc in the
-  same change. Small internal changes need no ADR and often no doc edit.
-- Do not refactor code to match the docs; report the mismatch instead.
-- Read-only roles (architect, reviewer) return findings and proposed text, not edits.
+## Ràng buộc
+- Chỉ mô tả những gì code, config, test hoặc quyết định đã xác nhận chứng minh được. Không
+  trình bày kiến trúc mong muốn như thể nó đang là hiện trạng.
+- Dẫn bằng chứng bằng đường dẫn file tương đối, kèm tên symbol hoặc khoảng dòng khi hữu ích.
+- Giữ tài liệu đồng bộ: một thay đổi làm đổi ranh giới hay contract phải cập nhật tài liệu của
+  nó trong cùng thay đổi đó. Thay đổi nội bộ nhỏ không cần ADR và thường không cần sửa tài
+  liệu.
+- Đừng refactor code cho khớp tài liệu; hãy báo cáo chỗ lệch.
+- Các role chỉ đọc (architect, reviewer) trả về phát hiện và bản văn đề xuất, không sửa file.
 
-## Verification
-- Every relative link and cited path resolves; run the project's link checker if it
-  has one, otherwise check each path exists.
-- Code examples and commands in the docs run or compile against the current tree, or
-  are marked illustrative.
-- Each diagram node and arrow matches an import, call, route or config entry.
-- No statement lacks evidence or an "Unverified" mark.
+## Kiểm chứng
+- Mọi link tương đối và đường dẫn được dẫn đều phân giải được; chạy bộ kiểm tra link của
+  project nếu có, nếu không thì kiểm từng đường dẫn có tồn tại.
+- Ví dụ code và câu lệnh trong tài liệu chạy hoặc biên dịch được trên cây hiện tại, hoặc được
+  đánh dấu là minh hoạ.
+- Mỗi node và mũi nối trong sơ đồ khớp với một import, lời gọi, route hay mục config.
+- Không có phát biểu nào thiếu bằng chứng hoặc thiếu dấu "Unverified".
 
-## Failure handling
-- Evidence conflicts (code says one thing, config or docs another): document what runs,
-  flag the conflict as an open question, and report it.
-- Area too large for the assignment: document the boundary and entry points, list
-  uncovered modules, and return; do not expand scope.
-- Decision needed but unconfirmed: draft the ADR as `Proposed` and route it to main.
-- Existing docs layout is unclear or contested: ask before restructuring.
+## Xử lý khi thất bại
+- Bằng chứng xung đột (code nói một đằng, config hoặc tài liệu nói một nẻo): ghi lại cái đang
+  chạy, nêu xung đột thành câu hỏi mở, và báo cáo.
+- Khu vực quá lớn so với việc được giao: ghi lại ranh giới và entry point, liệt kê các module
+  chưa phủ, rồi trả về; đừng mở rộng phạm vi.
+- Cần một quyết định nhưng chưa được xác nhận: soạn ADR ở trạng thái `Proposed` và chuyển cho
+  main.
+- Bố cục tài liệu hiện tại không rõ hoặc đang tranh cãi: hỏi trước khi cấu trúc lại.
 
-## References
-- [references/evidence-rules.md](references/evidence-rules.md) — read when collecting facts and citing them (steps 2-5, 9).
-- [references/adr.md](references/adr.md) — read when deciding whether a change needs an ADR or writing one (step 6).
-- [references/diagrams.md](references/diagrams.md) — read when adding or updating a Mermaid diagram (step 7).
+## Tài liệu tham chiếu
+- [references/evidence-rules.md](references/evidence-rules.md) — đọc khi thu dữ kiện và dẫn nguồn (bước 2-5, 9).
+- [references/adr.md](references/adr.md) — đọc khi quyết định một thay đổi có cần ADR hay không, và khi viết ADR (bước 6).
+- [references/diagrams.md](references/diagrams.md) — đọc khi thêm hoặc cập nhật sơ đồ Mermaid (bước 7).

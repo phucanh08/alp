@@ -1,85 +1,85 @@
-# Deployment and rollback
+# Deploy và rollback
 
-Read when planning a rollout, ordering database migrations, or writing and rehearsing a rollback.
+Đọc khi lên kế hoạch rollout, sắp thứ tự migration database, hoặc viết và diễn tập một lần rollback.
 
-Planning is the default output. Executing any step against a shared or production environment
-requires explicit authorization for that step.
+Đầu ra mặc định là bản kế hoạch. Thực thi bất kỳ bước nào lên môi trường dùng chung hay production
+đều cần phép tường minh cho đúng bước đó.
 
-## Choose a strategy
+## Chọn một chiến lược
 
-| Strategy | How | Fits | Cost |
+| Chiến lược | Cách làm | Phù hợp với | Cái giá |
 |---|---|---|---|
-| Rolling | Replace instances in batches | Stateless services, compatible versions | Mixed versions during rollout |
-| Blue/green | Run new stack beside old, switch traffic at once | Fast, clean rollback; config or runtime changes | Double capacity during switch |
-| Canary | Send a small share of traffic to new version, widen in steps | Risky changes, high traffic, good metrics | Needs traffic splitting and comparison |
-| Feature flag | Ship code dark, enable per cohort | Behavior changes independent of deploy | Flag debt; needs cleanup |
-| Recreate | Stop old, start new | Dev or batch jobs where downtime is fine | Downtime |
+| Rolling | Thay instance theo từng lô | Service không giữ state, các phiên bản tương thích nhau | Lẫn nhiều phiên bản trong lúc rollout |
+| Blue/green | Chạy stack mới song song stack cũ, chuyển lưu lượng một lần | Rollback nhanh và gọn; đổi config hay runtime | Cần gấp đôi năng lực trong lúc chuyển |
+| Canary | Đẩy một phần nhỏ lưu lượng sang bản mới, rồi mở rộng dần | Thay đổi rủi ro, lưu lượng lớn, có chỉ số tốt | Cần chia lưu lượng và cần so sánh |
+| Feature flag | Đưa code lên nhưng tắt, rồi bật theo từng nhóm | Thay đổi hành vi độc lập với việc deploy | Nợ flag; cần dọn về sau |
+| Recreate | Tắt bản cũ, bật bản mới | Môi trường dev hay job theo lô, nơi downtime không sao | Có downtime |
 
-Use the strategy the platform and project already support. Introducing traffic splitting, a
-flag service or extra environments is an owner decision.
+Hãy dùng chiến lược mà nền tảng và dự án đã hỗ trợ. Đưa vào việc chia lưu lượng, một
+dịch vụ flag hay thêm môi trường là quyết định của chủ sở hữu.
 
-## Rollout plan contents
+## Nội dung của một kế hoạch rollout
 
-- Version or artifact identifier being deployed, and the one being replaced.
-- Preconditions: tests passed, migration compatibility confirmed, on-call aware if the project
-  requires it, change window if any.
-- Steps with the exact commands or pipeline actions, in order.
-- Success signals: which metrics, logs or checks, with thresholds and watch duration per step.
-- Abort criteria: what triggers rollback (error rate, latency, saturation, failed healthchecks).
-- Rollback steps (below) and who can execute them.
+- Định danh phiên bản hay artifact đang được deploy, và cái đang bị thay thế.
+- Tiền điều kiện: test đã pass, đã xác nhận migration tương thích, người trực đã biết nếu dự án
+  yêu cầu, và khung thời gian thay đổi nếu có.
+- Các bước kèm đúng lệnh hay đúng hành động pipeline, theo thứ tự.
+- Tín hiệu thành công: những chỉ số, log hay kiểm tra nào, kèm ngưỡng và thời gian theo dõi cho mỗi bước.
+- Tiêu chí hủy: cái gì làm khởi động rollback (tỉ lệ lỗi, độ trễ, độ bão hòa, healthcheck fail).
+- Các bước rollback (bên dưới) và ai được phép thực hiện chúng.
 
-## Canary and progressive delivery
+## Canary và giao hàng tăng dần
 
-- Steps such as 1% then 5%, 25%, 50%, 100%, with a watch period at each. Use what the platform supports.
-- Compare canary against baseline on the same metrics over the same window, not against
-  yesterday.
-- Automate abort on clear threshold breaches where tooling exists; otherwise name a human watcher.
-- Make sure the canary receives representative traffic (regions, client types).
+- Các bước như 1% rồi 5%, 25%, 50%, 100%, kèm một khoảng theo dõi ở mỗi mức. Hãy dùng cái nền tảng hỗ trợ.
+- So canary với mốc cơ sở trên cùng các chỉ số trong cùng một khoảng thời gian, không so với
+  hôm qua.
+- Tự động hủy khi vượt ngưỡng rõ rệt, ở nơi có công cụ; nếu không, hãy chỉ định một người theo dõi.
+- Bảo đảm canary nhận được lưu lượng mang tính đại diện (các vùng, các loại client).
 
 ## Blue/green
 
-- Warm the new stack and run smoke checks before switching.
-- Keep the old stack running and untouched until the watch period ends.
-- Switch and switch back through the same mechanism (load balancer, DNS with low TTL, router).
-- Watch long-lived connections, sessions and caches across the switch.
+- Làm nóng stack mới và chạy các kiểm tra smoke trước khi chuyển.
+- Giữ stack cũ vẫn chạy và không chạm tới nó cho tới khi hết khoảng theo dõi.
+- Chuyển đi và chuyển lại bằng cùng một cơ chế (load balancer, DNS với TTL thấp, router).
+- Để ý các kết nối sống lâu, session và cache khi chuyển qua.
 
-## Database migrations ordering (expand and contract)
+## Thứ tự migration database (mở rộng rồi thu hẹp)
 
-Code and schema must be compatible across the rollout and the rollback.
+Code và schema phải tương thích nhau suốt cả lần rollout và cả lần rollback.
 
-1. **Expand:** add new columns, tables or indexes in a backward-compatible way (nullable or with
-   defaults; build indexes without long locks where the database supports it).
-2. **Deploy code** that writes both old and new shapes, or reads new with fallback to old.
-3. **Backfill** in small batches with throttling; make it resumable and idempotent.
-4. **Switch reads** to the new shape; verify.
-5. **Contract:** remove old columns or code paths in a later release, after the rollback window.
+1. **Mở rộng:** thêm cột, bảng hay index mới theo cách tương thích ngược (cho phép null hoặc có
+   giá trị mặc định; tạo index mà không khóa lâu, ở nơi database hỗ trợ).
+2. **Deploy code** ghi cả hình dạng cũ và mới, hoặc đọc hình dạng mới và quay về cũ khi cần.
+3. **Backfill** theo từng lô nhỏ có điều tiết; làm nó tiếp tục được và idempotent.
+4. **Chuyển phần đọc** sang hình dạng mới; rồi kiểm chứng.
+5. **Thu hẹp:** bỏ cột cũ hay các đường code cũ ở một bản release sau, sau khi hết khung rollback.
 
-- Never combine a destructive migration with the code change that depends on it.
-- Estimate lock impact and duration on production-sized data before running.
-- Back up or snapshot before irreversible steps, and confirm the restore procedure works.
-- Migrations run once, from one place (pipeline job or release step), not from every instance.
+- Không bao giờ gộp một migration phá hủy với chính thay đổi code phụ thuộc vào nó.
+- Hãy ước lượng tác động khóa và thời lượng trên dữ liệu cỡ production trước khi chạy.
+- Backup hay snapshot trước những bước không đảo lại được, và xác nhận là quy trình phục hồi chạy được.
+- Migration chạy một lần, từ một chỗ duy nhất (job pipeline hay bước release), không chạy từ mỗi instance.
 
 ## Rollback
 
-- Application: redeploy the previous immutable artifact through the normal pipeline, or switch
-  traffic back (blue/green), or reduce canary to 0%.
-- Configuration and flags: revert the specific change; keep config versioned.
-- Schema: with expand/contract, old code still works, so roll back code only. A rollback that needs
-  a down-migration is high risk; prefer a forward fix unless the down path is tested.
-- Infrastructure: revert the IaC change and run plan; check for resources that cannot be
-  recreated (data stores, static IPs) before any destroy.
-- Data written by the new version must remain readable by the old version, or the rollback plan
-  must say how it is handled.
+- Ứng dụng: deploy lại artifact bất biến trước đó qua pipeline bình thường, hoặc chuyển
+  lưu lượng về (blue/green), hoặc giảm canary về 0%.
+- Cấu hình và flag: hoàn tác đúng thay đổi đó; giữ config có phiên bản.
+- Schema: với mở rộng/thu hẹp, code cũ vẫn chạy được, nên chỉ cần rollback code. Một lần rollback cần tới
+  một migration đi xuống là rất rủi ro; hãy ưu tiên sửa tiến lên, trừ khi đường đi xuống đã được test.
+- Hạ tầng: hoàn tác thay đổi IaC rồi chạy plan; kiểm xem có tài nguyên nào không tạo lại được
+  (kho dữ liệu, IP tĩnh) trước khi destroy bất cứ gì.
+- Dữ liệu do bản mới ghi ra phải vẫn đọc được bởi bản cũ, hoặc kế hoạch rollback
+  phải nói rõ nó được xử lý thế nào.
 
-## Rehearsal
+## Diễn tập
 
-- Rehearse the rollback in a non-production environment for changes that are new, risky or touch
-  schema. Record the command, duration and result.
-- If rehearsal is not possible, mark the plan "rollback unrehearsed" and state the risk.
-- Time each step; a rollback slower than the tolerated outage needs a different strategy.
+- Hãy diễn tập rollback trong một môi trường không phải production với những thay đổi mới, rủi ro hoặc chạm tới
+  schema. Ghi lại lệnh, thời lượng và kết quả.
+- Nếu không diễn tập được, hãy ghi vào kế hoạch là "rollback chưa diễn tập" và nêu rủi ro.
+- Bấm thời gian từng bước; một lần rollback chậm hơn mức downtime chịu được thì cần một chiến lược khác.
 
-## After deploy
+## Sau khi deploy
 
-- Watch the success signals for the stated period; confirm error budgets and alerts are quiet.
-- Record what was deployed, when, by whom, and any deviations from the plan.
-- Schedule the contract step and flag cleanup.
+- Theo dõi các tín hiệu thành công trong khoảng thời gian đã nêu; xác nhận ngân sách lỗi và các alert đều im.
+- Ghi lại cái gì đã được deploy, khi nào, bởi ai, và mọi chỗ lệch khỏi kế hoạch.
+- Lên lịch cho bước thu hẹp và việc dọn flag.

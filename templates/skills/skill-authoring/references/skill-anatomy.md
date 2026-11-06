@@ -1,8 +1,9 @@
-# Skill anatomy
+# Cấu tạo một skill
 
-Read when writing a skill's frontmatter, ordering its body, or laying out its files.
+Đọc khi viết frontmatter của một skill, khi xếp thứ tự thân bài, hoặc khi bố trí các file của
+nó.
 
-## Layout
+## Bố cục
 ```
 <name>/
   SKILL.md              required; Level 1
@@ -10,8 +11,8 @@ Read when writing a skill's frontmatter, ordering its body, or laying out its fi
   scripts/<tool>.mjs    optional; Level 3, run on demand only
   assets/<file>         optional; Level 3, templates or fixtures copied by a step
 ```
-Library skills live in the user's library `skills/<name>/`; project skills in
-`.alp/skills/<name>/`, which replaces the library skill of the same name in that project.
+Skill thư viện sống trong `skills/<name>/` của thư viện người dùng; skill của project sống
+trong `.alp/skills/<name>/`, và nó thay thế skill thư viện cùng tên trong project đó.
 
 ## Frontmatter
 ```
@@ -20,47 +21,50 @@ name: release-notes
 description: "Draft release notes from merged changes ... Use when ... Not for ..."
 ---
 ```
-- `name`: lowercase `a-z`, `0-9` and single hyphens; no leading, trailing or double
-  hyphen; at most 64 characters; equal to the directory name.
-- `description`: one line, at most 1024 characters by the format; the ALP index shows
-  the first 400, and `alp_skill` accepts at most 300. No line breaks, no angle brackets.
-- Optional keys allowed by the format: `license`, `compatibility` (environment needs,
-  for example "Node 20+, git"), `metadata` (a map of string keys to string values, such
-  as version or author), `allowed-tools` (advisory list; it grants nothing in ALP).
-  Shipped ALP templates use only `name` and `description`; add optional keys only when
-  a consumer reads them.
+- `name`: chữ thường `a-z`, `0-9` và dấu gạch nối đơn; không gạch nối ở đầu, ở cuối hay hai
+  gạch liền; nhiều nhất 64 ký tự; phải bằng tên thư mục.
+- `description`: một dòng, theo định dạng thì nhiều nhất 1024 ký tự; index của ALP hiển thị 400
+  ký tự đầu, và `alp_skill` chỉ nhận tối đa 300. Không có ngắt dòng, không có dấu ngoặc nhọn.
+- Các khoá tuỳ chọn mà định dạng cho phép: `license`, `compatibility` (nhu cầu môi trường, ví
+  dụ "Node 20+, git"), `metadata` (một map từ khoá chuỗi sang giá trị chuỗi, như version hay
+  tác giả), `allowed-tools` (danh sách mang tính tư vấn; trong ALP nó không cấp gì). Các
+  template ALP được ship chỉ dùng `name` và `description`; chỉ thêm khoá tuỳ chọn khi có một
+  bên tiêu thụ thật sự đọc chúng.
 
-## Body sections
-| Section | Holds |
+## Các mục trong thân bài
+| Mục | Chứa gì |
 |---|---|
-| `# Title` | Imperative name of the job |
-| When to use | Concrete situations, mirroring the description triggers |
-| Not for | Neighbouring jobs and the skill that owns each |
-| Prerequisites | What must be read or known before step 1 |
-| Workflow | Numbered steps, each with an observable output |
-| Constraints | Limits the agent must not cross |
-| Verification | Checks that prove the result, not the effort |
-| Failure handling | What to do when a step cannot complete |
-| References | One line per file: link, then "read when ..." |
+| `# Title` | Tên công việc ở dạng mệnh lệnh |
+| Khi dùng | Các tình huống cụ thể, phản chiếu các điều kiện kích hoạt trong description |
+| Không dùng cho | Các công việc lân cận và skill sở hữu từng cái |
+| Điều kiện tiên quyết | Những gì phải đọc hay phải biết trước bước 1 |
+| Quy trình | Các bước có số, mỗi bước có một output quan sát được |
+| Ràng buộc | Các giới hạn agent không được vượt |
+| Kiểm chứng | Các phép kiểm chứng minh kết quả, không phải chứng minh sự nỗ lực |
+| Xử lý khi thất bại | Làm gì khi một bước không hoàn tất được |
+| Tài liệu tham chiếu | Một dòng cho mỗi file: link, rồi "đọc khi ..." |
 
-## Writing rules
-- Imperative, specific, testable: "Run the project's test command", not "ensure quality".
-- One idea per bullet; numbers only where order matters.
-- State defaults and thresholds once; references extend, never repeat, the body.
-- Prefer the project's own tools and conventions; never invent commands.
-- Keep SKILL.md and each reference within about 110 lines; split by decision, not size.
+## Quy tắc viết
+- Mệnh lệnh, cụ thể, kiểm được: "Chạy câu lệnh test của project", không phải "đảm bảo chất
+  lượng".
+- Mỗi gạch đầu dòng một ý; chỉ dùng số ở chỗ thứ tự có ý nghĩa.
+- Nêu các giá trị mặc định và ngưỡng một lần; reference mở rộng thân bài, không bao giờ lặp lại
+  nó.
+- Ưu tiên công cụ và quy ước của chính project; đừng bao giờ bịa ra câu lệnh.
+- Giữ SKILL.md và từng reference trong khoảng 110 dòng; tách theo quyết định, không theo kích
+  cỡ.
 
-## Scripts
-- Node `.mjs`, run as `node scripts/<tool>.mjs <args>`; standard library first.
-- Never install packages. If an optional dependency is absent, print
-  "missing dependency: <name>; install it or skip step N" and exit with code 2.
-- Deterministic output, no network unless the step says so, no writes outside the
-  path given as an argument.
-- Ship a test or a documented sample invocation with expected output.
+## Script
+- Node `.mjs`, chạy bằng `node scripts/<tool>.mjs <args>`; ưu tiên thư viện chuẩn.
+- Đừng bao giờ cài package. Nếu một dependency tuỳ chọn không có, hãy in
+  "missing dependency: <name>; install it or skip step N" rồi thoát với mã 2.
+- Output tất định, không dùng mạng trừ khi bước đó nói vậy, không ghi ra ngoài
+  đường dẫn được truyền vào làm tham số.
+- Ship kèm một test hoặc một lần gọi mẫu có ghi tài liệu, kèm output mong đợi.
 
-## Versioning
-- A user-edited library skill is the user's: propose a new version with `alp_skill`
-  and `replace: true`; never edit the file in place.
-- Record behavioural changes in the proposal summary, not in the body.
-- Compatibility breaks (renamed sections a hook or role depends on, removed
-  references) are new versions the user must approve.
+## Đánh version
+- Một skill thư viện mà người dùng đã sửa là của người dùng: hãy đề xuất một bản mới bằng
+  `alp_skill` với `replace: true`; đừng bao giờ sửa trực tiếp file đó.
+- Ghi các thay đổi về hành vi trong phần tóm tắt của đề xuất, không ghi trong thân bài.
+- Các lần phá vỡ tương thích (đổi tên một mục mà một hook hay một role dựa vào, bỏ các
+  reference) là những version mới mà người dùng phải duyệt.

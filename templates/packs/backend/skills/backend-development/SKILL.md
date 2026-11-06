@@ -1,101 +1,102 @@
 ---
 name: backend-development
-description: "Build server-side features in the project's existing stack: API endpoints, service logic, auth integration, error handling, and background jobs. Use when adding or changing handlers, services, permission checks, outbound calls, or jobs. Not for schema design or migrations (databases) or deployment and infrastructure (devops)."
+description: "Xây dựng tính năng phía server trong stack hiện có của dự án: API endpoint, logic service, tích hợp auth, xử lý lỗi và background job. Dùng khi thêm hoặc sửa handler, service, kiểm tra quyền, lời gọi ra ngoài, hoặc job. Không dùng cho thiết kế schema hay migration (databases), cũng không cho deployment và hạ tầng (devops)."
 ---
 
-# Backend Development
+# Phát triển backend
 
-## When to use
+## Khi nào dùng
 
-- Adding or changing an HTTP or RPC endpoint, a service, or domain logic.
-- Wiring authentication or authorization into a request path.
-- Shaping errors, retries, timeouts, and logs in server code.
-- Adding a background job, queue consumer, webhook receiver, or scheduled task.
-- A read-only advisor or reviewer is asked whether backend code is sound (advice only).
+- Thêm hoặc sửa một endpoint HTTP hay RPC, một service, hoặc logic nghiệp vụ.
+- Nối authentication hoặc authorization vào một đường đi của request.
+- Định hình lỗi, retry, timeout và log trong code phía server.
+- Thêm một background job, queue consumer, webhook receiver, hoặc scheduled task.
+- Một cố vấn (advisor) hoặc reviewer chỉ đọc được hỏi code backend có vững không (chỉ tư vấn).
 
-## Not for
+## Không dùng cho
 
-- Schema design, migrations, indexes, or slow queries: use databases.
-- Deployment, containers, CI/CD, or infrastructure: use devops.
-- Deciding what to test across a change: use test-strategy.
-- A failing test or regression: use bug-loop.
-- A security audit of a change: use security-review.
-- Choosing a new framework, language, or architecture style: owner decision.
+- Thiết kế schema, migration, index, hay truy vấn chậm: dùng databases.
+- Deployment, container, CI/CD, hay hạ tầng: dùng devops.
+- Quyết định cần test những gì cho một thay đổi: dùng test-strategy.
+- Một test fail hoặc một regression: dùng bug-loop.
+- Audit bảo mật cho một thay đổi: dùng security-review.
+- Chọn framework, ngôn ngữ, hay kiểu kiến trúc mới: quyết định của owner.
 
-## Prerequisites
+## Điều kiện tiên quyết
 
-- The brief's owned paths and acceptance criteria; ALP.md and project instructions.
-- The actual stack, read from manifests, lockfiles, and config (for example
-  `package.json` for Node/TypeScript, `pyproject.toml` for Python, `go.mod` for Go).
-  Do not infer the stack from folder names.
-- One or two existing endpoints or services similar to the task. They define the
-  conventions for routing, validation, errors, logging, and tests.
-- The project's lint, typecheck, and test commands and how they run locally.
+- Đường dẫn sở hữu và tiêu chí nghiệm thu trong brief; ALP.md và chỉ dẫn của dự án.
+- Stack thực tế, đọc từ manifest, lockfile và config (ví dụ `package.json` cho
+  Node/TypeScript, `pyproject.toml` cho Python, `go.mod` cho Go). Đừng suy ra stack
+  từ tên thư mục.
+- Một hoặc hai endpoint hay service hiện có gần giống task. Chúng định ra quy ước về
+  routing, validation, lỗi, logging và test.
+- Lệnh lint, typecheck và test của dự án, cùng cách chúng chạy ở local.
 
-## Workflow
+## Quy trình
 
-1. Restate the contract: inputs, outputs, error cases, who may call it, and side
-   effects. Product rules the brief leaves open go upward; do not guess them.
-2. Locate the seams: transport (routing, parsing, status codes), service or domain
-   logic, data access. Follow the existing layering; keep transport details out of
-   service code.
-3. Shape the interface in the project's existing API style. Read api-design.md for
-   new resources, pagination, idempotency, versioning, or validation rules.
-4. Validate input at the boundary with the project's existing validation approach.
-   Reject malformed or unknown input with a clear client error.
-5. Authenticate once at the edge; authorize per resource where the resource is
-   loaded. Read authentication.md when touching login, sessions, tokens, or roles.
-6. Implement service logic as small units with explicit dependencies (data store,
-   clients, clock, config) so tests can substitute them.
-7. Handle failure deliberately: map domain errors to responses in one place, put a
-   timeout on every outbound call, retry only idempotent work. Read error-handling.md.
-8. For background work: make handlers safe to run twice, bound retries with backoff,
-   record a terminal failure state, enqueue only after the data commit, and never
-   hold a transaction open across an external call.
-9. Add tests at the seams the change affects. Read testing.md.
-10. Run the project's lint, typecheck, and tests. Exercise the endpoint once against
-    a local or test server when the environment allows.
-11. Hand off: files changed, contract summary, commands run with results, schema or
-    config changes needed (and who owns them), and open decisions.
+1. Nêu lại contract: input, output, các ca lỗi, ai được gọi, và side effect. Quy tắc
+   sản phẩm mà brief để mở thì chuyển lên; đừng đoán.
+2. Tìm các mối nối (seam): transport (routing, parsing, status code), logic service
+   hay nghiệp vụ, truy cập dữ liệu. Theo đúng phân lớp hiện có; giữ chi tiết
+   transport ra ngoài code service.
+3. Định hình interface theo đúng kiểu API hiện có của dự án. Đọc api-design.md khi có
+   resource mới, phân trang, idempotency, versioning, hoặc quy tắc validation.
+4. Validate input ở biên bằng cách tiếp cận validation hiện có của dự án. Từ chối
+   input sai dạng hoặc không nhận biết được bằng một lỗi client rõ ràng.
+5. Authenticate một lần ở biên; authorize theo từng resource tại nơi resource được
+   load. Đọc authentication.md khi chạm vào login, session, token, hoặc role.
+6. Hiện thực logic service thành các đơn vị nhỏ với dependency tường minh (data
+   store, client, clock, config) để test có thể thay thế chúng.
+7. Xử lý thất bại có chủ đích: map lỗi nghiệp vụ sang response ở một chỗ, đặt timeout
+   cho mọi lời gọi ra ngoài, chỉ retry việc idempotent. Đọc error-handling.md.
+8. Với background work: làm handler an toàn khi chạy hai lần, giới hạn retry kèm
+   backoff, ghi lại trạng thái thất bại cuối, chỉ enqueue sau khi dữ liệu đã commit,
+   và không bao giờ giữ transaction mở xuyên qua một lời gọi ra ngoài.
+9. Thêm test tại những seam mà thay đổi chạm tới. Đọc testing.md.
+10. Chạy lint, typecheck và test của dự án. Gọi thử endpoint một lần với server local
+    hoặc server test khi môi trường cho phép.
+11. Handoff: file đã đổi, tóm tắt contract, lệnh đã chạy kèm kết quả, thay đổi schema
+    hay config còn cần (và ai sở hữu chúng), và các quyết định còn mở.
 
-A read-only agent runs steps 1-3 and reviews 4-8 against the code or proposal, then
-reports findings and a recommended change instead of editing.
+Một agent chỉ đọc chạy bước 1-3 và review bước 4-8 đối chiếu với code hoặc đề xuất,
+rồi báo các phát hiện và thay đổi được khuyến nghị thay vì tự sửa.
 
-## Constraints
+## Ràng buộc
 
-- Follow the project's existing stack and conventions first. Express, Fastify,
-  NestJS, FastAPI, Django, Flask, or Go net/http are examples, not recommendations.
-- Do not add dependencies, frameworks, or services without the owner's decision.
-  No auto-install. If a library would help, propose it with the reason and route up.
-- Never hardcode secrets or read secret values; use the project's config mechanism
-  and documented example config. Never log tokens, passwords, or full personal data.
-- Do not change a public contract (field names, status codes, error shapes) without
-  the owner's decision; prefer additive changes.
-- Schema changes go to whoever owns migrations, described with the databases skill.
-- Stay inside owned paths. The skill grants no authority to push, release, deploy,
-  or edit CI.
+- Theo stack và quy ước hiện có của dự án trước đã. Express, Fastify, NestJS,
+  FastAPI, Django, Flask, hay Go net/http là ví dụ, không phải khuyến nghị.
+- Không thêm dependency, framework, hay service mà không có quyết định của owner.
+  Không tự cài. Nếu một library có ích, hãy đề xuất kèm lý do và chuyển lên.
+- Không bao giờ hardcode secret hay đọc giá trị secret; dùng cơ chế config của dự án
+  và config ví dụ đã có tài liệu. Không bao giờ log token, password, hay dữ liệu cá
+  nhân đầy đủ.
+- Không đổi một contract công khai (tên field, status code, hình dạng lỗi) mà không
+  có quyết định của owner; ưu tiên thay đổi chỉ thêm vào.
+- Thay đổi schema chuyển cho người sở hữu migration, mô tả bằng skill databases.
+- Ở trong đường dẫn sở hữu. Skill này không cho quyền push, release, deploy, hay sửa
+  CI.
 
-## Verification
+## Kiểm chứng
 
-- Project lint, typecheck, and tests pass on the final tree.
-- New tests fail without the change and pass with it.
-- Every error case in the contract has a test or a stated reason it has none.
-- The authorization-denied path is tested (wrong user or missing role).
-- No secrets, tokens, or real personal data in code, logs, fixtures, or snapshots.
-- The request was exercised end to end once, or the handoff says why it was not.
+- Lint, typecheck và test của dự án pass trên cây cuối cùng.
+- Test mới fail khi chưa có thay đổi và pass khi đã có.
+- Mọi ca lỗi trong contract có một test, hoặc một lý do đã nêu vì sao không có.
+- Đường authorization bị từ chối đã được test (sai user hoặc thiếu role).
+- Không có secret, token, hay dữ liệu cá nhân thật trong code, log, fixture, snapshot.
+- Request đã được gọi thử đầu-cuối một lần, hoặc handoff nói vì sao không.
 
-## Failure handling
+## Xử lý khi thất bại
 
-- Tests cannot run (missing database, service, or credential): report the exact gap
-  and what was verified instead. Do not mock away the behavior under change.
-- Conventions conflict or are missing: follow the nearest established pattern and
-  note the inconsistency. Do not refactor unrelated code.
-- An unexpected failure or regression appears: switch to bug-loop.
-- An ambiguity affects behavior, data, or security: stop that part and route upward.
+- Không chạy được test (thiếu database, service, hay credential): báo đúng khoảng
+  trống đó và những gì đã kiểm chứng thay thế. Đừng mock bỏ hành vi đang thay đổi.
+- Quy ước xung đột hoặc thiếu: theo mẫu đã thiết lập gần nhất và ghi lại chỗ không
+  nhất quán. Đừng refactor code không liên quan.
+- Xuất hiện một thất bại hay regression bất ngờ: chuyển sang bug-loop.
+- Một điểm nhập nhằng ảnh hưởng hành vi, dữ liệu, hay bảo mật: dừng phần đó và chuyển lên.
 
-## References
+## Tài liệu tham khảo
 
-- [references/api-design.md](references/api-design.md) — read when designing a new resource or endpoint, or choosing status codes, pagination, idempotency, versioning, or validation (step 3).
-- [references/authentication.md](references/authentication.md) — read when touching login, sessions, tokens, OAuth/OIDC, password storage, or permission checks (step 5).
-- [references/error-handling.md](references/error-handling.md) — read when mapping errors to responses, adding retries or timeouts, or deciding what to log (step 7).
-- [references/testing.md](references/testing.md) — read when choosing handler, service, integration, or contract tests (step 9).
+- [references/api-design.md](references/api-design.md) — đọc khi thiết kế resource hoặc endpoint mới, hoặc chọn status code, phân trang, idempotency, versioning, hay validation (bước 3).
+- [references/authentication.md](references/authentication.md) — đọc khi chạm vào login, session, token, OAuth/OIDC, lưu password, hay kiểm tra quyền (bước 5).
+- [references/error-handling.md](references/error-handling.md) — đọc khi map lỗi sang response, thêm retry hay timeout, hoặc quyết định log những gì (bước 7).
+- [references/testing.md](references/testing.md) — đọc khi chọn test handler, service, integration, hay contract (bước 9).

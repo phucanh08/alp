@@ -1,6 +1,6 @@
 {
   "label": "Quality",
-  "description": "Tooling-level web testing: end-to-end, unit and component, performance and security testing in test environments.",
+  "description": "Kiểm thử web ở mức tooling: end-to-end, unit và component, kiểm thử hiệu năng và bảo mật trong môi trường test.",
   "skills": ["web-testing"],
   "assign": { "lead": ["web-testing"], "peer": ["web-testing"], "reviewer": ["web-testing"] }
 }

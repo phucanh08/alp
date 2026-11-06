@@ -1,86 +1,86 @@
 # Observability
 
-Read when adding or reviewing logs, metrics, traces, SLOs, alerts or dashboards.
+Đọc khi thêm hay review log, metric, trace, SLO, alert hay dashboard.
 
-Use the telemetry stack the project already has. Adding an agent, vendor, collector or paid
-plan is an owner decision.
+Hãy dùng stack telemetry mà dự án đã có. Thêm một agent, nhà cung cấp, collector hay gói
+trả phí là quyết định của chủ sở hữu.
 
-## Logs
+## Log
 
-- Structured (JSON or the project's format) with consistent fields: timestamp, level, service,
-  environment, version, request or trace ID, event name, outcome, duration.
-- Levels mean something: error = needs attention, warn = degraded but handled, info = significant
-  business or lifecycle events, debug = off by default in production.
-- Log events, not narratives: `event=payment_failed reason=card_declined order_id=...`.
-- Never log secrets, tokens, passwords, full card numbers or unnecessary personal data. Redact
-  at the logger, not by convention.
-- Write to stdout/stderr in containers; let the platform collect and ship.
-- Control volume: sample noisy success logs, not errors. Avoid logging inside tight loops.
+- Có cấu trúc (JSON hoặc định dạng của dự án) với các field nhất quán: timestamp, level, service,
+  môi trường, phiên bản, ID của request hay của trace, tên event, kết quả, thời lượng.
+- Các level phải có ý nghĩa: error = cần ai đó để ý, warn = suy giảm nhưng đã xử lý được, info = những
+  event nghiệp vụ hay vòng đời đáng kể, debug = mặc định tắt ở production.
+- Hãy ghi log dạng event, không kể chuyện: `event=payment_failed reason=card_declined order_id=...`.
+- Không bao giờ ghi log secret, token, mật khẩu, số thẻ đầy đủ hay dữ liệu cá nhân không cần thiết. Hãy che
+  ngay tại logger, không chỉ dựa vào quy ước.
+- Ghi ra stdout/stderr trong container; để nền tảng thu thập và chuyển đi.
+- Kiểm soát lượng log: lấy mẫu các log thành công ồn ào, không lấy mẫu các log lỗi. Tránh ghi log trong vòng lặp chặt.
 
-## Metrics
+## Metric
 
-- Requests (RED): rate, errors, duration for every service endpoint or queue consumer.
-- Resources (USE): utilization, saturation, errors for CPU, memory, disk, connection pools, queues.
-- Business signals that show user impact: sign-ups completed, orders placed, jobs processed.
-- Duration as histograms, not averages; report p50, p95, p99.
-- Keep label cardinality bounded: no user IDs, request IDs or raw URLs as labels; use route templates.
-- Name metrics with units and the project's naming convention.
+- Request (RED): tần suất, lỗi, thời lượng cho mọi endpoint service hay consumer hàng đợi.
+- Tài nguyên (USE): mức sử dụng, độ bão hòa, lỗi cho CPU, bộ nhớ, đĩa, pool kết nối, hàng đợi.
+- Những tín hiệu nghiệp vụ cho thấy tác động tới người dùng: số lần đăng ký xong, số đơn đã đặt, số job đã xử lý.
+- Thời lượng thì dùng histogram, không dùng giá trị trung bình; hãy báo p50, p95, p99.
+- Giữ lực lượng của label có giới hạn: không dùng ID người dùng, ID request hay URL thô làm label; hãy dùng mẫu route.
+- Đặt tên metric kèm đơn vị và theo quy ước đặt tên của dự án.
 
-## Traces
+## Trace
 
-- Propagate context across service boundaries with the standard headers the stack uses
-  (W3C trace context is common); include trace IDs in logs to link them.
-- Span the units that matter: inbound request, outbound calls, database queries, queue publish
-  and consume. Avoid a span per function.
-- Record attributes that help diagnosis (route, status, retry count), not payloads.
-- Sample at a rate the backend can afford; keep errors and slow traces when the tooling supports it.
+- Truyền ngữ cảnh qua các biên service bằng những header chuẩn mà stack dùng
+  (W3C trace context là phổ biến); kèm ID của trace vào log để liên kết chúng lại.
+- Tạo span cho những đơn vị đáng quan tâm: request vào, các lệnh gọi ra, truy vấn database, publish và
+  consume hàng đợi. Tránh tạo một span cho mỗi hàm.
+- Ghi những thuộc tính giúp chẩn đoán (route, status, số lần retry), không ghi payload.
+- Lấy mẫu ở mức mà backend chịu được; hãy giữ lại các trace lỗi và trace chậm khi công cụ hỗ trợ.
 
-## SLOs
+## SLO
 
-- Start from user-visible behavior: availability (successful requests / valid requests) and
-  latency (share of requests under a threshold), per important user journey.
-- Define: SLI formula, target (for example 99.5% over 28 days), window, and what counts as valid.
-- The error budget is 100% minus the target. Budget burn guides release pace and reliability work;
-  how the team acts on it is an owner policy.
-- Pick targets from current measured performance and user needs, not round aspirational numbers.
-- Few SLOs per service; each one has an owner.
+- Hãy bắt đầu từ hành vi người dùng thấy được: độ khả dụng (request thành công / request hợp lệ) và
+  độ trễ (tỉ lệ request dưới một ngưỡng), cho từng hành trình người dùng quan trọng.
+- Định nghĩa rõ: công thức SLI, mục tiêu (ví dụ 99.5% trong 28 ngày), khung thời gian, và cái gì được tính là hợp lệ.
+- Ngân sách lỗi là 100% trừ đi mục tiêu. Mức tiêu ngân sách định hướng nhịp phát hành và việc làm độ tin cậy;
+  còn đội phản ứng với nó thế nào là chính sách của chủ sở hữu.
+- Chọn mục tiêu từ hiệu năng đang đo được và từ nhu cầu người dùng, không chọn những con số tròn trịa mang tính khát vọng.
+- Mỗi service chỉ vài SLO; mỗi cái đều có một người sở hữu.
 
-## Alerts that are actionable
+## Alert hành động được
 
-- Every page answers: what is broken for users, how badly, and what to do first.
-- Page on symptoms (SLO burn, error rate, latency, saturation close to exhaustion), not on every
-  cause (single host CPU spike, one failed retry).
-- Prefer multi-window burn-rate alerts on SLOs: a fast window catches sharp outages, a slow window
-  catches steady degradation.
-- Each alert has: clear name, severity, threshold and duration, owner, runbook link or first
-  diagnostic step, and a dashboard link.
-- Non-urgent conditions become tickets or reports, not pages.
-- Test alerts: trigger in a non-production environment or with a synthetic condition and confirm
-  delivery and runbook accuracy.
-- Review alerts that fired without action or were silenced; tune or delete them.
+- Mỗi lần gọi người phải trả lời được: cái gì đang vỡ với người dùng, nặng tới đâu, và phải làm gì trước.
+- Gọi người theo triệu chứng (mức tiêu SLO, tỉ lệ lỗi, độ trễ, độ bão hòa gần cạn), không gọi theo mọi
+  nguyên nhân (CPU một host vọt lên, một lần retry thất bại).
+- Ưu tiên alert theo tốc độ tiêu ngân sách trên nhiều khung thời gian cho SLO: khung nhanh bắt các sự cố gắt, khung chậm
+  bắt sự suy giảm đều đều.
+- Mỗi alert đều có: tên rõ ràng, mức nghiêm trọng, ngưỡng và thời lượng, người sở hữu, link runbook hay bước
+  chẩn đoán đầu tiên, và một link dashboard.
+- Những điều kiện không gấp thì thành ticket hay báo cáo, không thành cuộc gọi người.
+- Hãy test alert: kích hoạt nó trong môi trường không phải production hoặc bằng một điều kiện tổng hợp và xác nhận
+  là nó được gửi tới và runbook là đúng.
+- Hãy xem lại những alert đã nổ mà không ai làm gì hoặc bị tắt tiếng; hãy chỉnh lại hoặc xóa chúng.
 
-## Dashboards
+## Dashboard
 
-- One overview per service: SLO status, RED metrics, saturation, recent deploys marked.
-- Drill-down dashboards per dependency. Same time range and units across panels.
-- Prefer few, well-labeled panels to many unexplained ones.
+- Một trang tổng quan cho mỗi service: trạng thái SLO, các chỉ số RED, độ bão hòa, có đánh dấu các lần deploy gần đây.
+- Dashboard đi sâu cho từng phụ thuộc. Cùng khoảng thời gian và cùng đơn vị trên khắp các panel.
+- Ưu tiên ít panel nhưng ghi nhãn tốt, hơn là nhiều panel không ai giải thích.
 
-## Runbooks
+## Runbook
 
-- Short: symptom, impact, first checks (dashboards, logs queries), safe mitigations (rollback,
-  scale, disable flag), escalation path.
-- Mitigations that change production still need the authorization the runbook names.
+- Ngắn: triệu chứng, tác động, các bước kiểm đầu tiên (dashboard, truy vấn log), các cách giảm thiểu an toàn (rollback,
+  scale, tắt flag), đường chuyển lên.
+- Những cách giảm thiểu có làm đổi production thì vẫn cần đúng sự cho phép mà runbook nêu ra.
 
-## Adding telemetry to a change
+## Thêm telemetry cho một thay đổi
 
-- Identify the new failure modes the change introduces and make each one visible: a log event,
-  an error metric, or a span attribute.
-- Add the signal before or with the change, so the rollout can be watched.
-- State in the handoff which signals show success and which show failure.
+- Xác định những chế độ lỗi mới mà thay đổi đó đưa vào và làm cho từng cái thấy được: một event log,
+  một metric lỗi, hoặc một thuộc tính span.
+- Thêm tín hiệu đó trước hoặc cùng lúc với thay đổi, để có thể theo dõi được lần rollout.
+- Nêu trong handoff những tín hiệu nào cho thấy thành công và những tín hiệu nào cho thấy thất bại.
 
-## Review checklist
+## Checklist review
 
-- No secrets or excess personal data in logs, labels or spans.
-- Cardinality bounded; histograms for latency.
-- Alerts symptom-based, owned, with runbooks; no alert without an action.
-- SLOs defined from user journeys with measured baselines.
+- Không có secret hay dữ liệu cá nhân quá mức trong log, label hay span.
+- Lực lượng label có giới hạn; độ trễ dùng histogram.
+- Alert dựa trên triệu chứng, có người sở hữu, có runbook; không có alert nào mà không kèm hành động.
+- SLO được định nghĩa từ các hành trình người dùng với mốc cơ sở đã đo.

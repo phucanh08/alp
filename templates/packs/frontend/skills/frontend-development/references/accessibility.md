@@ -1,86 +1,86 @@
 # Accessibility
 
-Read when building interactive controls, forms, dialogs, or custom widgets.
+Đọc khi dựng control tương tác, form, dialog, hay widget tự tạo.
 
-Aim for WCAG 2.2 AA unless the project states another target. Use the project's
-accessible design-system components first; they usually solve focus and ARIA.
+Nhắm tới WCAG 2.2 AA trừ khi dự án nêu mục tiêu khác. Trước hết hãy dùng các component
+design-system đã đạt accessibility của dự án; chúng thường đã xử lý focus và ARIA.
 
-## Semantic HTML first
+## HTML semantic trước đã
 
-- Use native elements for their purpose: `button` for actions, `a href` for
-  navigation, `input`/`select`/`textarea` for data, `label` for labels, `table` for
-  tabular data, lists for lists.
-- Never use a `div` or `span` with a click handler as a button; it lacks keyboard and
-  role support.
-- One `h1` per page and headings in order; landmarks (`header`, `nav`, `main`,
-  `footer`) so screen-reader users can jump.
-- Set the page `lang` and a meaningful document title per route.
+- Dùng phần tử native đúng mục đích của nó: `button` cho hành động, `a href` cho
+  điều hướng, `input`/`select`/`textarea` cho dữ liệu, `label` cho nhãn, `table` cho
+  dữ liệu dạng bảng, danh sách cho danh sách.
+- Không bao giờ dùng `div` hay `span` gắn click handler làm nút; nó thiếu hỗ trợ bàn phím
+  và vai trò.
+- Một `h1` cho mỗi trang và tiêu đề theo thứ tự; có landmark (`header`, `nav`, `main`,
+  `footer`) để người dùng trình đọc màn hình nhảy được.
+- Đặt `lang` cho trang và một tiêu đề tài liệu có nghĩa cho mỗi route.
 
-## Keyboard
+## Bàn phím
 
-- Everything operable by mouse is operable by keyboard: Tab and Shift+Tab to move,
-  Enter or Space to activate, Escape to dismiss, arrows inside composite widgets
-  (menus, tabs, listboxes) per the ARIA Authoring Practices patterns.
-- Tab order follows visual order. Avoid positive `tabindex`; use `tabindex="0"` only
-  for custom focusable widgets and `-1` for programmatic focus targets.
-- No keyboard traps, except a modal dialog trapping focus while open.
-- Provide a skip link to main content on pages with long navigation.
+- Mọi thứ điều khiển được bằng chuột đều điều khiển được bằng bàn phím: Tab và Shift+Tab để di chuyển,
+  Enter hoặc Space để kích hoạt, Escape để bỏ qua, các mũi tên bên trong widget phức hợp
+  (menu, tab, listbox) theo các pattern của ARIA Authoring Practices.
+- Thứ tự Tab theo thứ tự thị giác. Tránh `tabindex` dương; chỉ dùng `tabindex="0"`
+  cho widget tự tạo cần focus được và `-1` cho các đích focus bằng chương trình.
+- Không có bẫy bàn phím, trừ dialog dạng modal giữ focus trong lúc nó đang mở.
+- Cung cấp link bỏ qua để tới nội dung chính trên những trang có phần điều hướng dài.
 
-## Focus management
+## Quản lý focus
 
-- Focus must be visible; do not remove outlines without an equally visible style.
-- Dialogs: move focus into the dialog on open, trap it while open, close on Escape,
-  return focus to the trigger on close. Prefer the native `dialog` element or the
-  project's dialog component.
-- After client-side navigation, move focus to the new page heading or main region,
-  or use the framework's route announcer.
-- After a form error, focus the first invalid field or an error summary.
-- After deleting an item, move focus to a sensible neighbor.
+- Focus phải thấy được; không bỏ viền mà không có một kiểu khác thấy được tương đương.
+- Dialog: chuyển focus vào dialog khi mở, giữ nó trong lúc mở, đóng khi nhấn Escape,
+  trả focus về phần tử đã mở nó khi đóng. Ưu tiên phần tử `dialog` native hoặc
+  component dialog của dự án.
+- Sau khi điều hướng ở client, chuyển focus tới tiêu đề của trang mới hoặc vùng chính,
+  hoặc dùng cơ chế thông báo route của framework.
+- Sau một lỗi form, focus vào field không hợp lệ đầu tiên hoặc vào bản tóm tắt lỗi.
+- Sau khi xóa một mục, chuyển focus tới một mục lân cận hợp lý.
 
-## ARIA only when needed
+## Chỉ dùng ARIA khi cần
 
-- No ARIA is better than wrong ARIA. Use it only when native HTML cannot express the
-  role, state, or relationship.
-- Common legitimate uses: `aria-expanded` and `aria-controls` on disclosure
-  triggers, `aria-current` for the current nav item, `aria-describedby` for hints and
-  errors, `aria-live` regions for async status messages, `aria-label` for icon-only
-  buttons.
-- A custom widget must implement the full keyboard pattern for its role; adding a
-  `role` alone does not.
-- Do not hide focusable content with `aria-hidden`.
+- Không có ARIA còn tốt hơn ARIA sai. Chỉ dùng khi HTML native không diễn đạt được
+  vai trò, trạng thái, hay quan hệ.
+- Những cách dùng chính đáng thường gặp: `aria-expanded` và `aria-controls` trên phần tử
+  mở ra nội dung, `aria-current` cho mục điều hướng hiện tại, `aria-describedby` cho gợi ý và
+  lỗi, vùng `aria-live` cho các thông báo trạng thái bất đồng bộ, `aria-label` cho nút
+  chỉ có icon.
+- Widget tự tạo phải cài đặt đầy đủ pattern bàn phím của vai trò nó; chỉ thêm một
+  `role` thì không đủ.
+- Không ẩn nội dung focus được bằng `aria-hidden`.
 
-## Forms
+## Form
 
-- Every input has a programmatic label (visible `label` preferred). Placeholders are
-  not labels.
-- Mark required fields in text and with `required` or `aria-required`.
-- Associate error messages with the field (`aria-describedby`) and set
-  `aria-invalid` when invalid. Do not rely on color alone.
-- Group related controls with `fieldset` and `legend`.
-- Use correct input types and `autocomplete` values.
+- Mọi input đều có nhãn gắn được bằng chương trình (nên có `label` thấy được). Placeholder
+  không phải nhãn.
+- Đánh dấu field bắt buộc bằng chữ và bằng `required` hoặc `aria-required`.
+- Gắn thông báo lỗi với field (`aria-describedby`) và đặt
+  `aria-invalid` khi không hợp lệ. Không dựa vào màu đơn thuần.
+- Nhóm các control liên quan bằng `fieldset` và `legend`.
+- Dùng đúng loại input và đúng giá trị `autocomplete`.
 
-## Visual
+## Thị giác
 
-- Text contrast at least 4.5:1 (3:1 for large text); UI component and focus
-  indicator contrast at least 3:1. Use the project's tokens; report token failures to
-  ui-design rather than inventing colors.
-- Do not convey information by color alone; add text, icons, or patterns.
-- Support 200% zoom and narrow viewports without loss of content or horizontal
-  scrolling for text.
-- Interactive targets large enough to hit (at least 24 by 24 CSS pixels).
-- Respect `prefers-reduced-motion` for non-essential animation.
+- Tương phản chữ ít nhất 4.5:1 (3:1 với chữ lớn); tương phản của component UI và chỉ báo
+  focus ít nhất 3:1. Dùng token của dự án; báo token không đạt cho
+  ui-design chứ đừng tự nghĩ ra màu.
+- Không truyền tải thông tin chỉ bằng màu; hãy thêm chữ, icon, hay họa tiết.
+- Hỗ trợ zoom 200% và khung nhìn hẹp mà không mất nội dung và không phải cuộn
+  ngang để đọc chữ.
+- Đích tương tác đủ lớn để bấm (ít nhất 24 nhân 24 CSS pixel).
+- Tôn trọng `prefers-reduced-motion` với những hoạt họa không thiết yếu.
 
-## Media and content
+## Media và nội dung
 
-- Meaningful images have `alt` text describing their purpose; decorative images use
+- Ảnh mang nghĩa thì có chữ `alt` mô tả mục đích của nó; ảnh trang trí thì dùng
   `alt=""`.
-- Icon-only buttons have an accessible name.
-- Video has captions; audio has transcripts when the project supports it.
-- Link text describes the destination; avoid "click here".
+- Nút chỉ có icon thì có tên truy cập được.
+- Video có phụ đề; audio có bản ghi lời khi dự án hỗ trợ.
+- Chữ của link mô tả đích đến; tránh kiểu "bấm vào đây".
 
-## Checking
+## Cách kiểm
 
-- Operate the feature with keyboard only.
-- Run the project's automated checker (for example axe-based tooling) if present;
-  automated tools find only part of the issues.
-- Spot-check with a screen reader when the change introduces a custom widget.
+- Vận hành tính năng chỉ bằng bàn phím.
+- Chạy công cụ kiểm tự động của dự án (ví dụ công cụ dựa trên axe) nếu có;
+  công cụ tự động chỉ tìm ra một phần số vấn đề.
+- Kiểm thử nhanh bằng trình đọc màn hình khi thay đổi có đưa vào một widget tự tạo.

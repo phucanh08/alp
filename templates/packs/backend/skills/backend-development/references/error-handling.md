@@ -1,87 +1,86 @@
-# Error Handling
+# Xử lý lỗi
 
-Read when mapping errors to responses, adding retries or timeouts, or deciding
-what to log.
+Đọc khi map lỗi sang response, thêm retry hay timeout, hoặc quyết định
+log những gì.
 
-## Error taxonomy
+## Phân loại lỗi
 
-Classify every failure before deciding how to handle it.
+Phân loại mọi thất bại trước khi quyết định xử lý thế nào.
 
-| Class | Examples | Handling | Typical response |
+| Lớp | Ví dụ | Xử lý | Response thường dùng |
 | --- | --- | --- | --- |
-| Invalid input | bad type, missing field | reject at boundary | 400/422 |
-| Unauthenticated / forbidden | missing token, wrong owner | reject, no detail leak | 401/403/404 |
-| Not found | unknown ID | domain error | 404 |
-| Conflict | duplicate, stale version, invalid state transition | domain error | 409/412 |
-| Rate or quota | client over limit | reject with hint | 429 |
-| Transient dependency | timeout, connection reset, 503 upstream | retry if idempotent, else surface | 502/503/504 |
-| Permanent dependency | 4xx from upstream, bad config | do not retry; alert | 500/502 |
-| Bug / invariant broken | null where impossible | fail fast, log with context | 500 |
+| Input không hợp lệ | sai kiểu, thiếu field | từ chối ở biên | 400/422 |
+| Chưa authenticate / bị cấm | thiếu token, sai chủ sở hữu | từ chối, không lộ chi tiết | 401/403/404 |
+| Không tìm thấy | ID không biết | lỗi nghiệp vụ | 404 |
+| Xung đột | trùng lặp, version cũ, chuyển trạng thái không hợp lệ | lỗi nghiệp vụ | 409/412 |
+| Tần suất hoặc quota | client vượt giới hạn | từ chối kèm gợi ý | 429 |
+| Dependency lỗi tạm thời | timeout, mất kết nối, upstream 503 | retry nếu idempotent, nếu không thì đẩy ra | 502/503/504 |
+| Dependency lỗi vĩnh viễn | upstream trả 4xx, config sai | đừng retry; báo động | 500/502 |
+| Bug / vỡ bất biến | null ở chỗ không thể null | fail nhanh, log kèm ngữ cảnh | 500 |
 
-- Represent expected domain failures as typed errors or result values, following the
-  project's pattern (exceptions with codes, error values in Go, result types).
-- Do not use exceptions for normal control flow where the project does not.
-- Never swallow an error silently. Either handle it, wrap it with context and pass
-  it up, or log it at the boundary where it ends.
+- Biểu diễn các thất bại nghiệp vụ dự kiến thành lỗi có kiểu hoặc giá trị kết quả,
+  theo mẫu của dự án (exception kèm code, error value trong Go, result type).
+- Đừng dùng exception cho luồng điều khiển bình thường ở nơi dự án không làm vậy.
+- Đừng bao giờ lặng lẽ nuốt một lỗi. Hãy xử lý nó, bọc nó kèm ngữ cảnh rồi đẩy lên,
+  hoặc log nó ở biên nơi nó kết thúc.
 
-## Mapping to responses
+## Map sang response
 
-- Map errors to responses in one place (error middleware, exception handler, or a
-  shared helper), not in every handler.
-- Return the project's standard error shape with a stable code.
-- Expose no internals: no stack traces, SQL, file paths, or upstream bodies.
-- Include a request or correlation ID in the response and the logs so a report can be
-  traced.
-- Unknown errors become a generic 500 and are logged in full server-side.
+- Map lỗi sang response ở một chỗ (error middleware, exception handler, hay một
+  helper dùng chung), không phải trong từng handler.
+- Trả về hình dạng lỗi chuẩn của dự án với một code ổn định.
+- Không phơi nội bộ: không stack trace, SQL, đường dẫn file, hay body của upstream.
+- Đưa một request ID hoặc correlation ID vào response và vào log để có thể truy vết
+  một báo cáo.
+- Lỗi không biết trở thành một 500 chung và được log đầy đủ ở phía server.
 
-## Timeouts
+## Timeout
 
-- Every outbound call (HTTP, database, cache, queue) has a timeout. Use the client's
-  configured default if the project has one; otherwise propose a value.
-- Propagate the request deadline or cancellation (context in Go, AbortSignal in
-  Node, timeouts or task cancellation in Python) so work stops when the caller gave
-  up.
-- An inner timeout must be shorter than the outer one.
+- Mọi lời gọi ra ngoài (HTTP, database, cache, queue) đều có timeout. Dùng mặc định
+  đã cấu hình của client nếu dự án có; nếu không, hãy đề xuất một giá trị.
+- Lan truyền deadline hoặc tín hiệu hủy của request (context trong Go, AbortSignal
+  trong Node, timeout hay task cancellation trong Python) để công việc dừng khi người
+  gọi đã bỏ cuộc.
+- Timeout bên trong phải ngắn hơn timeout bên ngoài.
 
-## Retries
+## Retry
 
-- Retry only transient failures of idempotent operations, or operations made
-  idempotent with a key.
-- Bound attempts (small number), use exponential backoff with jitter, and respect
+- Chỉ retry các thất bại tạm thời của thao tác idempotent, hoặc thao tác đã được làm
+  cho idempotent bằng một key.
+- Giới hạn số lần thử (một số nhỏ), dùng exponential backoff kèm jitter, và tôn trọng
   Retry-After.
-- Retry at one layer only; stacked retries multiply load.
-- Do not retry validation, auth, or other permanent errors.
-- For a dependency that keeps failing, use the project's circuit breaker or fallback
-  if it has one; do not add a new library without a decision.
-- Background jobs: after the last attempt, move to a failure state or dead-letter
-  queue with the reason; do not loop forever.
+- Chỉ retry ở một lớp; retry xếp lồng nhau nhân tải lên.
+- Đừng retry lỗi validation, auth, hay các lỗi vĩnh viễn khác.
+- Với một dependency cứ fail liên tục, dùng circuit breaker hoặc fallback của dự án
+  nếu có; đừng thêm library mới mà không có quyết định.
+- Background job: sau lần thử cuối, chuyển sang trạng thái thất bại hoặc dead-letter
+  queue kèm lý do; đừng lặp mãi.
 
-## Partial failure
+## Thất bại một phần
 
-- Keep a database transaction short and local. Do not call external services inside
-  it.
-- When a database write and an external effect (message, email, payment) must both
-  happen, use the project's outbox or a compensating step; note the gap if neither
-  exists.
-- Make handlers safe to replay.
+- Giữ transaction database ngắn và cục bộ. Đừng gọi service bên ngoài bên trong nó.
+- Khi một lần ghi database và một hiệu ứng bên ngoài (message, email, thanh toán)
+  đều phải xảy ra, dùng outbox của dự án hoặc một bước bù; nêu rõ khoảng trống nếu
+  không có cả hai.
+- Làm handler an toàn khi chạy lại.
 
-## Logging without secrets
+## Log mà không lộ secret
 
-- Log at the boundary where an error is handled, once, with: error code, message,
-  request ID, operation, relevant non-sensitive IDs, and the cause chain.
-- Use the project's logger and structured fields; match existing levels (client
-  errors usually info or warn, server errors error).
-- Never log: passwords, tokens, API keys, session IDs, authorization headers, full
-  card numbers, secrets from config, or full request bodies that may contain them.
-- Mask or omit personal data (email, phone, address) unless the project's policy
-  allows it.
-- Check that error messages built from upstream responses do not echo credentials.
-- Do not log at error level for expected client mistakes; it hides real incidents.
+- Log ở biên nơi một lỗi được xử lý, một lần, với: code lỗi, message, request ID,
+  thao tác, các ID không nhạy cảm liên quan, và chuỗi nguyên nhân.
+- Dùng logger và field có cấu trúc của dự án; khớp với các level đang có (lỗi client
+  thường là info hoặc warn, lỗi server là error).
+- Đừng bao giờ log: password, token, API key, session ID, header authorization, số
+  thẻ đầy đủ, secret từ config, hay toàn bộ body request có thể chứa chúng.
+- Che hoặc bỏ dữ liệu cá nhân (email, điện thoại, địa chỉ) trừ khi policy của dự án
+  cho phép.
+- Kiểm tra rằng message lỗi dựng từ response của upstream không vọng lại credential.
+- Đừng log ở level error cho những lỗi client dự kiến; nó che mất sự cố thật.
 
-## Checks to add
+## Những kiểm tra cần thêm
 
-- Each mapped error class returns its documented status and code.
-- An unexpected exception returns a generic 500 without internal detail.
-- A timed-out dependency produces the documented response within the deadline.
-- Retry stops after the bound and does not retry permanent errors.
-- Log output for a failing auth request contains no token or password.
+- Mỗi lớp lỗi đã map trả về đúng status và code đã ghi trong tài liệu.
+- Một exception bất ngờ trả về 500 chung mà không có chi tiết nội bộ.
+- Một dependency bị timeout tạo ra response đã ghi trong tài liệu trong hạn deadline.
+- Retry dừng sau giới hạn và không retry các lỗi vĩnh viễn.
+- Log của một request auth thất bại không chứa token hay password.

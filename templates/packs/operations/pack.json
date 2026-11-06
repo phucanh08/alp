@@ -1,6 +1,6 @@
 {
   "label": "Operations",
-  "description": "Containers, CI/CD pipelines, deployment and rollback strategies, infrastructure changes and observability.",
+  "description": "Container, pipeline CI/CD, chiến lược triển khai và rollback, thay đổi hạ tầng và observability.",
   "skills": ["devops"],
   "assign": { "lead": ["devops"], "peer": ["devops"] }
 }

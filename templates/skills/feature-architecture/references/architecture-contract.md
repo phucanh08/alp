@@ -1,17 +1,17 @@
-# Architecture contract
+# Contract kiến trúc
 
-Read when the project has `docs/architecture/contract.json`, or wants dependency rules
-that a tool checks instead of a reviewer remembering them.
+Đọc khi project đã có `docs/architecture/contract.json`, hoặc muốn có các quy tắc phụ thuộc
+mà một công cụ kiểm thay vì để reviewer phải nhớ.
 
-## Prefer the project's own tools
+## Ưu tiên công cụ của chính project
 
-If the project already enforces boundaries (an ESLint boundaries or import rule,
-dependency-cruiser, Nx module boundaries, import-linter for Python, ArchUnit for
-Java, a custom script like `scripts/check-boundaries.mjs` of its own), use it and
-stop here. The contract below is a fallback for JavaScript/TypeScript repositories
-that have none. Adopting it is a project decision: propose it, do not add it.
+Nếu project đã thực thi ranh giới sẵn (một quy tắc boundaries hay import của ESLint,
+dependency-cruiser, Nx module boundaries, import-linter cho Python, ArchUnit cho Java,
+hay một script riêng như `scripts/check-boundaries.mjs` của chính nó), hãy dùng nó và
+dừng ở đây. Contract dưới đây là phương án dự phòng cho các repository JavaScript/TypeScript
+chưa có gì. Việc nhận nó là quyết định của project: hãy đề xuất, đừng tự thêm vào.
 
-## Format
+## Định dạng
 
 ```json
 {
@@ -38,51 +38,52 @@ that have none. Adopting it is a project decision: propose it, do not add it.
 }
 ```
 
-- `modules`: name -> globs over repository-relative POSIX paths (`**`, `*`, `?`). A file
-  belongs to the first module whose glob matches; files in no module are not checked.
-- `allow`: a listed module may import only itself and the modules named. A module not
-  listed in `allow` is unrestricted, so list every module you want to constrain.
-- `denyPackages`: bare package names (or `node:` builtins) a module must not import.
-- `ignore`: files never checked.
-- `exceptions`: the escalation record. Each needs `file` (one file, no pattern),
-  `import` (a glob over the imported file, or a package name; never `**`), `reason`
-  and `approvedBy`, and may have `expires` (YYYY-MM-DD; afterwards it excuses nothing).
-  Add one only after the decision was made by the person the rule belongs to, never to
-  make a failing check pass on your own. The checker lists exceptions nothing needs.
+- `modules`: tên -> các glob trên đường dẫn POSIX tương đối với repository (`**`, `*`, `?`).
+  Một file thuộc module đầu tiên có glob khớp; file không thuộc module nào thì không bị kiểm.
+- `allow`: một module được liệt kê chỉ được import chính nó và các module được nêu tên. Module
+  không có trong `allow` thì không bị hạn chế, nên hãy liệt kê mọi module bạn muốn ràng buộc.
+- `denyPackages`: tên package trần (hoặc builtin `node:`) mà một module không được import.
+- `ignore`: các file không bao giờ bị kiểm.
+- `exceptions`: bản ghi của việc chuyển lên. Mỗi mục cần `file` (một file, không dùng pattern),
+  `import` (một glob trên file bị import, hoặc một tên package; đừng bao giờ dùng `**`),
+  `reason` và `approvedBy`, và có thể có `expires` (YYYY-MM-DD; sau ngày đó nó không miễn gì
+  nữa). Chỉ thêm một mục sau khi quyết định đã được người sở hữu quy tắc đó đưa ra, đừng bao
+  giờ thêm để tự mình làm một phép kiểm đang fail lọt qua. Bộ kiểm sẽ liệt kê các exception
+  không ai cần.
 
-## Contract changes are reviewed
+## Thay đổi contract thì phải được review
 
-Weakening the contract (an exception, a wider `allow`, a removed denied package, a new
-`ignore`, a changed module) makes any check pass, so it is a decision like an exception.
-With `--base <git-ref>` the checker compares the contract with the one at that ref and
-fails (exit 1) on every loosening it finds, each named, until the run says who reviewed
-it: `--approved-by "main, 2026-11-05"`. Tightening needs no review. Gates run with
-`--base` (`main` for an assignment's branch, `origin/main` in CI) and never with
-`--approved-by`; the reviewer runs that after deciding.
+Làm yếu contract (thêm một exception, nới `allow`, bỏ một package bị cấm, thêm một `ignore`,
+đổi một module) sẽ làm mọi phép kiểm pass, nên đó là một quyết định giống như một exception.
+Với `--base <git-ref>`, bộ kiểm so contract với bản ở ref đó và fail (thoát mã 1) với mọi chỗ
+nới lỏng nó tìm thấy, nêu tên từng chỗ, cho tới khi lần chạy nói ra ai đã review
+nó: `--approved-by "main, 2026-11-05"`. Siết chặt thì không cần review. Các gate chạy với
+`--base` (`main` cho nhánh của một việc được giao, `origin/main` trong CI) và không bao giờ với
+`--approved-by`; reviewer chạy cờ đó sau khi đã quyết.
 
-## What the checker sees
+## Bộ kiểm thấy những gì
 
 `node <skill dir>/scripts/check-boundaries.mjs --root <repo> [--contract FILE] [--base REF [--approved-by NAME]] [--json]`
 
-- Reads `import ... from`, `export ... from`, side-effect `import '...'`, dynamic
-  `import('...')` and `require('...')`, comments ignored, in `.js .jsx .mjs .cjs .ts
-  .tsx .mts .cts` files (`.d.ts`, `node_modules`, `dist`, `build`, `coverage` skipped).
-- Resolves relative specifiers as Node and TypeScript do (extensions, `index.*`,
-  `./x.js` for `./x.ts`). Path aliases (`@/x`, tsconfig `paths`) and computed
-  specifiers are not resolved: a project using aliases needs its own tool.
-- Exit 0 clean, 1 violations (`file:line  from -> to (specifier): rule`) or an
-  unreviewed loosening, 2 invalid contract, arguments or base. It only reads files
-  (and `git show <base>:<contract>`).
+- Đọc `import ... from`, `export ... from`, `import '...'` dạng side-effect, `import('...')`
+  động và `require('...')`, bỏ qua comment, trong các file `.js .jsx .mjs .cjs .ts
+  .tsx .mts .cts` (bỏ qua `.d.ts`, `node_modules`, `dist`, `build`, `coverage`).
+- Phân giải các specifier tương đối theo cách Node và TypeScript làm (phần mở rộng, `index.*`,
+  `./x.js` cho `./x.ts`). Alias đường dẫn (`@/x`, `paths` trong tsconfig) và specifier được
+  tính ra lúc chạy thì không được phân giải: project dùng alias cần công cụ riêng của nó.
+- Thoát mã 0 là sạch, 1 là có vi phạm (`file:line  from -> to (specifier): rule`) hoặc có một
+  chỗ nới lỏng chưa được review, 2 là contract, tham số hay base không hợp lệ. Nó chỉ đọc file
+  (và `git show <base>:<contract>`).
 
-## Enforcing it
+## Thực thi nó
 
-Only rules the checker verifies reliably belong in a hard gate.
+Chỉ những quy tắc bộ kiểm xác minh được một cách đáng tin mới thuộc về một gate cứng.
 
-- CI: add the command to the project's CI or test script, with the script copied into
-  the repository (for example `tools/check-boundaries.mjs`) so CI needs no ALP library.
-- ALP: a blocking hook refuses a handoff, a task close or a merge while the check
-  fails; the end of its output is the reason the agent reads. A hook applies to the
-  agents that name it, so the user (not the agent) defines it and gives it to them:
+- CI: thêm câu lệnh vào CI hoặc script test của project, với script được sao vào chính
+  repository (ví dụ `tools/check-boundaries.mjs`) để CI không cần thư viện ALP.
+- ALP: một hook dạng blocking sẽ chặn một handoff, một lần đóng task hay một lần merge khi phép
+  kiểm còn fail; phần cuối output của nó là lý do agent đọc được. Một hook áp dụng cho các
+  agent nêu tên nó, nên người dùng (không phải agent) định nghĩa hook và cấp cho họ:
 
 ```sh
 alp hook add architecture --project --event handoff --command "node tools/check-boundaries.mjs --base main" --blocking --timeout 120
@@ -90,5 +91,5 @@ alp agent edit peer --project --hooks architecture
 alp hook test architecture --project
 ```
 
-Use `--event task.close` (on main or lead) or `--event merge` for the other gates.
-Project hooks run once the user trusts the workspace (`alp trust`).
+Dùng `--event task.close` (trên main hoặc lead) hay `--event merge` cho các gate còn lại.
+Hook của project chỉ chạy khi người dùng đã tin workspace (`alp trust`).

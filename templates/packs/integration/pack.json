@@ -1,6 +1,6 @@
 {
   "label": "Integration",
-  "description": "Model Context Protocol servers and clients: tool design, transports, testing, and wiring a server into ALP.",
+  "description": "Server và client Model Context Protocol: thiết kế tool, transport, kiểm thử, và nối một server vào ALP.",
   "skills": ["mcp-integration"],
   "assign": { "lead": ["mcp-integration"], "peer": ["mcp-integration"] }
 }

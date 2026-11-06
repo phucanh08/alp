@@ -1,6 +1,6 @@
 {
   "label": "Phở",
-  "description": "Main implements or delegates to peer; a supervisor reviews the process.",
+  "description": "Main tự làm hoặc giao việc cho peer; một supervisor review quy trình.",
   "main": "main",
   "members": {
     "main": { "model": "claude:claude-opus-5-5", "thinking": "high" },

@@ -1,43 +1,46 @@
-# Contract tests
+# Contract test
 
-Read when a change touches an API, protocol, CLI output, event, schema or file format that other code or users depend on.
+Đọc khi một thay đổi chạm tới một API, protocol, output CLI, event, schema hay định dạng file mà code khác hoặc người dùng khác dựa vào.
 
-## What a contract test proves
-That a producer still emits, and a consumer still accepts, the agreed shape and
-semantics: field names, types, required versus optional, status or exit codes, error
-format, ordering guarantees and versioning rules. It does not prove business logic.
+## Một contract test chứng minh điều gì
+Rằng bên sản xuất vẫn phát ra, và bên tiêu thụ vẫn nhận, đúng hình dạng và ngữ nghĩa đã
+thống nhất: tên field, kiểu, bắt buộc so với tuỳ chọn, mã trạng thái hay mã thoát, định dạng
+lỗi, các bảo đảm về thứ tự và quy tắc đánh version. Nó không chứng minh logic nghiệp vụ.
 
-## Choosing the form
-| Situation | Form |
+## Chọn hình thức
+| Tình huống | Hình thức |
 |---|---|
-| Schema exists (OpenAPI, JSON Schema, proto, SQL migration) | Validate real responses or records against the schema in tests |
-| Consumer and provider in the same repository | Shared fixture: provider test produces it, consumer test reads it |
-| Separate consumer teams or services | Consumer-driven contract: consumer states expectations, provider verifies them in its build |
-| Text or file output (CLI, reports, generated files) | Golden file compared byte for byte, with a reviewed update path |
-| Wire protocol or event stream | Recorded messages replayed against the parser and emitted by the producer |
+| Đã có schema (OpenAPI, JSON Schema, proto, migration SQL) | Kiểm response hay bản ghi thật đối chiếu schema ngay trong test |
+| Bên tiêu thụ và bên cung cấp nằm cùng một repository | Fixture dùng chung: test của bên cung cấp sinh ra nó, test của bên tiêu thụ đọc nó |
+| Các team hay service tiêu thụ tách riêng | Contract do bên tiêu thụ dẫn dắt: bên tiêu thụ nêu kỳ vọng, bên cung cấp xác minh chúng trong build của mình |
+| Output dạng chữ hay dạng file (CLI, báo cáo, file sinh ra) | Golden file so từng byte, kèm một đường cập nhật có review |
+| Protocol trên đường truyền hay luồng event | Các message đã thu lại, replay vào bộ phân tích và được bên sản xuất phát ra |
 
-Prefer the mechanism the project already uses; do not add a contract-testing framework
-without approval routed to main.
+Ưu tiên cơ chế project đã dùng; đừng thêm một framework contract test
+mà không có lần duyệt được chuyển lên main.
 
-## Golden files
-- Store next to the test, named after the case; review them like code.
-- Normalise only genuinely variable parts (timestamps, ids, absolute paths) with a
-  documented, minimal rule.
-- Update through an explicit command or flag, never automatically on failure.
-- A golden diff in a change must be explained in the handoff.
+## Golden file
+- Lưu cạnh test, đặt tên theo ca đó; review chúng như review code.
+- Chỉ chuẩn hoá những phần thật sự biến thiên (timestamp, id, đường dẫn tuyệt đối) bằng một
+  quy tắc tối giản và có ghi tài liệu.
+- Cập nhật qua một câu lệnh hay một cờ rõ ràng, đừng bao giờ tự động cập nhật khi fail.
+- Một diff của golden file trong một thay đổi phải được giải thích trong handoff.
 
-## Backwards compatibility checks
-- Additive changes (new optional field, new endpoint) must leave old fixtures passing.
-- Removing or renaming a field, changing a type, tightening validation, changing a
-  default or an error code is breaking: keep a test with the old fixture and confirm
-  the planned deprecation or version bump with main.
-- Readers should tolerate unknown fields if the contract says so; test it.
-- Stored data: test that the new code reads data written by the previous version, and,
-  where rollback is supported, that the old code reads data written by the new one.
-- Versioned APIs: keep at least one test per supported version.
+## Kiểm tương thích ngược
+- Các thay đổi dạng thêm vào (field tuỳ chọn mới, endpoint mới) phải để các fixture cũ vẫn
+  pass.
+- Bỏ hay đổi tên một field, đổi một kiểu, siết chặt việc kiểm tra, đổi một
+  giá trị mặc định hay một mã lỗi đều là phá vỡ: hãy giữ một test với fixture cũ và xác nhận
+  kế hoạch khai tử dần hay việc nâng version với main.
+- Bên đọc nên chịu được các field lạ nếu contract nói vậy; hãy test điều đó.
+- Dữ liệu đã lưu: test rằng code mới đọc được dữ liệu do version trước ghi, và,
+  ở chỗ có hỗ trợ rollback, rằng code cũ đọc được dữ liệu do code mới ghi.
+- API có version: giữ ít nhất một test cho mỗi version được hỗ trợ.
 
-## Minimum set for a contract change
-1. A fixture of the previous shape, still accepted (or a documented, approved break).
-2. A fixture of the new shape, produced by the provider test.
-3. The consumer test reading the new shape.
-4. An error-shape case: invalid request or malformed message yields the documented error.
+## Tập tối thiểu cho một thay đổi contract
+1. Một fixture của hình dạng trước đây, vẫn được nhận (hoặc một lần phá vỡ đã ghi tài liệu và
+   đã duyệt).
+2. Một fixture của hình dạng mới, do test của bên cung cấp sinh ra.
+3. Test của bên tiêu thụ đọc hình dạng mới.
+4. Một ca về hình dạng lỗi: request không hợp lệ hay message sai dạng sinh ra đúng lỗi đã ghi
+   tài liệu.

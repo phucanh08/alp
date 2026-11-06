@@ -26,7 +26,7 @@ test('a reviewer files a verdict whose result follows from its criteria and find
   const { assignmentId } = await main.call('alp_delegate', { agent: 'reviewer', task: 'Review the retry change', wait: false });
   const reviewer = runtimes[1];
   await until(() => reviewer.started.length === 1);
-  assert.match(reviewer.calls.find(call => call.method === 'thread/start').params.developerInstructions, /## Verdict[\s\S]*`pass_with_findings`: only medium or low findings/);
+  assert.match(reviewer.calls.find(call => call.method === 'thread/start').params.developerInstructions, /## Verdict[\s\S]*`pass_with_findings`: chỉ có phát hiện mức medium hay low/);
 
   const refused = async (args, pattern) => {
     const answer = await reviewer.call('alp_handoff', { outcome: 'complete', summary: 'Reviewed', ...args });

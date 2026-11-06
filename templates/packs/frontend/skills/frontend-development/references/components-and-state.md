@@ -1,79 +1,79 @@
-# Components and State
+# Component và state
 
-Read when splitting components, choosing where state lives, or handling forms.
+Đọc khi chia component, chọn chỗ đặt state, hoặc xử lý form.
 
-Examples use React terms; the same ideas map to Vue (props, emits, refs, computed,
-composables) and Svelte (props, stores, runes or reactive statements). Follow the
-project's existing patterns and file layout.
+Ví dụ dùng thuật ngữ React; cùng ý tưởng đó map sang Vue (props, emits, refs, computed,
+composable) và Svelte (props, store, rune hoặc câu lệnh reactive). Hãy theo
+pattern và bố trí file đang có của dự án.
 
-## Component structure
+## Cấu trúc component
 
-- One component, one job. Split when a part has its own state, is reused, or makes
-  the parent hard to read; do not split only to shorten a file.
-- Separate data-loading containers from presentational components when the project
-  does; presentational components take props and are easy to test.
-- Props flow down, events flow up. Name callbacks for intent (`onSubmit`,
-  `onSelect`), not for the DOM event.
-- Prefer composition (children, slots) over many boolean props that toggle layout.
-- Keep components pure during render: no fetching, subscriptions, or mutations in
-  the render body; use the framework's effect or lifecycle mechanism.
-- Use stable keys from data IDs in lists, never array indexes for reorderable lists.
-- Extract reusable logic into hooks or composables only once a second use exists.
+- Một component, một việc. Chia khi một phần có state riêng, được dùng lại, hoặc làm
+  component cha khó đọc; không chia chỉ để file ngắn đi.
+- Tách container tải dữ liệu khỏi component trình bày khi dự án làm vậy;
+  component trình bày nhận props và dễ test.
+- Props chảy xuống, event chảy lên. Đặt tên callback theo ý định (`onSubmit`,
+  `onSelect`), không theo tên event của DOM.
+- Ưu tiên composition (children, slot) hơn là nhiều props boolean bật tắt layout.
+- Giữ component thuần khi render: không fetch, không subscribe, không thay đổi dữ liệu trong
+  thân render; dùng cơ chế effect hoặc lifecycle của framework.
+- Dùng key ổn định từ ID của dữ liệu trong danh sách, không bao giờ dùng chỉ số mảng cho danh sách xếp lại được.
+- Chỉ bóc logic dùng lại ra thành hook hoặc composable khi đã có chỗ dùng thứ hai.
 
-## Where state lives
+## State nằm ở đâu
 
-Choose the narrowest home that works:
+Chọn chỗ ở hẹp nhất mà vẫn chạy được:
 
-| Kind | Home |
+| Loại | Chỗ ở |
 | --- | --- |
-| Value only one component uses | local component state |
-| Value shared by siblings | lift to nearest common parent |
-| Value derivable from other state or props | compute it; do not store it |
-| Server data | the project's data-fetching cache, not global state |
-| URL-worthy (filters, tab, page, selected ID) | route params or query string |
-| Form input | form state (local or the project's form library) |
-| Truly app-wide (theme, session, locale) | context or the project's store |
+| Giá trị chỉ một component dùng | state cục bộ của component |
+| Giá trị dùng chung giữa các component cùng cấp | đưa lên component cha gần nhất |
+| Giá trị suy ra được từ state hay props khác | tính nó ra; đừng lưu lại |
+| Dữ liệu từ server | cache lấy dữ liệu của dự án, không phải state toàn cục |
+| Đáng nằm trên URL (filter, tab, trang, ID đang chọn) | tham số route hoặc query string |
+| Dữ liệu nhập trong form | state của form (cục bộ hoặc thư viện form của dự án) |
+| Thực sự dùng toàn app (theme, session, locale) | context hoặc store của dự án |
 
-- Duplicated state drifts. If two places hold the same fact, keep one source and
-  derive the other.
-- Avoid syncing state with effects (`useEffect` that copies props to state); derive
-  during render or reset with a key.
-- Context re-renders all consumers on change; split contexts or use a store if a
-  frequently changing value is shared widely.
-- Put state that should survive reload or be shareable in the URL.
-- Do not add a global store library without the owner's decision.
+- State bị trùng lặp sẽ lệch nhau. Nếu hai chỗ giữ cùng một sự thật, hãy giữ một nguồn và
+  suy ra chỗ kia.
+- Tránh đồng bộ state bằng effect (`useEffect` copy props vào state); hãy suy ra
+  trong lúc render hoặc reset bằng key.
+- Context render lại mọi consumer khi đổi; hãy tách context hoặc dùng store nếu một
+  giá trị đổi liên tục được dùng chung rộng khắp.
+- Đặt lên URL những state đáng sống sót qua lần tải lại hoặc đáng chia sẻ được.
+- Không thêm thư viện store toàn cục mà không có quyết định của chủ sở hữu.
 
-## Effects and lifecycle
+## Effect và lifecycle
 
-- Use effects to synchronize with something external (subscription, timer, DOM
-  API), not to compute values or respond to user events.
-- Every subscription, listener, timer, or observer gets cleaned up.
-- Handle strict-mode double invocation in development: effects must be safe to run,
-  clean up, and run again.
+- Dùng effect để đồng bộ với thứ gì bên ngoài (subscription, timer, DOM
+  API), không để tính giá trị hay phản ứng với event của người dùng.
+- Mọi subscription, listener, timer, hay observer đều phải được dọn.
+- Xử lý việc effect bị gọi hai lần ở strict mode khi dev: effect phải an toàn khi chạy,
+  dọn, rồi chạy lại.
 
-## Forms
+## Form
 
-- Use the project's form approach (native form, controlled inputs, or its form
-  library) consistently.
-- Every input has a label. Show validation errors next to the field and summarize
-  on submit; move focus to the first error.
-- Validate on the client for feedback; the server remains the authority.
-- Disable or guard the submit action while pending to prevent double submission;
-  show progress.
-- Keep entered data on a failed submit.
-- Treat the server's validation response as the source of field errors.
+- Dùng cách làm form của dự án (form native, input có kiểm soát, hoặc thư viện form
+  của nó) một cách nhất quán.
+- Mọi input đều có nhãn. Hiện lỗi validate ngay cạnh field và tóm tắt lại
+  khi submit; chuyển focus tới lỗi đầu tiên.
+- Validate ở client để phản hồi nhanh; server vẫn là nơi có thẩm quyền.
+- Vô hiệu hóa hoặc chặn hành động submit khi đang chờ để tránh submit hai lần;
+  hiện tiến trình.
+- Giữ lại dữ liệu đã nhập khi submit thất bại.
+- Coi phản hồi validate của server là nguồn của các lỗi theo field.
 
-## Typing and contracts
+## Kiểu và hợp đồng
 
-- Type props and events with the project's type system (TypeScript, PropTypes, or
-  framework-specific types).
-- Share API response types with the backend only through the project's existing
-  mechanism (generated types, shared package); do not hand-copy drifting types.
-- Narrow nullable data at the boundary so components receive complete values or an
-  explicit empty state.
+- Khai kiểu cho props và event bằng hệ kiểu của dự án (TypeScript, PropTypes, hoặc
+  kiểu riêng của framework).
+- Chỉ chia sẻ kiểu của phản hồi API với backend qua cơ chế đang có của dự án
+  (kiểu được sinh ra, package dùng chung); không copy tay những kiểu rồi sẽ lệch nhau.
+- Thu hẹp dữ liệu có thể null ngay tại biên để component nhận được giá trị đầy đủ hoặc một
+  trạng thái rỗng tường minh.
 
 ## Styling
 
-- Use the project's styling system (CSS modules, utility classes, CSS-in-JS, scoped
-  styles) and design tokens. Do not mix in a second approach.
-- Avoid inline magic values for spacing and color when tokens exist.
+- Dùng hệ thống styling của dự án (CSS module, utility class, CSS-in-JS, style có
+  phạm vi) và các design token. Không trộn thêm cách thứ hai.
+- Tránh giá trị thần kỳ viết thẳng cho khoảng cách và màu khi đã có token.

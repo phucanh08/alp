@@ -73,7 +73,7 @@ test('main starts a supervisor on Sonnet 5 that reviews each turn and asks main 
   assert.match(main.config.developerInstructions, /A supervisor reviews your process after each turn/);
   assert.deepEqual([supervisor.kind, supervisor.config.model, supervisor.config.thinking, supervisor.config.sandbox], ['claude', 'claude-sonnet-5', 'medium', 'read-only']);
   assert.deepEqual(supervisor.config.dynamicTools.map(tool => tool.name), ['alp_send', 'alp_board', 'alp_task']);
-  assert.match(supervisor.config.developerInstructions, /Supervisor — process reviewer for main/);
+  assert.match(supervisor.config.developerInstructions, /Supervisor — người review quy trình cho main/);
   assert.ok(supervisor.config.developerInstructions.includes(`Lessons main has recorded: ${path.join(root, '.alp/lessons.md')} and ${path.join(library, 'lessons.md')}`));
   for (const tool of [...main.config.dynamicTools, ...supervisor.config.dynamicTools]) {
     const shape = Object.keys(claudeToolShapes[tool.name] ?? {}).sort();
@@ -103,7 +103,7 @@ test('main starts a supervisor on Sonnet 5 that reviews each turn and asks main 
   assert.match(digest, /main answered the user \d+ s after their message of \d\d:\d\d:\d\d/);
   assert.match(digest, /main's session: claude:claude-opus-5-5, thinking high, mode full-access\. Judge main by this session and its own instructions; your system prompt describes your session/);
   assert.match(supervisor.config.developerInstructions, /a later lesson on the same point refines or replaces an earlier one/);
-  assert.match(supervisor.config.developerInstructions, /Leaving the user waiting\./);
+  assert.match(supervisor.config.developerInstructions, /Để người dùng phải chờ\./);
   // The tree stays busy while its supervisor reviews.
   assert.equal(runtime.snapshot('root').busy, true);
 
@@ -184,7 +184,7 @@ test('a project without agent copies runs the built-in supervisor and gets no co
   const { root, runtime, runtimes } = await setup(t);
   await runtime.open('root', { cwd: root });
   await until(() => runtimes.length === 2 && runtimes[1].calls.some(call => call.method === 'thread/start'));
-  assert.match(runtimes[1].config.developerInstructions, /Supervisor — process reviewer/);
+  assert.match(runtimes[1].config.developerInstructions, /Supervisor — người review quy trình/);
   await assert.rejects(readdir(path.join(root, '.alp/agents')), { code: 'ENOENT' });
 });
 

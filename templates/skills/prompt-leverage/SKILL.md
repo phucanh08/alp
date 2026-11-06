@@ -1,37 +1,37 @@
 ---
 name: prompt-leverage
-description: Convert a task into a self-contained delegation brief without changing user intent or predetermining the solution. Use before Main assigns Lead or Lead assigns Peer, or when asked to improve an execution prompt.
+description: Chuyển một task thành một brief giao việc tự chứa, không làm đổi ý định của người dùng và không định sẵn giải pháp. Dùng trước khi main giao cho lead hoặc lead giao cho peer, hoặc khi được yêu cầu làm tốt hơn một prompt thực thi.
 ---
 
-# Prepare an actionable brief
+# Soạn một brief làm được việc
 
-Identify the requested result and the recipient's responsibility. Preserve actual
-user constraints, but distinguish them from current design choices the recipient
-may question. Do not seed a reviewer's verdict or turn a preferred implementation
-into an invented requirement.
+Xác định kết quả được yêu cầu và trách nhiệm của người nhận. Giữ nguyên các ràng buộc thật
+sự của người dùng, nhưng phân biệt chúng với các lựa chọn thiết kế hiện tại mà người nhận
+có quyền chất vấn. Đừng gieo trước verdict cho một reviewer, và đừng biến một implementation
+mình thích thành một yêu cầu bịa ra.
 
-A useful brief supplies the root, outcome, relevant context, owned/excluded paths,
-authority, important dependencies, resources, verification, and expected handoff.
-Use [the brief format](references/brief-template.md) for substantial assignments;
-combine fields for a small task. A real base SHA is useful in a Git repository but
-is not required for a plain file project. Never fabricate one.
+Một brief hữu ích cung cấp root, kết quả cần đạt, context liên quan, đường dẫn sở hữu/bị loại,
+thẩm quyền, các phụ thuộc quan trọng, tài nguyên, kiểm chứng, và handoff mong đợi.
+Dùng [định dạng brief](references/brief-template.md) cho các việc được giao có khối lượng đáng kể;
+gộp các field lại với một task nhỏ. Một base SHA thật thì hữu ích trong một repository Git
+nhưng không bắt buộc với một project chỉ gồm file thường. Đừng bao giờ bịa ra một cái.
 
-Verification must describe the observable behavior and, when known, its executable
-check. If a command still needs discovery, state how it should be established from
-the repository. Do not invent a test command just to fill a field.
+Phần kiểm chứng phải mô tả hành vi quan sát được và, khi đã biết, cả phép kiểm chạy được của
+nó. Nếu còn phải đi tìm câu lệnh, hãy nói rõ nên xác lập nó từ repository bằng cách nào. Đừng
+bịa ra một câu lệnh test chỉ để điền cho đủ field.
 
-Choose the relevant installed skill by task type and mention it in the brief:
-research -> xia; diagnosis/regression -> bug-loop; an authorized commit handoff ->
-smart-commits. Do not require skills absent from the recipient's package. A reviewer
-can inspect an existing candidate without additional skill ceremonies.
+Chọn skill đã cài phù hợp theo loại việc và nêu tên nó trong brief:
+nghiên cứu -> xia; chẩn đoán/regression -> bug-loop; một handoff có quyền commit ->
+smart-commits. Đừng đòi những skill không có trong gói của người nhận. Một reviewer có thể
+xem xét một bản ứng viên đang có mà không cần thêm nghi thức skill nào.
 
-On current Paseo, pass the full brief as alp_delegate.task with an authorized agent
-and optional mode. Model and reasoning inherit from the parent; there is no model
-argument on this tool. Request read-only for research/review where appropriate.
-Implementation requires workspace-write on the parent and child. The call waits
-for a final handoff, so include everything needed to work without a live Q&A channel.
+Trên Paseo hiện tại, hãy truyền toàn bộ brief qua alp_delegate.task cùng một agent đã được cấp
+quyền và một mode tuỳ chọn. Model và mức suy luận thừa hưởng từ agent cha; tool này không có
+tham số model. Yêu cầu chỉ đọc cho việc nghiên cứu/review ở chỗ phù hợp. Việc hiện thực cần
+workspace-write ở cả cha và con. Lời gọi đó chờ tới khi có handoff cuối cùng, nên hãy đưa vào
+mọi thứ cần thiết để làm việc mà không có kênh hỏi đáp trực tiếp.
 
-This skill grants no new authority and never bypasses the configured routing graph.
-If asked only to improve a prompt, return the prompt. If assignment is authorized,
-send it using the actual runtime tool after preparing it. Missing capabilities
-must be reported, not simulated.
+Skill này không cấp thẩm quyền mới nào và không bao giờ lách đồ thị định tuyến đã cấu hình. Nếu
+chỉ được yêu cầu làm tốt hơn một prompt, hãy trả prompt về. Nếu việc giao đã được cấp quyền,
+hãy gửi nó bằng tool thật của runtime sau khi soạn xong. Những năng lực còn thiếu phải được báo
+cáo, không phải giả lập ra.

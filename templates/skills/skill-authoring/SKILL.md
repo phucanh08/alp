@@ -1,82 +1,84 @@
 ---
 name: skill-authoring
-description: "Design, write, validate and improve one agent skill: requirements, trigger description, progressive disclosure, references, optional scripts and trigger evaluation. Use when creating a new skill or revising one skill's scope, description or structure. Not for reviewing or retiring the whole lesson and skill catalog; use curate instead."
+description: "Thiết kế, viết, kiểm tra và cải thiện một agent skill: yêu cầu, description để kích hoạt, cách hé dần thông tin, các reference, script tuỳ chọn và cách đánh giá kích hoạt. Dùng khi tạo một skill mới hoặc khi sửa lại phạm vi, description hay cấu trúc của một skill. Không dùng để rà soát hay cho nghỉ toàn bộ danh mục bài học và skill; hãy dùng curate."
 ---
 
-# Author one skill
+# Viết một skill
 
-## When to use
-- A repeated workflow, three or more related lessons, or a user request calls for a new skill.
-- One existing skill triggers wrongly, misses its tasks, or has grown too long to follow.
-- A skill needs references, a deterministic script, or a project-specific override.
+## Khi dùng
+- Một quy trình lặp lại, ba bài học liên quan trở lên, hay một yêu cầu của người dùng đòi một
+  skill mới.
+- Một skill đang có kích hoạt sai chỗ, bỏ sót việc của nó, hay đã dài tới mức khó theo.
+- Một skill cần thêm reference, một script tất định, hay một bản ghi đè riêng cho project.
 
-## Not for
-- Merging, pruning or retiring lessons and skills across the catalog: use curate.
-- One-off instructions for a single task: put them in the brief or ALP.md instead.
-- Changing role authority: a skill grants no permissions and cannot widen scope.
+## Không dùng cho
+- Gộp, tỉa hay cho nghỉ các bài học và skill trên toàn danh mục: dùng curate.
+- Hướng dẫn dùng một lần cho một task duy nhất: hãy đặt chúng vào brief hoặc ALP.md.
+- Đổi thẩm quyền của role: một skill không cấp quyền nào và không thể nới rộng phạm vi.
 
-## Prerequisites
-- Read ALP.md and the skills already assigned to the target roles; avoid duplicates.
-- Know where it will live: user library (proposed by main via `alp_skill`) or project
-  (`.alp/skills/<name>/` in the repository, a normal reviewed change).
-- Have at least one real task the skill should have helped with.
+## Điều kiện tiên quyết
+- Đọc ALP.md và các skill đã gán cho các role đích; tránh trùng lặp.
+- Biết nó sẽ sống ở đâu: thư viện của người dùng (do main đề xuất qua `alp_skill`) hay project
+  (`.alp/skills/<name>/` trong repository, một thay đổi thường được review).
+- Có ít nhất một task thật mà skill này đáng lẽ đã giúp được.
 
-## Workflow
-1. **Requirements.** Write the job in one sentence, the roles that use it, the inputs it
-   assumes, and the observable result it must return. Drop anything a capable agent
-   already does without instructions.
-2. **Trigger spec.** List 3-5 positive tasks that must select it and 3-5 neighbouring
-   tasks that must not, each naming the skill that owns it instead.
-3. **Description.** It is the only text an agent sees at session start. State WHAT, then
-   "Use when ...", then "Not for ... (use X)". Keep the key words in the first 400
-   characters shown by the ALP index; `alp_skill` accepts at most 300.
-4. **Disclosure levels.** Level 0: name and description (always loaded). Level 1:
-   SKILL.md body, read when the description matches. Level 2: references, read only at
-   the step that links them. Level 3: scripts and assets, run on demand and never at
-   discovery. Put each fact at the lowest level that still reaches the step needing it.
-5. **Body.** Sections in order: When to use, Not for, Prerequisites, Workflow (numbered),
-   Constraints, Verification, Failure handling, References. Terse imperatives, no
-   history, no restated role rules, at most about 110 lines.
-6. **References.** One topic per file, kebab-case, one level deep, each linked from the
-   step that needs it with "read when ...". Split a reference when it covers two
-   decisions; delete one that no step links.
-7. **Scripts (optional).** Add one only when the same deterministic transformation or
-   check is repeated and error-prone in prose. Use Node `.mjs` run with `node`; no
-   auto-installed dependencies; print a clear message naming any missing dependency
-   and exit non-zero; include a test or a sample run with expected output.
-8. **Validate.** Run `alp skill check <name|dir>`, then `--strict` before proposing.
-   Fix every error and warning; valid frontmatter alone proves nothing about quality.
-9. **Evaluate.** Run the trigger scenarios against the description and do one dry run
-   on a real task by following the body literally; record gaps and fix them.
-10. **Deliver.** Library skill: main proposes it with `alp_skill` (name, description,
-    body, roles) and the user approves. `alp_skill` writes only SKILL.md, so references
-    and scripts are added by the user or via `alp skill new` / `alp skill edit`.
-    Project skill: write `.alp/skills/<name>/` within owned paths and hand off.
+## Quy trình
+1. **Yêu cầu.** Viết công việc nó làm trong một câu, các role dùng nó, các input nó
+   giả định, và kết quả quan sát được mà nó phải trả về. Bỏ mọi thứ mà một agent có năng lực
+   vốn đã làm được mà không cần hướng dẫn.
+2. **Đặc tả kích hoạt.** Liệt kê 3-5 task dương phải chọn nó và 3-5 task lân cận
+   phải không chọn nó, mỗi task nêu tên skill thực sự sở hữu nó.
+3. **Description.** Đây là đoạn chữ duy nhất một agent thấy khi phiên bắt đầu. Nêu LÀM GÌ, rồi
+   "Dùng khi ...", rồi "Không dùng cho ... (dùng X)". Giữ các từ khoá trong 400
+   ký tự đầu mà index của ALP hiển thị; `alp_skill` chỉ nhận tối đa 300.
+4. **Các mức hé dần.** Mức 0: tên và description (luôn được nạp). Mức 1:
+   thân SKILL.md, đọc khi description khớp. Mức 2: các reference, chỉ đọc tại
+   bước có link tới chúng. Mức 3: script và asset, chạy khi cần và không bao giờ lúc khám phá.
+   Đặt mỗi dữ kiện ở mức thấp nhất mà vẫn tới được bước cần nó.
+5. **Thân bài.** Các mục theo thứ tự: Khi dùng, Không dùng cho, Điều kiện tiên quyết, Quy trình
+   (có số), Ràng buộc, Kiểm chứng, Xử lý khi thất bại, Tài liệu tham chiếu. Câu mệnh lệnh gọn,
+   không kể lịch sử, không nhắc lại quy tắc của role, nhiều nhất khoảng 110 dòng.
+6. **Reference.** Một chủ đề một file, tên kebab-case, chỉ một mức sâu, mỗi file được link từ
+   bước cần nó kèm chữ "đọc khi ...". Tách một reference khi nó phủ hai
+   quyết định; xoá reference không bước nào link tới.
+7. **Script (tuỳ chọn).** Chỉ thêm khi cùng một phép biến đổi hay phép kiểm tất định bị lặp lại
+   và dễ sai nếu diễn bằng lời. Dùng Node `.mjs` chạy bằng `node`; không tự động cài
+   dependency; in một thông điệp rõ ràng nêu tên dependency còn thiếu
+   rồi thoát với mã khác 0; kèm một test hoặc một lần chạy mẫu với output mong đợi.
+8. **Kiểm tra.** Chạy `alp skill check <name|dir>`, rồi `--strict` trước khi đề xuất.
+   Sửa mọi error và warning; riêng frontmatter hợp lệ chẳng chứng minh gì về chất lượng.
+9. **Đánh giá.** Chạy các tình huống kích hoạt đối chiếu với description và làm một lần chạy
+   khan trên một task thật bằng cách theo thân bài sát từng chữ; ghi lại chỗ hụt và sửa chúng.
+10. **Giao.** Skill thư viện: main đề xuất nó bằng `alp_skill` (name, description,
+    body, roles) và người dùng duyệt. `alp_skill` chỉ ghi SKILL.md, nên các reference
+    và script do người dùng thêm, hoặc thêm qua `alp skill new` / `alp skill edit`.
+    Skill của project: ghi `.alp/skills/<name>/` trong các đường dẫn sở hữu rồi handoff.
 
-## Constraints
-- Never overwrite a user-edited library skill. Read it, then propose a new version with
-  `alp_skill` and `replace: true`; the user approves or rejects it.
-- To change behaviour for one project only, add an override in `.alp/skills/<name>/`
-  instead of editing the library copy.
-- No tool names specific to one runtime, no secrets, no instructions to push, release,
-  install dependencies or write outside owned paths.
-- Keep names stable once roles reference them; renaming is a retire plus a new skill.
+## Ràng buộc
+- Đừng bao giờ ghi đè một skill thư viện mà người dùng đã sửa. Hãy đọc nó, rồi đề xuất một bản
+  mới bằng `alp_skill` với `replace: true`; người dùng duyệt hoặc từ chối.
+- Muốn đổi hành vi cho riêng một project, hãy thêm một bản ghi đè trong `.alp/skills/<name>/`
+  thay vì sửa bản trong thư viện.
+- Không dùng tên tool riêng của một runtime, không có secret, không có hướng dẫn push, phát
+  hành, cài dependency hay ghi ra ngoài các đường dẫn sở hữu.
+- Giữ tên ổn định khi các role đã tham chiếu tới nó; đổi tên là cho nghỉ cộng với một skill
+  mới.
 
-## Verification
-- `alp skill check <name> --strict` passes with no warnings.
-- Every positive scenario selects the skill; every negative one selects the named
-  alternative or none; ambiguous cases are resolved in the description.
-- The dry run reached the stated result without improvising missing steps.
-- Every reference and script is linked from a step and exists.
+## Kiểm chứng
+- `alp skill check <name> --strict` pass mà không có warning.
+- Mọi tình huống dương đều chọn skill này; mọi tình huống âm đều chọn đúng phương án
+  được nêu tên hoặc không chọn gì; các ca nhập nhằng được giải quyết trong description.
+- Lần chạy khan đã tới được kết quả đã nêu mà không phải tự ứng biến các bước còn thiếu.
+- Mọi reference và script đều được link từ một bước và đều tồn tại.
 
-## Failure handling
-- Validator errors: fix the file and rerun; do not edit the validator or skip `--strict`.
-- Overlap with an existing skill: narrow one description, or propose merging via curate.
-- User rejects the proposal: revise from the feedback and propose again; do not write
-  the library file directly.
-- No real task to dry-run on: deliver as a draft and state that evaluation is pending.
+## Xử lý khi thất bại
+- Bộ kiểm báo error: sửa file rồi chạy lại; đừng sửa bộ kiểm hay bỏ qua `--strict`.
+- Chồng lấn với một skill đang có: thu hẹp một description, hoặc đề xuất gộp qua curate.
+- Người dùng từ chối đề xuất: sửa theo góp ý rồi đề xuất lại; đừng ghi
+  file thư viện trực tiếp.
+- Không có task thật để chạy khan: hãy giao như một bản nháp và nói rõ phần đánh giá còn treo.
 
-## References
-- [references/skill-anatomy.md](references/skill-anatomy.md) — read when writing frontmatter, choosing sections or laying out files (steps 3-7).
-- [references/trigger-design.md](references/trigger-design.md) — read when drafting or repairing the description and non-triggers (steps 2-3).
-- [references/evaluation.md](references/evaluation.md) — read when building the scenario table and running the dry evaluation (step 9).
+## Tài liệu tham chiếu
+- [references/skill-anatomy.md](references/skill-anatomy.md) — đọc khi viết frontmatter, chọn các mục hay bố trí file (bước 3-7).
+- [references/trigger-design.md](references/trigger-design.md) — đọc khi soạn hay chữa description và các điều kiện không kích hoạt (bước 2-3).
+- [references/evaluation.md](references/evaluation.md) — đọc khi dựng bảng tình huống và chạy lượt đánh giá khan (bước 9).

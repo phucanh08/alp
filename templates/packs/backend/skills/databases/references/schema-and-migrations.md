@@ -1,87 +1,87 @@
-# Schema and Migrations
+# Schema và migration
 
-Read when designing tables, constraints, or document shapes, or planning
-expand/contract migrations, backfills, reversibility, or lock risk.
+Đọc khi thiết kế bảng, constraint, hay hình dạng document, hoặc khi lập kế hoạch
+migration expand/contract, backfill, tính đảo được, hay rủi ro lock.
 
-## Normalization trade-offs
+## Đánh đổi khi chuẩn hóa
 
-- Start normalized (roughly third normal form): each fact stored once, related by
-  keys. It keeps writes simple and prevents update anomalies.
-- Denormalize only for a measured read need: a counter, a cached aggregate, a copied
-  field to avoid a hot join. Record who keeps the copy in sync (trigger, same
-  transaction, or job) and how drift is detected.
-- Use JSON columns for genuinely schemaless or sparse attributes, not to avoid
-  designing columns that are queried, filtered, or constrained.
-- Document stores: shape documents around the access pattern. Embed data read
-  together and bounded in size; reference data that is shared, large, or unbounded
-  (arrays that grow without limit hurt). Plan a schema version field when shapes
-  will evolve.
+- Bắt đầu ở dạng chuẩn hóa (khoảng dạng chuẩn thứ ba): mỗi dữ kiện lưu một lần, liên
+  kết bằng khóa. Nó giữ việc ghi đơn giản và ngăn các bất thường khi cập nhật.
+- Chỉ phi chuẩn hóa cho một nhu cầu đọc đã đo được: một bộ đếm, một tổng hợp được
+  cache, một field sao chép để tránh một join nóng. Ghi lại ai giữ bản sao đồng bộ
+  (trigger, cùng transaction, hay một job) và cách phát hiện lệch.
+- Dùng cột JSON cho các thuộc tính thật sự không có schema hoặc thưa, không phải để
+  khỏi phải thiết kế các cột được truy vấn, lọc, hay ràng buộc.
+- Document store: hình dạng document theo mẫu truy cập. Nhúng dữ liệu được đọc cùng
+  nhau và có kích thước giới hạn; tham chiếu dữ liệu dùng chung, lớn, hay không giới
+  hạn (mảng lớn lên vô hạn gây hại). Lên kế hoạch một field version schema khi hình
+  dạng sẽ còn thay đổi.
 
-## Keys and types
+## Khóa và kiểu dữ liệu
 
-- One primary key per table; follow the project's ID style (bigint identity,
-  UUID/ULID). Random UUIDv4 keys fragment B-tree indexes on large tables; time-
-  ordered IDs avoid that where the project allows.
-- Use precise types: decimal or integer minor units for money, timestamps with time
-  zone (or UTC by convention), enums or check constraints for closed sets, text with
-  a length check rather than arbitrary varchar limits.
-- Store times in UTC; convert at the edges.
+- Một primary key cho mỗi bảng; theo kiểu ID của dự án (bigint identity, UUID/ULID).
+  Khóa UUIDv4 ngẫu nhiên làm phân mảnh index B-tree trên bảng lớn; ID có thứ tự theo
+  thời gian tránh được điều đó ở nơi dự án cho phép.
+- Dùng kiểu chính xác: decimal hay số nguyên theo đơn vị nhỏ nhất cho tiền, timestamp
+  có múi giờ (hoặc UTC theo quy ước), enum hay check constraint cho các tập đóng, text
+  kèm một check độ dài thay vì giới hạn varchar tùy ý.
+- Lưu thời gian theo UTC; chuyển đổi ở biên.
 
-## Constraints
+## Constraint
 
-- NOT NULL by default; nullable only when absence has meaning.
-- Foreign keys for relationships, with an explicit ON DELETE behavior chosen on
-  purpose (restrict, cascade, set null).
-- Unique constraints for business uniqueness (email per tenant), not only app checks;
-  app-level checks race.
-- Check constraints for value rules the engine can enforce.
-- SQLite: foreign keys need enabling per connection; many ALTER operations require
-  a table rebuild. MySQL: check constraints are enforced only from 8.0.16.
-- Name constraints and indexes consistently so later migrations can reference them.
+- Mặc định NOT NULL; chỉ cho nullable khi sự vắng mặt có ý nghĩa.
+- Foreign key cho các quan hệ, với một hành vi ON DELETE được chọn có chủ đích
+  (restrict, cascade, set null).
+- Unique constraint cho tính duy nhất nghiệp vụ (email theo từng tenant), không chỉ
+  kiểm tra ở tầng app; kiểm tra ở tầng app sẽ bị đua.
+- Check constraint cho các quy tắc giá trị mà engine có thể cưỡng chế.
+- SQLite: foreign key cần bật theo từng kết nối; nhiều thao tác ALTER đòi phải dựng
+  lại bảng. MySQL: check constraint chỉ được cưỡng chế từ 8.0.16.
+- Đặt tên constraint và index nhất quán để các migration sau có thể tham chiếu chúng.
 
-## Expand and contract
+## Mở rộng rồi thu hẹp
 
-Change a live schema in steps, each compatible with both old and new app versions:
+Đổi một schema đang sống theo từng bước, mỗi bước tương thích với cả bản app cũ và mới:
 
-1. Expand: add the new column, table, or index. Nullable or with a safe default.
-2. Write both: deploy code that writes old and new shapes.
-3. Backfill existing rows into the new shape.
-4. Read new: switch reads; verify.
-5. Contract: stop writing the old shape, then drop it in a later migration.
+1. Mở rộng: thêm cột, bảng, hay index mới. Cho nullable hoặc có default an toàn.
+2. Ghi cả hai: deploy code ghi cả hình dạng cũ và mới.
+3. Backfill các dòng hiện có sang hình dạng mới.
+4. Đọc cái mới: chuyển các lượt đọc; kiểm chứng.
+5. Thu hẹp: ngừng ghi hình dạng cũ, rồi xóa nó trong một migration sau.
 
-Renaming a column in place breaks the running version; use add-copy-switch-drop.
-Adding NOT NULL to an existing column: add a check or validate in a separate step
-after the backfill, then set NOT NULL.
+Đổi tên một cột tại chỗ làm vỡ bản đang chạy; hãy dùng thêm-sao chép-chuyển-xóa.
+Thêm NOT NULL cho một cột đang có: thêm một check hoặc validate ở một bước riêng
+sau khi backfill, rồi mới đặt NOT NULL.
 
-## Backfills
+## Backfill
 
-- Separate from the schema migration for large tables.
-- Batch by primary key range or keyset (for example 1k-10k rows per batch), commit
-  per batch, pause between batches if load matters.
-- Idempotent and resumable: select only rows still needing the change.
-- Log progress counts, not row contents.
-- Verify: count remaining rows needing change equals zero.
+- Tách khỏi migration schema với bảng lớn.
+- Chia lô theo khoảng primary key hoặc keyset (ví dụ 1k-10k dòng mỗi lô), commit theo
+  từng lô, nghỉ giữa các lô nếu tải là vấn đề.
+- Idempotent và tiếp tục được: chỉ chọn những dòng vẫn còn cần đổi.
+- Log số lượng tiến độ, không log nội dung dòng.
+- Kiểm chứng: số dòng còn cần đổi bằng không.
 
-## Reversible migrations
+## Migration đảo được
 
-- Provide a down step when the tool supports it and the change can be undone.
-- Data-destroying changes cannot be truly reversed; the rollback plan is restore or
-  a retained copy. Say so explicitly.
-- Keep each migration small and single-purpose; do not mix schema and large data
-  changes.
-- Never edit an applied migration; add a new one.
+- Cung cấp một bước down khi công cụ hỗ trợ và thay đổi có thể hoàn tác được.
+- Thay đổi phá hủy dữ liệu thì không thể đảo thật sự; kế hoạch rollback là restore
+  hoặc một bản sao được giữ lại. Hãy nói thẳng điều đó.
+- Giữ mỗi migration nhỏ và một mục đích; đừng trộn thay đổi schema với thay đổi dữ
+  liệu lớn.
+- Đừng bao giờ sửa một migration đã được áp; hãy thêm một migration mới.
 
-## Locking risks
+## Rủi ro locking
 
-| Operation | Risk | Safer form |
+| Thao tác | Rủi ro | Dạng an toàn hơn |
 | --- | --- | --- |
-| Create index (PostgreSQL) | blocks writes | `CREATE INDEX CONCURRENTLY` outside a transaction |
-| Create index (MySQL InnoDB) | usually online | confirm `ALGORITHM=INPLACE, LOCK=NONE` |
-| Add column with volatile default | table rewrite | add nullable, backfill, then default |
-| Change column type | often rewrite | new column, backfill, swap |
-| Add foreign key / check on big table | full scan under lock | PostgreSQL: `NOT VALID`, then `VALIDATE` |
-| Add NOT NULL | scan under lock | validated check constraint first |
+| Tạo index (PostgreSQL) | chặn các lượt ghi | `CREATE INDEX CONCURRENTLY` ngoài transaction |
+| Tạo index (MySQL InnoDB) | thường là online | xác nhận `ALGORITHM=INPLACE, LOCK=NONE` |
+| Thêm cột với default biến động | ghi lại cả bảng | thêm nullable, backfill, rồi mới đặt default |
+| Đổi kiểu cột | thường là ghi lại | cột mới, backfill, đổi chỗ |
+| Thêm foreign key / check trên bảng lớn | full scan dưới lock | PostgreSQL: `NOT VALID`, rồi `VALIDATE` |
+| Thêm NOT NULL | scan dưới lock | check constraint đã validate trước |
 
-- Set a lock timeout (for example `SET lock_timeout` in PostgreSQL) so a migration
-  waiting behind a long transaction fails fast instead of blocking all traffic.
-- Behavior differs by engine and version; check the docs for the version in use.
+- Đặt một lock timeout (ví dụ `SET lock_timeout` trong PostgreSQL) để một migration
+  đang chờ sau một transaction dài fail nhanh thay vì chặn toàn bộ lưu lượng.
+- Hành vi khác nhau theo engine và version; hãy xem tài liệu của version đang dùng.

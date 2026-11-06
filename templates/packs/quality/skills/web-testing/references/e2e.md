@@ -1,85 +1,85 @@
-# End-to-End Tests
+# Test end-to-end
 
-Read when writing or stabilizing browser end-to-end tests.
+Đọc khi viết hay làm ổn định test end-to-end trên browser.
 
-Examples use Playwright-style APIs; Cypress and WebDriver-based tools have
-equivalents. Use the project's runner, config, and helpers.
+Ví dụ dùng API kiểu Playwright; Cypress và các công cụ dựa trên WebDriver đều có
+cái tương đương. Hãy dùng runner, config, và helper của dự án.
 
-## Scope
+## Phạm vi
 
-- Keep e2e tests few and focused on critical user journeys: sign in, the main
-  create/read/update flow, checkout or submission, permission boundaries.
-- Push edge cases and validation variants down to component or unit tests.
-- One test proves one journey; avoid giant scripts that test everything in order.
+- Giữ số test e2e ít và tập trung vào các hành trình người dùng then chốt: đăng nhập, luồng
+  tạo/đọc/cập nhật chính, thanh toán hay gửi biểu mẫu, các ranh giới phân quyền.
+- Đẩy các ca biên và biến thể validate xuống tầng test component hoặc unit.
+- Một test chứng minh một hành trình; tránh những script khổng lồ test mọi thứ theo thứ tự.
 
-## Selectors
+## Selector
 
-Prefer selectors a user would recognize, in this order:
+Ưu tiên những selector mà người dùng cũng nhận ra, theo thứ tự sau:
 
-1. Role with accessible name: `getByRole('button', { name: 'Save' })`.
-2. Label: `getByLabel('Email')`.
-3. Visible text or placeholder for non-interactive content.
-4. A dedicated test ID (`data-testid`) when no accessible handle exists, per the
-   project's convention.
+1. Vai trò kèm tên truy cập được: `getByRole('button', { name: 'Save' })`.
+2. Nhãn: `getByLabel('Email')`.
+3. Chữ thấy được hoặc placeholder cho nội dung không tương tác.
+4. Một test ID riêng (`data-testid`) khi không có chỗ nắm nào truy cập được, theo
+   quy ước của dự án.
 
-Avoid CSS classes, DOM structure, nth-child, and XPath; they break on markup
-changes. A missing accessible name is often a real accessibility bug; report it.
+Tránh class CSS, cấu trúc DOM, nth-child, và XPath; chúng vỡ khi markup
+đổi. Thiếu tên truy cập được thường là một bug accessibility thật; hãy báo lại.
 
-## Waiting, never sleeping
+## Chờ theo điều kiện, không ngủ
 
-- Never use fixed sleeps (`waitForTimeout`, `sleep`) to synchronize.
-- Use auto-waiting actions and web-first assertions that retry until a condition
-  holds (`expect(locator).toBeVisible()`, `toHaveText`, `toHaveURL`).
-- Wait on the specific network response or UI state the next step depends on.
-- Keep timeouts at the project's defaults; raising a timeout to pass a test hides a
-  slow or broken path.
+- Không bao giờ dùng thời gian ngủ cố định (`waitForTimeout`, `sleep`) để đồng bộ.
+- Dùng các hành động tự chờ và những assertion ưu tiên web, tự thử lại tới khi một điều kiện
+  thành đúng (`expect(locator).toBeVisible()`, `toHaveText`, `toHaveURL`).
+- Chờ đúng phản hồi mạng hay trạng thái UI mà bước kế tiếp phụ thuộc vào.
+- Giữ timeout ở mức mặc định của dự án; nâng timeout lên để test pass là che đi một
+  đường đi chậm hoặc đã vỡ.
 
-## Isolation
+## Cách ly
 
-- Each test creates or seeds its own data (API calls, seed helpers, or fixtures)
-  and does not rely on other tests or run order.
-- Use a fresh browser context per test; reuse authenticated storage state from a
-  setup step rather than logging in through the UI every time, if the project does.
-- Use unique names (suffix with a run ID) to avoid collisions under parallel runs.
-- Clean up created data when the environment is shared, or use a disposable
-  environment.
-- Do not share mutable module-level state between tests.
+- Mỗi test tự tạo hoặc tự seed dữ liệu của nó (gọi API, helper seed, hoặc fixture)
+  và không dựa vào test khác hay thứ tự chạy.
+- Dùng một context browser mới cho mỗi test; dùng lại trạng thái lưu trữ đã đăng nhập từ một
+  bước setup thay vì đăng nhập qua UI mỗi lần, nếu dự án làm vậy.
+- Dùng tên độc nhất (thêm hậu tố là ID của lần chạy) để tránh xung đột khi chạy song song.
+- Dọn dữ liệu đã tạo khi môi trường là dùng chung, hoặc dùng một môi trường
+  dùng một lần rồi bỏ.
+- Không dùng chung state thay đổi được ở cấp module giữa các test.
 
-## External dependencies
+## Phụ thuộc bên ngoài
 
-- Stub third-party services (payments, email, maps, analytics) at the network layer
-  or point them at sandbox modes the project already uses.
-- Never send real email, SMS, or payments from tests.
-- Control time and randomness where the app supports it (clock mocking, seeded data).
+- Thay thế các dịch vụ bên thứ ba (thanh toán, email, bản đồ, analytics) ở tầng mạng
+  hoặc trỏ chúng tới các chế độ sandbox mà dự án đã dùng.
+- Không bao giờ gửi email, SMS, hay thanh toán thật từ test.
+- Kiểm soát thời gian và tính ngẫu nhiên ở nơi app cho phép (mock đồng hồ, dữ liệu có seed).
 
-## Assertions
+## Assertion
 
-- Assert user-visible outcomes: text, URL, enabled state, a row appearing.
-- Assert the absence of error toasts or console errors when the project does so.
-- Avoid asserting exact pixel layout in functional tests; that is visual testing.
+- Khẳng định các kết quả người dùng thấy được: chữ, URL, trạng thái bật, một dòng xuất hiện.
+- Khẳng định là không có toast lỗi hay lỗi console, khi dự án cũng làm vậy.
+- Tránh khẳng định layout chính xác tới từng pixel trong test chức năng; đó là việc của test thị giác.
 
-## Visual and accessibility checks
+## Kiểm thị giác và accessibility
 
-- Visual snapshots: stable viewport, fonts, and data; mask dynamic regions (dates,
-  avatars); disable animations. Review every snapshot diff before accepting it.
-- Snapshots differ across OS and browser builds; generate baselines in the same
-  environment CI uses.
-- Accessibility scans (axe-style) on key pages and states, including open dialogs.
-  Treat them as a floor, not proof of accessibility.
+- Snapshot thị giác: khung nhìn, font, và dữ liệu ổn định; che các vùng động (ngày,
+  ảnh đại diện); tắt hoạt họa. Hãy xem lại mọi khác biệt snapshot trước khi chấp nhận nó.
+- Snapshot khác nhau giữa các OS và bản build browser; hãy sinh mốc cơ sở trong cùng
+  môi trường mà CI dùng.
+- Quét accessibility (kiểu axe) trên các trang và trạng thái chính, gồm cả dialog đang mở.
+  Coi chúng là mức sàn, không phải bằng chứng đã đạt accessibility.
 
-## Debugging and traces
+## Gỡ lỗi và trace
 
-- Enable traces, screenshots, or video on failure or first retry, per project config.
-- Read the trace before changing the test: locate the step, the DOM state, and the
-  network calls at failure.
-- Reproduce a flake with repeated runs (`--repeat-each` or equivalent) and with
-  parallel workers; record the failure rate.
-- Retries in CI may exist as policy; a test that needs them is still flaky and goes
-  to bug-loop.
+- Bật trace, ảnh chụp, hay video khi fail hoặc ở lần retry đầu, theo config của dự án.
+- Đọc trace trước khi sửa test: xác định bước nào, trạng thái DOM, và các
+  lệnh gọi mạng tại thời điểm fail.
+- Tái hiện sự chập chờn bằng cách chạy lặp lại (`--repeat-each` hoặc tương đương) và với
+  nhiều worker song song; ghi lại tỉ lệ fail.
+- Retry trong CI có thể tồn tại như một chính sách; một test cần tới chúng thì vẫn là chập chờn và phải
+  chuyển sang bug-loop.
 
-## Running
+## Chạy test
 
-- Run against a local server or preview build started the way the project does
-  (the runner's web-server config or a script).
-- Run headless in CI and headed or with the inspector locally when debugging.
-- Run the browsers the project targets; do not add browsers without a decision.
+- Chạy trên một server cục bộ hay bản build preview, khởi động theo đúng cách dự án làm
+  (config web-server của runner hoặc một script).
+- Chạy headless trong CI, và chạy có giao diện hoặc kèm inspector ở cục bộ khi gỡ lỗi.
+- Chạy đúng những browser mà dự án nhắm tới; không thêm browser mà không có quyết định.

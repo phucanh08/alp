@@ -1,20 +1,20 @@
-# Verdict Template
+# Mẫu verdict
 
-Read when deciding the verdict and writing the release readiness report.
+Đọc khi quyết định verdict và viết báo cáo mức sẵn sàng phát hành.
 
-## Decision rules
+## Quy tắc quyết định
 
-- NO-GO: any blocking criterion is FAIL, or a blocking criterion is NOT VERIFIED
-  and cannot be verified before the planned release.
-- CONDITIONAL: no blocking FAIL, and every remaining NOT VERIFIED or FAIL item has
-  a named owner, a concrete closing action, and a "must close before" point
-  (before tag, before publish, within N days after release for non-blocking).
-- GO: every blocking criterion is PASS with evidence; non-blocking gaps are listed.
+- NO-GO: có tiêu chí chặn nào FAIL, hoặc một tiêu chí chặn là NOT VERIFIED
+  mà không thể kiểm chứng được trước thời điểm phát hành dự kiến.
+- CONDITIONAL: không có tiêu chí chặn nào FAIL, và mọi mục NOT VERIFIED hay FAIL còn lại đều
+  có một người sở hữu được nêu tên, một hành động đóng cụ thể, và một mốc "phải đóng trước"
+  (trước khi tag, trước khi publish, trong N ngày sau phát hành với các mục không chặn).
+- GO: mọi tiêu chí chặn đều PASS kèm bằng chứng; các khoảng trống không chặn được liệt kê ra.
 
-A CONDITIONAL verdict is not permission to release; the conditions marked "before
-tag" or "before publish" must be closed and re-verified first.
+Verdict CONDITIONAL không phải là giấy phép phát hành; các điều kiện được ghi "trước khi
+tag" hay "trước khi publish" phải được đóng và kiểm chứng lại trước.
 
-## Report
+## Báo cáo
 
 ```text
 Release readiness: <project> <version>
@@ -46,8 +46,8 @@ Release actions pending user authorization
 - <tag/publish/push/deploy steps>; none performed by this assessment.
 ```
 
-## Writing tips
+## Mẹo viết
 
-- Put the verdict and reason first; reviewers read top-down.
-- Quote evidence briefly: the command and the decisive output line.
-- Do not soften NO-GO into CONDITIONAL without owners and closing actions.
+- Đặt verdict và lý do lên trước; reviewer đọc từ trên xuống.
+- Dẫn bằng chứng cho ngắn: câu lệnh và dòng output quyết định.
+- Đừng làm mềm NO-GO thành CONDITIONAL khi chưa có người sở hữu và hành động đóng.

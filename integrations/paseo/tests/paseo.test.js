@@ -287,7 +287,7 @@ test('a team session shows its team, and main starts its supervisor as a child o
   assert.equal(childConfig.mode, 'read-only');
   const start = runtimes[1].calls.find(c => c.method === 'thread/start').params;
   assert.deepEqual(start.dynamicTools.map(tool => tool.name), ['alp_send', 'alp_board', 'alp_task']);
-  assert.match(start.developerInstructions, /Supervisor — process reviewer for main/);
+  assert.match(start.developerInstructions, /Supervisor — người review quy trình cho main/);
   assert.ok(runtimes[0].calls.find(c => c.method === 'thread/start').params.dynamicTools.some(tool => tool.name === 'alp_lesson'));
 });
 
