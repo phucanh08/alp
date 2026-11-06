@@ -36,12 +36,22 @@ trong `sdk.mjs`, `bridge.mjs` và `browser-sdk.js`, và ALP không build lại �
 | 0.3.318 (latest, kiểm ngày 2026-11-06) | 4.6.2 | có |
 
 Vì vậy artifact phát hành của ALP vẫn **chứa một bản zod nằm trong diện advisory**, bên trong SDK.
-ALP không sửa, viết lại hay vendor các file minified đó. Điều kiện đóng t-ffe4.3: SDK phát hành bản nhúng
-zod ≥4.6.6 (hoặc dùng hẳn peer zod), rồi ALP nâng SDK, build và pack lại, quét lại các bản nhúng.
+ALP không sửa, viết lại hay vendor các file minified đó.
 
 Ngày 2026-11-06 người dùng chấp nhận rủi ro còn lại này (bản zod nhúng trong SDK vẫn chưa được vá) và
-t-ffe4.3 được đóng ở trạng thái wontfix; điều kiện mở lại nằm trong task t-ffe4.3 và quyết định
-p-3f3a8f96 trên board.
+t-ffe4.3 được đóng ở trạng thái wontfix (quyết định p-3f3a8f96 trên board).
+
+**Hai điều kiện mở lại, chỉ cần một là đủ:**
+
+1. Anthropic phát hành SDK nhúng zod ≥4.6.6 (hoặc dùng hẳn peer zod như SDK đã khai). Khi đó: nâng
+   SDK, build và pack lại 8 package, quét lại các bản nhúng đã cài, chạy lại regression và lane
+   consumer, review ở đúng SHA.
+2. Tìm ra một đường chạy thật mà kẻ tấn công điều khiển được đầu vào đi tới các parser zod nhúng
+   trong SDK. Khi đó việc này thành **P1** và sự chấp nhận rủi ro ở trên **hết hiệu lực** — không
+   còn là residual nữa.
+
+Sự chấp nhận này chỉ bao các bản zod nhúng bên trong SDK. zod mà ALP tự khai vẫn phải ≥4.6.6, và đây
+không phải waiver cho advisory nào khác, cũng không phải lý do bỏ audit.
 
 ## Rủi ro được nói đúng mức
 
