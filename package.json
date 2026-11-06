@@ -78,7 +78,7 @@
     "react-native": "0.81.5",
     "typescript": "5.9.3",
     "ws": "^8.22.0",
-    "zod": "4.4.3"
+    "zod": "4.6.7"
   },
   "dependencies": {
     "@anhlp/alp-client": "0.0.1-beta.8",
