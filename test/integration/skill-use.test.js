@@ -6,20 +6,37 @@ import path from 'node:path';
 import { claudePermissions, skillPlugin, SKILL_PLUGIN } from '../../dist/runtime/index.js';
 import { renderLog } from '../../packages/client/src/render.js';
 import { tree, until } from '../support/fake-agent.js';
+import { templateIndexDescription } from '../support/template-text.js';
+
+/**
+ * The one index line for `name`, asserted to point at that skill's SKILL.md and to carry the
+ * description THAT FILE declares. Read from the template (t-814a): a copy of the sentence here made
+ * every rewording of a skill a failure of this test, which is not about the wording at all.
+ */
+async function indexes(instructions, name) {
+  const line = instructions.split('\n').find(entry => entry.startsWith(`- ${name} (`));
+  assert.ok(line, `no skill index line for ${name} in:\n${instructions.slice(0, 400)}`);
+  assert.match(line, new RegExp(`^- ${name} \\([^)]+[\\\\/]skills[\\\\/]${name}[\\\\/]SKILL\\.md\\): `), line);
+  // The description the runtime itself renders from that SKILL.md (flattened, truncated past 400
+  // characters): the index must end with exactly it.
+  const description = await templateIndexDescription(`skills/${name}/SKILL.md`);
+  assert.ok(line.endsWith(description), `${name}: the index does not carry the description templates/skills/${name}/SKILL.md declares\n  index:    ${line}\n  template: ${description}`);
+  return line;
+}
 
 test('Claude gets the agent\'s skills to load as its own; Codex finds them in its instructions', async t => {
   const claude = await tree(t, { prefix: 'alp-skill-', open: { model: 'claude:claude-opus-5-5' } });
   const config = claude.main.config;
   assert.deepEqual(config.skills.map(skill => skill.name), ['architecture-docs', 'bug-loop', 'compact', 'curate', 'feature-architecture', 'goal-griller', 'prompt-leverage', 'release-readiness', 'safe-refactor', 'security-review', 'sequence-execution-plan', 'skill-authoring', 'smart-commits', 'test-strategy', 'xia']);
-  assert.match(config.developerInstructions, /- curate \([^)]+[\\/]skills[\\/]curate[\\/]SKILL\.md\): Rà soát toàn bộ bài học/);
+  await indexes(config.developerInstructions, 'curate');
   assert.ok(config.skills.every(skill => skill.path.endsWith(path.join('/skills', skill.name, 'SKILL.md'))));
   assert.match(config.developerInstructions, /Your skills are also Claude Code skills named alp:<name>: run one with the Skill tool/);
-  assert.match(config.developerInstructions, /- xia \([^)]+[\\/]skills[\\/]xia[\\/]SKILL\.md\): Nghiên cứu một implementation chưa quen/);
+  await indexes(config.developerInstructions, 'xia');
 
   const codex = await tree(t, { prefix: 'alp-skill-', open: { model: 'codex:gpt-5.6-sol' } });
   assert.equal(codex.main.config.skills, undefined);
   assert.doesNotMatch(codex.main.config.developerInstructions, /Claude Code skills/);
-  assert.match(codex.main.config.developerInstructions, /- smart-commits \([^)]+\): Gói các thay đổi đã sở hữu/);
+  await indexes(codex.main.config.developerInstructions, 'smart-commits');
 });
 
 test('an agent using a skill is logged once per skill: by the Skill tool, or by reading its SKILL.md', async t => {

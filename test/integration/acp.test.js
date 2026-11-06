@@ -10,6 +10,7 @@ import { testEntry } from '../../packages/client/src/library-test.js';
 import { diagnose } from '../../packages/client/src/doctor.js';
 import { ModelCatalog, acpDecision, acpPermission, createAlpRuntime, setActiveCatalog } from '../../dist/runtime/index.js';
 import { listProviders } from '../../packages/core/src/providers.js';
+import { literal, templateBodySentence, templateIndexDescription } from '../support/template-text.js';
 
 const FAKE = fileURLToPath(new URL('../support/fake-acp.js', import.meta.url));
 
@@ -129,8 +130,15 @@ test('a session on an ACP agent: instructions in its first prompt, its answer st
   assert.match(prompts[0][0].text, /ALP's tools \(alp_\*\) come from the MCP server named alp\. ALP answers your permission requests by your full-access mode/);
   // Skills on ACP: the same Level 0 index as Codex (no native Skill tool is pretended); bodies stay in their files.
   assert.match(prompts[0][0].text, /Your skills: [^\n]*Open a skill's references only for the step that needs them/);
-  assert.match(prompts[0][0].text, /\n- feature-architecture \([^)]+SKILL\.md\): Hiện thực một feature mới/);
-  assert.doesNotMatch(prompts[0][0].text, /Vẽ ra các module bị chạm và hướng của từng phụ thuộc mới|Claude Code skills named alp/);
+  const indexed = prompts[0][0].text.split('\n').find(line => line.startsWith('- feature-architecture ('));
+  assert.ok(indexed, prompts[0][0].text.slice(0, 400));
+  assert.match(indexed, /^- feature-architecture \([^)]+SKILL\.md\): /);
+  assert.ok(indexed.endsWith(await templateIndexDescription('skills/feature-architecture/SKILL.md')), indexed);
+  // Only the index: a sentence from the skill's BODY must not be in the prompt. Both the index text
+  // and this sentence are read from the template (t-814a), so a reworded skill cannot quietly turn
+  // this doesNotMatch into an assertion about a sentence that no longer exists anywhere.
+  assert.doesNotMatch(prompts[0][0].text, literal(templateBodySentence('skills/feature-architecture/SKILL.md')));
+  assert.doesNotMatch(prompts[0][0].text, /Claude Code skills named alp/);
 
   // The agent lists and calls ALP's tools through the MCP server ALP gave it.
   const tools = await turn('fake:tools');

@@ -9,6 +9,7 @@ import { ProviderEventSchema, PROVIDER_CAPABILITIES } from '@getpaseo/plugin/ser
 import { connect, readLock } from '@anhlp/alp-client';
 import { createTask } from '@anhlp/alp-core/tasks';
 import { teardown } from '../../../test/support/teardown.js';
+import { literal, templateTitle } from '../../../test/support/template-text.js';
 
 async function fixture(t) {
   const defer = teardown(t);
@@ -296,7 +297,7 @@ test('a team session shows its team, and main starts its supervisor as a child o
   assert.equal(childConfig.mode, 'read-only');
   const start = runtimes[1].calls.find(c => c.method === 'thread/start').params;
   assert.deepEqual(start.dynamicTools.map(tool => tool.name), ['alp_send', 'alp_board', 'alp_task']);
-  assert.match(start.developerInstructions, /Supervisor — người review quy trình cho main/);
+  assert.match(start.developerInstructions, literal(templateTitle('agents/supervisor/AGENT.md')));
   assert.ok(runtimes[0].calls.find(c => c.method === 'thread/start').params.dynamicTools.some(tool => tool.name === 'alp_lesson'));
 });
 

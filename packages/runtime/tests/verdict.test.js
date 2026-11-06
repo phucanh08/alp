@@ -7,6 +7,7 @@ import { initProject } from '@anhlp/alp-core/init';
 import { createTask, getTask, loadTasks, startTask, submitTask, taskDigest } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { fakeTransport, until } from '../../../test/support/fake-agent.js';
+import { literal, templateLineWith } from '../../../test/support/template-text.js';
 
 const criterion = (result, text = 'Retries stop after three attempts') => ({ criterion: text, result, evidence: `src/retry.ts:40 ${result}` });
 
@@ -26,7 +27,10 @@ test('a reviewer files a verdict whose result follows from its criteria and find
   const { assignmentId } = await main.call('alp_delegate', { agent: 'reviewer', task: 'Review the retry change', wait: false });
   const reviewer = runtimes[1];
   await until(() => reviewer.started.length === 1);
-  assert.match(reviewer.calls.find(call => call.method === 'thread/start').params.developerInstructions, /## Verdict[\s\S]*`pass_with_findings`: chỉ có phát hiện mức medium hay low/);
+  const instructions = reviewer.calls.find(call => call.method === 'thread/start').params.developerInstructions;
+  assert.match(instructions, /## Verdict/);
+  // The one line of the reviewer template that defines pass_with_findings, read from it.
+  assert.match(instructions, literal(templateLineWith('agents/reviewer/AGENT.md', '`pass_with_findings`')));
 
   const refused = async (args, pattern) => {
     const answer = await reviewer.call('alp_handoff', { outcome: 'complete', summary: 'Reviewed', ...args });
