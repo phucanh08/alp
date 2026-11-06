@@ -217,7 +217,20 @@ export function npmMessage(positionals = []) {
 /** Why this bundle cannot update itself: it was not installed by install.sh / install.ps1. @param {string} root */
 export const notInstalledMessage = root => `alp: ${root} is not an installed ALP (no app/current points at it); install the release with install.sh (Windows: install.ps1), which alp update can then keep up to date:\n  curl -fsSL https://github.com/${DEFAULT_REPO}/releases/latest/download/install.sh | sh`;
 
-const systemTar = () => process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+/**
+ * tar, as this platform must start it. On Windows it is the system's own bsdtar
+ * (%SystemRoot%\System32\tar.exe), never whatever comes first on PATH: under Git Bash that is Git's
+ * GNU tar, which reads a drive-letter path such as `D:\a\…\alp.zip` as a remote `host:file`
+ * archive and cannot read or write a zip at all. `--force-local` is not an answer: bsdtar rejects it.
+ *
+ * DUPLICATE, deliberately (t-ffe4.6): `windowsTar` in scripts/spawn-command.mjs is the same
+ * knowledge for the repository's own scripts. This package is published, so it cannot import from
+ * scripts/, and scripts/ must keep working before anything is built. Change one and change the
+ * other; test/integration/spawn-command.test.js asserts the two agree, and refuses any third copy.
+ * @param {string} platform @param {Record<string, string | undefined>} env
+ */
+export const systemTar = (platform = process.platform, env = process.env) =>
+  platform === 'win32' ? path.win32.join(env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
 
 /** Extracts the archive into `directory` and returns the bundle inside it. @param {string} archive @param {string} directory @param {{ name: string }} asset @param {string} platform */
 function extract(archive, directory, asset, platform, run = spawnSync) {
