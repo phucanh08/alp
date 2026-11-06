@@ -31,7 +31,17 @@ type ClaudeQuery = AsyncGenerator<SDKMessage, void> & {
   initializationResult?(): Promise<unknown>;
 };
 
-/** A field whose size is checked before zod walks it; its JSON Schema is the inner schema's (input-limits.ts). */
+/**
+ * A field whose size is checked before zod walks it; its JSON Schema is the inner schema's
+ * (input-limits.ts).
+ *
+ * Needed for any field zod's own cap does not protect. zod's GHSA-mrhx-c7xc-m3w5 fix (4.6.6) refuses
+ * a collection over its `.max()` before reading an element for `array`, `map` and `set` — and for
+ * NOTHING ELSE. `z.record` is NOT covered: a capped record is still read element by element, one
+ * issue kept per failure (t-5294.4). So a limited record must go through `bounded` (as `vars` below
+ * does), and turning a capped `z.array` field into a `z.record` silently drops that protection.
+ * docs/alp/zod-advisory.md has the repository-wide survey.
+ */
 const bounded = <T extends z.ZodType>(schema: T, limits: InputLimits) => z.preprocess((value, ctx) => {
   const error = inputLimitError(value, limits);
   if (error) ctx.addIssue({ code: 'custom', message: error });
