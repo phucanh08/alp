@@ -114,9 +114,9 @@ async function paseoCompile(packageDirectory) {
   return { server: bundles.serverBundle?.length ?? 0, client: bundles.clientBundle?.length ?? 0 };
 }
 
-/** How a finished spawnSync failed: the start error, the signal or the exit status. */
+/** How a finished spawnSync failed: its error (not started, timed out, output too large), signal or exit status. */
 export function exitDescription(result) {
-  if (result.error) return `failed to start: ${result.error.message}`;
+  if (result.error) return `could not run to completion: ${result.error.message}`;
   return result.signal ? `was killed by ${result.signal}` : `exited ${result.status}`;
 }
 
