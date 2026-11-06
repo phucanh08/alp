@@ -6,6 +6,7 @@ import { cleanupFakeWeb, freeWebPort } from './beta-web-lifecycle.mjs';
 import { spawnSync } from 'node:child_process';
 import { spawnCommand } from './spawn-command.mjs';
 import { LAUNCHER, LAUNCHER_LOCATION, releaseArtifacts } from './release-lib.mjs';
+import { clearCallerSession } from './test-lib.mjs';
 import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -18,6 +19,12 @@ function run(command, args, options = {}) {
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed:\n${result.stdout}${result.stderr}${result.error ?? ''}`);
   return result.stdout;
 }
+// t-5294.3: `alp web --print` below is a user-only command, so this smoke must not inherit the ALP
+// session of an agent's shell; otherwise the installed CLI answers "alp web is the user's ... started
+// by an ALP agent" and the smoke fails for a reason that has nothing to do with the package. Same
+// mechanism as scripts/core-standalone-smoke.mjs:138; the product guard is unchanged.
+const clearedSession = clearCallerSession();
+if (clearedSession.length) console.log(`package smoke: cleared the caller's ALP session variables, so the installed CLI runs as the user's: ${clearedSession.join(', ')}`);
 const env = { ...process.env, ALP_HOME: path.join(directory, 'home') };
 let cli;
 try {

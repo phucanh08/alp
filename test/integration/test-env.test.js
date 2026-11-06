@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { hermeticEnv, homelessEnv, isCallerBinary } from '../../scripts/test-lib.mjs';
+import { CALLER_SESSION_VARIABLES, clearCallerSession, hermeticEnv, homelessEnv, isCallerBinary } from '../../scripts/test-lib.mjs';
 
 test('isCallerBinary: ALP_<NAME>_BIN in any case, nothing else', () => {
   for (const name of ['ALP_CODEX_BIN', 'ALP_CLAUDE_BIN', 'ALP_ANTIGRAVITY_BIN', 'ALP_GH_BIN', 'alp_codex_bin', 'ALP_X2_BIN']) assert.equal(isCallerBinary(name), true, name);
@@ -194,3 +194,61 @@ test('abnormal coordinator exit retains all runner scratch', {timeout:15000}, as
   assert.equal(retained.length,3,result.stderr);
   for(const dir of retained) await access(dir);
 });
+
+// t-5294.3 / t-3a63. An agent's shell exports ALP_AGENT_SESSION, every ALP client in a child process
+// then announces `principal.agent`, and the user-only guards refuse it. That is correct for an agent
+// doing the user's business — and wrong for a VERIFICATION run, which exists to check what the user's
+// install does. Until this was fixed no agent could finish `npm run validate:core` (it exited 1 at
+// scripts/core-standalone-smoke.mjs:138, where the installed CLI answered "alp web is the user's:
+// ... this process was started by an ALP agent" instead of the expected "alp web is not built") or
+// `npm run validate:packages` ("Only the user answers a question; this connection was opened by an
+// ALP agent", in tarball-consumer.mjs's installed-plugin regressions). CI never saw it: a GitHub
+// runner has no ALP and sets no session variable.
+test('clearCallerSession removes exactly the caller session from the live env and reports what it removed', async t => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const saved = Object.fromEntries(CALLER_SESSION_VARIABLES.map(name => [name, process.env[name]]));
+  t.after(() => {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  });
+  process.env.ALP_AGENT_SESSION = 'injected-session';
+  process.env.ALP_BRIDGE_TOKEN = 'injected-token';
+  process.env.ALP_KEEP_ME = 'kept';
+  t.after(() => { delete process.env.ALP_KEEP_ME; });
+
+  const removed = clearCallerSession();
+  assert.ok(removed.includes('ALP_AGENT_SESSION') && removed.includes('ALP_BRIDGE_TOKEN'), removed.join(', '));
+  assert.ok(!removed.includes('ALP_KEEP_ME'), 'only the session variables, so a caller can name them in a log line');
+  for (const name of CALLER_SESSION_VARIABLES) assert.equal(process.env[name], undefined, name);
+  assert.equal(process.env.ALP_KEEP_ME, 'kept');
+  assert.deepEqual(clearCallerSession(), [], 'nothing left to remove, so nothing is claimed');
+
+  // The point of doing it in place: a child spawned with no env of its own is clean too, which is
+  // how scripts/validate.mjs isolates every step it runs.
+  const child = await promisify(execFile)(process.execPath, ['-p', 'JSON.stringify([process.env.ALP_AGENT_SESSION, process.env.ALP_BRIDGE_TOKEN, process.env.ALP_KEEP_ME])'], { timeout: 20_000 });
+  assert.deepEqual(JSON.parse(child.stdout), [null, null, 'kept']);
+});
+
+// The wiring, file by file, because the defect was never one guard: it was every entry point that
+// drives a user-facing CLI while inheriting the caller's shell. The behaviour is covered above; this
+// says each of those entry points is actually connected to it, including the ones that are run
+// directly as well as through the validate wrapper.
+test('every verification entry point that drives a user-facing CLI isolates the caller session', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const entries = {
+    // The wrapper: its steps spawn without an env of their own, so clearing here covers the lane.
+    'scripts/validate.mjs': 'npm run validate:core / :paseo / :packages / :web',
+    // Also run directly, so each clears for itself rather than trusting the wrapper.
+    'scripts/core-standalone-smoke.mjs': 'npm run test:core:standalone',
+    'scripts/tarball-consumer.mjs': 'npm run release:tarball-check',
+    'scripts/package-smoke.mjs': 'npm run test:packages:smoke',
+    'scripts/binary-smoke.mjs': 'the binary-build CI lane, and by hand on a built bundle',
+  };
+  for (const [relative, how] of Object.entries(entries)) {
+    const source = await readFile(new URL(`../../${relative}`, import.meta.url), 'utf8');
+    assert.match(source, /clearCallerSession\(\)/, `${relative} (${how}) must clear the caller's ALP session variables: an agent running it otherwise hits a user-only refusal that has nothing to do with what it checks`);
+  }
+});
+

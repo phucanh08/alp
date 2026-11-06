@@ -19,9 +19,20 @@ import { spawnSync } from 'node:child_process';
 import { exitDescription, spawnCommand } from './spawn-command.mjs';
 import { LAUNCHER, releaseArtifacts } from './release-lib.mjs';
 import { checkPaseoNpmSource, describe as describePaseoSource } from './paseo-source-check.mjs';
+import { clearCallerSession } from './test-lib.mjs';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+// t-5294.3: the installed-plugin regressions below are the published packages as a USER installs
+// them. Run from an ALP agent's shell, the inherited ALP_AGENT_SESSION made the installed client
+// announce itself as an agent, and the user-only guard answered "Only the user answers a question;
+// this connection was opened by an ALP agent" — so `npm run validate:packages` could not pass for
+// any agent either. The guard is product behaviour and is untouched; what is cleared is the caller's
+// own session, here as well as in the validate wrapper, because this script is also run directly
+// (`npm run release:tarball-check`, scripts/release-consumer.mjs).
+const clearedSession = clearCallerSession();
+if (clearedSession.length) console.log(`tarball consumer: cleared the caller's ALP session variables, so the installed packages run as the user's: ${clearedSession.join(', ')}`);
 
 const root = path.resolve(import.meta.dirname, '..');
 const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));

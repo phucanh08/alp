@@ -54,6 +54,23 @@ export function hermeticEnv(env = process.env) {
   return result;
 }
 
+/**
+ * The same isolation for a whole process rather than one child: removes the caller's ALP session
+ * variables from `env` IN PLACE and returns the names it removed, so the caller can say so.
+ *
+ * For a wrapper that spawns its steps without passing an env (scripts/validate.mjs): every child
+ * then inherits the cleaned environment, and no step has to remember (t-5294.3, t-3a63). The
+ * product guards are untouched — a real agent process still announces itself and is still refused
+ * the user's methods. What this undoes is only the accident that a VERIFICATION run inherits the
+ * session of the shell that started it, which made `alp web --print` in core-standalone-smoke.mjs
+ * and the installed plugin regressions in tarball-consumer.mjs refuse to run for any agent.
+ */
+export function clearCallerSession(env = process.env) {
+  const removed = CALLER_SESSION_VARIABLES.filter(name => env[name] !== undefined);
+  for (const name of removed) delete env[name];
+  return removed;
+}
+
 /** ALP_CODEX_BIN, ALP_CLAUDE_BIN, ALP_GH_BIN, ...: the caller's provider and tool executables. */
 export const isCallerBinary = name => /^ALP_[A-Z0-9_]+_BIN$/i.test(name);
 
