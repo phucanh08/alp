@@ -13,6 +13,7 @@ import { WORKSPACE_GIT } from '@anhlp/alp-protocol';
 import { DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, gitPath, gitRemoteUrl, projectGitDiff, projectGitStatus } from '../src/policy.js';
 import { fakeDaemon } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 const CAPABILITIES = ['attach.after', 'prompt.receipts', 'workspace.registry', 'workspace.git'];
 
@@ -28,8 +29,9 @@ const textFile = (file, extra = {}) => ({ path: file, change: 'modified', kind: 
 const diff = (files, extra = {}) => ({ compare: { mode: 'uncommitted', ignoreWhitespace: false }, snapshot: 's1', files, hiddenCount: 0, truncated: false, ...extra });
 
 async function world(t, { maxFrame } = {}) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-git-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const a = path.join(directory, 'a');
   const b = path.join(directory, 'b');
   await mkdir(a);
@@ -68,12 +70,13 @@ test('the matrix: status needs project.read, diff project.read and files.read; t
 });
 
 test('workspace.git.facts is owner-only: prohibited, its capability withheld, -32601 for every grant and never at alpd', async t => {
+  const defer = teardown(t);
   assert.equal(EXPOSURE['workspace.git.facts'].status, 'prohibited');
   assert.ok(!FORWARDED_CAPABILITIES.includes('workspace.git.facts'));
   const daemon = fakeDaemon({ capabilities: [...CAPABILITIES, 'workspace.git.facts'] });
   daemon.state.handlers['workspace.git.facts'] = () => ({ kind: 'unknown' });
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-facts-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const { sdk } = await startGateway(t, { daemon, credentials: { reader: { workspaces: [directory], permissions: ['project.read', 'files.read'] } } });
   const { client, hello } = await sdk('reader');
   assert.ok(!hello.capabilities.includes('workspace.git.facts'), 'the capability is not forwarded');

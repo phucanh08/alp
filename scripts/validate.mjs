@@ -11,15 +11,6 @@ const scope = process.argv[2] ?? 'all';
 if (!['all', 'core', 'paseo', 'packages', 'web'].includes(scope) || process.argv.length > 3) {
   throw new Error('Usage: validate.mjs [all|core|paseo|packages|web]');
 }
-/** The commit this run checks, and whether the checkout differs from it, so a gate log names what it ran on. */
-function commit() {
-  const git = (...args) => spawnSync('git', args, { cwd: ROOT, encoding: 'utf8' });
-  const head = git('rev-parse', 'HEAD');
-  if (head.status !== 0 || !head.stdout.trim()) return 'commit unknown (not a git checkout)';
-  const changes = git('status', '--porcelain', '--untracked-files=no');
-  return `commit ${head.stdout.trim()}${changes.status !== 0 ? ' (uncommitted changes unknown)' : changes.stdout.trim() ? ' with uncommitted changes' : ''}`;
-}
-console.log(`[validate:${scope}] ${commit()}`);
 // t-5294.3 / t-3a63: this lane checks what the USER's install does, so it must not run as the agent
 // whose shell happened to start it. An inherited ALP_AGENT_SESSION made every child announce itself
 // as an agent, and the user-only guards then refused the very steps being checked: `alp web --print`
@@ -31,6 +22,15 @@ console.log(`[validate:${scope}] ${commit()}`);
 // spawn without an env of their own and so inherit this one.
 const cleared = clearCallerSession();
 if (cleared.length) console.log(`[validate:${scope}] cleared the caller's ALP session variables, so every step runs as the user would: ${cleared.join(', ')}`);
+/** The commit this run checks, and whether the checkout differs from it, so a gate log names what it ran on. */
+function commit() {
+  const git = (...args) => spawnSync('git', args, { cwd: ROOT, encoding: 'utf8' });
+  const head = git('rev-parse', 'HEAD');
+  if (head.status !== 0 || !head.stdout.trim()) return 'commit unknown (not a git checkout)';
+  const changes = git('status', '--porcelain', '--untracked-files=no');
+  return `commit ${head.stdout.trim()}${changes.status !== 0 ? ' (uncommitted changes unknown)' : changes.stdout.trim() ? ' with uncommitted changes' : ''}`;
+}
+console.log(`[validate:${scope}] ${commit()}`);
 function node(script, ...args) {
   console.log(`\n[validate:${scope}] ${script} ${args.join(' ')}`);
   const result = spawnSync(process.execPath, [script, ...args], { cwd: ROOT, stdio: 'inherit' });

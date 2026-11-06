@@ -12,6 +12,7 @@ import path from 'node:path';
 import { DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, PERMISSIONS, projectConfigurePreview, projectConfigured, projectConversation, projectEffective } from '../src/policy.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 const CAPABILITIES = ['attach.after', 'prompt.receipts', 'session.history', 'session.reload', 'session.configure.live'];
 const GEN = '0123456789abcdef0123456789abcdef';
@@ -22,8 +23,9 @@ const effective = (extra = {}) => ({
 });
 
 async function world(t, { capabilities = CAPABILITIES } = {}) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-configure-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const [a, b] = ['a', 'b'].map(name => path.join(directory, name));
   for (const dir of [a, b]) await mkdir(dir, { recursive: true });
   const [ca, cb] = await Promise.all([a, b].map(dir => realpath(dir)));

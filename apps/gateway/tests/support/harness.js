@@ -7,6 +7,7 @@ import WebSocket from 'ws';
 import { AlpRpcClient, hello } from '@anhlp/alp-client/portable';
 import { connectWebSocket } from '@anhlp/alp-client/websocket';
 import { CredentialStore, createCredential, createGateway, createGatewayLogger, resolveConfig } from '../../src/index.js';
+import { teardown } from '../../../../test/support/teardown.js';
 
 export const ORIGIN = 'https://app.example';
 
@@ -21,7 +22,16 @@ export async function until(check, what = 'condition', ms = 5000) {
  * @param {{ daemon: ReturnType<typeof import('./fake-daemon.js').fakeDaemon>, credentials?: Record<string, { workspaces: string[], permissions?: string[], modes?: string[], worktreeMappings?: string[], agent?: boolean | string }>, config?: object, serveStatic?: Function }} options
  */
 export async function startGateway(t, { daemon, credentials = {}, config = {}, serveStatic }) {
+  // One ordered list, shared with the calling test through teardown(t) (t-5294.6, review finding M).
+  // This used to be three bare `t.after` hooks: one that closed the gateway and store and THEN
+  // removed the directory, and two later ones terminating a socket and closing an SDK client. Since
+  // node:test runs hooks in registration order and stops at the first that throws, a routine
+  // ENOTEMPTY in that removal stranded the socket and the client — and in a test that also used
+  // teardown(t), the defer list ran first and stranded the gateway itself. Every step now goes in
+  // setup order and is undone in reverse, so nothing in here can be skipped by an earlier failure.
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gateway-'));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const home = path.join(directory, 'gateway');
   const tokens = {};
   const ids = {};
@@ -38,8 +48,9 @@ export async function startGateway(t, { daemon, credentials = {}, config = {}, s
     config: resolveConfig({ port: 0, origins: [ORIGIN], ...config }),
     store, logger, version: 'test', openTransport: daemon.open, monitorIntervalMs: 50, ...(serveStatic ? { serveStatic } : {}),
   });
+  defer(() => store.close());
   const address = await gateway.listen();
-  t.after(async () => { await gateway.close(); store.close(); await rm(directory, { recursive: true, force: true }); });
+  defer(() => gateway.close());
   const base = address.url;
   const wsUrl = `${base.replace(/^http/, 'ws')}/v1/ws`;
 
@@ -78,7 +89,7 @@ export async function startGateway(t, { daemon, credentials = {}, config = {}, s
       socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, ...(params === undefined ? {} : { params }) }));
     });
     const closed = new Promise(resolve => socket.once('close', (code, reason) => resolve({ code, reason: reason.toString() })));
-    t.after(() => socket.terminate());
+    defer(() => socket.terminate());
     return { socket, frames, call, closed };
   }
 
@@ -87,7 +98,7 @@ export async function startGateway(t, { daemon, credentials = {}, config = {}, s
     const { body } = await ticket(tokens[label], { origin });
     const transport = await connectWebSocket(wsUrl, { protocols: body.subprotocols, createSocket: (url, protocols) => new WebSocket(url, protocols, { origin }) });
     const client = new AlpRpcClient(transport);
-    t.after(() => client.close());
+    defer(() => client.close());
     const greeting = await hello(client, { name: 'gateway-test', version: '0' });
     return { client, hello: greeting };
   }

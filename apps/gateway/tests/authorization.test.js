@@ -14,10 +14,12 @@ import { EXPOSURE, unclassified } from '../src/index.js';
 import { hostLabel, projectLibraryContent, promptImageLimits } from '../src/policy.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway, until } from './support/harness.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 async function world(t, { modes, maxFrame } = {}) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-authz-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const a = path.join(directory, 'a');
   const b = path.join(directory, 'b');
   await mkdir(a);
@@ -307,8 +309,9 @@ test('session.list pages: alpd lists the granted workspaces only, reads on past 
 });
 
 test('session.list for a grant too large to name to alpd: the whole list, searched by the gateway, never alpd\'s query', async t => {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-many-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const workspaces = [];
   for (let i = 0; i < 1030; i++) { const workspace = path.join(directory, `w${i}`); await mkdir(workspace); workspaces.push(workspace); }
   const outside = path.join(directory, 'outside');

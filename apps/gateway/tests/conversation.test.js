@@ -15,6 +15,7 @@ import { DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, PERMISSIONS, pro
 import { credentialsFile, renameWithRetry } from '../src/credentials.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway, until } from './support/harness.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 const CAPABILITIES = ['attach.after', 'prompt.receipts', 'workspace.registry', 'session.history', 'session.fork', 'session.rewind'];
 const GEN = '0123456789abcdef0123456789abcdef';
@@ -24,8 +25,9 @@ const AT = '2026-10-23T00:00:00.000Z';
 const CONVERSATION = { fork: true, rewind: true };
 
 async function world(t, { capabilities = CAPABILITIES } = {}) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-conv-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const [a, a2, b] = ['a', 'a2', 'b'].map(name => path.join(directory, name));
   for (const dir of [a, a2, b]) await mkdir(dir, { recursive: true });
   const [ca, ca2, cb] = await Promise.all([a, a2, b].map(dir => realpath(dir)));

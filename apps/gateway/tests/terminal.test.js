@@ -15,6 +15,7 @@ import { DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, PERMISSIONS, TER
 import { reissueCredential, revokeCredential } from '../src/credentials.js';
 import { fakeDaemon } from './support/fake-daemon.js';
 import { startGateway, until } from './support/harness.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 const T1 = `term_${'1'.repeat(32)}`;
 const T2 = `term_${'2'.repeat(32)}`;
@@ -22,8 +23,9 @@ const LIMITS = Object.fromEntries(['maxPerPrincipal', 'maxPerDaemon', 'maxInputB
 const info = (id = T1, extra = {}) => ({ terminalId: id, workspaceId: 'wks_a', title: 'zsh', cols: 80, rows: 24, state: 'running', attached: false, createdAt: '2026-10-23T00:00:00.000Z', lastActivityAt: '2026-10-23T00:00:00.000Z', expiresAt: '2026-10-23T08:00:00.000Z', ...extra });
 
 async function world(t, { capabilities = ['terminal', 'workspace.registry'], config } = {}) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-term-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const a = path.join(directory, 'a');
   const b = path.join(directory, 'b');
   await mkdir(a); await mkdir(b);
@@ -155,8 +157,9 @@ test('a revoked, rotated or regranted credential\'s terminals end through termin
 });
 
 test('the credential CLI says what terminal.exec grants where it is granted', async t => {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-term-cli-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const workspace = path.join(directory, 'w');
   await mkdir(workspace);
   const { execFile } = await import('node:child_process');
