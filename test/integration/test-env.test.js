@@ -67,6 +67,7 @@ test('normal runner isolates sessions and permits an unreferenced esbuild servic
   assert.ok(output.stderr.includes(`[test-file] START ${file}`));
   assert.ok(output.stderr.includes(`[test-file] PASS ${file}`));
   assert.ok(!output.stderr.includes('retained'),output.stderr);
+  assert.ok(!output.stderr.includes('HANG DUMP'),'a file that ends in time dumps nothing');
   const scratch = JSON.parse(output.stdout.match(/scratch=(\[.+\])/)?.[1] || 'null');
   assert.equal(scratch.length,3);
   for(const dir of scratch) await assert.rejects(access(dir),{code:'ENOENT'});
@@ -118,6 +119,47 @@ test('hard timeout names the leaking file, returns boundedly, retains scratch an
   for(const dir of retained) await access(dir);
   assert.equal(sentinel.exitCode,null);
   process.kill(sentinel.pid,0);
+});
+
+// t-5294.2: three macOS files hung to the deadline after one subtest failed, and the spec reporter (which
+// prints failures when a file ends) left nothing to diagnose. The fixture is that shape: a first after
+// hook that throws skips the one closing a server, the next test passes, and the file never exits.
+test('a file stopped at the deadline first dumps its subtests, failures, processes and open handles', {timeout:20000}, async t => {
+  const {mkdtemp,writeFile,rm} = await import('node:fs/promises');
+  const {tmpdir} = await import('node:os');
+  const path = await import('node:path');
+  const {execFile} = await import('node:child_process');
+  const {promisify} = await import('node:util');
+  const directory = await mkdtemp(path.join(tmpdir(),'alp-hang-dump-'));
+  let retained = [];
+  t.after(async()=>{ for(const dir of retained) await rm(dir,{recursive:true,force:true}); await rm(directory,{recursive:true,force:true}); });
+  const file = path.join(directory,'hung.test.mjs');
+  await writeFile(file, `import test from 'node:test';
+    import net from 'node:net';
+    test('leaves a server open', async t => {
+      const server = net.createServer();
+      await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+      t.after(() => { throw new Error('simulated ENOTEMPTY in the first hook'); });
+      t.after(() => new Promise(resolve => server.close(resolve)));
+    });
+    test('a later test still passes', () => {});`);
+  const runner = new URL('../../scripts/test-lib.mjs',import.meta.url).href;
+  const env = {...process.env};delete env.NODE_TEST_CONTEXT;
+  const result = await promisify(execFile)(process.execPath,['--input-type=module','-e',
+    `import {runNodeTests} from ${JSON.stringify(runner)};process.exitCode=runNodeTests([${JSON.stringify(file)}],{privateHome:true,fileTimeoutMs:2000});`],{env,timeout:15000}).catch(error=>error);
+  retained = result.stderr.match(/warning: cleanup unconfirmed; retained (.+)/)?.[1].split(', ') || [];
+  assert.equal(result.code,1,result.stderr);
+  const dump = result.stderr.slice(result.stderr.indexOf(`[test-file] HANG DUMP ${file}`));
+  assert.ok(dump.includes(`[test-file] END HANG DUMP ${file}`),result.stderr);
+  assert.ok(result.stderr.indexOf('[test-file] END HANG DUMP') < result.stderr.indexOf(`[test-file] FAIL ${file}`),'dumped before the file is stopped');
+  assert.match(dump,/subtests: 1 passed, 1 failed, 0 in flight/);
+  assert.match(dump,/not ok: leaves a server open \(\d+ ms, hookFailed\)\n\s+simulated ENOTEMPTY in the first hook/);
+  assert.match(dump,/in flight: none; every subtest finished and the file's process stayed alive/);
+  assert.match(dump,/ processes:\n  pid \d+/);
+  if (process.platform === 'win32') assert.match(dump,/open handles: not available on Windows/);
+  // The file's own process names the server it never closed.
+  else assert.match(dump,/hung\.test\.mjs\n(    .*\n)*?    tcp localEndpoint=\{[^}]*"port":\d+/);
+  assert.ok(!/environmentVariables|"PATH"/.test(dump),'no environment in the dump');
 });
 
 test('abnormal coordinator exit retains all runner scratch', {timeout:15000}, async t => {
