@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
@@ -22,17 +24,24 @@ import { teardown } from '../support/teardown.js';
 const PEER = 'claude:claude-sonnet-5';
 const REVIEWER = ['claude:claude-sonnet-5:high', 'codex:gpt-6-sol:low', 'claude:sonnet'];
 
-async function setup(t, profiles = { peer: { profiles: [`${PEER}:medium`] }, reviewer: { profiles: REVIEWER } }, { custom = false, team = 'pho' } = {}) {
+async function setup(t, profiles = { peer: { profiles: [`${PEER}:medium`] }, reviewer: { profiles: REVIEWER } }, { custom = false, team = 'pho', teamJson, settings } = {}) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-allowlist-'));
   // defer runs in reverse: the directory, registered first, goes after the runtime has shut down.
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(directory, 'project');
   const library = path.join(directory, 'home');
+  // teamJson: a team of the project's own, in .alp/teams/<team>/team.json.
+  if (teamJson) {
+    await mkdir(path.join(root, '.alp', 'teams', team), { recursive: true });
+    await writeFile(path.join(root, '.alp', 'teams', team, 'team.json'), JSON.stringify(teamJson));
+  }
   await initProject(root);
   await seedLibrary(library);
+  // settings: a function of the project root that prepares the project's settings itself (alp init, alp setup).
+  if (settings) await settings({ root, library });
   // custom: a delegation graph of the project's own, which has no team and so no model profiles.
-  await writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify(custom
+  else await writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify(custom
     ? { defaultAgent: 'main', delegation: { main: ['peer'] } }
     : { defaultAgent: 'main', workflow: { mode: team, supervisor: false }, team: { [team]: profiles } }));
   const agents = [];
@@ -164,4 +173,91 @@ test('the coordinator is told one rule: the profiles are the allowlist', async t
   assert.match(instructions, /Model profiles of your targets are the models you may pass for them; a model outside them is refused/);
   assert.doesNotMatch(instructions, /unless you pass another model/);
   assert.match(instructions, /peer: claude:claude-sonnet-5 \(effort medium\)/);
+});
+
+test('the refusal offers alp setup only where it helps: Phở or Cafe, and a Claude or Codex model', async t => {
+  const { delegate } = await setup(t);
+  // setup writes no Antigravity or ACP model, so it is not offered for one; the settings key still is.
+  const antigravity = await delegate({ agent: 'peer', model: 'antigravity:gemini-3.8-flash-high' });
+  assert.match(antigravity.error ?? '', /team\.pho\.peer\.profiles in \S+[\\/]\.alp[\\/]settings\.json/, JSON.stringify(antigravity));
+  assert.match(antigravity.error, /"antigravity:\*" for any model of that provider/);
+  assert.doesNotMatch(antigravity.error, /alp setup/);
+  // For a Codex model in Phở it is, and says it keeps lists written by hand.
+  const codex = await delegate({ agent: 'peer', model: 'codex:gpt-6-sol' });
+  assert.match(codex.error ?? '', /or run alp setup \S+ --runtime mix, which gives Phở's and Cafe's members both Claude and Codex profiles \(it keeps profiles written by hand\)\./, JSON.stringify(codex));
+});
+
+test('in a team of the project\'s own, the refusal names its settings key and never alp setup', async t => {
+  const teamJson = { label: 'Review', main: 'main', members: { main: { model: 'claude:claude-opus-5-5', thinking: 'high' }, peer: { role: 'peer', model: 'claude:claude-sonnet-5', thinking: 'medium' } }, delegation: { main: ['peer'] } };
+  const { delegate, startedOn } = await setup(t, { peer: { profiles: [`${PEER}:medium`] } }, { team: 'review', teamJson });
+  const refused = await delegate({ agent: 'peer', model: 'codex:gpt-6-sol' });
+  assert.match(refused.error ?? '', /codex:gpt-6-sol is not one of peer's model profiles in team review; pass claude:claude-sonnet-5, or omit model/, JSON.stringify(refused));
+  assert.match(refused.error, /team\.review\.peer\.profiles in \S+[\\/]\.alp[\\/]settings\.json/);
+  // alp setup writes only Phở's and Cafe's profiles, so it would not help this team.
+  assert.doesNotMatch(refused.error, /alp setup/);
+  assert.match(await startedOn(await delegate({ agent: 'peer' })), /claude-sonnet-5/);
+});
+
+test('an acp: profile starts, and the answer says its effort was not checked', async t => {
+  // acp: takes the same path as antigravity:: ALP has no effort list for it (profileEfforts returns []).
+  const { delegate, startedOn } = await setup(t, { reviewer: { profiles: ['acp:opencode/big-model', `${PEER}:high`] } });
+  const answer = await delegate({ agent: 'reviewer', model: 'acp:opencode/big-model', thinking: 'high' });
+  assert.match(answer.thinkingNote ?? '', /effort high was not checked: ALP does not know which efforts acp:opencode\/big-model takes/, JSON.stringify(answer));
+  assert.match(await startedOn(answer), /big-model/);
+  // Still an allowlist: another ACP model is refused.
+  assert.match((await delegate({ agent: 'reviewer', model: 'acp:opencode/other', thinking: 'high' })).error ?? '', /acp:opencode\/other is not one of reviewer's model profiles/);
+});
+
+const repository = fileURLToPath(new URL('../..', import.meta.url));
+/** Runs alp init or alp setup on a project, with ALP_HOME at the test's library. */
+const alp = (library, ...args) => {
+  const result = spawnSync(process.execPath, [path.join(repository, 'packages/cli/src/cli.js'), ...args], { env: { ...process.env, ALP_HOME: library }, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+};
+/** Settings as alp init writes them, in Cafe, with or without alp setup after. */
+const cafe = runtime => async ({ root, library }) => {
+  await rm(path.join(root, '.alp', 'settings.json'));
+  alp(library, 'init', root);
+  if (runtime) alp(library, 'setup', root, '--runtime', runtime);
+  const file = path.join(root, '.alp', 'settings.json');
+  const settings = JSON.parse(await readFile(file, 'utf8'));
+  await writeFile(file, JSON.stringify({ ...settings, workflow: { mode: 'cafe', supervisor: false } }));
+};
+
+test('a default Claude-only project: each configured target still starts on its model without one being passed', async t => {
+  const { agents, delegate, startedOn } = await setup(t, undefined, { team: 'cafe', settings: cafe() });
+  // lead first: one lead runs at a time, while reviewer and oracle, read-only advisors, run beside it.
+  assert.match(await startedOn(await delegate({ agent: 'lead' })), /claude-opus-5-5/);
+  await until(() => agents.at(-1).turnId, 'lead\'s turn');
+  const lead = agents.at(-1);
+  assert.match(await startedOn(await lead.call('alp_delegate', { agent: 'peer', task: 'Look', mode: 'read-only', wait: false })), /claude-opus-5-5/);
+  assert.match(await startedOn(await delegate({ agent: 'reviewer' })), /claude-opus-5-5/);
+  assert.match(await startedOn(await delegate({ agent: 'oracle', model: 'claude:claude-fable-5-1' })), /claude-fable-5-1/);
+  // And a model outside the profiles is refused with an actionable message.
+  const refused = await delegate({ agent: 'reviewer', model: 'codex:gpt-6.1-sol', thinking: 'high' });
+  assert.match(refused.error ?? '', /codex:gpt-6\.1-sol is not one of reviewer's model profiles in team cafe; pass claude:claude-opus-5-5, or omit model[\s\S]*team\.cafe\.reviewer\.profiles[\s\S]*alp setup \S+ --runtime mix/, JSON.stringify(refused));
+});
+
+test('a project set up with --runtime mix: lead, reviewer and peer start on either provider', async t => {
+  const { agents, main, delegate, startedOn } = await setup(t, undefined, { team: 'cafe', settings: cafe('mix') });
+  // main is told, per target, that it chooses model and effort for lead and reviewer; oracle keeps its lenses.
+  const instructions = main.config.developerInstructions;
+  assert.match(instructions, /For an agent with several, or with any model of a provider, you choose both for each assignment/);
+  for (const agent of ['lead', 'reviewer']) assert.match(instructions, new RegExp(`${agent}, choose a model and effort: claude:claude-opus-5-5[^;]*, usually high; codex:gpt-6\\.1-sol[^;]*, usually high`));
+  // Several profiles: the coordinator chooses, so a delegation without a model is answered with the choice.
+  assert.match((await delegate({ agent: 'lead' })).error ?? '', /lead has several model profiles: choose one/);
+  // lead on the provider main does not run on, then lead's peers on either.
+  assert.match(await startedOn(await delegate({ agent: 'lead', model: 'codex:gpt-6.1-sol', thinking: 'high', modelReason: 'test' })), /gpt-6\.1-sol/);
+  await until(() => agents.at(-1).turnId, 'lead\'s turn');
+  const lead = agents.at(-1);
+  for (const model of ['codex:gpt-6-luna', 'claude:claude-sonnet-5']) {
+    assert.match(await startedOn(await lead.call('alp_delegate', { agent: 'peer', task: 'Look', mode: 'read-only', model, thinking: 'medium', wait: false })), new RegExp(model.split(':')[1]));
+  }
+  for (const model of ['codex:gpt-6.1-sol', 'claude:claude-opus-5-5']) {
+    assert.match(await startedOn(await delegate({ agent: 'reviewer', model, thinking: 'high' })), new RegExp(model.split(':')[1].replace('.', '\\.')));
+  }
+  assert.match(await startedOn(await delegate({ agent: 'oracle', model: 'codex:gpt-6-astra' })), /gpt-6-astra/);
+  // A model outside them is still refused, naming what may be passed.
+  const refused = await delegate({ agent: 'reviewer', model: 'antigravity:gemini-3.8-flash-high', thinking: 'high' });
+  assert.match(refused.error ?? '', /is not one of reviewer's model profiles in team cafe; pass claude:claude-opus-5-5 or codex:gpt-6\.1-sol\. /, JSON.stringify(refused));
 });
