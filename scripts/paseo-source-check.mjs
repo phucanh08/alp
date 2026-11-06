@@ -114,6 +114,25 @@ async function paseoCompile(packageDirectory) {
   return { server: bundles.serverBundle?.length ?? 0, client: bundles.clientBundle?.length ?? 0 };
 }
 
+/** How a finished spawnSync failed: the start error, the signal or the exit status. */
+export function exitDescription(result) {
+  if (result.error) return `failed to start: ${result.error.message}`;
+  return result.signal ? `was killed by ${result.signal}` : `exited ${result.status}`;
+}
+
+/** The `package/package.json` inside a packed tarball, read with `tar`; a tar failure reports its own cause. */
+export function packedManifest(tarball) {
+  const args = ['-xOzf', tarball, 'package/package.json'];
+  const result = spawnSync('tar', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  const stderr = result.stderr?.trim() ? `\n${result.stderr.trim()}` : '';
+  if (result.error || result.status !== 0) throw new Error(`tar ${args.join(' ')} ${exitDescription(result)}${stderr}`);
+  try {
+    return JSON.parse(result.stdout);
+  } catch (error) {
+    throw new Error(`tar ${args.join(' ')} printed no package.json (${error.message}): ${JSON.stringify(result.stdout.slice(0, 200))}${stderr}`);
+  }
+}
+
 /** Install `plugin` as Paseo installs an npm: source, check its imports and compile it. */
 export async function checkPaseoNpmSource({ plugin, dependencies = [], work }) {
   const project = path.join(work, 'paseo-npm-source');
@@ -121,8 +140,8 @@ export async function checkPaseoNpmSource({ plugin, dependencies = [], work }) {
   writeFileSync(path.join(project, 'package.json'), `${JSON.stringify({ name: 'paseo-plugin-installation', version: '1.0.0', private: true }, null, 2)}\n`);
   const args = [...PASEO_NPM_INSTALL, '--no-audit', '--no-fund', plugin, ...dependencies];
   const result = spawnSync(...spawnCommand('npm', args), { cwd: project, encoding: 'utf8', stdio: 'inherit' });
-  if (result.status !== 0) throw new Error(`npm ${args.join(' ')} exited ${result.status}`);
-  const name = JSON.parse(spawnSync('tar', ['-xOzf', plugin, 'package/package.json'], { encoding: 'utf8' }).stdout).name;
+  if (result.status !== 0) throw new Error(`npm ${args.join(' ')} ${exitDescription(result)}`);
+  const { name } = packedManifest(plugin);
   const packageDirectory = path.join(project, 'node_modules', name);
   const manifest = JSON.parse(readFileSync(path.join(packageDirectory, 'package.json'), 'utf8'));
   // A peer that is also a dependency (ws) is installed as the dependency; only peer-only ones must be absent.
