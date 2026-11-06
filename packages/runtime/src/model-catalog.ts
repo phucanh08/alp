@@ -93,6 +93,8 @@ export class ModelCatalog {
   private acpRunning?: Promise<CatalogSnapshot>;
   private acpError?: string;
   private acpLearning = new Map<string, Set<string>>();
+  /** Cache writes under way: stop() waits for them, so whoever stopped the catalog may remove its home. */
+  private writes = new Set<Promise<void>>();
 
   /**
    * ACP providers (t-d0b0) come from `acpProviders` (the library's providers/<id>.json) without starting
@@ -116,7 +118,18 @@ export class ModelCatalog {
     const every = this.options.refreshMs ?? REFRESH_MS;
     if (every > 0) { this.timer = setInterval(() => { void this.refresh().catch(() => {}); }, every); this.timer.unref?.(); }
   }
-  stop() { if (this.timer) clearInterval(this.timer); this.timer = undefined; this.listeners.clear(); }
+  /**
+   * Stops the timer and the listeners, then waits for what already started (a background refresh, a
+   * refreshAcp a saved provider asked for, a learned model's cache write) to finish writing the cache
+   * (t-5294.2). A caller that only stops may ignore the promise; one that removes the home awaits it.
+   */
+  async stop() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+    this.listeners.clear();
+    // A refreshAcp queued behind a running one starts when it ends: wait until nothing runs.
+    while (this.running || this.acpRunning || this.writes.size) await Promise.allSettled([this.running, this.acpRunning, ...this.writes]);
+  }
 
   async load() {
     if (!this.file) return;
@@ -259,7 +272,12 @@ export class ModelCatalog {
     this.current = next;
     if (this.options.apply !== false) applyCatalog(next);
     if (save && this.file) {
-      try { await mkdir(path.dirname(this.file), { recursive: true }); await writeAtomic(this.file, JSON.stringify(this.snapshot, null, 2)); } catch { /* the cache is best effort */ }
+      const file = this.file;
+      const write = (async () => {
+        try { await mkdir(path.dirname(file), { recursive: true }); await writeAtomic(file, JSON.stringify(this.snapshot, null, 2)); } catch { /* the cache is best effort */ }
+      })();
+      this.writes.add(write);
+      try { await write; } finally { this.writes.delete(write); }
     }
     if (save) for (const listener of this.listeners) { try { listener(this.snapshot, next); } catch { /* a listener never stops the catalog */ } }
     return changed;

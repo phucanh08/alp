@@ -12,18 +12,37 @@ import { validateResult } from '@anhlp/alp-protocol/contract';
 
 const transport = () => () => ({ async initialize() {}, onNotification() {}, onFailure() {}, onRequest() {}, async close() {}, async request() { return {}; } });
 
+/**
+ * Teardown in the reverse order of setup: every step runs even when one throws, and the first failure
+ * still fails the test (t-5294.2). node:test runs t.after hooks in the order they were added and stops
+ * at the first that throws: with the directory removed first, a failed rm (ENOTEMPTY while the catalog
+ * still wrote its cache for a refreshAcp alpd fired) skipped the server and client closes, and their
+ * sockets kept the file alive until the 300 s watchdog.
+ */
+function teardown(t) {
+  const steps = [];
+  t.after(async () => {
+    const errors = [];
+    for (const step of steps.reverse()) { try { await step(); } catch (error) { errors.push(error); } }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length) throw new AggregateError(errors, 'teardown failed');
+  });
+  return step => { steps.push(step); };
+}
+
 async function setup(t, probes) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-catalog-'));
+  const defer = teardown(t);
+  defer(() => rm(directory, { recursive: true, force: true }));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
   const runtime = createAlpRuntime({ transport: transport(), libraryDir: home });
   const modelCatalog = probes ? new ModelCatalog({ home, probes, refreshMs: 0 }) : undefined;
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', home, ...(modelCatalog ? { modelCatalog } : {}) });
   await server.listen();
-  t.after(async () => { await server.close(); await runtime.shutdown(); await new ModelCatalog({ probes: {} }).refresh(); });
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(async () => { await server.close(); await runtime.shutdown(); await modelCatalog?.stop(); await new ModelCatalog({ probes: {} }).refresh(); });
   const client = await connect(daemonPaths(directory).socket, { name: 'catalog-test', version: '0' });
-  t.after(() => client.close());
+  defer(() => client.close());
   const call = async (method, params = {}) => {
     const result = await client.request(method, params);
     assert.deepEqual(validateResult(method, result), [], `${method} result: ${JSON.stringify(result)}`);
@@ -61,7 +80,8 @@ test('without a live catalog, catalog.refresh is unavailable and catalog.get ans
 // t-d0b0: ACP providers' rows come from their files; catalog.refresh and enabling a provider are the only probes.
 test('ACP rows in catalog.get without a probe; catalog.refresh and enabling a provider probe it', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-acp-catalog-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const defer = teardown(t);
+  defer(() => rm(directory, { recursive: true, force: true }));
   const home = path.join(directory, 'home');
   await mkdir(path.join(home, 'providers'), { recursive: true, mode: 0o700 });
   const { writeFile } = await import('node:fs/promises');
@@ -74,9 +94,10 @@ test('ACP rows in catalog.get without a probe; catalog.refresh and enabling a pr
   await modelCatalog.start();
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', home, modelCatalog });
   await server.listen();
-  t.after(async () => { await server.close(); await runtime.shutdown(); modelCatalog.stop(); await new ModelCatalog({ probes: {} }).refresh(); });
+  // stop() waits for the cache write of the refreshAcp alpd fires when 'later' is enabled (server.ts onProviderSaved).
+  defer(async () => { await server.close(); await runtime.shutdown(); await modelCatalog.stop(); await new ModelCatalog({ probes: {} }).refresh(); });
   const client = await connect(daemonPaths(directory).socket, { name: 'catalog-test', version: '0' });
-  t.after(() => client.close());
+  defer(() => client.close());
   const call = async (method, params = {}) => { const result = await client.request(method, params); assert.deepEqual(validateResult(method, result), [], method); return result; };
 
   const first = await call('catalog.get');

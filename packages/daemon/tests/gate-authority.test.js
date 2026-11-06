@@ -18,6 +18,24 @@ function fakeTransport() {
   });
 }
 
+/**
+ * Teardown in the reverse order of setup: every step runs even when one throws, and the first failure
+ * still fails the test (t-5294.2). node:test runs t.after hooks in the order they were added and stops
+ * at the first that throws: with the directory removed first, a failed rm (ENOTEMPTY while the runtime
+ * still scaffolded the project for a main's supervisor) skipped the server and client closes, and
+ * their sockets kept the file alive until the 300 s watchdog.
+ */
+function teardown(t) {
+  const steps = [];
+  t.after(async () => {
+    const errors = [];
+    for (const step of steps.reverse()) { try { await step(); } catch (error) { errors.push(error); } }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length) throw new AggregateError(errors, 'teardown failed');
+  });
+  return step => { steps.push(step); };
+}
+
 async function connectAs(socket, agent) {
   const saved = process.env.ALP_AGENT_SESSION;
   if (agent) process.env.ALP_AGENT_SESSION = '1'; else delete process.env.ALP_AGENT_SESSION;
@@ -27,10 +45,11 @@ async function connectAs(socket, agent) {
 
 test('an agent connection cannot clear a human gate or answer a question; the user can', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-gate-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const defer = teardown(t);
+  defer(() => rm(directory, { recursive: true, force: true }));
   const savedHome = process.env.ALP_HOME;
   process.env.ALP_HOME = path.join(directory, 'alp-home');
-  t.after(() => { if (savedHome === undefined) delete process.env.ALP_HOME; else process.env.ALP_HOME = savedHome; });
+  defer(() => { if (savedHome === undefined) delete process.env.ALP_HOME; else process.env.ALP_HOME = savedHome; });
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
   const project = path.join(directory, 'project');
@@ -38,14 +57,14 @@ test('an agent connection cannot clear a human gate or answer a question; the us
   const runtime = createAlpRuntime({ transport: fakeTransport(), libraryDir: home });
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', home });
   await server.listen();
-  t.after(async () => { await server.close(); await runtime.shutdown(); });
+  defer(async () => { await server.close(); await runtime.shutdown(); });
 
   const task = await createTask(project, { title: 'Release' }, 'main');
   await addGate(project, task.id, { kind: 'human', note: 'Ship it?' }, 'main');
   await addGate(project, task.id, { kind: 'timer', until: '+3d' }, 'main');
 
   const agent = await connectAs(daemonPaths(directory).socket, true);
-  t.after(() => agent.close());
+  defer(() => agent.close());
   const refused = error => { assert.equal(error.code, 1003, error.message + JSON.stringify(error.data)); assert.equal(error.data?.reason, 'user_only'); return true; };
   await assert.rejects(agent.request('task.gate.resolve', { projectRoot: project, id: task.id, gate: 'g1' }), refused);
   await assert.rejects(agent.request('task.gate.resolve', { projectRoot: project, id: task.id, gate: 'g1', reject: true, note: 'no' }), refused);
@@ -62,7 +81,7 @@ test('an agent connection cannot clear a human gate or answer a question; the us
   assert.ok(!(await loadTasks(project)).tasks[0].gates[0].resolved);
 
   const user = await connectAs(daemonPaths(directory).socket, false);
-  t.after(() => user.close());
+  defer(() => user.close());
   await user.request('task.gate.resolve', { projectRoot: project, id: task.id, gate: 'g1', note: 'OK' });
   const gate = (await loadTasks(project)).tasks[0].gates[0];
   assert.deepEqual([gate.resolved.by, gate.resolved.channel], ['user', 'web']);
@@ -72,10 +91,11 @@ test('an agent connection cannot clear a human gate or answer a question; the us
 
 test('an agent connection cannot close a task with an open human gate; the user closes it, overriding the gate (t-f438)', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-close-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const defer = teardown(t);
+  defer(() => rm(directory, { recursive: true, force: true }));
   const savedHome = process.env.ALP_HOME;
   process.env.ALP_HOME = path.join(directory, 'alp-home');
-  t.after(() => { if (savedHome === undefined) delete process.env.ALP_HOME; else process.env.ALP_HOME = savedHome; });
+  defer(() => { if (savedHome === undefined) delete process.env.ALP_HOME; else process.env.ALP_HOME = savedHome; });
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
   const project = path.join(directory, 'project');
@@ -83,17 +103,17 @@ test('an agent connection cannot close a task with an open human gate; the user 
   const runtime = createAlpRuntime({ transport: fakeTransport(), libraryDir: home });
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', home });
   await server.listen();
-  t.after(async () => { await server.close(); await runtime.shutdown(); });
+  defer(async () => { await server.close(); await runtime.shutdown(); });
 
   const task = await createTask(project, { title: 'Release' }, 'main');
   await addGate(project, task.id, { kind: 'human', note: 'Ship it?' }, 'main');
   const agent = await connectAs(daemonPaths(directory).socket, true);
-  t.after(() => agent.close());
+  defer(() => agent.close());
   await assert.rejects(agent.request('task.update', { projectRoot: project, id: task.id, action: 'close' }), error => error.code === 1003 && error.data?.reason === 'user_only');
   assert.equal((await loadTasks(project)).tasks[0].status, 'open');
 
   const user = await connectAs(daemonPaths(directory).socket, false);
-  t.after(() => user.close());
+  defer(() => user.close());
   await user.request('task.update', { projectRoot: project, id: task.id, action: 'close' });
   const closed = (await loadTasks(project)).tasks[0];
   assert.equal(closed.status, 'closed');
@@ -102,10 +122,11 @@ test('an agent connection cannot close a task with an open human gate; the user 
 
 test('session.create from an agent connection drops spec.restore; the owner\'s reaches the runtime', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-restore-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const defer = teardown(t);
+  defer(() => rm(directory, { recursive: true, force: true }));
   const savedHome = process.env.ALP_HOME;
   process.env.ALP_HOME = path.join(directory, 'alp-home');
-  t.after(() => { if (savedHome === undefined) delete process.env.ALP_HOME; else process.env.ALP_HOME = savedHome; });
+  defer(() => { if (savedHome === undefined) delete process.env.ALP_HOME; else process.env.ALP_HOME = savedHome; });
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
   const project = path.join(directory, 'project');
@@ -120,18 +141,18 @@ test('session.create from an agent connection drops spec.restore; the owner\'s r
   }) });
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', home });
   await server.listen();
-  t.after(async () => { await server.close(); await runtime.shutdown(); });
+  defer(async () => { await server.close(); await runtime.shutdown(); });
   const restore = { agent: 'main', threadId: 'thread-of-the-owner' };
 
   const agent = await connectAs(daemonPaths(directory).socket, true);
-  t.after(() => agent.close());
+  defer(() => agent.close());
   const made = await agent.request('session.create', { sessionId: 'ses_agent', spec: { cwd: project, persist: true, restore } });
   // The agent's root starts a conversation of its own: the named thread is never opened for it.
   assert.deepEqual(threads, [{ method: 'thread/start', threadId: undefined }]);
   assert.equal(made.session.threadId, 'thread-new');
 
   const user = await connectAs(daemonPaths(directory).socket, false);
-  t.after(() => user.close());
+  defer(() => user.close());
   const resumed = await user.request('session.create', { sessionId: 'ses_owner', spec: { cwd: project, persist: true, restore } });
   assert.deepEqual(threads.at(-1), { method: 'thread/resume', threadId: 'thread-of-the-owner' });
   assert.equal(resumed.session.threadId, 'thread-of-the-owner');
@@ -139,7 +160,8 @@ test('session.create from an agent connection drops spec.restore; the owner\'s r
 
 test('a hello that names an agent (principal.agent, t-1c59) marks the connection; a malformed name is refused unmarked', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-gate-name-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const defer = teardown(t);
+  defer(() => rm(directory, { recursive: true, force: true }));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
   const project = path.join(directory, 'project');
@@ -147,18 +169,18 @@ test('a hello that names an agent (principal.agent, t-1c59) marks the connection
   const runtime = createAlpRuntime({ transport: fakeTransport(), libraryDir: home });
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', home });
   await server.listen();
-  t.after(async () => { await server.close(); await runtime.shutdown(); });
+  defer(async () => { await server.close(); await runtime.shutdown(); });
   const task = await createTask(project, { title: 'Release' }, 'main');
   await addGate(project, task.id, { kind: 'human', note: 'Ship it?' }, 'main');
   const refused = error => error.code === 1003 && error.data?.reason === 'user_only';
 
   const bad = await connectAs(daemonPaths(directory).socket, false);
-  t.after(() => bad.close());
+  defer(() => bad.close());
   for (const name of ['Bad', '', 7, 'a-']) {
     await assert.rejects(bad.request('daemon.hello', { protocolVersion: 1, principal: { agent: name } }), error => error.code === -32602, JSON.stringify(name));
   }
   const named = await connectAs(daemonPaths(directory).socket, false);
-  t.after(() => named.close());
+  defer(() => named.close());
   await named.request('daemon.hello', { protocolVersion: 1, principal: { agent: 'reviewer' } });
   await assert.rejects(named.request('task.gate.resolve', { projectRoot: project, id: task.id, gate: 'g1' }), refused);
   // A later hello with no name, or another, never sheds the mark.
