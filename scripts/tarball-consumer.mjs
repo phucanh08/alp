@@ -33,7 +33,8 @@ const typescript = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
 function run(command, args, options = {}) {
   const result = spawnSync(...spawnCommand(command, args), { cwd: options.cwd ?? root, encoding: 'utf8', stdio: options.capture ? 'pipe' : 'inherit', maxBuffer: 128 * 1024 * 1024 });
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
-  if (options.allowFailure) return { status: result.status, output };
+  // A start error or signal leaves status null: callers must not read that as a command's own failure.
+  if (options.allowFailure) return { status: result.status, output, failure: exitDescription(result) };
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} ${exitDescription(result)}${output ? `\n${output}` : ''}`);
   return output;
 }
@@ -68,13 +69,14 @@ function installProject(directory, specs) {
 
 function typecheck(directory, tsconfig, { expectFailure = false, mustMention } = {}) {
   writeJson(path.join(directory, 'tsconfig.json'), tsconfig);
-  const { status, output } = run(process.execPath, [typescript, '-p', path.join(directory, 'tsconfig.json')], { cwd: directory, capture: true, allowFailure: true });
+  const { status, output, failure } = run(process.execPath, [typescript, '-p', path.join(directory, 'tsconfig.json')], { cwd: directory, capture: true, allowFailure: true });
+  if (status === null) throw new Error(`tsc for ${tsconfig.files.join(', ')} ${failure}${output ? `\n${output}` : ''}`);
   if (expectFailure) {
     if (status === 0) throw new Error(`expected a type error for ${tsconfig.files.join(', ')} but tsc passed`);
     if (mustMention && !output.includes(mustMention)) throw new Error(`expected tsc to report ${mustMention}\n${output}`);
     return output;
   }
-  if (status !== 0) throw new Error(`typecheck failed for ${tsconfig.files.join(', ')}\n${output}`);
+  if (status !== 0) throw new Error(`typecheck failed for ${tsconfig.files.join(', ')} (tsc ${failure})\n${output}`);
   return output;
 }
 
@@ -176,7 +178,7 @@ console.log('plugin runtime imports ok');
   const shipped = readdirSync(path.join(pluginDir, 'node_modules/@anhlp/alp-paseo'), { recursive: true }).filter(file => /\.d\.[cm]?ts$/.test(file) && !file.split(path.sep).includes('node_modules'));
   if (shipped.length) throw new Error(`@anhlp/alp-paseo must not ship declarations (#111), found: ${shipped.join(', ')}`);
   const missing = run(process.execPath, ['--input-type=module', '-e', "await import('@anhlp/alp-paseo/paseo/does-not-exist')"], { cwd: pluginDir, capture: true, allowFailure: true });
-  if (missing.status === 0 || !missing.output.includes('ERR_MODULE_NOT_FOUND')) throw new Error(`an unknown ./paseo/* subpath must not import\n${missing.output}`);
+  if (missing.status === 0 || !missing.output.includes('ERR_MODULE_NOT_FOUND')) throw new Error(`an unknown ./paseo/* subpath must not import (node ${missing.failure})\n${missing.output}`);
   console.log('plugin consumer ok (isolated, real SDK, no declarations)');
 
   // Run the existing behavioral regressions against installed public APIs, not workspace links.
