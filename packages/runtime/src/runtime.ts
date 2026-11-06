@@ -3462,10 +3462,14 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       // Actionable in one step: what may be passed now, and where the user widens the list.
       const team = session.mapping.workflow.mode;
       const settingsFile = path.join(session.mapping.agent.projectRoot, '.alp', 'settings.json');
-      const setup = ['pho', 'cafe'].includes(team) ? `, or run alp setup ${session.mapping.agent.projectRoot} --runtime mix, which rewrites Phở's and Cafe's profiles with both providers` : '';
+      // alp setup writes only Phở's and Cafe's profiles, and only Claude and Codex models: offer it where it can help.
+      const provider = args.model.slice(0, args.model.indexOf(':'));
+      const setup = ['pho', 'cafe'].includes(team) && ['claude', 'codex'].includes(provider)
+        ? `, or run alp setup ${session.mapping.agent.projectRoot} --runtime mix, which gives Phở's and Cafe's members both Claude and Codex profiles (it keeps profiles written by hand)`
+        : '';
       return toolResult(false, {
         error: `${args.model} is not one of ${args.agent}'s model profiles in team ${team}; pass ${allowed}${choosing ? '' : ', or omit model to run on it'}. ` +
-          `The user can allow it by adding it to team.${team}.${args.agent}.profiles in ${settingsFile} ("provider:model" or "provider:model:effort", or "${args.model.slice(0, args.model.indexOf(':'))}:*" for any model of that provider, which makes you choose model and effort per assignment)${setup}.`,
+          `The user can allow it by adding it to team.${team}.${args.agent}.profiles in ${settingsFile} ("provider:model" or "provider:model:effort", or "${provider}:*" for any model of that provider, which makes you choose model and effort per assignment)${setup}.`,
         models: listed,
       });
     }
