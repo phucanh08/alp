@@ -14,12 +14,10 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnCommand } from './spawn-command.mjs';
+import { exitDescription, spawnCommand } from './spawn-command.mjs';
 import { installedProblems, shippedWebProblems, verifyRelease } from './release-lib.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
-// The error, signal or exit status of a finished spawnSync (its output went to this terminal).
-const exitDescription = result => result.error ? `could not run to completion: ${result.error.message}` : result.signal ? `was killed by ${result.signal}` : `exited ${result.status}`;
 const args = process.argv.slice(2);
 const flag = name => { const index = args.indexOf(name); if (index >= 0) args.splice(index, 1); return index >= 0; };
 const rehearsal = flag('--rehearsal');

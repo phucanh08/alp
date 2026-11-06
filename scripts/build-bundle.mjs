@@ -21,6 +21,7 @@ import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } fro
 import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { spawnCommand } from './spawn-command.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 export const PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64', 'windows-x64'];
@@ -67,8 +68,6 @@ function run(command, args, options = {}) {
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed (${result.status ?? result.error})`);
   return result.stdout;
 }
-
-const systemTar = () => process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
 
 /** Downloads (or reuses from `cache`) the pinned Node archive for `platform` and checks its sha256. */
 export async function nodeArchive(platform, cache) {
@@ -192,7 +191,7 @@ export async function buildBundle({ platform, out, build = true, nodeCache = pat
     const node = await nodeArchive(platform, nodeCache);
     const unpacked = path.join(work, 'node');
     await mkdir(unpacked);
-    run(systemTar(), [windows ? '-xf' : '-xzf', node.file, '-C', unpacked]);
+    run(...spawnCommand('tar', [windows ? '-xf' : '-xzf', node.file, '-C', unpacked]));
     await mkdir(path.join(directory, windows ? 'node' : 'node/bin'), { recursive: true });
     const exe = windows ? 'node.exe' : 'bin/node';
     await copyFile(path.join(unpacked, node.name, exe), path.join(directory, 'node', exe));

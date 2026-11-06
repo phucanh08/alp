@@ -20,7 +20,7 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { spawnCommand } from './spawn-command.mjs';
+import { exitDescription, spawnCommand } from './spawn-command.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const PLUGIN_DIR = path.join(ROOT, 'integrations/paseo');
@@ -35,10 +35,11 @@ const pkg = readJson(path.join(PLUGIN_DIR, 'package.json'));
 const manifest = readJson(path.join(PLUGIN_DIR, 'paseo-plugin.json'));
 const problems = [];
 
+/** Runs `command` as spawnCommand starts it: npm/npx through Node and tar as the system's bsdtar on Windows. */
 function run(command, commandArgs, options = {}) {
   const result = spawnSync(...spawnCommand(command, commandArgs), { encoding: 'utf8', ...options });
-  if (result.status !== 0) {
-    throw new Error(`${command} ${commandArgs.join(' ')} exited ${result.status}\n${result.stdout ?? ''}${result.stderr ?? ''}`);
+  if (result.error || result.status !== 0) {
+    throw new Error(`${command} ${commandArgs.join(' ')} ${exitDescription(result)}\n${result.stdout ?? ''}${result.stderr ?? ''}`);
   }
   return result.stdout;
 }
@@ -134,7 +135,8 @@ async function checkLatest() {
     mkdirSync(host);
     writeFileSync(path.join(host, 'package.json'), JSON.stringify({ name: 'alp-paseo-compat-host', private: true }));
     run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--omit=peer', `@getpaseo/protocol@${versions['@getpaseo/protocol']}`], { cwd: host });
-    run('tar', ['xzf', files[0], '-C', work, 'package/paseo-plugin.json']);
+    // Through spawnCommand: on Windows Git Bash's GNU tar would read the tarball's `D:\…` path as a remote host.
+    run('tar', ['-xzf', files[0], '-C', work, 'package/paseo-plugin.json']);
     const packedManifest = readJson(path.join(work, 'package/paseo-plugin.json'));
     const latestHost = await hostCheck(path.join(host, 'node_modules/@getpaseo/protocol'));
     try {

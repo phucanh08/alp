@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto';
 import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { spawnCommand } from './spawn-command.mjs';
 
 const PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64', 'windows-x64'];
 
@@ -34,9 +35,8 @@ export async function pack({ bundle, out }) {
   const archive = path.resolve(out, `${name}${windows ? '.zip' : '.tar.gz'}`);
   // bsdtar (Windows' tar.exe, macOS) writes a zip with --format zip; GNU tar cannot.
   const args = windows ? ['--format', 'zip', '-cf', archive, '-C', path.dirname(bundle), name] : ['-czf', archive, '-C', path.dirname(bundle), name];
-  // On Windows, Git's GNU tar may come first on PATH; use the system's bsdtar.
-  const tar = process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
-  const result = spawnSync(tar, args, { stdio: 'inherit', env: { ...process.env, COPYFILE_DISABLE: '1' } });
+  // spawnCommand runs the system's bsdtar on Windows, where Git's GNU tar may come first on PATH.
+  const result = spawnSync(...spawnCommand('tar', args), { stdio: 'inherit', env: { ...process.env, COPYFILE_DISABLE: '1' } });
   if (result.status !== 0) throw new Error(`tar failed (${result.status ?? result.error})`);
   return archive;
 }
