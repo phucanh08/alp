@@ -22,7 +22,7 @@ import { teardown } from '../support/teardown.js';
 const PEER = 'claude:claude-sonnet-5';
 const REVIEWER = ['claude:claude-sonnet-5:high', 'codex:gpt-6-sol:low', 'claude:sonnet'];
 
-async function setup(t, pho = { peer: { profiles: [`${PEER}:medium`] }, reviewer: { profiles: REVIEWER } }, { custom = false } = {}) {
+async function setup(t, profiles = { peer: { profiles: [`${PEER}:medium`] }, reviewer: { profiles: REVIEWER } }, { custom = false, team = 'pho' } = {}) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-allowlist-'));
   // defer runs in reverse: the directory, registered first, goes after the runtime has shut down.
@@ -34,11 +34,11 @@ async function setup(t, pho = { peer: { profiles: [`${PEER}:medium`] }, reviewer
   // custom: a delegation graph of the project's own, which has no team and so no model profiles.
   await writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify(custom
     ? { defaultAgent: 'main', delegation: { main: ['peer'] } }
-    : { defaultAgent: 'main', workflow: { mode: 'pho', supervisor: false }, team: { pho } }));
+    : { defaultAgent: 'main', workflow: { mode: team, supervisor: false }, team: { [team]: profiles } }));
   const agents = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(agents), supervisor: false, libraryDir: library, runLogDir: path.join(directory, 'runs') });
   defer(() => runtime.shutdown());
-  await runtime.open('root', { cwd: root, ...(custom ? {} : { workflow: 'pho' }) });
+  await runtime.open('root', { cwd: root, ...(custom ? {} : { workflow: team }) });
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Go' }] });
   const main = agents[0];
   /** Delegates read-only (so assignments never wait on the shared checkout's one writer) and returns the answer. */
@@ -72,6 +72,21 @@ test('one named profile is the only model a target takes; a wrong one is refused
   // Its effort is checked against the model's, as it already was for a choice among several.
   const effort = await delegate({ agent: 'peer', model: PEER, thinking: 'ludicrous' });
   assert.match(effort.error ?? '', /claude:claude-sonnet-5 takes effort .*high/, JSON.stringify(effort));
+});
+
+test('in Cafe, main to lead and lead to peer follow the same allowlist', async t => {
+  const { agents, delegate, startedOn } = await setup(t, { lead: { profiles: [`${PEER}:medium`] }, peer: { profiles: ['codex:gpt-6-sol:low'] } }, { team: 'cafe' });
+  // main → lead: a wrong model is refused naming Cafe, lead and its profile; its own starts.
+  const refused = await delegate({ agent: 'lead', model: 'codex:gpt-6-sol' });
+  assert.match(refused.error ?? '', /codex:gpt-6-sol is not one of lead's model profiles in team cafe; pass claude:claude-sonnet-5, or omit model[\s\S]*team\.cafe\.lead\.profiles/, JSON.stringify(refused));
+  const started = await delegate({ agent: 'lead' });
+  assert.match(await startedOn(started), /claude-sonnet-5/);
+  // lead → peer, from lead's own session.
+  await until(() => agents.at(-1).turnId, 'lead\'s turn');
+  const lead = agents.at(-1);
+  const wrong = await lead.call('alp_delegate', { agent: 'peer', task: 'Look', mode: 'read-only', model: 'claude:claude-opus-5-5', wait: false });
+  assert.match(wrong.error ?? '', /claude:claude-opus-5-5 is not one of peer's model profiles in team cafe; pass codex:gpt-6-sol/, JSON.stringify(wrong));
+  assert.match(await startedOn(await lead.call('alp_delegate', { agent: 'peer', task: 'Look', mode: 'read-only', wait: false })), /gpt-6-sol/);
 });
 
 test('several profiles and oracle refuse and accept as before', async t => {
