@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { teardown } from '../support/teardown.js';
-import { ALLOWED, teardownProblems } from '../../scripts/check-teardown-order.mjs';
+import { ALLOWED, scan, teardownProblems } from '../../scripts/check-teardown-order.mjs';
 
 const HELPER = new URL('../support/teardown.js', import.meta.url).href;
 const RUNNER = new URL('../../scripts/test-lib.mjs', import.meta.url).href;
@@ -194,4 +194,21 @@ test('one', async t => {
     assert.match(site, /^[\w./-]+\.test\.js:\d+$/, site);
     assert.ok(typeof reason === 'string' && reason.length > 20, `${site} needs a reason, got ${JSON.stringify(reason)}`);
   }
+});
+
+// The other half of the allowlist contract. An excused site is a defect someone else is fixing on
+// another branch, so the entry has a lifetime: the moment that branch lands (or the line simply
+// moves), the entry stops matching anything and would silently excuse nothing while still reading
+// like an open defect. Then this fails and the entry has to go. Without this, the list is exactly
+// the "agreed baseline of known failures" that let the original 54 sites survive 22 of them being
+// written down in a task.
+test('no allowlist entry is stale: each one still names a site the scan reports', async () => {
+  const everything = await scan({ allowed: {} });
+  const sites = new Set(everything.map(problem => problem.site));
+  const stale = Object.keys(ALLOWED).filter(site => !sites.has(site));
+  assert.deepEqual(stale, [], `allowlisted in scripts/check-teardown-order.mjs but no longer reported: ${stale.join(', ')}. The site was fixed or its line moved — delete the entry (or re-point it) instead of leaving it to excuse nothing.`);
+  // And the allowlist is the only thing standing between the scan and a clean build, so the default
+  // scan must be empty: a real new defect cannot hide behind the excused ones.
+  const open = await scan();
+  assert.deepEqual(open.map(problem => problem.detail), [], 'scripts/check-teardown-order.mjs reports a teardown-order defect that is not allowlisted');
 });

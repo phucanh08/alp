@@ -8,12 +8,14 @@ import { fileURLToPath } from 'node:url';
 import { initProject } from '../../packages/core/src/init.js';
 import { addAllowRule, commandDecision, parseRule, profileFor, simpleCommands, unwrapShell, validatePermissions } from '../../packages/core/src/permissions.js';
 import { claudePermissions, createAlpRuntime, createCopy, reclaimCopies, removeCopy, resolveSession } from '../../dist/runtime/index.js';
+import { teardown } from '../support/teardown.js';
 
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
 
 async function project(t, permissions, userPermissions) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-permissions-'));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(directory, 'project');
   const home = path.join(directory, 'home');
   await initProject(root);
@@ -100,13 +102,14 @@ test('Claude enforces allow and deny rules itself', () => {
 });
 
 test('Codex asks ALP before leaving its sandbox, and ALP answers by the profile', async t => {
+  const defer = teardown(t);
   const { directory, root, home } = await project(t, {
     profiles: { review: { base: 'read-only', allow: ['Bash(npm test:*)'], deny: ['Bash(rm:*)'] }, lead: { deny: ['Bash(git push:*)'] }, builder: { base: 'workspace-write' } },
     agents: { reviewer: 'review', main: 'lead', peer: 'builder' },
   });
   const runtimes = [];
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: home, runLogDir: path.join(directory, 'runs') });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, model: 'codex:gpt-6.1-sol' });
   await until(() => runtimes.length === 2);
   const [main] = runtimes;
@@ -157,10 +160,11 @@ test('Codex asks ALP before leaving its sandbox, and ALP answers by the profile'
 });
 
 test('without permission settings Codex never asks, as before', async t => {
+  const defer = teardown(t);
   const { directory, root, home } = await project(t);
   const runtimes = [];
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: home, runLogDir: path.join(directory, 'runs') });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, model: 'codex:gpt-6.1-sol' });
   await until(() => runtimes.length === 2);
   const [main, supervisor] = runtimes;
@@ -174,10 +178,11 @@ test('without permission settings Codex never asks, as before', async t => {
 });
 
 test('a Claude session carries its profile to the transport', async t => {
+  const defer = teardown(t);
   const { directory, root, home } = await project(t, { profiles: { review: { base: 'read-only', allow: ['Bash(npm test:*)'] } }, agents: { reviewer: 'review' } });
   const runtimes = [];
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: home, runLogDir: path.join(directory, 'runs') });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root });
   await until(() => runtimes.length === 2);
   const [main, supervisor] = runtimes;
@@ -211,13 +216,14 @@ test('Claude asks ALP for ask rules and for what a read-only mode refuses', asyn
 });
 
 test('the user answers permission questions; always allow writes the rule and stops asking', async t => {
+  const defer = teardown(t);
   const { directory, root, home } = await project(t, {
     profiles: { review: { base: 'read-only', ask: ['Bash(git push *)'], beyondMode: 'ask' } },
     agents: { reviewer: 'review' },
   });
   const runtimes = [];
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: home, runLogDir: path.join(directory, 'runs') });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, model: 'codex:gpt-6.1-sol' });
   await until(() => runtimes.length === 2);
   const [main] = runtimes;
@@ -284,10 +290,11 @@ test('the user answers permission questions; always allow writes the rule and st
 
 // #116: the user writing in the chat ends main's own alp_ask, never a permission prompt.
 test('a permission prompt keeps waiting for the user\'s decision when the user writes in the chat', async t => {
+  const defer = teardown(t);
   const { directory, root, home } = await project(t, { profiles: { guard: { ask: ['Bash(git push *)'] } }, agents: { main: 'guard' } });
   const runtimes = [];
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: home, runLogDir: path.join(directory, 'runs') });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, model: 'codex:gpt-6.1-sol' });
   await until(() => runtimes.length === 2);
   const [main] = runtimes;
@@ -303,13 +310,14 @@ test('a permission prompt keeps waiting for the user\'s decision when the user w
 });
 
 test('by default ALP asks permission questions in Vietnamese and takes Vietnamese answers (ALPD §54)', async t => {
+  const defer = teardown(t);
   const { directory, root, home } = await project(t, {
     profiles: { review: { base: 'read-only', ask: ['Bash(git push *)'], beyondMode: 'ask' } },
     agents: { reviewer: 'review' },
   });
   const runtimes = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), libraryDir: home, runLogDir: path.join(directory, 'runs') });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, model: 'codex:gpt-6.1-sol' });
   await until(() => runtimes.length === 2);
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Review' }] });
@@ -481,14 +489,15 @@ test('a review copy has the requester\'s state, links node_modules, and leaves t
 });
 
 test('an assignment with workdir copy writes, builds and tests in its copy, which goes when it ends', async t => {
+  const defer = teardown(t);
   const { directory, root, home } = await project(t, { profiles: { review: { base: 'read-only', workdir: 'copy', allow: ['Bash(npm test *)'] } }, agents: { reviewer: 'review' } });
   git(root, 'init', '-q'); git(root, 'config', 'core.autocrlf', 'false'); git(root, 'add', '-A'); git(root, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'init');
   const previous = process.env.ALP_CLAUDE_SANDBOX;
   process.env.ALP_CLAUDE_SANDBOX = '1';
-  t.after(() => { if (previous === undefined) delete process.env.ALP_CLAUDE_SANDBOX; else process.env.ALP_CLAUDE_SANDBOX = previous; });
+  defer(() => { if (previous === undefined) delete process.env.ALP_CLAUDE_SANDBOX; else process.env.ALP_CLAUDE_SANDBOX = previous; });
   const runtimes = [];
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: home, runLogDir: path.join(directory, 'runs'), copyDir: path.join(directory, 'copies') });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, model: 'codex:gpt-6.1-sol' });
   await until(() => runtimes.length === 2);
   const [main] = runtimes;
@@ -538,13 +547,14 @@ test('an assignment with workdir copy writes, builds and tests in its copy, whic
 });
 
 test('advisors on Claude run Bash in a read-only floor by default', async t => {
+  const defer = teardown(t);
   const { directory, root, home } = await project(t);
   const previous = process.env.ALP_CLAUDE_SANDBOX;
   process.env.ALP_CLAUDE_SANDBOX = '1';
-  t.after(() => { if (previous === undefined) delete process.env.ALP_CLAUDE_SANDBOX; else process.env.ALP_CLAUDE_SANDBOX = previous; });
+  defer(() => { if (previous === undefined) delete process.env.ALP_CLAUDE_SANDBOX; else process.env.ALP_CLAUDE_SANDBOX = previous; });
   const runtimes = [];
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: home, runLogDir: path.join(directory, 'runs') });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root });
   await until(() => runtimes.length === 2);
   const [main, supervisor] = runtimes;
@@ -556,14 +566,15 @@ test('advisors on Claude run Bash in a read-only floor by default', async t => {
 
 
 test('read-only Claude lead and peers get the same inspection sandbox regardless of profile', async t => {
+  const defer = teardown(t);
   const { directory, root, home } = await project(t, { agents: { lead: 'workspace-write' } });
   const previous = process.env.ALP_CLAUDE_SANDBOX;
   process.env.ALP_CLAUDE_SANDBOX = '1';
-  t.after(() => { if (previous === undefined) delete process.env.ALP_CLAUDE_SANDBOX; else process.env.ALP_CLAUDE_SANDBOX = previous; });
+  defer(() => { if (previous === undefined) delete process.env.ALP_CLAUDE_SANDBOX; else process.env.ALP_CLAUDE_SANDBOX = previous; });
   await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ workflow: { mode: 'cafe', supervisor: false }, permissions: { agents: { lead: 'workspace-write' } } }));
   const runtimes = [];
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: home, runLogDir: path.join(directory, 'runs') });
-  t.after(() => runtime.shutdown());
+  defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, model: 'claude:claude-sonnet-4-6' });
   const main = runtimes[0];
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Assess security' }] });
