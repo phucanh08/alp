@@ -4,6 +4,11 @@
 //
 //   node check-boundaries.mjs [--root DIR] [--contract FILE] [--base GIT-REF [--approved-by NAME]] [--json]
 //
+// Its help, usage and error strings stay ENGLISH on purpose (t-d11c item 3, decided by the user
+// 2026-11-06), even though the documentation around it is Vietnamese: this output is what the
+// Blueprint house rules tell a peer to attach to a handoff, so a project's CI may match on it.
+// Translating it would be a behaviour change for user projects, not a documentation fix.
+//
 // Exit 0: no violations. Exit 1: violations (each printed as file:line), or with --base a change to
 // the contract that loosens it (an added exception, a wider allow list, a removed denied package, a
 // new ignore, a changed module) not acknowledged with --approved-by. Exit 2: the contract or the

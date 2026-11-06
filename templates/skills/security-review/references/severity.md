@@ -1,5 +1,9 @@
 # Khung mức nghiêm trọng và mẫu báo cáo
 
+Khung báo cáo dưới đây giữ nhãn tiếng ANH có chủ ý (t-d11c mục 3, người dùng quyết định
+2026-11-06): đó là hình dạng một artifact mà tooling khác đọc. Phần nội dung viết bằng ngôn ngữ
+của project.
+
 Đọc khi xếp mức các phát hiện và viết báo cáo review bảo mật.
 
 ## Xếp mức

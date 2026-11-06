@@ -15,6 +15,10 @@ Skill thư viện sống trong `skills/<name>/` của thư viện người dùng
 trong `.alp/skills/<name>/`, và nó thay thế skill thư viện cùng tên trong project đó.
 
 ## Frontmatter
+
+Ví dụ dưới đây để tiếng ANH có chủ ý (t-d11c mục 3, người dùng quyết định 2026-11-06): nó minh họa
+định dạng frontmatter, không phải câu chữ nên viết. `description` của skill thật viết bằng ngôn ngữ
+của người dùng.
 ```
 ---
 name: release-notes
