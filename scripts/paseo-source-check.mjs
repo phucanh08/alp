@@ -15,8 +15,9 @@
 //      installed beside it, and
 //   2. runs Paseo's own compiler (from the pinned checkout scripts/paseo-checkout.mjs makes) on
 //      the installed plugin's server and client entries, which also follows the declarations of
-//      installed dependencies. Without that checkout it is skipped, unless
-//      ALP_REQUIRE_PASEO_COMPILER=1 (validate:packages sets it after making the checkout).
+//      installed dependencies. Without that checkout it is skipped, loudly (a GitHub Actions warning
+//      in CI), unless ALP_REQUIRE_PASEO_COMPILER=1, which makes a missing checkout an error:
+//      validate:packages and release-acceptance.yml set it after making the checkout.
 // The scan in 1 resolves imports as Paseo's compiler-imports.ts does, but only the plugin's own
 // files: it is a fast, readable pre-check; the compile in 2 is the authoritative one. The compiler
 // is bundled against this repository's esbuild and typescript, not Paseo's pinned versions.
@@ -88,11 +89,13 @@ export function unresolvedTypeScriptImports(project, packageDirectory) {
 }
 
 /** Compile the installed plugin with Paseo's own compiler, as `paseo plugin add` does. */
-async function paseoCompile(packageDirectory) {
+export async function paseoCompile(packageDirectory) {
   const compiler = path.join(PASEO_SOURCE, PASEO_COMPILER);
   if (!existsSync(compiler)) {
     if (process.env.ALP_REQUIRE_PASEO_COMPILER === '1') throw new Error(`Paseo's plugin compiler is missing at ${compiler}; run scripts/paseo-checkout.mjs first`);
-    return { skipped: `no Paseo checkout at ${PASEO_SOURCE}` };
+    const skipped = `no Paseo checkout at ${PASEO_SOURCE}; #111's compile half was NOT checked (run scripts/paseo-checkout.mjs, or set ALP_REQUIRE_PASEO_COMPILER=1 to require it)`;
+    if (process.env.GITHUB_ACTIONS === 'true') console.log(`::warning title=Paseo compiler not run (#111)::${skipped}`);
+    return { skipped };
   }
   // Bundled into this repository's .cache so its own esbuild and typescript imports resolve here.
   const outfile = path.join(ROOT, '.cache/paseo-compiler/compiler.mjs');

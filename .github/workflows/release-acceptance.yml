@@ -3,8 +3,14 @@
 # pushed) and keeps the eight tarballs as the artifact every acceptance row uses, macOS included.
 # Then, on those exact files and with the repository's fake Codex and fake Claude only (no secrets,
 # no cost): release-consumer, CLI C1–C9 per provider, and W6's token gate, on Linux, macOS and
-# Windows. Fake runs are rehearsals, never gate evidence: the gate's real-provider rows run on
-# macOS by hand (D7). macOS decides this run's result; Linux and Windows are reported, not blocking.
+# Windows. release-consumer includes the #111 check (scripts/paseo-source-check.mjs) in both halves:
+# the plugin installed as `paseo plugin add npm:` installs it, with no import of an uninstalled
+# package, AND compiled by Paseo's own plugin compiler from a pinned checkout of Paseo's sources
+# (scripts/paseo-checkout.mjs, a public clone of github.com/getpaseo/paseo: no credentials, but a
+# network dependency of every row). ALP_REQUIRE_PASEO_COMPILER=1 makes a missing compiler fail the
+# row instead of printing "Paseo compiler skipped" (t-ffe4.4). Fake runs are rehearsals, never gate
+# evidence: the gate's real-provider rows run on macOS by hand (D7). macOS decides this run's result;
+# Linux and Windows are reported, not blocking.
 # packs_run reuses the release artifact of an earlier run: never pack the same release twice.
 name: Release acceptance
 
@@ -88,6 +94,9 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      # The compile half of #111 is required here, never skipped (scripts/paseo-source-check.mjs).
+      ALP_REQUIRE_PASEO_COMPILER: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -106,6 +115,10 @@ jobs:
       - name: Locate the release
         run: echo "PACKS=$RUNNER_TEMP/release/v$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
       - run: npm ci
+      # Paseo's plugin compiler at the pinned commit, which release-consumer's #111 check runs on the
+      # plugin installed from these tarballs.
+      - name: Paseo plugin compiler checkout (#111)
+        run: node scripts/paseo-checkout.mjs
       - run: npm run release:consumer -- "$PACKS"
       - name: CLI C1–C9, fake Codex
         if: ${{ !cancelled() }}
