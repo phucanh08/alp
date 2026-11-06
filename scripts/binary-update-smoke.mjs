@@ -71,13 +71,9 @@ try {
   check(r.code === 0 && /up to date/.test(r.stdout), `alp update --check reports ${version} up to date (${r.code} ${r.stdout}${r.stderr})`);
   r = await alp(['update', '.']);
   check(r.code === 1 && /did you mean `alp update-template`/.test(r.stderr), 'a template-style argument gets the update-template hint');
-  if (windows) {
-    // Windows cannot replace the directory a running node.exe comes from: refused, nothing changed.
-    const before = versions();
-    r = await alp(['update', '--yes', '--version', version, '--base-url', fileUrl]);
-    check(r.code !== 0 && /Windows cannot replace it in place/.test(r.stderr), `a reinstall of the running version is refused on Windows (${r.stderr.trim()})`);
-    check(JSON.stringify(versions()) === JSON.stringify(before), 'the refused reinstall changed nothing');
-  } else {
+  // Every row below runs on Windows too: Windows renames a directory that holds a running
+  // executable, so a reinstall of the running version moves it aside there as well (t-5294.7,
+  // board finding p-bcd9c956). Only install.sh's rerun stays POSIX-only.
   r = await alp(['update', '--version', version, '--base-url', fileUrl]);
   check(r.code !== 0 && /pass --yes/.test(r.stderr), 'without a terminal, alp update needs --yes');
 
@@ -114,7 +110,6 @@ try {
   if (!windows) {
     r = await runCmd('sh', [path.join(ROOT, 'install.sh'), '--base-url', mirror, '--dir', bin, '--root', root, '--no-modify-path']);
     check(r.code === 0 && (await alp(['--version'])).stdout.trim() === version, 'rerunning install.sh over an install works');
-  }
   }
   log('ok');
 } finally {

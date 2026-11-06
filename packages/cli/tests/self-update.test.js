@@ -250,6 +250,99 @@ test('bundle: when the running copy cannot be put back either, the error says wh
   assert.ok(!existsSync(path.join(m.app, '1.0.0')), 'nothing half-moved in its place');
 });
 
+/**
+ * Teardown in reverse order of setup: node:test runs t.after hooks FIFO and stops at the first that
+ * throws, so a failed rm would otherwise skip the restore of a monkeypatched fs and poison the next
+ * test. Every step runs; the first error is rethrown.
+ * @param {import('node:test').TestContext} t
+ */
+function defer(t) {
+  const steps = [];
+  t.after(async () => {
+    let failure;
+    for (const step of steps.reverse()) try { await step(); } catch (error) { failure ??= error; }
+    if (failure) throw failure;
+  });
+  return (/** @type {() => unknown} */ step) => { steps.push(step); };
+}
+
+/**
+ * An installed bundle at <app>/1.0.0 and a mirror holding the windows-x64 archive for it, so a
+ * reinstall of the running version can be driven with platform 'win32' on this host. Only the move
+ * of <app>/1.0.0 is real; unpacking is the injected extract (no zip tool needed).
+ */
+async function winMirror(t, { renameSync } = {}) {
+  const after = defer(t);
+  const work = await mkdtemp(path.join(tmpdir(), 'alp-self-update-win-'));
+  after(() => rm(work, { recursive: true, force: true }));
+  const mirrorDir = path.join(work, 'mirror');
+  await mkdir(mirrorDir, { recursive: true });
+  const bytes = Buffer.from('not a real zip; deps.extract unpacks instead');
+  await writeFile(path.join(mirrorDir, 'alp-1.0.0-windows-x64.zip'), bytes);
+  await writeFile(path.join(mirrorDir, 'SHA256SUMS'), `${sha256(bytes)}  alp-1.0.0-windows-x64.zip\n`);
+  const app = await realpath(await mkdir(path.join(work, 'app'), { recursive: true }).then(() => path.join(work, 'app')));
+  const root = path.join(app, '1.0.0');
+  await mkdir(root);
+  await writeFile(path.join(root, 'alp-bundle.json'), JSON.stringify({ name: 'alp', version: '1.0.0', platform: 'windows-x64' }));
+  await writeFile(path.join(root, 'running-copy'), 'the files this process runs from');
+  switchCurrent(app, '1.0.0');
+  // selfUpdate ends in switchCurrent(platform: 'win32'), which builds its link path with
+  // path.win32: on this host that is a backslash name with no leading slash, so the junction lands
+  // in the working directory. Remove that one path, so the test leaves nothing behind.
+  after(() => rm(path.resolve(path.win32.join(app, 'current')), { force: true }));
+  if (renameSync) {
+    const original = fs.renameSync;
+    fs.renameSync = renameSync(original);
+    syncBuiltinESMExports();
+    after(() => { fs.renameSync = original; syncBuiltinESMExports(); });
+  }
+  const out = [];
+  const deps = {
+    bundle: { root, app, version: '1.0.0', platform: 'windows-x64', current: path.join(app, 'current') },
+    version: '1.0.0', platform: 'win32', arch: 'x64', env: { ALP_UPDATE_BASE_URL: pathToFileURL(mirrorDir).href },
+    log: l => out.push(l), warn: l => out.push(l), interactive: false, provenance: () => 'unavailable',
+    extract: (archive, directory, asset) => {
+      const unpacked = path.join(directory, asset.name.replace(/\.zip$/, ''));
+      fs.mkdirSync(unpacked, { recursive: true });
+      fs.writeFileSync(path.join(unpacked, 'alp-bundle.json'), JSON.stringify({ name: 'alp', version: '1.0.0', platform: 'windows-x64' }));
+      return unpacked;
+    },
+    runVersion: () => '1.0.0',
+    daemon: async () => ({ version: '1.0.0', sessions: 0 }),
+  };
+  return { app, root, out, deps };
+}
+
+// t-5294.7 / board finding p-bcd9c956: Windows renames a directory that holds a running executable,
+// so `alp update --version <the running one>` must do the same thing it does everywhere else.
+test('bundle: on Windows a reinstall of the running version moves it aside, not refused (t-5294.7)', async t => {
+  const m = await winMirror(t);
+  assert.equal(await selfUpdate(['--version', '1.0.0', '--yes'], m.deps), 0);
+  const aside = readdirSync(m.app).find(name => /^\.alp-old-[0-9a-f]+$/.test(name));
+  assert.ok(aside, `the running copy was moved aside: ${readdirSync(m.app).join(',')}`);
+  assert.ok(existsSync(path.join(m.app, aside, 'running-copy')), 'the files this process runs are in the aside copy');
+  assert.ok(existsSync(path.join(m.root, 'alp-bundle.json')), 'the fresh copy is at app/1.0.0');
+  assert.ok(!existsSync(path.join(m.root, 'running-copy')), 'app/1.0.0 is the new unpacked bundle, not the old one');
+  assert.match(m.out.join('\n'), /Updated ALP 1\.0\.0 → 1\.0\.0/);
+});
+
+test('bundle: when the move aside fails, the error names what really holds the directory (t-5294.7)', async t => {
+  // EXDEV is not retried, so the message arrives without retryBusy's 8 s of attempts.
+  const m = await winMirror(t, {
+    renameSync: original => (from, to) => {
+      if (path.basename(String(to)).startsWith('.alp-old-')) throw Object.assign(new Error(`EXDEV: cross-device link not permitted, rename '${from}' -> '${to}'`), { code: 'EXDEV' });
+      return original(from, to);
+    },
+  });
+  const error = await selfUpdate(['--version', '1.0.0', '--yes'], m.deps).then(() => assert.fail('the update must fail'), caught => caught);
+  assert.match(error.message, /Could not move .*1\.0\.0 aside to reinstall ALP 1\.0\.0/);
+  assert.match(error.message, /a process whose working directory is inside it, or a file handle opened without delete sharing/);
+  assert.doesNotMatch(error.message, /Windows cannot/, 'no claim that Windows itself refuses the move');
+  assert.equal(error.cause?.code, 'EXDEV');
+  assert.ok(existsSync(path.join(m.root, 'running-copy')), 'the installed copy is untouched');
+  assert.ok(!readdirSync(m.app).some(name => name.startsWith('.alp-old-')), readdirSync(m.app).join(','));
+});
+
 test('bundle: a checksum mismatch, a failed provenance check or a wrong version changes nothing', async t => {
   for (const [options, deps, error] of [
     [{ corrupt: true }, {}, /Checksum mismatch/],
