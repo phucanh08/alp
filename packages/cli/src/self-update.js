@@ -344,8 +344,10 @@ export async function selfUpdate(args, overrides = {}) {
   if (order < 0 && !wanted) { deps.log(`alp ${deps.version} is newer than the latest release ${asset.version}; nothing to do (pass --version ${asset.version} to go back)`); return 0; }
 
   const { app, current } = bundle;
-  // Windows cannot rename or delete a directory that a running node.exe (this one) comes from.
-  if (deps.platform === 'win32' && asset.version === path.basename(bundle.root)) throw new Error(`ALP ${asset.version} is the version running now; Windows cannot replace it in place. Close ALP (alp daemon stop) and rerun install.ps1 to repair it`);
+  // A reinstall of the running version moves its directory aside instead of replacing it in place,
+  // on Windows too: Windows renames a directory that holds a running executable. Only a process
+  // whose working directory is inside the tree, or a handle opened without delete sharing, refuses
+  // the move (t-5294.7, board finding p-bcd9c956) — that failure is reported below, not predicted.
   // The version a running alpd uses keeps its files, like the one this process runs.
   const running = await deps.daemon().catch(() => undefined);
   try { nodeFs.accessSync(app, nodeFs.constants.W_OK); } catch { throw new Error(`${app} is not writable; run alp update with the permissions that installed ALP there`); }
@@ -379,7 +381,15 @@ export async function selfUpdate(args, overrides = {}) {
     if (reported !== asset.version) throw new Error(`The downloaded ALP reports version ${JSON.stringify(reported)}, not ${asset.version}; nothing was changed`);
     if (nodeFs.existsSync(target)) {
       // A reinstall of the running version moves it aside (its processes keep their files); any other copy is stale.
-      if (samePath(target, bundle.root) || running?.version === asset.version) { aside = `.alp-old-${randomBytes(6).toString('hex')}`; retryBusy(() => nodeFs.renameSync(target, path.join(app, aside))); }
+      if (samePath(target, bundle.root) || running?.version === asset.version) {
+        const moved = `.alp-old-${randomBytes(6).toString('hex')}`;
+        try { retryBusy(() => nodeFs.renameSync(target, path.join(app, moved))); } catch (error) {
+          // Nothing has been replaced yet. Say what really holds the directory, so nobody looks for
+          // a Windows rule that does not exist (t-5294.7).
+          throw new Error(`Could not move ${target} aside to reinstall ALP ${asset.version}: ${error.message}. Something holds that directory: a process whose working directory is inside it, or a file handle opened without delete sharing. Stop alpd (alp daemon stop), leave that directory in any shell, and run alp update again`, { cause: error });
+        }
+        aside = moved;
+      }
       else nodeFs.rmSync(target, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
     try { retryBusy(() => nodeFs.renameSync(unpacked, target)); } catch (error) {
