@@ -39,6 +39,10 @@ Vì vậy artifact phát hành của ALP vẫn **chứa một bản zod nằm tr
 ALP không sửa, viết lại hay vendor các file minified đó. Điều kiện đóng t-ffe4.3: SDK phát hành bản nhúng
 zod ≥4.6.6 (hoặc dùng hẳn peer zod), rồi ALP nâng SDK, build và pack lại, quét lại các bản nhúng.
 
+Ngày 2026-11-06 người dùng chấp nhận rủi ro còn lại này (bản zod nhúng trong SDK vẫn chưa được vá) và
+t-ffe4.3 được đóng ở trạng thái wontfix; điều kiện mở lại nằm trong task t-ffe4.3 và quyết định
+p-3f3a8f96 trên board.
+
 ## Rủi ro được nói đúng mức
 
 Rủi ro đã xác nhận là: **artifact phát hành có chứa bản zod dễ tổn thương**. Chưa có bằng chứng về
