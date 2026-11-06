@@ -26,7 +26,8 @@ expected here. If Codex is not on `PATH`, set `ALP_CODEX_BIN` to its absolute pa
 ## 2. Point Phở and Cafe at Codex
 
 In a project, `alp setup --runtime codex` writes Codex-only profiles for every Phở and
-Cafe agent, the oracle included, into `.alp/settings.json`. To point every project at
+Cafe agent, the oracle included, into `.alp/settings.json` (an agent's list you wrote by hand
+is kept, and setup says so; other teams are left to you). To point every project at
 Codex instead, override the teams in your library:
 
 ```sh

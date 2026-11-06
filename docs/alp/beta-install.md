@@ -92,7 +92,9 @@ alp run --team pho "Read this folder and list its files. Change nothing."
 ```
 
 `alp setup` writes Phở and Cafe's models into `.alp/settings.json`. It does not install CLIs,
-sign in or call models. Its other options (`--prefer`, `--claude-model`, `--codex-model`,
+sign in or call models. It replaces only profiles ALP wrote: a list you wrote by hand is kept,
+and a team other than Phở and Cafe is left to you; setup prints a line naming each, with the
+`team.<team>.<agent>.profiles` key to edit. Its other options (`--prefer`, `--claude-model`, `--codex-model`,
 `--claude-supervisor`, `--codex-supervisor`, `--claude-oracle`, `--codex-oracle`) are in the
 usage `alp` prints when run with no command, and in the [README](../../README.md#install).
 Codex only: see [codex-only.md](codex-only.md).

@@ -43,6 +43,18 @@ medium, Fable 5.1 at high / GPT-6 Astra at low (the only effort it takes). Setup
 not install CLIs, log in or call models: run `alp doctor` for that. New sessions use
 the profiles; running sessions keep theirs.
 
+Setup rewrites only the entries ALP wrote: the template's defaults, and what an earlier
+`alp setup` wrote (it records that in `.alp/state/setup-profiles.json`, which Git ignores;
+without the record, an entry that matches setup's defaults for some runtime counts as setup's). A profile list you
+wrote yourself is kept, and so is one whose model a library or project override of Phở or
+Cafe names in its `team.json`; setup prints a `Kept team.<team>.<agent>.profiles …` line for
+each, and the next setup replaces it only after you delete that entry. Other teams (your own,
+in the library or `.alp/teams`) are left as they are, because their `team.json` chooses their
+models: setup names each one and the key to edit, `team.<team>.<agent>.profiles` in
+`.alp/settings.json`. Setup writes Claude and Codex models only. In mix, lead, reviewer and peer each list both providers, so whoever assigns them
+passes a model and an effort every time; with one provider, lead and reviewer have one model
+and run on it when none is passed.
+
 The package provides the `alp` command and `alpd`, the per-user daemon that runs ALP sessions. To view and drive sessions in Paseo, also install the [Paseo plugin](integrations/paseo/README.md).
 
 ## Initialize a project
@@ -149,8 +161,9 @@ not a shipped default. New and upgraded configurations use `"auto"`.
 
 Unspecified agents keep the team's choices. Explicit session/delegation model and
 effort win (a delegation only among the target's profiles), then project team choices, then the older `runtime` settings, then
-team and agent defaults. Run `alp setup` again to rewrite Phở and Cafe's profiles, or
-edit the file to change one agent. Only configured oracle lenses are available, and an
+team and agent defaults. Run `alp setup` again to rewrite the Phở and Cafe profiles ALP
+wrote (it keeps the ones you wrote, and leaves other teams to you), or edit the file to
+change one agent. Only configured oracle lenses are available, and an
 unavailable lens is reported rather than substituted.
 
 Example `.alp/settings.json`:

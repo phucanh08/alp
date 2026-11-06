@@ -987,9 +987,31 @@ A target with no model profiles (a custom delegation graph) runs on the parent's
 one is passed. An effort the model does not take is refused; an effort ALP cannot check is
 passed on, and the answer's `thinkingNote` says so. A refused model is answered with the
 allowed ones and the remedy: add the model, or `provider:*`, to
-`team.<team>.<agent>.profiles` in `.alp/settings.json` (or, for Phở and Cafe, run
-`alp setup --runtime mix`, which rewrites their profiles with both providers). Invalid choices
-fail explicitly.
+`team.<team>.<agent>.profiles` in `.alp/settings.json` (or, for Phở and Cafe and a Claude or
+Codex model, run `alp setup --runtime mix`). Invalid choices fail explicitly.
+
+`alp setup --runtime mix` gives Phở's and Cafe's members both Claude and Codex: main one model
+of the preferred provider; lead, reviewer, the supervisor and the oracle one named model of
+each provider with its effort (`claude:claude-opus-5-5:high` and `codex:gpt-6.1-sol:high` for
+lead and reviewer); peer `claude:*` and `codex:*`. Lead, reviewer and peer therefore have
+several profiles, and their coordinator passes `model` and `thinking` for each assignment;
+the oracle is chosen by lens as always, and the supervisor starts on its first profile.
+`--runtime claude` or `codex` gives every member one provider: lead and reviewer one model
+they run on when none is passed, peer that provider's `*`. Setup writes no Antigravity or ACP
+model. It replaces only entries ALP wrote: the template's defaults, and its own earlier output,
+which it records in `.alp/state/setup-profiles.json` (this checkout's state: the directory
+ignores itself in Git, and settings.json gains no key, since an ALP that does not know a key
+refuses the file). Without that record, or with one that is damaged or from a newer ALP, an
+entry that matches setup's defaults for some runtime counts as setup's; setup never refuses
+to run over the record. An entry you wrote, or one
+whose model a library or project override of Phở or Cafe names in its `team.json`, is kept,
+with a line such as `Kept team.cafe.reviewer.profiles (claude:sonnet:high): written by hand,
+not by ALP. Delete the entry from the file and run alp setup again to replace it.` A team
+other than Phở and Cafe is never written, because its `team.json` chooses its models; setup
+names it: `Team agy (project) is not Phở or Cafe, so alp setup leaves its profiles as they
+are: its team.json chooses its models. To change them, edit team.agy.<agent>.profiles in
+<root>/.alp/settings.json (agents: main, peer, reviewer).` A replaced file is backed up to
+`.alp/settings.json.bak`.
 
 Oracle runs on Fable (`claude:claude-fable-5-1`) or Astra (`codex:gpt-6-astra`); any
 other model, or none, is refused. Its effort defaults to `high`; `modelReason` is
