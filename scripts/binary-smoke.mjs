@@ -18,6 +18,7 @@ import { connectWebSocket } from '@anhlp/alp-client/websocket';
 
 import { bundleCommand } from '../packages/cli/src/self-update.js';
 import { hostPlatform } from './build-bundle.mjs';
+import { clearCallerSession } from './test-lib.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const version = JSON.parse(await readFile(path.join(ROOT, 'packages/cli/package.json'), 'utf8')).version;
@@ -32,6 +33,12 @@ const log = message => console.log(`[binary-smoke] ${message}`);
 const run = promisify(execFile);
 const work = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-binary-smoke-')));
 const home = path.join(work, 'home');
+// t-5294.3: `alp web --print` below is a user-only command, so this smoke must not inherit the ALP
+// session of an agent's shell; otherwise the installed CLI answers "alp web is the user's ... started
+// by an ALP agent" and the smoke fails for a reason that has nothing to do with the package. Same
+// mechanism as scripts/core-standalone-smoke.mjs:138; the product guard is unchanged.
+const clearedSession = clearCallerSession();
+if (clearedSession.length) log(`cleared the caller's ALP session variables, so the bundled CLI runs as the user's: ${clearedSession.join(', ')}`);
 const env = { ...process.env, ALP_HOME: home, SHELL: '/bin/sh', ALP_CODEX_BIN: path.join(ROOT, 'packages/daemon/tests/support/fake-codex.js'), ALP_CLAUDE_BIN: path.join(ROOT, 'packages/daemon/tests/support/fake-claude.js'), ALP_DAEMON_ENTRY: '', ALP_WEB_APP: '' };
 delete env.ALP_DAEMON_ENTRY; delete env.ALP_WEB_APP;
 const alp = async (args, cwd = work) => (await run(node, [...cliArgs, ...args], { env, cwd, timeout: 60_000 })).stdout.trim();

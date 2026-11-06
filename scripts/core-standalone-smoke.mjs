@@ -13,6 +13,18 @@ import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync
 import os from 'node:os';
 import path from 'node:path';
 import { corePackageProblems } from './core-package-boundary.mjs';
+import { clearCallerSession } from './test-lib.mjs';
+
+// t-5294.3: this smoke is the installed CLI as a USER runs it, and `alp web --print` below is one of
+// the things it checks. Run from an ALP agent's shell, the inherited ALP_AGENT_SESSION made the
+// installed CLI answer "alp web is the user's: ... started by an ALP agent" instead of the expected
+// "alp web is not built" (:138, through cli-standalone-driver.mjs:43), so this script could not pass
+// for any agent — scripts/validate.mjs exited 1 there with 145/145 test files already green. The
+// product guard is right and is untouched; inheriting the caller's session into the child is not.
+// Also for a direct `node scripts/core-standalone-smoke.mjs` / `npm run test:core:standalone`, which
+// does not go through the validate wrapper.
+const clearedSession = clearCallerSession();
+if (clearedSession.length) console.log(`standalone core smoke: cleared the caller's ALP session variables, so the installed CLI runs as the user's: ${clearedSession.join(', ')}`);
 
 const root = path.resolve(import.meta.dirname, '..');
 const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));

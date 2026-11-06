@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnCommand } from './spawn-command.mjs';
-import { ROOT, buildAll, buildWorkspace, integrationTests, packageTests, packages, runNodeTests, webTests } from './test-lib.mjs';
+import { ROOT, buildAll, buildWorkspace, clearCallerSession, integrationTests, packageTests, packages, runNodeTests, webTests } from './test-lib.mjs';
 
 const scope = process.argv[2] ?? 'all';
 if (!['all', 'core', 'paseo', 'packages', 'web'].includes(scope) || process.argv.length > 3) {
@@ -20,6 +20,17 @@ function commit() {
   return `commit ${head.stdout.trim()}${changes.status !== 0 ? ' (uncommitted changes unknown)' : changes.stdout.trim() ? ' with uncommitted changes' : ''}`;
 }
 console.log(`[validate:${scope}] ${commit()}`);
+// t-5294.3 / t-3a63: this lane checks what the USER's install does, so it must not run as the agent
+// whose shell happened to start it. An inherited ALP_AGENT_SESSION made every child announce itself
+// as an agent, and the user-only guards then refused the very steps being checked: `alp web --print`
+// in core-standalone-smoke.mjs (:138) answered "alp web is the user's" instead of the expected
+// missing-bundle error, and tarball-consumer.mjs's installed-plugin regressions answered "Only the
+// user answers a question". So no agent could run validate:core or validate:packages at all, and
+// every "validated locally" from an agent needed a footnote. The guards are product behaviour and
+// are unchanged; what is removed here is the caller's session, once, for every step below, which
+// spawn without an env of their own and so inherit this one.
+const cleared = clearCallerSession();
+if (cleared.length) console.log(`[validate:${scope}] cleared the caller's ALP session variables, so every step runs as the user would: ${cleared.join(', ')}`);
 function node(script, ...args) {
   console.log(`\n[validate:${scope}] ${script} ${args.join(' ')}`);
   const result = spawnSync(process.execPath, [script, ...args], { cwd: ROOT, stdio: 'inherit' });
