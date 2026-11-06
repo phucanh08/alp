@@ -173,7 +173,7 @@ test('a Phở or Cafe override that names a member\'s model keeps that member\'s
   assert.equal(result.status, 0, result.stderr);
   const after = await read(f.file);
   assert.deepEqual(after.team.cafe.reviewer.profiles, ['claude:sonnet:high']);
-  assert.match(result.stdout, /Kept team\.cafe\.reviewer\.profiles \(claude:sonnet:high\): the cafe team's team\.json names its model \(claude:sonnet\)/);
+  assert.match(result.stdout, /Kept team\.cafe\.reviewer\.profiles \(claude:sonnet:high\): the cafe team's team\.json sets it \(claude:sonnet, effort high\)/);
   assert.deepEqual(after.team.cafe.lead.profiles, ['claude:claude-opus-5-5:high', 'codex:gpt-6.1-sol:high'], 'a member the override does not pin gets both providers');
   assert.deepEqual(after.team.pho.reviewer.profiles, ['claude:claude-opus-5-5:high', 'codex:gpt-6.1-sol:high']);
 });
@@ -206,4 +206,43 @@ test('setup\'s record ignores itself in Git, and a bad one never stops setup', a
     if (what === 'a directory') assert.match(cli(f, '--runtime', 'mix').stdout, /Could not save \S+setup-profiles\.json/);
     else if (what !== 'a newer version') assert.equal((await read(recordPath)).version, 1, `${what}: rewritten`);
   }
+});
+
+test('an override that sets only a member\'s effort keeps that member too', async t => {
+  const f = await fixture(t);
+  await projectTeam(f.root, 'cafe', { main: { model: 'claude:claude-opus-5-5', thinking: 'high' }, lead: { role: 'lead', thinking: 'low' }, peer: { role: 'peer' }, reviewer: { role: 'reviewer' } }, { delegation: { main: ['lead', 'reviewer'], lead: ['peer', 'reviewer'] } });
+  const result = cli(f, '--runtime', 'mix');
+  assert.equal(result.status, 0, result.stderr);
+  const after = await read(f.file);
+  assert.deepEqual(after.team.cafe.lead.profiles, ['claude:claude-opus-5-5:low']);
+  assert.match(result.stdout, /Kept team\.cafe\.lead\.profiles \(claude:claude-opus-5-5:low\): the cafe team's team\.json sets it \(effort low\)/);
+  assert.deepEqual(after.team.cafe.reviewer.profiles, ['claude:claude-opus-5-5:high', 'codex:gpt-6.1-sol:high']);
+});
+
+test('without a record, a model an earlier setup chose by flag is kept and the line says why', async t => {
+  const f = await fixture(t);
+  assert.equal(cli(f, '--runtime', 'mix', '--codex-model', 'gpt-6-sol').status, 0);
+  await rm(path.join(f.root, '.alp/state'), { recursive: true });
+  const result = cli(f, '--runtime', 'claude');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Kept team\.cafe\.lead\.profiles \(claude:claude-opus-5-5:high, codex:gpt-6-sol:high\): ALP cannot tell whether an earlier alp setup or you wrote it \(it is none of setup's defaults, and no setup record names it\), so it is kept as yours\. Delete the entry from the file and run alp setup again to replace it\./);
+  assert.deepEqual((await read(f.file)).team.cafe.peer.profiles, ['claude:*'], 'entries matching setup\'s defaults are still replaced');
+});
+
+test('a malformed entry already in the file is reported by its path, and nothing is written', async t => {
+  const f = await fixture(t);
+  assert.equal(cli(f, '--runtime', 'mix').status, 0);
+  await rm(path.join(f.root, '.alp/state'), { recursive: true });
+  const settings = await read(f.file);
+  settings.team.cafe.reviewer.profiles = 'claude:sonnet';
+  const broken = JSON.stringify(settings, null, 2);
+  await writeFile(f.file, broken);
+  await rm(`${f.file}.bak`, { force: true });
+  const result = cli(f, '--runtime', 'claude');
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /team\.cafe\.reviewer\.profiles must be a nonempty list/);
+  assert.doesNotMatch(result.stderr, /TypeError|is not a function/);
+  assert.equal(await readFile(f.file, 'utf8'), broken);
+  await assert.rejects(access(`${f.file}.bak`));
+  await assert.rejects(access(path.join(f.root, '.alp/state')));
 });

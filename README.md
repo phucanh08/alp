@@ -46,8 +46,8 @@ the profiles; running sessions keep theirs.
 Setup rewrites only the entries ALP wrote: the template's defaults, and what an earlier
 `alp setup` wrote (it records that in `.alp/state/setup-profiles.json`, which Git ignores;
 without the record, an entry that matches setup's defaults for some runtime counts as setup's). A profile list you
-wrote yourself is kept, and so is one whose model a library or project override of Phở or
-Cafe names in its `team.json`; setup prints a `Kept team.<team>.<agent>.profiles …` line for
+wrote yourself is kept, and so is one whose model or effort a library or project override of
+Phở or Cafe sets in its `team.json`; setup prints a `Kept team.<team>.<agent>.profiles …` line for
 each, and the next setup replaces it only after you delete that entry. Other teams (your own,
 in the library or `.alp/teams`) are left as they are, because their `team.json` chooses their
 models: setup names each one and the key to edit, `team.<team>.<agent>.profiles` in

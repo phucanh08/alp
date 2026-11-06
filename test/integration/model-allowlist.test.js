@@ -184,7 +184,7 @@ test('the refusal offers alp setup only where it helps: Phở or Cafe, and a Cla
   assert.doesNotMatch(antigravity.error, /alp setup/);
   // For a Codex model in Phở it is, and says it keeps lists written by hand.
   const codex = await delegate({ agent: 'peer', model: 'codex:gpt-6-sol' });
-  assert.match(codex.error ?? '', /or run alp setup \S+ --runtime mix, which gives Phở's and Cafe's members both Claude and Codex profiles \(it keeps profiles written by hand\)\./, JSON.stringify(codex));
+  assert.match(codex.error ?? '', /or run alp setup \S+ --runtime mix, which gives Phở's and Cafe's members both Claude and Codex profiles \(it keeps profiles written by hand or set in a team\.json\)\./, JSON.stringify(codex));
 });
 
 test('in a team of the project\'s own, the refusal names its settings key and never alp setup', async t => {
