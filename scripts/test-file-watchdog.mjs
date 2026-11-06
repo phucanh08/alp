@@ -8,7 +8,11 @@
 // The dump adds at most about 5.2 s to the deadline (a 3 s ps, 2.2 s of reports), and never blocks the
 // other files' workers. On Windows it lists no processes and has no reports: a cold WMI query took over
 // 4 s on windows-daemon (24) and broke the deadline's own bound, so it runs only with ALP_WATCHDOG_WIN_PROCS=1.
+// The process listing is in ./test-file-watchdog-processes.mjs, which a test can import: this file
+// cannot be (it reads process.argv[2] and ends in a top-level await), so the opt-in path had no test
+// at all (t-5294.7).
 import { spawn, spawnSync } from 'node:child_process';
+import { processSummary } from './test-file-watchdog-processes.mjs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
@@ -68,41 +72,6 @@ function progressSummary(file) {
   if (inFlight.length) for (const entry of inFlight) out.push(`  in flight: ${entry.name}${entry.line ? ` (line ${entry.line})` : ''}, started ${Date.now() - entry.at} ms ago`);
   else out.push('  in flight: none; every subtest finished and the file\'s process stayed alive (an open handle or a pending hook)');
   return out;
-}
-
-/** A command's stdout, or why there is none; asynchronous, and killed after `ms`. */
-function capture(command, args, ms) {
-  return new Promise(resolve => {
-    let stdout = '';
-    let child;
-    try { child = spawn(command, args, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }); }
-    catch (error) { resolve({ error: error.message }); return; }
-    // A listing that outlives its kill must not keep the coordinator alive: drop its pipe and handle too.
-    const timer = setTimeout(() => { child.kill('SIGKILL'); child.stdout.destroy(); child.unref(); resolve({ error: `no answer within ${ms} ms` }); }, ms);
-    child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
-    child.once('error', error => { clearTimeout(timer); resolve({ error: error.message }); });
-    child.once('close', code => { clearTimeout(timer); resolve(code === 0 ? { stdout } : { error: `status ${code}` }); });
-  });
-}
-
-/** The file's processes: its group and descendants (POSIX), or its process tree (Windows). Listed, never signalled. */
-async function processSummary(root) {
-  if (windows) {
-    if (process.env.ALP_WATCHDOG_WIN_PROCS !== '1') return ['  not collected on Windows (ALP_WATCHDOG_WIN_PROCS=1 lists them through WMI, up to 2.5 s more)'];
-    const script = 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)" }';
-    const result = await capture('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], 2500);
-    if (result.error) return [`  process list unavailable: ${result.error}`];
-    const rows = result.stdout.split(/\r?\n/).filter(Boolean).map(line => { const [pid, ppid, ...command] = line.split('\t'); return { pid: Number(pid), ppid: Number(ppid), command: command.join('\t') }; });
-    const tree = new Set([root]);
-    for (let grew = true; grew;) { grew = false; for (const row of rows) if (!tree.has(row.pid) && tree.has(row.ppid)) { tree.add(row.pid); grew = true; } }
-    return rows.filter(row => tree.has(row.pid)).map(row => `  pid ${row.pid} ppid ${row.ppid}: ${row.command}`);
-  }
-  const result = await capture('ps', ['-A', '-o', 'pid=,ppid=,pgid=,stat=,etime=,command='], 3000);
-  if (result.error) return [`  process list unavailable: ${result.error}`];
-  const rows = result.stdout.split('\n').filter(Boolean).map(line => { const [pid, ppid, pgid, stat, etime, ...command] = line.trim().split(/\s+/); return { pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), stat, etime, command: command.join(' ') }; });
-  const tree = new Set([root]);
-  for (let grew = true; grew;) { grew = false; for (const row of rows) if (!tree.has(row.pid) && (tree.has(row.ppid) || row.pgid === root)) { tree.add(row.pid); grew = true; } }
-  return rows.filter(row => tree.has(row.pid)).map(row => `  pid ${row.pid} ppid ${row.ppid} pgid ${row.pgid} ${row.stat} ${row.etime}: ${row.command.slice(0, 400)}`);
 }
 
 /** One line per libuv handle a diagnostic report lists, without the report's environment. */

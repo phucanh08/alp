@@ -156,6 +156,12 @@ test('a file stopped at the deadline first dumps its subtests, failures, process
     test('a later test still passes', () => {});`);
   const runner = new URL('../../scripts/test-lib.mjs',import.meta.url).href;
   const env = {...process.env};delete env.NODE_TEST_CONTEXT;
+  // The opt-in is SET here, never inherited (t-5294.7): the Windows listing runs only with
+  // ALP_WATCHDOG_WIN_PROCS=1, so a suite run that happened to have it set used to flip this test's
+  // own expectation and fail it for a reason unrelated to the code under test. On Windows the
+  // variable makes the windows-daemon lane the one place the WMI listing really executes; on POSIX
+  // it means nothing, and is dropped so the run stays the cheap one.
+  if (process.platform === 'win32') env.ALP_WATCHDOG_WIN_PROCS = '1'; else delete env.ALP_WATCHDOG_WIN_PROCS;
   const result = await promisify(execFile)(process.execPath,['--input-type=module','-e',
     `import {runNodeTests} from ${JSON.stringify(runner)};process.exitCode=runNodeTests([${JSON.stringify(file)}],{privateHome:true,fileTimeoutMs:2000});`],{env,timeout:15000}).catch(error=>error);
   retained = result.stderr.match(/warning: cleanup unconfirmed; retained (.+)/)?.[1].split(', ') || [];
@@ -166,11 +172,14 @@ test('a file stopped at the deadline first dumps its subtests, failures, process
   assert.match(dump,/subtests: 1 passed, 1 failed, 0 in flight/);
   assert.match(dump,/not ok: leaves a server open \(\d+ ms, hookFailed\)\n\s+simulated ENOTEMPTY in the first hook/);
   assert.match(dump,/in flight: none; every subtest finished and the file's process stayed alive/);
-  // Windows lists processes only on request (WMI can take seconds, more than the deadline's bound allows).
-  if (process.platform === 'win32') {
-    assert.match(dump,/ processes:\n  not collected on Windows \(ALP_WATCHDOG_WIN_PROCS=1/);
-    assert.match(dump,/open handles: not available on Windows/);
-  } else assert.match(dump,/ processes:\n  pid \d+/);
+  // Windows lists processes only on request (WMI can take seconds, more than the deadline's bound
+  // allows), and this run asked for it above: the file's own process must be in the listing either
+  // way. The refusal when nobody asks is covered without a Windows host by the
+  // scripts/test-file-watchdog-processes.mjs tests below.
+  // On Windows this is the one place the WMI query and its process-tree walk really run; the rows it
+  // parsed have the module's Windows shape (no pgid/stat/etime, which only `ps` reports).
+  assert.match(dump,process.platform === 'win32' ? / processes:\n  pid \d+ ppid \d+: / : / processes:\n  pid \d+ ppid \d+ pgid \d+ /);
+  if (process.platform === 'win32') assert.match(dump,/open handles: not available on Windows/);
   // The file's own process names the server it never closed.
   if (process.platform !== 'win32') assert.match(dump,/hung\.test\.mjs\n(    .*\n)*?    tcp localEndpoint=\{[^}]*"port":\d+/);
   assert.ok(!/environmentVariables|"PATH"/.test(dump),'no environment in the dump');
@@ -324,4 +333,65 @@ test('homelessEnv: HOMESHARE and the XDG base directories cannot reach past the 
   // An unset XDG variable still gets the private value: a child must never fall back to $HOME/.config
   // of a HOME that a later spread could restore, and the directory is one runNodeTests created.
   assert.equal(homelessEnv({ PATH: 'p' }, '/tmp/private').XDG_CONFIG_HOME, path.join('/tmp/private', '.config'));
+});
+
+// t-5294.7 (2): nothing ever ran the Windows opt-in process listing, so its WMI parsing and tree
+// walk were only ever read, never executed. scripts/test-file-watchdog.mjs is an executable script
+// (it reads process.argv[2] and finishes with a top-level await), so a test cannot import it; the
+// listing lives in its own module for exactly this reason, with platform, env and capture injected.
+test('the watchdog lists no Windows processes unless ALP_WATCHDOG_WIN_PROCS=1 asks for them (t-5294.7)', async () => {
+  const { processSummary } = await import('../../scripts/test-file-watchdog-processes.mjs');
+  let called = 0;
+  const capture = () => { called++; return Promise.resolve({ stdout: '' }); };
+  const lines = await processSummary(1234, { platform: 'win32', env: {}, capture });
+  assert.equal(called, 0, 'no WMI query without the opt-in');
+  assert.deepEqual(lines, ['  not collected on Windows (ALP_WATCHDOG_WIN_PROCS=1 lists them through WMI, up to 2.5 s more)']);
+  // Any other value is not the opt-in either.
+  assert.deepEqual(await processSummary(1234, { platform: 'win32', env: { ALP_WATCHDOG_WIN_PROCS: 'true' }, capture }), lines);
+  assert.equal(called, 0);
+});
+
+test('the watchdog opt-in lists the file\'s own Windows process tree and nothing else (t-5294.7)', async () => {
+  const { processSummary } = await import('../../scripts/test-file-watchdog-processes.mjs');
+  // What `Get-CimInstance Win32_Process` prints through the script's format string: pid, ppid,
+  // command line, tab separated, CRLF ended. 1234 is the file's process; 5678 and 9012 descend from
+  // it (a grandchild); 4 and 777 are unrelated and must not appear. 31 has no parent row at all.
+  const rows = [
+    '4\t0\tSystem',
+    '1234\t999\tC:\\node.exe --test C:\\repo\\hung.test.mjs',
+    '777\t999\tC:\\node.exe some other test file',
+    '9012\t5678\tC:\\WINDOWS\\system32\\cmd.exe /c alp.cmd',
+    '5678\t1234\tC:\\node.exe -e setTimeout(()=>{},8000)',
+    '31\t4242\tghost.exe',
+  ];
+  const seen = [];
+  const capture = (command, args, ms) => { seen.push({ command, args, ms }); return Promise.resolve({ stdout: rows.join('\r\n') + '\r\n' }); };
+  const lines = await processSummary(1234, { platform: 'win32', env: { ALP_WATCHDOG_WIN_PROCS: '1' }, capture });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].command, 'powershell.exe');
+  assert.deepEqual(seen[0].args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-Command']);
+  assert.match(seen[0].args[3], /^Get-CimInstance Win32_Process \|/, seen[0].args[3]);
+  assert.ok(seen[0].ms <= 2500, `the query stays inside the deadline's bound: ${seen[0].ms} ms`);
+  // The root first, then its descendants in the order the listing gave them.
+  assert.deepEqual(lines, [
+    '  pid 1234 ppid 999: C:\\node.exe --test C:\\repo\\hung.test.mjs',
+    '  pid 9012 ppid 5678: C:\\WINDOWS\\system32\\cmd.exe /c alp.cmd',
+    '  pid 5678 ppid 1234: C:\\node.exe -e setTimeout(()=>{},8000)',
+  ]);
+  // A listing that never arrives is reported, not thrown: the dump must stay bounded.
+  assert.deepEqual(await processSummary(1234, { platform: 'win32', env: { ALP_WATCHDOG_WIN_PROCS: '1' },
+    capture: () => Promise.resolve({ error: 'no answer within 2500 ms' }) }),
+    ['  process list unavailable: no answer within 2500 ms']);
+});
+
+test('the watchdog process capture returns stdout, a bad status and a timeout, and outlives neither (t-5294.7)', async () => {
+  const { capture } = await import('../../scripts/test-file-watchdog-processes.mjs');
+  assert.deepEqual(await capture(process.execPath, ['-e', 'process.stdout.write("a\tb\tc")'], 5000), { stdout: 'a\tb\tc' });
+  assert.deepEqual(await capture(process.execPath, ['-e', 'process.exit(3)'], 5000), { error: 'status 3' });
+  const absent = await capture(path.join(import.meta.dirname, 'no-such-listing-command'), [], 5000);
+  assert.match(absent.error, /ENOENT/, JSON.stringify(absent));
+  assert.equal(absent.stdout, undefined);
+  const started = Date.now();
+  assert.deepEqual(await capture(process.execPath, ['-e', 'setInterval(()=>{},50)'], 300), { error: 'no answer within 300 ms' });
+  assert.ok(Date.now() - started < 3000, `a hung listing is abandoned at its bound: ${Date.now() - started} ms`);
 });
