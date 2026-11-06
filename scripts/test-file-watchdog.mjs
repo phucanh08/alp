@@ -5,8 +5,9 @@
 // failed (with their errors) or are still in flight, the file's processes, and (not on Windows) each
 // one's open libuv handles from a Node diagnostic report. A passing or failing file costs one extra
 // reporter writing a line per subtest to scratch, and a report signal handler nothing triggers.
-// The dump adds at most about 6.5 s to the deadline (a 4 s process listing, 2.2 s of reports), and
-// never blocks the other files' workers.
+// The dump adds at most about 5.2 s to the deadline (POSIX: a 3 s ps, 2.2 s of reports; Windows: a 2.5 s
+// listing, no reports), and never blocks the other files' workers. On Windows the listing is best effort:
+// a cold WMI query took over 4 s on windows-daemon (24), so it may come back as "no answer".
 import { spawn, spawnSync } from 'node:child_process';
 import { availableParallelism, tmpdir } from 'node:os';
 import { mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync } from 'node:fs';
@@ -76,7 +77,8 @@ function capture(command, args, ms) {
     let child;
     try { child = spawn(command, args, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }); }
     catch (error) { resolve({ error: error.message }); return; }
-    const timer = setTimeout(() => { child.kill('SIGKILL'); resolve({ error: `no answer within ${ms} ms` }); }, ms);
+    // A listing that outlives its kill must not keep the coordinator alive: drop its pipe and handle too.
+    const timer = setTimeout(() => { child.kill('SIGKILL'); child.stdout.destroy(); child.unref(); resolve({ error: `no answer within ${ms} ms` }); }, ms);
     child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
     child.once('error', error => { clearTimeout(timer); resolve({ error: error.message }); });
     child.once('close', code => { clearTimeout(timer); resolve(code === 0 ? { stdout } : { error: `status ${code}` }); });
@@ -87,7 +89,7 @@ function capture(command, args, ms) {
 async function processSummary(root) {
   if (windows) {
     const script = 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)" }';
-    const result = await capture('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], 4000);
+    const result = await capture('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], 2500);
     if (result.error) return [`  process list unavailable: ${result.error}`];
     const rows = result.stdout.split(/\r?\n/).filter(Boolean).map(line => { const [pid, ppid, ...command] = line.split('\t'); return { pid: Number(pid), ppid: Number(ppid), command: command.join('\t') }; });
     const tree = new Set([root]);
@@ -180,7 +182,7 @@ async function worker() {
         timedOut = true;
         retainScratch = true;
         console.error(`[test-file] TIMEOUT ${file} after ${fileTimeoutMs} ms; retaining scratch; detached descendants may survive`);
-        // The dump is bounded (about 6.5 s at most) and must not defeat the deadline if it fails.
+        // The dump is bounded (about 5.2 s at most) and must not defeat the deadline if it fails.
         try { await dump(file, child, progress, reports); } catch (error) { console.error(`[test-file] hang dump failed: ${error.message}`); }
         stop(child);
         // A failed kill must not defeat the deadline.
