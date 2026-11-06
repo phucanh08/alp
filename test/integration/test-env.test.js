@@ -3,7 +3,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { CALLER_SESSION_VARIABLES, clearCallerSession, hermeticEnv, homelessEnv, isCallerBinary } from '../../scripts/test-lib.mjs';
+import { CALLER_SESSION_VARIABLES, XDG_BASE_DIRECTORIES, clearCallerSession, hermeticEnv, homelessEnv, isCallerBinary } from '../../scripts/test-lib.mjs';
+
+/** The POSIX base directories homelessEnv points at the private home, for a deepEqual on its output. */
+const xdg = home => Object.fromEntries(Object.entries(XDG_BASE_DIRECTORIES).map(([name, relative]) => [name, path.join(home, relative)]));
 
 test('isCallerBinary: ALP_<NAME>_BIN in any case, nothing else', () => {
   for (const name of ['ALP_CODEX_BIN', 'ALP_CLAUDE_BIN', 'ALP_ANTIGRAVITY_BIN', 'ALP_GH_BIN', 'alp_codex_bin', 'ALP_X2_BIN']) assert.equal(isCallerBinary(name), true, name);
@@ -13,7 +16,7 @@ test('isCallerBinary: ALP_<NAME>_BIN in any case, nothing else', () => {
 test('homelessEnv: drops ALP_*_BIN and every spelling of private profile variables; keeps tools', () => {
   const caller = { PATH: 'p', ALP_HOME: 'h', ALP_CODEX_BIN: 'c', alp_gh_bin: 'g', HOME: '/home/me', UserProfile: 'C:\Users\me', home: 'x', ALP_TERMINAL: '1' };
   const env = homelessEnv(caller, '/tmp/u');
-  assert.deepEqual(env, { PATH: 'p', ALP_HOME: 'h', ALP_TERMINAL: '1', HOME: '/tmp/u', USERPROFILE: '/tmp/u', APPDATA: path.join('/tmp/u', 'AppData', 'Roaming'), LOCALAPPDATA: path.join('/tmp/u', 'AppData', 'Local') });
+  assert.deepEqual(env, { PATH: 'p', ALP_HOME: 'h', ALP_TERMINAL: '1', HOME: '/tmp/u', USERPROFILE: '/tmp/u', APPDATA: path.join('/tmp/u', 'AppData', 'Roaming'), LOCALAPPDATA: path.join('/tmp/u', 'AppData', 'Local'), ...xdg('/tmp/u') });
   assert.equal(caller.ALP_CODEX_BIN, 'c', 'the caller env is not changed');
 });
 
@@ -34,7 +37,7 @@ test('homelessEnv isolates Windows profile variables case-insensitively', () => 
 
 test('hermeticEnv then homelessEnv: neither the caller session nor its executables reach the run', () => {
   const env = homelessEnv(hermeticEnv({ ALP_AGENT_SESSION: 's', ALP_BRIDGE_TOKEN: 't', ALP_CLAUDE_BIN: 'c', KEEP: 'k' }), 'u');
-  assert.deepEqual(env, { KEEP: 'k', HOME: 'u', USERPROFILE: 'u', APPDATA: path.join('u', 'AppData', 'Roaming'), LOCALAPPDATA: path.join('u', 'AppData', 'Local') });
+  assert.deepEqual(env, { KEEP: 'k', HOME: 'u', USERPROFILE: 'u', APPDATA: path.join('u', 'AppData', 'Roaming'), LOCALAPPDATA: path.join('u', 'AppData', 'Local'), ...xdg('u') });
 });
 
 test('normal runner isolates sessions and permits an unreferenced esbuild service', {timeout:15000}, async t => {
@@ -56,6 +59,14 @@ test('normal runner isolates sessions and permits an unreferenced esbuild servic
       assert.ok(existsSync(process.env[name]),name+' exists');
       assert.ok(path.relative(process.env.HOME,process.env[name]).startsWith('AppData'),name+' is private');
     }
+    // t-d05e: the POSIX base directories a program reads instead of $HOME/.config are private too,
+    // and they exist, so nothing falls back to the user's own.
+    for(const name of ['XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_CACHE_HOME']) {
+      assert.ok(existsSync(process.env[name]),name+' exists');
+      const relative = path.relative(process.env.HOME,process.env[name]);
+      assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative),name+' is under the private home, got '+process.env[name]);
+    }
+    assert.equal(process.env.HOMESHARE,undefined);
     if(process.platform==='win32') assert.equal(process.env.HOMEDRIVE+process.env.HOMEPATH,process.env.USERPROFILE);
     await build({stdin:{contents:'export const value=1'},write:false});
     console.log('scratch='+JSON.stringify([process.env.ALP_HOME,process.env.TMPDIR,process.env.HOME]));`);
@@ -252,3 +263,30 @@ test('every verification entry point that drives a user-facing CLI isolates the 
   }
 });
 
+// t-d05e (oracle review of da711fc): redirecting HOME, USERPROFILE, APPDATA, LOCALAPPDATA, HOMEDRIVE
+// and HOMEPATH leaves two other ways to the user's real directories. HOMESHARE is the network home a
+// Windows domain profile defines. The XDG base directories are read INSTEAD of $HOME/.config and
+// friends when they are set, and this repository has a consumer that reads one:
+// packages/client/src/service.js resolves the systemd user unit directory to
+// `XDG_CONFIG_HOME/systemd/user`, so a private-home run that installed a service without
+// ALP_SERVICE_DIR would have written a unit into the user's own ~/.config. (Every service test today
+// sets ALP_SERVICE_DIR, so nothing depended on the real XDG directories; this closes the way in
+// before something does.)
+test('homelessEnv: HOMESHARE and the XDG base directories cannot reach past the private home', () => {
+  const caller = { PATH: 'p', HOMESHARE: '\\\\fileserver\\home\\me', homeshare: '\\\\other\\home',
+    XDG_CONFIG_HOME: '/Users/me/.config', XDG_DATA_HOME: '/Users/me/.local/share', XDG_CACHE_HOME: '/Users/me/.cache',
+    XDG_RUNTIME_DIR: '/run/user/501', KEEP: 'k' };
+  const env = homelessEnv(caller, '/tmp/private');
+  for (const name of ['HOMESHARE', 'homeshare']) assert.equal(env[name], undefined, name);
+  assert.equal(env.XDG_CONFIG_HOME, path.join('/tmp/private', '.config'));
+  assert.equal(env.XDG_DATA_HOME, path.join('/tmp/private', '.local', 'share'));
+  assert.equal(env.XDG_CACHE_HOME, path.join('/tmp/private', '.cache'));
+  // systemd owns XDG_RUNTIME_DIR (0700, its sockets live there): replacing it would change
+  // behaviour rather than isolate it, so it is left exactly as the caller had it.
+  assert.equal(env.XDG_RUNTIME_DIR, '/run/user/501');
+  assert.equal(env.KEEP, 'k');
+  assert.equal(caller.HOMESHARE, '\\\\fileserver\\home\\me', 'the caller env is not changed');
+  // An unset XDG variable still gets the private value: a child must never fall back to $HOME/.config
+  // of a HOME that a later spread could restore, and the directory is one runNodeTests created.
+  assert.equal(homelessEnv({ PATH: 'p' }, '/tmp/private').XDG_CONFIG_HOME, path.join('/tmp/private', '.config'));
+});

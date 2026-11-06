@@ -75,6 +75,17 @@ export function clearCallerSession(env = process.env) {
 export const isCallerBinary = name => /^ALP_[A-Z0-9_]+_BIN$/i.test(name);
 
 /**
+ * The POSIX base directories a program looks in INSTEAD of `$HOME/.config` and friends when they are
+ * set (t-d05e). Redirecting HOME alone leaves them pointing at the user's real directories, and this
+ * repository has a consumer that reads one: packages/client/src/service.js resolves the systemd user
+ * unit directory to `XDG_CONFIG_HOME/systemd/user`, so a private-home run that installed a service
+ * without ALP_SERVICE_DIR would write a unit into the USER's ~/.config. XDG_RUNTIME_DIR is
+ * deliberately NOT here: it is a 0700 directory systemd owns and uses for sockets, and handing a
+ * test one we made would change socket behaviour rather than isolate it.
+ */
+export const XDG_BASE_DIRECTORIES = { XDG_CONFIG_HOME: '.config', XDG_DATA_HOME: path.join('.local', 'share'), XDG_CACHE_HOME: '.cache' };
+
+/**
  * Redirect home/profile-based discovery to the private home (t-bfbd), removing
  * caller ALP_*_BIN overrides. PATH stays available for normal tool execution.
  * This is test environment isolation, not a filesystem sandbox.
@@ -82,7 +93,9 @@ export const isCallerBinary = name => /^ALP_[A-Z0-9_]+_BIN$/i.test(name);
 export function homelessEnv(env, home) {
   const result = { ...env };
   // Windows names are case-insensitive: drop every spelling so the child sees only the private one.
-  for (const name of Object.keys(result)) if (isCallerBinary(name) || /^(HOME|USERPROFILE|APPDATA|LOCALAPPDATA|HOMEDRIVE|HOMEPATH)$/i.test(name)) delete result[name];
+  // HOMESHARE is the network home a Windows domain profile defines; os.homedir() does not read it,
+  // but a tool that does would reach past the private profile to the user's real one (t-d05e).
+  for (const name of Object.keys(result)) if (isCallerBinary(name) || /^(HOME|USERPROFILE|APPDATA|LOCALAPPDATA|HOMEDRIVE|HOMEPATH|HOMESHARE)$/i.test(name)) delete result[name];
   // Use the private profile for Windows consumers that bypass os.homedir().
   // A drive/UNC home also defines the legacy HOMEDRIVE + HOMEPATH pair.
   const windowsRoot = path.win32.parse(home).root;
@@ -91,6 +104,9 @@ export function homelessEnv(env, home) {
   return { ...result, HOME: home, USERPROFILE: home,
     APPDATA: profilePath.join(home, 'AppData', 'Roaming'),
     LOCALAPPDATA: profilePath.join(home, 'AppData', 'Local'),
+    // Set, not deleted: unset means "use $HOME/.config", which is already the private home, but an
+    // inherited value would survive the deletion of HOME and must be overwritten.
+    ...Object.fromEntries(Object.entries(XDG_BASE_DIRECTORIES).map(([name, relative]) => [name, profilePath.join(home, relative)])),
     ...(drive ? { HOMEDRIVE: drive, HOMEPATH: home.slice(drive.length) || '\\' } : {}),
   };
 }
@@ -121,7 +137,7 @@ export function runNodeTests(files, { extra = [], privateHome = false, fileTimeo
     // alpd under test never asks the real providers for models (t-e5ee); a test that wants it unsets this.
     // A per-file hard watchdog also cuts off leaked handles after five minutes.
     const base = user ? homelessEnv(hermeticEnv(), user) : hermeticEnv();
-    if (user) for (const directory of [base.APPDATA, base.LOCALAPPDATA]) mkdirSync(directory, { recursive: true });
+    if (user) for (const directory of [base.APPDATA, base.LOCALAPPDATA, ...Object.keys(XDG_BASE_DIRECTORIES).map(name => base[name])]) mkdirSync(directory, { recursive: true });
     const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts/test-file-watchdog.mjs'), JSON.stringify({ files, extra, fileTimeoutMs })], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...base, ALP_TEST_RETAIN: retain, ALP_HOME: home, TMPDIR: scratch, TMP: scratch, TEMP: scratch } });
     if (result.error || result.signal || result.status === null) writeFileSync(retain, 'coordinator failed\n');
     return result.status ?? 1;
