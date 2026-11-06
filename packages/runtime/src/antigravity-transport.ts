@@ -46,12 +46,14 @@ const READ_ONLY_COMMANDS = ['pwd'];
 const SHELL_SYNTAX = /[;&|<>`$(){}\\\n\r]/;
 /**
  * Whether read-only allows a terminal command line, by ALP's own reading of the allowlist:
- * one allowed command with no shell syntax. Unknown input is refused.
+ * one allowed entry with no shell syntax. agy matches an allow rule by command prefix, so an
+ * entry may name a subcommand or a flag ('git diff'), and the line must continue it on a word
+ * boundary: 'pwd' allows 'pwd -L' but never 'pwdx'. Unknown input is refused.
  */
 export function antigravityReadOnlyCommandAllowed(commandLine: unknown): boolean {
   if (typeof commandLine !== 'string' || SHELL_SYNTAX.test(commandLine)) return false;
-  const [command] = commandLine.trim().split(/\s+/);
-  return READ_ONLY_COMMANDS.includes(command);
+  const line = commandLine.trim().replace(/\s+/g, ' ');
+  return READ_ONLY_COMMANDS.some(prefix => line === prefix || line.startsWith(`${prefix} `));
 }
 const COMMAND_TOOLS = new Set(['run_command']);
 /** agy's file-editing tools, which read-only always denies. */
@@ -93,7 +95,7 @@ export function antigravityEffortArgs(thinking: unknown): string[] {
 /** What each mode lets an Antigravity agent do, for its instructions. */
 export function antigravityModeText(sandbox: unknown): string {
   const mode = modeOf(sandbox);
-  if (mode === 'read-only') return 'agy enforces read-only: its own file reading and search tools work, and ALP\'s tools; it allows only the terminal command pwd, with no redirection or chaining (read files with its own tools), and denies every file edit and other command. A denied tool ends your turn, so do not attempt one: report work that needs changes to your requester.';
+  if (mode === 'read-only') return `agy enforces read-only: its own file reading and search tools work inside your workspace, ALP's tools work, and its terminal runs these commands and no others, each with no redirection, pipe or chaining: ${READ_ONLY_COMMANDS.join(', ')}. Its sandbox refuses every write in the workspace, so no edit, build, install or commit can run, and a denied tool ends your turn: attempt nothing outside that list and report work that needs changes to your requester.`;
   if (mode === 'workspace-write') return 'agy accepts file edits and runs terminal commands in its sandbox, which writes only inside your workspace; anything outside the workspace or the sandbox is denied, and a denied tool ends your turn. Report work that needs more to your requester.';
   return 'Antigravity runs with full access: every tool runs without asking.';
 }
