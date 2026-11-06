@@ -12,14 +12,16 @@ import { resumeCommandOf } from '@anhlp/alp-protocol';
 import { EXPOSURE, FORWARDED_CAPABILITIES, projectConversation } from '../src/policy.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 const CAPABILITIES = ['attach.after', 'prompt.receipts', 'session.history', 'session.fork', 'session.rewind', 'session.reload', 'session.resumeCommand'];
 const GEN = '0123456789abcdef0123456789abcdef';
 const CONVERSATION = { fork: true, rewind: true, reload: true };
 
 async function world(t, { capabilities = CAPABILITIES } = {}) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-reload-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const [a, b] = ['a', 'b'].map(name => path.join(directory, name));
   for (const dir of [a, b]) await mkdir(dir, { recursive: true });
   const [ca, cb] = await Promise.all([a, b].map(dir => realpath(dir)));

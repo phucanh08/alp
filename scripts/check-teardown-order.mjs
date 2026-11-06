@@ -25,6 +25,7 @@
 // Exit 0 when clean, 1 with a report when not. Run by scripts/validate.mjs (scope all|core, so the
 // CI lanes `core` and `core-paseo-macos`), as `npm run check:teardown-order`, and by
 // test/integration/teardown-order.test.js, which also fails on a STALE entry in ALLOWED below.
+import { readFileSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -104,15 +105,19 @@ function sequenceOf(fn, parsed, deferNames = new Map()) {
         && ts.isCallExpression(node.initializer) && ts.isIdentifier(node.initializer.expression)
         && node.initializer.expression.text === 'teardown' && ts.isIdentifier(node.initializer.arguments[0])) {
       deferNames.set(node.name.text, node.initializer.arguments[0].text);
+      // `teardown(t)` registers ONE hook, here. Everything the test registers with a bare `t.after`
+      // after this point therefore runs after the whole defer list (t-5294.6, review finding M).
+      events.push({ kind: 'teardown', context: node.initializer.arguments[0].text, position: node.getStart(),
+        file: parsed.fileName, line: parsed.getLineAndCharacterOfPosition(node.getStart()).line + 1 });
     }
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
         && node.expression.name.text === 'after' && ts.isIdentifier(node.expression.expression)) {
       events.push({ kind: 'hook', context: node.expression.expression.text, position: node.getStart(),
-        line: parsed.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+        file: parsed.fileName, line: parsed.getLineAndCharacterOfPosition(node.getStart()).line + 1,
         ...classify(node.arguments.map(a => a.getText()).join('\n')) });
     } else if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && deferNames.has(node.expression.text)) {
       events.push({ kind: 'step', context: deferNames.get(node.expression.text), position: node.getStart(),
-        line: parsed.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+        file: parsed.fileName, line: parsed.getLineAndCharacterOfPosition(node.getStart()).line + 1,
         ...classify(node.arguments.map(a => a.getText()).join('\n')) });
     } else if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) {
       events.push({ kind: 'call', name: node.expression.text, position: node.getStart(),
@@ -122,6 +127,28 @@ function sequenceOf(fn, parsed, deferNames = new Map()) {
   };
   walk(fn);
   return events.sort((a, b) => a.position - b.position);
+}
+
+/**
+ * The RELATIVE named imports of a file: local name -> { specifier, imported }. A fixture helper
+ * usually lives in a support module (`import { startGateway } from './support/harness.js'`), and the
+ * hooks it registers land in the calling test's context exactly as a same-file helper's do. Reading
+ * only the test file therefore misses them entirely, which is how apps/gateway/tests/support/
+ * harness.js kept the hang shape through the whole of t-5294.6 (review finding M).
+ */
+function relativeImports(parsed) {
+  const found = new Map();
+  for (const statement of parsed.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    const specifier = statement.moduleSpecifier.text;
+    if (!specifier.startsWith('.')) continue;
+    const bindings = statement.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const element of bindings.elements) {
+      found.set(element.name.text, { specifier, imported: (element.propertyName ?? element.name).text });
+    }
+  }
+  return found;
 }
 
 /** Every module-level named function (declaration or `const name = ... =>`), by name. */
@@ -142,30 +169,45 @@ function namedFunctions(parsed) {
  * The hooks one test registers on its own context, in order: its body's own `t.after` calls with the
  * hooks of every fixture helper it passes `t` to spliced in where the call happens.
  */
-function hooksOf(fn, context, parsed, helpers, seen = new Set(), deferNames = new Map(), frame = 'test') {
+function hooksOf(fn, context, unit, load, seen = new Set(), deferNames = new Map(), frame = 'test') {
   const hooks = [];
-  for (const event of sequenceOf(fn, parsed, deferNames)) {
+  for (const event of sequenceOf(fn, unit.parsed, deferNames)) {
     if (event.kind !== 'call') { if (event.context === context) hooks.push({ ...event, frame }); continue; }
-    const helper = helpers.get(event.name);
     const index = event.arguments.indexOf(context);
-    if (!helper || index < 0 || seen.has(event.name)) continue;
+    if (index < 0) continue;
+    // The helper may be in this file, or imported from a support module beside it.
+    let where = unit, helper = unit.helpers.get(event.name);
+    if (!helper) {
+      const imported = unit.imports.get(event.name);
+      const other = imported && load(unit.relative, imported.specifier);
+      helper = other?.helpers.get(imported.imported);
+      if (helper) where = other;
+    }
+    const key = `${where.relative}#${event.name}`;
+    if (!helper || seen.has(key)) continue;
     // The helper's own name for the context it was handed. `teardown(t)` inside it returns the very
     // same defer, so its steps belong to this list, spliced in where the helper is called.
     // Each invocation is its own frame: a test that calls the same fixture twice gets two sets of
     // steps, and the second fixture's removal must not be read as skipping the first's release.
     const inner = parameterNames(helper)[index];
-    if (inner) hooks.push(...hooksOf(helper, inner, parsed, helpers, new Set([...seen, event.name]), new Map(deferNames), `${frame}>${event.name}@${event.position}`));
+    if (inner) hooks.push(...hooksOf(helper, inner, where, load, new Set([...seen, key]), new Map(deferNames), `${frame}>${event.name}@${event.position}`));
   }
   return hooks;
+}
+
+/** One parsed file: what hooksOf needs to read it and to follow a helper out of it. */
+export function unitOf(relative, source) {
+  const parsed = ts.createSourceFile(relative, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  return { relative, parsed, helpers: namedFunctions(parsed), imports: relativeImports(parsed) };
 }
 
 /**
  * The order problems in one file's source. `allowed` defaults to ALLOWED; pass `{}` to see the
  * excused sites too, which is how the test checks that no entry has gone stale.
  */
-export function teardownProblems(relative, source, allowed = ALLOWED) {
-  const parsed = ts.createSourceFile(relative, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  const helpers = namedFunctions(parsed);
+export function teardownProblems(relative, source, allowed = ALLOWED, load = () => undefined) {
+  const unit = unitOf(relative, source);
+  const parsed = unit.parsed;
   /** One ordered hook list per test, plus one for the file-level `test.after` hooks. */
   const contexts = [];
   const fileLevel = [];
@@ -173,7 +215,7 @@ export function teardownProblems(relative, source, allowed = ALLOWED) {
     if (testCallName(node)) {
       const body = node.arguments.find(functionLike);
       const context = body && parameterNames(body)[0];
-      if (body && context) contexts.push(hooksOf(body, context, parsed, helpers));
+      if (body && context) contexts.push(hooksOf(body, context, unit, load));
     }
     // A file-level hook (`test.after`) runs after every per-test hook: its own order is all that matters.
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'after'
@@ -183,6 +225,8 @@ export function teardownProblems(relative, source, allowed = ALLOWED) {
     ts.forEachChild(node, walk);
   };
   walk(parsed);
+  /** `file:line`, naming the support module when the hook was registered there, not the test file. */
+  const at = entry => `${entry.file ?? relative}:${entry.line}`;
 
   const problems = [];
   const add = problem => {
@@ -191,23 +235,62 @@ export function teardownProblems(relative, source, allowed = ALLOWED) {
     problems.push(problem);
   };
   for (const registrations of [...contexts, fileLevel]) {
-    for (const [index, entry] of registrations.entries()) {
-      if (entry.releasesFirst) continue;
-      // A bare `t.after` runs in registration order: a removal must come after every release.
-      if (entry.kind === 'hook' && entry.removes) {
-        const later = registrations.slice(index + 1).find(other => other.kind === 'hook' && other.releases);
-        if (later) add({ site: `${relative}:${entry.line}`, skips: `${relative}:${later.line}`,
-          detail: `${relative}:${entry.line} removes a path in an after hook registered before ${relative}:${later.line}, which releases a resource: if the removal throws, node:test never runs the release and the file hangs to the watchdog` });
+    const steps = registrations.filter(entry => entry.kind === 'step');
+    const teardownAt = registrations.find(entry => entry.kind === 'teardown');
+    /**
+     * node:test runs the hooks of one test in registration order, and `teardown(t)` is ONE of them.
+     * So the comparable unit is not a single `defer` step but the whole list, registered where
+     * `teardown(t)` was called: it releases if any step releases, removes if any step removes, and
+     * runs its releases before its removals because it runs in reverse (the `step` rule below is
+     * what checks that the steps inside it are in the right order). Normalising it this way is what
+     * lets the three shapes be one rule — two bare hooks, a bare removal before a defer list that
+     * releases, and a bare release after a defer list that removes (review finding M: all three are
+     * present in apps/gateway/tests).
+     */
+    const list = teardownAt && steps.length ? {
+      kind: 'list', position: teardownAt.position, file: teardownAt.file, line: teardownAt.line,
+      removes: steps.some(step => step.removes), releases: steps.some(step => step.releases),
+    } : undefined;
+    if (list) list.releasesFirst = list.removes && list.releases;
+    // Registration order, which is `registrations` as hooksOf built it — NOT line order. A test that
+    // calls the same fixture twice registers two sets of hooks from the same lines, and the first
+    // set's removal really does come before the second set's release (test/integration/
+    // teams.test.js:68 is that shape). Sorting by position would merge the two frames and lose it.
+    // Only the FIRST teardown(t) becomes a list: calling it again returns the same defer, so it
+    // registers no second hook, however many fixtures in the chain ask for one.
+    let listPlaced = false;
+    const order = registrations.flatMap(entry => {
+      if (entry.kind === 'hook') return [entry];
+      if (entry.kind === 'teardown' && list && !listPlaced) { listPlaced = true; return [list]; }
+      return [];
+    });
+    const describe = entry => (entry.kind === 'list' ? `the teardown(t) list started at ${at(entry)}` : `the after hook at ${at(entry)}`);
+
+    for (const [index, entry] of order.entries()) {
+      // A removal that cannot be reached past: every hook after it is skipped when it throws.
+      //
+      // KNOWN LIMITATION, measured and deliberate. `releasesFirst` — one bare hook that does
+      // `await close(); await rm(dir)` — is skipped here, and that is NOT the same as safe: if its
+      // rm throws, every LATER hook is still stranded. Lifting the exemption reports 132 pairs over
+      // 54 sites in 45 files on this tree, a family the size of the one t-5294.6 was opened for and
+      // far outside one assignment, so it is tracked as discovered work instead: a lint that fails
+      // the build on 45 files nobody is converting gets switched off, and then it protects nothing.
+      if (entry.removes && !entry.releasesFirst) {
+        const later = order.slice(index + 1).find(other => other.releases);
+        if (later) add({ site: at(entry), skips: at(later),
+          detail: `${describe(entry)} removes a path and is registered before ${describe(later)}, which releases a resource: node:test stops at the first after hook that throws, so the release never runs and the file hangs to the watchdog. Register both through test/support/teardown.js (defer), each step right after the setup it undoes` });
       }
-      // A `defer` step runs in REVERSE registration order, so the rule inverts: register each step
-      // right after the setup it undoes, which puts the removal FIRST and the release after it.
-      // Only within one frame: across two invocations of the same fixture, the second's removal
-      // legitimately follows the first's release, and each pair is undone correctly on its own.
-      if (entry.kind === 'step' && entry.releases && !entry.removes) {
-        const later = registrations.slice(index + 1).find(other => other.kind === 'step' && other.removes && !other.releases && other.frame === entry.frame);
-        if (later) add({ site: `${relative}:${entry.line}`, skips: `${relative}:${later.line}`,
-          detail: `${relative}:${entry.line} releases a resource in a defer step registered before the removal at ${relative}:${later.line}; defer runs in reverse, so the path would be removed FIRST. Register each step right after the setup it undoes` });
-      }
+    }
+
+    // A `defer` step runs in REVERSE registration order, so the rule inverts: register each step
+    // right after the setup it undoes, which puts the removal FIRST and the release after it.
+    // Only within one frame: across two invocations of the same fixture, the second's removal
+    // legitimately follows the first's release, and each pair is undone correctly on its own.
+    for (const [index, entry] of steps.entries()) {
+      if (!entry.releases || entry.removes || entry.releasesFirst) continue;
+      const later = steps.slice(index + 1).find(other => other.removes && !other.releases && other.frame === entry.frame);
+      if (later) add({ site: at(entry), skips: at(later),
+        detail: `${at(entry)} releases a resource in a defer step registered before the removal at ${at(later)}; defer runs in reverse, so the path would be removed FIRST. Register each step right after the setup it undoes` });
     }
   }
   return problems;
@@ -221,12 +304,30 @@ async function testFiles(directory) {
   } catch { return []; }
 }
 
+/**
+ * Loads a relative import as a unit, so a fixture helper in a support module is expanded at its call
+ * site like a local one. Cached: one support module serves a dozen test files.
+ */
+function moduleLoader() {
+  const cache = new Map();
+  return (from, specifier) => {
+    const relative = path.join(path.dirname(from), specifier).split(path.sep).join('/');
+    if (!cache.has(relative)) {
+      let source;
+      try { source = readFileSync(path.join(root, relative), 'utf8'); } catch { source = undefined; }
+      cache.set(relative, source === undefined ? undefined : unitOf(relative, source));
+    }
+    return cache.get(relative);
+  };
+}
+
 /** Every problem in the tree at `root`. Pass `{ allowed: {} }` to include the excused sites. */
 export async function scan({ allowed = ALLOWED } = {}) {
   const problems = [];
+  const load = moduleLoader();
   for (const directory of TEST_DIRECTORIES) {
     for (const relative of await testFiles(directory)) {
-      problems.push(...teardownProblems(relative, await readFile(path.join(root, relative), 'utf8'), allowed));
+      problems.push(...teardownProblems(relative, await readFile(path.join(root, relative), 'utf8'), allowed, load));
     }
   }
   return problems;

@@ -11,10 +11,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 async function world(t) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-modes-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const a = path.join(directory, 'a');
   await mkdir(a);
   const where = await realpath(a);

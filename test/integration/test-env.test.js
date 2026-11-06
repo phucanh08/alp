@@ -248,6 +248,7 @@ test('clearCallerSession removes exactly the caller session from the live env an
 // directly as well as through the validate wrapper.
 test('every verification entry point that drives a user-facing CLI isolates the caller session', async () => {
   const { readFile } = await import('node:fs/promises');
+  const ts = (await import('typescript')).default;
   const entries = {
     // The wrapper: its steps spawn without an env of their own, so clearing here covers the lane.
     'scripts/validate.mjs': 'npm run validate:core / :paseo / :packages / :web',
@@ -257,9 +258,43 @@ test('every verification entry point that drives a user-facing CLI isolates the 
     'scripts/package-smoke.mjs': 'npm run test:packages:smoke',
     'scripts/binary-smoke.mjs': 'the binary-build CI lane, and by hand on a built bundle',
   };
+  /**
+   * Does this subtree start a child process? Only that: `await mkdtemp(...)` is not work whose
+   * environment matters, and demanding the clear come before it would be a rule about tidiness
+   * rather than about the defect. The limit of the check is an imported module that spawns while
+   * being imported, which none of these five does.
+   */
+  const startsWork = node => {
+    let found = false;
+    const walk = child => {
+      if (found) return;
+      if (ts.isCallExpression(child)) {
+        const callee = child.expression;
+        const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : '';
+        if (/^(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork|run|npm|node)$/.test(name)) found = true;
+      }
+      ts.forEachChild(child, walk);
+    };
+    walk(node);
+    return found;
+  };
   for (const [relative, how] of Object.entries(entries)) {
     const source = await readFile(new URL(`../../${relative}`, import.meta.url), 'utf8');
-    assert.match(source, /clearCallerSession\(\)/, `${relative} (${how}) must clear the caller's ALP session variables: an agent running it otherwise hits a user-only refusal that has nothing to do with what it checks`);
+    const parsed = ts.createSourceFile(relative, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    // Top-level statements in order. A function or class DECLARATION only defines something, so a
+    // `spawnSync` inside one is not work this file has done yet — which is why reading offsets out
+    // of the text is not enough: scripts/package-smoke.mjs declares its `run()` wrapper above the
+    // isolation and calls it below.
+    const statements = parsed.statements.filter(statement =>
+      !ts.isImportDeclaration(statement) && !ts.isFunctionDeclaration(statement) && !ts.isClassDeclaration(statement));
+    const cleared = statements.findIndex(statement => /\bclearCallerSession\s*\(/.test(statement.getText()));
+    assert.ok(cleared >= 0, `${relative} (${how}) must clear the caller's ALP session variables at the top level: an agent running it otherwise hits a user-only refusal that has nothing to do with what it checks`);
+    // And it must come first. The point is the CHILD's environment, so a clear after the first child
+    // has started changes nothing for that child: validate.mjs printed its banner — two `git` calls —
+    // before clearing, until this assertion said so.
+    const work = statements.findIndex(startsWork);
+    assert.ok(work < 0 || cleared < work,
+      `${relative} (${how}) clears the caller session in top-level statement ${cleared}, after statement ${work} already started a child process:\n  ${statements[work].getText().split('\n')[0]}`);
   }
 });
 

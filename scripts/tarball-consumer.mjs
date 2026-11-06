@@ -20,6 +20,7 @@ import { exitDescription, spawnCommand } from './spawn-command.mjs';
 import { LAUNCHER, releaseArtifacts } from './release-lib.mjs';
 import { checkPaseoNpmSource, describe as describePaseoSource } from './paseo-source-check.mjs';
 import { clearCallerSession } from './test-lib.mjs';
+import { requireRelativeImports } from './relative-imports.mjs';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -214,16 +215,9 @@ console.log('plugin runtime imports ok');
   }
   // Say which support file is missing, here, instead of leaving a module-resolution error 180 s into
   // `node --test`: the copied suite is a moving target, and the next test to gain a support import
-  // would otherwise fail with nothing pointing at this block.
-  for (const name of tests) {
-    const file = path.join(suite, `${name}.test.js`);
-    for (const [, specifier] of readFileSync(file, 'utf8').matchAll(/\bfrom\s+'(\.[^']*)'/g)) {
-      const target = path.resolve(path.dirname(file), specifier);
-      if (!existsSync(target)) {
-        throw new Error(`${name}.test.js imports ${specifier}, which this script does not copy into the isolated project (expected ${target}). Copy it next to test/support/fake-agent.js above.`);
-      }
-    }
-  }
+  // would otherwise fail with nothing pointing at this block. Parsed, so every import form counts
+  // (scripts/relative-imports.mjs).
+  for (const name of tests) await requireRelativeImports(path.join(suite, `${name}.test.js`), 'scripts/tarball-consumer.mjs');
   const regression = spawnSync(process.execPath, ['--test', ...tests.map(name => path.join(suite, `${name}.test.js`))], {
     cwd: pluginDir, stdio: 'inherit', timeout: 180_000,
     env: { ...process.env, ALP_HOME: path.join(pluginDir, 'home'), NODE_PATH: '' },

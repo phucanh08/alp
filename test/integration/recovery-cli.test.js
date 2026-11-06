@@ -7,9 +7,14 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { connect, daemonPaths, bootTime } from '@anhlp/alp-client';
 import { fakeTransport, until, workspace } from '../support/recovery.js';
+import { teardown } from '../support/teardown.js';
 
 // Built CLI -> real socket daemon -> runtime -> scripted native transport. Every home is disposable.
 test('explicit CLI prompt continues a manual recovery child; default send remains mail', async t => {
+  // workspace(t) registers its rm through the shared list, so everything opened after it must go in
+  // the same list: a bare t.after here would run AFTER that whole list, i.e. after the removal
+  // (t-5294.6, review finding M).
+  const defer = teardown(t);
   const { directory, root, options } = await workspace(t);
   const home = path.join(directory, 'cli-home');
   await mkdir(home, { mode: 0o700 });
@@ -29,10 +34,10 @@ test('explicit CLI prompt continues a manual recovery child; default send remain
   const socketPath = daemonPaths(home).socket;
   const server = createDaemonServer({ runtime, socketPath, version: 'test', runLogDir: options.runLogDir });
   await server.listen();
-  t.after(async () => { await server.close(); await runtime.shutdown(); });
+  defer(async () => { await server.close(); await runtime.shutdown(); });
   await writeFile(daemonPaths(home).lock, JSON.stringify({ pid: process.pid, bootTime: bootTime(), ready: true, socket: socketPath }));
   const observer = await connect(socketPath);
-  t.after(() => observer.close());
+  defer(() => observer.close());
   await observer.request('session.create', { sessionId: 'root', spec: { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot.threadId, runtime: snapshot.runtime, model: snapshot.model, workflow: snapshot.workflow } } });
   await runtime.recover('root');
   const peer = runtimes.findLast(agent => agent.threadId === peerThread);
@@ -43,7 +48,7 @@ test('explicit CLI prompt continues a manual recovery child; default send remain
     let output = '';
     child.stdout.on('data', data => { output += data; });
     child.stderr.on('data', data => { output += data; });
-    t.after(() => { if (child.exitCode === null) child.kill(); });
+    defer(() => { if (child.exitCode === null) child.kill(); });
     const timeout = setTimeout(() => child.kill(), 10000);
     const done = new Promise(resolve => child.on('close', code => { clearTimeout(timeout); resolve({ code, output }); }));
     return { child, done };
@@ -53,7 +58,7 @@ test('explicit CLI prompt continues a manual recovery child; default send remain
   assert.equal(peer.started.length, 0, 'mail must not unpark recovery');
   assert.ok(runtime.snapshot(delegated.assignmentId).parked);
   const client = await connect(socketPath);
-  t.after(() => client.close());
+  defer(() => client.close());
   // The existing RPC is an independent positive control on another recovery child.
   await client.request('session.prompt', { sessionId: control.assignmentId, clientMessageId: 'control', content: [{ type: 'text', text: 'RPC CONTROL' }] });
   await until(() => controlPeer.started.length === 1);

@@ -15,6 +15,7 @@ import { CONTENT_TYPES, DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, P
 import { reissueCredential, revokeCredential } from '../src/credentials.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway, until } from './support/harness.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 const CAPABILITIES = ['attach.after', 'prompt.receipts', 'prompt.images', 'attachments'];
 const UPLOAD = `upl_${'1'.repeat(32)}`;
@@ -24,8 +25,9 @@ const info = (extra = {}) => ({ attachmentId: ATTACHMENT, sessionId: 'sa', name:
 const daemonLimits = { ...Object.fromEntries(Object.entries(ATTACHMENTS).filter(([key]) => key !== 'maxNameBytes')), maxObjectBytes: 1024 * 1024 };
 
 async function world(t, { maxFrame, capabilities = CAPABILITIES } = {}) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-attach-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  defer(() => rm(directory, { recursive: true, force: true }));
   const a = path.join(directory, 'a');
   const b = path.join(directory, 'b');
   const credentials = {

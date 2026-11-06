@@ -85,6 +85,12 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
       entry = path.join(scripts, 'package-smoke.mjs');
       await writeFile(entry, source);
       await copyFile(path.join(root, 'scripts/beta-web-lifecycle.mjs'), path.join(scripts, 'beta-web-lifecycle.mjs'));
+      // t-5294.3: package-smoke.mjs clears the caller's ALP session variables through
+      // scripts/test-lib.mjs, which imports only node builtins — copied, not stubbed, so the fixture
+      // runs the real isolation rather than a hand-written double of it. Without it the entry dies on
+      // ERR_MODULE_NOT_FOUND before the first owned process starts, and this test fails with a
+      // missing pids.jsonl that says nothing about why.
+      await copyFile(path.join(root, 'scripts/test-lib.mjs'), path.join(scripts, 'test-lib.mjs'));
       await writeFile(path.join(base, 'package.json'), JSON.stringify({ name: '@anhlp/alp', version: '0.0.0-fixture', workspaces: [] }));
       await writeFile(path.join(scripts, 'release-lib.mjs'), `export const LAUNCHER = '@anhlp/alp';
       export const LAUNCHER_LOCATION = 'npm/alp';

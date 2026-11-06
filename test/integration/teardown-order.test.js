@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { teardown } from '../support/teardown.js';
-import { ALLOWED, scan, teardownProblems } from '../../scripts/check-teardown-order.mjs';
+import { ALLOWED, scan, teardownProblems, unitOf } from '../../scripts/check-teardown-order.mjs';
 
 const HELPER = new URL('../support/teardown.js', import.meta.url).href;
 const RUNNER = new URL('../../scripts/test-lib.mjs', import.meta.url).href;
@@ -211,4 +211,106 @@ test('no allowlist entry is stale: each one still names a site the scan reports'
   // scan must be empty: a real new defect cannot hide behind the excused ones.
   const open = await scan();
   assert.deepEqual(open.map(problem => problem.detail), [], 'scripts/check-teardown-order.mjs reports a teardown-order defect that is not allowlisted');
+});
+
+// Review finding M, t-5294.6. The hang shape can live in a SUPPORT MODULE, and then nothing in the
+// test file shows it. apps/gateway/tests/support/harness.js was exactly that: `startGateway(t)`
+// registered a bare hook that closed the gateway and store and THEN removed its directory, and two
+// later ones terminating a raw socket and closing an SDK client. Reading only the test file, the
+// lint saw a test that registers one `t.after(rm(...))` and nothing else, and passed it — for all 15
+// gateway files, through the whole of the original conversion.
+//
+// So the lint follows a fixture helper out of the file it is imported from, and treats the one hook
+// `teardown(t)` registers as a single unit at the point it was registered. That makes the three
+// shapes below one rule. `load` is the seam: the scan reads the real file, a test passes a map.
+const SUPPORT = `import { teardown } from '../../../test/support/teardown.js';
+export async function startGateway(t, options) {
+  const directory = await mkdtemp('gw');
+  const gateway = createGateway(options);
+  await gateway.listen();
+  t.after(async () => { await gateway.close(); store.close(); await rm(directory, { recursive: true, force: true }); });
+  async function rawSession(label) {
+    const socket = await open(label);
+    t.after(() => socket.terminate());
+    return socket;
+  }
+  return { rawSession };
+}`;
+const load = (from, specifier) => (specifier === './support/harness.js' ? unitOf('tests/support/harness.js', SUPPORT) : undefined);
+
+test('the lint follows a fixture helper into the support module it is imported from', () => {
+  // SHAPE 1, the 13 plain gateway files: the test removes its own directory in a bare hook, then
+  // calls the fixture, whose hook closes the gateway. The removal is registered first, so one
+  // ENOTEMPTY strands the gateway's listening socket and the file sits to the watchdog.
+  const plain = `import test from 'node:test';
+import { startGateway } from './support/harness.js';
+test('one', async t => {
+  const directory = await mkdtemp('own');
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const { rawSession } = await startGateway(t, { directory });
+  await rawSession('a');
+});`;
+  const found = teardownProblems('tests/plain.test.js', plain, {}, load);
+  assert.equal(found.length, 1, JSON.stringify(found, null, 1));
+  assert.equal(found[0].site, 'tests/plain.test.js:5', 'the test\'s own rm');
+  assert.equal(found[0].skips, 'tests/support/harness.js:6', 'the gateway close inside the helper, in the other file');
+  assert.match(found[0].detail, /tests\/support\/harness\.js:6/, 'the message names the support module, not just the test');
+
+  // Reading the test file alone — no `load` — sees a single harmless hook and reports nothing. That
+  // is the blind spot itself, asserted so it cannot come back unnoticed.
+  assert.deepEqual(teardownProblems('tests/plain.test.js', plain, {}), []);
+
+  // SHAPE 2, the half-converted file (apps/gateway/tests/{credentials,gateway}.test.js on this
+  // branch before the fix): the test uses teardown(t), the helper still uses bare t.after. node:test
+  // runs the teardown hook first because it was registered first, so the whole defer list — rm
+  // included — runs BEFORE the helper's close. Converting one side only makes it worse, not better.
+  const half = `import test from 'node:test';
+import { teardown } from '../support/teardown.js';
+import { startGateway } from './support/harness.js';
+test('one', async t => {
+  const defer = teardown(t);
+  const directory = await mkdtemp('own');
+  defer(() => rm(directory, { recursive: true, force: true }));
+  const { rawSession } = await startGateway(t, { directory });
+  await rawSession('a');
+});`;
+  const mixed = teardownProblems('tests/half.test.js', half, {}, load);
+  assert.equal(mixed.length, 1, JSON.stringify(mixed, null, 1));
+  assert.equal(mixed[0].site, 'tests/half.test.js:5', 'the teardown(t) list, at the line that started it');
+  assert.equal(mixed[0].skips, 'tests/support/harness.js:6');
+  assert.match(mixed[0].detail, /teardown\(t\) list/);
+
+  // SHAPE 3, fixed: the helper registers through the same list, so there is one ordered list across
+  // both files and nothing can strand anything. This is what the real harness does now.
+  const fixedSupport = SUPPORT
+    .replace('export async function startGateway(t, options) {', 'export async function startGateway(t, options) {\n  const defer = teardown(t);')
+    .replace("t.after(async () => { await gateway.close(); store.close(); await rm(directory, { recursive: true, force: true }); });",
+      "defer(() => rm(directory, { recursive: true, force: true }));\n  defer(() => store.close());\n  defer(() => gateway.close());")
+    .replace('t.after(() => socket.terminate());', 'defer(() => socket.terminate());');
+  const fixedLoad = (from, specifier) => (specifier === './support/harness.js' ? unitOf('tests/support/harness.js', fixedSupport) : undefined);
+  assert.deepEqual(teardownProblems('tests/half.test.js', half, {}, fixedLoad), []);
+});
+
+// The same mechanism in the other direction: a test that calls one fixture TWICE registers two sets
+// of hooks from the same source lines, and the first set's removal really is registered before the
+// second set's release. Registration order, not line order, is what decides — reading the hooks by
+// position would merge the two frames and lose the defect (test/integration/teams.test.js:68).
+test('two invocations of one fixture are two frames: the first removal strands the second release', () => {
+  const twice = `import test from 'node:test';
+function session(t, root) {
+  const runtime = create(root);
+  t.after(() => runtime.shutdown());
+  t.after(() => rm(root, { recursive: true, force: true }));
+  return runtime;
+}
+test('one', async t => {
+  const a = session(t, 'a');
+  const b = session(t, 'b');
+  await a.open(); await b.open();
+});`;
+  const found = teardownProblems('f.test.js', twice, {});
+  assert.equal(found.length, 1, JSON.stringify(found, null, 1));
+  // The first frame's rm (line 5) is registered before the second frame's shutdown (line 4).
+  assert.equal(found[0].site, 'f.test.js:5');
+  assert.equal(found[0].skips, 'f.test.js:4');
 });

@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { corePackageProblems } from './core-package-boundary.mjs';
 import { clearCallerSession } from './test-lib.mjs';
+import { requireRelativeImports } from './relative-imports.mjs';
 
 // t-5294.3: this smoke is the installed CLI as a USER runs it, and `alp web --print` below is one of
 // the things it checks. Run from an ALP agent's shell, the inherited ALP_AGENT_SESSION made the
@@ -126,7 +127,14 @@ try {
   mkdirSync(path.join(core, 'test/support'), { recursive: true });
   mkdirSync(path.join(core, 'test/integration'), { recursive: true });
   copyFileSync(path.join(root, 'test/support/recovery.js'), path.join(core, 'test/support/recovery.js'));
+  // recovery.js registers its teardown through the shared helper (t-5294.6), so the copy needs it too.
+  copyFileSync(path.join(root, 'test/support/teardown.js'), path.join(core, 'test/support/teardown.js'));
   copyFileSync(path.join(root, 'test/integration/recovery-cli.test.js'), path.join(core, 'test/integration/recovery-cli.test.js'));
+  // And say which support file is missing here, rather than as an ERR_MODULE_NOT_FOUND inside the
+  // `node --test` run below, in a temporary directory, with nothing pointing back at this copy.
+  for (const file of ['test/support/recovery.js', 'test/integration/recovery-cli.test.js']) {
+    await requireRelativeImports(path.join(core, file), 'scripts/core-standalone-smoke.mjs');
+  }
   for (const [directory, cli] of [[core, 'node_modules/@anhlp/alp-cli/dist/cli.js']]) {
     // Installs use --legacy-peer-deps, so only missing peers of an installed package are expected.
     const { stdout: tree } = run('npm', ['ls', '--all', '--json'], { cwd: directory, capture: true, allowFailure: true });

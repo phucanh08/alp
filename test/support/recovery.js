@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
+import { teardown } from './teardown.js';
 
 let calls = 0;
 /** A fake native harness; resuming a thread keeps its id, as Codex and Claude do. */
@@ -53,8 +54,11 @@ export const git = (cwd, ...args) => {
 };
 
 export async function workspace(t) {
+  // Through the shared list, not a bare `t.after` (t-5294.6): this removal was registered before
+  // every runtime/daemon the calling test then starts, so one ENOTEMPTY here stranded all of them.
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-recovery-'));
-  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(directory, 'project');
   await initProject(root);
   git(root, 'init', '-q', '-b', 'main');
