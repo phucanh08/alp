@@ -24,6 +24,36 @@ hạn. Từ 4.6.6, danh sách vượt giới hạn bị từ chối ngay ở gi�
   (`claude-transport.ts`, `toolShapes`) và hai danh sách lồng trong `verdict` của `alp_handoff`. Với
   zod 4.4.3 cả 4 test fail; với 4.6.7 cả 4 pass.
 
+## Ràng buộc cho người viết schema: bản vá chỉ bao ba loại collection (t-5294.4)
+
+Bản vá 4.6.6 chỉ kiểm `.max()` trước khi đọc phần tử cho **`z.array`, `z.map`, `z.set`**. Không có
+loại nào khác được bao, và điều đáng chú ý nhất là:
+
+> **`z.record` KHÔNG được bao.** Một `z.record` dù có khai giới hạn vẫn bị zod đọc từng phần tử và
+> giữ một issue cho mỗi phần tử sai, đúng hành vi mà advisory này nói tới.
+
+Vì vậy, khi viết một field mới nhận đầu vào từ bên ngoài:
+
+- Giới hạn một collection thì dùng `z.array` (hoặc `map`/`set`) kèm `.max()`. Đổi một field đang là
+  array có `.max()` sang `z.record` là **mất** lớp bảo vệ, kể cả khi vẫn khai giới hạn.
+- Nếu thật cần một record có giới hạn, phải chặn kích thước **trước** khi zod parse, bằng
+  `bounded()` trong `packages/runtime/src/claude-transport.ts` (nó đo kích thước trong
+  `z.preprocess` rồi mới cho schema chạy). `vars` của `alp_pour` là đúng mẫu này.
+- Field nào dựa vào `.max()` của array thì nên có test ghim **cả hình dạng** chứ không chỉ con số,
+  để lần sau ai đổi sang record thì test kêu. Hai ví dụ:
+  `packages/runtime/tests/zod-security.test.js` (tool schema Claude) và
+  `integrations/paseo/tests/compact-schema.test.js` (`alp.agent.compact.sessions`, max 4).
+
+Rà toàn repo ngày 2026-11-06 (t-5294.4, mục 3) — **không có** `z.record` nào có giới hạn mà chưa qua
+`bounded()`. Bốn chỗ dùng `z.record`, và đây là trạng thái của từng chỗ:
+
+| Chỗ dùng | Đầu vào hay đầu ra | Giới hạn | Trạng thái |
+| --- | --- | --- | --- |
+| `packages/runtime/src/claude-transport.ts:138` (`alp_pour.vars`) | đầu vào | có | đã qua `bounded()` — đúng mẫu |
+| `integrations/paseo/shared/library.ts:68` (`alp.library.save.content`) | đầu vào | không | không khai giới hạn (giá trị là `z.unknown()`, zod không parse sâu); t-32c1 chặn kích thước ở tầng trước |
+| `integrations/paseo/shared/library.ts:46` (`alp.library.get.content`) | đầu ra | không | dữ liệu do ALP tạo, không phải đầu vào ngoài |
+| `integrations/paseo/shared/tasks.ts:48` (`alp.tasks.list.sessions`) | đầu ra | không | dữ liệu do ALP tạo, không phải đầu vào ngoài |
+
 ## Phần còn lại, chưa sửa (t-ffe4.3)
 
 Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`) khai `zod` là peerDependency (`^4.0.0`), nên các
