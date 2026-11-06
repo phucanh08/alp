@@ -1,5 +1,9 @@
 # Bản ghi quyết định kiến trúc (ADR)
 
+Khung ADR dưới đây giữ tiêu đề tiếng ANH có chủ ý (t-d11c mục 3, người dùng quyết định
+2026-11-06): đó là hình dạng một artifact mà tooling khác đọc, không phải prose hướng dẫn cách
+làm việc. Phần nội dung dưới mỗi tiêu đề viết bằng ngôn ngữ của project.
+
 Đọc khi phán xét một thay đổi có đáng viết ADR, khi viết ADR, hoặc khi đổi status của một ADR.
 
 ## Khi nào nên viết ADR
