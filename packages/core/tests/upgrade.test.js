@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { upgradeProject, shippedRoleHashes } from '../src/upgrade.js';
 import { shippedTemplateRoot } from '../src/template-path.js';
 import { resolveAgent } from '../src/resolver.js';
+import { literal, templateTitle } from '../../../test/support/template-text.js';
 
 async function fixture(t, main = '# Main agent\n\nHelp with tasks in this project.\n') {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-upgrade-'));
@@ -27,7 +28,7 @@ test('upgrade backs up original scaffold, enables routing, and preserves runtime
   assert.equal(await readFile(path.join(result.backup, '.alp/agents/main/AGENT.md'), 'utf8'), '# Main agent\n\nHelp with tasks in this project.\n');
   const main = await resolveAgent(root);
   assert.equal(main.source, 'builtin');
-  assert.match(main.instructions.agent, /người giám sát chủ động/);
+  assert.match(main.instructions.agent, literal(templateTitle('agents/main/AGENT.md')));
   assert.equal(await readFile(path.join(result.backup, '.alp/settings.json'), 'utf8'), '{"defaultAgent":"main","runtime":{"model":"my-model"}}');
   const settings = JSON.parse(await readFile(path.join(root, '.alp/settings.json'), 'utf8'));
   assert.equal(settings.runtime.model, 'my-model');

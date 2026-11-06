@@ -208,6 +208,11 @@ console.log('plugin runtime imports ok');
   // ERR_MODULE_NOT_FOUND before a single regression executes. It imports nothing itself, so it is
   // copied verbatim.
   copyFileSync(path.join(root, 'test/support/teardown.js'), path.join(pluginDir, 'test/support/teardown.js'));
+  // t-814a, same reason: paseo.test.js and team.test.js now read the shipped role definitions from
+  // the template root instead of keeping a copy of a sentence. It imports only published package
+  // specifiers (@anhlp/alp-core/template-path, @anhlp/alp-runtime), both of which this project
+  // installs, so it too is copied verbatim.
+  copyFileSync(path.join(root, 'test/support/template-text.js'), path.join(pluginDir, 'test/support/template-text.js'));
   for (const name of tests) {
     const source = readFileSync(path.join(root, 'integrations/paseo/tests', `${name}.test.js`), 'utf8')
       .replace("new URL('../server/dist/index.js', import.meta.url)", "import.meta.resolve('@anhlp/alp-paseo')");

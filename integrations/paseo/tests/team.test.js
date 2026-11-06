@@ -7,6 +7,7 @@ import { initProject } from '@anhlp/alp-core/init';
 import { createProvider } from '@anhlp/alp-paseo';
 import { PROVIDER_CAPABILITIES, ProviderEventSchema } from '@getpaseo/plugin/server/provider';
 import { teardown } from '../../../test/support/teardown.js';
+import { literal, templateTitle } from '../../../test/support/template-text.js';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 async function until(check) {
@@ -78,7 +79,7 @@ test('real provider boundary routes main -> lead -> peer, isolates instructions 
   const peerConfig = runtimes[2].calls.find(c => c.method === 'thread/start').params;
   assert.deepEqual(peerConfig.dynamicTools.map(tool => tool.name), ['alp_send', 'alp_handoff', 'alp_ask', 'alp_pin', 'alp_board', 'alp_unpin', 'alp_task']);
   assert.match(peerConfig.developerInstructions, /assignment from lead\. You do not talk to the user: lead does, through main\. If a decision is genuinely theirs, ask with alp_ask[\s\S]*Before ending your turn, call alp_handoff/);
-  assert.match(peerConfig.developerInstructions, /Peer — người đóng góp độc lập trong phạm vi giới hạn/);
+  assert.match(peerConfig.developerInstructions, literal(templateTitle('agents/peer/AGENT.md')));
   assert.doesNotMatch(peerConfig.developerInstructions, /# Main —/);
   assert.equal(peerConfig.sandbox, 'read-only');
   assert.equal(peerConfig.approvalPolicy, 'never');
