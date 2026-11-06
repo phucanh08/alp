@@ -311,8 +311,10 @@ test('install.ps1: reinstalling the current version puts the running copy back w
 
 // t-5294.5: `alp --version` and then a reinstall failed once on CI with "ALP 9.8.7 is in use": the version
 // that just ran was still held when install.ps1 moved it aside, and a rerun passed. A user doing the same
-// met the same refusal. A process run from app\9.8.7 stands in for that hold, deterministically: the
-// install ends it once install.ps1 says it waits (a short hold), or never (a version really running).
+// met the same refusal. A process run from app\9.8.7 with its working directory there stands in for that
+// hold, deterministically. Windows lets a directory holding a running executable be renamed (seen on the
+// lane), not one that is a process's working directory (t-598d). The install ends the holder once
+// install.ps1 says it waits (a short hold), or never (a version really in use).
 test('install.ps1: a reinstall waits out a short hold on the current version, and names what still runs from it after the wait (t-5294.5)', { skip: !windows }, async t => {
   const releases = await mirror(t);
   const localAppData = await temp(t, 'alp-ps-lad-');
@@ -321,7 +323,7 @@ test('install.ps1: a reinstall waits out a short hold on the current version, an
   assert.equal(first.code, 0, first.stderr);
   const node = path.join(dir, 'app', '9.8.7', 'node', 'node.exe');
   const hold = () => {
-    const holder = spawn(node, ['-e', 'setTimeout(() => {}, 120000)'], { stdio: 'ignore', cwd: localAppData });
+    const holder = spawn(node, ['-e', 'setTimeout(() => {}, 120000)'], { stdio: 'ignore', cwd: path.dirname(node) });
     t.after(() => holder.kill());
     return holder;
   };
@@ -342,7 +344,10 @@ test('install.ps1: a reinstall waits out a short hold on the current version, an
   await new Promise(resolve => setTimeout(resolve, 500));
   const refused = await install(['-Dir', dir, '-NoModifyPath', '-BaseUrl', releases], { localAppData });
   assert.notEqual(refused.code, 0, refused.stdout);
-  assert.match(refused.stderr, new RegExp(`ALP 9\\.8\\.7 is in use \\(Windows cannot move a running version\\): node\\.exe \\(pid ${running.pid}\\)`), refused.stderr);
+  // Windows PowerShell may wrap a long error record: compare with runs of whitespace collapsed.
+  const refusal = refused.stderr.replace(/\s+/g, ' ');
+  assert.match(refusal, /ALP 9\.8\.7 is in use \(Windows cannot move a running version\)/, refused.stderr);
+  assert.ok(refusal.includes(`node.exe (pid ${running.pid})`), refused.stderr);
   running.kill();
   assert.equal(version(path.join(dir, 'alp.cmd')), '9.8.7', 'the refused reinstall left the current version running');
 });
