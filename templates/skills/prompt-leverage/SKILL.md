@@ -25,11 +25,13 @@ nghiên cứu -> xia; chẩn đoán/regression -> bug-loop; một handoff có qu
 smart-commits. Đừng đòi những skill không có trong gói của người nhận. Một reviewer có thể
 xem xét một bản ứng viên đang có mà không cần thêm nghi thức skill nào.
 
-Trên Paseo hiện tại, hãy truyền toàn bộ brief qua alp_delegate.task cùng một agent đã được cấp
-quyền và một mode tuỳ chọn. Model và mức suy luận thừa hưởng từ agent cha; tool này không có
-tham số model. Yêu cầu chỉ đọc cho việc nghiên cứu/review ở chỗ phù hợp. Việc hiện thực cần
-workspace-write ở cả cha và con. Lời gọi đó chờ tới khi có handoff cuối cùng, nên hãy đưa vào
-mọi thứ cần thiết để làm việc mà không có kênh hỏi đáp trực tiếp.
+Gửi toàn bộ brief qua tool giao việc mà runtime của bạn thật sự cung cấp, cho một agent đã được
+cấp quyền. Cách chọn model và effort cho người nhận, và việc có phải chọn hay không, lấy từ
+instruction runtime của bạn (model profile của người nhận, catalog của runtime); đừng giả định
+người nhận chạy trên model của bạn. Yêu cầu chỉ đọc cho việc nghiên cứu/review ở chỗ phù hợp.
+Việc hiện thực cần workspace-write ở cả cha và con. Việc giao có thể chạy nền và trả kết quả
+về sau; người nhận có thể hỏi lại hoặc không, tuỳ kênh mà runtime có. Vì vậy hãy đưa vào brief
+mọi thứ cần thiết để làm xong việc mà không phải hỏi lại.
 
 Skill này không cấp thẩm quyền mới nào và không bao giờ lách đồ thị định tuyến đã cấu hình. Nếu
 chỉ được yêu cầu làm tốt hơn một prompt, hãy trả prompt về. Nếu việc giao đã được cấp quyền,

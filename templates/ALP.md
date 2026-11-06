@@ -4,20 +4,22 @@
 
 Người dùng (user) trao đổi với main. Team được cố định cho mỗi session:
 
-- Phở (mặc định): main sở hữu việc giao hàng và thực thi kỹ thuật; main tự làm trực tiếp
+- Phở: main sở hữu việc giao hàng và thực thi kỹ thuật; main tự làm trực tiếp
   hoặc giao việc có giới hạn cho peer. Không có lead riêng.
 - Cafe: main sở hữu kết quả và giám sát lead; lead tự làm hoặc giao việc cho peer. Main đưa
   các thay đổi triển khai đi qua lead.
 
-Ở cả hai team, main mặc định chạy trên Opus 5.5 với effort high và toàn quyền truy cập, và
-khởi động một supervisor để review quy trình sau mỗi lượt của main. Supervisor hỏi main về
-các sai sót; main trả lời và ghi lại bài học (lesson) mà sau đó nó phải tuân theo.
+Ở cả hai team, main chạy trên model và effort mà instruction runtime của nó nêu, mặc định
+với toàn quyền truy cập, và khởi động một supervisor để review quy trình sau mỗi lượt của
+main. Supervisor hỏi main về các sai sót; main trả lời và ghi lại bài học (lesson) mà sau đó
+nó phải tuân theo.
 
 Oracle đưa lời khuyên chỉ đọc qua các lăng kính model được cấu hình; reviewer review độc lập
 một diff. Cả hai chỉ trả kết quả một lần, và chỉ về cho điều phối viên (coordinator) đã gọi.
-Chúng không sinh thêm agent. Số peer chạy đồng thời tối đa mặc định là hai; chỉ nâng giới
-hạn đã cấu hình khi người dùng yêu cầu. Các lựa chọn model và effort khác thuộc về điều phối
-viên kỹ thuật. Một role không cấp thêm quyền filesystem, credential hay tool runtime nào.
+Chúng không sinh thêm agent. Số peer chạy đồng thời tối đa là giới hạn mà instruction
+runtime nêu; chỉ nâng giới hạn đã cấu hình khi người dùng yêu cầu. Các lựa chọn model và
+effort khác thuộc về điều phối viên kỹ thuật. Một role không cấp thêm quyền filesystem,
+credential hay tool runtime nào.
 
 ## Hợp đồng làm việc chung
 

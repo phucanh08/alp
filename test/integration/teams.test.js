@@ -11,6 +11,7 @@ import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createProvider } from '../../integrations/paseo/server/dist/index.js';
 import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
 import { teardown } from '../support/teardown.js';
+import { templateText } from '../support/template-text.js';
 
 // The user library is $ALP_HOME (default ~/.alp), read when a session resolves its team and
 // providers. Give this file an empty library of its own, so it never reads the user's real one
@@ -23,8 +24,9 @@ after(async () => {
   if (isolatedHome) await rm(isolatedHome, { recursive: true, force: true });
 });
 
-// The coordination text the runtime held before teams; Phở and Cafe's house rules are this text, moved (translated to Vietnamese in t-9043).
-const BEFORE_TEAMS = mode => `Profile: ${mode}; fixed for this session. Ở Phở (pho), main tự làm hoặc giao việc trực tiếp cho peer; đừng tạo lead. Ở Cafe (cafe), main giám sát lead; lead có thể tự làm hoặc giao việc cho peer. Điều phối viên kỹ thuật (coordinator) chọn model và effort cho từng peer. Dùng oracle khi có bất định đáng kể; dùng reviewer cho thay đổi logic và thay đổi rủi ro, không bắt buộc với sửa typo/định dạng. Cố vấn (advisor) chỉ trả kết quả về cho điều phối viên đã gọi mình.`;
+// Each team's house rules, as shipped: the runtime prints them after the profile line. A custom
+// graph has no team of its own and falls back to Phở's (packages/runtime/src/resolve.ts).
+const HOUSE_RULES = mode => `Profile: ${mode}; fixed for this session. ${templateText(`teams/${mode === 'custom' ? 'pho' : mode}/HOUSE_RULES.md`).trim()}`;
 
 async function fixture(t) {
   const defer = teardown(t);
@@ -78,14 +80,19 @@ const docsTeam = {
   supervisor: { agent: 'watcher', model: 'codex:gpt-6-sol', thinking: 'low' },
 };
 
-test('Phở and Cafe give main the coordination text it had before teams, and a custom graph keeps it too', async t => {
+test('Phở and Cafe each give main their own house rules, and a custom graph gets Phở\'s', async t => {
+  // R6/D2 of the architecture review: each team's rules describe that team, not both.
+  assert.match(templateText('teams/pho/HOUSE_RULES.md'), /Phở \(pho\)/);
+  assert.doesNotMatch(templateText('teams/pho/HOUSE_RULES.md'), /Cafe|cafe/);
+  assert.match(templateText('teams/cafe/HOUSE_RULES.md'), /Cafe \(cafe\)/);
+  assert.doesNotMatch(templateText('teams/cafe/HOUSE_RULES.md'), /Phở|pho\b/);
   for (const mode of ['pho', 'cafe', undefined]) {
     const root = await fixture(t);
     await initProject(root);
     if (!mode) await files(root, { '.alp/settings.json': { delegation: { main: ['peer'] } } });
     const { runtimes } = await session(t, root, mode ? { workflow: mode } : {}, { supervisor: false });
     const instructions = runtimes[0].config.developerInstructions;
-    assert.ok(instructions.includes(`\n\n${BEFORE_TEAMS(mode ?? 'custom')}\n\n`), instructions);
+    assert.ok(instructions.includes(`\n\n${HOUSE_RULES(mode ?? 'custom')}\n\n`), instructions);
     // Main still runs on Opus 5.5 with high effort, in a team or a custom graph.
     assert.deepEqual([runtimes[0].kind, runtimes[0].config.model, runtimes[0].config.thinking], ['claude', 'claude-opus-5-5', 'high']);
   }
