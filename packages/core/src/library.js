@@ -64,7 +64,7 @@ export const SHIPPED_ROLE_SKILLS = Object.freeze({
   'e60be7eec8d9b5180866c9b5a2c14cf0d95a9f1331ed771e93791f7b524af9b1': { main: ['goal-griller', 'xia', 'sequence-execution-plan', 'prompt-leverage', 'bug-loop', 'smart-commits', 'compact', 'curate', 'skill-authoring', 'architecture-docs', 'feature-architecture', 'test-strategy', 'safe-refactor', 'security-review', 'release-readiness'], lead: ['xia', 'sequence-execution-plan', 'prompt-leverage', 'bug-loop', 'smart-commits', 'architecture-docs', 'feature-architecture', 'test-strategy', 'safe-refactor', 'security-review', 'release-readiness'], peer: ['xia', 'bug-loop', 'smart-commits', 'feature-architecture', 'test-strategy', 'safe-refactor'], reviewer: ['security-review', 'release-readiness'] },
 });
 
-/** A role → skills object's pairs as `role/skill` strings; anything else gives none. @param {unknown} roles */
+/** An agent → skills object's pairs as `agent/skill` strings (role-skills.json is keyed by agent name); anything else gives none. @param {unknown} roles */
 const rolePairs = roles => roles && typeof roles === 'object' && !Array.isArray(roles)
   ? Object.entries(roles).flatMap(([role, names]) => Array.isArray(names) ? names.filter(skillName).map(name => `${role}/${name}`) : [])
   : [];
@@ -195,7 +195,7 @@ export async function librarySkills(home, agent) {
   let roles;
   try { roles = JSON.parse(text); }
   catch (cause) { throw new AlpError('INVALID_LIBRARY', `${file}: ${cause.message}`, { cause }); }
-  if (!roles || typeof roles !== 'object' || Array.isArray(roles)) throw new AlpError('INVALID_LIBRARY', `${file}: expected an object of role names to skill lists`);
+  if (!roles || typeof roles !== 'object' || Array.isArray(roles)) throw new AlpError('INVALID_LIBRARY', `${file}: expected an object of agent names to skill lists`);
   const names = roles[agent] ?? [];
   if (!Array.isArray(names) || !names.every(skillName)) throw new AlpError('INVALID_LIBRARY', `${file}: ${agent} must list skill directory names`);
   const skills = [];

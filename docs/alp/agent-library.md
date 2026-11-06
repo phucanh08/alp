@@ -56,7 +56,7 @@ agent.
 - `skills`, `mcp` and `hooks` name entries of the project, else the library. A name that
   resolves to neither fails with the `agent.json` path, and so does an unknown key, with a
   suggestion for a likely typo.
-- The skills come after the role's skills from `role-skills.json`. The agent's own
+- The skills come after the skills `role-skills.json` lists under the agent's name. The agent's own
   `skills/` directory comes last and replaces a skill of the same name.
 - The MCP servers come before the agent's own `.mcp.json`. A server named in both is an
   error.

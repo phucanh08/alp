@@ -36,8 +36,9 @@ for communicating with the user and may execute work itself.
 
 ## How agents see their skills
 
-An agent sees only its own skills: its role's in `role-skills.json`, plus those its
-`agent.json` names. Each one appears in the agent's instructions with its file and the
+An agent sees only its own skills: those `role-skills.json` lists under its agent name,
+plus those its `agent.json` names. Despite the file's name, its keys are agent names, not
+roles: a custom agent `backend` with role `peer` gets nothing from the `peer` list. Each one appears in the agent's instructions with its file and the
 `description` from its frontmatter, so the agent knows what work a skill is for without
 opening it. The instructions tell the agent to read a skill's `SKILL.md` before work its
 description matches, and to say which skill it uses.
@@ -69,7 +70,7 @@ security-review and release-readiness, oracle and supervisor get none by default
 Optional packs (`templates/packs/`) are never seeded; see [skill system](skill-system.md#optional-packs).
 
 The library belongs to the user. Edit a skill, add your own under `skills/`, or change
-which skills a role gets in `role-skills.json`. `library.json` records the hash of
+which skills each agent gets in `role-skills.json`. `library.json` records the hash of
 every file ALP wrote. When an app update ships new templates, ALP:
 
 - adds a file it never shipped before, unless you already made a file of that name;
