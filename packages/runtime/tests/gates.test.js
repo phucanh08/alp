@@ -251,7 +251,13 @@ test('a second answer to a gate card, an answer another channel beat, and a fail
   await addGate(root, task.id, { kind: 'human', note: 'Go?' }, 'main');
   await addGate(root, task.id, { kind: 'human', note: 'Also?' }, 'main');
   await addGate(root, other.id, { kind: 'human', note: 'Fix?' }, 'main');
-  const { runtime } = await start(t, root, { gateSyncMs: 60_000 });
+  // No task-file watcher and no timer (gateSyncMs 0 turns startGateWatch off; the cards still show
+  // at open, and every answer still syncs when it is done). Each refusal below belongs to a card
+  // that is still shown, and only this test's own steps change that. With the watcher on, its
+  // 50 ms debounced sync settled g2's card right after the cli write, so the answer met "No
+  // question … waits" instead of the refusal under test, and the failed write's card could go the
+  // same way. The watcher settling a card is the previous test's subject.
+  const { runtime } = await start(t, root, { gateSyncMs: 0 });
   await until(() => card(runtime, task.id) && card(runtime, task.id, 'g2') && card(runtime, other.id), 'cards');
 
   // Two answers to one card: the first decides, the second is refused, not dropped.
@@ -263,10 +269,13 @@ test('a second answer to a gate card, an answer another channel beat, and a fail
 
   // Another channel decided g2 first: the card's answer says so.
   await resolveGate(root, task.id, 'g2', { by: 'user', channel: 'cli' });
-  await assert.rejects(Promise.resolve().then(() => runtime.answer(`gate-${task.id}-g2`, { text: 'Từ chối', channel: 'web' })), /already/);
+  assert.ok(card(runtime, task.id, 'g2'), 'the card still shows the gate the cli decided');
+  await assert.rejects(Promise.resolve().then(() => runtime.answer(`gate-${task.id}-g2`, { text: 'Từ chối', channel: 'web' })), { code: 'GATE_DECIDED', message: /already approved in cli/ });
   assert.equal((await getTask(root, task.id)).gates[1].rejected, undefined);
+  assert.equal(card(runtime, task.id, 'g2'), undefined, 'the refused answer settled the stale card');
 
   // The write fails: the caller gets the error.
   await writeFile(path.join(root, '.alp', 'tasks', `${other.id}.json`), '{ not json');
-  await assert.rejects(Promise.resolve().then(() => runtime.answer(`gate-${other.id}-g1`, { text: 'Duyệt', channel: 'web' })));
+  assert.ok(card(runtime, other.id), 'the card is still shown when its answer is written');
+  await assert.rejects(Promise.resolve().then(() => runtime.answer(`gate-${other.id}-g1`, { text: 'Duyệt', channel: 'web' })), { code: 'TASK_NOT_FOUND', message: `No task ${other.id}` });
 });
