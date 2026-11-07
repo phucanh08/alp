@@ -4,8 +4,12 @@ Phở and Cafe run main on Claude Opus 5.5 and their supervisor on Claude Sonnet
 On a machine with only Codex, point those two at Codex models. The rest of the team
 follows:
 
-- **Lead, peer and reviewer** have no fixed model. They run on what their requester
-  chooses, or inherit its model, so they run on Codex once main does.
+- **Lead, peer and reviewer** have no model of their own in the team. When ALP writes a
+  project's settings (`alp init`, `alp setup`), each gets main's model as its one profile, so
+  they run on Codex once main does. From `0.0.1-beta.8` that profile is also the only model main
+  or lead may pass them. `alp setup --runtime codex` gives peer `codex:*` instead (any Codex
+  model, chosen per task); for lead or reviewer, list `codex:*` in
+  `team.<team>.<agent>.profiles` in `.alp/settings.json`.
 - **Oracle** runs only on Fable (`claude:claude-fable-5-1`) or Astra
   (`codex:gpt-6-astra`). On Codex only, it uses Astra.
 
@@ -13,7 +17,8 @@ follows:
 
 You need Node.js 22 (22.12 or later) or 24 and the Codex CLI, logged in (`codex login`).
 Claude Code is not needed. Install the beta by name; a plain `npm install -g @anhlp/alp`
-installs the older `0.10.0` ([beta-install.md](beta-install.md)).
+installs whatever npm's `latest` tag points at, which moves to a new beta only after that beta's
+post-publish checks ([beta-install.md](beta-install.md)).
 
 ```sh
 npm install -g @anhlp/alp@beta

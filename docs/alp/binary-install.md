@@ -5,7 +5,7 @@ ALP ships two ways. Both run the same JavaScript, `@anhlp/alp-cli`, on Node:
 - **npm**: `npm install -g @anhlp/alp@beta` (see [npm packages](#npm-packages)). It uses your Node (22.12 or later).
 - **The ALP bundle** (`install.sh`, `install.ps1`, GitHub Releases): macOS and Linux (glibc), arm64 and x64, and Windows x64 (best-effort). It needs no Node: it carries the official Node release it runs on, the way Paseo's daemon runs on Electron's Node.
 
-Up to 0.0.1-beta.6 the release was one file built with `bun build --compile` (t-1e02). That build needed a special case for every computed import, native add-on and `process.execPath` spawn (0.0.1-beta.5 lost the Claude Agent SDK). The bundle is the npm install itself, so those special cases are gone; see [Upgrading from the single-file alp](#upgrading-from-the-single-file-alp-005-beta5beta6).
+Up to 0.0.1-beta.6 the release was one file built with `bun build --compile` (t-1e02). That build needed a special case for every computed import, native add-on and `process.execPath` spawn (0.0.1-beta.5 lost the Claude Agent SDK). The bundle is the npm install itself, so those special cases are gone; see [Upgrading from the single-file alp](#upgrading-from-the-single-file-alp-001-beta5beta6).
 
 ## Layout
 

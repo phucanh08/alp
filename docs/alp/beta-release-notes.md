@@ -1,3 +1,138 @@
+# ALP 0.0.1-beta.8 — release notes
+
+Prepared 2026-11-07 from the commits `v0.0.1-beta.7..a711dcd` (task t-a178 bumped the version).
+npm (8 packages, `beta` tag) and the GitHub release carry the same version from one main SHA, as
+in beta.7. **The gate's real-provider rows (§6.1 R1–R7 of [beta-scope.md](beta-scope.md)) were not
+run for this release; they are recorded as waived, not as passed.** Release acceptance ran with
+the repository's fake Codex and fake Claude on the packed tarballs.
+
+**Upgrading from beta.7:** `alp update` (bundle) or `npm install -g @anhlp/alp@beta` (npm), then
+`alp daemon restart`. Then run `alp upgrade` in each project to receive the new `ALP.md` (see
+*Vietnamese instructions* below). Users of beta.5/6 still rerun the installer, as for beta.7.
+
+Changes that affect an existing user:
+
+- **A target's model profiles are now an allowlist, also when there is only one.** Before, a
+  target with exactly one model profile took any model a coordinator passed. Now the profiles
+  that name a model (or `provider:*`) are the allowlist for every delegation target: main or lead
+  cannot pass a model outside them. The refusal lists the allowed models (with one profile, leave
+  `model` out) and says where to widen the list: `team.<teamId>.<agent>.profiles` in
+  `<root>/.alp/settings.json`, a `provider:*` wildcard, and, for a Claude or Codex model in Phở or
+  Cafe, `alp setup <root> --runtime mix`. The effort is now checked against the model for every
+  target with profiles. An effort ALP cannot check (`antigravity:`, `acp:`, a model listed without
+  efforts) is passed on, and the answer says it was not checked. Oracle is unchanged. In
+  practice: `alp init` gives lead, peer and reviewer one profile each, main's model. So a main
+  started on Codex with `--model codex:…` in a project set up for Claude can no longer move peer
+  or reviewer to Codex by passing a model. Run `alp setup --runtime codex` or `--runtime mix`, or
+  add a Codex profile (65702004, 80ba6253, be083bfc).
+- **`alp setup` keeps profile lists you wrote by hand.** It rewrites only entries ALP wrote: the
+  template's defaults, or its own earlier output, which it now records in
+  `<root>/.alp/state/setup-profiles.json` (Git ignores that directory, so the record is per
+  checkout). Without a record, an entry that matches one of setup's defaults counts as setup's.
+  Any other entry is kept, and so is one whose model or effort a library or project override of
+  Phở or Cafe sets in its `team.json`. Setup prints a `Kept team.<team>.<agent>.profiles …` line
+  for each, saying why. Teams other than Phở and Cafe are no longer skipped silently: setup names
+  each one and the `team.<id>.<agent>.profiles` key to edit. Single-provider and mix output for Phở
+  and Cafe is unchanged (60f8ccf8, b056ad88, 20957f4e).
+- **Vietnamese instructions.** The shipped templates are now in Vietnamese: the six built-in
+  agents' `AGENT.md`, the Phở and Cafe house rules, `ALP.md`, the core skills, and the optional
+  packs with their agents and the Blueprint team. Identifiers stay English: file and skill names,
+  JSON keys, role and team ids, `alp_*` tools, commands, and the labels inside code fences
+  (1f827c6, a4fecefd, d26f6413). `alp language` still sets only the language agents use when
+  they write to you; it does not choose the language of the instructions. What happens to what you
+  already have:
+  - Built-in agents and the Phở/Cafe teams are read from the installed ALP. They switch to
+    Vietnamese as soon as you update. An override in `~/.alp/` or `.alp/` (`alp team edit`, an
+    agent of the same name) holds its own copy of the files, written when you made it, and stays
+    in English.
+  - Library skills in `~/.alp/skills` and `role-skills.json`: a file still exactly as ALP wrote it
+    (checked against `~/.alp/library.json`) is replaced by the new version on the next session
+    open or `alp init`/`alp upgrade`, without a backup (`alp init`/`alp upgrade` print how many
+    files they updated; a session open prints nothing). A file you edited is kept as it is, in
+    English. A shipped file you deleted stays deleted.
+  - A project's `ALP.md` changes only with `alp upgrade` (alias `alp update-template`). If it is a
+    copy of any `ALP.md` ALP shipped and you never edited it, it is replaced by the Vietnamese one
+    and the old file goes to `.alp/backups/upgrade-*/`. If you edited it, it is kept, and the
+    command prints `Custom instructions preserved; reconcile with templates if needed: ALP.md`.
+    Until you run `alp upgrade`, an unedited English `ALP.md` stays in English.
+  - Project copies of built-in agents (`.alp/agents/<role>/AGENT.md` from older scaffolds),
+    with `alp upgrade`: an unedited copy with nothing added is backed up and removed, so the
+    built-in applies. An unedited copy you added skills, MCP servers or hooks to keeps them, and
+    only its `AGENT.md` is replaced (with a backup). An edited copy is kept and listed under custom
+    instructions. Until then, such a copy overrides the built-in, in English.
+  - "Unedited" means byte-for-byte one of the versions ALP shipped (line endings aside). Every
+    version in this repository's history is now listed for `ALP.md` and the six agents, so no
+    earlier copy counts as edited by mistake (b60d118b, d5a8738f, 80ba6253).
+- **Antigravity read-only allows only `pwd` in the terminal.** In beta.7 it also allowed `ls`,
+  `cat`, `head`, `tail`, `wc` and `grep`. agy matches allow rules by command prefix, so `ls` also
+  let `ls ~/.ssh` run. agy's own file reading, listing and search tools still work, and are not
+  kept inside the workspace (f0d193b0, 36c96a89). The provider setting `readOnlyMode` and
+  `alp provider edit --read-only-mode` are removed: an old provider file still loads with a
+  warning, and saving it drops the key (6367aac8).
+- **Advisors and reviewers are read-only by role.** A team member that serves as an advisor or
+  reviewer is capped at read-only, whatever its profile, `agent.json` mode or the caller asks,
+  and this now applies to custom teams too, not only to the built-in names (27e849d3).
+- **Claude: `/clear`, `/new` and `/reset` are refused.** On Claude they start a new native
+  conversation while ALP keeps the old thread, so resume, fork and rewind went back to the old
+  conversation. They are now refused, with the way out (a new ALP session, or compact), and hidden
+  from the composer. A scheduled one fails with the reason instead of being recorded as
+  delivered. A custom `/new` or `/reset` of your own is offered and passed on (1fd1f0b1, 54121ee4,
+  c3216ebd, 59b4002d).
+- **More is reserved for the user.** alpd refuses a connection an agent opened (one that announces
+  `ALP_AGENT_SESSION`) for `session.fork`, `session.rewind`, `session.reload`,
+  `session.compact` and `extension.register`. Every `alp web` command refuses to run from an agent
+  process. The Paseo plugin stops (exit 1) instead of retrying when it was started from an agent's
+  shell (42a5466d, e65bc70f, b1eefc89, 3580e8a6, 16b8200e).
+- **`install.sh --root DIR` without `--dir` installs the command in `DIR/bin` and edits no shell
+  profile** unless you add `--modify-path` (Windows: `install.ps1 -Root`, `-ModifyPath` or
+  `ALP_INSTALL_MODIFY_PATH=1`). An empty, self-owned `ALP_HOME` you created with mode 0755 is
+  tightened to 0700 instead of being refused (606ae983, 87c9399f).
+
+Also new or fixed:
+
+- **Skills:** seven new core skills (skill-authoring, architecture-docs, feature-architecture,
+  test-strategy, safe-refactor, security-review, release-readiness). An unedited
+  `role-skills.json` gets them automatically. `alp upgrade` adds them once to an edited one and
+  says so; remove any you do not want, and it will not add them again (18fb6c4f, ae035dd8).
+  Also `alp skill check` and a skill-format check in `alp doctor` (c0d5700d); optional packs
+  with `alp packs` and `alp pack install <id>`, including the architecture pack with its
+  Blueprint team (b49fcd6a, 7ccc2725); `alp skill restore` and `alp skills --retired` (87e54847,
+  03ddac04); `alp skill cp` copies the whole skill directory (8503b1a7).
+- **Compact** from the web app and Paseo (ae035dd8), and ALP's compact prompts no longer appear as
+  your messages in the timeline (b25096a8).
+- **Models:** ACP providers are listed without being started at alpd start (5a64780b, 83473d6f).
+  The CLI checks an effort against alpd's cached model list, as alpd does (bb11346f).
+- **alpd** waits 60 s to start (was 15 s), set with `ALP_DAEMON_START_TIMEOUT_MS` (c3cac442).
+  `alp doctor` classifies leftover worktrees and `alp-*` temp directories, and suggests a removal
+  command only for a clean, pushed one with no ignored files (5658dff6, da2dc508, 9eb8ce75,
+  e976de45). A full disk holds work at once instead of at the next check (5658dff6).
+- **Windows:** the Git status and diff alpd shows (web app, Paseo) no longer list files behind an
+  untracked junction or directory symlink, which reached outside the checkout (a31dced2,
+  1ac39940). ConPTY terminals report the shell's real pid and close only after the shell has
+  exited (2858bbee, 9a4f3ab0). The Paseo plugin finds alpd behind npm's or `install.ps1`'s
+  `alp.cmd` (8d51121a). `alp update` can reinstall the running version (9301010e). `install.ps1`
+  waits out a short hold on a version directory before refusing, and its refusal names what holds
+  the directory (51360066, 9777f168).
+- **Security:** zod is pinned to 4.6.7 in ALP's own manifests (was 4.4.3), for
+  [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) (HIGH: memory
+  exhaustion on oversized capped arrays, maps and sets). `npm audit` of the repository goes from 1
+  HIGH (zod) at beta.7 to 0 (89316904; [zod-advisory.md](zod-advisory.md)). The release and CI
+  scripts run Windows' own `tar.exe` on Windows instead of the one first on `PATH`. Under Git Bash
+  that was GNU tar, which reads `C:\…` as a remote `host:file` archive. This changes nothing for
+  an installed ALP: `alp update` already used the system tar (c53c3da6, ef18d4da, 01f28b98).
+- Tests and CI: hermetic test runs, per-file hang dumps and a teardown-order lint (53578385,
+  b125cc57, 67052d0e and their follow-ups).
+
+Not in this release:
+
+- **The Claude Agent SDK's own bundled zod is still inside the advisory range.** ALP cannot pin it,
+  so it ships unpatched. The user accepted this as a residual risk on 2026-11-06 (board decision
+  p-3f3a8f96), with the conditions for reopening it in [zod-advisory.md](zod-advisory.md)
+  (eefc4989, 934d9642).
+- Antigravity's own read tools are still not confined to the workspace, and a read-only reviewer
+  on Antigravity cannot run tests or `git diff` (36c96a89, 6367aac8).
+- Remote mode (`@anhlp/alp-gateway`) is still not published.
+
 # ALP 0.0.1-beta.7 — release notes
 
 Prepared 2026-10-31 (tasks t-1807, t-7933). The first release shipped as the Node bundle; GitHub
