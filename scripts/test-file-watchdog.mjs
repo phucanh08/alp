@@ -5,9 +5,10 @@
 // failed (with their errors) or are still in flight, the file's processes, and (not on Windows) each
 // one's open libuv handles from a Node diagnostic report. A passing or failing file costs one extra
 // reporter writing a line per subtest to scratch, and a report signal handler nothing triggers.
-// The dump adds at most about 5.2 s to the deadline (a 3 s ps, 2.2 s of reports), and never blocks the
-// other files' workers. On Windows it lists no processes and has no reports: a cold WMI query took over
-// 4 s on windows-daemon (24) and broke the deadline's own bound, so it runs only with ALP_WATCHDOG_WIN_PROCS=1.
+// The dump adds at most about 5.2 s to the deadline on POSIX (a 3 s ps, 2.2 s of reports), and never
+// blocks the other files' workers. On Windows it has no reports and lists no processes unless
+// ALP_WATCHDOG_WIN_PROCS=1 asks: a cold WMI query took over 4 s on windows-daemon (24), so the default
+// run never pays for it; with the opt-in, the listing gets up to 8 s (LIST_MS in the module below).
 // The process listing is in ./test-file-watchdog-processes.mjs, which a test can import: this file
 // cannot be (it reads process.argv[2] and ends in a top-level await), so the opt-in path had no test
 // at all (t-5294.7).
@@ -152,7 +153,7 @@ async function worker() {
         timedOut = true;
         retainScratch = true;
         console.error(`[test-file] TIMEOUT ${file} after ${fileTimeoutMs} ms; retaining scratch; detached descendants may survive`);
-        // The dump is bounded (about 5.2 s at most) and must not defeat the deadline if it fails.
+        // The dump is bounded (about 5.2 s on POSIX, 8 s on Windows with the opt-in) and must not defeat the deadline if it fails.
         try { await dump(file, child, progress, reports); } catch (error) { console.error(`[test-file] hang dump failed: ${error.message}`); }
         stop(child);
         // A failed kill must not defeat the deadline.

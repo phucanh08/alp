@@ -116,7 +116,9 @@ test('hard timeout names the leaking file, returns boundedly, retains scratch an
     const child=spawn(process.execPath,['-e','setTimeout(()=>{},8000)'],{detached:true,stdio:'inherit'});
     writeFileSync(${JSON.stringify(pidFile)},String(child.pid));child.unref();setInterval(()=>{},50);`);
   const runner=new URL('../../scripts/test-lib.mjs',import.meta.url).href;
-  const env={...process.env};delete env.NODE_TEST_CONTEXT;
+  // Never the Windows opt-in, whatever the caller has set: its listing may take up to 8 s, past this
+  // test's 7 s bound, and this test is about the hard return, not the dump.
+  const env={...process.env};delete env.NODE_TEST_CONTEXT;delete env.ALP_WATCHDOG_WIN_PROCS;
   const started=Date.now();
   const result=await promisify(execFile)(process.execPath,['--input-type=module','-e',
     `import {runNodeTests} from ${JSON.stringify(runner)};process.exitCode=runNodeTests([${JSON.stringify(file)}],{privateHome:true,fileTimeoutMs:1500});`],{env,timeout:8000}).catch(error=>error);
@@ -135,7 +137,7 @@ test('hard timeout names the leaking file, returns boundedly, retains scratch an
 // t-5294.2: three macOS files hung to the deadline after one subtest failed, and the spec reporter (which
 // prints failures when a file ends) left nothing to diagnose. The fixture is that shape: a first after
 // hook that throws skips the one closing a server, the next test passes, and the file never exits.
-test('a file stopped at the deadline first dumps its subtests, failures, processes and open handles', {timeout:20000}, async t => {
+test('a file stopped at the deadline first dumps its subtests, failures, processes and open handles', {timeout:30000}, async t => {
   const {mkdtemp,writeFile,rm} = await import('node:fs/promises');
   const {tmpdir} = await import('node:os');
   const path = await import('node:path');
@@ -163,7 +165,7 @@ test('a file stopped at the deadline first dumps its subtests, failures, process
   // it means nothing, and is dropped so the run stays the cheap one.
   if (process.platform === 'win32') env.ALP_WATCHDOG_WIN_PROCS = '1'; else delete env.ALP_WATCHDOG_WIN_PROCS;
   const result = await promisify(execFile)(process.execPath,['--input-type=module','-e',
-    `import {runNodeTests} from ${JSON.stringify(runner)};process.exitCode=runNodeTests([${JSON.stringify(file)}],{privateHome:true,fileTimeoutMs:2000});`],{env,timeout:15000}).catch(error=>error);
+    `import {runNodeTests} from ${JSON.stringify(runner)};process.exitCode=runNodeTests([${JSON.stringify(file)}],{privateHome:true,fileTimeoutMs:2000});`],{env,timeout:25000}).catch(error=>error);
   retained = result.stderr.match(/warning: cleanup unconfirmed; retained (.+)/)?.[1].split(', ') || [];
   assert.equal(result.code,1,result.stderr);
   const dump = result.stderr.slice(result.stderr.indexOf(`[test-file] HANG DUMP ${file}`));
@@ -377,7 +379,7 @@ test('the watchdog lists no Windows processes unless ALP_WATCHDOG_WIN_PROCS=1 as
   const capture = () => { called++; return Promise.resolve({ stdout: '' }); };
   const lines = await processSummary(1234, { platform: 'win32', env: {}, capture });
   assert.equal(called, 0, 'no WMI query without the opt-in');
-  assert.deepEqual(lines, ['  not collected on Windows (ALP_WATCHDOG_WIN_PROCS=1 lists them through WMI, up to 2.5 s more)']);
+  assert.deepEqual(lines, ['  not collected on Windows (ALP_WATCHDOG_WIN_PROCS=1 lists them through WMI, up to 8 s more)']);
   // Any other value is not the opt-in either.
   assert.deepEqual(await processSummary(1234, { platform: 'win32', env: { ALP_WATCHDOG_WIN_PROCS: 'true' }, capture }), lines);
   assert.equal(called, 0);
@@ -403,7 +405,7 @@ test('the watchdog opt-in lists the file\'s own Windows process tree and nothing
   assert.equal(seen[0].command, 'powershell.exe');
   assert.deepEqual(seen[0].args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-Command']);
   assert.match(seen[0].args[3], /^Get-CimInstance Win32_Process \|/, seen[0].args[3]);
-  assert.ok(seen[0].ms <= 2500, `the query stays inside the deadline's bound: ${seen[0].ms} ms`);
+  assert.equal(seen[0].ms, 8000, 'the query has its own hard bound');
   // The root first, then its descendants in the order the listing gave them.
   assert.deepEqual(lines, [
     '  pid 1234 ppid 999: C:\\node.exe --test C:\\repo\\hung.test.mjs',
@@ -412,8 +414,8 @@ test('the watchdog opt-in lists the file\'s own Windows process tree and nothing
   ]);
   // A listing that never arrives is reported, not thrown: the dump must stay bounded.
   assert.deepEqual(await processSummary(1234, { platform: 'win32', env: { ALP_WATCHDOG_WIN_PROCS: '1' },
-    capture: () => Promise.resolve({ error: 'no answer within 2500 ms' }) }),
-    ['  process list unavailable: no answer within 2500 ms']);
+    capture: () => Promise.resolve({ error: 'no answer within 8000 ms' }) }),
+    ['  process list unavailable: no answer within 8000 ms']);
 });
 
 test('the watchdog process capture returns stdout, a bad status and a timeout, and outlives neither (t-5294.7)', async () => {
