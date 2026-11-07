@@ -119,8 +119,9 @@ Also new or fixed:
   the directory (51360066, 9777f168).
 - **Security:** zod is pinned to 4.6.7 in ALP's own manifests (was 4.4.3), for
   [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) (HIGH: memory
-  exhaustion on oversized capped arrays, maps and sets). `npm audit` of the repository goes from 1
-  HIGH (zod) at beta.7 to 0 (89316904; [zod-advisory.md](zod-advisory.md)). The release and CI
+  exhaustion on oversized capped arrays, maps and sets). `npm audit` of ALP's lockfile, which
+  covers the packages ALP declares, goes from 1 HIGH (zod) at beta.7 to 0 (89316904;
+  [zod-advisory.md](zod-advisory.md)); it does not see the SDK's bundled copy (below). The release and CI
   scripts run Windows' own `tar.exe` on Windows instead of the one first on `PATH`. Under Git Bash
   that was GNU tar, which reads `C:\…` as a remote `host:file` archive. This changes nothing for
   an installed ALP: `alp update` already used the system tar (c53c3da6, ef18d4da, 01f28b98).
