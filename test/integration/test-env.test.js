@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { CALLER_SESSION_VARIABLES, XDG_BASE_DIRECTORIES, clearCallerSession, hermeticEnv, homelessEnv, isCallerBinary } from '../../scripts/test-lib.mjs';
+import { teardown } from '../support/teardown.js';
 
 /** The POSIX base directories homelessEnv points at the private home, for a deepEqual on its output. */
 const xdg = home => Object.fromEntries(Object.entries(XDG_BASE_DIRECTORIES).map(([name, relative]) => [name, path.join(home, relative)]));
@@ -175,12 +176,28 @@ test('a file stopped at the deadline first dumps its subtests, failures, process
   assert.match(dump,/not ok: leaves a server open \(\d+ ms, hookFailed\)\n\s+simulated ENOTEMPTY in the first hook/);
   assert.match(dump,/in flight: none; every subtest finished and the file's process stayed alive/);
   // Windows lists processes only on request (WMI can take seconds, more than the deadline's bound
-  // allows), and this run asked for it above: the file's own process must be in the listing either
-  // way. The refusal when nobody asks is covered without a Windows host by the
-  // scripts/test-file-watchdog-processes.mjs tests below.
-  // On Windows this is the one place the WMI query and its process-tree walk really run; the rows it
-  // parsed have the module's Windows shape (no pgid/stat/etime, which only `ps` reports).
-  assert.match(dump,process.platform === 'win32' ? / processes:\n  pid \d+ ppid \d+: / : / processes:\n  pid \d+ ppid \d+ pgid \d+ /);
+  // allows), and this run asked for it above. The section always follows the listing, which the dump
+  // awaits; it ends in one of two states, and each is asserted as itself:
+  // - the listing answered: the file's own process (the pid the dump's header names) is a row, in
+  //   the module's shape for this platform (Windows has no pgid/stat/etime, which only `ps` reports);
+  // - on Windows only, the WMI query reached the module's bound (8 s): the section is exactly the
+  //   bounded line, nothing else. That is the dump's contract, not a defect: a cold WMI query on a
+  //   loaded windows-daemon runner took 0.6-2.2 s in passing runs and missed the old 2.5 s bound in
+  //   runs 42229826556 and 42254412288, where the whole section read that line; no bound is a
+  //   guarantee on a loaded runner. The real WMI query, its parse and its tree walk are proven,
+  //   without racing the bound, by the real-listing test below; the refusal when nobody asks by the
+  //   injected-capture tests.
+  const pid = dump.match(/^\[test-file\] HANG DUMP .* \(pid (\d+)\)$/m)?.[1];
+  assert.ok(pid, dump);
+  const processes = dump.match(/\n processes:\n((?: {2}.*\n)*)/)?.[1];
+  assert.ok(processes, dump);
+  if (process.platform === 'win32' && processes === '  process list unavailable: no answer within 8000 ms\n') t.diagnostic('the WMI listing reached its 8 s bound');
+  else {
+    // Rows only, every line in this platform's shape, and one of them the file's own process.
+    const shape = process.platform === 'win32' ? ':' : ' pgid \\d+ ';
+    for (const line of processes.trimEnd().split('\n')) assert.match(line, new RegExp(`^  pid \\d+ ppid \\d+${shape}`), dump);
+    assert.match(processes, new RegExp(`^  pid ${pid} ppid \\d+${shape}`, 'm'), dump);
+  }
   if (process.platform === 'win32') assert.match(dump,/open handles: not available on Windows/);
   // The file's own process names the server it never closed.
   if (process.platform !== 'win32') assert.match(dump,/hung\.test\.mjs\n(    .*\n)*?    tcp localEndpoint=\{[^}]*"port":\d+/);
@@ -416,6 +433,29 @@ test('the watchdog opt-in lists the file\'s own Windows process tree and nothing
   assert.deepEqual(await processSummary(1234, { platform: 'win32', env: { ALP_WATCHDOG_WIN_PROCS: '1' },
     capture: () => Promise.resolve({ error: 'no answer within 8000 ms' }) }),
     ['  process list unavailable: no answer within 8000 ms']);
+});
+
+// The real listing, given the time it needs: on Windows the one place a real WMI query, its parse and
+// its tree walk run outside the hang dump, where the dump's 8 s bound can legitimately cut it off;
+// on POSIX the real `ps`. Only the bound is lifted, through the module's own capture injection: the
+// command, its arguments and the parsing are the product's, and it still asks for its own bound.
+test('the watchdog\'s real process listing names a live process and its child once it is given the time (t-5294.7)', { timeout: 60_000 }, async t => {
+  const { spawn } = await import('node:child_process');
+  const { once } = await import('node:events');
+  const { capture, processSummary } = await import('../../scripts/test-file-watchdog-processes.mjs');
+  const defer = teardown(t);
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });
+  defer(() => child.exitCode !== null || child.signalCode !== null ? undefined : new Promise(resolve => { child.once('exit', resolve); child.kill(); }));
+  await once(child, 'spawn');
+  const asked = [];
+  const lines = await processSummary(process.pid, { env: { ALP_WATCHDOG_WIN_PROCS: '1' },
+    capture: (command, args, ms) => { asked.push({ command, ms }); return capture(command, args, 30_000); } });
+  const windows = process.platform === 'win32';
+  assert.deepEqual(asked, [windows ? { command: 'powershell.exe', ms: 8000 } : { command: 'ps', ms: 3000 }]);
+  const listing = lines.join('\n');
+  const shape = windows ? ':' : ' pgid \\d+ ';
+  assert.match(listing, new RegExp(`^  pid ${process.pid} ppid \\d+${shape}`, 'm'), listing);
+  assert.match(listing, new RegExp(`^  pid ${child.pid} ppid ${process.pid}${shape}`, 'm'), listing);
 });
 
 test('the watchdog process capture returns stdout, a bad status and a timeout, and outlives neither (t-5294.7)', async () => {
