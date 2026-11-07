@@ -11,6 +11,16 @@
 // Processes are listed, never signalled: this is diagnosis, not containment.
 import { spawn } from 'node:child_process';
 
+/**
+ * How long each listing may take. POSIX `ps` answers in milliseconds. The Windows query starts
+ * PowerShell and a WMI provider: on a loaded windows-daemon runner it answered in about 0.6-2.2 s
+ * and, cold, missed 2.5 s twice (runs 42229826556, 42254412288) and 4 s once (cd0f0c8). It runs only
+ * for someone who opted in to chase a hang, after that file's 300 s deadline, while every other
+ * file's worker goes on, so a wider bound costs that one dump a few seconds and buys it its process
+ * list. Still a hard bound: `capture` kills the query and drops its pipe and handle when it expires.
+ */
+export const LIST_MS = { posix: 3000, win32: 8000 };
+
 /** A command's stdout, or why there is none; asynchronous, and killed after `ms`. */
 export function capture(command, args, ms) {
   return new Promise(resolve => {
@@ -43,14 +53,14 @@ function tree(rows, root, extra = () => false) {
  */
 export async function processSummary(root, { platform = process.platform, env = process.env, capture: run = capture } = {}) {
   if (platform === 'win32') {
-    if (env.ALP_WATCHDOG_WIN_PROCS !== '1') return ['  not collected on Windows (ALP_WATCHDOG_WIN_PROCS=1 lists them through WMI, up to 2.5 s more)'];
+    if (env.ALP_WATCHDOG_WIN_PROCS !== '1') return [`  not collected on Windows (ALP_WATCHDOG_WIN_PROCS=1 lists them through WMI, up to ${LIST_MS.win32 / 1000} s more)`];
     const script = 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)" }';
-    const result = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], 2500);
+    const result = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], LIST_MS.win32);
     if (result.error) return [`  process list unavailable: ${result.error}`];
     const rows = result.stdout.split(/\r?\n/).filter(Boolean).map(line => { const [pid, ppid, ...command] = line.split('\t'); return { pid: Number(pid), ppid: Number(ppid), command: command.join('\t') }; });
     return tree(rows, root).map(row => `  pid ${row.pid} ppid ${row.ppid}: ${row.command}`);
   }
-  const result = await run('ps', ['-A', '-o', 'pid=,ppid=,pgid=,stat=,etime=,command='], 3000);
+  const result = await run('ps', ['-A', '-o', 'pid=,ppid=,pgid=,stat=,etime=,command='], LIST_MS.posix);
   if (result.error) return [`  process list unavailable: ${result.error}`];
   const rows = result.stdout.split('\n').filter(Boolean).map(line => { const [pid, ppid, pgid, stat, etime, ...command] = line.trim().split(/\s+/); return { pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), stat, etime, command: command.join(' ') }; });
   // The file's process is its own group leader (spawned detached), so its group is its family too.
