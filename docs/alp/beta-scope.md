@@ -1,4 +1,6 @@
-# Phạm vi beta (`0.0.0-beta.1` đến `0.0.1-beta.7`)
+# Phạm vi beta (`0.0.0-beta.1` đến `0.0.1-beta.8`)
+
+> **Beta.8 (`0.0.1-beta.8`, t-a178):** phát hành như beta.7: npm 8 gói và GitHub release dạng bundle, cùng version, từ một SHA của main. Các dòng provider thật của gate (§6.1 R1–R7) **không chạy** cho beta.8; chúng được ghi là waived (miễn), không phải pass (board p-a05f52d3). `release:gate` tính `waived` là còn mở, nên các phase `publish`, `latest` và `announce` exit 1 vì các dòng chặn R1, R2, R5, R7. Thay đổi hành vi cho người đang dùng (model profile thành allowlist, `alp setup` giữ profile tự viết, template tiếng Việt): xem [beta-release-notes.md](beta-release-notes.md).
 
 > **Beta.7 (`0.0.1-beta.7`, t-7933):** bản đầu tiên phát hành dạng bundle Node (GitHub release) và npm 8 gói (`@anhlp/alp` là wrapper của `@anhlp/alp-cli`). Người dùng beta.5/6 phải chạy lại `install.sh`/`install.ps1` rồi `alp daemon restart`. Xem [beta-release-notes.md](beta-release-notes.md).
 

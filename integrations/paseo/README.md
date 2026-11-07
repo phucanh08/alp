@@ -64,9 +64,9 @@ This follows [Paseo's native archive contract](https://github.com/getpaseo/paseo
 
 ## Install
 
-This is the beta `0.0.1-beta.7` (npm's `beta` and `latest` tags; check with
+This is the beta `0.0.1-beta.8` (npm's `beta` and `latest` tags; check with
 `npm view @anhlp/alp-paseo dist-tags`); name it when you install (`@beta`, or
-exactly `@0.0.1-beta.7`). See the
+exactly `@0.0.1-beta.8`). See the
 [release notes](https://github.com/phucanh08/alp/blob/main/docs/alp/beta-release-notes.md) and
 [install, upgrade and removal steps](https://github.com/phucanh08/alp/blob/main/docs/alp/beta-install.md).
 
@@ -168,7 +168,7 @@ for existing projects, model selection, permissions, and runtime limitations.
 
 ## Remote mode (deferred, not in the beta)
 
-Remote mode is **not part of the beta (`0.0.1-beta.7`)**: it needs `@anhlp/alp-gateway`, which is not
+Remote mode is **not part of the beta (`0.0.1-beta.8`)**: it needs `@anhlp/alp-gateway`, which is not
 published. The text below describes the code in this repository for development only.
 
 To use ALP running on another machine, start the daemon process that loads this plugin with
