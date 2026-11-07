@@ -3,8 +3,9 @@
 Prepared 2026-11-07 from the commits `v0.0.1-beta.7..a711dcd` (task t-a178 bumped the version).
 npm (8 packages, `beta` tag) and the GitHub release carry the same version from one main SHA, as
 in beta.7. **The gate's real-provider rows (§6.1 R1–R7 of [beta-scope.md](beta-scope.md)) were not
-run for this release; they are recorded as waived, not as passed.** Release acceptance ran with
-the repository's fake Codex and fake Claude on the packed tarballs.
+run for this release; they are recorded as waived, not as passed.** Release acceptance runs the
+repository's fake Codex and fake Claude on the packed tarballs; macOS decides it, Linux and
+Windows are reported.
 
 **Upgrading from beta.7:** `alp update` (bundle) or `npm install -g @anhlp/alp@beta` (npm), then
 `alp daemon restart`. Then run `alp upgrade` in each project to receive the new `ALP.md` (see
@@ -61,8 +62,8 @@ Changes that affect an existing user:
     only its `AGENT.md` is replaced (with a backup). An edited copy is kept and listed under custom
     instructions. Until then, such a copy overrides the built-in, in English.
   - "Unedited" means byte-for-byte one of the versions ALP shipped (line endings aside). Every
-    version in this repository's history is now listed for `ALP.md` and the six agents, so no
-    earlier copy counts as edited by mistake (b60d118b, d5a8738f, 80ba6253).
+    released `ALP.md` and every version of the six agents' `AGENT.md` is now listed, so no copy
+    from an earlier release counts as edited by mistake (b60d118b, d5a8738f, 80ba6253).
 - **Antigravity read-only allows only `pwd` in the terminal.** In beta.7 it also allowed `ls`,
   `cat`, `head`, `tail`, `wc` and `grep`. agy matches allow rules by command prefix, so `ls` also
   let `ls ~/.ssh` run. agy's own file reading, listing and search tools still work, and are not
@@ -96,8 +97,11 @@ Also new or fixed:
   says so; remove any you do not want, and it will not add them again (18fb6c4f, ae035dd8).
   Also `alp skill check` and a skill-format check in `alp doctor` (c0d5700d); optional packs
   with `alp packs` and `alp pack install <id>`, including the architecture pack with its
-  Blueprint team (b49fcd6a, 7ccc2725); `alp skill restore` and `alp skills --retired` (87e54847,
-  03ddac04); `alp skill cp` copies the whole skill directory (8503b1a7).
+  Blueprint team (b49fcd6a, 7ccc2725). Main can propose retiring a library skill with
+  `alp_skill_retire`: nothing moves until you approve the card, the skill is kept in
+  `~/.alp/retired-skills`, and `alp skill restore` / `alp skills --retired` bring it back
+  (39d3ae60, c5c8729f, 87e54847, 03ddac04). `alp skill new` now refuses a skill that fails the
+  strict format (6775bde3), and `alp skill cp` copies the whole skill directory (8503b1a7).
 - **Compact** from the web app and Paseo (ae035dd8), and ALP's compact prompts no longer appear as
   your messages in the timeline (b25096a8).
 - **Models:** ACP providers are listed without being started at alpd start (5a64780b, 83473d6f).
