@@ -633,6 +633,40 @@ test('--stop fails while a web.lock holder alp cannot prove keeps running', asyn
   assert.match(status.stdout, /web\.lock is held by a process that alp cannot prove/);
 });
 
+test('start flags: --host stays loopback, --port is checked, and --status with --stop is a usage error', async t => {
+  const { home } = await createHome(t);
+  const { port } = (await homeJson(home, 'settings.json')).dashboard;
+  const nothingStarted = async what => {
+    for (const file of ['dashboard.json', 'integrations/dashboard.lock', 'alpd.lock']) assert.equal(existsSync(path.join(home, file)), false, `${what}: ${file}`);
+  };
+  for (const host of ['0.0.0.0', '::1', '192.168.1.10']) {
+    const refused = await run(['dashboard', '--print', '--host', host], home);
+    assert.notEqual(refused.code, 0, host);
+    assert.match(refused.stderr, new RegExp(`--host ${host.replaceAll('.', '\\.')} is refused`));
+    await nothingStarted(`--host ${host}`);
+  }
+  for (const bad of ['80', 'x', '70000', '7433.5']) {
+    const refused = await run(['dashboard', '--print', '--port', bad], home);
+    assert.notEqual(refused.code, 0, bad);
+    assert.match(refused.stderr, /--port must be a port from 1024 to 65535/);
+    await nothingStarted(`--port ${bad}`);
+  }
+  const both = await run(['dashboard', '--status', '--stop'], home);
+  assert.notEqual(both.code, 0);
+  assert.match(both.stderr + both.stdout, /^Usage:/m);
+
+  // --no-open prints the address like --print; --host localhost names localhost in it.
+  const served = await run(['dashboard', '--no-open', '--host', 'localhost'], home);
+  assert.equal(served.code, 0, served.stderr || served.stdout);
+  assert.match(served.stdout.trim(), new RegExp(`^http://localhost:${port}/#token=alpgw1\\.`));
+  const same = await run(['dashboard', '--print', '--port', String(port)], home);
+  assert.equal(same.code, 0, same.stderr || same.stdout);
+  assert.equal(printedUrl(same).port, port);
+  const other = await run(['dashboard', '--print', '--port', String(await freePort())], home);
+  assert.notEqual(other.code, 0);
+  assert.match(other.stderr, new RegExp(`already runs on port ${port} .*Stop it with \`alp dashboard --stop\`, or drop --port`));
+});
+
 test('alp web is gone: the command is unknown', async t => {
   const { home } = await createHome(t);
   const result = await run(['web', '--print'], home);

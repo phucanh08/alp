@@ -7,7 +7,7 @@ import { MAX_FRAME } from '@anhlp/alp-client/index';
 
 /**
  * The Paseo integration's local listener (ALPD §61, §62): a socket on 127.0.0.1, at a port the
- * system picks (alp-web owns `web.port` and web.json), that speaks Paseo's protocol through the
+ * system picks (alp dashboard owns `dashboard.port` and dashboard.json), that speaks Paseo's protocol through the
  * bridge. The socket needs the token kept in $ALP_HOME/paseo.json, which is also the password
  * Paseo's app asks for. Only `daemon.get_status` (which reports this address) and
  * token-authenticated Paseo sockets use this listener; relay sockets attach to the bridge directly.
@@ -18,7 +18,7 @@ import { MAX_FRAME } from '@anhlp/alp-client/index';
  */
 
 /**
- * @deprecated The integration no longer listens on `web.port` (alp-web does); it binds port 0.
+ * @deprecated The integration no longer listens on the dashboard's port (alp dashboard does); it binds port 0.
  * Kept for one release for importers of `@anhlp/alp-paseo/web`.
  */
 export const DEFAULT_WEB_PORT = 7433;
@@ -45,7 +45,7 @@ const legacyWebFile = (home: string) => path.join(home, 'web.json');
 /**
  * The token and the server id are made once and kept, so a paired device survives alpd restarts.
  * Without paseo.json, an identity the integration wrote to web.json before the rename is carried
- * over once (alp-web's own web.json names `app: 'alp-web'` and is never read).
+ * over once (a web.json of alp web, 0.0.1-beta.8 and earlier, names `app: 'alp-web'` and is never read).
  */
 async function lastIdentity(home: string) {
   let kept: { token?: unknown; serverId?: unknown; app?: unknown } = {};

@@ -141,16 +141,18 @@ async function waitForGrant(home, credentialId, project, { timeoutMs = 5_000 } =
 
 /** Whether settings.json turns alp dashboard off (`dashboard.enabled`, else `web.enabled` from before the rename). @param {string} home */
 async function dashboardDisabled(home) {
-  const settings = await readFile(path.join(home, 'settings.json'), 'utf8').then(text => JSON.parse(text), () => undefined);
+  const settings = await readJsonFile(path.join(home, 'settings.json'));
   return dashboardSettings(settings).enabled === false;
 }
 
 const DISABLED = 'alp dashboard is disabled by settings ("dashboard.enabled": false).';
 
+/** A file's JSON, or undefined when it is missing or not JSON (as before: a broken file counts as none). @param {string} file */
+const readJsonFile = file => readFile(file, 'utf8').then(text => { try { return JSON.parse(text); } catch { return undefined; } }, () => undefined);
 /** @param {string} home */
-const readPublished = home => readFile(path.join(home, DASHBOARD.info), 'utf8').then(text => JSON.parse(text), () => undefined);
+const readPublished = home => readJsonFile(path.join(home, DASHBOARD.info));
 /** @param {string} home */
-const readServiceLock = home => readFile(path.join(home, 'integrations', `${DASHBOARD.lock}.lock`), 'utf8').then(text => JSON.parse(text), () => undefined);
+const readServiceLock = home => readJsonFile(path.join(home, 'integrations', `${DASHBOARD.lock}.lock`));
 
 /**
  * The running service as its files and its listener show it, without ps (so also on Windows): the
@@ -206,7 +208,7 @@ async function serveDashboard(home, entry, { port } = {}) {
     throw new Error(`alp dashboard published no address; see ${path.join(home, 'logs', 'integrations', 'alp-dashboard.log')}`);
   }
   if (port !== undefined && info.port !== port) {
-    throw new Error(`alp dashboard listens on port ${info.port}, not ${port} (port ${port} was busy or alp dashboard was starting already); stop it with \`alp dashboard --stop\` and free port ${port}, or drop --port`);
+    throw new Error(`alp dashboard is running on port ${info.port}, not ${port} (port ${port} was busy or alp dashboard was starting already); it was left running there. Stop it with \`alp dashboard --stop\` and free port ${port}, or drop --port`);
   }
   if (project) {
     await registerProject(home, project);

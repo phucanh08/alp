@@ -89,7 +89,7 @@ alp desktop                   # mở app desktop (docs/alp/desktop.md)
   `No alp dashboard running for this ALP home.`, và exit 1 khi lock bị giữ bởi process alp không chứng minh
   được là service.
 - `--port N` (1024–65535): nếu service đang chạy ở port khác thì lệnh từ chối và bảo dùng `--stop` hoặc
-  bỏ `--port` (như Hermes); nếu port đó bận thì báo lỗi, không lặng lẽ dùng port khác.
+  bỏ `--port` (như Hermes); nếu port đó bận thì báo lỗi kèm port mà service đang chạy (service vẫn chạy ở đó).
 - `--host`: alp-dashboard **chỉ** nghe trên `127.0.0.1`. Token là khoá duy nhất và gateway chỉ nhận
   Host/Origin loopback, nên `--host` chỉ nhận `127.0.0.1` hoặc `localhost`; mọi giá trị khác (ví dụ
   `0.0.0.0`) bị từ chối. Hermes cũng từ chối bind ngoài loopback khi không có auth provider, mà ALP không
@@ -100,8 +100,9 @@ alp desktop                   # mở app desktop (docs/alp/desktop.md)
   Service giữ `integrations/dashboard.lock`, ghi `<home>/dashboard.json` (`version: 2`,
   `app: "alp-dashboard"`, pid, port, URL, token) và log ở `<home>/logs/integrations/alp-dashboard.log`.
   Service giữ alpd chạy (`ALP_SUPERVISE=0` thì không), trừ sau `alp daemon stop`.
-- **Nâng cấp từ `alp web` (`0.0.1-beta.8` trở về trước).** Mọi lệnh `alp dashboard …` tự chuyển trước khi
-  đọc hay chạy gì, giữ token, port và trạng thái bật/tắt:
+- **Nâng cấp từ `alp web` (`0.0.1-beta.8` trở về trước).** `alp dashboard` (khởi động), `alp dashboard rotate` và
+  `alp dashboard --stop` tự chuyển trước khi đọc hay chạy gì, giữ token, port và trạng thái bật/tắt
+  (`pair` dùng integration Paseo và không cần chuyển):
   1. `alp web` cũ còn chạy dưới `integrations/web.lock` (hoặc integration Paseo trước khi đổi tên) được
      dừng bằng SIGTERM với cùng các bằng chứng như `--stop`; nếu không chứng minh được process giữ lock
      thì không dừng, không chuyển gì, và lệnh khởi động báo lỗi;

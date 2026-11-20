@@ -27,7 +27,7 @@ test('every alp dashboard command refuses a process an ALP agent started, printi
   // A running service's record, as alp dashboard would print it.
   await writeFile(path.join(home, 'dashboard.json'), JSON.stringify({ url: 'http://127.0.0.1:1', token: 'alpgw1.secret-token' }), { mode: 0o600 });
   const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
-  for (const args of [['dashboard', '--print'], ['dashboard', '--status'], ['dashboard', '--stop'], ['dashboard', 'rotate'], ['dashboard', 'pair']]) {
+  for (const args of [['dashboard', '--print'], ['dashboard', '--status'], ['dashboard', '--stop'], ['dashboard', 'rotate'], ['dashboard', 'pair'], ['dashboard', 'serve']]) {
     const run = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', env: { ...process.env, ALP_HOME: home, ALP_AGENT_SESSION: 'session-1' }, timeout: 30_000 });
     assert.notEqual(run.status, 0, args.join(' '));
     assert.match(run.stderr, /started by an ALP agent/, args.join(' '));

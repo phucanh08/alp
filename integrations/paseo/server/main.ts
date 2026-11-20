@@ -46,7 +46,7 @@ async function userSettings(home: string): Promise<any> {
 async function run(home: string) {
   await mkdir(home, { recursive: true, mode: 0o700 });
   const settings = await userSettings(home);
-  // web.enabled controls alp-web only; Paseo pairing still uses web.relay below.
+  // dashboard.enabled (web.enabled before t-81b0.5) controls alp dashboard only; Paseo pairing uses web.relay below.
 
   const integrationLock = createIntegrationLock(home, 'paseo');
   const { acquired, lock } = await integrationLock.acquire();
@@ -62,7 +62,7 @@ async function run(home: string) {
   const webLog = (message: string) => log.info(`web: ${message}`);
   let listening: string | null = null;
   const gateway = createPaseoBridge({ version: VERSION, home, token: () => web?.token ?? '', serverId: () => web?.serverId ?? '', relay: settings?.web?.relay, listen: () => listening, log: webLog });
-  // Port 0: `web.port` belongs to alp-web; this listener serves only daemon.get_status and Paseo sockets with the token.
+  // Port 0: `dashboard.port` belongs to alp dashboard; this listener serves only daemon.get_status and Paseo sockets with the token.
   const web = createWebServer({ gateway, home, port: 0, log: webLog });
   // Ready is published only after web.pairing is registered (below), so a caller that waits for the
   // ready lock can rely on the RPC being served; marking ready here would race callers of web.pairing.
