@@ -181,10 +181,17 @@ export function appEnv({ dir }, alp) {
   return { ...cleanEnv(), HOME: path.join(dir, 'app-home'), ALP_DESKTOP_ALP: alp, ALP_DESKTOP_USER_DATA: path.join(dir, 'user-data') };
 }
 
+/**
+ * Chromium switches of every automated launch. --use-mock-keychain: with a scratch HOME there is no
+ * login keychain, and an app that asks for its cookie key (the packaged app's EnableCookieEncryption
+ * fuse) would put a "Keychain Not Found" dialog on the user's screen; the mock keychain never asks.
+ */
+export const TEST_SWITCHES = ['--use-mock-keychain'];
+
 /** Launches the app; it is closed before the host stops and the directory goes. */
 export async function launch(t, context, alp, { app = APP } = {}) {
   await mkdir(path.join(context.dir, 'app-home'), { recursive: true });
-  const electronApp = await _electron.launch({ executablePath: ELECTRON, args: [app], env: appEnv(context, alp), timeout: 30_000 });
+  const electronApp = await _electron.launch({ executablePath: ELECTRON, args: [...TEST_SWITCHES, app], env: appEnv(context, alp), timeout: 30_000 });
   // The app's own output, reported with the test if the app died, so a crash on CI says why. A link token is masked
   // (the app never prints one, but Chromium could).
   let output = '';
@@ -211,7 +218,7 @@ export async function launch(t, context, alp, { app = APP } = {}) {
 
 /** Starts a second instance of the app with the same profile; resolves with its exit code. */
 export function secondInstance(context, alp, { app = APP } = {}) {
-  const child = spawn(ELECTRON, [app], { env: appEnv(context, alp), stdio: 'ignore' });
+  const child = spawn(ELECTRON, [...TEST_SWITCHES, app], { env: appEnv(context, alp), stdio: 'ignore' });
   context.defer(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
   return once(child, 'exit').then(([code]) => code);
 }
