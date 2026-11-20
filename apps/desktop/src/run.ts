@@ -67,9 +67,13 @@ export function run(file: string, args: string[], options: RunOptions): Promise<
       finish();
     }, timeout);
 
-    const append = (which: 'stdout' | 'stderr') => (chunk: Buffer) => {
-      if (which === 'stdout') stdout = (stdout + chunk.toString()).slice(0, maxBuffer);
-      else stderr = (stderr + chunk.toString()).slice(0, maxBuffer);
+    // setEncoding decodes through a StringDecoder, so a UTF-8 character split across two chunks
+    // arrives whole instead of as two replacement characters.
+    child.stdout?.setEncoding('utf8');
+    child.stderr?.setEncoding('utf8');
+    const append = (which: 'stdout' | 'stderr') => (chunk: string) => {
+      if (which === 'stdout') stdout = (stdout + chunk).slice(0, maxBuffer);
+      else stderr = (stderr + chunk).slice(0, maxBuffer);
     };
     child.stdout?.on('data', append('stdout'));
     child.stderr?.on('data', append('stderr'));

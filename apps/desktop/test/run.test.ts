@@ -13,6 +13,11 @@ describe('run', () => {
     const result = await run('/bin/sh', ['-c', 'echo out; echo err >&2; exit 3'], { env, timeout: 5000 });
     expect(result).toMatchObject({ code: 3, stdout: 'out\n', stderr: 'err\n', timedOut: false });
   });
+  test('a UTF-8 character split across two writes arrives whole', async () => {
+    // "é" is C3 A9; the shell writes the two bytes with a pause between, so they reach run as two chunks.
+    const result = await run('/bin/sh', ['-c', "printf '\\303'; sleep 0.2; printf '\\251\\n'"], { env, timeout: 5000 });
+    expect(result.stdout).toBe('é\n');
+  });
   test('a child that ignores SIGTERM is killed at the deadline, and run answers', async () => {
     const started = Date.now();
     const result = await run('/bin/sh', ['-c', "trap '' TERM; echo partial; while :; do sleep 1; done"], { env, timeout: 400, killGroup: true });
