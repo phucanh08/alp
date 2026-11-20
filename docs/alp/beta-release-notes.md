@@ -1,3 +1,87 @@
+# ALP 0.0.1-beta.9 — release notes
+
+Prepared 2026-11-20 from the commits `v0.0.1-beta.8..07569e38` (task t-81b0.6 bumped the version).
+npm (8 packages, `beta` tag) and the GitHub release carry the same version from one main SHA, as
+in beta.8. REAL_PROVIDER_ROWS_PLACEHOLDER Release acceptance runs the repository's fake Codex and
+fake Claude on the packed tarballs; macOS decides it, Linux and Windows are reported.
+
+**Upgrading from beta.8:**
+
+1. **Windows only, before you upgrade:** if `alp web` is running, stop it yourself. alp does not
+   stop processes on Windows, and while the old `alp web` holds its lock the first `alp dashboard`
+   refuses to start and moves nothing. Its pid is in `%USERPROFILE%\.alp\web.json` (or
+   `$ALP_HOME\web.json`): `taskkill /PID <pid>`. beta.8 has no command that stops `alp web`.
+2. `alp update` (bundle) or `npm install -g @anhlp/alp@beta` (npm), then `alp daemon restart`.
+3. Run `alp dashboard` once: it moves `alp web`'s token, port and settings to the new names (below).
+4. If alpd runs as a launchd or systemd service (`alp daemon install`), run `alp daemon install`
+   again on macOS or Linux to switch the service to the native alpd. Without it the service keeps
+   running alpd on the bundled Node, which still works.
+
+Changes that affect an existing user:
+
+- **`alp web` is now `alp dashboard`; `alp web` is gone, with no alias.** The subcommands moved
+  with it: `alp dashboard rotate`, `alp dashboard pair [--on|--off]`. New options, after Hermes'
+  `hermes dashboard`:
+  - `--status` says whether the service runs (pid, address without the token, port). It changes
+    nothing and always exits 0.
+  - `--stop` stops the service of this ALP home (exit 1 when the lock is held by a process alp
+    cannot prove is the service).
+  - `--port N` uses that port for this run without changing `dashboard.port`. It is refused while
+    the service runs on another port.
+  - `--host` accepts only `127.0.0.1` or `localhost`. The service listens on loopback only, because
+    its token is the only key; for another machine use an SSH tunnel.
+  - `--no-open` prints the address instead of opening the browser; `--print` prints only the
+    address (the desktop app uses it).
+
+  Details: [dashboard.md](dashboard.md) §3.1 (c31e385f, 76ad5ec2, 2f47e5a0, 382651ac).
+- **The first `alp dashboard` moves what `alp web` left.** `alp dashboard`, `alp dashboard rotate`
+  and `alp dashboard --stop` first move a beta.8 home to the new names, keeping the token, the port
+  and the on/off setting: on macOS and Linux a running `alp web` is stopped (only when alp can prove
+  the process is `alp web`; otherwise nothing moves and the command says why), `~/.alp/web/` becomes
+  `dashboard/`, `web.json` becomes `dashboard.json`, `alp-web.log` becomes `alp-dashboard.log`, and
+  `web.enabled`, `web.port` and `web.permissions` in `settings.json` become `dashboard.*`
+  (`web.relay`, Paseo's, stays). Running it again does nothing; when both names exist the new one
+  wins and the old one is left as it is. `--status` moves nothing: it lists what the next start
+  would move. `web.*` settings and `ALP_WEB_*` variables are still read where the new ones are not
+  set (c31e385f, 76ad5ec2).
+- **The bundle's alpd is a native executable on macOS and Linux.** The GitHub release bundles for
+  darwin-arm64, darwin-x64, linux-x64 and linux-arm64 add `bin/alpd`, alpd compiled with Bun 1.4.2
+  (`bun build --compile`; the Bun runtime is downloaded from Bun's release and checked against
+  pinned sha256 values). `alp daemon start`, `alp daemon restart`, `alp dashboard` and
+  `alp daemon install` start it. The `alp` command, `alp dashboard`, the ACP agent and the MCP
+  bridges keep running on the bundled Node, and everything alpd runs as JavaScript (a JavaScript
+  `claude`, the `node -e` bridges) runs under the bundled Node too. Unchanged:
+  - **Windows** keeps alpd on the bundled Node in this release.
+  - **npm installs** always run alpd on Node.
+  - **Services installed before beta.9** keep running `node alpd.js` until you run
+    `alp daemon install` again.
+
+  `install.sh`, `alp update` and the build run `bin/alpd --version` first and refuse a bundle whose
+  native alpd cannot run on this machine (an old CPU or glibc, a quarantined file), changing
+  nothing. On such a machine set `ALP_NATIVE_DAEMON=0` and keep it set: the check is skipped and
+  alpd stays on the bundled Node. Details: [binary-install.md](binary-install.md#the-native-alpd-t-81b09)
+  and decision D34 (bd4d2220, 2e3f2d1b, ec3f6e4a, c386b9fa, 07569e38).
+- **`alp desktop`** opens the ALP desktop app: `ALP.app` in `/Applications`, then
+  `~/Applications`, only when its bundle id is `com.anhlp.alp.shell` (another app with that name is
+  skipped with a `Skipped <path>: its bundle id is …` line), else the app built in the checkout
+  `ALP_DESKTOP_CHECKOUT` names. Without either it prints how to get one and exits 1
+  ([desktop.md](desktop.md) §7; c31e385f, 50644f7f).
+
+Not in this release:
+
+- **The desktop app (`ALP.app`, macOS) is not published.** No DMG is attached to the GitHub release
+  or put anywhere else. CI builds two ad-hoc signed DMGs (arm64, x64) as workflow artifacts, kept
+  14 days, for testing only; they are not notarized. So `alp desktop` finds an app only if you
+  built it yourself from a checkout (`apps/desktop`, [desktop.md](desktop.md)) or took a CI
+  artifact. The app is a thin Electron shell over the `alp dashboard` you already run: it reconnects
+  when the dashboard restarts, moves port or rotates its token, and tells an `alp` too old for
+  `alp dashboard` (beta.8 and earlier) to update (PRs #337, #338, #339, #341, #342). Publishing
+  it, and installing a missing ALP from the app, come in a later release.
+- Native alpd on Windows (see above).
+- Still as in beta.8: the Claude Agent SDK's own bundled zod is inside the advisory range (accepted
+  residual risk, [zod-advisory.md](zod-advisory.md)); Antigravity's own read tools are not confined
+  to the workspace; remote mode (`@anhlp/alp-gateway`) is not published.
+
 # ALP 0.0.1-beta.8 — release notes
 
 Prepared 2026-11-07 from the commits `v0.0.1-beta.7..a711dcd` (task t-a178 bumped the version).

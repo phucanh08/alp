@@ -1,13 +1,13 @@
-# Installing, upgrading and removing the ALP beta (`0.0.1-beta.8`)
+# Installing, upgrading and removing the ALP beta (`0.0.1-beta.9`)
 
-This guide covers the beta (`0.0.1-beta.8`; earlier betas were `0.0.0-beta.1`, `0.0.0-beta.2` and `0.0.1-beta.3` to `0.0.1-beta.7`): a new install, signing in to a provider, the daemon, the
+This guide covers the beta (`0.0.1-beta.9`; earlier betas were `0.0.0-beta.1`, `0.0.0-beta.2` and `0.0.1-beta.3` to `0.0.1-beta.8`): a new install, signing in to a provider, the daemon, the
 Paseo plugin, `alp dashboard` on this machine, upgrading from 0.10.0 or earlier, backups, going back,
 and removing ALP. What the beta includes and what it does not is in the
 [release notes](beta-release-notes.md); the scope, gate and release checklist are in
 [beta-scope.md](beta-scope.md).
 
 > **Check the version.** The `@beta` commands below install whatever npm's `beta` tag points at.
-> Check with `npm view @anhlp/alp dist-tags`: it lists `beta: '0.0.1-beta.8'` for this guide.
+> Check with `npm view @anhlp/alp dist-tags`: it lists `beta: '0.0.1-beta.9'` for this guide.
 
 ## Always ask for the beta
 
@@ -17,14 +17,14 @@ either by tag or exactly:
 
 | Package | By tag | Exact |
 |---|---|---|
-| CLI and daemon | `@anhlp/alp@beta` | `@anhlp/alp@0.0.1-beta.8` |
-| Paseo plugin (and `alp web` up to `0.0.1-beta.3`) | `@anhlp/alp-paseo@beta` | `@anhlp/alp-paseo@0.0.1-beta.8` |
+| CLI and daemon | `@anhlp/alp@beta` | `@anhlp/alp@0.0.1-beta.9` |
+| Paseo plugin (and `alp web` up to `0.0.1-beta.3`) | `@anhlp/alp-paseo@beta` | `@anhlp/alp-paseo@0.0.1-beta.9` |
 
 The six core packages (`@anhlp/alp-protocol`, `-core`, `-runtime`, `-client`, `-daemon`,
 `-cli`) come with these at the same pinned version; you do not install them yourself. The old
 plugin name `alp-paseo-plugin` stays at `0.10.0`; do not install it with the beta.
 
-Use `npm install`, not `npm update`, to move to the beta: by semver, `0.0.1-beta.8` sorts below
+Use `npm install`, not `npm update`, to move to the beta: by semver, `0.0.1-beta.9` sorts below
 `0.10.0`.
 
 ## Requirements
@@ -50,7 +50,7 @@ install or sign in to them.
 ```sh
 node -v                                   # v22.12+ or v24
 npm install -g @anhlp/alp@beta
-npm ls -g @anhlp/alp                      # @anhlp/alp@0.0.1-beta.8
+npm ls -g @anhlp/alp                      # @anhlp/alp@0.0.1-beta.9
 ```
 
 The package provides `alp`; `alp` starts `alpd`, the per-user daemon that runs sessions.
@@ -259,13 +259,21 @@ peers or turn a host-managed plugin into a standalone installation.
    `npm install -g @anhlp/alp@beta`, then `npm ls -g @anhlp/alp`. With the bundle from GitHub
    Releases, run `alp update`; from 0.0.1-beta.5 or beta.6, rerun the installer instead
    ([binary-install.md](binary-install.md#upgrading-from-the-single-file-alp-001-beta5beta6)).
+   From `0.0.1-beta.8` on Windows, first stop a running `alp web` yourself
+   (`taskkill /PID <pid>`, the pid in `%USERPROFILE%\.alp\web.json`): alp does not stop it there,
+   and the first `alp dashboard` refuses while it runs ([dashboard.md](dashboard.md) §3.1).
 2. `alp daemon restart`, so alpd runs the new version. Running sessions resume at their next
-   prompt.
+   prompt. From `0.0.1-beta.9` the bundle on macOS and Linux runs the native alpd; a launchd or
+   systemd service installed earlier switches to it only after `alp daemon install` again
+   ([binary-install.md](binary-install.md#the-native-alpd-t-81b09)).
 3. In each project, `alp upgrade [directory]` (the same as `alp update-template`). From
    `0.0.1-beta.8` this is how an `ALP.md` you never edited gets the Vietnamese text. It backs up
    what it replaces and keeps what you edited. The
    [release notes](beta-release-notes.md#alp-001-beta8--release-notes) list what else changes,
    including model profiles becoming an allowlist.
+4. From `0.0.1-beta.8`: `alp web` is now `alp dashboard`. Run `alp dashboard` once; it moves the
+   token, port and settings `alp web` left
+   ([release notes](beta-release-notes.md#alp-001-beta9--release-notes)).
 
 ## Upgrading from 0.10.0 or earlier
 
@@ -288,7 +296,7 @@ plugin ID, `alp-provider`, is the same).
 
    ```sh
    npm install -g @anhlp/alp@beta @anhlp/alp-paseo@beta
-   npm ls -g @anhlp/alp @anhlp/alp-paseo     # both 0.0.1-beta.8
+   npm ls -g @anhlp/alp @anhlp/alp-paseo     # both 0.0.1-beta.9
    alp-paseo-integration --register
    ```
 
