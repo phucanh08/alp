@@ -6,9 +6,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { rm } from 'node:fs/promises';
+import { cp, mkdir, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { appCopy, closeWindows, connectAgain, connectedTo, fakeAlp, freePort, host, inPage, launch, only, scratch, secondInstance, waitFor, windows } from './support.mjs';
+import { APP, appCopy, closeWindows, connectAgain, connectedTo, fakeAlp, freePort, host, inPage, launch, only, scratch, secondInstance, waitFor, windows } from './support.mjs';
 
 const limit = { timeout: 120_000 };
 
@@ -45,6 +47,19 @@ test('connects to alp dashboard, and apps/web takes the token out of the address
   assert.equal(await inPage(app, "sessionStorage.getItem('alp-web:link-token')") === web.web.token, true, 'apps/web kept the link token in the tab only');
 });
 
+test('t-81b0.7: the alp dashboard page can neither load nor open a bundled page', limit, async t => {
+  const { context, web, alp } = await connectedSetup(t);
+  const app = await launch(t, context, alp.file);
+  await connectedTo(app, web.origin);
+  const asStylesheet = `new Promise(resolve => { const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = 'alp-page://app/page.css'; link.onload = () => resolve('loaded'); link.onerror = () => resolve('refused'); document.head.append(link); })`;
+  assert.equal(await inPage(app, asStylesheet), 'refused');
+  await inPage(app, "location.href = 'alp-page://app/error.html'; window.open('alp-page://app/error.html'); 1");
+  await sleep(1000);
+  const list = await windows(app);
+  assert.equal(list.length, 1, 'no window opened');
+  assert.equal(list[0].origin, web.origin, 'the window stays on alp dashboard');
+});
+
 test('no alp: the install page names the path that was tried', limit, async t => {
   const context = await scratch(t);
   const missing = path.join(context.dir, 'nowhere', 'alp');
@@ -64,6 +79,31 @@ test("alp's own error is shown as is, without its error: prefix", limit, async t
   const text = await inPage(app, 'document.body.innerText');
   assert.ok(text.includes('alp dashboard is disabled (dashboard.enabled is false)'), text);
   assert.ok(!text.includes('error: alp dashboard'), text);
+});
+
+test('t-81b0.7: a build whose source tree is gone still shows its pages, and an alp without `alp dashboard` is named', limit, async t => {
+  // The packaged app runs on a machine without the tree it was built from: build a copy, remove its
+  // source, then run it. A bundle that looks for its pages in the source tree shows a blank window.
+  const context = await scratch(t);
+  const build = path.join(context.dir, 'build');
+  await mkdir(build);
+  await cp(path.join(APP, 'package.json'), path.join(build, 'package.json'));
+  await cp(path.join(APP, 'src'), path.join(build, 'src'), { recursive: true });
+  await promisify(execFile)('bun', ['run', 'build'], { cwd: build, timeout: 60_000 });
+  await rm(path.join(build, 'src'), { recursive: true });
+  const alp = await fakeAlp(context);
+  // What 0.0.1-beta.8 answers: its usage on stderr, exit 1 (no `dashboard` command); --version works.
+  await alp.set("printf 'Usage:\\n  alp web [--print]\\n' >&2; exit 1");
+  await alp.setVersion('0.0.1-beta.8');
+  const app = await launch(t, context, alp.file, { app: build });
+  await waitFor(async () => { const s = await only(app); return s?.page === 'error.html' && s.visible; }, 'the error page');
+  assert.equal(await inPage(app, "document.querySelector('h1')?.textContent"), 'ALP could not open');
+  assert.equal(await inPage(app, 'location.origin + location.pathname'), 'alp-page://app/error.html');
+  // page.css applied and page.js ran (it fills the message in): both came through the same scheme.
+  assert.equal(await inPage(app, 'getComputedStyle(document.body).display'), 'grid');
+  const text = await inPage(app, 'document.body.innerText');
+  assert.ok(text.includes(`Your alp 0.0.1-beta.8 (${alp.file}) has no \`alp dashboard\``), text);
+  assert.ok(!text.includes('Usage:'), text);
 });
 
 test('a window reopened from the Dock during a connect shows the newer connect, and the older one is dropped', limit, async t => {

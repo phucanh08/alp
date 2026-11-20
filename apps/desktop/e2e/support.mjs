@@ -133,10 +133,16 @@ export async function host(t, { dir, defer }) {
 export async function fakeAlp({ dir }) {
   const file = path.join(dir, 'bin', 'alp');
   await mkdir(path.dirname(file), { recursive: true });
-  const set = async body => {
-    await writeFile(file, `#!/bin/sh\n[ "$1 $2" = "dashboard --print" ] || exit 64\n${body}\n`);
+  let version = '';
+  let current = '';
+  const write = async () => {
+    const answer = version ? `[ "$1" = --version ] && { printf '%s\\n' '${version}'; exit 0; }\n` : '';
+    await writeFile(file, `#!/bin/sh\n${answer}[ "$1 $2" = "dashboard --print" ] || exit 64\n${current}\n`);
     await chmod(file, 0o755);
   };
+  const set = async body => { current = body; await write(); };
+  /** Makes `alp --version` print `value` (by default it exits 64, as anything else does). */
+  const setVersion = async value => { version = value; await write(); };
   /** Prints `address` after `delay` seconds. */
   const prints = (address, delay = 0) => set(`${delay ? `sleep ${delay}\n` : ''}printf '%s\\n' '${address}'`);
   /**
@@ -163,7 +169,7 @@ export async function fakeAlp({ dir }) {
     return { firstStarted: () => exists(count), release: () => writeFile(gate, ''), firstDone: () => exists(done) };
   };
   await set('exit 70');
-  return { file, set, prints, firstGated };
+  return { file, set, setVersion, prints, firstGated };
 }
 
 /** A copy of the built app (package.json and dist) that a test may break. */
@@ -234,8 +240,8 @@ export function windows(electronApp) {
     try { url = new URL(raw); } catch { return { visible: window.isVisible(), origin: '', page: undefined, token: false }; }
     return {
       visible: window.isVisible(),
-      origin: url.protocol === 'file:' ? 'file://' : url.origin,
-      page: url.protocol === 'file:' ? url.pathname.split('/').pop() : undefined,
+      origin: url.protocol === 'alp-page:' ? 'alp-page://app' : url.origin,
+      page: url.protocol === 'alp-page:' ? url.pathname.split('/').pop() : undefined,
       token: url.hash.includes('token='),
     };
   }));

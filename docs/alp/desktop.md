@@ -44,6 +44,7 @@ Nếu PATH dựng từ (1)–(2) không có `node`, PATH của login shell đư�
 |---|---|
 | Không tìm thấy `alp` | Trang cài đặt trong app: lệnh `npm install -g @anhlp/alp@beta` và cách đặt `alpPath`. |
 | `alp` báo lỗi (vd. `dashboard.enabled` là false, chạy trong session của agent) | Nguyên văn thông báo lỗi của `alp`. |
+| `alp` quá cũ, chưa có `alp dashboard` (0.0.1-beta.8 trở về trước: in usage thay vì địa chỉ) | Một câu nói rõ phiên bản (`alp --version`) và đường dẫn của `alp` đó, kèm cách cập nhật (`alp update`, hoặc cài bản build từ main); không dán usage. |
 | `alp dashboard --print` không trả lời trong 90 giây, hoặc in ra thứ không phải địa chỉ ALP dashboard | Thông báo lỗi tương ứng. |
 | Trang không tải được | Thông báo lỗi; chọn **File › Connect again** (⇧⌘R) để thử lại. |
 
@@ -96,6 +97,13 @@ Connect again.
   trong app desktop ở bản này.
 - Single-instance: mở app lần hai chỉ focus cửa sổ đang có (không còn cửa sổ nào thì mở và kết nối).
 - DevTools chỉ có khi chạy từ source (chưa đóng gói).
+- Trang nội bộ được phục vụ qua scheme riêng `alp-page://app/<tên>`, không qua `file://` (xem §6.4).
+  Handler trong main process chỉ trả đúng sáu file `connecting.html`, `error.html`, `missing-alp.html`,
+  `page.css`, `page.js`, `missing-alp.js` trong `dist/pages` của app (`app.getAppPath()`); mọi đường
+  dẫn khác, `..`, dấu phân cách đã mã hóa hay đường dẫn tuyệt đối đều nhận 404. Scheme được đăng ký chỉ
+  với `standard` (để `page.css`/`page.js` tương đối và CSP `'self'` resolve về `alp-page://app`);
+  không có `secure`, `supportFetchAPI`, `corsEnabled`, `bypassCSP`, `allowServiceWorkers` hay `stream`. Trang của `alp-dashboard` không được
+  điều hướng tới, mở hay xin quyền từ scheme này: chốt origin ở trên không đổi.
 
 ## 5. Build và chạy từ source
 
@@ -199,6 +207,8 @@ như §5.1) mount DMG, chép `ALP.app` vào một thư mục `Applications` tạ
 - với `ELECTRON_RUN_AS_NODE=1`, app vẫn chạy như app (Electron dev, không có fuse, thì chạy script như
   Node: đó là đối chứng);
 - `alp desktop` (CLI đã build, `HOME` tạm, `open` giả ghi lại đối số) mở đúng `ALP.app` theo thứ tự §7.
+- ba trang nội bộ (đang kết nối, lỗi với một `alp` như 0.0.1-beta.8, chưa cài) nạp từ
+  `alp-page://app/…` của chính app, có tiêu đề `h1` (§6.4).
 
 Playwright `_electron` cần Node inspector, mà fuse `EnableNodeCliInspectArguments` đã tắt, nên test đọc
 cửa sổ qua DevTools protocol (`--remote-debugging-port`). Mọi lần chạy app tự động (cả e2e dev ở §5.1)
@@ -220,6 +230,25 @@ giây thay vì 60 giây; khi test fail, thông báo lỗi kèm output và trạn
 
 `alp dashboard --print --json`; dừng `alp dashboard` khi thoát app; ký bằng Developer ID và notarize;
 tự cập nhật; phát hành DMG; Windows và Linux; mang alpd theo app.
+
+### 6.4 Bài học: cửa sổ trắng của bản đóng gói (t-81b0.7)
+
+`ALP.app` từ artifact của main ff7c98be mở ra một cửa sổ trắng trên máy người dùng: DevTools cho thấy
+`chrome-error://chromewebdata/` với body rỗng, log ghi `ERR_FILE_NOT_FOUND` cho mọi trang nội bộ. Có
+hai nguyên nhân chồng lên nhau, và e2e đóng gói không thấy cái nào:
+
+1. `bun build` thay `__dirname` (và `import.meta.dir`/`path`/`url`) bằng thư mục nguồn **trên máy
+   build**, nên app tìm trang ở `/Users/runner/work/alp/alp/apps/desktop/src/pages` của runner CI. E2E
+   chạy trên chính runner đó, nơi đường dẫn ấy tồn tại, nên vẫn xanh. Trang giờ lấy từ
+   `app.getAppPath()/dist/pages`; `test/bundle.test.ts` fail nếu bundle còn chứa đường dẫn tuyệt đối
+   của cây build, và e2e dev build một bản sao rồi xóa `src` của nó trước khi chạy.
+2. Fuse `GrantFileProtocolExtraPrivileges` tắt thì `file://` không đọc được bên trong `app.asar`.
+   Electron dev không có fuse, còn đường dẫn sai ở (1) lại nằm ngoài asar, nên lỗi này bị che. Fuse vẫn
+   tắt; trang đi qua `alp-page://` (§4), đọc bằng main process nơi `app.asar` là một thư mục.
+
+Quy tắc: một trang hay tài nguyên mà app đóng gói nạp phải được kiểm trên **app đóng gói** và bằng
+URL nó thật sự nạp (scheme, nguồn) cùng nội dung hiển thị, không chỉ bằng việc test xanh trên máy đã
+build nó. `e2e/packaged.spec.mjs` kiểm ba trang nội bộ như vậy; DMG của ff7c98be fail cả ba.
 
 ## 7. `alp desktop`
 
