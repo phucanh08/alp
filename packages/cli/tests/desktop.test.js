@@ -36,7 +36,7 @@ test('ALP.app in /Applications, then ~/Applications, wins over a checkout', asyn
   await mkdir(path.join(system, 'ALP.app'), { recursive: true });
   assert.equal((await resolveDesktop({ platform: 'darwin', env, applications: [system, user] })).app, path.join(system, 'ALP.app'));
   // The default places are /Applications and ~/Applications.
-  const found = await resolveDesktop({ platform: 'darwin', home: path.join(directory, 'home'), env: {} });
+  const found = await resolveDesktop({ platform: 'darwin', home: path.join(directory, 'empty-home'), env: {} });
   assert.ok(found.kind === 'missing' || found.app === '/Applications/ALP.app', JSON.stringify(found));
 });
 
