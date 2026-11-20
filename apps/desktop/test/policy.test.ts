@@ -113,3 +113,17 @@ describe('isTokenRejection', () => {
     expect(isTokenRejection(r, s)).toBe(false);
   });
 });
+
+describe('the bundled pages scheme is local only (t-81b0.7)', () => {
+  const origin = 'http://127.0.0.1:4096';
+  const page = 'alp-page://app/error.html?message=x';
+  test('the alp dashboard page may not navigate to a bundled page, nor open it outside', () => {
+    expect(isAllowedNavigation(page, origin)).toBe(false);
+    expect(isAllowedNavigation(page, undefined)).toBe(false);
+    expect(isAllowedExternal(page)).toBe(false);
+  });
+  test('a bundled page gets no permission', () => {
+    expect(isAllowedPermission('clipboard-sanitized-write', page, origin)).toBe(false);
+    expect(isAllowedPermission('clipboard-sanitized-write', page, undefined)).toBe(false);
+  });
+});

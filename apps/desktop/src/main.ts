@@ -4,11 +4,13 @@
  * and connects to its own origin. The window is a same-origin client of alp-dashboard like a browser tab:
  * no preload, no Node, navigation pinned to that origin.
  */
-import { app, BrowserWindow, Menu, session, shell, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, Menu, protocol, session, shell, type MenuItemConstructorOptions } from 'electron';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { connectDashboard, probeDashboard, type Connect } from './dashboard';
 import { isAllowedExternal, isAllowedPermission, isTokenRejection, navigationGuard } from './policy';
 import { Reconnector } from './reconnect';
+import { isPageUrl, PAGE_SCHEME, pageUrl, resolvePage } from './pages';
 import { readSettings } from './settings';
 import type { DashboardAddress } from './url';
 
@@ -26,7 +28,26 @@ let committed = false;
 /** The longest error text shown (alp's stderr can be long; it travels in the page's query). */
 const MAX_MESSAGE = 4000;
 
-const page = (name: string) => path.join(__dirname, 'pages', name);
+/**
+ * The app's own dist/pages (inside app.asar when packaged). Not __dirname: `bun build` writes the build
+ * machine's source directory into the bundle in its place, so a packaged app looked for its pages on
+ * the CI runner and every one of them was a blank window (t-81b0.7).
+ */
+const pagesDir = () => path.join(app.getAppPath(), 'dist', 'pages');
+
+/** Answers alp-page://app/<name> (./pages.ts) with a bundled page, read in the main process. */
+async function servePage(request: Request): Promise<Response> {
+  const found = resolvePage(request.url, pagesDir());
+  if (!found) return new Response('Not found', { status: 404 });
+  try {
+    return new Response(await readFile(found.file), { headers: { 'content-type': found.type } });
+  } catch {
+    return new Response('Not found', { status: 404 });
+  }
+}
+
+/** Shows bundled page `name` in `window`; resolves once it loaded or failed. */
+const loadPage = (window: BrowserWindow, name: string, query?: Record<string, string>) => window.loadURL(pageUrl(name, query)).catch(() => undefined);
 
 async function resolveAddress(): Promise<Connect> {
   const settings = await readSettings(app.getPath('userData'));
@@ -103,7 +124,7 @@ function createWindow(): BrowserWindow {
   // with another bundled page, which could loop.
   contents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
     // Only the load of the latest connect() may show an error; an older one was superseded.
-    if (!isMainFrame || code === -3 || url.startsWith('file:') || remoteLoad !== generation) return;
+    if (!isMainFrame || code === -3 || isPageUrl(url) || remoteLoad !== generation) return;
     // A page that was up (or a reload of it) failing is the reconnector's: it retries before it shows anything.
     if (reconnector.active) { reconnector.loadFailed(); return; }
     void showError(`The ALP dashboard page did not load (${description}). Start ALP, then choose Connect again.`, window);
@@ -138,7 +159,7 @@ async function showMissing(override?: string, window = win) {
   reconnector.stop();
   allowedOrigin = undefined;
   shownAddress = undefined;
-  await window?.loadFile(page('missing-alp.html'), { query: override ? { override } : {} }).catch(() => undefined);
+  if (window) await loadPage(window, 'missing-alp.html', override ? { override } : {});
   reveal(window);
 }
 
@@ -147,7 +168,7 @@ async function showError(message: string, window = win) {
   allowedOrigin = undefined;
   shownAddress = undefined;
   const text = message.length > MAX_MESSAGE ? `${message.slice(0, MAX_MESSAGE)}…` : message;
-  await window?.loadFile(page('error.html'), { query: { message: text } }).catch(() => undefined);
+  if (window) await loadPage(window, 'error.html', { message: text });
   reveal(window);
 }
 
@@ -166,7 +187,8 @@ async function connect() {
   allowedOrigin = undefined;
   shownAddress = undefined;
   remoteLoad = 0;
-  await current()?.loadFile(page('connecting.html')).catch(() => undefined);
+  const connecting = current();
+  if (connecting) await loadPage(connecting, 'connecting.html');
   reveal(current());
   let result: Awaited<ReturnType<typeof connectDashboard>>;
   try {
@@ -199,6 +221,10 @@ function buildMenu() {
 
 // Tests and a second profile use their own data directory; it must be set before ready.
 if (process.env.ALP_DESKTOP_USER_DATA) app.setPath('userData', path.resolve(process.env.ALP_DESKTOP_USER_DATA));
+// The bundled pages' scheme, registered before ready with the one privilege they need: standard, so
+// that relative page.css and page.js and CSP 'self' resolve against alp-page://app. Nothing else
+// (secure, fetch, CORS, bypassCSP, service workers, stream): the pages are static text and two scripts.
+protocol.registerSchemesAsPrivileged([{ scheme: PAGE_SCHEME, privileges: { standard: true } }]);
 app.enableSandbox();
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -218,6 +244,7 @@ if (!app.requestSingleInstanceLock()) {
     });
   });
   app.whenReady().then(() => {
+    protocol.handle(PAGE_SCHEME, servePage);
     // Everything is denied (camera, notifications, …) except clipboard writes from alp dashboard's origin.
     session.defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) => callback(isAllowedPermission(permission, details.requestingUrl, allowedOrigin)));
     session.defaultSession.setPermissionCheckHandler((_contents, permission, requestingOrigin) => isAllowedPermission(permission, requestingOrigin, allowedOrigin));

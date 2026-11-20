@@ -7,7 +7,7 @@ import http from 'node:http';
 import os from 'node:os';
 import { parseDashboardOutput, type DashboardAddress } from './url';
 import { parseShellProbe, resolveAlp, SHELL_PROBE, type Resolved } from './resolve';
-import { run } from './run';
+import { run, type RunResult } from './run';
 
 /** Starting alpd and alp-dashboard on a cold machine can take a while. */
 const PRINT_TIMEOUT_MS = 90_000;
@@ -50,16 +50,29 @@ export async function connectDashboard(override: string | undefined): Promise<Co
   // Electron's own switches must not reach a node that alp starts.
   delete env.ELECTRON_RUN_AS_NODE;
   const result = await run(resolved.alp, ['dashboard', '--print'], { env, timeout: PRINT_TIMEOUT_MS });
-  if (result.code === 0) {
-    const address = parseDashboardOutput(result.stdout);
-    if (address) return { ok: true, address };
-    return { ok: false, error: '`alp dashboard --print` did not print an ALP dashboard address. Update ALP, then try again.' };
-  }
+  const address = result.code === 0 ? parseDashboardOutput(result.stdout) : undefined;
+  if (address) return { ok: true, address };
+  // An alp older than `alp dashboard` (0.0.1-beta.8 and before) answers with its usage text.
+  if (!result.timedOut && isUsage(result)) return { ok: false, error: await tooOld(resolved.alp, env) };
+  if (result.code === 0) return { ok: false, error: '`alp dashboard --print` did not print an ALP dashboard address. Update ALP, then try again.' };
   // alp's own message (web disabled, refused, not built…) is shown as is; stdout may hold the
   // address, so it is never shown.
   if (result.timedOut) return { ok: false, error: `\`alp dashboard --print\` did not answer within ${PRINT_TIMEOUT_MS / 1000} seconds.` };
   const message = result.stderr.trim() || result.error?.message || `alp exited with code ${result.code}`;
   return { ok: false, error: message.replace(/^error:\s*/i, '') };
+}
+
+const VERSION_TIMEOUT_MS = 10_000;
+
+/** Whether alp answered with its usage text: it does not know `alp dashboard --print`. */
+const isUsage = (result: RunResult) => /^Usage:/.test(result.stderr.trim()) || /^Usage:/.test(result.stdout.trim());
+
+/** The message for an alp without `alp dashboard`, naming its version when `alp --version` gives one. */
+async function tooOld(alp: string, env: NodeJS.ProcessEnv): Promise<string> {
+  const result = await run(alp, ['--version'], { env, timeout: VERSION_TIMEOUT_MS });
+  const line = result.code === 0 ? result.stdout.trim().split(/\r?\n/, 1)[0] : '';
+  const version = /^\d+\.\d+\.\d+[0-9A-Za-z.+-]*$/.test(line) ? ` ${line}` : '';
+  return `Your alp${version} (${alp}) has no \`alp dashboard\`, which the ALP desktop app needs. Update ALP with \`alp update\`, or install a build from main.`;
 }
 
 /** How long a /readyz probe may take before it counts as no answer. */

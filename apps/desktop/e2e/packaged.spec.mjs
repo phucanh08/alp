@@ -177,6 +177,74 @@ async function connectedPage(context, started, origin) {
   }
 }
 
+/**
+ * Waits over DevTools for the window to show a bundled page other than `skip` (or Chromium's error
+ * page in its place: a page that failed to load is chrome-error://), and returns its URL, heading and text.
+ */
+async function bundledPage(context, started, skip) {
+  const deadline = Date.now() + (started.rosetta ? 300_000 : 60_000);
+  try {
+    const browser = await whileRunning(started, () => chromium.connectOverCDP(`http://127.0.0.1:${started.port}`, { timeout: 10_000 }), 'the DevTools endpoint', deadline);
+    context.defer(() => browser.close());
+    return await whileRunning(started, async () => {
+      for (const page of browser.contexts().flatMap(c => c.pages())) {
+        const url = page.url();
+        if (!url.startsWith('alp-page:') && !url.startsWith('file:') && !url.startsWith('chrome-error:')) continue;
+        if (skip && url.split('?')[0].endsWith(`/${skip}`)) continue;
+        const read = script => bounded(page.evaluate(script), 10_000, 'reading the page');
+        return { url, h1: await read(() => document.querySelector('h1')?.textContent ?? null), text: await read(() => document.body?.innerText ?? '') };
+      }
+      return undefined;
+    }, `a bundled page${skip ? ` other than ${skip}` : ''}`, deadline);
+  } catch (error) {
+    throw new Error(`${error.message}\napp output:\n${started.output()}`);
+  }
+}
+
+/** Asserts that `url` is bundled page `name` (alp-page://app/<name>, served from the app's own asar). */
+function assertBundled(url, name) {
+  assert.equal(url.split('?')[0], `alp-page://app/${name}`, `${name} loaded`);
+}
+
+// t-81b0.7: the packaged app showed a blank window instead of any of its pages on the user's Mac. Its
+// bundle looked for them in the tree it was built in (found here only because CI runs where that tree
+// exists), and file:// cannot read inside app.asar once GrantFileProtocolExtraPrivileges is off. Each
+// page must load from the app itself, with its heading.
+test('the installed app shows Connecting, from the app itself', limit, async t => {
+  const context = await scratch(t);
+  const app = await install(context);
+  const alp = await fakeAlp(context);
+  // alp answers only once the page has been read (bounded, so no shell is left behind).
+  const gate = path.join(context.dir, 'gate');
+  await alp.set(`i=0; while [ ! -f '${gate}' ] && [ $i -lt 6000 ]; do sleep 0.05; i=$((i + 1)); done; exit 1`);
+  context.defer(() => writeFile(gate, ''));
+  const shown = await bundledPage(context, await start(context, app, alp.file));
+  assertBundled(shown.url, 'connecting.html');
+  assert.equal(shown.h1, 'Starting ALP…');
+});
+
+test('an alp without `alp dashboard` (0.0.1-beta.8): the error page, from the app itself, says so', limit, async t => {
+  const context = await scratch(t);
+  const app = await install(context);
+  const alp = await fakeAlp(context);
+  // What 0.0.1-beta.8 answers: its usage on stderr and exit 1.
+  await alp.set("printf 'Usage:\\n  alp web [--print]\\n' >&2; exit 1");
+  await alp.setVersion('0.0.1-beta.8');
+  const shown = await bundledPage(context, await start(context, app, alp.file), 'connecting.html');
+  assertBundled(shown.url, 'error.html');
+  assert.equal(shown.h1, 'ALP could not open');
+  assert.ok(shown.text.includes(`Your alp 0.0.1-beta.8 (${alp.file}) has no \`alp dashboard\``), shown.text);
+  assert.ok(!shown.text.includes('Usage:'), shown.text);
+});
+
+test('no alp: the install page, from the app itself', limit, async t => {
+  const context = await scratch(t);
+  const app = await install(context);
+  const shown = await bundledPage(context, await start(context, app, path.join(context.dir, 'nowhere', 'alp')), 'connecting.html');
+  assertBundled(shown.url, 'missing-alp.html');
+  assert.match(shown.text, /npm install -g/);
+});
+
 async function connectedSetup(t) {
   const context = await scratch(t);
   const web = await host(t, context);
