@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { bundleInfo, entryCommand, scriptCommand, selfCommand, selfEntry, stablePath } from '../src/packaged.js';
+import { bundleDaemon, bundleDist, isBundleDaemon, bundleInfo, bundleNode, daemonEntry, entryCommand, isNativeDaemonName, nativeDaemon, nodeExecutable, registerNativeDaemon, scriptCommand, selfCommand, selfEntry, stablePath } from '../src/packaged.js';
 import { bridgeCommand, isBridgeArgs, ACP_BRIDGE, ANTIGRAVITY_BRIDGE } from '../src/bridges.js';
 
 test('ALP starts its roles as scripts under process.execPath, and bridges as -e', () => {
@@ -26,6 +26,7 @@ test('an entry found on disk runs by its kind: a script under execPath, an `alp`
   assert.throws(() => entryCommand('/bin/alp', /** @type {any} */ ('nope')), /Unknown ALP role/);
   // Only alp/alp.exe/alp.cmd is a command: a TypeScript or extensionless entry still runs under execPath.
   assert.deepEqual(entryCommand('/src/alp/alpd.ts', 'daemon', ['--detach'], '/opt/node'), { command: '/opt/node', args: ['/src/alp/alpd.ts', '--detach'] });
+  // An alpd that is no bundle's native alpd (no alp-bundle.json beside its bin/) is a script too (t-81b0.9).
   assert.deepEqual(entryCommand('/opt/alp/bin/alpd', 'daemon', [], '/opt/node'), { command: '/opt/node', args: ['/opt/alp/bin/alpd'] });
 });
 
@@ -81,4 +82,48 @@ test('a bundle that current does not point at keeps its own paths', async t => {
   await mkdir(path.dirname(plain), { recursive: true });
   await writeFile(plain, '');
   assert.equal(bundleInfo(plain), undefined);
+});
+
+test('the native alpd (t-81b0.9): alp starts bin/alpd when the bundle ships it, through current; ALP_NATIVE_DAEMON=0 keeps alpd.js', async t => {
+  const b = await fakeBundle(t);
+  const info = bundleInfo(b.node);
+  const current = path.join(b.app, 'current');
+  assert.equal(daemonEntry(b.alpd, { bundle: info, env: {} }), path.join(current, path.relative(b.root, b.alpd)), 'no bin/alpd: alpd.js');
+  const native = bundleDaemon(info);
+  await mkdir(path.dirname(native), { recursive: true });
+  await writeFile(native, '');
+  assert.equal(daemonEntry(b.alpd, { bundle: info, env: {} }), path.join(current, 'bin', path.basename(native)));
+  assert.equal(daemonEntry(b.alpd, { bundle: info, env: { ALP_NATIVE_DAEMON: '0' } }), path.join(current, path.relative(b.root, b.alpd)));
+  assert.equal(daemonEntry(b.alpd, { bundle: undefined, env: {} }), b.alpd, 'outside a bundle (npm): alpd.js');
+  // The native alpd's own path names the same bundle, and its Node and dist.
+  const fromNative = bundleInfo(native);
+  assert.equal(fromNative?.root, b.root);
+  assert.equal(fromNative?.current, current);
+  assert.equal(bundleNode(info), b.node);
+  assert.equal(bundleDist(info), path.dirname(b.alpd));
+  // alp runs the native alpd itself with alpd's options, never as a script or through a role subcommand.
+  assert.deepEqual(entryCommand(native, 'daemon', ['--detach']), { command: native, args: ['--detach'] });
+  assert.deepEqual(entryCommand(native, 'daemon', ['--service'], '/n'), { command: native, args: ['--service'] });
+  assert.equal(isBundleDaemon(native), true);
+  assert.equal(isBundleDaemon(path.join(b.work, 'bin', 'alpd')), false, 'no alp-bundle.json: not a native alpd');
+  assert.equal(isNativeDaemonName('/x/bin/alpd'), true);
+  assert.equal(isNativeDaemonName('C:\\x\\bin\\alpd.exe'), true);
+  assert.equal(isNativeDaemonName('/x/alpd.js'), false);
+  assert.equal(isNativeDaemonName('/x/bin/alp'), false);
+});
+
+test('inside the native alpd: it restarts itself without a script, records its executable, and runs JavaScript with the bundle\'s Node', async t => {
+  assert.equal(nativeDaemon(), undefined);
+  assert.equal(nodeExecutable(), process.execPath);
+  registerNativeDaemon({ modules: {} });
+  t.after(() => { delete globalThis[Symbol.for('alp.nativeDaemon')]; });
+  // This test process is no bundle, so the Node for scripts is `node` on PATH.
+  assert.equal(nodeExecutable(), 'node');
+  assert.deepEqual(selfCommand('daemon', { script: '/b/alpd.js', args: ['--x'] }), { command: process.execPath, args: ['--x'] });
+  assert.throws(() => selfCommand('dashboard', { script: '/b/alp-dashboard.js' }), /native alpd cannot start/);
+  assert.equal(selfEntry('/$bunfs/root/alpd'), process.execPath);
+  assert.deepEqual(scriptCommand('/p/fake.js', ['a']), { command: 'node', args: ['/p/fake.js', 'a'] });
+  const { command, args } = bridgeCommand('acp');
+  assert.equal(command, 'node');
+  assert.equal(args[0], '-e');
 });

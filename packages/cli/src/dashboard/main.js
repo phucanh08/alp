@@ -34,7 +34,7 @@ import { CredentialStore, createGateway, createGatewayLogger, parseToken, rename
 import { TERMINAL_EXEC_WARNING } from '@anhlp/alp-gateway/policy';
 import { createGrant, grantPermissions, dashboardGatewayHome } from './grant.js';
 import { createStaticServer } from './serve.js';
-import { selfEntry } from '@anhlp/alp-core/packaged';
+import { daemonEntry as bundledDaemonEntry } from '@anhlp/alp-core/packaged';
 
 // __ALP_VERSION__ is replaced at build time (esbuild define); a run from source reports a placeholder.
 // @ts-ignore -- a build-time constant, not a declared global
@@ -55,7 +55,8 @@ const WEB_FILE_VERSION = 2;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appDir = () => path.resolve(env('APP') || path.join(here, 'alp-dashboard'));
-const daemonEntry = () => process.env.ALP_DAEMON_ENTRY ?? selfEntry(path.join(here, 'alpd.js'));
+// The bundle's native alpd when it ships one (t-81b0.9), else alpd.js beside this script.
+const daemonEntry = () => process.env.ALP_DAEMON_ENTRY ?? bundledDaemonEntry(path.join(here, 'alpd.js'));
 const webFile = (/** @type {string} */ home) => path.join(home, 'dashboard.json');
 /** Where the Paseo integration kept its identity before its own rename (and alp web, before t-81b0.5, its address). */
 const legacyWebFile = (/** @type {string} */ home) => path.join(home, 'web.json');

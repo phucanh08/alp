@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { scrubText } from '@anhlp/alp-core/log';
-import { entryCommand } from '@anhlp/alp-core/packaged';
+import { entryCommand, NATIVE_DAEMON } from '@anhlp/alp-core/packaged';
 import { dashboardSettings } from '@anhlp/alp-core/user-settings';
 import { createSocketTransport } from './ipc.js';
 import { AlpRpcClient } from './rpc/client.js';
@@ -110,13 +110,13 @@ const BIN_DIRECTORIES = [path.join(os.homedir(), '.alp', 'bin'), path.join(os.ho
 const CLI_PACKAGES = ['@anhlp/alp', '@anhlp/alp-cli'];
 
 /**
- * alpd.js behind an `alp` found on PATH (its real path), or undefined: the ALP bundle's launcher
- * (<bundle>/bin/alp or alp.cmd, t-1807), npm's @anhlp/alp-cli (dist/cli.js) or the @anhlp/alp wrapper (bin/alp.js),
+ * alpd behind an `alp` found on PATH (its real path), or undefined: the ALP bundle's launcher
+ * (<bundle>/bin/alp or alp.cmd, t-1807; its native alpd when it ships one, t-81b0.9, else its alpd.js), npm's @anhlp/alp-cli (dist/cli.js) or the @anhlp/alp wrapper (bin/alp.js),
  * which depends on @anhlp/alp-cli (installed beside it, or in its own node_modules). On Windows an
  * alp.cmd shim of npm or install.ps1 is followed to the script it runs (t-1f14).
- * @param {string} cli @param {number} [depth]
+ * @param {string} cli @param {number} [depth] @param {NodeJS.ProcessEnv} [env]
  */
-async function cliDaemonEntry(cli, depth = 0) {
+async function cliDaemonEntry(cli, depth = 0, env = process.env) {
   const base = path.basename(cli).toLowerCase();
   const root = path.resolve(path.dirname(cli), '..');
   const alpd = directory => path.join(directory, 'dist', 'alpd.js');
@@ -128,7 +128,7 @@ async function cliDaemonEntry(cli, depth = 0) {
     const text = await stat(cli).then(info => info.size <= 64 * 1024 ? readFile(cli, 'utf8') : '', () => '');
     for (const [, quoted] of text.matchAll(/"([^"\r\n]+\.js)"/gi)) {
       const script = quoted.replace(/^%~?dp0%?[\\/]?/i, `${path.dirname(cli)}${path.sep}`);
-      const entry = path.isAbsolute(script) && await isFile(script) ? await cliDaemonEntry(script, depth + 1) : undefined;
+      const entry = path.isAbsolute(script) && await isFile(script) ? await cliDaemonEntry(script, depth + 1, env) : undefined;
       if (entry) return entry;
     }
     return undefined;
@@ -138,7 +138,9 @@ async function cliDaemonEntry(cli, depth = 0) {
     if (!await isFile(path.join(root, 'alp-bundle.json'))) return undefined;
     const current = path.join(path.dirname(root), 'current');
     const viaCurrent = await realpath(current).then(real => real === root, () => false);
-    candidates = [alpd(path.join(viaCurrent ? current : root, 'lib', 'node_modules', '@anhlp', 'alp-cli'))];
+    const bundle = viaCurrent ? current : root;
+    // The native alpd first (t-81b0.9), as the bundle's own `alp` starts it; alpd.js where it ships none.
+    candidates = [...(env.ALP_NATIVE_DAEMON === '0' ? [] : [path.join(bundle, 'bin', NATIVE_DAEMON)]), alpd(path.join(bundle, 'lib', 'node_modules', '@anhlp', 'alp-cli'))];
   } else if (base === 'cli.js' && CLI_PACKAGES.includes(await named(root))) {
     candidates = [alpd(root)];
   } else if (base === 'alp.js' && await named(root) === '@anhlp/alp') {
@@ -163,7 +165,7 @@ export async function findDaemonEntry({ home = alpHome(), env = process.env, can
   for (const directory of [...(env.PATH ?? '').split(path.delimiter).filter(Boolean), ...binDirectories]) {
     for (const name of process.platform === 'win32' ? ['alp.cmd', 'alp'] : ['alp']) {
       const cli = await realpath(path.join(directory, name)).catch(() => undefined);
-      const entry = cli && await cliDaemonEntry(cli);
+      const entry = cli && await cliDaemonEntry(cli, 0, env);
       if (entry) return entry;
     }
   }

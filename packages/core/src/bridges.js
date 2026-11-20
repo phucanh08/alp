@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { isExecutableName, stablePath } from './packaged.js';
+import { isExecutableName, nodeExecutable, stablePath } from './packaged.js';
 
 /**
  * The stdio MCP bridges an agent CLI starts to reach alpd's tools (ACP agents and Antigravity).
@@ -94,7 +94,8 @@ export function runBridge(kind) {
 export function bridgeCommand(kind) {
   if (!Object.hasOwn(BRIDGES, kind)) throw new Error(`Unknown bridge: ${kind}; expected acp or antigravity`);
   // Agents keep this command in their MCP configuration: name the ALP bundle's Node through app/current.
-  return { command: stablePath(process.execPath), args: ['-e', BRIDGES[kind]] };
+  // In the native alpd (t-81b0.9) that is still the bundle's Node: the native alpd does not evaluate -e.
+  return { command: stablePath(nodeExecutable()), args: ['-e', BRIDGES[kind]] };
 }
 
 /**
