@@ -36,10 +36,11 @@ const code = error => /** @type {any} */ (error)?.code;
  * @param {string} home
  * @param {{ strict?: boolean }} [options] strict: a legacy holder alp cannot stop is an error (a start
  *   would otherwise lose its port to it); without it, it is reported and the files are left alone.
- * @returns {Promise<{ stopped?: number, moved: string[], kept: string[], warnings: string[] }>}
+ * @returns {Promise<{ stopped?: number, held?: boolean, moved: string[], kept: string[], warnings: string[] }>}
+ *   held: a legacy holder alp would not stop is still running (only without strict).
  */
 export async function migrateDashboard(home, { strict = false } = {}) {
-  /** @type {{ stopped?: number, moved: string[], kept: string[], warnings: string[] }} */
+  /** @type {{ stopped?: number, held?: boolean, moved: string[], kept: string[], warnings: string[] }} */
   const report = { moved: [], kept: [], warnings: [] };
 
   // 1. The service from before the rename.
@@ -49,12 +50,14 @@ export async function migrateDashboard(home, { strict = false } = {}) {
     catch (error) {
       if (strict) throw error;
       report.warnings.push(/** @type {any} */ (error)?.message ?? String(error));
+      report.held = true;
       return report;
     }
   } else if (owner.alive) {
     const message = `${refusal(home, LEGACY_WEB)} (${owner.reason}); stop it, then run the command again`;
     if (strict) throw new Error(message);
     report.warnings.push(message);
+    report.held = true;
     return report;
   }
 
@@ -74,18 +77,27 @@ export async function migrateDashboard(home, { strict = false } = {}) {
   const newInfo = path.join(home, DASHBOARD.info);
   const published = await readFile(oldInfo, 'utf8').then(text => JSON.parse(text), () => undefined);
   if (published?.app === LEGACY_WEB.app) {
-    if (await exists(newInfo)) report.kept.push(oldInfo);
-    else {
+    // The same token in dashboard.json: this file was already carried (by an earlier or a concurrent
+    // run, or a crash after the link), so the old one is only a copy.
+    const carriedAlready = async () => (await readFile(newInfo, 'utf8').then(text => JSON.parse(text), () => undefined))?.token === published.token;
+    const removeOld = () => unlink(oldInfo).catch(error => { if (code(error) !== 'ENOENT') throw error; });
+    if (await exists(newInfo)) {
+      if (await carriedAlready()) await removeOld();
+      else report.kept.push(oldInfo);
+    } else {
       // Only what the next start reuses; the old pid, port and URL died with the old service.
       const carried = { version: published.version, app: DASHBOARD.app, token: published.token, credentialId: published.credentialId };
       const temporary = `${newInfo}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
       try {
         await writeFile(temporary, `${JSON.stringify(carried)}\n`, { mode: 0o600, flag: 'wx' });
         await chmod(temporary, 0o600);
-        // A link never replaces: a dashboard.json written meanwhile wins.
-        await link(temporary, newInfo).then(() => report.moved.push(`${oldInfo} -> ${newInfo}`), error => { if (code(error) !== 'EEXIST') throw error; });
+        // A link never replaces: a dashboard.json written meanwhile wins, and the old file is
+        // removed only when that one carries the same token.
+        const linked = await link(temporary, newInfo).then(() => true, error => { if (code(error) !== 'EEXIST') throw error; return false; });
+        if (linked) { report.moved.push(`${oldInfo} -> ${newInfo}`); await removeOld(); }
+        else if (await carriedAlready()) await removeOld();
+        else report.kept.push(oldInfo);
       } finally { await unlink(temporary).catch(() => {}); }
-      await unlink(oldInfo).catch(error => { if (code(error) !== 'ENOENT') throw error; });
     }
   }
 
@@ -107,4 +119,32 @@ export async function migrateDashboard(home, { strict = false } = {}) {
     report.warnings.push(`settings.json was not migrated (web.* is still read): ${/** @type {any} */ (error)?.message ?? error}`);
   }
   return report;
+}
+
+/**
+ * What a home still has under the names from before the rename, without changing anything (for
+ * `alp dashboard --status`): `pending` the next `alp dashboard` moves, `kept` it leaves because the
+ * new name exists, and the legacy service if one runs.
+ * @param {string} home
+ * @returns {Promise<{ legacy?: { pid?: number, reason?: string }, pending: string[], kept: string[] }>}
+ */
+export async function legacyLeftovers(home) {
+  /** @type {{ legacy?: { pid?: number, reason?: string }, pending: string[], kept: string[] }} */
+  const result = { pending: [], kept: [] };
+  const owner = await serviceOwner(home, LEGACY_WEB);
+  if ('pid' in owner) result.legacy = { pid: owner.pid };
+  else if (owner.alive) result.legacy = { reason: owner.reason };
+  const place = async (/** @type {string} */ old, /** @type {string} */ current) => (await exists(current) ? result.kept : result.pending).push(old);
+  if (await exists(path.join(home, 'web', 'credentials.json'))) await place(path.join(home, 'web'), path.join(home, 'dashboard'));
+  const published = await readFile(path.join(home, LEGACY_WEB.info), 'utf8').then(text => JSON.parse(text), () => undefined);
+  if (published?.app === LEGACY_WEB.app) await place(path.join(home, LEGACY_WEB.info), path.join(home, DASHBOARD.info));
+  const logs = path.join(home, 'logs', 'integrations');
+  if (await exists(path.join(logs, 'alp-web.log'))) await place(path.join(logs, 'alp-web.log'), path.join(logs, 'alp-dashboard.log'));
+  const settings = await readFile(path.join(home, 'settings.json'), 'utf8').then(text => JSON.parse(text), () => undefined);
+  for (const key of ['enabled', 'port', 'permissions']) {
+    if (settings?.web?.[key] === undefined) continue;
+    if (settings?.dashboard?.[key] !== undefined) result.kept.push(`settings.json web.${key} (dashboard.${key} is set and wins)`);
+    else result.pending.push(`settings.json web.${key}`);
+  }
+  return result;
 }
