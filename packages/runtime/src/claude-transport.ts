@@ -11,12 +11,20 @@ import { inputLimitError, POUR_VARS, VAR_NAME, type InputLimits } from './input-
 import { claudeToolDetail, resultText } from './tool-detail.js';
 import { CLOSE_REASONS, GATE_KINDS, TASK_STATUSES, TASK_TYPES } from '@anhlp/alp-core/tasks';
 import { commandDecision } from '@anhlp/alp-core/permissions';
+import { isScript, nativeDaemon, nodeExecutable } from '@anhlp/alp-core/packaged';
 
 // Keep the Claude SDK behind the runtime boundary. Paseo inspects static
 // imports while compiling plugin entrypoints, including their declaration
 // graph; the SDK is a daemon-only optional runtime dependency.
+// The native alpd (t-81b0.9) carries the SDK inside its executable: there is no node_modules to import
+// it from by name, so its entry registers it.
 const CLAUDE_SDK = ['@anthropic-ai', 'claude-agent-sdk'].join('/');
-const claudeSdk = (): Promise<any> => import(CLAUDE_SDK);
+const claudeSdk = (): Promise<any> => nativeDaemon()?.modules.claudeAgentSdk?.() ?? import(CLAUDE_SDK);
+/**
+ * A JavaScript `claude` (a test's fake, an npm install's cli.js) runs under Node. The SDK would pick
+ * `bun` inside the native alpd, so name the Node there.
+ */
+const scriptExecutable = (command: string): { executable?: any } => nativeDaemon() && isScript(command) ? { executable: nodeExecutable() } : {};
 
 type SDKUserMessage = any;
 type SDKMessage = any;
@@ -547,7 +555,7 @@ export class ClaudeTransport {
   async probeModels(signal?: AbortSignal) {
     const { query } = await claudeSdk();
     if (signal?.aborted) throw new Error('aborted');
-    const probe = query({ prompt: new InputQueue(), options: { cwd: this.cwd, env: this.env, settingSources: [], persistSession: false, strictMcpConfig: true, mcpServers: {}, pathToClaudeCodeExecutable: this.command } }) as ClaudeQuery;
+    const probe = query({ prompt: new InputQueue(), options: { cwd: this.cwd, env: this.env, settingSources: [], persistSession: false, strictMcpConfig: true, mcpServers: {}, pathToClaudeCodeExecutable: this.command, ...scriptExecutable(this.command) } }) as ClaudeQuery;
     // A probe that outlives its bound is closed, so a hanging Claude process never stays behind.
     const stop = () => probe.close();
     signal?.addEventListener('abort', stop);
@@ -564,7 +572,7 @@ export class ClaudeTransport {
   private async probeUsage() {
     if (this.closed) return undefined;
     const { query } = await claudeSdk();
-    const probe = query({ prompt: new InputQueue(), options: { cwd: this.cwd, env: this.env, settingSources: [], persistSession: false, strictMcpConfig: true, mcpServers: {}, pathToClaudeCodeExecutable: this.command } }) as ClaudeQuery;
+    const probe = query({ prompt: new InputQueue(), options: { cwd: this.cwd, env: this.env, settingSources: [], persistSession: false, strictMcpConfig: true, mcpServers: {}, pathToClaudeCodeExecutable: this.command, ...scriptExecutable(this.command) } }) as ClaudeQuery;
     try {
       return await probe.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true });
     } finally {
@@ -812,6 +820,7 @@ export class ClaudeTransport {
       ...(from ? { resume: from.resume, ...(from.fork ? { forkSession: true, sessionId: this.threadId } : {}), ...(from.at ? { resumeSessionAt: from.at } : {}) } : { sessionId: this.threadId }),
       // Explicit native path avoids SDK optional binaries inside Electron app.asar.
       pathToClaudeCodeExecutable: this.command,
+      ...scriptExecutable(this.command),
     };
 
     this.bootFailure = new Promise<never>((_, reject) => { this.rejectBoot = reject; });

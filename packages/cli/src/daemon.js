@@ -5,14 +5,14 @@ import { holdDaemon, startDaemon } from '@anhlp/alp-client/supervise';
 import { alpHome, connect, daemonStartTimeoutMs, lockAlive, readLock, withDaemonLifecycle } from '@anhlp/alp-client/index';
 import { scrubText } from '@anhlp/alp-core/log';
 import { UsageError } from './usage.js';
-import { DAEMON_ENTRY } from './paths.js';
+import { DAEMON_ENTRY, DAEMON_SCRIPT } from './paths.js';
 import { runRole } from './roles.js';
 
-async function built() {
+async function built(entry = DAEMON_ENTRY) {
   try {
-    await access(DAEMON_ENTRY);
+    await access(entry);
   } catch {
-    throw new Error(`alpd is not built (${DAEMON_ENTRY}); run npm run build`);
+    throw new Error(`alpd is not built (${entry}); run npm run build`);
   }
 }
 
@@ -61,8 +61,9 @@ async function stop() {
 }
 
 async function daemon([action, ...rest]) {
-  // alpd itself in this process; its own options (--detach, --service, --startup-timeout=MS) follow.
-  if (action === 'run') { await built(); return runRole('daemon', DAEMON_ENTRY, rest); }
+  // alpd itself in this process (alpd.js on this Node, even where the bundle ships the native alpd);
+  // its own options (--detach, --service, --startup-timeout=MS) follow.
+  if (action === 'run') { await built(DAEMON_SCRIPT); return runRole('daemon', DAEMON_SCRIPT, rest); }
   if (rest.length && !(action === 'status' && rest.length === 1 && rest[0] === '--json')) throw new UsageError();
   if (action === 'start') {
     const socket = await start();

@@ -54,7 +54,7 @@ export function serviceFor({ home, env = process.env, platform = process.platfor
   return undefined;
 }
 
-/** The service definition that runs `entry` (alpd.js with `execPath`, or an `alp` command) for `home`. */
+/** The service definition that runs `entry` (alpd.js with `execPath`, the native alpd, or an `alp` command) for `home`. */
 export function serviceDefinition(service, { home, entry, execPath = process.execPath, env = process.env }) {
   const variables = { ALP_HOME: path.resolve(home), PATH: env.PATH ?? '' };
   for (const name of CARRIED) if (env[name]) variables[name] = env[name];
@@ -115,7 +115,7 @@ WantedBy=default.target
 `;
 }
 
-/** The program an installed definition runs: [node, alpd.js], or undefined when it is not installed. */
+/** The program an installed definition runs: [node, alpd.js] or [alpd, --service] (native, t-81b0.9), or undefined when it is not installed. */
 export async function installedProgram(service) {
   const text = await readFile(service.file, 'utf8').catch(() => undefined);
   if (text === undefined) return undefined;

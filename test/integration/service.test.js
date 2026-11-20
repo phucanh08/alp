@@ -92,6 +92,15 @@ test('a service naming the alp command runs `alp daemon run --service`, and alpd
     await fsp.rm(path.join(userBin, launcher));
     await fsp.symlink(path.join(app, 'current', 'bin', launcher), path.join(userBin, launcher));
     assert.equal(await findDaemonEntry({ binDirectories: [], home: empty, env: { PATH: userBin } }), path.join(app, 'current', 'lib', 'node_modules', '@anhlp', 'alp-cli', 'dist', 'alpd.js'), 'through app/current');
+    // t-81b0.9: a bundle with the native alpd is found by it first, unless ALP_NATIVE_DAEMON=0.
+    await writeFile(path.join(root, 'bin', 'alpd'), '');
+    assert.equal(await findDaemonEntry({ binDirectories: [], home: empty, env: { PATH: userBin } }), path.join(app, 'current', 'bin', 'alpd'), 'the native alpd, through app/current');
+    assert.equal(await findDaemonEntry({ binDirectories: [], home: empty, env: { PATH: userBin, ALP_NATIVE_DAEMON: '0' } }), path.join(app, 'current', 'lib', 'node_modules', '@anhlp', 'alp-cli', 'dist', 'alpd.js'), 'ALP_NATIVE_DAEMON=0: alpd.js');
+    // Its service runs it directly with --service, and installedProgram reads that back.
+    const nativeEntry = path.join(app, 'current', 'bin', 'alpd');
+    const nativePlist = serviceDefinition(serviceFor({ home, env, platform: 'darwin', uid: 501 }), { home, entry: nativeEntry, execPath: '/opt/node', env });
+    assert.match(nativePlist, new RegExp(`<key>ProgramArguments</key>\\s*<array>\\s*<string>${nativeEntry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</string>\\s*<string>--service</string>\\s*</array>`));
+    assert.doesNotMatch(nativePlist, /\/opt\/node/);
   }
   const recorded = path.join(directory, 'recorded');
   await fsp.mkdir(recorded, { mode: 0o700 });

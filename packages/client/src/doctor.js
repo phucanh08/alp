@@ -78,13 +78,14 @@ async function runtimeChecks({ env, run }) {
   return checks;
 }
 
-/** An installed alpd service whose node or alpd.js moved can no longer start alpd. */
+/** An installed alpd service whose node, alpd.js or native alpd moved can no longer start alpd. */
 async function serviceCheck(home, env) {
   const service = serviceFor({ home, env });
   const program = service && await installedProgram(service);
   if (!program) return undefined;
   const missing = [];
-  for (const file of program) if (!await lstat(file).then(() => true, () => false)) missing.push(file);
+  // [node, alpd.js], or [alpd, --service] for the native alpd (t-81b0.9): only the files.
+  for (const file of program.filter(arg => path.isAbsolute(arg))) if (!await lstat(file).then(() => true, () => false)) missing.push(file);
   return missing.length
     ? { id: 'service', status: 'fail', summary: `the ${service.kind} service ${service.name} runs files that are gone; run alp daemon install again`, details: missing }
     : { id: 'service', status: 'ok', summary: `${service.kind} runs alpd as ${service.name}` };

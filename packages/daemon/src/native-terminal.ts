@@ -12,8 +12,16 @@ const sha = (value: Buffer) => createHash('sha256').update(value).digest('hex');
 function binary() {
   const libc = process.platform === 'linux' ? (process.report?.getReport() as { header?: { glibcVersionRuntime?: string } })?.header?.glibcVersionRuntime ? 'glibc' : 'musl' : undefined;
   const slot = [process.platform, process.arch, libc].filter(Boolean).join('-');
-  const adjacent = path.join(path.dirname(fileURLToPath(import.meta.url)), 'terminal-native');
-  const dir = existsSync(adjacent) ? adjacent : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../native');
+  // The native alpd (t-81b0.9) has no directory of its own (import.meta.url is inside its executable):
+  // it uses the helper in its bundle's @anhlp/alp-cli dist; outside a bundle it has none.
+  // This file stays self-contained (it is shipped and tested on its own), so it reads the native alpd's
+  // registration (@anhlp/alp-core/packaged, native-register.ts) from its global directly.
+  const native = (globalThis as { [key: symbol]: { distDir?: () => string | undefined } | undefined })[Symbol.for('alp.nativeDaemon')];
+  const bundled = native?.distDir?.();
+  if (native && !bundled) throw new Error('The native alpd runs outside an ALP bundle: no terminal helper');
+  const here = bundled ?? path.dirname(fileURLToPath(import.meta.url));
+  const adjacent = path.join(here, 'terminal-native');
+  const dir = existsSync(adjacent) || bundled ? adjacent : path.resolve(here, '../native');
   const file = path.join(dir, 'prebuilt', slot, 'terminal-owner');
   const manifest = JSON.parse(readFileSync(path.join(path.dirname(file), 'manifest.json'), 'utf8'));
   if (!statSync(file).isFile() || manifest.protocol !== 1 || manifest.slot !== slot || manifest.source !== sha(readFileSync(path.join(dir, 'terminal-owner.c'))) || manifest.sha256 !== sha(readFileSync(file))) throw new Error('Native helper manifest mismatch');
