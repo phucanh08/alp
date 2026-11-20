@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync, chmodSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, chmodSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { run } from '../src/run';
 import { isExecutable } from '../src/alp-web';
@@ -38,6 +38,40 @@ describe('run', () => {
     const result = await run('/bin/sh', ['-c', "trap '' TERM; sleep 30 & wait"], { env, timeout: 400, killGroup: true });
     expect(result.timedOut).toBe(true);
     expect(Date.now() - started).toBeLessThan(2500);
+  });
+  test('killGroup: a background job left in the group is stopped after a normal exit', async () => {
+    const pidFile = path.join(scratch, 'job.pid');
+    // No job control in sh -c: the job stays in the child's group, and its stdio is closed so only
+    // the group kill can end it.
+    const result = await run('/bin/sh', ['-c', `sleep 30 >/dev/null 2>&1 </dev/null & echo $! > '${pidFile}'; exit 0`], { env, timeout: 5000, killGroup: true });
+    expect(result).toMatchObject({ code: 0, timedOut: false });
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    expect(pid).toBeGreaterThan(0);
+    const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    const until = Date.now() + 2000;
+    while (alive() && Date.now() < until) await Bun.sleep(20);
+    expect(alive()).toBe(false);
+  });
+  test('without killGroup, a background job is left alone', async () => {
+    const pidFile = path.join(scratch, 'job2.pid');
+    await run('/bin/sh', ['-c', `sleep 30 >/dev/null 2>&1 </dev/null & echo $! > '${pidFile}'; exit 0`], { env, timeout: 5000 });
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    await Bun.sleep(200);
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    process.kill(pid, 'SIGKILL');
+  });
+  test('a deadline that falls inside the grace window after the exit is not a timeout', async () => {
+    // The child exits at once; a grandchild holds stdout; the deadline (300 ms) comes before the grace (2 s) ends.
+    const result = await run('/bin/sh', ['-c', 'sleep 30 & echo done; exit 4'], { env, timeout: 300, exitGrace: 2000, killGroup: true });
+    expect(result).toMatchObject({ code: 4, stdout: 'done\n', timedOut: false });
+  });
+  test('maxBuffer counts bytes, and a cut never splits the characters before it', async () => {
+    // "é" is two bytes: 5 bytes keep "éé" and the first byte of the third, which decodes as U+FFFD.
+    const result = await run('/bin/sh', ['-c', "printf 'ééé'"], { env, timeout: 5000, maxBuffer: 5 });
+    expect(result.stdout).toBe('éé\uFFFD');
+    const exact = await run('/bin/sh', ['-c', "printf 'ééé'"], { env, timeout: 5000, maxBuffer: 4 });
+    expect(exact.stdout).toBe('éé');
+    expect(Buffer.byteLength(exact.stdout)).toBe(4);
   });
   test('a program that does not exist reports the error', async () => {
     const result = await run(path.join(scratch, 'nope'), [], { env, timeout: 2000 });

@@ -12,7 +12,7 @@ export type RunResult = {
   code: number | null;
   stdout: string;
   stderr: string;
-  /** True when the deadline was reached. */
+  /** True when the deadline was reached before the child exited. */
   timedOut: boolean;
   /** Why the child could not start (ENOENT, EACCES…). */
   error?: Error;
@@ -23,17 +23,23 @@ export type RunOptions = {
   timeout: number;
   /** How long to wait for stdio to close after the child exits; a grandchild may hold it open. */
   exitGrace?: number;
-  /** Kill the child's whole process group at the deadline (the child is started in its own group). */
+  /**
+   * Start the child in its own process group and kill that group when run() answers: with SIGKILL
+   * at the deadline, with SIGTERM after a normal exit (a background job an rc file left in the group).
+   * A job that made its own group (a shell with job control) is not reached; the shell hangs it up.
+   */
   killGroup?: boolean;
+  /** The most bytes kept of each of stdout and stderr; the rest is dropped. */
   maxBuffer?: number;
 };
 
 export function run(file: string, args: string[], options: RunOptions): Promise<RunResult> {
   const { env, timeout, exitGrace = 500, killGroup = false, maxBuffer = 1 << 20 } = options;
   return new Promise<RunResult>(resolve => {
-    let stdout = '';
-    let stderr = '';
+    const out = collector(maxBuffer);
+    const err = collector(maxBuffer);
     let code: number | null = null;
+    let exited = false;
     let settled = false;
     let timedOut = false;
     let startError: Error | undefined;
@@ -41,12 +47,13 @@ export function run(file: string, args: string[], options: RunOptions): Promise<
 
     const child = spawn(file, args, { env, shell: false, windowsHide: true, detached: killGroup, stdio: ['ignore', 'pipe', 'pipe'] });
 
-    const kill = () => {
+    const signal = (name: NodeJS.Signals) => {
       try {
-        if (killGroup && child.pid) process.kill(-child.pid, 'SIGKILL');
-        else child.kill('SIGKILL');
+        if (killGroup && child.pid) process.kill(-child.pid, name);
+        else if (!exited) child.kill(name);
       } catch {
-        try { child.kill('SIGKILL'); } catch { /* already gone */ }
+        // The group is gone (ESRCH): nothing of it is left to stop.
+        try { if (!exited) child.kill(name); } catch { /* already gone */ }
       }
     };
     const finish = () => {
@@ -57,35 +64,52 @@ export function run(file: string, args: string[], options: RunOptions): Promise<
       // Whoever still holds the pipes, this caller is done with them.
       child.stdout?.destroy();
       child.stderr?.destroy();
-      if (killGroup && child.pid && child.exitCode === null && child.signalCode === null) kill();
+      // The child's group outlives it while a job it started is alive (its pgid is not reused then);
+      // a group with no member left answers ESRCH, which signal() ignores.
+      if (killGroup && child.pid) signal(timedOut ? 'SIGKILL' : 'SIGTERM');
       child.unref();
-      resolve({ code: timedOut ? null : code, stdout, stderr, timedOut, error: startError });
+      resolve({ code: timedOut ? null : code, stdout: out.text(), stderr: err.text(), timedOut, error: startError });
     };
     const deadline = setTimeout(() => {
-      timedOut = true;
-      kill();
+      // A child that already exited is not late: only its pipes are still open (the grace window).
+      if (!exited) {
+        timedOut = true;
+        signal('SIGKILL');
+      }
       finish();
     }, timeout);
 
-    // setEncoding decodes through a StringDecoder, so a UTF-8 character split across two chunks
-    // arrives whole instead of as two replacement characters.
-    child.stdout?.setEncoding('utf8');
-    child.stderr?.setEncoding('utf8');
-    const append = (which: 'stdout' | 'stderr') => (chunk: string) => {
-      if (which === 'stdout') stdout = (stdout + chunk).slice(0, maxBuffer);
-      else stderr = (stderr + chunk).slice(0, maxBuffer);
-    };
-    child.stdout?.on('data', append('stdout'));
-    child.stderr?.on('data', append('stderr'));
+    child.stdout?.on('data', out.add);
+    child.stderr?.on('data', err.add);
     child.on('error', error => { startError = error; finish(); });
     child.on('exit', exitCode => {
+      exited = true;
       code = exitCode;
       // close normally follows at once; a grandchild holding the pipe must not delay the answer.
       graceTimer = setTimeout(finish, exitGrace);
     });
     child.on('close', exitCode => {
+      exited = true;
       if (code === null) code = exitCode;
       finish();
     });
   });
+}
+
+/**
+ * Collects a stream's bytes up to `limit` and decodes them once, at the end: a UTF-8 character split
+ * across two chunks arrives whole, and the limit counts bytes, as maxBuffer says.
+ */
+function collector(limit: number) {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  return {
+    add: (chunk: Buffer) => {
+      if (size >= limit) return;
+      const part = chunk.length > limit - size ? chunk.subarray(0, limit - size) : chunk;
+      chunks.push(part);
+      size += part.length;
+    },
+    text: () => Buffer.concat(chunks, size).toString('utf8'),
+  };
 }
