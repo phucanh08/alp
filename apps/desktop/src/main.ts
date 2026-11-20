@@ -60,7 +60,7 @@ function createWindow(): BrowserWindow {
 
 async function showMissing(override?: string, window = win) {
   allowedOrigin = undefined;
-  await window?.loadFile(page('missing-alp.html'), { query: override ? { override } : {} });
+  await window?.loadFile(page('missing-alp.html'), { query: override ? { override } : {} }).catch(() => undefined);
 }
 
 async function showError(message: string, window = win) {
@@ -75,6 +75,8 @@ async function showError(message: string, window = win) {
  * whose result is dropped; each one loads into the window that is current when it finishes.
  */
 async function connect() {
+  // Connect again with every window closed opens one (macOS keeps the app running).
+  if (!win || win.isDestroyed()) win = createWindow();
   const id = ++generation;
   const current = () => (id === generation && win && !win.isDestroyed() ? win : undefined);
   allowedOrigin = undefined;
@@ -126,10 +128,9 @@ if (!app.requestSingleInstanceLock()) {
     session.defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) => callback(isAllowedPermission(permission, details.requestingUrl, allowedOrigin)));
     session.defaultSession.setPermissionCheckHandler((_contents, permission, requestingOrigin) => isAllowedPermission(permission, requestingOrigin, allowedOrigin));
     buildMenu();
-    win = createWindow();
     void connect();
     app.on('activate', () => {
-      if (!win) { win = createWindow(); void connect(); }
+      if (!win) void connect();
     });
   });
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
