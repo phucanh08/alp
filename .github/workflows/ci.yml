@@ -176,11 +176,12 @@ jobs:
       - run: npm run validate:packages
 
   # The macOS desktop shell (apps/desktop, D32): a standalone bun project outside the npm workspaces,
-  # so the root runner never sees its tests. Unit tests, typecheck and the bundle; the Electron e2e
-  # comes with slice 3.
+  # so the root runner never sees its tests. Unit tests, typecheck, the bundle, then the Electron e2e
+  # against a disposable alp web host built from this checkout (packages/cli/dist/alp-web.js), with
+  # Playwright's _electron from the root install.
   desktop-macos:
     runs-on: macos-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: apps/desktop
@@ -193,3 +194,12 @@ jobs:
       - run: bun test test
       - run: bun run typecheck
       - run: bun run build
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        working-directory: .
+      - run: node scripts/build-workspace.mjs cli
+        working-directory: .
+      - run: bun run e2e
