@@ -11,7 +11,9 @@
  *   the error page, where File › Connect again starts over. The count restarts only after a page has
  *   stayed up for `stableMs`, so an alp web that fails again at once cannot cause a storm.
  * - A token refused again by an address alp still prints is given up at once: reloading it would
- *   only be refused again.
+ *   only be refused again. main.ts reports a 401 only from a document committed for the address it
+ *   loaded, so a late 401 from the page being replaced cannot count against the new one.
+ * - A load that neither finishes nor fails within `loadTimeoutMs` counts as failed.
  *
  * Pure apart from the injected dependencies, so tests drive it with fake timers.
  */
@@ -46,6 +48,8 @@ export type ReconnectOptions = {
   backoffMs?: readonly number[];
   maxAttempts?: number;
   stableMs?: number;
+  /** How long a load may take before it counts as failed (a server that accepts but never answers). */
+  loadTimeoutMs?: number;
 };
 
 export const DEFAULTS = {
@@ -54,6 +58,7 @@ export const DEFAULTS = {
   backoffMs: [1_000, 2_000, 4_000, 8_000, 16_000, 30_000],
   maxAttempts: 8,
   stableMs: 60_000,
+  loadTimeoutMs: 30_000,
 } as const;
 
 const realTimers: Timers = {
@@ -92,13 +97,14 @@ export class Reconnector {
     // A recovery waiting or asking alp goes on: a page that loaded meanwhile (a reload) does not
     // say alp web is back, and the attempt checks that itself.
     if (this.#state === 'waiting' || this.#state === 'resolving') return;
-    const recovered = this.#state === 'loading';
+    const fresh = this.#state === 'idle';
     this.#enter('watching');
     this.#address = address;
     this.#failures = 0;
     this.#since = this.#timers.now();
-    // A manual connect starts from zero; a recovery keeps its count until the page proves stable.
-    if (!recovered) this.#attempts = 0;
+    // A manual connect starts from zero; a recovery, or a reload while watching, keeps the count
+    // until the page proves stable (stableMs).
+    if (fresh) this.#attempts = 0;
     this.#schedulePoll();
   }
 
@@ -197,6 +203,8 @@ export class Reconnector {
     }
     this.#enter('loading');
     this.#address = result.address;
+    const loading = this.#epoch;
+    this.#timer = this.#timers.set(() => { if (loading === this.#epoch) this.trigger('load-failed'); }, this.#options.loadTimeoutMs);
     this.#deps.load(result.address);
   }
 
