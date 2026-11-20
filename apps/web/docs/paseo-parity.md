@@ -2,7 +2,7 @@
 
 > **Historical.** paseo-web was removed from this repository on 2026-10-27 (task t-55ce.3, PR
 > #233): its patches, `paseo-web/upstream.json`, `scripts/build-paseo-web.mjs`, `dist/web-app`
-> and the screenshot script `apps/web/scripts/compare-paseo.mjs` are gone, and `alp web` serves
+> and the screenshot script `apps/web/scripts/compare-paseo.mjs` are gone, and `alp dashboard` serves
 > apps/web. The paths and commands below describe the repository before that; the comparison is
 > kept as the record of the parity work.
 
@@ -182,7 +182,7 @@ Compared with Paseo **0.14.0** (getpaseo/paseo `v0.14.0`, `8c6de84`) for the App
 
 | Feature | paseo-web | apps/web | Backend | Priority | Now |
 |---|---|---|---|---|---|
-| Connect: alp web's token (patch 0001); add host; SSH | P:components/add-host-modal.tsx | Có, by design different: gateway URL and a pasted token | yes | none | — |
+| Connect: alp dashboard's token (patch 0001); add host; SSH | P:components/add-host-modal.tsx | Có, by design different: gateway URL and a pasted token | yes | none | — |
 | Pairing, saved hosts | P:components/pair-link-modal.tsx | Thiếu (by design) | no | P2 | — |
 | Toasts: variants, stacking, in-development once (patch 0006) | P:components/toast-host.tsx | Một phần: one notice at a time | client only | P1 | — |
 | i18n (9 locales) | P:i18n/ | Thiếu (English only) | client only | P1 | — |

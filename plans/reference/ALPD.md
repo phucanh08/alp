@@ -1978,7 +1978,7 @@ Goal (D30, steps 2–3): installing ALP is enough to code from a browser. alpd s
 ## 62. The ALP web app on Paseo's app (2026-10-10)
 
 > **Historical (superseded by epic t-55ce, 2026-10-26).** `alp web` serves ALP's own app (`apps/web`)
-> through the CLI's `alp-web` service ([docs/alp/web.md](../../docs/alp/web.md) §3.1). Paseo's web
+> through the CLI's `alp-web` service ([docs/alp/dashboard.md](../../docs/alp/dashboard.md) §3.1). Paseo's web
 > app was removed on 2026-10-27 (t-55ce.3): `paseo-web/` (patches, `upstream.json`, its LICENSE and
 > NOTICE), `scripts/build-paseo-web.mjs`, `scripts/check-web-app.mjs`, `scripts/web-app-smoke.mjs`,
 > `npm run build:web`, `dist/web-app` and `server/dist/web-app`, and the serving of the app's files

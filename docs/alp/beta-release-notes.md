@@ -257,7 +257,7 @@ Changes since `0.0.1-beta.3`:
   ALP gateway; `alp-web` keeps alpd running (`ALP_SUPERVISE=0` opts out). `alp web --print` prints
   `http://127.0.0.1:<port>/#token=alpgw1.…` instead of opening it. The gateway stays private and
   unpublished (bundled into the CLI): still eight tarballs. Details:
-  [web.md](web.md#31-alp-web-trên-máy-này-alp-web), [beta-install.md](beta-install.md#alp-web-on-this-machine).
+  [dashboard.md](dashboard.md#31-alp-dashboard-trên-máy-này-alp-dashboard), [beta-install.md](beta-install.md#alp-dashboard-on-this-machine).
   - **Credential:** the token is a gateway credential in `~/.alp/web/credentials.json`, a store of
     alp-web's own that `alp-gateway credential list/create` do not see. The page drops it from the
     address and keeps it only in the tab's session storage; a reload reuses it.

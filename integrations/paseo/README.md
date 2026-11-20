@@ -40,8 +40,8 @@ The ALP plugin settings screen and the ALP project panel manage the host's ALP
 library (teams, agents, skills, hooks, MCP servers) and project overrides; saving a
 built-in entry creates an override. ALP's patched build of Paseo's web app, which
 also showed these under Settings → Host, was removed (t-55ce.3). ALP's own web app
-(`alp web`) shows the library under Settings, within the limits in
-[web.md](https://github.com/phucanh08/alp/blob/main/docs/alp/web.md).
+(`alp dashboard`) shows the library under Settings, within the limits in
+[dashboard.md](https://github.com/phucanh08/alp/blob/main/docs/alp/dashboard.md).
 
 ## Managed worktree removal through the web facade
 
@@ -196,16 +196,16 @@ npm pack -w @anhlp/alp-paseo
 
 ## Optional standalone integration (relay pairing)
 
-`@anhlp/alp` and the six core packages install without Paseo. `alp web` no longer needs this
-package: from the release after `0.0.1-beta.3` it runs the CLI's own `alp-web` service
-([web.md](https://github.com/phucanh08/alp/blob/main/docs/alp/web.md)). This package's standalone
+`@anhlp/alp` and the six core packages install without Paseo. `alp dashboard` no longer needs this
+package: from the release after `0.0.1-beta.3` it runs the CLI's own `alp-dashboard` service
+([dashboard.md](https://github.com/phucanh08/alp/blob/main/docs/alp/dashboard.md)). This package's standalone
 integration (integration `paseo`) is what pairs Paseo's app on another device through the relay:
 
 ```sh
 npm install -g @anhlp/alp@beta @anhlp/alp-paseo@beta
 alp-paseo-integration --register
-alp web pair --on       # starts the integration, turns the relay on, prints the link and password
-alp web pair --off
+alp dashboard pair --on       # starts the integration, turns the relay on, prints the link and password
+alp dashboard pair --off
 ```
 
 Normal npm installs resolve the plugin's required peers (`@getpaseo/*`, `ws`); React and
@@ -232,20 +232,20 @@ available independently of this standalone web process.
 Core upgrades no longer update a bundled plugin: upgrade `@anhlp/alp-paseo`
 separately, and re-register if its installation location changes. Keep existing
 `web` settings and ALP session storage. The integration is named `paseo`: it keeps its token and
-server identity in `paseo.json` (carried over once from a `web.json` written before the rename),
+server identity in `paseo.json` (carried over once from a `dashboard.json` written before the rename),
 locks `integrations/paseo.lock`, registers `integrations/paseo.json` and binds a port the system
-picks, since `web.port` and `web.json` now belong to `alp-web`. `alp-web-integration` remains an
+picks, since `dashboard.port` and `dashboard.json` now belong to `alp-dashboard`. `alp-web-integration` remains an
 alias of `alp-paseo-integration` for one release, and a home that has only the old
 `integrations/web.json` descriptor still starts it, with a hint to re-register.
-When Paseo's app asks for a password, give it the one `alp web pair` prints.
+When Paseo's app asks for a password, give it the one `alp dashboard pair` prints.
 `ALP_PASEO_INTEGRATION` names the integration's entry; `ALP_WEB_INTEGRATION` is read for it too,
-after `ALP_PASEO_INTEGRATION`, for one release, and never selects what `alp web` runs.
-`alp web pair --on/--off`, `ALP_INTEGRATION_ENTRY`, `ALP_DAEMON_ENTRY`, `ALP_SUPERVISE` and
-`ALP_HOME` retain their meanings. `alp web` and `alp web --print` now open the CLI's `alp-web`
+after `ALP_PASEO_INTEGRATION`, for one release, and never selects what `alp dashboard` runs.
+`alp dashboard pair --on/--off`, `ALP_INTEGRATION_ENTRY`, `ALP_DAEMON_ENTRY`, `ALP_SUPERVISE` and
+`ALP_HOME` retain their meanings. `alp dashboard` and `alp dashboard --print` now open the CLI's `alp-dashboard`
 service; this package no longer has a web app, and its listener answers plain HTTP with 404 and
-keeps only the token-guarded Paseo socket. The first `alp web` stops a pre-rename integration
+keeps only the token-guarded Paseo socket. The first `alp dashboard` stops a pre-rename integration
 that still holds `integrations/web.lock` (only a provable same-user, same-boot owner). Without the
-plugin, `alp web pair` explains how to install it; CLI, daemon, IPC, ACP and `alp web` remain
+plugin, `alp dashboard pair` explains how to install it; CLI, daemon, IPC, ACP and `alp dashboard` remain
 usable.
 
 The public provider (`alp`), plugin ID (`alp-provider`), exports (`.`, `/main`,

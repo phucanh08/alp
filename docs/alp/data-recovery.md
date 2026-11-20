@@ -36,8 +36,8 @@ described under [Restoring](#restoring). Nothing outside these units is read or 
 - `logs/`, `worktrees/`, `copies/`, `alpd.lock`, the socket and `alpd.json` are process
   files. ALP recreates them.
 - `paseo.json` and `relay-keypair.json` are secrets that the Paseo integration regenerates;
-  `web.json` and `web/credentials.json` are alp-web's, which it regenerates too.
-  If the relay key pair is lost, your phone needs pairing again with `alp web pair`.
+  `dashboard.json` and `web/credentials.json` are alp-dashboard's, which it regenerates too.
+  If the relay key pair is lost, your phone needs pairing again with `alp dashboard pair`.
 - `integrations/` records where this machine's install lives.
 - `backups/` is where backups themselves are kept.
 

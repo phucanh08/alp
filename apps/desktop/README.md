@@ -1,7 +1,7 @@
 # ALP desktop (macOS)
 
 An Electron shell over the ALP already installed on this Mac (D32, `docs/alp/desktop.md`). It runs
-`alp web --print` and shows the ALP web app in its own window. It is a standalone **bun** project,
+`alp dashboard --print` and shows the ALP dashboard app in its own window. It is a standalone **bun** project,
 not one of the root npm workspaces: it has its own `bun.lock` and depends on no `@anhlp/*` package.
 
 ```sh
@@ -21,6 +21,6 @@ bun run e2e        # Electron e2e; needs the root `npm ci` and `node scripts/bui
 
 Settings: `~/Library/Application Support/ALP/settings.json`, `{ "alpPath": "/absolute/path/to/alp" }`.
 
-`alp web` refuses to run in a process started by an ALP agent (`ALP_AGENT_SESSION`). Try the app
+`alp dashboard` refuses to run in a process started by an ALP agent (`ALP_AGENT_SESSION`). Try the app
 from an agent against a disposable host (a scratch `ALP_HOME`) and a fake `alp` that prints that
 host's address, never against the user's `~/.alp`.
