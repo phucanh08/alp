@@ -134,7 +134,9 @@ Các ca kiểm tra:
 - kết nối cũ trả về muộn một địa chỉ không tải được, sau kết nối mới (qua Dock hay Connect again):
   kết quả cũ bị bỏ, không hiện trang lỗi. Chromium hủy navigation cũ ngay khi navigation mới bắt
   đầu (`ERR_ABORTED`, bị bỏ qua), nên trường hợp cũ thật sự có thể xảy ra là kết quả `alp` đến
-  muộn. Hai test này fail khi bỏ điều kiện `id === generation` trong `connect()`;
+  muộn. `alp` giả của lần đầu chỉ trả lời khi test mở cổng, tức là sau khi kết nối mới đã xong, nên
+  thứ tự này luôn đúng dù máy chậm. Hai test này fail khi bỏ điều kiện `id === generation` trong
+  `connect()`;
 - trang đầu tiên không tải được thì cửa sổ vẫn hiện;
 - instance thứ hai khi không có cửa sổ;
 - `alp-web` khởi động lại trên port khác;
