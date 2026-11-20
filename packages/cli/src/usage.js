@@ -14,11 +14,13 @@ const USAGE = `Usage:
   alp daemon <install|uninstall>         run alpd as a login service that restarts after a crash
   alp daemon run [--detach] [--service]  run alpd in this process (what services written by 0.0.1-beta.5/6 start)
   alp acp                                serve ALP to an editor (Zed, JetBrains) over the Agent Client Protocol on stdio
-  alp web [--print]                      open the ALP web app on this machine (alp-web, loopback); --print only prints its address
-  alp web serve [--service|--rotate] [--project DIR]   run alp-web in this process (what alp web starts)
+  alp dashboard [--port N] [--host 127.0.0.1|localhost] [--no-open|--print]   open ALP's dashboard in the browser (alp-dashboard, loopback only); --no-open/--print only print its address
+  alp dashboard --status|--stop          whether alp dashboard runs (address without its token) | stop it
+  alp desktop                            open ALP's desktop app (ALP.app, else the checkout in ALP_DESKTOP_CHECKOUT)
+  alp dashboard serve [--service|--rotate] [--project DIR] [--port N]   run alp-dashboard in this process (what alp dashboard starts)
   alp bridge <acp|antigravity>           the stdio MCP bridge an agent CLI starts to reach alpd (internal)
-  alp web rotate                         give alp web a new token: open pages lose access; prints the new address
-  alp web pair [--on|--off]              the link that pairs Paseo's app on another device through the relay; --on or --off turns the relay on or off
+  alp dashboard rotate                   give alp dashboard a new token: open pages lose access; prints the new address
+  alp dashboard pair [--on|--off]        the link that pairs Paseo's app on another device through the relay; --on or --off turns the relay on or off
   alp terminal <allow [--paseo] --yes|deny [--paseo]|status> [--json]   remote terminals (a shell as you on this host; a workspace is not a sandbox), off by default
   alp doctor [--project DIR] [--fix] [--json]   check this machine and project; --fix repairs what is safe to
   alp backup [-o FILE] [--project DIR]... [--no-projects] [--stop] [--json]   sessions, settings, library and tasks in one file

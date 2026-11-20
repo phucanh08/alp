@@ -318,12 +318,12 @@ test('the consumer lockfile must resolve every @anhlp package to the saved tarba
   ]);
 }));
 
-test('the CLI package must pack alp web: alp-web.js, its app and the notices; the wrapper carries none', () => {
-  const cli = ['dist/alp-web.js', 'dist/alp-web/index.html', 'dist/alp-web/THIRD-PARTY-NOTICES.txt', 'dist/THIRD-PARTY-NOTICES.txt'];
+test('the CLI package must pack alp dashboard: alp-dashboard.js, its app and the notices; the wrapper carries none', () => {
+  const cli = ['dist/alp-dashboard.js', 'dist/alp-dashboard/index.html', 'dist/alp-dashboard/THIRD-PARTY-NOTICES.txt', 'dist/THIRD-PARTY-NOTICES.txt'];
   assert.deepEqual(SHIPPED_WEB_FILES['@anhlp/alp-cli'], cli);
   assert.deepEqual(Object.keys(SHIPPED_WEB_FILES), ['@anhlp/alp-cli'], 'the gateway is never a package of its own; the wrapper has no JavaScript of ALP\'s');
-  assert.deepEqual(shippedWebProblems('@anhlp/alp-cli', ['package.json', ...cli, 'dist/alp-web/assets/index.js']), []);
-  const found = shippedWebProblems('@anhlp/alp-cli', [...cli, 'src/web/main.js']);
+  assert.deepEqual(shippedWebProblems('@anhlp/alp-cli', ['package.json', ...cli, 'dist/alp-dashboard/assets/index.js']), []);
+  const found = shippedWebProblems('@anhlp/alp-cli', [...cli, 'src/dashboard/main.js']);
   assert.equal(found.length, 1);
   assert.match(found[0], /bundled-only .* is packed/);
   for (const file of cli) {
@@ -331,7 +331,7 @@ test('the CLI package must pack alp web: alp-web.js, its app and the notices; th
     assert.equal(missing.length, 1);
     assert.match(missing[0], new RegExp(`^@anhlp/alp-cli: ${file.replace(/[.]/g, '\\.')} is not packed`));
   }
-  // Packages without the CLI carry no alp web, and A5 itself is unchanged by this list.
+  // Packages without the CLI carry no alp dashboard, and A5 itself is unchanged by this list.
   for (const name of RELEASE_NAMES.filter(name => !(name in SHIPPED_WEB_FILES))) assert.deepEqual(shippedWebProblems(name, []), []);
   withRelease({}, directory => assert.deepEqual(verifyRelease(directory).problems, []));
 });

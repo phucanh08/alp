@@ -121,7 +121,7 @@ test('startIntegration keeps every artifact in the selected home and passes it t
   assert.ok(!existsSync(path.join(ambient, 'integrations')), 'the ambient home got no integrations directory');
 
   // The launcher starts the entry as a detached service, so the entry can write the log its errors
-  // advertise. Without this the normal `alp web` path loses every startup error.
+  // advertise. Without this the normal `alp dashboard` path loses every startup error.
   const argv = JSON.parse(await readFile(path.join(selected, 'integrations', 'argv.json'), 'utf8'));
   assert.ok(argv.includes('--service'), `the detached entry must be told it is a service, got ${JSON.stringify(argv)}`);
   assert.equal(await readFile(path.join(selected, 'logs', 'integrations', 'paseo.log'), 'utf8'), 'integration started\n', 'the advertised integration log is created at the documented path');

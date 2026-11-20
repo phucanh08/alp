@@ -239,13 +239,15 @@ test('args follow --service, and must be strings', async t => {
   for (const args of ['--project', [1], [null]]) await assert.rejects(startIntegration({ name: f.name, entry: service, home: f.home, args }), /args must be a list of strings/);
 });
 
-test('web.enabled=false refuses web only; messages name the integration, its entry and its own log', async t => {
+test('dashboard.enabled=false (or web.enabled from before the rename) refuses dashboard only; messages name the integration, its entry and its own log', async t => {
   const f = await fixture('gated');
   environment(t, f.name, {});
-  await writeFile(path.join(f.home, 'settings.json'), JSON.stringify({ web: { enabled: false } }));
   const service = await f.write(path.join(f.directory, 'service.mjs'), 'gated');
-  await assert.rejects(startIntegration({ name: 'web', entry: service, home: f.home }), /^Error: alp web is disabled by settings \("web\.enabled": false\)\.$/);
-  // Another integration is not alp web: the switch does not apply.
+  for (const settings of [{ dashboard: { enabled: false } }, { web: { enabled: false } }, { web: { enabled: true }, dashboard: { enabled: false } }]) {
+    await writeFile(path.join(f.home, 'settings.json'), JSON.stringify(settings));
+    await assert.rejects(startIntegration({ name: 'dashboard', entry: service, home: f.home }), /^Error: alp dashboard is disabled by settings \("dashboard\.enabled": false\)\.$/, JSON.stringify(settings));
+  }
+  // Another integration is not alp dashboard: the switch does not apply.
   const lock = await startIntegration({ name: f.name, entry: service, home: f.home });
   assert.equal(lock.pid, (await started(f.home, 'gated')).pid);
 
@@ -257,7 +259,7 @@ test('web.enabled=false refuses web only; messages name the integration, its ent
     await assert.rejects(startIntegration({ name: 'other', entry: failing, home: f.home }), new RegExp(`^Error: ALP integration other \\(entry ${escape(failing)}\\) failed to start; see ${escape(path.join(logs, 'other.log'))}$`));
     await assert.rejects(startIntegration({ name: 'paseo', entry: failing, home: f.home }), new RegExp(`^Error: The Paseo integration \\(entry ${escape(failing)}\\) failed to start; see ${escape(path.join(logs, 'paseo.log'))}$`));
     await rm(path.join(f.home, 'settings.json'));
-    await assert.rejects(startIntegration({ name: 'web', entry: failing, home: f.home }), new RegExp(`^Error: alp web \\(entry ${escape(failing)}\\) failed to start; see ${escape(path.join(logs, 'alp-web.log'))}$`));
+    await assert.rejects(startIntegration({ name: 'dashboard', entry: failing, home: f.home }), new RegExp(`^Error: alp dashboard \\(entry ${escape(failing)}\\) failed to start; see ${escape(path.join(logs, 'alp-dashboard.log'))}$`));
   });
   assert.deepEqual(events, ['exit:1', 'startup-check', 'exit:1', 'startup-check', 'exit:1', 'startup-check']);
   // A missing integration: the name decides the guidance.
@@ -279,7 +281,7 @@ const timer = setInterval(() => { if (existsSync(${JSON.stringify(release)})) pr
   assert.deepEqual(events, ['startup-check', 'readiness-poll', 'exit:1']);
 });
 
-test('web is never discovered; ALP_WEB_INTEGRATION names the Paseo integration only', async t => {
+test('dashboard and web are never discovered; ALP_WEB_INTEGRATION names the Paseo integration only', async t => {
   const f = await fixture('paseo');
   const legacy = await f.write(path.join(f.directory, 'legacy.mjs'), 'legacy');
   const own = await f.write(path.join(f.directory, 'own.mjs'), 'own');
@@ -289,7 +291,8 @@ test('web is never discovered; ALP_WEB_INTEGRATION names the Paseo integration o
   await mkdir(path.join(f.home, 'integrations'), { recursive: true });
   await writeFile(path.join(f.home, 'integrations', 'web.json'), JSON.stringify({ main: legacy }));
   assert.equal(await discoverIntegration('web', { home: f.home }), undefined);
-  await assert.rejects(startIntegration({ name: 'web', home: f.home }), /alp web runs the alp-web service of the ALP CLI/);
+  assert.equal(await discoverIntegration('dashboard', { home: f.home }), undefined);
+  await assert.rejects(startIntegration({ name: 'dashboard', home: f.home }), /alp dashboard runs the alp-dashboard service of the ALP CLI/);
   assert.ok(await absent(path.join(f.home, 'started-legacy.json')), 'nothing was started');
   // For paseo, the pre-rename override still works for one release, after the integration's own.
   assert.equal(await discoverIntegration('paseo', { home: f.home }), legacy);

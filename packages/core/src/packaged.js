@@ -13,10 +13,10 @@ import path from 'node:path';
  * through `current`, so an update never leaves them on a removed version.
  */
 
-/** Subcommands of `alp` that run each ALP role in that process (`alp daemon run`, `alp web serve`, `alp bridge acp`). */
+/** Subcommands of `alp` that run each ALP role in that process (`alp daemon run`, `alp dashboard serve`, `alp bridge acp`). */
 export const ROLE_ARGS = Object.freeze({
   daemon: Object.freeze(['daemon', 'run']),
-  web: Object.freeze(['web', 'serve']),
+  dashboard: Object.freeze(['dashboard', 'serve']),
   'bridge-acp': Object.freeze(['bridge', 'acp']),
   'bridge-antigravity': Object.freeze(['bridge', 'antigravity']),
 });

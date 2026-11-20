@@ -83,7 +83,7 @@ test('the CLI may bundle the private gateway only as a devDependency; other pack
   await write('package.json', JSON.stringify({ private: true, workspaces: ['packages/cli', 'packages/daemon', 'apps/gateway'] }));
   await write('apps/gateway/package.json', JSON.stringify({ name: '@anhlp/alp-gateway', version: '0.0.0', private: true }));
   await write('packages/daemon/package.json', JSON.stringify({ name: '@anhlp/alp-daemon', version: '0.0.0' }));
-  await write('packages/cli/src/web/main.js', "import { createGateway } from '@anhlp/alp-gateway';\nexport default createGateway;\n");
+  await write('packages/cli/src/dashboard/main.js', "import { createGateway } from '@anhlp/alp-gateway';\nexport default createGateway;\n");
   await write('packages/cli/package.json', JSON.stringify({ name: '@anhlp/alp-cli', version: '0.0.0', devDependencies: { '@anhlp/alp-gateway': '0.0.0' } }));
   const bundled = check();
   assert.equal(bundled.status, 0, bundled.output);
@@ -91,8 +91,8 @@ test('the CLI may bundle the private gateway only as a devDependency; other pack
   await write('packages/cli/src/cli.js', "import { createGateway } from '@anhlp/alp-gateway';\nexport default createGateway;\n");
   const unbundled = check();
   assert.equal(unbundled.status, 1, unbundled.output);
-  assert.match(unbundled.output.replaceAll('\\', '/'), /packages\/cli\/src\/cli\.js: imports @anhlp\/alp-gateway, which only src\/web\/ \(bundled\) may import/);
-  assert.doesNotMatch(unbundled.output.replaceAll('\\', '/'), /src\/web\/main\.js/);
+  assert.match(unbundled.output.replaceAll('\\', '/'), /packages\/cli\/src\/cli\.js: imports @anhlp\/alp-gateway, which only src\/dashboard\/ \(bundled\) may import/);
+  assert.doesNotMatch(unbundled.output.replaceAll('\\', '/'), /src\/dashboard\/main\.js/);
   await rm(path.join(fixture, 'packages/cli/src/cli.js'));
   await write('packages/cli/package.json', JSON.stringify({ name: '@anhlp/alp-cli', version: '0.0.0', dependencies: { '@anhlp/alp-gateway': '0.0.0' } }));
   const installed = check();

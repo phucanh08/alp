@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { requestPairing } from '../src/interfaces.js';
 
 /**
- * `alp web pair` runs right after `alp daemon restart`, where the integration is still
+ * `alp dashboard pair` runs right after `alp daemon restart`, where the integration is still
  * re-registering `web.pairing` on the new daemon connection. The old code called the method once
  * and failed with -32601 in that window; the fix waits for the fresh registration. These tests
  * drive the wait directly, without a daemon, so the race is deterministic.

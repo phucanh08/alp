@@ -174,7 +174,7 @@ export function createIntegrationLock(home, name) {
           try {
             try { await handle.writeFile(JSON.stringify(value)); info = await handle.stat(); }
             finally { await handle.close(); }
-            // Readers (alp web status, a polling client) may hold the lock open; Windows then refuses the
+            // Readers (alp dashboard --status, a polling client) may hold the lock open; Windows then refuses the
             // replace with EPERM/EACCES/EBUSY for a moment, so moveFile retries it there.
             await moveFile(tmp, file);
             owned = { owner: value.owner, dev: info.dev, ino: info.ino };

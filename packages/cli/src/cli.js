@@ -11,7 +11,8 @@ import { run, ps, attach, send, questions, answer, top, log, board, models, paus
 import { libraryCommand, editCommand, teamsCommand, packsCommand, packCommand } from './library.js';
 import { scheduleCommand } from './schedules.js';
 import { tasksCommand, formulaCommand, taskCommand } from './tasks.js';
-import { webCommand, acpCommand } from './interfaces.js';
+import { dashboardCommand, acpCommand } from './interfaces.js';
+import { desktopCommand } from './desktop.js';
 import { backupCommand, restoreCommand } from './backup.js';
 import { terminalCommand } from './terminal.js';
 import { bridgeCommand } from './roles.js';
@@ -47,7 +48,7 @@ async function updateCommand(args) {
   if (code) process.exitCode = code;
 }
 
-const commands = { schedule: scheduleCommand, setup: args => setup(args, alpHome()), init: args => project('init', args), 'update-template': args => project('upgrade', args), upgrade: args => project('upgrade', args), update: updateCommand, daemon, doctor, run, ps, top, attach, send, questions, answer, log, board, tasks: tasksCommand, task: taskCommand, formula: formulaCommand, permissions: permissionsCommand, agents: args => libraryCommand('agents', args), skills: args => libraryCommand('skills', args), mcp: args => ['add', 'rm', 'mv', 'cp', 'test', 'show', 'edit'].includes(args[0]) ? editCommand('mcp', args) : libraryCommand('mcp', args), hooks: args => libraryCommand('hooks', args), providers: args => libraryCommand('providers', args), provider: args => editCommand('providers', args), teams: teamsCommand, packs: packsCommand, pack: packCommand, trust: trustCommand, agent: args => editCommand('agents', args), team: args => editCommand('teams', args), skill: args => editCommand('skills', args), hook: args => editCommand('hooks', args), verify, recall, pause, resume, language, models, interrupt, compact, acp: acpCommand, web: webCommand, backup: backupCommand, restore: restoreCommand, terminal: terminalCommand, bridge: bridgeCommand };
+const commands = { schedule: scheduleCommand, setup: args => setup(args, alpHome()), init: args => project('init', args), 'update-template': args => project('upgrade', args), upgrade: args => project('upgrade', args), update: updateCommand, daemon, doctor, run, ps, top, attach, send, questions, answer, log, board, tasks: tasksCommand, task: taskCommand, formula: formulaCommand, permissions: permissionsCommand, agents: args => libraryCommand('agents', args), skills: args => libraryCommand('skills', args), mcp: args => ['add', 'rm', 'mv', 'cp', 'test', 'show', 'edit'].includes(args[0]) ? editCommand('mcp', args) : libraryCommand('mcp', args), hooks: args => libraryCommand('hooks', args), providers: args => libraryCommand('providers', args), provider: args => editCommand('providers', args), teams: teamsCommand, packs: packsCommand, pack: packCommand, trust: trustCommand, agent: args => editCommand('agents', args), team: args => editCommand('teams', args), skill: args => editCommand('skills', args), hook: args => editCommand('hooks', args), verify, recall, pause, resume, language, models, interrupt, compact, acp: acpCommand, dashboard: dashboardCommand, desktop: desktopCommand, backup: backupCommand, restore: restoreCommand, terminal: terminalCommand, bridge: bridgeCommand };
 const [command, ...args] = process.argv.slice(2);
 try {
   if (command === '--version') {
