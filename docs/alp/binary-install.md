@@ -29,10 +29,10 @@ From 0.0.1-beta.9 the bundles for macOS and Linux (arm64 and x64) carry `bin/alp
 
 | Platform | alpd in 0.0.1-beta.9 | Why |
 | --- | --- | --- |
-| darwin-arm64 | native | required; the bundle smokes pass against `bin/alpd` |
-| darwin-x64 | native (Bun's `baseline` build, no AVX2 needed) | required; the bundle smokes pass against `bin/alpd` |
-| linux-x64 | native (`baseline`, glibc) | the same smokes pass in CI, including `debian:bookworm-slim` without Node |
-| linux-arm64 | native (glibc) | the same smokes pass in CI, including `debian:bookworm-slim` without Node |
+| darwin-arm64 | native | required; the bundle smokes (binary-build.yml) must pass against `bin/alpd` |
+| darwin-x64 | native (Bun's `baseline` build, no AVX2 needed) | required; the bundle smokes (binary-build.yml) must pass against `bin/alpd` |
+| linux-x64 | native (`baseline`, glibc) | native only while the same smokes pass, including `debian:bookworm-slim` without Node |
+| linux-arm64 | native (glibc) | native only while the same smokes pass, including `debian:bookworm-slim` without Node |
 | windows-x64 | Node (`alpd.js`) | not native in this release |
 
 - **If it cannot run here.** `bin/alpd --version` prints the version without starting alpd; `install.sh`, `alp update` and the build run it and refuse a bundle whose native alpd does not run (an old CPU or glibc, a quarantined file), so nothing is changed. Set `ALP_NATIVE_DAEMON=0` to keep alpd on the bundled Node meanwhile. `BUN_BE_BUN` is removed from the environment `alp` starts it with.
