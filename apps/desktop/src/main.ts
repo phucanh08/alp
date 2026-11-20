@@ -7,7 +7,7 @@
 import { app, BrowserWindow, Menu, session, shell, type MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
 import { connectAlpWeb } from './alp-web';
-import { isAllowedExternal, isAllowedNavigation, isAllowedPermission } from './policy';
+import { isAllowedExternal, isAllowedPermission, navigationGuard } from './policy';
 import { readSettings } from './settings';
 
 let win: BrowserWindow | undefined;
@@ -15,6 +15,8 @@ let win: BrowserWindow | undefined;
 let allowedOrigin: string | undefined;
 /** Each connect() takes the next number; only the latest one may change the window. */
 let generation = 0;
+/** The connect() whose alp web load is in the window; a failure of any other load is stale. */
+let remoteLoad = 0;
 /** The longest error text shown (alp's stderr can be long; it travels in the page's query). */
 const MAX_MESSAGE = 4000;
 
@@ -39,8 +41,11 @@ function createWindow(): BrowserWindow {
     },
   });
   const contents = window.webContents;
-  const guard = (event: Electron.Event, url: string) => { if (!isAllowedNavigation(url, allowedOrigin)) event.preventDefault(); };
+  // Every frame, the main one and any subframe, stays on the shown origin: will-frame-navigate is
+  // will-navigate for all frames, and will-redirect fires for redirects in any frame.
+  const guard = navigationGuard(() => allowedOrigin);
   contents.on('will-navigate', guard);
+  contents.on('will-frame-navigate', guard);
   contents.on('will-redirect', guard);
   contents.on('will-attach-webview', event => event.preventDefault());
   contents.setWindowOpenHandler(({ url }) => {
@@ -51,22 +56,31 @@ function createWindow(): BrowserWindow {
   // -3 (ERR_ABORTED) is a load replaced by another one. A bundled page that fails is not retried
   // with another bundled page, which could loop.
   contents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
-    if (isMainFrame && code !== -3 && !url.startsWith('file:')) void showError(`The ALP web page did not load (${description}). Start ALP, then choose Connect again.`);
+    // Only the load of the latest connect() may show an error; an older one was superseded.
+    if (!isMainFrame || code === -3 || url.startsWith('file:') || remoteLoad !== generation) return;
+    void showError(`The ALP web page did not load (${description}). Start ALP, then choose Connect again.`, window);
   });
   window.once('ready-to-show', () => window.show());
   window.on('closed', () => { if (win === window) win = undefined; });
   return window;
 }
 
+/** A window created hidden is shown on its first paint; a page that fails to load never paints. */
+function reveal(window: BrowserWindow | undefined) {
+  if (window && !window.isDestroyed() && !window.isVisible()) window.show();
+}
+
 async function showMissing(override?: string, window = win) {
   allowedOrigin = undefined;
   await window?.loadFile(page('missing-alp.html'), { query: override ? { override } : {} }).catch(() => undefined);
+  reveal(window);
 }
 
 async function showError(message: string, window = win) {
   allowedOrigin = undefined;
   const text = message.length > MAX_MESSAGE ? `${message.slice(0, MAX_MESSAGE)}…` : message;
   await window?.loadFile(page('error.html'), { query: { message: text } }).catch(() => undefined);
+  reveal(window);
 }
 
 /**
@@ -80,15 +94,19 @@ async function connect() {
   const id = ++generation;
   const current = () => (id === generation && win && !win.isDestroyed() ? win : undefined);
   allowedOrigin = undefined;
+  remoteLoad = 0;
   await current()?.loadFile(page('connecting.html')).catch(() => undefined);
+  reveal(current());
   const settings = await readSettings(app.getPath('userData'));
   const result = await connectAlpWeb(settings.alpPath || process.env.ALP_DESKTOP_ALP || undefined);
   const window = current();
   if (!window) return;
   if (result.ok) {
     allowedOrigin = result.address.origin;
+    remoteLoad = id;
     // A failed load shows its error through did-fail-load; ERR_ABORTED means a newer load won.
     await window.loadURL(result.address.url).catch(() => undefined);
+    reveal(window);
   } else if ('missing' in result) await showMissing(result.override, window);
   else await showError(result.error, window);
 }
@@ -111,7 +129,8 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (!win) return;
+    // macOS keeps the app running with no window; opening it again must show one.
+    if (!win || win.isDestroyed()) { void connect(); return; }
     if (win.isMinimized()) win.restore();
     win.focus();
   });
