@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { scrubText } from '@anhlp/alp-core/log';
-import { entryCommand, NATIVE_DAEMON } from '@anhlp/alp-core/packaged';
+import { entryCommand, isNativeDaemonName, NATIVE_DAEMON } from '@anhlp/alp-core/packaged';
 import { dashboardSettings } from '@anhlp/alp-core/user-settings';
 import { createSocketTransport } from './ipc.js';
 import { AlpRpcClient } from './rpc/client.js';
@@ -546,8 +546,11 @@ export async function ensureDaemon({ home = alpHome(), entry = /** @type {string
     signal?.throwIfAborted();
     await new Promise((resolve, reject) => {
       const launch = entryCommand(entry, 'daemon', ['--detach', `--startup-timeout=${timeoutMs}`], execPath);
+      // BUN_BE_BUN=1 would turn the native alpd (t-81b0.9) into the Bun CLI instead of starting alpd.
+      const launchEnv = { ...env, ALP_HOME: home, ELECTRON_RUN_AS_NODE: '1' };
+      if (isNativeDaemonName(launch.command)) delete launchEnv.BUN_BE_BUN;
       const launcher = spawn(launch.command, launch.args, {
-        env: { ...env, ALP_HOME: home, ELECTRON_RUN_AS_NODE: '1' },
+        env: launchEnv,
         stdio: ['ignore', 'ignore', 'pipe'],
         windowsHide: true,
       });

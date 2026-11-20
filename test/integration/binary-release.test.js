@@ -221,4 +221,9 @@ test('the native alpd (t-81b0.9): Bun targets per platform, Windows excluded, an
   assert.deepEqual(leakedPaths(bytes, ['/home/ci/work/alp', '/tmp/alpd-native-x']), ['/home/ci/work/alp']);
   assert.deepEqual(leakedPaths(Buffer.from('C:/a/alp/x'), ['C:\\a\\alp']), ['C:/a/alp'], 'a Windows path is also looked for with forward slashes');
   assert.deepEqual(leakedPaths(bytes, ['', '/a']), [], 'empty and very short paths are not looked for');
+  assert.deepEqual(leakedPaths(Buffer.from('x /root y'), ['/root'], Buffer.from('bun runtime /root')), [], 'a string the bare Bun runtime holds is no leak (building as root)');
+  const pins = JSON.parse(await readFile(path.join(ROOT, 'scripts/bun-runtime.json'), 'utf8'));
+  assert.equal(pins.version, await pinnedBun(), 'bun-runtime.json and apps/desktop/package.json pin one Bun');
+  assert.deepEqual(Object.keys(pins.archives).sort(), [...NATIVE_PLATFORMS].sort());
+  for (const { sha256 } of Object.values(pins.archives)) assert.match(sha256, /^[0-9a-f]{64}$/);
 });
