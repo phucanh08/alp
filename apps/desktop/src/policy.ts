@@ -46,3 +46,17 @@ export function isTicketRequest(url: string, origin: string | undefined): boolea
     return parsed.origin === origin && parsed.pathname === '/v1/tickets';
   } catch { return false; }
 }
+
+/**
+ * Whether a completed request says the shown page's token was refused: a 401 to POST /v1/tickets on
+ * the shown origin, from the window's own webContents, once the document loaded for that address
+ * has committed (`committed`). A late 401 from the page being replaced does not count.
+ */
+export function isTokenRejection(
+  request: { statusCode: number; method: string; url: string; webContentsId?: number },
+  shown: { committed: boolean; windowId: number | undefined; origin: string | undefined },
+): boolean {
+  return request.statusCode === 401 && request.method === 'POST' && shown.committed
+    && shown.windowId !== undefined && request.webContentsId === shown.windowId
+    && isTicketRequest(request.url, shown.origin);
+}

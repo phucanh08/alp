@@ -7,7 +7,7 @@
 import { app, BrowserWindow, Menu, session, shell, type MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
 import { connectAlpWeb, probeAlpWeb, type Connect } from './alp-web';
-import { isAllowedExternal, isAllowedPermission, isTicketRequest, navigationGuard } from './policy';
+import { isAllowedExternal, isAllowedPermission, isTokenRejection, navigationGuard } from './policy';
 import { Reconnector } from './reconnect';
 import { readSettings } from './settings';
 import type { AlpWebAddress } from './url';
@@ -40,9 +40,16 @@ function loadRemote(window: BrowserWindow, address: AlpWebAddress) {
   shownAddress = address;
   remoteLoad = id;
   committed = false;
+  // Only the fragment differs (alp web rotated its token on the same port): Chromium navigates within
+  // the page, and apps/web reads the token only when it loads, so the page is reloaded after it.
+  const sameDocument = withoutFragment(window.webContents.getURL()) === withoutFragment(address.url);
   // A failed load shows up as did-fail-load; ERR_ABORTED means a newer load won.
-  return window.loadURL(address.url).catch(() => undefined);
+  return window.loadURL(address.url).catch(() => undefined).then(() => {
+    if (sameDocument && id === generation && !window.isDestroyed()) window.webContents.reload();
+  });
 }
+
+const withoutFragment = (url: string) => url.split('#', 1)[0];
 
 /** Watches a loaded alp web and loads it again when it moved, restarted or rotated its token. */
 const reconnector = new Reconnector({
@@ -216,9 +223,8 @@ if (!app.requestSingleInstanceLock()) {
     // The page's gateway refused its token (POST /v1/tickets → 401, after `alp web rotate`): ask alp
     // for the new address. Only the status and the path are read; the request is not touched.
     session.defaultSession.webRequest.onCompleted(details => {
-      if (details.statusCode !== 401 || details.method !== 'POST' || !committed) return;
-      if (!win || win.isDestroyed() || details.webContentsId !== win.webContents.id) return;
-      if (isTicketRequest(details.url, allowedOrigin)) reconnector.trigger('token-rejected');
+      const window = win && !win.isDestroyed() ? win : undefined;
+      if (isTokenRejection(details, { committed, windowId: window?.webContents.id, origin: allowedOrigin })) reconnector.trigger('token-rejected');
     });
     buildMenu();
     void connect();
