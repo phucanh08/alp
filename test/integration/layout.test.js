@@ -21,14 +21,24 @@ const allowed = {
  * no test file strays outside it, none is selected twice, and no core package test reaches the
  * optional Paseo plugin or a package that depends on it.
  */
+// apps/desktop is outside the npm workspaces and the root runner: it is built and tested with bun
+// (D32), its tests in apps/desktop/test run by `bun test test`, and CI runs them in its own job. Its
+// test directory is exempt only while its package.json says so, so a node-runner test dropped there,
+// or another app copying the exemption, still fails below.
+const bunOwnedTests = { 'apps/desktop': 'apps/desktop/test' };
+
 test('test files live only in a package tests directory or test/integration', () => {
+  for (const [app, directory] of Object.entries(bunOwnedTests)) {
+    assert.equal(JSON.parse(readFileSync(path.join(root, app, 'package.json'), 'utf8')).scripts?.test, `bun test ${path.relative(app, directory)}`, `${app} must run ${directory} with bun test`);
+  }
+  const exempt = new Set(Object.values(bunOwnedTests));
   const stray = [];
   const walk = (directory, inTests) => {
     for (const entry of readdirSync(path.join(root, directory), { withFileTypes: true })) {
       if (['node_modules', 'dist', '.git'].includes(entry.name)) continue;
       const relative = `${directory}/${entry.name}`;
       if (entry.isDirectory()) walk(relative, inTests || entry.name === 'tests');
-      else if (/\.test\.[cm]?[jt]s$/.test(entry.name) && !inTests) stray.push(relative);
+      else if (/\.test\.[cm]?[jt]s$/.test(entry.name) && !inTests && !(exempt.has(directory) && /\.test\.ts$/.test(entry.name) && /from 'bun:test'/.test(readFileSync(path.join(root, relative), 'utf8')))) stray.push(relative);
     }
   };
   for (const group of ['packages', 'integrations', 'apps']) {
