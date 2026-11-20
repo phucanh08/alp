@@ -211,8 +211,8 @@ kill ngay và test fail. Không bao giờ bấm hay script câu trả lời cho 
 Trong CI, job `desktop-macos` (macos-latest, arm64) build với `CSC_FOR_PULL_REQUEST=true`, vì
 electron-builder bỏ ký trên build của pull request (lo ngại chứng chỉ và secret lọt sang PR từ fork;
 ký ad-hoc không dùng chứng chỉ, secret hay keychain nào), và `CSC_IDENTITY_AUTO_DISCOVERY=false`. Job
-chạy test này với DMG arm64 và DMG x64 (qua Rosetta), rồi giữ hai artifact `alp-desktop-macos-arm64-dmg` và `alp-desktop-macos-x64-dmg` trong 14
-ngày.
+chạy test này với DMG arm64 và DMG x64 (qua Rosetta), rồi giữ hai artifact
+`alp-desktop-macos-arm64-dmg` và `alp-desktop-macos-x64-dmg` trong 14 ngày.
 
 ### 6.3 Chưa có trong bản này
 

@@ -208,6 +208,8 @@ jobs:
       # electron-builder skips code signing on pull-request builds unless CSC_FOR_PULL_REQUEST is set.
       # Its concern is a certificate from the keychain or secrets reaching a fork's PR; this build
       # signs ad-hoc (identity '-') with no certificate, secret or keychain, so it signs as on main.
+      # Tripwire: the day this job gets a certificate or a secret (CSC_LINK, Apple notarization
+      # credentials), remove CSC_FOR_PULL_REQUEST, or a fork's PR code could sign with them.
       - run: bun run dist
         env:
           CSC_FOR_PULL_REQUEST: 'true'
