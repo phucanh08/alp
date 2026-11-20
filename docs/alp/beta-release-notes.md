@@ -2,15 +2,25 @@
 
 Prepared 2026-11-20 from the commits `v0.0.1-beta.8..07569e38` (task t-81b0.6 bumped the version).
 npm (8 packages, `beta` tag) and the GitHub release carry the same version from one main SHA, as
-in beta.8. REAL_PROVIDER_ROWS_PLACEHOLDER Release acceptance runs the repository's fake Codex and
-fake Claude on the packed tarballs; macOS decides it, Linux and Windows are reported.
+in beta.8. Release acceptance runs the repository's fake Codex and fake Claude on the packed
+tarballs; macOS decides it, Linux and Windows are reported. **The gate's real-provider rows
+(§6.1 of [beta-scope.md](beta-scope.md)) were run in part, on macOS, on tarballs packed from the
+release candidate (commit 26c50065, before merge), with `--unattended` judging the steps a person
+would read:** R2 (Claude, C1–C9) passed; R7 on macOS (real worktrees and `alp_merge`, Codex and
+Claude) passed; **R1 (Codex) did not pass**: in two runs C8 could not be judged, because the
+answer `alp run` printed for C4 was main's reply to the supervisor's check-in instead of the
+answer to the question, and in the second run C6 failed (`alp run` ended before a permission
+question). R5 (the Paseo plugin, which needs a person and Paseo 0.11.x) and the Linux rows R3, R4,
+R6 and R7's Linux half were not run.
 
 **Upgrading from beta.8:**
 
-1. **Windows only, before you upgrade:** if `alp web` is running, stop it yourself. alp does not
-   stop processes on Windows, and while the old `alp web` holds its lock the first `alp dashboard`
-   refuses to start and moves nothing. Its pid is in `%USERPROFILE%\.alp\web.json` (or
-   `$ALP_HOME\web.json`): `taskkill /PID <pid>`. beta.8 has no command that stops `alp web`.
+1. **Windows only, before you upgrade:** if `alp web` is running, stop it yourself. alp never
+   stops a running `alp web` on Windows: while it holds its lock, `alp dashboard`,
+   `alp dashboard rotate` and `alp dashboard --stop` refuse and move nothing (`--status` says that
+   `web.lock` is held and alp does not stop it on Windows). Its pid is in `%USERPROFILE%\.alp\web.json` (or
+   `$ALP_HOME\web.json`): `taskkill /F /PID <pid>` (`/F`: it has no window to close). beta.8 has no
+   command that stops `alp web`.
 2. `alp update` (bundle) or `npm install -g @anhlp/alp@beta` (npm), then `alp daemon restart`.
 3. Run `alp dashboard` once: it moves `alp web`'s token, port and settings to the new names (below).
 4. If alpd runs as a launchd or systemd service (`alp daemon install`), run `alp daemon install`
@@ -25,13 +35,14 @@ Changes that affect an existing user:
   - `--status` says whether the service runs (pid, address without the token, port). It changes
     nothing and always exits 0.
   - `--stop` stops the service of this ALP home (exit 1 when the lock is held by a process alp
-    cannot prove is the service).
+    cannot prove is the service). On Windows alp stops no process, so `--stop` refuses there too;
+    end the pid in `dashboard.json` with `taskkill /F /PID <pid>`.
   - `--port N` uses that port for this run without changing `dashboard.port`. It is refused while
     the service runs on another port.
   - `--host` accepts only `127.0.0.1` or `localhost`. The service listens on loopback only, because
     its token is the only key; for another machine use an SSH tunnel.
-  - `--no-open` prints the address instead of opening the browser; `--print` prints only the
-    address (the desktop app uses it).
+  - `--no-open` and `--print` both print the address and do not open the browser; `--print` is
+    the one the desktop app runs.
 
   Details: [dashboard.md](dashboard.md) §3.1 (c31e385f, 76ad5ec2, 2f47e5a0, 382651ac).
 - **The first `alp dashboard` moves what `alp web` left.** `alp dashboard`, `alp dashboard rotate`
@@ -42,15 +53,17 @@ Changes that affect an existing user:
   `web.enabled`, `web.port` and `web.permissions` in `settings.json` become `dashboard.*`
   (`web.relay`, Paseo's, stays). Running it again does nothing; when both names exist the new one
   wins and the old one is left as it is. `--status` moves nothing: it lists what the next start
-  would move. `web.*` settings and `ALP_WEB_*` variables are still read where the new ones are not
-  set (c31e385f, 76ad5ec2).
+  would move. The new names are the `dashboard.enabled`, `dashboard.port` and
+  `dashboard.permissions` settings and the `ALP_DASHBOARD_*` variables; `web.*` settings and
+  `ALP_WEB_*` variables are still read where the new ones are not set (c31e385f, 76ad5ec2).
 - **The bundle's alpd is a native executable on macOS and Linux.** The GitHub release bundles for
   darwin-arm64, darwin-x64, linux-x64 and linux-arm64 add `bin/alpd`, alpd compiled with Bun 1.4.2
   (`bun build --compile`; the Bun runtime is downloaded from Bun's release and checked against
   pinned sha256 values). `alp daemon start`, `alp daemon restart`, `alp dashboard` and
   `alp daemon install` start it. The `alp` command, `alp dashboard`, the ACP agent and the MCP
   bridges keep running on the bundled Node, and everything alpd runs as JavaScript (a JavaScript
-  `claude`, the `node -e` bridges) runs under the bundled Node too. Unchanged:
+  `claude`, the `node -e` bridges) runs under the bundled Node too. `alp daemon run` still runs
+  alpd in its own Node process. Unchanged:
   - **Windows** keeps alpd on the bundled Node in this release.
   - **npm installs** always run alpd on Node.
   - **Services installed before beta.9** keep running `node alpd.js` until you run
@@ -78,6 +91,12 @@ Not in this release:
   `alp dashboard` (beta.8 and earlier) to update (PRs #337, #338, #339, #341, #342). Publishing
   it, and installing a missing ALP from the app, come in a later release.
 - Native alpd on Windows (see above).
+- **Paseo 0.16 and later:** Paseo 0.16 lets a client ask for the terminals of every workspace at
+  once (a terminal subscription without a working directory). If such a request reaches the
+  plugin, it answers with an empty list, so ALP's terminals may be missing from that view; per-workspace terminal
+  lists are not affected. Seen in the compatibility check against the newest Paseo SDK (0.16.2),
+  which fails to typecheck since 0.16.0 (2026-11-16); beta.8 is affected the same way. Not tried in
+  a running Paseo 0.16.
 - Still as in beta.8: the Claude Agent SDK's own bundled zod is inside the advisory range (accepted
   residual risk, [zod-advisory.md](zod-advisory.md)); Antigravity's own read tools are not confined
   to the workspace; remote mode (`@anhlp/alp-gateway`) is not published.
