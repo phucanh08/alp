@@ -67,7 +67,8 @@ try {
   assert.equal(session.status, 'error');
   assert.equal(session.lastError.code, 'daemon_restarted');
   const ps = cli('ps', '--all').stdout;
-  assert.match(ps, new RegExp(`${sessionId}.*daemon_restarted`));
+  // `alp ps` lists the session but no longer prints its error code; session.get above checks daemon_restarted.
+  assert.match(ps, new RegExp(sessionId));
 
   const third = await stream(['send', sessionId, 'What was the code word I asked you to remember? Reply with the word only.']).done;
   assert.equal(third.code, 0);
