@@ -22,7 +22,6 @@ import { fixtureProcesses } from '../support/fixture-processes.js';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
 const cli = path.join(root, 'packages', 'cli', 'dist', 'cli.js');
-const integrationDescriptor = path.join(root, 'integrations', 'paseo.json');
 const paseoEntry = path.join(root, 'integrations', 'paseo', 'server', 'dist', 'main.js');
 const cliDist = path.join(root, 'packages', 'cli', 'dist');
 const alpWebService = path.join(cliDist, 'alp-dashboard.js');
@@ -45,9 +44,10 @@ const { bootTime, connect, readLock, lockAlive } = await import('../../packages/
  * Runs the CLI in a child process and never rejects: the caller reads the exit code and output.
  * A timeout is reported as `signal: 'SIGKILL'` with a code that is not 0, so a hang fails the test.
  */
-async function run(args, home, timeout = 60_000, extraEnv = {}, script = cli) {
+async function run(args, home, timeout = 60_000, extraEnv = {}, script = cli, cwd = undefined) {
   try {
     const { stdout, stderr } = await execFileAsync(process.execPath, [script, ...args], {
+      cwd,
       env: { ...process.env, ...extraEnv, ...processFixtures.get(home).env },
       encoding: 'utf8',
       timeout,
@@ -850,18 +850,30 @@ function installedIntegration() {
   return ['/opt/homebrew/bin', '/usr/local/bin'].flatMap(directory => ['alp-paseo-integration', 'alp-web-integration'].map(binary => path.join(directory, binary))).find(file => existsSync(file));
 }
 
-/** Runs `fn` with the distribution descriptor hidden and an environment that reaches no installed integration. */
+/**
+ * A copy of the CLI distribution with no integration descriptor at or above it: discovery searches
+ * the roots of the running cli.js (its real path) and the working directory, so a CLI run from this
+ * copy, in this directory, finds no integrations/paseo.json. The repository's own descriptor is never
+ * moved: another test file reads it at the same time (t-1695). Bare imports resolve through a link to
+ * the repository's node_modules.
+ */
+const isolatedDistribution = await mkdtemp(path.join(tmpdir(), 'alp-cli-no-descriptor-'));
+after(() => rm(isolatedDistribution, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+await cp(cliDist, path.join(isolatedDistribution, 'packages', 'cli', 'dist'), { recursive: true });
+await cp(path.join(root, 'packages', 'cli', 'package.json'), path.join(isolatedDistribution, 'packages', 'cli', 'package.json'));
+await symlink(path.join(root, 'node_modules'), path.join(isolatedDistribution, 'node_modules'), 'junction');
+const isolatedCli = path.join(isolatedDistribution, 'packages', 'cli', 'dist', 'cli.js');
+
+/**
+ * Runs `fn` with a CLI that finds no distribution descriptor (the copy above) and an environment
+ * that reaches no installed integration. `fn` gets that environment and a `run` for that CLI.
+ */
 async function withoutDiscovery(t, fn) {
-  const hidden = `${integrationDescriptor}.hidden`;
-  await rename(integrationDescriptor, hidden);
-  t.after(async () => { await rename(hidden, integrationDescriptor).catch(() => {}); });
   const empty = await mkdtemp(path.join(tmpdir(), 'alp-no-home-'));
   t.after(() => rm(empty, { recursive: true, force: true }));
-  try {
-    return await fn({ PATH: empty, HOME: empty, USERPROFILE: empty, ALP_WEB_INTEGRATION: '', ALP_INTEGRATION_ENTRY: '', ALP_PASEO_INTEGRATION: '' });
-  } finally {
-    await rename(hidden, integrationDescriptor).catch(() => {});
-  }
+  const env = { PATH: empty, HOME: empty, USERPROFILE: empty, ALP_WEB_INTEGRATION: '', ALP_INTEGRATION_ENTRY: '', ALP_PASEO_INTEGRATION: '' };
+  const runIsolated = (args, home, timeout, extraEnv) => run(args, home, timeout, extraEnv, isolatedCli, isolatedDistribution);
+  return fn(env, runIsolated);
 }
 
 test('a home registered before the rename still starts the Paseo integration, with a hint', async t => {
@@ -871,13 +883,13 @@ test('a home registered before the rename still starts the Paseo integration, wi
   await startDaemon(home);
   await mkdir(path.join(home, 'integrations'), { recursive: true, mode: 0o700 });
   await writeFile(path.join(home, 'integrations', 'web.json'), JSON.stringify({ main: paseoEntry }));
-  await withoutDiscovery(t, async env => {
-    const paired = await run(['dashboard', 'pair', '--off'], home, 60_000, env);
+  await withoutDiscovery(t, async (env, runIsolated) => {
+    const paired = await runIsolated(['dashboard', 'pair', '--off'], home, 60_000, env);
     assert.equal(paired.code, 0, paired.stderr || paired.stdout);
     assert.match(paired.stderr, /registered before its rename[\s\S]*alp-paseo-integration --register/);
     assert.equal((await paseoLock(home))?.pid, (await paseoJson(home))?.pid, 'the legacy entry runs as integration paseo');
     // alp dashboard itself never runs that descriptor: it starts alp-dashboard under the web lock.
-    const served = await run(['dashboard', '--print'], home, 60_000, env);
+    const served = await runIsolated(['dashboard', '--print'], home, 60_000, env);
     assert.equal(served.code, 0, served.stderr || served.stdout);
     assert.equal((await webJson(home)).app, 'alp-dashboard');
   });
@@ -895,14 +907,14 @@ test('the pre-rename fallback reads only the home descriptor, never PATH or othe
   const bin = path.join(directory, 'bin');
   await mkdir(bin);
   await symlink(paseoEntry, path.join(bin, 'alp-web-integration'));
-  await withoutDiscovery(t, async env => {
-    const refused = await run(['dashboard', 'pair', '--off'], home, 60_000, { ...env, PATH: bin });
+  await withoutDiscovery(t, async (env, runIsolated) => {
+    const refused = await runIsolated(['dashboard', 'pair', '--off'], home, 60_000, { ...env, PATH: bin });
     assert.notEqual(refused.code, 0, refused.stdout);
     assert.match((refused.stderr || '') + (refused.stdout || ''), /optional integration package/i);
     assert.equal(await paseoLock(home), undefined, 'nothing ran as integration paseo');
     // A corrupt home descriptor is no registration either: the same guidance, not a parse error.
     await writeFile(path.join(home, 'integrations', 'web.json'), '{bad');
-    const corrupt = await run(['dashboard', 'pair', '--off'], home, 60_000, { ...env, PATH: bin });
+    const corrupt = await runIsolated(['dashboard', 'pair', '--off'], home, 60_000, { ...env, PATH: bin });
     assert.notEqual(corrupt.code, 0, corrupt.stdout);
     assert.match((corrupt.stderr || '') + (corrupt.stdout || ''), /optional integration package/i);
     assert.equal(await paseoLock(home), undefined);
@@ -916,14 +928,14 @@ test('a missing Paseo integration names the optional package, and alp dashboard 
   if (installed) { t.skip(`${path.basename(installed)} is installed at ${installed}, which discovery always searches`); return; }
   const { home } = await createHome(t);
   await startDaemon(home);
-  // Hide the distribution descriptor so discovery finds no integration. Discovery also searches
-  // PATH and the well-known bin directories under HOME, so the CLI gets an empty PATH and HOME and
-  // no explicit overrides, and no installed integration is reachable.
-  await withoutDiscovery(t, async env => {
-    const refused = await run(['dashboard', 'pair', '--off'], home, 60_000, env);
+  // A CLI copy with no distribution descriptor, so discovery finds no integration there. Discovery
+  // also searches PATH and the well-known bin directories under HOME, so the CLI gets an empty PATH
+  // and HOME and no explicit overrides, and no installed integration is reachable.
+  await withoutDiscovery(t, async (env, runIsolated) => {
+    const refused = await runIsolated(['dashboard', 'pair', '--off'], home, 60_000, env);
     assert.notEqual(refused.code, 0);
     assert.match((refused.stderr || '') + (refused.stdout || ''), /optional integration package/i);
-    const served = await run(['dashboard', '--print'], home, 60_000, env);
+    const served = await runIsolated(['dashboard', '--print'], home, 60_000, env);
     assert.equal(served.code, 0, served.stderr || served.stdout);
     printedUrl(served);
   });
