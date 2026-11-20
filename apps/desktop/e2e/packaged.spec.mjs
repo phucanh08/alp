@@ -85,11 +85,14 @@ async function start(context, app, alp, extraEnv = {}, args = []) {
   const child = spawn(binary, [...TEST_SWITCHES, `--remote-debugging-port=${port}`, ...args], {
     env: { ...appEnv(context, alp), ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'],
   });
-  const exited = once(child, 'exit');
+  // Masked before the tail is cut, so no token is left half-masked at the cut.
   let output = '';
-  const keep = chunk => { output = (output + chunk).slice(-20_000); };
+  const keep = chunk => { output = (output + chunk).replace(/alpgw1\.[A-Za-z0-9_.-]+/g, 'alpgw1.<masked>').slice(-20_000); };
   child.stdout.on('data', keep);
   child.stderr.on('data', keep);
+  // A spawn failure (ENOENT, EACCES) is an 'exit'-less 'error': recorded, and the waits see `failed`.
+  let failed;
+  child.once('error', error => { failed = error; keep(`\n[spawn error: ${error.message}]\n`); });
   // A watchdog: should a prompt appear anyway, the app is killed at once and the test fails, so a
   // dialog never waits on the user's screen. It fails closed: when the windows cannot be read three
   // times in a row, the app is killed too, since a prompt could no longer be seen.
@@ -109,41 +112,59 @@ async function start(context, app, alp, extraEnv = {}, args = []) {
   })();
   context.defer(async () => { watching = false; await watchdog; if (prompted) throw new Error(`the watchdog killed the app: ${typeof prompted === 'string' ? prompted : `a prompt appeared ${JSON.stringify(prompted)}`}`); });
   context.defer(async () => {
-    if (child.exitCode !== null || child.signalCode !== null) return;
+    if (failed || child.exitCode !== null || child.signalCode !== null) return;
     const exited = once(child, 'exit');
     child.kill('SIGTERM');
     const timer = setTimeout(() => child.kill('SIGKILL'), 15_000);
     try { await exited; } finally { clearTimeout(timer); }
   });
-  return { child, port, baseline, rosetta, exited, output: () => output.replace(/alpgw1\.[A-Za-z0-9_.-]+/g, 'alpgw1.<masked>') };
+  const ended = () => failed !== undefined || child.exitCode !== null || child.signalCode !== null;
+  return { child, port, baseline, rosetta, ended, output: () => output };
 }
 
-/** Connects to the app over DevTools and waits for its window on `origin` with the token taken out. */
+/**
+ * Polls `probe` until it answers something truthy, the app ends (at once, with its state) or
+ * `deadline` passes. Unlike support.mjs's waitFor, it stops as soon as the app is gone.
+ */
+async function whileRunning(started, probe, what, deadline) {
+  let last;
+  for (;;) {
+    if (started.ended()) throw new Error(`the app ended while waiting for ${what}`);
+    try { const value = await probe(); if (value) return value; last = value; } catch (error) { last = error; }
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what} (last: ${last instanceof Error ? last.message : JSON.stringify(last)})`);
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+}
+
+/**
+ * Connects to the app over DevTools and waits for its window on `origin` with the token taken out.
+ * Both waits share one deadline, kept below the per-test limit, so a slow start fails with the
+ * app's state and output rather than with node:test's bare timeout.
+ */
 async function connectedPage(context, started, origin) {
   // Under Rosetta (an x64 app on an arm64 Mac) the first start translates Electron and is much
   // slower, above all on a CI VM.
-  const timeout = started.rosetta ? 300_000 : 60_000;
-  const state = () => `app ${started.child.exitCode !== null || started.child.signalCode !== null ? `exited (${started.child.exitCode ?? started.child.signalCode})` : 'running'}${started.rosetta ? ', under Rosetta' : ''}; its output:\n${started.output()}`;
-  // Stops waiting as soon as the app exits, rather than at the deadline.
-  const died = started.exited.then(() => { throw new Error('the app exited'); });
-  died.catch(() => {});
-  let browser;
+  const deadline = Date.now() + (started.rosetta ? 300_000 : 60_000);
+  const state = () => {
+    const { exitCode, signalCode } = started.child;
+    const how = started.ended() ? `ended (${exitCode ?? signalCode ?? 'spawn error'})` : 'running';
+    return `app ${how}${started.rosetta ? ', under Rosetta' : ''}; its output:\n${started.output()}`;
+  };
   try {
-    browser = await Promise.race([waitFor(() => chromium.connectOverCDP(`http://127.0.0.1:${started.port}`), 'the DevTools endpoint', timeout), died]);
+    const browser = await whileRunning(started, () => chromium.connectOverCDP(`http://127.0.0.1:${started.port}`, { timeout: 10_000 }), 'the DevTools endpoint', deadline);
+    // connectOverCDP's close() only disconnects; the app itself is ended by start()'s step.
+    context.defer(() => browser.close());
+    return await whileRunning(started, async () => {
+      for (const page of browser.contexts().flatMap(c => c.pages())) {
+        const url = new URL(page.url());
+        if (url.origin !== origin || url.hash) continue;
+        if (await page.evaluate(() => sessionStorage.getItem('alp-web:link-token') !== null)) return page;
+      }
+      return undefined;
+    }, `the window on ${origin} with the token taken out of the address`, deadline);
   } catch (error) {
     throw new Error(`${error.message}\n${state()}`);
   }
-  // connectOverCDP's close() only disconnects; the app itself is ended by start()'s step.
-  context.defer(() => browser.close());
-  return waitFor(async () => {
-    if (started.child.exitCode !== null || started.child.signalCode !== null) throw new Error(`the app exited (${started.child.exitCode ?? started.child.signalCode}):\n${started.output()}`);
-    for (const page of browser.contexts().flatMap(c => c.pages())) {
-      const url = new URL(page.url());
-      if (url.origin !== origin || url.hash) continue;
-      if (await page.evaluate(() => sessionStorage.getItem('alp-web:link-token') !== null)) return page;
-    }
-    return undefined;
-  }, `the window on ${origin} with the token taken out of the address`, timeout).catch(error => { throw new Error(`${error.message}\n${state()}`); });
 }
 
 async function connectedSetup(t) {
