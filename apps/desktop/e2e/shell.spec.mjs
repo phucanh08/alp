@@ -5,7 +5,6 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import path from 'node:path';
 import { rm } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -67,17 +66,24 @@ test("alp's own error is shown as is, without its error: prefix", limit, async t
   assert.ok(!text.includes('error: alp web'), text);
 });
 
-test('a window reopened from the Dock during a connect shows that connect, once', limit, async t => {
+test('a window reopened from the Dock during a connect shows the newer connect, and the older one is dropped', limit, async t => {
   const { context, web, alp } = await connectedSetup(t);
-  await alp.prints(web.address, 3);
+  // The first connect's alp answers late with an address nothing listens on: if its result were
+  // used, the window would load it and show the error page.
+  const dead = web.address.replace(/:\d+\//, `:${await freePort(web.web.port)}/`);
+  const first = await alp.firstSlow(dead, 3, web.address);
   const app = await launch(t, context, alp.file);
   await waitFor(async () => (await only(app))?.page === 'connecting.html', 'Connecting');
+  await waitFor(first.firstStarted, 'the first connect to run alp');
   await closeWindows(app);
   await waitFor(async () => (await windows(app)).length === 0, 'no window');
-  await app.evaluate(({ app: electron }) => { electron.emit('activate'); });
-  await connectedTo(app, web.origin);
-  // The first connect's alp answers too; it was superseded and must not open or change anything.
-  await sleep(3500);
+  const shown = await pagesShown(app, async () => {
+    await app.evaluate(({ app: electron }) => { electron.emit('activate'); });
+    await connectedTo(app, web.origin);
+    await waitFor(first.firstDone, 'the first alp to answer');
+    await sleep(1000);
+  });
+  assert.ok(!shown.has('error.html'), `pages shown: ${[...shown].join(', ')}`);
   const list = await windows(app);
   assert.equal(list.length, 1);
   assert.equal(list[0].origin, web.origin);
@@ -93,36 +99,35 @@ test('File › Connect again with every window closed opens one and connects', l
   await connectedTo(app, web.origin);
 });
 
-test('L1: the failure of a superseded load does not cover a newer connect', limit, async t => {
+test('L1: a superseded connect that ends with a failing load does not cover the newer connect', limit, async t => {
+  // Connect again aborts the first connect's navigation at once (ERR_ABORTED, ignored), so the stale
+  // case that can really happen is the older connect's result arriving after the newer one: it must
+  // be dropped, not loaded (its address refuses connections, so loading it would show the error page).
   const { context, web, alp } = await connectedSetup(t);
-  // A server that accepts and never answers: the first connect's load hangs on it.
-  const sockets = new Set();
-  const hole = http.createServer(() => { /* never answers */ });
-  hole.on('connection', socket => sockets.add(socket));
-  await new Promise(resolve => hole.listen(0, '127.0.0.1', resolve));
-  context.defer(() => new Promise(resolve => { for (const socket of sockets) socket.destroy(); hole.close(resolve); }));
-  const holeAddress = web.address.replace(/:\d+\//, `:${hole.address().port}/`);
-  await alp.prints(holeAddress);
+  const dead = web.address.replace(/:\d+\//, `:${await freePort(web.web.port)}/`);
+  const first = await alp.firstSlow(dead, 3, web.address);
   const app = await launch(t, context, alp.file);
-  await waitFor(() => sockets.size > 0, 'the first load to reach the hanging server');
-  await alp.prints(web.address, 2);
+  await waitFor(async () => (await only(app))?.page === 'connecting.html', 'Connecting');
+  await waitFor(first.firstStarted, 'the first connect to run alp');
   const shown = await pagesShown(app, async () => {
     await connectAgain(app);
-    // The first load now fails for real (connection reset), while the second connect is running.
-    for (const socket of sockets) socket.destroy();
     await connectedTo(app, web.origin);
+    await waitFor(first.firstDone, 'the first alp to answer');
+    await sleep(1000);
   });
   assert.ok(!shown.has('error.html'), `pages shown: ${[...shown].join(', ')}`);
+  assert.equal((await only(app))?.origin, web.origin);
 });
 
 test('L2: a first page that fails to load still shows the window', limit, async t => {
   const { context, web, alp } = await connectedSetup(t);
   const copy = await appCopy(context);
   await rm(path.join(copy, 'dist', 'pages', 'connecting.html'));
-  await alp.prints(web.address, 4);
+  await alp.prints(web.address, 12);
   const app = await launch(t, context, alp.file, { app: copy });
-  // While alp still runs, the Connecting page is missing, so it never paints; the window shows anyway.
-  await waitFor(async () => (await only(app))?.visible, 'a visible window while alp runs', 3500);
+  // While alp still runs (12 s), the Connecting page is missing, so it never paints; the window shows anyway.
+  const state = await waitFor(async () => { const s = await only(app); return s?.visible ? s : undefined; }, 'a visible window while alp runs', 6000);
+  assert.notEqual(state.origin, web.origin, 'shown before alp answered');
   await connectedTo(app, web.origin);
 });
 
@@ -143,7 +148,7 @@ test('alp web restarting on another port: the window follows it', limit, async t
   await connectedTo(app, web.origin);
   const before = web.origin;
   await web.stop();
-  await web.start(await freePort());
+  await web.start(await freePort(Number(new URL(before).port)));
   assert.notEqual(web.origin, before);
   await alp.prints(web.address);
   await connectedTo(app, web.origin, 60_000);

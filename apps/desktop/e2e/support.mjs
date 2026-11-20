@@ -11,7 +11,7 @@
  */
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import net from 'node:net';
 import os from 'node:os';
@@ -39,8 +39,15 @@ export async function waitFor(probe, what, timeoutMs = 30_000) {
   }
 }
 
-/** A loopback port that is free right now (alp web tries it and the next nine). */
-export async function freePort() {
+/** A loopback port that is free right now (alp web tries it and the next nine), other than `not`. */
+export async function freePort(...not) {
+  for (;;) {
+    const port = await anyFreePort();
+    if (!not.some(other => Math.abs(other - port) < 10)) return port;
+  }
+}
+
+async function anyFreePort() {
   const server = net.createServer();
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
@@ -132,8 +139,25 @@ export async function fakeAlp({ dir }) {
   };
   /** Prints `address` after `delay` seconds. */
   const prints = (address, delay = 0) => set(`${delay ? `sleep ${delay}\n` : ''}printf '%s\\n' '${address}'`);
+  /**
+   * The first run waits `delay` seconds, prints `late`, then writes <dir>/bin/first-done; every later
+   * run prints `address` at once. `firstStarted()` and `firstDone()` say where the first run is.
+   */
+  const firstSlow = async (late, delay, address) => {
+    const count = path.join(dir, 'bin', 'count');
+    const done = path.join(dir, 'bin', 'first-done');
+    await set([
+      `n=$(cat '${count}' 2>/dev/null || echo 0); n=$((n + 1)); echo $n > '${count}'`,
+      `if [ "$n" = 1 ]; then sleep ${delay}; printf '%s\\n' '${late}'; : > '${done}'; exit 0; fi`,
+      `printf '%s\\n' '${address}'`,
+    ].join('\n'));
+    const exists = file => access(file).then(() => true, () => false);
+    // The order of runs is the order they read the count: wait for `firstStarted` before starting a
+    // second connect, or the newer connect's run could be the slow one.
+    return { firstStarted: () => exists(count), firstDone: () => exists(done) };
+  };
   await set('exit 70');
-  return { file, set, prints };
+  return { file, set, prints, firstSlow };
 }
 
 /** A copy of the built app (package.json and dist) that a test may break. */
@@ -147,13 +171,23 @@ export async function appCopy({ dir }) {
 
 /** The environment the app runs with: the fake alp, a scratch profile, no ELECTRON_RUN_AS_NODE. */
 export function appEnv({ dir }, alp) {
-  return { ...cleanEnv(), ALP_DESKTOP_ALP: alp, ALP_DESKTOP_USER_DATA: path.join(dir, 'user-data') };
+  // A scratch HOME too: nothing Electron writes under ~ (logs, caches) lands in the user's.
+  return { ...cleanEnv(), HOME: path.join(dir, 'app-home'), ALP_DESKTOP_ALP: alp, ALP_DESKTOP_USER_DATA: path.join(dir, 'user-data') };
 }
 
 /** Launches the app; it is closed before the host stops and the directory goes. */
 export async function launch(t, context, alp, { app = APP } = {}) {
+  await mkdir(path.join(context.dir, 'app-home'), { recursive: true });
   const electronApp = await _electron.launch({ executablePath: ELECTRON, args: [app], env: appEnv(context, alp), timeout: 30_000 });
-  context.defer(() => electronApp.close());
+  // Bounded: a close that hangs is ended with SIGKILL, so the steps after it still run.
+  context.defer(async () => {
+    let timer;
+    const closed = electronApp.close().then(() => true, () => false);
+    const late = new Promise(resolve => { timer = setTimeout(() => resolve(false), 15_000); });
+    const ok = await Promise.race([closed, late]);
+    clearTimeout(timer);
+    if (!ok) electronApp.process().kill('SIGKILL');
+  });
   return electronApp;
 }
 
