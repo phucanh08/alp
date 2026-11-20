@@ -36,14 +36,14 @@ async function install({ dir, defer }) {
   if (!DMG) throw new Error('set ALP_DESKTOP_DMG to the DMG built by `bun run dist`');
   const mount = path.join(dir, 'mnt');
   await mkdir(mount);
-  await run('hdiutil', ['attach', '-nobrowse', '-readonly', '-noautoopen', '-mountpoint', mount, DMG]);
+  await run('hdiutil', ['attach', '-nobrowse', '-readonly', '-noautoopen', '-mountpoint', mount, DMG], { timeout: 120_000 });
   let attached = true;
-  const detach = async () => { if (attached) { attached = false; await run('hdiutil', ['detach', mount, '-force']); } };
+  const detach = async () => { if (attached) { attached = false; await run('hdiutil', ['detach', mount, '-force'], { timeout: 60_000 }); } };
   defer(detach);
   const applications = path.join(dir, 'home', 'Applications');
   await mkdir(applications, { recursive: true });
   const app = path.join(applications, 'ALP.app');
-  await run('ditto', [path.join(mount, 'ALP.app'), app]);
+  await run('ditto', [path.join(mount, 'ALP.app'), app], { timeout: 120_000 });
   await detach();
   return app;
 }
@@ -85,9 +85,12 @@ async function start(context, app, alp, extraEnv = {}, args = []) {
   const child = spawn(binary, [...TEST_SWITCHES, `--remote-debugging-port=${port}`, ...args], {
     env: { ...appEnv(context, alp), ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'],
   });
-  // Masked before the tail is cut, so no token is left half-masked at the cut.
+  // The raw tail is kept and masked when read: a token split across chunks is whole by then, and
+  // the possibly cut first line is dropped, so no half token is shown either.
   let output = '';
-  const keep = chunk => { output = (output + chunk).replace(/alpgw1\.[A-Za-z0-9_.-]+/g, 'alpgw1.<masked>').slice(-20_000); };
+  let cut = false;
+  const keep = chunk => { output += chunk; if (output.length > 20_000) { output = output.slice(-20_000); cut = true; } };
+  const masked = () => (cut ? output.slice(output.indexOf('\n') + 1) : output).replace(/alpgw1\.[A-Za-z0-9_.-]+/g, 'alpgw1.<masked>');
   child.stdout.on('data', keep);
   child.stderr.on('data', keep);
   // A spawn failure (ENOENT, EACCES) is an 'exit'-less 'error': recorded, and the waits see `failed`.
@@ -119,7 +122,14 @@ async function start(context, app, alp, extraEnv = {}, args = []) {
     try { await exited; } finally { clearTimeout(timer); }
   });
   const ended = () => failed !== undefined || child.exitCode !== null || child.signalCode !== null;
-  return { child, port, baseline, rosetta, ended, output: () => output };
+  return { child, port, baseline, rosetta, ended, output: masked };
+}
+
+/** `promise`, or a rejection naming `what` after `ms`. */
+function bounded(promise, ms, what) {
+  let timer;
+  const late = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${what} took over ${ms / 1000} s`)), ms); });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
 }
 
 /**
@@ -158,7 +168,7 @@ async function connectedPage(context, started, origin) {
       for (const page of browser.contexts().flatMap(c => c.pages())) {
         const url = new URL(page.url());
         if (url.origin !== origin || url.hash) continue;
-        if (await page.evaluate(() => sessionStorage.getItem('alp-web:link-token') !== null)) return page;
+        if (await bounded(page.evaluate(() => sessionStorage.getItem('alp-web:link-token') !== null), 10_000, 'reading the page')) return page;
       }
       return undefined;
     }, `the window on ${origin} with the token taken out of the address`, deadline);
@@ -216,7 +226,7 @@ test('ELECTRON_RUN_AS_NODE=1 does not make the packaged app run as Node (RunAsNo
   const { context, web, alp, app } = await connectedSetup(t);
   const script = "process.stdout.write('ran-as-node\\n'); process.exit(0)";
   // The control: the development Electron, which has no fuses, does run the script as Node.
-  const control = await run(DEV_ELECTRON, ['-e', script], { env: { ...hermeticEnv(process.env), ELECTRON_RUN_AS_NODE: '1' } });
+  const control = await run(DEV_ELECTRON, ['-e', script], { env: { ...hermeticEnv(process.env), ELECTRON_RUN_AS_NODE: '1' }, timeout: 60_000 });
   assert.equal(control.stdout, 'ran-as-node\n');
   const started = await start(context, app, alp.file, { ELECTRON_RUN_AS_NODE: '1' }, ['-e', script]);
   await connectedPage(context, started, web.origin);
