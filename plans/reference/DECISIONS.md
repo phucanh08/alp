@@ -312,3 +312,12 @@ Decided by the user on 2026-11-20 (task t-81b0.5, gates g1–g4). D30–D32 abov
 - **`--host` stays loopback**: only `127.0.0.1` or `localhost`; the token is the dashboard's only lock and the gateway accepts only loopback Host and Origin names.
 - **`alp desktop`** (g3) opens `ALP.app` from `/Applications` or `~/Applications`, else the built app in the checkout `ALP_DESKTOP_CHECKOUT` names, else prints how to get it. It passes no token.
 - `alp dashboard --print --json` stays separate (t-81b0.4).
+
+## D34 — alpd ships as a native executable; `alp` stays on the bundled Node
+
+Decided on 2026-11-20 (task t-81b0.9; board p-4befcf00): the user asked for "a native alpd, built and released first, the desktop app after", and gave main the decisions of that session; main chose to build alpd with `bun build --compile` now, without a separate spike.
+
+- **Only alpd.** The 0.0.1-beta.9 bundle adds `bin/alpd`, alpd compiled by Bun (the version `apps/desktop` pins), on macOS and Linux, arm64 and x64. The `alp` CLI, `alp dashboard`, the ACP agent and the MCP bridges keep running on the bundle's official Node, as decided on 2026-10-30 (plans/261030-node-runtime-bundle), and `alpd.js` still ships beside them. Windows keeps alpd on the bundled Node in this release.
+- **How it relates to 2026-10-30.** That decision replaced the single-file `bun --compile` build of 0.0.1-beta.5/6 because every computed import, native add-on and `process.execPath` spawn needed a special case, and beta.5 lost the Claude Agent SDK. It stands for `alp`. For alpd the special cases are now few, named and tested on the compiled binary: the SDK is embedded through a registration in the native entry (no computed import); alpd restarts itself with its options only (no script path, no self-spawn chain); every piece of JavaScript alpd runs with a Node (a JavaScript `claude` or provider, the `node -e` bridges) runs under the bundle's own Node; the terminal helper comes from the bundle's dist; the build fails if a build-machine path is inlined into the executable; `.env` and `bunfig.toml` are not autoloaded. Node-pty, the Windows special case of beta.5/6, is not needed on macOS and Linux, where terminals use ALP's native helper.
+- **Fallback.** `ALP_NATIVE_DAEMON=0` runs alpd on the bundled Node; npm installs always do. A platform ships native only when the same bundle smokes pass against `bin/alpd`.
+- docs/alp/binary-install.md describes the layout and the per-platform table.
