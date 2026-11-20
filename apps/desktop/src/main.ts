@@ -6,9 +6,11 @@
  */
 import { app, BrowserWindow, Menu, session, shell, type MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
-import { connectAlpWeb } from './alp-web';
-import { isAllowedExternal, isAllowedPermission, navigationGuard } from './policy';
+import { connectAlpWeb, probeAlpWeb, type Connect } from './alp-web';
+import { isAllowedExternal, isAllowedPermission, isTicketRequest, navigationGuard } from './policy';
+import { Reconnector } from './reconnect';
 import { readSettings } from './settings';
+import type { AlpWebAddress } from './url';
 
 let win: BrowserWindow | undefined;
 /** The origin the window may show; undefined while it shows a bundled page. */
@@ -17,10 +19,43 @@ let allowedOrigin: string | undefined;
 let generation = 0;
 /** The connect() whose alp web load is in the window; a failure of any other load is stale. */
 let remoteLoad = 0;
+/** The address of the alp web load in the window (remoteLoad); kept in memory only. */
+let shownAddress: AlpWebAddress | undefined;
 /** The longest error text shown (alp's stderr can be long; it travels in the page's query). */
 const MAX_MESSAGE = 4000;
 
 const page = (name: string) => path.join(__dirname, 'pages', name);
+
+async function resolveAddress(): Promise<Connect> {
+  const settings = await readSettings(app.getPath('userData'));
+  return connectAlpWeb(settings.alpPath || process.env.ALP_DESKTOP_ALP || undefined);
+}
+
+/** Loads `address` into `window` as the latest connect; its outcome comes back as did-finish/fail-load. */
+function loadRemote(window: BrowserWindow, address: AlpWebAddress) {
+  const id = ++generation;
+  allowedOrigin = address.origin;
+  shownAddress = address;
+  remoteLoad = id;
+  // A failed load shows up as did-fail-load; ERR_ABORTED means a newer load won.
+  return window.loadURL(address.url).catch(() => undefined);
+}
+
+/** Watches a loaded alp web and loads it again when it moved, restarted or rotated its token. */
+const reconnector = new Reconnector({
+  resolve: resolveAddress,
+  probe: origin => probeAlpWeb(origin),
+  load: address => {
+    if (!win || win.isDestroyed()) { reconnector.stop(); return; }
+    void loadRemote(win, address).then(() => reveal(win));
+  },
+  giveUp: (result, message) => {
+    ++generation;
+    if (result && !result.ok && 'missing' in result) void showMissing(result.override);
+    else if (result && !result.ok) void showError(`Reconnecting to ALP web failed: ${result.error} Choose Connect again to retry.`);
+    else void showError(message);
+  },
+});
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -58,10 +93,22 @@ function createWindow(): BrowserWindow {
   contents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
     // Only the load of the latest connect() may show an error; an older one was superseded.
     if (!isMainFrame || code === -3 || url.startsWith('file:') || remoteLoad !== generation) return;
+    // A page that was up (or a reload of it) failing is the reconnector's: it retries before it shows anything.
+    if (reconnector.active) { reconnector.loadFailed(); return; }
     void showError(`The ALP web page did not load (${description}). Start ALP, then choose Connect again.`, window);
   });
+  contents.on('did-finish-load', () => {
+    if (remoteLoad !== generation || !shownAddress) return;
+    let origin: string;
+    try { origin = new URL(contents.getURL()).origin; } catch { return; }
+    if (origin === shownAddress.origin) reconnector.loaded(shownAddress);
+  });
   window.once('ready-to-show', () => window.show());
-  window.on('closed', () => { if (win === window) win = undefined; });
+  window.on('closed', () => {
+    if (win !== window) return;
+    win = undefined;
+    reconnector.stop();
+  });
   return window;
 }
 
@@ -71,13 +118,17 @@ function reveal(window: BrowserWindow | undefined) {
 }
 
 async function showMissing(override?: string, window = win) {
+  reconnector.stop();
   allowedOrigin = undefined;
+  shownAddress = undefined;
   await window?.loadFile(page('missing-alp.html'), { query: override ? { override } : {} }).catch(() => undefined);
   reveal(window);
 }
 
 async function showError(message: string, window = win) {
+  reconnector.stop();
   allowedOrigin = undefined;
+  shownAddress = undefined;
   const text = message.length > MAX_MESSAGE ? `${message.slice(0, MAX_MESSAGE)}…` : message;
   await window?.loadFile(page('error.html'), { query: { message: text } }).catch(() => undefined);
   reveal(window);
@@ -93,14 +144,16 @@ async function connect() {
   if (!win || win.isDestroyed()) win = createWindow();
   const id = ++generation;
   const current = () => (id === generation && win && !win.isDestroyed() ? win : undefined);
+  // A manual connect replaces any recovery under way.
+  reconnector.stop();
   allowedOrigin = undefined;
+  shownAddress = undefined;
   remoteLoad = 0;
   await current()?.loadFile(page('connecting.html')).catch(() => undefined);
   reveal(current());
   let result: Awaited<ReturnType<typeof connectAlpWeb>>;
   try {
-    const settings = await readSettings(app.getPath('userData'));
-    result = await connectAlpWeb(settings.alpPath || process.env.ALP_DESKTOP_ALP || undefined);
+    result = await resolveAddress();
   } catch (error) {
     // An unexpected rejection must not leave the window on Connecting with nothing to say.
     const window = current();
@@ -110,10 +163,7 @@ async function connect() {
   const window = current();
   if (!window) return;
   if (result.ok) {
-    allowedOrigin = result.address.origin;
-    remoteLoad = id;
-    // A failed load shows its error through did-fail-load; ERR_ABORTED means a newer load won.
-    await window.loadURL(result.address.url).catch(() => undefined);
+    await loadRemote(window, result.address);
     reveal(window);
   } else if ('missing' in result) await showMissing(result.override, window);
   else await showError(result.error, window);
@@ -154,6 +204,11 @@ if (!app.requestSingleInstanceLock()) {
     // Everything is denied (camera, notifications, …) except clipboard writes from alp web's origin.
     session.defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) => callback(isAllowedPermission(permission, details.requestingUrl, allowedOrigin)));
     session.defaultSession.setPermissionCheckHandler((_contents, permission, requestingOrigin) => isAllowedPermission(permission, requestingOrigin, allowedOrigin));
+    // The page's gateway refused its token (POST /v1/tickets → 401, after `alp web rotate`): ask alp
+    // for the new address. Only the status and the path are read; the request is not touched.
+    session.defaultSession.webRequest.onCompleted(details => {
+      if (details.statusCode === 401 && details.method === 'POST' && isTicketRequest(details.url, allowedOrigin)) reconnector.trigger('token-rejected');
+    });
     buildMenu();
     void connect();
     app.on('activate', () => {

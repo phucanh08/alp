@@ -1,7 +1,7 @@
 # ALP desktop (macOS, MVP)
 
-> **Trạng thái:** bản khung (t-81b0.2, phần 1), chưa phát hành, chưa có DMG. Quyết định: D32
-> (`plans/reference/DECISIONS.md`). Kết nối lại tự động, e2e, đóng gói DMG là các phần sau.
+> **Trạng thái:** t-81b0.2 phần 1 (khung) và phần 2 (tự kết nối lại), chưa phát hành, chưa có DMG.
+> Quyết định: D32 (`plans/reference/DECISIONS.md`). E2E và đóng gói DMG là các phần sau.
 
 App desktop là một **vỏ mỏng** bằng Electron bọc quanh ALP mà người dùng đã cài. Nó không mang theo
 alpd, gateway hay app web: nó chạy `alp web --print` của người dùng, lệnh này khởi động hoặc gắn vào
@@ -31,6 +31,9 @@ App mở từ Finder chỉ có `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, còn `alp` 
 2. Các thư mục bin mà alp-client cũng tìm: `~/.alp/bin`, `~/.npm-global/bin`, `~/.local/bin`,
    `/opt/homebrew/bin`, `/usr/local/bin`.
 3. Login shell của người dùng (`$SHELL -ilc`, giới hạn 5 giây): `command -v alp` và `$PATH`.
+   Shell chạy trong process group riêng: hết hạn thì cả group bị SIGKILL; thoát bình thường thì
+   job nền mà file rc để lại trong group bị SIGTERM (job có group riêng, khi shell bật job control,
+   do shell tự hang up).
 
 Nếu PATH dựng từ (1)–(2) không có `node`, PATH của login shell được nối thêm.
 
@@ -45,17 +48,43 @@ Nếu PATH dựng từ (1)–(2) không có `node`, PATH của login shell đư�
 
 **File › Connect again** chạy lại toàn bộ luồng ở §1, kể cả sau `alp web rotate`.
 
+### 3.1 Tự kết nối lại
+
+Khi trang của `alp-web` đã tải xong, app theo dõi nó (`src/reconnect.ts`):
+
+| Dấu hiệu | Nghĩa |
+|---|---|
+| `GET <origin>/readyz` mỗi 3 giây không có trả lời HTTP nào (từ chối kết nối, quá 2 giây) hai lần liền | `alp-web` dừng, crash hoặc đổi port. |
+| Trang gặp 401 ở `POST <origin>/v1/tickets` | Token bị `alp web rotate` hoặc revoke. |
+| Tải lại trang (View › Reload, hay lần tải do app kết nối lại) thất bại | Như trên. |
+
+Khi đó app chạy lại `alp web --print` (lệnh này khởi động `alp-web` nếu nó không chạy) và tải địa chỉ
+mới. `/readyz` trả 503 (alpd đang khởi động lại) **không** phải dấu hiệu: `alp-web` vẫn chạy và app
+web tự nối lại gateway. Nếu `alp web --print` in lại đúng địa chỉ cũ sau khi `alp-web` sống lại, app
+không tải lại trang, vì app web tự nối lại; nếu địa chỉ cũ chính là token vừa bị từ chối, app dừng
+ngay và báo lỗi.
+
+Không có bão kết nối: mỗi lúc chỉ một lần thử, mọi dấu hiệu đến trong lúc đó bị bỏ qua. Các lần thử
+cách nhau 1, 2, 4, 8, 16 rồi 30 giây; sau 8 lần, app hiện trang lỗi và chờ **File › Connect again**.
+Bộ đếm chỉ về 0 khi trang đã sống ổn định 60 giây. Không tìm thấy `alp` thì hiện trang cài đặt ngay.
+Trong lúc thử, cửa sổ vẫn giữ trang cũ (app web hiện trạng thái mất kết nối của nó). Connect again
+hủy mọi lần thử đang chờ. `/readyz` không gửi credential; với 401, app chỉ đọc status và path của
+request, không đọc header hay body.
+
 ## 4. Bảo mật của cửa sổ
 
 - `contextIsolation`, `sandbox`, không `nodeIntegration`, không preload, không `webview`;
   `app.enableSandbox()`.
-- Chỉ điều hướng trong đúng origin của `alp-web` (`will-navigate`, `will-redirect`). Trang nội bộ
-  (đang kết nối, lỗi, chưa cài) không được điều hướng đi đâu.
+- Chỉ điều hướng trong đúng origin của `alp-web` (`will-navigate`, `will-frame-navigate`,
+  `will-redirect`), ở cả frame chính lẫn subframe. Trang nội bộ (đang kết nối, lỗi, chưa cài) không
+  được điều hướng đi đâu. Subframe `about:blank` và `about:srcdoc` bị từ chối như mọi đích khác (origin
+  của URL là `null`): app web không có iframe, và một iframe sau này phải tải URL thật trên origin của
+  `alp-web`.
 - `window.open` luôn bị từ chối; link `https:` được mở bằng trình duyệt mặc định, scheme khác bị bỏ.
 - Mọi quyền (camera, micro, notification, vị trí…) bị từ chối, trừ `clipboard-sanitized-write` từ
   origin của `alp-web` (các nút Copy của app web). Vì vậy notification của app web không hoạt động
   trong app desktop ở bản này.
-- Single-instance: mở app lần hai chỉ focus cửa sổ đang có.
+- Single-instance: mở app lần hai chỉ focus cửa sổ đang có (không còn cửa sổ nào thì mở và kết nối).
 - DevTools chỉ có khi chạy từ source (chưa đóng gói).
 
 ## 5. Build và chạy từ source
@@ -74,6 +103,6 @@ dùng `~/.alp` của người dùng (`ALP_DESKTOP_ALP`, `ALP_DESKTOP_USER_DATA`)
 
 ## 6. Chưa có trong bản này
 
-Tự kết nối lại khi `alp-web` hay alpd khởi động lại hoặc đổi port; e2e Playwright;
+E2e Playwright (phần 3);
 DMG ký ad-hoc (arm64, x64) và Electron fuses; `alp web --print --json`; dừng `alp web` khi thoát app;
 ký và notarize; Windows và Linux; mang alpd theo app.

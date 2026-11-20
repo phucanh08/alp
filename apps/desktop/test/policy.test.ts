@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { isAllowedExternal, isAllowedNavigation, isAllowedPermission, navigationGuard } from '../src/policy';
+import { isAllowedExternal, isAllowedNavigation, isAllowedPermission, isTicketRequest, navigationGuard } from '../src/policy';
 
 const ORIGIN = 'http://127.0.0.1:7433';
 
@@ -64,5 +64,31 @@ describe('navigationGuard', () => {
     const second = event(`${ORIGIN}/`, false);
     guard(second);
     expect(second.prevented).toBe(false);
+  });
+});
+
+describe('about:blank and about:srcdoc subframes (decision: refused)', () => {
+  // apps/web has no iframes. A blank or srcdoc frame would run with the page's origin outside the
+  // origin check (its URL's origin is "null"), so the guard refuses it like any other target; a
+  // future iframe in apps/web must load a real URL on alp web's origin.
+  test.each(['about:blank', 'about:srcdoc', 'about:blank#x', 'about:blank?x'])('refuses %s in a subframe and the main frame', target => {
+    const guard = navigationGuard(() => ORIGIN);
+    for (const isMainFrame of [true, false]) {
+      const e = { url: target, isMainFrame, prevented: false, preventDefault() { e.prevented = true; } };
+      guard(e);
+      expect(e.prevented).toBe(true);
+    }
+    expect(isAllowedNavigation(target, ORIGIN)).toBe(false);
+  });
+});
+
+describe('isTicketRequest', () => {
+  test('POST /v1/tickets on the shown origin only', () => {
+    expect(isTicketRequest(`${ORIGIN}/v1/tickets`, ORIGIN)).toBe(true);
+    expect(isTicketRequest(`${ORIGIN}/v1/tickets?x=1`, ORIGIN)).toBe(true);
+    for (const url of [`${ORIGIN}/v1/tickets/x`, `${ORIGIN}/v1/ws`, 'http://127.0.0.1:7434/v1/tickets', `${ORIGIN}/readyz`, 'nope']) {
+      expect(isTicketRequest(url, ORIGIN)).toBe(false);
+    }
+    expect(isTicketRequest(`${ORIGIN}/v1/tickets`, undefined)).toBe(false);
   });
 });

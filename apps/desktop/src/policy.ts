@@ -34,3 +34,15 @@ const PERMITTED = new Set(['clipboard-sanitized-write']);
 export function isAllowedPermission(permission: string, requestingUrl: string | undefined, origin: string | undefined): boolean {
   return PERMITTED.has(permission) && requestingUrl !== undefined && isAllowedNavigation(requestingUrl, origin);
 }
+
+/**
+ * Whether `url` is the gateway's ticket request on the shown origin (POST /v1/tickets, where a page
+ * presents its token). A 401 there means the token was rotated or revoked.
+ */
+export function isTicketRequest(url: string, origin: string | undefined): boolean {
+  if (!origin) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.origin === origin && parsed.pathname === '/v1/tickets';
+  } catch { return false; }
+}
