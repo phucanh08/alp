@@ -115,7 +115,7 @@ alp desktop                   # mở app desktop (docs/alp/desktop.md)
   `--status` không chuyển gì: nó chỉ liệt kê `alp web` cũ còn chạy và những gì lần chạy kế tiếp sẽ chuyển.
   `--stop` chuyển như các lệnh khác và exit 1 nếu `alp web` cũ còn giữ lock mà alp không chứng minh được.
   Windows: alp không dừng `alp web` cũ đang chạy; dừng process có pid trong `<home>/web.json`
-  (`taskkill /PID <pid>`) rồi chạy `alp dashboard`.
+  (`taskkill /F /PID <pid>`) rồi chạy `alp dashboard`.
   Mỗi bước chỉ chuyển tên cũ sang tên mới còn trống: chạy lần hai không làm gì; khi có cả hai thì tên mới
   thắng, tên cũ giữ nguyên (không gộp, không xoá) và `--status` liệt kê chúng. Settings được **chuyển tại
   chỗ** để file của người dùng chỉ còn một nơi đúng; nếu không ghi được (file sai, chỉ đọc) thì
@@ -151,7 +151,7 @@ alp desktop                   # mở app desktop (docs/alp/desktop.md)
   vẫn chạy. Relay của Paseo vẫn tuân theo `web.relay.enabled` (và `alp dashboard pair --off`).
 - Setting: `dashboard.port`, `dashboard.permissions`, `dashboard.enabled` chỉ được đọc khi service khởi động.
   `alp daemon stop` không dừng alp-dashboard. Muốn áp dụng thay đổi: `alp dashboard --stop` (Windows: dừng
-  process có pid trong `<home>/dashboard.json` bằng `taskkill /PID <pid>`), rồi chạy `alp dashboard`; token
+  process có pid trong `<home>/dashboard.json` bằng `taskkill /F /PID <pid>`), rồi chạy `alp dashboard`; token
   được giữ.
   `alp dashboard rotate` cũng khởi động lại service, nhưng với token mới.
 - Nâng cấp từ `alp web` dựa trên Paseo (trước `0.0.1-beta.4`): nếu integration Paseo cũ vẫn giữ
@@ -164,7 +164,7 @@ alp desktop                   # mở app desktop (docs/alp/desktop.md)
   ghi đè `credentials.json` và `dashboard.json` có cơ chế retry/backoff để xử lý lỗi `EPERM`/`EBUSY` khi
   file đang được đọc. Trên Windows, alp không tự dừng alp-dashboard hay integration Paseo cũ đang chạy:
   `alp dashboard rotate` và bước takeover khi nâng cấp từ chối khi chúng còn chạy. Dừng process có pid
-  trong `<home>/dashboard.json` (`taskkill /PID <pid>`), rồi chạy lại lệnh. Cách dừng này không phải shutdown
+  trong `<home>/dashboard.json` (`taskkill /F /PID <pid>`), rồi chạy lại lệnh. Cách dừng này không phải shutdown
   sạch; lần khởi động sau tự lấy lại lock.
 
 ### 3.2 Triển khai riêng với `alp-gateway`

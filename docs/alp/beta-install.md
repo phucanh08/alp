@@ -196,14 +196,14 @@ alp dashboard rotate       # replaces the token; pages already open lose access
   service, if that folder is an ALP project.
 - alp-dashboard keeps alpd running (`ALP_SUPERVISE=0` turns that off). It reads `dashboard.port`,
   `dashboard.permissions` and `dashboard.enabled` when it starts, and `alp daemon stop` does not stop it: to
-  apply a change, stop the process whose pid `~/.alp/dashboard.json` names (`kill <pid>`; on Windows `taskkill /PID <pid>`), then run
+  apply a change, stop the process whose pid `~/.alp/dashboard.json` names (`kill <pid>`; on Windows `taskkill /F /PID <pid>`), then run
   `alp dashboard`.
 - **Windows: untested.** CI runs alp-dashboard's tests on Linux and macOS only, and macOS remains the
   primary platform. A trial on Windows CI found writes of the credential file failing now and then
   with `EPERM`, which can make `alp dashboard rotate`, a workspace grant update or a start that replaces the token fail. On Windows alp never
   stops a running alp-dashboard or the old Paseo integration for you: `alp dashboard rotate` and the upgrade
   takeover refuse while one runs. End the process whose pid `~/.alp/dashboard.json` names
-  (`taskkill /PID <pid>`), then run the command again. Ending it this way is not a clean shutdown;
+  (`taskkill /F /PID <pid>`), then run the command again. Ending it this way is not a clean shutdown;
   the next start reclaims its lock.
 
 More: [dashboard.md](dashboard.md#31-alp-dashboard-trên-máy-này-alp-dashboard).
@@ -260,8 +260,9 @@ peers or turn a host-managed plugin into a standalone installation.
    Releases, run `alp update`; from 0.0.1-beta.5 or beta.6, rerun the installer instead
    ([binary-install.md](binary-install.md#upgrading-from-the-single-file-alp-001-beta5beta6)).
    From `0.0.1-beta.8` on Windows, first stop a running `alp web` yourself
-   (`taskkill /PID <pid>`, the pid in `%USERPROFILE%\.alp\web.json`): alp does not stop it there,
-   and the first `alp dashboard` refuses while it runs ([dashboard.md](dashboard.md) §3.1).
+   (`taskkill /F /PID <pid>`, the pid in `%USERPROFILE%\.alp\web.json`): alp does not stop it
+   there, and `alp dashboard` (also `rotate` and `--stop`) refuses while it runs
+   ([dashboard.md](dashboard.md) §3.1).
 2. `alp daemon restart`, so alpd runs the new version. Running sessions resume at their next
    prompt. From `0.0.1-beta.9` the bundle on macOS and Linux runs the native alpd; a launchd or
    systemd service installed earlier switches to it only after `alp daemon install` again
