@@ -3,6 +3,7 @@
  * alp-web service and prints its address with the token in the fragment.
  */
 import { access, constants, stat } from 'node:fs/promises';
+import http from 'node:http';
 import os from 'node:os';
 import { parseAlpWebOutput, type AlpWebAddress } from './url';
 import { parseShellProbe, resolveAlp, SHELL_PROBE, type Resolved } from './resolve';
@@ -59,4 +60,26 @@ export async function connectAlpWeb(override: string | undefined): Promise<Conne
   if (result.timedOut) return { ok: false, error: `\`alp web --print\` did not answer within ${PRINT_TIMEOUT_MS / 1000} seconds.` };
   const message = result.stderr.trim() || result.error?.message || `alp exited with code ${result.code}`;
   return { ok: false, error: message.replace(/^error:\s*/i, '') };
+}
+
+/** How long a /readyz probe may take before it counts as no answer. */
+const PROBE_TIMEOUT_MS = 2_000;
+
+/**
+ * Whether alp web at `origin` answers HTTP: GET /readyz, any status. 503 means alpd is not ready,
+ * which the page handles by itself; only no answer (refused, reset, timeout) means alp web is gone.
+ * No credential is sent.
+ */
+export function probeAlpWeb(origin: string, timeout = PROBE_TIMEOUT_MS): Promise<boolean> {
+  return new Promise(resolve => {
+    let request: http.ClientRequest;
+    try {
+      request = http.get(`${origin}/readyz`, { timeout, agent: false, headers: { accept: 'application/json' } }, response => {
+        response.resume();
+        resolve(true);
+      });
+    } catch { resolve(false); return; }
+    request.on('timeout', () => request.destroy(new Error('timeout')));
+    request.on('error', () => resolve(false));
+  });
 }
