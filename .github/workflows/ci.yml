@@ -178,10 +178,12 @@ jobs:
   # The macOS desktop shell (apps/desktop, D32): a standalone bun project outside the npm workspaces,
   # so the root runner never sees its tests. Unit tests, typecheck, the bundle, then the Electron e2e
   # against a disposable alp dashboard host built from this checkout (packages/cli/dist/alp-dashboard.js), with
-  # Playwright's _electron from the root install.
+  # Playwright's _electron from the root install. Then the two ad-hoc signed DMGs (arm64, x64; t-81b0.3,
+  # docs/alp/desktop.md §6), each tested as installed (e2e/packaged.spec.mjs; x64 under Rosetta) and
+  # kept as a workflow artifact. Nothing is published.
   desktop-macos:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: apps/desktop
@@ -203,3 +205,22 @@ jobs:
       - run: node scripts/build-workspace.mjs cli
         working-directory: .
       - run: bun run e2e
+      - run: bun run dist
+      - run: ls -l release/*.dmg
+      # The DMG name carries package.json's version: ALP-<version>-<arch>.dmg.
+      - run: ALP_DESKTOP_DMG="$(ls release/ALP-*-arm64.dmg)" bun run e2e:packaged
+      - run: ALP_DESKTOP_DMG="$(ls release/ALP-*-x64.dmg)" bun run e2e:packaged
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: alp-desktop-macos-arm64-dmg
+          path: apps/desktop/release/ALP-*-arm64.dmg
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: alp-desktop-macos-x64-dmg
+          path: apps/desktop/release/ALP-*-x64.dmg
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

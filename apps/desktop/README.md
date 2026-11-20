@@ -12,7 +12,16 @@ bun run typecheck
 bun run build      # dist/main.cjs + dist/pages
 bun run start      # build, then run Electron (ELECTRON_RUN_AS_NODE unset)
 bun run e2e        # Electron e2e; needs the root `npm ci` and `node scripts/build-workspace.mjs cli`
+bun run dist       # release/ALP-<version>-arm64.dmg and -x64.dmg: ad-hoc signed, not notarized, not published
+ALP_DESKTOP_DMG=release/ALP-0.0.0-arm64.dmg bun run e2e:packaged   # tests ALP.app from that DMG
 ```
+
+Packaging (`electron-builder.yml`, `build/`): bundle `ALP.app`, id `com.anhlp.alp.shell` (the id
+`alp desktop` opens), hardened runtime with ad-hoc signature, Electron fuses set. `package.json` has
+`"packageManager"` and an empty `"workspaces"` only so electron-builder treats this directory, not the
+npm root, as the project root. A downloaded DMG is quarantined: on macOS 15 open it once, then
+System Settings › Privacy & Security › Open Anyway (`docs/alp/desktop.md` §6.1). The icon is drawn by
+`node scripts/icon.mjs`.
 
 | Variable | Use |
 |---|---|
@@ -23,4 +32,6 @@ Settings: `~/Library/Application Support/ALP/settings.json`, `{ "alpPath": "/abs
 
 `alp dashboard` refuses to run in a process started by an ALP agent (`ALP_AGENT_SESSION`). Try the app
 from an agent against a disposable host (a scratch `ALP_HOME`) and a fake `alp` that prints that
-host's address, never against the user's `~/.alp`.
+host's address, never against the user's `~/.alp`. Pass `--use-mock-keychain` to any automated launch
+with a scratch `HOME`: there is no login keychain there, and the packaged app would otherwise put a
+"Keychain Not Found" dialog on the user's screen.

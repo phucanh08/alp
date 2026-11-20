@@ -1,7 +1,8 @@
 # ALP desktop (macOS, MVP)
 
-> **Trạng thái:** t-81b0.2 phần 1 (khung), phần 2 (tự kết nối lại) và phần 3 (e2e Electron), chưa
-> phát hành, chưa có DMG. Quyết định: D32 (`plans/reference/DECISIONS.md`). Đóng gói DMG là phần sau.
+> **Trạng thái:** t-81b0.2 phần 1 (khung), phần 2 (tự kết nối lại) và phần 3 (e2e Electron); t-81b0.3:
+> DMG ký ad-hoc (arm64, x64) build trong CI thành artifact (§6), chưa phát hành. Quyết định: D32
+> (`plans/reference/DECISIONS.md`).
 
 App desktop là một **vỏ mỏng** bằng Electron bọc quanh ALP mà người dùng đã cài. Nó không mang theo
 alpd, gateway hay app web: nó chạy `alp dashboard --print` của người dùng, lệnh này khởi động hoặc gắn vào
@@ -103,7 +104,8 @@ Connect again.
 nó. Test của nó (`apps/desktop/test`, `bun:test`) được miễn khỏi luật bố cục test trong
 `test/integration/layout.test.js` chỉ khi script `test` của nó là `bun test test`; job CI
 `desktop-macos` chạy `bun install --frozen-lockfile`, `bun test test`, typecheck và build, rồi
-`npm ci`, `node scripts/build-workspace.mjs cli` và e2e (`bun run e2e`). Lệnh: xem `apps/desktop/README.md` (`bun install`, `bun test test`, `bun run build`,
+`npm ci`, `node scripts/build-workspace.mjs cli`, e2e (`bun run e2e`), rồi build hai DMG và chạy
+e2e của app đã đóng gói trên từng DMG (§6). Lệnh: xem `apps/desktop/README.md` (`bun install`, `bun test test`, `bun run build`,
 `bun run start`).
 
 Shell của agent trong môi trường này có `ELECTRON_RUN_AS_NODE=1`: phải bỏ biến này khi chạy Electron
@@ -150,16 +152,79 @@ npm ci && node scripts/build-workspace.mjs cli   # ở gốc repo
 cd apps/desktop && bun run e2e
 ```
 
-## 6. Chưa có trong bản này
+## 6. Đóng gói: DMG cho macOS
 
-DMG ký ad-hoc (arm64, x64) và Electron fuses; `alp dashboard --print --json`; dừng `alp dashboard` khi thoát app;
-ký và notarize; Windows và Linux; mang alpd theo app.
+`bun run dist` (trong `apps/desktop`) build `dist/` rồi chạy electron-builder (`electron-builder.yml`):
+hai DMG, `release/ALP-<version>-arm64.dmg` và `release/ALP-<version>-x64.dmg` (mỗi file khoảng
+130 MB), mỗi DMG chứa `ALP.app`. Không có gì được publish (`publish: null`, `--publish never`).
+
+| Mục | Giá trị |
+|---|---|
+| Tên bundle | `ALP.app` (`productName: ALP`): `alp desktop` tìm đúng tên này (§7) |
+| Bundle id | `com.anhlp.alp.shell`, khác app desktop cũ `com.anhlp.alp.desktop`; `alp desktop` chỉ mở bundle có id này |
+| Chữ ký | ad-hoc (`identity: '-'`), hardened runtime; không có Apple Developer ID, không notarize. Không ký thì Apple Silicon báo app "bị hỏng" |
+| Entitlements | `build/entitlements.mac.plist`: `allow-jit` và `disable-library-validation` (app ký ad-hoc nạp framework Electron mang Team ID khác) |
+| Electron fuses | `RunAsNode`, `EnableNodeOptionsEnvironmentVariable`, `EnableNodeCliInspectArguments` tắt; `OnlyLoadAppFromAsar`, `EnableEmbeddedAsarIntegrityValidation`, `EnableCookieEncryption` bật; `GrantFileProtocolExtraPrivileges` tắt |
+| Icon | `build/icon.png` (1024×1024), vẽ bằng `node scripts/icon.mjs`; electron-builder đổi sang `.icns` |
+| macOS tối thiểu | 12.0 |
+
+electron-builder dò package manager và workspace root bằng cách đi ngược lên tới `package.json` đầu
+tiên có trường `workspaces`, tức là `package.json` gốc (npm), dù `apps/desktop` không nằm trong đó, rồi
+fail khi gom `node_modules`. Vì vậy `apps/desktop/package.json` có `"packageManager": "bun@1.4.2"` và
+`"workspaces": []`: nó tự là gốc, và electron-builder dùng bun. App không có dependency lúc chạy nên
+không có `node_modules` nào được đóng gói.
+
+### 6.1 Mở app đã tải về (Gatekeeper)
+
+App chỉ ký ad-hoc, chưa notarize, nên Gatekeeper chặn lần mở đầu tiên một app **tải về** (có thuộc
+tính `com.apple.quarantine`):
+
+1. Mở DMG, kéo `ALP.app` vào `/Applications` (hoặc `~/Applications`).
+2. Mở `ALP.app`; macOS báo không thể kiểm tra app. Chọn **Done** (không chọn Move to Trash).
+3. Từ macOS 15 (Sequoia), Control-click › Open không còn bỏ qua được: vào **System Settings ›
+   Privacy & Security**, tìm dòng về "ALP" và chọn **Open Anyway**, xác nhận bằng mật khẩu, rồi mở lại.
+
+Build tại máy (không qua trình duyệt) không có quarantine nên mở được ngay. Nếu cần bỏ quarantine
+của một bản mình tự build và chép qua kênh khác: `xattr -dr com.apple.quarantine /Applications/ALP.app`.
+Đừng làm vậy với app không rõ nguồn.
+
+### 6.2 Kiểm tra app đã đóng gói
+
+`e2e/packaged.spec.mjs` (`ALP_DESKTOP_DMG=<dmg> bun run e2e:packaged`, cần cài đặt gốc và CLI đã build
+như §5.1) mount DMG, chép `ALP.app` vào một thư mục `Applications` tạm (`HOME` tạm), rồi kiểm:
+
+- `Info.plist` (tên, bundle id), chữ ký ad-hoc có cờ `runtime` (`codesign -dv`, `codesign --verify
+  --deep --strict`) và các fuse (`@electron/fuses`);
+- app kết nối tới host dùng một lần qua `alp` giả, và app web lấy token ra khỏi địa chỉ;
+- với `ELECTRON_RUN_AS_NODE=1`, app vẫn chạy như app (Electron dev, không có fuse, thì chạy script như
+  Node: đó là đối chứng);
+- `alp desktop` (CLI đã build, `HOME` tạm, `open` giả ghi lại đối số) mở đúng `ALP.app` theo thứ tự §7.
+
+Playwright `_electron` cần Node inspector, mà fuse `EnableNodeCliInspectArguments` đã tắt, nên test đọc
+cửa sổ qua DevTools protocol (`--remote-debugging-port`). Mọi lần chạy app tự động (cả e2e dev ở §5.1)
+có `--use-mock-keychain`: với `HOME` tạm không có login keychain, và app có `EnableCookieEncryption`
+sẽ hiện hộp thoại "Keychain Not Found" trên màn hình người dùng. Test còn theo dõi cửa sổ trên màn
+hình (chỉ pid, tên process và layer, không đọc tiêu đề hay pixel): hễ có cửa sổ mới của
+SecurityAgent, UserNotificationCenter, CoreServicesUIAgent, coreautha, hoặc app có thêm cửa sổ, app bị
+kill ngay và test fail. Không bao giờ bấm hay script câu trả lời cho hộp thoại như vậy.
+
+Trong CI, job `desktop-macos` (macos-latest, arm64) chạy test này với DMG arm64 và DMG x64 (qua
+Rosetta), rồi giữ hai artifact `alp-desktop-macos-arm64-dmg` và `alp-desktop-macos-x64-dmg` trong 14
+ngày.
+
+### 6.3 Chưa có trong bản này
+
+`alp dashboard --print --json`; dừng `alp dashboard` khi thoát app; ký bằng Developer ID và notarize;
+tự cập nhật; phát hành DMG; Windows và Linux; mang alpd theo app.
 
 ## 7. `alp desktop`
 
 `alp desktop` (t-81b0.5) mở app này, theo thứ tự:
 
-1. `ALP.app` trong `/Applications`, rồi `~/Applications` (macOS): mở bằng `open`;
+1. `ALP.app` trong `/Applications`, rồi `~/Applications` (macOS): mở bằng `open`. Chỉ tính bundle có
+   `CFBundleIdentifier` là `com.anhlp.alp.shell` (§6); một app khác cùng tên (vd. app desktop cũ
+   `com.anhlp.alp.desktop`) bị bỏ qua với một dòng `Skipped <đường dẫn>: its bundle id is …` trên
+   stderr, rồi tìm tiếp;
 2. nếu không có: checkout do `ALP_DESKTOP_CHECKOUT` chỉ tới (gốc repo, hoặc chính `apps/desktop`), với app
    đã build (`bun install && bun run build` trong `apps/desktop`): chạy bằng Electron của checkout đó,
    bỏ `ELECTRON_RUN_AS_NODE`;
@@ -167,5 +232,4 @@ ký và notarize; Windows và Linux; mang alpd theo app.
    exit 1; trong lúc chờ, `alp dashboard` mở ALP trên trình duyệt.
 
 `alp desktop` không đọc và không truyền token: app tự chạy `alp dashboard --print` (§1). Tên biến theo
-các biến `ALP_DESKTOP_*` khác (`ALP_DESKTOP_ALP`, `ALP_DESKTOP_USER_DATA`). DMG cho `/Applications` là
-t-81b0.3.
+các biến `ALP_DESKTOP_*` khác (`ALP_DESKTOP_ALP`, `ALP_DESKTOP_USER_DATA`). DMG cho `/Applications`: §6.
