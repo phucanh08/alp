@@ -619,6 +619,20 @@ test('a move stopped halfway (store moved, web.json not) finishes on the next ru
   assert.equal(existsSync(path.join(home, 'web.json')), false, 'a web.json with the token dashboard.json already has is only a copy');
 });
 
+test('--stop fails while a web.lock holder alp cannot prove keeps running', async t => {
+  // Root may signal any pid, so EPERM is only observable for an unprivileged user.
+  if (process.getuid?.() === 0 || process.platform === 'win32') return;
+  const { home } = await createHome(t);
+  await mkdir(path.join(home, 'integrations'), { recursive: true, mode: 0o700 });
+  await writeFile(path.join(home, 'integrations', 'web.lock'), JSON.stringify({ pid: 1, bootTime: bootTime(), startedAt: new Date().toISOString(), ready: true, lockVersion: 1, owner: randomUUID() }), { mode: 0o600 });
+  const stopped = await run(['dashboard', '--stop'], home);
+  assert.equal(stopped.code, 1, stopped.stdout);
+  assert.match(stopped.stderr, /cannot prove[\s\S]*pid 1 belongs to another user/);
+  const status = await run(['dashboard', '--status'], home);
+  assert.equal(status.code, 0);
+  assert.match(status.stdout, /web\.lock is held by a process that alp cannot prove/);
+});
+
 test('alp web is gone: the command is unknown', async t => {
   const { home } = await createHome(t);
   const result = await run(['web', '--print'], home);

@@ -29,6 +29,8 @@ import { DASHBOARD, LEGACY_WEB, refusal, serviceOwner, stopService } from './das
 
 /** @param {string} file */
 const exists = file => lstat(file).then(() => true, () => false);
+/** A file's JSON, or undefined when it is missing or not JSON. @param {string} file */
+const readJson = file => readFile(file, 'utf8').then(text => { try { return JSON.parse(text); } catch { return undefined; } }, () => undefined);
 /** @param {unknown} error */
 const code = error => /** @type {any} */ (error)?.code;
 
@@ -75,11 +77,11 @@ export async function migrateDashboard(home, { strict = false } = {}) {
   // 3. What the service published.
   const oldInfo = path.join(home, LEGACY_WEB.info);
   const newInfo = path.join(home, DASHBOARD.info);
-  const published = await readFile(oldInfo, 'utf8').then(text => JSON.parse(text), () => undefined);
+  const published = await readJson(oldInfo);
   if (published?.app === LEGACY_WEB.app) {
     // The same token in dashboard.json: this file was already carried (by an earlier or a concurrent
     // run, or a crash after the link), so the old one is only a copy.
-    const carriedAlready = async () => (await readFile(newInfo, 'utf8').then(text => JSON.parse(text), () => undefined))?.token === published.token;
+    const carriedAlready = async () => typeof published.token === 'string' && published.token !== '' && (await readJson(newInfo))?.token === published.token;
     const removeOld = () => unlink(oldInfo).catch(error => { if (code(error) !== 'ENOENT') throw error; });
     if (await exists(newInfo)) {
       if (await carriedAlready()) await removeOld();
@@ -136,11 +138,11 @@ export async function legacyLeftovers(home) {
   else if (owner.alive) result.legacy = { reason: owner.reason };
   const place = async (/** @type {string} */ old, /** @type {string} */ current) => (await exists(current) ? result.kept : result.pending).push(old);
   if (await exists(path.join(home, 'web', 'credentials.json'))) await place(path.join(home, 'web'), path.join(home, 'dashboard'));
-  const published = await readFile(path.join(home, LEGACY_WEB.info), 'utf8').then(text => JSON.parse(text), () => undefined);
+  const published = await readJson(path.join(home, LEGACY_WEB.info));
   if (published?.app === LEGACY_WEB.app) await place(path.join(home, LEGACY_WEB.info), path.join(home, DASHBOARD.info));
   const logs = path.join(home, 'logs', 'integrations');
   if (await exists(path.join(logs, 'alp-web.log'))) await place(path.join(logs, 'alp-web.log'), path.join(logs, 'alp-dashboard.log'));
-  const settings = await readFile(path.join(home, 'settings.json'), 'utf8').then(text => JSON.parse(text), () => undefined);
+  const settings = await readJson(path.join(home, 'settings.json'));
   for (const key of ['enabled', 'port', 'permissions']) {
     if (settings?.web?.[key] === undefined) continue;
     if (settings?.dashboard?.[key] !== undefined) result.kept.push(`settings.json web.${key} (dashboard.${key} is set and wins)`);
