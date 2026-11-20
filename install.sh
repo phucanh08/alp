@@ -211,6 +211,11 @@ if ! $SUDO cp -R "$tmp/x/$name" "$stage/$name"; then cleanup_stage; die "could n
 # Checked on the copy that is installed (not in TMPDIR, which may be noexec).
 reported=$("$stage/$name/bin/alp" --version 2>/dev/null || true)
 if [ "$reported" != "$version" ]; then cleanup_stage; die "the downloaded ALP reports version '$reported', not $version"; fi
+# The native alpd (bin/alpd, t-81b0.9) must run on this machine too (CPU, glibc, quarantine).
+if [ -e "$stage/$name/bin/alpd" ]; then
+  reported=$("$stage/$name/bin/alpd" --version 2>/dev/null || true)
+  if [ "$reported" != "$version" ]; then cleanup_stage; die "the downloaded ALP's native alpd (bin/alpd) reports version '$reported', not $version, so it cannot run on this machine; nothing was installed"; fi
+fi
 aside=""
 if [ -e "$APP/$version" ]; then
   if [ "$previous" = "$version" ] || [ "$alpd_version" = "$version" ]; then

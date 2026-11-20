@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
-import { bundleInfo, samePath } from '@anhlp/alp-core/packaged';
+import { bundleInfo, NATIVE_DAEMON, samePath } from '@anhlp/alp-core/packaged';
 
 /**
  * `alp update` (t-1807): installs a release of the ALP bundle from GitHub Releases beside the running
@@ -304,7 +304,7 @@ async function confirm(question) {
  *   fetchBytes: (url: string) => Promise<Uint8Array>, confirm: (question: string) => Promise<boolean>,
  *   provenance: (file: string, repo: string) => string, extract: typeof extract,
  *   daemon: () => Promise<{ version: string, sessions?: number } | undefined>, restartDaemon: (root: string) => number,
- *   runVersion: (root: string) => string,
+ *   runVersion: (root: string) => string, runDaemonVersion: (root: string) => string,
  * }} UpdateDeps
  */
 
@@ -319,6 +319,7 @@ export async function selfUpdate(args, overrides = {}) {
     daemon: async () => undefined,
     restartDaemon: root => { const run = bundleCommand(root); return spawnSync(run.command, [...run.args, 'daemon', 'restart'], { stdio: 'inherit', windowsHide: true }).status ?? 1; },
     runVersion: root => { const run = bundleCommand(root); return spawnSync(run.command, [...run.args, '--version'], { encoding: 'utf8', windowsHide: true, timeout: 60_000 }).stdout?.trim() ?? ''; },
+    runDaemonVersion: root => spawnSync(path.join(root, 'bin', NATIVE_DAEMON), ['--version'], { encoding: 'utf8', windowsHide: true, timeout: 60_000 }).stdout?.trim() ?? '',
     ...overrides,
   };
   const { bundle } = deps;
@@ -392,6 +393,12 @@ export async function selfUpdate(args, overrides = {}) {
     if (manifest.version !== asset.version || (manifest.platform && manifest.platform !== platform)) throw new Error(`${asset.name} holds ALP ${manifest.version} for ${manifest.platform}, not ${asset.version} for ${platform}; nothing was changed`);
     const reported = deps.runVersion(unpacked);
     if (reported !== asset.version) throw new Error(`The downloaded ALP reports version ${JSON.stringify(reported)}, not ${asset.version}; nothing was changed`);
+    // The native alpd (t-81b0.9) must run on this machine too: an old CPU, glibc or a quarantined file would
+    // otherwise leave alp without a daemon after the switch.
+    if (nodeFs.existsSync(path.join(unpacked, 'bin', NATIVE_DAEMON))) {
+      const native = deps.runDaemonVersion(unpacked);
+      if (native !== asset.version) throw new Error(`The downloaded ALP's native alpd (bin/${NATIVE_DAEMON}) reports version ${JSON.stringify(native)}, not ${asset.version}, so it cannot run here; nothing was changed. Report it, and meanwhile keep alpd on Node with ALP_NATIVE_DAEMON=0`);
+    }
     if (nodeFs.existsSync(target)) {
       // A reinstall of the running version moves it aside (its processes keep their files); any other copy is stale.
       if (samePath(target, bundle.root) || running?.version === asset.version) {

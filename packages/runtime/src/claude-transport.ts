@@ -24,7 +24,8 @@ const claudeSdk = (): Promise<any> => nativeDaemon()?.modules.claudeAgentSdk?.()
  * A JavaScript `claude` (a test's fake, an npm install's cli.js) runs under Node. The SDK would pick
  * `bun` inside the native alpd, so name the Node there.
  */
-const scriptExecutable = (command: string): { executable?: any } => nativeDaemon() && isScript(command) ? { executable: nodeExecutable() } : {};
+// The SDK treats .js/.mjs/.cjs/.ts/.tsx/.jsx as scripts.
+const scriptExecutable = (command: string): { executable?: any } => nativeDaemon() && (isScript(command) || /\.(ts|tsx|jsx)$/i.test(command)) ? { executable: nodeExecutable() } : {};
 
 type SDKUserMessage = any;
 type SDKMessage = any;

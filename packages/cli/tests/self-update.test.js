@@ -151,7 +151,7 @@ test('a bundle that install.sh did not install (no app/current) is not updated i
 });
 
 /** An installed bundle (<app>/1.0.0, current → it) and a file:// mirror with one archive for this host. */
-async function mirror(t, { version = '9.9.9', corrupt = false, bundleVersion = version } = {}) {
+async function mirror(t, { version = '9.9.9', corrupt = false, bundleVersion = version, nativeDaemon = false } = {}) {
   const work = await mkdtemp(path.join(tmpdir(), 'alp-self-update-'));
   t.after(() => rm(work, { recursive: true, force: true }));
   const platform = releasePlatform();
@@ -159,6 +159,7 @@ async function mirror(t, { version = '9.9.9', corrupt = false, bundleVersion = v
   const name = `alp-${version}-${platform}`;
   await mkdir(path.join(work, 'src', name), { recursive: true });
   await writeFile(path.join(work, 'src', name, 'alp-bundle.json'), JSON.stringify({ name: 'alp', version: bundleVersion, platform }));
+  if (nativeDaemon) { await mkdir(path.join(work, 'src', name, 'bin')); await writeFile(path.join(work, 'src', name, 'bin', process.platform === 'win32' ? 'alpd.exe' : 'alpd'), ''); }
   const mirrorDir = path.join(work, 'mirror');
   await mkdir(mirrorDir);
   const archive = path.join(mirrorDir, `${name}${windows ? '.zip' : '.tar.gz'}`);
@@ -208,6 +209,17 @@ test('bundle: --check reports only; --yes installs app/<version> from a file:// 
   const out3 = [];
   assert.equal(await selfUpdate(['--yes'], { ...baseDeps(m, out3), version: '9.9.9' }), 0);
   assert.match(out3.join('\n'), /up to date/);
+});
+
+test('bundle: a native alpd that cannot run here refuses the update and changes nothing (t-81b0.9)', async t => {
+  const m = await mirror(t, { nativeDaemon: true });
+  const before = readdirSync(m.app).sort();
+  await assert.rejects(selfUpdate(['--yes'], { ...baseDeps(m, []), runDaemonVersion: () => '' }), /native alpd \(bin\/alpd(\.exe)?\) reports version "", not 9\.9\.9.*nothing was changed.*ALP_NATIVE_DAEMON=0/);
+  assert.equal(await currentVersion(m), '1.0.0');
+  assert.deepEqual(readdirSync(m.app).filter(name => !name.startsWith('.alp-update-')).sort(), before.filter(name => !name.startsWith('.alp-update-')));
+  // One that runs and reports the version is installed.
+  assert.equal(await selfUpdate(['--yes'], { ...baseDeps(m, []), runDaemonVersion: () => '9.9.9' }), 0);
+  assert.equal(await currentVersion(m), '9.9.9');
 });
 
 test('bundle: --version of the running version reinstalls it and keeps the running copy aside', async t => {
