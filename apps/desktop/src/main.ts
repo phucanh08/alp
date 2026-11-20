@@ -97,8 +97,16 @@ async function connect() {
   remoteLoad = 0;
   await current()?.loadFile(page('connecting.html')).catch(() => undefined);
   reveal(current());
-  const settings = await readSettings(app.getPath('userData'));
-  const result = await connectAlpWeb(settings.alpPath || process.env.ALP_DESKTOP_ALP || undefined);
+  let result: Awaited<ReturnType<typeof connectAlpWeb>>;
+  try {
+    const settings = await readSettings(app.getPath('userData'));
+    result = await connectAlpWeb(settings.alpPath || process.env.ALP_DESKTOP_ALP || undefined);
+  } catch (error) {
+    // An unexpected rejection must not leave the window on Connecting with nothing to say.
+    const window = current();
+    if (window) await showError(error instanceof Error ? error.message : String(error), window);
+    return;
+  }
   const window = current();
   if (!window) return;
   if (result.ok) {
