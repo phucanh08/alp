@@ -3,7 +3,7 @@
 ALP ships two ways. Both run the same JavaScript, `@anhlp/alp-cli`, on Node:
 
 - **npm**: `npm install -g @anhlp/alp@beta` (see [npm packages](#npm-packages)). It uses your Node (22.12 or later).
-- **The ALP bundle** (`install.sh`, `install.ps1`, GitHub Releases): macOS and Linux (glibc), arm64 and x64, and Windows x64 (best-effort). It needs no Node: it carries the official Node release it runs on, the way Paseo's daemon runs on Electron's Node.
+- **The ALP bundle** (`install.sh`, `install.ps1`, GitHub Releases): macOS and Linux (glibc), arm64 and x64, and Windows x64 (best-effort). It needs no Node: it carries the official Node release it runs on, the way Paseo's daemon runs on Electron's Node. From 0.0.1-beta.9 its alpd is a native executable on macOS and Linux (see [The native alpd](#the-native-alpd-t-81b09)); the `alp` command still runs on the bundled Node.
 
 Up to 0.0.1-beta.6 the release was one file built with `bun build --compile` (t-1e02). That build needed a special case for every computed import, native add-on and `process.execPath` spawn (0.0.1-beta.5 lost the Claude Agent SDK). The bundle is the npm install itself, so those special cases are gone; see [Upgrading from the single-file alp](#upgrading-from-the-single-file-alp-001-beta5beta6).
 
@@ -14,13 +14,31 @@ One archive per platform, `alp-<version>-<os>-<arch>.tar.gz` (`alp-<version>-win
 ```
 alp-<version>-<os>-<arch>/
   bin/alp                 sh launcher (bin/alp.cmd on Windows)
+  bin/alpd                the native alpd (macOS and Linux; not on Windows), see below
   node/bin/node           the official Node release, checksum-pinned in scripts/node-runtime.json (node/node.exe on Windows), and its LICENSE
   lib/node_modules/       @anhlp/alp-cli and its production dependencies, as `npm install -g @anhlp/alp-cli` lays them out
-  alp-bundle.json         { name: "alp", version, platform, node }
+  alp-bundle.json         { name: "alp", version, platform, node, daemon: "native" | "node" }
   LICENSE  NOTICE  THIRD-PARTY-NOTICES.txt
 ```
 
-The launcher follows symlinks to its own directory and runs `node/bin/node lib/node_modules/@anhlp/alp-cli/dist/cli.js "$@"`. `process.execPath` is then the bundled Node, so alpd, `alp dashboard`, the ACP agent and the MCP bridges start exactly as they do from npm (`node alpd.js`, `node -e <bridge>`).
+The launcher follows symlinks to its own directory and runs `node/bin/node lib/node_modules/@anhlp/alp-cli/dist/cli.js "$@"`. `process.execPath` is then the bundled Node, so `alp dashboard`, the ACP agent and the MCP bridges start exactly as they do from npm (`node alp-dashboard.js`, `node -e <bridge>`). alpd is `bin/alpd` where the bundle ships it, else `node alpd.js` as from npm.
+
+## The native alpd (t-81b0.9)
+
+From 0.0.1-beta.9 the bundles for macOS and Linux (arm64 and x64) carry `bin/alpd`: alpd compiled with `bun build --compile` (Bun 1.4.2, pinned in `apps/desktop/package.json`) into one executable. Only alpd is native; `alp` keeps running on the bundled Node, and `lib/node_modules/@anhlp/alp-cli/dist/alpd.js` still ships. Windows keeps alpd on the bundled Node (node-pty and ConPTY under Bun were the 0.0.1-beta.5/6 trouble spot and are not re-proven there). Decision D34 in `plans/reference/DECISIONS.md`.
+
+| Platform | alpd in 0.0.1-beta.9 | Why |
+| --- | --- | --- |
+| darwin-arm64 | native | required; the bundle smokes pass against `bin/alpd` |
+| darwin-x64 | native (Bun's `baseline` build, no AVX2 needed) | required; the bundle smokes pass against `bin/alpd` |
+| linux-x64 | native (`baseline`, glibc) | the same smokes pass in CI, including `debian:bookworm-slim` without Node |
+| linux-arm64 | native (glibc) | the same smokes pass in CI, including `debian:bookworm-slim` without Node |
+| windows-x64 | Node (`alpd.js`) | not native in this release |
+
+- **Who starts it.** `alp daemon start`, `alp dashboard`, `alp daemon install` (the launchd or systemd service) and clients that find alpd through `alp` on `PATH` (`findDaemonEntry`) start `<root>/app/current/bin/alpd` when the bundle has it (`daemonEntry` in `@anhlp/alp-core/packaged`), and alpd records that path in `alpd.json`. `ALP_NATIVE_DAEMON=0` keeps alpd on the bundled Node (`alpd.js`). `alp daemon run` always runs alpd.js in its own process.
+- **What differs inside it.** The executable has no `node_modules` of its own. Its entry (`packages/daemon/src/native-entry.ts`) registers the Claude Agent SDK, which the build embeds, so the computed import that cost 0.0.1-beta.5 its SDK is not used. It starts itself with only its options (`spawn(execPath, ['--service'])`, never a script path), so it cannot start a chain of copies. Everything that is JavaScript run by a Node (a JavaScript `claude` or provider, the MCP bridges' `node -e <bridge>`) runs under the bundle's `node/bin/node`, named through `app/current` as before. The terminal helper comes from the bundle's `@anhlp/alp-cli/dist/terminal-native`. `.env` and `bunfig.toml` in alpd's working directory are not loaded.
+- **Build checks.** `scripts/build-alpd-native.mjs` refuses another Bun version and fails when the executable carries a path of the build machine (the checkout, its scratch directory, the home directory); Bun inlines `__dirname`-style paths, which is how the desktop app of t-81b0.7 lost its pages.
+- **Services installed before 0.0.1-beta.9** still run `node alpd.js`, which keeps working after an update; `alp daemon install` again switches the service to `bin/alpd`.
 
 Left out on purpose: `@anthropic-ai/claude-agent-sdk-<platform>`, the native Claude Code CLI of every platform (about 250 MB). ALP always runs your own `claude` (or `ALP_CLAUDE_BIN`). node-pty keeps only this platform's prebuild, and the native terminal helper only this platform's slot.
 
@@ -96,19 +114,19 @@ alp daemon restart
 ```
 
 - `~/.alp/bin/alp` becomes a link to `~/.alp/app/current/bin/alp`; `install.sh` renames it over the old file, so a running alpd is not disturbed. On Windows, `install.ps1` renames `alp.exe` aside and installs `alp.cmd`.
-- A launchd or systemd service installed by the single-file build runs `~/.alp/bin/alp daemon run --service`. That still works with the bundle's launcher. `alp daemon install` writes the new form (`<root>/app/current/node/bin/node <root>/app/current/lib/node_modules/@anhlp/alp-cli/dist/alpd.js --service`).
+- A launchd or systemd service installed by the single-file build runs `~/.alp/bin/alp daemon run --service`. That still works with the bundle's launcher. `alp daemon install` writes the new form (`<root>/app/current/bin/alpd --service` where the bundle has the native alpd, else `<root>/app/current/node/bin/node <root>/app/current/lib/node_modules/@anhlp/alp-cli/dist/alpd.js --service`).
 - MCP entries that the single-file build wrote as `alp bridge acp|antigravity` are still recognised as ALP's; `alp setup` rewrites them as `node -e <bridge>` under the bundled Node.
 - `<ALP_HOME>/cache/<version>/` (the single-file build's extracted assets) and `~/.alp/share/doc/alp` are no longer used and may be deleted.
 
 ## How the bundle is built
 
-`scripts/build-bundle.mjs --platform <os-arch>` packs the workspaces `@anhlp/alp-protocol`, `-core`, `-client` and `-cli` (`npm pack`, already built), installs them with `npm install --omit=dev --os --cpu [--libc=glibc]` into the bundle's `lib/`, with every third-party package that `package-lock.json` holds at one version pinned to it (`overrides`; the build fails if anything differs), drops type declarations, source maps and third-party READMEs, removes the Claude Code native packages and other platforms' prebuilds, downloads the pinned Node archive from nodejs.org and checks its sha256 (`scripts/node-runtime.json`; cached in `.cache/node`), keeps only `node` and its licence, and writes the launchers, `alp-bundle.json` and the licences. `scripts/package-binary.mjs pack --bundle <dir>` archives it; `sums <dir>` writes `SHA256SUMS`. To move to another Node release, change its version and all five sha256 values (from `https://nodejs.org/dist/v<version>/SHA256SUMS.txt`) together.
+`scripts/build-bundle.mjs --platform <os-arch>` packs the workspaces `@anhlp/alp-protocol`, `-core`, `-client` and `-cli` (`npm pack`, already built), installs them with `npm install --omit=dev --os --cpu [--libc=glibc]` into the bundle's `lib/`, with every third-party package that `package-lock.json` holds at one version pinned to it (`overrides`; the build fails if anything differs), drops type declarations, source maps and third-party READMEs, removes the Claude Code native packages and other platforms' prebuilds, downloads the pinned Node archive from nodejs.org and checks its sha256 (`scripts/node-runtime.json`; cached in `.cache/node`), keeps only `node` and its licence, on macOS and Linux compiles the native alpd into `bin/alpd` (`scripts/build-alpd-native.mjs`; `--no-native-daemon` leaves it out, `--bun <path>` names the Bun), and writes the launchers, `alp-bundle.json` and the licences (Bun's notice joins THIRD-PARTY-NOTICES.txt when `bin/alpd` is there). `scripts/package-binary.mjs pack --bundle <dir>` archives it; `sums <dir>` writes `SHA256SUMS`. To move to another Node release, change its version and all five sha256 values (from `https://nodejs.org/dist/v<version>/SHA256SUMS.txt`) together.
 
 ## Build and test locally
 
 ```sh
 npm ci && node scripts/build-bundle.mjs                 # dist/bundle/alp-<version>-<this platform>
-node scripts/binary-smoke.mjs                           # full smoke: launcher, daemon, web, terminal, fake Codex and Claude, bridge
+node scripts/binary-smoke.mjs                           # full smoke: launcher, (native) daemon, web, terminal, fake Codex, Claude and ACP agent, bridge
 node scripts/binary-update-smoke.mjs                    # install.sh into a temporary root, then alp update from file:// and HTTP mirrors
 env -i PATH=/usr/bin:/bin sh scripts/binary-smoke-nodeless.sh dist/bundle/alp-<version>-<platform>/bin/alp   # no system Node
 node scripts/package-binary.mjs pack --bundle dist/bundle/alp-<version>-<platform> --out dist/release
