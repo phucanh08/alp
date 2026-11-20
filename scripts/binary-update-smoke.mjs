@@ -7,7 +7,7 @@
 //
 //   node scripts/binary-update-smoke.mjs [dist/bundle/alp-<version>-<platform>]
 import { execFile } from 'node:child_process';
-import { existsSync, readdirSync, readlinkSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, readlinkSync } from 'node:fs';
 import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
@@ -38,6 +38,10 @@ const installed = path.join(bin, windows ? 'alp.cmd' : 'alp');
 const alp = args => runCmd(installed, args, { shell: windows });
 const current = () => windows ? readlinkSync(path.join(app, 'current')) : readlinkSync(path.join(app, 'current'));
 const versions = () => readdirSync(app).sort();
+// The native alpd (t-81b0.9) where the bundle ships one: alp starts it through app/current, it survives
+// an update of its own version, and a restart runs the new copy.
+const native = JSON.parse(await readFile(path.join(bundle, 'alp-bundle.json'), 'utf8')).daemon === 'native';
+const daemonEntry = () => JSON.parse(readFileSync(path.join(env.ALP_HOME, 'alpd.json'), 'utf8')).entry;
 
 let server;
 try {
@@ -66,6 +70,10 @@ try {
   check(existsSync(path.join(app, version, 'alp-bundle.json')), `app/${version} holds the bundle`);
   let r = await alp(['--version']);
   check(r.code === 0 && r.stdout.trim() === version, `the installed alp runs (${r.stdout.trim()} ${r.stderr.trim()})`);
+  if (native) {
+    r = await alp(['daemon', 'start']);
+    check(r.code === 0 && daemonEntry() === path.join(app, 'current', 'bin', windows ? 'alpd.exe' : 'alpd'), `the installed alp starts the native alpd through app/current (${daemonEntry()})`);
+  }
 
   r = await alp(['update', '--check', '--base-url', fileUrl]);
   check(r.code === 0 && /up to date/.test(r.stdout), `alp update --check reports ${version} up to date (${r.code} ${r.stdout}${r.stderr})`);
@@ -103,7 +111,8 @@ try {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   r = await alp(['update', '--yes', '--version', version, '--base-url', `http://127.0.0.1:${server.address().port}/v${version}`]);
   check(r.code === 0 && /Updated ALP/.test(r.stdout), `alp update --yes from a loopback HTTP mirror (${r.stderr.trim() || 'ok'})`);
-  check(versions().filter(name => name.startsWith('.alp-old-')).length === 1, `only the latest aside copy is kept (${versions().join(', ')})`);
+  // With alpd running (the native alpd started above) every aside copy stays: alpd may still run from one (pruneVersions keepAside).
+  check(versions().filter(name => name.startsWith('.alp-old-')).length === (native ? 2 : 1), `${native ? 'the aside copies a running alpd may use are kept' : 'only the latest aside copy is kept'} (${versions().join(', ')})`);
   check((await alp(['--version'])).stdout.trim() === version, 'alp still runs after the HTTP update');
 
   // install.sh again (an upgrade of an existing install) keeps one version and the command.
@@ -111,8 +120,16 @@ try {
     r = await runCmd('sh', [path.join(ROOT, 'install.sh'), '--base-url', mirror, '--dir', bin, '--root', root, '--no-modify-path']);
     check(r.code === 0 && (await alp(['--version'])).stdout.trim() === version, 'rerunning install.sh over an install works');
   }
+  if (native) {
+    // The alpd started before the updates still answers; a restart runs app/current/bin/alpd again.
+    check((await alp(['daemon', 'status'])).stdout.includes('ready'), 'the native alpd kept running through the updates');
+    r = await alp(['daemon', 'restart']);
+    check(r.code === 0 && daemonEntry() === path.join(app, 'current', 'bin', windows ? 'alpd.exe' : 'alpd'), `alp daemon restart runs the updated native alpd (${r.stdout.trim()} ${r.stderr.trim()})`);
+    check((await alp(['daemon', 'stop'])).stdout.includes('stopped'), 'alp daemon stop');
+  }
   log('ok');
 } finally {
   server?.close();
+  if (native && existsSync(installed)) await alp(['daemon', 'stop']);
   await rm(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

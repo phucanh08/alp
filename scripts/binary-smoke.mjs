@@ -28,7 +28,10 @@ const windows = process.platform === 'win32';
 const launcher = path.join(bundle, 'bin', windows ? 'alp.cmd' : 'alp');
 // The bundle's own Node and CLI (bin/alp runs exactly this); Windows starts alp.cmd only through a shell.
 const { command: node, args: cliArgs } = bundleCommand(bundle);
-const alpd = path.join(bundle, 'lib/node_modules/@anhlp/alp-cli/dist/alpd.js');
+const manifest = JSON.parse(await readFile(path.join(bundle, 'alp-bundle.json'), 'utf8'));
+// The native alpd (t-81b0.9) where the bundle ships one, else alpd.js on the bundle's Node.
+const native = manifest.daemon === 'native';
+const alpd = native ? path.join(bundle, 'bin', windows ? 'alpd.exe' : 'alpd') : path.join(bundle, 'lib/node_modules/@anhlp/alp-cli/dist/alpd.js');
 const log = message => console.log(`[binary-smoke] ${message}`);
 const run = promisify(execFile);
 const work = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-binary-smoke-')));
@@ -47,6 +50,9 @@ const check = (condition, message) => { if (!condition) throw new Error(message)
 try {
   await mkdir(home, { mode: 0o700 });
   await writeFile(path.join(home, 'settings.json'), JSON.stringify({ dashboard: { permissions: ['terminal.exec'] } }));
+  // The stand-in ACP agent of the bridge check below (a provider of the user's library).
+  await mkdir(path.join(home, 'providers'), { recursive: true });
+  await writeFile(path.join(home, 'providers', 'fakeacp.json'), JSON.stringify({ kind: 'acp', label: 'Fake ACP', command: path.join(ROOT, 'packages/daemon/tests/support/fake-acp.js') }));
   check(await alp(['--version']) === version, 'alp --version');
   check((await run(launcher, ['--version'], { env, timeout: 60_000, shell: windows })).stdout.trim() === version, 'the launcher runs the bundle');
   if (!windows) {
@@ -58,17 +64,27 @@ try {
   const sdk = readdirSync(path.join(bundle, 'lib/node_modules/@anthropic-ai'));
   check(sdk.includes('claude-agent-sdk') && !sdk.some(name => name.startsWith('claude-agent-sdk-')), `the Claude Agent SDK is bundled without its native claude (${sdk.join(', ')})`);
   const { findDaemonEntry } = await import('@anhlp/alp-client/index');
-  check(await findDaemonEntry({ home: path.join(work, 'none'), env: { PATH: path.join(bundle, 'bin') } }) === alpd, 'discovery finds alpd.js behind the launcher on PATH');
+  check(native === existsSync(path.join(bundle, 'bin', windows ? 'alpd.exe' : 'alpd')), `alp-bundle.json says daemon ${manifest.daemon} and bin/ agrees`);
+  check(await findDaemonEntry({ home: path.join(work, 'none'), env: { PATH: path.join(bundle, 'bin') } }) === alpd, `discovery finds ${native ? 'the native alpd' : 'alpd.js'} behind the launcher on PATH`);
   const project = path.join(work, 'project');
   await mkdir(project);
   await alp(['init', project]);
   check(existsSync(path.join(project, '.alp', 'ALP.md')) || existsSync(path.join(project, 'ALP.md')), 'alp init writes its templates');
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
   await alp(['terminal', 'allow', '--yes']);
-  check(/running \(pid \d+\)/.test(await alp(['daemon', 'start'])), 'alp daemon start (detached alpd under the bundled Node)');
+  const started = Date.now();
+  check(/running \(pid \d+\)/.test(await alp(['daemon', 'start'])), `alp daemon start (detached ${native ? 'native alpd' : 'alpd under the bundled Node'}, ${Date.now() - started} ms)`);
   check((await alp(['daemon', 'status'])).includes('ready'), 'alp daemon status');
   const record = JSON.parse(await readFile(path.join(home, 'alpd.json'), 'utf8'));
-  check(record.entry === alpd, `the install record names the bundle's alpd.js (${record.entry})`);
+  check(record.entry === alpd, `the install record names the bundle's ${native ? 'native alpd' : 'alpd.js'} (${record.entry})`);
+  if (native && !windows) {
+    // The detached alpd is the executable itself with no script argument (no /$bunfs path, no self-spawn chain).
+    const { pid } = JSON.parse(await readFile(path.join(home, 'alpd.lock'), 'utf8'));
+    const command = (await run('ps', ['-o', 'command=', '-p', String(pid)])).stdout.trim();
+    check(command === alpd || command.startsWith(`${alpd} `) && !command.includes('$bunfs'), `the running alpd is the native executable (${command})`);
+    const children = (await run('ps', ['-A', '-o', 'ppid=,command=']).catch(() => ({ stdout: '' }))).stdout.split('\n').filter(line => line.trim().startsWith(`${pid} `) && line.includes(alpd));
+    check(children.length === 0, 'the native alpd started no copy of itself');
+  }
   const url = await alp(['dashboard', '--print'], project);
   const token = url.split('#token=')[1];
   const base = url.replace(/\/#.*$/, '');
@@ -118,6 +134,17 @@ try {
     await client.request('session.prompt', { sessionId: claude.session.id, clientMessageId: 'smoke-2', content: [{ type: 'text', text: 'hello' }] });
     for (let i = 0; !events.includes('turn.ended') && i < 400; i++) await new Promise(resolve => setTimeout(resolve, 25));
     check(events.includes('turn.ended') && payloads.some(text => text.includes('ok 1: hello')), 'a provider turn with the fake Claude through the bundled Claude Agent SDK');
+    // An ACP agent (a JavaScript stand-in, run by its shebang) gets alpd's MCP bridge and runs it: the
+    // native alpd must hand it a Node that evaluates the bridge's -e source, not itself (t-81b0.9).
+    if (!windows) {
+      events.length = 0; payloads.length = 0;
+      const acp = await client.request('session.create', { spec: { cwd: project, model: 'acp:fakeacp', agent: 'main' }, history: 'skip' });
+      await client.request('session.prompt', { sessionId: acp.session.id, clientMessageId: 'smoke-3', content: [{ type: 'text', text: 'hello' }] });
+      for (let i = 0; !events.includes('turn.ended') && i < 600; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      const reply = payloads.join('\n').match(/bridge (\S+) tools ([^"\\]*)|bridge failed: [^"\\]*/)?.[0] ?? '';
+      const bridgeNode = path.join(bundle, 'node', 'bin', 'node');
+      check(events.includes('turn.ended') && reply.startsWith(`bridge ${bridgeNode} tools `) && /alp_/.test(reply), `an ACP agent ran alpd's MCP bridge with the bundle's Node and listed alpd's tools (${reply.slice(0, 160)})`);
+    }
   } finally { client.close(); }
 
   // alp bridge acp: speaks MCP on stdio to alpd's bridge socket; here a stand-in socket that accepts the token.

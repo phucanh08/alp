@@ -1,5 +1,6 @@
 # The ALP bundle (t-1807, docs/alp/binary-install.md): ALP's npm install beside the official Node
-# release, built by scripts/build-bundle.mjs on a native runner per platform, smoked there with the
+# release, plus the native alpd (bin/alpd, bun --compile, t-81b0.9) on macOS and Linux, built by
+# scripts/build-bundle.mjs on a native runner per platform, smoked there with the
 # runner's Node driving it (scripts/binary-smoke.mjs, scripts/binary-update-smoke.mjs: install.sh or
 # install.ps1, then alp update) and with no system Node at all (scripts/binary-smoke-nodeless.sh:
 # debian:bookworm-slim on Linux, `env -i PATH=/usr/bin:/bin` on macOS; scripts/binary-smoke-nodeless.ps1
@@ -62,6 +63,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The native alpd (t-81b0.9, scripts/build-alpd-native.mjs) is compiled with the Bun that
+      # apps/desktop/package.json pins; Windows keeps alpd.js on the bundle's Node and needs no Bun.
+      - if: runner.os != 'Windows'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
       - name: The runner is the platform (native build and smoke, no emulation)
         run: |
           node -e 'const want = process.argv[1]; const have = `${process.platform}-${process.arch}`; if (have !== want) { console.error(`runner is ${have}, platform ${want}`); process.exit(1); }' '${{ matrix.host }}'
@@ -96,6 +103,9 @@ jobs:
         run: node scripts/package-binary.mjs pack --bundle "$BUNDLE" --out dist/release
       - name: Size
         run: |
+          if [ -f "$BUNDLE/bin/alpd" ]; then
+            echo "bin/alpd (native alpd): $(wc -c < "$BUNDLE/bin/alpd" | tr -d ' ') bytes; $(file -b "$BUNDLE/bin/alpd")" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
           for archive in dist/release/*.tar.gz dist/release/*.zip; do
             [ -f "$archive" ] || continue
             size=$(wc -c < "$archive" | tr -d ' ')

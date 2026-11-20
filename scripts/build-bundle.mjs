@@ -6,6 +6,8 @@
 //
 //   alp-<version>-<platform>/
 //     bin/alp (sh) | bin/alp.cmd (Windows)   launcher: node/…/node lib/node_modules/@anhlp/alp-cli/dist/cli.js
+//     bin/alpd                               the native alpd (t-81b0.9, scripts/build-alpd-native.mjs) on the
+//                                            platforms in NATIVE_PLATFORMS; elsewhere alpd is alpd.js on node/
 //     node/bin/node | node/node.exe          + node/LICENSE
 //     lib/node_modules/…                     @anhlp/alp-cli and its production dependencies
 //     alp-bundle.json  LICENSE  NOTICE  THIRD-PARTY-NOTICES.txt
@@ -14,6 +16,7 @@
 // ALP always runs the user's own `claude` (or ALP_CLAUDE_BIN).
 //
 //   node scripts/build-bundle.mjs [--platform darwin-arm64] [--out dist/bundle] [--no-build] [--node-cache dir]
+//                                 [--bun path] [--no-native-daemon]
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -22,6 +25,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { spawnCommand } from './spawn-command.mjs';
+import { buildNativeDaemon, NATIVE_PLATFORMS, pinnedBun } from './build-alpd-native.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 export const PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64', 'windows-x64'];
@@ -130,7 +134,7 @@ async function prune(modules, platform) {
 }
 
 /** THIRD-PARTY-NOTICES.txt: Node's licence, then the notices of the bundled JavaScript. */
-async function notices(nodeLicense) {
+async function notices(nodeLicense, bunVersion) {
   const parts = [`Third-party software in the ALP bundle
 
 node/ is the official Node.js release (https://nodejs.org), under the licence below. lib/node_modules
@@ -138,6 +142,8 @@ holds ALP's npm dependencies, each with its own licence file; the notices of the
 into @anhlp/alp-cli's dist follow Node's.
 `];
   parts.push(`\n${'='.repeat(100)}\nNode.js\n${'='.repeat(100)}\n\n${nodeLicense.trim()}\n`);
+  // The native alpd (t-81b0.9) is the Bun runtime with alpd's JavaScript inside.
+  if (bunVersion) parts.push(`\n${'='.repeat(100)}\nBun ${bunVersion} (bin/alpd)\n${'='.repeat(100)}\n\nbin/alpd is built with \`bun build --compile\` and contains the Bun runtime ${bunVersion}\n(https://github.com/oven-sh/bun, MIT License, Copyright (c) Jarred Sumner and Oven contributors).\nBun statically links JavaScriptCore and WebKit's bmalloc/WTF (LGPL-2.1, source at\nhttps://github.com/oven-sh/WebKit) and other third-party libraries; their licences are listed at\nhttps://bun.com/docs/project/licensing. The JavaScript inside bin/alpd is the same as\nlib/node_modules/@anhlp/alp-cli/dist/alpd.js plus @anthropic-ai/claude-agent-sdk, whose notices follow\nor ship in lib/node_modules.\n`);
   for (const source of ['packages/cli/dist/THIRD-PARTY-NOTICES.txt', 'packages/cli/dist/alp-dashboard/THIRD-PARTY-NOTICES.txt']) {
     const text = await readFile(path.join(ROOT, source), 'utf8').catch(() => { throw new Error(`${source} is missing; run npm run build first`); });
     parts.push(`\n${'='.repeat(100)}\n${source}\n${'='.repeat(100)}\n\n${text.trim()}\n`);
@@ -147,9 +153,10 @@ into @anhlp/alp-cli's dist follow Node's.
 
 /**
  * Builds the bundle directory and returns its path.
- * @param {{ platform: string, out: string, build?: boolean, nodeCache?: string }} options
+ * @param {{ platform: string, out: string, build?: boolean, nodeCache?: string, bun?: string, nativeDaemon?: boolean }} options
+ * nativeDaemon: build bin/alpd (default: on the platforms in NATIVE_PLATFORMS)
  */
-export async function buildBundle({ platform, out, build = true, nodeCache = path.join(ROOT, '.cache/node') }) {
+export async function buildBundle({ platform, out, build = true, nodeCache = path.join(ROOT, '.cache/node'), bun, nativeDaemon = NATIVE_PLATFORMS.includes(platform) }) {
   if (!PLATFORMS.includes(platform)) throw new Error(`Unsupported platform ${platform}; expected one of ${PLATFORMS.join(', ')}`);
   const windows = platform.startsWith('windows-');
   if (build) run('npm', ['run', 'build'], { stdio: 'inherit' });
@@ -202,18 +209,20 @@ export async function buildBundle({ platform, out, build = true, nodeCache = pat
     await mkdir(path.join(directory, 'bin'));
     if (windows) await writeFile(path.join(directory, 'bin/alp.cmd'), WINDOWS_LAUNCHER);
     else { await writeFile(path.join(directory, 'bin/alp'), POSIX_LAUNCHER); await chmod(path.join(directory, 'bin/alp'), 0o755); }
-    await writeFile(path.join(directory, 'alp-bundle.json'), `${JSON.stringify({ name: 'alp', version, platform, node: node.version }, null, 2)}\n`);
+    // 5. The native alpd: alp starts it instead of alpd.js when it is there (packages/core/src/packaged.js daemonEntry).
+    if (nativeDaemon) await buildNativeDaemon({ platform, out: path.join(directory, 'bin/alpd'), version, ...(bun ? { bun } : {}) });
+    await writeFile(path.join(directory, 'alp-bundle.json'), `${JSON.stringify({ name: 'alp', version, platform, node: node.version, daemon: nativeDaemon ? 'native' : 'node' }, null, 2)}\n`);
     await copyFile(path.join(ROOT, 'LICENSE'), path.join(directory, 'LICENSE'));
     await copyFile(path.join(ROOT, 'NOTICE'), path.join(directory, 'NOTICE'));
-    await writeFile(path.join(directory, 'THIRD-PARTY-NOTICES.txt'), await notices(nodeLicense));
+    await writeFile(path.join(directory, 'THIRD-PARTY-NOTICES.txt'), await notices(nodeLicense, nativeDaemon ? await pinnedBun() : undefined));
   } finally { await rm(work, { recursive: true, force: true }); }
   console.log(`Built ${directory} (ALP ${version}, ${platform})`);
   return directory;
 }
 
 async function main() {
-  const { values } = parseArgs({ options: { platform: { type: 'string' }, out: { type: 'string' }, 'no-build': { type: 'boolean' }, 'node-cache': { type: 'string' } } });
-  await buildBundle({ platform: values.platform ?? hostPlatform(), out: path.resolve(values.out ?? path.join(ROOT, 'dist/bundle')), build: !values['no-build'], ...(values['node-cache'] ? { nodeCache: path.resolve(values['node-cache']) } : {}) });
+  const { values } = parseArgs({ options: { platform: { type: 'string' }, out: { type: 'string' }, 'no-build': { type: 'boolean' }, 'node-cache': { type: 'string' }, bun: { type: 'string' }, 'no-native-daemon': { type: 'boolean' } } });
+  await buildBundle({ platform: values.platform ?? hostPlatform(), out: path.resolve(values.out ?? path.join(ROOT, 'dist/bundle')), build: !values['no-build'], ...(values['node-cache'] ? { nodeCache: path.resolve(values['node-cache']) } : {}), ...(values.bun ? { bun: values.bun } : {}), ...(values['no-native-daemon'] ? { nativeDaemon: false } : {}) });
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.filename)) await main();

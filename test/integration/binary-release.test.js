@@ -207,3 +207,18 @@ test('build-bundle pins exactly the third-party packages the lockfile holds at o
   } });
   assert.deepEqual(Object.fromEntries(pins), { a: '1.0.0', '@s/b': '2.0.0' });
 });
+
+test('the native alpd (t-81b0.9): Bun targets per platform, Windows excluded, and the build-path leak check', async () => {
+  const { bunTarget, leakedPaths, NATIVE_PLATFORMS, pinnedBun } = await import('../../scripts/build-alpd-native.mjs');
+  assert.deepEqual(NATIVE_PLATFORMS, ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64']);
+  assert.equal(bunTarget('darwin-arm64'), 'bun-darwin-arm64');
+  assert.equal(bunTarget('darwin-x64'), 'bun-darwin-x64-baseline');
+  assert.equal(bunTarget('linux-x64'), 'bun-linux-x64-baseline');
+  assert.equal(bunTarget('linux-arm64'), 'bun-linux-arm64');
+  assert.throws(() => bunTarget('windows-x64'), /No native alpd for windows-x64/);
+  assert.match(await pinnedBun(), /^\d+\.\d+\.\d+$/);
+  const bytes = Buffer.from('...\0/$bunfs/root/alpd\0/home/ci/work/alp/packages/daemon/src/main.ts\0...');
+  assert.deepEqual(leakedPaths(bytes, ['/home/ci/work/alp', '/tmp/alpd-native-x']), ['/home/ci/work/alp']);
+  assert.deepEqual(leakedPaths(Buffer.from('C:/a/alp/x'), ['C:\\a\\alp']), ['C:/a/alp'], 'a Windows path is also looked for with forward slashes');
+  assert.deepEqual(leakedPaths(bytes, ['', '/a']), [], 'empty and very short paths are not looked for');
+});
