@@ -10,7 +10,8 @@ would read:** R2 (Claude, C1–C9) passed; R7 on macOS (real worktrees and `alp_
 Claude) passed; **R1 (Codex) did not pass**: in two runs C8 could not be judged, because the
 answer `alp run` printed for C4 was main's reply to the supervisor's check-in instead of the
 answer to the question, and in the second run C6 failed (`alp run` ended before a permission
-question). R5 (the Paseo plugin, which needs a person and Paseo 0.11.x) and the Linux rows R3, R4,
+question). A control run of R1 on the published beta.8 tarballs shows the same C4 answer (a reply
+to the supervisor), so that is not new in beta.9. R5 (the Paseo plugin, which needs a person and Paseo 0.11.x) and the Linux rows R3, R4,
 R6 and R7's Linux half were not run.
 
 **Upgrading from beta.8:**
@@ -91,12 +92,11 @@ Not in this release:
   `alp dashboard` (beta.8 and earlier) to update (PRs #337, #338, #339, #341, #342). Publishing
   it, and installing a missing ALP from the app, come in a later release.
 - Native alpd on Windows (see above).
-- **Paseo 0.16 and later:** Paseo 0.16 lets a client ask for the terminals of every workspace at
-  once (a terminal subscription without a working directory). If such a request reaches the
-  plugin, it answers with an empty list, so ALP's terminals may be missing from that view; per-workspace terminal
-  lists are not affected. Seen in the compatibility check against the newest Paseo SDK (0.16.2),
-  which fails to typecheck since 0.16.0 (2026-11-16); beta.8 is affected the same way. Not tried in
-  a running Paseo 0.16.
+- **Paseo 0.16 and later:** the plugin fails to typecheck against the newest Paseo SDK (0.16.2;
+  failing since 0.16.0, 2026-11-16, and beta.8 the same way). Paseo 0.16 lets a client ask for the
+  terminals of every workspace at once, without a working directory, and the plugin refuses a
+  terminal request without one, so the all-workspaces terminal list may not show ALP's terminals.
+  Per-workspace terminal lists are not affected. Not verified on a live Paseo 0.16.
 - Still as in beta.8: the Claude Agent SDK's own bundled zod is inside the advisory range (accepted
   residual risk, [zod-advisory.md](zod-advisory.md)); Antigravity's own read tools are not confined
   to the workspace; remote mode (`@anhlp/alp-gateway`) is not published.
