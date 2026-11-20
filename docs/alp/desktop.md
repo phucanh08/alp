@@ -1,7 +1,7 @@
 # ALP desktop (macOS, MVP)
 
-> **Trạng thái:** t-81b0.2 phần 1 (khung) và phần 2 (tự kết nối lại), chưa phát hành, chưa có DMG.
-> Quyết định: D32 (`plans/reference/DECISIONS.md`). E2E và đóng gói DMG là các phần sau.
+> **Trạng thái:** t-81b0.2 phần 1 (khung), phần 2 (tự kết nối lại) và phần 3 (e2e Electron), chưa
+> phát hành, chưa có DMG. Quyết định: D32 (`plans/reference/DECISIONS.md`). Đóng gói DMG là phần sau.
 
 App desktop là một **vỏ mỏng** bằng Electron bọc quanh ALP mà người dùng đã cài. Nó không mang theo
 alpd, gateway hay app web: nó chạy `alp web --print` của người dùng, lệnh này khởi động hoặc gắn vào
@@ -102,7 +102,8 @@ Connect again.
 `bun.lock` riêng và không phụ thuộc package `@anhlp/*` nào; `npm ci` và runner test gốc không chạy
 nó. Test của nó (`apps/desktop/test`, `bun:test`) được miễn khỏi luật bố cục test trong
 `test/integration/layout.test.js` chỉ khi script `test` của nó là `bun test test`; job CI
-`desktop-macos` chạy `bun install --frozen-lockfile`, `bun test test`, typecheck và build. Lệnh: xem `apps/desktop/README.md` (`bun install`, `bun test test`, `bun run build`,
+`desktop-macos` chạy `bun install --frozen-lockfile`, `bun test test`, typecheck và build, rồi
+`npm ci`, `node scripts/build-workspace.mjs cli` và e2e (`bun run e2e`). Lệnh: xem `apps/desktop/README.md` (`bun install`, `bun test test`, `bun run build`,
 `bun run start`).
 
 Shell của agent trong môi trường này có `ELECTRON_RUN_AS_NODE=1`: phải bỏ biến này khi chạy Electron
@@ -110,8 +111,40 @@ Shell của agent trong môi trường này có `ELECTRON_RUN_AS_NODE=1`: phải
 bằng một host dùng một lần (`ALP_HOME` tạm) và một `alp` giả in địa chỉ của host đó, không bao giờ
 dùng `~/.alp` của người dùng (`ALP_DESKTOP_ALP`, `ALP_DESKTOP_USER_DATA`).
 
+### 5.1 E2E
+
+`apps/desktop/e2e/shell.spec.mjs` (`node --test`, tên `*.spec.mjs` như `apps/web/e2e`, nên runner
+gốc và luật bố cục test không chọn nó) chạy app Electron thật bằng `_electron` của `playwright-core`
+(lấy từ cài đặt gốc) và gồm hai thành phần:
+
+- **Host dùng một lần:** `packages/cli/dist/alp-web.js --service` đã build từ checkout này, chạy với
+  `ALP_HOME` và `HOME` tạm, `web.port` riêng và `ALP_SUPERVISE=0`, nên không có alpd. Biến session
+  của agent (`ALP_AGENT_SESSION`…) bị bỏ bằng `hermeticEnv` của `scripts/test-lib.mjs`, giống runner
+  test gốc; alp-web không bao giờ thấy `~/.alp`.
+- **`alp` giả:** một script shell in địa chỉ của host đó, báo lỗi hoặc chờ trước khi in, được chỉ tới
+  qua `ALP_DESKTOP_ALP`.
+
+Các ca kiểm tra:
+
+- kết nối, và app web lấy token ra khỏi địa chỉ;
+- trang chưa cài `alp`;
+- trang lỗi của `alp`;
+- mở lại cửa sổ từ Dock trong lúc đang kết nối;
+- Connect again khi không còn cửa sổ;
+- load bị thay thế mà thất bại không che kết nối mới;
+- trang đầu tiên không tải được thì cửa sổ vẫn hiện;
+- instance thứ hai khi không có cửa sổ;
+- `alp-web` khởi động lại trên port khác;
+- `alp web rotate` trên cùng port.
+
+Teardown dùng `defer` của `test/support/teardown.js`: đóng Electron, dừng host, rồi mới xóa thư mục.
+
+```sh
+npm ci && node scripts/build-workspace.mjs cli   # ở gốc repo
+cd apps/desktop && bun run e2e
+```
+
 ## 6. Chưa có trong bản này
 
-E2e Playwright (phần 3);
 DMG ký ad-hoc (arm64, x64) và Electron fuses; `alp web --print --json`; dừng `alp web` khi thoát app;
 ký và notarize; Windows và Linux; mang alpd theo app.

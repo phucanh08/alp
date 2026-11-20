@@ -10,6 +10,7 @@
     "build": "bun build src/main.ts --target=node --format=cjs --external electron --outfile dist/main.cjs && rm -rf dist/pages && cp -R src/pages dist/pages",
     "start": "bun run build && env -u ELECTRON_RUN_AS_NODE electron .",
     "test": "bun test test",
+    "e2e": "bun run build && node --test --test-concurrency=1 e2e/shell.spec.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
