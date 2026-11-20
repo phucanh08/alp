@@ -26,7 +26,7 @@ const isFile = file => stat(file).then(info => info.isFile(), () => false);
  */
 async function desktopPackage(dir) {
   for (const candidate of [path.join(dir, 'apps', 'desktop'), dir]) {
-    const manifest = await readFile(path.join(candidate, 'package.json'), 'utf8').then(text => JSON.parse(text), () => undefined);
+    const manifest = await readFile(path.join(candidate, 'package.json'), 'utf8').then(text => { try { return JSON.parse(text); } catch { return undefined; } }, () => undefined);
     if (manifest?.name === 'alp-desktop') return candidate;
   }
   return undefined;
