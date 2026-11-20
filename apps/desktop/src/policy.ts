@@ -1,5 +1,5 @@
 /**
- * What the window may do. It shows one origin, the alp web service's, and nothing else: navigation
+ * What the window may do. It shows one origin, the alp dashboard service's, and nothing else: navigation
  * elsewhere is refused, new windows are refused, and only https links may go to the user's browser.
  */
 
@@ -27,7 +27,7 @@ export function isAllowedExternal(target: string): boolean {
   } catch { return false; }
 }
 
-/** Permissions the alp web page may have: only writing plain text to the clipboard (Copy buttons). */
+/** Permissions the alp dashboard page may have: only writing plain text to the clipboard (Copy buttons). */
 const PERMITTED = new Set(['clipboard-sanitized-write']);
 
 /** Whether a permission request or check from `requestingUrl` is granted while showing `origin`. */

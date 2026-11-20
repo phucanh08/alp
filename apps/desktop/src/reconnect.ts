@@ -1,15 +1,15 @@
 /**
- * Keeping the window on a live alp web (docs/alp/desktop.md §3.1). Once an alp web page has loaded,
+ * Keeping the window on a live alp dashboard (docs/alp/desktop.md §3.1). Once an alp dashboard page has loaded,
  * the shell watches it: it asks GET <origin>/readyz every few seconds, and main.ts reports a failed
- * reload and a token the gateway refused (401 from POST /v1/tickets, after `alp web rotate`). Then it
- * runs `alp web --print` again, which starts alp web if it is down, and loads the address it prints.
+ * reload and a token the gateway refused (401 from POST /v1/tickets, after `alp dashboard rotate`). Then it
+ * runs `alp dashboard --print` again, which starts alp dashboard if it is down, and loads the address it prints.
  *
- * - alpd restarting is not a reason: alp web keeps answering (/readyz 503) and the page reconnects to
- *   its gateway by itself. Only alp web not answering HTTP at all (stopped, crashed, moved port) is.
+ * - alpd restarting is not a reason: alp dashboard keeps answering (/readyz 503) and the page reconnects to
+ *   its gateway by itself. Only alp dashboard not answering HTTP at all (stopped, crashed, moved port) is.
  * - One recovery at a time: triggers while one is pending or running are dropped (debounce).
  * - Attempts wait 1, 2, 4, 8, 16, then 30 seconds; after `maxAttempts` the shell gives up and shows
  *   the error page, where File › Connect again starts over. The count restarts only after a page has
- *   stayed up for `stableMs`, so an alp web that fails again at once cannot cause a storm.
+ *   stayed up for `stableMs`, so an alp dashboard that fails again at once cannot cause a storm.
  * - A token refused again by an address alp still prints is given up at once: reloading it would
  *   only be refused again. main.ts reports a 401 only from a document committed for the address it
  *   loaded, so a late 401 from the page being replaced cannot count against the new one.
@@ -17,8 +17,8 @@
  *
  * Pure apart from the injected dependencies, so tests drive it with fake timers.
  */
-import type { Connect } from './alp-web';
-import type { AlpWebAddress } from './url';
+import type { Connect } from './dashboard';
+import type { DashboardAddress } from './url';
 
 export type Trigger = 'down' | 'load-failed' | 'token-rejected';
 export type ReconnectState = 'idle' | 'watching' | 'waiting' | 'resolving' | 'loading';
@@ -30,12 +30,12 @@ export type Timers = {
 };
 
 export type ReconnectDeps = {
-  /** Runs `alp web --print` (connectAlpWeb). */
+  /** Runs `alp dashboard --print` (connectDashboard). */
   resolve(): Promise<Connect>;
-  /** Whether alp web at `origin` answers HTTP at all (any status, 503 included). */
+  /** Whether alp dashboard at `origin` answers HTTP at all (any status, 503 included). */
   probe(origin: string): Promise<boolean>;
   /** Starts loading `address`; the outcome comes back through loaded() or loadFailed(). */
-  load(address: AlpWebAddress): void;
+  load(address: DashboardAddress): void;
   /** Recovery is over without a page: show why (missing alp, alp's error, or `message`). */
   giveUp(result: Connect | undefined, message: string): void;
   timers?: Timers;
@@ -43,7 +43,7 @@ export type ReconnectDeps = {
 
 export type ReconnectOptions = {
   pollMs?: number;
-  /** Consecutive failed probes that mean alp web is down (one can be a slow answer). */
+  /** Consecutive failed probes that mean alp dashboard is down (one can be a slow answer). */
   failuresToTrigger?: number;
   backoffMs?: readonly number[];
   maxAttempts?: number;
@@ -69,7 +69,7 @@ const realTimers: Timers = {
 
 export class Reconnector {
   #state: ReconnectState = 'idle';
-  #address: AlpWebAddress | undefined;
+  #address: DashboardAddress | undefined;
   /** Bumped by stop() and each new phase; a callback from an older one does nothing. */
   #epoch = 0;
   #timer: unknown;
@@ -89,13 +89,13 @@ export class Reconnector {
 
   get state(): ReconnectState { return this.#state; }
   get attempts(): number { return this.#attempts; }
-  /** Whether a failure of an alp web load is this machine's to handle (not an error page's). */
+  /** Whether a failure of an alp dashboard load is this machine's to handle (not an error page's). */
   get active(): boolean { return this.#state !== 'idle'; }
 
-  /** An alp web page finished loading: watch it. */
-  loaded(address: AlpWebAddress) {
+  /** An alp dashboard page finished loading: watch it. */
+  loaded(address: DashboardAddress) {
     // A recovery waiting or asking alp goes on: a page that loaded meanwhile (a reload) does not
-    // say alp web is back, and the attempt checks that itself.
+    // say alp dashboard is back, and the attempt checks that itself.
     if (this.#state === 'waiting' || this.#state === 'resolving') return;
     const fresh = this.#state === 'idle';
     this.#enter('watching');
@@ -116,7 +116,7 @@ export class Reconnector {
     this.#attempts = 0;
   }
 
-  /** Something says alp web is gone or the page lost it. Ignored unless a page is watched or loading. */
+  /** Something says alp dashboard is gone or the page lost it. Ignored unless a page is watched or loading. */
   trigger(reason: Trigger) {
     if (this.#state === 'watching') {
       if (this.#timers.now() - this.#since >= this.#options.stableMs) this.#attempts = 0;
@@ -157,7 +157,7 @@ export class Reconnector {
 
   #scheduleAttempt() {
     if (this.#attempts >= this.#options.maxAttempts) {
-      this.#giveUp(undefined, 'ALP web stopped answering, and reconnecting did not work. Start ALP, then choose Connect again.');
+      this.#giveUp(undefined, 'ALP dashboard stopped answering, and reconnecting did not work. Start ALP, then choose Connect again.');
       return;
     }
     const { backoffMs } = this.#options;
@@ -178,18 +178,18 @@ export class Reconnector {
     }
     if (mine !== this.#epoch) return;
     if (!result.ok) {
-      // Missing alp will not fix itself; alp's own error might (alp web still starting).
+      // Missing alp will not fix itself; alp's own error might (alp dashboard still starting).
       if ('missing' in result || this.#attempts >= this.#options.maxAttempts) this.#giveUp(result, '');
       else this.#scheduleAttempt();
       return;
     }
     const same = result.address.url === this.#address?.url;
     if (same && this.#reason === 'token-rejected') {
-      this.#giveUp(undefined, 'ALP web refused its own access token. Run `alp web rotate`, then choose Connect again.');
+      this.#giveUp(undefined, 'ALP dashboard refused its own access token. Run `alp dashboard rotate`, then choose Connect again.');
       return;
     }
     if (same && this.#reason === 'down') {
-      // alp web is back on the same address and token: the page reconnects to it by itself.
+      // alp dashboard is back on the same address and token: the page reconnects to it by itself.
       let up = false;
       try { up = await this.#deps.probe(result.address.origin); } catch { up = false; }
       if (mine !== this.#epoch) return;

@@ -83,10 +83,10 @@ if (result.problems.length) {
   console.error(`[release-pack] A5 failed on the packed artifacts in ${out}:\n- ${result.problems.join('\n- ')}`);
   process.exit(1);
 }
-// Beside A5: the CLI's alp web files (alp-web.js, its app and notices) are in the CLI package.
+// Beside A5: the CLI's alp dashboard files (alp-dashboard.js, its app and notices) are in the CLI package.
 const missing = result.artifacts.flatMap(artifact => shippedWebProblems(artifact.name, artifact.files.keys()));
 if (missing.length) {
-  console.error(`[release-pack] the packed artifacts in ${out} cannot run alp web:\n- ${missing.join('\n- ')}`);
+  console.error(`[release-pack] the packed artifacts in ${out} cannot run alp dashboard:\n- ${missing.join('\n- ')}`);
   process.exit(1);
 }
 console.log(`[release-pack] ${artifacts.length} tarballs, ${SUMS_FILE} and ${MANIFEST_FILE} in ${out}`);

@@ -9,7 +9,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repository = path.resolve(here, '../..');
 const { version } = JSON.parse(readFileSync(path.join(here, 'package.json'), 'utf8'));
 
-// Port 7435 beside the gateway's 7434; the existing `alp web` (7433) is left alone.
+// Port 7435 beside the gateway's 7434; the existing `alp dashboard` (7433) is left alone.
 export default defineConfig({
   root: here,
   plugins: [tailwindcss(), browserBoundary({ repository })],

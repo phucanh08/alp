@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync, chmodSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { run } from '../src/run';
-import { isExecutable } from '../src/alp-web';
+import { isExecutable } from '../src/dashboard';
 
 const scratch = mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'alp-desktop-run-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));

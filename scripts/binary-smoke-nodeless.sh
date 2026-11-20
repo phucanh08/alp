@@ -34,16 +34,16 @@ log "ok: alp daemon start"
 "$binary" daemon status | grep -q ready || fail "alp daemon status"
 log "ok: alp daemon status"
 
-url=$(cd "$work/project" && "$binary" web --print)
-case "$url" in http://127.0.0.1:*'#token='*) ;; *) fail "alp web --print printed '$url'" ;; esac
-log "ok: alp web --print"
+url=$(cd "$work/project" && "$binary" dashboard --print)
+case "$url" in http://127.0.0.1:*'#token='*) ;; *) fail "alp dashboard --print printed '$url'" ;; esac
+log "ok: alp dashboard --print"
 if command -v curl >/dev/null 2>&1; then
   base="${url%%/#*}"
-  [ "$(curl -s -o /dev/null -w '%{http_code}' "$base/")" = 200 ] || fail "alp web does not serve its app"
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "$base/")" = 200 ] || fail "alp dashboard does not serve its app"
   [ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$base/v1/tickets")" = 401 ] || fail "a ticket without a token was not refused"
-  log "ok: alp web serves the app and gates tickets"
+  log "ok: alp dashboard serves the app and gates tickets"
 fi
-web_pid=$(sed -n 's/.*"pid":[ ]*\([0-9][0-9]*\).*/\1/p' "$ALP_HOME/web.json" 2>/dev/null | head -n 1)
+web_pid=$(sed -n 's/.*"pid":[ ]*\([0-9][0-9]*\).*/\1/p' "$ALP_HOME/dashboard.json" 2>/dev/null | head -n 1)
 if [ -n "$web_pid" ]; then kill "$web_pid" 2>/dev/null || true; fi
 
 "$binary" daemon stop | grep -q stopped || fail "alp daemon stop"

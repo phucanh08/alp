@@ -70,7 +70,7 @@ describe('navigationGuard', () => {
 describe('about:blank and about:srcdoc subframes (decision: refused)', () => {
   // apps/web has no iframes. A blank or srcdoc frame would run with the page's origin outside the
   // origin check (its URL's origin is "null"), so the guard refuses it like any other target; a
-  // future iframe in apps/web must load a real URL on alp web's origin.
+  // future iframe in apps/web must load a real URL on alp dashboard's origin.
   test.each(['about:blank', 'about:srcdoc', 'about:blank#x', 'about:blank?x'])('refuses %s in a subframe and the main frame', target => {
     const guard = navigationGuard(() => ORIGIN);
     for (const isMainFrame of [true, false]) {

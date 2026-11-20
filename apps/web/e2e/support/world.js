@@ -70,7 +70,7 @@ async function stop(child) {
 /**
  * @param {{ webPort?: number, gatewayPort?: number, provider?: 'fake' | 'real', serveWeb?: boolean, worktrees?: boolean, terminal?: boolean, gateway?: boolean, settings?: object }} [options]
  *   gateway: false starts no standalone alp-gateway and creates no credentials (a spec that runs
- *   `alp web`, whose service is its own gateway). settings: the host's settings.json.
+ *   `alp dashboard`, whose service is its own gateway). settings: the host's settings.json.
  *   terminal (#121 H): the host's owner allows remote terminals (alp terminal allow --yes writes
  *   <home>/terminal.json, 0600) before alpd starts, alpd's shell is /bin/sh, and the credential
  *   `terminal` holds terminal.exec.

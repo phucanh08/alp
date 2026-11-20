@@ -1,6 +1,6 @@
 /**
  * The desktop shell end to end (docs/alp/desktop.md): the real Electron app, driven by Playwright's
- * `_electron`, against a disposable alp web host and a fake `alp` (./support.mjs). Run with
+ * `_electron`, against a disposable alp dashboard host and a fake `alp` (./support.mjs). Run with
  * `bun run e2e` in apps/desktop after building packages/cli (`node scripts/build-workspace.mjs cli`).
  */
 import test from 'node:test';
@@ -37,7 +37,7 @@ async function pagesShown(electronApp, during) {
   return seen;
 }
 
-test('connects to alp web, and apps/web takes the token out of the address', limit, async t => {
+test('connects to alp dashboard, and apps/web takes the token out of the address', limit, async t => {
   const { context, web, alp } = await connectedSetup(t);
   const app = await launch(t, context, alp.file);
   await connectedTo(app, web.origin);
@@ -58,12 +58,12 @@ test('no alp: the install page names the path that was tried', limit, async t =>
 test("alp's own error is shown as is, without its error: prefix", limit, async t => {
   const context = await scratch(t);
   const alp = await fakeAlp(context);
-  await alp.set("echo 'error: alp web is disabled (web.enabled is false)' >&2; exit 1");
+  await alp.set("echo 'error: alp dashboard is disabled (dashboard.enabled is false)' >&2; exit 1");
   const app = await launch(t, context, alp.file);
   await waitFor(async () => (await only(app))?.page === 'error.html', 'the error page');
   const text = await inPage(app, 'document.body.innerText');
-  assert.ok(text.includes('alp web is disabled (web.enabled is false)'), text);
-  assert.ok(!text.includes('error: alp web'), text);
+  assert.ok(text.includes('alp dashboard is disabled (dashboard.enabled is false)'), text);
+  assert.ok(!text.includes('error: alp dashboard'), text);
 });
 
 test('a window reopened from the Dock during a connect shows the newer connect, and the older one is dropped', limit, async t => {
@@ -150,7 +150,7 @@ test('L3: opening the app again with no window open opens one and connects', lim
   await connectedTo(app, web.origin);
 });
 
-test('alp web restarting on another port: the window follows it', limit, async t => {
+test('alp dashboard restarting on another port: the window follows it', limit, async t => {
   const { context, web, alp } = await connectedSetup(t);
   const app = await launch(t, context, alp.file);
   await connectedTo(app, web.origin);
@@ -163,7 +163,7 @@ test('alp web restarting on another port: the window follows it', limit, async t
   assert.equal(await inPage(app, "sessionStorage.getItem('alp-web:link-token')") === web.web.token, true);
 });
 
-test('alp web rotate: the window reloads with the new token', limit, async t => {
+test('alp dashboard rotate: the window reloads with the new token', limit, async t => {
   const { context, web, alp } = await connectedSetup(t);
   const app = await launch(t, context, alp.file);
   await connectedTo(app, web.origin);

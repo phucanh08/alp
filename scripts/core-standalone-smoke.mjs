@@ -16,10 +16,10 @@ import { corePackageProblems } from './core-package-boundary.mjs';
 import { clearCallerSession } from './test-lib.mjs';
 import { requireRelativeImports } from './relative-imports.mjs';
 
-// t-5294.3: this smoke is the installed CLI as a USER runs it, and `alp web --print` below is one of
+// t-5294.3: this smoke is the installed CLI as a USER runs it, and `alp dashboard --print` below is one of
 // the things it checks. Run from an ALP agent's shell, the inherited ALP_AGENT_SESSION made the
-// installed CLI answer "alp web is the user's: ... started by an ALP agent" instead of the expected
-// "alp web is not built" (:138, through cli-standalone-driver.mjs:43), so this script could not pass
+// installed CLI answer "alp dashboard is the user's: ... started by an ALP agent" instead of the expected
+// "alp dashboard is not built" (:138, through cli-standalone-driver.mjs:43), so this script could not pass
 // for any agent — scripts/validate.mjs exited 1 there with 145/145 test files already green. The
 // product guard is right and is untouched; inheriting the caller's session into the child is not.
 // Also for a direct `node scripts/core-standalone-smoke.mjs` / `npm run test:core:standalone`, which
@@ -74,7 +74,7 @@ try {
   for (const location of sourceManifest.workspaces) {
     mkdirSync(path.join(source, location), { recursive: true });
     // The CLI bundles the private gateway (apps/gateway) as a devDependency; a core-only copy has no
-    // apps, so such edges to workspaces left out are dropped (the CLI then builds without alp-web).
+    // apps, so such edges to workspaces left out are dropped (the CLI then builds without alp-dashboard).
     const pkg = JSON.parse(readFileSync(path.join(root, location, 'package.json'), 'utf8'));
     for (const name of Object.keys(pkg.devDependencies ?? {})) if (name.startsWith('@anhlp/alp-') && !copied.has(name)) delete pkg.devDependencies[name];
     writeFileSync(path.join(source, location, 'package.json'), `${JSON.stringify(pkg, null, 2)}\n`);

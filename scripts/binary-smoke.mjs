@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Smoke test of the ALP bundle (t-1807), in a throwaway ALP_HOME, run by the bundle's own Node:
-// its launcher, init, daemon start/status, alp web (HTTP, token gate, ticket, WebSocket), a terminal
+// its launcher, init, daemon start/status, alp dashboard (HTTP, token gate, ticket, WebSocket), a terminal
 // (the native helper; node-pty on Windows), provider turns with the fake Codex and the fake Claude
 // (the Claude Agent SDK from the bundle's node_modules), the ACP bridge subcommand, and daemon stop.
 //
@@ -33,20 +33,20 @@ const log = message => console.log(`[binary-smoke] ${message}`);
 const run = promisify(execFile);
 const work = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-binary-smoke-')));
 const home = path.join(work, 'home');
-// t-5294.3: `alp web --print` below is a user-only command, so this smoke must not inherit the ALP
-// session of an agent's shell; otherwise the installed CLI answers "alp web is the user's ... started
+// t-5294.3: `alp dashboard --print` below is a user-only command, so this smoke must not inherit the ALP
+// session of an agent's shell; otherwise the installed CLI answers "alp dashboard is the user's ... started
 // by an ALP agent" and the smoke fails for a reason that has nothing to do with the package. Same
 // mechanism as scripts/core-standalone-smoke.mjs:138; the product guard is unchanged.
 const clearedSession = clearCallerSession();
 if (clearedSession.length) log(`cleared the caller's ALP session variables, so the bundled CLI runs as the user's: ${clearedSession.join(', ')}`);
-const env = { ...process.env, ALP_HOME: home, SHELL: '/bin/sh', ALP_CODEX_BIN: path.join(ROOT, 'packages/daemon/tests/support/fake-codex.js'), ALP_CLAUDE_BIN: path.join(ROOT, 'packages/daemon/tests/support/fake-claude.js'), ALP_DAEMON_ENTRY: '', ALP_WEB_APP: '' };
-delete env.ALP_DAEMON_ENTRY; delete env.ALP_WEB_APP;
+const env = { ...process.env, ALP_HOME: home, SHELL: '/bin/sh', ALP_CODEX_BIN: path.join(ROOT, 'packages/daemon/tests/support/fake-codex.js'), ALP_CLAUDE_BIN: path.join(ROOT, 'packages/daemon/tests/support/fake-claude.js'), ALP_DAEMON_ENTRY: '', ALP_DASHBOARD_APP: '' };
+delete env.ALP_DAEMON_ENTRY; delete env.ALP_DASHBOARD_APP; delete env.ALP_WEB_APP;
 const alp = async (args, cwd = work) => (await run(node, [...cliArgs, ...args], { env, cwd, timeout: 60_000 })).stdout.trim();
 const check = (condition, message) => { if (!condition) throw new Error(message); log(`ok: ${message}`); };
 
 try {
   await mkdir(home, { mode: 0o700 });
-  await writeFile(path.join(home, 'settings.json'), JSON.stringify({ web: { permissions: ['terminal.exec'] } }));
+  await writeFile(path.join(home, 'settings.json'), JSON.stringify({ dashboard: { permissions: ['terminal.exec'] } }));
   check(await alp(['--version']) === version, 'alp --version');
   check((await run(launcher, ['--version'], { env, timeout: 60_000, shell: windows })).stdout.trim() === version, 'the launcher runs the bundle');
   if (!windows) {
@@ -69,10 +69,10 @@ try {
   check((await alp(['daemon', 'status'])).includes('ready'), 'alp daemon status');
   const record = JSON.parse(await readFile(path.join(home, 'alpd.json'), 'utf8'));
   check(record.entry === alpd, `the install record names the bundle's alpd.js (${record.entry})`);
-  const url = await alp(['web', '--print'], project);
+  const url = await alp(['dashboard', '--print'], project);
   const token = url.split('#token=')[1];
   const base = url.replace(/\/#.*$/, '');
-  check((await fetch(base)).status === 200, 'alp web serves its app over HTTP');
+  check((await fetch(base)).status === 200, 'alp dashboard serves its app over HTTP');
   check((await fetch(`${base}/v1/tickets`, { method: 'POST' })).status === 401, 'a ticket without a token is refused');
   check((await fetch(`${base}/v1/tickets`, { method: 'POST', headers: { authorization: 'Bearer alpgw1.x.y' } })).status === 401, 'a ticket with a wrong token is refused');
   const ticket = await (await fetch(`${base}/v1/tickets`, { method: 'POST', headers: { authorization: `Bearer ${token}` } })).json();
@@ -134,7 +134,7 @@ try {
   check((await alp(['daemon', 'stop'])).includes('stopped'), 'alp daemon stop');
   log('ok');
 } finally {
-  const web = await readFile(path.join(home, 'web.json'), 'utf8').then(text => JSON.parse(text).pid, () => undefined);
+  const web = await readFile(path.join(home, 'dashboard.json'), 'utf8').then(text => JSON.parse(text).pid, () => undefined);
   if (web) try { process.kill(web, 'SIGTERM'); } catch {}
   await run(node, [...cliArgs, 'daemon', 'stop'], { env, timeout: 20_000 }).catch(() => {});
   await rm(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

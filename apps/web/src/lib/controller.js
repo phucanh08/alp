@@ -243,7 +243,7 @@ export function initialState(gateway = '') {
  *   terminalOptions?: Partial<import('./terminal.js').TerminalOptions>,
  *   linkStorage?: import('./link-token.js').TokenStorage,
  * }} ControllerOptions
- *   linkStorage: where this tab keeps the token of the address `alp web` opened (sessionStorage,
+ *   linkStorage: where this tab keeps the token of the address `alp dashboard` opened (sessionStorage,
  *   lib/link-token.js); the controller forgets it there when the gateway refuses it or the person
  *   disconnects or connects with another token.
  *   terminalStorage: where a terminal tab keeps its terminal's id for the page (sessionStorage), so a
@@ -442,10 +442,10 @@ export class Controller {
 
   /**
    * Connects to a gateway with an access token. The token stays in memory until disconnect().
-   * `link`: the token came from the address `alp web` opened (lib/link-token.js) and this tab keeps
+   * `link`: the token came from the address `alp dashboard` opened (lib/link-token.js) and this tab keeps
    * it in linkStorage. Nobody is at a form then, so the first connection retries a host that is not
    * up yet instead of failing, and a refused token is forgotten with a message saying to run
-   * `alp web` again. A connection without `link` (the form) forgets a kept link token.
+   * `alp dashboard` again. A connection without `link` (the form) forgets a kept link token.
    * @param {{ url: string, token: string, link?: boolean }} input
    */
   connect({ url, token, link = false }) {
@@ -513,7 +513,7 @@ export class Controller {
    * Ends the connection and forgets the token and everything the host sent. Its terminals end too
    * (terminal.close), except when the page is going away (`keepTerminals`, a reload): the host keeps
    * them for reconnectMs, and the reloaded page attaches them again. The token this tab kept from
-   * an `alp web` link is forgotten too, except when the page is going away (`keepLink`, a reload
+   * an `alp dashboard` link is forgotten too, except when the page is going away (`keepLink`, a reload
    * connects with it again).
    * @param {{ keepTerminals?: boolean, keepLink?: boolean }} [options]
    */
@@ -572,7 +572,7 @@ export class Controller {
     }
     if (state === 'waiting') {
       // The first connection gets one try: the person is looking at the form and wants to know.
-      // A link's has nobody at a form: it waits for the host (alp web starting, restarting).
+      // A link's has nobody at a form: it waits for the host (alp dashboard starting, restarting).
       if (!run.opened && !run.link) return this.#fail(error ?? new Error('Could not connect.'));
       if (!run.opened) {
         this.#set({ connection: { ...connection, phase: 'connecting', error: error ? describe(error) : undefined } });

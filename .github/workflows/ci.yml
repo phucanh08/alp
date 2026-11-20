@@ -118,11 +118,11 @@ jobs:
       # The win32 terminal owner: unit tests, then a real cmd.exe through node-pty/ConPTY (the "ConPTY:" tests run only here).
       - run: node scripts/run-tests.mjs --private-home packages/daemon/tests/windows-terminal.test.js
       - run: node scripts/test-package.mjs gateway --private-home
-      - run: node scripts/run-tests.mjs --private-home packages/cli/tests/alp-web.test.js
+      - run: node scripts/run-tests.mjs --private-home packages/cli/tests/alp-dashboard.test.js
       # npm install -g of the packed wrapper into a throwaway prefix: npm's alp.cmd runs, and alpd is found through it (t-1f14).
       - run: node scripts/npm-wrapper-smoke.mjs
 
-  # The standalone browser app (apps/web, docs/alp/web.md): types, unit tests, the bundle's SDK-only
+  # The standalone browser app (apps/web, docs/alp/dashboard.md): types, unit tests, the bundle's SDK-only
   # boundary, then Playwright against a real gateway and alpd with a fake provider on random ports.
   alp-web:
     needs: terminal-native
@@ -177,7 +177,7 @@ jobs:
 
   # The macOS desktop shell (apps/desktop, D32): a standalone bun project outside the npm workspaces,
   # so the root runner never sees its tests. Unit tests, typecheck, the bundle, then the Electron e2e
-  # against a disposable alp web host built from this checkout (packages/cli/dist/alp-web.js), with
+  # against a disposable alp dashboard host built from this checkout (packages/cli/dist/alp-dashboard.js), with
   # Playwright's _electron from the root install.
   desktop-macos:
     runs-on: macos-latest

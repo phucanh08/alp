@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import type { Connect } from '../src/alp-web';
+import type { Connect } from '../src/dashboard';
 import { DEFAULTS, Reconnector, type Timers } from '../src/reconnect';
-import type { AlpWebAddress } from '../src/url';
+import type { DashboardAddress } from '../src/url';
 
 const TOKEN = `alpgw1.${'a'.repeat(16)}.${'b'.repeat(43)}`;
-const address = (port: number, token = TOKEN): AlpWebAddress => ({ url: `http://127.0.0.1:${port}/#token=${token}`, origin: `http://127.0.0.1:${port}` });
+const address = (port: number, token = TOKEN): DashboardAddress => ({ url: `http://127.0.0.1:${port}/#token=${token}`, origin: `http://127.0.0.1:${port}` });
 const A = address(7433);
 const MOVED = address(7434);
 const ROTATED = address(7433, `alpgw1.${'c'.repeat(16)}.${'d'.repeat(43)}`);
@@ -38,7 +38,7 @@ function fakeTimers() {
 
 function setup(options: { up?: () => boolean; resolve?: () => Connect | Promise<Connect> } = {}) {
   const clock = fakeTimers();
-  const calls = { resolve: 0, probe: 0, loads: [] as AlpWebAddress[], giveUps: [] as { result: Connect | undefined; message: string }[] };
+  const calls = { resolve: 0, probe: 0, loads: [] as DashboardAddress[], giveUps: [] as { result: Connect | undefined; message: string }[] };
   let up = options.up ?? (() => true);
   let resolveWith = options.resolve ?? ((): Connect => ({ ok: true, address: A }));
   const reconnector = new Reconnector({
@@ -89,7 +89,7 @@ describe('Reconnector', () => {
     expect(calls.resolve).toBe(1);
   });
 
-  test('alp web restarted on a new port: the new address is loaded, and watching resumes once it loads', async () => {
+  test('alp dashboard restarted on a new port: the new address is loaded, and watching resumes once it loads', async () => {
     const { reconnector, calls, clock, setUp, setResolve } = setup();
     reconnector.loaded(A);
     setUp(() => false);
@@ -105,7 +105,7 @@ describe('Reconnector', () => {
     expect(calls.probe).toBe(probes + 1);
   });
 
-  test('alp web back on the same address and token: no reload, the page reconnects by itself', async () => {
+  test('alp dashboard back on the same address and token: no reload, the page reconnects by itself', async () => {
     let upNow = true;
     const { reconnector, calls, clock, setUp } = setup({ up: () => upNow });
     reconnector.loaded(A);
@@ -134,13 +134,13 @@ describe('Reconnector', () => {
     await clock.advance(DEFAULTS.backoffMs[0]);
     expect(calls.loads).toEqual([]);
     expect(calls.giveUps).toHaveLength(1);
-    expect(calls.giveUps[0].message).toContain('alp web rotate');
+    expect(calls.giveUps[0].message).toContain('alp dashboard rotate');
     expect(reconnector.state).toBe('idle');
     await clock.advance(120_000);
     expect(calls.resolve).toBe(1);
   });
 
-  test('triggers during a recovery are dropped: one alp web --print at a time (debounce)', async () => {
+  test('triggers during a recovery are dropped: one alp dashboard --print at a time (debounce)', async () => {
     let finish: (value: Connect) => void = () => {};
     const { reconnector, calls, clock } = setup({ up: () => false, resolve: () => new Promise<Connect>(r => { finish = r; }) });
     reconnector.loaded(A);
@@ -179,11 +179,11 @@ describe('Reconnector', () => {
   });
 
   test('alp failing keeps retrying with backoff, then hands alp\'s error to giveUp', async () => {
-    const { reconnector, calls, clock } = setup({ up: () => false, resolve: () => ({ ok: false, error: 'alp web is disabled' }) });
+    const { reconnector, calls, clock } = setup({ up: () => false, resolve: () => ({ ok: false, error: 'alp dashboard is disabled' }) });
     reconnector.loaded(A);
     await clock.advance(POLL * 2 + 200_000);
     expect(calls.resolve).toBe(DEFAULTS.maxAttempts);
-    expect(calls.giveUps).toEqual([{ result: { ok: false, error: 'alp web is disabled' }, message: '' }]);
+    expect(calls.giveUps).toEqual([{ result: { ok: false, error: 'alp dashboard is disabled' }, message: '' }]);
   });
 
   test('missing alp is given up at the first attempt', async () => {

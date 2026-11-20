@@ -104,7 +104,7 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
         export function spawnSync(command, args, options) {
           // The npm wrapper (runs @anhlp/alp-cli): prints the fixture version.
           if (String(args[0]).endsWith('alp.js') && args[1] === '--version') return { status: 0, stdout: '0.0.0-fixture\\n', stderr: '' };
-          if (args[1] === 'web' && args[2] === '--print') {
+          if (args[1] === 'dashboard' && args[2] === '--print') {
             for (const role of ['daemon', 'web']) {
               const result = realSpawnSync(process.execPath, [path.join(process.env.FIXTURE_BASE, 'launch.mjs'), role, options.env.ALP_HOME], { env: options.env });
               if (result.status !== 0) throw new Error('fixture launch failed');
@@ -131,9 +131,9 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
       console.log(JSON.stringify({ scenario, ownedProcesses: pids.map(entry => ({ ...entry, alive: alive(entry.pid) })) }));
       assert.equal(await readFile(path.join(base, 'wrong-order'), 'utf8').catch(() => undefined), undefined, 'web must exit before daemon stop');
       const settings = JSON.parse(await readFile(scenario === 'package-startup-failure' ? path.join(base, 'package-settings.json') : path.join(pids[0].home, 'settings.json'), 'utf8'));
-      // The CLI rejects any home whose settings fail this production check (web.port 1024–65535).
+      // The CLI rejects any home whose settings fail this production check (dashboard.port 1024–65535).
       assert.doesNotThrow(() => validateUserSettings(settings, 'fixture settings.json'));
-      assert.ok(Number.isInteger(settings.web.port) && settings.web.port >= 1024 && settings.web.port <= 65535, `web.port ${settings.web.port}`);
+      assert.ok(Number.isInteger(settings.dashboard.port) && settings.dashboard.port >= 1024 && settings.dashboard.port <= 65535, `dashboard.port ${settings.dashboard.port}`);
       assert.equal(settings.web.relay.enabled, false);
     } finally {
       // Test failure must not reproduce the leak in the test runner itself.

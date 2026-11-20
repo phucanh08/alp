@@ -21,7 +21,7 @@ function rememberedGateway() {
   return defaultGatewayAddress({ location: window.location, remembered, dev: DEV });
 }
 
-/** The page `alp web` opened, connecting with the token from its address (it retries until alp web is up). */
+/** The page `alp dashboard` opened, connecting with the token from its address (it retries until alp dashboard is up). */
 function LinkConnecting() {
   const controller = useController();
   const { connection } = useAppState();
@@ -37,7 +37,7 @@ function LinkConnecting() {
         </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner label="Connecting…" />
-          {connection.attempt > 1 ? <span>Waiting for alp web (attempt {connection.attempt})</span> : null}
+          {connection.attempt > 1 ? <span>Waiting for alp dashboard (attempt {connection.attempt})</span> : null}
         </div>
         {connection.error ? <p className="text-sm text-muted-foreground">{connection.error.message}</p> : null}
         <Button size="sm" variant="ghost" onClick={() => controller.disconnect()}>Use another access token</Button>
@@ -54,7 +54,7 @@ export function ConnectScreen() {
   const [token, setToken] = React.useState('');
   const connecting = connection.phase === 'connecting';
   const error = connection.phase === 'failed' ? connection.error : undefined;
-  // The address `alp web` opened is connecting with its token: nothing to type.
+  // The address `alp dashboard` opened is connecting with its token: nothing to type.
   if (connecting && connection.link) return <LinkConnecting />;
 
   const submit = (event: React.FormEvent) => {
@@ -100,7 +100,7 @@ export function ConnectScreen() {
           <div className="mt-3 space-y-2">
             {servedByAlpWeb({ location: window.location, dev: DEV }) ? (
               <>
-                <p>On this machine, run <code className="font-mono">alp web</code>: it opens this page with a link that signs you in. <code className="font-mono">alp web --print</code> prints the link instead, and <code className="font-mono">alp web rotate</code> replaces its token, signing out every open page.</p>
+                <p>On this machine, run <code className="font-mono">alp dashboard</code>: it opens this page with a link that signs you in. <code className="font-mono">alp dashboard --print</code> prints the link instead, and <code className="font-mono">alp dashboard rotate</code> replaces its token, signing out every open page.</p>
                 <p>To use a standalone gateway instead, create a token for the workspaces you want to open, then start the gateway with this page's address as an allowed origin:</p>
               </>
             ) : (

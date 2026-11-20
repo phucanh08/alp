@@ -17,9 +17,9 @@ function tabStorage(): TokenStorage | undefined {
   try { return window.sessionStorage; } catch { return undefined; }
 }
 
-// The address `alp web` opened carries its token in the fragment (#token=alpgw1.…): taken out of the
+// The address `alp dashboard` opened carries its token in the fragment (#token=alpgw1.…): taken out of the
 // address bar first, before anything renders, and kept in this tab's sessionStorage only, so a
-// reload of this tab connects again (lib/link-token.js, docs/alp/web.md §4.2).
+// reload of this tab connects again (lib/link-token.js, docs/alp/dashboard.md §4.2).
 const linkStorage = tabStorage();
 const link = takeLinkToken({ location: window.location, history: window.history, storage: linkStorage });
 

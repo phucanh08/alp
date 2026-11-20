@@ -26,22 +26,22 @@ try {
   const lock = await readLock(home);
   const client = await connect(lock.socket);
   try { assert.equal((await client.request('daemon.status')).pid, lock.pid); } finally { client.close(); }
-  // alp web runs alp-web, which ships in the CLI as dist/alp-web.js: no optional integration is
+  // alp dashboard runs alp-dashboard, which ships in the CLI as dist/alp-dashboard.js: no optional integration is
   // needed. A CLI built from a core-only source (no apps/gateway or apps/web, as
-  // core-standalone-smoke builds it) has no alp-web and must say so; package-smoke covers the full build.
+  // core-standalone-smoke builds it) has no alp-dashboard and must say so; package-smoke covers the full build.
   let webChecked;
-  if (existsSync(path.join(path.dirname(cli), 'alp-web.js'))) {
-    const printed = run('web', '--print').trim().split('\n').pop();
+  if (existsSync(path.join(path.dirname(cli), 'alp-dashboard.js'))) {
+    const printed = run('dashboard', '--print').trim().split('\n').pop();
     const match = /^(http:\/\/127\.0\.0\.1:\d+)\/#token=(alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43})$/.exec(printed);
-    assert.ok(match, `alp web --print: ${printed}`);
+    assert.ok(match, `alp dashboard --print: ${printed}`);
     const ticket = await fetch(`${match[1]}/v1/tickets`, { method: 'POST', headers: { authorization: `Bearer ${match[2]}` } });
     assert.equal(ticket.status, 201, 'the printed token is a live credential');
     await ticket.body?.cancel();
-    assert.equal(JSON.parse(await readFile(path.join(home, 'web.json'), 'utf8')).app, 'alp-web');
-    webChecked = 'alp web (alp-web)';
+    assert.equal(JSON.parse(await readFile(path.join(home, 'dashboard.json'), 'utf8')).app, 'alp-dashboard');
+    webChecked = 'alp dashboard (alp-dashboard)';
   } else {
-    assert.throws(() => run('web', '--print'), /alp web is not built: .*alp-web\.js is missing/);
-    webChecked = 'alp web refused (core-only build: no alp-web)';
+    assert.throws(() => run('dashboard', '--print'), /alp dashboard is not built: .*alp-dashboard\.js is missing/);
+    webChecked = 'alp dashboard refused (core-only build: no alp-dashboard)';
   }
   run('daemon', 'status');
 
@@ -74,9 +74,9 @@ try {
   console.log(`INSTALLED_CLI_OK init/upgrade + daemon + IPC + ${webChecked} + ACP stdio handshake/prompt/stream; no Paseo`);
 } finally {
   child?.kill();
-  // alp-web keeps alpd up; stop it first (its own lock and web.json name it), then alpd.
-  const web = await readFile(path.join(home, 'web.json'), 'utf8').then(JSON.parse, () => undefined);
-  if (web?.app === 'alp-web' && Number.isSafeInteger(web.pid)) {
+  // alp-dashboard keeps alpd up; stop it first (its own lock and dashboard.json name it), then alpd.
+  const web = await readFile(path.join(home, 'dashboard.json'), 'utf8').then(JSON.parse, () => undefined);
+  if (web?.app === 'alp-dashboard' && Number.isSafeInteger(web.pid)) {
     try { process.kill(web.pid, 'SIGTERM'); } catch {}
     for (let i = 0; i < 200; i++) { try { process.kill(web.pid, 0); } catch { break; } await new Promise(resolve => setTimeout(resolve, 50)); }
   }

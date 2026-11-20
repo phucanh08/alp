@@ -11,7 +11,7 @@ import { MAX_FRAME } from '@anhlp/alp-client/index';
  * bridge. The socket needs the token kept in $ALP_HOME/paseo.json, which is also the password
  * Paseo's app asks for. Only `daemon.get_status` (which reports this address) and
  * token-authenticated Paseo sockets use this listener; relay sockets attach to the bridge directly.
- * It served Paseo's web app (paseo-web) until that app was removed (t-55ce.3); `alp web` now serves
+ * It served Paseo's web app (paseo-web) until that app was removed (t-55ce.3); `alp dashboard` now serves
  * ALP's own app (apps/web), so this listener answers plain HTTP requests with 404. Requests must
  * name this host and port (no DNS rebinding). Only clients without an Origin header may open
  * the socket; browser origins are refused now that this listener serves no browser app.
@@ -64,7 +64,7 @@ async function lastIdentity(home: string) {
 }
 
 /** What every plain HTTP request gets: there is no page here. */
-const NO_PAGE = 'Not found: this is the Paseo bridge\'s socket, not a web page. Open ALP\'s web app with `alp web`.\n';
+const NO_PAGE = 'Not found: this is the Paseo bridge\'s socket, not a web page. Open ALP\'s web app with `alp dashboard`.\n';
 
 export function createWebServer({ gateway: given, app, home, port = 0, log = () => {} }: {
   /** The bridge each authenticated socket is attached to; without it the socket is refused. */

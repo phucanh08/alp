@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { parseAlpWebOutput, validateAlpWebUrl } from '../src/url';
+import { parseDashboardOutput, validateDashboardUrl } from '../src/url';
 
 const TOKEN = `alpgw1.${'0123456789abcdef'}.${'A'.repeat(42)}_`;
 const GOOD = `http://127.0.0.1:7433/#token=${TOKEN}`;
 
-describe('validateAlpWebUrl', () => {
-  test('accepts the address alp web prints, with its origin', () => {
-    expect(validateAlpWebUrl(GOOD)).toEqual({ url: GOOD, origin: 'http://127.0.0.1:7433' });
+describe('validateDashboardUrl', () => {
+  test('accepts the address alp dashboard prints, with its origin', () => {
+    expect(validateDashboardUrl(GOOD)).toEqual({ url: GOOD, origin: 'http://127.0.0.1:7433' });
   });
   test.each([
     ['https', GOOD.replace('http:', 'https:')],
@@ -30,16 +30,16 @@ describe('validateAlpWebUrl', () => {
     ['no token', 'http://127.0.0.1:7433/'],
     ['empty', ''],
   ])('refuses %s', (_name, text) => {
-    expect(validateAlpWebUrl(text)).toBeUndefined();
+    expect(validateDashboardUrl(text)).toBeUndefined();
   });
 });
 
-describe('parseAlpWebOutput', () => {
+describe('parseDashboardOutput', () => {
   test('takes the last non-empty line', () => {
-    expect(parseAlpWebOutput(`Starting alpd…\n${GOOD}\n\n`)?.url).toBe(GOOD);
+    expect(parseDashboardOutput(`Starting alpd…\n${GOOD}\n\n`)?.url).toBe(GOOD);
   });
   test('refuses output whose last line is not an address', () => {
-    expect(parseAlpWebOutput(`${GOOD}\nsomething else\n`)).toBeUndefined();
-    expect(parseAlpWebOutput('')).toBeUndefined();
+    expect(parseDashboardOutput(`${GOOD}\nsomething else\n`)).toBeUndefined();
+    expect(parseDashboardOutput('')).toBeUndefined();
   });
 });

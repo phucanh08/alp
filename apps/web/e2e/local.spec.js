@@ -1,10 +1,10 @@
-// `alp web` end to end (docs/alp/web.md §4.2): a real alpd with the fake Codex in a temporary home,
-// the built CLI's `alp web --print` starting the alp-web service (dist/alp-web.js serving
-// dist/alp-web) on a free loopback port, and `alp run` making a session. The browser opens the
+// `alp dashboard` end to end (docs/alp/dashboard.md §4.2): a real alpd with the fake Codex in a temporary home,
+// the built CLI's `alp dashboard --print` starting the alp-dashboard service (dist/alp-dashboard.js serving
+// dist/alp-dashboard) on a free loopback port, and `alp run` making a session. The browser opens the
 // printed address, whose fragment carries the token: the app connects by itself (no form), takes the
 // token out of the address, keeps it in this tab's sessionStorage only, connects again after a
-// reload, reconnects by itself when alp-web changes the grant (4403), and after `alp web rotate`
-// shows the connect form with a message to run `alp web` again. No fixed waits: every step waits
+// reload, reconnects by itself when alp-dashboard changes the grant (4403), and after `alp dashboard rotate`
+// shows the connect form with a message to run `alp dashboard` again. No fixed waits: every step waits
 // for what it needs, in the page or on the host.
 import { expect, test } from '@playwright/test';
 import { execFile } from 'node:child_process';
@@ -22,17 +22,17 @@ let world;
 let env;
 test.beforeAll(async () => {
   const port = await freePort();
-  world = await startWorld({ serveWeb: false, gateway: false, settings: { web: { port, relay: { enabled: false } } } });
-  // The alp-web service: this test's alpd (no supervision of its own) and a fast registry refresh,
+  world = await startWorld({ serveWeb: false, gateway: false, settings: { dashboard: { port }, web: { relay: { enabled: false } } } });
+  // The alp-dashboard service: this test's alpd (no supervision of its own) and a fast registry refresh,
   // so a new project changes the grant within a moment.
-  env = { ...world.env, ALP_SUPERVISE: '0', ALP_WEB_GRANT_REFRESH_MS: '200' };
-  delete env.ALP_WEB_APP;
+  env = { ...world.env, ALP_SUPERVISE: '0', ALP_DASHBOARD_GRANT_REFRESH_MS: '200' };
+  delete env.ALP_DASHBOARD_APP;
 });
 test.afterAll(async () => {
   if (!world) return;
   await closeWorldAfter(world, async () => {
-    // alp-web before alpd: it holds a socket to alpd and the browser's connections.
-    const info = await readFile(path.join(world.home, 'web.json'), 'utf8').then(JSON.parse, () => undefined);
+    // alp-dashboard before alpd: it holds a socket to alpd and the browser's connections.
+    const info = await readFile(path.join(world.home, 'dashboard.json'), 'utf8').then(JSON.parse, () => undefined);
     if (info?.pid) {
       try { process.kill(info.pid, 'SIGTERM'); } catch {}
       await expect.poll(() => { try { process.kill(info.pid, 0); return true; } catch { return false; } }, { timeout: 15_000 }).toBe(false);
@@ -71,10 +71,10 @@ const storage = page => page.evaluate(() => ({
   session: Object.fromEntries(Object.keys(sessionStorage).map(key => [key, sessionStorage.getItem(key)])),
 }));
 
-test('alp web opens the app connected by its link token, kept in the tab only; rotate ends it', async ({ page, browser }) => {
+test('alp dashboard opens the app connected by its link token, kept in the tab only; rotate ends it', async ({ page, browser }) => {
   test.setTimeout(240_000);
   // A session made from the CLI, before the browser opens.
-  // Run in the project, as `alp web` is: both name it by its real path (the temporary directory may
+  // Run in the project, as `alp dashboard` is: both name it by its real path (the temporary directory may
   // be reached through a symbolic link, /var -> /private/var on macOS). `alp run` ends its session
   // when the turn is over: the sidebar lists closed sessions too.
   const project = await realpath(world.projects.main);
@@ -85,7 +85,7 @@ test('alp web opens the app connected by its link token, kept in the tab only; r
   const session = sessions[0];
   const title = session.title || session.id;
 
-  const printed = await alp('web', '--print');
+  const printed = await alp('dashboard', '--print');
   const link = LINK.exec(printed.trim());
   expect(link, printed).not.toBeNull();
   const [url, , token] = link;
@@ -116,7 +116,7 @@ test('alp web opens the app connected by its link token, kept in the tab only; r
   expect(await page.evaluate(() => window.__alp)).toEqual({ hashAtLoad: false, formSeen: false });
   expect((await storage(page)).local).not.toContain('alpgw1');
 
-  // alp-web follows alpd's registry: a new project changes the grant, the gateway closes the page's
+  // alp-dashboard follows alpd's registry: a new project changes the grant, the gateway closes the page's
   // socket with 4403, and the page reconnects with the same token, the new project now granted.
   await mkdir(path.join(world.directory, 'projects', 'added'), { recursive: true });
   const added = await realpath(path.join(world.directory, 'projects', 'added'));
@@ -128,25 +128,25 @@ test('alp web opens the app connected by its link token, kept in the tab only; r
   await expect(sessionRow(page, title)).toBeVisible();
   expect(await page.evaluate(() => window.__alp.formSeen)).toBe(false);
 
-  // alp web rotate: the old tab's token is refused once the service is back, so the page forgets it
+  // alp dashboard rotate: the old tab's token is refused once the service is back, so the page forgets it
   // and shows the connect form saying why.
-  await alp('web', 'rotate');
-  await expect(page.getByRole('alert')).toHaveText(/no longer valid.*alp web/, { timeout: 60_000 });
+  await alp('dashboard', 'rotate');
+  await expect(page.getByRole('alert')).toHaveText(/no longer valid.*alp dashboard/, { timeout: 60_000 });
   await expect(tokenInput(page)).toBeVisible();
   await expect(page.getByLabel('Gateway address')).toHaveValue(origin);
   stored = await storage(page);
   expect(stored.session['alp-web:link-token']).toBeUndefined();
   expect(stored.local).not.toContain('alpgw1');
-  // Reloading does not try the old token again; the form still names alp web's own address, and
-  // its help points to alp web.
+  // Reloading does not try the old token again; the form still names alp dashboard's own address, and
+  // its help points to alp dashboard.
   await page.reload();
   await expect(tokenInput(page)).toBeVisible();
   await expect(page.getByLabel('Gateway address')).toHaveValue(origin);
   await page.getByText('Getting a token').click();
-  await expect(page.getByText(/run alp web: it opens this page/)).toBeVisible();
+  await expect(page.getByText(/run alp dashboard: it opens this page/)).toBeVisible();
 
   // The new link works in a new tab.
-  const fresh = LINK.exec((await alp('web', '--print')).trim());
+  const fresh = LINK.exec((await alp('dashboard', '--print')).trim());
   expect(fresh?.[2]).toBeTruthy();
   expect(fresh[2]).not.toBe(token);
   const other = await browser.newPage();
@@ -156,9 +156,9 @@ test('alp web opens the app connected by its link token, kept in the tab only; r
   expect(await other.evaluate(() => location.hash)).toBe('');
   await other.close();
 
-  // Nothing carried either token out: console, page errors, request URLs, Referer; nor alp-web's log.
+  // Nothing carried either token out: console, page errors, request URLs, Referer; nor alp-dashboard's log.
   for (const secret of [token, fresh[2], 'alpgw1.']) expect(leaks.filter(entry => entry.includes(secret))).toEqual([]);
-  const log = await readFile(path.join(world.home, 'logs', 'integrations', 'alp-web.log'), 'utf8').catch(() => '');
+  const log = await readFile(path.join(world.home, 'logs', 'integrations', 'alp-dashboard.log'), 'utf8').catch(() => '');
   expect(log).not.toContain(token);
   expect(log).not.toContain(fresh[2]);
 });

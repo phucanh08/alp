@@ -1,6 +1,6 @@
-// The token in the address `alp web` opens (docs/alp/web.md §4.2): parsed from the fragment, taken
+// The token in the address `alp dashboard` opens (docs/alp/dashboard.md §4.2): parsed from the fragment, taken
 // out of the address at once, kept in this tab's sessionStorage (never localStorage), and what the
-// controller does with it: a refused token is forgotten with a message to run `alp web` again, a
+// controller does with it: a refused token is forgotten with a message to run `alp dashboard` again, a
 // socket the gateway closes with 4403 (grant changed) reconnects with the same token by itself.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -140,7 +140,7 @@ test('a socket closed with 4403 (grant changed) reconnects with the same token a
   await until(() => w.state().connection.phase === 'open' && w.state().principal, 'open');
   assert.equal(w.state().connection.link, true);
   assert.deepEqual(w.state().principal.workspaces, ['/w/a', '/w/b']);
-  // alp-web's grant follows alpd's registry: a new project, then the gateway closes every socket of the credential.
+  // alp-dashboard's grant follows alpd's registry: a new project, then the gateway closes every socket of the credential.
   w.host.principal = { ...w.host.principal, workspaces: ['/w/a', '/w/b', '/w/c'], workspaceRoots: [...w.host.principal.workspaceRoots, { path: '/w/c', canonical: '/w/c' }] };
   const opens = w.host.opens;
   for (const connection of [...w.host.connections]) connection.end({ code: 4403, reason: 'credential grant changed' });
@@ -150,17 +150,17 @@ test('a socket closed with 4403 (grant changed) reconnects with the same token a
   assert.equal(storage.items.get(LINK_TOKEN_KEY), TOKEN, 'still kept for a reload');
 });
 
-test('a link token the gateway refuses is forgotten, with a message to run alp web again', async t => {
+test('a link token the gateway refuses is forgotten, with a message to run alp dashboard again', async t => {
   const storage = memoryStorage({ [LINK_TOKEN_KEY]: TOKEN });
   const w = setup(t, storage);
   w.controller.connect({ url: 'http://127.0.0.1:7433', token: TOKEN, link: true });
   await until(() => w.state().connection.phase === 'open', 'open');
-  // alp web rotate: the service restarts, the old token is refused.
+  // alp dashboard rotate: the service restarts, the old token is refused.
   w.host.refuse = new AuthenticationError();
   w.host.drop();
   await until(() => w.state().connection.phase === 'failed', 'failed');
   assert.equal(w.state().connection.error.message, LINK_TOKEN_INVALID);
-  assert.match(LINK_TOKEN_INVALID, /no longer valid.*alp web/);
+  assert.match(LINK_TOKEN_INVALID, /no longer valid.*alp dashboard/);
   assert.equal(w.state().connection.error.message.includes(TOKEN), false);
   assert.equal(storage.items.has(LINK_TOKEN_KEY), false, 'a reload shows the form instead of trying it again');
   assert.equal(w.state().principal, null);
@@ -240,13 +240,13 @@ test('showError shows the connect form with a message', t => {
   assert.equal(w.state().connection.error.message, LINK_NOT_LOOPBACK);
 });
 
-test('the connect form defaults to the page origin on alp web\'s loopback page, else to the standalone gateway', () => {
+test('the connect form defaults to the page origin on alp dashboard\'s loopback page, else to the standalone gateway', () => {
   const at = href => page(href).location;
-  // alp web serves the app and its gateway on one loopback listener: the page's origin is the gateway.
+  // alp dashboard serves the app and its gateway on one loopback listener: the page's origin is the gateway.
   assert.equal(defaultGatewayAddress({ location: at('http://127.0.0.1:7433/') }), 'http://127.0.0.1:7433');
   assert.equal(defaultGatewayAddress({ location: at('http://localhost:9000/?x=1') }), 'http://localhost:9000');
   assert.equal(servedByAlpWeb({ location: at('http://127.0.0.1:7433/') }), true);
-  // Vite's dev server sits beside a standalone gateway; a page elsewhere is not alp web's.
+  // Vite's dev server sits beside a standalone gateway; a page elsewhere is not alp dashboard's.
   assert.equal(defaultGatewayAddress({ location: at('http://127.0.0.1:7435/'), dev: true }), STANDALONE_GATEWAY);
   assert.equal(servedByAlpWeb({ location: at('http://127.0.0.1:7435/'), dev: true }), false);
   assert.equal(defaultGatewayAddress({ location: at('https://alp.example.com/') }), STANDALONE_GATEWAY);

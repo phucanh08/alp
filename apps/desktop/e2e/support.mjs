@@ -1,8 +1,8 @@
 /**
- * The desktop e2e's fixtures (docs/alp/desktop.md §5): a disposable alp web host and a fake `alp`.
+ * The desktop e2e's fixtures (docs/alp/desktop.md §5): a disposable alp dashboard host and a fake `alp`.
  *
- * - The host is the built service, packages/cli/dist/alp-web.js, run under a scratch ALP_HOME (and
- *   HOME) with its own web.port and ALP_SUPERVISE=0: the real listener, built app and link token,
+ * - The host is the built service, packages/cli/dist/alp-dashboard.js, run under a scratch ALP_HOME (and
+ *   HOME) with its own dashboard.port and ALP_SUPERVISE=0: the real listener, built app and link token,
  *   with no alpd. Never the user's ~/.alp.
  * - The fake `alp` is a shell script the test rewrites at will: it prints the host's address, fails,
  *   or waits first. The app finds it through ALP_DESKTOP_ALP.
@@ -24,7 +24,7 @@ import { hermeticEnv } from '../../../scripts/test-lib.mjs';
 
 export const APP = path.resolve(import.meta.dirname, '..');
 const ROOT = path.resolve(APP, '..', '..');
-export const SERVICE = process.env.ALP_DESKTOP_E2E_SERVICE || path.join(ROOT, 'packages/cli/dist/alp-web.js');
+export const SERVICE = process.env.ALP_DESKTOP_E2E_SERVICE || path.join(ROOT, 'packages/cli/dist/alp-dashboard.js');
 /** The Electron binary of apps/desktop's own install (require('electron') gives its path). */
 const ELECTRON = createRequire(path.join(APP, 'package.json'))('electron');
 
@@ -39,7 +39,7 @@ export async function waitFor(probe, what, timeoutMs = 30_000) {
   }
 }
 
-/** A loopback port that is free right now (alp web tries it and the next nine), other than `not`. */
+/** A loopback port that is free right now (alp dashboard tries it and the next nine), other than `not`. */
 export async function freePort(...not) {
   for (;;) {
     const port = await anyFreePort();
@@ -75,9 +75,9 @@ function cleanEnv() {
 }
 
 /**
- * A disposable alp web host. `start(port)` runs the service on that web.port and resolves once
- * web.json names it; `stop()` ends it (SIGTERM, its graceful exit); `rotate()` replaces the token
- * the way `alp web rotate` does (the service must be stopped).
+ * A disposable alp dashboard host. `start(port)` runs the service on that dashboard.port and resolves once
+ * dashboard.json names it; `stop()` ends it (SIGTERM, its graceful exit); `rotate()` replaces the token
+ * the way `alp dashboard rotate` does (the service must be stopped).
  */
 export async function host(t, { dir, defer }) {
   const home = path.join(dir, 'home');
@@ -87,7 +87,7 @@ export async function host(t, { dir, defer }) {
   defer(() => processes.stop());
   const env = { ...cleanEnv(), ...processes.env, HOME: dir, ALP_SUPERVISE: '0' };
   let child;
-  const log = () => readFile(path.join(home, 'logs', 'integrations', 'alp-web.log'), 'utf8').catch(() => '(no log)');
+  const log = () => readFile(path.join(home, 'logs', 'integrations', 'alp-dashboard.log'), 'utf8').catch(() => '(no log)');
   const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
   const self = {
     home,
@@ -95,15 +95,15 @@ export async function host(t, { dir, defer }) {
     get address() { return `${self.web.url}#token=${self.web.token}`; },
     get origin() { return `http://127.0.0.1:${self.web.port}`; },
     async start(port) {
-      await writeFile(path.join(home, 'settings.json'), JSON.stringify({ web: { port } }));
+      await writeFile(path.join(home, 'settings.json'), JSON.stringify({ dashboard: { port } }));
       const started = spawn(process.execPath, [SERVICE, '--service'], { env, stdio: 'ignore' });
       child = started;
       self.web = await waitFor(async () => {
-        if (started.exitCode !== null) throw new Error(`alp-web exited ${started.exitCode}:\n${await log()}`);
-        const lock = await readJson(path.join(home, 'integrations', 'web.lock')).catch(() => undefined);
-        const info = await readJson(path.join(home, 'web.json')).catch(() => undefined);
+        if (started.exitCode !== null) throw new Error(`alp-dashboard exited ${started.exitCode}:\n${await log()}`);
+        const lock = await readJson(path.join(home, 'integrations', 'dashboard.lock')).catch(() => undefined);
+        const info = await readJson(path.join(home, 'dashboard.json')).catch(() => undefined);
         return lock?.ready && lock.pid === started.pid && info?.pid === started.pid ? info : undefined;
-      }, 'alp-web to become ready');
+      }, 'alp-dashboard to become ready');
       return self;
     },
     async stop() {
@@ -118,8 +118,8 @@ export async function host(t, { dir, defer }) {
     async rotate() {
       const rotating = spawn(process.execPath, [SERVICE, '--rotate'], { env, stdio: 'ignore' });
       const [code] = await once(rotating, 'exit');
-      if (code !== 0) throw new Error(`alp-web --rotate exited ${code}:\n${await log()}`);
-      self.web = await readJson(path.join(home, 'web.json'));
+      if (code !== 0) throw new Error(`alp-dashboard --rotate exited ${code}:\n${await log()}`);
+      self.web = await readJson(path.join(home, 'dashboard.json'));
     },
   };
   defer(() => self.stop());
@@ -127,20 +127,20 @@ export async function host(t, { dir, defer }) {
 }
 
 /**
- * A fake `alp` at <dir>/bin/alp. `set(script)` replaces what `alp web --print` does (a /bin/sh
- * body); anything other than `web --print` exits 64.
+ * A fake `alp` at <dir>/bin/alp. `set(script)` replaces what `alp dashboard --print` does (a /bin/sh
+ * body); anything other than `dashboard --print` exits 64.
  */
 export async function fakeAlp({ dir }) {
   const file = path.join(dir, 'bin', 'alp');
   await mkdir(path.dirname(file), { recursive: true });
   const set = async body => {
-    await writeFile(file, `#!/bin/sh\n[ "$1 $2" = "web --print" ] || exit 64\n${body}\n`);
+    await writeFile(file, `#!/bin/sh\n[ "$1 $2" = "dashboard --print" ] || exit 64\n${body}\n`);
     await chmod(file, 0o755);
   };
   /** Prints `address` after `delay` seconds. */
   const prints = (address, delay = 0) => set(`${delay ? `sleep ${delay}\n` : ''}printf '%s\\n' '${address}'`);
   /**
-   * A stale first run: the first `alp web --print` blocks until the test calls `release()`, then
+   * A stale first run: the first `alp dashboard --print` blocks until the test calls `release()`, then
    * prints `late` and writes <dir>/bin/first-done; every later run prints `address` at once. The
    * test releases it only after the newer connect has finished, so the late answer always arrives
    * after it, however slow the machine (a fixed sleep could answer first and test nothing).
@@ -218,7 +218,7 @@ export function secondInstance(context, alp, { app = APP } = {}) {
 
 /**
  * The app's windows as the main process sees them: what each shows, never the address itself (it
- * may still carry the token). `page` is the bundled page's file name, or undefined on alp web.
+ * may still carry the token). `page` is the bundled page's file name, or undefined on alp dashboard.
  */
 export function windows(electronApp) {
   return electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map(window => {
@@ -260,7 +260,7 @@ export function closeWindows(electronApp) {
   return electronApp.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) window.close(); });
 }
 
-/** Waits until the single window shows alp web at `origin` with the token taken out by apps/web. */
+/** Waits until the single window shows alp dashboard at `origin` with the token taken out by apps/web. */
 export function connectedTo(electronApp, origin, timeoutMs = 30_000) {
   return waitFor(async () => {
     const state = await only(electronApp);
