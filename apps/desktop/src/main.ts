@@ -44,9 +44,10 @@ function loadRemote(window: BrowserWindow, address: AlpWebAddress) {
   // the page, and apps/web reads the token only when it loads, so the page is reloaded after it.
   const sameDocument = withoutFragment(window.webContents.getURL()) === withoutFragment(address.url);
   // A failed load shows up as did-fail-load; ERR_ABORTED means a newer load won.
-  return window.loadURL(address.url).catch(() => undefined).then(() => {
+  // The reload follows only a navigation that succeeded; a failed one is the reconnector's to retry.
+  return window.loadURL(address.url).then(() => {
     if (sameDocument && id === generation && !window.isDestroyed()) window.webContents.reload();
-  });
+  }, () => undefined);
 }
 
 const withoutFragment = (url: string) => url.split('#', 1)[0];
