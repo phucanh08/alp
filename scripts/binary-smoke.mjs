@@ -49,7 +49,8 @@ const check = (condition, message) => { if (!condition) throw new Error(message)
 
 try {
   await mkdir(home, { mode: 0o700 });
-  await writeFile(path.join(home, 'settings.json'), JSON.stringify({ dashboard: { permissions: ['terminal.exec'] } }));
+  // recovery.autoResume off: the kill check below finds the interrupted root parked instead of continued.
+  await writeFile(path.join(home, 'settings.json'), JSON.stringify({ dashboard: { permissions: ['terminal.exec'] }, recovery: { autoResume: false } }));
   // The stand-in ACP agent of the bridge check below (a provider of the user's library).
   await mkdir(path.join(home, 'providers'), { recursive: true });
   await writeFile(path.join(home, 'providers', 'fakeacp.json'), JSON.stringify({ kind: 'acp', label: 'Fake ACP', command: path.join(ROOT, 'packages/daemon/tests/support/fake-acp.js') }));
@@ -146,6 +147,36 @@ try {
       check(events.includes('turn.ended') && reply.startsWith(`bridge ${bridgeNode} tools `) && /alp_/.test(reply), `an ACP agent ran alpd's MCP bridge with the bundle's Node and listed alpd's tools (${reply.slice(0, 160)})`);
     }
   } finally { client.close(); }
+
+  // alpd killed mid-turn (SIGKILL) and started again: its lock is taken over, and the interrupted turn is
+  // reported as daemon_restarted, as under Node (t-81b0.9 hazard f; ALPD §66).
+  if (!windows) {
+    const { connect, readLock } = await import('@anhlp/alp-client/index');
+    const first = await readLock(home);
+    const direct = await connect(first.socket, { name: 'binary-smoke', version: '0' });
+    const started = [];
+    direct.onEvent(envelope => started.push(envelope.event.type));
+    const { session } = await direct.request('session.create', { spec: { cwd: project, model: 'codex:gpt-5.6-sol' }, history: 'skip' });
+    await direct.request('session.attach', { sessionId: session.id });
+    await direct.request('session.prompt', { sessionId: session.id, clientMessageId: 'kill-1', content: [{ type: 'text', text: 'hold on [hold]' }] });
+    for (let i = 0; !started.includes('turn.started') && i < 400; i++) await new Promise(resolve => setTimeout(resolve, 25));
+    check(started.includes('turn.started'), 'a held turn runs before the kill');
+    process.kill(first.pid, 'SIGKILL');
+    direct.close();
+    for (let i = 0; i < 200; i++) { try { process.kill(first.pid, 0); } catch { break; } await new Promise(resolve => setTimeout(resolve, 25)); }
+    check(/running \(pid \d+\)/.test(await alp(['daemon', 'start'])), 'alp daemon start after alpd was killed takes over its lock');
+    const second = await readLock(home);
+    check(second.pid !== first.pid && second.socket === first.socket, `a new alpd (pid ${second.pid}) listens on the same socket`);
+    const again = await connect(second.socket, { name: 'binary-smoke', version: '0' });
+    try {
+      const ended = [];
+      again.onEvent(envelope => { if (envelope.event.type === 'turn.ended') ended.push(envelope.event); });
+      for (let i = 0; i < 400 && !(await again.request('session.list', { includeClosed: true })).sessions.find(row => row.id === session.id)?.parked; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      await again.request('session.attach', { sessionId: session.id });
+      for (let i = 0; !ended.some(event => event.error?.code === 'daemon_restarted') && i < 400; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      check(ended.some(event => event.state === 'failed' && event.error?.code === 'daemon_restarted'), 'the restarted alpd reports the interrupted turn as daemon_restarted');
+    } finally { again.close(); }
+  }
 
   // alp bridge acp: speaks MCP on stdio to alpd's bridge socket; here a stand-in socket that accepts the token.
   if (process.platform !== 'win32') {
