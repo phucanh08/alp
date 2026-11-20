@@ -25,10 +25,11 @@ Build a small provider-neutral ALP core, integrate it with Paseo first, then sta
 | 14 | Noted for later: mains of different teams working together | `phases/14-team-of-teams.md` |
 | 15 | D30: ALP as an ACP agent (step 1), then a local web app served by alpd (steps 2–3) | `reference/DECISIONS.md` D30, `reference/ALPD.md` §60–§61 |
 | 16 | D31: the web app becomes Paseo's app over alpd: build pipeline and protocol core (steps 1–2), agents and timelines (step 3), questions as cards (step 4), "in development" for the rest, history and find in chat (step 5), projects and workspaces (step 6), ALP's panels and the team as subagents (step 7), a checkout's changes and files read-only (step 8), packaged and built in CI with the classic page gone (step 9) | `reference/DECISIONS.md` D31, `reference/ALPD.md` §62 |
+| 17 | D32: an ALP desktop app, macOS first: an Electron shell, built with bun, over the user's installed `alp web` (skeleton, then reconnect, e2e and CI, then an unsigned DMG) | `reference/DECISIONS.md` D32, `../docs/alp/desktop.md` |
 
 ## Non-goals for early phases
 
-Do not build a marketplace, broad preset role library, distributed scheduler, or custom desktop UI (D30 allows a local web app). The Paseo plugin path is validated (v0.2.0); the native `alpd` daemon is now authorized by D12. The explicitly requested main/lead/peer starter is in scope.
+Do not build a marketplace, broad preset role library, distributed scheduler, or custom desktop UI beyond the local web app (D30) and its desktop shell (D32). The Paseo plugin path is validated (v0.2.0); the native `alpd` daemon is now authorized by D12. The explicitly requested main/lead/peer starter is in scope.
 
 ## Authorized team workflow update — 2026-10-07
 
