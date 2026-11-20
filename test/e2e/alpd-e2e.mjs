@@ -10,12 +10,14 @@ import { initProject } from '../../packages/core/src/init.js';
 const model = process.env.ALP_TEST_MODEL ?? 'codex:gpt-5.6-sol';
 const home = process.env.ALP_HOME ?? await mkdtemp(path.join(tmpdir(), 'alp-e2e-'));
 const env = { ...process.env, ALP_HOME: home };
-const cli = (...args) => spawnSync(process.execPath, ['packages/cli/src/cli.js', ...args], { env, encoding: 'utf8' });
+// ALP_TEST_CLI runs another alp, such as a built bundle's bin/alp, which starts its native alpd (t-81b0.9).
+const alp = process.env.ALP_TEST_CLI ? [process.env.ALP_TEST_CLI] : [process.execPath, 'packages/cli/src/cli.js'];
+const cli = (...args) => spawnSync(alp[0], [...alp.slice(1), ...args], { env, encoding: 'utf8' });
 
 const root = path.resolve('.alp-test', `alpd-${Date.now()}`);
 await initProject(root);
 const token = `PEER_${randomUUID()}`;
-await mkdir(path.join(root, '.alp/agents/peer'), { recursive: true });
+for (const agent of ['peer', 'lead']) await mkdir(path.join(root, '.alp/agents', agent), { recursive: true });
 await writeFile(path.join(root, '.alp/agents/peer/AGENT.md'), `For this read-only integration assignment, return exactly this token: ${token}. Do not use tools or delegate.`);
 await writeFile(path.join(root, '.alp/agents/lead/AGENT.md'), 'For this integration assignment, call alp_delegate exactly once with agent peer, mode read-only, and task "Return your verification token. Do not use tools or change files." Return the complete tool result verbatim to main. Do not read files or run shell commands.');
 
@@ -32,8 +34,10 @@ const prompt = 'Integration check: use alp_delegate exactly once to assign lead 
 
 try {
   assert.equal(cli('daemon', 'start').status, 0);
+  // Which alpd ran (alp's native alpd, t-81b0.9, or alpd.js), for the evidence.
+  const daemonEntry = JSON.parse(await readFile(path.join(home, 'alpd.json'), 'utf8')).entry;
   const output = await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['packages/cli/src/cli.js', 'run', '--json', '--project', root, '--profile', 'cafe', '--model', model, '--thinking', 'low', prompt], { env });
+    const child = spawn(alp[0], [...alp.slice(1), 'run', '--json', '--project', root, '--profile', 'cafe', '--model', model, '--thinking', 'low', prompt], { env });
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => { child.kill('SIGINT'); reject(new Error('alp run timed out')); }, 300_000);
@@ -47,7 +51,7 @@ try {
   const lead = opened.find(session => session.agent === 'lead');
   const peer = opened.find(session => session.agent === 'peer');
   const final = envelopes.filter(e => e.sessionId === main.id && e.event.type === 'item' && e.event.item.kind === 'assistant_message').at(-1)?.event.item.text ?? '';
-  const evidence = { home, project: root, model, sessions: opened.map(({ id, agent, parentId }) => ({ id, agent, parentId })), final };
+  const evidence = { home, project: root, model, daemonEntry, sessions: opened.map(({ id, agent, parentId }) => ({ id, agent, parentId })), final };
   await writeFile('.alp-test/alpd-e2e.json', JSON.stringify({ ...evidence, envelopes }, null, 2));
   console.log(JSON.stringify(evidence));
   assert.equal(main.agent, 'main');
