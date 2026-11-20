@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '../../packages/core/src/init.js';
@@ -12,11 +12,13 @@ import { connect, readLock } from '../../packages/client/src/index.js';
 const model = process.env.ALP_TEST_MODEL ?? 'codex:gpt-5.6-sol';
 const home = await mkdtemp(path.join(tmpdir(), 'alp-persist-'));
 const env = { ...process.env, ALP_HOME: home, ALP_RUN_LOG_DIR: path.join(home, 'runs') };
-const cli = (...args) => spawnSync(process.execPath, ['packages/cli/src/cli.js', ...args], { env, encoding: 'utf8' });
+// ALP_TEST_CLI runs another alp, such as a built bundle's bin/alp, which starts its native alpd (t-81b0.9).
+const alp = process.env.ALP_TEST_CLI ? [process.env.ALP_TEST_CLI] : [process.execPath, 'packages/cli/src/cli.js'];
+const cli = (...args) => spawnSync(alp[0], [...alp.slice(1), ...args], { env, encoding: 'utf8' });
 
 /** Runs the CLI with --json; resolves its envelopes, or calls `onEnvelope` as they stream. */
 function stream(args, onEnvelope = () => {}) {
-  const child = spawn(process.execPath, ['packages/cli/src/cli.js', ...args, '--json'], { env });
+  const child = spawn(alp[0], [...alp.slice(1), ...args, '--json'], { env });
   const envelopes = [];
   let buffer = '';
   child.stdout.on('data', chunk => {
@@ -46,6 +48,8 @@ try {
 
   // Kill alpd while a turn runs.
   const { pid } = await readLock(home);
+  // Which alpd ran (alp's native alpd, t-81b0.9, or alpd.js), for the evidence.
+  const daemonEntry = JSON.parse(await readFile(path.join(home, 'alpd.json'), 'utf8')).entry;
   let killed = false;
   const second = stream(['send', sessionId, 'Run the shell command `sleep 90`, then reply only with DONE.'], (envelope, child) => {
     if (!killed && envelope.sessionId === sessionId && envelope.event.type === 'turn.started') {
@@ -68,7 +72,7 @@ try {
   const third = await stream(['send', sessionId, 'What was the code word I asked you to remember? Reply with the word only.']).done;
   assert.equal(third.code, 0);
   const answer = lastAnswer(third.envelopes, sessionId);
-  const evidence = { home, project: root, sessionId, word, killedPid: pid, statusAfterRestart: session.status, lastError: session.lastError, ps, answer };
+  const evidence = { home, project: root, daemonEntry, sessionId, word, killedPid: pid, statusAfterRestart: session.status, lastError: session.lastError, ps, answer };
   await writeFile('.alp-test/persistence-e2e.json', JSON.stringify(evidence, null, 2));
   console.log(JSON.stringify(evidence));
   assert.ok(answer.includes(word), 'the resumed session remembers the code word');
