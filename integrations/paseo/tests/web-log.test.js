@@ -13,7 +13,7 @@ const entry = path.resolve(import.meta.dirname, '..', 'server', 'dist', 'main.js
 const logFile = home => path.join(home, 'logs', 'integrations', 'paseo.log');
 
 // The advertised log path is what the launcher's failure messages point at. A normal, detached
-// `alp web` launch must create it and capture a startup failure there; before the fix the entry only
+// `alp dashboard` launch must create it and capture a startup failure there; before the fix the entry only
 // logged under `--service`, which the launcher never passed, so the file never appeared.
 
 function listen(port) {

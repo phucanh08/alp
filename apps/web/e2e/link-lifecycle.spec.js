@@ -13,16 +13,16 @@ const connected = page => page.getByRole('navigation', { name: 'Workspaces and s
 const kept = page => page.evaluate(key => sessionStorage.getItem(key) !== null, tokenKey);
 
 test.beforeAll(async () => {
-  world = await startWorld({ gateway: false, serveWeb: false, settings: { web: { port: await freePort(), relay: { enabled: false } } } });
+  world = await startWorld({ gateway: false, serveWeb: false, settings: { dashboard: { port: await freePort() }, web: { relay: { enabled: false } } } });
   world.env.ALP_SUPERVISE = '0';
-  delete world.env.ALP_WEB_APP;
-  url = (await world.alp('web', '--print')).trim();
+  delete world.env.ALP_DASHBOARD_APP;
+  url = (await world.alp('dashboard', '--print')).trim();
   origin = new URL(url).origin;
 });
 test.afterAll(async () => {
   if (!world) return;
   await closeWorldAfter(world, async () => {
-    const info = JSON.parse(await readFile(path.join(world.home, 'web.json'), 'utf8'));
+    const info = JSON.parse(await readFile(path.join(world.home, 'dashboard.json'), 'utf8'));
     try { process.kill(info.pid, 'SIGTERM'); } catch {}
     await expect.poll(() => { try { process.kill(info.pid, 0); return true; } catch { return false; } }).toBe(false);
   });
@@ -60,12 +60,12 @@ test('nonloopback link clears an old credential in that origin tab storage', asy
 });
 
 test('daemon restart leaves alp-web in charge of its listener and creates no standalone gateway', async ({ page }) => {
-  const service = JSON.parse(await readFile(path.join(world.home, 'web.json'), 'utf8'));
+  const service = JSON.parse(await readFile(path.join(world.home, 'dashboard.json'), 'utf8'));
   await page.goto(url);
   await expect(connected(page)).toBeVisible();
   await world.restartDaemon();
   await expect(connected(page)).toBeVisible();
-  const after = JSON.parse(await readFile(path.join(world.home, 'web.json'), 'utf8'));
+  const after = JSON.parse(await readFile(path.join(world.home, 'dashboard.json'), 'utf8'));
   expect(after.pid).toBe(service.pid);
   expect((await fetch(origin)).ok).toBe(true);
   expect(await fetch(world.gatewayUrl).then(() => true, () => false)).toBe(false);

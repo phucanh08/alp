@@ -40,15 +40,15 @@ try {
   Log 'ok: the bundle carries node-pty for win32-x64'
 
   Push-Location $project
-  try { $url = Alp web --print } finally { Pop-Location }
-  if ($url -notmatch '^http://127\.0\.0\.1:[0-9]+/?#token=') { Fail "alp web --print printed '$url'" }
+  try { $url = Alp dashboard --print } finally { Pop-Location }
+  if ($url -notmatch '^http://127\.0\.0\.1:[0-9]+/?#token=') { Fail "alp dashboard --print printed '$url'" }
   $base = $url -replace '/?#.*$', ''
-  if ((Invoke-WebRequest -Uri "$base/" -UseBasicParsing).StatusCode -ne 200) { Fail 'alp web does not serve its app' }
+  if ((Invoke-WebRequest -Uri "$base/" -UseBasicParsing).StatusCode -ne 200) { Fail 'alp dashboard does not serve its app' }
   $refused = 0
   try { Invoke-WebRequest -Uri "$base/v1/tickets" -Method Post -UseBasicParsing | Out-Null } catch { $refused = [int]$_.Exception.Response.StatusCode }
   if ($refused -ne 401) { Fail "a ticket without a token was answered $refused, not 401" }
-  Log 'ok: alp web serves the app and gates tickets'
-  $webJson = Join-Path $env:ALP_HOME 'web.json'
+  Log 'ok: alp dashboard serves the app and gates tickets'
+  $webJson = Join-Path $env:ALP_HOME 'dashboard.json'
   if (Test-Path $webJson) { $webPid = (Get-Content $webJson -Raw | ConvertFrom-Json).pid; if ($webPid) { Stop-Process -Id $webPid -Force -ErrorAction SilentlyContinue } }
 
   if ((Alp daemon stop) -notmatch 'stopped') { Fail 'alp daemon stop' }

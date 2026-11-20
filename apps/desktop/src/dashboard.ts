@@ -1,20 +1,20 @@
 /**
- * Running the user's `alp` (no shell, never logged): `alp web --print` starts or attaches the
- * alp-web service and prints its address with the token in the fragment.
+ * Running the user's `alp` (no shell, never logged): `alp dashboard --print` starts or attaches the
+ * alp-dashboard service and prints its address with the token in the fragment.
  */
 import { access, constants, stat } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
-import { parseAlpWebOutput, type AlpWebAddress } from './url';
+import { parseDashboardOutput, type DashboardAddress } from './url';
 import { parseShellProbe, resolveAlp, SHELL_PROBE, type Resolved } from './resolve';
 import { run } from './run';
 
-/** Starting alpd and alp-web on a cold machine can take a while. */
+/** Starting alpd and alp-dashboard on a cold machine can take a while. */
 const PRINT_TIMEOUT_MS = 90_000;
 const SHELL_TIMEOUT_MS = 5_000;
 
 export type Connect =
-  | { ok: true; address: AlpWebAddress }
+  | { ok: true; address: DashboardAddress }
   | { ok: false; missing: true; override?: string }
   | { ok: false; error: string };
 
@@ -43,21 +43,21 @@ export function findAlp(override: string | undefined): Promise<Resolved> {
 }
 
 /** Resolves alp and asks it for the address. The address is returned, never printed. */
-export async function connectAlpWeb(override: string | undefined): Promise<Connect> {
+export async function connectDashboard(override: string | undefined): Promise<Connect> {
   const resolved = await findAlp(override);
   if ('missing' in resolved) return { ok: false, missing: true, override: resolved.override };
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: resolved.path };
   // Electron's own switches must not reach a node that alp starts.
   delete env.ELECTRON_RUN_AS_NODE;
-  const result = await run(resolved.alp, ['web', '--print'], { env, timeout: PRINT_TIMEOUT_MS });
+  const result = await run(resolved.alp, ['dashboard', '--print'], { env, timeout: PRINT_TIMEOUT_MS });
   if (result.code === 0) {
-    const address = parseAlpWebOutput(result.stdout);
+    const address = parseDashboardOutput(result.stdout);
     if (address) return { ok: true, address };
-    return { ok: false, error: '`alp web --print` did not print an ALP web address. Update ALP, then try again.' };
+    return { ok: false, error: '`alp dashboard --print` did not print an ALP dashboard address. Update ALP, then try again.' };
   }
   // alp's own message (web disabled, refused, not built…) is shown as is; stdout may hold the
   // address, so it is never shown.
-  if (result.timedOut) return { ok: false, error: `\`alp web --print\` did not answer within ${PRINT_TIMEOUT_MS / 1000} seconds.` };
+  if (result.timedOut) return { ok: false, error: `\`alp dashboard --print\` did not answer within ${PRINT_TIMEOUT_MS / 1000} seconds.` };
   const message = result.stderr.trim() || result.error?.message || `alp exited with code ${result.code}`;
   return { ok: false, error: message.replace(/^error:\s*/i, '') };
 }
@@ -66,11 +66,11 @@ export async function connectAlpWeb(override: string | undefined): Promise<Conne
 const PROBE_TIMEOUT_MS = 2_000;
 
 /**
- * Whether alp web at `origin` answers HTTP: GET /readyz, any status. 503 means alpd is not ready,
- * which the page handles by itself; only no answer (refused, reset, timeout) means alp web is gone.
+ * Whether alp dashboard at `origin` answers HTTP: GET /readyz, any status. 503 means alpd is not ready,
+ * which the page handles by itself; only no answer (refused, reset, timeout) means alp dashboard is gone.
  * No credential is sent.
  */
-export function probeAlpWeb(origin: string, timeout = PROBE_TIMEOUT_MS): Promise<boolean> {
+export function probeDashboard(origin: string, timeout = PROBE_TIMEOUT_MS): Promise<boolean> {
   return new Promise(resolve => {
     let request: http.ClientRequest;
     try {

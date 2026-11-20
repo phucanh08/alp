@@ -64,12 +64,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # The CLI's build includes alp-web (`alp web`): packages/cli/dist/alp-web.js with the private
-      # gateway inlined, and the apps/web files in packages/cli/dist/alp-web/ with their notices.
+      # The CLI's build includes alp-dashboard (`alp dashboard`): packages/cli/dist/alp-dashboard.js with the private
+      # gateway inlined, and the apps/web files in packages/cli/dist/alp-dashboard/ with their notices.
       - run: npm run build:packages
       # release:pack refuses a dirty checkout or an untagged commit, runs prepack, writes SHA256SUMS
       # and release-manifest.json, and runs A5 itself, then checks that @anhlp/alp and @anhlp/alp-cli
-      # carry alp-web.js, alp-web/index.html and the notices; verify again against the SHA asked for.
+      # carry alp-dashboard.js, alp-dashboard/index.html and the notices; verify again against the SHA asked for.
       - name: release:pack
         run: npm run release:pack -- --out "$OUT"
       - run: npm run release:verify -- "$OUT" --sha "$RELEASE_SHA"
@@ -126,7 +126,7 @@ jobs:
       - name: CLI C1–C9, fake Claude
         if: ${{ !cancelled() }}
         run: node scripts/beta-acceptance-cli.mjs --packs "$PACKS" --fake --provider claude --work "$RUNNER_TEMP/alp-beta" --runner "github-actions ${{ github.actor }}"
-      - name: alp web W6 token gate
+      - name: alp dashboard W6 token gate
         if: ${{ !cancelled() }}
         run: node scripts/beta-acceptance-web.mjs --packs "$PACKS" --fake --work "$RUNNER_TEMP/alp-beta" --runner "github-actions ${{ github.actor }}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Plugin and `alp web` acceptance on the saved tarballs: docs/alp/beta-scope.md §6.3 W1–W6 (rows R5, R6).
+// Plugin and `alp dashboard` acceptance on the saved tarballs: docs/alp/beta-scope.md §6.3 W1–W6 (rows R5, R6).
 // --live adds the plugin to the Paseo on this machine and needs a person for W3–W5; --fake checks
 // only what needs no Paseo and no model: W6's token gate on a throwaway ALP_HOME.
 import { cleanupFakeWeb, freeWebPort } from './beta-web-lifecycle.mjs';
@@ -12,7 +12,7 @@ import { CHOICES, Run, alpCommand, environment, gateRow, install, manual, option
 const USAGE = `Usage: node scripts/beta-acceptance-web.mjs --packs <dir> (--fake | --live --provider codex|claude) [options]
 
   --packs DIR          the saved release (§7.2); never repacked
-  --fake               W6's token gate only (alp web, no plugin), on a throwaway ALP_HOME with the fakes; not gate evidence
+  --fake               W6's token gate only (alp dashboard, no plugin), on a throwaway ALP_HOME with the fakes; not gate evidence
   --live               W1–W6 with the Paseo 0.11.x on this machine (R5 on macOS, R6 on Linux); W3–W5 need you
   --provider P         codex or claude: the runtime alp setup gives the project's teams
   --use-default-home   allow ALP_HOME to be ~/.alp (Paseo's default). Back it up first (alp daemon stop, copy it),
@@ -47,7 +47,7 @@ const paseo = (label, args) => run.exec(label, 'paseo', args, { env, cwd: projec
 const settingsFile = path.join(project, '.alp', 'settings.json');
 
 try {
-  if (opts.fake) writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ web: { port: await freeWebPort(), relay: { enabled: false } } }));
+  if (opts.fake) writeFileSync(path.join(home, 'settings.json'), JSON.stringify({ dashboard: { port: await freeWebPort() }, web: { relay: { enabled: false } } }));
   mkdirSync(project, { recursive: true });
   run.exec('git', 'git', ['init', '-q', '-b', 'main'], { cwd: project });
   run.exec('git', 'git', ['-c', 'user.name=ALP beta', '-c', 'user.email=alp-beta@localhost', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: project });
@@ -97,11 +97,11 @@ try {
     for (const id of ['W1', 'W2', 'W3', 'W4', 'W5']) run.record(id, 'skip', 'needs Paseo and a model (--live); permission cards are covered hermetically by integrations/paseo/tests/permissions.test.js and bridge-socket.test.js');
   }
 
-  await run.step('W6', 'alp web --print (alp-web, no plugin needed); the token gate', async () => {
-    const printed = cli('W6', ['web', '--print']);
+  await run.step('W6', 'alp dashboard --print (alp-dashboard, no plugin needed); the token gate', async () => {
+    const printed = cli('W6', ['dashboard', '--print']);
     const url = printed.stdout.trim().split('\n').at(-1);
     const match = /^(http:\/\/127\.0\.0\.1:\d+)\/#token=(alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43})$/.exec(url ?? '');
-    if (printed.status !== 0 || !match) throw new Error(`alp web --print gave no loopback address with an alpgw1 token: ${(printed.stderr || printed.stdout).trim().slice(0, 300)}`);
+    if (printed.status !== 0 || !match) throw new Error(`alp dashboard --print gave no loopback address with an alpgw1 token: ${(printed.stderr || printed.stdout).trim().slice(0, 300)}`);
     const [, origin, token] = match;
     const page = await fetch(`${origin}/`);
     await page.body?.cancel();
@@ -132,7 +132,7 @@ try {
 }
 process.exit(run.summary());
 
-/** POST /v1/tickets on alp-web's gateway with `token` (none: no Authorization header): the status. */
+/** POST /v1/tickets on alp-dashboard's gateway with `token` (none: no Authorization header): the status. */
 async function ticket(origin, token) {
   const response = await fetch(`${origin}/v1/tickets`, { method: 'POST', headers: token ? { authorization: `Bearer ${token}` } : {} });
   await response.body?.cancel();

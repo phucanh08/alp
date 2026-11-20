@@ -1,26 +1,26 @@
 /**
- * ALP desktop shell (D32, docs/alp/desktop.md): one window showing the user's own alp web. It runs
- * `alp web --print`, checks the address, and loads it; apps/web takes the token out of the address
- * and connects to its own origin. The window is a same-origin client of alp-web like a browser tab:
+ * ALP desktop shell (D32, docs/alp/desktop.md): one window showing the user's own alp dashboard. It runs
+ * `alp dashboard --print`, checks the address, and loads it; apps/web takes the token out of the address
+ * and connects to its own origin. The window is a same-origin client of alp-dashboard like a browser tab:
  * no preload, no Node, navigation pinned to that origin.
  */
 import { app, BrowserWindow, Menu, session, shell, type MenuItemConstructorOptions } from 'electron';
 import path from 'node:path';
-import { connectAlpWeb, probeAlpWeb, type Connect } from './alp-web';
+import { connectDashboard, probeDashboard, type Connect } from './dashboard';
 import { isAllowedExternal, isAllowedPermission, isTokenRejection, navigationGuard } from './policy';
 import { Reconnector } from './reconnect';
 import { readSettings } from './settings';
-import type { AlpWebAddress } from './url';
+import type { DashboardAddress } from './url';
 
 let win: BrowserWindow | undefined;
 /** The origin the window may show; undefined while it shows a bundled page. */
 let allowedOrigin: string | undefined;
 /** Each connect() takes the next number; only the latest one may change the window. */
 let generation = 0;
-/** The connect() whose alp web load is in the window; a failure of any other load is stale. */
+/** The connect() whose alp dashboard load is in the window; a failure of any other load is stale. */
 let remoteLoad = 0;
-/** The address of the alp web load in the window (remoteLoad); kept in memory only. */
-let shownAddress: AlpWebAddress | undefined;
+/** The address of the alp dashboard load in the window (remoteLoad); kept in memory only. */
+let shownAddress: DashboardAddress | undefined;
 /** Whether the window's document is the one loaded for shownAddress (did-navigate seen for it). */
 let committed = false;
 /** The longest error text shown (alp's stderr can be long; it travels in the page's query). */
@@ -30,17 +30,17 @@ const page = (name: string) => path.join(__dirname, 'pages', name);
 
 async function resolveAddress(): Promise<Connect> {
   const settings = await readSettings(app.getPath('userData'));
-  return connectAlpWeb(settings.alpPath || process.env.ALP_DESKTOP_ALP || undefined);
+  return connectDashboard(settings.alpPath || process.env.ALP_DESKTOP_ALP || undefined);
 }
 
 /** Loads `address` into `window` as the latest connect; its outcome comes back as did-finish/fail-load. */
-function loadRemote(window: BrowserWindow, address: AlpWebAddress) {
+function loadRemote(window: BrowserWindow, address: DashboardAddress) {
   const id = ++generation;
   allowedOrigin = address.origin;
   shownAddress = address;
   remoteLoad = id;
   committed = false;
-  // Only the fragment differs (alp web rotated its token on the same port): Chromium navigates within
+  // Only the fragment differs (alp dashboard rotated its token on the same port): Chromium navigates within
   // the page, and apps/web reads the token only when it loads, so the page is reloaded after it.
   const sameDocument = withoutFragment(window.webContents.getURL()) === withoutFragment(address.url);
   // A failed load shows up as did-fail-load; ERR_ABORTED means a newer load won.
@@ -52,10 +52,10 @@ function loadRemote(window: BrowserWindow, address: AlpWebAddress) {
 
 const withoutFragment = (url: string) => url.split('#', 1)[0];
 
-/** Watches a loaded alp web and loads it again when it moved, restarted or rotated its token. */
+/** Watches a loaded alp dashboard and loads it again when it moved, restarted or rotated its token. */
 const reconnector = new Reconnector({
   resolve: resolveAddress,
-  probe: origin => probeAlpWeb(origin),
+  probe: origin => probeDashboard(origin),
   load: address => {
     if (!win || win.isDestroyed()) { reconnector.stop(); return; }
     void loadRemote(win, address).then(() => reveal(win));
@@ -63,7 +63,7 @@ const reconnector = new Reconnector({
   giveUp: (result, message) => {
     ++generation;
     if (result && !result.ok && 'missing' in result) void showMissing(result.override);
-    else if (result && !result.ok) void showError(`Reconnecting to ALP web failed: ${result.error} Choose Connect again to retry.`);
+    else if (result && !result.ok) void showError(`Reconnecting to ALP dashboard failed: ${result.error} Choose Connect again to retry.`);
     else void showError(message);
   },
 });
@@ -106,7 +106,7 @@ function createWindow(): BrowserWindow {
     if (!isMainFrame || code === -3 || url.startsWith('file:') || remoteLoad !== generation) return;
     // A page that was up (or a reload of it) failing is the reconnector's: it retries before it shows anything.
     if (reconnector.active) { reconnector.loadFailed(); return; }
-    void showError(`The ALP web page did not load (${description}). Start ALP, then choose Connect again.`, window);
+    void showError(`The ALP dashboard page did not load (${description}). Start ALP, then choose Connect again.`, window);
   });
   // The new document has replaced the old one: from now on a 401 is the new page's, not a late one
   // from the page being replaced (whose requests Chromium cancels at this point).
@@ -153,7 +153,7 @@ async function showError(message: string, window = win) {
 
 /**
  * Asks alp for the address and opens it, or shows why not. A later call (Connect again, a window
- * reopened from the Dock while an earlier `alp web --print` still runs) supersedes an earlier one,
+ * reopened from the Dock while an earlier `alp dashboard --print` still runs) supersedes an earlier one,
  * whose result is dropped; each one loads into the window that is current when it finishes.
  */
 async function connect() {
@@ -168,7 +168,7 @@ async function connect() {
   remoteLoad = 0;
   await current()?.loadFile(page('connecting.html')).catch(() => undefined);
   reveal(current());
-  let result: Awaited<ReturnType<typeof connectAlpWeb>>;
+  let result: Awaited<ReturnType<typeof connectDashboard>>;
   try {
     result = await resolveAddress();
   } catch (error) {
@@ -218,10 +218,10 @@ if (!app.requestSingleInstanceLock()) {
     });
   });
   app.whenReady().then(() => {
-    // Everything is denied (camera, notifications, …) except clipboard writes from alp web's origin.
+    // Everything is denied (camera, notifications, …) except clipboard writes from alp dashboard's origin.
     session.defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) => callback(isAllowedPermission(permission, details.requestingUrl, allowedOrigin)));
     session.defaultSession.setPermissionCheckHandler((_contents, permission, requestingOrigin) => isAllowedPermission(permission, requestingOrigin, allowedOrigin));
-    // The page's gateway refused its token (POST /v1/tickets → 401, after `alp web rotate`): ask alp
+    // The page's gateway refused its token (POST /v1/tickets → 401, after `alp dashboard rotate`): ask alp
     // for the new address. Only the status and the path are read; the request is not touched.
     session.defaultSession.webRequest.onCompleted(details => {
       const window = win && !win.isDestroyed() ? win : undefined;

@@ -3,7 +3,7 @@
   "productName": "ALP",
   "version": "0.0.0",
   "private": true,
-  "description": "ALP desktop shell for macOS: opens the user's installed alp web in its own window (D32).",
+  "description": "ALP desktop shell for macOS: opens the user's installed alp dashboard in its own window (D32).",
   "main": "dist/main.cjs",
   "scripts": {
     "postinstall": "install-electron",

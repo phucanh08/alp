@@ -12,7 +12,7 @@ export async function closeWorldAfter(world, beforeClose) {
     try {
       // Only the service recorded in this disposable world's private home. A failed assertion
       // must not leave alp-web's listener alive when the host directory is removed below.
-      const info = await readFile(path.join(world.home, 'web.json'), 'utf8').then(JSON.parse, () => undefined);
+      const info = await readFile(path.join(world.home, 'dashboard.json'), 'utf8').then(JSON.parse, () => undefined);
       if (info?.pid && alive(info.pid)) {
         try { process.kill(info.pid, 'SIGKILL'); } catch {}
         for (let i = 0; i < 600 && alive(info.pid); i++) await delay(25);

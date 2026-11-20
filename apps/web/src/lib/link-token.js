@@ -1,11 +1,11 @@
 // @ts-check
 /**
- * The token in the address `alp web` opens (docs/alp/web.md §4.2): `http://127.0.0.1:<port>/#token=alpgw1.…`.
+ * The token in the address `alp dashboard` opens (docs/alp/dashboard.md §4.2): `http://127.0.0.1:<port>/#token=alpgw1.…`.
  * A fragment never reaches a server, but it stays in the address bar, the history and anything that
  * copies the address. So the page takes the token out of the address at once (history.replaceState)
  * and keeps it in this tab's sessionStorage only, where a reload of the same tab finds it again. It
  * never goes to localStorage, which every tab and every later visit shares. The page connects to its
- * own origin, the alp web service that served it, and only on a loopback address.
+ * own origin, the alp dashboard service that served it, and only on a loopback address.
  */
 
 /** The sessionStorage key of the link's token. */
@@ -15,13 +15,13 @@ export const LINK_TOKEN_KEY = 'alp-web:link-token';
 const TOKEN = /^alpgw1\.[a-f0-9]{16}\.[A-Za-z0-9_-]{43}$/;
 
 /** What the connect form says when the link's token stopped working (rotated, revoked). */
-export const LINK_TOKEN_INVALID = 'This link\'s access token is no longer valid. Run `alp web` again to open ALP with a new link.';
+export const LINK_TOKEN_INVALID = 'This link\'s access token is no longer valid. Run `alp dashboard` again to open ALP with a new link.';
 /** What the connect form says when a link was opened on an address that is not this machine. */
-export const LINK_NOT_LOOPBACK = 'This page is not on this machine\'s loopback address, so it did not use the access token in its link. Open the address `alp web` printed.';
-/** What the connect form says when the link's token is not an ALP web token at all. */
-export const LINK_TOKEN_MALFORMED = 'The access token in this link is incomplete or damaged. Run `alp web` again, or copy its whole address.';
+export const LINK_NOT_LOOPBACK = 'This page is not on this machine\'s loopback address, so it did not use the access token in its link. Open the address `alp dashboard` printed.';
+/** What the connect form says when the link's token is not an ALP dashboard token at all. */
+export const LINK_TOKEN_MALFORMED = 'The access token in this link is incomplete or damaged. Run `alp dashboard` again, or copy its whole address.';
 
-/** Loopback host names: the ones lib/gateway.js accepts over http (alp web listens on 127.0.0.1). */
+/** Loopback host names: the ones lib/gateway.js accepts over http (alp dashboard listens on 127.0.0.1). */
 const LOOPBACK = new Set(['127.0.0.1', 'localhost']);
 
 /** Whether `value` has the shape of an `alpgw1.*` token. @param {unknown} value @returns {value is string} */
@@ -104,8 +104,8 @@ export function takeLinkToken({ location, history, storage }) {
 export const STANDALONE_GATEWAY = 'http://127.0.0.1:7434';
 
 /**
- * Whether this page is probably the one `alp web` serves: a built app (not Vite's dev server, which
- * sits beside a standalone gateway) on this machine's loopback address. alp web serves the app and
+ * Whether this page is probably the one `alp dashboard` serves: a built app (not Vite's dev server, which
+ * sits beside a standalone gateway) on this machine's loopback address. alp dashboard serves the app and
  * its gateway on one listener, so there the page's own origin is the gateway. This is a heuristic
  * from the address alone: anything else that serves the built app on loopback looks the same. The
  * connect form uses it only for its default address, which the user can edit, and its help text.
@@ -115,7 +115,7 @@ export const servedByAlpWeb = ({ location, dev = false }) => !dev && isLoopbackP
 
 /**
  * The connect form's gateway address before the person types one: the address remembered from an
- * earlier connect on this origin, else this page's origin when alp web serves it, else the
+ * earlier connect on this origin, else this page's origin when alp dashboard serves it, else the
  * standalone gateway's default.
  * @param {{ location: { protocol: string, hostname: string, origin: string }, remembered?: string | null, dev?: boolean }} page
  */

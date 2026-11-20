@@ -19,8 +19,8 @@ function run(command, args, options = {}) {
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed:\n${result.stdout}${result.stderr}${result.error ?? ''}`);
   return result.stdout;
 }
-// t-5294.3: `alp web --print` below is a user-only command, so this smoke must not inherit the ALP
-// session of an agent's shell; otherwise the installed CLI answers "alp web is the user's ... started
+// t-5294.3: `alp dashboard --print` below is a user-only command, so this smoke must not inherit the ALP
+// session of an agent's shell; otherwise the installed CLI answers "alp dashboard is the user's ... started
 // by an ALP agent" and the smoke fails for a reason that has nothing to do with the package. Same
 // mechanism as scripts/core-standalone-smoke.mjs:138; the product guard is unchanged.
 const clearedSession = clearCallerSession();
@@ -29,7 +29,7 @@ const env = { ...process.env, ALP_HOME: path.join(directory, 'home') };
 let cli;
 try {
   await mkdir(env.ALP_HOME, { recursive: true, mode: 0o700 });
-  await writeFile(path.join(env.ALP_HOME, 'settings.json'), JSON.stringify({ web: { port: await freeWebPort(), relay: { enabled: false } } }));
+  await writeFile(path.join(env.ALP_HOME, 'settings.json'), JSON.stringify({ dashboard: { port: await freeWebPort() }, web: { relay: { enabled: false } } }));
   const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
   const dependencies = {};
   const workspaceNames = [];
@@ -96,7 +96,7 @@ void frame; void observe;
   const version = run(process.execPath, [launcher, '--version'], { env }).trim();
   if (version !== manifest.version) throw new Error(`alp --version through ${LAUNCHER} printed ${JSON.stringify(version)}, expected ${manifest.version}`);
   run(process.execPath, [launcher, 'init', path.join(directory, 'launcher-project')], { env });
-  // `alp web` runs alp-web, which ships in the CLI: it needs no plugin. It starts from an unrelated
+  // `alp dashboard` runs alp-dashboard, which ships in the CLI: it needs no plugin. It starts from an unrelated
   // directory through a symlink, as its own process, with the alpgw1 token of a live credential.
   const bin = path.join(directory, 'bin');
   const elsewhere = path.join(directory, 'elsewhere');
@@ -105,13 +105,13 @@ void frame; void observe;
   const alpLink = path.join(bin, 'alp');
   await symlink(path.relative(bin, cli), alpLink);
   const fromElsewhere = (...args) => run(process.execPath, [alpLink, ...args], { cwd: elsewhere, env });
-  const line = fromElsewhere('web', '--print').trim().split('\n').pop();
+  const line = fromElsewhere('dashboard', '--print').trim().split('\n').pop();
   const match = /^(http:\/\/127\.0\.0\.1:\d+)\/#token=(alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43})$/.exec(line);
-  if (!match) throw new Error(`alp web --print printed no loopback address with an alpgw1 token: ${line}`);
+  if (!match) throw new Error(`alp dashboard --print printed no loopback address with an alpgw1 token: ${line}`);
   const [, origin, token] = match;
   const alpd = JSON.parse(await readFile(path.join(env.ALP_HOME, 'alpd.lock'), 'utf8'));
-  const web = JSON.parse(await readFile(path.join(env.ALP_HOME, 'integrations', 'web.lock'), 'utf8'));
-  if (!web.pid || web.pid === alpd.pid) throw new Error(`alp web must run as its own process (alpd ${alpd.pid}, alp-web ${web.pid})`);
+  const web = JSON.parse(await readFile(path.join(env.ALP_HOME, 'integrations', 'dashboard.lock'), 'utf8'));
+  if (!web.pid || web.pid === alpd.pid) throw new Error(`alp dashboard must run as its own process (alpd ${alpd.pid}, alp-dashboard ${web.pid})`);
   for (const pid of [alpd.pid, web.pid]) { try { process.kill(pid, 0); } catch { throw new Error(`process ${pid} is not alive`); } }
   const served = await fetch(`${origin}/`);
   if (served.status !== 200) throw new Error(`GET ${origin}/ answered ${served.status}`);
@@ -119,12 +119,12 @@ void frame; void observe;
   const ticket = await fetch(`${origin}/v1/tickets`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
   if (ticket.status !== 201) throw new Error(`POST ${origin}/v1/tickets with the printed token answered ${ticket.status}`);
   await ticket.body?.cancel();
-  // Explicitly register the separately installed plugin, using its existing public command; `alp web
-  // pair` then starts the Paseo integration beside alp-web.
+  // Explicitly register the separately installed plugin, using its existing public command; `alp dashboard
+  // pair` then starts the Paseo integration beside alp-dashboard.
   run(process.execPath, [path.join(directory, 'node_modules/@anhlp/alp-paseo/server/dist/main.js'), '--register'], { env });
-  const paired = fromElsewhere('web', 'pair', '--off');
-  if (!/relay is off/i.test(paired)) throw new Error(`alp web pair --off did not report the relay off: ${paired}`);
-  console.log(`Standalone installation verified: ${imports.length} module APIs, Paseo server, ACP, CLI and daemon lifecycle, the ${LAUNCHER} wrapper, alp web (alp-web, no plugin) and the separately installed Paseo integration.`);
+  const paired = fromElsewhere('dashboard', 'pair', '--off');
+  if (!/relay is off/i.test(paired)) throw new Error(`alp dashboard pair --off did not report the relay off: ${paired}`);
+  console.log(`Standalone installation verified: ${imports.length} module APIs, Paseo server, ACP, CLI and daemon lifecycle, the ${LAUNCHER} wrapper, alp dashboard (alp-dashboard, no plugin) and the separately installed Paseo integration.`);
 } finally {
   await cleanupFakeWeb(env.ALP_HOME, () => {
     if (cli) spawnSync(process.execPath, [cli, 'daemon', 'stop'], { cwd: directory, env, stdio: 'ignore', timeout: 20_000 });

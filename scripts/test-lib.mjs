@@ -62,7 +62,7 @@ export function hermeticEnv(env = process.env) {
  * then inherits the cleaned environment, and no step has to remember (t-5294.3, t-3a63). The
  * product guards are untouched — a real agent process still announces itself and is still refused
  * the user's methods. What this undoes is only the accident that a VERIFICATION run inherits the
- * session of the shell that started it, which made `alp web --print` in core-standalone-smoke.mjs
+ * session of the shell that started it, which made `alp dashboard --print` in core-standalone-smoke.mjs
  * and the installed plugin regressions in tarball-consumer.mjs refuse to run for any agent.
  */
 export function clearCallerSession(env = process.env) {

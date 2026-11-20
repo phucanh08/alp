@@ -8,14 +8,14 @@ const reachable = url => fetch(url, { signal: AbortSignal.timeout(1000) }).then(
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
 test('cleanup releases the real host even when the preceding stop assertion fails', async ({ browser }) => {
-  const world = await startWorld({ settings: { web: { port: await freePort(), relay: { enabled: false } } } });
+  const world = await startWorld({ settings: { dashboard: { port: await freePort() }, web: { relay: { enabled: false } } } });
   const pid = world.daemonPid;
   let context, webPid;
   try {
     world.env.ALP_SUPERVISE = '0';
-    delete world.env.ALP_WEB_APP;
-    const webUrl = new URL((await world.alp('web', '--print')).trim()).origin;
-    ({ pid: webPid } = JSON.parse(await readFile(path.join(world.home, 'web.json'), 'utf8')));
+    delete world.env.ALP_DASHBOARD_APP;
+    const webUrl = new URL((await world.alp('dashboard', '--print')).trim()).origin;
+    ({ pid: webPid } = JSON.parse(await readFile(path.join(world.home, 'dashboard.json'), 'utf8')));
     context = await browser.newContext();
     const page = await context.newPage();
     await page.goto(world.webUrl);

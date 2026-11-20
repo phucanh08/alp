@@ -35,7 +35,7 @@ test('the listener serves no page at any address, on 127.0.0.1 only, and without
     const page = await fetch(`${origin}${address}`);
     assert.equal(page.status, 404);
     assert.match(page.headers.get('content-type'), /^text\/plain/);
-    assert.match(await page.text(), /not a web page[\s\S]*alp web/);
+    assert.match(await page.text(), /not a web page[\s\S]*alp dashboard/);
     assert.equal(page.headers.get('content-security-policy'), "default-src 'none'; frame-ancestors 'none'");
     assert.equal(page.headers.get('x-frame-options'), 'DENY');
   }
@@ -100,6 +100,6 @@ test('settings may turn the web app off or move its port', () => {
   assert.doesNotThrow(() => validateUserSettings({ web: { enabled: false, port: 8000 } }, 'settings.json'));
   assert.throws(() => validateUserSettings({ web: { port: 80 } }, 'settings.json'), /web.port must be a port from 1024/);
   assert.throws(() => validateUserSettings({ web: { host: '0.0.0.0' } }, 'settings.json'), /unsupported web field 'host'/);
-  // The classic page of ALPD §61 is gone; `alp web` serves apps/web.
+  // The classic page of ALPD §61 is gone; `alp dashboard` serves apps/web.
   assert.throws(() => validateUserSettings({ web: { app: 'classic' } }, 'settings.json'), /unsupported web field 'app'/);
 });

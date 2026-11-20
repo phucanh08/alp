@@ -13,8 +13,8 @@ if (!['all', 'core', 'paseo', 'packages', 'web'].includes(scope) || process.argv
 }
 // t-5294.3 / t-3a63: this lane checks what the USER's install does, so it must not run as the agent
 // whose shell happened to start it. An inherited ALP_AGENT_SESSION made every child announce itself
-// as an agent, and the user-only guards then refused the very steps being checked: `alp web --print`
-// in core-standalone-smoke.mjs (:138) answered "alp web is the user's" instead of the expected
+// as an agent, and the user-only guards then refused the very steps being checked: `alp dashboard --print`
+// in core-standalone-smoke.mjs (:138) answered "alp dashboard is the user's" instead of the expected
 // missing-bundle error, and tarball-consumer.mjs's installed-plugin regressions answered "Only the
 // user answers a question". So no agent could run validate:core or validate:packages at all, and
 // every "validated locally" from an agent needed a footnote. The guards are product behaviour and
@@ -93,7 +93,7 @@ if (scope === 'all' || scope === 'packages') {
   node('scripts/gateway-smoke.mjs');
 }
 if (scope === 'all' || scope === 'web') {
-  // The browser app (docs/alp/web.md): types, unit tests and its bundle boundary, then the UI end
+  // The browser app (docs/alp/dashboard.md): types, unit tests and its bundle boundary, then the UI end
   // to end against a real alpd and gateway with a fake provider, in Chromium.
   node('node_modules/typescript/bin/tsc', '-p', 'apps/web/tsconfig.json');
   tests(webTests());
