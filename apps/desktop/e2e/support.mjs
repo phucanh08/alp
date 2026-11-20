@@ -140,24 +140,30 @@ export async function fakeAlp({ dir }) {
   /** Prints `address` after `delay` seconds. */
   const prints = (address, delay = 0) => set(`${delay ? `sleep ${delay}\n` : ''}printf '%s\\n' '${address}'`);
   /**
-   * The first run waits `delay` seconds, prints `late`, then writes <dir>/bin/first-done; every later
-   * run prints `address` at once. `firstStarted()` and `firstDone()` say where the first run is.
+   * A stale first run: the first `alp web --print` blocks until the test calls `release()`, then
+   * prints `late` and writes <dir>/bin/first-done; every later run prints `address` at once. The
+   * test releases it only after the newer connect has finished, so the late answer always arrives
+   * after it, however slow the machine (a fixed sleep could answer first and test nothing).
+   * `firstStarted()` and `firstDone()` say where the first run is.
    */
-  const firstSlow = async (late, delay, address) => {
+  const firstGated = async (late, address) => {
     const count = path.join(dir, 'bin', 'count');
+    const gate = path.join(dir, 'bin', 'gate');
     const done = path.join(dir, 'bin', 'first-done');
     await set([
       `n=$(cat '${count}' 2>/dev/null || echo 0); n=$((n + 1)); echo $n > '${count}'`,
-      `if [ "$n" = 1 ]; then sleep ${delay}; printf '%s\\n' '${late}'; : > '${done}'; exit 0; fi`,
+      // Bounded (60 s), so a test that fails before release() leaves no shell polling behind.
+      `if [ "$n" = 1 ]; then i=0; while [ ! -f '${gate}' ] && [ $i -lt 1200 ]; do sleep 0.05; i=$((i + 1)); done`,
+      `  printf '%s\\n' '${late}'; : > '${done}'; exit 0; fi`,
       `printf '%s\\n' '${address}'`,
     ].join('\n'));
     const exists = file => access(file).then(() => true, () => false);
     // The order of runs is the order they read the count: wait for `firstStarted` before starting a
-    // second connect, or the newer connect's run could be the slow one.
-    return { firstStarted: () => exists(count), firstDone: () => exists(done) };
+    // second connect, or the newer connect's run could be the blocked one.
+    return { firstStarted: () => exists(count), release: () => writeFile(gate, ''), firstDone: () => exists(done) };
   };
   await set('exit 70');
-  return { file, set, prints, firstSlow };
+  return { file, set, prints, firstGated };
 }
 
 /** A copy of the built app (package.json and dist) that a test may break. */
@@ -179,8 +185,20 @@ export function appEnv({ dir }, alp) {
 export async function launch(t, context, alp, { app = APP } = {}) {
   await mkdir(path.join(context.dir, 'app-home'), { recursive: true });
   const electronApp = await _electron.launch({ executablePath: ELECTRON, args: [app], env: appEnv(context, alp), timeout: 30_000 });
+  // The app's own output, reported with the test if the app died, so a crash on CI says why. A link token is masked
+  // (the app never prints one, but Chromium could).
+  let output = '';
+  const keep = chunk => { output = (output + chunk).slice(-20_000); };
+  electronApp.process().stdout?.on('data', keep);
+  electronApp.process().stderr?.on('data', keep);
+  // Reported only when the app ended before teardown closed it (a crash or an unexpected quit).
+  let ended = false;
+  let closing = false;
+  electronApp.process().once('exit', (code, signal) => { if (!closing) ended = true; keep(`\n[app exited: code ${code}, signal ${signal}]\n`); });
+  context.defer(() => { if (ended) t.diagnostic(`app output:\n${output.replace(/alpgw1\.[A-Za-z0-9_.-]+/g, 'alpgw1.<masked>')}`); });
   // Bounded: a close that hangs is ended with SIGKILL, so the steps after it still run.
   context.defer(async () => {
+    closing = true;
     let timer;
     const closed = electronApp.close().then(() => true, () => false);
     const late = new Promise(resolve => { timer = setTimeout(() => resolve(false), 15_000); });

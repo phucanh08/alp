@@ -68,10 +68,10 @@ test("alp's own error is shown as is, without its error: prefix", limit, async t
 
 test('a window reopened from the Dock during a connect shows the newer connect, and the older one is dropped', limit, async t => {
   const { context, web, alp } = await connectedSetup(t);
-  // The first connect's alp answers late with an address nothing listens on: if its result were
-  // used, the window would load it and show the error page.
+  // The first connect's alp answers only when released, with an address nothing listens on: if its
+  // result were used, the window would load it and show the error page.
   const dead = web.address.replace(/:\d+\//, `:${await freePort(web.web.port)}/`);
-  const first = await alp.firstSlow(dead, 3, web.address);
+  const first = await alp.firstGated(dead, web.address);
   const app = await launch(t, context, alp.file);
   await waitFor(async () => (await only(app))?.page === 'connecting.html', 'Connecting');
   await waitFor(first.firstStarted, 'the first connect to run alp');
@@ -80,7 +80,11 @@ test('a window reopened from the Dock during a connect shows the newer connect, 
   const shown = await pagesShown(app, async () => {
     await app.evaluate(({ app: electron }) => { electron.emit('activate'); });
     await connectedTo(app, web.origin);
+    // Only now does the first connect's alp answer: strictly after the newer connect loaded.
+    await first.release();
     await waitFor(first.firstDone, 'the first alp to answer');
+    // Its result reaches connect() at once; a wrongly kept one would load the dead address and
+    // show the error page within this margin.
     await sleep(1000);
   });
   assert.ok(!shown.has('error.html'), `pages shown: ${[...shown].join(', ')}`);
@@ -105,14 +109,18 @@ test('L1: a superseded connect that ends with a failing load does not cover the 
   // be dropped, not loaded (its address refuses connections, so loading it would show the error page).
   const { context, web, alp } = await connectedSetup(t);
   const dead = web.address.replace(/:\d+\//, `:${await freePort(web.web.port)}/`);
-  const first = await alp.firstSlow(dead, 3, web.address);
+  const first = await alp.firstGated(dead, web.address);
   const app = await launch(t, context, alp.file);
   await waitFor(async () => (await only(app))?.page === 'connecting.html', 'Connecting');
   await waitFor(first.firstStarted, 'the first connect to run alp');
   const shown = await pagesShown(app, async () => {
     await connectAgain(app);
     await connectedTo(app, web.origin);
+    // Only now does the first connect's alp answer: strictly after the newer connect loaded.
+    await first.release();
     await waitFor(first.firstDone, 'the first alp to answer');
+    // Its result reaches connect() at once; a wrongly kept one would load the dead address and
+    // show the error page within this margin.
     await sleep(1000);
   });
   assert.ok(!shown.has('error.html'), `pages shown: ${[...shown].join(', ')}`);
