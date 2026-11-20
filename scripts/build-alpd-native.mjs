@@ -73,7 +73,7 @@ export async function bunRuntime(platform, cache) {
   await rm(unpacked, { recursive: true, force: true });
   await mkdir(unpacked, { recursive: true });
   const result = spawnSync('unzip', ['-q', '-o', zip, '-d', unpacked], { stdio: ['ignore', 'inherit', 'inherit'] });
-  if (result.status !== 0 || !existsSync(runtime)) throw new Error(`Could not unpack ${zip} (${result.status ?? result.error})`);
+  if (result.status !== 0 || !existsSync(runtime)) throw new Error(`Could not unpack ${zip} with unzip (${result.status ?? result.error})`);
   return runtime;
 }
 

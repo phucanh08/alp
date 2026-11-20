@@ -211,11 +211,12 @@ if ! $SUDO cp -R "$tmp/x/$name" "$stage/$name"; then cleanup_stage; die "could n
 # Checked on the copy that is installed (not in TMPDIR, which may be noexec).
 reported=$("$stage/$name/bin/alp" --version 2>/dev/null || true)
 if [ "$reported" != "$version" ]; then cleanup_stage; die "the downloaded ALP reports version '$reported', not $version"; fi
-# The native alpd (bin/alpd, t-81b0.9) must run on this machine too (CPU, glibc, quarantine).
-if [ -e "$stage/$name/bin/alpd" ]; then
+# The native alpd (bin/alpd, t-81b0.9) must run on this machine too (CPU, glibc, quarantine), unless
+# ALP_NATIVE_DAEMON=0 keeps alpd on the bundled Node.
+if [ -e "$stage/$name/bin/alpd" ] && [ "${ALP_NATIVE_DAEMON:-}" != 0 ]; then
   # Without BUN_BE_BUN, which would make it the Bun CLI.
   reported=$(env -u BUN_BE_BUN "$stage/$name/bin/alpd" --version 2>/dev/null || true)
-  if [ "$reported" != "$version" ]; then cleanup_stage; die "the downloaded ALP's native alpd (bin/alpd) reports version '$reported', not $version, so it cannot run on this machine; nothing was installed"; fi
+  if [ "$reported" != "$version" ]; then cleanup_stage; die "the downloaded ALP's native alpd (bin/alpd) reports version '$reported', not $version, so it cannot run on this machine; nothing was installed (rerun with ALP_NATIVE_DAEMON=0 in the environment to install it with alpd on the bundled Node, and keep that variable set)"; fi
 fi
 aside=""
 if [ -e "$APP/$version" ]; then

@@ -214,9 +214,13 @@ test('bundle: --check reports only; --yes installs app/<version> from a file:// 
 test('bundle: a native alpd that cannot run here refuses the update and changes nothing (t-81b0.9)', async t => {
   const m = await mirror(t, { nativeDaemon: true });
   const before = readdirSync(m.app).sort();
-  await assert.rejects(selfUpdate(['--yes'], { ...baseDeps(m, []), runDaemonVersion: () => '' }), /native alpd \(bin\/alpd(\.exe)?\) reports version "", not 9\.9\.9.*nothing was changed.*ALP_NATIVE_DAEMON=0/);
+  await assert.rejects(selfUpdate(['--yes'], { ...baseDeps(m, []), runDaemonVersion: () => '' }), /native alpd \(bin\/alpd(\.exe)?\) reports version "", not 9\.9\.9.*nothing was changed.*ALP_NATIVE_DAEMON=0 for this update/);
   assert.equal(await currentVersion(m), '1.0.0');
   assert.deepEqual(readdirSync(m.app).filter(name => !name.startsWith('.alp-update-')).sort(), before.filter(name => !name.startsWith('.alp-update-')));
+  // With ALP_NATIVE_DAEMON=0 alpd stays on Node, so the native alpd is not probed.
+  const m2 = await mirror(t, { nativeDaemon: true });
+  assert.equal(await selfUpdate(['--yes'], { ...baseDeps(m2, []), env: { ...baseDeps(m2, []).env, ALP_NATIVE_DAEMON: '0' }, runDaemonVersion: () => assert.fail('not probed') }), 0);
+  assert.equal(await currentVersion(m2), '9.9.9');
   // One that runs and reports the version is installed.
   assert.equal(await selfUpdate(['--yes'], { ...baseDeps(m, []), runDaemonVersion: () => '9.9.9' }), 0);
   assert.equal(await currentVersion(m), '9.9.9');
