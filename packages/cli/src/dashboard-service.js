@@ -10,11 +10,15 @@ import { distributionEntry } from './paths.js';
 import { selfEntry } from '@anhlp/alp-core/packaged';
 
 /**
- * The CLI's side of alp-web (packages/cli/src/web), the service behind `alp web`: where it is, which
- * process owns its lock, and how to stop that process safely.
+ * The CLI's side of alp-dashboard (packages/cli/src/dashboard), the service behind `alp dashboard`:
+ * where it is, which process owns its lock, and how to stop that process safely. The same proofs
+ * apply to what ran under the names from before the rename (t-81b0.5): `integrations/web.lock` and
+ * `web.json`, held by alp web of 0.0.1-beta.8 or earlier, or by the Paseo integration from before
+ * its own rename.
  *
- * Only a process proven to be the one that took `integrations/web.lock` is ever signalled, and only
- * with SIGTERM (the CLI's own `--rotate` child aside, which it may time out): the lock and `web.json` name the same pid, both files are the user's, the lock is
+ * Only a process proven to be the one that took the service's lock is ever signalled, and only
+ * with SIGTERM (the CLI's own `--rotate` child aside, which it may time out): the lock and the
+ * service's `<name>.json` name the same pid, both files are the user's, the lock is
  * from this boot, the pid answers signal 0 (so it is the user's own process), and that process
  * started no later than the lock was written (so the pid was not reused). Anything else is reported
  * and left alone. A stopped owner releases the lock; one that died holding it leaves it to the next
@@ -24,15 +28,25 @@ import { selfEntry } from '@anhlp/alp-core/packaged';
 const execFileAsync = promisify(execFile);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-/** The alp-web service script beside this CLI; a clear error when this CLI was built without it. */
-export function alpWebScript() {
-  const entry = fileURLToPath(distributionEntry('alp-web.js'));
-  if (!existsSync(entry)) throw new Error(`alp web is not built: ${entry} is missing. Build the CLI (npm run build in the ALP checkout) or reinstall ALP.`);
+/** The alp-dashboard service script beside this CLI; a clear error when this CLI was built without it. */
+export function dashboardScript() {
+  const entry = fileURLToPath(distributionEntry('alp-dashboard.js'));
+  if (!existsSync(entry)) throw new Error(`alp dashboard is not built: ${entry} is missing. Build the CLI (npm run build in the ALP checkout) or reinstall ALP.`);
   return entry;
 }
 
-/** What starts alp-web: its script under Node (named through app/current in the ALP bundle). */
-export const alpWebEntry = () => selfEntry(alpWebScript());
+/** What starts alp-dashboard: its script under Node (named through app/current in the ALP bundle). */
+export const dashboardEntry = () => selfEntry(dashboardScript());
+
+/**
+ * @typedef {{ lock: string, info: string, app: string, what: string }} Service
+ * The integration lock's name, the file the service publishes, the `app` it writes there, and what
+ * messages call it.
+ */
+/** @type {Service} */
+export const DASHBOARD = Object.freeze({ lock: 'dashboard', info: 'dashboard.json', app: 'alp-dashboard', what: 'alp dashboard' });
+/** alp web as 0.0.1-beta.8 and earlier ran it (and, before that, the Paseo integration). @type {Service} */
+export const LEGACY_WEB = Object.freeze({ lock: 'web', info: 'web.json', app: 'alp-web', what: 'alp web from before its rename to alp dashboard' });
 
 const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
 
@@ -50,20 +64,20 @@ async function processTimes(pid) {
 }
 
 /**
- * The process that owns alp web's lock, if it is proven safe to stop; else why not. `kind` says
- * whether waiting can help: `transient` (an owner still starting has not published web.json yet),
+ * The process that owns `service`'s lock, if it is proven safe to stop; else why not. `kind` says
+ * whether waiting can help: `transient` (an owner still starting has not published its file yet),
  * `foreign` (proven not to be the integration: another user's, another boot's, or a reused pid) or
  * `unknown` (it cannot be proven either way, for example without ps or on Windows).
  *
  * The reuse proof compares the lock's creation time with the process's start from ps: when
  * `startedUptime` is recorded, monotonic uptime comparison prevents clock step vulnerabilities.
  * For legacy locks, wall-clock `startedAt` is compared.
- * @param {string} home
+ * @param {string} home @param {Service} [service]
  * @returns {Promise<{ pid: number, app: unknown } | { reason: string, alive: boolean, kind?: 'transient' | 'foreign' | 'unknown' }>}
  */
-export async function webOwner(home) {
-  const lockFile = path.join(home, 'integrations', 'web.lock');
-  const infoFile = path.join(home, 'web.json');
+export async function serviceOwner(home, service = DASHBOARD) {
+  const lockFile = path.join(home, 'integrations', `${service.lock}.lock`);
+  const infoFile = path.join(home, service.info);
   let lock, lockInfo;
   try { lockInfo = await lstat(lockFile); lock = await readJson(lockFile); } catch { return { reason: `${lockFile} is missing or unreadable`, alive: false }; }
   if (!lockInfo.isFile() || !Number.isSafeInteger(lock?.pid) || lock.pid <= 0 || typeof lock.bootTime !== 'number' || !Number.isFinite(Date.parse(lock.startedAt))) {
@@ -89,7 +103,7 @@ export async function webOwner(home) {
     ? (Math.floor(os.uptime()) - times.elapsed) > lock.startedUptime + 2
     : times.started > Date.parse(lock.startedAt) + 2_000;
   if (isReused) return refuse(`pid ${pid} started after the lock was written (a reused pid)`, 'foreign');
-  // The lock's owner; web.json must name it too (an owner still starting has not written it yet).
+  // The lock's owner; its published file must name it too (an owner still starting has not written it yet).
   let info, infoStat;
   try { infoStat = await lstat(infoFile); info = await readJson(infoFile); } catch { return refuse(`${infoFile} is missing or unreadable`, 'transient'); }
   if (info?.pid !== pid) return refuse(`${infoFile} names another process than the lock`, 'transient');
@@ -111,53 +125,45 @@ async function terminate(pid, what, timeoutMs = 20_000) {
   throw new Error(`${what} (pid ${pid}) did not stop within ${timeoutMs / 1000} s of SIGTERM; stop it, then run the command again`);
 }
 
-/** Whether `web.json` is alp-web's own (the pre-rename Paseo integration wrote it without `app`). */
-const isAlpWeb = app => app === 'alp-web';
 const PASEO_BEFORE_RENAME = 'The Paseo integration from before its rename';
 
-/**
- * Stops the Paseo integration from before its rename when it still runs as integration `web` (its
- * web.json has no `app: 'alp-web'`), so alp-web can take the lock and web.port. Returns the pid it
- * stopped. A process that cannot be proven to be that integration is left alone.
- * @param {string} home
- */
-export async function stopPreRenamePaseo(home) {
-  const owner = await webOwner(home);
-  if (!('pid' in owner) || isAlpWeb(owner.app)) return undefined;
-  await terminate(owner.pid, PASEO_BEFORE_RENAME);
-  return owner.pid;
-}
+/** What a proven owner of `service`'s lock is, by the `app` its file names. @param {Service} service @param {unknown} app */
+const ownerName = (service, app) => app === service.app || service === DASHBOARD ? service.what : PASEO_BEFORE_RENAME;
 
 /**
- * Stops whatever runs as integration `web` (alp-web, or the Paseo integration from before its
- * rename), waiting up to `timeoutMs` for a starting owner to publish what proves it. Resolves once
- * no live process owns the lock; refuses at once an owner that is foreign or cannot be proven.
- * @param {string} home @param {number} [timeoutMs]
+ * Stops whatever runs as `service` (alp dashboard; for LEGACY_WEB, alp web from before the rename or
+ * the Paseo integration from before its own), waiting up to `timeoutMs` for a starting owner to
+ * publish what proves it. Resolves with the pid it stopped, or undefined once no live process owns
+ * the lock; refuses at once an owner that is foreign or cannot be proven.
+ * @param {string} home @param {number} [timeoutMs] @param {Service} [service]
  */
-export async function stopWebService(home, timeoutMs = 30_000) {
+export async function stopService(home, timeoutMs = 30_000, service = DASHBOARD) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const owner = await webOwner(home);
-    if ('pid' in owner) { await terminate(owner.pid, isAlpWeb(owner.app) ? 'alp web' : PASEO_BEFORE_RENAME); return owner.pid; }
+    const owner = await serviceOwner(home, service);
+    if ('pid' in owner) { await terminate(owner.pid, ownerName(service, owner.app)); return owner.pid; }
     if (!owner.alive) return undefined;
     // Only an owner still starting can become provable; waiting changes nothing else.
-    if (owner.kind !== 'transient' || Date.now() >= deadline) throw new Error(`${refusal(home)} (${owner.reason}); stop it, then run the command again`);
+    if (owner.kind !== 'transient' || Date.now() >= deadline) throw new Error(`${refusal(home, service)} (${owner.reason}); stop it, then run the command again`);
     await sleep(200);
   }
 }
 
-/** The opening of the message for a web lock held by a process alp would not stop. @param {string} home */
-export function refusal(home) {
-  return `${path.join(home, 'integrations', 'web.lock')} is held by a process that alp cannot prove is alp web or the Paseo integration from before its rename, so it was left running`;
+/** The opening of the message for a lock held by a process alp would not stop. @param {string} home @param {Service} [service] */
+export function refusal(home, service = DASHBOARD) {
+  const lock = path.join(home, 'integrations', `${service.lock}.lock`);
+  return service === DASHBOARD
+    ? `${lock} is held by a process that alp cannot prove is alp dashboard, so it was left running`
+    : `${lock} is held by a process that alp cannot prove is ${service.what} or the Paseo integration from before its rename, so it was left running`;
 }
 
 /**
- * Probes whether the published web service URL is live and answering requests.
+ * Probes whether the published dashboard URL is live and answering requests.
  * Accepts only loopback HTTP/HTTPS addresses.
  * @param {string | undefined} url
  * @param {number} [timeoutMs]
  */
-export async function isWebReady(url, timeoutMs = 1_000) {
+export async function isDashboardReady(url, timeoutMs = 1_000) {
   if (typeof url !== 'string' || !url) return false;
   try {
     const parsed = new URL(url);
@@ -171,7 +177,7 @@ export async function isWebReady(url, timeoutMs = 1_000) {
 }
 
 /**
- * Whether web metadata is genuinely claimed by a live alp-web process.
+ * Whether the published file is genuinely claimed by a live alp-dashboard process.
  * If the process is proven foreign (e.g. a reused PID or from another boot) or
  * the URL does not answer HTTP requests, it is never claimed.
  * @param {any} published
@@ -179,8 +185,8 @@ export async function isWebReady(url, timeoutMs = 1_000) {
  * @param {any} held
  * @param {number} [timeoutMs]
  */
-export async function isWebClaimed(published, lockPid, held, timeoutMs = 1_000) {
-  if (published?.app !== 'alp-web' || published.pid !== lockPid) return false;
+export async function isServiceClaimed(published, lockPid, held, timeoutMs = 1_000) {
+  if (published?.app !== DASHBOARD.app || published.pid !== lockPid) return false;
   if (held?.kind === 'foreign') return false;
-  return isWebReady(published.url, timeoutMs);
+  return isDashboardReady(published.url, timeoutMs);
 }

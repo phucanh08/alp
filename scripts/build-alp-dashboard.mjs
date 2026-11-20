@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// The browser files `alp web` serves (packages/cli/dist/alp-web.js, docs/alp/web.md): apps/web built
-// with its own Vite config straight into packages/cli/dist/alp-web/, with a THIRD-PARTY-NOTICES.txt
+// The browser files `alp dashboard` serves (packages/cli/dist/alp-dashboard.js, docs/alp/dashboard.md): apps/web built
+// with its own Vite config straight into packages/cli/dist/alp-dashboard/, with a THIRD-PARTY-NOTICES.txt
 // for exactly the npm packages Rollup put into the browser bundle (its module graph, not a guess).
 import { access, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { THIRD_PARTY_NOTICES, packageDirectory, writeNoticesFor } from './third-party-notices.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-export const ALP_WEB_DIR = path.join(ROOT, 'packages/cli/dist/alp-web');
+export const ALP_DASHBOARD_DIR = path.join(ROOT, 'packages/cli/dist/alp-dashboard');
 
 /** The installed package directory of a Rollup module id, if it is one; virtual and query parts dropped. @param {string} id */
 export function bundledPackage(id) {
@@ -49,7 +49,7 @@ export async function importedStylePackages(stylesheet) {
 }
 
 /** Builds apps/web into `outDir` and writes its notices; returns the bundled npm package directories. */
-export async function buildAlpWeb({ outDir = ALP_WEB_DIR, log = console.log } = {}) {
+export async function buildAlpDashboard({ outDir = ALP_DASHBOARD_DIR, log = console.log } = {}) {
   const { build } = await import('vite');
   const packages = new Set();
   const stylesheets = new Set();
@@ -77,10 +77,10 @@ export async function buildAlpWeb({ outDir = ALP_WEB_DIR, log = console.log } = 
   for (const stylesheet of stylesheets) for (const directory of await importedStylePackages(stylesheet)) packages.add(directory);
   if (helpers) packages.add(await installedPackage('vite', path.join(ROOT, 'apps/web')));
   if (!packages.size) throw new Error('the apps/web bundle names no npm package; the notices would be empty');
-  const { headings } = await writeNoticesFor(path.join(outDir, THIRD_PARTY_NOTICES), [...packages], 'the ALP web app (packages/cli/dist/alp-web)');
+  const { headings } = await writeNoticesFor(path.join(outDir, THIRD_PARTY_NOTICES), [...packages], 'the ALP web app (packages/cli/dist/alp-dashboard)');
   const files = (await readdir(outDir, { recursive: true })).length;
   log(`Built the ALP web app: ${path.relative(ROOT, outDir)} (${files} files, ${headings.length} third-party packages)`);
   return { packages: [...packages], headings };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) await buildAlpWeb();
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) await buildAlpDashboard();

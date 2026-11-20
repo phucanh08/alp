@@ -53,7 +53,7 @@ export function assertRemoteInputs(metafile, label) {
 }
 
 /**
- * Workspace inputs (packages/*, and apps/* such as the gateway inlined into the CLI's alp-web.js)
+ * Workspace inputs (packages/*, and apps/* such as the gateway inlined into the CLI's alp-dashboard.js)
  * and external imports of one bundle, small and deterministic.
  */
 export function summarize(metafile, outfile) {

@@ -87,7 +87,7 @@ export function superviseDaemon({ home, entry, env = process.env, intervalMs = 5
     // Stopped while this check looked: start nothing.
     if (++missed >= misses && !stopped) await start('was down; started it again');
   };
-  // `by` names the supervising service in the log, for example `Paseo` or `alp web`.
+  // `by` names the supervising service in the log, for example `Paseo` or `alp dashboard`.
   const initial = start(by ? `started with ${by}` : 'started', false);
   const timer = setInterval(() => { void check(); }, intervalMs);
   timer.unref?.();

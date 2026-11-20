@@ -410,8 +410,6 @@ async function recall(args) {
   console.log(answer.answer);
 }
 
-/** alp web: opens the web app alpd serves on 127.0.0.1, with the token in the address (ALPD §61). */
-
 async function interrupt(args) {
   if (args.length !== 1) throw new UsageError();
   const client = await running();

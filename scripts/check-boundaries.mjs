@@ -27,13 +27,13 @@ const allowed = {
   '@anhlp/alp-paseo': ['@anhlp/alp-daemon', '@anhlp/alp-runtime', '@anhlp/alp-client', '@anhlp/alp-core', '@anhlp/alp-protocol'],
 };
 /**
- * The one exception to "apps are leaves": the CLI bundles the private gateway into dist/alp-web.js
- * (`alp web`), so it names it as a devDependency only and never installs it. Only the sources of
- * that bundle (src/web/) may import it: every other CLI file is built with `@anhlp/*` external and
+ * The one exception to "apps are leaves": the CLI bundles the private gateway into dist/alp-dashboard.js
+ * (`alp dashboard`), so it names it as a devDependency only and never installs it. Only the sources of
+ * that bundle (src/dashboard/) may import it: every other CLI file is built with `@anhlp/*` external and
  * would ship an import of a package that is never published.
  */
 const bundledApps = { '@anhlp/alp-cli': ['@anhlp/alp-gateway'] };
-const bundledSources = { '@anhlp/alp-cli': `src${path.sep}web${path.sep}` };
+const bundledSources = { '@anhlp/alp-cli': `src${path.sep}dashboard${path.sep}` };
 const failures = corePackageProblems(manifest);
 /** The only sources that may name process.execPath directly: the runtime-neutral launch helpers. */
 const EXECPATH_HOMES = new Set(['packages/core/src/packaged.js', 'packages/core/src/bridges.js']);

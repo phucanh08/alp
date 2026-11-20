@@ -4,7 +4,7 @@ import { realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 /**
- * The static side of `alp web` (docs/alp/web.md): the built apps/web files, served through the
+ * The static side of `alp dashboard` (docs/alp/dashboard.md): the built apps/web files, served through the
  * gateway's `serveStatic` hook on the gateway's own loopback listener. The gateway has refused an
  * unknown Host (421) before a request reaches this, and hands over GET and HEAD only, with the RAW
  * request target. This module normalizes that target itself and never serves a file whose real
@@ -35,7 +35,7 @@ const FORBIDDEN_IN_SEGMENT = /[\u0000-\u001f\u007f/\\:]/;
 
 /** What a page without the built app says. @param {string} dir */
 const missingPage = dir => `<!doctype html><meta charset="utf-8"><title>ALP</title><body style="font:16px system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem">
-<h1>ALP web is not built</h1><p>The web app's files are missing from <code>${dir.replace(/[&<>"]/g, char => `&#${char.charCodeAt(0)};`)}</code>. Build them from a checkout with <code>node scripts/build-workspace.mjs cli</code> (or <code>node scripts/build-alp-web.mjs</code>), or install ALP from npm, which carries them. The gateway on this address keeps running.</p>`;
+<h1>ALP dashboard is not built</h1><p>The web app's files are missing from <code>${dir.replace(/[&<>"]/g, char => `&#${char.charCodeAt(0)};`)}</code>. Build them from a checkout with <code>node scripts/build-workspace.mjs cli</code> (or <code>node scripts/build-alp-dashboard.mjs</code>), or install ALP from npm, which carries them. The gateway on this address keeps running.</p>`;
 
 /**
  * The path segments a raw request target names, each decoded once, or a refusal.
@@ -46,8 +46,8 @@ export function parseTarget(raw) {
   if (typeof raw !== 'string' || !raw.startsWith('/') || raw.includes('\\') || /%5c/i.test(raw) || raw.includes('\0')) return { status: 400 };
   let url;
   // Never `new URL(raw, base)`: a raw `//host/x` would name another host. The fixed origin keeps it a path.
-  try { url = new URL(`http://alp-web.invalid${raw}`); } catch { return { status: 400 }; }
-  if (url.host !== 'alp-web.invalid') return { status: 400 };
+  try { url = new URL(`http://alp-dashboard.invalid${raw}`); } catch { return { status: 400 }; }
+  if (url.host !== 'alp-dashboard.invalid') return { status: 400 };
   const parts = url.pathname.split('/').slice(1);
   /** @type {string[]} */
   const segments = [];

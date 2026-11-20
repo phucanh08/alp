@@ -20,9 +20,9 @@ test('an entry found on disk runs by its kind: a script under execPath, an `alp`
   assert.deepEqual(entryCommand('/opt/alp/dist/alpd.js', 'daemon', ['--service'], '/opt/node'), { command: '/opt/node', args: ['/opt/alp/dist/alpd.js', '--service'] });
   // What a 0.0.1-beta.5/6 single-file install recorded, and the bundle's launcher.
   assert.deepEqual(entryCommand('/home/u/.alp/bin/alp', 'daemon', ['--service'], '/opt/node'), { command: '/home/u/.alp/bin/alp', args: ['daemon', 'run', '--service'] });
-  assert.deepEqual(entryCommand('C:\\alp\\alp.exe', 'web', ['--rotate']), { command: 'C:\\alp\\alp.exe', args: ['web', 'serve', '--rotate'] });
+  assert.deepEqual(entryCommand('C:\\alp\\alp.exe', 'dashboard', ['--rotate']), { command: 'C:\\alp\\alp.exe', args: ['dashboard', 'serve', '--rotate'] });
   // A third-party integration entry is always a script, whatever its name.
-  assert.deepEqual(entryCommand('/usr/bin/alp-x-integration', 'web', ['--service'], '/opt/node', { scriptOnly: true }), { command: '/opt/node', args: ['/usr/bin/alp-x-integration', '--service'] });
+  assert.deepEqual(entryCommand('/usr/bin/alp-x-integration', 'dashboard', ['--service'], '/opt/node', { scriptOnly: true }), { command: '/opt/node', args: ['/usr/bin/alp-x-integration', '--service'] });
   assert.throws(() => entryCommand('/bin/alp', /** @type {any} */ ('nope')), /Unknown ALP role/);
   // Only alp/alp.exe/alp.cmd is a command: a TypeScript or extensionless entry still runs under execPath.
   assert.deepEqual(entryCommand('/src/alp/alpd.ts', 'daemon', ['--detach'], '/opt/node'), { command: '/opt/node', args: ['/src/alp/alpd.ts', '--detach'] });

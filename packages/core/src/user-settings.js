@@ -3,7 +3,7 @@ import { moveFile } from './atomic.js';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { AlpError } from './errors.js';
-import { validateUserSettings } from './validation.js';
+import { DASHBOARD_SETTINGS, validateUserSettings } from './validation.js';
 
 /**
  * The user's own settings in $ALP_HOME/settings.json that ALP and its screens edit
@@ -73,4 +73,54 @@ export async function setWebRelay(home, patch) {
   await writeFile(temporary, JSON.stringify(next, null, 2) + '\n');
   await moveFile(temporary, file);
   return next.web.relay;
+}
+
+/**
+ * alp dashboard's settings (enabled, port, permissions): `dashboard.*` first, then the `web.*` they
+ * had before the rename (t-81b0.5), so a file not yet migrated is still obeyed rather than ignored.
+ * @param {any} settings
+ * @returns {{ enabled?: boolean, port?: number, permissions?: string[] }}
+ */
+export function dashboardSettings(settings) {
+  const now = settings?.dashboard ?? {};
+  const before = settings?.web ?? {};
+  /** @type {any} */
+  const result = {};
+  for (const key of DASHBOARD_SETTINGS) {
+    const value = now[key] !== undefined ? now[key] : before[key];
+    if (value !== undefined) result[key] = value;
+  }
+  return result;
+}
+
+/**
+ * Moves alp dashboard's settings from `web` (before the rename, t-81b0.5) to `dashboard` in
+ * settings.json, keeping everything else, `web.relay` (Paseo's) included. A key `dashboard` already
+ * sets wins: the `web` one is left in place and reported, never merged over it. Idempotent: a file
+ * with nothing to move is not written. Returns what it moved and what it left.
+ * @param {string} home
+ * @returns {Promise<{ moved: string[], conflicts: string[] }>}
+ */
+export async function migrateDashboardSettings(home) {
+  const { file, settings } = await readSettings(home);
+  const web = settings.web;
+  if (!web || typeof web !== 'object') return { moved: [], conflicts: [] };
+  const moved = [], conflicts = [];
+  const dashboard = { ...settings.dashboard };
+  const rest = { ...web };
+  for (const key of DASHBOARD_SETTINGS) {
+    if (web[key] === undefined) continue;
+    if (dashboard[key] !== undefined) { conflicts.push(key); continue; }
+    dashboard[key] = web[key];
+    delete rest[key];
+    moved.push(key);
+  }
+  if (!moved.length) return { moved, conflicts };
+  const next = { ...settings, dashboard };
+  if (Object.keys(rest).length) next.web = rest; else delete next.web;
+  validateUserSettings(next, file);
+  const temporary = `${file}.${randomUUID().slice(0, 8)}.tmp`;
+  await writeFile(temporary, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
+  await moveFile(temporary, file);
+  return { moved, conflicts };
 }

@@ -25,7 +25,7 @@ import { spawnCommand } from './spawn-command.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 export const PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64', 'windows-x64'];
-/** The workspaces @anhlp/alp-cli needs at run time (alpd, the runtime and alp-web are bundled in its dist). */
+/** The workspaces @anhlp/alp-cli needs at run time (alpd, the runtime and alp-dashboard are bundled in its dist). */
 const WORKSPACES = ['packages/protocol', 'packages/core', 'packages/client', 'packages/cli'];
 const CLI = 'lib/node_modules/@anhlp/alp-cli/dist/cli.js';
 
@@ -138,7 +138,7 @@ holds ALP's npm dependencies, each with its own licence file; the notices of the
 into @anhlp/alp-cli's dist follow Node's.
 `];
   parts.push(`\n${'='.repeat(100)}\nNode.js\n${'='.repeat(100)}\n\n${nodeLicense.trim()}\n`);
-  for (const source of ['packages/cli/dist/THIRD-PARTY-NOTICES.txt', 'packages/cli/dist/alp-web/THIRD-PARTY-NOTICES.txt']) {
+  for (const source of ['packages/cli/dist/THIRD-PARTY-NOTICES.txt', 'packages/cli/dist/alp-dashboard/THIRD-PARTY-NOTICES.txt']) {
     const text = await readFile(path.join(ROOT, source), 'utf8').catch(() => { throw new Error(`${source} is missing; run npm run build first`); });
     parts.push(`\n${'='.repeat(100)}\n${source}\n${'='.repeat(100)}\n\n${text.trim()}\n`);
   }

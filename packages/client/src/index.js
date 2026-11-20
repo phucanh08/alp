@@ -9,6 +9,7 @@ import path from 'node:path';
 
 import { scrubText } from '@anhlp/alp-core/log';
 import { entryCommand } from '@anhlp/alp-core/packaged';
+import { dashboardSettings } from '@anhlp/alp-core/user-settings';
 import { createSocketTransport } from './ipc.js';
 import { AlpRpcClient } from './rpc/client.js';
 import { hello } from './rpc/handshake.js';
@@ -631,18 +632,19 @@ async function distributionRoots() {
 /**
  * The entry of integration `name`: an environment override, a descriptor under the home or a
  * distribution root, or an `alp-<name>-integration` binary. Discovery never returns an entry for
- * `web`: that name belongs to alp-web, which ships with the CLI and is started with its explicit
- * entry. Everything once registered under `web` (the descriptor `integrations/web.json`, the
+ * `dashboard`: that is alp dashboard's service, which ships with the CLI and is started with its
+ * explicit entry; nor for `web`, its name before the rename (t-81b0.5). Everything once registered
+ * under `web` (the descriptor `integrations/web.json`, the
  * `alp-web-integration` binary, `ALP_WEB_INTEGRATION`) is the Paseo integration from before its
  * rename to `paseo`, which must never run under the web lock. `ALP_WEB_INTEGRATION` is read for
  * `paseo` only, after `ALP_PASEO_INTEGRATION`, for one release (like the alp-web-integration alias).
  * @param {string} [name]
  * @param {{ home?: string, env?: NodeJS.ProcessEnv, binDirectories?: string[], roots?: string[] }} [options]
  */
-export async function discoverIntegration(name = 'web', options = {}) {
+export async function discoverIntegration(name = 'dashboard', options = {}) {
   // The name becomes a descriptor path under <home>/integrations, so it must stay one safe segment.
   assertIntegrationName(name);
-  if (name === 'web') return undefined;
+  if (name === 'dashboard' || name === 'web') return undefined;
   const { env = process.env, binDirectories = BIN_DIRECTORIES, roots } = options;
   // Explicit environment override always wins: the integration's own, then the generic one.
   const envCandidates = [
@@ -684,17 +686,17 @@ export function integrationAlive(lock) {
 }
 
 /**
- * What startIntegration says about integration `name`, and where its service writes its log: alp-web
- * (`web`) is part of the CLI, Paseo (`paseo`) an optional package, anything else named as is.
+ * What startIntegration says about integration `name`, and where its service writes its log: alp
+ * dashboard (`dashboard`) is part of the CLI, Paseo (`paseo`) an optional package, anything else named as is.
  * @param {string} name
  * @param {string} home
  */
 function integrationText(name, home) {
   const logs = path.join(home, 'logs', 'integrations');
-  if (name === 'web') return {
-    what: 'alp web',
-    log: path.join(logs, 'alp-web.log'),
-    missing: 'alp web runs the alp-web service of the ALP CLI, which is started with its entry (packages/cli/dist/alp-web.js); run `alp web`',
+  if (name === 'dashboard') return {
+    what: 'alp dashboard',
+    log: path.join(logs, 'alp-dashboard.log'),
+    missing: 'alp dashboard runs the alp-dashboard service of the ALP CLI, which is started with its entry (packages/cli/dist/alp-dashboard.js); run `alp dashboard`',
   };
   if (name === 'paseo') return {
     what: 'The Paseo integration',
@@ -709,16 +711,16 @@ function integrationText(name, home) {
 }
 
 /**
- * Starts integration `name` (default `web`) detached with `--service` (then `args`) unless its lock
+ * Starts integration `name` (default `dashboard`) detached with `--service` (then `args`) unless its lock
  * already names a live owner, then waits until its ready lock and `<home>/<name>.json` name the same
  * pid. `entry` names the script to run with this Node and skips descriptor, environment and PATH
- * discovery; `web` (alp-web) is never discovered, so it needs its entry. `"web": { "enabled": false }`
- * in the home's settings.json refuses `web` only.
+ * discovery; `dashboard` is never discovered, so it needs its entry. `"dashboard": { "enabled": false }`
+ * in the home's settings.json (or `web.enabled`, its key before the rename) refuses `dashboard` only.
  * @param {string | { name?: string, entry?: string, home?: string, args?: string[] }} [nameOrOptions]
  */
-export async function startIntegration(nameOrOptions = 'web') {
+export async function startIntegration(nameOrOptions = 'dashboard') {
   const options = typeof nameOrOptions === 'string' ? { name: nameOrOptions } : (nameOrOptions ?? {});
-  const name = assertIntegrationName(options.name ?? 'web');
+  const name = assertIntegrationName(options.name ?? 'dashboard');
   if (options.entry !== undefined && (typeof options.entry !== 'string' || !options.entry)) throw new TypeError('startIntegration entry must be a non-empty path');
   const args = options.args ?? [];
   if (!Array.isArray(args) || !args.every(arg => typeof arg === 'string')) throw new TypeError('startIntegration args must be a list of strings');
@@ -734,11 +736,11 @@ export async function startIntegration(nameOrOptions = 'web') {
   const webPath = pathMod.join(home, `${name}.json`);
   const started = explicit ? ` (entry ${explicit})` : '';
 
-  // web.enabled turns off alp web only; other integrations have their own switches.
-  if (name === 'web') {
+  // dashboard.enabled turns off alp dashboard only; other integrations have their own switches.
+  if (name === 'dashboard') {
     let settings = {};
     try { settings = JSON.parse(await fs.readFile(pathMod.join(home, 'settings.json'), 'utf8')); } catch {}
-    if (settings?.web?.enabled === false) throw new Error('alp web is disabled by settings ("web.enabled": false).');
+    if (dashboardSettings(settings).enabled === false) throw new Error('alp dashboard is disabled by settings ("dashboard.enabled": false).');
   }
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -760,10 +762,10 @@ export async function startIntegration(nameOrOptions = 'web') {
         const info = await readWeb();
         if (info && info.pid === lock.pid) return lock;
       }
-      // alp-web can fail during bootstrap after the initial exit check (for example a
+      // alp dashboard can fail during bootstrap after the initial exit check (for example a
       // refused uncertain lock). Its service log carries the cause; do not mask it with
-      // a readiness/web.json timeout. Check a concurrent winner's ready lock first.
-      if (name === 'web' && webStartupFailed()) throw new Error(`${text.what}${started} failed to start; see ${text.log}`);
+      // a readiness/dashboard.json timeout. Check a concurrent winner's ready lock first.
+      if (name === 'dashboard' && webStartupFailed()) throw new Error(`${text.what}${started} failed to start; see ${text.log}`);
       await sleep(100);
     }
     const lock = await readLock();
@@ -786,8 +788,8 @@ export async function startIntegration(nameOrOptions = 'web') {
   // The child is detached with its stdio ignored, so it cannot rely on the parent's console. `--service`
   // is the generic contract: the entry writes its own log (the path its error messages advertise) and
   // keeps the process alive as a service. `--register` still prints to stdout and is not passed here.
-  // alp-web may be an `alp` command (`alp web serve`); other integrations are scripts.
-  const launch = name === 'web' ? entryCommand(entry, 'web', ['--service', ...args]) : entryCommand(entry, 'web', ['--service', ...args], undefined, { scriptOnly: true });
+  // alp dashboard may be an `alp` command (`alp dashboard serve`); other integrations are scripts.
+  const launch = name === 'dashboard' ? entryCommand(entry, 'dashboard', ['--service', ...args]) : entryCommand(entry, 'dashboard', ['--service', ...args], undefined, { scriptOnly: true });
   const child = spawn(launch.command, launch.args, { stdio: 'ignore', detached: true, env: { ...process.env, ALP_HOME: home } });
   let spawnError = null;
   child.on('error', error => { spawnError = error; });

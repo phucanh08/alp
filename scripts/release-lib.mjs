@@ -157,24 +157,24 @@ export function createReleaseManifest({ version, git, build, pack, artifacts, sh
 }
 
 /**
- * `alp web` runs alp-web (docs/alp/web.md): its service bundle, the browser app and their notices
+ * `alp dashboard` runs alp-dashboard (docs/alp/dashboard.md): its service bundle, the browser app and their notices
  * ship inside the CLI package (the executable embeds them too). The gateway it inlines stays private
  * (A5 refuses a tarball outside the release); this list is checked beside A5, not as part of it.
  */
-const ALP_WEB_FILES = ['dist/alp-web.js', 'dist/alp-web/index.html', `dist/alp-web/${THIRD_PARTY_NOTICES}`, `dist/${THIRD_PARTY_NOTICES}`];
+const ALP_DASHBOARD_FILES = ['dist/alp-dashboard.js', 'dist/alp-dashboard/index.html', `dist/alp-dashboard/${THIRD_PARTY_NOTICES}`, `dist/${THIRD_PARTY_NOTICES}`];
 export const SHIPPED_WEB_FILES = Object.freeze({
-  '@anhlp/alp-cli': ALP_WEB_FILES,
+  '@anhlp/alp-cli': ALP_DASHBOARD_FILES,
 });
 
 /**
- * Missing alp-web assets or bundled-only source leaked into a packed package.
+ * Missing alp-dashboard assets or bundled-only source leaked into a packed package.
  * @param {string} name @param {Iterable<string>} files the packed paths, relative to the package root
  */
 export function shippedWebProblems(name, files) {
   const packed = new Set(files);
-  const problems = (SHIPPED_WEB_FILES[name] ?? []).filter(file => !packed.has(file)).map(file => `${name}: ${file} is not packed; alp web cannot run (build the CLI with apps/gateway and apps/web present)`);
-  const sourcePrefix = name === '@anhlp/alp-cli' ? 'src/web/' : undefined;
-  if (sourcePrefix && [...packed].some(file => file.startsWith(sourcePrefix))) problems.push(`${name}: bundled-only ${sourcePrefix} is packed; it imports the unpublished gateway (ship dist/alp-web.js instead)`);
+  const problems = (SHIPPED_WEB_FILES[name] ?? []).filter(file => !packed.has(file)).map(file => `${name}: ${file} is not packed; alp dashboard cannot run (build the CLI with apps/gateway and apps/web present)`);
+  const sourcePrefix = name === '@anhlp/alp-cli' ? 'src/dashboard/' : undefined;
+  if (sourcePrefix && [...packed].some(file => file.startsWith(sourcePrefix))) problems.push(`${name}: bundled-only ${sourcePrefix} is packed; it imports the unpublished gateway (ship dist/alp-dashboard.js instead)`);
   return problems;
 }
 
@@ -333,7 +333,7 @@ export const GATE_ROWS = [
   { id: 'H2', title: 'validate:core + validate:paseo on macOS (CI core-paseo-macos, Node 24)', blocking: true, binds: 'sha' },
   { id: 'H3', title: 'CI packages-and-web (validate:packages), Ubuntu, Node 22', blocking: true, binds: 'sha' },
   { id: 'H4', title: 'CI windows-daemon, Node 22 and 24', blocking: true, binds: 'sha' },
-  { id: 'H5', title: 'CI alp-web, Ubuntu and macOS', blocking: false, binds: 'sha' },
+  { id: 'H5', title: 'CI alp-dashboard, Ubuntu and macOS', blocking: false, binds: 'sha' },
   { id: 'L1', title: 'Licence, license field, repository metadata (T4)', blocking: true, binds: 'sha' },
   { id: 'S1', title: 'npm audit high/critical triage of runtime dependencies (T6)', blocking: true, binds: 'sha' },
   { id: 'A5', title: 'Saved artifacts: SHA256SUMS, 8 tarballs, version, licences, no gateway, no Paseo in core (release-verify)', blocking: true, binds: 'artifacts' },
@@ -342,8 +342,8 @@ export const GATE_ROWS = [
   // D7: macOS is the primary test platform; Linux rows are run when possible and do not block.
   { id: 'R3', title: 'Linux, Codex, CLI/alpd C1–C9 on the tarballs', blocking: false, binds: 'artifacts' },
   { id: 'R4', title: 'Linux, Claude Code, CLI/alpd C1–C9 on the tarballs', blocking: false, binds: 'artifacts' },
-  { id: 'R5', title: 'macOS, Codex and Claude, plugin in Paseo 0.11.x + alp web W1–W6 on the tarballs', blocking: true, binds: 'artifacts' },
-  { id: 'R6', title: 'Linux, Codex or Claude, plugin in Paseo 0.11.x + alp web W1–W6 on the tarballs', blocking: false, binds: 'artifacts' },
+  { id: 'R5', title: 'macOS, Codex and Claude, plugin in Paseo 0.11.x + alp dashboard W1–W6 on the tarballs', blocking: true, binds: 'artifacts' },
+  { id: 'R6', title: 'Linux, Codex or Claude, plugin in Paseo 0.11.x + alp dashboard W1–W6 on the tarballs', blocking: false, binds: 'artifacts' },
   { id: 'R7', title: 'macOS (Linux when possible), Codex and Claude, test/e2e/worktree-e2e.mjs at the release SHA', blocking: true, binds: 'sha' },
   { id: 'Q1', title: 'Registry: beta dist-tag and integrity of all 8 match the manifest', blocking: true, binds: 'artifacts', phase: 'post' },
   { id: 'Q2', title: 'Clean install from the registry on macOS (Linux when possible); lockfile integrity matches', blocking: true, binds: 'artifacts', phase: 'post' },

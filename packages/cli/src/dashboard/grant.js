@@ -7,35 +7,35 @@ import { DEFAULT_PERMISSIONS, PERMISSIONS } from '@anhlp/alp-gateway/policy';
 import { isAgentProcess } from '@anhlp/alp-core/tasks';
 
 /**
- * The one gateway credential `alp web` hands the browser (docs/alp/web.md): its token travels in
+ * The one gateway credential `alp dashboard` hands the browser (docs/alp/dashboard.md): its token travels in
  * the URL the CLI opens, so it is a real `alpgw1.*` credential with the least the app needs.
  *
- * Single writer: the credentials live in `<home>/web/credentials.json`, a file of alp-web's own
- * (not the standalone gateway's `<home>/gateway`). Only the process holding the `web` integration
+ * Single writer: the credentials live in `<home>/dashboard/credentials.json`, a file of alp dashboard's own
+ * (not the standalone gateway's `<home>/gateway`). Only the process holding the `dashboard` integration
  * lock writes it, and inside that process every write goes through one queue (`serial`), so no
  * two writes interleave their read-modify-write. Another tool must not write it while the service
- * runs. Because the file is alp-web's own, `alp-gateway credential list/revoke` (which read
- * `<home>/gateway`) do not see this credential: `alp web rotate` is the way to replace or end it.
+ * runs. Because the file is alp dashboard's own, `alp-gateway credential list/revoke` (which read
+ * `<home>/gateway`) do not see this credential: `alp dashboard rotate` is the way to replace or end it.
  * The gateway's own checks apply to this path as to its default one: the directory must be the
  * user's and private (0700, checked on every start, not only on a write) and the file 0600 and the
  * user's, else nothing is read or written and the service does not start.
  *
- * Grant: permissions are DEFAULT_PERMISSIONS + workspace.write, plus `web.permissions` from the
+ * Grant: permissions are DEFAULT_PERMISSIONS + workspace.write, plus `dashboard.permissions` from the
  * user's settings when every entry is a permission a credential may hold (with any unknown entry
  * the whole list is ignored, with a warning naming it, so the grant stays the default). Workspaces are alpd's project
  * registry (live projects) ∪ the `--project` directory the caller named; with none, a private
  * empty directory stands in (a credential needs one workspace, and it grants nothing).
  */
 
-export const LABEL = 'alp web (this machine)';
+export const LABEL = 'alp dashboard (this machine)';
 export const BASE_PERMISSIONS = Object.freeze([...DEFAULT_PERMISSIONS, 'workspace.write']);
 
-/** Where alp-web keeps its credentials. @param {string} home */
-export const webGatewayHome = home => path.join(home, 'web');
+/** Where alp dashboard keeps its credentials. @param {string} home */
+export const dashboardGatewayHome = home => path.join(home, 'dashboard');
 
 /**
- * The permissions to grant: the base set and, when valid, `web.permissions`.
- * @param {unknown} extra the `web.permissions` setting
+ * The permissions to grant: the base set and, when valid, `dashboard.permissions`.
+ * @param {unknown} extra the `dashboard.permissions` setting
  * @param {(message: string) => void} [warn]
  */
 export function grantPermissions(extra, warn = () => {}) {
@@ -43,7 +43,7 @@ export function grantPermissions(extra, warn = () => {}) {
   if (extra !== undefined) {
     const unknown = Array.isArray(extra) ? extra.filter(entry => typeof entry !== 'string' || !PERMISSIONS.includes(entry)) : [extra];
     if (!unknown.length) for (const entry of /** @type {string[]} */ (extra)) wanted.add(entry);
-    else warn(`ignoring web.permissions: ${unknown.map(entry => JSON.stringify(entry)).join(', ')} ${unknown.length === 1 ? 'is not a permission' : 'are not permissions'} a credential may hold (${PERMISSIONS.join(', ')}); the default grant (${BASE_PERMISSIONS.join(', ')}) is in use`);
+    else warn(`ignoring dashboard.permissions: ${unknown.map(entry => JSON.stringify(entry)).join(', ')} ${unknown.length === 1 ? 'is not a permission' : 'are not permissions'} a credential may hold (${PERMISSIONS.join(', ')}); the default grant (${BASE_PERMISSIONS.join(', ')}) is in use`);
   }
   // As the gateway stores them: a write permission holds its read (credentials.js checkPermissions).
   if (wanted.has('session.write')) wanted.add('session.read');
@@ -91,7 +91,7 @@ export async function registryRoots(socket, { timeoutMs = 3_000 } = {}) {
 async function listRoots(socket, opened) {
   let client;
   try {
-    client = await connect(socket, { name: 'alp-web', version: '1' });
+    client = await connect(socket, { name: 'alp-dashboard', version: '1' });
     opened(client);
     /** @type {string[]} */
     const roots = [];
@@ -116,7 +116,7 @@ const sameWorkspaces = (a, b) => {
 const samePermissions = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
 
 /**
- * Owns alp-web's credential while this process holds the web lock.
+ * Owns alp dashboard's credential while this process holds the dashboard lock.
  * @param {{
  *   home: string,
  *   store: import('@anhlp/alp-gateway').CredentialStore,
@@ -127,7 +127,7 @@ const samePermissions = (a, b) => JSON.stringify([...a].sort()) === JSON.stringi
  * }} options
  */
 export function createGrant({ home, store, permissions, project, socket, log = () => {} }) {
-  const credentialsHome = webGatewayHome(home);
+  const credentialsHome = dashboardGatewayHome(home);
   const placeholder = path.join(credentialsHome, 'no-project');
   /** @type {Promise<unknown>} */
   let tail = Promise.resolve();
@@ -156,15 +156,15 @@ export function createGrant({ home, store, permissions, project, socket, log = (
     settled: () => tail.then(() => undefined),
     /**
      * Reuses the credential of `token` when it still verifies, else creates one; revokes every other
-     * live credential in alp-web's file. Returns the token to publish.
-     * @param {{ token?: unknown, credentialId?: unknown }} previous what web.json held
+     * live credential in alp dashboard's file. Returns the token to publish.
+     * @param {{ token?: unknown, credentialId?: unknown }} previous what dashboard.json held
      */
     ensure: previous => serial(async () => {
-      // Only the user holds alp web's user credential (t-1c59): a process an ALP agent started gets no token.
-      if (isAgentProcess()) throw new Error('alp web hands out a user credential; this process was started by an ALP agent (ALP_AGENT_SESSION is set), so it is refused');
+      // Only the user holds alp dashboard's user credential (t-1c59): a process an ALP agent started gets no token.
+      if (isAgentProcess()) throw new Error('alp dashboard hands out a user credential; this process was started by an ALP agent (ALP_AGENT_SESSION is set), so it is refused');
       // Throws unless the directory is the user's and private; creates it (0700) on the first start.
       await assertPrivateDirectory(credentialsHome, { create: true }).catch(error => {
-        throw new Error(`alp web keeps its credentials in ${credentialsHome}, which must be a directory owned by you with private permissions (0700); run chmod 700 on it (${error?.message ?? error})`, { cause: error });
+        throw new Error(`alp dashboard keeps its credentials in ${credentialsHome}, which must be a directory owned by you with private permissions (0700); run chmod 700 on it (${error?.message ?? error})`, { cause: error });
       });
       await store.reload();
       const reused = typeof previous.token === 'string' ? store.verify(previous.token) : undefined;

@@ -6,10 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { createServer } from 'node:http';
 import { bootId, bootTime } from '@anhlp/alp-client/index';
-import { isWebClaimed, isWebReady, refusal, webOwner } from '../src/web-service.js';
+import { isServiceClaimed, isDashboardReady, refusal, serviceOwner } from '../src/dashboard-service.js';
 import { teardown } from '../../../test/support/teardown.js';
 
-test('webOwner accepts live integration across clock jumps when bootId matches', async (t) => {
+test('serviceOwner accepts live integration across clock jumps when bootId matches', async (t) => {
   const defer = teardown(t);
   const curId = bootId();
   if (!curId) return;
@@ -33,7 +33,7 @@ test('webOwner accepts live integration across clock jumps when bootId matches',
 
   // Lock written with clock jump of 120s forward, but matching bootId and valid startedUptime
   await writeFile(
-    path.join(home, 'integrations', 'web.lock'),
+    path.join(home, 'integrations', 'dashboard.lock'),
     JSON.stringify({
       pid: child.pid,
       bootTime: bootTime() - 120,
@@ -48,21 +48,21 @@ test('webOwner accepts live integration across clock jumps when bootId matches',
   );
 
   await writeFile(
-    path.join(home, 'web.json'),
+    path.join(home, 'dashboard.json'),
     JSON.stringify({
       pid: child.pid,
-      app: 'alp-web',
+      app: 'alp-dashboard',
       url: 'http://127.0.0.1:7433',
     }),
     { mode: 0o600 }
   );
 
-  const owner = await webOwner(home);
+  const owner = await serviceOwner(home);
   assert.equal(owner.pid, child.pid);
-  assert.equal(owner.app, 'alp-web');
+  assert.equal(owner.app, 'alp-dashboard');
 });
 
-test('webOwner refuses lock from another boot as foreign (cross-boot PID reuse protection)', async (t) => {
+test('serviceOwner refuses lock from another boot as foreign (cross-boot PID reuse protection)', async (t) => {
   const defer = teardown(t);
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-web-owner-cross-'));
   defer(async () => {
@@ -82,7 +82,7 @@ test('webOwner refuses lock from another boot as foreign (cross-boot PID reuse p
 
   // Lock with different bootId
   await writeFile(
-    path.join(home, 'integrations', 'web.lock'),
+    path.join(home, 'integrations', 'dashboard.lock'),
     JSON.stringify({
       pid: child.pid,
       bootTime: bootTime(),
@@ -97,22 +97,22 @@ test('webOwner refuses lock from another boot as foreign (cross-boot PID reuse p
   );
 
   await writeFile(
-    path.join(home, 'web.json'),
+    path.join(home, 'dashboard.json'),
     JSON.stringify({
       pid: child.pid,
-      app: 'alp-web',
+      app: 'alp-dashboard',
       url: 'http://127.0.0.1:7433',
     }),
     { mode: 0o600 }
   );
 
-  const owner = await webOwner(home);
+  const owner = await serviceOwner(home);
   assert.equal(owner.alive, true);
   assert.equal(owner.kind, 'foreign');
   assert.match(owner.reason, /from another boot/);
 });
 
-test('webOwner detects reused PID via startedUptime even if wall clock stepped backward', async (t) => {
+test('serviceOwner detects reused PID via startedUptime even if wall clock stepped backward', async (t) => {
   const defer = teardown(t);
   const curId = bootId();
   if (!curId) return;
@@ -139,7 +139,7 @@ test('webOwner detects reused PID via startedUptime even if wall clock stepped b
   // Lock was recorded with startedUptime: 0 (way in the past relative to child start)
   // Wall clock stepped backward: startedAt is set to the future or past
   await writeFile(
-    path.join(home, 'integrations', 'web.lock'),
+    path.join(home, 'integrations', 'dashboard.lock'),
     JSON.stringify({
       pid: child.pid,
       bootTime: bootTime(),
@@ -154,32 +154,32 @@ test('webOwner detects reused PID via startedUptime even if wall clock stepped b
   );
 
   await writeFile(
-    path.join(home, 'web.json'),
+    path.join(home, 'dashboard.json'),
     JSON.stringify({
       pid: child.pid,
-      app: 'alp-web',
+      app: 'alp-dashboard',
       url: 'http://127.0.0.1:7433',
     }),
     { mode: 0o600 }
   );
 
-  const owner = await webOwner(home);
+  const owner = await serviceOwner(home);
   assert.equal(owner.alive, true);
   assert.equal(owner.kind, 'foreign');
   assert.match(owner.reason, /reused pid/);
 });
 
-test('isWebReady verifies reachable loopback HTTP endpoints and rejects closed or invalid endpoints', async (t) => {
+test('isDashboardReady verifies reachable loopback HTTP endpoints and rejects closed or invalid endpoints', async (t) => {
   const defer = teardown(t);
-  assert.equal(await isWebReady(undefined), false);
-  assert.equal(await isWebReady(''), false);
-  assert.equal(await isWebReady('not-a-url'), false);
-  assert.equal(await isWebReady('ftp://127.0.0.1:7433'), false);
-  assert.equal(await isWebReady('http://example.com:7433'), false);
-  assert.equal(await isWebReady('http://192.168.1.1:7433'), false);
+  assert.equal(await isDashboardReady(undefined), false);
+  assert.equal(await isDashboardReady(''), false);
+  assert.equal(await isDashboardReady('not-a-url'), false);
+  assert.equal(await isDashboardReady('ftp://127.0.0.1:7433'), false);
+  assert.equal(await isDashboardReady('http://example.com:7433'), false);
+  assert.equal(await isDashboardReady('http://192.168.1.1:7433'), false);
 
   // Closed port
-  assert.equal(await isWebReady('http://127.0.0.1:59999/'), false);
+  assert.equal(await isDashboardReady('http://127.0.0.1:59999/'), false);
 
   // Active loopback server
   const server = createServer((req, res) => {
@@ -193,11 +193,11 @@ test('isWebReady verifies reachable loopback HTTP endpoints and rejects closed o
   const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
   assert.ok(port > 0);
 
-  assert.equal(await isWebReady(`http://127.0.0.1:${port}/`), true);
-  assert.equal(await isWebReady(`http://localhost:${port}/`), true);
+  assert.equal(await isDashboardReady(`http://127.0.0.1:${port}/`), true);
+  assert.equal(await isDashboardReady(`http://localhost:${port}/`), true);
 });
 
-test('isWebClaimed rejects stale metadata on reused PID, cross-boot, or unreachable service', async (t) => {
+test('isServiceClaimed rejects stale metadata on reused PID, cross-boot, or unreachable service', async (t) => {
   const defer = teardown(t);
   const server = createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -211,13 +211,13 @@ test('isWebClaimed rejects stale metadata on reused PID, cross-boot, or unreacha
   const liveUrl = `http://127.0.0.1:${port}/`;
   const deadUrl = 'http://127.0.0.1:59998/';
 
-  const validPublished = { app: 'alp-web', pid: 12345, url: liveUrl };
+  const validPublished = { app: 'alp-dashboard', pid: 12345, url: liveUrl };
 
   // App mismatch
-  assert.equal(await isWebClaimed({ app: 'other', pid: 12345, url: liveUrl }, 12345, { alive: false }), false);
+  assert.equal(await isServiceClaimed({ app: 'other', pid: 12345, url: liveUrl }, 12345, { alive: false }), false);
 
   // PID mismatch
-  assert.equal(await isWebClaimed(validPublished, 99999, { alive: false }), false);
+  assert.equal(await isServiceClaimed(validPublished, 99999, { alive: false }), false);
 
   // Reused PID proof: must be rejected even if published.pid matches lockPid and server answers
   const reusedHeld = {
@@ -225,7 +225,7 @@ test('isWebClaimed rejects stale metadata on reused PID, cross-boot, or unreacha
     kind: 'foreign',
     reason: 'pid 12345 started after the lock was written (a reused pid)',
   };
-  assert.equal(await isWebClaimed(validPublished, 12345, reusedHeld), false);
+  assert.equal(await isServiceClaimed(validPublished, 12345, reusedHeld), false);
 
   // Cross-boot proof: must be rejected
   const crossBootHeld = {
@@ -233,16 +233,16 @@ test('isWebClaimed rejects stale metadata on reused PID, cross-boot, or unreacha
     kind: 'foreign',
     reason: 'its lock is from another boot',
   };
-  assert.equal(await isWebClaimed(validPublished, 12345, crossBootHeld), false);
+  assert.equal(await isServiceClaimed(validPublished, 12345, crossBootHeld), false);
 
   for (const reason of ['pid 12345 belongs to another user', 'its lock is not yours', 'pid 12345 is not an integration']) {
-    assert.equal(await isWebClaimed(validPublished, 12345, { alive: true, kind: 'foreign', reason }), false, reason);
+    assert.equal(await isServiceClaimed(validPublished, 12345, { alive: true, kind: 'foreign', reason }), false, reason);
   }
 
   // Unreachable service URL: must be rejected
-  const deadPublished = { app: 'alp-web', pid: 12345, url: deadUrl };
-  assert.equal(await isWebClaimed(deadPublished, 12345, { alive: false }), false);
+  const deadPublished = { app: 'alp-dashboard', pid: 12345, url: deadUrl };
+  assert.equal(await isServiceClaimed(deadPublished, 12345, { alive: false }), false);
 
   // Valid claimed service: live process, matching PID, answering URL
-  assert.equal(await isWebClaimed(validPublished, 12345, { pid: 12345, app: 'alp-web' }), true);
+  assert.equal(await isServiceClaimed(validPublished, 12345, { pid: 12345, app: 'alp-dashboard' }), true);
 });

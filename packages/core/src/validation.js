@@ -14,7 +14,9 @@ function requireValue(condition, code, source, message) {
 /** Top-level keys of a project's .alp/settings.json. */
 export const PROJECT_SETTINGS = ['$schema', 'defaultAgent', 'workflow', 'runtime', 'permissions', 'verify', 'delegation', 'team', 'profile', 'templateDefaults', 'compact', 'curate'];
 /** Top-level keys of the user's $ALP_HOME/settings.json. */
-export const USER_SETTINGS = ['$schema', 'language', 'permissions', 'limits', 'recovery', 'web', 'curate'];
+export const USER_SETTINGS = ['$schema', 'language', 'permissions', 'limits', 'recovery', 'dashboard', 'web', 'curate'];
+/** The settings of `alp dashboard`; before the rename (t-81b0.5) they lived under `web`, which still holds Paseo's relay. */
+export const DASHBOARD_SETTINGS = Object.freeze(['enabled', 'port', 'permissions']);
 /**
  * Top-level keys ALP no longer reads, with what to use instead. They warn rather than
  * fail, so settings written for an older ALP keep working.
@@ -182,12 +184,22 @@ export function validateUserSettings(settings, source) {
     check(!extra, `unsupported ${key} field '${extra}'; use autoResume`);
     if (settings[key].autoResume !== undefined) check(typeof settings[key].autoResume === 'boolean', `${key}.autoResume must be true or false`);
   }
+  // `dashboard` holds alp dashboard's settings. `web` keeps Paseo's relay, and still accepts the
+  // dashboard settings written before the rename (alp dashboard moves them, then reads them from
+  // `dashboard` first and `web` second), so a file written for an older release stays valid.
+  for (const key of ['dashboard', 'web']) {
+    const section = settings[key];
+    if (section === undefined) continue;
+    check(object(section), `${key} must be an object`);
+    const allowed = key === 'web' ? [...DASHBOARD_SETTINGS, 'relay'] : DASHBOARD_SETTINGS;
+    const extra = Object.keys(section).find(field => !allowed.includes(field));
+    check(!extra, `unsupported ${key} field '${extra}'; use ${allowed.slice(0, -1).join(', ')} or ${allowed.at(-1)}`);
+    // Gateway permissions `alp dashboard` adds to its default grant; the service checks each name against the gateway's list.
+    if (section.permissions !== undefined) check(Array.isArray(section.permissions) && section.permissions.every(entry => typeof entry === 'string' && /^[a-z][a-z.]*$/.test(entry)), `${key}.permissions must be a list of permission names, such as files.read`);
+    if (section.enabled !== undefined) check(typeof section.enabled === 'boolean', `${key}.enabled must be true or false`);
+    if (section.port !== undefined) check(Number.isInteger(section.port) && section.port >= 1024 && section.port <= 65535, `${key}.port must be a port from 1024 to 65535`);
+  }
   if (settings.web !== undefined) {
-    check(object(settings.web), 'web must be an object');
-    const extra = Object.keys(settings.web).find(field => !['enabled', 'port', 'relay', 'permissions'].includes(field));
-    check(!extra, `unsupported web field '${extra}'; use enabled, port, relay or permissions`);
-    // Gateway permissions `alp web` adds to its default grant; alp-web checks each name against the gateway's list.
-    if (settings.web.permissions !== undefined) check(Array.isArray(settings.web.permissions) && settings.web.permissions.every(entry => typeof entry === 'string' && /^[a-z][a-z.]*$/.test(entry)), 'web.permissions must be a list of permission names, such as files.read');
     // The relay that lets Paseo's app reach alpd from another device (ALPD §64).
     const relay = settings.web.relay;
     if (relay !== undefined) {
@@ -198,8 +210,6 @@ export function validateUserSettings(settings, source) {
       if (relay.endpoint !== undefined) check(typeof relay.endpoint === 'string' && /^[a-z0-9.-]+:\d{1,5}$/i.test(relay.endpoint), 'web.relay.endpoint must be host:port, such as relay.paseo.sh:443');
       if (relay.useTls !== undefined) check(typeof relay.useTls === 'boolean', 'web.relay.useTls must be true or false');
     }
-    if (settings.web.enabled !== undefined) check(typeof settings.web.enabled === 'boolean', 'web.enabled must be true or false');
-    if (settings.web.port !== undefined) check(Number.isInteger(settings.web.port) && settings.web.port >= 1024 && settings.web.port <= 65535, 'web.port must be a port from 1024 to 65535');
   }
   if (settings.language !== undefined) check(nonempty(settings.language) && settings.language.trim().length <= 40, 'language must be a language name of at most 40 characters, such as Vietnamese or English');
   validatePermissions(settings.permissions, source);

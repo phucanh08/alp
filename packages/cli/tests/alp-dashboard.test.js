@@ -15,18 +15,18 @@ import { connect, daemonPaths, readLock } from '@anhlp/alp-client/index';
 import { fixtureProcesses } from '../../../test/support/fixture-processes.js';
 
 /**
- * alp-web (packages/cli/dist/alp-web.js), the service behind `alp web`, as a real process under a
+ * alp-dashboard (packages/cli/dist/alp-dashboard.js), the service behind `alp dashboard`, as a real process under a
  * temporary ALP_HOME: one loopback listener with the gateway and the built app, its lock and
- * web.json, its least-privilege credential and grant refresh, and the static server's own path
+ * dashboard.json, its least-privilege credential and grant refresh, and the static server's own path
  * normalization (the gateway hands it the raw request target).
  */
 
 const root = path.resolve(import.meta.dirname, '..', '..', '..');
-const SERVICE = path.join(root, 'packages/cli/dist/alp-web.js');
-const BUILT_APP = path.join(root, 'packages/cli/dist/alp-web');
+const SERVICE = path.join(root, 'packages/cli/dist/alp-dashboard.js');
+const BUILT_APP = path.join(root, 'packages/cli/dist/alp-dashboard');
 const DEFAULT_GRANT = ['session.read', 'session.write', 'project.read', 'project.write', 'workspace.write'];
 const SECRET = 'TOP-SECRET-alp-web-fixture';
-const INDEX = '<!doctype html><title>alp-web fixture</title>';
+const INDEX = '<!doctype html><title>alp-dashboard fixture</title>';
 const posix = process.platform !== 'win32';
 /** Each test starts real processes; none may hang the run. */
 const limit = { timeout: 120_000 };
@@ -114,36 +114,36 @@ async function fixtureApp(directory) {
   return app;
 }
 
-/** Starts the service; resolves once its lock is ready and web.json names it. */
+/** Starts the service; resolves once its lock is ready and dashboard.json names it. */
 async function startService(context, { args = [], env = {}, wait = true } = {}) {
   const child = spawn(process.execPath, [SERVICE, '--service', ...args], { stdio: 'ignore', env: { ...process.env, ...context.env, ...env } });
   const exited = once(child, 'exit');
   if (!wait) return { child, exited };
   const web = await waitFor(async () => {
-    if (child.exitCode !== null) assert.fail(`alp-web exited ${child.exitCode}:\n${await serviceLog(context.home)}`);
-    const lock = await readJson(path.join(context.home, 'integrations', 'web.lock'));
-    const info = await readJson(path.join(context.home, 'web.json'));
+    if (child.exitCode !== null) assert.fail(`alp-dashboard exited ${child.exitCode}:\n${await serviceLog(context.home)}`);
+    const lock = await readJson(path.join(context.home, 'integrations', 'dashboard.lock'));
+    const info = await readJson(path.join(context.home, 'dashboard.json'));
     return lock.ready && lock.pid === child.pid && info.pid === child.pid ? info : undefined;
-  }, 'alp-web to become ready').catch(async error => {
+  }, 'alp-dashboard to become ready').catch(async error => {
     // What the service was doing, and what it left on disk, when it never became ready.
-    const lock = await readFile(path.join(context.home, 'integrations', 'web.lock'), 'utf8').catch(() => '(none)');
-    const info = await readFile(path.join(context.home, 'web.json'), 'utf8').catch(() => '(none)');
-    throw new Error(`${error.message} (pid ${child.pid})\nweb.lock: ${lock}\nweb.json: ${info}\nlog:\n${await serviceLog(context.home)}`, { cause: error });
+    const lock = await readFile(path.join(context.home, 'integrations', 'dashboard.lock'), 'utf8').catch(() => '(none)');
+    const info = await readFile(path.join(context.home, 'dashboard.json'), 'utf8').catch(() => '(none)');
+    throw new Error(`${error.message} (pid ${child.pid})\ndashboard.lock: ${lock}\nweb.json: ${info}\nlog:\n${await serviceLog(context.home)}`, { cause: error });
   });
   return { child, exited, web };
 }
 
-const serviceLog = home => readFile(path.join(home, 'logs', 'integrations', 'alp-web.log'), 'utf8').catch(() => '(no log)');
+const serviceLog = home => readFile(path.join(home, 'logs', 'integrations', 'alp-dashboard.log'), 'utf8').catch(() => '(no log)');
 
 /** The process's exit [code, signal], or a failure after `timeoutMs` (a hang fails the test, it never waits forever). */
 async function exitOf(service, timeoutMs = 30_000) {
   let timer;
-  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`alp-web (pid ${service.child.pid}) did not exit within ${timeoutMs} ms`)), timeoutMs); });
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`alp-dashboard (pid ${service.child.pid}) did not exit within ${timeoutMs} ms`)), timeoutMs); });
   try { return await Promise.race([service.exited, timeout]); } finally { clearTimeout(timer); }
 }
 
 /**
- * The exit code a stop gives: on POSIX, SIGTERM is alp-web's graceful shutdown (exit 0, lock
+ * The exit code a stop gives: on POSIX, SIGTERM is alp-dashboard's graceful shutdown (exit 0, lock
  * released). Windows has no signals: kill() ends the process at once (exit code null), its lock is
  * left behind and the next start reclaims it from the dead pid.
  */
@@ -155,34 +155,34 @@ async function stopService(service) {
   return code;
 }
 
-const credentialsOf = async home => (await readJson(path.join(home, 'web', 'credentials.json'))).credentials;
+const credentialsOf = async home => (await readJson(path.join(home, 'dashboard', 'credentials.json'))).credentials;
 
-test('alp-web serves the app and the gateway on one loopback listener, with its own credential', limit, async t => {
+test('alp-dashboard serves the app and the gateway on one loopback listener, with its own credential', limit, async t => {
   const port = await freePorts();
-  const context = await createHome(t, { web: { port } });
+  const context = await createHome(t, { dashboard: { port } });
   const project = path.join(context.directory, 'project');
   await mkdir(project);
   const app = await fixtureApp(context.directory);
-  const service = await startService(context, { args: ['--project', project], env: { ALP_WEB_APP: app } });
+  const service = await startService(context, { args: ['--project', project], env: { ALP_DASHBOARD_APP: app } });
   t.after(() => stopService(service).catch(() => {}));
   const { web } = service;
 
-  // web.json v2: where it listens and the alpgw1 token of its credential, private.
+  // dashboard.json v2: where it listens and the alpgw1 token of its credential, private.
   assert.deepEqual(Object.keys(web).sort(), ['app', 'credentialId', 'pid', 'port', 'token', 'url', 'version']);
   assert.equal(web.version, 2);
-  assert.equal(web.app, 'alp-web');
+  assert.equal(web.app, 'alp-dashboard');
   assert.equal(web.port, port);
   assert.equal(web.url, `http://127.0.0.1:${port}/`);
   assert.match(web.token, /^alpgw1\.[a-f0-9]{16}\.[A-Za-z0-9_-]{43}$/);
   assert.equal(web.token.split('.')[1], web.credentialId);
-  if (posix) for (const file of ['web.json', 'web/credentials.json']) assert.equal((await stat(path.join(context.home, file))).mode & 0o777, 0o600, file);
-  if (posix) assert.equal((await stat(path.join(context.home, 'web'))).mode & 0o777, 0o700, 'its credentials directory is private');
+  if (posix) for (const file of ['dashboard.json', 'dashboard/credentials.json']) assert.equal((await stat(path.join(context.home, file))).mode & 0o777, 0o600, file);
+  if (posix) assert.equal((await stat(path.join(context.home, 'dashboard'))).mode & 0o777, 0o700, 'its credentials directory is private');
 
   // The credential: the default grant plus workspace.write, the project it was given, nothing else.
   const [credential, ...others] = await credentialsOf(context.home);
   assert.deepEqual(others, []);
   assert.equal(credential.id, web.credentialId);
-  assert.equal(credential.label, 'alp web (this machine)');
+  assert.equal(credential.label, 'alp dashboard (this machine)');
   assert.deepEqual(credential.permissions, DEFAULT_GRANT);
   assert.deepEqual(credential.workspaces.map(entry => entry.path), [project]);
 
@@ -269,23 +269,23 @@ test('alp-web serves the app and the gateway on one loopback listener, with its 
   assert.equal((await tickets(port, web.token, { origin: `http://127.0.0.1:${port + 1}` })).status, 403);
 
   // A second start finds the lock held, exits and writes nothing.
-  const before = await readFile(path.join(context.home, 'web', 'credentials.json'), 'utf8');
-  const second = await startService(context, { args: ['--project', context.directory], env: { ALP_WEB_APP: app }, wait: false });
+  const before = await readFile(path.join(context.home, 'dashboard', 'credentials.json'), 'utf8');
+  const second = await startService(context, { args: ['--project', context.directory], env: { ALP_DASHBOARD_APP: app }, wait: false });
   assert.deepEqual(await exitOf(second), [0, null]);
-  assert.equal(await readFile(path.join(context.home, 'web', 'credentials.json'), 'utf8'), before);
-  assert.equal((await readJson(path.join(context.home, 'web.json'))).pid, service.child.pid);
+  assert.equal(await readFile(path.join(context.home, 'dashboard', 'credentials.json'), 'utf8'), before);
+  assert.equal((await readJson(path.join(context.home, 'dashboard.json'))).pid, service.child.pid);
 
   // SIGTERM: it stops, exits 0 and releases its lock (POSIX; on Windows the process just ends).
   assert.equal(await stopService(service), STOPPED);
   if (posix) {
-    assert.equal(existsSync(path.join(context.home, 'integrations', 'web.lock')), false);
-    assert.equal(existsSync(path.join(context.home, 'integrations', 'web.lock.reclaim')), false);
+    assert.equal(existsSync(path.join(context.home, 'integrations', 'dashboard.lock')), false);
+    assert.equal(existsSync(path.join(context.home, 'integrations', 'dashboard.lock.reclaim')), false);
   }
 });
 
 test('the token survives a restart, and the built app is served when no override is set', limit, async t => {
   const port = await freePorts();
-  const context = await createHome(t, { web: { port } });
+  const context = await createHome(t, { dashboard: { port } });
   const first = await startService(context, { env: { ALP_SUPERVISE: '0' } });
   assert.equal(await stopService(first), STOPPED);
   const second = await startService(context, { env: { ALP_SUPERVISE: '0' } });
@@ -296,10 +296,10 @@ test('the token survives a restart, and the built app is served when no override
   const credentials = await credentialsOf(context.home);
   assert.deepEqual(credentials.map(entry => [entry.id, entry.revokedAt ?? null]), [[first.web.credentialId, null]]);
   // With nothing registered and no --project, a private empty directory stands in for a workspace.
-  assert.deepEqual(credentials[0].workspaces.map(entry => entry.path), [path.join(context.home, 'web', 'no-project')]);
+  assert.deepEqual(credentials[0].workspaces.map(entry => entry.path), [path.join(context.home, 'dashboard', 'no-project')]);
   assert.equal((await tickets(port, first.web.token)).status, 201);
 
-  // packages/cli/dist/alp-web, as built beside the service, with the notices of its npm packages.
+  // packages/cli/dist/alp-dashboard, as built beside the service, with the notices of its npm packages.
   const page = await request(port, '/');
   assert.equal(page.status, 200);
   assert.equal(page.body, await readFile(path.join(BUILT_APP, 'index.html'), 'utf8'));
@@ -312,14 +312,14 @@ test('the token survives a restart, and the built app is served when no override
   for (const name of ['react', 'react-dom', '@xterm/xterm', 'tailwindcss', 'vite']) assert.match(notices, new RegExp(`\\n${name.replace(/[/.]/g, '\\$&')}@\\d`), name);
 });
 
-test('a stale web.json token is replaced and its credential revoked', limit, async t => {
+test('a stale dashboard.json token is replaced and its credential revoked', limit, async t => {
   const port = await freePorts();
-  const context = await createHome(t, { web: { port } });
+  const context = await createHome(t, { dashboard: { port } });
   const first = await startService(context, { env: { ALP_SUPERVISE: '0' } });
   assert.equal(await stopService(first), STOPPED);
-  // The token in web.json no longer matches its credential (lost secret, hand edit).
+  // The token in dashboard.json no longer matches its credential (lost secret, hand edit).
   const forged = { ...first.web, token: `alpgw1.${first.web.credentialId}.${'A'.repeat(43)}` };
-  await writeFile(path.join(context.home, 'web.json'), JSON.stringify(forged), { mode: 0o600 });
+  await writeFile(path.join(context.home, 'dashboard.json'), JSON.stringify(forged), { mode: 0o600 });
   const second = await startService(context, { env: { ALP_SUPERVISE: '0' } });
   t.after(() => stopService(second).catch(() => {}));
   assert.notEqual(second.web.credentialId, first.web.credentialId);
@@ -331,7 +331,7 @@ test('a stale web.json token is replaced and its credential revoked', limit, asy
 });
 
 test('a SIGTERM while startup waits on alpd exits 0, publishes nothing and releases the lock', { ...limit, skip: !posix && 'a Unix socket stands in for alpd' }, async t => {
-  const context = await createHome(t, { web: { port: await freePorts() } });
+  const context = await createHome(t, { dashboard: { port: await freePorts() } });
   // An "alpd" that accepts and never answers: the first grant refresh of startup waits on it (bounded).
   const connections = [];
   const silent = net.createServer(socket => connections.push(socket));
@@ -345,27 +345,27 @@ test('a SIGTERM while startup waits on alpd exits 0, publishes nothing and relea
   assert.equal(service.child.exitCode, null);
   service.child.kill('SIGTERM');
   assert.deepEqual(await exitOf(service), [0, null]);
-  assert.equal(existsSync(path.join(context.home, 'web.json')), false, 'no web.json after the shutdown began');
-  assert.equal(existsSync(path.join(context.home, 'integrations', 'web.lock')), false, 'the lock is released');
-  assert.equal(existsSync(path.join(context.home, 'integrations', 'web.lock.reclaim')), false, 'and its guard');
-  for (const directory of [context.home, path.join(context.home, 'web')]) {
+  assert.equal(existsSync(path.join(context.home, 'dashboard.json')), false, 'no dashboard.json after the shutdown began');
+  assert.equal(existsSync(path.join(context.home, 'integrations', 'dashboard.lock')), false, 'the lock is released');
+  assert.equal(existsSync(path.join(context.home, 'integrations', 'dashboard.lock.reclaim')), false, 'and its guard');
+  for (const directory of [context.home, path.join(context.home, 'dashboard')]) {
     assert.deepEqual((await readdir(directory)).filter(name => name.endsWith('.tmp')), [], `no temporary file left in ${directory}`);
   }
 });
 
-test('web.enabled=false starts nothing', limit, async t => {
-  const context = await createHome(t, { web: { enabled: false, port: await freePorts() } });
+test('dashboard.enabled=false starts nothing', limit, async t => {
+  const context = await createHome(t, { dashboard: { enabled: false, port: await freePorts() } });
   const service = await startService(context, { env: { ALP_SUPERVISE: '0' }, wait: false });
   assert.deepEqual(await exitOf(service), [0, null]);
-  for (const file of ['web.json', 'integrations/web.lock', 'web/credentials.json']) assert.equal(existsSync(path.join(context.home, file)), false, file);
+  for (const file of ['dashboard.json', 'integrations/dashboard.lock', 'dashboard/credentials.json']) assert.equal(existsSync(path.join(context.home, file)), false, file);
 });
 
-test('a busy web.port moves to the next port, and web.permissions adds only known permissions', limit, async t => {
+test('a busy dashboard.port moves to the next port, and dashboard.permissions adds only known permissions', limit, async t => {
   const port = await freePorts();
   const busy = net.createServer();
   await new Promise(resolve => busy.listen(port, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => busy.close(resolve)));
-  const context = await createHome(t, { web: { port, permissions: ['files.read'] } });
+  const context = await createHome(t, { dashboard: { port, permissions: ['files.read'] } });
   const service = await startService(context, { env: { ALP_SUPERVISE: '0' } });
   t.after(() => stopService(service).catch(() => {}));
   // The next usable port: port + 1 unless another process took it after freePorts saw it free
@@ -379,12 +379,12 @@ test('a busy web.port moves to the next port, and web.permissions adds only know
   assert.deepEqual((await credentialsOf(context.home))[0].permissions, ['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'workspace.write']);
 });
 
-test('an unknown web.permissions entry leaves the default grant, and says so', limit, async t => {
-  const context = await createHome(t, { web: { port: await freePorts(), permissions: ['files.read', 'host.admin'] } });
+test('an unknown dashboard.permissions entry leaves the default grant, and says so', limit, async t => {
+  const context = await createHome(t, { dashboard: { port: await freePorts(), permissions: ['files.read', 'host.admin'] } });
   const service = await startService(context, { env: { ALP_SUPERVISE: '0' } });
   t.after(() => stopService(service).catch(() => {}));
   assert.deepEqual((await credentialsOf(context.home))[0].permissions, DEFAULT_GRANT);
-  const warnings = (await serviceLog(context.home)).split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(record => record.code === 'ALP_WEB_PERMISSIONS_IGNORED');
+  const warnings = (await serviceLog(context.home)).split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(record => record.code === 'ALP_DASHBOARD_PERMISSIONS_IGNORED');
   assert.equal(warnings.length, 1, 'one warning');
   assert.equal(warnings[0].level, 'warn');
   assert.match(warnings[0].msg, /"host\.admin" is not a permission/);
@@ -393,25 +393,25 @@ test('an unknown web.permissions entry leaves the default grant, and says so', l
 });
 
 test('the credentials directory and file keep the gateway\'s private-mode checks', { ...limit, skip: !posix && 'POSIX file modes' }, async t => {
-  const context = await createHome(t, { web: { port: await freePorts() } });
+  const context = await createHome(t, { dashboard: { port: await freePorts() } });
   const first = await startService(context, { env: { ALP_SUPERVISE: '0' } });
   assert.equal(await stopService(first), STOPPED);
-  const file = path.join(context.home, 'web', 'credentials.json');
-  const kept = { credentials: await readFile(file, 'utf8'), web: await readFile(path.join(context.home, 'web.json'), 'utf8') };
+  const file = path.join(context.home, 'dashboard', 'credentials.json');
+  const kept = { credentials: await readFile(file, 'utf8'), web: await readFile(path.join(context.home, 'dashboard.json'), 'utf8') };
   const refused = async (what, pattern) => {
     const service = await startService(context, { env: { ALP_SUPERVISE: '0' }, wait: false });
     assert.deepEqual(await exitOf(service), [1, null], `${what}: it does not start`);
     assert.match(await serviceLog(context.home), pattern, what);
     assert.equal(await readFile(file, 'utf8'), kept.credentials, `${what}: no credential written`);
-    assert.equal(await readFile(path.join(context.home, 'web.json'), 'utf8'), kept.web, `${what}: web.json untouched`);
-    assert.equal(existsSync(path.join(context.home, 'integrations', 'web.lock')), false, `${what}: the lock is released`);
+    assert.equal(await readFile(path.join(context.home, 'dashboard.json'), 'utf8'), kept.web, `${what}: dashboard.json untouched`);
+    assert.equal(existsSync(path.join(context.home, 'integrations', 'dashboard.lock')), false, `${what}: the lock is released`);
   };
   await chmod(file, 0o644);
   await refused('a credentials file others can read', /readable by other users/);
   await chmod(file, 0o600);
-  await chmod(path.join(context.home, 'web'), 0o755);
-  await refused('a credentials directory others can list', /alp web keeps its credentials in .*web, which must be a directory owned by you with private permissions \(0700\)/);
-  await chmod(path.join(context.home, 'web'), 0o700);
+  await chmod(path.join(context.home, 'dashboard'), 0o755);
+  await refused('a credentials directory others can list', /alp dashboard keeps its credentials in .*dashboard, which must be a directory owned by you with private permissions \(0700\)/);
+  await chmod(path.join(context.home, 'dashboard'), 0o700);
   const again = await startService(context, { env: { ALP_SUPERVISE: '0' } });
   t.after(() => stopService(again).catch(() => {}));
   assert.equal(again.web.token, first.web.token, 'private again: the same credential');
@@ -419,15 +419,15 @@ test('the credentials directory and file keep the gateway\'s private-mode checks
 
 test('without the built files the page says how to build them and the gateway stays up', limit, async t => {
   const port = await freePorts();
-  const context = await createHome(t, { web: { port } });
+  const context = await createHome(t, { dashboard: { port } });
   const empty = path.join(context.directory, 'empty');
   await mkdir(empty);
-  const service = await startService(context, { env: { ALP_SUPERVISE: '0', ALP_WEB_APP: empty } });
+  const service = await startService(context, { env: { ALP_SUPERVISE: '0', ALP_DASHBOARD_APP: empty } });
   t.after(() => stopService(service).catch(() => {}));
   const page = await request(port, '/');
   assert.equal(page.status, 503);
   assert.match(page.body, /not built/);
-  assert.match(page.body, /build-alp-web\.mjs/);
+  assert.match(page.body, /build-alp-dashboard\.mjs/);
   assert.equal(page.headers['x-frame-options'], 'DENY');
   assert.equal((await request(port, '/healthz')).status, 200);
   assert.equal((await tickets(port, service.web.token)).status, 201);
@@ -435,11 +435,11 @@ test('without the built files the page says how to build them and the gateway st
 
 test('the grant follows alpd\'s project registry without a new token', limit, async t => {
   const port = await freePorts();
-  const context = await createHome(t, { web: { port } });
+  const context = await createHome(t, { dashboard: { port } });
   const [first, second] = [path.join(context.directory, 'first'), path.join(context.directory, 'second')];
   await mkdir(first);
   await mkdir(second);
-  const service = await startService(context, { args: ['--project', first], env: { ALP_WEB_GRANT_REFRESH_MS: '100' } });
+  const service = await startService(context, { args: ['--project', first], env: { ALP_DASHBOARD_GRANT_REFRESH_MS: '100' } });
   t.after(() => stopService(service).catch(() => {}));
   const lock = await waitFor(async () => { const value = await readLock(context.home); return value?.ready ? value : undefined; }, 'alpd ready');
   assert.equal(lock.socket, daemonPaths(context.home).socket);
@@ -456,8 +456,8 @@ test('the grant follows alpd\'s project registry without a new token', limit, as
   assert.deepEqual(granted.workspaces.map(entry => entry.path).sort(), [first, second].sort());
   assert.ok(granted.updatedAt, 'updated in place');
   assert.equal(granted.id, service.web.credentialId);
-  const web = await readJson(path.join(context.home, 'web.json'));
-  assert.equal(web.token, service.web.token, 'the token in web.json is unchanged');
+  const web = await readJson(path.join(context.home, 'dashboard.json'));
+  assert.equal(web.token, service.web.token, 'the token in dashboard.json is unchanged');
   const ticket = await tickets(port, service.web.token);
   assert.equal(ticket.status, 201);
   assert.deepEqual(JSON.parse(ticket.body).principal.workspaces.sort(), [first, second].sort());
@@ -467,7 +467,7 @@ test('the grant follows alpd\'s project registry without a new token', limit, as
 async function priorBootLock(context) {
   const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
   await once(child, 'exit');
-  const file = path.join(context.home, 'integrations', 'web.lock');
+  const file = path.join(context.home, 'integrations', 'dashboard.lock');
   await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const bytes = JSON.stringify({ pid: child.pid, bootTime: 1, startedAt: new Date().toISOString(), ready: true });
   await writeFile(file, bytes, { mode: 0o600 });
@@ -478,19 +478,19 @@ test('bootstrap lock refusal is logged privately and preserves the refused lock'
   const context = await createHome(t);
   const kept = await priorBootLock(context);
   const token = `alpgw1.${'a'.repeat(16)}.${'B'.repeat(43)}`;
-  await writeFile(path.join(context.home, 'web.json'), JSON.stringify({ token }));
+  await writeFile(path.join(context.home, 'dashboard.json'), JSON.stringify({ token }));
   const service = await startService(context, { env: { ALP_SUPERVISE: '0' }, wait: false });
   assert.deepEqual(await exitOf(service), [1, null]);
   const log = await serviceLog(context.home);
   assert.ok(log.trim(), 'bootstrap failure must reach the service log');
-  const record = log.trim().split('\n').map(line => JSON.parse(line)).find(line => line.code === 'ALP_WEB_START_FAILED');
+  const record = log.trim().split('\n').map(line => JSON.parse(line)).find(line => line.code === 'ALP_DASHBOARD_START_FAILED');
   assert.ok(record, log);
   assert.match(log, /Integration owner boot context is uncertain/);
   assert.match(log, /manual lock-only recovery/);
   assert.ok(!log.includes(token));
   assert.equal(await readFile(kept.file, 'utf8'), kept.bytes);
-  assert.equal(existsSync(path.join(context.home, 'web/credentials.json')), false);
-  if (posix) assert.equal((await stat(path.join(context.home, 'logs/integrations/alp-web.log'))).mode & 0o777, 0o600);
+  assert.equal(existsSync(path.join(context.home, 'dashboard/credentials.json')), false);
+  if (posix) assert.equal((await stat(path.join(context.home, 'logs/integrations/alp-dashboard.log'))).mode & 0o777, 0o600);
 });
 
 test('a delayed web bootstrap refusal reports failed startup before the readiness deadline', limit, async t => {
@@ -501,7 +501,7 @@ test('a delayed web bootstrap refusal reports failed startup before the readines
   await writeFile(preload, `if (process.argv[1] === ${JSON.stringify(SERVICE)}) await new Promise(resolve => setTimeout(resolve, 400));`);
   const runner = path.join(context.directory, 'runner.mjs');
   await writeFile(runner, `import { startIntegration } from ${JSON.stringify(pathToFileURL(path.join(root, 'packages/client/src/index.js')).href)};
-try { await startIntegration({ name: 'web', home: process.env.ALP_HOME, entry: ${JSON.stringify(SERVICE)} }); process.exitCode = 2; }
+try { await startIntegration({ name: 'dashboard', home: process.env.ALP_HOME, entry: ${JSON.stringify(SERVICE)} }); process.exitCode = 2; }
 catch (error) { console.error(error.message); process.exitCode = 1; }`);
   const child = spawn(process.execPath, [runner], { env: { ...process.env, ...context.env, ALP_SUPERVISE: '0', NODE_OPTIONS: `${context.env.NODE_OPTIONS ?? ''} --import=${pathToFileURL(preload).href}` }, stdio: ['ignore', 'ignore', 'pipe'] });
   let diagnostic = '';
@@ -509,14 +509,14 @@ catch (error) { console.error(error.message); process.exitCode = 1; }`);
   const service = { child, exited: once(child, 'exit') };
   t.after(async () => { if (child.exitCode === null && child.signalCode === null) child.kill(); await service.exited; });
   assert.deepEqual(await exitOf(service, 10_000), [1, null]);
-  assert.match(diagnostic, /alp web .*failed to start; see .*alp-web\.log/);
+  assert.match(diagnostic, /alp dashboard .*failed to start; see .*alp-dashboard\.log/);
   assert.match(await serviceLog(context.home), /Integration owner boot context is uncertain/);
   assert.equal(await readFile(kept.file, 'utf8'), kept.bytes);
 });
 
-test('alp web from another project registers it and adds it to the running web grant (t-c0e0)', limit, async t => {
+test('alp dashboard from another project registers it and adds it to the running web grant (t-c0e0)', limit, async t => {
   const port = await freePorts();
-  const context = await createHome(t, { web: { port } });
+  const context = await createHome(t, { dashboard: { port } });
   const rawA = path.join(context.directory, 'projectA');
   const rawB = path.join(context.directory, 'projectB');
   const outside = path.join(context.directory, 'outside');
@@ -528,10 +528,10 @@ test('alp web from another project registers it and adds it to the running web g
 
   const CLI = path.join(root, 'packages/cli/dist/cli.js');
   const exec = promisify(execFile);
-  const env = { ...process.env, ...context.env, ALP_WEB_GRANT_REFRESH_MS: '100' };
+  const env = { ...process.env, ...context.env, ALP_DASHBOARD_GRANT_REFRESH_MS: '100' };
 
-  // 1. Invoke alp web from projectA (starts alpd and alp-web)
-  const first = await exec(process.execPath, [CLI, 'web', '--print'], { cwd: projectA, env, timeout: 30_000 });
+  // 1. Invoke alp dashboard from projectA (starts alpd and alp-dashboard)
+  const first = await exec(process.execPath, [CLI, 'dashboard', '--print'], { cwd: projectA, env, timeout: 30_000 });
   assert.equal(first.stderr, '');
   const urlA = first.stdout.trim();
   assert.match(urlA, /^http:\/\/127\.0\.0\.1:\d+\/#token=alpgw1\./);
@@ -541,10 +541,10 @@ test('alp web from another project registers it and adds it to the running web g
   const workspacesA = credsA[0].workspaces.map(w => w.canonical ?? w.path);
   assert.ok(workspacesA.includes(projectA), 'projectA is in the initial grant');
   assert.ok(!workspacesA.includes(projectB), 'projectB is not yet in the grant');
-  const initialToken = (await readJson(path.join(context.home, 'web.json'))).token;
+  const initialToken = (await readJson(path.join(context.home, 'dashboard.json'))).token;
 
-  // 2. Invoke alp web from projectB (service already running)
-  const second = await exec(process.execPath, [CLI, 'web', '--print'], { cwd: projectB, env, timeout: 30_000 });
+  // 2. Invoke alp dashboard from projectB (service already running)
+  const second = await exec(process.execPath, [CLI, 'dashboard', '--print'], { cwd: projectB, env, timeout: 30_000 });
   assert.equal(second.stderr, '');
   const urlB = second.stdout.trim();
   assert.equal(urlB, urlA, 'same address and token fragment returned');
@@ -554,11 +554,11 @@ test('alp web from another project registers it and adds it to the running web g
   const workspacesB = credsB[0].workspaces.map(w => w.canonical ?? w.path);
   assert.ok(workspacesB.includes(projectA), 'projectA remains in the grant');
   assert.ok(workspacesB.includes(projectB), 'projectB is added to the grant');
-  const web = await readJson(path.join(context.home, 'web.json'));
+  const web = await readJson(path.join(context.home, 'dashboard.json'));
   assert.equal(web.token, initialToken, 'token is preserved');
 
-  // 3. Invoking alp web from outside a project does not add outside to grant
-  const third = await exec(process.execPath, [CLI, 'web', '--print'], { cwd: outside, env, timeout: 30_000 });
+  // 3. Invoking alp dashboard from outside a project does not add outside to grant
+  const third = await exec(process.execPath, [CLI, 'dashboard', '--print'], { cwd: outside, env, timeout: 30_000 });
   assert.equal(third.stderr, '');
   const credsC = await credentialsOf(context.home);
   const workspacesC = credsC[0].workspaces.map(w => w.canonical ?? w.path);
