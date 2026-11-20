@@ -11,7 +11,7 @@ import { entryCommand } from '@anhlp/alp-core/packaged';
 import { isAgentProcess } from '@anhlp/alp-core/tasks';
 import { runRole } from './roles.js';
 import { DASHBOARD, LEGACY_WEB, dashboardEntry, dashboardScript, isDashboardReady, isServiceClaimed, refusal, serviceOwner, stopService } from './dashboard-service.js';
-import { migrateDashboard } from './dashboard-migrate.js';
+import { legacyLeftovers, migrateDashboard } from './dashboard-migrate.js';
 import { dashboardSettings } from '@anhlp/alp-core/user-settings';
 
 /** The Paseo integration (its web app, bridge and relay) runs as integration `paseo`. */
@@ -224,34 +224,44 @@ function reportMigration(report) {
 
 /**
  * alp dashboard --status, after Hermes' `hermes dashboard --status` (hermes_cli/main_dashboard.py
- * _report_dashboard_status): what runs, or that nothing does; always exit 0. The address is printed
+ * _report_dashboard_status): what runs, or that nothing does; always exit 0, and nothing is changed
+ * (the move from `alp web` waits for a command that starts or stops). The address is printed
  * without its token.
  * @param {string} home
  */
 async function statusCommand(home) {
-  const report = await migrateDashboard(home);
-  reportMigration(report);
-  const running = await runningDashboard(home);
-  if (running && 'url' in running) {
-    console.log('1 alp dashboard process running:');
-    console.log(`    PID ${running.pid} [dashboard]: ${running.url} (port ${running.port})`);
-  } else if (running) {
-    const owner = await serviceOwner(home);
-    console.log(`No alp dashboard running. pid ${running.held} holds ${path.join(home, 'integrations', `${DASHBOARD.lock}.lock`)}${'reason' in owner ? ` (${owner.reason})` : ''}.`);
-  } else console.log('No alp dashboard running.');
-  if (await dashboardDisabled(home)) console.log(DISABLED);
-  for (const kept of report.kept) console.log(`Left from before the rename to alp dashboard, not used: ${kept}`);
+  try {
+    const running = await runningDashboard(home);
+    if (running && 'url' in running) {
+      console.log('1 alp dashboard process running:');
+      console.log(`    PID ${running.pid} [dashboard]: ${running.url} (port ${running.port})`);
+    } else if (running) {
+      const owner = await serviceOwner(home);
+      console.log(`No alp dashboard running. pid ${running.held} holds ${path.join(home, 'integrations', `${DASHBOARD.lock}.lock`)}${'reason' in owner ? ` (${owner.reason})` : ''}.`);
+    } else console.log('No alp dashboard running.');
+    if (await dashboardDisabled(home)) console.log(DISABLED);
+    const left = await legacyLeftovers(home);
+    if (left.legacy?.pid) console.log(`${LEGACY_WEB.what} still runs (pid ${left.legacy.pid}); \`alp dashboard\` or \`alp dashboard --stop\` stops it.`);
+    else if (left.legacy) console.log(`${refusal(home, LEGACY_WEB)} (${left.legacy.reason}).`);
+    for (const item of left.pending) console.log(`From before the rename to alp dashboard, moved by the next \`alp dashboard\`: ${item}`);
+    for (const item of left.kept) console.log(`Left from before the rename to alp dashboard, not used: ${item}`);
+  } catch (error) {
+    console.log(`alp dashboard could not tell everything: ${error?.message ?? error}`);
+  }
 }
 
 /**
  * alp dashboard --stop, after Hermes' `hermes dashboard --stop` (hermes_cli/main.py
- * _dashboard_lifecycle_flags): only this ALP home's service; nothing running is not an error; a
- * process alp cannot prove is the service is left running and the command fails.
+ * _dashboard_lifecycle_flags): only this ALP home's service (and alp web from before the rename,
+ * which the move stops); nothing running is not an error; a process alp cannot prove is the service
+ * is left running and the command fails.
  * @param {string} home
  */
 async function stopCommand(home) {
   const report = await migrateDashboard(home);
   reportMigration(report);
+  // alp web from before the rename still holds its lock: not stopped, so not a success.
+  if (report.held) process.exitCode = 1;
   const owner = await serviceOwner(home);
   if (!owner.alive && !('pid' in owner)) {
     if (!report.stopped) console.log('No alp dashboard running for this ALP home.');

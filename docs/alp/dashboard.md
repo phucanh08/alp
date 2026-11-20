@@ -74,7 +74,7 @@ alp dashboard --no-open       # như trên nhưng không mở trình duyệt, ch
 alp dashboard --print         # chỉ in link (app desktop dùng lệnh này)
 alp dashboard --port 7500     # lần chạy này dùng port 7500 (không đổi dashboard.port)
 alp dashboard --host localhost   # in link với localhost; chỉ nhận 127.0.0.1 hoặc localhost
-alp dashboard --status        # service có chạy không: pid, link KHÔNG kèm token, port; luôn exit 0
+alp dashboard --status        # service có chạy không: pid, link KHÔNG kèm token, port; luôn exit 0, không đổi gì
 alp dashboard --stop          # dừng service của ALP home này; không chạy thì báo và exit 0
 alp dashboard rotate          # thay token; trang đang mở mất quyền
 alp dashboard pair [--on|--off]   # link pair app Paseo qua relay
@@ -111,6 +111,10 @@ alp desktop                   # mở app desktop (docs/alp/desktop.md)
   4. `logs/integrations/alp-web.log` → `alp-dashboard.log`;
   5. `settings.json`: `web.enabled`, `web.port`, `web.permissions` chuyển sang `dashboard.*`;
      `web.relay` (của Paseo) ở lại `web`.
+  `--status` không chuyển gì: nó chỉ liệt kê `alp web` cũ còn chạy và những gì lần chạy kế tiếp sẽ chuyển.
+  `--stop` chuyển như các lệnh khác và exit 1 nếu `alp web` cũ còn giữ lock mà alp không chứng minh được.
+  Windows: alp không dừng `alp web` cũ đang chạy; dừng process có pid trong `<home>/web.json`
+  (`taskkill /PID <pid>`) rồi chạy `alp dashboard`.
   Mỗi bước chỉ chuyển tên cũ sang tên mới còn trống: chạy lần hai không làm gì; khi có cả hai thì tên mới
   thắng, tên cũ giữ nguyên (không gộp, không xoá) và `--status` liệt kê chúng. Settings được **chuyển tại
   chỗ** để file của người dùng chỉ còn một nơi đúng; nếu không ghi được (file sai, chỉ đọc) thì
