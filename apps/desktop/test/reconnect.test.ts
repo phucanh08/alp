@@ -250,6 +250,47 @@ describe('Reconnector', () => {
     expect(calls.loads).toEqual([MOVED]);
   });
 
+  test('a 401 for the page being loaded leads to the next attempt, and the new page loading ends it watching', async () => {
+    const { reconnector, calls, clock } = setup({ up: () => false, resolve: () => ({ ok: true, address: ROTATED }) });
+    reconnector.loaded(A);
+    reconnector.trigger('token-rejected');
+    await clock.advance(1000);
+    expect(reconnector.state).toBe('loading');
+    reconnector.loaded(ROTATED);
+    expect(reconnector.state).toBe('watching');
+    expect(calls.giveUps).toEqual([]);
+  });
+
+  test('a load that neither finishes nor fails within loadTimeoutMs counts as failed', async () => {
+    const { reconnector, calls, clock } = setup({ up: () => false, resolve: () => ({ ok: true, address: MOVED }) });
+    reconnector.loaded(A);
+    await clock.advance(POLL * 2 + 1000);
+    expect(calls.loads).toHaveLength(1);
+    expect(reconnector.state).toBe('loading');
+    await clock.advance(DEFAULTS.loadTimeoutMs - 1);
+    expect(reconnector.state).toBe('loading');
+    await clock.advance(1);
+    expect(reconnector.state).toBe('waiting');
+    await clock.advance(2000);
+    expect(calls.loads).toHaveLength(2);
+  });
+
+  test('a reload while watching keeps the attempt count; only a stable minute or a fresh start resets it', async () => {
+    let upNow = true;
+    const { reconnector, clock } = setup({ up: () => upNow, resolve: () => ({ ok: true, address: MOVED }) });
+    reconnector.loaded(A);
+    upNow = false;
+    await clock.advance(POLL * 2 + 1000);
+    upNow = true;
+    reconnector.loaded(MOVED);
+    expect(reconnector.attempts).toBe(1);
+    reconnector.loaded(MOVED);
+    expect(reconnector.attempts).toBe(1);
+    reconnector.stop();
+    reconnector.loaded(MOVED);
+    expect(reconnector.attempts).toBe(0);
+  });
+
   test('a probe that throws counts as no answer', async () => {
     const { reconnector, clock, setUp } = setup();
     setUp(() => { throw new Error('boom'); });

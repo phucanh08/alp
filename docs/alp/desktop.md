@@ -69,7 +69,13 @@ cách nhau 1, 2, 4, 8, 16 rồi 30 giây; sau 8 lần, app hiện trang lỗi v�
 Bộ đếm chỉ về 0 khi trang đã sống ổn định 60 giây. Không tìm thấy `alp` thì hiện trang cài đặt ngay.
 Trong lúc thử, cửa sổ vẫn giữ trang cũ (app web hiện trạng thái mất kết nối của nó). Connect again
 hủy mọi lần thử đang chờ. `/readyz` không gửi credential; với 401, app chỉ đọc status và path của
-request, không đọc header hay body.
+request, không đọc header hay body, và chỉ tính 401 của trang đã commit cho địa chỉ vừa tải (401 muộn
+của trang cũ đang bị thay thì bỏ qua). Một lần tải không xong cũng không lỗi trong 30 giây được tính
+là thất bại. Reload trang không đặt lại bộ đếm.
+
+Giới hạn: `/readyz` có trả lời HTTP bất kỳ là được coi là còn sống, nên nếu một server khác chiếm port
+cũ ngay sau khi `alp-web` dừng, app không nhận ra cho tới khi trang tự báo lỗi hoặc người dùng chọn
+Connect again.
 
 ## 4. Bảo mật của cửa sổ
 

@@ -21,6 +21,8 @@ let generation = 0;
 let remoteLoad = 0;
 /** The address of the alp web load in the window (remoteLoad); kept in memory only. */
 let shownAddress: AlpWebAddress | undefined;
+/** Whether the window's document is the one loaded for shownAddress (did-navigate seen for it). */
+let committed = false;
 /** The longest error text shown (alp's stderr can be long; it travels in the page's query). */
 const MAX_MESSAGE = 4000;
 
@@ -37,6 +39,7 @@ function loadRemote(window: BrowserWindow, address: AlpWebAddress) {
   allowedOrigin = address.origin;
   shownAddress = address;
   remoteLoad = id;
+  committed = false;
   // A failed load shows up as did-fail-load; ERR_ABORTED means a newer load won.
   return window.loadURL(address.url).catch(() => undefined);
 }
@@ -96,6 +99,12 @@ function createWindow(): BrowserWindow {
     // A page that was up (or a reload of it) failing is the reconnector's: it retries before it shows anything.
     if (reconnector.active) { reconnector.loadFailed(); return; }
     void showError(`The ALP web page did not load (${description}). Start ALP, then choose Connect again.`, window);
+  });
+  // The new document has replaced the old one: from now on a 401 is the new page's, not a late one
+  // from the page being replaced (whose requests Chromium cancels at this point).
+  contents.on('did-navigate', (_event, url) => {
+    if (remoteLoad !== generation || !shownAddress) return;
+    try { if (new URL(url).origin === shownAddress.origin) committed = true; } catch { /* not a URL */ }
   });
   contents.on('did-finish-load', () => {
     if (remoteLoad !== generation || !shownAddress) return;
@@ -207,7 +216,9 @@ if (!app.requestSingleInstanceLock()) {
     // The page's gateway refused its token (POST /v1/tickets → 401, after `alp web rotate`): ask alp
     // for the new address. Only the status and the path are read; the request is not touched.
     session.defaultSession.webRequest.onCompleted(details => {
-      if (details.statusCode === 401 && details.method === 'POST' && isTicketRequest(details.url, allowedOrigin)) reconnector.trigger('token-rejected');
+      if (details.statusCode !== 401 || details.method !== 'POST' || !committed) return;
+      if (!win || win.isDestroyed() || details.webContentsId !== win.webContents.id) return;
+      if (isTicketRequest(details.url, allowedOrigin)) reconnector.trigger('token-rejected');
     });
     buildMenu();
     void connect();
