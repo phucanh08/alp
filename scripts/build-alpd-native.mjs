@@ -67,14 +67,13 @@ export async function bunRuntime(platform, cache) {
     if (sha256(bytes) !== entry.sha256) throw new Error(`${entry.file}: sha256 ${sha256(bytes)} is not the pinned ${entry.sha256}`);
     await writeFile(zip, bytes);
   }
+  // Always unpacked afresh from the verified zip: nothing extracted earlier is trusted.
   const unpacked = path.join(cache, `${entry.file.replace(/\.zip$/, '')}-${entry.sha256.slice(0, 12)}`);
   const runtime = path.join(unpacked, entry.file.replace(/\.zip$/, ''), 'bun');
-  if (!existsSync(runtime)) {
-    await rm(unpacked, { recursive: true, force: true });
-    await mkdir(unpacked, { recursive: true });
-    const result = spawnSync('unzip', ['-q', '-o', zip, '-d', unpacked], { stdio: ['ignore', 'inherit', 'inherit'] });
-    if (result.status !== 0 || !existsSync(runtime)) throw new Error(`Could not unpack ${zip} (${result.status ?? result.error})`);
-  }
+  await rm(unpacked, { recursive: true, force: true });
+  await mkdir(unpacked, { recursive: true });
+  const result = spawnSync('unzip', ['-q', '-o', zip, '-d', unpacked], { stdio: ['ignore', 'inherit', 'inherit'] });
+  if (result.status !== 0 || !existsSync(runtime)) throw new Error(`Could not unpack ${zip} (${result.status ?? result.error})`);
   return runtime;
 }
 

@@ -319,7 +319,8 @@ export async function selfUpdate(args, overrides = {}) {
     daemon: async () => undefined,
     restartDaemon: root => { const run = bundleCommand(root); return spawnSync(run.command, [...run.args, 'daemon', 'restart'], { stdio: 'inherit', windowsHide: true }).status ?? 1; },
     runVersion: root => { const run = bundleCommand(root); return spawnSync(run.command, [...run.args, '--version'], { encoding: 'utf8', windowsHide: true, timeout: 60_000 }).stdout?.trim() ?? ''; },
-    runDaemonVersion: root => spawnSync(path.join(root, 'bin', NATIVE_DAEMON), ['--version'], { encoding: 'utf8', windowsHide: true, timeout: 60_000 }).stdout?.trim() ?? '',
+    // Without BUN_BE_BUN, which would make the native alpd the Bun CLI.
+    runDaemonVersion: root => spawnSync(path.join(root, 'bin', NATIVE_DAEMON), ['--version'], { encoding: 'utf8', windowsHide: true, timeout: 60_000, env: Object.fromEntries(Object.entries(process.env).filter(([name]) => name !== 'BUN_BE_BUN')) }).stdout?.trim() ?? '',
     ...overrides,
   };
   const { bundle } = deps;
