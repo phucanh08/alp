@@ -59,7 +59,8 @@ function run() {
   const list = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, 0)));
   return JSON.stringify(list.map(w => ({ pid: w.kCGWindowOwnerPID, owner: w.kCGWindowOwnerName, layer: w.kCGWindowLayer })));
 }`;
-  return JSON.parse((await run('osascript', ['-l', 'JavaScript', '-e', script])).stdout);
+  // Bounded, so a hung read counts as a failed one for the watchdog.
+  return JSON.parse((await run('osascript', ['-l', 'JavaScript', '-e', script], { timeout: 5_000 })).stdout);
 }
 const PROMPT_OWNERS = new Set(['SecurityAgent', 'UserNotificationCenter', 'CoreServicesUIAgent', 'coreautha']);
 const windowKey = w => `${w.pid}/${w.owner}/${w.layer}`;
