@@ -9,3 +9,6 @@ packages/*/dist/
 packages/core/templates/
 integrations/paseo/server/dist/
 packages/cli/.binary/
+
+# ALP desktop (apps/desktop, bun project): electron-builder output; dist/ and node_modules/ are covered above
+apps/desktop/release/
