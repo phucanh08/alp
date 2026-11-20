@@ -33,6 +33,12 @@ log "ok: alp init writes its templates"
 log "ok: alp daemon start"
 "$binary" daemon status | grep -q ready || fail "alp daemon status"
 log "ok: alp daemon status"
+# The native alpd (t-81b0.9), where the bundle ships one, is what alp started.
+bin_dir=$(cd "$(dirname "$binary")" && pwd -P)
+if [ -x "$bin_dir/alpd" ]; then
+  grep -q "\"entry\":\"$bin_dir/alpd\"" "$ALP_HOME/alpd.json" || fail "alp did not start the native alpd: $(cat "$ALP_HOME/alpd.json")"
+  log "ok: the running alpd is the native alpd"
+fi
 
 url=$(cd "$work/project" && "$binary" dashboard --print)
 case "$url" in http://127.0.0.1:*'#token='*) ;; *) fail "alp dashboard --print printed '$url'" ;; esac
