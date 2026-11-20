@@ -13,7 +13,10 @@ import { readSettings } from './settings';
 let win: BrowserWindow | undefined;
 /** The origin the window may show; undefined while it shows a bundled page. */
 let allowedOrigin: string | undefined;
-let connecting = false;
+/** Each connect() takes the next number; only the latest one may change the window. */
+let generation = 0;
+/** The longest error text shown (alp's stderr can be long; it travels in the page's query). */
+const MAX_MESSAGE = 4000;
 
 const page = (name: string) => path.join(__dirname, 'pages', name);
 
@@ -45,39 +48,47 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' };
   });
   // Never log the URL: before apps/web runs, it still carries the token.
-  contents.on('did-fail-load', (_event, code, description, _url, isMainFrame) => {
-    if (isMainFrame && code !== -3) void showError(`The ALP web page did not load (${description}). Start ALP, then choose Connect again.`);
+  // -3 (ERR_ABORTED) is a load replaced by another one. A bundled page that fails is not retried
+  // with another bundled page, which could loop.
+  contents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+    if (isMainFrame && code !== -3 && !url.startsWith('file:')) void showError(`The ALP web page did not load (${description}). Start ALP, then choose Connect again.`);
   });
   window.once('ready-to-show', () => window.show());
   window.on('closed', () => { if (win === window) win = undefined; });
   return window;
 }
 
-async function showMissing(override?: string) {
+async function showMissing(override?: string, window = win) {
   allowedOrigin = undefined;
-  await win?.loadFile(page('missing-alp.html'), { query: override ? { override } : {} });
+  await window?.loadFile(page('missing-alp.html'), { query: override ? { override } : {} });
 }
 
-async function showError(message: string) {
+async function showError(message: string, window = win) {
   allowedOrigin = undefined;
-  await win?.loadFile(page('error.html'), { query: { message } });
+  const text = message.length > MAX_MESSAGE ? `${message.slice(0, MAX_MESSAGE)}…` : message;
+  await window?.loadFile(page('error.html'), { query: { message: text } }).catch(() => undefined);
 }
 
-/** Asks alp for the address and opens it, or shows why not. */
+/**
+ * Asks alp for the address and opens it, or shows why not. A later call (Connect again, a window
+ * reopened from the Dock while an earlier `alp web --print` still runs) supersedes an earlier one,
+ * whose result is dropped; each one loads into the window that is current when it finishes.
+ */
 async function connect() {
-  if (connecting || !win) return;
-  connecting = true;
-  try {
-    await win.loadFile(page('connecting.html'));
-    const settings = await readSettings(app.getPath('userData'));
-    const result = await connectAlpWeb(settings.alpPath || process.env.ALP_DESKTOP_ALP || undefined);
-    if (!win) return;
-    if (result.ok) {
-      allowedOrigin = result.address.origin;
-      await win.loadURL(result.address.url).catch(() => undefined);
-    } else if ('missing' in result) await showMissing(result.override);
-    else await showError(result.error);
-  } finally { connecting = false; }
+  const id = ++generation;
+  const current = () => (id === generation && win && !win.isDestroyed() ? win : undefined);
+  allowedOrigin = undefined;
+  await current()?.loadFile(page('connecting.html')).catch(() => undefined);
+  const settings = await readSettings(app.getPath('userData'));
+  const result = await connectAlpWeb(settings.alpPath || process.env.ALP_DESKTOP_ALP || undefined);
+  const window = current();
+  if (!window) return;
+  if (result.ok) {
+    allowedOrigin = result.address.origin;
+    // A failed load shows its error through did-fail-load; ERR_ABORTED means a newer load won.
+    await window.loadURL(result.address.url).catch(() => undefined);
+  } else if ('missing' in result) await showMissing(result.override, window);
+  else await showError(result.error, window);
 }
 
 function buildMenu() {

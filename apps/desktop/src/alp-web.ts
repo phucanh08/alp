@@ -30,7 +30,9 @@ function run(file: string, args: string[], options: { env: NodeJS.ProcessEnv; ti
 /** The user's login shell's `alp` and PATH, or undefined when it fails or takes too long. */
 async function loginShell(): Promise<{ alp?: string; path?: string } | undefined> {
   const shell = process.env.SHELL && process.env.SHELL.startsWith('/') ? process.env.SHELL : '/bin/zsh';
-  const result = await run(shell, ['-ilc', SHELL_PROBE], { env: process.env, timeout: SHELL_TIMEOUT_MS });
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const result = await run(shell, ['-ilc', SHELL_PROBE], { env, timeout: SHELL_TIMEOUT_MS });
   return result.code === 0 ? parseShellProbe(result.stdout) : undefined;
 }
 
