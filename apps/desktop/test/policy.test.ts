@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { isAllowedExternal, isAllowedNavigation, isAllowedPermission, isTicketRequest, navigationGuard } from '../src/policy';
+import { isAllowedExternal, isAllowedNavigation, isAllowedPermission, isTicketRequest, isTokenRejection, navigationGuard } from '../src/policy';
 
 const ORIGIN = 'http://127.0.0.1:7433';
 
@@ -90,5 +90,26 @@ describe('isTicketRequest', () => {
       expect(isTicketRequest(url, ORIGIN)).toBe(false);
     }
     expect(isTicketRequest(`${ORIGIN}/v1/tickets`, undefined)).toBe(false);
+  });
+});
+
+describe('isTokenRejection', () => {
+  const request = { statusCode: 401, method: 'POST', url: `${ORIGIN}/v1/tickets`, webContentsId: 7 };
+  const shown = { committed: true, windowId: 7, origin: ORIGIN };
+  test('a 401 on the ticket request of the committed page in the window counts', () => {
+    expect(isTokenRejection(request, shown)).toBe(true);
+  });
+  test.each([
+    ['before the new document committed (a late 401 from the page being replaced)', request, { ...shown, committed: false }],
+    ['from another webContents', { ...request, webContentsId: 8 }, shown],
+    ['with no webContents (a service worker)', { ...request, webContentsId: undefined }, shown],
+    ['with no window', request, { ...shown, windowId: undefined }],
+    ['another status', { ...request, statusCode: 403 }, shown],
+    ['another method', { ...request, method: 'GET' }, shown],
+    ['another path', { ...request, url: `${ORIGIN}/v1/ws` }, shown],
+    ['another origin', { ...request, url: 'http://127.0.0.1:7434/v1/tickets' }, shown],
+    ['nothing shown', request, { ...shown, origin: undefined }],
+  ])('does not count %s', (_name, r, s) => {
+    expect(isTokenRejection(r, s)).toBe(false);
   });
 });

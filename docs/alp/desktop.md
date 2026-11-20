@@ -71,7 +71,10 @@ Trong lúc thử, cửa sổ vẫn giữ trang cũ (app web hiện trạng thái
 hủy mọi lần thử đang chờ. `/readyz` không gửi credential; với 401, app chỉ đọc status và path của
 request, không đọc header hay body, và chỉ tính 401 của trang đã commit cho địa chỉ vừa tải (401 muộn
 của trang cũ đang bị thay thì bỏ qua). Một lần tải không xong cũng không lỗi trong 30 giây được tính
-là thất bại. Reload trang không đặt lại bộ đếm.
+là thất bại. Reload trang không đặt lại bộ đếm. Sau `alp web rotate` trên cùng port, địa chỉ mới chỉ
+khác ở fragment (`#token=`), nên Chromium chỉ điều hướng trong trang. Vì vậy app tải lại trang để app
+web đọc token mới. Còn một khe rất nhỏ: một 401 của trang cũ đã nằm sẵn trong hàng đợi đúng lúc commit
+vẫn được tính, và hệ quả tối đa là thêm một lần thử.
 
 Giới hạn: `/readyz` có trả lời HTTP bất kỳ là được coi là còn sống, nên nếu một server khác chiếm port
 cũ ngay sau khi `alp-web` dừng, app không nhận ra cho tới khi trang tự báo lỗi hoặc người dùng chọn
