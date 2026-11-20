@@ -1,7 +1,7 @@
 # ALP desktop (macOS, MVP)
 
 > **Trạng thái:** bản khung (t-81b0.2, phần 1), chưa phát hành, chưa có DMG. Quyết định: D32
-> (`plans/reference/DECISIONS.md`). Kết nối lại tự động, e2e và CI, đóng gói DMG là các phần sau.
+> (`plans/reference/DECISIONS.md`). Kết nối lại tự động, e2e, đóng gói DMG là các phần sau.
 
 App desktop là một **vỏ mỏng** bằng Electron bọc quanh ALP mà người dùng đã cài. Nó không mang theo
 alpd, gateway hay app web: nó chạy `alp web --print` của người dùng, lệnh này khởi động hoặc gắn vào
@@ -61,8 +61,10 @@ Nếu PATH dựng từ (1)–(2) không có `node`, PATH của login shell đư�
 ## 5. Build và chạy từ source
 
 `apps/desktop` là project **bun** độc lập, không nằm trong `workspaces` của `package.json` gốc, có
-`bun.lock` riêng và không phụ thuộc package `@anhlp/*` nào; `npm ci` và các check của repo không
-chạm tới nó. Lệnh: xem `apps/desktop/README.md` (`bun install`, `bun test test`, `bun run build`,
+`bun.lock` riêng và không phụ thuộc package `@anhlp/*` nào; `npm ci` và runner test gốc không chạy
+nó. Test của nó (`apps/desktop/test`, `bun:test`) được miễn khỏi luật bố cục test trong
+`test/integration/layout.test.js` chỉ khi script `test` của nó là `bun test test`; job CI
+`desktop-macos` chạy `bun install --frozen-lockfile`, `bun test test`, typecheck và build. Lệnh: xem `apps/desktop/README.md` (`bun install`, `bun test test`, `bun run build`,
 `bun run start`).
 
 Shell của agent trong môi trường này có `ELECTRON_RUN_AS_NODE=1`: phải bỏ biến này khi chạy Electron
@@ -72,6 +74,6 @@ dùng `~/.alp` của người dùng (`ALP_DESKTOP_ALP`, `ALP_DESKTOP_USER_DATA`)
 
 ## 6. Chưa có trong bản này
 
-Tự kết nối lại khi `alp-web` hay alpd khởi động lại hoặc đổi port; e2e Playwright và job CI macOS;
+Tự kết nối lại khi `alp-web` hay alpd khởi động lại hoặc đổi port; e2e Playwright;
 DMG ký ad-hoc (arm64, x64) và Electron fuses; `alp web --print --json`; dừng `alp web` khi thoát app;
 ký và notarize; Windows và Linux; mang alpd theo app.
