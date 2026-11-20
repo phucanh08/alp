@@ -26,11 +26,11 @@ async function temp(t, prefix) {
 }
 
 /** A release mirror: one archive per platform for each version, SHA256SUMS and install.sh. */
-async function mirror(t, versions = ['9.8.7']) {
+async function mirror(t, versions = ['9.8.7'], options = {}) {
   const out = await temp(t, 'alp-mirror-');
   for (const version of versions) {
     const work = await temp(t, 'alp-bundles-');
-    for (const platform of PLATFORMS) await pack({ bundle: await fakeBundle(work, version, platform), out });
+    for (const platform of PLATFORMS) await pack({ bundle: await fakeBundle(work, version, platform, options), out });
   }
   await copyFile(INSTALL, path.join(out, 'install.sh'));
   await sums(out);
@@ -226,4 +226,19 @@ test('the native alpd (t-81b0.9): Bun targets per platform, Windows excluded, an
   assert.equal(pins.version, await pinnedBun(), 'bun-runtime.json and apps/desktop/package.json pin one Bun');
   assert.deepEqual(Object.keys(pins.archives).sort(), [...NATIVE_PLATFORMS].sort());
   for (const { sha256 } of Object.values(pins.archives)) assert.match(sha256, /^[0-9a-f]{64}$/);
+});
+
+test('install.sh refuses a bundle whose native alpd cannot run here, unless ALP_NATIVE_DAEMON=0 (t-81b0.9)', { skip: !posix }, async t => {
+  const broken = await mirror(t, ['9.8.7'], { nativeDaemon: '' });
+  const home = await temp(t, 'alp-home-');
+  const refused = await install(['--base-url', broken], { home, extraEnv: { BUN_BE_BUN: '1' } });
+  assert.notEqual(refused.code, 0);
+  assert.match(refused.stderr, /native alpd \(bin\/alpd\) reports version '', not 9\.8\.7.*nothing was installed.*ALP_NATIVE_DAEMON=0/);
+  assert.equal(existsSync(path.join(home, '.alp/bin/alp')), false);
+  const node = await install(['--base-url', broken], { home, extraEnv: { ALP_NATIVE_DAEMON: '0' } });
+  assert.equal(node.code, 0, node.stderr);
+  const good = await mirror(t, ['9.8.7'], { nativeDaemon: '9.8.7' });
+  const home2 = await temp(t, 'alp-home-');
+  const installed = await install(['--base-url', good], { home: home2, extraEnv: { BUN_BE_BUN: '1' } });
+  assert.equal(installed.code, 0, installed.stderr);
 });

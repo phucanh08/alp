@@ -6,7 +6,8 @@ import path from 'node:path';
 import { POSIX_LAUNCHER, WINDOWS_LAUNCHER } from '../../scripts/build-bundle.mjs';
 
 /** Writes <directory>/alp-<version>-<platform>/ and returns its path. */
-export async function fakeBundle(directory, version, platform) {
+/** nativeDaemon: also a bin/alpd that prints `nativeDaemon` for --version (an empty string: it cannot run). */
+export async function fakeBundle(directory, version, platform, { nativeDaemon } = {}) {
   const root = path.join(directory, `alp-${version}-${platform}`);
   const windows = platform.startsWith('windows-');
   const cli = path.join(root, 'lib/node_modules/@anhlp/alp-cli/dist/cli.js');
@@ -21,6 +22,10 @@ export async function fakeBundle(directory, version, platform) {
     await writeFile(path.join(root, 'bin/alp'), POSIX_LAUNCHER);
     await chmod(path.join(root, 'bin/alp'), 0o755);
     await symlink(process.execPath, path.join(root, 'node/bin/node'));
+  }
+  if (nativeDaemon !== undefined && !windows) {
+    await writeFile(path.join(root, 'bin/alpd'), nativeDaemon ? `#!/bin/sh\necho ${nativeDaemon}\n` : '#!/bin/sh\nexit 132\n');
+    await chmod(path.join(root, 'bin/alpd'), 0o755);
   }
   await writeFile(path.join(root, 'alp-bundle.json'), JSON.stringify({ name: 'alp', version, platform, node: process.versions.node }));
   for (const file of ['LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.txt']) await writeFile(path.join(root, file), `${file} of the test bundle\n`);

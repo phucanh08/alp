@@ -396,9 +396,9 @@ export async function selfUpdate(args, overrides = {}) {
     if (reported !== asset.version) throw new Error(`The downloaded ALP reports version ${JSON.stringify(reported)}, not ${asset.version}; nothing was changed`);
     // The native alpd (t-81b0.9) must run on this machine too: an old CPU, glibc or a quarantined file would
     // otherwise leave alp without a daemon after the switch.
-    if (nodeFs.existsSync(path.join(unpacked, 'bin', NATIVE_DAEMON))) {
+    if (deps.env.ALP_NATIVE_DAEMON !== '0' && nodeFs.existsSync(path.join(unpacked, 'bin', NATIVE_DAEMON))) {
       const native = deps.runDaemonVersion(unpacked);
-      if (native !== asset.version) throw new Error(`The downloaded ALP's native alpd (bin/${NATIVE_DAEMON}) reports version ${JSON.stringify(native)}, not ${asset.version}, so it cannot run here; nothing was changed. Report it, and meanwhile keep alpd on Node with ALP_NATIVE_DAEMON=0`);
+      if (native !== asset.version) throw new Error(`The downloaded ALP's native alpd (bin/${NATIVE_DAEMON}) reports version ${JSON.stringify(native)}, not ${asset.version}, so it cannot run here; nothing was changed. To update with alpd on the bundled Node, set ALP_NATIVE_DAEMON=0 for this update and keep it set`);
     }
     if (nodeFs.existsSync(target)) {
       // A reinstall of the running version moves it aside (its processes keep their files); any other copy is stale.
