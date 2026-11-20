@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,12 +7,36 @@ import { UsageError } from './usage.js';
 /**
  * alp desktop (t-81b0.5): opens ALP's desktop app (apps/desktop, an Electron shell for macOS). The
  * app is looked for, in order:
- *   1. ALP.app in /Applications, then in ~/Applications (macOS), opened with `open`;
+ *   1. ALP.app in /Applications, then in ~/Applications (macOS), opened with `open`. Only a bundle
+ *      whose CFBundleIdentifier is DESKTOP_BUNDLE_ID counts: another app of that name (an older ALP
+ *      desktop app, say) is skipped with a one-line message and the lookup goes on;
  *   2. a checkout named by ALP_DESKTOP_CHECKOUT (the repository root, or its apps/desktop), whose
  *      app is built (`bun install && bun run build` in apps/desktop), run with its own Electron;
  *   3. neither: how to get it, and exit 1.
  * Nothing secret passes here: the app asks `alp dashboard --print` for its address itself.
  */
+
+/** The bundle id of the packaged app (apps/desktop/electron-builder.yml, appId). */
+export const DESKTOP_BUNDLE_ID = 'com.anhlp.alp.shell';
+
+/**
+ * The CFBundleIdentifier of the app bundle at `app`, or undefined when it cannot be read. An XML
+ * Info.plist (what electron-builder writes) is read directly; any other form through plutil.
+ * @param {string} app
+ * @returns {Promise<string | undefined>}
+ */
+export async function readBundleId(app) {
+  const plist = path.join(app, 'Contents', 'Info.plist');
+  const text = await readFile(plist, 'utf8').catch(() => undefined);
+  if (text === undefined) return undefined;
+  if (text.trimStart().startsWith('<')) {
+    const match = /<key>CFBundleIdentifier<\/key>\s*<string>([^<]*)<\/string>/.exec(text);
+    return match ? match[1].trim() : undefined;
+  }
+  return new Promise(resolve => {
+    execFile('/usr/bin/plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', plist], (error, stdout) => resolve(error ? undefined : stdout.trim() || undefined));
+  });
+}
 
 /** @param {string} file */
 const isDirectory = file => stat(file).then(info => info.isDirectory(), () => false);
@@ -34,16 +58,20 @@ async function desktopPackage(dir) {
 
 /**
  * Where the app is and how to start it. Exported for tests.
- * @param {{ platform?: NodeJS.Platform, home?: string, env?: NodeJS.ProcessEnv, applications?: string[] }} [options]
+ * `onSkip` hears about each ALP.app passed over because its bundle id is not DESKTOP_BUNDLE_ID.
+ * @param {{ platform?: NodeJS.Platform, home?: string, env?: NodeJS.ProcessEnv, applications?: string[], onSkip?: (message: string) => void }} [options]
  * @returns {Promise<{ kind: 'app', app: string, command: string, args: string[] }
  *   | { kind: 'checkout', dir: string, command: string, args: string[] }
  *   | { kind: 'missing', reason?: string }>}
  */
-export async function resolveDesktop({ platform = process.platform, home = os.homedir(), env = process.env, applications } = {}) {
+export async function resolveDesktop({ platform = process.platform, home = os.homedir(), env = process.env, applications, onSkip = () => {} } = {}) {
   if (platform === 'darwin') {
     for (const directory of applications ?? ['/Applications', path.join(home, 'Applications')]) {
       const app = path.join(directory, 'ALP.app');
-      if (await isDirectory(app)) return { kind: 'app', app, command: 'open', args: [app] };
+      if (!(await isDirectory(app))) continue;
+      const id = await readBundleId(app);
+      if (id === DESKTOP_BUNDLE_ID) return { kind: 'app', app, command: 'open', args: [app] };
+      onSkip(`Skipped ${app}: its bundle id is ${id ? JSON.stringify(id) : 'unreadable'}, not ${DESKTOP_BUNDLE_ID} (ALP's desktop app).`);
     }
   }
   const checkout = env.ALP_DESKTOP_CHECKOUT;
@@ -70,7 +98,7 @@ Meanwhile, \`alp dashboard\` opens ALP in your browser.`;
  */
 export async function desktopCommand(args, { resolve = resolveDesktop, launch = start } = {}) {
   if (args.length) throw new UsageError();
-  const found = await resolve();
+  const found = await resolve({ onSkip: message => console.error(message) });
   if (found.kind === 'missing') {
     if (found.reason) console.error(found.reason);
     console.error(INSTRUCTIONS);
