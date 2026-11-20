@@ -9,6 +9,16 @@ export function isAllowedNavigation(target: string, origin: string | undefined):
   try { return new URL(target).origin === origin; } catch { return false; }
 }
 
+/**
+ * The handler for will-navigate, will-frame-navigate and will-redirect: whichever frame navigates,
+ * main or sub, a target outside the shown origin is prevented. `origin` is read at each event.
+ */
+export function navigationGuard(origin: () => string | undefined) {
+  return (event: { url: string; isMainFrame?: boolean; preventDefault(): void }) => {
+    if (!isAllowedNavigation(event.url, origin())) event.preventDefault();
+  };
+}
+
 /** Whether a link the page tried to open may go to the user's browser: https only. */
 export function isAllowedExternal(target: string): boolean {
   try {

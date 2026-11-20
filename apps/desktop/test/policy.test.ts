@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { isAllowedExternal, isAllowedNavigation, isAllowedPermission } from '../src/policy';
+import { isAllowedExternal, isAllowedNavigation, isAllowedPermission, navigationGuard } from '../src/policy';
 
 const ORIGIN = 'http://127.0.0.1:7433';
 
@@ -35,5 +35,34 @@ describe('isAllowedPermission', () => {
   });
   test.each(['media', 'notifications', 'geolocation', 'clipboard-read', 'openExternal', 'fileSystem'])('denies %s', permission => {
     expect(isAllowedPermission(permission, `${ORIGIN}/`, ORIGIN)).toBe(false);
+  });
+});
+
+describe('navigationGuard', () => {
+  const event = (url: string, isMainFrame: boolean) => {
+    const e = { url, isMainFrame, prevented: false, preventDefault() { e.prevented = true; } };
+    return e;
+  };
+  test('a subframe is held to the same origin as the main frame', () => {
+    const guard = navigationGuard(() => ORIGIN);
+    for (const isMainFrame of [true, false]) {
+      const away = event('https://evil.test/', isMainFrame);
+      guard(away);
+      expect(away.prevented).toBe(true);
+      const home = event(`${ORIGIN}/sessions`, isMainFrame);
+      guard(home);
+      expect(home.prevented).toBe(false);
+    }
+  });
+  test('reads the origin at each event, and refuses all while none is shown', () => {
+    let origin: string | undefined;
+    const guard = navigationGuard(() => origin);
+    const first = event(`${ORIGIN}/`, false);
+    guard(first);
+    expect(first.prevented).toBe(true);
+    origin = ORIGIN;
+    const second = event(`${ORIGIN}/`, false);
+    guard(second);
+    expect(second.prevented).toBe(false);
   });
 });
