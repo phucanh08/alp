@@ -1,18 +1,18 @@
-# ALP web (Task 10A, beta)
+# ALP dashboard (Task 10A, beta)
 
 > **Trạng thái (bản beta sau `0.0.1-beta.3`, chưa phát hành).** App `apps/web` (`@anhlp/alp-web`,
 > private) không phải là package riêng: nó được build vào CLI (`@anhlp/alp`, `@anhlp/alp-cli`,
-> `dist/alp-web/`) và mở bằng `alp web` (§3.1). `@anhlp/alp-gateway` vẫn không phát hành; CLI mang
-> sẵn gateway trong `dist/alp-web.js`. Cách triển khai riêng ở §3.2 cần `alp-gateway` chạy từ
+> `dist/alp-dashboard/`) và mở bằng `alp dashboard` (§3.1). `@anhlp/alp-gateway` vẫn không phát hành; CLI mang
+> sẵn gateway trong `dist/alp-dashboard.js`. Cách triển khai riêng ở §3.2 cần `alp-gateway` chạy từ
 > checkout. Trong `0.0.1-beta.3` đã phát hành, `alp web` vẫn là web của Paseo trong
 > `@anhlp/alp-paseo`. Kết quả ở §9 là bằng chứng lịch sử của nhánh phát triển. Phạm vi:
 > [beta-scope.md](beta-scope.md) §4.
 
 App trình duyệt độc lập (`apps/web`, package `@anhlp/alp-web`, private). App nói chuyện với alpd
 **chỉ qua** ALP remote gateway ([remote-gateway.md](remote-gateway.md)) và client SDK
-([client-sdk.md](client-sdk.md)). Từ bản này `alp web` mở app này (service `alp-web`) thay cho web
+([client-sdk.md](client-sdk.md)). Từ bản này `alp dashboard` mở app này (service `alp-dashboard`) thay cho web
 của Paseo. Web của Paseo (`paseo-web/`, `server/dist/web-app` trong `@anhlp/alp-paseo`) đã bị gỡ
-khỏi repo và package plugin (t-55ce.3); integration `paseo` chỉ còn bridge, relay và `alp web pair`.
+khỏi repo và package plugin (t-55ce.3); integration `paseo` chỉ còn bridge, relay và `alp dashboard pair`.
 
 Luồng: `Browser → HTTPS/WSS (hoặc loopback/SSH) → alp-gateway → IPC → alpd`.
 
@@ -22,12 +22,12 @@ Số mục (§) có thể được code và test tham chiếu; giữ ổn địn
 
 | Có | Chi tiết |
 |---|---|
-| Kết nối | `alp web` mở link có sẵn token và app tự kết nối (§3.1, §4.2). Hoặc form kết nối: HTTPS, hoặc HTTP chỉ trên loopback (`127.0.0.1`, `localhost`, SSH tunnel); token dán tay chỉ giữ trong bộ nhớ của tab. Trên trang loopback của bản build (như trang `alp web` phục vụ; dev server Vite thì không), ô gateway mặc định là origin của trang (địa chỉ đã nhớ thì ưu tiên), và "Getting a token" chỉ tới `alp web`, `alp web --print`, `alp web rotate` trước, rồi tới `alp-gateway credential create` + `serve --origin` cho gateway riêng. |
+| Kết nối | `alp dashboard` mở link có sẵn token và app tự kết nối (§3.1, §4.2). Hoặc form kết nối: HTTPS, hoặc HTTP chỉ trên loopback (`127.0.0.1`, `localhost`, SSH tunnel); token dán tay chỉ giữ trong bộ nhớ của tab. Trên trang loopback của bản build (như trang `alp dashboard` phục vụ; dev server Vite thì không), ô gateway mặc định là origin của trang (địa chỉ đã nhớ thì ưu tiên), và "Getting a token" chỉ tới `alp dashboard`, `alp dashboard --print`, `alp dashboard rotate` trước, rồi tới `alp-gateway credential create` + `serve --origin` cho gateway riêng. |
 | Projects | Các workspace mà credential cấp (`principal.workspaces`), cùng registry chung của host (`workspace.registry`, protocol §16, #121): **Add project** chỉ đăng ký một thư mục đã được cấp sẵn (`workspace.write`; không duyệt thư mục của host, không cấp thêm quyền), pin chung giữa các client và giữ qua restart, worktree tạo/xóa theo mapping chủ host đã duyệt (`workspace.manage`, chỉ macOS/Linux). Web chưa có nút bỏ project (`project.remove` của protocol chỉ bỏ đăng ký, không xóa file). |
 | Sessions | Liệt kê, tạo (team, permissions, model, title), mở, đổi tên, archive. Mỗi agent của cây (main và assignment) là một tab. Trên Codex và Claude (#121): fork và rewind chỉ hội thoại (§12.7, không đổi file), đổi team/model/thinking khi session đang sống (§12.9, đổi team cần thêm `session.team.write`), Reload agent và Copy resume command trong menu tab (§12.8), tải lịch sử cũ hơn (`session.history`, §8.7), đính kèm file không phải ảnh (§12.6, cần `attachments.write`). |
 | Chat | Prompt + stream, tool call, todo, notice; trả lời câu hỏi theo luồng chọn rồi Submit của Paseo (Other thay lựa chọn, Enter gửi, Dismiss), thẻ câu hỏi nằm trong stream; interrupt; steer khi agent đang chạy; hàng đợi (§4.3). |
 | Tasks | Liệt kê (poll), tạo, mở chi tiết trong tab lớn, đóng, mở lại, duyệt human gate. Mọi thay đổi gửi `ifRev`. |
-| Settings | Bố cục như `alp web` cũ: App (General, Appearance, Sidebar, Chat, Terminal, Editor, Diagnostics, About) và Host (Overview, Projects, Connections, Templates, Agents, Skills, Hooks, MCP servers, Providers…). Library xem nội dung đã redaction: file Markdown dưới dạng text, cấu hình dưới dạng JSON. Instruction agents/skills riêng của project sửa được với explicit `library.write` (#118). Mục chưa hỗ trợ ghi rõ "not available in this beta". |
+| Settings | Bố cục như `alp dashboard` cũ: App (General, Appearance, Sidebar, Chat, Terminal, Editor, Diagnostics, About) và Host (Overview, Projects, Connections, Templates, Agents, Skills, Hooks, MCP servers, Providers…). Library xem nội dung đã redaction: file Markdown dưới dạng text, cấu hình dưới dạng JSON. Instruction agents/skills riêng của project sửa được với explicit `library.write` (#118). Mục chưa hỗ trợ ghi rõ "not available in this beta". |
 | Workspace | Phím tắt như Paseo (dialog Shortcuts), History với session đã archive và Unarchive, attention trên mọi session (`question.list`), menu chuột phải của tab, kéo đổi thứ tự tab, tab giữ qua reload, sidebar và dock kéo đổi độ rộng, command center (⌘K), trạng thái trên favicon và title, notification của trình duyệt khi session chờ trả lời. |
 | New session | Màn hình như tab new agent của Paseo: tin đầu tiên, chọn team/model/thinking/permissions, `session.preview`, nhớ lựa chọn lần trước (§4.2). |
 | Phục hồi | Reconnect có backoff, resume theo cursor, reload trang, gateway hoặc alpd khởi động lại (§5). |
@@ -46,15 +46,15 @@ thiếu thì panel ghi lý do và không mở terminal.
 
 ```sh
 npm ci                       # ở gốc repo
-npm run dev:alp-web          # Vite dev server: http://127.0.0.1:7435
-npm run build:alp-web        # bundle tĩnh ở apps/web/dist
-npm run typecheck:alp-web
-npm run test:alp-web         # unit test (node:test)
+npm run dev:alp-dashboard          # Vite dev server: http://127.0.0.1:7435
+npm run build:alp-dashboard        # bundle tĩnh ở apps/web/dist
+npm run typecheck:alp-dashboard
+npm run test:alp-dashboard         # unit test (node:test)
 npm run test:alp-web:e2e     # build cli, daemon, web rồi chạy Playwright
 npm run validate:web         # cả lane CI: tsc, unit, boundary, build, E2E
 ```
 
-- Port mặc định: Vite dev server **7435**, `alp-gateway` riêng **7434**, `alp web` (alp-web: app và
+- Port mặc định: Vite dev server **7435**, `alp-gateway` riêng **7434**, `alp dashboard` (alp-dashboard: app và
   gateway trên một listener) **7433**. Test dùng port ngẫu nhiên.
 - E2E cần Chromium của Playwright: `npx playwright install chromium` (Linux:
   `--with-deps`).
@@ -64,58 +64,102 @@ npm run validate:web         # cả lane CI: tsc, unit, boundary, build, E2E
 
 ## 3. Triển khai
 
-### 3.1 `alp web` trên máy này (alp-web)
+### 3.1 `alp dashboard` trên máy này (alp-dashboard)
+
+Trước t-81b0.5 (đến `0.0.1-beta.8`) lệnh này là `alp web`; `alp web` đã bị xoá, không có alias.
 
 ```sh
-alp web            # chạy service alp-web nếu chưa chạy, rồi mở link có token
-alp web --print    # chỉ in link
-alp web rotate     # thay token; trang đang mở mất quyền
+alp dashboard                 # chạy service alp-dashboard nếu chưa chạy, rồi mở link có token trong trình duyệt
+alp dashboard --no-open       # như trên nhưng không mở trình duyệt, chỉ in link
+alp dashboard --print         # chỉ in link (app desktop dùng lệnh này)
+alp dashboard --port 7500     # lần chạy này dùng port 7500 (không đổi dashboard.port)
+alp dashboard --host localhost   # in link với localhost; chỉ nhận 127.0.0.1 hoặc localhost
+alp dashboard --status        # service có chạy không: pid, link KHÔNG kèm token, port; luôn exit 0
+alp dashboard --stop          # dừng service của ALP home này; không chạy thì báo và exit 0
+alp dashboard rotate          # thay token; trang đang mở mất quyền
+alp dashboard pair [--on|--off]   # link pair app Paseo qua relay
+alp desktop                   # mở app desktop (docs/alp/desktop.md)
 ```
 
-- Service: `alp web` chạy `dist/alp-web.js` của CLI (source `packages/cli/src/web/`). Một listener
-  trên `127.0.0.1` tại `web.port` (mặc định **7433**; port bận thì thử chín port kế tiếp) phục vụ
-  file của app (`dist/alp-web/`) và gateway nhúng trên cùng origin. Service giữ
-  `integrations/web.lock`, ghi `<home>/web.json` (`version: 2`, `app: "alp-web"`, pid, port, URL,
-  token) và log ở `<home>/logs/integrations/alp-web.log`. Service giữ alpd chạy (`ALP_SUPERVISE=0`
-  thì không), trừ sau `alp daemon stop`.
+- `--status`/`--stop` theo Hermes (`hermes dashboard --status/--stop`, NousResearch/hermes-agent
+  `hermes_cli/main.py` `_dashboard_lifecycle_flags`, `hermes_cli/main_dashboard.py`
+  `_report_dashboard_status`): cờ vòng đời thắng cờ khởi động; `--status` in `No alp dashboard running.`
+  hoặc `1 alp dashboard process running:` rồi `    PID <pid> [dashboard]: <url> (port <port>)`, luôn exit 0;
+  `--stop` chỉ dừng service của ALP home này, in `Stopped alp dashboard (pid <pid>).` hoặc
+  `No alp dashboard running for this ALP home.`, và exit 1 khi lock bị giữ bởi process alp không chứng minh
+  được là service.
+- `--port N` (1024–65535): nếu service đang chạy ở port khác thì lệnh từ chối và bảo dùng `--stop` hoặc
+  bỏ `--port` (như Hermes); nếu port đó bận thì báo lỗi, không lặng lẽ dùng port khác.
+- `--host`: alp-dashboard **chỉ** nghe trên `127.0.0.1`. Token là khoá duy nhất và gateway chỉ nhận
+  Host/Origin loopback, nên `--host` chỉ nhận `127.0.0.1` hoặc `localhost`; mọi giá trị khác (ví dụ
+  `0.0.0.0`) bị từ chối. Hermes cũng từ chối bind ngoài loopback khi không có auth provider, mà ALP không
+  có. Muốn dùng từ máy khác: SSH tunnel tới `127.0.0.1`.
+- Service: `alp dashboard` chạy `dist/alp-dashboard.js` của CLI (source `packages/cli/src/dashboard/`). Một
+  listener trên `127.0.0.1` tại `--port`, nếu không thì `dashboard.port` (mặc định **7433**; port bận thì thử
+  chín port kế tiếp) phục vụ file của app (`dist/alp-dashboard/`) và gateway nhúng trên cùng origin.
+  Service giữ `integrations/dashboard.lock`, ghi `<home>/dashboard.json` (`version: 2`,
+  `app: "alp-dashboard"`, pid, port, URL, token) và log ở `<home>/logs/integrations/alp-dashboard.log`.
+  Service giữ alpd chạy (`ALP_SUPERVISE=0` thì không), trừ sau `alp daemon stop`.
+- **Nâng cấp từ `alp web` (`0.0.1-beta.8` trở về trước).** Mọi lệnh `alp dashboard …` tự chuyển trước khi
+  đọc hay chạy gì, giữ token, port và trạng thái bật/tắt:
+  1. `alp web` cũ còn chạy dưới `integrations/web.lock` (hoặc integration Paseo trước khi đổi tên) được
+     dừng bằng SIGTERM với cùng các bằng chứng như `--stop`; nếu không chứng minh được process giữ lock
+     thì không dừng, không chuyển gì, và lệnh khởi động báo lỗi;
+  2. `<home>/web/` (kho credential) → `<home>/dashboard/`;
+  3. `<home>/web.json` có `app: "alp-web"` → `<home>/dashboard.json` (giữ token và credential id);
+     `web.json` không có `app` là danh tính của integration Paseo cũ và vẫn được chép sang `paseo.json`;
+  4. `logs/integrations/alp-web.log` → `alp-dashboard.log`;
+  5. `settings.json`: `web.enabled`, `web.port`, `web.permissions` chuyển sang `dashboard.*`;
+     `web.relay` (của Paseo) ở lại `web`.
+  Mỗi bước chỉ chuyển tên cũ sang tên mới còn trống: chạy lần hai không làm gì; khi có cả hai thì tên mới
+  thắng, tên cũ giữ nguyên (không gộp, không xoá) và `--status` liệt kê chúng. Settings được **chuyển tại
+  chỗ** để file của người dùng chỉ còn một nơi đúng; nếu không ghi được (file sai, chỉ đọc) thì
+  `dashboard.*` vẫn được đọc trước rồi tới `web.*`, nên setting cũ không bao giờ bị bỏ qua lặng lẽ.
+  Biến môi trường `ALP_WEB_APP` và `ALP_WEB_GRANT_REFRESH_MS` (cho test) vẫn được đọc khi
+  `ALP_DASHBOARD_APP`/`ALP_DASHBOARD_GRANT_REFRESH_MS` không đặt; tên mới thắng.
+- **Không đổi tên, và vì sao:** `apps/web` và package `@anhlp/alp-web` (mã nguồn của app trình duyệt,
+  không phải service); RPC `web.pairing` (extension của integration Paseo, đổi là đổi giao thức);
+  kênh gate `'web'` (được ghi vào log task đã lưu); `state/web-workspaces.json` (registry của alpd và đơn
+  vị backup/restore); `web.relay` trong settings (của Paseo); job CI `alp-web` (test app trình duyệt).
 - Link: `http://127.0.0.1:<port>/#token=alpgw1.…`. Token là credential gateway thật, lưu trong
-  `<home>/web/credentials.json` (thư mục 0700, file 0600 của user; sai quyền thì service không
-  chạy). Đây là kho riêng của alp-web: `alp-gateway credential list/create/revoke` (đọc
-  `<home>/gateway`) không thấy credential này. Lần chạy sau dùng lại token trong `web.json` khi nó
+  `<home>/dashboard/credentials.json` (thư mục 0700, file 0600 của user; sai quyền thì service không
+  chạy). Đây là kho riêng của alp-dashboard: `alp-gateway credential list/create/revoke` (đọc
+  `<home>/gateway`) không thấy credential này. Lần chạy sau dùng lại token trong `dashboard.json` khi nó
   còn hợp lệ.
-- `alp web rotate`: dừng alp-web, tạo credential mới, revoke mọi credential khác trong kho đó (token
-  cũ hết hiệu lực, trang đang mở nhận 401 và báo chạy `alp web` lại), rồi chạy lại service và in link
-  mới. Với `"web": { "enabled": false }`, rotate vẫn thay token nhưng không chạy lại service.
+- `alp dashboard rotate`: dừng alp-dashboard, tạo credential mới, revoke mọi credential khác trong kho đó (token
+  cũ hết hiệu lực, trang đang mở nhận 401 và báo chạy `alp dashboard` lại), rồi chạy lại service và in link
+  mới. Với `"dashboard": { "enabled": false }`, rotate vẫn thay token nhưng không chạy lại service.
 - Quyền mặc định: `DEFAULT_PERMISSIONS` của gateway cộng `workspace.write`, tức `session.read`,
   `session.write`, `project.read`, `project.write`, `workspace.write`. Các quyền khác (ví dụ
   `files.read`, `attachments.write`, `session.team.write`, `terminal.exec`) chỉ có khi thêm vào
-  setting `web.permissions` (mảng). Chỉ cần một mục không phải quyền của credential là alp-web bỏ
+  setting `dashboard.permissions` (mảng). Chỉ cần một mục không phải quyền của credential là alp-dashboard bỏ
   qua **cả danh sách** và ghi warning; grant giữ mặc định. Còn một mục sai dạng (không phải chuỗi
   chữ thường và dấu chấm, ví dụ `"files-read"`) làm cả `settings.json` không hợp lệ: cả alpd lẫn
-  alp-web đều bỏ qua toàn bộ file (với alp-web là kể cả `web.port`; với alpd là mọi setting của nó)
+  alp-dashboard đều bỏ qua toàn bộ file (với alp-dashboard là kể cả `dashboard.port`; với alpd là mọi setting của nó)
   và ghi `ALP_SETTINGS_INVALID` vào log. Có `terminal.exec` thì log
   ghi cảnh báo của gateway.
-- Workspace được cấp: registry project của alpd (project chưa bị bỏ) ∪ thư mục mà `alp web` đang
-  đứng khi khởi động service (hoặc khi `alp web rotate`), nếu thư mục đó có `.alp/` (là project
-  ALP). Đường dẫn được so theo realpath. alp-web theo dõi registry khoảng mỗi 5 giây; grant đổi
+- Workspace được cấp: registry project của alpd (project chưa bị bỏ) ∪ thư mục mà `alp dashboard` đang
+  đứng khi khởi động service (hoặc khi `alp dashboard rotate`), nếu thư mục đó có `.alp/` (là project
+  ALP). Đường dẫn được so theo realpath. alp-dashboard theo dõi registry khoảng mỗi 5 giây; grant đổi
   thì credential được cập nhật (giữ token) và gateway đóng các kết nối với 4403, app tự nối lại.
-- `web.enabled=false` chỉ tắt alp-web (`alp web`); integration Paseo và `alp web pair`
-  vẫn chạy. Relay của Paseo vẫn tuân theo `web.relay.enabled` (và `alp web pair --off`).
-- Setting: `web.port`, `web.permissions`, `web.enabled` chỉ được đọc khi service khởi động. Không
-  có `alp web stop`, và `alp daemon stop` không dừng alp-web. Muốn áp dụng thay đổi: dừng process
-  có pid trong `<home>/web.json` (macOS/Linux: `kill <pid>`; Windows: `taskkill /PID <pid>`), rồi chạy `alp web`; token được giữ.
-  `alp web rotate` cũng khởi động lại service, nhưng với token mới.
-- Nâng cấp từ `alp web` dựa trên Paseo: nếu integration Paseo cũ vẫn giữ `web.lock` (`web.json`
-  không có `app`), `alp web` gửi SIGTERM cho nó, chỉ khi chứng minh được đó là process của chính
-  user, cùng lần boot, và pid không bị dùng lại (macOS/Linux; Windows không dừng nó). Trước lần đầu
-  ghi đè `web.json`, alp-web chép token và server id của integration cũ sang `<home>/paseo.json` một
-  lần, chỉ khi `paseo.json` chưa có, để thiết bị đã pair vẫn dùng được.
+- `dashboard.enabled=false` chỉ tắt alp-dashboard (`alp dashboard`); integration Paseo và `alp dashboard pair`
+  vẫn chạy. Relay của Paseo vẫn tuân theo `web.relay.enabled` (và `alp dashboard pair --off`).
+- Setting: `dashboard.port`, `dashboard.permissions`, `dashboard.enabled` chỉ được đọc khi service khởi động.
+  `alp daemon stop` không dừng alp-dashboard. Muốn áp dụng thay đổi: `alp dashboard --stop` (Windows: dừng
+  process có pid trong `<home>/dashboard.json` bằng `taskkill /PID <pid>`), rồi chạy `alp dashboard`; token
+  được giữ.
+  `alp dashboard rotate` cũng khởi động lại service, nhưng với token mới.
+- Nâng cấp từ `alp web` dựa trên Paseo (trước `0.0.1-beta.4`): nếu integration Paseo cũ vẫn giữ
+  `integrations/web.lock` (`web.json` không có `app`), `alp dashboard` gửi SIGTERM cho nó, chỉ khi chứng
+  minh được đó là process của chính user, cùng lần boot, và pid không bị dùng lại (macOS/Linux; Windows
+  không dừng nó). alp-dashboard chép token và server id của integration cũ từ `web.json` sang
+  `<home>/paseo.json` một lần, chỉ khi `paseo.json` chưa có, để thiết bị đã pair vẫn dùng được.
 - **Windows:** macOS vẫn là nền tảng chính; trình duyệt E2E chạy trên Linux và macOS. Service
-  alp-web và gateway được kiểm thử trong CI Windows (`windows-daemon` trên Node 22 và 24). Thao tác
-  ghi đè `credentials.json` và `web.json` có cơ chế retry/backoff để xử lý lỗi `EPERM`/`EBUSY` khi
-  file đang được đọc. Trên Windows, alp không tự dừng alp-web hay integration Paseo cũ đang chạy:
-  `alp web rotate` và bước takeover khi nâng cấp từ chối khi chúng còn chạy. Dừng process có pid
-  trong `<home>/web.json` (`taskkill /PID <pid>`), rồi chạy lại lệnh. Cách dừng này không phải shutdown
+  alp-dashboard và gateway được kiểm thử trong CI Windows (`windows-daemon` trên Node 22 và 24). Thao tác
+  ghi đè `credentials.json` và `dashboard.json` có cơ chế retry/backoff để xử lý lỗi `EPERM`/`EBUSY` khi
+  file đang được đọc. Trên Windows, alp không tự dừng alp-dashboard hay integration Paseo cũ đang chạy:
+  `alp dashboard rotate` và bước takeover khi nâng cấp từ chối khi chúng còn chạy. Dừng process có pid
+  trong `<home>/dashboard.json` (`taskkill /PID <pid>`), rồi chạy lại lệnh. Cách dừng này không phải shutdown
   sạch; lần khởi động sau tự lấy lại lock.
 
 ### 3.2 Triển khai riêng với `alp-gateway`
@@ -147,7 +191,7 @@ cũng được.
 
 Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:7435 host`, rồi mở
 `http://127.0.0.1:7435` và dùng gateway `http://127.0.0.1:7434`. App build sẵn trên loopback không
-phân biệt được trang của `alp web` với bản tự phục vụ, nên ô gateway lúc đầu là origin của trang
+phân biệt được trang của `alp dashboard` với bản tự phục vụ, nên ô gateway lúc đầu là origin của trang
 (`http://127.0.0.1:7435`): gõ `http://127.0.0.1:7434` một lần, app nhớ địa chỉ đó cho lần sau.
 
 ## 4. Thiết kế
@@ -175,19 +219,19 @@ phân biệt được trang của `alp web` với bản tự phục vụ, nên �
     `redirect: 'error'`, `referrerPolicy: 'no-referrer'`.
   - Không bao giờ lưu vào localStorage hay cookie.
 - Token gõ vào form chỉ nằm trong bộ nhớ: reload hay đóng tab là mất.
-- Link của `alp web` (`http://127.0.0.1:<port>/#token=alpgw1.…`, `src/lib/link-token.js`):
+- Link của `alp dashboard` (`http://127.0.0.1:<port>/#token=alpgw1.…`, `src/lib/link-token.js`):
   - Khi trang load, `main.tsx` đọc `#token=` và kiểm tra dạng `alpgw1.<16 hex>.<43 base64url>`.
   - Fragment bị xóa ngay bằng `history.replaceState`, trước khi render, kể cả khi token hỏng.
   - Token hợp lệ được giữ trong sessionStorage của tab (key `alp-web:link-token`). Reload tab đó
     kết nối lại; tab khác và lần mở sau không thấy token.
-  - App kết nối tới `location.origin` (alp-web vừa serve trang), chỉ khi trang ở loopback
+  - App kết nối tới `location.origin` (alp-dashboard vừa serve trang), chỉ khi trang ở loopback
     (`127.0.0.1`, `localhost`). Ngoài loopback, app không giữ và không dùng token của link.
-  - Lần kết nối đầu không có form: app chờ alp-web lên (retry với backoff) và có nút
+  - Lần kết nối đầu không có form: app chờ alp-dashboard lên (retry với backoff) và có nút
     "Use another access token".
-  - Gateway từ chối token (401, sau `alp web rotate` hay revoke): app xóa token khỏi
+  - Gateway từ chối token (401, sau `alp dashboard rotate` hay revoke): app xóa token khỏi
     sessionStorage và hiện form với thông báo "This link's access token is no longer valid. Run
-    `alp web` again…". Lỗi terminal khác (origin, TLS) giữ token cho lần reload sau.
-  - Gateway đóng socket với 4403 (grant đổi, ví dụ alp-web thêm project mới): app tự nối lại với
+    `alp dashboard` again…". Lỗi terminal khác (origin, TLS) giữ token cho lần reload sau.
+  - Gateway đóng socket với 4403 (grant đổi, ví dụ alp-dashboard thêm project mới): app tự nối lại với
     cùng token và nhận grant mới.
   - Disconnect hoặc kết nối bằng form thì xóa token của link. `pagehide` thì giữ để reload dùng lại.
 - E2E kiểm tra token không có trong localStorage, URL, Referer, console và log.
@@ -316,8 +360,8 @@ phân biệt được trang của `alp web` với bản tự phục vụ, nên �
 |---|---|
 | "allows this page's origin" | Thêm đúng origin của trang: `alp-gateway serve --origin <scheme://host:port>`. |
 | "refused this access token" | Token sai, đã bị rotate hoặc revoke: `alp-gateway credential list`; cấp token mới. |
-| "This link's access token is no longer valid" | Token của `alp web` đã bị `alp web rotate`: chạy `alp web` lại để mở link mới. Credential này không có trong `alp-gateway credential list` (§3.1). |
-| `alp web` báo `web.lock` "is held by a process that alp cannot prove…" | Một process khác giữ lock (của user khác, lần boot khác, hoặc trên Windows). Dừng nó rồi chạy `alp web` lại. |
+| "This link's access token is no longer valid" | Token của `alp dashboard` đã bị `alp dashboard rotate`: chạy `alp dashboard` lại để mở link mới. Credential này không có trong `alp-gateway credential list` (§3.1). |
+| `alp dashboard` báo `dashboard.lock` (hoặc `web.lock` khi nâng cấp) "is held by a process that alp cannot prove…" | Một process khác giữ lock (của user khác, lần boot khác, hoặc trên Windows). Dừng nó rồi chạy `alp dashboard` lại. |
 | `tls_required` | Truy cập từ ngoài loopback mà không có HTTPS: dùng reverse proxy TLS hoặc SSH tunnel. |
 | Banner "Reconnecting…" kéo dài | Gateway hoặc alpd đang dừng. Work trên host vẫn chạy; app tự nối lại và tiếp tục sau cursor. |
 | "can only drive sessions in … mode" | Credential bị giới hạn `--mode`; session chạy mode khác. Tạo session với mode được phép. |
@@ -351,8 +395,8 @@ phân biệt được trang của `alp web` với bản tự phục vụ, nên �
       settings;
     - recovery;
     - access: token sai, chỉ đọc, giới hạn mode, workspace khác, revoke, origin không được phép;
-    - local: `alp web --print` với CLI đã build, link tự kết nối, hash rỗng, token chỉ ở
-      sessionStorage, reload, 4403 khi thêm project, `alp web rotate`;
+    - local: `alp dashboard --print` với CLI đã build, link tự kết nối, hash rỗng, token chỉ ở
+      sessionStorage, reload, 4403 khi thêm project, `alp dashboard rotate`;
     - chat, new-session, settings, tabs, workspace;
     - mobile.
 - Chạy E2E: `npm ci` ở gốc repo một lần (workspace dùng chung `node_modules` gốc), rồi
@@ -360,12 +404,12 @@ phân biệt được trang của `alp web` với bản tự phục vụ, nên �
   `pretest:e2e` của `apps/web`: build lại `packages/cli`, `packages/daemon` và bundle web trước
   Playwright, nên dist cũ (lỗi "host too old: lacks attach.after") không còn xảy ra. Gọi thẳng
   `npx playwright test` thì bỏ qua bước này.
-- CI: job `alp-web` trên `ubuntu-latest` và `macos-latest`, Node 22, chạy `npm run validate:web`.
-  Khi lỗi, CI upload trace và ảnh. Service alp-web và gateway cũng chạy trong job `windows-daemon` trên Windows (Node 22 và 24; xem §3.1).
+- CI: job `alp-dashboard` trên `ubuntu-latest` và `macos-latest`, Node 22, chạy `npm run validate:web`.
+  Khi lỗi, CI upload trace và ảnh. Service alp-dashboard và gateway cũng chạy trong job `windows-daemon` trên Windows (Node 22 và 24; xem §3.1).
 
 ## 8. Giới hạn đã biết
 
-- `alp web`: session được ghi với projectRoot qua symlink (ví dụ `/var/…` thay vì `/private/var/…`
+- `alp dashboard`: session được ghi với projectRoot qua symlink (ví dụ `/var/…` thay vì `/private/var/…`
   trên macOS) không hiện dưới grant theo realpath của thư mục đang đứng.
 - Chỉ một cây session được attach tại một thời điểm. Session khác cập nhật qua poll list mỗi 15
   giây.

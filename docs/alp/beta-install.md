@@ -1,7 +1,7 @@
 # Installing, upgrading and removing the ALP beta (`0.0.1-beta.8`)
 
 This guide covers the beta (`0.0.1-beta.8`; earlier betas were `0.0.0-beta.1`, `0.0.0-beta.2` and `0.0.1-beta.3` to `0.0.1-beta.7`): a new install, signing in to a provider, the daemon, the
-Paseo plugin, `alp web` on this machine, upgrading from 0.10.0 or earlier, backups, going back,
+Paseo plugin, `alp dashboard` on this machine, upgrading from 0.10.0 or earlier, backups, going back,
 and removing ALP. What the beta includes and what it does not is in the
 [release notes](beta-release-notes.md); the scope, gate and release checklist are in
 [beta-scope.md](beta-scope.md).
@@ -101,7 +101,7 @@ Codex only: see [codex-only.md](codex-only.md).
 
 ## Remote terminals (optional, off by default)
 
-alpd can run a real terminal (a shell) for remote clients: the ALP web app through `alp-gateway`,
+alpd can run a real terminal (a shell) for remote clients: the ALP dashboard app through `alp-gateway`,
 and Paseo app devices paired with this host. The shell runs **as the account that runs alpd**, with
 its files, programs and network; a workspace only picks the directory it starts in and is **not a
 sandbox**. It stays off until you opt in on the host:
@@ -159,84 +159,85 @@ Paseo plugins are trusted, unsandboxed code. The plugin keeps alpd running while
 More: [integrations/paseo/README.md](../../integrations/paseo/README.md) and
 [paseo-plugin.md](paseo-plugin.md).
 
-## `alp web` on this machine
+## `alp dashboard` on this machine
 
-> From the release after `0.0.1-beta.3`. In `0.0.1-beta.3` itself, `alp web` is Paseo's web app
+> From the release after `0.0.1-beta.3` (named `alp web` up to `0.0.1-beta.8`; the first `alp dashboard` moves
+> its files and settings, see [dashboard.md](dashboard.md) §3.1). In `0.0.1-beta.3` itself, `alp web` is Paseo's web app
 > in `@anhlp/alp-paseo` and needs `alp-paseo-integration --register` first.
 
-`alp web` opens ALP's web app (`apps/web`), which ships in the CLI (`@anhlp/alp`); it needs neither
+`alp dashboard` opens ALP's web app (`apps/web`), which ships in the CLI (`@anhlp/alp`); it needs neither
 Paseo nor `@anhlp/alp-paseo`.
 
 ```sh
-alp web              # starts the alp-web service if needed and opens its address with its token
-alp web --print      # prints the address instead
-alp web rotate       # replaces the token; pages already open lose access
+alp dashboard              # starts the alp-dashboard service if needed and opens its address with its token
+alp dashboard --print      # prints the address instead
+alp dashboard rotate       # replaces the token; pages already open lose access
 ```
 
-- The `alp-web` service listens on `127.0.0.1` only, at `web.port` (default 7433; if it is busy,
+- The `alp-dashboard` service listens on `127.0.0.1` only, at `dashboard.port` (default 7433; if it is busy,
   the next nine ports). One port carries the app and its embedded gateway. On a headless Linux
   machine, forward it and open the printed address on your own machine:
   `ssh -L 7433:127.0.0.1:7433 <host>`.
 - The address is `http://127.0.0.1:<port>/#token=alpgw1.…`. The token is a gateway credential
-  kept in `~/.alp/web/credentials.json`, a store of alp-web's own: `alp-gateway credential list`
+  kept in `~/.alp/dashboard/credentials.json`, a store of alp-dashboard's own: `alp-gateway credential list`
   does not show it. The page keeps the token only in that tab's session storage. When the page
-  says the token is no longer valid, run `alp web` again.
-- `alp web rotate` stops alp-web, replaces the credential (the old token stops working) and starts
-  it again; get the new address from its output or `alp web --print`.
+  says the token is no longer valid, run `alp dashboard` again.
+- `alp dashboard rotate` stops alp-dashboard, replaces the credential (the old token stops working) and starts
+  it again; get the new address from its output or `alp dashboard --print`.
 - The token may read and drive sessions and projects and add projects. To allow more, list the
   permissions in `~/.alp/settings.json`, for example
-  `"web": { "permissions": ["files.read", "attachments.write"] }` (others: `session.team.write`,
+  `"dashboard": { "permissions": ["files.read", "attachments.write"] }` (others: `session.team.write`,
   `terminal.exec`). If one entry is not a permission, the whole list is ignored with a warning;
   an entry that is not a lowercase name with dots (such as `"files-read"`) makes the whole
-  `settings.json` invalid, so both alpd and alp-web ignore all of it (alp-web's `web.port`
-  included, alpd's own settings too) and log `ALP_SETTINGS_INVALID`, alp-web in
-  `~/.alp/logs/integrations/alp-web.log`.
-- It reaches the projects alpd knows, and the folder you ran `alp web` in when it started the
+  `settings.json` invalid, so both alpd and alp-dashboard ignore all of it (alp-dashboard's `dashboard.port`
+  included, alpd's own settings too) and log `ALP_SETTINGS_INVALID`, alp-dashboard in
+  `~/.alp/logs/integrations/alp-dashboard.log`.
+- It reaches the projects alpd knows, and the folder you ran `alp dashboard` in when it started the
   service, if that folder is an ALP project.
-- alp-web keeps alpd running (`ALP_SUPERVISE=0` turns that off). It reads `web.port`,
-  `web.permissions` and `web.enabled` when it starts, and `alp daemon stop` does not stop it: to
-  apply a change, stop the process whose pid `~/.alp/web.json` names (`kill <pid>`; on Windows `taskkill /PID <pid>`), then run
-  `alp web`.
-- **Windows: untested.** CI runs alp-web's tests on Linux and macOS only, and macOS remains the
+- alp-dashboard keeps alpd running (`ALP_SUPERVISE=0` turns that off). It reads `dashboard.port`,
+  `dashboard.permissions` and `dashboard.enabled` when it starts, and `alp daemon stop` does not stop it: to
+  apply a change, stop the process whose pid `~/.alp/dashboard.json` names (`kill <pid>`; on Windows `taskkill /PID <pid>`), then run
+  `alp dashboard`.
+- **Windows: untested.** CI runs alp-dashboard's tests on Linux and macOS only, and macOS remains the
   primary platform. A trial on Windows CI found writes of the credential file failing now and then
-  with `EPERM`, which can make `alp web rotate`, a workspace grant update or a start that replaces the token fail. On Windows alp never
-  stops a running alp-web or the old Paseo integration for you: `alp web rotate` and the upgrade
-  takeover refuse while one runs. End the process whose pid `~/.alp/web.json` names
+  with `EPERM`, which can make `alp dashboard rotate`, a workspace grant update or a start that replaces the token fail. On Windows alp never
+  stops a running alp-dashboard or the old Paseo integration for you: `alp dashboard rotate` and the upgrade
+  takeover refuse while one runs. End the process whose pid `~/.alp/dashboard.json` names
   (`taskkill /PID <pid>`), then run the command again. Ending it this way is not a clean shutdown;
   the next start reclaims its lock.
 
-More: [web.md](web.md#31-alp-web-trên-máy-này-alp-web).
+More: [dashboard.md](dashboard.md#31-alp-dashboard-trên-máy-này-alp-dashboard).
 
 ### Upgrading from the Paseo-based `alp web`
 
 Before the rename, the Paseo integration ran as integration `web` and kept its token and server id
-in `~/.alp/web.json`. The first `alp web` after the upgrade:
+in `~/.alp/dashboard.json`. The first `alp dashboard` after the upgrade:
 
 - stops that integration if it still holds `integrations/web.lock`, with SIGTERM, and only when it
   can prove the process is yours, from this boot, and the one that took the lock (on Windows it
   never stops it: stop it yourself). Any other holder is reported and left running;
-- copies the old token and server id from `web.json` to `~/.alp/paseo.json`, once and only when
-  `paseo.json` does not exist yet, so devices paired through the relay keep working; then alp-web
-  writes its own `web.json`.
+- copies the old token and server id from `dashboard.json` to `~/.alp/paseo.json`, once and only when
+  `paseo.json` does not exist yet, so devices paired through the relay keep working; then alp-dashboard
+  writes its own `dashboard.json`.
 
-From the CLI, only `alp web pair` starts the Paseo integration now, as integration `paseo`.
+From the CLI, only `alp dashboard pair` starts the Paseo integration now, as integration `paseo`.
 
 ### Paseo's app on another device (optional)
 
-The Paseo integration in `@anhlp/alp-paseo` runs apart from alp-web, as integration `paseo` on a
+The Paseo integration in `@anhlp/alp-paseo` runs apart from alp-dashboard, as integration `paseo` on a
 port the system picks, and keeps its token in `~/.alp/paseo.json`. You need it only to pair
 Paseo's app on another device through the relay, which is **experimental** and off by default:
 
 ```sh
 npm install -g @anhlp/alp-paseo@beta
 alp-paseo-integration --register            # in the ALP_HOME you use
-alp web pair --on                         # turns the relay on and prints the pairing link
+alp dashboard pair --on                         # turns the relay on and prints the pairing link
 ```
 
 Normal npm installs bring the plugin's required peers (`@getpaseo/*`, `ws`); React and React
 Native are optional peers that the Paseo app provides, so npm does not install them. Do not add
-`--legacy-peer-deps`. Open the link `alp web pair` prints on the device that runs Paseo's app;
-when Paseo's app asks for a password, give it the one `alp web pair` prints (the token in
+`--legacy-peer-deps`. Open the link `alp dashboard pair` prints on the device that runs Paseo's app;
+when Paseo's app asks for a password, give it the one `alp dashboard pair` prints (the token in
 `~/.alp/paseo.json`). This package no longer ships Paseo's web app (removed in t-55ce.3). `alp-web-integration` remains an alias of
 `alp-paseo-integration`, and `ALP_WEB_INTEGRATION` of `ALP_PASEO_INTEGRATION`, for one release.
 
@@ -270,7 +271,7 @@ peers or turn a host-managed plugin into a standalone installation.
 
 0.10.0 has no `alp backup` or `alp restore`, so copy alpd's home yourself before upgrading.
 0.10.0 also shipped `alp web` inside `@anhlp/alp`; betas up to `0.0.1-beta.3` move it to
-`@anhlp/alp-paseo`, and later ones bring ALP's own `alp web` back into `@anhlp/alp`. The Paseo
+`@anhlp/alp-paseo`, and later ones bring ALP's own `alp dashboard` back into `@anhlp/alp`. The Paseo
 plugin changed its npm name from `alp-paseo-plugin` to `@anhlp/alp-paseo` (its
 plugin ID, `alp-provider`, is the same).
 
@@ -374,8 +375,8 @@ npm uninstall -g @anhlp/alp-paseo @anhlp/alp
 What stays, for you to keep or remove yourself once you no longer need it:
 
 - `$ALP_HOME` (default `~/.alp`): sessions, settings, your library, logs, backups,
-  `paseo.json` (the Paseo integration's token) and `integrations/paseo.json`, `web.json` and
-  `web/credentials.json` (alp-web's address and token), and `integrations/web.json` from earlier
+  `paseo.json` (the Paseo integration's token) and `integrations/paseo.json`, `dashboard.json` and
+  `web/credentials.json` (alp-dashboard's address and token), and `integrations/web.json` from earlier
   versions;
 - in each project: `ALP.md` and `.alp/` (including `.alp/tasks`), and git branches
   `alp/<id>` that hold an assignment's work;

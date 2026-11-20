@@ -20,7 +20,7 @@ alp-<version>-<os>-<arch>/
   LICENSE  NOTICE  THIRD-PARTY-NOTICES.txt
 ```
 
-The launcher follows symlinks to its own directory and runs `node/bin/node lib/node_modules/@anhlp/alp-cli/dist/cli.js "$@"`. `process.execPath` is then the bundled Node, so alpd, `alp web`, the ACP agent and the MCP bridges start exactly as they do from npm (`node alpd.js`, `node -e <bridge>`).
+The launcher follows symlinks to its own directory and runs `node/bin/node lib/node_modules/@anhlp/alp-cli/dist/cli.js "$@"`. `process.execPath` is then the bundled Node, so alpd, `alp dashboard`, the ACP agent and the MCP bridges start exactly as they do from npm (`node alpd.js`, `node -e <bridge>`).
 
 Left out on purpose: `@anthropic-ai/claude-agent-sdk-<platform>`, the native Claude Code CLI of every platform (about 250 MB). ALP always runs your own `claude` (or `ALP_CLAUDE_BIN`). node-pty keeps only this platform's prebuild, and the native terminal helper only this platform's slot.
 

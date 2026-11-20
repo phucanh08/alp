@@ -194,7 +194,7 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
   terminal; xem "Who decides a human gate" trong `team-workflow.md`). Không đánh dấu được thì gateway
   đóng client (1011, fail closed).
   - Dấu chỉ **bớt** quyền, không thêm: credential không có `--agent` (mọi credential cũ, và credential
-    `alp web pair` tạo) vẫn là của người dùng, y như trước; client của nó vẫn có thể tự khai
+    `alp dashboard pair` tạo) vẫn là của người dùng, y như trước; client của nó vẫn có thể tự khai
     `principal.agent`.
   - Một chiều: `reissue --agent` thêm dấu cho credential của người dùng (connection của nó đóng và
     nối lại có dấu); không lệnh nào gỡ dấu, `reissue` với `agent: false` bị từ chối. Cần credential
@@ -210,7 +210,7 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
     được đặt tên cho credential agent chưa có tên (hoặc đánh dấu credential của người dùng), nhưng không
     đổi tên một credential đã có tên. `credential list` hiện `agent <tên>`.
   - Không tự cấp, không tự hết hạn: chỉ người dùng tạo credential bằng tay; alpd và gateway không bao giờ
-    tự phát credential cho agent. (`alp web` tạo credential người dùng cho trình duyệt trên máy này, nhưng mọi lệnh `alp web` (in, `rotate`, `pair`) và chính dịch vụ đều từ chối khi `ALP_AGENT_SESSION` có giá trị.) Không có hạn mặc định; `--expires-in-days` vẫn tùy chọn như trước.
+    tự phát credential cho agent. (`alp dashboard` tạo credential người dùng cho trình duyệt trên máy này, nhưng mọi lệnh `alp dashboard` (in, `rotate`, `pair`) và chính dịch vụ đều từ chối khi `ALP_AGENT_SESSION` có giá trị.) Không có hạn mặc định; `--expires-in-days` vẫn tùy chọn như trước.
   - Chỉ người dùng quản lý credential: tạo, `rotate`, `reissue`/`edit`, `revoke` chỉ có ở CLI cục bộ;
     gateway và alpd không có RPC nào về credential (connection, agent hay không, gọi `credential.*` nhận
     -32601). CLI từ chối các lệnh đổi credential khi `ALP_AGENT_SESSION` có giá trị (tiến trình do ALP
@@ -1025,10 +1025,10 @@ Upgrade bị từ chối trả HTTP (không có WebSocket):
 - **Origin**: không có Origin (Node, RN) → được phép. Có Origin → phải nằm trong `origins`
   (khớp tuyệt đối, chỉ gồm scheme, host và port).
 - Gateway không tự deploy, không sửa cấu hình máy và không khởi động alpd.
-- `alp web` không dùng gateway này: service `alp-web` của CLI chạy gateway nhúng riêng trên
+- `alp dashboard` không dùng gateway này: service `alp-dashboard` của CLI chạy gateway nhúng riêng trên
   `127.0.0.1:<web.port>` (mặc định 7433), cùng origin với app, với kho credential riêng
-  `<home>/web/credentials.json`. `alp-gateway credential list/create/revoke` (đọc `<home>/gateway`)
-  không thấy credential đó; thay token của nó bằng `alp web rotate` ([web.md](web.md) §3.1).
+  `<home>/dashboard/credentials.json`. `alp-gateway credential list/create/revoke` (đọc `<home>/gateway`)
+  không thấy credential đó; thay token của nó bằng `alp dashboard rotate` ([dashboard.md](dashboard.md) §3.1).
 
 ### 7.2 Đường TLS chính: reverse proxy
 

@@ -9,11 +9,11 @@ startup error) stops its lane and returns a nonzero exit status.
 | `npm run validate:core` / `core` | Source boundaries; core typecheck; daemon + CLI workspace builds and neutral root bundles; artifact boundaries; all six core workspaces' unit tests; clean core-only source build/prepack; isolated six-package and main-distribution tarball installs with CLI/IPC/fake ACP stdio smoke |
 | `npm run validate:paseo` / `paseo` | Existing server + client typechecks; workspace/plugin/root builds; Paseo unit tests; all cross-package integration tests |
 | `npm run validate:packages` / `packages-and-web` | Pinned checkout of Paseo's plugin compiler (`scripts/paseo-checkout.mjs`); workspace/plugin/root builds; artifact boundaries; packed exports/bins; the release-pack rehearsal (eight tarballs, A5); isolated core and plugin tarball consumers, the plugin compiled by Paseo's own compiler (#111); package/compatibility-root installation smoke; gateway smoke |
-| `npm run validate:web` / `alp-web` | apps/web typecheck, unit tests, and Playwright end to end against a real gateway and alpd (Ubuntu and macOS) |
+| `npm run validate:web` / `alp-dashboard` | apps/web typecheck, unit tests, and Playwright end to end against a real gateway and alpd (Ubuntu and macOS) |
 
 `packages-and-web` keeps its name, a required check, but no longer builds or smokes Paseo's web
 app: that app (`paseo-web/`, `scripts/build-paseo-web.mjs`, `scripts/web-app-smoke.mjs`) was
-removed in t-55ce.3, and the browser app is tested by `alp-web`. The existing
+removed in t-55ce.3, and the browser app is tested by `alp-dashboard`. The existing
 Windows daemon subset remains in its own job. Core and Paseo retain Node 22/24 on
 Ubuntu; packaging and browser validation use Node 22. This is not a full OS/Node
 matrix or a publishing workflow.

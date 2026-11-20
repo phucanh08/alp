@@ -297,8 +297,18 @@ Decided by the user on 2026-10-10, after using the D30 web app: "it does not fee
 
 Decided by the user on 2026-11-20 (board p-3c2a790c): build an ALP desktop app, as proposed, with Electron, macOS first, and built with bun.
 
-- **A thin shell over the installed ALP.** The app (`apps/desktop`) runs the user's own `alp web --print`, which starts or attaches the alp-web service, and shows apps/web from that service's loopback origin in its own window. It bundles no alpd, gateway or web app; bundling alpd is a later, separate phase. Without an `alp` it shows install instructions; an error from `alp` is shown as is.
+- **A thin shell over the installed ALP.** The app (`apps/desktop`) runs the user's own `alp web --print` (`alp dashboard --print` since D33), which starts or attaches the alp-web service, and shows apps/web from that service's loopback origin in its own window. It bundles no alpd, gateway or web app; bundling alpd is a later, separate phase. Without an `alp` it shows install instructions; an error from `alp` is shown as is.
 - **No new trust.** The window is a same-origin client of alp-web, like a browser tab: the token comes in the link's fragment, apps/web takes it out of the address, and the gateway and alpd are unchanged. The address is kept in memory only. The window runs without Node or a preload, sandboxed, with navigation pinned to that one origin, new windows refused, only https links sent to the browser, and every permission but clipboard writes denied.
 - **Build.** `apps/desktop` is a bun project with its own `bun.lock`, outside the root npm workspaces, and depends on no `@anhlp/*` package. This does not change the 2026-10-30 decision that the alp CLI ships on a bundled official Node.
 - **Release.** macOS only and unsigned (ad-hoc signed) for internal use. Signing, notarization, Windows and Linux come later.
 - This lifts the "no custom desktop UI" non-goal for this shell only.
+
+## D33 — `alp web` becomes `alp dashboard`; `alp desktop` opens the app
+
+Decided by the user on 2026-11-20 (task t-81b0.5, gates g1–g4). D30–D32 above keep their wording as history: where they say `alp web`, `alp-web`, `web.json` or `web.port`, read `alp dashboard`, `alp-dashboard`, `dashboard.json` and `dashboard.port` from this decision on.
+
+- **`alp web` is removed** (g1), with no alias. `alp dashboard` replaces it, with `--status`, `--stop`, `--port`, `--host` and `--no-open` after Hermes' `hermes dashboard`, and keeps `--print` (the desktop app runs `alp dashboard --print`); `rotate`, `pair` and `serve` move under it.
+- **The service's internals are renamed** (g2): `alp-dashboard.js`, integration and lock `dashboard`, `dashboard.json`, `<home>/dashboard/`, `alp-dashboard.log`, settings `dashboard.enabled|port|permissions`, `ALP_DASHBOARD_*`. Every `alp dashboard` command first moves a beta.8 home to the new names (stops a running `alp web`, keeps its token, port and on/off setting; idempotent; the new name wins when both exist). `web.*` settings and `ALP_WEB_*` variables are still read where the new ones are not set. Not renamed: `apps/web`, the `web.pairing` RPC, the gate channel `web`, `state/web-workspaces.json`, `web.relay`.
+- **`--host` stays loopback**: only `127.0.0.1` or `localhost`; the token is the dashboard's only lock and the gateway accepts only loopback Host and Origin names.
+- **`alp desktop`** (g3) opens `ALP.app` from `/Applications` or `~/Applications`, else the built app in the checkout `ALP_DESKTOP_CHECKOUT` names, else prints how to get it. It passes no token.
+- `alp dashboard --print --json` stays separate (t-81b0.4).

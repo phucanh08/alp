@@ -134,7 +134,7 @@ khớp các bản cũ, không khớp `0.0.0-beta.1`. Bỏ deprecate nhầm: `npm
 | `@anhlp/alp-protocol`, `-core`, `-runtime`, `-client`, `-daemon`, `-cli` | Phát hành (bắt buộc) | Vẫn là package JS; plugin pin đúng version. `-cli` mang `alp web` (`dist/alp-web.js`, `dist/alp-web/`, `THIRD-PARTY-NOTICES.txt`) |
 | `@anhlp/alp-paseo` | Phát hành | plugin Paseo, web của Paseo (bản fork, Apache-2.0; tới `0.0.1-beta.3` là `alp web`), `alp-paseo-integration` (`alp-web-integration` là alias trong một bản phát hành) |
 | `@anhlp/alp-gateway` | **Không phát hành** (deferred) | workspace private (`apps/gateway`); từ bản sau `0.0.1-beta.3` được bundle vào `dist/alp-web.js` của CLI, nên không thêm tarball nào |
-| `@anhlp/alp-web` (`apps/web`) | Không phát hành riêng | private; từ bản sau `0.0.1-beta.3`, bản build nằm trong CLI và mở bằng `alp web` ([web.md](web.md) §3.1) |
+| `@anhlp/alp-web` (`apps/web`) | Không phát hành riêng | private; từ bản sau `0.0.1-beta.3`, bản build nằm trong CLI và mở bằng `alp web` ([dashboard.md](dashboard.md) §3.1) |
 | `@anhlp/alp-tui` | Không phát hành | private, rỗng |
 
 Thứ tự publish: protocol → core → runtime → client → daemon → cli → plugin → `@anhlp/alp` (wrapper, cuối cùng) (§7.4). Tổng cộng 8 tarball (t-1807 bỏ 5 package platform).
