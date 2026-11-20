@@ -209,6 +209,8 @@ jobs:
       - run: ls -l release/*.dmg
       # The DMG name carries package.json's version: ALP-<version>-<arch>.dmg.
       - run: ALP_DESKTOP_DMG="$(ls release/ALP-*-arm64.dmg)" bun run e2e:packaged
+      # The x64 app runs under Rosetta on the arm64 runner; install it when the image lacks it.
+      - run: arch -x86_64 /usr/bin/true || softwareupdate --install-rosetta --agree-to-license
       - run: ALP_DESKTOP_DMG="$(ls release/ALP-*-x64.dmg)" bun run e2e:packaged
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

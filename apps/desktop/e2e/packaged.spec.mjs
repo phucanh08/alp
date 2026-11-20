@@ -87,17 +87,23 @@ async function start(context, app, alp, extraEnv = {}, args = []) {
   child.stdout.on('data', keep);
   child.stderr.on('data', keep);
   // A watchdog: should a prompt appear anyway, the app is killed at once and the test fails, so a
-  // dialog never waits on the user's screen.
+  // dialog never waits on the user's screen. It fails closed: when the windows cannot be read three
+  // times in a row, the app is killed too, since a prompt could no longer be seen.
   let prompted;
   let watching = true;
   const watchdog = (async () => {
+    let failures = 0;
     while (watching && child.exitCode === null && child.signalCode === null) {
-      const found = newPrompts(await screenWindows().catch(() => []), baseline, child.pid);
+      let found;
+      try { found = newPrompts(await screenWindows(), baseline, child.pid); failures = 0; } catch (error) {
+        if (++failures >= 3) { prompted = `the on-screen windows could not be read: ${error.message}`; child.kill('SIGKILL'); return; }
+        found = [];
+      }
       if (found.length) { prompted = found; child.kill('SIGKILL'); return; }
       await new Promise(resolve => setTimeout(resolve, 250));
     }
   })();
-  context.defer(async () => { watching = false; await watchdog; if (prompted) throw new Error(`a prompt appeared and the app was killed: ${JSON.stringify(prompted)}`); });
+  context.defer(async () => { watching = false; await watchdog; if (prompted) throw new Error(`the watchdog killed the app: ${typeof prompted === 'string' ? prompted : `a prompt appeared ${JSON.stringify(prompted)}`}`); });
   context.defer(async () => {
     if (child.exitCode !== null || child.signalCode !== null) return;
     const exited = once(child, 'exit');
