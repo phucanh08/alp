@@ -24,7 +24,7 @@ import { hermeticEnv } from '../../../scripts/test-lib.mjs';
 import { DESKTOP_BUNDLE_ID, readBundleId } from '../../../packages/cli/src/desktop.js';
 
 const run = promisify(execFile);
-const limit = { timeout: 180_000 };
+const limit = { timeout: 420_000 };
 const DMG = process.env.ALP_DESKTOP_DMG ? path.resolve(process.env.ALP_DESKTOP_DMG) : undefined;
 const ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 const CLI = path.join(ROOT, 'packages', 'cli', 'dist', 'cli.js');
@@ -79,10 +79,13 @@ function newPrompts(windows, baseline, pid) {
 async function start(context, app, alp, extraEnv = {}, args = []) {
   await mkdir(path.join(context.dir, 'app-home'), { recursive: true });
   const port = await freePort();
+  const binary = path.join(app, 'Contents', 'MacOS', 'ALP');
+  const rosetta = process.arch === 'arm64' && (await run('lipo', ['-archs', binary])).stdout.trim() === 'x86_64';
   const baseline = new Set((await screenWindows()).map(windowKey));
-  const child = spawn(path.join(app, 'Contents', 'MacOS', 'ALP'), [...TEST_SWITCHES, `--remote-debugging-port=${port}`, ...args], {
+  const child = spawn(binary, [...TEST_SWITCHES, `--remote-debugging-port=${port}`, ...args], {
     env: { ...appEnv(context, alp), ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'],
   });
+  const exited = once(child, 'exit');
   let output = '';
   const keep = chunk => { output = (output + chunk).slice(-20_000); };
   child.stdout.on('data', keep);
@@ -112,12 +115,24 @@ async function start(context, app, alp, extraEnv = {}, args = []) {
     const timer = setTimeout(() => child.kill('SIGKILL'), 15_000);
     try { await exited; } finally { clearTimeout(timer); }
   });
-  return { child, port, baseline, output: () => output.replace(/alpgw1\.[A-Za-z0-9_.-]+/g, 'alpgw1.<masked>') };
+  return { child, port, baseline, rosetta, exited, output: () => output.replace(/alpgw1\.[A-Za-z0-9_.-]+/g, 'alpgw1.<masked>') };
 }
 
 /** Connects to the app over DevTools and waits for its window on `origin` with the token taken out. */
 async function connectedPage(context, started, origin) {
-  const browser = await waitFor(() => chromium.connectOverCDP(`http://127.0.0.1:${started.port}`), 'the DevTools endpoint', 60_000);
+  // Under Rosetta (an x64 app on an arm64 Mac) the first start translates Electron and is much
+  // slower, above all on a CI VM.
+  const timeout = started.rosetta ? 300_000 : 60_000;
+  const state = () => `app ${started.child.exitCode !== null || started.child.signalCode !== null ? `exited (${started.child.exitCode ?? started.child.signalCode})` : 'running'}${started.rosetta ? ', under Rosetta' : ''}; its output:\n${started.output()}`;
+  // Stops waiting as soon as the app exits, rather than at the deadline.
+  const died = started.exited.then(() => { throw new Error('the app exited'); });
+  died.catch(() => {});
+  let browser;
+  try {
+    browser = await Promise.race([waitFor(() => chromium.connectOverCDP(`http://127.0.0.1:${started.port}`), 'the DevTools endpoint', timeout), died]);
+  } catch (error) {
+    throw new Error(`${error.message}\n${state()}`);
+  }
   // connectOverCDP's close() only disconnects; the app itself is ended by start()'s step.
   context.defer(() => browser.close());
   return waitFor(async () => {
@@ -128,7 +143,7 @@ async function connectedPage(context, started, origin) {
       if (await page.evaluate(() => sessionStorage.getItem('alp-web:link-token') !== null)) return page;
     }
     return undefined;
-  }, `the window on ${origin} with the token taken out of the address`, 60_000);
+  }, `the window on ${origin} with the token taken out of the address`, timeout).catch(error => { throw new Error(`${error.message}\n${state()}`); });
 }
 
 async function connectedSetup(t) {

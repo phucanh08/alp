@@ -183,7 +183,7 @@ jobs:
   # kept as a workflow artifact. Nothing is published.
   desktop-macos:
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: apps/desktop
@@ -215,11 +215,7 @@ jobs:
           CSC_FOR_PULL_REQUEST: 'true'
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - run: ls -l release/*.dmg
-      # The DMG name carries package.json's version: ALP-<version>-<arch>.dmg.
-      - run: ALP_DESKTOP_DMG="$(ls release/ALP-*-arm64.dmg)" bun run e2e:packaged
-      # The x64 app runs under Rosetta on the arm64 runner; install it when the image lacks it.
-      - run: arch -x86_64 /usr/bin/true || softwareupdate --install-rosetta --agree-to-license
-      - run: ALP_DESKTOP_DMG="$(ls release/ALP-*-x64.dmg)" bun run e2e:packaged
+      # Kept before the packaged tests, so a red run still has the DMGs to look at.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: alp-desktop-macos-arm64-dmg
@@ -234,3 +230,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+      # The DMG name carries package.json's version: ALP-<version>-<arch>.dmg.
+      - run: ALP_DESKTOP_DMG="$(ls release/ALP-*-arm64.dmg)" bun run e2e:packaged
+      # The x64 app runs under Rosetta on the arm64 runner; install it when the image lacks it.
+      - run: arch -x86_64 /usr/bin/true || softwareupdate --install-rosetta --agree-to-license
+      - run: ALP_DESKTOP_DMG="$(ls release/ALP-*-x64.dmg)" bun run e2e:packaged
