@@ -175,6 +175,25 @@ version="${name#alp-}"
 version="${version%"-$os-$arch"}"
 
 # --- install --------------------------------------------------------------------------------
+# t-66a4: the ALP home (${ALP_HOME:-$HOME/.alp}) is also alpd's IPC directory, which must be 0700.
+# When this install puts files in it and it does not exist yet, create it private: under a 022 umask
+# `mkdir -p` would make it 0755 and alpd would refuse to start. An existing home keeps its mode: a
+# directory the user made is never chmod'ed behind their back (t-37f1); a shared one gets a warning.
+ALP_HOME_DIR="${ALP_HOME:-$HOME/.alp}"
+case "$ALP_HOME_DIR" in /*) ;; *) ALP_HOME_DIR="$(pwd)/$ALP_HOME_DIR" ;; esac
+ALP_HOME_DIR="${ALP_HOME_DIR%/}"
+in_alp_home() { case "$1" in "$ALP_HOME_DIR"|"$ALP_HOME_DIR"/*) return 0 ;; *) return 1 ;; esac; }
+if in_alp_home "$ROOT" || in_alp_home "$DIR"; then
+  if [ ! -e "$ALP_HOME_DIR" ] && [ ! -L "$ALP_HOME_DIR" ]; then
+    mkdir -p "$(dirname "$ALP_HOME_DIR")" 2>/dev/null || true
+    mkdir -m 700 "$ALP_HOME_DIR" 2>/dev/null || true
+  elif [ -d "$ALP_HOME_DIR" ] && [ ! -L "$ALP_HOME_DIR" ]; then
+    case "$(ls -ld "$ALP_HOME_DIR" | cut -c5-10)" in
+      ------) ;;
+      *) say "warning: $ALP_HOME_DIR is readable or writable by others; alpd needs it private (0700). Fix it with: chmod 700 '$ALP_HOME_DIR'" ;;
+    esac
+  fi
+fi
 SUDO=""
 writable() { # $1 exists and is writable, or can be created
   if [ -d "$1" ]; then [ -w "$1" ]; else mkdir -p "$1" 2>/dev/null; fi
