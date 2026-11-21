@@ -1,8 +1,8 @@
 # ALP desktop (macOS, MVP)
 
 > **Trạng thái:** t-81b0.2 phần 1 (khung), phần 2 (tự kết nối lại) và phần 3 (e2e Electron); t-81b0.3:
-> DMG ký ad-hoc (arm64, x64) build trong CI thành artifact (§6), chưa phát hành; t-81b0.8: tự cài ALP
-> khi máy chưa có (§3.2). Quyết định: D32, D35 (`plans/reference/DECISIONS.md`).
+> DMG ký ad-hoc (arm64, x64) build trong CI thành artifact (§6); t-81b0.8: tự cài ALP
+> khi máy chưa có (§3.2); t-81b0.10: phát hành hai DMG trong GitHub Release từ `0.0.1-beta.10` (§8). Quyết định: D32, D35 (`plans/reference/DECISIONS.md`).
 
 App desktop là một **vỏ mỏng** bằng Electron bọc quanh ALP mà người dùng đã cài. Nó không mang theo
 alpd, gateway hay app web: nó chạy `alp dashboard --print` của người dùng, lệnh này khởi động hoặc gắn vào
@@ -242,7 +242,9 @@ cd apps/desktop && bun run e2e
 
 `bun run dist` (trong `apps/desktop`) build `dist/` rồi chạy electron-builder (`electron-builder.yml`):
 hai DMG, `release/ALP-<version>-arm64.dmg` và `release/ALP-<version>-x64.dmg` (mỗi file khoảng
-130 MB), mỗi DMG chứa `ALP.app`. Không có gì được publish (`publish: null`, `--publish never`).
+130 MB), mỗi DMG chứa `ALP.app`. `<version>` là version trong `apps/desktop/package.json`, từ
+`0.0.1-beta.10` bằng version của bản phát hành. electron-builder không publish gì (`publish: null`,
+`--publish never`); workflow phát hành gắn DMG vào bản nháp của GitHub Release (§8).
 
 | Mục | Giá trị |
 |---|---|
@@ -307,7 +309,7 @@ giây thay vì 60 giây; khi test fail, thông báo lỗi kèm output và trạn
 ### 6.3 Chưa có trong bản này
 
 `alp dashboard --print --json`; dừng `alp dashboard` khi thoát app; ký bằng Developer ID và notarize;
-tự cập nhật; phát hành DMG; Windows và Linux; mang alpd theo app.
+tự cập nhật; Windows và Linux; mang alpd theo app.
 
 ### 6.4 Bài học: cửa sổ trắng của bản đóng gói (t-81b0.7)
 
@@ -344,3 +346,40 @@ build nó. `e2e/packaged.spec.mjs` kiểm ba trang nội bộ như vậy; DMG c�
 
 `alp desktop` không đọc và không truyền token: app tự chạy `alp dashboard --print` (§1). Tên biến theo
 các biến `ALP_DESKTOP_*` khác (`ALP_DESKTOP_ALP`, `ALP_DESKTOP_USER_DATA`). DMG cho `/Applications`: §6.
+
+## 8. Tải và cài DMG từ GitHub Release (t-81b0.10)
+
+Từ `0.0.1-beta.10`, mỗi GitHub Release (`https://github.com/phucanh08/alp/releases`) có:
+
+| File | Nội dung |
+|---|---|
+| `ALP-<version>-arm64.dmg` | App cho Apple Silicon (M1 trở lên) |
+| `ALP-<version>-x64.dmg` | App cho Intel; trên Apple Silicon chạy được qua Rosetta nhưng nên dùng bản arm64 |
+| `DESKTOP-SHA256SUMS` | SHA-256 của hai DMG. `SHA256SUMS` của release chỉ liệt kê archive và trình cài của ALP, không có DMG |
+
+Workflow `release-binaries.yml` build hai DMG từ đúng SHA của main mà các archive được build, kiểm
+version của DMG bằng version của bản phát hành, chạy e2e của app đóng gói trên từng DMG (§6.2), rồi gắn
+chúng vào bản nháp kèm `DESKTOP-SHA256SUMS` và attestation build provenance. Workflow chỉ tạo bản
+nháp; bản phát hành được publish bằng tay.
+
+Cài:
+
+1. Tải DMG đúng kiến trúc và `DESKTOP-SHA256SUMS` vào cùng một thư mục, rồi kiểm:
+   ```sh
+   grep ' ALP-<version>-arm64.dmg$' DESKTOP-SHA256SUMS | shasum -a 256 -c
+   gh attestation verify ALP-<version>-arm64.dmg --repo phucanh08/alp \
+     --signer-workflow phucanh08/alp/.github/workflows/release-binaries.yml
+   ```
+   Checksum chỉ chống file hỏng hay tải dở; attestation (cần `gh`) mới chứng minh DMG được build bởi
+   workflow phát hành của repo này.
+2. Mở DMG, kéo `ALP.app` vào `/Applications` (hoặc `~/Applications`).
+3. Lần mở đầu: Gatekeeper chặn vì app chỉ ký ad-hoc, chưa notarize (§6.1). macOS 14 trở về trước:
+   Control-click (chuột phải) `ALP.app` › Open. macOS 15 trở đi: mở một lần, chọn Done, rồi System
+   Settings › Privacy & Security › Open Anyway. Hoặc, **sau khi** đã kiểm ở bước 1:
+   `xattr -dr com.apple.quarantine /Applications/ALP.app`.
+4. App tìm `alp` (§2). Máy chưa có ALP thì app đề nghị cài bản phát hành **mới nhất** (§3.2; app chỉ
+   kiểm checksum, không kiểm attestation). Đã có `alp` cũ hơn 0.0.1-beta.9 thì cập nhật bằng
+   `alp update` hoặc npm. Sau đó `alp desktop` cũng mở được app này (§7).
+
+App không tự cập nhật: bản mới thì tải DMG mới và thay `ALP.app`. Gỡ: thoát app, xóa `ALP.app`; dữ
+liệu của app nằm ở `~/Library/Application Support/ALP` (ALP đã cài dưới `~/.alp` không bị đụng tới).

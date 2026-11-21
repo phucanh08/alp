@@ -1,3 +1,70 @@
+# ALP 0.0.1-beta.10 — release notes
+
+Prepared 2026-11-21 from the commits `v0.0.1-beta.9..ddd8ac80` (task t-81b0.10 bumped the version
+and added the desktop app to the release). npm (8 packages, `beta` tag) and the GitHub release carry
+the same version from one main SHA, as in beta.9. New in this release: the GitHub release also
+carries the macOS desktop app as two DMGs. Release acceptance runs the repository's fake Codex and
+fake Claude on the packed tarballs; macOS decides it, Linux and Windows are reported. **The gate's
+real-provider rows (§6.1 of [beta-scope.md](beta-scope.md)) had not been run for beta.10 when these
+notes were written;** none of them is claimed as passed here. The known R1 (Codex) failure from
+beta.9 is unchanged (below).
+
+**Upgrading from beta.9:**
+
+1. `alp update` (bundle) or `npm install -g @anhlp/alp@beta` (npm), then `alp daemon restart`.
+2. If `install.sh` of beta.8 or beta.9 created your `~/.alp` on a fresh machine, it is `0755` and
+   alpd refuses it (`ALP_HOME_UNUSABLE … must be 0700`). Run `chmod 700 ~/.alp` once. beta.10's
+   `install.sh` does not change the mode of an existing home; it prints a warning with that command.
+
+Changes that affect an existing user:
+
+- **The macOS desktop app is published.** The GitHub release carries `ALP-0.0.1-beta.10-arm64.dmg`
+  (Apple Silicon) and `ALP-0.0.1-beta.10-x64.dmg` (Intel), built by the release workflow from the
+  same main SHA as the archives, with their checksums in a separate file, `DESKTOP-SHA256SUMS`, and
+  build-provenance attestations like the archives (`gh attestation verify ALP-0.0.1-beta.10-arm64.dmg
+  --repo phucanh08/alp`). `SHA256SUMS` still lists only the ALP archives and installers, so
+  `install.sh`, `install.ps1` and `alp update` read it as before. The DMGs are **ad-hoc signed and
+  not notarized** (no Apple Developer ID), so macOS Gatekeeper blocks the first open of the
+  downloaded app: on macOS 14 and earlier, Control-click (right-click) `ALP.app` › Open; from
+  macOS 15, open it once, choose Done, then System Settings › Privacy & Security › Open Anyway. Or,
+  after checking the DMG against `DESKTOP-SHA256SUMS` (and its attestation), remove the quarantine
+  attribute: `xattr -dr com.apple.quarantine /Applications/ALP.app`. The app is a thin Electron
+  shell over the `alp dashboard` you run; `alp desktop` opens it from `/Applications` or
+  `~/Applications` ([desktop.md](desktop.md) §6, §7, §8).
+- **The desktop app offers to install ALP when it finds none** (t-81b0.8, decision D35). It reads
+  only the latest release's `SHA256SUMS`, shows the version, source, archive, checksum and every path
+  (`~/.alp/app/<version>`, `~/.alp/bin/alp`, the ALP home), and writes nothing until you choose
+  Install. It then runs the `install.sh` it was built with (`--no-modify-path`: no shell profile is
+  edited). It installs the **latest** release, which may be newer than the app; an `alp` older than
+  beta.9 already on the machine is not replaced (the app says how to update it). **Provenance limit:**
+  the archive is checked only against the release's `SHA256SUMS` (by `install.sh`, downloaded again
+  over HTTPS at install time) and by the versions its binaries report. The app does **not** verify
+  the GitHub attestation: anyone who can change the release can change `SHA256SUMS` too. The
+  confirmation page shows the `gh attestation verify` command to run yourself
+  ([desktop.md](desktop.md) §3.2).
+- **`install.sh` creates a missing ALP home `0700`** (t-66a4). Before, on a fresh machine it made
+  `~/.alp` (or `$ALP_HOME`) under the umask, usually `0755`, and alpd refused to start until you ran
+  `chmod 700`. Now, when the install puts files in the ALP home and the home does not exist, it is
+  created `0700`. **An existing home keeps its mode:** if it is readable or writable by others,
+  `install.sh` only prints `alp-install: warning: … Fix it with: chmod 700 '<home>'` (see Upgrading
+  above). `--system`, or a `--root` outside the ALP home, creates no home. `install.ps1` is
+  unchanged (Windows does not check the mode) (336510ec, 18d927c3).
+
+Known issues, carried from beta.9:
+
+- **R1 (Codex) of the real-provider gate does not pass** (t-beb5): the answer `alp run` prints for
+  C4 is main's reply to the supervisor's check-in, so C8 cannot be judged; the same on beta.8.
+- **Paseo 0.16 and later** (t-1af7): the plugin fails to typecheck against the newest Paseo SDK, and
+  the all-workspaces terminal list of Paseo 0.16 may not show ALP's terminals. Per-workspace terminal
+  lists are not affected. Not verified on a live Paseo 0.16.
+- **Windows keeps alpd on the bundled Node**; the native alpd is macOS and Linux only. npm installs
+  always run alpd on Node.
+- The desktop app is macOS only, not notarized, has no auto-update, and does not stop
+  `alp dashboard` when it quits.
+- Still as in beta.9: the Claude Agent SDK's own bundled zod is inside the advisory range (accepted
+  residual risk, [zod-advisory.md](zod-advisory.md)); Antigravity's own read tools are not confined
+  to the workspace; remote mode (`@anhlp/alp-gateway`) is not published.
+
 # ALP 0.0.1-beta.9 — release notes
 
 Prepared 2026-11-20 from the commits `v0.0.1-beta.8..07569e38` (task t-81b0.6 bumped the version).
