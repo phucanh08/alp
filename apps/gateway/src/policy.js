@@ -608,6 +608,10 @@ export function isModelId(value) {
  *   name or else forwarded to alpd with `params`; every other connection gets the `denied` answer
  *   (-32601 not_exposed), so for a remote credential an owner method is a denied one; denied: not
  *   exposed until a contract or policy makes its scope checkable; prohibited: never remote in v1.
+ *   handler (owner only): the method is the gateway's own (a `host.*` name alpd does not serve),
+ *   answered only by the owner handler of that name, never forwarded; it lists `params` (the only
+ *   keys the handler receives) and the handler validates their values itself, as it has no
+ *   methods-v1 schema. An owner method without `handler` is alpd's and has a methods-v1 schema.
  *   alsoRequires: permissions the grant must hold besides `permission` (each checked, refused
  *   with 1003 grant naming the first one missing, before anything reaches alpd).
  * @typedef {{
@@ -617,6 +621,7 @@ export function isModelId(value) {
  *   scope: string,
  *   capability?: string,
  *   params?: readonly string[],
+ *   handler?: true,
  *   tests?: readonly string[],
  *   reason?: string,
  * }} Exposure

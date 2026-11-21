@@ -764,6 +764,8 @@ export class ClientConnection {
     const issues = validateParams(method, params);
     if (issues?.length) throw new GatewayError(RPC_ERROR.invalidParams, `Invalid params: ${issues.map(issue => `${issue.path || 'params'} ${issue.message}`).join('; ')}`, { reason: 'invalid_params', issues });
     const handler = this.#owner && Object.hasOwn(this.#owner.methods, method) ? this.#owner.methods[method] : undefined;
+    // The gateway's own owner method (`handler: true`) is answered by its handler or not at all.
+    if (exposure.handler && (!handler || !exposure.params)) throw refused();
     if (handler) {
       return handler({
         method,
