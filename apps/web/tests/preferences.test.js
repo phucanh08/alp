@@ -18,10 +18,10 @@ const DEFAULTS = {
   contentMaxWidth: null, syntaxTheme: 'one',
   chatDisplay: 'collapseTurns', chatOutline: true, terminalScrollback: 10_000,
   sidebar: {
-    header: [{ id: 'new-session', visible: true }, { id: 'history', visible: true }, { id: 'search', visible: true }],
+    header: [{ id: 'new-session', visible: true }, { id: 'history', visible: true }, { id: 'search', visible: true }, { id: 'schedules', visible: true }],
     footer: [{ id: 'tasks', visible: false }],
   },
-  sidebarDisplay: { grouping: 'project', sort: 'created', titleSource: 'title', rowItems: { branch: false, project: false, host: true, labels: true }, trailing: 'timestamp', projectFilters: [] },
+  sidebarDisplay: { grouping: 'project', sort: 'created', titleSource: 'title', rowItems: { branch: true, project: false, host: false, labels: true }, trailing: 'none', projectFilters: [] },
   newSession: {},
 };
 
@@ -79,7 +79,7 @@ test('font families never carry a CSS function: url() and var() are dropped, quo
 test('sidebar sections keep the stored order and switches; unknown rows are dropped, missing ones added', () => {
   const sidebar = parse({ sidebar: { header: [{ id: 'search', visible: false }, { id: 'nope' }, { id: 'search', visible: true }, { id: 'new-session', visible: true }], footer: [{ id: 'tasks', visible: true }, { id: 'history', visible: true }] } }).sidebar;
   assert.deepEqual(sidebar, {
-    header: [{ id: 'search', visible: false }, { id: 'new-session', visible: true }, { id: 'history', visible: true }],
+    header: [{ id: 'search', visible: false }, { id: 'new-session', visible: true }, { id: 'history', visible: true }, { id: 'schedules', visible: true }],
     footer: [{ id: 'tasks', visible: true }],
   });
   assert.deepEqual(parse({ sidebar: 'compact' }).sidebar, DEFAULTS.sidebar);
@@ -139,4 +139,12 @@ test('sidebar display preferences: Paseo\'s choices kept, anything else its defa
   assert.deepEqual(display, { grouping: 'status', sort: 'lastPrompt', titleSource: 'branch', rowItems: { branch: true, project: false, host: false, labels: true }, trailing: 'none', projectFilters: ['/a', '/b'] });
   assert.deepEqual(parse({ sidebarDisplay: { grouping: 'labels', sort: 'manual', trailing: 'diff' } }).sidebarDisplay, DEFAULTS.sidebarDisplay);
   assert.equal(parse({ sidebarDisplay: { projectFilters: Array.from({ length: 100 }, (_, index) => `/p${index}`) } }).sidebarDisplay.projectFilters.length, 64);
+});
+
+test('sidebar Show items default to Paseo\'s (branch on, host off, no time); a stored choice stays as stored (t-ff83)', () => {
+  const stored = parse({ sidebarDisplay: { rowItems: { branch: false, project: false, host: true, labels: true }, trailing: 'timestamp' } }).sidebarDisplay;
+  assert.deepEqual([stored.rowItems, stored.trailing], [{ branch: false, project: false, host: true, labels: true }, 'timestamp']);
+  const partial = parse({ sidebarDisplay: { rowItems: { labels: false } } }).sidebarDisplay;
+  assert.deepEqual([partial.rowItems, partial.trailing], [{ branch: true, project: false, host: false, labels: false }, 'none']);
+  assert.equal(parse({ sidebarDisplay: { trailing: 'sometimes' } }).sidebarDisplay.trailing, 'none');
 });

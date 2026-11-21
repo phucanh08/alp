@@ -1,6 +1,6 @@
 import * as React from 'react';
 import {
-  ArrowDown, ArrowLeft, ArrowUp, Ban, BookOpen, Bot, Boxes, ChevronRight, CircleCheck, Code, Files as FilesIcon, FolderGit2, Gauge, History, Info,
+  ArrowDown, ArrowLeft, ArrowUp, Ban, BookOpen, Bot, Boxes, CalendarClock, ChevronRight, CircleCheck, Code, Files as FilesIcon, FolderGit2, Gauge, History, Info,
   ListChecks, MessageSquare, Network, PanelLeft, Palette, Plug, Plus, Search, Server, Settings as SettingsIcon, SquareTerminal,
   Stethoscope, Users, Webhook,
 } from 'lucide-react';
@@ -70,6 +70,7 @@ const SIDEBAR_ITEM_LABELS: Record<SidebarItemId, { label: string; icon: Icon }> 
   'new-session': { label: 'New session', icon: Plus },
   history: { label: 'History', icon: History },
   search: { label: 'Search', icon: Search },
+  schedules: { label: 'Schedules', icon: CalendarClock },
   tasks: { label: 'Tasks', icon: ListChecks },
 };
 
@@ -285,28 +286,38 @@ function Appearance() {
   );
 }
 
-/** Paseo's Settings › Sidebar: per section, each row with Move up, Move down and a show switch. */
+/**
+ * Paseo's Settings › Sidebar: per section, each row with Move up, Move down and a show switch. The
+ * host owner's header slot reads New workspace (what the sidebar shows there for the owner) and
+ * lists Schedules; anyone else sees New session and no Schedules row (its place is kept).
+ */
 function SidebarSettings() {
   const controller = useController();
   const { preferences } = useAppState();
+  const owner = useOwner();
   const change = (section: 'header' | 'footer', rows: SidebarItem[]) => controller.updatePreferences({ sidebar: { ...preferences.sidebar, [section]: rows } });
+  const listed = (section: 'header' | 'footer') => preferences.sidebar[section].filter(row => owner || row.id !== 'schedules');
+  /** Swaps a listed row with its listed neighbour; a row this page does not list keeps its place. */
   const move = (section: 'header' | 'footer', index: number, by: -1 | 1) => {
+    const shown = listed(section);
     const rows = [...preferences.sidebar[section]];
-    [rows[index], rows[index + by]] = [rows[index + by], rows[index]];
+    const from = rows.findIndex(row => row.id === shown[index].id);
+    const to = rows.findIndex(row => row.id === shown[index + by].id);
+    [rows[from], rows[to]] = [rows[to], rows[from]];
     change(section, rows);
   };
   const card = (section: 'header' | 'footer', title: string, info: string) => (
     <Section title={title}>
       <p className="px-4 pt-3 text-xs text-muted-foreground">{info}</p>
-      {preferences.sidebar[section].map((row, index, rows) => {
-        const item = SIDEBAR_ITEM_LABELS[row.id];
+      {listed(section).map((row, index, rows) => {
+        const item = row.id === 'new-session' && owner ? { ...SIDEBAR_ITEM_LABELS[row.id], label: 'New workspace' } : SIDEBAR_ITEM_LABELS[row.id];
         return (
           <div key={row.id} className={cn('flex items-center gap-2 p-4', index > 0 && 'border-t border-border')} data-testid={`sidebar-nav-item-${row.id}`}>
             <item.icon aria-hidden strokeWidth={1.75} className="size-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1 truncate text-sm text-foreground">{item.label}</span>
             <Button size="icon" variant="ghost" className="size-7" aria-label={`Move ${item.label} up`} disabled={index === 0} onClick={() => move(section, index, -1)}><ArrowUp aria-hidden /></Button>
             <Button size="icon" variant="ghost" className="size-7" aria-label={`Move ${item.label} down`} disabled={index === rows.length - 1} onClick={() => move(section, index, 1)}><ArrowDown aria-hidden /></Button>
-            <Switch checked={row.visible} aria-label={item.label} onCheckedChange={visible => change(section, rows.map(other => other.id === row.id ? { ...other, visible } : other))} />
+            <Switch checked={row.visible} aria-label={item.label} onCheckedChange={visible => change(section, preferences.sidebar[section].map(other => other.id === row.id ? { ...other, visible } : other))} />
           </div>
         );
       })}

@@ -643,6 +643,10 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
       case 'history': return <NavRow icon={History} label="History" onClick={() => { onHistory(); onNavigate(); }} active={historyOpen} disabled={!workspace} testId="sidebar-history" />;
       case 'search': return <SearchRow query={query} onQuery={setQuery} open={searching} onOpen={() => setSearching(true)} onClose={closeSearch}
         focusRequest={searchFocus} />;
+      // Paseo's Schedules row, for the host owner only: ALP's scheduled wakes, read only.
+      case 'schedules': return owner && onSchedules
+        ? <NavRow icon={CalendarClock} label="Schedules" onClick={() => { onSchedules(); onNavigate(); }} active={schedulesOpen} disabled={!online} testId="sidebar-schedules" />
+        : null;
       case 'tasks': return <NavRow icon={ListChecks} label="Tasks" onClick={() => { onTasks?.(); onNavigate(); }} active={tasksOpen} disabled={!workspace || !onTasks} testId="sidebar-tasks" />;
     }
   };
@@ -653,8 +657,6 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
       <div className="flex shrink-0 flex-col gap-0.5 border-b border-border pb-1.5 pt-2">
         {/* Settings › Sidebar › Header orders these and hides any of them (Paseo's sidebar nav items). */}
         {preferences.sidebar.header.filter(item => item.visible).map(item => <React.Fragment key={item.id}>{navItem(item.id)}</React.Fragment>)}
-        {/* Paseo's Schedules row, for the host owner: ALP's scheduled wakes, read only. */}
-        {owner && onSchedules ? <NavRow icon={CalendarClock} label="Schedules" onClick={() => { onSchedules(); onNavigate(); }} active={schedulesOpen} disabled={!online} testId="sidebar-schedules" /> : null}
       </div>
       {onClose ? (
         <button type="button" aria-label="Close sessions" onClick={onClose}
