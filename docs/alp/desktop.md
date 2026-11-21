@@ -393,5 +393,6 @@ Settings của app là Settings của app web ([dashboard.md](dashboard.md) §4.
 trang một thay đổi), còn cùng app web nối tới một `alp-gateway` từ xa thì không bao giờ được, và nhận lỗi
 như trước.
 
-Voice, Pair device và Plugins không còn trong Settings: ALP không có speech provider; ghép thiết bị
-là `alp dashboard pair` chạy trên host; cài plugin thay đổi host và ALP không có đường cài plugin từ app.
+Voice, Pair device, Plugins và Metadata không còn trong Settings: ALP không có speech provider; ghép
+thiết bị là `alp dashboard pair` chạy trên host; cài plugin thay đổi host và ALP không có đường cài
+plugin từ app; ALP không có tính năng sinh tiêu đề session hay tên nhánh.

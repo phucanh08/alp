@@ -12,7 +12,7 @@ import { cn } from '../../lib/utils';
 export type Page =
   | 'general' | 'appearance' | 'sidebar' | 'chat' | 'terminal' | 'editor' | 'files' | 'diagnostics' | 'about'
   | 'host' | 'projects' | 'connections' | 'alp-templates' | 'alp-agents' | 'alp-skills' | 'alp-hooks' | 'alp-mcp'
-  | 'metadata' | 'workspaces' | 'providers' | 'usage' | 'terminals';
+  | 'workspaces' | 'providers' | 'usage' | 'terminals';
 
 export const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset';
 
