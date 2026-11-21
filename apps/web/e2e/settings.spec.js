@@ -252,16 +252,16 @@ test('Host pages: a builtin library entry reads without an error, the open proje
 
 });
 
-// t-a95b (docs/breaking-changes.md): Voice, Pair device and Plugins are not Settings pages any more;
+// t-a95b (docs/breaking-changes.md): Voice, Pair device, Plugins and Metadata are not Settings pages any more;
 // the host pages moved to settings/HostPages.tsx still render. This gateway is a standalone
 // alp-gateway, never a host owner, so Usage keeps its old panel.
-test('Settings has no Voice, Pair device or Plugins page, and Usage still renders', async ({ page }) => {
+test('Settings has no Voice, Pair device, Plugins or Metadata page, and Usage still renders', async ({ page }) => {
   await connect(page, world);
   const settings = await openSettings(page);
   const nav = settings.getByTestId('settings-sidebar');
   await expect(nav.getByTestId('settings-usage')).toBeVisible();
-  for (const id of ['voice', 'pair-device', 'plugins']) await expect(settings.getByTestId(`settings-${id}`)).toHaveCount(0);
-  for (const label of ['Voice', 'Pair device', 'Plugins']) await expect(nav.getByRole('button', { name: label, exact: true })).toHaveCount(0);
+  for (const id of ['voice', 'pair-device', 'plugins', 'metadata']) await expect(settings.getByTestId(`settings-${id}`)).toHaveCount(0);
+  for (const label of ['Voice', 'Pair device', 'Plugins', 'Metadata']) await expect(nav.getByRole('button', { name: label, exact: true })).toHaveCount(0);
   await nav.getByTestId('settings-usage').click();
   await expect(settings.getByTestId('settings-detail-header-title')).toHaveText('Usage');
   await expect(settings).toContainText('Usage and limits is not available in this beta');

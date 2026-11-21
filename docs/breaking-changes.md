@@ -3,12 +3,13 @@
 Những chỗ ALP cố ý khác Paseo (upstream `getpaseo/paseo`) hoặc khác bản ALP trước, theo thứ tự mới
 nhất trước. Mỗi mục nói cái gì đổi, ai bị ảnh hưởng, và vì sao.
 
-## 2026-11-21: Settings bỏ Voice, Pair device, Plugins; việc đổi host chỉ cho host owner (t-a95b)
+## 2026-11-21: Settings bỏ Voice, Pair device, Plugins, Metadata; việc đổi host chỉ cho host owner (t-a95b)
 
-- **Bỏ trang** (khác Paseo): Settings của app web và ALP.app không còn Voice, Pair device và Plugins,
+- **Bỏ trang** (khác Paseo): Settings của app web và ALP.app không còn Voice, Pair device, Plugins và Metadata,
   cả trong nav lẫn trong code trang. ALP không có speech provider để cài trên host; ghép thiết bị là
-  `alp dashboard pair` trên host; cài plugin thay đổi host và ALP không có đường cài plugin từ app.
-  Ai mở Settings ở các trang đó (`settings-voice`, `settings-pair-device`, `settings-plugins`) không
+  `alp dashboard pair` trên host; cài plugin thay đổi host và ALP không có đường cài plugin từ app;
+  ALP không có tính năng sinh tiêu đề session hay tên nhánh. Ai mở Settings ở các trang đó
+  (`settings-voice`, `settings-pair-device`, `settings-plugins`, `settings-metadata`) không
   còn thấy chúng.
 - **Host owner** (khác Paseo, nơi app cục bộ là chủ daemon): việc đổi host trong Settings chỉ mở cho
   credential của `alp dashboard` trên kết nối loopback trực tiếp

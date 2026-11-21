@@ -27,7 +27,7 @@ Số mục (§) có thể được code và test tham chiếu; giữ ổn địn
 | Sessions | Liệt kê, tạo (team, permissions, model, title), mở, đổi tên, archive. Mỗi agent của cây (main và assignment) là một tab. Trên Codex và Claude (#121): fork và rewind chỉ hội thoại (§12.7, không đổi file), đổi team/model/thinking khi session đang sống (§12.9, đổi team cần thêm `session.team.write`), Reload agent và Copy resume command trong menu tab (§12.8), tải lịch sử cũ hơn (`session.history`, §8.7), đính kèm file không phải ảnh (§12.6, cần `attachments.write`). |
 | Chat | Prompt + stream, tool call, todo, notice; trả lời câu hỏi theo luồng chọn rồi Submit của Paseo (Other thay lựa chọn, Enter gửi, Dismiss), thẻ câu hỏi nằm trong stream; interrupt; steer khi agent đang chạy; hàng đợi (§4.3). |
 | Tasks | Liệt kê (poll), tạo, mở chi tiết trong tab lớn, đóng, mở lại, duyệt human gate. Mọi thay đổi gửi `ifRev`. |
-| Settings | Bố cục như `alp dashboard` cũ: App (General, Appearance, Sidebar, Chat, Terminal, Editor, Diagnostics, About) và Host (Overview, Projects, Connections, Templates, Agents, Skills, Hooks, MCP servers, Providers…). Library xem nội dung đã redaction: file Markdown dưới dạng text, cấu hình dưới dạng JSON. Instruction agents/skills riêng của project sửa được với explicit `library.write` (#118). Mục chưa hỗ trợ ghi rõ "not available in this beta". Voice, Pair device và Plugins không còn trong Settings (§4.6). Việc đổi host chỉ mở cho host owner (§4.6). |
+| Settings | Bố cục như `alp dashboard` cũ: App (General, Appearance, Sidebar, Chat, Terminal, Editor, Diagnostics, About) và Host (Overview, Projects, Connections, Templates, Agents, Skills, Hooks, MCP servers, Providers…). Library xem nội dung đã redaction: file Markdown dưới dạng text, cấu hình dưới dạng JSON. Instruction agents/skills riêng của project sửa được với explicit `library.write` (#118). Mục chưa hỗ trợ ghi rõ "not available in this beta". Voice, Pair device, Plugins và Metadata không còn trong Settings (§4.6). Việc đổi host chỉ mở cho host owner (§4.6). |
 | Workspace | Phím tắt như Paseo (dialog Shortcuts), History với session đã archive và Unarchive, attention trên mọi session (`question.list`), menu chuột phải của tab, kéo đổi thứ tự tab, tab giữ qua reload, sidebar và dock kéo đổi độ rộng, command center (⌘K), trạng thái trên favicon và title, notification của trình duyệt khi session chờ trả lời. |
 | New session | Màn hình như tab new agent của Paseo: tin đầu tiên, chọn team/model/thinking/permissions, `session.preview`, nhớ lựa chọn lần trước (§4.2). |
 | Phục hồi | Reconnect có backoff, resume theo cursor, reload trang, gateway hoặc alpd khởi động lại (§5). |
@@ -344,16 +344,17 @@ riêng, thiết bị Paseo qua relay, proxy hay tunnel (có header chuyển ti�
 đúng lỗi như trước (`-32601 not_exposed`). App biết mình là owner qua capability `host.owner` trong
 hello (`state.owner`, `useOwner()`), và gửi việc của owner bằng `controller.ownerRequest`.
 
-Settings bỏ ba trang của Paseo, không còn mục nào trong nav:
+Settings bỏ bốn trang của Paseo, không còn mục nào trong nav:
 
 - **Voice**: ALP không có speech provider nào để cài trên host; agent của ALP nhận text.
 - **Pair device**: ghép app Paseo trên thiết bị khác là việc trên host, bằng `alp dashboard pair`
   (§3.1); app này không phải nơi làm việc đó.
 - **Plugins**: cài plugin thay đổi host, và ALP không có đường cài plugin từ app.
+- **Metadata**: ALP không có tính năng sinh tiêu đề session hay tên nhánh, nên không có gì để cài.
 
 Các trang host (Usage, Providers, Terminals, Workspaces, Projects) nằm trong
 `apps/web/src/app/settings/HostPages.tsx`, các trang library (Templates, Agents, Skills, Hooks, MCP
-servers, Editor, Metadata) trong `settings/LibraryPages.tsx`; lần này chỉ chuyển chỗ, hành vi không đổi.
+servers, Editor) trong `settings/LibraryPages.tsx`; lần này chỉ chuyển chỗ, hành vi không đổi.
 
 ## 5. Phục hồi (theo bài học 09B-2)
 

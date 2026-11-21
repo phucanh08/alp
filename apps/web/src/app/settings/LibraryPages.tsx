@@ -11,16 +11,12 @@ import { Row, Section, Unavailable, focusRing } from './parts';
 
 /*
  * Settings' library pages (t-a95b): the library (templates, agents, skills, hooks, MCP servers, and
- * the provider list Host › Providers shows), Editor and Metadata. Moved out of Settings.tsx
+ * the provider list Host › Providers shows) and Editor. Moved out of Settings.tsx
  * unchanged; the host owner's library actions are added here by later changes (group C).
  */
 
 export function EditorPage() {
   return <Unavailable what="Editor" why="This app opens a workspace's files read only (the Files panel); changing them is the agents' work, or yours on the host." />;
-}
-
-export function MetadataPage() {
-  return <Unavailable what="Metadata generation" why="A host setting the gateway does not expose." />;
 }
 
 export type LibraryKind = 'teams' | 'agents' | 'skills' | 'hooks' | 'mcp' | 'providers';

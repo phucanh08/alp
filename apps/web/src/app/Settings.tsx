@@ -1,7 +1,7 @@
 import * as React from 'react';
 import {
   ArrowDown, ArrowLeft, ArrowUp, Ban, BookOpen, Bot, Boxes, ChevronRight, CircleCheck, Code, Files as FilesIcon, FolderGit2, Gauge, History, Info,
-  ListChecks, MessageSquare, Network, PanelLeft, Palette, Plug, Plus, Search, Server, Settings as SettingsIcon, Sparkles, SquareTerminal,
+  ListChecks, MessageSquare, Network, PanelLeft, Palette, Plug, Plus, Search, Server, Settings as SettingsIcon, SquareTerminal,
   Stethoscope, Users, Webhook,
 } from 'lucide-react';
 import { can } from '../lib/gateway.js';
@@ -20,15 +20,16 @@ import { useAppState, useController } from './store';
 import { useNotificationPermission } from './attention';
 import { Row, Section, Select, Unavailable, focusRing, type Page } from './settings/parts';
 import { ProjectsPage, ProvidersPage, TerminalsPage, UsagePage, WorkspacesPage } from './settings/HostPages';
-import { EditorPage, LibraryPage, MetadataPage } from './settings/LibraryPages';
+import { EditorPage, LibraryPage } from './settings/LibraryPages';
 
 /*
  * Settings as the old ALP web (the Paseo fork) lays them out: a full screen with its own sidebar
  * ("Back", then the App and Host groups, the host's ALP screens among them) and the
  * chosen page on the right, in cards. What the gateway does not offer is a page that says so; no
- * page falls back to the old app. Voice, Pair device and Plugins are not pages at all (t-a95b,
- * docs/breaking-changes.md): ALP has no speech provider, pairing is `alp dashboard pair` on the
- * host, and ALP has no way to install a plugin from the app. The host and library pages live in
+ * page falls back to the old app. Voice, Pair device, Plugins and Metadata are not pages at all
+ * (t-a95b, docs/breaking-changes.md): ALP has no speech provider, pairing is `alp dashboard pair`
+ * on the host, ALP has no way to install a plugin from the app, and ALP has no session title or
+ * branch generation to set up. The host and library pages live in
  * settings/HostPages.tsx and settings/LibraryPages.tsx.
  */
 
@@ -55,7 +56,6 @@ const HOST_PAGES: Array<{ id: Page; label: string; icon: Icon }> = [
   { id: 'alp-skills', label: 'Skills', icon: BookOpen },
   { id: 'alp-hooks', label: 'Hooks', icon: Webhook },
   { id: 'alp-mcp', label: 'MCP servers', icon: Plug },
-  { id: 'metadata', label: 'Metadata', icon: Sparkles },
   { id: 'workspaces', label: 'Workspaces', icon: FolderGit2 },
   { id: 'providers', label: 'Providers', icon: Boxes },
   { id: 'usage', label: 'Usage', icon: Gauge },
@@ -483,7 +483,6 @@ function PageContent({ page, mobile, onNavigate }: { page: Page; mobile: boolean
     case 'alp-hooks': return <LibraryPage kind="hooks" noun="hooks" />;
     case 'alp-mcp': return <LibraryPage kind="mcp" noun="MCP servers" />;
     case 'providers': return <ProvidersPage />;
-    case 'metadata': return <MetadataPage />;
     case 'workspaces': return <WorkspacesPage />;
     case 'usage': return <UsagePage />;
     case 'terminals': return <TerminalsPage onNavigate={onNavigate} />;
