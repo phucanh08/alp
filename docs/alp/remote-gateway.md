@@ -398,6 +398,7 @@ Cột Test dùng các mã sau:
 - `E`: lọc event, giữ thứ tự replay;
 - `M`: giới hạn mode (§5.5);
 - `F`: dòng chỉ giữ field liệt kê;
+- `owner`: `apps/gateway/tests/owner.test.js` (§5.19);
 - `T`: answer phải là đúng tree đã kiểm tra (§5.6);
 - `I`: E2E với alpd thật.
 
@@ -462,7 +463,7 @@ Cột Test dùng các mã sau:
 | `library.get` | `library` | `projectRoot` **bắt buộc**; entry áp dụng (project, rồi library, rồi built-in), hoặc một `scope`; chỉ đọc. Kết quả: `LIBRARY_ENTRY_FIELDS`, `content` qua `projectLibraryContent`, `secrets` do gateway tính lại (§5.7) | project.read | exposed | P S R I |
 | `settings.language.get` | `settings.language` | không (ngôn ngữ người dùng đọc) | session.read | exposed | P I |
 | `daemon.status` | — | host (pid, persistence, đếm mọi workspace) | — | denied (dùng `/readyz`) | -32601 |
-| `daemon.usage` | — | host; `refresh` spawn probe | — | denied | -32601 |
+| `daemon.usage` | — | host; `refresh` spawn probe | — | owner (§5.19): chỉ host owner; mọi credential khác như denied | owner, -32601 |
 | `assignment.recall` | — | không kiểm chứng được; gọi model | — | denied | -32601 |
 | `daemon.pause`/`resume`/`pauses` | — | host.admin | — | denied | -32601 |
 | `daemon.shutdown` | — | host | — | prohibited | -32601 |
@@ -599,7 +600,8 @@ như paseo-web (patch 0015). `project.read` chỉ đọc; project instruction ed
   hồi gần nhất, chi phí session nếu runtime có) và trường `usage` trong snapshot session đi qua
   như mọi event/snapshot của session trong grant (lọc `E`/`R` như cũ); gateway không cần đổi code.
   Không có secret, đường dẫn hay dữ liệu tài khoản trong đó (docs/protocol/alp-json-rpc-v1.md §8.5).
-- `daemon.usage` và `daemon.status` **vẫn denied**: context meter chỉ cần usage của chính session.
+- `daemon.usage` **là owner** (§5.19), `daemon.status` **vẫn denied**: với mọi credential từ xa cả hai
+  vẫn là -32601 như trước; context meter chỉ cần usage của chính session.
   `daemon.usage` là usage cả tài khoản (mọi workspace, gói, cửa sổ hạn mức) và `refresh` của nó
   khởi chạy probe provider trên host; `daemon.status` mang `pid` và số đếm mọi workspace (§10). Vì
   vậy web không có các thẻ usage tài khoản trong hover card như Paseo.
@@ -958,6 +960,48 @@ Contract: docs/protocol/alp-json-rpc-v1.md §12.10.
   terminal khi `terminal.json` có thêm `"allowPaseoTerminal": true` (`alp terminal allow --paseo --yes`).
 - **Không hỗ trợ**: Windows (capability không bao giờ được liệt kê); chụp màn hình phía server, đổi tên
   terminal, lệnh hay profile do client chọn.
+
+### 5.19 Host owner (t-a95b)
+
+Quyết định (main, theo quyền người dùng, 2026-11-21): ALP.app và `alp dashboard` được làm các việc thay
+đổi host (Settings) **chỉ cho chủ máy cục bộ**; mọi credential từ xa giữ nguyên hành vi cũ.
+
+- **Owner là gì**: một kết nối WebSocket được gọi các method mà matrix (§5.4) đánh dấu `owner`. Không
+  có permission nào cấp được nó: thêm tay một chuỗi permission vào `credentials.json` không làm ai thành
+  owner (store bỏ chuỗi lạ khi đọc; không permission hợp lệ nào là owner).
+- **Ai là owner**: chỉ khi **cả bốn** điều kiện đúng (`apps/gateway/src/owner.js`,
+  `ClientConnection#isOwner` trong `connection.js`):
+  1. gateway được tạo với option `owner`. Chỉ `alp dashboard` (`packages/cli/src/dashboard/main.js`)
+     truyền nó; `alp-gateway serve` không bao giờ truyền, nên sau gateway riêng **không ai** là owner.
+     Gateway có `owner` phải nghe loopback, không TLS, không `trustProxy`, không `allowInsecure`, nếu
+     không `createGateway` từ chối;
+  2. credential của kết nối là credential mà `owner.credentialId()` trả về **lúc request tới** (dashboard
+     đọc `grant.id` sống): sau `alp dashboard rotate` hay revoke, token cũ không còn là owner, kể cả
+     trên kết nối còn mở;
+  3. socket tới thẳng từ loopback: địa chỉ peer của chính socket là `127.0.0.1`, `::1` hoặc
+     `::ffff:127.0.0.1`, không qua proxy tin cậy, và request upgrade **không có header chuyển tiếp nào**
+     (`Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `Via`, …): proxy hay tunnel chạy trên cùng máy đi từ
+     loopback nhưng tự khai là chuyển tiếp thì không phải owner;
+  4. kết nối không bị đánh dấu là của ALP agent (credential agent, hoặc hello khai `AGENT_CAPABILITY`).
+- **Relay của Paseo** (`alp dashboard pair --on`) không bao giờ tới listener này: relay thuộc process
+  riêng của integration Paseo, gắn socket relay vào bridge Paseo
+  (`integrations/paseo/server/paseo/index.ts`, `createRelay` → `gateway.attach`) và nói với alpd qua
+  socket IPC riêng (`connect(lock.socket)`), với token riêng trong `paseo.json`; nó không có địa chỉ hay
+  credential của dashboard.
+- **Client biết mình là owner**: `daemon.hello` của gateway liệt kê capability `host.owner` (chỉ của
+  gateway, alpd không bao giờ liệt kê; nếu có thì `FORWARDED_CAPABILITIES` bỏ). Web giữ nó trong
+  `state.owner` và gửi việc của owner bằng `controller.ownerRequest`, từ chối ngay ở client khi không phải
+  owner; gateway vẫn kiểm lại mọi request.
+- **Không phải owner**: method `owner` trả **đúng** lỗi của method denied: `-32601`, message
+  `<method> is not available through the gateway`, `data.reason` `not_exposed`; alpd không nhận gì.
+- **Trả lời**: method `owner` được handler owner cùng tên trả lời (chạy trong process dashboard, bằng
+  user; `packages/cli/src/dashboard/owner/`, chữ ký trong `owner/index.js`), nếu không thì chuyển tới alpd
+  với đúng các `params` mà entry liệt kê. Ví dụ đầu tiên: `daemon.usage { refresh }` (Settings › Usage).
+  Method chưa có trong matrix thì handler không bao giờ được gọi.
+- **Thêm method owner**: thêm entry `status: 'owner'` với `tests: ['owner']` vào khối
+  `// --- owner: host (group B) ---` hoặc `// --- owner: library (group C) ---` của `policy.js`, và
+  handler (nếu cần) vào `owner/host.js` hoặc `owner/library.js`. Một tên định nghĩa hai lần làm dashboard
+  dừng lúc khởi động.
 
 ## 6. Streaming và recovery
 

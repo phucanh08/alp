@@ -19,7 +19,8 @@ service `alp-dashboard` ([dashboard.md](dashboard.md) §3.1), rồi mở app web
 
 Địa chỉ chứa token chỉ nằm trong bộ nhớ: không ghi log, không ghi file, không truyền qua tham số dòng
 lệnh. Cửa sổ là một client cùng origin với `alp-dashboard` như một tab trình duyệt, nên gateway và alpd
-không đổi gì và không có origin tin cậy mới.
+không đổi gì và không có origin tin cậy mới. Như tab đó, cửa sổ là **host owner** (§9): token của
+dashboard trên loopback.
 
 ## 2. Tìm `alp`
 
@@ -383,3 +384,14 @@ Cài:
 
 App không tự cập nhật: bản mới thì tải DMG mới và thay `ALP.app`. Gỡ: thoát app, xóa `ALP.app`; dữ
 liệu của app nằm ở `~/Library/Application Support/ALP` (ALP đã cài dưới `~/.alp` không bị đụng tới).
+
+## 9. Settings trong app (t-a95b)
+
+Settings của app là Settings của app web ([dashboard.md](dashboard.md) §4.6). Cửa sổ dùng token của
+`alp dashboard` trên kết nối loopback, nên nó là **host owner**
+([remote-gateway.md](remote-gateway.md) §5.19): các việc đổi host trong Settings mở cho nó (dần dần, mỗi
+trang một thay đổi), còn cùng app web nối tới một `alp-gateway` từ xa thì không bao giờ được, và nhận lỗi
+như trước.
+
+Voice, Pair device và Plugins không còn trong Settings: ALP không có speech provider; ghép thiết bị
+là `alp dashboard pair` chạy trên host; cài plugin thay đổi host và ALP không có đường cài plugin từ app.
