@@ -727,8 +727,8 @@ export const EXPOSURE = Object.freeze({
   'extension.register': { status: 'prohibited', scope: 'host', reason: 'Would let a remote client serve methods every local client calls.' },
   'extension.unregister': { status: 'prohibited', scope: 'host', reason: 'Extension methods are never remote.' },
   'schedule.create': { status: 'prohibited', scope: 'workspace', reason: 'A scheduled continuation opens a turn on a session without a user message, later than the request that made it; the gateway forwards nothing that fires after the request in v1.' },
-  'schedule.list': { status: 'prohibited', scope: 'workspace', reason: 'The jobs of the host name sessions the gateway does not check; as schedule.create, they are never remote in v1.' },
-  'schedule.get': { status: 'prohibited', scope: 'workspace', reason: 'As schedule.list: a job of the host is never remote in v1.' },
+  'schedule.list': { status: 'owner', scope: 'host: any project root of alpd (the owner is not limited to granted workspaces)', reason: 'The jobs of the host name sessions the gateway does not check: only the host owner\'s own dashboard reads them (the sidebar\'s Schedules, t-ff83), forwarded to alpd unchanged; never a remote credential.', params: ['projectRoot', 'status'], tests: ['owner', 'owner-schedule'] },
+  'schedule.get': { status: 'owner', scope: 'host: as schedule.list', reason: 'As schedule.list: one job of the host, the host owner\'s own dashboard only.', params: ['id', 'projectRoot'], tests: ['owner', 'owner-schedule'] },
   'schedule.cancel': { status: 'prohibited', scope: 'workspace', reason: 'As schedule.create: cancelling a job of the host is never remote in v1.' },
   // Owner methods (status 'owner'; t-a95b): appended below by later changes, one block each, so
   // they do not edit the same lines. Each entry names its `tests` (authorization.test.js asserts it)
