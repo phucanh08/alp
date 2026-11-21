@@ -4,7 +4,7 @@
  * disposable alp dashboard host and fake `alp` as shell.spec.mjs (./support.mjs). Never the user's
  * ~/.alp, ~/Applications or /Applications.
  *
- *   ALP_DESKTOP_DMG=release/ALP-0.0.0-arm64.dmg bun run e2e:packaged
+ *   ALP_DESKTOP_DMG=release/ALP-<version>-arm64.dmg bun run e2e:packaged
  *
  * Playwright's `_electron` cannot drive the packaged app: it needs the Node inspector, which the
  * EnableNodeCliInspectArguments fuse turns off. The test reads the window over Chromium's DevTools
@@ -31,6 +31,31 @@ const CLI = path.join(ROOT, 'packages', 'cli', 'dist', 'cli.js');
 /** The development Electron of apps/desktop's install: the control for the RunAsNode check. */
 const DEV_ELECTRON = path.join(import.meta.dirname, '..', 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron');
 
+/** hdiutil's "Resource busy" (exit 16): something (Spotlight, fseventsd) still holds the volume briefly. */
+const busy = error => error?.code === 16 || /Resource busy/i.test(`${error?.stderr ?? ''}${error?.message ?? ''}`);
+
+/**
+ * Detaches the image mounted at `mount` (t-81b0.10). A volume that was just read can stay busy for a
+ * moment (CI run 44885075659: "couldn't eject disk7 - Resource busy" right after ditto), so a busy
+ * detach is retried with a short backoff, then forced; any other error, or a volume still busy after
+ * the forced attempts, fails the test with every attempt's message.
+ */
+async function detachImage(mount) {
+  const attempts = [[0, false], [1_000, false], [2_000, false], [4_000, false], [4_000, true], [8_000, true]];
+  const failures = [];
+  for (const [delay, force] of attempts) {
+    if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+    try {
+      await run('hdiutil', ['detach', mount, ...(force ? ['-force'] : [])], { timeout: 60_000 });
+      return;
+    } catch (error) {
+      failures.push(`${force ? 'detach -force' : 'detach'}: ${String(error?.stderr || error?.message).trim()}`);
+      if (!busy(error)) break;
+    }
+  }
+  throw new Error(`hdiutil could not detach ${mount}:\n${failures.join('\n')}`);
+}
+
 /** Copies ALP.app out of the DMG into <dir>/home/Applications, as a user would; returns its path. */
 async function install({ dir, defer }) {
   if (!DMG) throw new Error('set ALP_DESKTOP_DMG to the DMG built by `bun run dist`');
@@ -38,7 +63,7 @@ async function install({ dir, defer }) {
   await mkdir(mount);
   await run('hdiutil', ['attach', '-nobrowse', '-readonly', '-noautoopen', '-mountpoint', mount, DMG], { timeout: 120_000 });
   let attached = true;
-  const detach = async () => { if (attached) { attached = false; await run('hdiutil', ['detach', mount, '-force'], { timeout: 60_000 }); } };
+  const detach = async () => { if (attached) { attached = false; await detachImage(mount); } };
   defer(detach);
   const applications = path.join(dir, 'home', 'Applications');
   await mkdir(applications, { recursive: true });
