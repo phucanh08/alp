@@ -24,11 +24,13 @@ export async function dashboardSettings(extra = {}) {
  * app (apps/web/dist), and answers its link: `url` (with the token fragment), `origin`, `token`.
  * `stop()` ends the service; call it before world.close().
  * @param {Awaited<ReturnType<typeof import('./world.js').startWorld>>} world
+ * @param {{ env?: Record<string, string> }} [options]
  */
-export async function startDashboard(world) {
+export async function startDashboard(world, { env: extra = {} } = {}) {
   // This world's alpd (no supervision of its own), the freshly built app, and a fast registry refresh
-  // so a project registered or removed reaches the grant (and the page) quickly.
-  const env = { ...world.env, ALP_SUPERVISE: '0', ALP_DASHBOARD_APP: path.join(WEB, 'dist'), ALP_DASHBOARD_GRANT_REFRESH_MS: '200' };
+  // so a project registered or removed reaches the grant (and the page) quickly. `env` adds to the
+  // dashboard process's environment (sidebar-facts.spec.js puts a fake gh first on its PATH).
+  const env = { ...world.env, ...extra, ALP_SUPERVISE: '0', ALP_DASHBOARD_APP: path.join(WEB, 'dist'), ALP_DASHBOARD_GRANT_REFRESH_MS: '200' };
   const printed = (await run(process.execPath, [world.cli, 'dashboard', '--print'], { env, cwd: world.projects.main, timeout: 120_000 })).stdout.trim();
   const link = LINK.exec(printed);
   if (!link) throw new Error(`alp dashboard --print printed no link:\n${printed}`);
