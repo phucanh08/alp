@@ -1,8 +1,8 @@
 # ALP desktop (macOS, MVP)
 
 > **Trạng thái:** t-81b0.2 phần 1 (khung), phần 2 (tự kết nối lại) và phần 3 (e2e Electron); t-81b0.3:
-> DMG ký ad-hoc (arm64, x64) build trong CI thành artifact (§6), chưa phát hành. Quyết định: D32
-> (`plans/reference/DECISIONS.md`).
+> DMG ký ad-hoc (arm64, x64) build trong CI thành artifact (§6), chưa phát hành; t-81b0.8: tự cài ALP
+> khi máy chưa có (§3.2). Quyết định: D32, D35 (`plans/reference/DECISIONS.md`).
 
 App desktop là một **vỏ mỏng** bằng Electron bọc quanh ALP mà người dùng đã cài. Nó không mang theo
 alpd, gateway hay app web: nó chạy `alp dashboard --print` của người dùng, lệnh này khởi động hoặc gắn vào
@@ -42,7 +42,8 @@ Nếu PATH dựng từ (1)–(2) không có `node`, PATH của login shell đư�
 
 | Trường hợp | App hiển thị |
 |---|---|
-| Không tìm thấy `alp` | Trang cài đặt trong app: lệnh `npm install -g @anhlp/alp@beta` và cách đặt `alpPath`. |
+| Không tìm thấy `alp` (và không đặt `alpPath`/`ALP_DESKTOP_ALP`) | Đề nghị cài ALP (§3.2); trang này cũng ghi lệnh cài từ terminal (`install.sh`, npm) và cách đặt `alpPath`. |
+| `alpPath`/`ALP_DESKTOP_ALP` trỏ tới đường dẫn không chạy được | Trang chưa cài, nêu đúng đường dẫn đó; không đề nghị cài (bản cài vào `~/.alp` sẽ không được dùng). |
 | `alp` báo lỗi (vd. `dashboard.enabled` là false, chạy trong session của agent) | Nguyên văn thông báo lỗi của `alp`. |
 | `alp` quá cũ, chưa có `alp dashboard` (0.0.1-beta.8 trở về trước: in usage thay vì địa chỉ) | Một câu nói rõ phiên bản (`alp --version`) và đường dẫn của `alp` đó, kèm cách cập nhật (`alp update`, hoặc cài bản build từ main); không dán usage. |
 | `alp dashboard --print` không trả lời trong 90 giây, hoặc in ra thứ không phải địa chỉ ALP dashboard | Thông báo lỗi tương ứng. |
@@ -82,6 +83,47 @@ Giới hạn: `/readyz` có trả lời HTTP bất kỳ là được coi là cò
 cũ ngay sau khi `alp-dashboard` dừng, app không nhận ra cho tới khi trang tự báo lỗi hoặc người dùng chọn
 Connect again.
 
+### 3.2 Cài ALP khi máy chưa có (t-81b0.8, D35)
+
+Khi §2 không tìm thấy `alp` nào và không có `alpPath`, app:
+
+1. Đọc **chỉ** `SHA256SUMS` của bản phát hành mới nhất
+   (`https://github.com/phucanh08/alp/releases/latest/download/SHA256SUMS`, qua `net.fetch` của Chromium,
+   theo proxy của hệ thống), chọn archive `alp-<version>-darwin-<arch>.tar.gz` giống cách `install.sh`
+   chọn. Bản cũ hơn 0.0.1-beta.9 (chưa có `alp dashboard`) bị từ chối. Đọc không được thì trang chưa cài
+   nêu lý do và lệnh cài từ terminal.
+2. Hiện trang xác nhận `install.html` trong cửa sổ: phiên bản, nguồn tải (`…/releases/download/v<version>`),
+   tên archive và checksum, thư mục cài (`~/.alp/app/<version>`), lệnh `~/.alp/bin/alp`, thư mục dữ liệu
+   ALP (`$ALP_HOME` hoặc `~/.alp`, tạo 0700 nếu chưa có), và việc PATH/shell profile không bị sửa. **Chưa
+   ghi gì** cho tới khi người dùng bấm **Install**. **Cancel** quay về trang chưa cài; Connect again đề
+   nghị lại.
+3. Bấm Install: chạy `install.sh` **đóng gói sẵn trong app** (`dist/install.sh`, bản sao của `install.sh`
+   ở gốc repo lúc build; app không tải và chạy script nào từ mạng) bằng `/bin/sh -s -- --version <v>
+   --base-url <nguồn của v> --root ~/.alp --dir ~/.alp/bin --no-modify-path`. Môi trường của nó bỏ
+   `ALP_INSTALL_BASE_URL`/`ALP_INSTALL_REPO`, nên nguồn luôn đúng nguồn trang đã nêu. `install.sh` tải
+   archive, so SHA-256 với `SHA256SUMS`, kiểm `bin/alp --version` (và `bin/alpd --version` của alpd
+   native), tạo ALP home 0700 (t-66a4), rồi mới chuyển bản cài vào chỗ.
+4. Xong thì kết nối như §1 (`~/.alp/bin/alp` đứng đầu §2). Lỗi thì trang lỗi nêu lý do của `install.sh`
+   (vd. `checksum mismatch …`, `could not download …`).
+
+**Được kiểm và không được kiểm.** Được kiểm: archive đúng từng byte với checksum mà `SHA256SUMS` của
+chính bản phát hành đó (tải qua HTTPS từ github.com) liệt kê, và hai binary trong đó báo đúng phiên bản.
+Điều này chống file hỏng, tải dở hay một bản sao trung gian bị đổi, nhưng **không** chứng minh ai đã build
+bản phát hành: ai sửa được release trên GitHub thì sửa được cả `SHA256SUMS`. App **không** kiểm GitHub
+attestation (Sigstore) — làm vậy cần `gh` hoặc một bộ kiểm Sigstore trong app; trang xác nhận ghi lệnh
+`gh attestation verify` để người dùng tự kiểm.
+
+**Không bị ghi một nửa.** Checksum sai, tải lỗi hay Cancel: không có gì được tạo dưới `~/.alp` (`install.sh`
+chỉ ghi sau khi kiểm xong, và tự xóa thư mục tạm). Lỗi ở bước chuyển vào chỗ thì `install.sh` dọn bản
+đang dựng; có thể còn lại thư mục rỗng `~/.alp/app` và `~/.alp/bin`.
+
+**`alp` cũ hơn 0.0.1-beta.9 đã có:** app không tự cập nhật nó (có thể là bản npm hay bản hệ thống mà app
+không quản lý, và đang chạy một alpd); trang lỗi nêu phiên bản và cách cập nhật (`alp update`) như §3.
+
+**Nguồn thử nghiệm.** `ALP_DESKTOP_INSTALL_MIRROR` (thư mục tuyệt đối hoặc `file://`) thay GitHub bằng một
+bản sao cục bộ, **chỉ** khi app chạy từ source (`app.isPackaged` là false). ALP.app bỏ qua biến này
+(unit test `installSource` và e2e đóng gói kiểm điều đó).
+
 ## 4. Bảo mật của cửa sổ
 
 - `contextIsolation`, `sandbox`, không `nodeIntegration`, không preload, không `webview`;
@@ -98,12 +140,16 @@ Connect again.
 - Single-instance: mở app lần hai chỉ focus cửa sổ đang có (không còn cửa sổ nào thì mở và kết nối).
 - DevTools chỉ có khi chạy từ source (chưa đóng gói).
 - Trang nội bộ được phục vụ qua scheme riêng `alp-page://app/<tên>`, không qua `file://` (xem §6.4).
-  Handler trong main process chỉ trả đúng sáu file `connecting.html`, `error.html`, `missing-alp.html`,
-  `page.css`, `page.js`, `missing-alp.js` trong `dist/pages` của app (`app.getAppPath()`); mọi đường
+  Handler trong main process chỉ trả đúng chín file `connecting.html`, `error.html`, `missing-alp.html`,
+  `install.html`, `installing.html`, `page.css`, `page.js`, `missing-alp.js`, `install.js` trong `dist/pages` của app (`app.getAppPath()`); mọi đường
   dẫn khác, `..`, dấu phân cách đã mã hóa hay đường dẫn tuyệt đối đều nhận 404. Scheme được đăng ký chỉ
   với `standard` (để `page.css`/`page.js` tương đối và CSP `'self'` resolve về `alp-page://app`);
   không có `secure`, `supportFetchAPI`, `corsEnabled`, `bypassCSP`, `allowServiceWorkers` hay `stream`. Trang của `alp-dashboard` không được
   điều hướng tới, mở hay xin quyền từ scheme này: chốt origin ở trên không đổi.
+- Nút Install/Cancel của trang xác nhận (§3.2) là một navigation tới `alp-page://app/confirm?action=…&nonce=…`
+  mà main process chặn (`will-frame-navigate`, chỉ main frame) và đọc. Nonce là ngẫu nhiên, chỉ có trong
+  địa chỉ của trang xác nhận đang hiện, dùng một lần; câu trả lời khác hoặc cũ bị bỏ qua. Trang vẫn không
+  có preload hay Node.
 
 ## 5. Build và chạy từ source
 
@@ -151,6 +197,21 @@ Các ca kiểm tra:
 - instance thứ hai khi không có cửa sổ;
 - `alp-dashboard` khởi động lại trên port khác;
 - `alp dashboard rotate` trên cùng port.
+
+`apps/desktop/e2e/install.spec.mjs` (t-81b0.8) chạy app với `HOME`, `ALP_HOME`, `TMPDIR` tạm, một login
+shell giả không tìm thấy `alp`, và một bản sao phát hành cục bộ (`releaseMirror`: `SHA256SUMS` và archive
+chứa bundle giả) qua `ALP_DESKTOP_INSTALL_MIRROR`, không dùng mạng:
+
+- trang xác nhận nêu phiên bản và mọi đường dẫn, không có gì được ghi trước Install, Install xong thì ALP
+  home là 0700, `bin/alp` và `app/current` đúng, không file profile nào bị ghi, cửa sổ mở alp dashboard;
+- archive bị sửa (checksum sai), archive thiếu (tải lỗi): trang lỗi nêu lý do, không có `~/.alp`, không
+  còn thư mục tạm của `install.sh`;
+- Cancel: không ghi gì; nonce cũ không làm gì; Connect again đề nghị lại;
+- không đọc được `SHA256SUMS`.
+
+Ca cuối cài **bản phát hành thật** từ một bản sao tài sản của nó, chỉ khi `ALP_DESKTOP_E2E_RELEASE_MIRROR`
+trỏ tới thư mục chứa `SHA256SUMS` và archive darwin: alpd thật chạy dưới ALP home tạm (kiểm đường dẫn socket
+trước khi dừng), `alp dashboard --print` chạy được và cửa sổ mở nó.
 
 Teardown dùng `defer` của `test/support/teardown.js`: đóng Electron (quá 15 giây thì SIGKILL), dừng
 host, rồi mới xóa thư mục. App chạy với `HOME` tạm.
