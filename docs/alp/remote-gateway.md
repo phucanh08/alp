@@ -1010,7 +1010,7 @@ Quyết định (main, theo quyền người dùng, 2026-11-21): ALP.app và `al
 - **Trả lời**: method `owner` được handler owner cùng tên trả lời (chạy trong process dashboard, bằng
   user; `packages/cli/src/dashboard/owner/`, chữ ký trong `owner/index.js`), nếu không thì chuyển tới alpd
   với đúng các `params` mà entry liệt kê. Method đầu tiên: `daemon.usage { refresh }`; trang Settings › Usage
-  dùng nó từ PR sau của t-a95b.1 (trong PR này trang vẫn là bảng "not available"). Method owner của alpd
+  dùng nó cho host owner (dashboard.md §4.7); với mọi client khác trang vẫn là bảng "not available". Method owner của alpd
   phải có schema trong `methods-v1.json` (params được kiểm trước khi tới alpd). Method riêng của gateway
   (`handler: true`) là tên `host.*` không có trong `methods-v1.json` (protocol chỉ liệt kê method alpd
   phục vụ), phải liệt kê `params` (chỉ các key đó tới handler) và handler tự kiểm giá trị; không có

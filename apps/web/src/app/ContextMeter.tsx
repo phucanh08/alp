@@ -15,8 +15,8 @@ const LEVEL_CLASS = { normal: 'text-muted-foreground', warning: 'text-warning', 
  * context window the session holds, muted below 70%, amber from 70%, red above 90%; an empty
  * track while the runtime has not said both numbers. Hovering, focusing or tapping it shows
  * the details: the share used, the tokens against the window, the tokens last reported and
- * the session's cost when the runtime reports them. Paseo's account usage cards are not shown:
- * account-wide usage (daemon.usage) stays on the host (docs/alp/remote-gateway.md §5.9).
+ * the session's cost when the runtime reports them. Paseo's account usage cards are not shown here:
+ * account-wide usage (daemon.usage) is the host owner's Settings › Usage (docs/alp/dashboard.md §4.7).
  */
 export function ContextMeter({ usage, className }: { usage?: SessionUsage; className?: string }) {
   const [open, setOpen] = React.useState(false);

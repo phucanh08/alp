@@ -546,8 +546,8 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
       {/* Paseo's footer line: Add project, Usage, Hosts, then Help and Settings at the end. */}
       <div className="flex shrink-0 items-center border-t border-border px-2 py-1.5" data-testid="sidebar-footer-bottom-line">
         <FooterButton label="Add project" onClick={() => setAddingProject(true)} testId="sidebar-add-project"><FolderPlus aria-hidden /></FooterButton>
-        {/* Paseo's usage icon opens the account's usage; the gateway does not pass the host's
-            (daemon.usage), so it opens Settings › Usage, which says where to read it. */}
+        {/* Paseo's usage icon opens the account's usage: Settings › Usage, which shows daemon.usage to
+            the host owner (docs/alp/dashboard.md §4.7) and says where to read it to anyone else. */}
         <FooterButton label="Usage" onClick={() => onSettings('usage')} testId="sidebar-usage-icon"><CircleGauge aria-hidden /></FooterButton>
         <Menu label="Hosts" title={`${principal?.label ?? 'Access token'} · ${hostName}${online ? '' : ' · reconnecting'}`} align="start" testId="sidebar-hosts-trigger"
           trigger={<><Server aria-hidden className="!size-[19px] md:!size-[15px]" /><span aria-hidden className={cn('absolute bottom-[11px] right-[11px] size-1.5 md:bottom-[5px] md:right-[5px] rounded-full ring-2 ring-sidebar', online ? 'bg-dot-success' : 'bg-dot-warning')} /></>}
