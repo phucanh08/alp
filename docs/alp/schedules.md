@@ -57,5 +57,7 @@ change `limits.autoResume`.
 
 A task timer gate merely makes a task eligible when its time passes; it does not wake
 main. Assignment notes describe work and may ride with a later turn; they are not
-scheduled continuations. Jobs are local to alpd; the remote gateway prohibits all
-`schedule.*` methods. There is no recurring/cron support.
+scheduled continuations. Jobs are local to alpd; the remote gateway prohibits
+`schedule.create` and `schedule.cancel` for every connection, and answers `schedule.list` and
+`schedule.get` only for the host owner's own dashboard (read only, the sidebar's Schedules;
+remote-gateway.md §5.19); every remote credential gets `-32601 not_exposed`. There is no recurring/cron support.
