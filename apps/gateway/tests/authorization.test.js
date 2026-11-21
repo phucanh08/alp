@@ -162,6 +162,11 @@ test('every v1 method is classified, and every exposed one has a permission, par
   }
   assert.deepEqual(Object.keys(OUT_OF_SCOPE).sort(), [...exposed].sort());
   assert.deepEqual(Object.keys(IN_SCOPE({ a: '/x' })).sort(), [...exposed].sort());
+  // Owner methods (owner.test.js): each names its tests, and one alpd answers lists its params.
+  for (const [method, entry] of Object.entries(EXPOSURE).filter(([, entry]) => entry.status === 'owner')) {
+    assert.ok(entry.tests?.includes('owner'), `${method}: an owner method names the 'owner' test`);
+    assert.ok(!entry.permission, `${method}: an owner method needs no permission a credential could hold`);
+  }
 });
 
 // The daemon's own annotations (x-alp, added by Task 09B-1) must agree with what the gateway
@@ -201,7 +206,8 @@ test('the exposure matrix agrees with the daemon\'s x-alp annotations', t => {
 test('methods not exposed answer -32601 and never reach alpd: host, administration, library writes and unknown methods', async t => {
   const { daemon, sdk } = await world(t);
   const { client } = await sdk('alice');
-  const refused = [...Object.entries(EXPOSURE).filter(([, entry]) => entry.status === 'denied' || entry.status === 'prohibited').map(([method]) => method), 'subscribe', 'provider.list'];
+  // Owner methods too: this gateway has no owner, so they answer as denied ones (owner.test.js).
+  const refused = [...Object.entries(EXPOSURE).filter(([, entry]) => entry.status === 'denied' || entry.status === 'prohibited' || entry.status === 'owner').map(([method]) => method), 'subscribe', 'provider.list'];
   const mark = daemon.calls().length;
   for (const method of refused) {
     const params = method === 'extension.register' ? { method: 'x.y' } : method === 'assignment.recall' ? { question: 'q' } : {};

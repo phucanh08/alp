@@ -601,8 +601,12 @@ export function isModelId(value) {
 }
 
 /**
- * @typedef {'gateway' | 'exposed' | 'denied' | 'prohibited'} ExposureStatus
- *   gateway: answered by the gateway itself; exposed: forwarded after the checks; denied: not
+ * @typedef {'gateway' | 'exposed' | 'owner' | 'denied' | 'prohibited'} ExposureStatus
+ *   gateway: answered by the gateway itself; exposed: forwarded after the checks; owner: only for
+ *   the host owner's connection (isOwner in connection.js: a gateway created with `owner`, the
+ *   credential it names, a direct loopback socket), answered by the gateway's owner handler of that
+ *   name or else forwarded to alpd with `params`; every other connection gets the `denied` answer
+ *   (-32601 not_exposed), so for a remote credential an owner method is a denied one; denied: not
  *   exposed until a contract or policy makes its scope checkable; prohibited: never remote in v1.
  *   alsoRequires: permissions the grant must hold besides `permission` (each checked, refused
  *   with 1003 grant naming the first one missing, before anything reaches alpd).
@@ -709,7 +713,7 @@ export const EXPOSURE = Object.freeze({
   'library.skills.set': { status: 'denied', scope: 'host', reason: 'Host-level write (role-skills.json).' },
   'settings.language.set': { status: 'denied', scope: 'host', reason: 'Host-level write (settings.json).' },
   'daemon.status': { status: 'denied', scope: 'host', reason: 'Host-wide: pid, persistence state and counts across every workspace; the result schema requires pid. Readiness is GET /readyz.' },
-  'daemon.usage': { status: 'denied', scope: 'host', reason: 'Account-wide provider usage; refresh probes providers on the daemon host.' },
+  'daemon.usage': { status: 'owner', scope: 'host', reason: 'Account-wide provider usage; refresh probes providers on the daemon host. The host owner\'s own dashboard reads it (Settings > Usage); never a remote credential.', params: ['refresh'], tests: ['owner'] },
   'assignment.recall': { status: 'denied', scope: 'unverifiable', reason: 'assignmentId/taskId do not name a workspace the gateway can check before the call, which runs a model.' },
   'daemon.pause': { status: 'denied', scope: 'host', reason: 'host.admin' },
   'daemon.resume': { status: 'denied', scope: 'host', reason: 'host.admin' },
@@ -721,6 +725,13 @@ export const EXPOSURE = Object.freeze({
   'schedule.list': { status: 'prohibited', scope: 'workspace', reason: 'The jobs of the host name sessions the gateway does not check; as schedule.create, they are never remote in v1.' },
   'schedule.get': { status: 'prohibited', scope: 'workspace', reason: 'As schedule.list: a job of the host is never remote in v1.' },
   'schedule.cancel': { status: 'prohibited', scope: 'workspace', reason: 'As schedule.create: cancelling a job of the host is never remote in v1.' },
+  // Owner methods (status 'owner'; t-a95b): appended below by later changes, one block each, so
+  // they do not edit the same lines. Each entry names its `tests` (authorization.test.js asserts it)
+  // and either the `params` forwarded to alpd or an owner handler of the same name
+  // (packages/cli/src/dashboard/owner/). A method that is not here is never reachable, whatever
+  // handler the dashboard registers.
+  // --- owner: host (group B) ---
+  // --- owner: library (group C) ---
 });
 
 /** The exposure of a method, or undefined when the gateway does not know it at all. @param {string} method */

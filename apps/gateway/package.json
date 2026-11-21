@@ -31,6 +31,14 @@
       "types": "./dist/policy.d.ts",
       "default": "./src/policy.js"
     },
+    "./owner": {
+      "alp-source": {
+        "types": "./src/owner.js",
+        "default": "./src/owner.js"
+      },
+      "types": "./dist/owner.d.ts",
+      "default": "./src/owner.js"
+    },
     "./credentials": {
       "alp-source": {
         "types": "./src/credentials.js",

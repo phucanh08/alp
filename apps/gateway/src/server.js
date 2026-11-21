@@ -6,6 +6,7 @@ import https from 'node:https';
 import { WebSocketServer } from 'ws';
 import { ClientConnection, CLOSE_CODE } from './connection.js';
 import { isLoopbackAddress } from './config.js';
+import { directLoopback, ownerOptionError } from './owner.js';
 import { TicketBook } from './tickets.js';
 import { daemonMonitor, upstreamConnector } from './upstream.js';
 
@@ -49,12 +50,18 @@ const ownPath = pathname => pathname === '/healthz' || pathname === '/readyz' ||
  *   version: string,
  *   monitorIntervalMs?: number,
  *   serveStatic?: (request: http.IncomingMessage, response: http.ServerResponse) => unknown,
+ *   owner?: import('./owner.js').OwnerOption,
  * }} options
  *   `serveStatic` answers GET and HEAD requests outside the gateway's own paths, once the Host and
  *   TLS checks passed. It writes the response itself; returning (or resolving to) `false` without
  *   writing leaves the gateway's 404, and a throw or rejection becomes a 500.
+ *   `owner` (alp dashboard only; owner.js) names the host owner's credential and the owner handlers:
+ *   that credential on a direct loopback socket may call the methods the matrix marks `owner`. It
+ *   needs a plain loopback config (no TLS, no trusted proxy), else createGateway throws.
  */
-export function createGateway({ config, store, openTransport, logger, version, monitorIntervalMs, serveStatic }) {
+export function createGateway({ config, store, openTransport, logger, version, monitorIntervalMs, serveStatic, owner }) {
+  const ownerProblem = ownerOptionError(owner, config);
+  if (ownerProblem) throw new Error(ownerProblem);
   const { limits } = config;
   const tickets = new TicketBook({ ttlMs: limits.ticketTtlMs });
   /** @type {Set<ClientConnection>} */
@@ -248,9 +255,14 @@ export function createGateway({ config, store, openTransport, logger, version, m
         counted = false;
         decrementPrincipal(grant.id);
       };
+      // Whether this socket could be the owner's is fixed at the upgrade; the credential half is
+      // checked again on every request (connection.js #isOwner), so a rotated or revoked owner
+      // credential stops being the owner at once.
+      const direct = !!owner && directLoopback(request, peer);
       try {
         const connection = new ClientConnection({
           ws, grant, id, connectUpstream, logger: log,
+          ...(owner ? { owner: { isOwner: () => direct && owner.credentialId() === grant.id, methods: owner.methods ?? {} } } : {}),
           limits: { maxPending: limits.maxPending, rate: limits.rate, burst: limits.burst, maxStrikes: limits.maxStrikes, handshakeMs: limits.handshakeMs, requestTimeoutMs: limits.requestTimeoutMs, maxBufferedBytes: limits.maxBufferedBytes, maxQueue: limits.maxQueue, closeGraceMs: limits.closeGraceMs, maxFrame: limits.maxFrame },
           onClosed: (closed, code) => {
             connections.delete(closed);
