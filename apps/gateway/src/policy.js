@@ -713,7 +713,7 @@ export const EXPOSURE = Object.freeze({
   'library.skills.set': { status: 'denied', scope: 'host', reason: 'Host-level write (role-skills.json).' },
   'settings.language.set': { status: 'denied', scope: 'host', reason: 'Host-level write (settings.json).' },
   'daemon.status': { status: 'denied', scope: 'host', reason: 'Host-wide: pid, persistence state and counts across every workspace; the result schema requires pid. Readiness is GET /readyz.' },
-  'daemon.usage': { status: 'owner', scope: 'host', reason: 'Account-wide provider usage; refresh probes providers on the daemon host. The host owner\'s own dashboard reads it (Settings > Usage); never a remote credential.', params: ['refresh'], tests: ['owner'] },
+  'daemon.usage': { status: 'owner', scope: 'host', reason: 'Account-wide provider usage; refresh probes providers on the daemon host. Only the host owner\'s own dashboard may call it (Settings > Usage uses it from a later t-a95b.1 PR); never a remote credential.', params: ['refresh'], tests: ['owner'] },
   'assignment.recall': { status: 'denied', scope: 'unverifiable', reason: 'assignmentId/taskId do not name a workspace the gateway can check before the call, which runs a model.' },
   'daemon.pause': { status: 'denied', scope: 'host', reason: 'host.admin' },
   'daemon.resume': { status: 'denied', scope: 'host', reason: 'host.admin' },

@@ -14,8 +14,9 @@ import { isLoopbackHost } from './config.js';
  *      revoke the old token is no longer the owner, even on a connection that is still open;
  *   3. its WebSocket came in on a direct loopback socket (directLoopback below): 127.0.0.1, ::1 or
  *      ::ffff:127.0.0.1 as the socket's own peer address, through no trusted proxy, and with no
- *      forwarding header at all, so a local reverse proxy or tunnel that says it forwards for
- *      someone is never the owner;
+ *      forwarding header (isForwardingHeader), so a local reverse proxy that says it forwards for
+ *      someone is not the owner. A plain TCP forwarder (ssh -R, socat) adds no header and looks like a
+ *      direct client; it still needs the dashboard token;
  *   4. the connection is not marked as an ALP agent's (an agent credential, or a hello that says an
  *      agent started the client): what only the user may do stays the user's.
  * No credential permission grants it: a permission string added by hand to credentials.json is
@@ -39,6 +40,18 @@ export const OWNER_LOOPBACK = Object.freeze(['127.0.0.1', '::1', '::ffff:127.0.0
 export const FORWARDING_HEADERS = Object.freeze(['forwarded', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port', 'x-real-ip', 'via', 'cf-connecting-ip', 'true-client-ip', 'x-client-ip']);
 
 /**
+ * Whether a (lower-case) header name says the request was forwarded: one of FORWARDING_HEADERS, or
+ * any name in the families proxies use for it (`*forwarded*`, `x-real-*`, `x-original-*`,
+ * `*-client-ip`, `*-connecting-ip`), so a proxy's own variant (x-forwarded-server,
+ * x-original-forwarded-for, x-cluster-client-ip, fastly-client-ip) is caught too. A plain TCP
+ * forwarder adds no header at all and cannot be told from a direct client (docs §5.19).
+ * @param {string} name
+ */
+export function isForwardingHeader(name) {
+  return FORWARDING_HEADERS.includes(name) || name.includes('forwarded') || name.startsWith('x-real-') || name.startsWith('x-original-') || name.endsWith('-client-ip') || name.endsWith('connecting-ip');
+}
+
+/**
  * Whether an upgrade request came straight from this machine: the socket's own peer address is
  * loopback, the peer was not resolved through a trusted proxy, and no forwarding header is present.
  * @param {{ socket: { remoteAddress?: string }, headers: Record<string, unknown> }} request
@@ -47,7 +60,7 @@ export const FORWARDING_HEADERS = Object.freeze(['forwarded', 'x-forwarded-for',
 export function directLoopback(request, peer) {
   if (peer.proxied) return false;
   if (!OWNER_LOOPBACK.includes(request.socket.remoteAddress ?? '')) return false;
-  return !FORWARDING_HEADERS.some(name => request.headers[name] !== undefined);
+  return !Object.keys(request.headers).some(name => isForwardingHeader(name.toLowerCase()));
 }
 
 /**

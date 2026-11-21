@@ -14,7 +14,7 @@ nhất trước. Mỗi mục nói cái gì đổi, ai bị ảnh hưởng, và v
 - **Host owner** (khác Paseo, nơi app cục bộ là chủ daemon): việc đổi host trong Settings chỉ mở cho
   credential của `alp dashboard` trên kết nối loopback trực tiếp
   ([alp/remote-gateway.md](alp/remote-gateway.md) §5.19). Mọi credential của `alp-gateway` riêng, thiết
-  bị Paseo qua relay, proxy hay tunnel giữ nguyên hành vi: cùng lỗi `-32601 not_exposed` như trước.
+  bị Paseo qua relay, proxy có header chuyển tiếp giữ nguyên hành vi: cùng lỗi `-32601 not_exposed` như trước.
   Method đầu tiên là `daemon.usage` (trước đây denied cho mọi client của gateway).
 - **Protocol**: thêm capability `host.owner`, chỉ gateway của dashboard liệt kê trong hello cho owner;
   alpd không bao giờ liệt kê nó. Client cũ bỏ qua capability lạ, nên không phá client nào.

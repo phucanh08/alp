@@ -166,6 +166,8 @@ test('every v1 method is classified, and every exposed one has a permission, par
   for (const [method, entry] of Object.entries(EXPOSURE).filter(([, entry]) => entry.status === 'owner')) {
     assert.ok(entry.tests?.includes('owner'), `${method}: an owner method names the 'owner' test`);
     assert.ok(!entry.permission, `${method}: an owner method needs no permission a credential could hold`);
+    // Its params are validated against the v1 schema before any handler or alpd sees them.
+    assert.ok(Object.hasOwn(METHODS_V1.methods, method), `${method}: an owner method has a methods-v1 schema entry`);
   }
 });
 

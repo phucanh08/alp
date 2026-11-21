@@ -344,6 +344,12 @@ riêng, thiết bị Paseo qua relay, proxy hay tunnel (có header chuyển ti�
 đúng lỗi như trước (`-32601 not_exposed`). App biết mình là owner qua capability `host.owner` trong
 hello (`state.owner`, `useOwner()`), và gửi việc của owner bằng `controller.ownerRequest`.
 
+Giới hạn đã biết: một ALP agent chạy bằng cùng tài khoản mà đọc được `<ALP_HOME>/dashboard.json` thì có
+token và là host owner (nó chỉ không được tự khai là agent). Việc này không thêm quyền so với trước:
+token đó vốn đã tạo được session `full-access`. Bộ chuyển TCP trơn trên cùng máy (`ssh -R`, `socat`)
+không thêm header nên cũng không phân biệt được với client trực tiếp; nó vẫn cần token. Chi tiết ở
+remote-gateway.md §5.19.
+
 Settings bỏ bốn trang của Paseo, không còn mục nào trong nav:
 
 - **Voice**: ALP không có speech provider nào để cài trên host; agent của ALP nhận text.

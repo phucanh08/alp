@@ -9,7 +9,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { CAPABILITY } from '@anhlp/alp-protocol';
-import { EXPOSURE, FORWARDING_HEADERS, OWNER_LOOPBACK, createGateway, createGatewayLogger, CredentialStore, credentialsFile, directLoopback, ownerOptionError, resolveConfig, revokeCredential } from '../src/index.js';
+import { EXPOSURE, FORWARDING_HEADERS, OWNER_LOOPBACK, createGateway, createGatewayLogger, CredentialStore, credentialsFile, directLoopback, isForwardingHeader, ownerOptionError, resolveConfig, revokeCredential } from '../src/index.js';
 import { fakeDaemon } from './support/fake-daemon.js';
 import WebSocket from 'ws';
 import { AGENT_CAPABILITY, AlpRpcClient } from '@anhlp/alp-client/portable';
@@ -139,6 +139,13 @@ test('owner (e): only a direct loopback peer counts; a non-loopback, proxied or 
   }
   assert.equal(directLoopback(request('127.0.0.1'), { proxied: true }), false, 'through a trusted proxy');
   for (const header of FORWARDING_HEADERS) assert.equal(directLoopback(request('127.0.0.1', { [header]: 'x' }), { proxied: false }), false, header);
+  // A proxy's own variants of the forwarding headers count too (prefix/suffix families, isForwardingHeader).
+  for (const header of ['x-forwarded-server', 'x-original-forwarded-for', 'x-cluster-client-ip', 'fastly-client-ip', 'forwarded-for', 'x-real-port', 'x-original-host']) {
+    assert.equal(isForwardingHeader(header), true, header);
+    assert.equal(directLoopback(request('127.0.0.1', { [header]: 'x' }), { proxied: false }), false, header);
+  }
+  for (const header of ['host', 'origin', 'sec-websocket-protocol', 'user-agent', 'cookie']) assert.equal(isForwardingHeader(header), false, header);
+  assert.equal(directLoopback(request('127.0.0.1', { host: '127.0.0.1:7433', origin: 'http://127.0.0.1:7433' }), { proxied: false }), true, 'ordinary browser headers');
 });
 
 test('owner: an owner gateway is a plain loopback listener; any other config is refused at creation', async t => {
