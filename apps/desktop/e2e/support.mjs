@@ -23,6 +23,7 @@ import { _electron } from 'playwright-core';
 import { fixtureProcesses } from '../../../test/support/fixture-processes.js';
 import { teardown } from '../../../test/support/teardown.js';
 import { hermeticEnv } from '../../../scripts/test-lib.mjs';
+import { spawnCommand } from '../../../scripts/spawn-command.mjs';
 
 export const APP = path.resolve(import.meta.dirname, '..');
 const ROOT = path.resolve(APP, '..', '..');
@@ -334,7 +335,8 @@ export async function releaseMirror({ dir }, { version = '9.8.7', address }) {
     ].join('\n') + '\n');
     await chmod(path.join(root, 'bin', 'alp'), 0o755);
     const archive = path.join(mirror, `${name}.tar.gz`);
-    await exec('tar', ['-czf', archive, '-C', work, name]);
+    // Through spawnCommand (t-ffe4.6): the system tar on macOS, which is all this e2e runs on.
+    await exec(...spawnCommand('tar', ['-czf', archive, '-C', work, name]));
     archives.push(archive);
     lines.push(`${createHash('sha256').update(await readFile(archive)).digest('hex')}  ${name}.tar.gz`);
   }
