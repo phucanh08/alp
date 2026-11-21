@@ -69,6 +69,18 @@ test('host.files.write: a file changed since it was read is a conflict and is no
   assert.deepEqual(await readdir(path.join(root, 'src')), ['a.ts']);
 });
 
+test('host.files.write: a change after the temporary file was written is a conflict; the temporary is removed', async t => {
+  const { root, daemon } = await workspace(t);
+  const file = path.join(root, 'src', 'a.ts');
+  const read = await readFile(file, 'utf8');
+  const agentEdit = 'export const a = 7; // an agent edit during the save\n';
+  await assert.rejects(
+    writeWorkspaceFile({ daemon, params: { projectRoot: root, path: 'src/a.ts', content: 'mine\n', baseSha256: sha(read) } }, { beforeRename: () => writeFile(file, agentEdit) }),
+    refused(1004, 'revision_conflict'));
+  assert.equal(await readFile(file, 'utf8'), agentEdit, 'the agent edit is kept');
+  assert.deepEqual(await readdir(path.join(root, 'src')), ['a.ts'], 'no temporary file left');
+});
+
 test('host.files.write: each rejection writes nothing', async t => {
   const { root, outside, daemon } = await workspace(t);
   const base = sha('export const a = 1;\n');
