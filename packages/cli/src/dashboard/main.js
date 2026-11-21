@@ -9,6 +9,11 @@
  * It keeps alpd running (ALP_SUPERVISE=0 opts out) and keeps the credential's workspaces in step
  * with alpd's project registry.
  *
+ * Its gateway is created with `owner` (docs/alp/remote-gateway.md §5.19): its own credential, on a
+ * direct loopback socket, is the host owner and may call the methods the exposure matrix marks
+ * `owner`, answered by alpd or by the handlers of ./owner/. The credential is read live (grant.id),
+ * so after a rotate the old token is not the owner. Standalone `alp-gateway serve` has no owner.
+ *
  *   node alp-dashboard.js [--service] [--project DIR] [--port N]
  *   node alp-dashboard.js --rotate [--project DIR]
  * `--service` (how startIntegration starts it) writes the log to <home>/logs/integrations/alp-dashboard.log.
@@ -34,6 +39,7 @@ import { CredentialStore, createGateway, createGatewayLogger, parseToken, rename
 import { TERMINAL_EXEC_WARNING } from '@anhlp/alp-gateway/policy';
 import { createGrant, grantPermissions, dashboardGatewayHome } from './grant.js';
 import { createStaticServer } from './serve.js';
+import { ownerMethods } from './owner/index.js';
 import { daemonEntry as bundledDaemonEntry } from '@anhlp/alp-core/packaged';
 
 // __ALP_VERSION__ is replaced at build time (esbuild define); a run from source reports a placeholder.
@@ -250,6 +256,9 @@ async function run() {
     await grant.refresh();
     if (shuttingDown) return;
 
+    // The host owner's methods; a name defined twice stops the start here.
+    const methods = ownerMethods({ home, socket });
+    const owner = { credentialId: () => grant.id, methods };
     const dir = appDir();
     let bound = 0;
     const serveStatic = createStaticServer({ dir, csp: () => policy(bound), log: message => log.warn(message, { code: 'ALP_DASHBOARD_STATIC' }) });
@@ -267,7 +276,7 @@ async function run() {
         // (DEFAULT_LIMITS is frozen, so its type has the literal defaults; any positive number is valid.)
         limits: /** @type {any} */ ({ authFailures: 1_000 }),
       });
-      const candidate = createGateway({ config, store, logger: log, version: VERSION, openTransport: () => connectSocket(socket), serveStatic });
+      const candidate = createGateway({ config, store, logger: log, version: VERSION, openTransport: () => connectSocket(socket), serveStatic, owner });
       try {
         await candidate.listen();
         bound = port;
