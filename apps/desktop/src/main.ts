@@ -6,7 +6,7 @@
  */
 import { app, BrowserWindow, Menu, net, protocol, session, shell, type MenuItemConstructorOptions } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { lstat, readFile } from 'node:fs/promises';
+import { lstat, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +15,7 @@ import { isAllowedExternal, isAllowedPermission, isTokenRejection, navigationGua
 import { Reconnector } from './reconnect';
 import { isPageUrl, PAGE_SCHEME, pageUrl, resolvePage } from './pages';
 import { readSettings } from './settings';
-import { confirmAction, confirmQuery, installArgs, installEnv, installFailure, installPlan, installSource, latestRelease, type InstallPlan } from './install';
+import { confirmAction, confirmQuery, homeWarning, installArgs, installEnv, installFailure, installPlan, installSource, installWarnings, latestRelease, type InstallPlan } from './install';
 import { run } from './run';
 import type { DashboardAddress } from './url';
 
@@ -265,9 +265,12 @@ async function offerInstall(current: () => BrowserWindow | undefined) {
   if (!window) return;
   if ('error' in release) { await showMissing(undefined, window, `${release.error} You can install ALP from a terminal instead.`); return; }
   const plan = installPlan(release, source, os.homedir(), process.env);
+  // An existing home that is not private: install.sh only warns about it, and alpd would refuse it later.
+  const mode = await stat(plan.alpHome).then(info => (info.isDirectory() ? info.mode : undefined), () => undefined);
+  if (current() !== window) return;
   const nonce = randomUUID();
   pendingInstall = { nonce, plan };
-  await loadPage(window, 'install.html', confirmQuery(plan, nonce));
+  await loadPage(window, 'install.html', confirmQuery(plan, nonce, homeWarning(plan.alpHome, mode)));
   reveal(window);
 }
 
@@ -288,6 +291,7 @@ async function install(window: BrowserWindow, plan: InstallPlan) {
   installing = true;
   ++generation;
   let failure: string | undefined;
+  let warnings: string[] = [];
   const exists = (file: string) => lstat(file).then(() => true, () => false);
   const rootExisted = await exists(plan.root);
   try {
@@ -295,6 +299,7 @@ async function install(window: BrowserWindow, plan: InstallPlan) {
     const script = await readFile(installScript(), 'utf8');
     const result = await run('/bin/sh', ['-s', '--', ...installArgs(plan)], { input: script, env: installEnv(process.env), timeout: INSTALL_TIMEOUT_MS, killGroup: true });
     if (result.code !== 0) failure = installFailure(result);
+    else warnings = installWarnings(`${result.stdout}\n${result.stderr}`);
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
   } finally {
@@ -306,6 +311,12 @@ async function install(window: BrowserWindow, plan: InstallPlan) {
       ? `Nothing was installed (${plan.root} was not created).`
       : `The installer stopped before it finished; ALP ${plan.version} may be partly in place under ${plan.root}. Choose File › Connect again to use or reinstall it.`;
     await showError(`Installing ALP ${plan.version} failed: ${failure}\n\n${after}`, win && !win.isDestroyed() ? win : undefined);
+    return;
+  }
+  // Installed, but install.sh warned (an existing ALP home that is not private): connecting now would
+  // end on alpd refusing that home, so the warning and its fix come first.
+  if (warnings.length) {
+    await showError(`ALP ${plan.version} was installed in ${plan.appDir}, but the installer warned:\n\n${warnings.join('\n')}\n\nFix that, then choose File › Connect again.`, win && !win.isDestroyed() ? win : undefined);
     return;
   }
   await connect();
