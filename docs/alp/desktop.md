@@ -231,8 +231,19 @@ Ca cuối cài **bản phát hành thật** từ một bản sao tài sản củ
 trỏ tới thư mục chứa `SHA256SUMS` và archive darwin: alpd thật chạy dưới ALP home tạm (kiểm đường dẫn socket
 trước khi dừng), `alp dashboard --print` chạy được và cửa sổ mở nó.
 
+`apps/desktop/e2e/owner.spec.mjs` (t-ff83) chạy app với host owner thật: một alpd và `alp dashboard`
+dưới `HOME`/`ALP_HOME`/`TMPDIR` tạm (đường dẫn socket trong `alpd.lock` được kiểm nằm trong thư mục tạm
+trước mọi thay đổi), `alp` là một wrapper `env -i` chỉ giữ biến ALP, PATH (có `gh` giả, không mạng),
+HOME, TMPDIR; provider là `fake-codex.js` của `apps/web/e2e/support`:
+
+- sidebar: các repo Git thật đăng ký làm project, session nằm dưới workspace của nó, hàng mới nhất có
+  nhánh, `+thêm -bớt`, số PR và CI (từ `gh` giả, chỉ chạy trong các repo), icon `logo.svg` qua `<img>`,
+  ô chữ cái cho project không có icon, và Schedules liệt kê job đã tạo;
+- một thao tác owner trong Settings: General › Agents' language đặt English, `settings.json` ghi lại,
+  `alp language` đọc ra, vẫn còn sau khi tải lại trang.
+
 Teardown dùng `defer` của `test/support/teardown.js`: đóng Electron (quá 15 giây thì SIGKILL), dừng
-host, rồi mới xóa thư mục. App chạy với `HOME` tạm.
+host (với `owner.spec.mjs`: `alp dashboard --stop`, rồi `alp daemon stop`), rồi mới xóa thư mục. App chạy với `HOME` tạm.
 
 ```sh
 npm ci && node scripts/build-workspace.mjs cli   # ở gốc repo
