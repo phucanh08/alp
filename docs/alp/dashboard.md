@@ -470,6 +470,10 @@ Mọi client (owner hay không):
   bị ẩn.
 - **Icon project**: ô chữ cái màu (như trước) khi không có icon. Nhánh vẫn ở dòng meta theo Show ›
   Branch, từ registry, cho mọi hàng.
+- **Show mặc định như Paseo**: Branch bật, Host tắt, không có giờ ở cuối hàng (Last activity tắt);
+  Labels bật, Project tắt như trước (`DEFAULT_SIDEBAR_DISPLAY` trong `lib/preferences.js`).
+  Preferences đã lưu giữ nguyên; mỗi lần lưu ghi cả Show, nên mặc định mới chỉ tới trình duyệt chưa
+  từng lưu preference nào.
 
 Chỉ host owner (`state.owner`, §4.6; mọi request qua `controller.ownerRequest`). Client khác không
 gửi request nào trong số này, không thấy lỗi, hàng giống như trên:
@@ -485,11 +489,13 @@ gửi request nào trong số này, không thấy lỗi, hàng giống như trê
 - **Usage ở chân**: `daemon.usage`, mỗi provider một mục "<icon> 98% 5h  61% wk" (cửa sổ
   `five_hour`/5 giờ và `seven_day`/7 ngày); thiếu cửa sổ nào thì bỏ phần đó, không có usage thì không
   có dòng. Bấm mở Settings › Usage.
-- **Schedules**: hàng dưới Search, mở màn Schedules (`SchedulesScreen.tsx`): các job `schedule.list`
+- **Schedules**: hàng dưới Search (một mục của Settings › Sidebar › Header, ẩn/sắp xếp được; client
+  khác không thấy mục này ở cả sidebar lẫn Settings), mở màn Schedules (`SchedulesScreen.tsx`): các job `schedule.list`
   của mọi project root trong sidebar, pending trước theo giờ đến hạn; trạng thái, giờ đến hạn, dòng
   đầu prompt, link mở session. Chỉ đọc.
 - **New workspace** thay New session ở trên cùng: dialog nhập đường dẫn tuyệt đối, đăng ký bằng
-  `host.project.register` (như Settings › Projects). Client khác giữ New session.
+  `host.project.register` (như Settings › Projects). Client khác giữ New session. Settings › Sidebar
+  gọi mục đó là New workspace cho owner, New session cho client khác.
 
 Tải dữ liệu không chặn sidebar: facts và usage đọc nền, giữ trong state, đọc lại mỗi 60 s
 (`FACTS_REFRESH_MS`); facts đọc lại thêm 400 ms sau khi danh sách session đổi (session mới, turn kết
@@ -539,7 +545,7 @@ thì bỏ qua, hàng giữ dữ liệu cũ. Schedules đọc khi mở màn và m
 
 ## 7. Kiểm thử
 
-- Unit (`apps/web/tests`, 107 test):
+- Unit (`apps/web/tests`, 392 test ngày 2026-11-21; `cd apps/web && npm test`):
   - timeline projection;
   - controller, chạy với host JSON-RPC trong bộ nhớ: reconnect, resume, terminal, idle-close,
     stale answers, outcome unknown, task ifRev, create, children/questions, cancel, mode limit,
@@ -547,8 +553,10 @@ thì bỏ qua, hàng giữ dữ liệu cũ. Schedules đọc khi mở màn và m
     `user_message` và `turn.started`), attach đầu tiên timeout;
   - gateway (URL, ticket, lỗi HTTP);
   - preferences, layout (đọc dung thứ, không ghi token);
-  - boundary.
-- E2E (`apps/web/e2e`, Playwright, 21 test):
+  - boundary;
+  - sidebar facts (batch, diff/PR/usage).
+- E2E (`apps/web/e2e`, Playwright, 113 test ngày 2026-11-21: 111 pass, 2 skip là spec dùng provider
+  thật):
   - Mỗi spec dựng một host thật dùng một lần:
     - alpd từ `packages/daemon/dist`;
     - fake Codex tất định; Claude và Antigravity trỏ tới chương trình không tồn tại;
@@ -568,14 +576,20 @@ thì bỏ qua, hàng giữ dữ liệu cũ. Schedules đọc khi mở màn và m
       sessionStorage, reload, 4403 khi thêm project, `alp dashboard rotate`;
     - chat, new-session, settings, tabs, workspace;
     - sidebar-facts: session dưới mọi workspace; owner thấy diff/PR/CI trên hàng gần nhất, icon, usage,
-      Schedules, New workspace (facts và usage là fixture trong WebSocket của trang); non-owner không gửi
-      method owner nào;
+      Schedules, New workspace; non-owner không gửi method owner nào. `host.workspace.facts` là handler
+      thật của dashboard trên repo Git thật trong thư mục tạm, với một `gh` giả đứng đầu PATH của
+      process dashboard (không ra mạng); `schedule.list` đi qua gateway thật; chỉ `daemon.usage` là
+      fixture trong WebSocket của trang (usage thật cần tài khoản provider thật);
     - mobile.
 - Chạy E2E: `npm ci` ở gốc repo một lần (workspace dùng chung `node_modules` gốc), rồi
   `npm run test:alp-web:e2e` ở gốc hoặc `npm run test:e2e` trong `apps/web`. Cả hai đi qua
   `pretest:e2e` của `apps/web`: build lại `packages/cli`, `packages/daemon` và bundle web trước
   Playwright, nên dist cũ (lỗi "host too old: lacks attach.after") không còn xảy ra. Gọi thẳng
   `npx playwright test` thì bỏ qua bước này.
+- Chạy E2E với `ALP_AGENT_SESSION` và `ALP_HOME` **không đặt** (ví dụ `env -u ALP_AGENT_SESSION -u
+  ALP_HOME npx playwright test`): trong session của agent, `alp-gateway credential create` từ chối
+  chạy nên world không dựng được. Mỗi world tự dùng `ALP_HOME`/`ALP_GATEWAY_HOME` tạm của nó; đặt
+  `TMPDIR` riêng ngoài mọi checkout (không có thư mục `.alp` ở trên) và xoá đúng thư mục đó khi xong.
 - CI: job `alp-dashboard` trên `ubuntu-latest` và `macos-latest`, Node 22, chạy `npm run validate:web`.
   Khi lỗi, CI upload trace và ảnh. Service alp-dashboard và gateway cũng chạy trong job `windows-daemon` trên Windows (Node 22 và 24; xem §3.1).
 
