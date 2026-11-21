@@ -3,6 +3,7 @@
 // created with the owner option, and the printed link's token is the dashboard's own credential on
 // a direct loopback socket, so the page it opens is the host owner (state.owner). The standalone
 // alp-gateway of the same world (startWorld's gateway) has no owner: its tokens are the non-owners.
+// One helper for every owner spec (settings-host.spec.js, settings-library.spec.js).
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -25,7 +26,9 @@ export async function dashboardSettings(extra = {}) {
  * @param {Awaited<ReturnType<typeof import('./world.js').startWorld>>} world
  */
 export async function startDashboard(world) {
-  const env = { ...world.env, ALP_SUPERVISE: '0', ALP_DASHBOARD_APP: path.join(WEB, 'dist') };
+  // This world's alpd (no supervision of its own), the freshly built app, and a fast registry refresh
+  // so a project registered or removed reaches the grant (and the page) quickly.
+  const env = { ...world.env, ALP_SUPERVISE: '0', ALP_DASHBOARD_APP: path.join(WEB, 'dist'), ALP_DASHBOARD_GRANT_REFRESH_MS: '200' };
   const printed = (await run(process.execPath, [world.cli, 'dashboard', '--print'], { env, cwd: world.projects.main, timeout: 120_000 })).stdout.trim();
   const link = LINK.exec(printed);
   if (!link) throw new Error(`alp dashboard --print printed no link:\n${printed}`);

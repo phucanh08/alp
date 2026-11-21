@@ -222,6 +222,12 @@ export function TerminalsPage({ onNavigate }: { onNavigate: (page: Page) => void
 // Unavailable panels above, unchanged.
 
 /** A request's pending flag and error, for an owner action. */
+/** Whether the host owner's connection is open now: owner reads run (again) when this turns true. */
+function useOwnerOnline() {
+  const { connection, owner } = useAppState();
+  return connection.phase === 'open' && owner;
+}
+
 function useAction() {
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -250,7 +256,9 @@ function OwnerUsage() {
   const [data, setData] = React.useState<{ providers: UsageProvider[] } | null>(null);
   const { pending, error, run } = useAction();
   const load = React.useCallback((refresh: boolean) => run(async () => setData(await readUsage(controller, refresh))), [controller, run]);
-  React.useEffect(() => { void load(false); }, [load]);
+  const online = useOwnerOnline();
+  // Read again whenever the owner's connection opens (a grant change or a restart reconnects it).
+  React.useEffect(() => { if (online) void load(false); }, [online, load]);
   const providers = data?.providers ?? [];
   const parked = providers.reduce((sum, provider) => sum + (provider.parked ?? 0), 0);
   const now = Date.now();
@@ -396,7 +404,8 @@ function OwnerTerminals() {
   const [status, setStatus] = React.useState<Awaited<ReturnType<typeof terminalStatus>> | null>(null);
   const [confirming, setConfirming] = React.useState(false);
   const { pending, error, run } = useAction();
-  React.useEffect(() => { void run(async () => setStatus(await terminalStatus(controller))); }, [controller, run]);
+  const online = useOwnerOnline();
+  React.useEffect(() => { if (online) void run(async () => setStatus(await terminalStatus(controller))); }, [online, controller, run]);
   const set = async (allow: boolean) => {
     const next = await run(() => setTerminal(controller, allow, allow));
     if (next) { setStatus(next); setConfirming(false); }
@@ -411,10 +420,16 @@ function OwnerTerminals() {
           {status && !allowed && !confirming ? <Button size="sm" variant="secondary" disabled={pending} onClick={() => setConfirming(true)}>Allow…</Button> : null}
         </span>
       </Row>
+      {status && allowed ? (
+        <Row title="Paired Paseo app devices" hint={status.allowPaseoTerminal ? 'They can open terminals here too (alp terminal allow --paseo on the host). Turn that off on the host with alp terminal deny --paseo.' : 'They cannot open terminals here; only the host turns that on (alp terminal allow --paseo).'}>
+          <span data-testid="terminals-paseo"><Pill label={status.allowPaseoTerminal ? 'Allowed' : 'Off'} tone={status.allowPaseoTerminal ? 'warning' : 'muted'} /></span>
+        </Row>
+      ) : null}
       {status?.problem ? <p role="alert" className="border-t border-border px-4 py-3 text-xs text-destructive">{status.problem}</p> : null}
       {confirming && status ? (
         <div className="border-t border-border p-4" role="group" aria-label="Allow remote terminals" data-testid="terminals-confirm">
           <pre className="whitespace-pre-wrap rounded-md bg-secondary p-3 font-mono text-xs">{status.warning}</pre>
+          <p className="mt-2 text-xs text-muted-foreground">As alp terminal allow --yes: a Paseo-device permission already set on the host (alp terminal allow --paseo) is kept; the page shows it once allowed.</p>
           <div className="mt-3 flex gap-2">
             <Button size="sm" variant="destructive" disabled={pending} onClick={() => void set(true)}>Allow remote terminals</Button>
             <Button size="sm" variant="ghost" onClick={() => setConfirming(false)}>Cancel</Button>
@@ -443,8 +458,11 @@ function useOwnerRegistry() {
   const loading = useAction();
   const changing = useAction();
   const load = loading.run;
-  const reload = React.useCallback(() => load(async () => setRegistry(await ownerRegistry(controller))), [controller, load]);
-  React.useEffect(() => { if (online) void reload(); }, [online, reload]);
+  const reload = React.useCallback(() => load(async () => { setRegistry(await ownerRegistry(controller)); return true; }), [controller, load]);
+  // After a reconnect the view shows what the host now holds; a "may still have run" from the drop
+  // is then settled by the rows themselves, so it is cleared.
+  const clearChangeError = changing.setError;
+  React.useEffect(() => { if (online) void reload().then(read => { if (read) clearChangeError(null); }); }, [online, reload, clearChangeError]);
   /** Runs a change with the registry revision, then reloads this view and the shared list. */
   const run = changing.run;
   const change = React.useCallback(async (work: (revision: number) => Promise<unknown>) => {

@@ -9,16 +9,16 @@ import { mkdir, readFile, realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { freePort, startWorld } from './support/world.js';
+import { startWorld } from './support/world.js';
 import { closeWorldAfter } from './support/cleanup.js';
-import { startOwnerDashboard } from './support/host-owner.js';
+import { dashboardSettings, startDashboard } from './support/dashboard.js';
 import { connect } from './support/app.js';
 
 const FAKE_ACP = fileURLToPath(new URL('../../../test/support/fake-acp.js', import.meta.url));
 
 /** @type {Awaited<ReturnType<typeof startWorld>>} */
 let world;
-/** @type {Awaited<ReturnType<typeof startOwnerDashboard>>} */
+/** @type {Awaited<ReturnType<typeof startDashboard>>} */
 let dashboard;
 
 async function host(method, params = {}) {
@@ -28,13 +28,13 @@ async function host(method, params = {}) {
 
 test.beforeAll(async () => {
   test.setTimeout(240_000);
-  world = await startWorld({ settings: { dashboard: { port: await freePort() }, web: { relay: { enabled: false } } } });
+  world = await startWorld({ settings: await dashboardSettings() });
   // Two registered projects before the dashboard starts: its grant follows alpd's registry.
   for (const [index, directory] of [world.projects.main, world.projects.custom].entries()) {
     const { revision } = await host('project.list', {});
     await host('project.register', { directory: await realpath(directory), ifRevision: revision, requestId: `settings-host-${index}` });
   }
-  dashboard = await startOwnerDashboard(world);
+  dashboard = await startDashboard(world);
 });
 test.afterAll(async () => {
   if (world) await closeWorldAfter(world, async () => { await dashboard?.stop(); });
@@ -135,8 +135,17 @@ test('owner › Terminals turns the host\'s switch on after the CLI\'s warning, 
   await expect(settings.getByTestId('terminals-switch')).toHaveText('Allowed');
   expect(JSON.parse(await readFile(terminalFile, 'utf8'))).toEqual({ version: 1, allowRemoteTerminal: true });
   expect(await world.alp('terminal', 'status', '--json')).toContain('"allowRemoteTerminal":true');
-  await settings.getByRole('button', { name: 'Turn off' }).click();
-  await expect(settings.getByTestId('terminals-switch')).toHaveText('Off');
+  await expect(settings.getByTestId('terminals-paseo')).toHaveText('Off');
+  // Paseo-device access set on the host shows on the page (it is the host's, never turned on here).
+  await world.alp('terminal', 'allow', '--paseo', '--yes');
+  // Leaving the page and coming back reads the host's switch again.
+  await settings.getByTestId('settings-usage').click();
+  await settings.getByTestId('settings-terminals').click();
+  const again = settings;
+  await expect(again.getByTestId('terminals-paseo')).toHaveText('Allowed');
+  await again.getByRole('button', { name: 'Turn off' }).click();
+  await expect(again.getByTestId('terminals-switch')).toHaveText('Off');
+  await expect(again.getByTestId('terminals-paseo')).toHaveCount(0);
   expect(JSON.parse(await readFile(terminalFile, 'utf8'))).toEqual({ version: 1, allowRemoteTerminal: false });
 });
 
