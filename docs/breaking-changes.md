@@ -17,8 +17,13 @@ nhất trước. Mỗi mục nói cái gì đổi, ai bị ảnh hưởng, và v
 - **New workspace** (owner) đăng ký một thư mục của host (`host.project.register`); Paseo tạo
   workspace/worktree mới. Client không phải owner vẫn thấy New session ở trên cùng.
 - Usage ở chân (owner) đọc `daemon.usage`; icon provider là glyph vẽ lại, không phải logo của hãng.
-- Hàng Schedules và New workspace không nằm trong Settings › Sidebar (không ẩn/sắp xếp được); New
-  workspace chiếm chỗ của mục "New session" ở đó.
+- Schedules là một mục của Settings › Sidebar › Header (owner ẩn/sắp xếp được; danh sách đã lưu
+  không có nó thì được thêm vào cuối, hiện). New workspace chiếm chỗ mục "New session"; Settings ›
+  Sidebar gọi nó là New workspace cho owner.
+- **Show mặc định của sidebar đổi theo Paseo** (khác mặc định ALP trước đó): Branch bật, Host tắt,
+  không có giờ ở cuối hàng. Trước: Branch tắt, Host bật, có giờ. Preferences đã lưu trong trình duyệt
+  giữ nguyên: mỗi lần lưu ghi cả Show, nên ai đã lưu bất kỳ preference nào (kể cả theme) vẫn thấy Show
+  cũ; chỉ trình duyệt chưa từng lưu thấy mặc định mới. Đổi ở Display preferences › Show.
 
 ## 2026-11-21: Settings bỏ Voice, Pair device, Plugins, Metadata; việc đổi host chỉ cho host owner (t-a95b)
 
