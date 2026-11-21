@@ -11,4 +11,5 @@ export { CredentialStore, createCredential, reissueCredential, rotateCredential,
 export { TicketBook } from './tickets.js';
 export { EXPOSURE, PERMISSIONS, FORWARDED_CAPABILITIES, GATEWAY_ERROR, GATEWAY_REASON, SPEC_FIELDS, CONTENT_TYPES, GATEWAY_PROMPT_IMAGES, promptImageLimits, exposureOf, unclassified, workspaceOf } from './policy.js';
 export { upstreamConnector, daemonMonitor } from './upstream.js';
+export { OWNER_LOOPBACK, FORWARDING_HEADERS, directLoopback, ownerOptionError } from './owner.js';
 export { createGatewayLogger, scrubGatewaySecrets } from './log.js';

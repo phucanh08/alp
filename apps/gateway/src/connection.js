@@ -365,6 +365,8 @@ export class ClientConnection {
   /** @type {import('@anhlp/alp-protocol').TerminalLimits} */ #terminalLimits = gatewayTerminalLimits(undefined);
   /** alpd's terminal output events do not fit this gateway's frames: terminal.* is refused. */ #terminalFramesTooSmall = false;
   #terminalWatching = false;
+  /** The host owner hooks of an owner gateway (owner.js), else undefined: no owner method then. */
+  /** @type {{ isOwner: () => boolean, methods: Readonly<Record<string, import('./owner.js').OwnerHandler>> } | undefined} */ #owner;
   /** Terminals this connection attached: only their terminal.event notifications leave (§5.18). @type {Set<string>} */ #terminals = new Set();
 
   /**
@@ -372,10 +374,14 @@ export class ClientConnection {
    *   ws: import('ws').WebSocket, grant: import('./credentials.js').Grant, id: string,
    *   connectUpstream: () => Promise<Upstream>, limits: ConnectionLimits,
    *   logger: import('@anhlp/alp-core/log').Logger, onClosed: (connection: ClientConnection, code: number) => void,
+   *   owner?: { isOwner: () => boolean, methods: Readonly<Record<string, import('./owner.js').OwnerHandler>> },
    * }} options
+   *   `owner` (server.js, only on a gateway created with `owner`): `isOwner` answers, at each call,
+   *   whether this socket and its credential are the host owner's.
    */
-  constructor({ ws, grant, id, connectUpstream, limits, logger, onClosed }) {
+  constructor({ ws, grant, id, connectUpstream, limits, logger, onClosed, owner }) {
     this.id = id;
+    this.#owner = owner;
     this.principal = grant.id;
     this.#ws = ws;
     this.#grant = { ...grant, workspaces: [...grant.workspaces] };
@@ -721,6 +727,7 @@ export class ClientConnection {
     await this.#refreshWorktrees();
     const exposure = exposureOf(method);
     if (!exposure) throw new GatewayError(RPC_ERROR.methodNotFound, `Unknown method '${method}'`);
+    if (exposure.status === 'owner') return this.#ownerRequest(method, params, exposure);
     if (exposure.status !== 'exposed' || !exposure.permission) throw new GatewayError(RPC_ERROR.methodNotFound, `${method} is not available through the gateway`, { reason: GATEWAY_REASON.notExposed });
     const issues = validateParams(method, params);
     if (issues?.length) throw new GatewayError(RPC_ERROR.invalidParams, `Invalid params: ${issues.map(issue => `${issue.path || 'params'} ${issue.message}`).join('; ')}`, { reason: 'invalid_params', issues });
@@ -734,6 +741,40 @@ export class ClientConnection {
     const result = await handler(pick(params, exposure.params ?? []));
     await this.#eventTail;
     return result;
+  }
+
+  /**
+   * Whether this connection is the host owner's now (owner.js): an owner gateway, its socket direct
+   * from loopback and its credential the owner's (both in `isOwner`, the credential read afresh),
+   * and not marked as an ALP agent's.
+   */
+  #isOwner() {
+    if (!this.#owner || this.#agent || this.#grant.agent) return false;
+    try { return this.#owner.isOwner() === true; } catch { return false; }
+  }
+
+  /**
+   * A method the matrix marks `owner`: for any other connection, exactly the refusal of a denied
+   * method; for the owner, its owner handler, else alpd with the entry's params.
+   * @param {string} method @param {Record<string, any>} params @param {import('./policy.js').Exposure} exposure
+   */
+  async #ownerRequest(method, params, exposure) {
+    const refused = () => new GatewayError(RPC_ERROR.methodNotFound, `${method} is not available through the gateway`, { reason: GATEWAY_REASON.notExposed });
+    if (!this.#isOwner()) throw refused();
+    const issues = validateParams(method, params);
+    if (issues?.length) throw new GatewayError(RPC_ERROR.invalidParams, `Invalid params: ${issues.map(issue => `${issue.path || 'params'} ${issue.message}`).join('; ')}`, { reason: 'invalid_params', issues });
+    const handler = this.#owner && Object.hasOwn(this.#owner.methods, method) ? this.#owner.methods[method] : undefined;
+    if (handler) {
+      return handler({
+        method,
+        params: exposure.params ? pick(params, exposure.params) : params,
+        principal: this.principal,
+        daemon: { request: (name, values = {}) => this.#call(name, values) },
+      });
+    }
+    // Forwarded: only with the params the entry lists (none listed, nothing forwarded).
+    if (!exposure.params) throw refused();
+    return this.#call(method, pick(params, exposure.params));
   }
 
   /** The gateway's own handshake, answered once its handshake with alpd is done. @param {Record<string, any>} params */
@@ -761,7 +802,8 @@ export class ClientConnection {
       protocolVersion: PROTOCOL_VERSION,
       ...(typeof this.#daemonHello.daemonVersion === 'string' ? { daemonVersion: this.#daemonHello.daemonVersion } : {}),
       ...(hostLabel(this.#daemonHello.hostname) ? { hostname: hostLabel(this.#daemonHello.hostname) } : {}),
-      capabilities: [...this.#capabilities],
+      // host.owner is the gateway's own, never alpd's (FORWARDED_CAPABILITIES drops it): the owner's connection only.
+      capabilities: [...this.#capabilities, ...(this.#isOwner() ? [CAPABILITY.hostOwner] : [])],
       ...(this.#capabilities.includes('prompt.images') ? { promptImageLimits: promptImageLimits(this.#limits.maxFrame) } : {}),
       ...(this.#capabilities.includes('attachments') ? { attachmentLimits: { ...this.#attachmentLimits } } : {}),
       ...(this.#capabilities.includes('terminal') ? { terminalLimits: { ...this.#terminalLimits } } : {}),

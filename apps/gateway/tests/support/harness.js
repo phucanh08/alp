@@ -19,9 +19,10 @@ export async function until(check, what = 'condition', ms = 5000) {
 
 /**
  * @param {import('node:test').TestContext} t
- * @param {{ daemon: ReturnType<typeof import('./fake-daemon.js').fakeDaemon>, credentials?: Record<string, { workspaces: string[], permissions?: string[], modes?: string[], worktreeMappings?: string[], agent?: boolean | string }>, config?: object, serveStatic?: Function }} options
+ * @param {{ daemon: ReturnType<typeof import('./fake-daemon.js').fakeDaemon>, credentials?: Record<string, { workspaces: string[], permissions?: string[], modes?: string[], worktreeMappings?: string[], agent?: boolean | string }>, config?: object, serveStatic?: Function, owner?: (ids: Record<string, string>) => object }} options
+ * `owner` builds createGateway's owner option from the ids of the credentials made here.
  */
-export async function startGateway(t, { daemon, credentials = {}, config = {}, serveStatic }) {
+export async function startGateway(t, { daemon, credentials = {}, config = {}, serveStatic, owner }) {
   // One ordered list, shared with the calling test through teardown(t) (t-5294.6, review finding M).
   // This used to be three bare `t.after` hooks: one that closed the gateway and store and THEN
   // removed the directory, and two later ones terminating a socket and closing an SDK client. Since
@@ -46,7 +47,7 @@ export async function startGateway(t, { daemon, credentials = {}, config = {}, s
   const store = new CredentialStore({ home, logger, pollMs: 25 });
   const gateway = createGateway({
     config: resolveConfig({ port: 0, origins: [ORIGIN], ...config }),
-    store, logger, version: 'test', openTransport: daemon.open, monitorIntervalMs: 50, ...(serveStatic ? { serveStatic } : {}),
+    store, logger, version: 'test', openTransport: daemon.open, monitorIntervalMs: 50, ...(serveStatic ? { serveStatic } : {}), ...(owner ? { owner: owner(ids) } : {}),
   });
   defer(() => store.close());
   const address = await gateway.listen();
@@ -94,9 +95,9 @@ export async function startGateway(t, { daemon, credentials = {}, config = {}, s
   }
 
   /** The client SDK over the gateway, handshaken. */
-  async function sdk(label, { origin = ORIGIN } = {}) {
+  async function sdk(label, { origin = ORIGIN, headers } = {}) {
     const { body } = await ticket(tokens[label], { origin });
-    const transport = await connectWebSocket(wsUrl, { protocols: body.subprotocols, createSocket: (url, protocols) => new WebSocket(url, protocols, { origin }) });
+    const transport = await connectWebSocket(wsUrl, { protocols: body.subprotocols, createSocket: (url, protocols) => new WebSocket(url, protocols, { origin, ...(headers ? { headers } : {}) }) });
     const client = new AlpRpcClient(transport);
     defer(() => client.close());
     const greeting = await hello(client, { name: 'gateway-test', version: '0' });
