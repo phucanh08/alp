@@ -469,13 +469,18 @@ Cột Test dùng các mã sau:
 | `host.terminal.status`, `host.terminal.set` | — | host: `$ALP_HOME/terminal.json`; `allow` cần `confirm: true` sau cảnh báo | — | owner, `handler: true` | owner, -32601 |
 | `host.registry`, `host.workspace.update`, `host.workspace.label` | — | host: cả registry của alpd; archive, label (không placement) | — | owner, `handler: true` | owner, -32601 |
 | `host.project.register`, `host.project.remove` | — | host: thư mục bất kỳ có thật (kiểm trên host) | — | owner, `handler: true` | owner, -32601 |
+| `host.library.get` | — (gateway, `handler: true`) | host: entry của library host hoặc project qua `library.get` của alpd (env/header là marker) | — | owner (§5.19), handler của dashboard | owner, owner-library, -32601 |
+| `host.library.save`/`delete` | — (gateway, `handler: true`) | host: ghi agent, skill, team, MCP, hook ở library hoặc project qua `library.save`/`delete` của alpd, có `revision`; marker giữ secret, text mask bị từ chối | — | owner (§5.19), handler của dashboard | owner, owner-library, -32601 |
+| `host.library.test` | — (gateway, `handler: true`) | host: chạy MCP server hoặc hook một lần (`testEntry`) | — | owner (§5.19), handler của dashboard | owner, owner-library, -32601 |
+| `host.files.list`/`read` | — (gateway, `handler: true`) | workspace trong registry của alpd; path tương đối, không chặn; rồi `workspace.files.list/read` của alpd; `read` kèm sha256 | — | owner (§5.19), không cần `files.read` | owner, owner-files, -32601 |
+| `host.files.write` | — (gateway, `handler: true`) | như `host.files.read`; file thường đã có, một tên, không link; `baseSha256` khác → 1004; ≤ 1 MiB; ghi atomic | — | owner (§5.19), handler của dashboard | owner, owner-files, -32601 |
 | `assignment.recall` | — | không kiểm chứng được; gọi model | — | denied | -32601 |
 | `daemon.pause`/`resume`/`pauses` | — | host.admin | — | denied | -32601 |
 | `daemon.shutdown` | — | host | — | prohibited | -32601 |
 | `extension.register`/`unregister` | `extension.methods` | host | — | prohibited | -32601 |
 | `library.save`/`delete`/`duplicate`/`rename` | `library.project.write` | project | `library.write` | agents/skills project-only, policy `project-data`; no host/builtin collision, executable config or sidecars | 1003 / 1005 for old daemon |
 | `library.skills.set` | `library` | host | — | denied: ghi host | -32601 |
-| `settings.language.set` | `settings.language` | host | — | denied: ghi host | -32601 |
+| `settings.language.set` | `settings.language` | host (`settings.json`); `params: ['language']`, alpd trả lời | — | owner (§5.19, Settings › General): chỉ host owner; mọi credential khác như denied | owner, -32601 |
 
 ### 5.5 Grant có `modes`: drive và stop
 
@@ -1291,7 +1296,7 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
    - `library.get` ban đầu bị chặn; từ t-7679.14 đọc được với `project.read`, qua redaction của
      gateway (§5.7);
    - project-only agents/skills CRUD có qua `library.write` + `library.project.write`;
-     host `library.skills.set` và `settings.language.set` vẫn bị chặn;
+     host `library.skills.set` vẫn bị chặn; `settings.language.set` chỉ host owner (t-a95b, §5.19);
    - test `x-alp` chạy trên schema thật.
 3. Muốn expose thêm method, sửa `policy.js`:
    - `status: 'exposed'`, permission, params, scope;

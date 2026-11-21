@@ -392,6 +392,55 @@ params), `packages/cli/tests/dashboard-owner-host.test.js` (từng handler, giá
 chạy gì), `apps/web/e2e/settings-host.spec.js` (owner qua link `alp dashboard` làm việc chính của từng
 trang và host thấy kết quả; credential của `alp-gateway` riêng vẫn thấy bảng "not available").
 
+### 4.8 Settings: library and app pages (t-a95b nhóm C)
+
+Chỉ host owner (§4.6, `state.owner`) mới thay đổi được; mọi credential khác (gateway riêng, relay) thấy
+các trang y như trước, kể cả thông báo Unavailable. Các method owner nằm trong khối
+`// --- owner: library (group C) ---` của `apps/gateway/src/policy.js` (`handler: true`, chỉ các
+`params` liệt kê tới handler) và handler ở `packages/cli/src/dashboard/owner/library.js`; phía app là
+`apps/web/src/lib/owner-library.js`.
+
+- **Hooks, MCP servers** (`host.library.get/save/delete/test`): owner tạo, sửa, xoá và thử entry ở
+  library của host (`scope: library`, như `alp hook add/edit`, `alp mcp add/edit`) hoặc của project
+  đang mở (`scope: project`). Hook và MCP là form; trước khi ghi có bước **Review** cho thấy cái host sẽ
+  chạy: command và args, tên env/header (giá trị không bao giờ hiện), cwd hoặc URL, event và blocking
+  của hook. Đọc qua `library.get` của alpd: giá trị env/header về là marker `{ $secret: 'keep' }`, app
+  hiện `‹hidden on the host›` và nút Replace. Lưu mà không Replace thì app gửi lại marker và alpd
+  (`unredact`) giữ đúng giá trị đã lưu; handler từ chối mọi chuỗi chứa text mask (`secret_marker`), nên
+  mask không bao giờ được ghi. Test (nút *Test saved entry*) chạy `testEntry` của core như
+  `alp mcp test`/`alp hook test`, trong tiến trình dashboard, output cắt ở 16 KiB.
+- **Templates, Agents, Skills**: owner sửa cả entry của library host (không chỉ agent/skill của
+  project), dạng JSON của content; mở một entry built-in ở scope library rồi lưu là tạo bản của host.
+  Providers không nằm ở đây (Settings › Providers, nhóm B). Credential không phải owner giữ nguyên luật
+  `library.write` cũ (chỉ agent/skill của project).
+- **Files panel và Editor** (`host.files.list/read/write`): credential của dashboard **không** có
+  `files.read` và không được nới; owner đọc qua `host.files.list/read` (alpd `workspace.files.list/read`
+  trên kết nối của owner, sau khi handler kiểm projectRoot là workspace trong registry của alpd và
+  path tương đối, không `.`/`..`, không bị chặn). Mở file, bấm **Edit**, rồi **Save** (⌘/Ctrl+S).
+  `host.files.write` nằm ở handler của dashboard, không phải RPC mới của alpd: không đổi protocol, handler
+  chạy bằng đúng user đó, alpd vẫn là nguồn danh tính workspace (`workspace.list`). Nó từ chối: path tuyệt
+  đối, có `..`, thư mục trên đường đi là link (realpath phải trùng path), file là symlink hay hard link,
+  `.git`/`.alp`/`.env`/khoá (`blockedFilePath`), file chưa có (chỉ sửa), nội dung quá 1 MiB, workspace
+  không có trong registry. Điều kiện: `baseSha256` là sha256 của text đã đọc; khác thì `1004
+  revision_conflict` và không ghi gì, app giữ bản nháp. Ghi atomic: file tạm cạnh file (giữ mode), kiểm
+  lại inode và sha256, rồi rename.
+- **General › Agents' language**: setting ngôn ngữ thật của ALP là ngôn ngữ agent và ALP viết cho
+  người dùng (`alp language`, `settings.language.get/set`); app vẫn là tiếng Anh, không có i18n. Owner
+  đặt bất kỳ tên nào tối đa 40 ký tự hoặc Reset về mặc định (Vietnamese); `settings.language.set` từ
+  `denied` thành `owner`, alpd trả lời. Người khác thấy giá trị, chỉ đọc. Host › Overview vẫn hiện, chỉ
+  đọc, và chỉ về General: một control duy nhất.
+- **Chat**: bỏ dòng "Always expand reasoning": runtime không bao giờ phát reasoning (item `reasoning`
+  của Codex bị bỏ trong `nativeItem`, `packages/runtime/src/runtime.ts`), và
+  `git grep -nE "agent_thought|reasoning|thinking_delta" -- apps/web/src packages/protocol/src apps/gateway/src`
+  chỉ còn chính dòng đó.
+- **Files** (trang App): ALP không có plugin file panel; trang nói token này đọc được file không và sửa
+  được không.
+
+Kiểm chứng: `apps/gateway/tests/owner-library.test.js` (không owner và credential khác → `-32601
+not_exposed`, không handler nào chạy, alpd không nhận gì; owner nhận kết quả với đúng params),
+`packages/cli/tests/dashboard-owner-library.test.js` (từng lần từ chối, conflict, mask, marker),
+`apps/web/e2e/settings-library.spec.js` (qua `alp dashboard` thật: `e2e/support/dashboard.js`).
+
 ## 5. Phục hồi (theo bài học 09B-2)
 
 - Event đến trong lúc attach được buffer. Khi `reset`, app xóa projection rồi mới áp buffer.
