@@ -3,6 +3,23 @@
 Những chỗ ALP cố ý khác Paseo (upstream `getpaseo/paseo`) hoặc khác bản ALP trước, theo thứ tự mới
 nhất trước. Mỗi mục nói cái gì đổi, ai bị ảnh hưởng, và vì sao.
 
+## 2026-11-21: Sidebar như Paseo: session dưới mọi workspace, diff/PR/CI, Schedules, usage (t-ff83)
+
+- **Mọi client**: nhóm theo Project, sidebar liệt kê session của **mọi** workspace (trước chỉ
+  workspace đang mở), đọc `session.list` mỗi 15 s cho các workspace khác. Gập/mở theo từng project.
+- **Facts theo workspace, không theo agent worktree** (khác Paseo): ở Paseo mỗi agent có worktree
+  riêng nên mỗi hàng có diff, nhánh, PR, CI riêng. Ở ALP các session của một workspace dùng chung thư
+  mục, nên `host.workspace.facts` trả theo workspace và sidebar chỉ hiện chúng **một lần, trên hàng
+  session gần nhất** của workspace. Chỉ host owner thấy.
+- **Schedules là wake một lần của ALP, chỉ đọc** (khác Paseo): Paseo có schedule lặp lại tạo agent
+  mới; ALP có `schedule.*` mở một turn trên session gốc vào một giờ định trước. Màn Schedules chỉ liệt
+  kê (trạng thái, giờ, prompt, session); không tạo, tạm dừng hay sửa. Chỉ host owner.
+- **New workspace** (owner) đăng ký một thư mục của host (`host.project.register`); Paseo tạo
+  workspace/worktree mới. Client không phải owner vẫn thấy New session ở trên cùng.
+- Usage ở chân (owner) đọc `daemon.usage`; icon provider là glyph vẽ lại, không phải logo của hãng.
+- Hàng Schedules và New workspace không nằm trong Settings › Sidebar (không ẩn/sắp xếp được); New
+  workspace chiếm chỗ của mục "New session" ở đó.
+
 ## 2026-11-21: Settings bỏ Voice, Pair device, Plugins, Metadata; việc đổi host chỉ cho host owner (t-a95b)
 
 - **Bỏ trang** (khác Paseo): Settings của app web và ALP.app không còn Voice, Pair device, Plugins và Metadata,
