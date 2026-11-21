@@ -1,7 +1,8 @@
 import * as React from 'react';
 import {
-  Archive, CircleDashed, CircleGauge, CircleHelp, Clock, Copy, Folder, FolderCog, FolderPlus, GitBranch, History, ListChecks, LogOut, MoreHorizontal, MoreVertical,
-  Network, Pencil, Pin, PinOff, Plus, Search, Server, Settings, Settings2, Tag, Type, X,
+  Archive, CalendarClock, CircleCheck, CircleDashed, CircleGauge, CircleHelp, CircleX, Clock, Copy, Folder, FolderCog, FolderPlus, GitBranch, GitMerge, GitPullRequest,
+  GitPullRequestClosed, GitPullRequestDraft, History, ListChecks, LogOut, MoreHorizontal, MoreVertical, Network, Pencil, Pin, PinOff, Plus, Search, Server, Settings,
+  Settings2, Tag, Type, X,
 } from 'lucide-react';
 import { attentionReason, needsInput, type SessionSummary } from '../lib/controller.js';
 import { sessionBucket } from '../lib/attention.js';
@@ -16,6 +17,9 @@ import { cn } from '../lib/utils';
 import { isMacPlatform, shortcutLabel } from '../lib/shortcuts.js';
 import type { SidebarDisplay, SidebarItemId } from '../lib/preferences.js';
 import { filterProjects, groupByStatus, limitRows, resolveProjectFilters, sortSessions } from '../lib/sidebar-model.js';
+import { FACTS_REFRESH_MS, formatDiffCount, mostRecentSession, prLabel, readFacts, usageLine, type WorkspaceFacts } from '../lib/sidebar-facts.js';
+import { ownerRegistry, readUsage, registerDirectory, runtimeName, type UsageProvider } from '../lib/owner-host.js';
+import { ProviderIcon } from './ProviderIcon';
 import { useAppState, useController } from './store';
 import { StatusIndicator, type Bucket } from './status';
 import { WorktreeDialog } from './WorktreeActions';
@@ -103,29 +107,56 @@ function SectionHeader({ title, children, testId }: { title: string; children?: 
   );
 }
 
-type MetaItem = { key: string; icon: typeof Plus; text: string };
+type MetaItem = { key: string; icon: typeof Plus; text: string; className?: string; title?: string };
+
+const PR_ICONS = { open: GitPullRequest, draft: GitPullRequestDraft, merged: GitMerge, closed: GitPullRequestClosed } as const;
+const CI_ITEMS = {
+  passed: { icon: CircleCheck, className: 'text-green-600 dark:text-green-400' },
+  failed: { icon: CircleX, className: 'text-destructive' },
+  pending: { icon: Clock, className: 'text-amber-600 dark:text-amber-400' },
+} as const;
+
+/** The workspace's pull request and CI, as Paseo's row shows them after the branch (owner only). */
+export function factMeta(facts: WorkspaceFacts | undefined): MetaItem[] {
+  const items: MetaItem[] = [];
+  if (facts?.pr) items.push({ key: 'pr', icon: PR_ICONS[facts.pr.state], text: prLabel(facts.pr), title: `Pull request #${facts.pr.number} (${facts.pr.state})` });
+  if (facts?.ci) items.push({ key: 'ci', icon: CI_ITEMS[facts.ci].icon, text: facts.ci, className: CI_ITEMS[facts.ci].className, title: `CI ${facts.ci}` });
+  return items;
+}
+
+/** Paseo's diff counts at the row's trailing edge: +added in green, -removed in red. */
+function DiffCounts({ facts, className }: { facts: WorkspaceFacts; className?: string }) {
+  if (facts.additions === undefined && facts.deletions === undefined) return null;
+  return (
+    <span className={cn('shrink-0 text-xs tabular-nums', className)} data-testid="sidebar-row-diff" title={`${facts.additions ?? 0} added, ${facts.deletions ?? 0} removed (uncommitted and branch changes of the workspace)`}>
+      <span className="text-green-600 dark:text-green-400">+{formatDiffCount(facts.additions ?? 0)}</span>{' '}
+      <span className="text-red-600 dark:text-red-400">-{formatDiffCount(facts.deletions ?? 0)}</span>
+    </span>
+  );
+}
 
 /** Paseo's workspace row: status slot, title at 76% that lifts on hover, trailing time, the Show facts under it, kebab on hover. */
-function SessionRow({ session, title, meta, trailing, bucket, selected, canWrite, onSelect, onRename, onArchive }: {
-  session: SessionSummary; title: string; meta: MetaItem[]; trailing: string; bucket: Bucket; selected: boolean; canWrite: boolean;
+function SessionRow({ session, title, meta, trailing, facts, bucket, selected, canWrite, onSelect, onRename, onArchive }: {
+  session: SessionSummary; title: string; meta: MetaItem[]; trailing: string; facts?: WorkspaceFacts; bucket: Bucket; selected: boolean; canWrite: boolean;
   onSelect: () => void; onRename: () => void; onArchive: () => void;
 }) {
   const [menuOpen, setMenuOpen] = React.useState(false);
   const when = session.status === 'closed' ? 'Closed' : `Updated ${relativeTime(session.updatedAt ?? session.createdAt)}`;
   return (
     <li className={cn('group relative mb-0.5 rounded-lg', selected ? 'bg-sidebar-selected' : 'hover:bg-sidebar-hover active:bg-secondary', menuOpen && !selected && 'bg-sidebar-hover')}>
-      <button type="button" onClick={onSelect} aria-current={selected ? 'true' : undefined} data-testid="session-row" title={`${title} · ${when}`}
+      <button type="button" onClick={onSelect} aria-current={selected ? 'true' : undefined} data-testid="session-row" data-session-id={session.id} data-facts={facts ? 'true' : undefined} title={`${title} · ${when}`}
         className={cn('flex min-h-11 w-full min-w-0 items-start gap-2 rounded-lg py-2 pl-4 pr-3 text-left md:min-h-9', canWrite && 'max-md:pr-8', focusRing)}>
         <StatusIndicator bucket={bucket} />
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
             <span className={cn('min-w-0 flex-1 truncate text-sm leading-5 text-foreground', selected || menuOpen ? 'opacity-100' : 'opacity-[0.76] group-hover:opacity-100')}>{title}</span>
+            {facts ? <DiffCounts facts={facts} className={cn(canWrite && !trailing && 'md:group-hover:invisible', menuOpen && 'invisible')} /> : null}
             {trailing ? <span className={cn('shrink-0 text-xs text-muted-foreground tabular-nums', canWrite && 'md:group-hover:invisible', menuOpen && 'invisible')} data-testid="sidebar-workspace-timestamp">{trailing}</span> : null}
           </span>
           {meta.length ? (
             <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground" data-testid="sidebar-row-meta">
               {meta.map(item => (
-                <span key={item.key} className="flex min-w-0 max-w-full items-center gap-1" data-meta={item.key}>
+                <span key={item.key} className={cn('flex min-w-0 max-w-full items-center gap-1', item.className)} data-meta={item.key} title={item.title}>
                   <item.icon aria-hidden className="size-3 shrink-0" /><span className="truncate">{item.text}</span>
                 </span>
               ))}
@@ -151,8 +182,8 @@ function SessionRow({ session, title, meta, trailing, bucket, selected, canWrite
 }
 
 /** Paseo's project row: letter tile (a branch glyph for a worktree) that turns into the chevron on hover, muted name, + and the project's actions on hover. */
-function ProjectRow({ path, name, worktree, expanded, canWrite, actions, onToggle, onNewSession }: {
-  path: string; name: string; worktree: boolean; expanded: boolean; canWrite: boolean; actions: MenuItem[]; onToggle: () => void; onNewSession: () => void;
+function ProjectRow({ path, name, worktree, icon, expanded, canWrite, actions, onToggle, onNewSession }: {
+  path: string; name: string; worktree: boolean; icon?: string; expanded: boolean; canWrite: boolean; actions: MenuItem[]; onToggle: () => void; onNewSession: () => void;
 }) {
   const [menuOpen, setMenuOpen] = React.useState(false);
   return (
@@ -161,7 +192,9 @@ function ProjectRow({ path, name, worktree, expanded, canWrite, actions, onToggl
         className={cn('flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg p-2 pr-16 text-left md:min-h-9', focusRing)}>
         <span aria-hidden className="flex h-5 w-4 shrink-0 items-center justify-center">
           {worktree ? <GitBranch className="size-3.5 text-muted-foreground group-hover:hidden group-focus-within:hidden" />
-            : <span className="flex size-4 items-center justify-center rounded-[4px] text-[length:calc(9px*var(--ui-scale))] font-medium leading-none text-white group-hover:hidden group-focus-within:hidden"
+            // The project's own icon (host.workspace.facts, owner only) as an image, never as markup.
+            : icon ? <img src={icon} alt="" data-testid="project-icon" className="size-4 rounded-[4px] object-contain group-hover:hidden group-focus-within:hidden" />
+            : <span data-testid="project-letter-tile" className="flex size-4 items-center justify-center rounded-[4px] text-[length:calc(9px*var(--ui-scale))] font-medium leading-none text-white group-hover:hidden group-focus-within:hidden"
               style={{ backgroundColor: identityColor(path) }}>{name.slice(0, 1).toUpperCase()}</span>}
           <span className={cn('hidden size-3.5 text-muted-foreground group-hover:block group-focus-within:block transition-transform', expanded ? 'rotate-90' : '')}>›</span>
         </span>
@@ -271,6 +304,61 @@ function AddProjectDialog({ open, onClose, unregistered }: { open: boolean; onCl
   );
 }
 
+/**
+ * Paseo's New workspace, for the host owner: registers any directory of the host by its absolute
+ * path (host.project.register, as Settings › Projects does); it then joins the host's workspace
+ * list and this app's access.
+ */
+function NewWorkspaceDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const controller = useController();
+  const { connection } = useAppState();
+  const [directory, setDirectory] = React.useState('');
+  const [pending, setPending] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  React.useEffect(() => { if (open) { setDirectory(''); setError(null); } }, [open]);
+  const register = async () => {
+    if (!directory.trim() || pending) return;
+    setPending(true); setError(null);
+    try {
+      const { revision } = await ownerRegistry(controller);
+      await registerDirectory(controller, directory, revision);
+      void controller.refreshRegistry();
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally { setPending(false); }
+  };
+  return (
+    <Dialog open={open} onClose={onClose} title="New workspace"
+      description="Any existing directory on this host, by its absolute path. It joins the host's workspace list and this app's access; nothing in it changes."
+      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button disabled={!directory.trim() || pending || connection.phase !== 'open'} onClick={() => void register()} data-testid="new-workspace-register">{pending ? 'Adding…' : 'Add workspace'}</Button></>}>
+      <form onSubmit={event => { event.preventDefault(); void register(); }} className="flex flex-col gap-2">
+        <Input aria-label="Workspace directory" value={directory} onChange={event => setDirectory(event.target.value)} placeholder="/absolute/path/to/project" className="font-mono" autoFocus />
+        {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
+      </form>
+    </Dialog>
+  );
+}
+
+/** Paseo's usage line over the footer icons: per provider "<icon> 98% 5h  61% wk"; opens Settings › Usage. */
+function UsageLine({ providers, onOpen }: { providers: UsageProvider[]; onOpen: () => void }) {
+  const entries = usageLine(providers);
+  if (!entries.length) return null;
+  return (
+    <div className="shrink-0 border-t border-border px-2 py-1.5">
+      <button type="button" onClick={onOpen} data-testid="sidebar-usage-line" aria-label={`Usage: ${entries.map(entry => `${runtimeName(entry.runtime)} ${entry.parts.map(part => `${part.used}% ${part.key === '5h' ? '5 hours' : 'week'}`).join(', ')}`).join('; ')}`}
+        title="Open usage" className={cn('flex w-full flex-wrap items-center gap-x-4 gap-y-1 rounded-md px-2 py-1 text-left text-xs text-muted-foreground hover:text-foreground', rowFill, focusRing)}>
+        {entries.map(entry => (
+          <span key={entry.runtime} className="flex items-center gap-1.5 tabular-nums" data-testid="sidebar-usage-provider" data-runtime={entry.runtime}>
+            <ProviderIcon runtime={entry.runtime} />
+            {entry.parts.map(part => <span key={part.key} data-window={part.key} className="whitespace-nowrap">{part.used}% {part.key}</span>)}
+          </span>
+        ))}
+      </button>
+    </div>
+  );
+}
+
 /** Rename workspace (workspace.update title): a blank name goes back to the directory's. */
 function RenameWorkspaceDialog({ row, onClose }: { row: RegistryRow | null; onClose: () => void }) {
   const controller = useController();
@@ -287,8 +375,11 @@ function RenameWorkspaceDialog({ row, onClose }: { row: RegistryRow | null; onCl
   );
 }
 
-export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShortcuts, onNavigate, onClose, onHistory, historyOpen, onTasks, tasksOpen, onOpenSession, searchRequest, onSearchRequestHandled }: {
+export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShortcuts, onNavigate, onClose, onHistory, historyOpen, onTasks, tasksOpen, onSchedules, schedulesOpen, onOpenSession, searchRequest, onSearchRequestHandled }: {
   onNewSession: () => void;
+  /** The Schedules row (host owner only): the scheduled wakes of every workspace, read only. */
+  onSchedules?: () => void;
+  schedulesOpen?: boolean;
   /** The footer's Tasks row (Settings › Sidebar): ALP's tasks full screen. */
   onTasks?: () => void;
   tasksOpen?: boolean;
@@ -311,10 +402,12 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
 }) {
   const controller = useController();
   const state = useAppState();
-  const { principal, workspace, sessions, selected, connection, preferences } = state;
+  const { principal, workspace, sessions, selected, connection, preferences, owner } = state;
   const display = preferences.sidebarDisplay;
   const mac = React.useMemo(() => isMacPlatform(), []);
-  const [collapsed, setCollapsed] = React.useState(false);
+  // Projects the person folded; every other project shows its sessions (Paseo's sidebar).
+  const [folded, setFolded] = React.useState<Record<string, boolean>>({});
+  const [addingWorkspace, setAddingWorkspace] = React.useState(false);
   const [searching, setSearching] = React.useState(false);
   const [query, setQuery] = React.useState('');
   const [showAll, setShowAll] = React.useState<Record<string, boolean>>({});
@@ -338,27 +431,55 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
   const needle = query.trim().toLowerCase();
   const matches = (session: SessionSummary) => !needle || sessionName(session).toLowerCase().includes(needle);
 
-  // Grouped by status, the section shows every project's sessions (Paseo's status list): the open
-  // workspace's come live from the controller, the others are read every 15 s while it shows.
+  // Every project shows its sessions, in either grouping (Paseo's sidebar): the open workspace's come
+  // live from the controller, the others are read every 15 s (session.list, any client).
   const [others, setOthers] = React.useState<Record<string, SessionSummary[]>>({});
   const otherPaths = allProjects.filter(path => path !== workspace).join('\n');
   React.useEffect(() => {
-    if (display.grouping !== 'status' || !online) return;
+    if (!online) return;
     let live = true;
     const read = () => { void controller.listWorkspaceSessions(otherPaths ? otherPaths.split('\n') : []).then(lists => { if (live) setOthers(lists); }); };
     read();
     const timer = setInterval(read, 15_000);
     return () => { live = false; clearInterval(timer); };
-  }, [controller, display.grouping, online, otherPaths]);
+  }, [controller, online, otherPaths]);
+  const sessionsOf = (path: string): SessionSummary[] => path === workspace ? sessions.list : others[path] ?? [];
+
+  // The host owner's extras (state.owner; never requested on any other connection): each
+  // workspace's facts and the account usage, read in the background, again every 60 s, and the
+  // facts again when a session starts or a turn ends (a session's update time moves).
+  const ownerLive = owner && online;
+  const [facts, setFacts] = React.useState<Record<string, WorkspaceFacts>>({});
+  const [usage, setUsage] = React.useState<UsageProvider[]>([]);
+  const factIds = allProjects.map(path => registryOf(path)[0]?.id).filter((id): id is string => !!id).sort().join('\n');
+  const activity = allProjects.map(path => sessionsOf(path).map(session => `${session.id}:${session.updatedAt ?? session.createdAt ?? ''}`).sort().join(',')).join('|');
+  React.useEffect(() => {
+    if (!ownerLive || !factIds) return;
+    let live = true;
+    const read = () => { void readFacts(controller, factIds.split('\n')).then(next => { if (live) setFacts(current => ({ ...current, ...next })); }); };
+    // Session events come in bursts (a turn's updates): one read after they settle.
+    const soon = setTimeout(read, 400);
+    const timer = setInterval(read, FACTS_REFRESH_MS);
+    return () => { live = false; clearTimeout(soon); clearInterval(timer); };
+  }, [controller, ownerLive, factIds, activity]);
+  React.useEffect(() => {
+    if (!ownerLive) { setUsage([]); return; }
+    let live = true;
+    const read = () => { void readUsage(controller).then(result => { if (live) setUsage(result.providers); }, () => {}); };
+    read();
+    const timer = setInterval(read, FACTS_REFRESH_MS);
+    return () => { live = false; clearInterval(timer); };
+  }, [controller, ownerLive]);
 
   const updateDisplay = (change: Partial<SidebarDisplay>) => controller.updatePreferences({ sidebarDisplay: { ...display, ...change } });
+  const setFold = (path: string, value: boolean) => setFolded(current => ({ ...current, [path]: value }));
   const toggle = (path: string) => {
-    if (path === workspace) { setCollapsed(value => !value); return; }
-    setCollapsed(false);
+    if (path === workspace) { setFold(path, !folded[path]); return; }
+    setFold(path, false);
     controller.selectWorkspace(path);
   };
   const startIn = (path: string) => {
-    if (path !== workspace) { setCollapsed(false); controller.selectWorkspace(path); }
+    if (path !== workspace) { setFold(path, false); controller.selectWorkspace(path); }
     onNewSession();
     onNavigate();
   };
@@ -373,7 +494,6 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
   React.useEffect(() => {
     if (!searchRequest) return;
     setSearching(true);
-    setCollapsed(false);
     setSearchFocus(value => value + 1);
     onSearchRequestHandled?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -403,10 +523,24 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     };
   };
   const bucketFor = (session: SessionSummary) => bucketOf(session, needsInput(state, session.id), attentionReason(state, session.id));
+  /** The session that carries its workspace's facts: the workspace's most recent one (owner only). */
+  const factsFor = (path: string, session: SessionSummary): WorkspaceFacts | undefined => {
+    if (!owner) return undefined;
+    const id = mainRow(path)?.id;
+    const found = id ? facts[id] : undefined;
+    return found && mostRecentSession(sessionsOf(path))?.id === session.id ? found : undefined;
+  };
   const sessionRow = (path: string, session: SessionSummary) => {
     const row = rowFor(path, session);
+    const own = factsFor(path, session);
+    if (own) {
+      // The registry's branch shows first (Show › Branch); the facts' fills in when it has none.
+      if (display.rowItems.branch && own.branch && !row.meta.some(item => item.key === 'branch')) row.meta.unshift({ key: 'branch', icon: GitBranch, text: own.branch });
+      const branchAt = row.meta.findIndex(item => item.key === 'branch');
+      row.meta.splice(branchAt + 1, 0, ...factMeta(own));
+    }
     return (
-      <SessionRow key={session.id} session={session} title={row.title} meta={row.meta} trailing={row.trailing} selected={session.id === selected && !historyOpen} canWrite={canWrite}
+      <SessionRow key={session.id} session={session} title={row.title} meta={row.meta} trailing={row.trailing} facts={own} selected={session.id === selected && !historyOpen && !schedulesOpen} canWrite={canWrite}
         bucket={bucketFor(session)} onSelect={() => openSession(path, session.id)} onRename={() => onRename(session)} onArchive={() => onArchive(session)} />
     );
   };
@@ -434,25 +568,30 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
   };
 
   const projectBlock = (path: string) => {
-    const expanded = path === workspace && (!collapsed || !!needle);
+    const current = path === workspace;
+    const expanded = !folded[path] || !!needle;
     const row = mainRow(path);
-    const list = sortSessions(sessions.list.filter(matches), display.sort);
+    const all = sessionsOf(path);
+    const list = sortSessions(all.filter(matches), display.sort);
     const limited = limitRows(list, !!showAll[path] || !!needle, bucketFor);
+    // Searching hides a project none of whose sessions match (the open one keeps its message).
+    if (needle && !current && !list.length) return null;
+    const icon = owner && row ? facts[row.id]?.icon : undefined;
     return (
-      <div key={path} className={cn(expanded && 'pb-3')} data-testid="sidebar-project" data-path={path} data-workspace-id={row?.id} data-pinned={row?.pinnedAt ? 'true' : undefined}
-        data-branch={row?.branch ?? undefined} data-worktree={row?.managedWorktree ? 'true' : undefined}>
-        <ProjectRow path={path} name={projectName(path)} worktree={!!row?.managedWorktree} expanded={expanded} canWrite={canWrite && online} actions={projectActions(path)}
+      <div key={path} className={cn(expanded && (current || list.length > 0) && 'pb-3')} data-testid="sidebar-project" data-path={path} data-workspace-id={row?.id} data-pinned={row?.pinnedAt ? 'true' : undefined}
+        data-branch={row?.branch ?? undefined} data-worktree={row?.managedWorktree ? 'true' : undefined} data-current={current ? 'true' : undefined}>
+        <ProjectRow path={path} name={projectName(path)} worktree={!!row?.managedWorktree} icon={icon} expanded={expanded} canWrite={canWrite && online} actions={projectActions(path)}
           onToggle={() => toggle(path)} onNewSession={() => startIn(path)} />
         {expanded ? (
           <div>
-            {sessions.status === 'loading' && !sessions.list.length ? <div className="py-2 pl-4"><Spinner label="Loading sessions…" className="text-xs" /></div> : null}
-            {sessions.status === 'error' ? (
+            {current && sessions.status === 'loading' && !sessions.list.length ? <div className="py-2 pl-4"><Spinner label="Loading sessions…" className="text-xs" /></div> : null}
+            {current && sessions.status === 'error' ? (
               <div className="mx-1 mb-1 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive" role="alert">
                 {sessions.error?.message}{' '}
                 <button type="button" className="text-highlight underline-offset-4 hover:underline" onClick={() => void controller.refreshSessions()}>Try again</button>
               </div>
             ) : null}
-            {sessions.status === 'ready' && !sessions.list.length ? (
+            {current && sessions.status === 'ready' && !sessions.list.length ? (
               canWrite && online ? (
                 // Paseo's ghost row: the visible "New session" with the per-project name for assistive tech.
                 <button type="button" onClick={() => startIn(path)} aria-label={`Start a session in ${projectName(path)}`}
@@ -462,7 +601,7 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
                 </button>
               ) : <p className="flex min-h-9 items-center py-2 pl-10 pr-3 text-sm text-muted-foreground">No sessions yet</p>
             ) : null}
-            {needle && sessions.list.length && !list.length ? (
+            {current && needle && all.length && !list.length ? (
               <p className="flex min-h-9 items-center py-2 pl-10 pr-3 text-sm text-muted-foreground">No sessions match “{query.trim()}”</p>
             ) : null}
             <ul>{limited.visible.map(session => sessionRow(path, session))}</ul>
@@ -496,10 +635,13 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
 
   const navItem = (id: SidebarItemId) => {
     switch (id) {
-      case 'new-session': return <NavRow icon={Plus} label="New session" onClick={() => { onNewSession(); onNavigate(); }} disabled={!workspace || !canWrite || !online}
-        title={!canWrite ? 'Your access token cannot start sessions.' : undefined} shortcut={shortcutLabel('session.new', mac)} />;
+      // The host owner adds a workspace here, as Paseo's New workspace; anyone else starts a session.
+      case 'new-session': return owner
+        ? <NavRow icon={Plus} label="New workspace" onClick={() => setAddingWorkspace(true)} disabled={!online} testId="sidebar-new-workspace" />
+        : <NavRow icon={Plus} label="New session" onClick={() => { onNewSession(); onNavigate(); }} disabled={!workspace || !canWrite || !online}
+          title={!canWrite ? 'Your access token cannot start sessions.' : undefined} shortcut={shortcutLabel('session.new', mac)} />;
       case 'history': return <NavRow icon={History} label="History" onClick={() => { onHistory(); onNavigate(); }} active={historyOpen} disabled={!workspace} testId="sidebar-history" />;
-      case 'search': return <SearchRow query={query} onQuery={setQuery} open={searching} onOpen={() => { setSearching(true); setCollapsed(false); }} onClose={closeSearch}
+      case 'search': return <SearchRow query={query} onQuery={setQuery} open={searching} onOpen={() => setSearching(true)} onClose={closeSearch}
         focusRequest={searchFocus} />;
       case 'tasks': return <NavRow icon={ListChecks} label="Tasks" onClick={() => { onTasks?.(); onNavigate(); }} active={tasksOpen} disabled={!workspace || !onTasks} testId="sidebar-tasks" />;
     }
@@ -511,6 +653,8 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
       <div className="flex shrink-0 flex-col gap-0.5 border-b border-border pb-1.5 pt-2">
         {/* Settings › Sidebar › Header orders these and hides any of them (Paseo's sidebar nav items). */}
         {preferences.sidebar.header.filter(item => item.visible).map(item => <React.Fragment key={item.id}>{navItem(item.id)}</React.Fragment>)}
+        {/* Paseo's Schedules row, for the host owner: ALP's scheduled wakes, read only. */}
+        {owner && onSchedules ? <NavRow icon={CalendarClock} label="Schedules" onClick={() => { onSchedules(); onNavigate(); }} active={schedulesOpen} disabled={!online} testId="sidebar-schedules" /> : null}
       </div>
       {onClose ? (
         <button type="button" aria-label="Close sessions" onClick={onClose}
@@ -543,6 +687,7 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
           {footerItems.map(item => <React.Fragment key={item.id}>{navItem(item.id)}</React.Fragment>)}
         </div>
       ) : null}
+      {owner ? <UsageLine providers={usage} onOpen={() => onSettings('usage')} /> : null}
       {/* Paseo's footer line: Add project, Usage, Hosts, then Help and Settings at the end. */}
       <div className="flex shrink-0 items-center border-t border-border px-2 py-1.5" data-testid="sidebar-footer-bottom-line">
         <FooterButton label="Add project" onClick={() => setAddingProject(true)} testId="sidebar-add-project"><FolderPlus aria-hidden /></FooterButton>
@@ -568,6 +713,7 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
         <FooterButton label="Settings" onClick={() => onSettings()} testId="sidebar-settings"><Settings aria-hidden /></FooterButton>
       </div>
       <AddProjectDialog open={addingProject} onClose={() => setAddingProject(false)} unregistered={unregistered} />
+      {owner ? <NewWorkspaceDialog open={addingWorkspace} onClose={() => setAddingWorkspace(false)} /> : null}
       <RenameWorkspaceDialog row={renaming} onClose={() => setRenaming(null)} />
       {worktree ? <WorktreeDialog workspaceId={worktree.row.id} managed={!!worktree.row.managedWorktree} online={online} open onClose={() => setWorktree(null)} /> : null}
     </nav>

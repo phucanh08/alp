@@ -25,6 +25,7 @@ import { closeRange } from '../lib/tab-close.js';
 import type { PanelKind } from './panels';
 import { SplitView, WorkspaceHeader } from './Workspace';
 import { TasksScreen } from './TasksScreen';
+import { SchedulesScreen } from './SchedulesScreen';
 import { paneIds, type Direction } from '../lib/panes.js';
 import { ResizeHandle, usePanelWidth } from './ResizeHandle';
 
@@ -292,15 +293,17 @@ function Shell() {
   const [tabMenuRequest, setTabMenuRequest] = React.useState(0);
   // ALP's tasks board in place of the workspace (Open ALP tasks full screen), as History.
   const [tasksScreen, setTasksScreen] = React.useState(false);
-  const toWorkspace = () => { setHistory(false); setTasksScreen(false); };
-  const openHistory = () => { setTasksScreen(false); setHistory(true); };
+  // The host owner's Schedules list in place of the workspace (the sidebar's Schedules row), as History.
+  const [schedulesScreen, setSchedulesScreen] = React.useState(false);
+  const toWorkspace = () => { setHistory(false); setTasksScreen(false); setSchedulesScreen(false); };
+  const openHistory = () => { setTasksScreen(false); setSchedulesScreen(false); setHistory(true); };
   // The workspace's tabs are not on screen.
-  const away = history || tasksScreen;
+  const away = history || tasksScreen || schedulesScreen;
   const controller = useController();
   const { selected, workspace, principal, connection, sessions, tree } = useAppState();
   const canWrite = can(principal ?? undefined, 'session.write');
   // A session opened or started from anywhere brings the workspace back in place of History.
-  React.useEffect(() => { if (selected) { setHistory(false); setTasksScreen(false); } }, [selected]);
+  React.useEffect(() => { if (selected) { setHistory(false); setTasksScreen(false); setSchedulesScreen(false); } }, [selected]);
   // Desktop keeps both panels docked and lets the header toggles hide them; narrower screens
   // show each as an overlay the toggles open.
   const [navHidden, setNavHidden] = React.useState(false);
@@ -361,6 +364,7 @@ function Shell() {
       case 'tasks.screen':
         if (!workspace) return false;
         setHistory(false);
+        setSchedulesScreen(false);
         setTasksScreen(true);
         return;
       case 'settings.toggle': setCommandCenter(false); setSettings(value => !value); return;
@@ -392,12 +396,19 @@ function Shell() {
           {...(!medium && !navOpen ? { inert: true } : {})}>
           {medium ? <ResizeHandle which="sidebar" side="right" width={sidebarWidth.width} onWidth={sidebarWidth.setWidth} onCommit={sidebarWidth.save} testId="left-sidebar-resize-handle" /> : null}
           <Sidebar onNewSession={() => { toWorkspace(); newSession(); }} onRename={setRenaming} onArchive={setArchiving} onSettings={page => setSettings(page ?? true)} onShortcuts={() => setShortcuts(true)} onNavigate={() => setNavOpen(false)} onClose={medium ? undefined : () => setNavOpen(false)}
-            onHistory={() => openHistory()} historyOpen={history} onTasks={() => { if (workspace) { setHistory(false); setTasksScreen(true); } }} tasksOpen={tasksScreen} onOpenSession={() => toWorkspace()} searchRequest={searchRequest} onSearchRequestHandled={() => setSearchRequest(0)} />
+            onHistory={() => openHistory()} historyOpen={history} onTasks={() => { if (workspace) { setHistory(false); setSchedulesScreen(false); setTasksScreen(true); } }} tasksOpen={tasksScreen}
+            onSchedules={() => { setHistory(false); setTasksScreen(false); setSchedulesScreen(true); }} schedulesOpen={schedulesScreen} onOpenSession={() => toWorkspace()} searchRequest={searchRequest} onSearchRequestHandled={() => setSearchRequest(0)} />
         </div>
       )}
 
       <main className="flex min-w-0 flex-1 flex-col bg-background">
-        {tasksScreen ? (
+        {schedulesScreen ? (
+          <>
+            <ReconnectBanner />
+            <SchedulesScreen navOpen={navShown} onToggleNav={toggleNav} onClose={toWorkspace}
+              onOpenSession={(root, id) => { if (root !== workspace && principal?.workspaces.includes(root)) controller.selectWorkspace(root); controller.selectSession(id); toWorkspace(); }} />
+          </>
+        ) : tasksScreen ? (
           <>
             <ReconnectBanner />
             <TasksScreen navOpen={navShown} onToggleNav={toggleNav} onClose={toWorkspace} />
