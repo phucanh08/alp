@@ -489,7 +489,7 @@ gửi request nào trong số này, không thấy lỗi, hàng giống như trê
   thông tin này thuộc **workspace** (thư mục), không thuộc session, nên chỉ hiện **một lần, trên hàng
   session gần nhất của workspace trong các hàng đang hiện** (session có `updatedAt`, hoặc `createdAt`,
   mới nhất; hoà thì theo id; hàng bị "Show more" gập đi hay bị Search lọc ra không giữ thông tin này).
-  Mất quyền owner thì thông tin đã đọc bị xoá khỏi sidebar. Workspace không có session thì không hiện gì thêm. Hàng đó có `+thêm` (xanh) `-bớt` (đỏ) ở
+  Mất quyền owner thì thông tin đã đọc bị xoá khỏi sidebar. Đóng một session cũng cập nhật `updatedAt`, nên thông tin này có thể chuyển sang session vừa đóng (giữ như vậy, quyết định t-ff83). Workspace không có session thì không hiện gì thêm. Hàng đó có `+thêm` (xanh) `-bớt` (đỏ) ở
   bên phải; dòng thứ hai: nhánh · số PR (mở: `2`; `344 Merged`, `7 Draft`, `9 Closed`) · CI
   (`passed`, `failed`, `pending`). Nhánh của facts chỉ dùng khi registry không có và Show › Branch bật.
 - **Icon project**: khi facts có `icon` (URL `data:image/...;base64`) thì hiện bằng `<img>`, không

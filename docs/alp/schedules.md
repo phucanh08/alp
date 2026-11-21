@@ -14,6 +14,10 @@ alp schedule show sch_0123456789abcdef --project /absolute/project --json
 alp schedule cancel sch_0123456789abcdef --project /absolute/project --json
 ```
 
+`alp schedule create` needs the session to be open when the job is made: for an idle or closed
+session it answers `Session SESSION_ID is not open`. Open (resume) the session first, for example
+from the dashboard or with `session.create { resume: true }`, then create the job.
+
 `--at` requires seconds and `Z` or an explicit UTC offset. The offset identifies the
 instant; daylight-saving transitions do not reinterpret an already saved job. Output
 uses UTC. `--session` is required: no session is guessed or created. `--prompt` is the
