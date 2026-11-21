@@ -59,6 +59,10 @@ test('the release archive holds the bundle directory alp-<version>-<os>-<arch>/'
   assert.throws(() => archiveName('1.0.0', 'windows-arm64'), /No release archive/);
   assert.equal(archiveName('1.0.0', 'windows-x64'), 'alp-1.0.0-windows-x64');
   assert.throws(() => archiveName('../1', 'linux-x64'), /Invalid version/);
+  // t-81b0.10: the release directory also holds the desktop DMGs and their own DESKTOP-SHA256SUMS;
+  // SHA256SUMS, which install.sh, install.ps1, `alp update` and the desktop app parse, never lists them.
+  await writeFile(path.join(out, 'ALP-1.2.3-arm64.dmg'), 'dmg');
+  await writeFile(path.join(out, 'DESKTOP-SHA256SUMS'), `${'0'.repeat(64)}  ALP-1.2.3-arm64.dmg\n`);
   await sums(out);
   const line = (await readFile(path.join(out, 'SHA256SUMS'), 'utf8')).trim();
   assert.match(line, /^[0-9a-f]{64} {2}alp-1\.2\.3-linux-arm64\.tar\.gz$/);
