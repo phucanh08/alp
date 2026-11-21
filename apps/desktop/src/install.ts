@@ -96,20 +96,24 @@ export type InstallPlan = Release & {
   appDir: string;
   /** The alp command (a symlink to <root>/app/current/bin/alp). */
   command: string;
-  /** The ALP home (data and alpd's socket): created private (0700) when it does not exist. */
+  /** The ALP home (data and alpd's socket). */
   alpHome: string;
+  /** Whether install.sh creates the ALP home (0700) when it is missing: only when it is <root>. */
+  createsHome: boolean;
 };
 
 /** What will be installed where, for the confirmation page and for install.sh's arguments. */
 export function installPlan(release: Release, source: InstallSource, home: string, env: NodeJS.ProcessEnv): InstallPlan {
   const root = path.join(home, '.alp');
+  const alpHome = env.ALP_HOME && path.isAbsolute(env.ALP_HOME) ? path.resolve(env.ALP_HOME) : root;
   return {
     ...release,
     source: source.forVersion(release.version),
     root,
     appDir: path.join(root, 'app', release.version),
     command: path.join(root, 'bin', 'alp'),
-    alpHome: env.ALP_HOME && path.isAbsolute(env.ALP_HOME) ? path.resolve(env.ALP_HOME) : root,
+    alpHome,
+    createsHome: alpHome === root,
   };
 }
 
@@ -125,8 +129,8 @@ export const installArgs = (plan: InstallPlan): string[] => [
 export function installEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = { ...env };
   for (const name of [...SOURCE_VARIABLES, 'ELECTRON_RUN_AS_NODE', MIRROR_VARIABLE]) delete out[name];
-  // install.sh needs curl, shasum, tar and mktemp; an app started from Finder has the system PATH.
-  out.PATH = [env.PATH, '/usr/bin:/bin:/usr/sbin:/sbin'].filter(Boolean).join(':');
+  // install.sh needs curl, shasum, tar and mktemp: the system's come first, before anything on the app's PATH.
+  out.PATH = ['/usr/bin:/bin:/usr/sbin:/sbin', env.PATH].filter(Boolean).join(':');
   return out;
 }
 
@@ -145,6 +149,9 @@ export function confirmQuery(plan: InstallPlan, nonce: string): Record<string, s
   return {
     version: plan.version, asset: plan.asset, sha256: plan.sha256, source: plan.source,
     appDir: plan.appDir, command: plan.command, alpHome: plan.alpHome, bin: path.dirname(plan.command), nonce,
+    homeNote: plan.createsHome
+      ? 'created private (0700, only you can read it) if it does not exist yet; an existing folder keeps its permissions, and ALP needs it to be 0700'
+      : 'not created by the installer: ALP_HOME points outside the install folder',
   };
 }
 

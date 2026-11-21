@@ -82,14 +82,17 @@ describe('the plan and install.sh', () => {
       source: 'https://github.com/phucanh08/alp/releases/download/v0.0.1-beta.9',
       root: '/Users/u/.alp', appDir: '/Users/u/.alp/app/0.0.1-beta.9', command: '/Users/u/.alp/bin/alp', alpHome: '/Users/u/.alp',
     });
-    expect(installPlan(release, installSource(true, {}), '/Users/u', { ALP_HOME: '/data/alp' }).alpHome).toBe('/data/alp');
+    expect(plan.createsHome).toBe(true);
+    expect(installPlan(release, installSource(true, {}), '/Users/u', { ALP_HOME: '/data/alp' })).toMatchObject({ alpHome: '/data/alp', createsHome: false });
+    expect(confirmQuery(plan, 'n').homeNote).toContain('0700');
+    expect(confirmQuery(installPlan(release, installSource(true, {}), '/Users/u', { ALP_HOME: '/data/alp' }), 'n').homeNote).toContain('not created'); 
   });
   test('install.sh gets this version from this release, explicit paths, and no profile edit', () => {
     expect(installArgs(plan)).toEqual(['--version', '0.0.1-beta.9', '--base-url', plan.source, '--root', '/Users/u/.alp', '--dir', '/Users/u/.alp/bin', '--no-modify-path']);
   });
   test("install.sh's environment cannot change the source", () => {
     const env = installEnv({ PATH: '/x', HOME: '/Users/u', ALP_INSTALL_BASE_URL: 'https://evil', ALP_INSTALL_REPO: 'evil/alp', ELECTRON_RUN_AS_NODE: '1', [MIRROR_VARIABLE]: '/m' });
-    expect(env).toEqual({ PATH: '/x:/usr/bin:/bin:/usr/sbin:/sbin', HOME: '/Users/u' });
+    expect(env).toEqual({ PATH: '/usr/bin:/bin:/usr/sbin:/sbin:/x', HOME: '/Users/u' });
   });
   test("a failure is install.sh's own reason", () => {
     expect(installFailure({ code: 1, stdout: 'alp-install: downloading', stderr: 'alp-install: error: checksum mismatch for x (expected a, got b)\n', timedOut: false })).toBe('checksum mismatch for x (expected a, got b)');

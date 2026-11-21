@@ -6,13 +6,13 @@
 <dl>
 <dt>Version</dt><dd><code data-param="version" hidden></code> (the latest ALP release)</dd>
 <dt>Downloaded from</dt><dd><code data-param="source" hidden></code></dd>
-<dt>Archive</dt><dd><code data-param="asset" hidden></code>, checked against the release's SHA256SUMS (<code data-param="sha256" hidden></code>) before anything is installed</dd>
+<dt>Archive</dt><dd><code data-param="asset" hidden></code>. The release's SHA256SUMS lists it now as <code data-param="sha256" hidden></code>. The installer downloads SHA256SUMS of this version again and installs nothing if the archive does not match it.</dd>
 <dt>ALP goes to</dt><dd><code data-param="appDir" hidden></code></dd>
 <dt>The <code>alp</code> command</dt><dd><code data-param="command" hidden></code></dd>
-<dt>ALP's data folder</dt><dd><code data-param="alpHome" hidden></code>, created private (only you can read it) if it does not exist</dd>
+<dt>ALP's data folder</dt><dd><code data-param="alpHome" hidden></code>: <span data-param="homeNote" hidden></span></dd>
 </dl>
 <p class="muted">Your shell profile and PATH are not changed; this app runs that <code>alp</code> itself. To use <code>alp</code> in a terminal, add <code data-param="bin" hidden></code> to your PATH.</p>
-<p class="muted">The checksum shows the archive is the one the release lists. It does not prove who built the release; to check that, run <code>gh attestation verify &lt;archive&gt; --repo phucanh08/alp</code>.</p>
+<p class="muted">The checksum shows the archive is the one the release lists. It does not prove who built the release (whoever can change the release can change SHA256SUMS too); to check that, run <code>gh attestation verify &lt;archive&gt; --repo phucanh08/alp</code>.</p>
 <p class="actions"><a id="install-button" class="button primary" href="#">Install</a> <a id="cancel-button" class="button" href="#">Cancel</a></p>
 </main><script src="page.js"></script>
 <script src="install.js"></script></body></html>

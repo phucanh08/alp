@@ -6,7 +6,7 @@
  */
 import { app, BrowserWindow, Menu, net, protocol, session, shell, type MenuItemConstructorOptions } from 'electron';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { lstat, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -259,7 +259,8 @@ async function offerInstall(current: () => BrowserWindow | undefined) {
   if (!checking) return;
   await loadPage(checking, 'missing-alp.html', { status: 'Looking for the latest ALP release…' });
   const source = installSource(app.isPackaged, process.env);
-  const release = await latestRelease(source, process.arch, readText);
+  // An x64 app under Rosetta: install.sh installs the arm64 build there, so that is the one named.
+  const release = await latestRelease(source, app.runningUnderARM64Translation ? 'arm64' : process.arch, readText);
   const window = current();
   if (!window) return;
   if ('error' in release) { await showMissing(undefined, window, `${release.error} You can install ALP from a terminal instead.`); return; }
@@ -287,6 +288,8 @@ async function install(window: BrowserWindow, plan: InstallPlan) {
   installing = true;
   ++generation;
   let failure: string | undefined;
+  const exists = (file: string) => lstat(file).then(() => true, () => false);
+  const rootExisted = await exists(plan.root);
   try {
     await loadPage(window, 'installing.html', { version: plan.version, appDir: plan.appDir });
     const script = await readFile(installScript(), 'utf8');
@@ -298,7 +301,11 @@ async function install(window: BrowserWindow, plan: InstallPlan) {
     installing = false;
   }
   if (failure !== undefined) {
-    await showError(`Installing ALP ${plan.version} failed: ${failure}\n\nALP ${plan.version} was not installed.`, win && !win.isDestroyed() ? win : undefined);
+    // install.sh writes nothing before the archive passed its checks; a later failure may leave part of it.
+    const after = !rootExisted && !await exists(plan.root)
+      ? `Nothing was installed (${plan.root} was not created).`
+      : `The installer stopped before it finished; ALP ${plan.version} may be partly in place under ${plan.root}. Choose File › Connect again to use or reinstall it.`;
+    await showError(`Installing ALP ${plan.version} failed: ${failure}\n\n${after}`, win && !win.isDestroyed() ? win : undefined);
     return;
   }
   await connect();
