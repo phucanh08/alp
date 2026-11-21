@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { FACTS, ICON_CANDIDATES, ciOf, createWorkspaceFacts, factsParams, iconOf, looksLike, methods, numstat, prOf, readFacts } from '../src/dashboard/owner/workspace-facts.js';
+import { FACTS, ICON_CANDIDATES, ciOf, createWorkspaceFacts, factsParams, iconOf, isInside, looksLike, methods, numstat, prOf, readFacts } from '../src/dashboard/owner/workspace-facts.js';
 import { teardown } from '../../../test/support/teardown.js';
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(24, 1)]);
@@ -321,4 +321,42 @@ test('the handler is bounded: cached for the TTL, refresh rate limited, one read
   const failing = createWorkspaceFacts({ env: {}, now: () => clock, read: async () => { throw new Error('boom'); } });
   const answer = await failing.handler({ params: { workspaceIds: ['w2'] }, daemon });
   assert.deepEqual(Object.keys(answer.workspaces.w2), ['fetchedAt']);
+});
+
+test('review fixes (PR #354): an empty or failed read is cached only for FACTS.refreshMinMs; an all-digit branch asks no gh; isInside is not fooled by "..name"', { skip: skipGit }, async t => {
+  // An empty or failed answer is read again after FACTS.refreshMinMs, without refresh.
+  let clock = 1_000_000, reads = 0;
+  const { handler } = createWorkspaceFacts({ env: {}, now: () => clock, read: async () => { reads++; if (reads === 1) throw new Error('timeout'); return reads === 2 ? {} : { branch: 'b' }; } });
+  const daemon = registryDaemon([['w0', '/ws/0']]);
+  const ask = () => handler({ params: { workspaceIds: ['w0'] }, daemon });
+  await ask();
+  await ask();
+  assert.equal(reads, 1, 'within FACTS.refreshMinMs the failed answer is reused');
+  clock += FACTS.refreshMinMs;
+  await ask();
+  assert.equal(reads, 2, 'a failed answer is read again after FACTS.refreshMinMs');
+  clock += FACTS.refreshMinMs;
+  assert.equal((await ask()).workspaces.w0.branch, 'b', 'so is an empty one');
+  clock += FACTS.refreshMinMs;
+  await ask();
+  assert.equal(reads, 3, 'an answer with facts is kept for the TTL');
+
+  // A branch named like a pull request number: no gh call (gh would read it as PR #123).
+  const { directory, bin, env } = await scratch(t);
+  const repo = await repository(directory);
+  git(repo, 'checkout', '-q', '-b', '123');
+  const log = await fakeGh(bin, directory);
+  const json = path.join(directory, 'pr.json');
+  await writeFile(json, JSON.stringify({ number: 123, state: 'OPEN', isDraft: false, statusCheckRollup: [] }));
+  const facts = await readFacts(repo, { env: { ...env, FAKE_GH_JSON: json, FAKE_GH_LOG: log } });
+  assert.equal(facts.branch, '123');
+  assert.equal(facts.pr, undefined);
+  assert.equal(await readFile(log, 'utf8').catch(() => ''), '');
+
+  assert.ok(isInside('/w', '/w'));
+  assert.ok(isInside('/w', '/w/..name'));
+  assert.ok(isInside('/w', '/w/a/b'));
+  assert.ok(!isInside('/w', '/x'));
+  assert.ok(!isInside('/w', '/w2'));
+  assert.ok(!isInside('/w', '/'));
 });

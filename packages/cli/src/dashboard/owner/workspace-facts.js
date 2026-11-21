@@ -33,8 +33,12 @@ import { ownerRegistry } from './host.js';
  *
  * Bounds: Git and gh run with execFile (argument lists, no shell), each with a timeout and a
  * maxBuffer, in a per-directory deadline; at most FACTS.concurrency directories are read at once;
- * one read per directory is in flight however many calls ask; an answer is reused for FACTS.ttlMs,
+ * one read per directory is in flight however many calls ask; an answer is reused for FACTS.ttlMs
+ * (an empty or failed one only for FACTS.refreshMinMs),
  * and `refresh: true` reads again only when the last read is FACTS.refreshMinMs old.
+ *
+ * Git ignores global configuration, so a `safe.directory` entry there does not apply: a repository
+ * owned by another user shows no Git facts (fail soft).
  *
  * Git runs as alpd's Git reads do (packages/daemon/src/git.ts), only less strictly: no system or
  * global configuration, no optional locks, no prompts, nothing the repository configures runs (no
@@ -146,6 +150,12 @@ const GIT_OVERRIDES = [
   'diff.autoRefreshIndex=false', 'submodule.recurse=false', 'protocol.allow=never', 'maintenance.auto=false', 'gc.auto=0',
 ];
 
+/** Whether `target` is `root` or lies under it (both real paths). @param {string} root @param {string} target */
+export function isInside(root, target) {
+  const relative = path.relative(root, target);
+  return !relative || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
 /**
  * An executable `name` on env.PATH: absolute entries only, none inside `root`.
  * @param {string} name @param {NodeJS.ProcessEnv} env @param {string} root
@@ -154,8 +164,9 @@ export async function onPath(name, env, root) {
   const names = process.platform === 'win32' ? [`${name}.exe`] : [name];
   for (const entry of String(env.PATH ?? env.Path ?? '').split(path.delimiter)) {
     if (!entry || !path.isAbsolute(entry)) continue;
-    const relative = path.relative(root, entry);
-    if (!relative || (!relative.startsWith('..') && !path.isAbsolute(relative))) continue;
+    // The entry as it really is: a link that leads into the workspace counts as inside it.
+    const real = await realpath(entry).catch(() => undefined);
+    if (!real || isInside(root, real)) continue;
     for (const file of names) {
       const candidate = path.join(entry, file);
       const ok = await stat(candidate).then(info => info.isFile(), () => false) && await access(candidate, fsConstants.X_OK).then(() => true, () => false);
@@ -216,8 +227,7 @@ async function readIcon(root, relative) {
   const candidate = path.join(root, relative);
   if (!await lstat(candidate).then(() => true, () => false)) return undefined;
   const real = await realpath(candidate);
-  const inside = path.relative(root, real);
-  if (!inside || inside.startsWith('..') || path.isAbsolute(inside)) return undefined;
+  if (real === root || !isInside(root, real)) return undefined;
   // The extension of both names must be the allowed one: a link named logo.png to secret.txt is not an icon.
   const extension = path.extname(relative).toLowerCase();
   if (path.extname(real).toLowerCase() !== extension) return undefined;
@@ -301,7 +311,8 @@ export async function readFacts(directory, { env }) {
 
       const remotes = (await gitRun(['remote']))?.trim();
       const gh = facts.branch && remotes ? await onPath('gh', env, root) : undefined;
-      if (gh && facts.branch) {
+      // `gh pr view <n>` reads an all-digit argument as a pull request number, not a branch.
+      if (gh && facts.branch && !/^\d+$/.test(facts.branch)) {
         const ghEnv = { ...withoutGit(env), ...configEnv([`core.fsmonitor=false`, `core.hooksPath=${NULL_DEVICE}`, 'protocol.ext.allow=never']), GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_SPINNER_DISABLED: '1', NO_COLOR: '1', CLICOLOR: '0' };
         const output = await run(gh, ['pr', 'view', facts.branch, '--json', 'number,state,isDraft,statusCheckRollup'], { cwd: root, env: ghEnv, deadline });
         /** @type {any} */
@@ -325,7 +336,7 @@ export async function readFacts(directory, { env }) {
  * @param {{ env?: NodeJS.ProcessEnv, now?: () => number, read?: typeof readFacts }} [options]
  */
 export function createWorkspaceFacts({ env = process.env, now = Date.now, read = readFacts } = {}) {
-  /** @type {Map<string, { facts: WorkspaceFacts, at: number }>} */
+  /** @type {Map<string, { facts: WorkspaceFacts, at: number, ttl: number }>} */
   const cache = new Map();
   /** @type {Map<string, Promise<WorkspaceFacts>>} */
   const inflight = new Map();
@@ -341,12 +352,16 @@ export function createWorkspaceFacts({ env = process.env, now = Date.now, read =
     if (pending) return pending;
     const cached = cache.get(directory);
     const age = cached ? now() - cached.at : Infinity;
-    if (cached && (age < FACTS.refreshMinMs || (!refresh && age < FACTS.ttlMs))) return Promise.resolve(cached.facts);
+    if (cached && (age < FACTS.refreshMinMs || (!refresh && age < cached.ttl))) return Promise.resolve(cached.facts);
     const reading = (async () => {
       await acquire();
       try {
-        const facts = { ...await read(directory, { env }).catch(() => ({})), fetchedAt: new Date(now()).toISOString() };
-        cache.set(directory, { facts, at: now() });
+        const read$ = await read(directory, { env }).catch(() => undefined);
+        const facts = { ...read$, fetchedAt: new Date(now()).toISOString() };
+        // A read that failed or found nothing (a timeout, a passing error) is kept only briefly, so
+        // the sidebar's next poll after FACTS.refreshMinMs tries again instead of waiting the TTL.
+        const ttl = read$ && Object.keys(read$).length ? FACTS.ttlMs : FACTS.refreshMinMs;
+        cache.set(directory, { facts, at: now(), ttl });
         return facts;
       } finally { release(); inflight.delete(directory); }
     })();
