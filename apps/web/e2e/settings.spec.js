@@ -165,12 +165,15 @@ test('General, Chat, Terminal, Files and Sidebar pages hold Paseo 0.14\'s settin
 
   // Sidebar: hide History, move Search to the top, show the footer's Tasks row.
   await settings.getByRole('button', { name: 'Sidebar', exact: true }).click();
+  // Not the host owner: New session, and no Schedules row (t-ff83).
+  await expect(settings.getByTestId('sidebar-nav-item-new-session')).toContainText('New session');
+  await expect(settings.getByTestId('sidebar-nav-item-schedules')).toHaveCount(0);
   await settings.getByTestId('sidebar-nav-item-history').getByRole('switch').click();
   await settings.getByRole('button', { name: 'Move Search up' }).click();
   await settings.getByRole('button', { name: 'Move Search up' }).click();
   await settings.getByTestId('sidebar-nav-item-tasks').getByRole('switch').click();
   expect(await stored(page)).toMatchObject({ sendShortcut: 'mod-enter', sendBehavior: 'interrupt', chatOutline: false, terminalScrollback: 1_000_000,
-    sidebar: { header: [{ id: 'search', visible: true }, { id: 'new-session', visible: true }, { id: 'history', visible: false }], footer: [{ id: 'tasks', visible: true }] } });
+    sidebar: { header: [{ id: 'search', visible: true }, { id: 'new-session', visible: true }, { id: 'history', visible: false }, { id: 'schedules', visible: true }], footer: [{ id: 'tasks', visible: true }] } });
   await settings.getByRole('button', { name: 'Back' }).click();
   const nav = page.getByRole('navigation', { name: 'Workspaces and sessions' });
   await expect(nav.getByTestId('sidebar-history')).toHaveCount(0);

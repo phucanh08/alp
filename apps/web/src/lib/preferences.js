@@ -18,7 +18,7 @@ export const PREFERENCES_VERSION = 1;
 /** Paseo's themes ("system" is Paseo's "auto"). @typedef {'system' | 'light' | 'dark' | 'zinc' | 'midnight' | 'claude' | 'ghostty' | 'pureBlack'} ThemePreference */
 /** Paseo's Chat display: how much of an agent's work the chat shows. @typedef {'full' | 'collapseToolCalls' | 'collapseTurns'} ChatDisplay */
 /** Paseo's syntax highlight themes (@getpaseo/highlight SYNTAX_THEME_OPTIONS). @typedef {'github' | 'catppuccin' | 'dracula' | 'tokyo-night' | 'one' | 'nord' | 'gruvbox' | 'solarized'} SyntaxTheme */
-/** The sidebar rows Settings › Sidebar orders and shows. @typedef {'new-session' | 'history' | 'search' | 'tasks'} SidebarItemId */
+/** The sidebar rows Settings › Sidebar orders and shows. @typedef {'new-session' | 'history' | 'search' | 'schedules' | 'tasks'} SidebarItemId */
 /** @typedef {{ id: SidebarItemId, visible: boolean }} SidebarItem */
 /** @typedef {{ header: SidebarItem[], footer: SidebarItem[] }} SidebarItems */
 /**
@@ -64,17 +64,25 @@ export const LIMITS = Object.freeze({
 });
 export const MAX_FONT_FAMILY_LENGTH = 200;
 
-/** Paseo's sidebar sections: the header rows on, the footer's off until chosen. */
-export const SIDEBAR_ITEMS = Object.freeze({ header: /** @type {SidebarItemId[]} */ (['new-session', 'history', 'search']), footer: /** @type {SidebarItemId[]} */ (['tasks']) });
+/**
+ * Paseo's sidebar sections: the header rows on, the footer's off until chosen. `schedules` shows for
+ * the host owner only (the sidebar and Settings › Sidebar leave it out for anyone else); a stored
+ * list without it gets it appended, visible.
+ */
+export const SIDEBAR_ITEMS = Object.freeze({ header: /** @type {SidebarItemId[]} */ (['new-session', 'history', 'search', 'schedules']), footer: /** @type {SidebarItemId[]} */ (['tasks']) });
 const SIDEBAR_HIDDEN_BY_DEFAULT = new Set(['tasks']);
 /** @param {'header' | 'footer'} section */
 const defaultSidebarSection = section => SIDEBAR_ITEMS[section].map(id => ({ id, visible: !SIDEBAR_HIDDEN_BY_DEFAULT.has(id) }));
 
-/** Paseo's defaults (sidebar-view-store, row-items.ts, storage.ts). */
+/**
+ * Paseo's defaults (sidebar-view-store, row-items.ts, storage.ts), with the row items Paseo's sidebar
+ * shows: branch on, host off, no trailing time (t-ff83; until then ALP showed host and the time).
+ * A stored choice is kept as stored: only a value never saved takes these.
+ */
 export const DEFAULT_SIDEBAR_DISPLAY = Object.freeze(/** @type {SidebarDisplay} */ ({
   grouping: 'project', sort: 'created', titleSource: 'title',
-  rowItems: Object.freeze({ branch: false, project: false, host: true, labels: true }),
-  trailing: 'timestamp', projectFilters: /** @type {string[]} */ ([]),
+  rowItems: Object.freeze({ branch: true, project: false, host: false, labels: true }),
+  trailing: 'none', projectFilters: /** @type {string[]} */ ([]),
 }));
 const MAX_PROJECT_FILTERS = 64;
 
@@ -88,7 +96,7 @@ function parseSidebarDisplay(value) {
     sort: row.sort === 'lastPrompt' ? 'lastPrompt' : 'created',
     titleSource: row.titleSource === 'branch' ? 'branch' : 'title',
     rowItems: /** @type {SidebarDisplay['rowItems']} */ (Object.fromEntries(Object.entries(defaults.rowItems).map(([key, fallback]) => [key, typeof items[key] === 'boolean' ? items[key] : fallback]))),
-    trailing: row.trailing === 'none' ? 'none' : 'timestamp',
+    trailing: row.trailing === 'none' || row.trailing === 'timestamp' ? row.trailing : defaults.trailing,
     projectFilters: [...new Set(Array.isArray(row.projectFilters) ? row.projectFilters.filter(path => typeof path === 'string' && path && path.length <= 4096) : [])].slice(0, MAX_PROJECT_FILTERS),
   };
 }
