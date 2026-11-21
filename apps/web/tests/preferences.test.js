@@ -21,7 +21,7 @@ const DEFAULTS = {
     header: [{ id: 'new-session', visible: true }, { id: 'history', visible: true }, { id: 'search', visible: true }, { id: 'schedules', visible: true }],
     footer: [{ id: 'tasks', visible: false }],
   },
-  sidebarDisplay: { grouping: 'project', sort: 'created', titleSource: 'title', rowItems: { branch: true, project: false, host: false, labels: true }, trailing: 'none', projectFilters: [] },
+  sidebarDisplay: { grouping: 'project', sort: 'created', titleSource: 'title', rowItems: { branch: true, project: false, host: false, labels: true }, trailing: 'none', projectFilters: [], revision: 2 },
   newSession: {},
 };
 
@@ -136,14 +136,23 @@ test('thinking per model never keeps a model named after an Object.prototype mem
 
 test('sidebar display preferences: Paseo\'s choices kept, anything else its default, filters de-duplicated and bounded', () => {
   const display = parse({ sidebarDisplay: { grouping: 'status', sort: 'lastPrompt', titleSource: 'branch', rowItems: { branch: true, host: false, checks: true, labels: 'yes' }, trailing: 'none', projectFilters: ['/a', '/a', '', 7, '/b'] } }).sidebarDisplay;
-  assert.deepEqual(display, { grouping: 'status', sort: 'lastPrompt', titleSource: 'branch', rowItems: { branch: true, project: false, host: false, labels: true }, trailing: 'none', projectFilters: ['/a', '/b'] });
+  assert.deepEqual(display, { grouping: 'status', sort: 'lastPrompt', titleSource: 'branch', rowItems: { branch: true, project: false, host: false, labels: true }, trailing: 'none', projectFilters: ['/a', '/b'], revision: 2 });
   assert.deepEqual(parse({ sidebarDisplay: { grouping: 'labels', sort: 'manual', trailing: 'diff' } }).sidebarDisplay, DEFAULTS.sidebarDisplay);
   assert.equal(parse({ sidebarDisplay: { projectFilters: Array.from({ length: 100 }, (_, index) => `/p${index}`) } }).sidebarDisplay.projectFilters.length, 64);
 });
 
 test('sidebar Show items default to Paseo\'s (branch on, host off, no time); a stored choice stays as stored (t-ff83)', () => {
-  const stored = parse({ sidebarDisplay: { rowItems: { branch: false, project: false, host: true, labels: true }, trailing: 'timestamp' } }).sidebarDisplay;
-  assert.deepEqual([stored.rowItems, stored.trailing], [{ branch: false, project: false, host: true, labels: true }, 'timestamp']);
+  // A stored display that still equals ALP's old defaults exactly (never changed) moves to Paseo's once.
+  const OLD = { grouping: 'project', sort: 'created', titleSource: 'title', rowItems: { branch: false, project: false, host: true, labels: true }, trailing: 'timestamp', projectFilters: [] };
+  assert.deepEqual(parse({ sidebarDisplay: OLD }).sidebarDisplay, DEFAULTS.sidebarDisplay);
+  // Customised in any way: kept as stored.
+  const custom = parse({ sidebarDisplay: { ...OLD, grouping: 'status' } }).sidebarDisplay;
+  assert.deepEqual([custom.grouping, custom.rowItems, custom.trailing, custom.revision], ['status', OLD.rowItems, 'timestamp', 2]);
+  const filtered = parse({ sidebarDisplay: { ...OLD, projectFilters: ['/a'] } }).sidebarDisplay;
+  assert.deepEqual([filtered.rowItems, filtered.trailing], [OLD.rowItems, 'timestamp']);
+  // Saved again after the move (revision 2), the old values are a choice and stay.
+  const chosen = parse({ sidebarDisplay: { ...OLD, revision: 2 } }).sidebarDisplay;
+  assert.deepEqual([chosen.rowItems, chosen.trailing], [OLD.rowItems, 'timestamp']);
   const partial = parse({ sidebarDisplay: { rowItems: { labels: false } } }).sidebarDisplay;
   assert.deepEqual([partial.rowItems, partial.trailing], [{ branch: true, project: false, host: false, labels: false }, 'none']);
   assert.equal(parse({ sidebarDisplay: { trailing: 'sometimes' } }).sidebarDisplay.trailing, 'none');

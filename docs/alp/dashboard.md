@@ -472,16 +472,17 @@ Mọi client (owner hay không):
   Branch, từ registry, cho mọi hàng.
 - **Show mặc định như Paseo**: Branch bật, Host tắt, không có giờ ở cuối hàng (Last activity tắt);
   Labels bật, Project tắt như trước (`DEFAULT_SIDEBAR_DISPLAY` trong `lib/preferences.js`).
-  Preferences đã lưu giữ nguyên; mỗi lần lưu ghi cả Show, nên mặc định mới chỉ tới trình duyệt chưa
-  từng lưu preference nào.
+  Show đã lưu mà vẫn đúng y mặc định cũ (chưa có `revision: 2`) được chuyển một lần sang mặc định
+  mới; Show đã đổi bất kỳ chỗ nào giữ nguyên (`parseSidebarDisplay`).
 
 Chỉ host owner (`state.owner`, §4.6; mọi request qua `controller.ownerRequest`). Client khác không
 gửi request nào trong số này, không thấy lỗi, hàng giống như trên:
 
 - **Diff, PR, CI** từ `host.workspace.facts` ([remote-gateway.md](remote-gateway.md)). Ở ALP các
   thông tin này thuộc **workspace** (thư mục), không thuộc session, nên chỉ hiện **một lần, trên hàng
-  session gần nhất của workspace** (session có `updatedAt`, hoặc `createdAt`, mới nhất; hoà thì theo
-  id). Workspace không có session thì không hiện gì thêm. Hàng đó có `+thêm` (xanh) `-bớt` (đỏ) ở
+  session gần nhất của workspace trong các hàng đang hiện** (session có `updatedAt`, hoặc `createdAt`,
+  mới nhất; hoà thì theo id; hàng bị "Show more" gập đi hay bị Search lọc ra không giữ thông tin này).
+  Mất quyền owner thì thông tin đã đọc bị xoá khỏi sidebar. Workspace không có session thì không hiện gì thêm. Hàng đó có `+thêm` (xanh) `-bớt` (đỏ) ở
   bên phải; dòng thứ hai: nhánh · số PR (mở: `2`; `344 Merged`, `7 Draft`, `9 Closed`) · CI
   (`passed`, `failed`, `pending`). Nhánh của facts chỉ dùng khi registry không có và Show › Branch bật.
 - **Icon project**: khi facts có `icon` (URL `data:image/...;base64`) thì hiện bằng `<img>`, không

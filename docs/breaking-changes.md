@@ -21,9 +21,10 @@ nhất trước. Mỗi mục nói cái gì đổi, ai bị ảnh hưởng, và v
   không có nó thì được thêm vào cuối, hiện). New workspace chiếm chỗ mục "New session"; Settings ›
   Sidebar gọi nó là New workspace cho owner.
 - **Show mặc định của sidebar đổi theo Paseo** (khác mặc định ALP trước đó): Branch bật, Host tắt,
-  không có giờ ở cuối hàng. Trước: Branch tắt, Host bật, có giờ. Preferences đã lưu trong trình duyệt
-  giữ nguyên: mỗi lần lưu ghi cả Show, nên ai đã lưu bất kỳ preference nào (kể cả theme) vẫn thấy Show
-  cũ; chỉ trình duyệt chưa từng lưu thấy mặc định mới. Đổi ở Display preferences › Show.
+  không có giờ ở cuối hàng. Trước: Branch tắt, Host bật, có giờ. Chuyển một lần: Show đã lưu mà vẫn
+  đúng y mặc định cũ (người dùng chưa từng đổi; mỗi lần lưu bất kỳ preference nào, kể cả theme, ghi cả
+  Show) được chuyển sang mặc định mới; Show đã đổi bất kỳ chỗ nào giữ nguyên. Sau lần chuyển, Show được
+  lưu kèm `revision: 2`, nên chọn lại đúng mặc định cũ thì được giữ. Đổi ở Display preferences › Show.
 
 ## 2026-11-21: Settings bỏ Voice, Pair device, Plugins, Metadata; việc đổi host chỉ cho host owner (t-a95b)
 
