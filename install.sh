@@ -188,10 +188,10 @@ if in_alp_home "$ROOT" || in_alp_home "$DIR"; then
     mkdir -p "$(dirname "$ALP_HOME_DIR")" 2>/dev/null || true
     mkdir -m 700 "$ALP_HOME_DIR" 2>/dev/null || true
   elif [ -d "$ALP_HOME_DIR" ] && [ ! -L "$ALP_HOME_DIR" ]; then
-    case "$(ls -ld "$ALP_HOME_DIR" | cut -c5-10)" in
-      ------) ;;
-      *) say "warning: $ALP_HOME_DIR is readable or writable by others; alpd needs it private (0700). Fix it with: chmod 700 '$ALP_HOME_DIR'" ;;
-    esac
+    # Any group/other permission bit (POSIX find has no "any of" -perm, hence the six tests).
+    if [ -n "$(find "$ALP_HOME_DIR" -prune \( -perm -g=r -o -perm -g=w -o -perm -g=x -o -perm -o=r -o -perm -o=w -o -perm -o=x \) -print 2>/dev/null)" ]; then
+      say "warning: $ALP_HOME_DIR is readable or writable by others; alpd needs it private (0700). Fix it with: chmod 700 '$ALP_HOME_DIR'"
+    fi
   fi
 fi
 SUDO=""
