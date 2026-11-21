@@ -454,6 +454,48 @@ not_exposed`, không handler nào chạy, alpd không nhận gì; owner nhận k
 `packages/cli/tests/dashboard-owner-library.test.js` (từng lần từ chối, conflict, mask, marker),
 `apps/web/e2e/settings-library.spec.js` (qua `alp dashboard` thật: `e2e/support/dashboard.js`).
 
+### 4.9 Sidebar như Paseo (t-ff83)
+
+`apps/web/src/app/Sidebar.tsx`, theo sidebar của Paseo: các hàng trên cùng, mục Workspaces với
+Display preferences, mỗi workspace có icon và các session của nó ngay bên dưới, dòng usage trên hàng
+icon ở chân.
+
+Mọi client (owner hay không):
+
+- **Session dưới mọi workspace** khi nhóm theo Project, không chỉ workspace đang mở. Session của
+  workspace đang mở đến live từ controller; của các workspace khác đọc bằng `session.list` mỗi 15 s
+  (`controller.listWorkspaceSessions`, như nhóm theo Status đã làm). Gập/mở theo từng project (bấm
+  hàng project đang mở để gập; bấm project khác thì mở nó như trước), sort, giới hạn 7 hàng + Show
+  more (`limitRows`) và Search áp dụng cho từng project; khi Search, project không có session khớp
+  bị ẩn.
+- **Icon project**: ô chữ cái màu (như trước) khi không có icon. Nhánh vẫn ở dòng meta theo Show ›
+  Branch, từ registry, cho mọi hàng.
+
+Chỉ host owner (`state.owner`, §4.6; mọi request qua `controller.ownerRequest`). Client khác không
+gửi request nào trong số này, không thấy lỗi, hàng giống như trên:
+
+- **Diff, PR, CI** từ `host.workspace.facts` ([remote-gateway.md](remote-gateway.md)). Ở ALP các
+  thông tin này thuộc **workspace** (thư mục), không thuộc session, nên chỉ hiện **một lần, trên hàng
+  session gần nhất của workspace** (session có `updatedAt`, hoặc `createdAt`, mới nhất; hoà thì theo
+  id). Workspace không có session thì không hiện gì thêm. Hàng đó có `+thêm` (xanh) `-bớt` (đỏ) ở
+  bên phải; dòng thứ hai: nhánh · số PR (mở: `2`; `344 Merged`, `7 Draft`, `9 Closed`) · CI
+  (`passed`, `failed`, `pending`). Nhánh của facts chỉ dùng khi registry không có và Show › Branch bật.
+- **Icon project**: khi facts có `icon` (URL `data:image/...;base64`) thì hiện bằng `<img>`, không
+  bao giờ chèn SVG hay HTML vào trang; `lib/sidebar-facts.js` `cleanFacts` bỏ mọi giá trị khác.
+- **Usage ở chân**: `daemon.usage`, mỗi provider một mục "<icon> 98% 5h  61% wk" (cửa sổ
+  `five_hour`/5 giờ và `seven_day`/7 ngày); thiếu cửa sổ nào thì bỏ phần đó, không có usage thì không
+  có dòng. Bấm mở Settings › Usage.
+- **Schedules**: hàng dưới Search, mở màn Schedules (`SchedulesScreen.tsx`): các job `schedule.list`
+  của mọi project root trong sidebar, pending trước theo giờ đến hạn; trạng thái, giờ đến hạn, dòng
+  đầu prompt, link mở session. Chỉ đọc.
+- **New workspace** thay New session ở trên cùng: dialog nhập đường dẫn tuyệt đối, đăng ký bằng
+  `host.project.register` (như Settings › Projects). Client khác giữ New session.
+
+Tải dữ liệu không chặn sidebar: facts và usage đọc nền, giữ trong state, đọc lại mỗi 60 s
+(`FACTS_REFRESH_MS`); facts đọc lại thêm 400 ms sau khi danh sách session đổi (session mới, turn kết
+thúc làm đổi `updatedAt`). Mỗi lần gọi `host.workspace.facts` có tối đa 50 workspace id; một batch lỗi
+thì bỏ qua, hàng giữ dữ liệu cũ. Schedules đọc khi mở màn và mỗi 60 s.
+
 ## 5. Phục hồi (theo bài học 09B-2)
 
 - Event đến trong lúc attach được buffer. Khi `reset`, app xóa projection rồi mới áp buffer.
@@ -525,6 +567,9 @@ not_exposed`, không handler nào chạy, alpd không nhận gì; owner nhận k
     - local: `alp dashboard --print` với CLI đã build, link tự kết nối, hash rỗng, token chỉ ở
       sessionStorage, reload, 4403 khi thêm project, `alp dashboard rotate`;
     - chat, new-session, settings, tabs, workspace;
+    - sidebar-facts: session dưới mọi workspace; owner thấy diff/PR/CI trên hàng gần nhất, icon, usage,
+      Schedules, New workspace (facts và usage là fixture trong WebSocket của trang); non-owner không gửi
+      method owner nào;
     - mobile.
 - Chạy E2E: `npm ci` ở gốc repo một lần (workspace dùng chung `node_modules` gốc), rồi
   `npm run test:alp-web:e2e` ở gốc hoặc `npm run test:e2e` trong `apps/web`. Cả hai đi qua
