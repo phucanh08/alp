@@ -15,6 +15,9 @@ const TYPES: Record<string, string> = {
   'error.html': 'text/html; charset=utf-8',
   'missing-alp.html': 'text/html; charset=utf-8',
   'missing-alp.js': 'text/javascript; charset=utf-8',
+  'install.html': 'text/html; charset=utf-8',
+  'install.js': 'text/javascript; charset=utf-8',
+  'installing.html': 'text/html; charset=utf-8',
   'page.js': 'text/javascript; charset=utf-8',
   'page.css': 'text/css; charset=utf-8',
 };

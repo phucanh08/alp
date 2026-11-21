@@ -5,3 +5,9 @@ h1 { font-size: 1.4rem; margin: 0 0 .75rem; }
 pre, code { font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
 pre { padding: .75rem 1rem; border-radius: 6px; background: color-mix(in srgb, CanvasText 8%, Canvas); white-space: pre-wrap; word-break: break-word; }
 .muted { opacity: .7; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1rem; margin: 1rem 0; }
+dt { font-weight: 600; }
+dd { margin: 0; word-break: break-word; }
+.actions { display: flex; gap: .75rem; margin-top: 1.25rem; }
+.button { padding: .45rem 1.1rem; border-radius: 6px; border: 1px solid color-mix(in srgb, CanvasText 25%, Canvas); color: CanvasText; text-decoration: none; }
+.button.primary { background: AccentColor; color: AccentColorText; border-color: AccentColor; }

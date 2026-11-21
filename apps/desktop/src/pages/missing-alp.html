@@ -2,11 +2,12 @@
 <html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'"><title>ALP</title><link rel="stylesheet" href="page.css"></head>
 <body><main id="missing-alp">
 <h1>ALP is not installed</h1>
-<p>This app opens the ALP already installed on this Mac, and it found no <code>alp</code> command.</p>
+<p>This app opens the ALP installed on this Mac, and it found no <code>alp</code> command.</p>
+<p data-param="status" hidden></p>
 <p hidden id="override-line">The <code>alpPath</code> setting names <code data-param="override" hidden></code>, which is not an executable file.</p>
-<p>Install ALP from a terminal:</p>
-<pre>npm install -g @anhlp/alp@beta</pre>
-<p class="muted">Other ways to install: docs/alp/beta-install.md in the ALP repository.</p>
+<p>To install ALP from a terminal:</p>
+<pre>curl -fsSL https://github.com/phucanh08/alp/releases/latest/download/install.sh | sh</pre>
+<p class="muted">Or with npm: <code>npm install -g @anhlp/alp@beta</code>. Other ways: docs/alp/beta-install.md in the ALP repository.</p>
 <p class="muted">Installed somewhere else? Put its absolute path in <code>~/Library/Application Support/ALP/settings.json</code> as <code>{ "alpPath": "/path/to/alp" }</code>.</p>
 <p>Then choose <strong>File › Connect again</strong> (⇧⌘R).</p>
 </main><script src="page.js"></script>

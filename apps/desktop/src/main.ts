@@ -4,14 +4,19 @@
  * and connects to its own origin. The window is a same-origin client of alp-dashboard like a browser tab:
  * no preload, no Node, navigation pinned to that origin.
  */
-import { app, BrowserWindow, Menu, protocol, session, shell, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, Menu, net, protocol, session, shell, type MenuItemConstructorOptions } from 'electron';
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { connectDashboard, probeDashboard, type Connect } from './dashboard';
 import { isAllowedExternal, isAllowedPermission, isTokenRejection, navigationGuard } from './policy';
 import { Reconnector } from './reconnect';
 import { isPageUrl, PAGE_SCHEME, pageUrl, resolvePage } from './pages';
 import { readSettings } from './settings';
+import { confirmAction, confirmQuery, installArgs, installEnv, installFailure, installPlan, installSource, latestRelease, type InstallPlan } from './install';
+import { run } from './run';
 import type { DashboardAddress } from './url';
 
 let win: BrowserWindow | undefined;
@@ -25,6 +30,10 @@ let remoteLoad = 0;
 let shownAddress: DashboardAddress | undefined;
 /** Whether the window's document is the one loaded for shownAddress (did-navigate seen for it). */
 let committed = false;
+/** The install the confirmation page in the window offers; its buttons carry `nonce` (t-81b0.8). */
+let pendingInstall: { nonce: string; plan: InstallPlan } | undefined;
+/** True while install.sh runs: nothing else may change the window or start a second install. */
+let installing = false;
 /** The longest error text shown (alp's stderr can be long; it travels in the page's query). */
 const MAX_MESSAGE = 4000;
 
@@ -48,6 +57,22 @@ async function servePage(request: Request): Promise<Response> {
 
 /** Shows bundled page `name` in `window`; resolves once it loaded or failed. */
 const loadPage = (window: BrowserWindow, name: string, query?: Record<string, string>) => window.loadURL(pageUrl(name, query)).catch(() => undefined);
+
+/** How long reading SHA256SUMS and running install.sh (a download of about 100 MB) may take. */
+const LOOKUP_TIMEOUT_MS = 30_000;
+const INSTALL_TIMEOUT_MS = 20 * 60_000;
+/** The installer the app was built with (package.json's build copies the repository's install.sh). */
+const installScript = () => path.join(app.getAppPath(), 'dist', 'install.sh');
+
+/** A small text file over https (Chromium's network stack, with the system's proxy settings) or file://. */
+async function readText(url: string): Promise<string> {
+  if (url.startsWith('file://')) return readFile(fileURLToPath(url), 'utf8');
+  const response = await net.fetch(url, { signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS) });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const text = await response.text();
+  if (text.length > 64 * 1024) throw new Error('the file is too large');
+  return text;
+}
 
 async function resolveAddress(): Promise<Connect> {
   const settings = await readSettings(app.getPath('userData'));
@@ -111,6 +136,15 @@ function createWindow(): BrowserWindow {
   // Every frame, the main one and any subframe, stays on the shown origin: will-frame-navigate is
   // will-navigate for all frames, and will-redirect fires for redirects in any frame.
   const guard = navigationGuard(() => allowedOrigin);
+  // The confirmation page's buttons (t-81b0.8): a main-frame navigation that is stopped here and read.
+  // will-frame-navigate, not will-navigate: Electron emits will-navigate only when the guard below has
+  // not already prevented the navigation in will-frame-navigate.
+  contents.on('will-frame-navigate', event => {
+    const answer = event.isMainFrame ? confirmAction(event.url) : undefined;
+    if (!answer) return;
+    event.preventDefault();
+    void answerInstall(window, answer);
+  });
   contents.on('will-navigate', guard);
   contents.on('will-frame-navigate', guard);
   contents.on('will-redirect', guard);
@@ -155,11 +189,12 @@ function reveal(window: BrowserWindow | undefined) {
   if (window && !window.isDestroyed() && !window.isVisible()) window.show();
 }
 
-async function showMissing(override?: string, window = win) {
+async function showMissing(override?: string, window = win, status?: string) {
   reconnector.stop();
   allowedOrigin = undefined;
   shownAddress = undefined;
-  if (window) await loadPage(window, 'missing-alp.html', override ? { override } : {});
+  pendingInstall = undefined;
+  if (window) await loadPage(window, 'missing-alp.html', { ...(override ? { override } : {}), ...(status ? { status } : {}) });
   reveal(window);
 }
 
@@ -167,6 +202,7 @@ async function showError(message: string, window = win) {
   reconnector.stop();
   allowedOrigin = undefined;
   shownAddress = undefined;
+  pendingInstall = undefined;
   const text = message.length > MAX_MESSAGE ? `${message.slice(0, MAX_MESSAGE)}…` : message;
   if (window) await loadPage(window, 'error.html', { message: text });
   reveal(window);
@@ -180,12 +216,15 @@ async function showError(message: string, window = win) {
 async function connect() {
   // Connect again with every window closed opens one (macOS keeps the app running).
   if (!win || win.isDestroyed()) win = createWindow();
+  // An install under way finishes first; it connects when it is done.
+  if (installing) { await loadPage(win, 'installing.html'); reveal(win); return; }
   const id = ++generation;
   const current = () => (id === generation && win && !win.isDestroyed() ? win : undefined);
   // A manual connect replaces any recovery under way.
   reconnector.stop();
   allowedOrigin = undefined;
   shownAddress = undefined;
+  pendingInstall = undefined;
   remoteLoad = 0;
   const connecting = current();
   if (connecting) await loadPage(connecting, 'connecting.html');
@@ -204,8 +243,65 @@ async function connect() {
   if (result.ok) {
     await loadRemote(window, result.address);
     reveal(window);
-  } else if ('missing' in result) await showMissing(result.override, window);
-  else await showError(result.error, window);
+  } else if ('missing' in result) {
+    await showMissing(result.override, window);
+    // An explicit alpPath that is wrong is the user's to fix: installing elsewhere would not be used.
+    if (!result.override) await offerInstall(current);
+  } else await showError(result.error, window);
+}
+
+/**
+ * No alp was found: reads the latest release's SHA256SUMS and shows the confirmation page, which states
+ * the version, the source and every path. Nothing is written before the user chooses Install there.
+ */
+async function offerInstall(current: () => BrowserWindow | undefined) {
+  const checking = current();
+  if (!checking) return;
+  await loadPage(checking, 'missing-alp.html', { status: 'Looking for the latest ALP release…' });
+  const source = installSource(app.isPackaged, process.env);
+  const release = await latestRelease(source, process.arch, readText);
+  const window = current();
+  if (!window) return;
+  if ('error' in release) { await showMissing(undefined, window, `${release.error} You can install ALP from a terminal instead.`); return; }
+  const plan = installPlan(release, source, os.homedir(), process.env);
+  const nonce = randomUUID();
+  pendingInstall = { nonce, plan };
+  await loadPage(window, 'install.html', confirmQuery(plan, nonce));
+  reveal(window);
+}
+
+/** The confirmation page's answer; only the nonce of the page now shown counts, once. */
+async function answerInstall(window: BrowserWindow, answer: { action: 'install' | 'cancel'; nonce: string }) {
+  const pending = pendingInstall;
+  if (!pending || pending.nonce !== answer.nonce || installing || window !== win) return;
+  pendingInstall = undefined;
+  if (answer.action === 'cancel') {
+    await showMissing(undefined, window, 'Nothing was installed. Choose File › Connect again to be offered the install again.');
+    return;
+  }
+  await install(window, pending.plan);
+}
+
+/** Runs the bundled install.sh for `plan`, then connects; a failure is shown with install.sh's reason. */
+async function install(window: BrowserWindow, plan: InstallPlan) {
+  installing = true;
+  ++generation;
+  let failure: string | undefined;
+  try {
+    await loadPage(window, 'installing.html', { version: plan.version, appDir: plan.appDir });
+    const script = await readFile(installScript(), 'utf8');
+    const result = await run('/bin/sh', ['-s', '--', ...installArgs(plan)], { input: script, env: installEnv(process.env), timeout: INSTALL_TIMEOUT_MS, killGroup: true });
+    if (result.code !== 0) failure = installFailure(result);
+  } catch (error) {
+    failure = error instanceof Error ? error.message : String(error);
+  } finally {
+    installing = false;
+  }
+  if (failure !== undefined) {
+    await showError(`Installing ALP ${plan.version} failed: ${failure}\n\nALP ${plan.version} was not installed.`, win && !win.isDestroyed() ? win : undefined);
+    return;
+  }
+  await connect();
 }
 
 function buildMenu() {
