@@ -430,7 +430,9 @@ các trang y như trước, kể cả thông báo Unavailable. Các method owner
   không có trong registry. Điều kiện: `baseSha256` là sha256 của text đã đọc; khác thì `1004
   revision_conflict` và không ghi gì, app giữ bản nháp. Ghi atomic: file tạm cạnh file (giữ quyền
   `0o777` của file, không setuid/setgid), kiểm lại realpath thư mục cha, inode và sha256, rồi rename; lỗi
-  ở bất kỳ bước nào thì xoá file tạm. Cửa sổ còn lại: khoảng ngắn giữa lần kiểm cuối và `rename()` (một lstat, đọc lại file tới 1 MiB và tính sha256),
+  ở bất kỳ bước nào thì xoá file tạm qua đường dẫn cũ. Ngoại lệ: nếu một process khác đã đổi thư mục
+  cha thành link (bị từ chối `linked`), file tạm có thể còn lại trong thư mục đã bị dời đi; không gì được
+  ghi ra ngoài workspace. Cửa sổ còn lại: khoảng ngắn giữa lần kiểm cuối và `rename()` (một lstat, đọc lại file tới 1 MiB và tính sha256),
   trong đó một process khác **của cùng user** có thể đổi thư mục thành link hay sửa file (sửa đó bị ghi
   đè). Khoá file thì không có trên mọi nền tảng; rủi ro cần code của chính user đang chạy sẵn.
 - **General › Agents' language**: setting ngôn ngữ thật của ALP là ngôn ngữ agent và ALP viết cho
