@@ -230,6 +230,10 @@ test('projectRoot: absolute, normalized, a real project; symlinks out of .alp ar
   await fails('library.save', { kind: 'hooks', name: 'plain', scope: 'library', projectRoot: path.join(project, 'src'), content: { event: 'handoff', command: 'true' } }, 1001, 'not_alp_project');
   await fails('library.save', { kind: 'hooks', name: 'plain', scope: 'project', projectRoot: path.join(project, 'src'), content: { event: 'handoff', command: 'true' } }, 1001, 'not_alp_project');
   await assert.rejects(lstat(path.join(project, 'src', '.alp')));
+  await fails('library.list', { kind: 'agents', projectRoot: path.join(directory, 'missing') }, 1001, 'not_alp_project');
+  await mkdir(path.join(directory, 'file-alp'));
+  await writeFile(path.join(directory, 'file-alp', '.alp'), '');
+  await fails('library.list', { kind: 'agents', projectRoot: path.join(directory, 'file-alp') }, 1001, 'not_alp_project');
 
   const outside = path.join(directory, 'outside');
   await mkdir(path.join(outside, 'tasks'), { recursive: true });
