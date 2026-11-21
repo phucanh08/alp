@@ -1,6 +1,7 @@
 // @ts-check
 import { methods as host } from './host.js';
 import { methods as library } from './library.js';
+import { methods as workspaceFacts } from './workspace-facts.js';
 
 /**
  * The host owner's methods of alp dashboard (t-a95b; docs/alp/remote-gateway.md §5.19): what the
@@ -19,7 +20,8 @@ import { methods as library } from './library.js';
  * It returns the result, or throws: an error with a numeric `code` (and `data`) reaches the app as
  * that JSON-RPC error; any other is logged and answered "<method> failed in the gateway".
  *
- * host.js (group B) and library.js (group C) each own their methods; a name in both is a mistake
+ * host.js (group B), library.js (group C) and workspace-facts.js (t-ff83, the sidebar's
+ * host.workspace.facts) each own their methods; a name in both is a mistake
  * and stops the dashboard at start rather than letting one silently win.
  *
  * @typedef {{
@@ -56,6 +58,6 @@ export function mergeOwnerMethods(tables) {
  * @returns {Record<string, import('@anhlp/alp-gateway/owner').OwnerHandler>}
  */
 export function ownerMethods({ home, socket }) {
-  return Object.fromEntries(Object.entries(mergeOwnerMethods([host, library]))
+  return Object.fromEntries(Object.entries(mergeOwnerMethods([host, library, workspaceFacts]))
     .map(([name, handler]) => [name, (/** @type {any} */ context) => handler({ ...context, home, socket })]));
 }

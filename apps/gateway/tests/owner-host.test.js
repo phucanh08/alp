@@ -26,6 +26,7 @@ const HOST = {
   'host.workspace.label': { action: 'assign', workspaceId: 'wks_1', name: 'Client', color: 'sky', ifRevision: 3, requestId: 'r2' },
   'host.project.register': { directory: '/tmp/x', ifRevision: 3, requestId: 'r3' },
   'host.project.remove': { projectId: 'prj_1', ifRevision: 3, requestId: 'r4' },
+  'host.workspace.facts': { workspaceIds: ['wks_1', 'wks_2'], refresh: true },
 };
 const METHODS = Object.keys(HOST);
 

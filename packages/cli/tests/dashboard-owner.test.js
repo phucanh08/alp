@@ -1,4 +1,4 @@
-// alp dashboard's host owner methods (t-a95b, src/dashboard/owner/): the host and library tables are
+// alp dashboard's host owner methods (t-a95b, src/dashboard/owner/): the host, library and workspace-facts tables are
 // merged, a name in both stops the start, and each handler gets the gateway's context plus the ALP
 // home and alpd's socket.
 import test from 'node:test';
@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { mergeOwnerMethods, ownerMethods } from '../src/dashboard/owner/index.js';
 import { methods as host } from '../src/dashboard/owner/host.js';
 import { methods as library } from '../src/dashboard/owner/library.js';
+import { methods as workspaceFacts } from '../src/dashboard/owner/workspace-facts.js';
 
 test('owner methods: the host and library tables merge, and a name defined twice is refused', () => {
   const a = () => 'a';
@@ -13,7 +14,7 @@ test('owner methods: the host and library tables merge, and a name defined twice
   assert.deepEqual(Object.keys(mergeOwnerMethods([{ 'x.one': a }, { 'x.two': b }])).sort(), ['x.one', 'x.two']);
   assert.throws(() => mergeOwnerMethods([{ 'x.one': a }, { 'x.one': b }]), /x\.one is defined twice/);
   // The shipped tables merge (a duplicate between groups B and C would stop the dashboard here).
-  assert.deepEqual(Object.keys(ownerMethods({ home: '/h', socket: '/s' })).sort(), [...Object.keys(host), ...Object.keys(library)].sort());
+  assert.deepEqual(Object.keys(ownerMethods({ home: '/h', socket: '/s' })).sort(), [...Object.keys(host), ...Object.keys(library), ...Object.keys(workspaceFacts)].sort());
 });
 
 test('owner methods: a handler gets the gateway context with home and socket added', async () => {
