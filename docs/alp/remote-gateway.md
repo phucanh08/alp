@@ -469,6 +469,8 @@ Cột Test dùng các mã sau:
 | `host.terminal.status`, `host.terminal.set` | — | host: `$ALP_HOME/terminal.json`; `allow` cần `confirm: true` sau cảnh báo | — | owner, `handler: true` | owner, -32601 |
 | `host.registry`, `host.workspace.update`, `host.workspace.label` | — | host: cả registry của alpd; archive, label (không placement) | — | owner, `handler: true` | owner, -32601 |
 | `host.project.register`, `host.project.remove` | — | host: thư mục bất kỳ có thật (kiểm trên host) | — | owner, `handler: true` | owner, -32601 |
+| `host.workspace.facts` | — (gateway, `handler: true`) | host: thư mục của các workspace trong registry của alpd, gọi theo id (≤ 50; params không bao giờ là path); nhánh, `+/-` so với merge-base với nhánh gốc, PR và CI qua `gh`, logo trong workspace (data URI PNG/SVG/ICO ≤ 256 KB, không ra ngoài realpath của root); git/gh `execFile` không shell, có timeout và maxBuffer; cache 60 s, `refresh` ≥ 10 s/thư mục, một lần đọc/thư mục đang chạy, 4 thư mục cùng lúc | — | owner (§5.19), handler của dashboard (`owner/workspace-facts.js`, sidebar t-ff83) | owner, -32601 |
+| `schedule.list`, `schedule.get` | `schedule` | host: mọi `projectRoot` của alpd (owner không bị giới hạn ở workspace được grant); chuyển tới alpd nguyên vẹn với `params` liệt kê, kiểm schema v1 | — | owner (§5.19): sidebar Schedules của host owner; mọi credential khác như denied | owner, owner-schedule, -32601 |
 | `host.library.get` | — (gateway, `handler: true`) | host: entry của library host hoặc project qua `library.get` của alpd (env/header là marker) | — | owner (§5.19), handler của dashboard | owner, owner-library, -32601 |
 | `host.library.save`/`delete` | — (gateway, `handler: true`) | host: ghi agent, skill, team, MCP, hook ở library hoặc project qua `library.save`/`delete` của alpd, có `revision`; marker giữ secret, text mask bị từ chối | — | owner (§5.19), handler của dashboard | owner, owner-library, -32601 |
 | `host.library.test` | — (gateway, `handler: true`) | host: chạy MCP server hoặc hook một lần (`testEntry`) | — | owner (§5.19), handler của dashboard | owner, owner-library, -32601 |
@@ -1021,9 +1023,20 @@ Quyết định (main, theo quyền người dùng, 2026-11-21): ALP.app và `al
   phục vụ), phải liệt kê `params` (chỉ các key đó tới handler) và handler tự kiểm giá trị; không có
   handler thì bị từ chối, không bao giờ chuyển tới alpd (`authorization.test.js`).
   Method chưa có trong matrix thì handler không bao giờ được gọi.
+- **Sidebar (t-ff83)**: `host.workspace.facts { workspaceIds, refresh? }` trả `{ workspaces: { [id]: {
+  branch?, additions?, deletions?, pr?: { number, state: open|draft|merged|closed }, ci?: passed|failed|pending,
+  icon?, fetchedAt } } }`. Id không có trong registry (hoặc project đã xoá) bị bỏ; field nào không tính được
+  thì vắng, không bao giờ lỗi cả lời gọi. Diff = thay đổi đã commit và chưa commit của file được theo dõi
+  so với merge-base của HEAD và nhánh gốc (`origin/HEAD`, rồi `origin/main`, `origin/master`, `main`,
+  `master`), không có nhánh gốc thì chỉ thay đổi chưa commit so với HEAD; file untracked không tính, file
+  nhị phân tính 0. Git chạy không config system/global, không optional lock, không prompt, và không chạy gì
+  repo cấu hình (fsmonitor, hooks, pager, external diff, textconv, filter driver); `gh pr view <nhánh>` chỉ
+  chạy khi repo có remote; git và gh tìm trên PATH (entry tuyệt đối, ngoài workspace). Logo: danh sách tên
+  cố định (`ICON_CANDIDATES`), đuôi file và nội dung (magic PNG/ICO, `<svg`) phải khớp; web chỉ hiện qua
+  `<img>`. `schedule.list`/`schedule.get` là owner (chỉ đọc); `schedule.create`/`cancel` vẫn prohibited.
 - **Thêm method owner**: thêm entry `status: 'owner'` với `tests: ['owner']` vào khối
   `// --- owner: host (group B) ---` hoặc `// --- owner: library (group C) ---` của `policy.js`, và
-  handler (nếu cần) vào `owner/host.js` hoặc `owner/library.js`. Một tên định nghĩa hai lần làm dashboard
+  handler (nếu cần) vào `owner/host.js`, `owner/library.js` hoặc một bảng riêng gộp trong `owner/index.js` (như `owner/workspace-facts.js`). Một tên định nghĩa hai lần làm dashboard
   dừng lúc khởi động.
 
 ## 6. Streaming và recovery
@@ -1379,7 +1392,8 @@ exit/output fail closed. Silent clean exit1 remains Git's valid 'none ignored' r
 
 | Methods | Exposure | Reason |
 |---|---|---|
-| `schedule.create`, `schedule.list`, `schedule.get`, `schedule.cancel` | prohibited | local daemon jobs can wake a future session; no remote scheduling grant in v1 |
+| `schedule.create`, `schedule.cancel` | prohibited (even for the host owner) | local daemon jobs can wake a future session; no remote scheduling grant in v1 |
+| `schedule.list`, `schedule.get` | owner (§5.19) | read only, for the host owner's own dashboard (the sidebar's Schedules, t-ff83), forwarded to alpd with `params` `projectRoot, status` / `id, projectRoot`; every other connection gets `-32601 not_exposed` |
 
 See [scheduled continuations](schedules.md) for the local CLI and main tool.
 
