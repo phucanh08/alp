@@ -12,7 +12,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { EXPOSURE } from '../src/index.js';
 import { fakeDaemon } from './support/fake-daemon.js';
-import { startGateway } from './support/harness.js';
+import WebSocket from 'ws';
+import { AGENT_CAPABILITY, AlpRpcClient } from '@anhlp/alp-client/portable';
+import { connectWebSocket } from '@anhlp/alp-client/websocket';
+import { ORIGIN, startGateway } from './support/harness.js';
 import { teardown } from '../../../test/support/teardown.js';
 
 const notExposed = method => error => error.code === -32601 && error.message === `${method} is not available through the gateway` && error.data?.reason === 'not_exposed';
@@ -124,7 +127,7 @@ test('owner-library: on an owner gateway with no handler registered for a handle
 });
 
 test('owner-library: in a granted workspace with no .alp (not_alp_project), only the owner reads the library there; other credentials keep the refusal (t-a95b.1 F1)', async t => {
-  const { daemon, sdk, directory } = await world(t);
+  const { daemon, sdk, directory, ticket, tokens, wsUrl } = await world(t);
   const notProject = { code: 1001, message: 'not an ALP project; run alp init there', data: { reason: 'not_alp_project' } };
   // alpd as it answers a plain directory: every library read with a projectRoot is refused; without
   // one it answers the library and built-in layers. A request with projectRoot never answers rows.
@@ -148,6 +151,18 @@ test('owner-library: in a granted workspace with no .alp (not_alp_project), only
       await assert.rejects(client.request(method, params), isNotProject, `${name} ${method}`);
       assert.deepEqual(daemon.calls(method).slice(mark).map(call => call.params.projectRoot), [root], `${name} ${method}: never asked without projectRoot`);
     }
+  }
+
+  // The owner's credential on a connection marked as an ALP agent's is not the owner: refused once.
+  const { body } = await ticket(tokens.owner);
+  const transport = await connectWebSocket(wsUrl, { protocols: body.subprotocols, createSocket: (url, protocols) => new WebSocket(url, protocols, { origin: ORIGIN }) });
+  const agent = new AlpRpcClient(transport);
+  teardown(t)(() => agent.close());
+  await agent.request('daemon.hello', { protocolVersion: 1, client: { name: 'agent', version: '0' }, capabilities: [AGENT_CAPABILITY] });
+  for (const [method, params] of Object.entries(READS)) {
+    const mark = daemon.calls(method).length;
+    await assert.rejects(agent.request(method, params), isNotProject, `agent ${method}`);
+    assert.deepEqual(daemon.calls(method).slice(mark).map(call => call.params.projectRoot), [root], `agent ${method}: never asked without projectRoot`);
   }
 
   // The owner: asked again without projectRoot, and gets the library rows.
