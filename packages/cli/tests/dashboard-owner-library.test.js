@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod, link, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MASK_TEXT, OWNER_LIBRARY_KINDS, TEST_OUTPUT_CHARS, libraryTest, listWorkspaceFiles, maskIn, methods, readWorkspaceFile, writeWorkspaceFile } from '../src/dashboard/owner/library.js';
@@ -79,6 +79,21 @@ test('host.files.write: a change after the temporary file was written is a confl
     refused(1004, 'revision_conflict'));
   assert.equal(await readFile(file, 'utf8'), agentEdit, 'the agent edit is kept');
   assert.deepEqual(await readdir(path.join(root, 'src')), ['a.ts'], 'no temporary file left');
+});
+
+test('host.files.write: a directory swapped for a link after the first check is refused before the rename', async t => {
+  const { root, outside, daemon } = await workspace(t);
+  const file = path.join(root, 'src', 'a.ts');
+  const read = await readFile(file, 'utf8');
+  const before = (await readdir(outside)).sort();
+  await assert.rejects(
+    writeWorkspaceFile({ daemon, params: { projectRoot: root, path: 'src/a.ts', content: 'mine\n', baseSha256: sha(read) } }, {
+      // A racing process of the user moves src away and puts a link to a directory outside in its place.
+      afterTempWrite: async () => { await rename(path.join(root, 'src'), path.join(root, 'src-moved')); await symlink(outside, path.join(root, 'src'), 'dir'); },
+    }),
+    refused(1003, 'linked'));
+  assert.deepEqual((await readdir(outside)).sort(), before, 'nothing written outside the workspace');
+  assert.equal(await readFile(path.join(root, 'src-moved', 'a.ts'), 'utf8'), read, 'the file keeps its content');
 });
 
 test('host.files.write: each rejection writes nothing', async t => {

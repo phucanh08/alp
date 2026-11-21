@@ -199,7 +199,7 @@ async function confinedFile(root, segments, relative) {
  * again, so a reader sees the old or the new content.
  * @param {{ daemon: { request: (method: string, params?: Record<string, unknown>) => Promise<unknown> }, params: Record<string, any> }} context
  */
-export async function writeWorkspaceFile({ daemon, params }, { beforeRename } = /** @type {{ beforeRename?: () => unknown }} */ ({})) {
+export async function writeWorkspaceFile({ daemon, params }, { afterTempWrite, beforeRename } = /** @type {{ afterTempWrite?: () => unknown, beforeRename?: () => unknown }} */ ({})) {
   const projectRoot = rootOf(params.projectRoot, true);
   const segments = relativeSegments(params.path);
   const relative = segments.join('/');
@@ -219,8 +219,11 @@ export async function writeWorkspaceFile({ daemon, params }, { beforeRename } = 
     // The parent is checked again now the temporary file exists: a directory on the way swapped for a
     // link after confinedFile would put the temporary (and the rename) outside the workspace, so it is
     // refused and the temporary removed. What remains is a window of a few system calls between these
-    // checks and rename() in which a racing process of the same user could swap a directory or change
-    // the file; it needs that user's own code already running (docs/alp/dashboard.md §4.8).
+    // checks and rename() (an lstat, a re-read of the file of up to 1 MiB and its sha256) in which a
+    // racing process of the same user could swap a directory or change the file; it needs that user's
+    // own code already running (docs/alp/dashboard.md §4.8). The two hooks are test seams only: the
+    // methods table calls this with one argument.
+    await afterTempWrite?.();
     const parentNow = await realpath(path.dirname(file)).catch(() => undefined);
     if (parentNow !== path.dirname(file) || !(parentNow === root || parentNow.startsWith(`${root}${path.sep}`))) throw new OwnerError(ERROR.forbidden, 'linked', `${relative} is reached through a link; the app does not write through links`);
     await beforeRename?.();
