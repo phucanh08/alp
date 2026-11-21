@@ -453,6 +453,8 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
   const [usage, setUsage] = React.useState<UsageProvider[]>([]);
   const factIds = allProjects.map(path => registryOf(path)[0]?.id).filter((id): id is string => !!id).sort().join('\n');
   const activity = allProjects.map(path => sessionsOf(path).map(session => `${session.id}:${session.updatedAt ?? session.createdAt ?? ''}`).sort().join(',')).join('|');
+  // Facts belong to the owner connection that read them: dropped when it stops being the owner.
+  React.useEffect(() => { if (!owner) setFacts({}); }, [owner]);
   React.useEffect(() => {
     if (!ownerLive || !factIds) return;
     let live = true;
@@ -523,16 +525,20 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     };
   };
   const bucketFor = (session: SessionSummary) => bucketOf(session, needsInput(state, session.id), attentionReason(state, session.id));
-  /** The session that carries its workspace's facts: the workspace's most recent one (owner only). */
-  const factsFor = (path: string, session: SessionSummary): WorkspaceFacts | undefined => {
+  /**
+   * The session that carries its workspace's facts: the most recent of the workspace's rows on
+   * show (owner only), so a row folded away by "Show more" or filtered out by Search never takes
+   * them with it.
+   */
+  const factsFor = (path: string, session: SessionSummary, shown: readonly SessionSummary[]): WorkspaceFacts | undefined => {
     if (!owner) return undefined;
     const id = mainRow(path)?.id;
     const found = id ? facts[id] : undefined;
-    return found && mostRecentSession(sessionsOf(path))?.id === session.id ? found : undefined;
+    return found && mostRecentSession(shown)?.id === session.id ? found : undefined;
   };
-  const sessionRow = (path: string, session: SessionSummary) => {
+  const sessionRow = (path: string, session: SessionSummary, shown: readonly SessionSummary[]) => {
     const row = rowFor(path, session);
-    const own = factsFor(path, session);
+    const own = factsFor(path, session, shown);
     if (own) {
       // The registry's branch shows first (Show › Branch); the facts' fills in when it has none.
       if (display.rowItems.branch && own.branch && !row.meta.some(item => item.key === 'branch')) row.meta.unshift({ key: 'branch', icon: GitBranch, text: own.branch });
@@ -604,7 +610,7 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
             {current && needle && all.length && !list.length ? (
               <p className="flex min-h-9 items-center py-2 pl-10 pr-3 text-sm text-muted-foreground">No sessions match “{query.trim()}”</p>
             ) : null}
-            <ul>{limited.visible.map(session => sessionRow(path, session))}</ul>
+            <ul>{limited.visible.map(session => sessionRow(path, session, limited.visible))}</ul>
             {limited.canToggle || showAll[path] ? (
               <button type="button" onClick={() => setShowAll(current => ({ ...current, [path]: !current[path] }))} data-testid="sidebar-show-more"
                 className={cn('flex min-h-9 w-full items-center rounded-lg py-1 pl-10 pr-3 text-left text-xs text-muted-foreground hover:text-foreground', rowFill, focusRing)}>
@@ -628,7 +634,7 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     return groups.map(group => (
       <div key={group.bucket} data-testid={`sidebar-status-${group.bucket}`}>
         <SectionHeader title={group.label} />
-        <ul>{group.sessions.map(session => { const entry = sorted.find(item => item.session === session)!; return sessionRow(entry.path, session); })}</ul>
+        <ul>{group.sessions.map(session => { const entry = sorted.find(item => item.session === session)!; return sessionRow(entry.path, session, sorted.filter(item => item.path === entry.path).map(item => item.session)); })}</ul>
       </div>
     ));
   };

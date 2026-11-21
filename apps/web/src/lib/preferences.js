@@ -29,6 +29,7 @@ export const PREFERENCES_VERSION = 1;
  *   grouping: 'project' | 'status', sort: 'created' | 'lastPrompt', titleSource: 'title' | 'branch',
  *   rowItems: { branch: boolean, project: boolean, host: boolean, labels: boolean },
  *   trailing: 'timestamp' | 'none', projectFilters: string[],
+ *   revision?: 2,
  * }} SidebarDisplay
  */
 /**
@@ -83,7 +84,18 @@ export const DEFAULT_SIDEBAR_DISPLAY = Object.freeze(/** @type {SidebarDisplay} 
   grouping: 'project', sort: 'created', titleSource: 'title',
   rowItems: Object.freeze({ branch: true, project: false, host: false, labels: true }),
   trailing: 'none', projectFilters: /** @type {string[]} */ ([]),
+  revision: /** @type {2} */ (2),
 }));
+/**
+ * ALP's Show defaults before t-ff83. A stored display from before `revision: 2` that still equals
+ * them exactly (its user never changed it) moves to Paseo's defaults once; any other stored display
+ * stays as stored, and from `revision: 2` on an exact match is a choice and is kept.
+ */
+const PREVIOUS_SIDEBAR_DISPLAY = Object.freeze({
+  grouping: 'project', sort: 'created', titleSource: 'title',
+  rowItems: Object.freeze({ branch: false, project: false, host: true, labels: true }),
+  trailing: 'timestamp', projectFilters: Object.freeze([]),
+});
 const MAX_PROJECT_FILTERS = 64;
 
 /** @param {unknown} value @returns {SidebarDisplay} */
@@ -91,14 +103,22 @@ function parseSidebarDisplay(value) {
   const row = isRecord(value) ? /** @type {Record<string, any>} */ (value) : {};
   const items = isRecord(row.rowItems) ? row.rowItems : {};
   const defaults = DEFAULT_SIDEBAR_DISPLAY;
-  return {
+  /** @type {SidebarDisplay} */
+  const display = {
     grouping: row.grouping === 'status' ? 'status' : 'project',
     sort: row.sort === 'lastPrompt' ? 'lastPrompt' : 'created',
     titleSource: row.titleSource === 'branch' ? 'branch' : 'title',
     rowItems: /** @type {SidebarDisplay['rowItems']} */ (Object.fromEntries(Object.entries(defaults.rowItems).map(([key, fallback]) => [key, typeof items[key] === 'boolean' ? items[key] : fallback]))),
     trailing: row.trailing === 'none' || row.trailing === 'timestamp' ? row.trailing : defaults.trailing,
     projectFilters: [...new Set(Array.isArray(row.projectFilters) ? row.projectFilters.filter(path => typeof path === 'string' && path && path.length <= 4096) : [])].slice(0, MAX_PROJECT_FILTERS),
+    revision: 2,
   };
+  const previous = PREVIOUS_SIDEBAR_DISPLAY;
+  const untouched = row.revision !== 2 && isRecord(value)
+    && display.grouping === previous.grouping && display.sort === previous.sort && display.titleSource === previous.titleSource
+    && display.trailing === previous.trailing && !display.projectFilters.length
+    && Object.entries(previous.rowItems).every(([key, on]) => display.rowItems[/** @type {keyof SidebarDisplay['rowItems']} */ (key)] === on);
+  return untouched ? { ...defaults, rowItems: { ...defaults.rowItems }, projectFilters: [] } : display;
 }
 
 /** @type {Preferences} */

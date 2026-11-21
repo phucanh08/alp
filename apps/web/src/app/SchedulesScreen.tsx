@@ -36,8 +36,11 @@ export function SchedulesScreen({ navOpen, onToggleNav, onClose, onOpenSession }
   const [errors, setErrors] = React.useState<string[]>([]);
   const [pending, setPending] = React.useState(false);
   const online = connection.phase === 'open' && owner;
+  // Only the newest load may set the list: an older answer that comes back later is dropped.
+  const generation = React.useRef(0);
   const load = React.useCallback(async () => {
-    if (!online) return;
+    const mine = ++generation.current;
+    if (!online) { setJobs(null); setErrors([]); setPending(false); return; }
     setPending(true);
     const failures: string[] = [];
     const answers = await Promise.all((rootKey ? rootKey.split('\n') : []).map(async projectRoot => {
@@ -49,6 +52,7 @@ export function SchedulesScreen({ navOpen, onToggleNav, onClose, onOpenSession }
         return [projectRoot, []] as const;
       }
     }));
+    if (mine !== generation.current) return;
     setJobs(scheduleRows(Object.fromEntries(answers)) as ScheduleJob[]);
     setErrors(failures);
     setPending(false);
