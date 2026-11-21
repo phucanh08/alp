@@ -360,7 +360,7 @@ Settings bỏ bốn trang của Paseo, không còn mục nào trong nav:
 
 Các trang host (Usage, Providers, Terminals, Workspaces, Projects) nằm trong
 `apps/web/src/app/settings/HostPages.tsx`, các trang library (Templates, Agents, Skills, Hooks, MCP
-servers, Editor) trong `settings/LibraryPages.tsx`; lần này chỉ chuyển chỗ, hành vi không đổi.
+servers, Editor) trong `settings/LibraryPages.tsx`. Việc host owner làm được trên các trang đó ở §4.7 và §4.8.
 
 ### 4.7 Settings: host pages
 
