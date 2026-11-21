@@ -71,7 +71,7 @@ export async function scratch(t) {
  * session variables go (hermeticEnv, as the root test runner does, t-bf7f), so a run from an
  * agent's shell behaves as the user's. The host still only ever sees a scratch ALP_HOME and HOME.
  */
-function cleanEnv() {
+export function cleanEnv() {
   const env = hermeticEnv(process.env);
   for (const name of ['ELECTRON_RUN_AS_NODE', 'ALP_HOME', 'NODE_OPTIONS', 'ALP_DESKTOP_ALP', 'ALP_DESKTOP_USER_DATA', 'ALP_DESKTOP_INSTALL_MIRROR', 'ALP_INSTALL_BASE_URL', 'ALP_INSTALL_REPO', 'TMPDIR']) delete env[name];
   return env;
