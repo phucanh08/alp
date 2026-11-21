@@ -11,3 +11,4 @@ dd { margin: 0; word-break: break-word; }
 .actions { display: flex; gap: .75rem; margin-top: 1.25rem; }
 .button { padding: .45rem 1.1rem; border-radius: 6px; border: 1px solid color-mix(in srgb, CanvasText 25%, Canvas); color: CanvasText; text-decoration: none; }
 .button.primary { background: AccentColor; color: AccentColorText; border-color: AccentColor; }
+.warning { padding: .6rem .9rem; border-radius: 6px; border: 1px solid #c80; background: color-mix(in srgb, #c80 12%, Canvas); }

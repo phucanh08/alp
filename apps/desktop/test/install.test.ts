@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  compareVersions, confirmAction, confirmQuery, installArgs, installEnv, installFailure, installPlan, installSource,
+  compareVersions, confirmAction, confirmQuery, homeWarning, installArgs, installWarnings, installEnv, installFailure, installPlan, installSource,
   latestRelease, MIN_VERSION, MIRROR_VARIABLE, pickRelease, RELEASES,
 } from '../src/install';
 
@@ -74,6 +74,20 @@ describe('latestRelease', () => {
   });
 });
 
+describe('an existing ALP home that is not private (t-81b0.8)', () => {
+  test('is named with its mode and the chmod that fixes it; a private or missing one is not', () => {
+    expect(homeWarning('/Users/u/.alp', 0o40755)).toBe("/Users/u/.alp already exists and other users can read or enter it (mode 755). ALP needs it private, or alpd will refuse to start. Fix it in a terminal with: chmod 700 '/Users/u/.alp'");
+    expect(homeWarning('/h', 0o40750)).toContain('mode 750');
+    expect(homeWarning('/h', 0o40700)).toBeUndefined();
+    expect(homeWarning('/h', undefined)).toBeUndefined();
+  });
+  test("install.sh's warnings are read from its output, and the page carries the warning", () => {
+    expect(installWarnings("alp-install: checksum verified (x)\nalp-install: warning: /h is readable or writable by others; alpd needs it private (0700). Fix it with: chmod 700 '/h'\n"))
+      .toEqual(["/h is readable or writable by others; alpd needs it private (0700). Fix it with: chmod 700 '/h'"]);
+    expect(installWarnings('alp-install: installed\n')).toEqual([]);
+  });
+});
+
 describe('the plan and install.sh', () => {
   const release = { version: '0.0.1-beta.9', asset: 'alp-0.0.1-beta.9-darwin-arm64.tar.gz', sha256: SHA };
   const plan = installPlan(release, installSource(true, {}), '/Users/u', {});
@@ -100,6 +114,8 @@ describe('the plan and install.sh', () => {
     expect(installFailure({ code: null, stdout: '', stderr: '', timedOut: true })).toContain('did not finish');
   });
   test('the page states the plan and carries the nonce; only its own answers are read', () => {
+    expect(confirmQuery(plan, 'n1', 'w').homeWarning).toBe('w');
+    expect(confirmQuery(plan, 'n1')).not.toHaveProperty('homeWarning');
     expect(confirmQuery(plan, 'n1')).toMatchObject({ version: '0.0.1-beta.9', appDir: plan.appDir, command: plan.command, alpHome: plan.alpHome, bin: '/Users/u/.alp/bin', nonce: 'n1' });
     expect(confirmAction('alp-page://app/confirm?action=install&nonce=n1')).toEqual({ action: 'install', nonce: 'n1' });
     expect(confirmAction('alp-page://app/confirm?action=cancel&nonce=n1')).toEqual({ action: 'cancel', nonce: 'n1' });

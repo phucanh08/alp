@@ -11,7 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { lstat, readdir, readlink, stat } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, readlink, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
@@ -126,6 +126,26 @@ test('a release the app cannot read is shown on the install page, with the termi
   assert.ok(text.includes(`file://${mirror.dir}/SHA256SUMS`), text);
   assert.match(text, /install\.sh \| sh/);
   assert.equal(await exists(alpRoot), false);
+});
+
+test('an existing ALP home that is not private: the page warns with the chmod, and after Install the app shows install.sh\'s warning instead of connecting', limit, async t => {
+  const context = await scratch(t);
+  const mirror = await releaseMirror(context, { address: 'http://127.0.0.1:9/#token=unused' });
+  const alpRoot = path.join(context.dir, 'app-home', '.alp');
+  // What install.sh of 0.0.1-beta.8/9 left on a fresh machine (board p-69684f5b): ~/.alp at 0755.
+  await mkdir(alpRoot, { recursive: true });
+  await chmod(alpRoot, 0o755);
+  const { app } = await launchWithout(t, context, mirror.dir);
+  const text = await pageText(app, 'install.html', /Install ALP 9\.8\.7\?/);
+  assert.ok(text.includes(`${alpRoot} already exists and other users can read or enter it (mode 755)`), text);
+  assert.ok(text.includes(`chmod 700 '${alpRoot}'`), text);
+  await click(app, 'install-button');
+  const after = await pageText(app, 'error.html', /installer warned/, 60_000);
+  assert.ok(after.includes(`ALP 9.8.7 was installed in ${path.join(alpRoot, 'app', '9.8.7')}, but the installer warned:`), after);
+  assert.ok(after.includes(`chmod 700 '${alpRoot}'`), after);
+  // Installed, and the home's mode left alone (install.sh never chmods a home it did not create).
+  assert.equal(await readlink(path.join(alpRoot, 'app', 'current')), '9.8.7');
+  assert.equal((await stat(alpRoot)).mode & 0o777, 0o755);
 });
 
 const RELEASE_MIRROR = process.env.ALP_DESKTOP_E2E_RELEASE_MIRROR;

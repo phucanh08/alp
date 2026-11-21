@@ -144,9 +144,24 @@ export function installFailure(result: { code: number | null; stdout: string; st
   return tail || `the installer exited with code ${result.code}`;
 }
 
+/**
+ * Why an ALP home that already exists will stop alpd: any group or other permission bit (alpd refuses
+ * a home that is not 0700, and install.sh leaves an existing home's mode alone, only warning). `mode` is
+ * the home's st_mode, or undefined when it does not exist (install.sh then creates it 0700).
+ */
+export function homeWarning(alpHome: string, mode: number | undefined): string | undefined {
+  if (mode === undefined || (mode & 0o077) === 0) return undefined;
+  return `${alpHome} already exists and other users can read or enter it (mode ${(mode & 0o777).toString(8).padStart(3, '0')}). ALP needs it private, or alpd will refuse to start. Fix it in a terminal with: chmod 700 '${alpHome}'`;
+}
+
+/** install.sh's warnings (`alp-install: warning: …` lines), which it prints on success too. */
+export const installWarnings = (output: string): string[] => output.split(/\r?\n/)
+  .filter(line => line.startsWith('alp-install: warning: ')).map(line => line.slice('alp-install: warning: '.length));
+
 /** The confirmation page's query: everything it states, and the one-time nonce its buttons carry. */
-export function confirmQuery(plan: InstallPlan, nonce: string): Record<string, string> {
+export function confirmQuery(plan: InstallPlan, nonce: string, warning?: string): Record<string, string> {
   return {
+    ...(warning ? { homeWarning: warning } : {}),
     version: plan.version, asset: plan.asset, sha256: plan.sha256, source: plan.source,
     appDir: plan.appDir, command: plan.command, alpHome: plan.alpHome, bin: path.dirname(plan.command), nonce,
     homeNote: plan.createsHome

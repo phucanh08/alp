@@ -120,6 +120,12 @@ bản phát hành: ai sửa được release trên GitHub thì sửa được c�
 attestation (Sigstore) — làm vậy cần `gh` hoặc một bộ kiểm Sigstore trong app; trang xác nhận ghi lệnh
 `gh attestation verify` để người dùng tự kiểm.
 
+**ALP home có sẵn nhưng không riêng tư** (vd. `~/.alp` 0755 do `install.sh` của beta.8/beta.9 để lại):
+`install.sh` không chmod một home có sẵn, chỉ in `alp-install: warning: …`, và alpd sẽ từ chối home đó.
+App xem quyền của home trước: trang xác nhận ghi rõ mode hiện tại và lệnh `chmod 700 '<home>'`. Cài xong mà
+`install.sh` có cảnh báo thì app không tự kết nối (sẽ kết thúc bằng lỗi ALP_HOME_UNUSABLE khó hiểu) mà hiện
+trang "ALP <v> was installed …, but the installer warned:" kèm cảnh báo và lệnh sửa; sửa xong chọn Connect again.
+
 **Không bị ghi một nửa.** Checksum sai, tải lỗi hay Cancel: không có gì được tạo dưới `~/.alp` (`install.sh`
 chỉ ghi sau khi kiểm xong, và tự xóa thư mục tạm). Lỗi ở bước chuyển vào chỗ thì `install.sh` dọn bản
 đang dựng; có thể còn lại thư mục rỗng `~/.alp/app` và `~/.alp/bin`, hoặc (lỗi sau khi bản cài đã vào
@@ -216,7 +222,9 @@ chứa bundle giả) qua `ALP_DESKTOP_INSTALL_MIRROR`, không dùng mạng:
 - archive bị sửa (checksum sai), archive thiếu (tải lỗi): trang lỗi nêu lý do, không có `~/.alp`, không
   còn thư mục tạm của `install.sh`;
 - Cancel: không ghi gì; nonce cũ không làm gì; Connect again đề nghị lại;
-- không đọc được `SHA256SUMS`.
+- không đọc được `SHA256SUMS`;
+- `~/.alp` có sẵn ở 0755: trang xác nhận nêu mode và lệnh `chmod 700`, cài xong thì hiện cảnh báo của
+  `install.sh` thay vì kết nối, và mode của home không bị đổi.
 
 Ca cuối cài **bản phát hành thật** từ một bản sao tài sản của nó, chỉ khi `ALP_DESKTOP_E2E_RELEASE_MIRROR`
 trỏ tới thư mục chứa `SHA256SUMS` và archive darwin: alpd thật chạy dưới ALP home tạm (kiểm đường dẫn socket
