@@ -94,6 +94,7 @@ const STOP_WAITING = 'Stop is waiting for this message’s outcome.';
  * @typedef {{
  *   connection: { phase: Phase, gateway: string, attempt: number, error?: Failure, link?: boolean, daemonVersion?: string, hostname?: string, promptImageLimits?: ReturnType<typeof imageLimits>, attachmentLimits?: import('./attachments.js').FileLimits, terminalLimits?: import('@anhlp/alp-protocol').TerminalLimits, capabilities: string[] },
  *   principal: Principal | null,
+ *   owner: boolean,
  *   workspace: string | null,
  *   catalog: Load & { teams: Team[], teamsKnown?: boolean, teamsUnavailable?: import('./new-session.js').TeamsUnavailable, modes: Mode[], models: Model[], defaultMode?: string },
  *   sessions: Load & { list: SessionSummary[] },
@@ -172,6 +173,14 @@ export const FILES_READ_FORBIDDEN = 'This access token cannot read files (needs 
 export const FILES_READ_UNAVAILABLE = 'This host does not offer file reading. Update ALP on the host.';
 /** Paseo's FILE_SEARCH_LIMIT. */
 export const FILE_SEARCH_LIMIT = 100;
+/**
+ * The host owner (t-a95b; docs/alp/remote-gateway.md §5.19): the gateway's hello lists this
+ * capability only to alp dashboard's own credential on a direct loopback connection. State.owner
+ * mirrors it, from the current connection's hello only.
+ */
+export const HOST_OWNER = 'host.owner';
+/** What ownerRequest answers on a connection that is not the host owner's. */
+export const OWNER_REQUIRED = 'Only the host owner can change this: open ALP on the host itself (ALP.app or alp dashboard), not through a remote gateway.';
 
 /**
  * The host's machine name from the hello (alpd's os.hostname(), passed on by the gateway), as
@@ -204,6 +213,7 @@ export function initialState(gateway = '') {
   return {
     connection: { phase: 'idle', gateway, attempt: 0, capabilities: [] },
     principal: null,
+    owner: false,
     workspace: null,
     catalog: { status: 'idle', teams: [], modes: [], models: [] },
     sessions: { status: 'idle', list: [] },
@@ -648,6 +658,7 @@ export class Controller {
     if (workspace !== current) { this.#context = {}; this.#waiting = null; }
     this.#set(state => ({
       principal,
+      owner: capabilities.includes(HOST_OWNER),
       registry: changed ? initialState().registry : { ...state.registry, loading: false },
       connection: { ...state.connection, capabilities, ...(daemonVersion ? { daemonVersion } : {}), hostname, promptImageLimits: limits, attachmentLimits: files, terminalLimits: terminals },
       ...(workspace !== state.workspace ? { workspace, selected: null, focus: null, tree: null, sessions: initialState().sessions, history: initialState().history, attention: {}, turnAttention: {}, tasks: { ...initialState().tasks, visible: state.tasks.visible } } : {}),
@@ -689,6 +700,17 @@ export class Controller {
 
   /** @param {string} capability */
   hasCapability(capability) { return this.#state.connection.capabilities.includes(capability); }
+
+  /**
+   * A request only the host owner may make (state.owner): refused here, before anything is sent,
+   * on any other connection, with OWNER_REQUIRED; the gateway checks it again in any case. The
+   * Settings pages that change the host use this, so a remote client shows why instead of failing.
+   * @param {string} method @param {Record<string, unknown>} [params] @param {{ timeoutMs?: number }} [options]
+   */
+  async ownerRequest(method, params = {}, { timeoutMs } = {}) {
+    if (!this.#state.owner) throw new ConfigurationError(OWNER_REQUIRED);
+    return this.#client().request(method, params, { timeoutMs: timeoutMs ?? this.#options.requestTimeoutMs });
+  }
 
   // ---- terminals (#121 H) --------------------------------------------------------------------
 
