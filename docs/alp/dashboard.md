@@ -415,6 +415,13 @@ các trang y như trước, kể cả thông báo Unavailable. Các method owner
   (`unredact`) giữ đúng giá trị đã lưu; handler từ chối mọi chuỗi chứa text mask (`secret_marker`), nên
   mask không bao giờ được ghi. Test (nút *Test saved entry*) chạy `testEntry` của core như
   `alp mcp test`/`alp hook test`, trong tiến trình dashboard, output cắt ở 16 KiB.
+- **Workspace không phải project ALP** (không có `.alp`: thư mục `no-project` mặc định của dashboard,
+  repo chưa `alp init`; t-a95b.1 F1): alpd trả `1001 not_alp_project` khi có `projectRoot`. Với owner,
+  gateway (`team.list`, `library.list`, `library.get`) và các handler `host.library.get/save/delete`
+  hỏi lại alpd không có `projectRoot` khi lỗi đúng là `not_alp_project` và scope không phải `project`,
+  nên trang liệt kê và lưu được library của host ở đó. `scope: project` vẫn bị từ chối, không có gì
+  được ghi vào thư mục đó. Credential khác giữ nguyên lỗi; app nói workspace chưa là project ALP
+  (chạy `alp init`) thay vì "removed or expired".
 - **Templates, Agents, Skills**: owner sửa cả entry của library host (không chỉ agent/skill của
   project), dạng JSON của content; mở một entry built-in ở scope library rồi lưu là tạo bản của host.
   Providers không nằm ở đây (Settings › Providers, nhóm B). Credential không phải owner giữ nguyên luật

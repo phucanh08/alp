@@ -188,6 +188,27 @@ test('host.library.get and host.library.delete: alpd\'s methods with checked par
   assert.deepEqual(daemon.calls, [['library.get', { kind: 'hooks', name: 'notify', projectRoot: '/w' }], ['library.delete', { kind: 'hooks', name: 'notify', scope: 'project', projectRoot: '/w', revision: 'r1' }]]);
 });
 
+test('host.library.get/save/delete: in a directory with no .alp (alpd not_alp_project), a library call is asked again without projectRoot; scope project and other refusals are not (t-a95b.1 F1)', async () => {
+  const notProject = { code: 1001, message: 'not an ALP project', data: { reason: 'not_alp_project' } };
+  const refuseWithRoot = answer => params => { if (params.projectRoot !== undefined) throw notProject; return answer; };
+  const daemon = fakeDaemon({ 'library.get': refuseWithRoot({ content: {}, source: 'library' }), 'library.save': refuseWithRoot({ revision: 'r2' }), 'library.delete': refuseWithRoot({ removed: true }) });
+  const context = params => ({ method: 'm', params, principal: 'p', daemon, home: '/h', socket: '/s' });
+  assert.equal((await methods['host.library.get'](context({ kind: 'hooks', name: 'notify', projectRoot: '/w' }))).source, 'library');
+  assert.deepEqual(await methods['host.library.save'](context({ kind: 'hooks', name: 'notify', scope: 'library', projectRoot: '/w', content: { event: 'handoff', command: 'true' }, revision: null })), { revision: 'r2' });
+  assert.deepEqual(await methods['host.library.delete'](context({ kind: 'hooks', name: 'notify', scope: 'library', projectRoot: '/w', revision: 'r1' })), { removed: true });
+  assert.deepEqual(daemon.calls.map(([method, params]) => [method, params.projectRoot]), [['library.get', '/w'], ['library.get', undefined], ['library.save', '/w'], ['library.save', undefined], ['library.delete', '/w'], ['library.delete', undefined]]);
+  // Scope project needs a real project: alpd's refusal, asked once.
+  daemon.calls.length = 0;
+  for (const [method, params] of [['host.library.get', { kind: 'hooks', name: 'notify', scope: 'project', projectRoot: '/w' }], ['host.library.save', { kind: 'hooks', name: 'notify', scope: 'project', projectRoot: '/w', content: {}, revision: null }], ['host.library.delete', { kind: 'hooks', name: 'notify', scope: 'project', projectRoot: '/w', revision: 'r1' }]]) {
+    await assert.rejects(methods[method](context(params)), refused(1001, 'not_alp_project'), method);
+  }
+  assert.deepEqual(daemon.calls.map(([, params]) => params.projectRoot), ['/w', '/w', '/w']);
+  // Any other refusal is alpd's answer, asked once.
+  const gone = fakeDaemon({ 'library.get': () => { throw { code: 1001, message: 'gone', data: { reason: 'not_found' } }; } });
+  await assert.rejects(methods['host.library.get']({ method: 'm', params: { kind: 'hooks', name: 'notify', projectRoot: '/w' }, principal: 'p', daemon: gone, home: '/h', socket: '/s' }), refused(1001, 'not_found'));
+  assert.equal(gone.calls.length, 1);
+});
+
 test('host.library.test: runs testEntry as alp hook test does, output clipped; only MCP servers and hooks', async t => {
   const runs = [];
   const run = async (kind, name, options) => { runs.push([kind, name, options]); return { ok: true, exitCode: 0, stdout: 'y'.repeat(TEST_OUTPUT_CHARS + 10), stderr: '' }; };

@@ -109,3 +109,11 @@ test('describe handles 1003 content_type specifically instead of generic host re
   const described2 = describe(errorWithoutMessage);
   assert.equal(described2.message, 'This message contains content the host does not accept.');
 });
+
+test('describe: 1001 not_alp_project says the workspace has no .alp, not "removed or expired" (t-a95b.1 F1)', () => {
+  const described = describe({ code: 1001, message: '/w is not an ALP project; run alp init there', data: { reason: 'not_alp_project' } });
+  assert.match(described.message, /not an ALP project/);
+  assert.match(described.message, /alp init/);
+  assert.doesNotMatch(described.message, /removed or expired/);
+  assert.equal(describe({ code: 1001, data: { reason: 'not_found' } }).message, 'Not found on the host. It may have been removed or expired.');
+});

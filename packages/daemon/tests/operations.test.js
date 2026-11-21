@@ -3,7 +3,7 @@
 // their project, secrets kept inside alpd, and concurrent writes that never both win.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
@@ -224,6 +224,12 @@ test('projectRoot: absolute, normalized, a real project; symlinks out of .alp ar
   await mkdir(path.join(project, 'src'));
   await fails('task.list', { projectRoot: path.join(project, 'src') }, 1001, 'not_alp_project');
   await fails('library.list', { kind: 'agents', projectRoot: path.join(project, 'src') }, 1001, 'not_alp_project');
+  // alpd refuses a library call in a directory with no .alp in every scope, before it writes
+  // anything; only the owner's gateway and dashboard leave projectRoot out then (t-a95b.1 F1).
+  await fails('library.get', { kind: 'agents', name: 'nobody', scope: 'library', projectRoot: path.join(project, 'src') }, 1001, 'not_alp_project');
+  await fails('library.save', { kind: 'hooks', name: 'plain', scope: 'library', projectRoot: path.join(project, 'src'), content: { event: 'handoff', command: 'true' } }, 1001, 'not_alp_project');
+  await fails('library.save', { kind: 'hooks', name: 'plain', scope: 'project', projectRoot: path.join(project, 'src'), content: { event: 'handoff', command: 'true' } }, 1001, 'not_alp_project');
+  await assert.rejects(lstat(path.join(project, 'src', '.alp')));
 
   const outside = path.join(directory, 'outside');
   await mkdir(path.join(outside, 'tasks'), { recursive: true });
