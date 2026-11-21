@@ -80,7 +80,7 @@ test('a tampered archive (checksum mismatch) is refused, shown, and nothing is i
   await click(app, 'install-button');
   const text = await pageText(app, 'error.html', /checksum mismatch/, 60_000);
   assert.match(text, /Installing ALP 9\.8\.7 failed: checksum mismatch for alp-9\.8\.7-darwin-/);
-  assert.match(text, /ALP 9\.8\.7 was not installed/);
+  assert.ok(text.includes(`Nothing was installed (${alpRoot} was not created).`), text);
   assert.equal(await exists(alpRoot), false, 'nothing under the ALP home');
   await noInstallerLeft(tmp);
 });
@@ -92,7 +92,9 @@ test('a failed download is shown, and nothing is installed', limit, async t => {
   const { app, alpRoot, tmp } = await launchWithout(t, context, mirror.dir);
   await pageText(app, 'install.html', /Install ALP 9\.8\.7\?/);
   await click(app, 'install-button');
-  assert.match(await pageText(app, 'error.html', /could not download/, 60_000), /Installing ALP 9\.8\.7 failed: could not download/);
+  const text = await pageText(app, 'error.html', /could not download/, 60_000);
+  assert.match(text, /Installing ALP 9\.8\.7 failed: could not download/);
+  assert.ok(text.includes('Nothing was installed'), text);
   assert.equal(await exists(alpRoot), false);
   await noInstallerLeft(tmp);
 });

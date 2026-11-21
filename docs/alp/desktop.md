@@ -90,24 +90,31 @@ Khi §2 không tìm thấy `alp` nào và không có `alpPath`, app:
 1. Đọc **chỉ** `SHA256SUMS` của bản phát hành mới nhất
    (`https://github.com/phucanh08/alp/releases/latest/download/SHA256SUMS`, qua `net.fetch` của Chromium,
    theo proxy của hệ thống), chọn archive `alp-<version>-darwin-<arch>.tar.gz` giống cách `install.sh`
-   chọn. Bản cũ hơn 0.0.1-beta.9 (chưa có `alp dashboard`) bị từ chối. Đọc không được thì trang chưa cài
+   chọn (app x64 chạy qua Rosetta thì chọn bản arm64, như `install.sh`). Bản cũ hơn 0.0.1-beta.9 (chưa có `alp dashboard`) bị từ chối. Đọc không được thì trang chưa cài
    nêu lý do và lệnh cài từ terminal.
 2. Hiện trang xác nhận `install.html` trong cửa sổ: phiên bản, nguồn tải (`…/releases/download/v<version>`),
-   tên archive và checksum, thư mục cài (`~/.alp/app/<version>`), lệnh `~/.alp/bin/alp`, thư mục dữ liệu
-   ALP (`$ALP_HOME` hoặc `~/.alp`, tạo 0700 nếu chưa có), và việc PATH/shell profile không bị sửa. **Chưa
+   tên archive và checksum mà `SHA256SUMS` liệt kê lúc đó (để tham khảo: `install.sh` tự tải lại
+   `SHA256SUMS` của phiên bản đó và chỉ tin bản đó), thư mục cài (`~/.alp/app/<version>`), lệnh
+   `~/.alp/bin/alp`, thư mục dữ liệu ALP (`$ALP_HOME` hoặc `~/.alp`; `install.sh` chỉ tạo nó, 0700, khi nó
+   chính là `~/.alp` và chưa có; thư mục có sẵn giữ nguyên quyền), và việc PATH/shell profile không bị sửa. **Chưa
    ghi gì** cho tới khi người dùng bấm **Install**. **Cancel** quay về trang chưa cài; Connect again đề
    nghị lại.
 3. Bấm Install: chạy `install.sh` **đóng gói sẵn trong app** (`dist/install.sh`, bản sao của `install.sh`
    ở gốc repo lúc build; app không tải và chạy script nào từ mạng) bằng `/bin/sh -s -- --version <v>
    --base-url <nguồn của v> --root ~/.alp --dir ~/.alp/bin --no-modify-path`. Môi trường của nó bỏ
-   `ALP_INSTALL_BASE_URL`/`ALP_INSTALL_REPO`, nên nguồn luôn đúng nguồn trang đã nêu. `install.sh` tải
+   `ALP_INSTALL_BASE_URL`/`ALP_INSTALL_REPO`, nên nguồn luôn đúng nguồn trang đã nêu, và PATH của nó đặt
+   `/usr/bin:/bin:/usr/sbin:/sbin` trước PATH của app (curl, shasum, tar của hệ thống). `install.sh` tải
    archive, so SHA-256 với `SHA256SUMS`, kiểm `bin/alp --version` (và `bin/alpd --version` của alpd
    native), tạo ALP home 0700 (t-66a4), rồi mới chuyển bản cài vào chỗ.
 4. Xong thì kết nối như §1 (`~/.alp/bin/alp` đứng đầu §2). Lỗi thì trang lỗi nêu lý do của `install.sh`
-   (vd. `checksum mismatch …`, `could not download …`).
+   (vd. `checksum mismatch …`, `could not download …`) và: nếu `~/.alp` chưa có trước đó và vẫn chưa có,
+   "Nothing was installed"; nếu không, rằng trình cài dừng giữa chừng và ALP có thể đã nằm một phần dưới
+   `~/.alp` (Connect again sẽ dùng hoặc đề nghị cài lại).
 
-**Được kiểm và không được kiểm.** Được kiểm: archive đúng từng byte với checksum mà `SHA256SUMS` của
-chính bản phát hành đó (tải qua HTTPS từ github.com) liệt kê, và hai binary trong đó báo đúng phiên bản.
+**Được kiểm và không được kiểm.** Được kiểm (bởi `install.sh`): archive đúng từng byte với checksum mà `SHA256SUMS` của
+chính bản phát hành đó (tải lại qua HTTPS từ github.com lúc cài) liệt kê, và hai binary trong đó báo đúng
+phiên bản. Checksum hiện trên trang xác nhận không được truyền cho `install.sh`: nếu bản phát hành bị thay
+giữa lúc xem và lúc cài, `install.sh` kiểm theo `SHA256SUMS` mới.
 Điều này chống file hỏng, tải dở hay một bản sao trung gian bị đổi, nhưng **không** chứng minh ai đã build
 bản phát hành: ai sửa được release trên GitHub thì sửa được cả `SHA256SUMS`. App **không** kiểm GitHub
 attestation (Sigstore) — làm vậy cần `gh` hoặc một bộ kiểm Sigstore trong app; trang xác nhận ghi lệnh
@@ -115,7 +122,9 @@ attestation (Sigstore) — làm vậy cần `gh` hoặc một bộ kiểm Sigsto
 
 **Không bị ghi một nửa.** Checksum sai, tải lỗi hay Cancel: không có gì được tạo dưới `~/.alp` (`install.sh`
 chỉ ghi sau khi kiểm xong, và tự xóa thư mục tạm). Lỗi ở bước chuyển vào chỗ thì `install.sh` dọn bản
-đang dựng; có thể còn lại thư mục rỗng `~/.alp/app` và `~/.alp/bin`.
+đang dựng; có thể còn lại thư mục rỗng `~/.alp/app` và `~/.alp/bin`, hoặc (lỗi sau khi bản cài đã vào
+chỗ, vd. bước tạo link) một bản cài chưa trọn mà trang lỗi nói rõ. Hết thời gian (20 phút) thì app dừng cả
+process group của `install.sh`; thư mục dựng `.alp-update-*` còn lại được lần cài sau dọn.
 
 **`alp` cũ hơn 0.0.1-beta.9 đã có:** app không tự cập nhật nó (có thể là bản npm hay bản hệ thống mà app
 không quản lý, và đang chạy một alpd); trang lỗi nêu phiên bản và cách cập nhật (`alp update`) như §3.
