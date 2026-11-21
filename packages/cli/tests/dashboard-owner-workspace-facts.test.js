@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { FACTS, ICON_CANDIDATES, ciOf, createWorkspaceFacts, factsParams, iconOf, isInside, looksLike, methods, numstat, prOf, readFacts } from '../src/dashboard/owner/workspace-facts.js';
+import { FACTS, ICON_CANDIDATES, ciOf, createWorkspaceFacts, factsParams, iconOf, isInside, looksLike, onPath, methods, numstat, prOf, readFacts } from '../src/dashboard/owner/workspace-facts.js';
 import { teardown } from '../../../test/support/teardown.js';
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(24, 1)]);
@@ -359,4 +359,21 @@ test('review fixes (PR #354): an empty or failed read is cached only for FACTS.r
   assert.ok(!isInside('/w', '/x'));
   assert.ok(!isInside('/w', '/w2'));
   assert.ok(!isInside('/w', '/'));
+});
+
+test('onPath skips a PATH entry that is a link into the workspace', { skip: skipGit }, async t => {
+  const { directory, bin } = await scratch(t);
+  const workspace = path.join(directory, 'ws');
+  await mkdir(path.join(workspace, 'bin'), { recursive: true });
+  await writeFile(path.join(workspace, 'bin', 'gh'), '#!/bin/sh\n');
+  await chmod(path.join(workspace, 'bin', 'gh'), 0o755);
+  const link = path.join(directory, 'linked-bin');
+  await symlink(path.join(workspace, 'bin'), link);
+  const { realpath } = await import('node:fs/promises');
+  const root = await realpath(workspace);
+  assert.equal(await onPath('gh', { PATH: link }, root), undefined);
+  assert.equal(await onPath('gh', { PATH: path.join(workspace, 'bin') }, root), undefined);
+  // Outside the workspace it is found.
+  await fakeGh(bin, directory);
+  assert.ok(await onPath('gh', { PATH: [link, bin].join(path.delimiter) }, root));
 });
