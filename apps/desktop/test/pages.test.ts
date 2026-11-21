@@ -14,10 +14,12 @@ describe('bundled pages (alp-page://app, t-81b0.7)', () => {
     expect(resolvePage('alp-page://app/error.html?message=x', DIR)).toEqual({ file: `${DIR}/error.html`, type: 'text/html; charset=utf-8' });
     expect(resolvePage('alp-page://app/page.css', DIR)).toEqual({ file: `${DIR}/page.css`, type: 'text/css; charset=utf-8' });
     expect(resolvePage('alp-page://app/missing-alp.js', DIR)?.type).toBe('text/javascript; charset=utf-8');
+    expect(resolvePage('alp-page://app/install.js', DIR)?.type).toBe('text/javascript; charset=utf-8');
+    expect(resolvePage('alp-page://app/install.html?nonce=x', DIR)?.file).toBe(`${DIR}/install.html`);
   });
   test('anything else is not served', () => {
     for (const url of [
-      'alp-page://app/', 'alp-page://app/other.html', 'alp-page://app/../main.cjs', 'alp-page://app/%2e%2e/main.cjs',
+      'alp-page://app/', 'alp-page://app/other.html', 'alp-page://app/confirm?action=install&nonce=x', 'alp-page://app/install.sh', 'alp-page://app/../main.cjs', 'alp-page://app/%2e%2e/main.cjs',
       'alp-page://app/pages/error.html', 'alp-page://other/error.html', 'alp-page://u:p@app/error.html',
       'alp-page://app/%2Fetc%2Fpasswd', 'alp-page://app/..%2Fmain.cjs', 'alp-page://app/%2e%2e%2fmain.cjs', 'alp-page://app/error.html%00',
       'alp-page://app//etc/passwd', 'alp-page://app/etc/passwd', 'alp-page://app/C:%5Cerror.html', 'alp-page://app/..%5Cerror.html',

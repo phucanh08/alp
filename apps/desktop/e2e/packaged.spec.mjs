@@ -19,7 +19,7 @@ import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright-core';
-import { appEnv, fakeAlp, freePort, host, scratch, TEST_SWITCHES, waitFor } from './support.mjs';
+import { appEnv, fakeAlp, freePort, host, noAlpEnv, releaseMirror, scratch, TEST_SWITCHES, waitFor } from './support.mjs';
 import { hermeticEnv } from '../../../scripts/test-lib.mjs';
 import { DESKTOP_BUNDLE_ID, readBundleId } from '../../../packages/cli/src/desktop.js';
 
@@ -77,7 +77,8 @@ function newPrompts(windows, baseline, pid) {
  * before the host stops and the directory goes. Returns its output so far and the DevTools port.
  */
 async function start(context, app, alp, extraEnv = {}, args = []) {
-  await mkdir(path.join(context.dir, 'app-home'), { recursive: true });
+  await mkdir(path.join(context.dir, 'app-home'), { recursive: true, mode: 0o700 });
+  await mkdir(path.join(context.dir, 'tmp'), { recursive: true });
   const port = await freePort();
   const binary = path.join(app, 'Contents', 'MacOS', 'ALP');
   const rosetta = process.arch === 'arm64' && (await run('lipo', ['-archs', binary])).stdout.trim() === 'x86_64';
@@ -243,6 +244,26 @@ test('no alp: the install page, from the app itself', limit, async t => {
   const shown = await bundledPage(context, await start(context, app, path.join(context.dir, 'nowhere', 'alp')), 'connecting.html');
   assertBundled(shown.url, 'missing-alp.html');
   assert.match(shown.text, /npm install -g/);
+});
+
+// t-81b0.8: the test mirror (ALP_DESKTOP_INSTALL_MIRROR) is for an unpackaged app only. ALP.app with no alp
+// reads the latest release from GitHub whatever that variable says. A proxy that refuses every connection
+// keeps the test off the network: the lookup fails, and its message names the URL the app asked for.
+test('no alp: ALP.app ignores the test mirror and looks up GitHub Releases only', limit, async t => {
+  const context = await scratch(t);
+  const app = await install(context);
+  const mirror = await releaseMirror(context, { address: 'http://127.0.0.1:9/#token=unused' });
+  const started = await start(context, app, undefined, { ...(await noAlpEnv(context)), ALP_DESKTOP_INSTALL_MIRROR: mirror.dir }, ['--proxy-server=127.0.0.1:9']);
+  let shown;
+  for (let i = 0; i < 60; i++) {
+    shown = await bundledPage(context, started, 'connecting.html');
+    if (/Could not read the latest ALP release/.test(shown.text)) break;
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  assertBundled(shown.url, 'missing-alp.html');
+  assert.ok(shown.text.includes('https://github.com/phucanh08/alp/releases/latest/download/SHA256SUMS'), shown.text);
+  assert.ok(!shown.text.includes(mirror.dir), shown.text);
+  assert.equal(await stat(path.join(context.dir, 'app-home', '.alp')).then(() => true, () => false), false);
 });
 
 async function connectedSetup(t) {

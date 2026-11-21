@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { cp, mkdir, rm } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -85,12 +85,16 @@ test('t-81b0.7: a build whose source tree is gone still shows its pages, and an 
   // The packaged app runs on a machine without the tree it was built from: build a copy, remove its
   // source, then run it. A bundle that looks for its pages in the source tree shows a blank window.
   const context = await scratch(t);
-  const build = path.join(context.dir, 'build');
-  await mkdir(build);
+  // The repository's layout: the build copies ../../install.sh into dist (t-81b0.8).
+  const build = path.join(context.dir, 'apps', 'desktop');
+  await mkdir(build, { recursive: true });
   await cp(path.join(APP, 'package.json'), path.join(build, 'package.json'));
   await cp(path.join(APP, 'src'), path.join(build, 'src'), { recursive: true });
+  await cp(path.join(APP, '..', '..', 'install.sh'), path.join(context.dir, 'install.sh'));
   await promisify(execFile)('bun', ['run', 'build'], { cwd: build, timeout: 60_000 });
   await rm(path.join(build, 'src'), { recursive: true });
+  await rm(path.join(context.dir, 'install.sh'));
+  assert.equal(await readFile(path.join(build, 'dist', 'install.sh'), 'utf8'), await readFile(path.join(APP, '..', '..', 'install.sh'), 'utf8'), 'the build ships the repository\'s install.sh');
   const alp = await fakeAlp(context);
   // What 0.0.1-beta.8 answers: its usage on stderr, exit 1 (no `dashboard` command); --version works.
   await alp.set("printf 'Usage:\\n  alp web [--print]\\n' >&2; exit 1");

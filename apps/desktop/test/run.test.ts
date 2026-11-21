@@ -9,6 +9,10 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 const env = { PATH: '/usr/bin:/bin' };
 
 describe('run', () => {
+  test('input goes to stdin, which is then closed (install.sh runs as `sh -s`)', async () => {
+    const result = await run('/bin/sh', ['-s', '--', 'arg'], { env, timeout: 5000, input: 'echo "got $1"; cat; echo end\n' });
+    expect(result).toMatchObject({ code: 0, stdout: 'got arg\nend\n' });
+  });
   test('collects output and the exit code', async () => {
     const result = await run('/bin/sh', ['-c', 'echo out; echo err >&2; exit 3'], { env, timeout: 5000 });
     expect(result).toMatchObject({ code: 3, stdout: 'out\n', stderr: 'err\n', timedOut: false });

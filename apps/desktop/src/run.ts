@@ -31,10 +31,12 @@ export type RunOptions = {
   killGroup?: boolean;
   /** The most bytes kept of each of stdout and stderr; the rest is dropped. */
   maxBuffer?: number;
+  /** Written to the child's stdin, which is then closed; without it stdin is /dev/null. */
+  input?: string;
 };
 
 export function run(file: string, args: string[], options: RunOptions): Promise<RunResult> {
-  const { env, timeout, exitGrace = 500, killGroup = false, maxBuffer = 1 << 20 } = options;
+  const { env, timeout, exitGrace = 500, killGroup = false, maxBuffer = 1 << 20, input } = options;
   return new Promise<RunResult>(resolve => {
     const out = collector(maxBuffer);
     const err = collector(maxBuffer);
@@ -45,7 +47,12 @@ export function run(file: string, args: string[], options: RunOptions): Promise<
     let startError: Error | undefined;
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const child = spawn(file, args, { env, shell: false, windowsHide: true, detached: killGroup, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(file, args, { env, shell: false, windowsHide: true, detached: killGroup, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+    if (input !== undefined && child.stdin) {
+      // A child that exits before reading all of it closes the pipe (EPIPE): its exit code says why.
+      child.stdin.on('error', () => undefined);
+      child.stdin.end(input);
+    }
 
     const signal = (name: NodeJS.Signals) => {
       try {

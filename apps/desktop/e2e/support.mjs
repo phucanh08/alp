@@ -9,7 +9,8 @@
  * - Every resource is undone through test/support/teardown.js's `defer`, in reverse order: Electron
  *   closes and the host stops before their directory is removed.
  */
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { access, chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -17,6 +18,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { promisify } from 'node:util';
 import { _electron } from 'playwright-core';
 import { fixtureProcesses } from '../../../test/support/fixture-processes.js';
 import { teardown } from '../../../test/support/teardown.js';
@@ -70,7 +72,7 @@ export async function scratch(t) {
  */
 function cleanEnv() {
   const env = hermeticEnv(process.env);
-  for (const name of ['ELECTRON_RUN_AS_NODE', 'ALP_HOME', 'NODE_OPTIONS', 'ALP_DESKTOP_ALP', 'ALP_DESKTOP_USER_DATA']) delete env[name];
+  for (const name of ['ELECTRON_RUN_AS_NODE', 'ALP_HOME', 'NODE_OPTIONS', 'ALP_DESKTOP_ALP', 'ALP_DESKTOP_USER_DATA', 'ALP_DESKTOP_INSTALL_MIRROR', 'ALP_INSTALL_BASE_URL', 'ALP_INSTALL_REPO', 'TMPDIR']) delete env[name];
   return env;
 }
 
@@ -181,10 +183,17 @@ export async function appCopy({ dir }) {
   return copy;
 }
 
-/** The environment the app runs with: the fake alp, a scratch profile, no ELECTRON_RUN_AS_NODE. */
-export function appEnv({ dir }, alp) {
+/**
+ * The environment the app runs with: the fake alp (none when `alp` is undefined), a scratch HOME,
+ * ALP_HOME and TMPDIR (t-81b0.8: whatever the app installs or starts stays under `dir`), a scratch
+ * profile, no ELECTRON_RUN_AS_NODE; `extra` last.
+ */
+export function appEnv({ dir }, alp, extra = {}) {
   // A scratch HOME too: nothing Electron writes under ~ (logs, caches) lands in the user's.
-  return { ...cleanEnv(), HOME: path.join(dir, 'app-home'), ALP_DESKTOP_ALP: alp, ALP_DESKTOP_USER_DATA: path.join(dir, 'user-data') };
+  const home = path.join(dir, 'app-home');
+  const env = { ...cleanEnv(), HOME: home, ALP_HOME: path.join(home, '.alp'), TMPDIR: path.join(dir, 'tmp'), ALP_DESKTOP_USER_DATA: path.join(dir, 'user-data'), ...extra };
+  if (alp !== undefined) env.ALP_DESKTOP_ALP = alp;
+  return env;
 }
 
 /**
@@ -195,9 +204,10 @@ export function appEnv({ dir }, alp) {
 export const TEST_SWITCHES = ['--use-mock-keychain'];
 
 /** Launches the app; it is closed before the host stops and the directory goes. */
-export async function launch(t, context, alp, { app = APP } = {}) {
-  await mkdir(path.join(context.dir, 'app-home'), { recursive: true });
-  const electronApp = await _electron.launch({ executablePath: ELECTRON, args: [...TEST_SWITCHES, app], env: appEnv(context, alp), timeout: 30_000 });
+export async function launch(t, context, alp, { app = APP, env = {} } = {}) {
+  await mkdir(path.join(context.dir, 'app-home'), { recursive: true, mode: 0o700 });
+  await mkdir(path.join(context.dir, 'tmp'), { recursive: true });
+  const electronApp = await _electron.launch({ executablePath: ELECTRON, args: [...TEST_SWITCHES, app], env: appEnv(context, alp, env), timeout: 30_000 });
   // The app's own output, reported with the test if the app died, so a crash on CI says why. A link token is masked
   // (the app never prints one, but Chromium could).
   let output = '';
@@ -280,4 +290,62 @@ export function connectedTo(electronApp, origin, timeoutMs = 30_000) {
     if (!state || state.origin !== origin || state.token || !state.visible) return false;
     return inPage(electronApp, "sessionStorage.getItem('alp-web:link-token') !== null");
   }, `the window on ${origin} with the token taken out of the address`, timeoutMs);
+}
+
+const exec = promisify(execFile);
+
+/**
+ * No `alp` anywhere the app looks (t-81b0.8): the scratch HOME has none, and SHELL is a fake login shell
+ * that finds none, so neither the user's shell nor its PATH can hand the app the user's real alp. The
+ * fixed directories outside HOME (/opt/homebrew/bin, /usr/local/bin) must not hold one either.
+ */
+export async function noAlpEnv({ dir }) {
+  for (const fixed of ['/opt/homebrew/bin/alp', '/usr/local/bin/alp']) {
+    if (await access(fixed).then(() => true, () => false)) throw new Error(`${fixed} exists: the app would find it, so this test cannot run here`);
+  }
+  const shell = path.join(dir, 'login-shell');
+  await writeFile(shell, `#!/bin/sh\nprintf '__ALP_DESKTOP__\\n\\n%s\\n' "$PATH"\n`);
+  await chmod(shell, 0o755);
+  return { SHELL: shell };
+}
+
+/**
+ * A local release mirror at <dir>/mirror in install.sh's layout (SHA256SUMS and one archive per macOS
+ * architecture), read through file:// (ALP_DESKTOP_INSTALL_MIRROR, honoured only by an unpackaged app).
+ * Each archive is a fake ALP bundle whose `alp --version` prints `version` and whose
+ * `alp dashboard --print` prints `address`.
+ */
+export async function releaseMirror({ dir }, { version = '9.8.7', address }) {
+  const mirror = path.join(dir, 'mirror');
+  const work = path.join(dir, 'bundles');
+  await mkdir(mirror, { recursive: true });
+  const archives = [];
+  const lines = [];
+  for (const arch of ['arm64', 'x64']) {
+    const name = `alp-${version}-darwin-${arch}`;
+    const root = path.join(work, name);
+    await mkdir(path.join(root, 'bin'), { recursive: true });
+    await writeFile(path.join(root, 'alp-bundle.json'), JSON.stringify({ version }));
+    await writeFile(path.join(root, 'bin', 'alp'), [
+      '#!/bin/sh',
+      `[ "$1" = --version ] && { printf '%s\\n' '${version}'; exit 0; }`,
+      `[ "$1 $2" = "dashboard --print" ] && { printf '%s\\n' '${address}'; exit 0; }`,
+      'exit 64',
+    ].join('\n') + '\n');
+    await chmod(path.join(root, 'bin', 'alp'), 0o755);
+    const archive = path.join(mirror, `${name}.tar.gz`);
+    await exec('tar', ['-czf', archive, '-C', work, name]);
+    archives.push(archive);
+    lines.push(`${createHash('sha256').update(await readFile(archive)).digest('hex')}  ${name}.tar.gz`);
+  }
+  await writeFile(path.join(mirror, 'SHA256SUMS'), `${lines.join('\n')}\n`);
+  return {
+    dir: mirror,
+    version,
+    /** Changes every archive after SHA256SUMS was written (a tampered or corrupted download). */
+    tamper: async () => { for (const archive of archives) await writeFile(archive, Buffer.concat([await readFile(archive), Buffer.from('tampered')])); },
+    /** Removes every archive (the download fails). */
+    dropArchives: async () => { for (const archive of archives) await rm(archive); },
+    dropSums: () => rm(path.join(mirror, 'SHA256SUMS')),
+  };
 }
