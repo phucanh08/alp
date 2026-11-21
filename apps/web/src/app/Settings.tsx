@@ -5,6 +5,7 @@ import {
   Stethoscope, Users, Webhook,
 } from 'lucide-react';
 import { can } from '../lib/gateway.js';
+import { describe } from '../lib/errors.js';
 import { diagnosticsSections, diagnosticsText, type DiagnosticsInput } from '../lib/diagnostics.js';
 import { LIMITS, type ChatDisplay, type SendBehavior, type SendShortcut, type SidebarItem, type SidebarItemId, type SyntaxTheme, type ThemePreference } from '../lib/preferences.js';
 import { DEFAULT_MONO_FONT_STACK, DEFAULT_UI_FONT_STACK, THEME_OPTIONS, contentWidth } from '../lib/theme';
@@ -16,9 +17,9 @@ import { Input, NativeSelect } from '../components/ui/input';
 import { Spinner } from '../components/ui/spinner';
 import { modeLabel } from '../lib/format';
 import { cn } from '../lib/utils';
-import { useAppState, useController } from './store';
+import { useAppState, useController, useOwner } from './store';
 import { useNotificationPermission } from './attention';
-import { Row, Section, Select, Unavailable, focusRing, type Page } from './settings/parts';
+import { Row, Section, Select, focusRing, type Page } from './settings/parts';
 import { ProjectsPage, ProvidersPage, TerminalsPage, UsagePage, WorkspacesPage } from './settings/HostPages';
 import { EditorPage, LibraryPage } from './settings/LibraryPages';
 
@@ -114,15 +115,61 @@ function sendHint(behavior: SendBehavior, shortcut: SendShortcut, mod: string) {
 
 const MOD_KEY = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘' : 'Ctrl';
 
+/** Languages offered first; `alp language` takes any name of at most 40 characters. */
+const LANGUAGE_SUGGESTIONS = ['Vietnamese', 'English', 'French', 'German', 'Spanish', 'Japanese', 'Korean', 'Chinese'];
+const LANGUAGE_CHARS = 40;
+
+/**
+ * The language agents and ALP write to the user in (`alp language`, alpd settings.language.get/set),
+ * the only language setting ALP has: the app itself is English. The host owner's own dashboard sets
+ * it (settings.language.set, an owner method); any other token reads it. Host › Overview shows it.
+ */
+function LanguageRow() {
+  const controller = useController();
+  const owner = useOwner();
+  const { settings } = useAppState();
+  const language = settings.language;
+  const [draft, setDraft] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  React.useEffect(() => { void controller.loadSettings(); }, [controller]);
+  React.useEffect(() => { setDraft(language?.applies ?? ''); }, [language?.applies]);
+  const set = async (value: string | null) => {
+    setBusy(true); setError(null);
+    try { await controller.ownerRequest('settings.language.set', { language: value }); await controller.loadSettings(); }
+    catch (failure) { setError(describe(failure).message); }
+    finally { setBusy(false); }
+  };
+  const current = settings.status === 'loading' && !language ? 'Loading…' : language ? `${language.applies}${language.language ? '' : ' (default)'}` : 'Not available';
+  const valid = draft.trim().length > 0 && draft.trim().length <= LANGUAGE_CHARS;
+  return (
+    <Row first title="Agents' language" hint={owner
+      ? `The language agents and ALP write to you in (alp language): any language name, up to ${LANGUAGE_CHARS} characters. New sessions use it. This app itself is in English.`
+      : 'The language agents and ALP write to you in. Only you on the host itself (ALP.app or alp dashboard) can change it; this app itself is in English.'}>
+      {owner && language ? (
+        <span className="flex flex-col items-end gap-1">
+          <span className="flex items-center gap-2">
+            <Input aria-label="Agents' language" list="alp-language-suggestions" value={draft} maxLength={LANGUAGE_CHARS} disabled={busy}
+              onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && valid) { event.preventDefault(); void set(draft.trim()); } }} className="h-8 w-40" />
+            <datalist id="alp-language-suggestions">{LANGUAGE_SUGGESTIONS.map(name => <option key={name} value={name} />)}</datalist>
+            <Button size="sm" variant="secondary" disabled={busy || !valid || draft.trim() === language.applies} onClick={() => { void set(draft.trim()); }}>Set</Button>
+            {language.language ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => { void set(null); }} title={`Back to the default, ${language.default}`}>Reset</Button> : null}
+          </span>
+          <span className="text-xs" data-testid="agents-language">Now: {current}</span>
+          {error ? <span role="alert" className="text-xs text-destructive">{error}</span> : null}
+        </span>
+      ) : <span data-testid="agents-language">{current}</span>}
+    </Row>
+  );
+}
+
 function General({ mobile }: { mobile: boolean }) {
   const controller = useController();
   const { preferences } = useAppState();
   return (
     <>
       <Section title="General">
-        <Row first title="Language" hint="App language. This beta speaks English; the agents' language is a host setting (Host › Overview).">
-          <Select label="Language" value="system" options={[{ value: 'system', label: 'System' }]} />
-        </Row>
+        <LanguageRow />
       </Section>
       <Section title="Sending">
         {/* Paseo offers the send shortcut where keyboard shortcuts are (not on a phone). */}
@@ -287,7 +334,8 @@ function Chat() {
           <Switch checked={preferences.chatOutline} aria-label="Chat outline" onCheckedChange={chatOutline => controller.updatePreferences({ chatOutline })} />
         </Row>
       </Section>
-      <Unavailable what="Always expand reasoning" why="ALP's hosts do not send the agents' reasoning, so there is nothing to expand." />
+      {/* No "Always expand reasoning": ALP's runtime never emits the agents' reasoning (Codex
+          reasoning items are dropped in nativeItem), so there is nothing to expand (t-a95b group C). */}
     </>
   );
 }
@@ -305,11 +353,23 @@ function Terminal() {
   );
 }
 
-/** Paseo 0.14's Settings › Files: which panel opens each file type, for types several panels claim. */
+/**
+ * Settings › Files: what the Files panel may do on this connection. Paseo's page chose among
+ * plugin file panels; ALP has no plugins, so it says who reads and who edits instead.
+ */
 function Files() {
+  const controller = useController();
+  const owner = useOwner();
+  const { principal } = useAppState();
+  const reads = owner ? 'Yes, as the owner of this host' : !controller.filesReadable ? 'No: this host does not offer file reading' : can(principal ?? undefined, 'files.read') ? 'Yes (files.read)' : 'No: this access token lacks files.read';
   return (
-    <Section title="Files">
-      <div className="p-4 text-center text-sm text-muted-foreground" data-testid="file-panel-settings-empty">File panels appear here when a plugin adds one</div>
+    <Section title="Files panel">
+      <Row first title="Read files" hint="The Files panel of a workspace lists its folders and opens text files up to 1 MB. Secrets, keys, .git and ALP configuration never show.">
+        <span className="text-xs" data-testid="files-read-access">{reads}</span>
+      </Row>
+      <Row title="Edit files" hint={owner ? 'Open a file, then Edit. See Settings › Editor.' : 'Only the owner of the host edits files, from ALP on the host itself.'}>
+        <span className="text-xs" data-testid="files-edit-access">{owner ? 'Yes' : 'No'}</span>
+      </Row>
     </Section>
   );
 }
@@ -409,7 +469,7 @@ function Overview() {
         <Row first title="Machine" hint="The host's name, as it reports it.">{connection.hostname ?? 'unknown'}</Row>
         <Row title="ALP">{connection.daemonVersion ?? 'unknown'}</Row>
         <Row title="Gateway"><span className="break-all font-mono text-xs">{connection.gateway}</span></Row>
-        <Row title="Agents' language" hint="Set on the host with alp; read only here.">
+        <Row title="Agents' language" hint="Changed in App › General (only by you on the host itself), or with alp language.">
           {settings.status === 'loading' ? <Spinner label="Loading…" className="text-xs" /> : settings.language ? `${settings.language.applies}${settings.language.language ? '' : ' (default)'}` : 'Not available'}
         </Row>
         {settings.status === 'error' ? <p role="alert" className="border-t border-border px-4 py-3 text-xs text-destructive">{settings.error?.message}</p> : null}

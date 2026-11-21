@@ -1,12 +1,13 @@
 import * as React from 'react';
-import { Copy, Eye, FileCode, RefreshCw } from 'lucide-react';
+import { Copy, Eye, FileCode, Pencil, RefreshCw } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Spinner } from '../components/ui/spinner';
-import { FileAccessError, type Failure } from '../lib/errors.js';
+import { FileAccessError, describe, type Failure } from '../lib/errors.js';
+import { readOwnerFile, writeOwnerFile } from '../lib/owner-library.js';
 import { formatSize, isMarkdown, lineCount } from '../lib/file-tree.js';
 import { cn } from '../lib/utils';
 import { RichText } from './RichText';
-import { useAppState, useController } from './store';
+import { useAppState, useController, useOwner } from './store';
 import { Tokens, useHighlightedLines } from '../lib/syntax';
 import { useTabs } from './tabs';
 
@@ -19,8 +20,13 @@ import { useTabs } from './tabs';
  *
  * Markdown over PREVIEW_MAX_BYTES shows its source only.
  *
- * Deviations: no syntax highlighting (no highlighter in this app), no edit, no image or HTML
- * preview, no live watch; it reads again when the tab comes back to the front, or with Refresh.
+ * Deviations: no image or HTML preview, no live watch; it reads again when the tab comes back to
+ * the front, or with Refresh.
+ *
+ * Editing (t-a95b, docs/alp/dashboard.md §4.8): only on the host owner's own dashboard (state.owner),
+ * which reads through host.files.read and saves through host.files.write. Edit turns the text into
+ * a plain editor; Save (or Cmd/Ctrl+S) writes it only while the host still holds the text that was
+ * read, else says the file changed and keeps the draft. Any other token reads as above, read only.
  */
 
 /** The source's line height: 20 px at Paseo's default 12 px code size, growing with Code size. */
@@ -42,17 +48,42 @@ export function FileView({ path }: { path: string }) {
   const [copied, setCopied] = React.useState(false);
   const [attempt, setAttempt] = React.useState(0);
   const scroller = React.useRef<HTMLDivElement>(null);
-  const LINE_HEIGHT = lineHeightFor(useAppState().preferences.codeFontSize);
+  const { preferences, workspace } = useAppState();
+  const LINE_HEIGHT = lineHeightFor(preferences.codeFontSize);
+  const owner = useOwner();
+  const [draft, setDraft] = React.useState<string | null>(null);
+  // The text the edit started from: the save's base, whatever a later re-read shows.
+  const base = React.useRef('');
+  const [saving, setSaving] = React.useState(false);
+  const [saveError, setSaveError] = React.useState<{ message: string; conflict: boolean } | null>(null);
 
   React.useEffect(() => {
     let live = true;
     setRead(current => current.status === 'ready' ? current : { status: 'loading' });
-    controller.readWorkspaceFile({ path, includeIgnored }).then(
+    (owner && workspace ? readOwnerFile(controller, workspace, { path, includeIgnored }) : controller.readWorkspaceFile({ path, includeIgnored })).then(
       result => { if (live) setRead({ status: 'ready', content: result.content, size: result.size, ...(result.modifiedAt ? { modifiedAt: result.modifiedAt } : {}) }); },
       error => { if (live) setRead({ status: 'error', failure: failureOf(error) }); },
     );
     return () => { live = false; };
-  }, [controller, path, includeIgnored, attempt]);
+  }, [controller, owner, workspace, path, includeIgnored, attempt]);
+  // Another file or workspace: any draft is dropped.
+  React.useEffect(() => { setDraft(null); setSaveError(null); }, [path, workspace]);
+
+  const editing = draft !== null && read.status === 'ready';
+  const save = async () => {
+    if (draft === null || read.status !== 'ready' || !workspace) return;
+    setSaving(true); setSaveError(null);
+    try {
+      const saved = await writeOwnerFile(controller, workspace, { path, content: draft, base: base.current });
+      setRead({ status: 'ready', content: draft, size: typeof saved?.size === 'number' ? saved.size : draft.length, ...(typeof saved?.modifiedAt === 'string' ? { modifiedAt: saved.modifiedAt } : {}) });
+      setDraft(null);
+      controller.notify('info', `Saved ${path}.`);
+    } catch (error) {
+      const failure = error instanceof FileAccessError ? error.failure : describe(error);
+      const conflict = failure.code === 1004 || failure.reason === 'revision_conflict';
+      setSaveError({ conflict, message: conflict ? `${path} changed on the host since you opened it. Nothing was saved; your edit is kept here. Reload to see the host's version (your edit is then lost), or copy your edit first.` : failure.message });
+    } finally { setSaving(false); }
+  };
 
   // A link to a line shows the source there (also when the tab was already open).
   React.useEffect(() => { if (target?.line) setMode('source'); }, [target?.nonce, target?.line]);
@@ -85,9 +116,23 @@ export function FileView({ path }: { path: string }) {
           </span>
         ) : null}
         <Button size="icon-sm" variant="ghost" onClick={copy} aria-label="Copy path" title={copied ? 'Copied' : 'Copy path'} data-testid="file-view-copy-path"><Copy aria-hidden /></Button>
-        <Button size="icon-sm" variant="ghost" onClick={refresh} aria-label="Refresh" title="Refresh" data-testid="file-view-refresh"><RefreshCw aria-hidden /></Button>
+        {owner && read.status === 'ready' && !editing ? (
+          <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={() => { setSaveError(null); base.current = read.content; setDraft(read.content); }} data-testid="file-view-edit"><Pencil aria-hidden className="size-3.5" />Edit</Button>
+        ) : null}
+        {editing ? (
+          <>
+            <Button size="sm" className="h-7 text-xs" disabled={saving || draft === base.current} onClick={() => { void save(); }} data-testid="file-view-save">{saving ? 'Saving…' : 'Save'}</Button>
+            <Button size="sm" variant="ghost" className="h-7 text-xs" disabled={saving} onClick={() => { setDraft(null); setSaveError(null); }} data-testid="file-view-cancel">Cancel</Button>
+          </>
+        ) : null}
+        <Button size="icon-sm" variant="ghost" onClick={() => { setDraft(null); setSaveError(null); refresh(); }} aria-label="Refresh" title={editing ? 'Reload from the host (drops your edit)' : 'Refresh'} data-testid="file-view-refresh"><RefreshCw aria-hidden /></Button>
       </div>
-      {read.status === 'loading' ? (
+      {saveError ? <p role="alert" className="border-b border-border px-4 py-2 text-xs text-destructive" data-testid="file-view-save-error" data-conflict={saveError.conflict ? 'true' : 'false'}>{saveError.message}</p> : null}
+      {editing ? (
+        <textarea aria-label={`Edit ${path}`} value={draft ?? ''} onChange={event => setDraft(event.target.value)} spellCheck={false} disabled={saving}
+          onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void save(); } }}
+          className="min-h-0 flex-1 resize-none bg-background p-4 font-mono text-(length:--code-font-size) text-foreground outline-none" style={{ lineHeight: `${LINE_HEIGHT}px` }} data-testid="file-view-editor" />
+      ) : read.status === 'loading' ? (
         <div className="flex flex-1 items-center justify-center" data-testid="file-view-loading"><Spinner label="Reading the file…" /></div>
       ) : read.status === 'error' ? (
         <FileError failure={read.failure} onRetry={refresh} onShowIgnored={() => setIncludeIgnored(true)} />

@@ -159,7 +159,9 @@ test('General, Chat, Terminal, Files and Sidebar pages hold Paseo 0.14\'s settin
   await expect(settings.getByLabel('Terminal scrollback lines')).toHaveValue('1000000');
 
   await settings.getByTestId('settings-files').click();
-  await expect(settings.getByTestId('file-panel-settings-empty')).toHaveText('File panels appear here when a plugin adds one');
+  // ALP has no file-panel plugins: Files says what this token may do in the Files panel (t-a95b group C).
+  await expect(settings.getByTestId('files-read-access')).toHaveText('No: this access token lacks files.read');
+  await expect(settings.getByTestId('files-edit-access')).toHaveText('No');
 
   // Sidebar: hide History, move Search to the top, show the footer's Tasks row.
   await settings.getByRole('button', { name: 'Sidebar', exact: true }).click();
