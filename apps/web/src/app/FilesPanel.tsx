@@ -4,8 +4,9 @@ import { FILES_READ_FORBIDDEN, FILES_READ_UNAVAILABLE } from '../lib/controller.
 import { FileAccessError } from '../lib/errors.js';
 import { SORT_LABELS, flattenTree, nextSort, toggleExpanded, type Listing, type SortOption } from '../lib/file-tree.js';
 import { can } from '../lib/gateway.js';
+import { listOwnerFiles } from '../lib/owner-library.js';
 import { cn } from '../lib/utils';
-import { useAppState, useController } from './store';
+import { useAppState, useController, useOwner } from './store';
 import { useTabs } from './tabs';
 
 /*
@@ -14,6 +15,8 @@ import { useTabs } from './tabs';
  * a file opens in a file tab. The sort button cycles name, modified, size; Refresh lists the open
  * directories again. One toggle, "Show hidden files", shows dot-names and also lists what
  * .gitignore hides (includeIgnored). Blocked paths (secrets, .git, .alp) and links never show.
+ * The host owner's own dashboard (state.owner) lists through host.files.list instead, without
+ * files.read on its credential (t-a95b, docs/alp/dashboard.md §4.8); every other token as above.
  */
 
 const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset';
@@ -32,8 +35,9 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
   const controller = useController();
   const { workspace, connection, principal } = useAppState();
   const { openFile, active } = useTabs();
-  const readable = connection.capabilities.includes('workspace.files.read');
-  const granted = can(principal ?? undefined, 'files.read');
+  const owner = useOwner();
+  const readable = owner || connection.capabilities.includes('workspace.files.read');
+  const granted = owner || can(principal ?? undefined, 'files.read');
   const [listings, setListings] = React.useState<Record<string, Listing>>({});
   const [expanded, setExpanded] = React.useState<string[]>([]);
   const [sort, setSort] = React.useState<SortOption>('name');
@@ -44,11 +48,12 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
   const list = React.useCallback((directory: string, includeIgnored: boolean) => {
     const at = pass.current;
     setListings(current => ({ ...current, [directory]: current[directory]?.status === 'ready' ? current[directory] : { status: 'loading' } }));
-    controller.listWorkspaceFiles({ ...(directory ? { path: directory } : {}), includeIgnored }).then(
+    const request = { ...(directory ? { path: directory } : {}), includeIgnored };
+    (owner && workspace ? listOwnerFiles(controller, workspace, request) : controller.listWorkspaceFiles(request)).then(
       result => { if (pass.current === at) setListings(current => ({ ...current, [directory]: { status: 'ready', entries: result.entries, truncated: result.truncated } })); },
       error => { if (pass.current === at) setListings(current => ({ ...current, [directory]: { status: 'error', error: error instanceof FileAccessError || error instanceof Error ? error.message : 'Could not list this folder.' } })); },
     );
-  }, [controller]);
+  }, [controller, owner, workspace]);
 
   // A new workspace, connection or hidden setting: the tree starts again from the root, open
   // folders kept (except on a workspace change).
