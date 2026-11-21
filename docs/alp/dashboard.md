@@ -362,6 +362,36 @@ Các trang host (Usage, Providers, Terminals, Workspaces, Projects) nằm trong
 `apps/web/src/app/settings/HostPages.tsx`, các trang library (Templates, Agents, Skills, Hooks, MCP
 servers, Editor) trong `settings/LibraryPages.tsx`; lần này chỉ chuyển chỗ, hành vi không đổi.
 
+### 4.7 Settings: host pages
+
+Năm trang host làm việc thật khi kết nối là **host owner** (§4.6: link của `alp dashboard` trên máy
+này, `useOwner()`); mọi kết nối khác (credential của `alp-gateway`, thiết bị Paseo, proxy) thấy các
+trang như trước, kèm bảng "not available in this beta" không đổi. Mỗi việc đi qua
+`controller.ownerRequest` (`apps/web/src/lib/owner-host.js`) tới một method owner của gateway; method
+`host.*` do `packages/cli/src/dashboard/owner/host.js` trả lời, dùng lại đúng code của CLI hoặc RPC của
+alpd, không chép lại:
+
+| Trang | Owner làm được | Method | Dùng lại |
+| --- | --- | --- | --- |
+| Usage | xem hạn mức của từng provider (gói, cửa sổ, % đã dùng, giờ reset, việc đang park), **Refresh** hỏi lại provider trên host | `daemon.usage { refresh }` (alpd) | cách trình bày của màn Usage trong plugin Paseo (`integrations/paseo/client/usage.tsx`) |
+| Providers | **thêm** provider (id, command, args, env, label, description, models): trước khi lưu, bước xác nhận hiện đúng lệnh và args sẽ chạy và **tên** biến env, giá trị luôn là `‹hidden on the host›`; chỉ tạo mới, không ghi đè provider đã có. **Test** một provider (host chạy nó và hỏi `initialize`). **Diagnose**: các check về runtime và provider của `alp doctor` (codex, claude, antigravity cài và đăng nhập chưa, command của từng provider có không), chỉ đọc, không `--fix`, mất vài giây | `host.provider.add`, `host.provider.test`, `host.provider.diagnose` | `alp provider add` (`edited` + `saveEntry`, scope library, `revision: null`), `alp provider test` (`testEntry`), `alp doctor` (`diagnose`, lọc các check trên) |
+| Terminals | trạng thái công tắc terminal từ xa của host; **Allow…** hiện nguyên văn cảnh báo của `alp terminal allow` (`TERMINAL_WARNING`) và chỉ bật khi bấm xác nhận (handler từ chối `allow` thiếu `confirm: true`); **Turn off** tắt | `host.terminal.status`, `host.terminal.set { allow, confirm }` | `terminalCommand` của `alp terminal status/allow --yes/deny` (cùng file `$ALP_HOME/terminal.json`, 0600) |
+| Workspaces | mọi workspace của các project còn sống, kể cả đã archive (**Show archived**): **Archive/Unarchive**, gắn và bỏ **label** (tên, màu), đổi màu và xoá label trong danh mục | `host.registry`, `host.workspace.update { archived }`, `host.workspace.label` | `registry.owner` (không operation: đọc; `label.assign/update/delete`), `workspace.update` của alpd, không có roots của credential |
+| Projects | **đăng ký** bất kỳ thư mục nào có thật (đường dẫn tuyệt đối, đã chuẩn hoá, là thư mục: kiểm trên host trước khi tới alpd), **gỡ** một project (workspace của nó bị archive, file không đổi) | `host.project.register`, `host.project.remove` | `project.register`/`project.remove` của alpd; grant của dashboard theo registry (`grant.js`, watcher trên `state/`) nên trang nhận project mới ngay |
+
+Không có: **placement** (session thuộc workspace nào). alpd chỉ cho `placement.assign` một session chưa
+có workspace và từ chối chuyển nó sang workspace khác (`packages/daemon/src/registry.ts`,
+`placement.assign`: "Session already has another workspace"), nên không có thao tác "chuyển" nào để
+đưa lên; `placement.*` không bao giờ được gửi. Pin và đổi tên vẫn là việc của mọi credential có
+`workspace.write`, như trước. `requestId` của owner được gắn tiền tố `dashboard-owner:` để không trùng
+receipt của credential khác trong registry.
+
+Kiểm thử: `apps/gateway/tests/owner-host.test.js` (gateway không owner, credential khác, kết nối có
+header chuyển tiếp: `-32601 not_exposed`, handler và alpd không nhận gì; owner tới đúng handler với đúng
+params), `packages/cli/tests/dashboard-owner-host.test.js` (từng handler, giá trị sai bị từ chối trước khi
+chạy gì), `apps/web/e2e/settings-host.spec.js` (owner qua link `alp dashboard` làm việc chính của từng
+trang và host thấy kết quả; credential của `alp-gateway` riêng vẫn thấy bảng "not available").
+
 ## 5. Phục hồi (theo bài học 09B-2)
 
 - Event đến trong lúc attach được buffer. Khi `reset`, app xóa projection rồi mới áp buffer.

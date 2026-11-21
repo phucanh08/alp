@@ -464,6 +464,11 @@ Cột Test dùng các mã sau:
 | `settings.language.get` | `settings.language` | không (ngôn ngữ người dùng đọc) | session.read | exposed | P I |
 | `daemon.status` | — | host (pid, persistence, đếm mọi workspace) | — | denied (dùng `/readyz`) | -32601 |
 | `daemon.usage` | — | host; `refresh` spawn probe | — | owner (§5.19): chỉ host owner; mọi credential khác như denied | owner, -32601 |
+| `host.provider.add` | — | host: library `$ALP_HOME/providers`; chỉ tạo mới; app hiện lệnh, args, tên env (giá trị ẩn) trước khi lưu | — | owner, `handler: true` (dashboard.md §4.7) | owner, -32601 |
+| `host.provider.test`, `host.provider.diagnose` | — | host: chạy command của một provider; các check runtime/provider của `alp doctor`, chỉ đọc | — | owner, `handler: true` | owner, -32601 |
+| `host.terminal.status`, `host.terminal.set` | — | host: `$ALP_HOME/terminal.json`; `allow` cần `confirm: true` sau cảnh báo | — | owner, `handler: true` | owner, -32601 |
+| `host.registry`, `host.workspace.update`, `host.workspace.label` | — | host: cả registry của alpd; archive, label (không placement) | — | owner, `handler: true` | owner, -32601 |
+| `host.project.register`, `host.project.remove` | — | host: thư mục bất kỳ có thật (kiểm trên host) | — | owner, `handler: true` | owner, -32601 |
 | `assignment.recall` | — | không kiểm chứng được; gọi model | — | denied | -32601 |
 | `daemon.pause`/`resume`/`pauses` | — | host.admin | — | denied | -32601 |
 | `daemon.shutdown` | — | host | — | prohibited | -32601 |
