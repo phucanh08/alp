@@ -237,7 +237,7 @@ test('a token without workspace.write sees Workspaces read only', async ({ page 
   for (const button of await settings.getByRole('button', { name: /^(Pin|Unpin|Rename) workspace/ }).all()) await expect(button).toBeDisabled();
 });
 
-test('Host pages: a builtin library entry reads without an error, the open project says Current, Voice says why it is not offered', async ({ page }) => {
+test('Host pages: a builtin library entry reads without an error, the open project says Current', async ({ page }) => {
   await connect(page, world, world.tokens.libraryWriter);
   const settings = await openSettings(page);
   await settings.getByTestId('settings-alp-agents').click();
@@ -250,9 +250,22 @@ test('Host pages: a builtin library entry reads without an error, the open proje
   await settings.getByTestId('settings-projects').click();
   await expect(settings.getByTestId('project-current')).toHaveText('Current');
 
-  await settings.getByTestId('settings-voice').click();
-  await expect(settings.getByTestId('settings-detail-header-title')).toHaveText('Voice');
-  await expect(settings).toContainText('Voice is not available in this beta');
+});
+
+// t-a95b (docs/breaking-changes.md): Voice, Pair device and Plugins are not Settings pages any more;
+// the host pages moved to settings/HostPages.tsx still render. This gateway is a standalone
+// alp-gateway, never a host owner, so Usage keeps its old panel.
+test('Settings has no Voice, Pair device or Plugins page, and Usage still renders', async ({ page }) => {
+  await connect(page, world);
+  const settings = await openSettings(page);
+  const nav = settings.getByTestId('settings-sidebar');
+  await expect(nav.getByTestId('settings-usage')).toBeVisible();
+  for (const id of ['voice', 'pair-device', 'plugins']) await expect(settings.getByTestId(`settings-${id}`)).toHaveCount(0);
+  for (const label of ['Voice', 'Pair device', 'Plugins']) await expect(nav.getByRole('button', { name: label, exact: true })).toHaveCount(0);
+  await nav.getByTestId('settings-usage').click();
+  await expect(settings.getByTestId('settings-detail-header-title')).toHaveText('Usage');
+  await expect(settings).toContainText('Usage and limits is not available in this beta');
+  await expect(settings).toContainText('Account-wide on the host; check with alp usage there.');
 });
 
 test.describe('Host › Terminals on a host that allows terminals', () => {
