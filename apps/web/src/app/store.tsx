@@ -35,3 +35,8 @@ export function useAction<A extends unknown[]>(action: (...args: A) => Promise<u
   }, [action]);
   return { run, pending, error, clearError: () => setError(null) };
 }
+
+/** Whether this connection is the host owner's (state.owner, from the gateway's hello): host-changing Settings use controller.ownerRequest. */
+export function useOwner(): boolean {
+  return useAppState().owner;
+}
