@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { copyFile, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -13,6 +13,7 @@ import { archiveName, pack, sums } from '../../scripts/package-binary.mjs';
 import { namesExecPath } from '../../scripts/execpath-lint.mjs';
 import { spawnCommand } from '../../scripts/spawn-command.mjs';
 import { fakeBundle } from '../support/fake-bundle.mjs';
+import { assertPrivateDirectory } from '../../packages/client/src/index.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const INSTALL = path.join(ROOT, 'install.sh');
@@ -38,8 +39,9 @@ async function mirror(t, versions = ['9.8.7'], options = {}) {
 }
 
 /** Runs install.sh with a private HOME and a PATH without the install directory. */
-function install(args, { home, shell = '/bin/sh', extraEnv = {} }) {
-  return new Promise(resolve => execFile('/bin/sh', [INSTALL, ...args], {
+function install(args, { home, shell = '/bin/sh', extraEnv = {}, umask }) {
+  const command = umask ? ['-c', `umask ${umask} && exec /bin/sh "$0" "$@"`, INSTALL, ...args] : [INSTALL, ...args];
+  return new Promise(resolve => execFile('/bin/sh', command, {
     env: { HOME: home, SHELL: shell, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}), ...extraEnv }, timeout: 60_000,
   }, (error, stdout, stderr) => resolve({ code: error ? error.code ?? 1 : 0, stdout, stderr })));
 }
@@ -89,6 +91,39 @@ test('install.sh installs the latest release to ~/.alp/app/<version>, links ~/.a
   const fish = await install([], { home, shell: '/usr/bin/fish', extraEnv: { ALP_INSTALL_BASE_URL: pathToFileURL(releases).href } });
   assert.equal(fish.code, 0, fish.stderr);
   assert.ok((await readFile(path.join(home, '.config/fish/conf.d/alp.fish'), 'utf8')).includes('fish_add_path "$HOME/.alp/bin"'));
+});
+
+test('install.sh creates a missing ALP home 0700 under a 022 umask, so alpd accepts it; an existing home keeps its mode (t-66a4)', { skip: !posix }, async t => {
+  const releases = await mirror(t);
+  const mode = async directory => (await stat(directory)).mode & 0o777;
+  // A fresh machine: no ~/.alp. alpd's home check must accept what install.sh leaves.
+  const home = await temp(t, 'alp-home-');
+  const fresh = await install(['--no-modify-path', '--base-url', releases], { home, umask: '022' });
+  assert.equal(fresh.code, 0, fresh.stderr);
+  assert.equal(await mode(path.join(home, '.alp')), 0o700);
+  assert.equal(await mode(path.join(home, '.alp/app')), 0o755, 'only the home itself is made private');
+  await assertPrivateDirectory(path.join(home, '.alp'));
+  assert.doesNotMatch(fresh.stdout, /warning/);
+  // ALP_HOME elsewhere that the install also uses (--root inside it) is created private too.
+  const custom = path.join(home, 'custom-alp');
+  const rooted = await install(['--no-modify-path', '--root', custom, '--base-url', releases], { home, umask: '022', extraEnv: { ALP_HOME: custom } });
+  assert.equal(rooted.code, 0, rooted.stderr);
+  assert.equal(await mode(custom), 0o700);
+  // An existing, non-empty home the user made 0755 is not chmod'ed behind their back: install.sh
+  // warns with the fix and alpd still refuses with the same command (the t-37f1 policy).
+  const home2 = await temp(t, 'alp-home-');
+  await mkdir(path.join(home2, '.alp/notes'), { recursive: true });
+  await chmod(path.join(home2, '.alp'), 0o755);
+  const existing = await install(['--no-modify-path', '--base-url', releases], { home: home2, umask: '022' });
+  assert.equal(existing.code, 0, existing.stderr);
+  assert.equal(await mode(path.join(home2, '.alp')), 0o755);
+  assert.match(existing.stdout, /warning: .*\.alp is readable or writable by others; .*chmod 700/);
+  await assert.rejects(assertPrivateDirectory(path.join(home2, '.alp')), /must have private permissions \(0700\), not 0755; fix it with: chmod 700/);
+  // --system or a --root outside the ALP home does not create the home at all.
+  const home3 = await temp(t, 'alp-home-');
+  const outside = await install(['--root', path.join(home3, 'tools'), '--base-url', releases], { home: home3, umask: '022' });
+  assert.equal(outside.code, 0, outside.stderr);
+  assert.equal(existsSync(path.join(home3, '.alp')), false);
 });
 
 test('install.sh --version picks that release, --dir/--root install elsewhere, --no-modify-path only prints the line; an upgrade keeps the previous version', { skip: !posix }, async t => {
