@@ -379,6 +379,12 @@ alpd, không chép lại:
 | Workspaces | mọi workspace của các project còn sống, kể cả đã archive (**Show archived**): **Archive/Unarchive**, gắn và bỏ **label** (tên, màu), đổi màu và xoá label trong danh mục | `host.registry`, `host.workspace.update { archived }`, `host.workspace.label` | `registry.owner` (không operation: đọc; `label.assign/update/delete`), `workspace.update` của alpd, không có roots của credential |
 | Projects | **đăng ký** bất kỳ thư mục nào có thật (đường dẫn tuyệt đối, đã chuẩn hoá, là thư mục: kiểm trên host trước khi tới alpd), **gỡ** một project (workspace của nó bị archive, file không đổi) | `host.project.register`, `host.project.remove` | `project.register`/`project.remove` của alpd; grant của dashboard theo registry (`grant.js`, watcher trên `state/`) nên trang nhận project mới ngay |
 
+Trang Terminals còn hiện dòng **Paired Paseo app devices** khi công tắc bật: quyền mở terminal của thiết
+bị Paseo đã ghép (`alp terminal allow --paseo`) là của host, Allow ở đây giữ nguyên nó như
+`alp terminal allow --yes` và không bao giờ tự bật. Các trang owner đọc lại dữ liệu mỗi khi kết nối của
+owner mở lại (đổi grant, khởi động lại); thông báo "may still have run" sau khi rớt kết nối được xoá khi
+danh sách đã đọc lại.
+
 Không có: **placement** (session thuộc workspace nào). alpd chỉ cho `placement.assign` một session chưa
 có workspace và từ chối chuyển nó sang workspace khác (`packages/daemon/src/registry.ts`,
 `placement.assign`: "Session already has another workspace"), nên không có thao tác "chuyển" nào để
