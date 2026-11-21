@@ -3,6 +3,11 @@
 # then writes SHA256SUMS, attests build provenance for every archive, and creates or refreshes a
 # DRAFT (non-prerelease) GitHub release v<version> with the archives, SHA256SUMS and install.sh. It never publishes:
 # the owner reviews the draft and publishes it by hand (which is when the tag is created).
+# From 0.0.1-beta.10 (t-81b0.10) the draft also carries the macOS desktop app built from the same SHA:
+# ALP-<version>-arm64.dmg and ALP-<version>-x64.dmg (ad-hoc signed, not notarized; docs/alp/desktop.md §6),
+# with their own checksum file DESKTOP-SHA256SUMS and build-provenance attestations. SHA256SUMS keeps
+# listing only the ALP archives and installers: install.sh, install.ps1, `alp update` and the desktop
+# app's install flow read it, and none of them needs the DMGs.
 name: Release binaries
 # Names each run after the SHA it built.
 run-name: Release binaries ${{ inputs.sha }}
@@ -50,8 +55,66 @@ jobs:
     with:
       ref: ${{ inputs.sha }}
 
+  # The desktop DMGs, built and tested as CI's desktop-macos job does (ci.yml), from the release SHA.
+  desktop:
+    needs: check
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/desktop
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha }}
+      # The DMG is named after apps/desktop/package.json's version; it must be the release version.
+      - name: The desktop app's version is the release version
+        run: |
+          desktop=$(node -p "require('./package.json').version")
+          test "$desktop" = "$VERSION" || { echo "apps/desktop/package.json is $desktop, the release is $VERSION"; exit 1; }
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun test test
+      - run: bun run typecheck
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        working-directory: .
+      - run: node scripts/build-workspace.mjs cli
+        working-directory: .
+      # Ad-hoc signing with no certificate, secret or keychain (identity '-'), as in ci.yml. Tripwire:
+      # the day this job gets a certificate or Apple notarization credentials, revisit these variables.
+      - run: bun run dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Exactly the two DMGs of this version
+        run: |
+          ls -l release/*.dmg
+          test "$(find release -maxdepth 1 -name '*.dmg' | wc -l | tr -d ' ')" = 2 || { echo "expected exactly two DMGs"; exit 1; }
+          for arch in arm64 x64; do
+            test -f "release/ALP-$VERSION-$arch.dmg" || { echo "missing ALP-$VERSION-$arch.dmg"; exit 1; }
+          done
+      # The packaged app as installed from each DMG (e2e/packaged.spec.mjs; x64 under Rosetta), so the
+      # DMGs the draft carries are the ones tested.
+      - run: ALP_DESKTOP_DMG="release/ALP-$VERSION-arm64.dmg" bun run e2e:packaged
+      - run: arch -x86_64 /usr/bin/true || softwareupdate --install-rosetta --agree-to-license
+      - run: ALP_DESKTOP_DMG="release/ALP-$VERSION-x64.dmg" bun run e2e:packaged
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: alp-release-desktop
+          path: apps/desktop/release/ALP-*.dmg
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
   draft:
-    needs: [check, build]
+    needs: [check, build, desktop]
     if: github.ref == 'refs/heads/main'
     # The release environment admits deployments from main only (repository setting).
     environment: release
@@ -84,6 +147,21 @@ jobs:
           cp install.ps1 release/install.ps1
           node scripts/package-binary.mjs sums release
           ls -l release
+      # Added after SHA256SUMS is written, with their own checksum file, so SHA256SUMS stays as before.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: alp-release-desktop
+          path: desktop
+      - name: Desktop DMGs and DESKTOP-SHA256SUMS
+        run: |
+          for arch in arm64 x64; do
+            test -f "desktop/ALP-$VERSION-$arch.dmg" || { echo "missing ALP-$VERSION-$arch.dmg"; exit 1; }
+            cp "desktop/ALP-$VERSION-$arch.dmg" release/
+          done
+          (cd release && sha256sum "ALP-$VERSION-arm64.dmg" "ALP-$VERSION-x64.dmg" > DESKTOP-SHA256SUMS)
+          cat release/DESKTOP-SHA256SUMS
+          if grep -q '\.dmg' release/SHA256SUMS; then echo "SHA256SUMS must not list a DMG"; exit 1; fi
+          ls -l release
       # The release directory attached to the GitHub release (archives, installers, SHA256SUMS): kept
       # as this run's artifact for longer than binary-build's 7 days.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -99,6 +177,7 @@ jobs:
             release/*.zip
             release/install.sh
             release/install.ps1
+            release/*.dmg
       - name: Draft release v${{ needs.check.outputs.version }} (never published here)
         run: |
           tag="v$VERSION"
@@ -111,7 +190,7 @@ jobs:
           fi
           gh release create "$tag" release/* --draft --prerelease=false --target "$RELEASE_SHA" --repo "$GITHUB_REPOSITORY" \
             --title "ALP $VERSION" \
-            --notes "Draft binary release built from $RELEASE_SHA by run $GITHUB_RUN_ID. Install: curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/install.sh | sh -s -- --version $VERSION (Windows: install.ps1 -Version $VERSION). Verify provenance: gh attestation verify <archive> --repo $GITHUB_REPOSITORY --source-ref refs/heads/main --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release-binaries.yml."
+            --notes "Draft binary release built from $RELEASE_SHA by run $GITHUB_RUN_ID. Install: curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/download/$tag/install.sh | sh -s -- --version $VERSION (Windows: install.ps1 -Version $VERSION). macOS desktop app: ALP-$VERSION-arm64.dmg or ALP-$VERSION-x64.dmg, ad-hoc signed and not notarized (checksums in DESKTOP-SHA256SUMS; first open: docs/alp/desktop.md section 6.1). Verify provenance: gh attestation verify <archive or dmg> --repo $GITHUB_REPOSITORY --source-ref refs/heads/main --signer-workflow $GITHUB_REPOSITORY/.github/workflows/release-binaries.yml."
           # A normal release (not a prerelease) so install.sh's releases/latest resolves to it once published;
           # npm keeps betas on the beta dist-tag (docs/alp/binary-install.md, version policy).
           release=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,tagName,targetCommitish,assets \
