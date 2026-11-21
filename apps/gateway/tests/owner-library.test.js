@@ -35,6 +35,7 @@ async function world(t, { owner = true, without = [] } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-owner-library-'));
   defer(() => rm(directory, { recursive: true, force: true }));
   const daemon = fakeDaemon();
+  daemon.state.handlers['catalog.refresh'] = () => ({ models: [], modes: [], fetchedAt: '2026-11-21T00:00:00.000Z', providers: [] });
   daemon.state.handlers['settings.language.set'] = params => ({ ...LANGUAGE, language: params.language, applies: params.language ?? 'Vietnamese' });
   const ran = [];
   const handlers = Object.fromEntries(HANDLED.filter(method => !without.includes(method)).map(method => [method, async context => {
@@ -75,7 +76,7 @@ test('owner-library: without the owner option (standalone alp-gateway) each meth
   const { daemon, ran, sdk } = await world(t, { owner: false });
   const { client } = await sdk('owner');
   const mark = daemon.calls().length;
-  for (const [method, params] of Object.entries({ ...REQUESTS, 'settings.language.set': { language: 'English' } })) await assert.rejects(client.request(method, params), notExposed(method), method);
+  for (const [method, params] of Object.entries({ ...REQUESTS, 'settings.language.set': { language: 'English' }, 'catalog.refresh': {} })) await assert.rejects(client.request(method, params), notExposed(method), method);
   assert.deepEqual(daemon.calls().slice(mark), []);
   assert.deepEqual(ran, []);
 });
@@ -85,7 +86,7 @@ test('owner-library: another credential of an owner gateway (with files.read and
   for (const name of ['other', 'plain']) {
     const { client } = await sdk(name);
     const mark = daemon.calls().length;
-    for (const [method, params] of Object.entries({ ...REQUESTS, 'settings.language.set': { language: 'English' } })) await assert.rejects(client.request(method, params), notExposed(method), `${name}: ${method}`);
+    for (const [method, params] of Object.entries({ ...REQUESTS, 'settings.language.set': { language: 'English' }, 'catalog.refresh': {} })) await assert.rejects(client.request(method, params), notExposed(method), `${name}: ${method}`);
     assert.deepEqual(daemon.calls().slice(mark), [], name);
   }
   assert.deepEqual(ran, []);
@@ -103,6 +104,10 @@ test('owner-library: the owner gets each handler\'s answer with only the listed 
   assert.deepEqual(await client.request('settings.language.set', { language: 'English', extra: 1 }), LANGUAGE);
   assert.deepEqual(await client.request('settings.language.set', { language: null }), { ...LANGUAGE, language: null, applies: 'Vietnamese' });
   assert.deepEqual(daemon.calls().slice(mark).map(call => [call.method, call.params]), [['settings.language.set', { language: 'English' }], ['settings.language.set', { language: null }]]);
+  // catalog.refresh (Overview's Refresh): alpd's own method, forwarded with no params for the owner only.
+  const before = daemon.calls().length;
+  assert.equal((await client.request('catalog.refresh', { force: true })).fetchedAt, '2026-11-21T00:00:00.000Z');
+  assert.deepEqual(daemon.calls().slice(before).map(call => [call.method, call.params]), [['catalog.refresh', {}]]);
   // alpd's v1 schema still checks the language before alpd sees it.
   await assert.rejects(client.request('settings.language.set', { language: 'x'.repeat(41) }), error => error.code === -32602);
 });
