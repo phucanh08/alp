@@ -97,9 +97,27 @@ function entryParams(params, { scopeRequired = true, kinds = OWNER_LIBRARY_KINDS
 /** @param {string} text */
 const clip = text => typeof text === 'string' && text.length > TEST_OUTPUT_CHARS ? `${text.slice(0, TEST_OUTPUT_CHARS)}\n… (cut at ${TEST_OUTPUT_CHARS} characters)` : text;
 
+/**
+ * alpd's library call for the owner. Outside scope project, a projectRoot with no .alp (alpd's
+ * not_alp_project: the dashboard's no-project directory, a repository never `alp init`-ed) is left
+ * out and the call asked again, so it reads and writes the library there (t-a95b.1 F1). alpd refuses
+ * before it writes anything; scope project and every other refusal keep alpd's answer.
+ * @param {{ request: (method: string, params?: Record<string, unknown>) => Promise<unknown> }} daemon
+ * @param {string} method @param {Record<string, any>} values
+ */
+async function libraryCall(daemon, method, values) {
+  try { return await daemon.request(method, values); }
+  catch (caught) {
+    const error = /** @type {any} */ (caught);
+    if (values.scope === 'project' || values.projectRoot === undefined || error?.code !== ERROR.notFound || error?.data?.reason !== 'not_alp_project') throw caught;
+    const { projectRoot: _projectRoot, ...rest } = values;
+    return daemon.request(method, rest);
+  }
+}
+
 /** @type {import('./index.js').DashboardOwnerHandler} */
 async function libraryGet({ params, daemon }) {
-  return daemon.request('library.get', entryParams(params, { scopeRequired: false }));
+  return libraryCall(daemon, 'library.get', entryParams(params, { scopeRequired: false }));
 }
 
 /** @type {import('./index.js').DashboardOwnerHandler} */
@@ -109,14 +127,14 @@ async function librarySave({ params, daemon }) {
   const mask = maskIn(params.content);
   if (mask !== undefined) throw new OwnerError(RPC_ERROR.invalidParams, 'secret_marker', `${mask} holds the text that stands for a hidden value; keep the hidden value or type a new one`);
   if (!Object.hasOwn(params, 'revision')) throw invalid('revision is required: the revision read, or null for a new entry');
-  return daemon.request('library.save', { ...entry, content: params.content, revision: revisionOf(params.revision) });
+  return libraryCall(daemon, 'library.save', { ...entry, content: params.content, revision: revisionOf(params.revision) });
 }
 
 /** @type {import('./index.js').DashboardOwnerHandler} */
 async function libraryDelete({ params, daemon }) {
   const entry = entryParams(params);
   if (typeof params.revision !== 'string' || !params.revision || params.revision.length > 64) throw invalid('revision must be the revision read');
-  return daemon.request('library.delete', { ...entry, revision: params.revision });
+  return libraryCall(daemon, 'library.delete', { ...entry, revision: params.revision });
 }
 
 /**

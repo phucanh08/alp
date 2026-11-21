@@ -6,7 +6,7 @@
 // alp-gateway has no owner: its tokens still see the read-only pages and Unavailable notes. The
 // dashboard credential holds no files.read: the owner reads files through host.files.*.
 import { expect, test } from '@playwright/test';
-import { readFile, realpath, writeFile, access } from 'node:fs/promises';
+import { readFile, realpath, writeFile, access, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { connect as hostConnect } from '@anhlp/alp-client';
 import { startWorld } from './support/world.js';
@@ -145,6 +145,37 @@ test('owner: a hook is created with a review, tested, and deleted', async ({ pag
   await editor.getByRole('button', { name: /^Delete audit from/ }).click();
   await expect(settings.getByTestId('library-row-audit')).toHaveCount(0);
   await expect(access(path.join(world.home, 'hooks', 'audit.json'))).rejects.toThrow();
+});
+
+test('owner: in a workspace that is not an ALP project (no .alp), the library hooks list and a library save still work (t-a95b.1 F1)', async ({ page }) => {
+  // A plain directory, as the dashboard's no-project directory or a repo never `alp init`-ed.
+  const plain = path.join(world.directory, 'plain-no-alp');
+  await mkdir(plain, { recursive: true });
+  const real = await realpath(plain);
+  const { revision } = await host('project.list', {});
+  await host('project.register', { directory: real, ifRevision: revision, requestId: 'settings-library-plain' });
+  await page.goto(dashboard.url);
+  const row = page.locator(`[data-testid="project-row"][data-workspace="${real}"]`);
+  await expect(row).toBeVisible();
+  await row.click();
+  const settings = await openSettings(page);
+  await settings.getByTestId('settings-alp-hooks').click();
+  // Before the fix: "Not found on the host. It may have been removed or expired."
+  await expect(settings.getByTestId('library-row-notify')).toBeVisible();
+  await expect(settings).not.toContainText('removed or expired');
+  // With no row chosen the page opens on its New hook form.
+  const editor = settings.getByTestId('owner-library-editor');
+  await editor.getByLabel('Entry name').fill('plain-audit');
+  await editor.getByLabel('Event').selectOption('handoff');
+  await editor.getByLabel('Hook command').fill('echo plain-ok');
+  await editor.getByRole('button', { name: 'Review and save…' }).click();
+  await expect(editor.getByTestId('owner-library-review')).toContainText('This host (your library)');
+  await editor.getByRole('button', { name: 'Confirm and save' }).click();
+  await expect(settings.getByTestId('library-row-plain-audit')).toBeVisible();
+  expect(await stored(path.join(world.home, 'hooks', 'plain-audit.json'))).toMatchObject({ event: 'handoff', command: 'echo plain-ok' });
+  // No project settings were created in the plain directory.
+  await expect(access(path.join(real, '.alp'))).rejects.toThrow();
+  await rm(path.join(world.home, 'hooks', 'plain-audit.json'), { force: true });
 });
 
 test('owner: a workspace file is edited and saved; a file changed on the host is a conflict and nothing is written', async ({ page }) => {

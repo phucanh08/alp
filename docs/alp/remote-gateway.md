@@ -565,6 +565,13 @@ như paseo-web (patch 0015). `project.read` chỉ đọc; project instruction ed
   Không tạo quyền host-level mới: v1 không có quyền quản trị host qua remote (§4.2). Với `scope`
   (`project` hoặc `library`, được chuyển đi), client đọc được bản của một layer kể cả khi project
   ghi đè nó: tức mọi entry của layer library và built-in, đúng tập mà `library.list` đã cho thấy tên.
+- **Workspace không phải project ALP** (không có `.alp`, ví dụ thư mục `no-project` mặc định của
+  dashboard; t-a95b.1 F1): alpd trả `1001 not_alp_project` cho `team.list`, `library.list` và
+  `library.get`. Credential remote giữ nguyên lỗi đó: không có lần đọc library nào trên một workspace
+  không phải project. Chỉ kết nối của host owner (§5.19, cùng điều kiện `#isOwner`) và chỉ với lỗi
+  `not_alp_project`, ngoài `scope: project`, thì gateway hỏi lại alpd không có `projectRoot`, nên
+  Settings của owner liệt kê được layer library và built-in ở đó. Các method `host.library.*` của
+  dashboard làm như vậy cho `get`/`save`/`delete` (dashboard.md §4.8); `scope: project` vẫn bị từ chối.
 - **Lỗi**: lỗi alpd trả cho `library.get` được viết lại, chỉ giữ `code` và `data.reason`: file entry
   không parse được làm alpd báo đường dẫn trên host kèm đoạn trích file (V8 trích nội dung, có thể
   có secret). Không tìm thấy → `No <kind> entry '<name>'`; lỗi khác → `<kind> '<name>' cannot be read

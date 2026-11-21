@@ -958,6 +958,26 @@ export class ClientConnection {
     return { ...head, files, hiddenCount, truncated: page.truncated, ...(page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {}) };
   }
 
+  /**
+   * alpd's answer to a library read (team.list, library.list, library.get). When projectRoot names
+   * a directory alpd does not take as a project (no .alp: the dashboard's no-project directory, a
+   * repository never `alp init`-ed), alpd refuses with not_alp_project; for the host owner only
+   * (#isOwner) and outside scope project, the read is asked again without projectRoot, so the
+   * owner's Settings list the library and built-in layers there (t-a95b.1 F1). Any other refusal,
+   * and every other connection, keeps alpd's answer: a remote credential gains no library read on a
+   * workspace that is not an ALP project.
+   * @param {string} method @param {Record<string, any>} params
+   */
+  async #libraryRead(method, params) {
+    try { return await this.#call(method, params); }
+    catch (caught) {
+      const error = /** @type {any} */ (caught);
+      if (error?.code !== ERROR.notFound || error?.data?.reason !== 'not_alp_project' || params.scope === 'project' || !this.#isOwner()) throw caught;
+      const { projectRoot: _projectRoot, ...rest } = params;
+      return this.#call(method, rest);
+    }
+  }
+
   /** A projectRoot the gateway requires where alpd would fall back to host-level data. @param {unknown} projectRoot @param {string} method */
   #project(projectRoot, method) {
     if (projectRoot === undefined) throw forbidden(`${method} through the gateway needs a projectRoot this credential may use`, GATEWAY_REASON.hostScope);
@@ -1976,7 +1996,7 @@ export class ClientConnection {
     // alpd's errors here are rewritten for the same reason (opaqueDaemonError).
     'team.list': async params => {
       this.#project(params.projectRoot, 'team.list');
-      const result = await this.#call('team.list', params).catch(error => { throw opaqueDaemonError(error, 'The teams cannot be read on the daemon host'); });
+      const result = await this.#libraryRead('team.list', params).catch(error => { throw opaqueDaemonError(error, 'The teams cannot be read on the daemon host'); });
       const teams = (Array.isArray(result?.teams) ? result.teams : []).map((/** @type {any} */ team) => {
         const row = pick(team, TEAM_ROW_FIELDS);
         if (row.error !== undefined) row.error = 'This team cannot be read on the daemon host';
@@ -1986,7 +2006,7 @@ export class ClientConnection {
     },
     'library.list': async params => {
       this.#project(params.projectRoot, 'library.list');
-      const result = await this.#call('library.list', params).catch(error => { throw opaqueDaemonError(error, `The ${params.kind} entries cannot be read on the daemon host`); });
+      const result = await this.#libraryRead('library.list', params).catch(error => { throw opaqueDaemonError(error, `The ${params.kind} entries cannot be read on the daemon host`); });
       return { ...result, entries: (Array.isArray(result?.entries) ? result.entries : []).map((/** @type {any} */ entry) => pick(entry, LIBRARY_ROW_FIELDS)) };
     },
     // One entry, read only, as the projectRoot's sessions would use it (project, else library, else
@@ -1996,7 +2016,7 @@ export class ClientConnection {
     // and V8's quote of the file, which may hold a secret. Only the code and the reason pass on.
     'library.get': async params => {
       this.#project(params.projectRoot, 'library.get');
-      const result = await this.#call('library.get', params).catch(caught => {
+      const result = await this.#libraryRead('library.get', params).catch(caught => {
         const message = caught?.code === ERROR.notFound ? `No ${params.kind} entry '${params.name}'${params.scope ? ` in the ${params.scope}` : ''}` : `${params.kind} '${params.name}' cannot be read on the daemon host`;
         throw opaqueDaemonError(caught, message);
       });

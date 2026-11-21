@@ -54,7 +54,7 @@ async function world(t, { owner = true, without = [] } = {}) {
     },
     ...(owner ? { owner: ids => { current.id = ids.owner; return { credentialId: () => current.id, methods: handlers }; } } : {}),
   });
-  return { daemon, ran, ...gw };
+  return { daemon, ran, directory, ...gw };
 }
 
 test('owner-library: the group C entries are owner methods; the dashboard\'s are host.* handlers with listed params', () => {
@@ -121,4 +121,51 @@ test('owner-library: on an owner gateway with no handler registered for a handle
   assert.deepEqual(ran, []);
   // The methods that do have a handler still answer.
   assert.deepEqual(await client.request('host.files.read', REQUESTS['host.files.read']), { handled: 'host.files.read' });
+});
+
+test('owner-library: in a granted workspace with no .alp (not_alp_project), only the owner reads the library there; other credentials keep the refusal (t-a95b.1 F1)', async t => {
+  const { daemon, sdk, directory } = await world(t);
+  const notProject = { code: 1001, message: 'not an ALP project; run alp init there', data: { reason: 'not_alp_project' } };
+  // alpd as it answers a plain directory: every library read with a projectRoot is refused; without
+  // one it answers the library and built-in layers. A request with projectRoot never answers rows.
+  const refuseWithRoot = answer => params => { if (params.projectRoot !== undefined) throw notProject; return answer(params); };
+  daemon.state.handlers['library.list'] = refuseWithRoot(() => ({ projectRoot: null, entries: [{ name: 'notify', source: 'library', description: 'd' }] }));
+  daemon.state.handlers['library.get'] = refuseWithRoot(params => ({ kind: params.kind, name: params.name, source: 'library', content: { event: 'handoff' }, revision: 'r1', usedBy: [] }));
+  daemon.state.handlers['team.list'] = refuseWithRoot(() => ({ projectRoot: null, teams: [{ id: 'default', name: 'Default' }] }));
+  const root = path.join(directory, 'a');
+  const READS = {
+    'library.list': { kind: 'hooks', projectRoot: root },
+    'library.get': { kind: 'hooks', name: 'notify', projectRoot: root },
+    'team.list': { projectRoot: root },
+  };
+  const isNotProject = error => error.code === 1001 && error.data?.reason === 'not_alp_project';
+
+  // Not the owner, with project.read and library.write, or project.read only: alpd's refusal, asked once.
+  for (const name of ['other', 'plain']) {
+    const { client } = await sdk(name);
+    for (const [method, params] of Object.entries(READS)) {
+      const mark = daemon.calls(method).length;
+      await assert.rejects(client.request(method, params), isNotProject, `${name} ${method}`);
+      assert.deepEqual(daemon.calls(method).slice(mark).map(call => call.params.projectRoot), [root], `${name} ${method}: never asked without projectRoot`);
+    }
+  }
+
+  // The owner: asked again without projectRoot, and gets the library rows.
+  const { client } = await sdk('owner');
+  const mark = { list: daemon.calls('library.list').length, get: daemon.calls('library.get').length, team: daemon.calls('team.list').length };
+  assert.deepEqual((await client.request('library.list', READS['library.list'])).entries.map(entry => entry.name), ['notify']);
+  assert.equal((await client.request('library.get', READS['library.get'])).source, 'library');
+  assert.deepEqual((await client.request('team.list', READS['team.list'])).teams.map(team => team.id), ['default']);
+  assert.deepEqual(daemon.calls('library.list').slice(mark.list).map(call => call.params.projectRoot), [root, undefined]);
+  assert.deepEqual(daemon.calls('library.get').slice(mark.get).map(call => call.params.projectRoot), [root, undefined]);
+  assert.deepEqual(daemon.calls('team.list').slice(mark.team).map(call => call.params.projectRoot), [root, undefined]);
+  // Scope project is never asked again, even for the owner.
+  const before = daemon.calls('library.get').length;
+  await assert.rejects(client.request('library.get', { ...READS['library.get'], scope: 'project' }), isNotProject);
+  assert.equal(daemon.calls('library.get').length - before, 1);
+  // Any other refusal is not asked again either.
+  daemon.state.handlers['library.list'] = () => { throw { code: 1001, message: 'gone', data: { reason: 'not_found' } }; };
+  const other = daemon.calls('library.list').length;
+  await assert.rejects(client.request('library.list', READS['library.list']), error => error.code === 1001 && error.data?.reason === 'not_found');
+  assert.equal(daemon.calls('library.list').length - other, 1);
 });
