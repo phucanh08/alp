@@ -428,19 +428,28 @@ function OwnerTerminals() {
 
 // ---- Workspaces and projects
 
-/** alpd's whole registry as the owner sees it (host.registry), reloaded after each change. */
+/**
+ * alpd's whole registry as the owner sees it (host.registry), reloaded after each change and
+ * whenever the owner's connection opens again. Registering or removing a project changes the
+ * dashboard credential's grant, and the gateway then closes the connection (4403 grant changed),
+ * often before the answer to the change arrives: the change is reported as "may still have run",
+ * and the view is read again once the app has reconnected, so it shows what the host now holds.
+ */
 function useOwnerRegistry() {
   const controller = useController();
+  const { connection, owner } = useAppState();
+  const online = connection.phase === 'open' && owner;
   const [registry, setRegistry] = React.useState<OwnerRegistryData | null>(null);
   const loading = useAction();
   const changing = useAction();
   const load = loading.run;
   const reload = React.useCallback(() => load(async () => setRegistry(await ownerRegistry(controller))), [controller, load]);
-  React.useEffect(() => { void reload(); }, [reload]);
+  React.useEffect(() => { if (online) void reload(); }, [online, reload]);
   /** Runs a change with the registry revision, then reloads this view and the shared list. */
   const run = changing.run;
   const change = React.useCallback(async (work: (revision: number) => Promise<unknown>) => {
     const done = await run(async () => { await work(registry?.revision ?? 0); return true; });
+    // While the connection is down this read fails quietly; the effect above reads again on reconnect.
     await reload();
     void controller.refreshRegistry();
     return !!done;

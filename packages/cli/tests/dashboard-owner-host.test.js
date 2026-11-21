@@ -184,8 +184,15 @@ test('host.project.register checks the directory on the host (absolute, normaliz
   const daemon = fakeDaemon({ 'project.register': { project: { id: 'prj_n' }, revision: 9 } });
   assert.deepEqual(await call('host.project.register', { directory: project, ifRevision: 8, requestId: 'r' }, { home: '/h', daemon }), { project: { id: 'prj_n' }, revision: 9 });
   assert.deepEqual(daemon.calls, [['project.register', { directory: project, ifRevision: 8, requestId: 'dashboard-owner:r' }]]);
-  // A link to a directory is registered as given (alpd resolves its identity).
+  // A link to a directory is registered as given (alpd resolves its identity); a link to a file, or
+  // to nothing, is not a directory.
   assert.equal(await projectDirectory(link), link);
+  const fileLink = path.join(directory, 'file-link');
+  await symlink(file, fileLink);
+  await assert.rejects(projectDirectory(fileLink), invalid(/not a directory/));
+  const dangling = path.join(directory, 'dangling');
+  await symlink(path.join(directory, 'gone'), dangling);
+  await assert.rejects(projectDirectory(dangling), invalid(/not a directory/));
   for (const [value, pattern] of [['relative/dir', /absolute/], [`${project}/../project`, /normalized/], [`${project}/`, /normalized/], [path.join(directory, 'missing'), /does not exist/], [file, /not a directory/], [42, /directory must be/]]) {
     await assert.rejects(call('host.project.register', { directory: value, ifRevision: 8, requestId: 'r' }, { home: '/h', daemon }), invalid(pattern), String(value));
   }
