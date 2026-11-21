@@ -215,6 +215,9 @@ test('a non-owner (the standalone gateway) keeps the read-only pages: language, 
   await settings.getByTestId('settings-general').click();
   await expect(settings.getByLabel('Agents\' language')).toHaveCount(0);
   await expect(settings.getByTestId('agents-language')).toHaveText(/Vietnamese|English/);
+  // Overview: no models Refresh (catalog.refresh is the host owner's).
+  await settings.getByTestId('settings-host').click();
+  await expect(settings.getByTestId('settings-models-refresh')).toHaveCount(0);
   await settings.getByTestId('settings-alp-mcp').click();
   await expect(settings.getByTestId('owner-library-editor')).toHaveCount(0);
   await expect(settings).toContainText('Editing MCP servers is not available in this beta');
@@ -293,7 +296,12 @@ test('audit: every other control on the owner\'s app and host tabs does what it 
   // Overview: the host, the language and the models; no control that does nothing.
   await settings.getByTestId('settings-host').click();
   await expect(settings).toContainText('Agents\' language');
-  await expect(settings.getByTestId('settings-models-refresh')).toHaveCount(0);
+  // Models Refresh (catalog.refresh, owner only): alpd asks the providers again; the host answers.
+  const before = await host('catalog.get', {});
+  await settings.getByTestId('settings-models-refresh').click();
+  await expect(settings.getByTestId('settings-models-refresh')).toHaveText('Refresh');
+  await expect(settings.getByTestId('settings-models-refresh-error')).toHaveCount(0);
+  await expect.poll(async () => (await host('catalog.get', {})).fetchedAt).not.toBe(before.fetchedAt);
   // About: What's new links to the releases.
   await settings.getByTestId('settings-about').click();
   await expect(settings.getByTestId('settings-whats-new')).toHaveAttribute('href', 'https://github.com/phucanh08/alp/releases');

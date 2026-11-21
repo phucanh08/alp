@@ -3582,10 +3582,16 @@ export class Controller {
     if (this.#state.settings.status === 'ready') void this.loadSettings();
   }
 
-  /** Asks alpd to ask every provider for its models again (catalog.refresh), then re-reads them. */
+  /**
+   * Asks alpd to ask every provider for its models again (catalog.refresh), then re-reads them. Only
+   * the host owner may (the gateway answers it for the owner only, docs/alp/remote-gateway.md §5.19);
+   * a direct alpd connection that lists catalog.live may too.
+   */
   async refreshModels() {
-    if (!this.#state.principal || !can(this.#state.principal, 'session.read') || !this.hasCapability('catalog.live')) return;
-    await this.#client().request('catalog.refresh', {}, { timeoutMs: Math.max(this.#options.requestTimeoutMs ?? 0, 60_000) });
+    const timeoutMs = Math.max(this.#options.requestTimeoutMs ?? 0, 60_000);
+    if (this.#state.owner) await this.ownerRequest('catalog.refresh', {}, { timeoutMs });
+    else if (this.#state.principal && can(this.#state.principal, 'session.read') && this.hasCapability('catalog.live')) await this.#client().request('catalog.refresh', {}, { timeoutMs });
+    else return;
     this.#onCatalogUpdated();
   }
 

@@ -460,7 +460,9 @@ function About() {
 function Overview() {
   const controller = useController();
   const { principal, connection, settings } = useAppState();
+  const owner = useOwner();
   const [refreshing, setRefreshing] = React.useState(false);
+  const [refreshError, setRefreshError] = React.useState<string | null>(null);
   React.useEffect(() => { void controller.loadSettings(); }, [controller]);
   const permissions = ['session.read', 'session.write', 'project.read', 'project.write', 'workspace.write', 'workspace.manage', 'files.read', 'library.write', 'terminal.exec'];
   return (
@@ -475,7 +477,8 @@ function Overview() {
         {settings.status === 'error' ? <p role="alert" className="border-t border-border px-4 py-3 text-xs text-destructive">{settings.error?.message}</p> : null}
       </Section>
       <Section title={`Models new sessions can pick${settings.models.length ? ` (${settings.models.length})` : ''}`}
-        action={controller.hasCapability('catalog.live') ? <Button size="sm" variant="ghost" className="h-7 text-xs" data-testid="settings-models-refresh" disabled={refreshing} onClick={() => { setRefreshing(true); void controller.refreshModels().catch(() => {}).finally(() => setRefreshing(false)); }}>{refreshing ? 'Refreshing…' : 'Refresh'}</Button> : undefined}>
+        action={owner || controller.hasCapability('catalog.live') ? <Button size="sm" variant="ghost" className="h-7 text-xs" data-testid="settings-models-refresh" disabled={refreshing} onClick={() => { setRefreshing(true); setRefreshError(null); void controller.refreshModels().catch(error => setRefreshError(describe(error).message)).finally(() => setRefreshing(false)); }}>{refreshing ? 'Refreshing…' : 'Refresh'}</Button> : undefined}>
+        {refreshError ? <p role="alert" className="border-b border-border px-4 py-3 text-xs text-destructive" data-testid="settings-models-refresh-error">{refreshError}</p> : null}
         {settings.models.length ? (
           <ul className="max-h-72 divide-y divide-border overflow-y-auto">
             {settings.models.map(model => (

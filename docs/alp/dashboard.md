@@ -432,6 +432,8 @@ các trang y như trước, kể cả thông báo Unavailable. Các method owner
   đặt bất kỳ tên nào tối đa 40 ký tự hoặc Reset về mặc định (Vietnamese); `settings.language.set` từ
   `denied` thành `owner`, alpd trả lời. Người khác thấy giá trị, chỉ đọc. Host › Overview vẫn hiện, chỉ
   đọc, và chỉ về General: một control duy nhất.
+- **Host › Overview › Refresh** (models): `catalog.refresh` từ `denied` thành `owner` (alpd hỏi lại từng
+  provider, rồi app đọc lại `catalog.get`); lỗi hiện ngay dưới tiêu đề. Người khác không thấy nút này.
 - **Chat**: bỏ dòng "Always expand reasoning": runtime không bao giờ phát reasoning (item `reasoning`
   của Codex bị bỏ trong `nativeItem`, `packages/runtime/src/runtime.ts`), và
   `git grep -nE "agent_thought|reasoning|thinking_delta" -- apps/web/src packages/protocol/src apps/gateway/src`
