@@ -980,9 +980,17 @@ Quyết định (main, theo quyền người dùng, 2026-11-21): ALP.app và `al
      trên kết nối còn mở;
   3. socket tới thẳng từ loopback: địa chỉ peer của chính socket là `127.0.0.1`, `::1` hoặc
      `::ffff:127.0.0.1`, không qua proxy tin cậy, và request upgrade **không có header chuyển tiếp nào**
-     (`Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `Via`, …): proxy hay tunnel chạy trên cùng máy đi từ
-     loopback nhưng tự khai là chuyển tiếp thì không phải owner;
+     (`Forwarded`, `Via`, mọi header chứa `forwarded`, `X-Real-*`, `X-Original-*`, `*-Client-IP`,
+     `*-Connecting-IP`; `isForwardingHeader`): proxy chạy trên cùng máy đi từ loopback nhưng tự khai là
+     chuyển tiếp thì không phải owner. Một bộ chuyển TCP trơn (`ssh -R`, `socat`) không thêm header nào
+     nên không phân biệt được với client trực tiếp; nó vẫn cần token của dashboard;
   4. kết nối không bị đánh dấu là của ALP agent (credential agent, hoặc hello khai `AGENT_CAPABILITY`).
+- **Giới hạn đã biết: agent cùng user.** Điều kiện 4 dựa vào việc client tự khai: một process do ALP agent
+  chạy (cùng tài khoản) mà đọc được `<ALP_HOME>/dashboard.json` (0600, của chính user) thì có token, nối
+  qua loopback không khai `AGENT_CAPABILITY`, và **là host owner**. Owner không cho nó thêm quyền nào so
+  với hôm nay: credential của dashboard không giới hạn `modes`, nên cùng token đó đã tạo được session
+  `full-access` (chạy lệnh bất kỳ bằng user). Gốc của vấn đề là token đọc được bởi agent, theo dõi ở task
+  riêng; điều kiện 4 vẫn giữ để client tự nhận là agent không bao giờ là owner.
 - **Relay của Paseo** (`alp dashboard pair --on`) không bao giờ tới listener này: relay thuộc process
   riêng của integration Paseo, gắn socket relay vào bridge Paseo
   (`integrations/paseo/server/paseo/index.ts`, `createRelay` → `gateway.attach`) và nói với alpd qua
@@ -996,7 +1004,9 @@ Quyết định (main, theo quyền người dùng, 2026-11-21): ALP.app và `al
   `<method> is not available through the gateway`, `data.reason` `not_exposed`; alpd không nhận gì.
 - **Trả lời**: method `owner` được handler owner cùng tên trả lời (chạy trong process dashboard, bằng
   user; `packages/cli/src/dashboard/owner/`, chữ ký trong `owner/index.js`), nếu không thì chuyển tới alpd
-  với đúng các `params` mà entry liệt kê. Ví dụ đầu tiên: `daemon.usage { refresh }` (Settings › Usage).
+  với đúng các `params` mà entry liệt kê. Method đầu tiên: `daemon.usage { refresh }`; trang Settings › Usage
+  dùng nó từ PR sau của t-a95b.1 (trong PR này trang vẫn là bảng "not available"). Mọi method owner phải
+  có schema trong `methods-v1.json` (params được kiểm trước handler hay alpd; `authorization.test.js`).
   Method chưa có trong matrix thì handler không bao giờ được gọi.
 - **Thêm method owner**: thêm entry `status: 'owner'` với `tests: ['owner']` vào khối
   `// --- owner: host (group B) ---` hoặc `// --- owner: library (group C) ---` của `policy.js`, và
