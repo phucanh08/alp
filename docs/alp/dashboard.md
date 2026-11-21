@@ -422,8 +422,11 @@ các trang y như trước, kể cả thông báo Unavailable. Các method owner
   đối, có `..`, thư mục trên đường đi là link (realpath phải trùng path), file là symlink hay hard link,
   `.git`/`.alp`/`.env`/khoá (`blockedFilePath`), file chưa có (chỉ sửa), nội dung quá 1 MiB, workspace
   không có trong registry. Điều kiện: `baseSha256` là sha256 của text đã đọc; khác thì `1004
-  revision_conflict` và không ghi gì, app giữ bản nháp. Ghi atomic: file tạm cạnh file (giữ mode), kiểm
-  lại inode và sha256, rồi rename.
+  revision_conflict` và không ghi gì, app giữ bản nháp. Ghi atomic: file tạm cạnh file (giữ quyền
+  `0o777` của file, không setuid/setgid), kiểm lại realpath thư mục cha, inode và sha256, rồi rename; lỗi
+  ở bất kỳ bước nào thì xoá file tạm. Cửa sổ còn lại: vài system call giữa lần kiểm cuối và `rename()`,
+  trong đó một process khác **của cùng user** có thể đổi thư mục thành link hay sửa file (sửa đó bị ghi
+  đè). Khoá file thì không có trên mọi nền tảng; rủi ro cần code của chính user đang chạy sẵn.
 - **General › Agents' language**: setting ngôn ngữ thật của ALP là ngôn ngữ agent và ALP viết cho
   người dùng (`alp language`, `settings.language.get/set`); app vẫn là tiếng Anh, không có i18n. Owner
   đặt bất kỳ tên nào tối đa 40 ký tự hoặc Reset về mặc định (Vietnamese); `settings.language.set` từ

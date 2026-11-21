@@ -199,7 +199,7 @@ async function confinedFile(root, segments, relative) {
  * again, so a reader sees the old or the new content.
  * @param {{ daemon: { request: (method: string, params?: Record<string, unknown>) => Promise<unknown> }, params: Record<string, any> }} context
  */
-export async function writeWorkspaceFile({ daemon, params }) {
+export async function writeWorkspaceFile({ daemon, params }, { beforeRename } = /** @type {{ beforeRename?: () => unknown }} */ ({})) {
   const projectRoot = rootOf(params.projectRoot, true);
   const segments = relativeSegments(params.path);
   const relative = segments.join('/');
@@ -212,9 +212,18 @@ export async function writeWorkspaceFile({ daemon, params }) {
   const conflict = () => new OwnerError(ERROR.conflict, 'revision_conflict', `${relative} changed on the host since you opened it; reload it and apply your change again`);
   if (sha256(await readFile(file)) !== params.baseSha256) throw conflict();
   const temporary = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${randomBytes(4).toString('hex')}.alp-tmp`);
-  const handle = await open(temporary, 'wx', info.mode & 0o7777);
+  // Permission bits only: never carry setuid/setgid/sticky onto the new file.
+  const handle = await open(temporary, 'wx', info.mode & 0o777);
   try {
     try { await handle.writeFile(bytes); await handle.sync(); } finally { await handle.close(); }
+    // The parent is checked again now the temporary file exists: a directory on the way swapped for a
+    // link after confinedFile would put the temporary (and the rename) outside the workspace, so it is
+    // refused and the temporary removed. What remains is a window of a few system calls between these
+    // checks and rename() in which a racing process of the same user could swap a directory or change
+    // the file; it needs that user's own code already running (docs/alp/dashboard.md §4.8).
+    const parentNow = await realpath(path.dirname(file)).catch(() => undefined);
+    if (parentNow !== path.dirname(file) || !(parentNow === root || parentNow.startsWith(`${root}${path.sep}`))) throw new OwnerError(ERROR.forbidden, 'linked', `${relative} is reached through a link; the app does not write through links`);
+    await beforeRename?.();
     // Checked again just before the rename: the same file, still holding what the app read.
     const again = await lstat(file).catch(() => undefined);
     if (!again || again.isSymbolicLink() || !again.isFile() || again.ino !== info.ino || again.dev !== info.dev || again.nlink > 1) throw conflict();
