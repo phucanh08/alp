@@ -736,6 +736,20 @@ export const EXPOSURE = Object.freeze({
   // (packages/cli/src/dashboard/owner/). A method that is not here is never reachable, whatever
   // handler the dashboard registers.
   // --- owner: host (group B) ---
+  // Settings' host pages (docs/alp/dashboard.md §4.7). Answered by alp dashboard's owner handlers
+  // (packages/cli/src/dashboard/owner/host.js), never forwarded under these names; each handler
+  // checks the values of the params listed here. Remote credentials keep workspace.update and
+  // project.register as exposed above (no labels, no placement, granted directories only).
+  'host.provider.add': { status: 'owner', handler: true, scope: 'host: the user\'s library ($ALP_HOME/providers)', reason: 'Configures a command the host runs for agents (alp provider add): create only, never over an existing provider. The app shows the exact command, args and env names (values masked) in a confirm step first.', params: ['id', 'command', 'args', 'env', 'label', 'description', 'models'], tests: ['owner', 'handler'] },
+  'host.provider.test': { status: 'owner', handler: true, scope: 'host: starts one library provider\'s command', reason: 'alp provider test: runs the provider on the host and asks it to initialize.', params: ['name'], tests: ['owner', 'handler'] },
+  'host.provider.diagnose': { status: 'owner', handler: true, scope: 'host: runtime installs and logins, library providers', reason: 'alp doctor\'s runtime and provider checks, read only (runs each runtime\'s --version and login status on the host).', params: [], tests: ['owner', 'handler'] },
+  'host.terminal.status': { status: 'owner', handler: true, scope: 'host: $ALP_HOME/terminal.json', reason: 'alp terminal status: whether this host allows remote terminals.', params: [], tests: ['owner', 'handler'] },
+  'host.terminal.set': { status: 'owner', handler: true, scope: 'host: $ALP_HOME/terminal.json', reason: 'alp terminal allow --yes / deny: the host owner\'s switch for remote terminals; allow needs confirm: true after the CLI\'s warning.', params: ['allow', 'confirm'], tests: ['owner', 'handler'] },
+  'host.registry': { status: 'owner', handler: true, scope: 'host: alpd\'s whole registry (registry.owner without an operation)', reason: 'Every live project, every workspace (archived too) and the label catalogue, for the owner\'s Workspaces and Projects pages.', params: [], tests: ['owner', 'handler'] },
+  'host.workspace.update': { status: 'owner', handler: true, scope: 'host: any workspace of alpd\'s registry', reason: 'Archive or unarchive a workspace (alpd workspace.update with archived, no credential roots).', params: ['workspaceId', 'archived', 'ifRevision', 'requestId'], tests: ['owner', 'handler'] },
+  'host.workspace.label': { status: 'owner', handler: true, scope: 'host: alpd\'s registry labels', reason: 'Labels of workspaces (registry.owner label.assign, label.update, label.delete only; never placement).', params: ['action', 'workspaceId', 'name', 'newName', 'color', 'ifRevision', 'requestId'], tests: ['owner', 'handler'] },
+  'host.project.register': { status: 'owner', handler: true, scope: 'host: any existing directory', reason: 'Register a directory as a project (alpd project.register, no pregranted-directory restriction); the dashboard grant follows the registry.', params: ['directory', 'ifRevision', 'requestId'], tests: ['owner', 'handler'] },
+  'host.project.remove': { status: 'owner', handler: true, scope: 'host: any project of alpd\'s registry', reason: 'Remove a project (alpd project.remove: its workspaces are archived, no files change); the dashboard grant follows the registry.', params: ['projectId', 'ifRevision', 'requestId'], tests: ['owner', 'handler'] },
   // --- owner: library (group C) ---
 });
 
