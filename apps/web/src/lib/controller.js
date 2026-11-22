@@ -454,7 +454,7 @@ export class Controller {
     /** @type {Notice} */
     const notice = { id: ++this.#noticeId, level, text, ...(extra?.action ? { action: extra.action } : {}), ...(extra?.target ? { target: extra.target } : {}) };
     // The same words again replace the earlier notice instead of stacking a copy of it.
-    this.#set(state => ({ notice, notices: [...state.notices.filter(entry => entry.text !== text || entry.level !== level), notice].slice(-NOTICE_STACK) }));
+    this.#set(state => ({ notice, notices: [...state.notices.filter(entry => entry.text !== text || entry.level !== level || entry.action !== notice.action || entry.target !== notice.target), notice].slice(-NOTICE_STACK) }));
   }
 
   /**

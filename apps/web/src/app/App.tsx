@@ -281,7 +281,7 @@ function CommandCenterHost({ open, scope, onClose, history, splits, onAction, on
       for (const entry of modes) {
         const label = 'label' in entry && entry.label ? entry.label : modeLabel(entry.id);
         out.push({ id: `agent-mode:${entry.id}`, label: `Mode: ${label}`, group: 'agent', icon: Shield, checked: entry.id === mode, keywords: ['mode', 'permissions', 'change', entry.id],
-          disabled: !!state.busy.mode || configuring || !canWrite || !online,
+          disabled: !!state.busy.mode || configuring || !canWrite || !online || !!controller.driveBlock(),
           run: () => {
             if (entry.id === mode) return;
             if (locked) { controller.notify('error', 'Permissions change once the agent and its team are idle.'); return; }
