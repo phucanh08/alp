@@ -1767,6 +1767,13 @@ export class ClientConnection {
 
     // Acknowledging a root's attention is what a look at it does: a reader may (docs/alp/remote-gateway.md §5.1).
     'session.attention.clear': async params => { await this.#resolve(params.sessionId); return this.#call('session.attention.clear', params); },
+    // Mark as unread (Paseo's): a change every viewer sees, so session.write; the answer projected.
+    'session.attention.mark': async params => {
+      await this.#resolve(params.sessionId);
+      const result = await this.#call('session.attention.mark', params);
+      const attention = result?.attention;
+      return { marked: result?.marked === true, ...(result?.marked === true && attention && typeof attention.at === 'string' ? { attention: { reason: attention.reason === 'error' ? 'error' : 'finished', at: attention.at } } : {}) };
+    },
 
     'question.answer': async params => {
       // An exact id only: alpd accepts a unique prefix, which could match a question elsewhere.

@@ -7,7 +7,7 @@ import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { diagnoseProviders, methods, ownerRegistry, projectDirectory, providerOptions, PROVIDER_CHECKS } from '../src/dashboard/owner/host.js';
+import { diagnoseProviders, methods, ownerRegistry, projectDirectory, providerOptions, PROVIDER_CHECKS, revealCommand, revealer } from '../src/dashboard/owner/host.js';
 import { TERMINAL_WARNING, terminalCommand } from '../src/terminal.js';
 
 const FAKE_ACP = fileURLToPath(new URL('../../../test/support/fake-acp.js', import.meta.url));
@@ -179,6 +179,36 @@ test('host.workspace.update archives through alpd workspace.update, without cred
     await assert.rejects(call('host.workspace.update', params, { home: '/h', daemon }), error => error.code === -32602, JSON.stringify(params));
   }
   assert.equal(daemon.calls.length, 1);
+});
+
+test('host.workspace.reveal opens a live registry workspace\'s directory by id with argv and no shell; never a path from params', async t => {
+  const { directory } = await scratch(t);
+  const project = path.join(directory, 'project');
+  await mkdir(project);
+  const registry = {
+    ...REGISTRY,
+    projects: [...REGISTRY.projects, { id: 'prj_s', root: project, addedAt: 't' }],
+    workspaces: [...REGISTRY.workspaces, { id: 'wks_s', projectId: 'prj_s', directory: project, labels: [], createdAt: 't' }, { id: 'wks_missing', projectId: 'prj_s', directory: path.join(directory, 'missing'), labels: [], createdAt: 't' }],
+  };
+  const daemon = fakeDaemon({ 'registry.owner': { registry } });
+  const runs = [];
+  const original = revealer.run;
+  revealer.run = async (file, args) => { runs.push([file, args]); };
+  t.after(() => { revealer.run = original; });
+  assert.deepEqual(await call('host.workspace.reveal', { workspaceId: 'wks_s', directory: '/etc', path: '/etc' }, { home: '/h', daemon }), { opened: true });
+  assert.deepEqual(runs, [revealCommand(process.platform, project)]);
+  assert.deepEqual(daemon.calls, [['registry.owner', {}]], 'reads the registry only');
+  for (const [workspaceId, code] of [['wks_b', 1001], ['wks_gone', 1001], ['wks_nope', 1001], ['wks_missing', -32602], [undefined, -32602], [7, -32602]]) {
+    await assert.rejects(call('host.workspace.reveal', { workspaceId }, { home: '/h', daemon }), error => error.code === code, String(workspaceId));
+  }
+  assert.equal(runs.length, 1, 'archived, removed, unknown or missing: nothing opened');
+  revealer.run = async () => { throw new Error('spawn ENOENT'); };
+  await assert.rejects(call('host.workspace.reveal', { workspaceId: 'wks_s' }, { home: '/h', daemon }), error => error.code === 1000 && error.data.reason === 'reveal_failed');
+  assert.deepEqual(revealCommand('darwin', '/p/a', {}), ['/usr/bin/open', ['/p/a']]);
+  assert.deepEqual(revealCommand('darwin', '/p/a', { ALP_DASHBOARD_FILE_MANAGER: '/opt/fm' }), ['/opt/fm', ['/p/a']]);
+  assert.deepEqual(revealCommand('darwin', '/p/a', { ALP_DASHBOARD_FILE_MANAGER: 'fm' }), ['/usr/bin/open', ['/p/a']], 'only an absolute program');
+  assert.deepEqual(revealCommand('linux', '/p/a', {}), ['xdg-open', ['/p/a']]);
+  assert.deepEqual(revealCommand('win32', 'C:\\p', {}), ['explorer.exe', ['C:\\p']]);
 });
 
 test('host.workspace.label maps to registry.owner label operations only, never placement', async () => {
