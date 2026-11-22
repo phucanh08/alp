@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Brain, ChevronDown, CircleAlert, Cpu, Users } from 'lucide-react';
+import { Brain, ChevronDown, CircleAlert, Cpu, FolderGit2, GitBranch, Users } from 'lucide-react';
 import { describe } from '../lib/errors.js';
 import { can } from '../lib/gateway.js';
 import { buildSpec, effectiveModel, effortLabel, effortOptions, initialChoices, previewBase, previewRows, resolveThinking, startNewSession, startTeam, teamMenu, unlistedTeam, type Choices, type Preview } from '../lib/new-session.js';
@@ -22,6 +22,12 @@ import { useWorkspaceFileSource } from './CommandCenter';
  * mode. Sending the first message starts the session with it (Paseo's initial prompt); the start
  * button also works with an empty box. ALP adds what Paseo cannot show: session.preview's answer
  * on which team, agent, runtime, model, thinking and mode the choices would run.
+ *
+ * Where it runs (t-a35b, Paseo's "New worktree" option): this workspace, or a new managed
+ * worktree — a clean checkout of the committed HEAD in a destination the host owner configured,
+ * made first (workspace.worktree.create, as the sidebar's Create worktree and Fork into a worktree
+ * do), then the session is started there (session.create with its workspaceId) and the app opens
+ * that worktree. Offered only when the host and the token allow worktrees (workspace.manage).
  */
 
 type PreviewState = { status: 'idle' | 'loading' | 'ready' | 'error' | 'blocked'; preview?: Preview; error?: string;
@@ -69,6 +75,21 @@ export function NewSessionScreen() {
   const remembered = preferences.newSession;
   const [choices, setChoices] = React.useState<Choices>(() => initialChoices(catalog, remembered));
   const [title, setTitle] = React.useState('');
+  // Where the session runs: '' this workspace, else the worktree destination (mapping id) to make one in.
+  const worktreeSource = connection.phase === 'open' ? controller.worktreeForkSource() : null;
+  const [where, setWhere] = React.useState('');
+  const [destinations, setDestinations] = React.useState<string[] | null>(null);
+  // Names the worktree one opening of this screen makes per destination: a start refused after its
+  // worktree was made starts in that one when tried again, rather than making another.
+  const worktreeKey = React.useRef(globalThis.crypto.randomUUID());
+  React.useEffect(() => {
+    setWhere('');
+    setDestinations(null);
+    if (!worktreeSource) return;
+    let live = true;
+    controller.worktreeForkDestinations().then(ids => { if (live) setDestinations(ids); }, () => { if (live) setDestinations([]); });
+    return () => { live = false; };
+  }, [workspace, worktreeSource?.id, controller]); // eslint-disable-line react-hooks/exhaustive-deps
   // The catalog arrives (or a workspace's comes again): start from the remembered choices it offers.
   React.useEffect(() => {
     if (catalog.status === 'ready') setChoices(initialChoices(catalog, controller.getState().preferences.newSession));
@@ -178,6 +199,7 @@ export function NewSessionScreen() {
         ...(title.trim() ? { title: title.trim() } : {}),
         ...(text.trim() ? { prompt: text } : {}),
         ...(files.length ? { files } : {}),
+        ...(where && worktreeSource ? { worktree: { mappingId: where, key: `${worktreeKey.current}:${where}` } } : {}),
       }, text, { mounted: () => mounted.current, describe, nameOf: baseName });
       finishDraft(id);
     } finally {
@@ -208,6 +230,14 @@ export function NewSessionScreen() {
             ...efforts.map((entry, index) => ({ id: entry.id, label: entry.label, checked: thinking === entry.id, group: index === 0, onSelect: () => choose({ thinking: entry.id }) })),
           ]} />
       ) : null}
+      {worktreeSource && destinations?.length ? (
+        <Menu label="Where it runs" title={where ? `New worktree in ${where}` : 'This workspace'} align="start" disabled={creating} testId="new-session-where" triggerClassName={triggerClass}
+          trigger={<>{where ? <GitBranch aria-hidden /> : <FolderGit2 aria-hidden />}<span className="truncate" data-testid="new-session-where-label">{where ? 'New worktree' : 'Local'}</span><ChevronDown aria-hidden className="!size-3 opacity-70" /></>}
+          items={[
+            { id: '', label: 'This workspace', checked: !where, onSelect: () => { setWhere(''); refocus(); }, testId: 'new-session-where-local' },
+            ...destinations.map((id, index) => ({ id: `worktree:${id}`, label: destinations.length > 1 ? `New worktree in ${id}` : 'New worktree', title: 'A clean checkout of the last commit, made first; uncommitted changes here are not in it.', checked: where === id, group: index === 0, onSelect: () => { setWhere(id); refocus(); }, testId: 'new-session-where-worktree' })),
+          ]} />
+      ) : null}
       {choices.mode ? <ModeControl mode={choices.mode} modes={catalog.modes} locked={false} disabled={creating} onSelect={mode => choose({ mode })} /> : null}
     </>
   );
@@ -218,7 +248,9 @@ export function NewSessionScreen() {
         <div className="mx-auto flex w-full max-w-[820px] flex-col gap-5 px-4 pb-6 pt-10 md:pt-16">
           <div>
             <h2 className="text-lg font-medium text-foreground">New session</h2>
-            {workspace ? <p className="mt-1 text-sm text-muted-foreground">Runs on the host in <span className="font-mono text-foreground/90">{baseName(workspace)}</span>. Your first message starts it.</p> : null}
+            {workspace ? <p className="mt-1 text-sm text-muted-foreground" data-testid="new-session-runs-in">{where
+              ? <>Runs on the host in a new worktree of <span className="font-mono text-foreground/90">{baseName(workspace)}</span>: a clean checkout of the last commit, made first (uncommitted changes are not in it). Your first message starts it.</>
+              : <>Runs on the host in <span className="font-mono text-foreground/90">{baseName(workspace)}</span>. Your first message starts it.</>}</p> : null}
           </div>
           {catalog.status === 'loading' ? <Spinner label="Loading teams and models…" className="text-xs" /> : null}
           {catalog.status === 'error' ? <p role="alert" className="text-xs text-destructive">{catalog.error?.message}</p> : null}

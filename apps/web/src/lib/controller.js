@@ -2118,9 +2118,33 @@ export class Controller {
    * Files of the first message (#121 J) were held here: they are uploaded only once the session
    * exists, under its id, never a guessed one; a runtime that cannot read them leaves the message
    * failed with the reason, never sent without them.
-   * @param {{ team?: string, mode?: string, model?: string, thinking?: string, title?: string, prompt?: string, files?: import('./attachments.js').FileAttachment[] }} input
+   * With `worktree` (t-a35b, Paseo's New worktree option): a new managed worktree of the open
+   * workspace is made first in destination `worktree.mappingId` (#ensureWorktree; `worktree.key`
+   * names it for the whole attempt, so a start refused after the worktree was made starts in that
+   * one when tried again), the app opens it, and the session is created there (session.create with
+   * its workspaceId). The worktree is a clean checkout of the committed HEAD: nothing is copied.
+   * @param {{ team?: string, mode?: string, model?: string, thinking?: string, title?: string, prompt?: string, files?: import('./attachments.js').FileAttachment[], worktree?: { mappingId: string, key: string } }} input
    */
-  async createSession({ team, mode, model, thinking, title, prompt, files = [] } = {}) {
+  async createSession({ worktree, ...input } = {}) {
+    if (!worktree) return this.#createSession(input);
+    if (this.#creating || this.#state.busy.create) throw new ConfigurationError('A new session is already starting.');
+    const source = this.worktreeForkSource();
+    if (!source) throw new ConfigurationError('Worktrees are not available for this workspace.');
+    // Busy while the worktree is made: a second start must not make a second one.
+    this.#set(state => ({ busy: { ...state.busy, create: true } }));
+    let made;
+    try {
+      made = await this.#ensureWorktree(worktree.key, source, worktree.mappingId);
+    } finally {
+      this.#set(state => ({ busy: { ...state.busy, create: false } }));
+    }
+    this.selectWorkspace(made.directory);
+    if (this.#state.workspace !== made.directory) throw new ConfigurationError('The new worktree was made but cannot be opened with this access token. It shows in the sidebar when the host lists it.');
+    return this.#createSession({ ...input, workspaceId: made.id });
+  }
+
+  /** @param {{ team?: string, mode?: string, model?: string, thinking?: string, title?: string, prompt?: string, files?: import('./attachments.js').FileAttachment[], workspaceId?: string }} input */
+  async #createSession({ team, mode, model, thinking, title, prompt, files = [], workspaceId } = {}) {
     const workspace = this.#state.workspace;
     if (!workspace) throw new ConfigurationError('Choose a workspace first.');
     // One create at a time: a second Enter or click while one is starting must not make a second
@@ -2160,7 +2184,7 @@ export class Controller {
         // subscribed too, and still needs reconciliation when another root is selected.
         this.#attached = { client, root: id };
         try {
-          await client.request('session.create', { sessionId: id, spec, history: 'skip' }, { timeoutMs: this.#options.createTimeoutMs });
+          await client.request('session.create', { sessionId: id, ...(workspaceId ? { workspaceId } : {}), spec, history: 'skip' }, { timeoutMs: this.#options.createTimeoutMs });
           check();
           // session.create itself subscribes the client, even if the following attach fails.
           this.#attached = { client, root: id };
@@ -2557,23 +2581,7 @@ export class Controller {
     const key = this.#forkDestinations.get(requestId) ?? worktreeKey;
     this.#forkDestinations.set(requestId, key);
     try {
-      let made = this.#forkWorktrees.get(key);
-      if (!made) {
-        let params = this.#forkWorktreeRequests.get(key);
-        if (!params) { params = { workspaceId: source.id, mappingId, ifRevision: this.#state.registry.revision, requestId: `${key}:worktree` }; this.#forkWorktreeRequests.set(key, params); }
-        /** @type {import('@anhlp/alp-protocol').RpcMethodMap['workspace.worktree.create']['result']} */
-        let created;
-        try {
-          created = await this.#client().request('workspace.worktree.create', params, { timeoutMs: this.#options.createTimeoutMs });
-        } catch (error) {
-          if (/** @type {any} */ (error)?.data?.reason === 'stale_revision' || describe(error).sent === 'yes') this.#forkWorktreeRequests.delete(key);
-          throw error;
-        }
-        made = { id: created.workspace.id, directory: created.workspace.directory };
-        this.#forkWorktrees.set(key, made);
-        this.#forkWorktreeRequests.delete(key);
-        await this.refreshRegistry();
-      }
+      const made = await this.#ensureWorktree(key, source, mappingId);
       const result = await this.forkConversation({ requestId, boundary, branchId, workspaceId: made.id, directory: made.directory, title });
       this.#forkDestinations.delete(requestId);
       return result;
@@ -2582,6 +2590,34 @@ export class Controller {
       if (!describeConversationError(error).retrySame) this.#forkDestinations.delete(requestId);
       throw error;
     }
+  }
+
+  /**
+   * The managed worktree named `key` (Fork into a worktree, New session in a worktree): made once
+   * with workspace.worktree.create from `source` in destination `mappingId`, as Create worktree
+   * does; a retry under the same key sends the same request (so the host answers the one it made)
+   * or reuses the one already made. The registry is read again after, so the app can open it.
+   * @param {string} key @param {{ id: string }} source @param {string} mappingId
+   * @returns {Promise<{ id: string, directory: string }>}
+   */
+  async #ensureWorktree(key, source, mappingId) {
+    let made = this.#forkWorktrees.get(key);
+    if (made) return made;
+    let params = this.#forkWorktreeRequests.get(key);
+    if (!params) { params = { workspaceId: source.id, mappingId, ifRevision: this.#state.registry.revision, requestId: `${key}:worktree` }; this.#forkWorktreeRequests.set(key, params); }
+    /** @type {import('@anhlp/alp-protocol').RpcMethodMap['workspace.worktree.create']['result']} */
+    let created;
+    try {
+      created = await this.#client().request('workspace.worktree.create', params, { timeoutMs: this.#options.createTimeoutMs });
+    } catch (error) {
+      if (/** @type {any} */ (error)?.data?.reason === 'stale_revision' || describe(error).sent === 'yes') this.#forkWorktreeRequests.delete(key);
+      throw error;
+    }
+    made = { id: created.workspace.id, directory: created.workspace.directory };
+    this.#forkWorktrees.set(key, made);
+    this.#forkWorktreeRequests.delete(key);
+    await this.refreshRegistry();
+    return made;
   }
 
   /** The worktree destinations of the open workspace (Create worktree's). */
