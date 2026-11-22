@@ -217,7 +217,8 @@ export type AlpRuntime = {
   /** Current pauses and parked assignments. */
   pauses(): PauseState;
   /** Read-only, cached account usage for the web and desktop viewers. */
-  usage(refresh?: boolean): Promise<{ providers: Array<ProviderUsage & { pause: Pause | null; parked: number }> }>;
+  /** Every provider's usage (daemon.usage); `account` the signed-in email, else account: null (t-9116). */
+  usage(refresh?: boolean, account?: boolean): Promise<{ providers: Array<ProviderUsage & { pause: Pause | null; parked: number }> }>;
   /** The user asks a finished assignment, or the last one on a task of the project, about its work. */
   recall(target: { assignmentId?: string; taskId?: string; projectRoot?: string }, question: string): Promise<RecallAnswer>;
   /** Assignments an earlier alpd left running, which recover() can continue once their root is open again. */

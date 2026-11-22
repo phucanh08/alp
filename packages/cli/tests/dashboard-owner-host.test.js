@@ -134,13 +134,13 @@ test('host.usage.setting: on by default, off and back on in $ALP_HOME/usage.json
   assert.equal((await call('host.usage.setting.get', {}, { home })).enabled, true);
 });
 
-test('daemon.usage through the dashboard: forwarded with refresh while Check usage is on; off, answered disabled without asking alpd', async t => {
+test('daemon.usage through the dashboard: forwarded with refresh and account while Check usage is on; off, answered disabled without asking alpd', async t => {
   const { home } = await scratch(t);
   const usage = { providers: [{ runtime: 'codex', available: true, windows: [] }] };
   let daemon = fakeDaemon({ 'daemon.usage': usage });
   assert.deepEqual(await call('daemon.usage', { refresh: true }, { home, daemon }), usage);
   assert.deepEqual(await call('daemon.usage', {}, { home, daemon }), usage);
-  assert.deepEqual(daemon.calls, [['daemon.usage', { refresh: true }], ['daemon.usage', {}]]);
+  assert.deepEqual(daemon.calls, [['daemon.usage', { refresh: true, account: true }], ['daemon.usage', { account: true }]]);
   await call('host.usage.setting.set', { enabled: false }, { home });
   daemon = fakeDaemon({ 'daemon.usage': usage });
   assert.deepEqual(await call('daemon.usage', { refresh: true }, { home, daemon }), { disabled: true, providers: [] });

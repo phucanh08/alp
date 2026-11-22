@@ -62,7 +62,7 @@ test('explicit refresh bypasses the usage cache but concurrent refreshes share a
   assert.equal(calls.filter(call => call.endsWith(':usage')).length, 4);
 });
 
-test("daemon usage carries the account email and Paseo's fields from usageReport (t-9116)", async t => {
+test("daemon usage carries Paseo's fields, and the account email from usageReport only when asked (t-9116)", async t => {
   const calls = [];
   const factory = transport({ codex: { available: true, limits: [{ main: true, plan: 'plus', windows: [{ slot: 'primary', usedPercent: 5, windowMinutes: 300 }] }] }, claude: { available: false } }, calls);
   const runtime = createAlpRuntime({ transport: (...args) => Object.assign(factory(...args), {
@@ -74,8 +74,12 @@ test("daemon usage carries the account email and Paseo's fields from usageReport
   const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test' });
   const client = daemon.local();
   t.after(() => client.close());
-  const { providers } = await client.request('daemon.usage');
+  const { providers } = await client.request('daemon.usage', { account: true });
   assert.deepEqual(providers.map(provider => [provider.runtime, provider.account, provider.planLabel]), [['codex', { email: 'owner@example.com' }, 'plus'], ['claude', null, null]]);
+  // A caller that does not ask (the Paseo bridge, which hands the answer to paired devices) gets no email.
+  const plain = await client.request('daemon.usage');
+  assert.deepEqual(plain.providers.map(provider => provider.account), [null, null]);
+  assert.doesNotMatch(JSON.stringify(plain), /owner@example/);
   assert.deepEqual(providers[0].windows, [{ name: '5 hour window', usedPercent: 5, resetsAt: null, id: 'five_hour', label: '5-hour' }]);
   assert.deepEqual(providers[0].details, []);
   assert.deepEqual(providers[0].balances, []);

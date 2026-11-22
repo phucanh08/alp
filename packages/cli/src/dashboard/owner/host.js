@@ -25,7 +25,8 @@ import { TERMINAL_WARNING, terminalCommand } from '../../terminal.js';
  *                           (terminal.js terminalCommand, the same $ALP_HOME/terminal.json);
  *   host.usage.setting.get / host.usage.setting.set   Paseo's "Check usage" switch, in
  *                           $ALP_HOME/usage.json (default on). It belongs to the dashboard alone:
- *   daemon.usage            alpd's own, forwarded with its `refresh` param while the switch is on;
+ *   daemon.usage            alpd's own, forwarded with its `refresh` param and `account: true` (the
+ *                           signed-in email, which alpd gives no other caller) while the switch is on;
  *                           off, answered { disabled: true, providers: [] } without asking alpd, so
  *                           no provider is queried. `alp usage` and alpd's limit watch talk to alpd
  *                           directly and never read the switch (t-9116).
@@ -243,7 +244,8 @@ export const methods = {
 
   async 'daemon.usage'({ params, home, daemon }) {
     if (!(await usageSetting(home)).enabled) return { disabled: true, providers: [] };
-    return daemon.request('daemon.usage', params.refresh === undefined ? {} : { refresh: params.refresh });
+    // The owner's own page shows the signed-in email (Paseo's account label); alpd gives it only on request.
+    return daemon.request('daemon.usage', { ...(params.refresh === undefined ? {} : { refresh: params.refresh }), account: true });
   },
 
   async 'host.registry'({ daemon }) {

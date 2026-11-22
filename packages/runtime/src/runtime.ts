@@ -5485,10 +5485,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     diskLow(free) {
       notice('warning', say => say.diskLow(free));
     },
-    async usage(refresh = false) {
+    async usage(refresh = false, account = false) {
       const providers = await Promise.all((['codex', 'claude'] as const).map(kind => cachedUsage(kind, refresh)));
       const state = pauseState();
-      return { providers: providers.map(provider => ({ ...provider, pause: state.all ?? state.runtimes[provider.runtime] ?? null, parked: state.parked.filter(entry => entry.runtime === provider.runtime).length })) };
+      return { providers: providers.map(provider => ({ ...provider, account: account ? provider.account : null, pause: state.all ?? state.runtimes[provider.runtime] ?? null, parked: state.parked.filter(entry => entry.runtime === provider.runtime).length })) };
     },
 
     async recall(target, question) {
