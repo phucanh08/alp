@@ -18,7 +18,7 @@ import { isMacPlatform, shortcutLabel } from '../lib/shortcuts.js';
 import type { SidebarDisplay, SidebarItemId } from '../lib/preferences.js';
 import { filterProjects, groupByStatus, limitRows, resolveProjectFilters, sortSessions } from '../lib/sidebar-model.js';
 import { FACTS_REFRESH_MS, formatDiffCount, mostRecentSession, prLabel, readFacts, usageLine, type WorkspaceFacts } from '../lib/sidebar-facts.js';
-import { ownerRegistry, readUsage, registerDirectory, runtimeName, type UsageProvider } from '../lib/owner-host.js';
+import { ownerRegistry, readUsage, registerDirectory, USAGE_EVENT, runtimeName, type UsageProvider } from '../lib/owner-host.js';
 import { useUsagePrefs } from './settings/usage/prefs';
 import { ProviderIcon } from './ProviderIcon';
 import { useAppState, useController } from './store';
@@ -479,7 +479,10 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     const read = () => { void readUsage(controller).then(result => { if (live) setUsage(result.providers); }, () => {}); };
     read();
     const timer = setInterval(read, FACTS_REFRESH_MS);
-    return () => { live = false; clearInterval(timer); };
+    // The Usage page's reads and its Check usage switch reach the summary at once (t-9116).
+    const announced = (event: Event) => { const detail = (event as CustomEvent<{ providers?: UsageProvider[] }>).detail; if (live && Array.isArray(detail?.providers)) setUsage(detail.providers); };
+    globalThis.addEventListener(USAGE_EVENT, announced);
+    return () => { live = false; clearInterval(timer); globalThis.removeEventListener(USAGE_EVENT, announced); };
   }, [controller, ownerLive]);
 
   const updateDisplay = (change: Partial<SidebarDisplay>) => controller.updatePreferences({ sidebarDisplay: { ...display, ...change } });
