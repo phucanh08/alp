@@ -61,7 +61,15 @@ async function openMenu(page, title) {
   return menu;
 }
 const labels = menu => menu.getByRole('menuitem').evaluateAll(items => items.map(item => item.querySelector('span')?.textContent?.trim() ?? item.textContent?.trim()));
-const sessionOf = async title => (await host('session.list', { projectRoot: await realpath(world.projects.main) })).sessions.find(session => session.title === title);
+/** The host's row of the session titled `title`, by either spelling of the project's path (a temporary directory may sit under a symbolic link). */
+async function sessionOf(title, extra = {}) {
+  for (const projectRoot of new Set([world.projects.main, await realpath(world.projects.main)])) {
+    // A root nobody has open is closed, and still in the sidebar.
+    const found = (await host('session.list', { projectRoot, includeClosed: true, ...extra })).sessions.find(session => session.title === title);
+    if (found) return found;
+  }
+  return undefined;
+}
 
 test('a writer\'s menu: Paseo\'s items in order; copy, rename, mark unread then read, archive change what they say', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
@@ -70,32 +78,35 @@ test('a writer\'s menu: Paseo\'s items in order; copy, rename, mark unread then 
   await newSession(page, 'Menu second');
 
   let menu = await openMenu(page, 'Menu first');
-  // Not the owner: no branch facts and no file manager. Not in front and idle: Mark as unread.
-  expect(await labels(menu)).toEqual(['Copy path', 'Rename', 'Mark as unread', 'Archive']);
+  // Not the owner: no file manager. The checkout's branch is known. Not in front and idle: Mark as unread.
+  expect(await labels(menu)).toEqual(['Copy path', 'Copy branch name', 'Rename', 'Mark as unread', 'Archive']);
   await expect(menu.getByTestId('sidebar-workspace-menu-archive')).toContainText(/⇧⌘⌫|Ctrl\+Shift\+Backspace/);
 
   // Copy path: the session's directory on the host.
   await menu.getByRole('menuitem', { name: 'Copy path' }).click();
   await expect(menu).toBeHidden();
   await expect.poll(async () => realpath(await page.evaluate(() => navigator.clipboard.readText())).catch(() => '')).toBe(await realpath(world.projects.main));
+  menu = await openMenu(page, 'Menu first');
+  await menu.getByRole('menuitem', { name: 'Copy branch name' }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('feature/session-menu');
 
   // Mark as unread: the host keeps a finished attention for every client; the row shows it.
   menu = await openMenu(page, 'Menu first');
   await menu.getByRole('menuitem', { name: 'Mark as unread' }).click();
   await expect.poll(async () => (await sessionOf('Menu first'))?.attention?.reason).toBe('finished');
-  await expect(row(page, 'Menu first').locator('[data-status]')).toHaveAttribute('data-status', 'done');
+  await expect(row(page, 'Menu first').locator('[data-status]')).toHaveAttribute('data-status', 'attention');
   // …and the menu offers Mark as read in its place, which clears it on the host.
   menu = await openMenu(page, 'Menu first');
-  expect(await labels(menu)).toEqual(['Copy path', 'Rename', 'Mark as read', 'Archive']);
+  expect(await labels(menu)).toEqual(['Copy path', 'Copy branch name', 'Rename', 'Mark as read', 'Archive']);
   await menu.getByRole('menuitem', { name: 'Mark as read' }).click();
   await expect.poll(async () => (await sessionOf('Menu first'))?.attention).toBeUndefined();
-  await expect(row(page, 'Menu first').locator('[data-status]')).not.toHaveAttribute('data-status', 'done');
+  await expect(row(page, 'Menu first').locator('[data-status]')).toHaveAttribute('data-status', 'done');
 
   // The session in front keeps its mark until the user looks at it again.
   menu = await openMenu(page, 'Menu second');
   await menu.getByRole('menuitem', { name: 'Mark as unread' }).click();
   await expect.poll(async () => (await sessionOf('Menu second'))?.attention?.reason).toBe('finished');
-  await expect(row(page, 'Menu second').locator('[data-status]')).toHaveAttribute('data-status', 'done');
+  await expect(row(page, 'Menu second').locator('[data-status]')).toHaveAttribute('data-status', 'attention');
   await row(page, 'Menu second').click();
   await expect.poll(async () => (await sessionOf('Menu second'))?.attention).toBeUndefined();
 
@@ -114,7 +125,7 @@ test('a writer\'s menu: Paseo\'s items in order; copy, rename, mark unread then 
   const confirm = page.getByRole('dialog', { name: 'Archive session?' });
   await confirm.getByRole('button', { name: 'Archive' }).click();
   await expect(row(page, 'Menu renamed')).toHaveCount(0);
-  const archived = (await host('session.list', { projectRoot: await realpath(world.projects.main), includeArchived: true })).sessions.find(session => session.title === 'Menu renamed');
+  const archived = await sessionOf('Menu renamed', { includeArchived: true });
   expect(archived?.archived).toBe(true);
 });
 
@@ -124,7 +135,7 @@ test('a reader\'s menu has the copy items only', async ({ page }) => {
   const reader = await page.context().newPage();
   await connect(reader, world, world.tokens.viewer);
   const menu = await openMenu(reader, 'Menu for readers');
-  expect(await labels(menu)).toEqual(['Copy path']);
+  expect(await labels(menu)).toEqual(['Copy path', 'Copy branch name']);
   await reader.close();
 });
 
@@ -135,13 +146,15 @@ test.describe('the host owner\'s ALP.app', () => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: dashboard.origin });
     await page.goto(dashboard.url);
     await expect(page.getByLabel('Access token')).toHaveCount(0);
-    await newSession(page, 'Owner menu');
-    await newSession(page, 'Owner other');
+    const start = () => nav(page).getByRole('button', { name: /^Start a session in / }).first();
+    await newSession(page, 'Owner menu', { from: start() });
+    await newSession(page, 'Owner other', { from: start() });
     let menu = await openMenu(page, 'Owner menu');
     await expect.poll(() => labels(menu)).toEqual(['Copy path', 'Copy branch name', 'Rename', 'Mark as unread', 'Open in file manager', 'Archive']);
     await menu.getByRole('menuitem', { name: 'Copy branch name' }).click();
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('feature/session-menu');
     menu = await openMenu(page, 'Owner menu');
+    await page.screenshot({ path: path.join(test.info().outputDir, 'owner-session-menu.png') });
     await menu.getByRole('menuitem', { name: 'Open in file manager' }).click();
     await expect.poll(() => readFile(opened, 'utf8').catch(() => '')).toBe(await realpath(world.projects.main));
   });
