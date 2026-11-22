@@ -5,7 +5,7 @@
  * no preload, no Node, navigation pinned to that origin. Its Browser tabs are <webview> guests in their
  * own partition, held to the rules of ./browser.ts (t-9116).
  */
-import { app, BrowserWindow, Menu, net, protocol, session, shell, type MenuItemConstructorOptions, type WebContents } from 'electron';
+import { app, BrowserWindow, Menu, net, protocol, screen, session, shell, type MenuItemConstructorOptions, type WebContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { lstat, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
@@ -20,6 +20,8 @@ import { confirmAction, confirmQuery, homeWarning, installArgs, installEnv, inst
 import { run } from './run';
 import { BROWSER_PARTITION, OpenRequests, dashboardPort, isAllowedGuestNavigation, isAllowedGuestRequest, isBrowsableUrl, localHosts, markUserAgent, openEventScript, prepareWebview, type DashboardTarget } from './browser';
 import type { DashboardAddress } from './url';
+import { DEFAULT_HEIGHT, DEFAULT_WIDTH, MIN_HEIGHT, MIN_WIDTH, fitWindowState, readWindowState, stateOf, writeWindowState, type WindowState } from './window-state';
+import { attentionBadge, isCloseWindowKey } from './shell-keys';
 
 let win: BrowserWindow | undefined;
 /** The origin the window may show; undefined while it shows a bundled page. */
@@ -45,6 +47,10 @@ const dashboardTarget: DashboardTarget = { ports: dashboardPorts, hosts: localHo
 /** The webContents allowed to hold Browser tab guests: the dashboard windows'. */
 const webviewHosts = new Set<number>();
 const openRequests = new OpenRequests();
+/** The window's last size and place (./window-state.ts), read at start and kept as it changes. */
+let windowState: WindowState | undefined;
+/** How long after the last move or resize the window's state is written. */
+const SAVE_STATE_MS = 500;
 /** The longest error text shown (alp's stderr can be long; it travels in the page's query). */
 const MAX_MESSAGE = 4000;
 
@@ -128,11 +134,13 @@ const reconnector = new Reconnector({
 });
 
 function createWindow(): BrowserWindow {
+  const fitted = windowState ? fitWindowState(windowState, workAreas()) : undefined;
   const window = new BrowserWindow({
-    width: 1280,
-    height: 820,
-    minWidth: 720,
-    minHeight: 480,
+    width: fitted?.width ?? DEFAULT_WIDTH,
+    height: fitted?.height ?? DEFAULT_HEIGHT,
+    ...(fitted?.x !== undefined && fitted.y !== undefined ? { x: fitted.x, y: fitted.y } : {}),
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
     title: 'ALP',
     show: false,
     webPreferences: {
@@ -193,13 +201,61 @@ function createWindow(): BrowserWindow {
     try { origin = new URL(contents.getURL()).origin; } catch { return; }
     if (origin === shownAddress.origin) reconnector.loaded(shownAddress);
   });
-  window.once('ready-to-show', () => window.show());
+  rememberBounds(window);
+  // ⌘W closes the dashboard's current tab (apps/web, t-0166); on a bundled page, which has no tabs, it
+  // closes the window as File › Close Window does.
+  contents.on('before-input-event', (event, input) => {
+    if (isCloseWindowKey(input, process.platform === 'darwin') && !isDashboardShown(contents)) { event.preventDefault(); window.close(); }
+  });
+  // The dashboard shows in its favicon that a session asks for the user (apps/web attention.tsx); the
+  // Dock icon shows it as a dot. Read from the dashboard's own origin only.
+  contents.on('page-favicon-updated', (_event, favicons) => {
+    if (window === win) setBadge(isDashboardShown(contents) ? attentionBadge(favicons, allowedOrigin) : '');
+  });
+  contents.on('did-start-navigation', details => { if (details.isMainFrame && !details.isSameDocument && window === win) setBadge(''); });
+  window.once('ready-to-show', () => {
+    if (fitted?.maximized) window.maximize();
+    window.show();
+  });
   window.on('closed', () => {
     if (win !== window) return;
     win = undefined;
+    setBadge('');
     reconnector.stop();
   });
   return window;
+}
+
+/**
+ * Keeps windowState (and window-state.json) up to date with `window`: its normal bounds, whether it is
+ * maximized. Written a moment after the last move or resize, and when the window closes.
+ */
+function rememberBounds(window: BrowserWindow) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const capture = () => {
+    if (window.isDestroyed() || window.isFullScreen() || window.isMinimized()) return;
+    windowState = stateOf(window.getNormalBounds(), window.isMaximized());
+  };
+  const save = () => {
+    if (timer) { clearTimeout(timer); timer = undefined; }
+    capture();
+    if (!windowState) return;
+    try { writeWindowState(app.getPath('userData'), windowState); } catch { /* not saved: the next launch uses the last saved state */ }
+  };
+  const later = () => { if (timer) clearTimeout(timer); timer = setTimeout(save, SAVE_STATE_MS); };
+  for (const event of ['resize', 'move', 'maximize', 'unmaximize'] as const) window.on(event as 'resize', later);
+  window.on('close', save);
+}
+
+/** The displays' work areas, the primary display's first. */
+function workAreas() {
+  const primary = screen.getPrimaryDisplay();
+  return [primary.workArea, ...screen.getAllDisplays().filter(display => display.id !== primary.id).map(display => display.workArea)];
+}
+
+/** The Dock icon's badge (macOS); '' clears it. */
+function setBadge(text: string) {
+  if (process.platform === 'darwin') app.dock?.setBadge(text);
 }
 
 /** A window created hidden is shown on its first paint; a page that fails to load never paints. */
@@ -395,10 +451,13 @@ function setupBrowserSession() {
 function buildMenu() {
   const template: MenuItemConstructorOptions[] = [
     { role: 'appMenu' },
-    { label: 'File', submenu: [{ label: 'Connect again', accelerator: 'CmdOrCtrl+Shift+R', click: () => void connect() }, { type: 'separator' }, { role: 'close' }] },
+    // No ⌘W here: the dashboard page takes it to close its current tab (apps/web lib/shortcuts.js, as
+    // Paseo's desktop app does); before-input-event closes the window on a bundled page.
+    { label: 'File', submenu: [{ label: 'Connect again', accelerator: 'CmdOrCtrl+Shift+R', click: () => void connect() }, { type: 'separator' }, { label: 'Close Window', click: (_item, window) => { if (window instanceof BrowserWindow) window.close(); } }] },
     { role: 'editMenu' },
     { label: 'View', submenu: [{ role: 'reload' }, ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' } as MenuItemConstructorOptions]), { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
-    { role: 'windowMenu' },
+    // The Window menu without its Close item (⌘W is the dashboard's, above).
+    { label: 'Window', role: 'window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, ...(process.platform === 'darwin' ? [{ type: 'separator' }, { role: 'front' }] as MenuItemConstructorOptions[] : [])] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -431,12 +490,16 @@ if (!app.requestSingleInstanceLock()) {
       return { action: 'deny' };
     });
   });
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    windowState = await readWindowState(app.getPath('userData'));
     protocol.handle(PAGE_SCHEME, servePage);
     setupBrowserSession();
-    // Everything is denied (camera, notifications, …) except clipboard writes from alp dashboard's origin.
-    session.defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) => callback(isAllowedPermission(permission, details.requestingUrl, allowedOrigin)));
-    session.defaultSession.setPermissionCheckHandler((_contents, permission, requestingOrigin) => isAllowedPermission(permission, requestingOrigin, allowedOrigin));
+    // Everything is denied (camera, geolocation, …) except clipboard writes and notifications from alp
+    // dashboard's origin in the dashboard window (./policy.ts). Browser tabs have their own session,
+    // which denies everything (setupBrowserSession).
+    const fromDashboard = (contents: WebContents | null) => !!contents && webviewHosts.has(contents.id);
+    session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => callback(fromDashboard(contents) && isAllowedPermission(permission, details.requestingUrl, allowedOrigin)));
+    session.defaultSession.setPermissionCheckHandler((contents, permission, requestingOrigin) => fromDashboard(contents) && isAllowedPermission(permission, requestingOrigin, allowedOrigin));
     // The page's gateway refused its token (POST /v1/tickets → 401, after `alp dashboard rotate`): ask alp
     // for the new address. Only the status and the path are read; the request is not touched.
     session.defaultSession.webRequest.onCompleted(details => {
