@@ -32,7 +32,7 @@ function errorText(cause: unknown) {
   return typeof answered === 'string' && answered ? answered : describe(cause).message;
 }
 
-/** A clock that ticks each minute, so countdowns move while the page is open. */
+/** A clock that ticks every 30 s, so countdowns move while the page is open. */
 function useNow() {
   const [now, setNow] = React.useState(() => Date.now());
   React.useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 30_000); return () => clearInterval(timer); }, []);
