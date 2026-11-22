@@ -2,9 +2,10 @@
  * ALP desktop shell (D32, docs/alp/desktop.md): one window showing the user's own alp dashboard. It runs
  * `alp dashboard --print`, checks the address, and loads it; apps/web takes the token out of the address
  * and connects to its own origin. The window is a same-origin client of alp-dashboard like a browser tab:
- * no preload, no Node, navigation pinned to that origin.
+ * no preload, no Node, navigation pinned to that origin. Its Browser tabs are <webview> guests in their
+ * own partition, held to the rules of ./browser.ts (t-9116).
  */
-import { app, BrowserWindow, Menu, net, protocol, session, shell, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, Menu, net, protocol, session, shell, type MenuItemConstructorOptions, type WebContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { lstat, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
@@ -17,6 +18,7 @@ import { isPageUrl, PAGE_SCHEME, pageUrl, resolvePage } from './pages';
 import { readSettings } from './settings';
 import { confirmAction, confirmQuery, homeWarning, installArgs, installEnv, installFailure, installPlan, installSource, installWarnings, latestRelease, type InstallPlan } from './install';
 import { run } from './run';
+import { BROWSER_PARTITION, OpenRequests, isAllowedGuestNavigation, isAllowedGuestRequest, isBrowsableUrl, localHosts, markUserAgent, openEventScript, prepareWebview, type DashboardTarget } from './browser';
 import type { DashboardAddress } from './url';
 
 let win: BrowserWindow | undefined;
@@ -34,6 +36,15 @@ let committed = false;
 let pendingInstall: { nonce: string; plan: InstallPlan } | undefined;
 /** True while install.sh runs: nothing else may change the window or start a second install. */
 let installing = false;
+/**
+ * What Browser tab guests may not reach (./browser.ts): every port the dashboard has had in this run
+ * (it moves when alp dashboard restarts), on any local spelling of this machine.
+ */
+const dashboardPorts = new Set<number>();
+const dashboardTarget: DashboardTarget = { ports: dashboardPorts, hosts: localHosts() };
+/** The webContents allowed to hold Browser tab guests: the dashboard windows'. */
+const webviewHosts = new Set<number>();
+const openRequests = new OpenRequests();
 /** The longest error text shown (alp's stderr can be long; it travels in the page's query). */
 const MAX_MESSAGE = 4000;
 
@@ -85,6 +96,7 @@ function loadRemote(window: BrowserWindow, address: DashboardAddress) {
   allowedOrigin = address.origin;
   shownAddress = address;
   remoteLoad = id;
+  try { dashboardPorts.add(Number(new URL(address.origin).port)); } catch { /* validated by url.ts */ }
   committed = false;
   // Only the fragment differs (alp dashboard rotated its token on the same port): Chromium navigates within
   // the page, and apps/web reads the token only when it loads, so the page is reloaded after it.
@@ -128,11 +140,17 @@ function createWindow(): BrowserWindow {
       nodeIntegration: false,
       nodeIntegrationInSubFrames: false,
       webSecurity: true,
-      webviewTag: false,
+      // Browser tabs (t-9116): every attach goes through will-attach-webview below, which forces
+      // the guest's partition and preferences (./browser.ts).
+      webviewTag: true,
       devTools: !app.isPackaged,
     },
   });
   const contents = window.webContents;
+  // apps/web offers Browser only where it sees this marker; the marker grants nothing.
+  contents.setUserAgent(markUserAgent(contents.getUserAgent()));
+  webviewHosts.add(contents.id);
+  contents.once('destroyed', () => webviewHosts.delete(contents.id));
   // Every frame, the main one and any subframe, stays on the shown origin: will-frame-navigate is
   // will-navigate for all frames, and will-redirect fires for redirects in any frame.
   const guard = navigationGuard(() => allowedOrigin);
@@ -148,7 +166,6 @@ function createWindow(): BrowserWindow {
   contents.on('will-navigate', guard);
   contents.on('will-frame-navigate', guard);
   contents.on('will-redirect', guard);
-  contents.on('will-attach-webview', event => event.preventDefault());
   contents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternal(url)) void shell.openExternal(url);
     return { action: 'deny' };
@@ -322,6 +339,58 @@ async function install(window: BrowserWindow, plan: InstallPlan) {
   await connect();
 }
 
+/**
+ * A Browser tab's page: it navigates, in any frame, only where ./browser.ts allows, and opens no
+ * window; window.open becomes a new Browser tab in the dashboard (a few at a time).
+ */
+function guardGuest(contents: WebContents) {
+  const navigation = (event: { url: string; isMainFrame?: boolean; preventDefault(): void }) => {
+    if (!isAllowedGuestNavigation(event.url, event.isMainFrame !== false, dashboardTarget)) event.preventDefault();
+  };
+  contents.on('will-navigate', navigation);
+  contents.on('will-frame-navigate', navigation);
+  contents.on('will-redirect', navigation);
+  // A load the dashboard page starts (webview.loadURL, a changed src) emits none of the events above:
+  // the <webview> element asks the main process to call this guest's loadURL, which refuses it here.
+  // Its requests are also cancelled by setupBrowserSession, and a navigation that still starts
+  // somewhere else is stopped right after it starts (stop() inside the event crashes Electron).
+  const load = contents.loadURL.bind(contents);
+  contents.loadURL = (url, options) => isAllowedGuestNavigation(url, true, dashboardTarget)
+    ? load(url, options)
+    : Promise.reject(new Error(`ERR_BLOCKED_BY_CLIENT: a Browser tab may not open ${url.slice(0, 200)}`));
+  contents.on('did-start-navigation', details => {
+    if (!details.isMainFrame || details.isSameDocument || isAllowedGuestNavigation(details.url, true, dashboardTarget)) return;
+    setImmediate(() => { if (!contents.isDestroyed()) contents.stop(); });
+  });
+  contents.on('devtools-opened', () => contents.closeDevTools());
+  contents.setWindowOpenHandler(({ url }) => {
+    const host = contents.hostWebContents;
+    if (host && !host.isDestroyed() && webviewHosts.has(host.id) && isBrowsableUrl(url) && url !== 'about:blank'
+      && isAllowedGuestNavigation(url, true, dashboardTarget) && isDashboardShown(host) && openRequests.take(contents.id)) {
+      void host.executeJavaScript(openEventScript(contents.id, url)).catch(() => undefined);
+    }
+    return { action: 'deny' };
+  });
+  contents.once('destroyed', () => openRequests.forget(contents.id));
+}
+
+/** Whether `host` shows the alp dashboard (not a bundled page): only then is it told about new tabs. */
+function isDashboardShown(host: WebContents): boolean {
+  try { return !!allowedOrigin && new URL(host.getURL()).origin === allowedOrigin; } catch { return false; }
+}
+
+/** The Browser tabs' session: no permission, no download, nothing to the dashboard's port. */
+function setupBrowserSession() {
+  const browser = session.fromPartition(BROWSER_PARTITION);
+  browser.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  browser.setPermissionCheckHandler(() => false);
+  browser.setDevicePermissionHandler(() => false);
+  browser.on('will-download', (event, item) => { event.preventDefault(); item.cancel(); });
+  browser.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !isAllowedGuestRequest(details.url, dashboardTarget) }));
+  // file: never reaches the disk from a guest, however the load started.
+  browser.protocol.handle('file', () => new Response('Browser tabs cannot open files.', { status: 403, headers: { 'content-type': 'text/plain' } }));
+}
+
 function buildMenu() {
   const template: MenuItemConstructorOptions[] = [
     { role: 'appMenu' },
@@ -349,9 +418,13 @@ if (!app.requestSingleInstanceLock()) {
     if (win.isMinimized()) win.restore();
     win.focus();
   });
-  // No webview, no remote content in other frames, no new windows anywhere.
+  // No webview but the dashboard window's Browser tabs, held to ./browser.ts; no remote content in
+  // other frames; no new windows anywhere.
   app.on('web-contents-created', (_event, contents) => {
-    contents.on('will-attach-webview', event => event.preventDefault());
+    contents.on('will-attach-webview', (event, webPreferences, params) => {
+      if (!webviewHosts.has(contents.id) || !prepareWebview(webPreferences as never, params as never)) event.preventDefault();
+    });
+    if (contents.getType() === 'webview') { guardGuest(contents); return; }
     contents.setWindowOpenHandler(({ url }) => {
       if (isAllowedExternal(url)) void shell.openExternal(url);
       return { action: 'deny' };
@@ -359,6 +432,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.whenReady().then(() => {
     protocol.handle(PAGE_SCHEME, servePage);
+    setupBrowserSession();
     // Everything is denied (camera, notifications, …) except clipboard writes from alp dashboard's origin.
     session.defaultSession.setPermissionRequestHandler((_contents, permission, callback, details) => callback(isAllowedPermission(permission, details.requestingUrl, allowedOrigin)));
     session.defaultSession.setPermissionCheckHandler((_contents, permission, requestingOrigin) => isAllowedPermission(permission, requestingOrigin, allowedOrigin));

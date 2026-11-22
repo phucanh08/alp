@@ -12,7 +12,7 @@
     "build": "bun build src/main.ts --target=node --format=cjs --external electron --outfile dist/main.cjs && rm -rf dist/pages && cp -R src/pages dist/pages && cp ../../install.sh dist/install.sh",
     "start": "bun run build && env -u ELECTRON_RUN_AS_NODE electron .",
     "test": "bun test test",
-    "e2e": "bun run build && node --test --test-concurrency=1 e2e/shell.spec.mjs e2e/install.spec.mjs e2e/owner.spec.mjs",
+    "e2e": "bun run build && node --test --test-concurrency=1 e2e/shell.spec.mjs e2e/install.spec.mjs e2e/owner.spec.mjs e2e/browser.spec.mjs",
     "typecheck": "tsc --noEmit",
     "dist": "bun run build && electron-builder --mac dmg --arm64 --x64 --publish never",
     "e2e:packaged": "node --test --test-concurrency=1 e2e/packaged.spec.mjs"
