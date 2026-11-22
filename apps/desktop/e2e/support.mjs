@@ -31,12 +31,26 @@ export const SERVICE = process.env.ALP_DESKTOP_E2E_SERVICE || path.join(ROOT, 'p
 /** The Electron binary of apps/desktop's own install (require('electron') gives its path). */
 const ELECTRON = createRequire(path.join(APP, 'package.json'))('electron');
 
-/** Polls `probe` until it answers something truthy; fails after `timeoutMs`. */
+/**
+ * `promise`, or a rejection naming `what` after `timeoutMs`: a step that never settles (an evaluate in
+ * a page that never answers, an executeJavaScript queued behind a load that never ends) fails fast and
+ * says which step it was, instead of running into the test's own timeout with no message.
+ */
+export async function bounded(what, promise, timeoutMs = 30_000) {
+  let timer;
+  const late = new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error(`step did not settle within ${timeoutMs} ms: ${what}`)), timeoutMs); });
+  try { return await Promise.race([promise, late]); } finally { clearTimeout(timer); }
+}
+
+/**
+ * Polls `probe` until it answers something truthy; fails after `timeoutMs`. Each probe is itself
+ * bounded by the time left, so a probe that hangs cannot hold the wait past its deadline.
+ */
 export async function waitFor(probe, what, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   let last;
   for (;;) {
-    try { const value = await probe(); if (value) return value; last = value; } catch (error) { last = error; }
+    try { const value = await bounded(`a probe of ${what}`, Promise.resolve().then(probe), Math.max(1_000, deadline - Date.now())); if (value) return value; last = value; } catch (error) { last = error; }
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what} (last: ${last instanceof Error ? last.message : JSON.stringify(last)})`);
     await sleep(100);
   }
@@ -219,7 +233,8 @@ export async function launch(t, context, alp, { app = APP, env = {} } = {}) {
   let ended = false;
   let closing = false;
   electronApp.process().once('exit', (code, signal) => { if (!closing) ended = true; keep(`\n[app exited: code ${code}, signal ${signal}]\n`); });
-  context.defer(() => { if (ended) t.diagnostic(`app output:\n${output.replace(/alpgw1\.[A-Za-z0-9_.-]+/g, 'alpgw1.<masked>')}`); });
+  const masked = () => output.replace(/alpgw1\.[A-Za-z0-9_.-]+/g, 'alpgw1.<masked>');
+  context.defer(() => { if (ended) t.diagnostic(`app output:\n${masked()}`); });
   // Bounded: a close that hangs is ended with SIGKILL, so the steps after it still run.
   context.defer(async () => {
     closing = true;
@@ -230,6 +245,8 @@ export async function launch(t, context, alp, { app = APP, env = {} } = {}) {
     clearTimeout(timer);
     if (!ok) electronApp.process().kill('SIGKILL');
   });
+  /** The app's recent output (token masked), for a test to report when a step fails. */
+  electronApp.alpOutput = masked;
   return electronApp;
 }
 
