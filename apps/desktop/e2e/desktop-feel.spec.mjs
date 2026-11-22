@@ -70,12 +70,14 @@ test('⌘W: no menu item takes it; the dashboard page gets it and the window sta
   assert.ok(items.some(item => item.label === 'Close Window'), JSON.stringify(items.map(item => item.label)));
   assert.deepEqual(items.filter(item => /^(CmdOrCtrl|Cmd|Command|CommandOrControl|Ctrl|Control)\+W$/i.test(item.accelerator) || item.role.toLowerCase() === 'close'), []);
 
-  // The dashboard page receives ⌘W, ⌘1 and ⌘⌥1; the window stays open.
-  await inPage(app, "window.__keys = []; window.addEventListener('keydown', e => window.__keys.push([e.metaKey, e.ctrlKey, e.altKey, e.code].join(':'))); 1");
+  // The dashboard page gets ⌘W, ⌘1 and ⌥⌘1; the shell does not close the window. This page has no tab to
+  // close, so apps/web's fallback asks to close the window (window.close, recorded here instead).
+  await inPage(app, "window.__keys = []; window.__closed = 0; window.close = () => { window.__closed += 1; }; window.addEventListener('keydown', e => window.__keys.push([e.metaKey, e.ctrlKey, e.altKey, e.code].join(':'))); 1");
   await press(app, 'W', [MOD]);
   await press(app, '1', [MOD]);
   await press(app, '1', [MOD, 'alt']);
   const keys = await waitFor(async () => { const value = await inPage(app, 'window.__keys'); return value.length >= 3 ? value : undefined; }, 'the page to see the keys');
+  assert.equal(await waitFor(() => inPage(app, 'window.__closed'), 'the page to ask to close its window'), 1);
   const flag = MOD === 'meta' ? 'true:false' : 'false:true';
   assert.deepEqual(keys, [`${flag}:false:KeyW`, `${flag}:false:Digit1`, `${flag}:true:Digit1`]);
   assert.equal(await windowCount(app), 1);
