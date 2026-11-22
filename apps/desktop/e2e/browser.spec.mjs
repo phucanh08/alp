@@ -301,14 +301,17 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
 
   step('(6) window.open');
   // (6) window.open and target=_blank: new Browser tabs in the workspace, never a window.
-  await inGuest(app, guest.id, `window.open(${JSON.stringify(`${site.origin}/page2`)}); 'ok'`);
+  // A new tab is shown at once and the opener's tab (with its guest) leaves the page, so whatever
+  // opens one runs after the script has answered: an executeJavaScript whose guest is destroyed
+  // before it answers never settles (the CI hang of t-a876). The user gesture outlives the timeout.
+  await inGuest(app, guest.id, `setTimeout(() => window.open(${JSON.stringify(`${site.origin}/page2`)})); 'ok'`);
   await waitFor(async () => (await page.locator('[data-tab^="browser:"]').count()) === 2, 'a second Browser tab');
   await waitFor(async () => (await guests(app)).some(entry => entry.url === `${site.origin}/page2`), 'the new tab to show page2');
   assert.equal(await windowCount(app), 1);
   // A window.open to the dashboard is refused outright.
   const [second] = (await guests(app)).filter(entry => entry.url === `${site.origin}/page2`);
   await inGuest(app, second.id, `window.open(${JSON.stringify(`http://localhost:${info.port}/`)}); window.open('file:///etc/hosts'); 'ok'`);
-  await inGuest(app, second.id, `document.getElementById('blank').click(); 'ok'`);
+  await inGuest(app, second.id, `setTimeout(() => document.getElementById('blank').click()); 'ok'`);
   await waitFor(async () => (await page.locator('[data-tab^="browser:"]').count()) === 3, 'a third Browser tab from target=_blank');
   await sleep(500);
   assert.equal(await page.locator('[data-tab^="browser:"]').count(), 3);
