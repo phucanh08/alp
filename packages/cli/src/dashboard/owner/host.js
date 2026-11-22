@@ -285,7 +285,7 @@ export const methods = {
   async 'host.workspace.reveal'({ params, daemon }) {
     const workspaceId = text(params.workspaceId, 'workspaceId', { max: 200 });
     const registry = ownerRegistry((/** @type {any} */ (await daemon.request('registry.owner', {})))?.registry);
-    const workspace = registry.workspaces.find(entry => entry.id === workspaceId && !entry.archivedAt);
+    const workspace = registry.workspaces.find((/** @type {any} */ entry) => entry.id === workspaceId && !entry.archivedAt);
     if (!workspace) throw Object.assign(new Error(`No workspace ${workspaceId}`), { code: 1001, data: { reason: 'not_found' } });
     const [file, args] = revealCommand(process.platform, await projectDirectory(workspace.directory));
     try { await revealer.run(file, args); }
