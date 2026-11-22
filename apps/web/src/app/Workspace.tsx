@@ -13,7 +13,7 @@ import { cn } from '../lib/utils';
 import { COMPACT_NOTE, RELOAD_NOTE } from '../lib/conversation.js';
 import { newConversationRequestId } from '../lib/ids.js';
 import { BROWSER, PANELS, PanelView, type PanelKind } from './panels';
-import { BrowserPanel } from './BrowserPanel';
+import { BrowserHost, BrowserSlot } from './BrowserPanel';
 import { browserLabel, isDesktopApp } from '../lib/browser-url.js';
 import { NewSessionScreen } from './NewSession';
 import { ChatPanel, Empty } from './SessionView';
@@ -518,7 +518,8 @@ export function TabContent({ paneId = MAIN_PANE, onNewSession }: { paneId?: stri
   if (active?.kind === 'task') return <TaskDetail id={active.id} />;
   // Keyed by the workspace too: the same path in another workspace is another file.
   if (active?.kind === 'file') return <FileView key={`${workspace ?? ''}\n${active.id}`} path={active.id} />;
-  if (active?.kind === 'browser') return <BrowserPanel key={`${workspace ?? ''}\n${active.id}`} id={active.id} />;
+  // The page itself lives in BrowserHost's layer, laid over this slot, so it survives other tabs in front.
+  if (active?.kind === 'browser') return <BrowserSlot key={`${workspace ?? ''}\n${active.id}`} id={active.id} paneId={paneId} />;
   if (active?.kind === 'panel') return <div className={cn('min-h-0 flex-1', active.id === 'terminal' ? 'overflow-hidden' : 'overflow-y-auto')}><PanelView kind={active.id} /></div>;
   if (active?.kind === 'agent' && tree) return <ChatPanel key={active.id} sessionId={active.id} />;
   return <Empty onNewSession={onNewSession} />;
@@ -737,9 +738,11 @@ export function SplitView(props: RowProps & { splits: boolean }) {
   const alone = !props.splits || ids.length < 2 ? focusedPane : maximized && ids.includes(maximized) ? maximized : null;
   return (
     <DropContext.Provider value={drop}>
-      <div className="flex min-h-0 flex-1 flex-col" data-testid="workspace-panes" data-panes={ids.length}>
-        {/* Narrow: one row of every pane's tabs; picking one shows it (its pane takes the focus). */}
-        {alone ? <PaneView id={alone} props={props} whole={!props.splits && ids.length > 1} /> : <NodeView node={panes.root} props={props} />}
+      <div className="relative flex min-h-0 flex-1 flex-col" data-testid="workspace-panes" data-panes={ids.length}>
+        <BrowserHost>
+          {/* Narrow: one row of every pane's tabs; picking one shows it (its pane takes the focus). */}
+          {alone ? <PaneView id={alone} props={props} whole={!props.splits && ids.length > 1} /> : <NodeView node={panes.root} props={props} />}
+        </BrowserHost>
       </div>
     </DropContext.Provider>
   );

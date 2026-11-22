@@ -232,6 +232,25 @@ tối đa 20 tab Browser với địa chỉ của chúng trong `alp-web:layout` 
   cho trang dashboard sự kiện `alp-desktop:browser-open` (`executeJavaScript` chỉ chứa dữ liệu JSON:
   id webContents của guest và địa chỉ); tab Browser có guest đó mở một tab Browser mới trong cùng
   workspace. Tối đa 5 lần mỗi 10 giây cho mỗi guest, và địa chỉ phải qua cùng chốt điều hướng.
+- Điều hướng **của chính trang** (bấm link, redirect, đổi `location`) bị chốt điều hướng chặn ở main
+  frame thì main process gửi cho trang dashboard sự kiện `alp-desktop:browser-blocked` theo cùng cách
+  (dữ liệu JSON: id guest và địa chỉ, cắt còn 300 ký tự; tối đa 10 lần mỗi 2 giây cho mỗi guest). Chỉ
+  tab có guest đó hiện dòng "Blocked navigation to <địa chỉ>" (dạng chữ thuần, bỏ ký tự điều khiển,
+  cắt còn 200 ký tự), thay vì đứng yên không nói gì; điều hướng kế tiếp xóa dòng đó. Subframe bị chặn
+  thì không báo. `file:`, `data:`, `chrome:`, `devtools:` mà trang tự đi tới bị chính Chromium từ chối
+  trong renderer, trước khi tới chốt, nên không có thông báo; lần tải từ ô địa chỉ bị từ chối thì hiện
+  dòng lỗi "… is blocked in Browser or did not load." như trước.
+
+**Trang sống khi tab không ở phía trước (t-a35b).** Như webview "resident" của Paseo: mọi tab Browser
+của workspace đã từng được hiện được render một lần, trong một lớp phủ trên các pane (`BrowserHost`,
+`apps/web/src/app/BrowserPanel.tsx`), và đặt khít lên ô (`BrowserSlot`) của pane đang hiện tab đó. Tab
+không ở phía trước vẫn giữ `<webview>` (cùng webContents, không tải lại; scroll, ô nhập, state của
+script còn nguyên) nhưng bị ẩn: `visibility: hidden`, `inert` (không nhận focus), không nhận con trỏ.
+Chuyển tab sang pane khác chỉ di chuyển ô; phần tử `<webview>` không bao giờ đổi chỗ trong DOM (Electron
+tải lại guest có phần tử bị di chuyển). `window.open` từ một tab đang ẩn vẫn mở tab mới. Đóng tab thì
+gỡ `<webview>` và trang bị hủy. Đổi workspace, hay mở màn Tasks, History, Schedules (thay cả vùng
+pane) thì bỏ hết các trang; tab tải lại địa chỉ đã lưu khi được hiện lần sau. Tab Browser đã lưu mà
+chưa từng được hiện thì chưa tải gì.
 
 **Guest với tới được gì:** mọi trang http/https mà máy với tới được, kể cả server khác trên loopback
 (dev server của người dùng là mục đích chính), với cookie và storage riêng trong `persist:alp-browser`
@@ -245,8 +264,8 @@ session, khác origin), Node, preload, cửa sổ mới, quyền, file trên đ�
 - DNS rebinding (một tên miền trỏ về `127.0.0.1`) vượt qua chốt theo tên host; gateway của dashboard
   tự kiểm tra header `Host` (`apps/gateway/src/server.js`), và mọi request vẫn cần token.
 - Guest với tới các dịch vụ loopback khác của máy (không phải dashboard), như một trình duyệt thường.
-- Tab không ở phía trước bị gỡ khỏi DOM, nên quay lại tab thì trang được tải lại từ địa chỉ đã lưu
-  (Paseo giữ webview "resident").
+- Mỗi tab Browser đã hiện giữ một trang sống (bộ nhớ, timer, kết nối) cho đến khi tab bị đóng hay đổi
+  workspace; tối đa 20 tab mỗi workspace.
 
 ## 5. Build và chạy từ source
 
@@ -330,9 +349,14 @@ preload, không đọc được token, storage, cookie, Node hay `window.top` c�
 `file:`, `data:`, `chrome:`, `devtools:`, `blob:` và dashboard dưới mọi cách viết (kể cả qua redirect
 và iframe) bị chặn; fetch/XHR/WebSocket tới cổng dashboard bị `onBeforeRequest` hủy (fetch tới server
 của test thì đi); quyền bị từ chối, DevTools không mở, download bị hủy; `window.open` và
-`target=_blank` mở tab Browser mới, không bao giờ thêm cửa sổ; webview không partition, partition khác
+`target=_blank` mở tab Browser mới, không bao giờ thêm cửa sổ; (t-a35b) chuyển sang tab khác rồi quay
+lại giữ nguyên trang (cùng guest, không điều hướng mới, scroll, ô nhập và biến script còn), tab ẩn thì
+`inert` và `visibility: hidden`; điều hướng bị chặn hiện "Blocked navigation to …" (kể cả địa chỉ sau
+redirect), chỉ ở tab của guest đó; tab đang ẩn vẫn mở được tab mới bằng `window.open`; webview không partition, partition khác
 hay `src` `file:` bị từ chối, và preload bị bỏ. Với `ALP_DESKTOP_SHOTS=<thư mục>` test lưu hai ảnh
-chụp (menu "+" và tab Browser). Phía trình duyệt thường là `apps/web/e2e/browser-tab.spec.js`.
+chụp (menu "+" và tab Browser). Phía trình duyệt thường là `apps/web/e2e/browser-tab.spec.js` (với một `<webview>` giả: lớp
+resident qua đổi tab và chuyển pane, thông báo chặn điều hướng chỉ dạng chữ, dòng lỗi khi lần tải bị
+từ chối sau `dom-ready`).
 
 Teardown dùng `defer` của `test/support/teardown.js`: đóng Electron (quá 15 giây thì SIGKILL), dừng
 host (với `owner.spec.mjs` và `browser.spec.mjs`: `alp dashboard --stop`, rồi `alp daemon stop`), rồi mới xóa thư mục. App chạy với `HOME` tạm.

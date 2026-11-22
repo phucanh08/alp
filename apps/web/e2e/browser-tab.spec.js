@@ -97,3 +97,134 @@ test('an address submitted before the Browser tab guest is ready loads once it i
   expect(await desktop.evaluate(() => window.__thrown)).toBe(0);
   await marked.close();
 });
+
+/**
+ * ALP.app's <webview> as the page sees it, for the tests below: each one a guest with its own id
+ * (window.__views[n].__id), loadURL recorded in window.__loads; it throws until __ready() and, after,
+ * refuses (a rejected promise, or a throw) while window.__refuse says so.
+ */
+const fakeWebview = () => {
+  const views = [];
+  window.__views = views;
+  window.__loads = [];
+  window.__refuse = '';
+  const create = Document.prototype.createElement;
+  Document.prototype.createElement = function (name, options) {
+    const element = create.call(this, name, options);
+    if (String(name).toLowerCase() !== 'webview') return element;
+    let ready = false;
+    const id = 100 + views.length;
+    Object.assign(element, {
+      __id: id,
+      loadURL(url) {
+        if (!ready || window.__refuse === 'throw') throw new Error('The WebView must be attached to the DOM and the dom-ready event emitted before this method can be called.');
+        if (window.__refuse === 'reject') return Promise.reject(new Error('ERR_BLOCKED_BY_CLIENT'));
+        window.__loads.push([id, url]);
+        return Promise.resolve();
+      },
+      getWebContentsId: () => id, canGoBack: () => false, canGoForward: () => false,
+      __ready() { ready = true; element.dispatchEvent(new Event('dom-ready')); },
+    });
+    views.push(element);
+    return element;
+  };
+  window.__readyAll = () => { for (const view of views) if (view.isConnected) view.__ready(); };
+};
+const DESKTOP_UA = 'Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/140 Safari/537.36 ALPDesktop/1';
+const OPEN_EVENT = 'alp-desktop:browser-open';
+const BLOCKED_EVENT = 'alp-desktop:browser-blocked';
+
+test('a load refused after the Browser tab guest is ready shows the error line (t-a876 review)', async ({ browser }) => {
+  const marked = await browser.newContext({ userAgent: DESKTOP_UA, viewport: { width: 1440, height: 900 } });
+  await marked.addInitScript(fakeWebview);
+  const desktop = await marked.newPage();
+  await connect(desktop, world);
+  await desktop.getByRole('button', { name: 'New tab' }).click();
+  await desktop.getByRole('menuitem', { name: 'Browser' }).click();
+  await desktop.evaluate(() => window.__readyAll());
+  const address = desktop.getByTestId('browser-address');
+  // Refused as a rejected promise (what ALP.app's main process does for a refused address)…
+  await desktop.evaluate(() => { window.__refuse = 'reject'; });
+  await address.fill('127.0.0.1:5173/refused');
+  await address.press('Enter');
+  await expect(desktop.getByTestId('browser-error')).toHaveText('http://127.0.0.1:5173/refused is blocked in Browser or did not load.');
+  // …or thrown synchronously: the same line, nothing loaded.
+  await desktop.evaluate(() => { window.__refuse = 'throw'; });
+  await address.fill('127.0.0.1:5173/thrown');
+  await address.press('Enter');
+  await expect(desktop.getByTestId('browser-error')).toHaveText('http://127.0.0.1:5173/thrown is blocked in Browser or did not load.');
+  expect(await desktop.evaluate(() => window.__loads)).toEqual([]);
+  // A load that goes through clears it.
+  await desktop.evaluate(() => { window.__refuse = ''; });
+  await address.fill('127.0.0.1:5173/fine');
+  await address.press('Enter');
+  await expect.poll(() => desktop.evaluate(() => window.__loads.map(([, url]) => url))).toEqual(['http://127.0.0.1:5173/fine']);
+  await expect(desktop.getByTestId('browser-error')).toHaveCount(0);
+  await marked.close();
+});
+
+test('Browser tab pages stay alive behind other tabs and across panes; blocked navigation is said in its own tab (t-a35b)', async ({ browser }) => {
+  const marked = await browser.newContext({ userAgent: DESKTOP_UA, viewport: { width: 1440, height: 900 } });
+  await marked.addInitScript(fakeWebview);
+  const desktop = await marked.newPage();
+  await connect(desktop, world);
+  await desktop.getByRole('button', { name: 'New tab' }).click();
+  await desktop.getByRole('menuitem', { name: 'Browser' }).click();
+  await desktop.evaluate(() => window.__readyAll());
+  await desktop.getByTestId('browser-address').fill('127.0.0.1:5173/kept');
+  await desktop.getByTestId('browser-address').press('Enter');
+  await expect.poll(() => desktop.evaluate(() => window.__loads)).toEqual([[100, 'http://127.0.0.1:5173/kept']]);
+  const first = desktop.locator('[data-testid="browser-resident"][data-browser="b1"]');
+  await expect(first).toHaveAttribute('data-shown', 'true');
+
+  // Another tab in front: the page is kept (the same <webview>, still in the document) but hidden,
+  // inert and out of the pointer's way; the address typed stays.
+  await desktop.getByRole('button', { name: 'New tab' }).click();
+  await desktop.getByRole('menuitem', { name: 'Tasks' }).click();
+  await expect(first).toHaveAttribute('data-shown', 'false');
+  await expect(first).toHaveAttribute('inert', '');
+  await expect(first).toBeHidden();
+  expect(await first.evaluate(element => [getComputedStyle(element).visibility, getComputedStyle(element).pointerEvents])).toEqual(['hidden', 'none']);
+  expect(await desktop.evaluate(() => window.__views.map(view => [view.__id, view.isConnected]))).toEqual([[100, true]]);
+  const center = await desktop.getByTestId('workspace-pane-main').boundingBox();
+  expect(await desktop.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('[data-testid="browser-resident"]'), [center.x + center.width / 2, center.y + center.height / 2])).toBe(false);
+
+  // A hidden page's window.open still opens a tab (the opener is not unmounted).
+  await desktop.evaluate(([type]) => window.dispatchEvent(new CustomEvent(type, { detail: { guest: 100, url: 'http://127.0.0.1:5173/opened' } })), [OPEN_EVENT]);
+  await expect(desktop.locator('[data-tab^="browser:"]')).toHaveCount(2);
+  await expect(desktop.locator('[data-testid="browser-resident"][data-browser="b2"]')).toHaveAttribute('data-shown', 'true');
+  await desktop.evaluate(() => window.__readyAll());
+
+  // A blocked navigation of the first page: said in its tab only, as text.
+  const spoof = 'http://x.test/<img src=x onerror="window.__owned=1">';
+  await desktop.evaluate(([type, url]) => window.dispatchEvent(new CustomEvent(type, { detail: { guest: 100, url } })), [BLOCKED_EVENT, spoof]);
+  await expect(desktop.locator('[data-testid="browser-resident"][data-browser="b2"]').getByTestId('browser-error')).toHaveCount(0);
+  await desktop.locator('[data-tab="browser:b1"]').click();
+  await expect(first).toHaveAttribute('data-shown', 'true');
+  await expect(first.getByTestId('browser-error')).toHaveText(`Blocked navigation to ${spoof}`);
+  expect(await desktop.evaluate(() => [window.__owned ?? null, document.querySelectorAll('[data-testid="browser-error"] img').length])).toEqual([null, 0]);
+  await expect(first.getByTestId('browser-address')).toHaveValue('http://127.0.0.1:5173/kept');
+
+  // Moved to another pane: the same <webview>, laid over the new pane.
+  await desktop.getByRole('button', { name: 'More actions' }).first().click();
+  await desktop.getByTestId('workspace-split-pane-right').click();
+  await expect(desktop.getByTestId('workspace-pane-new-tab-panel')).toBeVisible();
+  await desktop.locator('[data-tab="browser:b1"]').click();
+  await desktop.keyboard.press('ControlOrMeta+K');
+  const palette = desktop.getByRole('dialog', { name: 'Command center' });
+  await palette.getByRole('combobox').fill('move tab right');
+  await palette.getByTestId('command-center-action-pane-move-tab-right').click();
+  await expect(desktop.getByTestId('workspace-pane-pane-1').locator('[data-tab="browser:b1"]')).toHaveCount(1);
+  await expect(first).toHaveAttribute('data-shown', 'true');
+  const right = await desktop.getByTestId('workspace-pane-pane-1').locator('[data-testid="browser-slot"]').boundingBox();
+  const shown = await first.boundingBox();
+  expect(Math.abs(shown.x - right.x) + Math.abs(shown.y - right.y) + Math.abs(shown.width - right.width) + Math.abs(shown.height - right.height)).toBeLessThan(4);
+  expect(await desktop.evaluate(() => window.__views.map(view => [view.__id, view.isConnected]))).toEqual([[100, true], [101, true]]);
+  expect(await desktop.evaluate(() => window.__loads.filter(([id]) => id === 100).length)).toBe(1);
+
+  // Closing the tab removes its page.
+  await desktop.getByTestId('workspace-pane-pane-1').getByRole('button', { name: 'Close Browser' }).click();
+  await expect(desktop.locator('[data-tab="browser:b1"]')).toHaveCount(0);
+  expect(await desktop.evaluate(() => window.__views.map(view => [view.__id, view.isConnected]))).toEqual([[100, false], [101, true]]);
+  await marked.close();
+});

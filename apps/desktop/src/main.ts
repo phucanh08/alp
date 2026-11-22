@@ -18,7 +18,7 @@ import { isPageUrl, PAGE_SCHEME, pageUrl, resolvePage } from './pages';
 import { readSettings } from './settings';
 import { confirmAction, confirmQuery, homeWarning, installArgs, installEnv, installFailure, installPlan, installSource, installWarnings, latestRelease, type InstallPlan } from './install';
 import { run } from './run';
-import { BROWSER_PARTITION, OpenRequests, dashboardPort, isAllowedGuestNavigation, isAllowedGuestRequest, isBrowsableUrl, localHosts, markUserAgent, openEventScript, prepareWebview, type DashboardTarget } from './browser';
+import { BROWSER_PARTITION, OpenRequests, blockedEventScript, dashboardPort, isAllowedGuestNavigation, isAllowedGuestRequest, isBrowsableUrl, localHosts, markUserAgent, openEventScript, prepareWebview, type DashboardTarget } from './browser';
 import type { DashboardAddress } from './url';
 import { DEFAULT_HEIGHT, DEFAULT_WIDTH, MIN_HEIGHT, MIN_WIDTH, fitWindowState, readWindowState, stateOf, writeWindowState, type WindowState } from './window-state';
 import { attentionBadge, dashboardKeyScript, isCloseWindowKey, isDashboardKey } from './shell-keys';
@@ -47,6 +47,8 @@ const dashboardTarget: DashboardTarget = { ports: dashboardPorts, hosts: localHo
 /** The webContents allowed to hold Browser tab guests: the dashboard windows'. */
 const webviewHosts = new Set<number>();
 const openRequests = new OpenRequests();
+/** How many blocked-navigation notices one guest sends the dashboard: a page looping on a refused address sends a few. */
+const blockedNotices = new OpenRequests(10, 2_000);
 /** The window's last size and place (./window-state.ts), read at start and kept as it changes. */
 let windowState: WindowState | undefined;
 /** How long after the last move or resize the window's state is written. */
@@ -402,7 +404,12 @@ async function install(window: BrowserWindow, plan: InstallPlan) {
  */
 function guardGuest(contents: WebContents) {
   const navigation = (event: { url: string; isMainFrame?: boolean; preventDefault(): void }) => {
-    if (!isAllowedGuestNavigation(event.url, event.isMainFrame !== false, dashboardTarget)) event.preventDefault();
+    const main = event.isMainFrame !== false;
+    if (isAllowedGuestNavigation(event.url, main, dashboardTarget)) return;
+    event.preventDefault();
+    // The page's own navigation (a link, a redirect, a location change) is stopped: its tab says so.
+    // Only the top frame's: a refused subframe is the page's business.
+    if (main) tellBlocked(contents, event.url);
   };
   contents.on('will-navigate', navigation);
   contents.on('will-frame-navigate', navigation);
@@ -438,7 +445,14 @@ function guardGuest(contents: WebContents) {
     }
     return { action: 'deny' };
   });
-  contents.once('destroyed', () => openRequests.forget(contents.id));
+  contents.once('destroyed', () => { openRequests.forget(contents.id); blockedNotices.forget(contents.id); });
+}
+
+/** Tells the dashboard page showing `contents` that its navigation to `url` was stopped (BLOCKED_EVENT). */
+function tellBlocked(contents: WebContents, url: string) {
+  const host = contents.hostWebContents;
+  if (!host || host.isDestroyed() || !webviewHosts.has(host.id) || !isDashboardShown(host) || !blockedNotices.take(contents.id)) return;
+  void host.executeJavaScript(blockedEventScript(contents.id, url)).catch(() => undefined);
 }
 
 /** Whether `host` shows the alp dashboard (not a bundled page): only then is it told about new tabs. */
