@@ -80,7 +80,7 @@ test('a writer\'s menu: Paseo\'s items in order; copy, rename, mark unread then 
   let menu = await openMenu(page, 'Menu first');
   // Not the owner: no file manager. The checkout's branch is known. Not in front and idle: Mark as unread.
   expect(await labels(menu)).toEqual(['Copy path', 'Copy branch name', 'Rename', 'Mark as unread', 'Archive']);
-  await expect(menu.getByTestId('sidebar-workspace-menu-archive')).toContainText(/⇧⌘⌫|Ctrl\+Shift\+Backspace/);
+  await expect(menu.getByTestId('sidebar-workspace-menu-archive')).toContainText(/⇧⌘⌫|Ctrl\+Shift\+⌫/);
 
   // Copy path: the session's directory on the host.
   await menu.getByRole('menuitem', { name: 'Copy path' }).click();
