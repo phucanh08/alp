@@ -25,6 +25,11 @@ nhất trước. Mỗi mục nói cái gì đổi, ai bị ảnh hưởng, và v
 - **Check usage** (`host.usage.setting.*`, như Paseo "Applies to <host> on every device"): tắt thì
   dashboard trả `{ disabled: true, providers: [] }` và không hỏi provider nào. Khác Paseo: chỉ áp
   dụng cho `alp dashboard`; bridge Paseo và việc theo dõi hạn mức của alpd không đọc công tắc.
+- **Trang Usage trên web, khác Paseo**: ghim mặc định là cửa sổ 5 giờ và tuần đầu tiên (không có cờ
+  `summary` của source như Paseo), nên một cửa sổ chính dài khác (ví dụ 1 ngày) mà Paseo ghim thì ALP
+  không ghim; nút refresh của từng thẻ làm mới mọi provider (`daemon.usage` chỉ có một `refresh`);
+  không kéo đổi thứ tự thẻ, không dự báo nhịp dùng; "Summary in sidebar" là công tắc riêng của trình
+  duyệt (Settings › Sidebar của ALP không có dòng Usage).
 
 ## 2026-11-21: Sidebar như Paseo: session dưới mọi workspace, diff/PR/CI, Schedules, usage (t-ff83)
 
