@@ -23,3 +23,14 @@ export function attentionBadge(favicons: string[], origin: string | undefined): 
     } catch { return false; }
   }) ? '•' : '';
 }
+
+/**
+ * Whether a key pressed in a Browser tab's page belongs to the dashboard instead (macOS): ⌘W (close
+ * the tab), ⌘1-9 (a session) and ⌥⌘1-9 (a tab) of Paseo's desktop set. Paseo forwards its shortcuts
+ * from the guest through a preload; ALP.app replays these few on the dashboard window instead (D32).
+ */
+export function isDashboardKey(input: { type: string; key: string; code: string; meta: boolean; control: boolean; alt: boolean; shift: boolean }): boolean {
+  if (input.type !== 'keyDown' || !input.meta || input.control || input.shift) return false;
+  if (/^Digit[1-9]$/.test(input.code)) return true;
+  return !input.alt && input.code === 'KeyW';
+}
