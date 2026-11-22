@@ -2140,7 +2140,10 @@ export class Controller {
     }
     this.selectWorkspace(made.directory);
     if (this.#state.workspace !== made.directory) throw new ConfigurationError('The new worktree was made but cannot be opened with this access token. It shows in the sidebar when the host lists it.');
-    return this.#createSession({ ...input, workspaceId: made.id });
+    const id = await this.#createSession({ ...input, workspaceId: made.id });
+    // Started: that worktree is this session's now; another start under the same key would reuse it.
+    this.#forkWorktrees.delete(worktree.key);
+    return id;
   }
 
   /** @param {{ team?: string, mode?: string, model?: string, thinking?: string, title?: string, prompt?: string, files?: import('./attachments.js').FileAttachment[], workspaceId?: string }} input */
