@@ -12,6 +12,8 @@
  * @typedef {import('@anhlp/alp-protocol/session').SessionSummary} SessionSummary
  */
 
+import { DEFAULT_USAGE_PREFS, pinnedSummary } from './usage-prefs.js';
+
 /** host.workspace.facts takes at most this many workspace ids per call. */
 export const FACTS_BATCH = 50;
 /** How often the sidebar reads facts, usage and schedules again while it shows (ms). */
@@ -96,23 +98,12 @@ export function mostRecentSession(sessions) {
 }
 
 /**
- * A provider's footer entry: "98% 5h  61% wk" as its parts, the 5-hour and weekly windows' used
- * percent; a window it did not report is left out, and a provider with neither is left out.
- * @param {readonly UsageProvider[]} providers
- * @returns {Array<{ runtime: string, parts: Array<{ key: '5h' | 'wk', used: number }> }>}
+ * The footer's usage summary: per provider whose card is on, its pinned windows (Paseo's default:
+ * the 5-hour and weekly ones) as "98% 5h  61% wk", in the Percentages choice (used or left), and
+ * nothing while Summary in sidebar is off. lib/usage-prefs.js pinnedSummary, which owns the rule.
+ * @param {readonly UsageProvider[]} providers @param {import('./usage-prefs.js').UsagePrefs} [prefs]
  */
-export function usageLine(providers) {
-  return providers.map(provider => {
-    const windows = Array.isArray(provider?.windows) ? provider.windows : [];
-    /** @type {Array<{ key: '5h' | 'wk', used: number }>} */
-    const parts = [];
-    for (const [key, exact, loose] of /** @type {const} */ ([['5h', 'five_hour', /five[ _-]?hour|\b5[ _-]?h(our)?\b/i], ['wk', 'seven_day', /seven[ _-]?day|\b7[ _-]?day\b|week/i]])) {
-      const window = windows.find(item => item?.name === exact) ?? windows.find(item => typeof item?.name === 'string' && loose.test(item.name));
-      if (window && typeof window.usedPercent === 'number' && Number.isFinite(window.usedPercent)) parts.push({ key, used: Math.max(0, Math.min(100, Math.round(window.usedPercent))) });
-    }
-    return { runtime: String(provider?.runtime ?? ''), parts };
-  }).filter(entry => entry.runtime && entry.parts.length);
-}
+export const usageLine = (providers, prefs = DEFAULT_USAGE_PREFS) => pinnedSummary(providers, prefs);
 
 /** A prompt's first line, at most `max` characters. @param {string} prompt @param {number} [max] */
 export function excerpt(prompt, max = 120) {

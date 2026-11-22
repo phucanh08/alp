@@ -51,16 +51,17 @@ test('the most recent session carries the facts: last update, else creation; tie
   assert.equal(mostRecentSession([])?.id, undefined);
 });
 
-test('the usage line shows each provider\'s 5h and weekly windows, leaving out what is missing', () => {
+test('the usage line shows each provider\'s default pins (5h and weekly) with a percent, leaving out what is missing', () => {
   const providers = [
     { runtime: 'claude', windows: [{ name: 'five_hour', usedPercent: 97.6 }, { name: 'seven_day', usedPercent: 61 }, { name: 'seven_day_opus', usedPercent: 5 }] },
     { runtime: 'codex', windows: [{ name: 'Codex · 5 hour window', usedPercent: 82 }, { name: 'Codex · 7 day window', usedPercent: null }] },
     { runtime: 'other', windows: [] },
     { runtime: 'down', available: false, windows: [{ name: 'five_hour', usedPercent: NaN }] },
   ];
-  assert.deepEqual(usageLine(providers), [
-    { runtime: 'claude', parts: [{ key: '5h', used: 98 }, { key: 'wk', used: 61 }] },
-    { runtime: 'codex', parts: [{ key: '5h', used: 82 }] },
+  const line = usageLine(providers).map(entry => ({ runtime: entry.runtime, parts: entry.windows.map(window => `${window.text} ${window.shortLabel}`) }));
+  assert.deepEqual(line, [
+    { runtime: 'claude', parts: ['98% 5h', '61% wk'] },
+    { runtime: 'codex', parts: ['82% 5h'] },
   ]);
   assert.deepEqual(usageLine([]), []);
 });
