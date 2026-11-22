@@ -299,5 +299,19 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
     await pressIn('KeyW', 'W');
     await waitFor(async () => (await page.locator('[data-tab^="browser:"]').count()) === tabsBefore - 1, 'the Browser tab to close');
     assert.equal(await windowCount(app), 1);
+    // ⌥⌘1 in a Browser tab's page goes to the dashboard's first tab.
+    await page.locator('[data-tab^="browser:"]').last().click();
+    const next = await waitFor(async () => {
+      const ids = await app.evaluate(({ webContents }) => webContents.getAllWebContents().filter(contents => contents.getType() === 'webview' && !contents.isDestroyed()).map(contents => contents.id));
+      return ids.at(-1);
+    }, 'the next Browser tab guest');
+    await app.evaluate(({ webContents }, id) => {
+      const contents = webContents.fromId(id);
+      contents.focus();
+      contents.sendInputEvent({ type: 'keyDown', keyCode: '1', modifiers: ['meta', 'alt'] });
+      contents.sendInputEvent({ type: 'keyUp', keyCode: '1', modifiers: ['meta', 'alt'] });
+    }, next);
+    const workspaceTabs = page.getByTestId('workspace-tab');
+    await waitFor(async () => (await workspaceTabs.first().getAttribute('aria-selected')) === 'true', 'the first tab to be shown', 10_000);
   }
 });

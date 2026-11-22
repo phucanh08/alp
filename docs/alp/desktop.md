@@ -157,11 +157,11 @@ bản sao cục bộ, **chỉ** khi app chạy từ source (`app.isPackaged` là
   tab Browser (partition riêng, §4.1) vẫn bị từ chối mọi quyền. Với bản ký ad-hoc, macOS có thể không
   hiện notification (đã thấy trên bản đóng gói thử 2026-11-22: trang tạo được, không có `show`).
 - Menu không giữ ⌘W: trang dashboard dùng nó để đóng tab hiện tại (bộ phím desktop của Paseo, t-0166);
-  không còn tab nào để đóng (hay đang ở History/Settings) thì trang gọi `window.close()`, trừ khi đang
-  mở dialog; trên trang nội bộ ⌘W đóng cửa sổ (`before-input-event`). File › Close Window không có phím
+  không còn tab nào để đóng (hay đang ở History) thì trang gọi `window.close()`, trừ khi đang mở
+  dialog, menu hay Settings (một overlay); trên trang nội bộ ⌘W đóng cửa sổ (`before-input-event`). File › Close Window không có phím
   tắt. Trong trang của tab Browser, ⌘W, ⌘1-9 và ⌥⌘1-9 bị giữ lại (`before-input-event` của guest) và
-  được bấm lại trên cửa sổ dashboard (`sendInputEvent`, sau khi bỏ focus khỏi phần tử `webview`); không
-  dữ liệu nào của trang đi theo.
+  cửa sổ dashboard nhận cùng phím đó: một `keydown` dựng chỉ từ tên phím cố định (`shell-keys.ts`
+  `dashboardKeyScript`), không dữ liệu nào của trang đi theo.
 - Kích thước, vị trí và trạng thái phóng to của cửa sổ được lưu ở `<userData>/window-state.json` (0600)
   và dùng lại khi mở app, chỉ khi vẫn thấy ít nhất 100×80 của cửa sổ trên một màn hình đang nối.
 - Dock hiện chấm (•) khi favicon của dashboard là favicon attention; đọc qua `page-favicon-updated`,

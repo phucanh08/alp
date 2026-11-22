@@ -34,3 +34,15 @@ export function isDashboardKey(input: { type: string; key: string; code: string;
   if (/^Digit[1-9]$/.test(input.code)) return true;
   return !input.alt && input.code === 'KeyW';
 }
+
+/**
+ * The script that presses a dashboard key (isDashboardKey) in the dashboard window: a keydown on its
+ * window, which apps/web's shortcuts listen to. Built only from the key's fixed name, never from what
+ * the Browser tab's page sent; throws for any other code.
+ */
+export function dashboardKeyScript(code: string, alt: boolean): string {
+  const digit = /^Digit([1-9])$/.exec(code);
+  if (!digit && code !== 'KeyW') throw new Error(`not a dashboard key: ${code}`);
+  const init = { code, key: digit ? digit[1] : 'w', metaKey: true, altKey: alt === true, bubbles: true, cancelable: true };
+  return `window.dispatchEvent(new KeyboardEvent('keydown', ${JSON.stringify(init)})); 1`;
+}
