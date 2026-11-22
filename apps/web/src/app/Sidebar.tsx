@@ -19,6 +19,7 @@ import type { SidebarDisplay, SidebarItemId } from '../lib/preferences.js';
 import { filterProjects, groupByStatus, limitRows, resolveProjectFilters, sortSessions } from '../lib/sidebar-model.js';
 import { FACTS_REFRESH_MS, formatDiffCount, mostRecentSession, prLabel, readFacts, usageLine, type WorkspaceFacts } from '../lib/sidebar-facts.js';
 import { ownerRegistry, readUsage, registerDirectory, runtimeName, type UsageProvider } from '../lib/owner-host.js';
+import { useUsagePrefs } from './settings/usage/prefs';
 import { ProviderIcon } from './ProviderIcon';
 import { useAppState, useController } from './store';
 import { StatusIndicator, type Bucket } from './status';
@@ -340,18 +341,26 @@ function NewWorkspaceDialog({ open, onClose }: { open: boolean; onClose: () => v
   );
 }
 
-/** Paseo's usage line over the footer icons: per provider "<icon> 98% 5h  61% wk"; opens Settings › Usage. */
+/**
+ * Paseo's usage summary over the footer icons: per provider "<icon> 98% 5h  61% wk", its pinned
+ * windows (Settings › Usage pins them; Paseo's default: 5-hour and weekly) in this browser's
+ * Percentages choice, leaving out cards turned off; nothing while Summary in sidebar is off. Opens
+ * Settings › Usage.
+ */
 function UsageLine({ providers, onOpen }: { providers: UsageProvider[]; onOpen: () => void }) {
-  const entries = usageLine(providers);
+  const prefs = useUsagePrefs();
+  const entries = usageLine(providers, prefs);
   if (!entries.length) return null;
+  const meaning = prefs.displayAs === 'used' ? 'used' : 'left';
   return (
     <div className="shrink-0 border-t border-border px-2 py-1.5">
-      <button type="button" onClick={onOpen} data-testid="sidebar-usage-line" aria-label={`Usage: ${entries.map(entry => `${runtimeName(entry.runtime)} ${entry.parts.map(part => `${part.used}% ${part.key === '5h' ? '5 hours' : 'week'}`).join(', ')}`).join('; ')}`}
+      <button type="button" onClick={onOpen} data-testid="sidebar-usage-line" data-display={prefs.displayAs}
+        aria-label={`Usage: ${entries.map(entry => `${runtimeName(entry.runtime)} ${entry.windows.map(window => `${window.label} ${window.text} ${meaning}`).join(', ')}`).join('; ')}`}
         title="Open usage" className={cn('flex w-full flex-wrap items-center gap-x-4 gap-y-1 rounded-md px-2 py-1 text-left text-xs text-muted-foreground hover:text-foreground', rowFill, focusRing)}>
         {entries.map(entry => (
           <span key={entry.runtime} className="flex items-center gap-1.5 tabular-nums" data-testid="sidebar-usage-provider" data-runtime={entry.runtime}>
             <ProviderIcon runtime={entry.runtime} />
-            {entry.parts.map(part => <span key={part.key} data-window={part.key} className="whitespace-nowrap">{part.used}% {part.key}</span>)}
+            {entry.windows.map(window => <span key={window.id} data-window={window.id} className="whitespace-nowrap"><span className="text-foreground">{window.text}</span> {window.shortLabel}</span>)}
           </span>
         ))}
       </button>
