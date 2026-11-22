@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { connectDashboard, probeDashboard, type Connect } from './dashboard';
-import { isAllowedExternal, isAllowedPermission, isTokenRejection, navigationGuard } from './policy';
+import { isAllowedExternal, isGrantedTo, isTokenRejection, navigationGuard } from './policy';
 import { Reconnector } from './reconnect';
 import { isPageUrl, PAGE_SCHEME, pageUrl, resolvePage } from './pages';
 import { readSettings } from './settings';
@@ -21,7 +21,7 @@ import { run } from './run';
 import { BROWSER_PARTITION, OpenRequests, dashboardPort, isAllowedGuestNavigation, isAllowedGuestRequest, isBrowsableUrl, localHosts, markUserAgent, openEventScript, prepareWebview, type DashboardTarget } from './browser';
 import type { DashboardAddress } from './url';
 import { DEFAULT_HEIGHT, DEFAULT_WIDTH, MIN_HEIGHT, MIN_WIDTH, fitWindowState, readWindowState, stateOf, writeWindowState, type WindowState } from './window-state';
-import { attentionBadge, isCloseWindowKey } from './shell-keys';
+import { attentionBadge, isCloseWindowKey, isDashboardKey } from './shell-keys';
 
 let win: BrowserWindow | undefined;
 /** The origin the window may show; undefined while it shows a bundled page. */
@@ -47,6 +47,8 @@ const dashboardTarget: DashboardTarget = { ports: dashboardPorts, hosts: localHo
 /** The webContents allowed to hold Browser tab guests: the dashboard windows'. */
 const webviewHosts = new Set<number>();
 const openRequests = new OpenRequests();
+/** When a key press from a Browser tab was last replayed on the dashboard window (guardGuest). */
+let replayedAt = 0;
 /** The window's last size and place (./window-state.ts), read at start and kept as it changes. */
 let windowState: WindowState | undefined;
 /** How long after the last move or resize the window's state is written. */
@@ -420,6 +422,19 @@ function guardGuest(contents: WebContents) {
     setImmediate(() => { if (!contents.isDestroyed()) contents.stop(); });
   });
   contents.on('devtools-opened', () => contents.closeDevTools());
+  // ⌘W, ⌘1-9 and ⌥⌘1-9 pressed in the page are the dashboard's (Paseo's desktop keys, t-0166): the key
+  // press is kept from the page and replayed on the dashboard window, as if pressed there. Nothing of
+  // the page travels with it.
+  contents.on('before-input-event', (event, input) => {
+    if (process.platform !== 'darwin' || !isDashboardKey(input)) return;
+    const host = contents.hostWebContents;
+    if (!host || host.isDestroyed() || !webviewHosts.has(host.id) || !isDashboardShown(host)) return;
+    // A replay that came back to this page (the focus did not move) is left to it: never a loop.
+    if (Date.now() - replayedAt < 300) return;
+    replayedAt = Date.now();
+    event.preventDefault();
+    replayOnDashboard(host, input.code, input.alt);
+  });
   contents.setWindowOpenHandler(({ url }) => {
     const host = contents.hostWebContents;
     if (host && !host.isDestroyed() && webviewHosts.has(host.id) && isBrowsableUrl(url) && url !== 'about:blank'
@@ -429,6 +444,23 @@ function guardGuest(contents: WebContents) {
     return { action: 'deny' };
   });
   contents.once('destroyed', () => openRequests.forget(contents.id));
+}
+
+/**
+ * Presses ⌘ (and ⌥) with `code` on the dashboard window. The Browser tab's element gives up the focus
+ * first, or Chromium would hand the key press back to the guest.
+ */
+function replayOnDashboard(host: WebContents, code: string, alt: boolean) {
+  const keyCode = code.replace(/^(Key|Digit)/, '');
+  const modifiers: Array<'meta' | 'alt'> = alt ? ['meta', 'alt'] : ['meta'];
+  void host.executeJavaScript("document.activeElement instanceof HTMLElement && document.activeElement.tagName === 'WEBVIEW' && document.activeElement.blur(); 1")
+    .catch(() => undefined)
+    .then(() => {
+      if (host.isDestroyed()) return;
+      host.focus();
+      host.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+      host.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+    });
 }
 
 /** Whether `host` shows the alp dashboard (not a bundled page): only then is it told about new tabs. */
@@ -497,9 +529,8 @@ if (!app.requestSingleInstanceLock()) {
     // Everything is denied (camera, geolocation, …) except clipboard writes and notifications from alp
     // dashboard's origin in the dashboard window (./policy.ts). Browser tabs have their own session,
     // which denies everything (setupBrowserSession).
-    const fromDashboard = (contents: WebContents | null) => !!contents && webviewHosts.has(contents.id);
-    session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => callback(fromDashboard(contents) && isAllowedPermission(permission, details.requestingUrl, allowedOrigin)));
-    session.defaultSession.setPermissionCheckHandler((contents, permission, requestingOrigin) => fromDashboard(contents) && isAllowedPermission(permission, requestingOrigin, allowedOrigin));
+    session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => callback(isGrantedTo(contents, webviewHosts, permission, details.requestingUrl, allowedOrigin)));
+    session.defaultSession.setPermissionCheckHandler((contents, permission, requestingOrigin) => isGrantedTo(contents, webviewHosts, permission, requestingOrigin, allowedOrigin));
     // The page's gateway refused its token (POST /v1/tickets → 401, after `alp dashboard rotate`): ask alp
     // for the new address. Only the status and the path are read; the request is not touched.
     session.defaultSession.webRequest.onCompleted(details => {

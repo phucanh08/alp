@@ -40,6 +40,14 @@ export function isAllowedPermission(permission: string, requestingUrl: string | 
 }
 
 /**
+ * The default session's permission handlers: only a request from a dashboard window's webContents
+ * (`hosts`; never null, never a Browser tab guest) on the shown origin, and only what PERMITTED holds.
+ */
+export function isGrantedTo(contents: { id: number } | null | undefined, hosts: ReadonlySet<number>, permission: string, requestingUrl: string | undefined, origin: string | undefined): boolean {
+  return !!contents && hosts.has(contents.id) && isAllowedPermission(permission, requestingUrl, origin);
+}
+
+/**
  * Whether `url` is the gateway's ticket request on the shown origin (POST /v1/tickets, where a page
  * presents its token). A 401 there means the token was rotated or revoked.
  */

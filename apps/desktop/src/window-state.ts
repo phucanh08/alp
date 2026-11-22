@@ -4,7 +4,7 @@
  * place is used only while enough of the window lands on a display that is connected now; otherwise
  * the size is kept, shrunk to the display, and the system places the window.
  */
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -79,8 +79,13 @@ export function writeWindowState(userData: string, state: WindowState): void {
   mkdirSync(userData, { recursive: true });
   const file = path.join(userData, FILE);
   const temporary = `${file}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(state)}\n`, { mode: 0o600 });
-  renameSync(temporary, file);
+  try {
+    writeFileSync(temporary, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+    renameSync(temporary, file);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
 }
 
 /** The state to save for a window: its normal (unmaximized) bounds and whether it is maximized. */

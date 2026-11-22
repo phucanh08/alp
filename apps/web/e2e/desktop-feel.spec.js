@@ -82,6 +82,50 @@ test('ALP.app takes Paseo\'s desktop keys; a browser keeps the web ones', async 
   await plain.close();
 });
 
+test('ALP.app: Mod+W that closes no tab closes the window; never while a dialog is open; a browser never', async ({ browser }) => {
+  const context = await browser.newContext({ userAgent: DESKTOP_UA, viewport: { width: 1440, height: 900 } });
+  await context.addInitScript(() => { window.__closed = 0; window.close = () => { window.__closed += 1; }; });
+  const page = await context.newPage();
+  await connect(page, world);
+  const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent));
+  const mod = mac ? 'Meta' : 'Control';
+  await newSession(page, 'Close one');
+  const body = () => page.locator('body').click({ position: { x: 700, y: 300 } });
+  await body();
+  const closed = () => page.evaluate(() => window.__closed);
+  // A tab to close: the tab closes, the window stays.
+  await page.keyboard.press(`${mod}+Shift+KeyT`);
+  await selected(page, 'Terminal');
+  await body();
+  await page.keyboard.press(`${mod}+KeyW`);
+  await expect(page.getByRole('tab', { name: 'Terminal', exact: true })).toHaveCount(0);
+  expect(await closed()).toBe(0);
+  // A dialog open: nothing closes.
+  await page.keyboard.press('Shift+?');
+  await expect(page.getByRole('dialog', { name: 'Shortcuts' })).toBeVisible();
+  await page.keyboard.press(`${mod}+KeyW`);
+  await page.waitForTimeout(200);
+  expect(await closed()).toBe(0);
+  await page.keyboard.press('Escape');
+  // History hides the tabs: nothing to close there, so the window closes.
+  await page.getByRole('navigation', { name: 'Workspaces and sessions' }).getByTestId('sidebar-history').click();
+  await expect(page.getByTestId('history-screen')).toBeVisible();
+  await page.keyboard.press(`${mod}+KeyW`);
+  await expect.poll(closed).toBe(1);
+  await context.close();
+
+  // A browser: Mod+W is the browser's, the page never closes itself.
+  const plain = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await plain.addInitScript(() => { window.__closed = 0; window.close = () => { window.__closed += 1; }; });
+  const web = await plain.newPage();
+  await connect(web, world);
+  await web.getByRole('navigation', { name: 'Workspaces and sessions' }).getByTestId('sidebar-history').click();
+  await web.keyboard.press(`${mod}+KeyW`);
+  await web.waitForTimeout(200);
+  expect(await web.evaluate(() => window.__closed)).toBe(0);
+  await plain.close();
+});
+
 test('Settings › Notifications: Enable, then Send shows a test notification that brings the window forward', async ({ page }) => {
   // The browser's Notification, recorded: what was shown, and the permission prompt's answer.
   await page.addInitScript(() => {

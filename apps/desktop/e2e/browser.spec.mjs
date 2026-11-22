@@ -278,4 +278,26 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   assert.deepEqual(forced, { own: true, preload: null });
   await page.evaluate(() => { for (const view of document.querySelectorAll('webview[data-probe]')) view.remove(); });
   assert.equal(await windowCount(app), 1);
+
+  // (8) t-0166: ⌘W pressed in a Browser tab's page closes that tab (the dashboard's key), not the
+  // window; ⌘C stays the page's.
+  if (process.platform === 'darwin') {
+    const tabsBefore = await page.locator('[data-tab^="browser:"]').count();
+    const shown = await waitFor(async () => {
+      const ids = await app.evaluate(({ webContents }) => webContents.getAllWebContents().filter(contents => contents.getType() === 'webview' && !contents.isDestroyed()).map(contents => contents.id));
+      return ids.at(-1);
+    }, 'a Browser tab guest');
+    await inGuest(app, shown, "window.__keys = []; window.addEventListener('keydown', e => window.__keys.push(e.code)); 'ok'");
+    const pressIn = (code, keyCode) => app.evaluate(({ webContents }, [id, key]) => {
+      const contents = webContents.fromId(id);
+      contents.focus();
+      contents.sendInputEvent({ type: 'keyDown', keyCode: key, modifiers: ['meta'] });
+      contents.sendInputEvent({ type: 'keyUp', keyCode: key, modifiers: ['meta'] });
+    }, [shown, keyCode]);
+    await pressIn('KeyC', 'C');
+    await waitFor(async () => (await inGuest(app, shown, 'window.__keys.join()')).includes('KeyC'), 'the page to get ⌘C');
+    await pressIn('KeyW', 'W');
+    await waitFor(async () => (await page.locator('[data-tab^="browser:"]').count()) === tabsBefore - 1, 'the Browser tab to close');
+    assert.equal(await windowCount(app), 1);
+  }
 });

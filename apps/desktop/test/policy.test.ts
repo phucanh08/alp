@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { isAllowedExternal, isAllowedNavigation, isAllowedPermission, isTicketRequest, isTokenRejection, navigationGuard } from '../src/policy';
+import { isAllowedExternal, isAllowedNavigation, isAllowedPermission, isGrantedTo, isTicketRequest, isTokenRejection, navigationGuard } from '../src/policy';
 
 const ORIGIN = 'http://127.0.0.1:7433';
 
@@ -129,5 +129,18 @@ describe('the bundled pages scheme is local only (t-81b0.7)', () => {
   test('a bundled page gets no permission', () => {
     expect(isAllowedPermission('clipboard-sanitized-write', page, origin)).toBe(false);
     expect(isAllowedPermission('clipboard-sanitized-write', page, undefined)).toBe(false);
+  });
+});
+
+describe('isGrantedTo', () => {
+  const hosts = new Set([7]);
+  test('only a dashboard window\'s webContents, on the shown origin', () => {
+    expect(isGrantedTo({ id: 7 }, hosts, 'notifications', `${ORIGIN}/`, ORIGIN)).toBe(true);
+    expect(isGrantedTo({ id: 8 }, hosts, 'notifications', `${ORIGIN}/`, ORIGIN)).toBe(false);
+    expect(isGrantedTo(null, hosts, 'notifications', `${ORIGIN}/`, ORIGIN)).toBe(false);
+    expect(isGrantedTo(undefined, hosts, 'notifications', `${ORIGIN}/`, ORIGIN)).toBe(false);
+    expect(isGrantedTo({ id: 7 }, hosts, 'notifications', 'http://127.0.0.1:9999/', ORIGIN)).toBe(false);
+    expect(isGrantedTo({ id: 7 }, hosts, 'geolocation', `${ORIGIN}/`, ORIGIN)).toBe(false);
+    expect(isGrantedTo({ id: 7 }, new Set(), 'notifications', `${ORIGIN}/`, ORIGIN)).toBe(false);
   });
 });

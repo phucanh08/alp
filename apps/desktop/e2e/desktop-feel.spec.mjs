@@ -89,6 +89,14 @@ test('⌘W: no menu item takes it; the dashboard page gets it and the window sta
   await waitFor(async () => (await windowCount(app)) === 0, 'the window to close');
 });
 
+test('the dashboard page can close its own window (apps/web\'s ⌘W when no tab is left to close)', limit, async t => {
+  const { context, web, alp } = await connectedSetup(t);
+  const app = await launch(t, context, alp.file);
+  await connectedTo(app, web.origin);
+  await inPage(app, 'setTimeout(() => window.close(), 0); 1');
+  await waitFor(async () => (await windowCount(app)) === 0, 'the window to close');
+});
+
 test('Dock badge: a dot while the dashboard shows its attention favicon, none otherwise', { ...limit, skip: process.platform !== 'darwin' && 'the Dock is macOS only' }, async t => {
   const { context, web, alp } = await connectedSetup(t);
   const app = await launch(t, context, alp.file);
