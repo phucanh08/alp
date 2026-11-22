@@ -115,8 +115,9 @@ test('pin and labels survive a restart; a catalog rename follows to the sessions
   const restored = (await daemon.request('session.get', { sessionId: session.id })).session;
   assert.equal(restored.status, 'closed');
   assert.deepEqual([restored.pinnedAt, restored.labels], [saved.pinnedAt, ['Bug', 'Later', 'Idea']]);
-  // A closed root is not marked unread: no turn of it ended unseen now (board p-60e3c299).
-  assert.deepEqual(await daemon.request('session.attention.mark', { sessionId: session.id }), { marked: false });
+  // A closed root is still marked unread (Paseo's Mark as unread on a row nobody has open): alpd
+  // closes roots no client attaches, so most rows the menu shows are closed (t-a876, board p-60e3c299).
+  assert.equal((await daemon.request('session.attention.mark', { sessionId: session.id })).marked, true);
 
   let { registry } = await daemon.request('registry.owner', {});
   ({ registry } = await daemon.request('registry.owner', { operation: 'label.update', args: { name: 'bug', newName: 'Defect' }, ifRevision: registry.revision, requestId: 'rename' }));

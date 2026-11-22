@@ -24,6 +24,8 @@ let world;
 let dashboard;
 /** Where the stand-in file manager writes the directory it was asked to open. */
 let opened;
+/** Where the stand-in editor writes `<editor id>|<directory>`. */
+let edited;
 
 async function host(method, params = {}) {
   const client = await hostConnect(world.socket);
@@ -43,7 +45,12 @@ test.beforeAll(async () => {
   const fileManager = path.join(world.directory, 'file-manager.sh');
   await writeFile(fileManager, `#!/bin/sh\nprintf '%s' "$1" > '${opened}'\n`);
   await chmod(fileManager, 0o755);
-  dashboard = await startDashboard(world, { env: { ALP_DASHBOARD_FILE_MANAGER: fileManager } });
+  // Open in editor (t-a876): two editors count as installed and a recorder stands in for them.
+  edited = path.join(world.directory, 'edited.txt');
+  const editor = path.join(world.directory, 'editor.sh');
+  await writeFile(editor, `#!/bin/sh\nprintf '%s|%s' "$1" "$2" > '${edited}'\n`);
+  await chmod(editor, 0o755);
+  dashboard = await startDashboard(world, { env: { ALP_DASHBOARD_FILE_MANAGER: fileManager, ALP_DASHBOARD_EDITORS: 'vscode,zed', ALP_DASHBOARD_EDITOR_RUNNER: editor } });
 });
 test.afterAll(async () => {
   if (world) await closeWorldAfter(world, async () => { await dashboard?.stop(); });
@@ -157,12 +164,46 @@ test.describe('the host owner\'s ALP.app', () => {
     await expect.poll(() => readFile(opened, 'utf8').catch(() => '')).toBe(await realpath(world.projects.main));
   });
 
+  test('the project menu: Open in file manager, and Open in editor lists the host\'s editors and opens the workspace in one', async ({ page }) => {
+    await page.goto(dashboard.url);
+    await expect(page.getByLabel('Access token')).toHaveCount(0);
+    const project = nav(page).getByTestId('project-row').first();
+    const projectMenu = async () => {
+      await project.hover();
+      await nav(page).getByRole('button', { name: /^Project actions for / }).first().click();
+      const menu = page.getByRole('menu', { name: /^Project actions for / });
+      await expect(menu).toBeVisible();
+      return menu;
+    };
+    let menu = await projectMenu();
+    await expect(menu.getByRole('menuitem', { name: 'Open in editor' })).toBeVisible();
+    await menu.getByRole('menuitem', { name: 'Open in editor' }).click();
+    const editors = page.getByRole('menu', { name: 'Open in editor' });
+    await expect(editors.getByTestId('project-open-editor-item')).toHaveText(['Visual Studio Code', 'Zed']);
+    await page.screenshot({ path: path.join(test.info().outputDir, 'owner-open-in-editor.png') });
+    await editors.getByRole('menuitem', { name: 'Zed' }).click();
+    await expect.poll(() => readFile(edited, 'utf8').catch(() => '')).toBe(`zed|${await realpath(world.projects.main)}`);
+    await writeFile(opened, '');
+    menu = await projectMenu();
+    await menu.getByRole('menuitem', { name: 'Open in file manager' }).click();
+    await expect.poll(() => readFile(opened, 'utf8').catch(() => '')).toBe(await realpath(world.projects.main));
+    await expect(page.getByText("Couldn't open")).toHaveCount(0);
+  });
+
   test('in a plain browser, the owner has no Open in file manager', async ({ browser }) => {
     const plain = await browser.newPage({ userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36' });
     await plain.goto(dashboard.url);
     await expect(plain.getByLabel('Access token')).toHaveCount(0);
     const menu = await openMenu(plain, 'Owner menu');
     await expect.poll(() => labels(menu)).toEqual(['Copy path', 'Copy branch name', 'Rename', 'Pin to top', 'Labels', 'Mark as unread', 'Archive']);
+    await plain.keyboard.press('Escape');
+    // Nor the project menu's file manager or editors.
+    await nav(plain).getByTestId('project-row').first().hover();
+    await nav(plain).getByRole('button', { name: /^Project actions for / }).first().click();
+    const project = plain.getByRole('menu', { name: /^Project actions for / });
+    await expect(project).toBeVisible();
+    await expect(project.getByRole('menuitem', { name: 'Open in editor' })).toHaveCount(0);
+    await expect(project.getByRole('menuitem', { name: 'Open in file manager' })).toHaveCount(0);
     await plain.close();
   });
 });

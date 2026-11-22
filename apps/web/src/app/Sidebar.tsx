@@ -649,8 +649,8 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     }
     if (attentionReason(state, session.id)) {
       items.push({ id: 'mark-as-read', label: 'Mark as read', icon: <CircleCheck aria-hidden />, onSelect: () => controller.markRead(session.id), testId: 'sidebar-workspace-menu-mark-as-read' });
-    } else if (controller.canMarkUnread && online && session.status !== 'running' && session.status !== 'closed' && !session.busy && !needsInput(state, session.id)) {
-      // Only a live idle root: a closed one has no turn to come back to (alpd answers marked: false for it).
+    } else if (controller.canMarkUnread && online && session.status !== 'running' && !session.busy && !needsInput(state, session.id)) {
+      // A closed root too: alpd closes every root no client has open, so that is most rows (t-a876).
       items.push({ id: 'mark-as-unread', label: 'Mark as unread', icon: <Circle aria-hidden />, onSelect: () => void controller.markUnread(session.id), testId: 'sidebar-workspace-menu-mark-as-unread' });
     }
     // The host's own file manager: only the owner's ALP.app on the host itself, by the workspace's id.
