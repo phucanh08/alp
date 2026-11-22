@@ -151,9 +151,17 @@ bản sao cục bộ, **chỉ** khi app chạy từ source (`app.isPackaged` là
   của URL là `null`): app web không có iframe, và một iframe sau này phải tải URL thật trên origin của
   `alp-dashboard`.
 - `window.open` luôn bị từ chối; link `https:` được mở bằng trình duyệt mặc định, scheme khác bị bỏ.
-- Mọi quyền (camera, micro, notification, vị trí…) bị từ chối, trừ `clipboard-sanitized-write` từ
-  origin của `alp-dashboard` (các nút Copy của app web). Vì vậy notification của app web không hoạt động
-  trong app desktop ở bản này.
+- Mọi quyền (camera, micro, vị trí…) bị từ chối, trừ `clipboard-sanitized-write` (các nút Copy của app
+  web) và `notifications` (t-0166: báo khi session chờ trả lời hay xong lượt), và chỉ khi yêu cầu đến từ
+  webContents của cửa sổ dashboard với đúng origin của `alp-dashboard`. Trang nội bộ (`alp-page://`) và
+  tab Browser (partition riêng, §4.1) vẫn bị từ chối mọi quyền. Với bản ký ad-hoc, macOS có thể không
+  hiện notification (đã thấy trên bản đóng gói thử 2026-11-22: trang tạo được, không có `show`).
+- Menu không giữ ⌘W: trang dashboard dùng nó để đóng tab hiện tại (bộ phím desktop của Paseo, t-0166);
+  trên trang nội bộ ⌘W đóng cửa sổ (`before-input-event`). File › Close Window không có phím tắt.
+- Kích thước, vị trí và trạng thái phóng to của cửa sổ được lưu ở `<userData>/window-state.json` (0600)
+  và dùng lại khi mở app, chỉ khi vẫn thấy ít nhất 100×80 của cửa sổ trên một màn hình đang nối.
+- Dock hiện chấm (•) khi favicon của dashboard là favicon attention; đọc qua `page-favicon-updated`,
+  không cần preload.
 - Single-instance: mở app lần hai chỉ focus cửa sổ đang có (không còn cửa sổ nào thì mở và kết nối).
 - DevTools chỉ có khi chạy từ source (chưa đóng gói).
 - Trang nội bộ được phục vụ qua scheme riêng `alp-page://app/<tên>`, không qua `file://` (xem §6.4).
