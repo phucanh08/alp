@@ -17,6 +17,7 @@ import { diffStats, editDiff, presentToolCall, type ToolIcon } from '../lib/tool
 import { conversationMarker } from '../lib/conversation.js';
 import { displayRows, summaryLabel, type DisplayRow } from '../lib/chat-display.js';
 import { ConversationMarker, ForkAction, RewindAction } from './Conversation';
+import { PaneFind } from './PaneFind';
 
 /**
  * One agent's conversation laid out as Paseo's agent stream: a centered column (820px, or Appearance › Content width), user
@@ -595,6 +596,7 @@ export function Timeline({ entries, prompts, agentOf, running, runningAgent, his
         {tail ? <div className="flex flex-col gap-2 pb-4">{tail}</div> : null}
       </div>
     </div>
+    <PaneFind scroller={scroller} onReveal={() => { pinned.current = false; jumping.current = 0; }} />
     {chatOutline && wide ? <ChatOutline prompts={outlinePrompts} active={activePrompt} onJump={jumpToPrompt} /> : null}
     {away ? (
       <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">

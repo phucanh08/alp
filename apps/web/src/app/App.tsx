@@ -1,6 +1,6 @@
 import * as React from 'react';
-import { Archive, ArrowLeftRight, ArrowLeftToLine, ArrowRightToLine, ChevronLeft, ChevronRight, CircleAlert, Columns2, Copy, CopyX, Crosshair, Info, Keyboard, ListTodo, PanelLeft, PanelRight, Pencil, Rows2, Search, Settings, SquarePen, History as HistoryIcon, WifiOff, X } from 'lucide-react';
-import { attentionReason, FILE_SEARCH_LIMIT, needsInput, type SessionSummary } from '../lib/controller.js';
+import { Brain, Cpu, Shield, Archive, ArrowLeftRight, ArrowLeftToLine, ArrowRightToLine, ChevronLeft, ChevronRight, CircleAlert, Columns2, Copy, CopyX, Crosshair, Info, Keyboard, ListTodo, PanelLeft, PanelRight, Pencil, Rows2, Search, Settings, SquarePen, History as HistoryIcon, WifiOff, X } from 'lucide-react';
+import { attentionReason, needsInput, type SessionSummary } from '../lib/controller.js';
 import { Button } from '../components/ui/button';
 import { cn } from '../lib/utils';
 import { ConnectScreen } from './ConnectScreen';
@@ -16,8 +16,10 @@ import { can } from '../lib/gateway.js';
 import { applyAppearance, applyTheme } from '../lib/theme';
 import { isMacPlatform, shortcutLabel, type Binding } from '../lib/shortcuts.js';
 import { isDesktopApp } from '../lib/browser-url.js';
-import { baseName, relativeTime, sessionName } from '../lib/format';
-import { CommandCenter, type CommandScope, type RunnableAction } from './CommandCenter';
+import { baseName, modeLabel, relativeTime, sessionName } from '../lib/format';
+import { liveModels } from '../lib/configure.js';
+import { effortOptions } from '../lib/new-session.js';
+import { CommandCenter, useWorkspaceFileSource, type CommandScope, type RunnableAction } from './CommandCenter';
 import { workspaceRows } from '../lib/command-center.js';
 import { usePageAttention } from './attention';
 import { bucketOf } from './Sidebar';
@@ -39,25 +41,48 @@ function useMedia(query: string) {
   return React.useSyncExternalStore(subscribe, () => window.matchMedia(query).matches, () => false);
 }
 
-function Notice() {
+type NoticeEntry = ReturnType<typeof useAppState>['notices'][number];
+
+/** One toast of the stack: its own 8 s, paused while the pointer or focus is on it. */
+function Toast({ notice }: { notice: NoticeEntry }) {
   const controller = useController();
   const { openDraft } = useTabs();
-  const { notice } = useAppState();
+  const [held, setHeld] = React.useState(false);
+  const left = React.useRef(8000);
   React.useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => controller.dismissNotice(), 8000);
-    return () => clearTimeout(timer);
-  }, [notice, controller]);
-  if (!notice) return null;
+    if (held) return;
+    const started = Date.now();
+    const timer = setTimeout(() => controller.dismissNotice(notice.id), left.current);
+    return () => { clearTimeout(timer); left.current = Math.max(0, left.current - (Date.now() - started)); };
+  }, [held, notice.id, controller]);
+  const error = notice.level === 'error';
   return (
-    <div role={notice.level === 'error' ? 'alert' : 'status'} className={cn('mx-auto my-2 flex w-[min(92%,28rem)] shrink-0 items-start gap-2 rounded-lg border px-3 py-2.5 text-sm shadow-xl shadow-[var(--shadow)]',
-      notice.level === 'error' ? 'border-destructive/40 bg-[var(--notice-error)] text-destructive' : 'border-border bg-popover text-foreground')}>
-      {notice.level === 'error' ? <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" /> : <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-info" />}
-      <span className="min-w-0 flex-1">{notice.text}</span>
-      {notice.action === 'new-session' ? <Button size="sm" variant="secondary" className="h-7 shrink-0 text-xs" onClick={() => { controller.dismissNotice(); openDraft(); }}>New session</Button> : null}
+    <div role={error ? 'alert' : 'status'} data-testid="notice" data-notice-id={notice.id}
+      onPointerEnter={() => setHeld(true)} onPointerLeave={() => setHeld(false)}
+      onFocus={() => setHeld(true)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setHeld(false); }}
+      className={cn('flex w-full items-start gap-2 rounded-lg border px-3 py-2.5 text-sm shadow-xl shadow-[var(--shadow)]',
+        error ? 'border-destructive/40 bg-[var(--notice-error)] text-destructive' : 'border-border bg-popover text-foreground')}>
+      {error ? <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" /> : <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-info" />}
+      <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{notice.text}</span>
+      {notice.action === 'new-session' ? <Button size="sm" variant="secondary" className="h-7 shrink-0 text-xs" onClick={() => { controller.dismissNotice(notice.id); openDraft(); }}>New session</Button> : null}
       {/* Paseo's archive toast: Undo unarchives the session it names. */}
       {notice.action === 'undo-archive' && notice.target ? <Button size="sm" variant="secondary" className="h-7 shrink-0 text-xs" data-testid="notice-undo-archive" onClick={() => void controller.undoArchive(notice.target!)}>Undo</Button> : null}
-      <Button size="icon-sm" variant="ghost" aria-label="Dismiss" onClick={() => controller.dismissNotice()}><X aria-hidden /></Button>
+      <Button size="icon-sm" variant="ghost" aria-label="Dismiss" onClick={() => controller.dismissNotice(notice.id)}><X aria-hidden /></Button>
+    </div>
+  );
+}
+
+/**
+ * The notices as a stack of toasts (Paseo's toasts), newest at the bottom, at most three: each goes
+ * after 8 s on its own, or with its x. In the page's flow, not over it, so a toast never hides
+ * composer controls or a terminal.
+ */
+function Notices() {
+  const { notices } = useAppState();
+  if (!notices.length) return null;
+  return (
+    <div className="mx-auto my-2 flex w-[min(92%,28rem)] shrink-0 flex-col gap-2" data-testid="notice-stack" aria-label="Notifications">
+      {notices.map(notice => <Toast key={notice.id} notice={notice} />)}
     </div>
   );
 }
@@ -208,6 +233,8 @@ function CommandCenterHost({ open, scope, onClose, history, splits, onAction, on
     { id: 'session-archive', label: 'Archive session', group: 'workspace', icon: Archive, shortcut: hint('session.archive', mac), disabled: !root || !canWrite, run: () => onAction('session.archive') },
     // Paseo's pane commands, where the center can split.
     ...(splits ? paneActions() : []),
+    { id: 'tab-switcher', label: 'Switch tab…', group: 'workspace', icon: ArrowLeftRight, keywords: ['tabs', 'search', 'find', 'go to'], disabled: !shownTabs || all.length < 1, run: () => onAction('tab.switcher') },
+    ...agentActions(),
     { id: 'toggle-explorer', label: 'Toggle explorer', group: 'workspace', icon: PanelRight, shortcut: hint('sidebar.right', mac), disabled: history, run: () => onAction('sidebar.right') },
     { id: 'history', label: 'History', group: 'actions', always: true, icon: HistoryIcon, keywords: ['archived', 'sessions'], disabled: !workspace, run: () => onAction('history') },
     { id: 'settings', label: 'Settings', group: 'actions', always: true, icon: Settings, shortcut: hint('settings.toggle', mac), keywords: ['preferences', 'theme'], run: () => onAction('settings.toggle') },
@@ -218,6 +245,52 @@ function CommandCenterHost({ open, scope, onClose, history, splits, onAction, on
     { id: 'alp-open-tasks', label: 'Open ALP tasks', group: 'alp', always: true, icon: ListTodo, keywords: ['tasks', 'todo', 'alp', 'panel'], disabled: !workspace, run: () => { openPanel('tasks'); onAction('tab.shown'); } },
     { id: 'alp-open-tasks-screen', label: 'Open ALP tasks full screen', group: 'alp', always: true, icon: ListTodo, keywords: ['tasks', 'todo', 'alp', 'phone'], disabled: !workspace, run: () => onAction('tasks.screen') },
   ];
+  /**
+   * The open session's agent, as the composer's controls change it: its model and thinking
+   * (session.configure.live) and its permissions mode. Each choice is a row ("Model: …"), shown
+   * when searched for; the current one is marked. A change the host cannot take now says why.
+   */
+  function agentActions(): RunnableAction[] {
+    if (!root || !tree || history) return [];
+    const rootSession = tree.projection.sessions[root];
+    const listed = sessions.list.find(session => session.id === root);
+    const runtime = rootSession?.runtime ?? listed?.runtime;
+    const model = rootSession?.model ?? listed?.model;
+    const thinking = rootSession?.thinking ?? listed?.thinking;
+    const mode = rootSession?.mode ?? listed?.mode;
+    const gate = controller.liveConfigure();
+    const { same, current } = liveModels(state.catalog.models, { runtime, model });
+    const configuring = !!state.busy.configure;
+    const out: RunnableAction[] = [];
+    if (gate.shown && model) {
+      for (const entry of same) {
+        out.push({ id: `agent-model:${entry.id}`, label: `Model: ${entry.label}`, group: 'agent', icon: Cpu, checked: entry.id === current?.id, keywords: ['model', 'change', 'switch', runtime ?? ''],
+          disabled: configuring, run: () => { if (entry.id !== current?.id) void controller.configureLive({ model: entry.id }); } });
+      }
+    }
+    if (gate.shown && thinking) {
+      for (const entry of effortOptions(current)) {
+        out.push({ id: `agent-thinking:${entry.id}`, label: `Thinking: ${entry.label}`, group: 'agent', icon: Brain, checked: entry.id === thinking, keywords: ['thinking', 'effort', 'reasoning', 'change'],
+          disabled: configuring, run: () => { if (entry.id !== thinking) void controller.configureLive({ thinking: entry.id }); } });
+      }
+    }
+    const modes = state.catalog.modes.length ? state.catalog.modes : mode ? [{ id: mode }] : [];
+    if (mode && modes.length > 1) {
+      // The host changes permissions only between turns, with no child session running.
+      const locked = root in tree.projection.running || controller.rootBusy(root) || Object.keys(tree.projection.running).length > 0;
+      for (const entry of modes) {
+        const label = 'label' in entry && entry.label ? entry.label : modeLabel(entry.id);
+        out.push({ id: `agent-mode:${entry.id}`, label: `Mode: ${label}`, group: 'agent', icon: Shield, checked: entry.id === mode, keywords: ['mode', 'permissions', 'change', entry.id],
+          disabled: !!state.busy.mode || configuring || !canWrite || !online,
+          run: () => {
+            if (entry.id === mode) return;
+            if (locked) { controller.notify('error', 'Permissions change once the agent and its team are idle.'); return; }
+            void controller.configureMode(entry.id);
+          } });
+      }
+    }
+    return out;
+  }
   function paneActions(): RunnableAction[] {
     const shown = shownTabs;
     const focus = (direction: Direction, label: string): RunnableAction => ({ id: `pane-focus-${direction}`, label, group: 'workspace', icon: Crosshair, keywords: ['pane', 'focus', direction], disabled: !shown || !many, run: () => { focusAdjacent(direction); } });
@@ -243,11 +316,7 @@ function CommandCenterHost({ open, scope, onClose, history, splits, onAction, on
   // Paseo's Workspaces: every workspace the token grants, the open one marked.
   const workspaceList = React.useMemo(() => workspaceRows(principal?.workspaces ?? [], workspace), [principal, workspace]);
   // Paseo's file search (workspace.files.search) where the host offers it.
-  const files = React.useMemo(() => ({
-    available: connection.capabilities.includes('workspace.files'),
-    source: workspace,
-    search: (query: string) => controller.searchWorkspaceFiles({ query, limit: FILE_SEARCH_LIMIT }),
-  }), [connection.capabilities, workspace, controller]);
+  const files = useWorkspaceFileSource();
   // Paseo opens the file in a tab: so does ALP where the host reads files (workspace.files.read)
   // and the token may (files.read). Otherwise the path goes to the clipboard, and the notice says why.
   const pickFile = (path: string) => {
@@ -302,6 +371,7 @@ function Shell() {
   // Closed, or open in a scope (Mod+P: Files).
   const [commandCenter, setCommandCenter] = React.useState<false | { scope: CommandScope }>(false);
   const [tabMenuRequest, setTabMenuRequest] = React.useState(0);
+  const [tabSwitcherRequest, setTabSwitcherRequest] = React.useState(0);
   // ALP's tasks board in place of the workspace (Open ALP tasks full screen), as History.
   const [tasksScreen, setTasksScreen] = React.useState(false);
   // The host owner's Schedules list in place of the workspace (the sidebar's Schedules row), as History.
@@ -383,6 +453,10 @@ function Shell() {
         if (!workspace || away) return false;
         setTabMenuRequest(value => value + 1);
         return;
+      case 'tab.switcher':
+        if (!workspace || away) return false;
+        setTabSwitcherRequest(value => value + 1);
+        return;
       case 'sidebar.left': toggleNav(); return;
       case 'sidebar.right': toggleExplorer(); return;
       case 'sidebar.both': {
@@ -435,11 +509,12 @@ function Shell() {
               explorerOpen={explorerShown} onToggleExplorer={toggleExplorer}
               onRename={setRenaming} onArchive={archive} />
             <ReconnectBanner />
-            <SplitView splits={medium} onNewSession={newSession} onRename={setRenaming} menuRequest={tabMenuRequest} onMenuRequestHandled={() => setTabMenuRequest(0)} />
+            <SplitView splits={medium} onNewSession={newSession} onRename={setRenaming} menuRequest={tabMenuRequest} onMenuRequestHandled={() => setTabMenuRequest(0)}
+              switcherRequest={tabSwitcherRequest} onSwitcherRequestHandled={() => setTabSwitcherRequest(0)} />
           </>
         )}
         {/* Reserve the notice's real height: overlays can hide composer controls or terminals. */}
-        <Notice />
+        <Notices />
       </main>
 
       {explorerShown && !away ? (

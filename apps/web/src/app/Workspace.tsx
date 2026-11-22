@@ -1,9 +1,10 @@
 import * as React from 'react';
-import { GitBranch, SquareTerminal, ArrowLeftToLine, ArrowRightToLine, Bot, CircleAlert, CircleDot, Columns2, Copy, CopyX, Ellipsis, FileText, ListTodo, Maximize, Minimize, PanelBottom, PanelLeft, PanelRight, PanelTop, Pencil, Plus, RotateCw, Rows2, Shrink, ShieldAlert, SquarePen, Archive, X } from 'lucide-react';
+import { Check, GitBranch, SquareTerminal, ArrowLeftToLine, ArrowRightToLine, Bot, CircleAlert, CircleDot, Columns2, Copy, CopyX, Ellipsis, FileText, ListTodo, Maximize, Minimize, PanelBottom, PanelLeft, PanelRight, PanelTop, Pencil, Plus, RotateCw, Rows2, Shrink, ShieldAlert, SquarePen, Archive, X } from 'lucide-react';
 import type { SessionSummary } from '../lib/controller.js';
 import { can } from '../lib/gateway.js';
 import { ContextMenu, Menu, type MenuItem } from '../components/ui/menu';
 import { moveKey, orderTabs } from '../lib/layout.js';
+import { matchScore } from '../lib/command-center.js';
 import { closeRange } from '../lib/tab-close.js';
 import { MAIN_PANE, MIN_SPLIT_SIZE, dropPosition, paneIds, splitPane, type GroupNode, type SplitNode, type SplitPosition } from '../lib/panes.js';
 import { isMacPlatform, shortcutLabel } from '../lib/shortcuts.js';
@@ -21,6 +22,7 @@ import { TabChip } from './TabChip';
 import { PaneContext } from './pane';
 import { TaskDetail } from './TaskDetail';
 import { FileView } from './FileView';
+import { ErrorBoundary, PaneErrorFallback } from './ErrorBoundary';
 import { useAppState, useController } from './store';
 import { readFacts } from '../lib/sidebar-facts.js';
 import { tabKey, useTabs, type Tab } from './tabs';
@@ -113,6 +115,13 @@ export function WorkspaceHeader({ navOpen, onToggleNav, explorerOpen, onToggleEx
 function useTabPresentation(tab: Tab) {
   const { tree, tasks, sessions } = useAppState();
   const { browserUrl } = useTabs();
+  return tabPresentation(tab, { tree, tasks, sessions, browserUrl });
+}
+
+type PresentationState = Pick<ReturnType<typeof useAppState>, 'tree' | 'tasks' | 'sessions'> & { browserUrl: (id: string) => string | undefined };
+
+/** A tab's label, icon and tooltip, as its chip shows them. */
+function tabPresentation(tab: Tab, { tree, tasks, sessions, browserUrl }: PresentationState) {
   if (tab.kind === 'agent') {
     const projection = tree?.projection;
     const session = projection?.sessions[tab.id];
@@ -325,7 +334,7 @@ const toolbarButton = cn('flex size-7 shrink-0 items-center justify-center round
  * the right, with split panes, the pane's Maximize / Restore button and its menu with Split pane
  * right / down.
  */
-export function TabsRow({ paneId = MAIN_PANE, whole = false, onNewSession, onRename, menuRequest, onMenuRequestHandled }: { paneId?: string; whole?: boolean; onNewSession: () => void; onRename: (session: SessionSummary) => void; menuRequest?: number; onMenuRequestHandled?: () => void }) {
+export function TabsRow({ paneId = MAIN_PANE, whole = false, onNewSession, onRename, menuRequest, onMenuRequestHandled, switcherRequest, onSwitcherRequestHandled }: RowProps & { paneId?: string; whole?: boolean }) {
   const { activeOf, activate, close, openPanel, openBrowser, focusedPane, panes, splitEmpty, canSplitEmpty, maximized, toggleMaximized } = useTabs();
   const drag = useTabDrag(paneId, whole);
   const drop = React.useContext(DropContext);
@@ -363,6 +372,7 @@ export function TabsRow({ paneId = MAIN_PANE, whole = false, onNewSession, onRen
             ...ALP_PANELS.map((kind, index) => item(kind, index === 0)),
           ]} />
       </div>
+      <TabSwitcher paneId={paneId} whole={whole} openRequest={focused ? switcherRequest : undefined} onOpenRequestHandled={onSwitcherRequestHandled} />
       {drop.splits ? (
         <div className="flex shrink-0 items-center gap-0.5 pr-1">
           {many ? (
@@ -380,6 +390,120 @@ export function TabsRow({ paneId = MAIN_PANE, whole = false, onNewSession, onRen
         </div>
       ) : null}
       <ContextMenu label="Tab actions" at={menu?.at ?? null} items={menu ? menuItems(menu.tab) : []} onClose={closeMenu} fallbackFocus={focusActiveTab} testId={menu ? `workspace-tab-context-${tabKey(menu.tab)}` : undefined} />
+    </div>
+  );
+}
+
+/** A render error in a pane's tab shows in that pane only; another tab in front starts afresh. */
+function PaneBoundary({ paneId, children }: { paneId: string; children: React.ReactNode }) {
+  const { activeOf, close } = useTabs();
+  const active = activeOf(paneId);
+  return (
+    <ErrorBoundary where={`pane:${paneId}`} resetKey={active ? tabKey(active) : ''}
+      fallback={(error, reset) => <PaneErrorFallback error={error} onRetry={reset} onClose={active ? () => close(active) : undefined} />}>
+      {children}
+    </ErrorBoundary>
+  );
+}
+
+/**
+ * Paseo's tab switcher (workspace.tabs.switcher): a button with the pane's tab count that opens a
+ * list of its tabs with a search field. Type to filter (by label and tooltip, as the command center
+ * matches), Up/Down move, Enter or a click shows the tab, Escape or a click outside closes. The
+ * command center's Switch tab… opens it on the focused pane.
+ */
+function TabSwitcher({ paneId, whole, openRequest, onOpenRequestHandled }: { paneId: string; whole: boolean; openRequest?: number; onOpenRequestHandled?: () => void }) {
+  const { tabs: all, byPane, activeOf, activate, browserUrl } = useTabs();
+  const { tree, tasks, sessions } = useAppState();
+  const tabs = whole ? all : byPane[paneId] ?? [];
+  const active = activeOf(paneId);
+  const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState('');
+  const [index, setIndex] = React.useState(0);
+  const trigger = React.useRef<HTMLButtonElement>(null);
+  const panel = React.useRef<HTMLDivElement>(null);
+  const input = React.useRef<HTMLInputElement>(null);
+  const listId = React.useId();
+  const rows = React.useMemo(() => {
+    const views = tabs.map(tab => ({ tab, ...tabPresentation(tab, { tree, tasks, sessions, browserUrl }) }));
+    const needle = query.trim();
+    if (!needle) return views;
+    return views.map((view, at) => ({ view, at, score: matchScore(needle, [view.label], [view.title ?? '', view.tab.kind]) }))
+      .filter(entry => entry.score !== undefined)
+      .sort((a, b) => (a.score as number) - (b.score as number) || a.at - b.at)
+      .map(entry => entry.view);
+  }, [tabs, tree, tasks, sessions, browserUrl, query]);
+  const show = () => {
+    setQuery('');
+    const at = active ? tabs.findIndex(tab => tabKey(tab) === tabKey(active)) : -1;
+    setIndex(Math.max(0, at));
+    setOpen(true);
+  };
+  const close = (refocus = true) => { setOpen(false); if (refocus) trigger.current?.focus(); };
+  React.useEffect(() => {
+    if (!openRequest) return;
+    onOpenRequestHandled?.();
+    show();
+  }, [openRequest]); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => { if (open) input.current?.focus(); }, [open]);
+  React.useEffect(() => {
+    if (!open) return;
+    const onDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!panel.current?.contains(target) && !trigger.current?.contains(target)) close(false);
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    return () => window.removeEventListener('pointerdown', onDown, true);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const at = rows.length ? Math.min(index, rows.length - 1) : 0;
+  React.useEffect(() => { panel.current?.querySelector(`[data-index="${at}"]`)?.scrollIntoView({ block: 'nearest' }); }, [at, open]);
+  const choose = (tab: Tab) => { activate(tab); close(false); };
+  const onKey = (event: React.KeyboardEvent) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (rows.length) setIndex((at + (event.key === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length);
+    } else if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      if (rows[at]) choose(rows[at].tab);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.nativeEvent.stopImmediatePropagation();
+      close();
+    }
+  };
+  if (!tabs.length) return null;
+  const label = `Switch tabs (${tabs.length} open)`;
+  return (
+    <div className="relative flex shrink-0 items-center pr-0.5">
+      <button ref={trigger} type="button" className={cn(toolbarButton, 'w-auto min-w-7 px-1.5')} aria-label={label} title={label} aria-haspopup="listbox" aria-expanded={open}
+        data-testid="workspace-tab-switcher-trigger" onClick={() => open ? close() : show()}>
+        <span className="min-w-4 rounded bg-secondary px-1 text-[11px] font-medium leading-4 tabular-nums text-muted-foreground">{tabs.length}</span>
+      </button>
+      {open ? (
+        <div ref={panel} role="dialog" aria-label="Workspace tabs" data-testid="workspace-tab-switcher" onKeyDown={onKey}
+          className="absolute right-0 top-full z-50 mt-1 flex w-[min(20rem,90vw)] flex-col overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-xl shadow-[var(--shadow)]">
+          <input ref={input} type="text" role="combobox" aria-expanded aria-controls={listId} aria-activedescendant={rows.length ? `${listId}-${at}` : undefined}
+            aria-label="Search tabs" placeholder="Search tabs" value={query} autoComplete="off" spellCheck={false} data-testid="workspace-tab-switcher-input"
+            onChange={event => { setQuery(event.target.value); setIndex(0); }}
+            className="border-b border-border bg-transparent px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground" />
+          <div id={listId} role="listbox" aria-label="Workspace tabs" className="max-h-72 overflow-y-auto p-1">
+            {rows.length ? rows.map((row, position) => {
+              const current = !!active && tabKey(active) === tabKey(row.tab);
+              return (
+                <div key={tabKey(row.tab)} id={`${listId}-${position}`} role="option" aria-selected={position === at} aria-current={current ? 'true' : undefined}
+                  data-index={position} data-tab={tabKey(row.tab)} data-testid="workspace-tab-switcher-option"
+                  onMouseMove={() => { if (position !== at) setIndex(position); }} onClick={() => choose(row.tab)}
+                  className={cn('flex min-h-8 cursor-pointer items-center gap-2 rounded-md px-2 text-sm', position === at && 'bg-secondary')}>
+                  <span className="flex w-4 shrink-0 justify-center text-muted-foreground">{row.icon}</span>
+                  <span className="min-w-0 flex-1 truncate" title={row.title}>{row.label}</span>
+                  {current ? <Check aria-hidden className="size-3.5 shrink-0 text-muted-foreground" /> : null}
+                </div>
+              );
+            }) : <p className="px-2 py-3 text-center text-sm text-muted-foreground">No tabs match</p>}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -458,7 +582,7 @@ function DropOverlay({ position }: { position: 'center' | SplitPosition }) {
   return <div aria-hidden data-testid="workspace-drop-zone" data-position={position} className={cn('pointer-events-none absolute z-40 rounded-md border-2 border-highlight bg-highlight/20', place)} />;
 }
 
-type RowProps = { onNewSession: () => void; onRename: (session: SessionSummary) => void; menuRequest?: number; onMenuRequestHandled?: () => void };
+type RowProps = { onNewSession: () => void; onRename: (session: SessionSummary) => void; menuRequest?: number; onMenuRequestHandled?: () => void; switcherRequest?: number; onSwitcherRequestHandled?: () => void };
 
 /** The pane menu's sides, in the order the menu lists them. */
 const PANE_SPLITS: Array<{ position: SplitPosition; label: string; icon: React.ReactNode }> = [
@@ -500,7 +624,7 @@ function PaneView({ id, props, whole = false }: { id: string; props: RowProps; w
             event.preventDefault();
             setMenu({ x: event.clientX, y: event.clientY });
           } : undefined}>
-          <TabContent paneId={id} onNewSession={props.onNewSession} />
+          <PaneBoundary paneId={id}><TabContent paneId={id} onNewSession={props.onNewSession} /></PaneBoundary>
           {zone ? <DropOverlay position={zone} /> : null}
         </div>
         <ContextMenu label="Pane actions" at={menu} onClose={() => setMenu(null)} testId={menu ? `workspace-pane-context-${id}` : undefined}

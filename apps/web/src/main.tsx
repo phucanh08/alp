@@ -5,6 +5,7 @@ import { PREFERENCES_KEY, type PreferenceStorage } from './lib/preferences.js';
 import { takeLinkToken, type TokenStorage } from './lib/link-token.js';
 import { App } from './app/App';
 import { ControllerProvider } from './app/store';
+import { ErrorBoundary, RootErrorFallback } from './app/ErrorBoundary';
 import './styles.css';
 
 /** The browser's localStorage when the page may use it (it throws when storage is disabled). */
@@ -43,7 +44,9 @@ window.addEventListener('storage', event => { if (event.key === PREFERENCES_KEY 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ControllerProvider controller={controller}>
-      <App />
+      <ErrorBoundary where="root" fallback={error => <RootErrorFallback error={error} />}>
+        <App />
+      </ErrorBoundary>
     </ControllerProvider>
   </StrictMode>,
 );

@@ -88,6 +88,8 @@ export const BINDINGS = [
   { action: 'sidebar.right', combo: 'Ctrl+`' },
   { action: 'sidebar.both', combo: 'Mod+.', section: 'layout', label: 'Toggle both sidebars' },
 
+  { action: 'pane.find', combo: 'Mod+F', section: 'tabs-panes', label: 'Find in chat', handledElsewhere: true },
+
   { action: 'composer.focus', combo: 'Mod+L', section: 'agent-input', label: 'Focus message input', handledElsewhere: true },
   { action: 'composer.mode', combo: 'Shift+Tab', section: 'agent-input', label: 'Cycle agent mode', handledElsewhere: true },
   { action: 'agent.interrupt', combo: 'Escape', section: 'agent-input', label: 'Interrupt agent', handledElsewhere: true },
