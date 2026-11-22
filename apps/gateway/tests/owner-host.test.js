@@ -30,6 +30,8 @@ const HOST = {
   'host.project.remove': { projectId: 'prj_1', ifRevision: 3, requestId: 'r4' },
   'host.workspace.facts': { workspaceIds: ['wks_1', 'wks_2'], refresh: true },
   'host.workspace.reveal': { workspaceId: 'wks_1' },
+  'host.workspace.editors': {},
+  'host.workspace.open': { workspaceId: 'wks_1', editor: 'vscode' },
 };
 const METHODS = Object.keys(HOST);
 
