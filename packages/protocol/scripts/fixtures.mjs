@@ -112,6 +112,19 @@ R('daemon.pause', pauses);
 P('daemon.resume', { runtime: 'codex' }); R('daemon.resume', { runtimes: {}, parked: [] });
 P('daemon.pauses', {}); R('daemon.pauses', { all: { since: ts, by: 'the user', reason: 'paused by the user' }, runtimes: {}, parked: [] });
 P('daemon.usage', { refresh: true }); R('daemon.usage', { providers: [{ runtime: 'codex', pause: null, parked: 0 }] });
+P('daemon.usage', { refresh: false, account: true }, true, 'asking for the account email');
+P('daemon.usage', { account: 'yes' }, false, 'with a string account');
+R('daemon.usage', { providers: [
+  { runtime: 'claude', available: true, checkedAt: ts, plan: 'max', planLabel: 'Max', limited: false,
+    windows: [{ name: 'five hour', usedPercent: 11, resetsAt: ts, id: 'five_hour', label: 'Session' }, { name: 'seven day fable', usedPercent: 61, resetsAt: null, id: 'weekly:fable', label: 'Weekly · Fable' }],
+    details: [{ id: 'extra_usage', label: 'Extra usage', value: 'Enabled' }], balances: [], account: { email: 'owner@example.com' }, pause: null, parked: 0 },
+  { runtime: 'codex', available: true, checkedAt: ts, plan: 'plus', planLabel: 'plus', limited: false,
+    windows: [{ name: '5 hour window', usedPercent: 42, resetsAt: ts, id: 'five_hour', label: '5-hour' }],
+    details: [], balances: [{ id: 'credits', label: 'Credits', remaining: 0, unlimited: false }], account: null, pause: null, parked: 0 },
+] }, true, 'with Paseo\'s window ids and labels, details, balances and the account');
+R('daemon.usage', { disabled: true, providers: [] }, true, 'from alp dashboard while Check usage is off');
+R('daemon.usage', { providers: [{ runtime: 'codex', account: { email: 42 } }] }, false, 'with a numeric account email');
+R('daemon.usage', { providers: [{ runtime: 'codex', windows: [{ name: 'x', usedPercent: 'high', resetsAt: null }] }] }, false, 'with a text percent');
 P('catalog.get', {}); R('catalog.get', { models: [{ id: 'codex:gpt-6.1-sol', label: 'Codex · GPT-6.1-Sol' }], modes: [{ id: 'read-only', label: 'Read only' }], thinkingOptions: [{ id: 'low', label: 'low' }], defaultModel: 'codex:gpt-6.1-sol' });
 P('catalog.refresh', {}); R('catalog.refresh', { models: [{ id: 'codex:gpt-6.1-sol', label: 'Codex · GPT-6.1-Sol' }], modes: [{ id: 'read-only', label: 'Read only' }], thinkingOptions: [{ id: 'low', label: 'low' }], defaultModel: 'codex:gpt-6.1-sol' });
 P('assignment.recall', { assignmentId: 'a_1', question: 'Bạn đã sửa gì?' });
