@@ -88,11 +88,12 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
   const expandedRef = React.useRef(expanded);
   expandedRef.current = expanded;
   React.useEffect(() => {
+    // Any of these changing ends a refresh under way: its answers belong to the pass it bumped.
+    setRefreshing(false);
     if (!readable || !granted || !workspace || connection.phase !== 'open') return;
     pass.current += 1;
     const keep = lastScope.current === scope;
     lastScope.current = scope;
-    setRefreshing(false);
     setListings({});
     if (!keep) setExpanded([]);
     list('', showHidden);
