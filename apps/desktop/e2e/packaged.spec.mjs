@@ -205,7 +205,8 @@ async function connectedPage(context, started, origin) {
 
 /**
  * Waits over DevTools for the window to show a bundled page other than `skip` (or Chromium's error
- * page in its place: a page that failed to load is chrome-error://), and returns its URL, heading and text.
+ * page in its place: a page that failed to load is chrome-error://), parsed and with its heading, and
+ * returns its URL, heading and text (read together, from one evaluate).
  */
 async function bundledPage(context, started, skip) {
   const deadline = Date.now() + (started.rosetta ? 300_000 : 60_000);
@@ -218,7 +219,13 @@ async function bundledPage(context, started, skip) {
         if (!url.startsWith('alp-page:') && !url.startsWith('file:') && !url.startsWith('chrome-error:')) continue;
         if (skip && url.split('?')[0].endsWith(`/${skip}`)) continue;
         const read = script => bounded(page.evaluate(script), 10_000, 'reading the page');
-        return { url, h1: await read(() => document.querySelector('h1')?.textContent ?? null), text: await read(() => document.body?.innerText ?? '') };
+        // The URL changes before the document is parsed (CI run 45017772537 read an empty heading): a
+        // bundled page counts once it is past loading and its heading has text; Chromium's error page
+        // (or a file: page, which is a failure here) once it is past loading.
+        const shown = await read(() => ({ ready: document.readyState, h1: document.querySelector('h1')?.textContent ?? null, text: document.body?.innerText ?? '' }));
+        if (shown.ready === 'loading') continue;
+        if (url.startsWith('alp-page:') && !shown.h1?.trim()) continue;
+        return { url, h1: shown.h1, text: shown.text };
       }
       return undefined;
     }, `a bundled page${skip ? ` other than ${skip}` : ''}`, deadline);
