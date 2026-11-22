@@ -31,7 +31,7 @@ async function setup(t, usage) {
   await initProject(root, { library: home });
   const agents = [];
   const factory = fakeTransport(agents);
-  const runtime = createAlpRuntime({ language: 'English', transport: (...args) => { const transport = factory(...args); if (usage) transport.orchestrationContext = async () => ({ usage: usage[args[2]] }); return transport; }, supervisor: false, libraryDir: home });
+  const runtime = createAlpRuntime({ language: 'English', transport: (...args) => { const transport = factory(...args); if (usage) transport.orchestrationContext = async () => ({ usage: usage[args[2]] }); transport.usageReport = async () => ({ usage: usage?.[args[2]], account: { email: 'private@example.com' } }); return transport; }, supervisor: false, libraryDir: home });
   const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test', home });
   let web;
   const gateway = createPaseoBridge({ clientFactory: async (onEvent) => {
@@ -442,6 +442,9 @@ test("ALP's plugin over the bridge: its catalog entry and RPCs, and no page or s
   assert.equal(new Set(modelChoices.map(model => model.id)).size, modelChoices.length);
   const usage = (await invoke('alp.usage.get', {})).output;
   assert.deepEqual(usage.providers.map(provider => [provider.runtime, provider.available, provider.windows]), [['codex', false, []], ['claude', false, []]]);
+  // The account email is opt-in at alpd (t-9116): the Paseo bridge never asks, so devices never get it.
+  assert.ok(usage.providers.every(provider => provider.account == null), 'no provider carries an account');
+  assert.ok(!JSON.stringify(usage).includes('private@example.com'));
   // A bad call fails as Paseo's daemon fails it, and an unknown one says so.
   assert.equal((await invoke('alp.tasks.add', { directory: root, title: '' })).code, 'handler_error');
   assert.equal((await invoke('alp.nope', {})).code, 'method_not_found');

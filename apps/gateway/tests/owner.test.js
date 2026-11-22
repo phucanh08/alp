@@ -70,6 +70,11 @@ test('owner (b, f): the owner credential on a direct loopback socket gets host.o
   const mark = daemon.calls().length;
   assert.deepEqual(await client.request('daemon.usage', { refresh: true, extra: 'dropped' }), USAGE);
   assert.deepEqual(daemon.calls().slice(mark).map(call => [call.method, call.params]), [['daemon.usage', { refresh: true }]]);
+  // The account email is opt-in at alpd (t-9116): the gateway never forwards `account`, so no
+  // gateway caller can ask alpd for it; only alp dashboard's own owner handler adds it.
+  const before = daemon.calls().length;
+  await client.request('daemon.usage', { account: true });
+  assert.deepEqual(daemon.calls().slice(before).map(call => call.params), [{}]);
   // Still a denied method for the owner: only `owner` entries open.
   await assert.rejects(client.request('daemon.status', {}), notExposed('daemon.status'));
   // Params are checked as for any v1 method.
