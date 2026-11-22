@@ -58,7 +58,7 @@ async function repository(directory, { branch, base, change }) {
  * repository), two sessions in shop and one in secret, one schedule on shop's newest session, and the
  * `alp` wrapper the app runs. Each step is undone through the test's `defer`, in reverse order.
  */
-async function ownerHost(context, { fileManager } = {}) {
+async function ownerHost(context, { fileManager, editor } = {}) {
   const { dir, defer } = context;
   const home = path.join(dir, 'h', '.alp');
   await mkdir(home, { recursive: true, mode: 0o700 });
@@ -89,6 +89,8 @@ async function ownerHost(context, { fileManager } = {}) {
     ALP_CLAUDE_BIN: path.join(dir, 'no-real-claude'), ALP_ANTIGRAVITY_BIN: path.join(dir, 'no-real-antigravity'),
     // Open in file manager's program (t-747e): a recorder in place of Finder, unless the run asks for the real one.
     ...(fileManager ? { ALP_DASHBOARD_FILE_MANAGER: fileManager } : {}),
+    // Open in editor (t-a876): VS Code and Zed count as installed and a recorder stands in for them.
+    ...(editor ? { ALP_DASHBOARD_EDITORS: 'vscode,zed', ALP_DASHBOARD_EDITOR_RUNNER: editor } : {}),
   };
   for (const value of [env.ALP_HOME, env.HOME, env.TMPDIR, env.ALP_SERVICE_DIR]) assert.ok(value.startsWith(`${dir}${path.sep}`), `${value} is outside the scratch directory`);
   const port = await freePort();
@@ -269,4 +271,98 @@ test('owner: a session row\'s ⋮ menu has Paseo\'s items, and Open in file mana
   await new Promise(resolve => setTimeout(resolve, 500));
   assert.equal(await page.getByText("Couldn't open folder").count(), 0);
   if (shots) await page.screenshot({ path: path.join(shots, 'session-menu-after-open.png') });
+});
+
+/**
+ * Paseo parity batch 2 in ALP.app as the host owner (t-a876): the session row's ⋮ Pin to top moves the
+ * row to Pinned and alpd keeps it; Labels shows the host's catalog and alpd keeps the check; the
+ * project's ⋮ › Open in editor lists the host's editors and has one open the workspace (a recorder
+ * stands in for the editor); the header's ⋯ has Copy path, Copy branch name, New terminal and New
+ * browser tab; Archive goes at once and Undo brings the session back. With ALP_DESKTOP_SHOTS=<dir>
+ * it saves screenshots of the app's own window there.
+ */
+test('owner: batch 2 menus in ALP.app: pin and labels, Open in editor, the header menu, Archive with Undo', { timeout: 240_000 }, async t => {
+  const context = await scratch(t);
+  const edited = path.join(context.dir, 'edited.txt');
+  const editor = path.join(context.dir, 'editor.sh');
+  await writeFile(editor, `#!/bin/sh\nprintf '%s|%s' "$1" "$2" > '${edited}'\n`);
+  await chmod(editor, 0o755);
+  const host = await ownerHost(context, { editor });
+  // A label in the host's catalog (Settings › Workspaces makes them), taken off the workspace again.
+  const lock = JSON.parse(await readFile(path.join(host.home, 'alpd.lock'), 'utf8'));
+  const client = await hostConnect(lock.socket);
+  try {
+    const { workspaces, revision } = await client.request('workspace.list', {});
+    const workspaceId = workspaces.find(row => row.directory === host.projects.shop && !row.archivedAt).id;
+    let at = revision;
+    for (const assigned of [true, false]) at = (await client.request('registry.owner', { operation: 'label.assign', args: { workspaceId, label: { name: 'urgent', color: 'red' }, assigned }, ifRevision: at, requestId: `desktop-label-${assigned}` })).registry.revision;
+  } finally { client.close(); }
+  const app = await launch(t, context, host.wrapper);
+  const info = await waitFor(async () => {
+    const value = JSON.parse(await readFile(path.join(host.home, 'dashboard.json'), 'utf8'));
+    return value?.port ? value : undefined;
+  }, 'alp dashboard to write dashboard.json', 90_000);
+  await connectedTo(app, `http://127.0.0.1:${info.port}`, 90_000);
+  const page = app.windows()[0];
+  const shots = process.env.ALP_DESKTOP_SHOTS;
+  if (shots) await mkdir(shots, { recursive: true });
+  const shot = async name => { if (shots) await page.screenshot({ path: path.join(shots, name) }); };
+  const read = async id => {
+    const reader = await hostConnect(lock.socket);
+    try { return (await reader.request('session.get', { sessionId: id })).session; } finally { reader.close(); }
+  };
+  const row = page.locator('[data-testid="session-row"][data-session-id="desktop-older"]');
+  await waitFor(async () => (await row.innerText().catch(() => ''))?.includes('Older shop work'), 'shop\'s older session row');
+  const rowMenu = async () => {
+    await row.hover();
+    await page.getByRole('button', { name: 'Actions for Older shop work' }).click();
+    const menu = page.getByRole('menu', { name: 'Actions for Older shop work' });
+    await menu.waitFor();
+    return menu;
+  };
+
+  // Pin to top: alpd keeps pinnedAt; the row sits in Pinned.
+  let menu = await rowMenu();
+  await menu.getByRole('menuitem', { name: 'Pin to top' }).click();
+  await waitFor(async () => typeof (await read('desktop-older'))?.pinnedAt === 'string', 'alpd to keep the pin');
+  await waitFor(async () => await page.getByTestId('sidebar-pinned-sessions').locator('[data-session-id="desktop-older"]').count() === 1, 'the row in Pinned');
+  // Labels: the catalog's label, checked, kept by alpd.
+  menu = await rowMenu();
+  await menu.getByRole('menuitem', { name: 'Labels' }).click();
+  const labelsPage = page.getByRole('menu', { name: 'Labels' });
+  await labelsPage.getByRole('menuitemcheckbox', { name: 'urgent' }).click();
+  await waitFor(async () => JSON.stringify((await read('desktop-older'))?.labels) === '["urgent"]', 'alpd to keep the label');
+  await shot('batch2-session-labels.png');
+  await page.keyboard.press('Escape');
+
+  // Open in editor from the project's ⋮: the host's editors; Zed opens shop's directory.
+  const project = page.locator(`[data-testid="sidebar-project"][data-path="${host.projects.shop}"]`).getByTestId('project-row');
+  await project.hover();
+  await page.getByRole('button', { name: /^Project actions for / }).first().click();
+  await page.getByRole('menu', { name: /^Project actions for / }).getByRole('menuitem', { name: 'Open in editor' }).click();
+  const editors = page.getByRole('menu', { name: 'Open in editor' });
+  await waitFor(async () => JSON.stringify(await editors.getByTestId('project-open-editor-item').allInnerTexts().catch(() => [])) === '["Visual Studio Code","Zed"]', 'the host\'s editors');
+  await shot('batch2-open-in-editor.png');
+  await editors.getByRole('menuitem', { name: 'Zed' }).click();
+  await waitFor(async () => (await readFile(edited, 'utf8').catch(() => '')) === `zed|${host.projects.shop}`, 'the editor to be asked for shop\'s directory', 30_000);
+  assert.equal(await page.getByText("Couldn't open").count(), 0);
+
+  // The header's ⋯ on the open session: Paseo's items; New browser tab only in ALP.app, New terminal only with terminal.exec (not in the dashboard's default grant).
+  await row.click();
+  await page.locator('main header').getByRole('button', { name: 'Session actions' }).click();
+  const header = page.getByRole('menu', { name: 'Session actions' });
+  const items = await header.getByRole('menuitem').evaluateAll(entries => entries.map(entry => entry.querySelector('span')?.textContent?.trim()));
+  assert.deepEqual(items, ['Copy path', 'Copy branch name', 'New browser tab', 'Rename', 'Copy session ID', 'Archive']);
+  await shot('batch2-header-menu.png');
+  await header.getByRole('menuitem', { name: 'New browser tab' }).click();
+  await waitFor(async () => await page.locator('[data-testid="workspace-tab"][data-tab^="browser:"]').count() === 1, 'a Browser tab');
+
+  // Archive from the header: the row goes at once; Undo brings it back on the host.
+  await page.locator('main header').getByRole('button', { name: 'Session actions' }).click();
+  await page.getByRole('menu', { name: 'Session actions' }).getByRole('menuitem', { name: 'Archive' }).click();
+  await waitFor(async () => (await read('desktop-older'))?.archived === true, 'alpd to archive it');
+  await shot('batch2-archive-undo.png');
+  await page.getByTestId('notice-undo-archive').click();
+  await waitFor(async () => !(await read('desktop-older'))?.archived, 'Undo to unarchive it');
+  await waitFor(async () => await row.count() === 1, 'the row back');
 });

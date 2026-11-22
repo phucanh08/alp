@@ -82,7 +82,7 @@ test('New terminal in the header opens the Terminal tab (a token with terminal.e
   // A reader with terminal.exec: Copy items, New terminal, Copy session ID; no Rename or Archive.
   expect(await labels(menu)).toEqual(['Copy path', 'Copy branch name', 'New terminal', 'Copy session ID']);
   await menu.getByRole('menuitem', { name: 'New terminal' }).click();
-  await expect(page.getByRole('tab', { name: 'Terminal' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tab', { name: 'Terminal', exact: true })).toHaveAttribute('aria-selected', 'true');
 });
 
 test('a reader\'s header menu has no write item', async ({ page }) => {
@@ -152,6 +152,66 @@ test('Remove project: confirmed, the project leaves the host\'s list; readers ne
   await reader.close();
 });
 
+test('Pin to top and Labels on a session: kept by the host, the row moves to Pinned and shows its labels', async ({ page }) => {
+  // The host's label catalog (the owner's Settings › Workspaces makes labels): two labels, then
+  // taken off the workspace again so the row's labels are the session's own.
+  const { workspaces } = await host('workspace.list', {});
+  const workspaceId = workspaces.find(entry => !entry.archivedAt).id;
+  // Each write takes the registry's revision as it is now (the app's own reads and writes move it).
+  const owner = async (operation, args, requestId) => host('registry.owner', { operation, args, ifRevision: (await host('registry.owner', {})).registry.revision, requestId });
+  for (const [name, color, assigned] of [['urgent', 'red', true], ['review', 'sky', true], ['urgent', 'red', false], ['review', 'sky', false]]) {
+    await owner('label.assign', { workspaceId, label: { name, color }, assigned }, `menus-${name}-${assigned}`);
+  }
+  await connect(page, world);
+  await newSession(page, 'Pin me');
+  await newSession(page, 'Stay put');
+
+  // Pin to top: the host keeps pinnedAt; the row leaves its project for the Pinned section.
+  let menu = await rowMenu(page, 'Pin me');
+  await menu.getByRole('menuitem', { name: 'Pin to top' }).click();
+  await expect.poll(async () => typeof (await sessionOf('Pin me'))?.pinnedAt).toBe('string');
+  const pinned = nav(page).getByTestId('sidebar-pinned-sessions');
+  await expect(pinned.getByTestId('session-row').filter({ hasText: 'Pin me' })).toHaveAttribute('data-pinned', 'true');
+  await expect(nav(page).getByTestId('sidebar-project').getByTestId('session-row').filter({ hasText: 'Pin me' })).toHaveCount(0);
+  await expect(nav(page).getByTestId('sidebar-project').getByTestId('session-row').filter({ hasText: 'Stay put' })).toHaveCount(1);
+
+  // Labels: the catalog's labels as checks; a check is kept by the host in the catalog's spelling.
+  menu = await rowMenu(page, 'Pin me');
+  await menu.getByRole('menuitem', { name: 'Labels' }).click();
+  // The menu shows its Labels page in place (named after it).
+  const page2 = page.getByRole('menu', { name: 'Labels' });
+  await expect(page2.getByTestId('sidebar-workspace-menu-label')).toHaveText(['urgent', 'review']);
+  await page2.getByRole('menuitemcheckbox', { name: 'urgent' }).click();
+  await expect(page2.getByRole('menuitemcheckbox', { name: 'urgent' })).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(async () => (await sessionOf('Pin me'))?.labels).toEqual(['urgent']);
+  await page.screenshot({ path: test.info().outputPath('session-labels.png') });
+  await page.keyboard.press('Escape');
+  await expect(row(page, 'Pin me').locator('[data-meta="labels"]')).toHaveText('urgent');
+
+  // A reload keeps them (the host's, not this page's).
+  await page.reload();
+  await connect(page, world);
+  await expect(nav(page).getByTestId('sidebar-pinned-sessions').getByTestId('session-row').filter({ hasText: 'Pin me' })).toHaveCount(1);
+  await expect(row(page, 'Pin me').locator('[data-meta="labels"]')).toHaveText('urgent');
+
+  // A catalog rename follows to the session.
+  await owner('label.update', { name: 'urgent', newName: 'hot' }, 'menus-rename');
+  await expect.poll(async () => (await sessionOf('Pin me'))?.labels).toEqual(['hot']);
+
+  // Unpin: back under its project.
+  menu = await rowMenu(page, 'Pin me');
+  await menu.getByRole('menuitem', { name: 'Unpin' }).click();
+  await expect.poll(async () => (await sessionOf('Pin me'))?.pinnedAt).toBeUndefined();
+  await expect(nav(page).getByTestId('sidebar-project').getByTestId('session-row').filter({ hasText: 'Pin me' })).toHaveCount(1);
+
+  // A reader: no Pin to top, no Labels.
+  const reader = await page.context().newPage();
+  await connect(reader, world, world.tokens.viewer);
+  const readerMenu = await rowMenu(reader, 'Pin me');
+  expect(await labels(readerMenu)).toEqual(['Copy path', 'Copy branch name']);
+  await reader.close();
+});
+
 test('Settings › Notifications: Play sound decides a notification\'s silent; Refresh reads the permission again', async ({ page }) => {
   await page.addInitScript(() => {
     const shown = [];
@@ -192,6 +252,7 @@ test('Settings › Notifications: Play sound decides a notification\'s silent; R
   await expect.poll(() => page.evaluate(() => window.__notes.at(-1)?.options.silent)).toBe(true);
   await page.screenshot({ path: test.info().outputPath('settings-notifications.png') });
   await page.reload();
+  await connect(page, world);
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(page.getByRole('region', { name: 'Settings' }).getByTestId('notification-sound')).toHaveAttribute('aria-checked', 'false');
 });
