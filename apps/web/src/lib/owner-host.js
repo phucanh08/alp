@@ -32,7 +32,19 @@ const requestId = () => globalThis.crypto.randomUUID();
  */
 export async function readUsage(controller, refresh = false) {
   const result = await controller.ownerRequest('daemon.usage', { refresh }, { timeoutMs: 60_000 });
-  return { providers: /** @type {UsageProvider[]} */ (Array.isArray(result?.providers) ? result.providers : []), disabled: result?.disabled === true };
+  const usage = { providers: /** @type {UsageProvider[]} */ (Array.isArray(result?.providers) ? result.providers : []), disabled: result?.disabled === true };
+  announceUsage(usage);
+  return usage;
+}
+
+/**
+ * The window event every usage read and Check usage change is announced on, so the sidebar's
+ * summary follows the Usage page at once instead of at its next 60 s read (t-9116).
+ */
+export const USAGE_EVENT = 'alp:usage';
+/** @param {{ providers: UsageProvider[], disabled: boolean }} usage */
+function announceUsage(usage) {
+  try { globalThis.dispatchEvent?.(new CustomEvent(USAGE_EVENT, { detail: usage })); } catch { /* no window (tests) */ }
 }
 
 /** host.usage.setting.get: whether the host checks usage, and its name. @param {OwnerController} controller @returns {Promise<UsageSetting>} */
@@ -43,7 +55,10 @@ export async function readUsageSetting(controller) {
 /** host.usage.setting.set: Check usage on or off, for every device of the host. @param {OwnerController} controller @param {boolean} enabled @returns {Promise<UsageSetting>} */
 export async function setUsageSetting(controller, enabled) {
   const result = await controller.ownerRequest('host.usage.setting.set', { enabled });
-  return { enabled: result?.enabled !== false, host: typeof result?.host === 'string' ? result.host : '' };
+  const setting = { enabled: result?.enabled !== false, host: typeof result?.host === 'string' ? result.host : '' };
+  // Off: the summary goes at once. On: the next read (the page's, or the sidebar's) brings it back.
+  if (!setting.enabled) announceUsage({ providers: [], disabled: true });
+  return setting;
 }
 
 /** @param {string} runtime */

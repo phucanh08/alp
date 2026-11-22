@@ -198,11 +198,14 @@ test('owner › Usage: Paseo\'s cards, options, pins and card switches, and the 
   await expect.poll(() => state.sent.some(request => request.method === 'host.usage.setting.set' && request.params?.enabled === false)).toBe(true);
   await page.keyboard.press('Escape');
   await expect(again.getByTestId('usage-off')).toContainText(`Usage is off on ${HOST}.`);
+  // The sidebar summary follows at once, not at its next 60 s read (t-9116).
+  await expect(page.getByTestId('sidebar-usage-line')).toHaveCount(0, { timeout: 2_000 });
   await expect(again.getByTestId('usage-refresh-all')).toHaveCount(0);
   await expect(again.getByTestId('usage-provider')).toHaveCount(0);
   if (SHOT_DIR) await again.screenshot({ path: `${SHOT_DIR}/usage-off.png` });
   await again.getByTestId('usage-turn-on').click();
   await expect(again.getByTestId('usage-provider')).toHaveCount(2);
+  await expect(summary(page, 'codex')).toHaveText('96% 5h34% wk', { timeout: 2_000 });
   expect(state.enabled).toBe(true);
 });
 
