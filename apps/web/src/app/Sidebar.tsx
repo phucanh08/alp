@@ -1,6 +1,6 @@
 import * as React from 'react';
 import {
-  Archive, CalendarClock, CircleCheck, CircleDashed, CircleGauge, CircleHelp, CircleX, Clock, Copy, Folder, FolderCog, FolderPlus, GitBranch, GitMerge, GitPullRequest,
+  Archive, Circle, FolderOpen, CalendarClock, CircleCheck, CircleDashed, CircleGauge, CircleHelp, CircleX, Clock, Copy, Folder, FolderCog, FolderPlus, GitBranch, GitMerge, GitPullRequest,
   GitPullRequestClosed, GitPullRequestDraft, History, ListChecks, LogOut, MoreHorizontal, MoreVertical, Network, Pencil, Pin, PinOff, Plus, Search, Server, Settings,
   Settings2, Tag, Type, X,
 } from 'lucide-react';
@@ -18,7 +18,8 @@ import { isMacPlatform, shortcutLabel } from '../lib/shortcuts.js';
 import type { SidebarDisplay, SidebarItemId } from '../lib/preferences.js';
 import { filterProjects, groupByStatus, limitRows, resolveProjectFilters, sortSessions } from '../lib/sidebar-model.js';
 import { FACTS_REFRESH_MS, formatDiffCount, mostRecentSession, prLabel, readFacts, usageLine, type WorkspaceFacts } from '../lib/sidebar-facts.js';
-import { ownerRegistry, readUsage, registerDirectory, USAGE_EVENT, runtimeName, type UsageProvider } from '../lib/owner-host.js';
+import { ownerRegistry, readUsage, registerDirectory, revealWorkspace, USAGE_EVENT, runtimeName, type UsageProvider } from '../lib/owner-host.js';
+import { isDesktopApp } from '../lib/browser-url.js';
 import { useUsagePrefs } from './settings/usage/prefs';
 import { ProviderIcon } from './ProviderIcon';
 import { useAppState, useController } from './store';
@@ -137,22 +138,24 @@ function DiffCounts({ facts, className }: { facts: WorkspaceFacts; className?: s
 }
 
 /** Paseo's workspace row: status slot, title at 76% that lifts on hover, trailing time, the Show facts under it, kebab on hover. */
-function SessionRow({ session, title, meta, trailing, facts, bucket, selected, canWrite, onSelect, onRename, onArchive }: {
-  session: SessionSummary; title: string; meta: MetaItem[]; trailing: string; facts?: WorkspaceFacts; bucket: Bucket; selected: boolean; canWrite: boolean;
-  onSelect: () => void; onRename: () => void; onArchive: () => void;
+function SessionRow({ session, title, meta, trailing, facts, bucket, selected, actions, onSelect }: {
+  session: SessionSummary; title: string; meta: MetaItem[]; trailing: string; facts?: WorkspaceFacts; bucket: Bucket; selected: boolean;
+  /** Paseo's workspace menu, as this session has it (sessionActions). */ actions: MenuItem[];
+  onSelect: () => void;
 }) {
+  const hasMenu = actions.length > 0;
   const [menuOpen, setMenuOpen] = React.useState(false);
   const when = session.status === 'closed' ? 'Closed' : `Updated ${relativeTime(session.updatedAt ?? session.createdAt)}`;
   return (
     <li className={cn('group relative mb-0.5 rounded-lg', selected ? 'bg-sidebar-selected' : 'hover:bg-sidebar-hover active:bg-secondary', menuOpen && !selected && 'bg-sidebar-hover')}>
       <button type="button" onClick={onSelect} aria-current={selected ? 'true' : undefined} data-testid="session-row" data-session-id={session.id} data-facts={facts ? 'true' : undefined} title={`${title} · ${when}`}
-        className={cn('flex min-h-11 w-full min-w-0 items-start gap-2 rounded-lg py-2 pl-4 pr-3 text-left md:min-h-9', canWrite && 'max-md:pr-8', focusRing)}>
+        className={cn('flex min-h-11 w-full min-w-0 items-start gap-2 rounded-lg py-2 pl-4 pr-3 text-left md:min-h-9', hasMenu && 'max-md:pr-8', focusRing)}>
         <StatusIndicator bucket={bucket} />
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-2">
             <span className={cn('min-w-0 flex-1 truncate text-sm leading-5 text-foreground', selected || menuOpen ? 'opacity-100' : 'opacity-[0.76] group-hover:opacity-100')}>{title}</span>
-            {facts ? <DiffCounts facts={facts} className={cn(canWrite && !trailing && 'md:group-hover:invisible', menuOpen && 'invisible')} /> : null}
-            {trailing ? <span className={cn('shrink-0 text-xs text-muted-foreground tabular-nums', canWrite && 'md:group-hover:invisible', menuOpen && 'invisible')} data-testid="sidebar-workspace-timestamp">{trailing}</span> : null}
+            {facts ? <DiffCounts facts={facts} className={cn(hasMenu && !trailing && 'md:group-hover:invisible', menuOpen && 'invisible')} /> : null}
+            {trailing ? <span className={cn('shrink-0 text-xs text-muted-foreground tabular-nums', hasMenu && 'md:group-hover:invisible', menuOpen && 'invisible')} data-testid="sidebar-workspace-timestamp">{trailing}</span> : null}
           </span>
           {meta.length ? (
             <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground" data-testid="sidebar-row-meta">
@@ -165,17 +168,14 @@ function SessionRow({ session, title, meta, trailing, facts, bucket, selected, c
           ) : null}
         </span>
       </button>
-      {canWrite ? (
+      {hasMenu ? (
         <div className={cn('absolute right-[5px] top-[13px] flex opacity-100 md:top-[9px] md:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100', menuOpen && 'opacity-100')}>
           {/* The scrim: the row's own fill fades the title's tail under the kebab, as Paseo's does. */}
           <span aria-hidden className={cn('pointer-events-none absolute inset-y-0 right-full hidden w-6 bg-linear-to-r md:block from-transparent', selected ? 'to-sidebar-selected' : 'to-sidebar-hover')} />
-          <Menu label={`Actions for ${title}`} onOpenChange={setMenuOpen}
+          <Menu label={`Actions for ${title}`} onOpenChange={setMenuOpen} align="end" width={260} testId="sidebar-workspace-menu"
             trigger={<MoreVertical aria-hidden className="size-3.5" />}
             triggerClassName={cn('flex size-[18px] items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground', selected ? 'bg-sidebar-selected' : 'bg-sidebar-hover', focusRing)}
-            items={[
-              { label: 'Rename', icon: <Pencil aria-hidden />, onSelect: onRename },
-              { label: 'Archive', icon: <Archive aria-hidden />, onSelect: onArchive, destructive: true },
-            ]} />
+            items={actions} />
         </div>
       ) : null}
     </li>
@@ -548,6 +548,36 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     const found = id ? facts[id] : undefined;
     return found && mostRecentSession(shown)?.id === session.id ? found : undefined;
   };
+  /**
+   * Paseo's workspace menu (sidebar-workspace-menu.tsx), on a session row: Copy path, Copy branch name,
+   * Rename, Mark as read or unread, Open in file manager, Archive. Pin to top and Labels act on a whole
+   * workspace in Paseo; an ALP row is one session, so they stay on the project's menu (t-747e).
+   * Readers get the copy items only.
+   */
+  const sessionActions = (path: string, session: SessionSummary): MenuItem[] => {
+    const row = mainRow(path);
+    const directory = session.projectRoot || path;
+    // The registry's branch (a managed worktree's), else the checkout's own (host.workspace.facts, owner only).
+    const branch = row?.branch || (owner && row ? facts[row.id]?.branch : undefined) || undefined;
+    const items: MenuItem[] = [
+      { id: 'copy-path', label: 'Copy path', icon: <Copy aria-hidden />, onSelect: () => copy(directory, 'Path'), testId: 'sidebar-workspace-menu-copy-path' },
+      ...(branch ? [{ id: 'copy-branch-name', label: 'Copy branch name', icon: <Copy aria-hidden />, onSelect: () => copy(branch, 'Branch name'), testId: 'sidebar-workspace-menu-copy-branch-name' }] : []),
+    ];
+    if (!canWrite) return items;
+    items.push({ id: 'rename', label: 'Rename', icon: <Pencil aria-hidden />, onSelect: () => onRename(session), testId: 'sidebar-workspace-menu-rename' });
+    if (attentionReason(state, session.id)) {
+      items.push({ id: 'mark-as-read', label: 'Mark as read', icon: <CircleCheck aria-hidden />, onSelect: () => controller.markRead(session.id), testId: 'sidebar-workspace-menu-mark-as-read' });
+    } else if (controller.canMarkUnread && online && session.status !== 'running' && session.status !== 'closed' && !session.busy && !needsInput(state, session.id)) {
+      items.push({ id: 'mark-as-unread', label: 'Mark as unread', icon: <Circle aria-hidden />, onSelect: () => void controller.markUnread(session.id), testId: 'sidebar-workspace-menu-mark-as-unread' });
+    }
+    // The host's own file manager: only the owner's ALP.app on the host itself, by the workspace's id.
+    if (owner && isDesktopApp() && row && online) {
+      items.push({ id: 'open-folder', label: 'Open in file manager', icon: <FolderOpen aria-hidden />, testId: 'sidebar-workspace-menu-open-folder',
+        onSelect: () => void revealWorkspace(controller, row.id).catch(error => controller.notify('error', `Couldn't open folder: ${error?.message ?? error}`)) });
+    }
+    items.push({ id: 'archive', label: 'Archive', icon: <Archive aria-hidden />, hint: shortcutLabel('session.archive', mac) || undefined, onSelect: () => onArchive(session), destructive: true, testId: 'sidebar-workspace-menu-archive' });
+    return items;
+  };
   const sessionRow = (path: string, session: SessionSummary, shown: readonly SessionSummary[]) => {
     const row = rowFor(path, session);
     const own = factsFor(path, session, shown);
@@ -558,8 +588,8 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
       row.meta.splice(branchAt + 1, 0, ...factMeta(own));
     }
     return (
-      <SessionRow key={session.id} session={session} title={row.title} meta={row.meta} trailing={row.trailing} facts={own} selected={session.id === selected && !historyOpen && !schedulesOpen} canWrite={canWrite}
-        bucket={bucketFor(session)} onSelect={() => openSession(path, session.id)} onRename={() => onRename(session)} onArchive={() => onArchive(session)} />
+      <SessionRow key={session.id} session={session} title={row.title} meta={row.meta} trailing={row.trailing} facts={own} selected={session.id === selected && !historyOpen && !schedulesOpen}
+        actions={sessionActions(path, session)} bucket={bucketFor(session)} onSelect={() => openSession(path, session.id)} />
     );
   };
 

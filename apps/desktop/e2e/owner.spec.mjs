@@ -58,7 +58,7 @@ async function repository(directory, { branch, base, change }) {
  * repository), two sessions in shop and one in secret, one schedule on shop's newest session, and the
  * `alp` wrapper the app runs. Each step is undone through the test's `defer`, in reverse order.
  */
-async function ownerHost(context) {
+async function ownerHost(context, { fileManager } = {}) {
   const { dir, defer } = context;
   const home = path.join(dir, 'h', '.alp');
   await mkdir(home, { recursive: true, mode: 0o700 });
@@ -87,6 +87,8 @@ async function ownerHost(context) {
     PATH: `${bin}${path.delimiter}${process.env.PATH ?? '/usr/bin:/bin'}`,
     ALP_CODEX_BIN: FAKE_CODEX, FAKE_CODEX_JOURNAL: path.join(dir, 'codex.jsonl'), FAKE_CODEX_STATE: path.join(dir, 'codex-threads.json'),
     ALP_CLAUDE_BIN: path.join(dir, 'no-real-claude'), ALP_ANTIGRAVITY_BIN: path.join(dir, 'no-real-antigravity'),
+    // Open in file manager's program (t-747e): a recorder in place of Finder, unless the run asks for the real one.
+    ...(fileManager ? { ALP_DASHBOARD_FILE_MANAGER: fileManager } : {}),
   };
   for (const value of [env.ALP_HOME, env.HOME, env.TMPDIR, env.ALP_SERVICE_DIR]) assert.ok(value.startsWith(`${dir}${path.sep}`), `${value} is outside the scratch directory`);
   const port = await freePort();
@@ -224,4 +226,47 @@ test('owner: Settings › General sets the agents\' language, and the sidebar sh
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('region', { name: 'Settings' }).getByTestId('settings-general').click();
   await has(page.getByRole('region', { name: 'Settings' }).getByTestId('agents-language'), 'Now: English', 'the agents\' language after a reload');
+});
+
+/**
+ * A session row's ⋮ menu in ALP.app as the host owner (t-747e; Paseo's workspace menu): Copy path,
+ * Copy branch name, Rename, Mark as unread, Open in file manager, Archive, in that order; Open in file
+ * manager has alp dashboard open the workspace's directory on the host. A recording program stands in
+ * for Finder unless ALP_DESKTOP_REAL_FILE_MANAGER=1, which opens a real Finder window on the scratch
+ * project. With ALP_DESKTOP_SHOTS=<dir> it saves a screenshot of the open menu there.
+ */
+test('owner: a session row\'s ⋮ menu has Paseo\'s items, and Open in file manager opens the workspace on the host', { timeout: 240_000 }, async t => {
+  const context = await scratch(t);
+  const real = process.env.ALP_DESKTOP_REAL_FILE_MANAGER === '1';
+  const opened = path.join(context.dir, 'opened.txt');
+  const recorder = path.join(context.dir, 'file-manager.sh');
+  await writeFile(recorder, `#!/bin/sh\nprintf '%s' "$1" > '${opened}'\n`);
+  await chmod(recorder, 0o755);
+  const host = await ownerHost(context, { fileManager: real ? undefined : recorder });
+  const app = await launch(t, context, host.wrapper);
+  const info = await waitFor(async () => {
+    const value = JSON.parse(await readFile(path.join(host.home, 'dashboard.json'), 'utf8'));
+    return value?.port ? value : undefined;
+  }, 'alp dashboard to write dashboard.json', 90_000);
+  await connectedTo(app, `http://127.0.0.1:${info.port}`, 90_000);
+  const page = app.windows()[0];
+  const row = page.locator('[data-testid="session-row"][data-session-id="desktop-older"]');
+  await waitFor(async () => (await row.innerText().catch(() => ''))?.includes('Older shop work'), 'shop\'s older session row');
+  // The branch is known once alp dashboard read the checkout's facts.
+  await waitFor(async () => (await row.locator('[data-meta="branch"]').innerText().catch(() => '')) === 'feat/desktop-sidebar', 'shop\'s branch');
+  const menu = page.getByRole('menu', { name: 'Actions for Older shop work' });
+  const labels = () => menu.getByRole('menuitem').evaluateAll(items => items.map(item => item.querySelector('span')?.textContent?.trim()));
+  await row.hover();
+  await page.getByRole('button', { name: 'Actions for Older shop work' }).click();
+  await waitFor(async () => JSON.stringify(await labels().catch(() => [])) === JSON.stringify(['Copy path', 'Copy branch name', 'Rename', 'Mark as unread', 'Open in file manager', 'Archive']),
+    `the menu's items (now ${JSON.stringify(await labels().catch(() => []))})`, 30_000);
+  assert.match(await menu.getByTestId('sidebar-workspace-menu-archive').innerText(), /⇧⌘⌫/);
+  const shots = process.env.ALP_DESKTOP_SHOTS;
+  if (shots) { await mkdir(shots, { recursive: true }); await page.screenshot({ path: path.join(shots, 'session-menu.png') }); }
+  await menu.getByRole('menuitem', { name: 'Open in file manager' }).click();
+  if (!real) await waitFor(async () => (await readFile(opened, 'utf8').catch(() => '')) === host.projects.shop, 'the file manager to be asked for shop\'s directory', 30_000);
+  // No error notice: alp dashboard answered { opened: true }.
+  await new Promise(resolve => setTimeout(resolve, 500));
+  assert.equal(await page.getByText("Couldn't open folder").count(), 0);
+  if (shots) await page.screenshot({ path: path.join(shots, 'session-menu-after-open.png') });
 });
