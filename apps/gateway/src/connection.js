@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { CAPABILITY, ERROR, PROTOCOL_VERSION, RPC_ERROR, TERMINAL, WORKSPACE_FILES, base64Bytes, blockedFilePath, resumeCommandOf } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 import { AGENT_CAPABILITY, isAlpClientError } from '@anhlp/alp-client/portable';
-import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, CATALOG_MODEL_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.js';
+import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, imagePreviewType, projectImagePreview, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, CATALOG_MODEL_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.js';
 import { projectGitDiff, projectGitStatus, gatewayAttachmentLimits, projectAttachment, projectUploadBegun } from './policy.js';
 import { CONFIGURE_REASONS, isGeneration, projectBranch, projectConfigured, projectConfigurePreview, projectConversation, projectForkedFrom } from './policy.js';
 import { TERMINAL_REFUSALS, gatewayTerminalLimits, projectTerminal, projectTerminalEvent } from './policy.js';
@@ -173,6 +173,7 @@ const FILE_REFUSALS = Object.freeze({
   too_large: `This file is larger than ${WORKSPACE_FILES.maxReadBytes} bytes`,
   not_directory: 'The workspace is not a directory the daemon host can read',
   invalid_path: 'path must be a relative path inside the workspace, with / between names and no . or .. segment',
+  not_image: 'Only PNG, JPEG, GIF and WebP images are previewed remotely; other files are read as text',
 });
 
 /**
@@ -1859,6 +1860,28 @@ export class ClientConnection {
         throw new GatewayError(ERROR.failed, 'The daemon host answered a file the gateway does not pass on');
       }
       return { path: params.path, content, size: Buffer.byteLength(content, 'utf8'), ...(typeof result.modifiedAt === 'string' && result.modifiedAt.length <= 64 ? { modifiedAt: result.modifiedAt } : {}) };
+    },
+    // An image of a workspace for the file view (t-a35b), with files.read as workspace.files.read:
+    // only a raster image by extension (imagePreviewType; never SVG, a document that can carry
+    // script), refused before alpd otherwise; the first and only chunk (offset, revision and
+    // internalLinks refused, so never through a link); maxBytes the gateway's own 1 MiB whatever the
+    // client asked. alpd confines the read (no link, one name, no private key, .gitignore); the
+    // answer must be that one whole image (projectImagePreview), else refused.
+    'workspace.files.preview': async params => {
+      const workspace = this.#workspace(params.projectRoot);
+      this.#checkFile(params.path);
+      if (!imagePreviewType(params.path)) throw forbidden(FILE_REFUSALS.not_image, 'not_image');
+      if ((params.offset !== undefined && params.offset !== 0) || params.revision !== undefined || (params.internalLinks !== undefined && params.internalLinks !== false)) {
+        throw new GatewayError(RPC_ERROR.invalidParams, 'Images are previewed whole, from offset 0, and never through a link: leave out offset, revision and internalLinks', { reason: 'invalid_params' });
+      }
+      const result = await this.#call('workspace.files.preview', { projectRoot: workspace.canonical, path: params.path, ...(params.includeIgnored === true ? { includeIgnored: true } : {}), maxBytes: WORKSPACE_FILES.maxReadBytes }).catch(error => { throw this.#fileError(error); });
+      if (result?.nextOffset !== undefined && result?.path === params.path) throw new GatewayError(ERROR.failed, FILE_REFUSALS.too_large, { reason: 'too_large' });
+      const image = projectImagePreview(result, params.path);
+      if (!image) {
+        this.#log.error('workspace.files.preview answered another file, not one whole image, or one over the limit; refused it', { code: 'ALP_GATEWAY_FILE_OUT_OF_SCOPE' });
+        throw new GatewayError(ERROR.failed, 'The daemon host answered a file the gateway does not pass on');
+      }
+      return image;
     },
 
     // A workspace's Git state, read only (docs/protocol/alp-json-rpc-v1.md §12.5, issue #121 G1):

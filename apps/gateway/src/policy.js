@@ -1,5 +1,5 @@
 // @ts-check
-import { ATTACHMENTS, CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS, TERMINAL, TERMINAL_LIMIT_KEYS, WORKSPACE_GIT, attachmentChunkBytes, blockedFilePath, isTerminalId } from '@anhlp/alp-protocol';
+import { ATTACHMENTS, CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS, TERMINAL, TERMINAL_LIMIT_KEYS, WORKSPACE_FILES, WORKSPACE_GIT, attachmentChunkBytes, base64Bytes, blockedFilePath, isTerminalId } from '@anhlp/alp-protocol';
 
 /**
  * What the gateway lets a remote client call (docs/alp/remote-gateway.md §5): the method
@@ -700,7 +700,7 @@ export const EXPOSURE = Object.freeze({
   'workspace.files.list': { status: 'exposed', permission: 'files.read', scope: 'workspace: projectRoot names a granted workspace and is sent as its canonical path; path relative, no . or .. segment, never a blocked one (blockedFilePath, refused by the gateway before alpd); alpd lists regular files and directories under it, no link followed; answered entries must be direct children of path, plainly relative and not blocked, others dropped; alpd errors rewritten to fixed text', capability: CAPABILITY.workspaceFilesRead, params: ['projectRoot', 'path', 'includeIgnored'], tests: ['permission', 'workspace-param', 'result-filter', 'path-filter'] },
   'workspace.files.read': { status: 'exposed', permission: 'files.read', scope: 'workspace: as workspace.files.list; alpd reads one UTF-8 text file of at most WORKSPACE_FILES.maxReadBytes, no link or hard link; the answer must name the requested path and fit the limit, else refused; alpd errors rewritten to fixed text', capability: CAPABILITY.workspaceFilesRead, params: ['projectRoot', 'path', 'includeIgnored'], tests: ['permission', 'workspace-param', 'result-filter', 'path-filter'] },
   'workspace.files.find': { status: 'denied', scope: 'workspace: projectRoot; every file and directory name under it, in pages of a snapshot alpd keeps for the connection that asked', reason: 'For the daemon host\'s own clients (the Paseo bridge, t-bb87): no grant covers a whole-tree listing or its snapshots yet; remote clients search names with workspace.files.search (project.read).' },
-  'workspace.files.preview': { status: 'denied', scope: 'workspace: projectRoot and path; the bytes of any text, image or binary file up to 50 MiB, in chunks', reason: 'For the daemon host\'s own clients (the Paseo bridge, t-bb87): files.read covers UTF-8 text of at most 1 MiB only; remote clients read files with workspace.files.read.' },
+  'workspace.files.preview': { status: 'exposed', permission: 'files.read', scope: 'workspace: as workspace.files.read, narrowed to raster images (imagePreviewType: .png .jpg .jpeg .gif .webp, any case; never .svg), refused by the gateway before alpd otherwise; offset 0 only (offset, revision, internalLinks refused), maxBytes forced to WORKSPACE_FILES.maxReadBytes whatever the client sends; alpd reads the file with its own confinement (no link, one name, no private key); the answer projected by projectImagePreview (kind image, base64 of at most maxReadBytes decoded, the requested path, no target or nextOffset, the extension\'s MIME type) or refused; alpd errors rewritten to fixed text', capability: CAPABILITY.workspaceFilesBrowse, params: ['projectRoot', 'path', 'includeIgnored', 'offset', 'revision', 'internalLinks'], tests: ['permission', 'workspace-param', 'result-filter', 'path-filter', 'image-only'] },
   'host.directories.search': { status: 'prohibited', scope: 'host', reason: 'Names of the daemon host\'s directories outside any workspace (home, typed absolute paths): the host owner\'s own, never remote.' },
   'workspace.git.status': { status: 'exposed', permission: 'project.read', scope: 'workspace: workspaceId names a registry workspace whose directory a grant names exactly (#registryWorkspace, managed worktrees included); read only, never a Git mutation; answer projected by projectGitStatus: listed fields only, rows whose path or old path is not plainly relative or is blocked dropped and counted hidden, a local remote URL answered null; alpd errors rewritten to fixed text', capability: CAPABILITY.workspaceGit, params: ['workspaceId'], tests: ['permission', 'registry-scope', 'result-filter'] },
   'workspace.git.diff': { status: 'exposed', permission: 'project.read', alsoRequires: ['files.read'], scope: 'workspace: as workspace.git.status; hunks are file content, so files.read too (never a default); compare re-projected to mode, baseRef, ignoreWhitespace; path relative and not blocked, refused by the gateway before alpd; answer projected by projectGitDiff: files of other paths, non-relative or blocked ones dropped (counted hidden), each file\'s patch and the page within WORKSPACE_GIT or the answer refused, pages split to fit the client\'s frame (sealed gateway cursors); alpd errors rewritten to fixed text', capability: CAPABILITY.workspaceGit, params: ['workspaceId', 'compare', 'path', 'cursor'], tests: ['permission', 'registry-scope', 'result-filter', 'path-filter'] },
@@ -769,6 +769,7 @@ export const EXPOSURE = Object.freeze({
   'host.library.test': { status: 'owner', handler: true, scope: 'host: starts an MCP server or runs a hook once on the daemon host (core testEntry, as alp mcp test / alp hook test); output clipped', reason: 'Executes host configuration; never a remote credential.', params: ['kind', 'name', 'scope', 'projectRoot'], tests: ['owner', 'owner-library'] },
   'host.files.list': { status: 'owner', handler: true, scope: 'workspace: projectRoot a workspace alpd\'s registry knows; path relative, no . or .., never blocked; then alpd\'s workspace.files.list on the owner\'s connection', reason: 'The owner\'s Files panel without files.read on the dashboard credential; remote clients list with workspace.files.list and files.read.', params: ['projectRoot', 'path', 'includeIgnored'], tests: ['owner', 'owner-files'] },
   'host.files.read': { status: 'owner', handler: true, scope: 'workspace: as host.files.list; then alpd\'s workspace.files.read (UTF-8 text, at most WORKSPACE_FILES.maxReadBytes, no link), answered with the sha256 of its bytes', reason: 'The owner\'s file view and Editor without files.read; remote clients read with workspace.files.read and files.read.', params: ['projectRoot', 'path', 'includeIgnored'], tests: ['owner', 'owner-files'] },
+  'host.files.preview': { status: 'owner', handler: true, scope: 'workspace: as host.files.read, narrowed as workspace.files.preview: a raster image by extension (imagePreviewType, never .svg), offset 0, at most WORKSPACE_FILES.maxReadBytes; then alpd\'s workspace.files.preview on the owner\'s connection, its answer checked by projectImagePreview', reason: 'The owner\'s file view shows images without files.read; remote clients preview with workspace.files.preview and files.read.', params: ['projectRoot', 'path', 'includeIgnored'], tests: ['owner', 'owner-files', 'image-only'] },
   'host.files.write': { status: 'owner', handler: true, scope: 'workspace: as host.files.read; an existing regular file with one name, every directory on the way real (no link), never blocked (.git, .alp, .env, keys), content at most WORKSPACE_FILES.maxReadBytes; written only while its sha256 is baseSha256 (else 1004 revision_conflict), atomically through a temporary file beside it', reason: 'Changes workspace files on the host; never a remote credential.', params: ['projectRoot', 'path', 'content', 'baseSha256'], tests: ['owner', 'owner-files'] },
 });
 
@@ -970,4 +971,45 @@ export function projectGitDiff(raw, { path } = {}) {
       ...(source.nextCursor !== undefined ? { nextCursor: source.nextCursor } : {}),
     },
   };
+}
+
+/**
+ * The images a file view may show (workspace.files.preview through the gateway, host.files.preview
+ * for the owner): raster formats only, by extension in any case, with the MIME type alpd answers for
+ * each (packages/daemon/src/files.ts PREVIEW_IMAGES). SVG is left out on purpose: it is a document
+ * that can carry script, so an .svg file stays text (workspace.files.read).
+ */
+export const PREVIEW_IMAGE_TYPES = Object.freeze({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' });
+
+/** The MIME type of a path PREVIEW_IMAGE_TYPES allows, by its last extension in any case; else undefined. @param {unknown} file */
+export function imagePreviewType(file) {
+  if (typeof file !== 'string') return undefined;
+  const name = file.slice(file.lastIndexOf('/') + 1);
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0) return undefined;
+  const extension = name.slice(dot + 1).toLowerCase();
+  return Object.hasOwn(PREVIEW_IMAGE_TYPES, extension) ? PREVIEW_IMAGE_TYPES[/** @type {keyof typeof PREVIEW_IMAGE_TYPES} */ (extension)] : undefined;
+}
+
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+/**
+ * alpd's workspace.files.preview answer as a file view may receive it, or undefined: one whole image
+ * (kind image, base64, offset 0 and no nextOffset) of `file` itself (no target: never through a
+ * link), its MIME type the one its extension names, at most WORKSPACE_FILES.maxReadBytes decoded and
+ * as large as its size says. Only path, mimeType, size, modifiedAt, encoding and content pass.
+ * @param {unknown} raw @param {string} file
+ * @returns {{ path: string, kind: 'image', mimeType: string, size: number, modifiedAt?: string, encoding: 'base64', content: string } | undefined}
+ */
+export function projectImagePreview(raw, file) {
+  const source = /** @type {any} */ (raw);
+  const mimeType = imagePreviewType(file);
+  if (!mimeType || !source || typeof source !== 'object' || Array.isArray(source)) return undefined;
+  if (source.path !== file || source.target !== undefined || source.kind !== 'image' || source.encoding !== 'base64' || source.mimeType !== mimeType) return undefined;
+  if (source.nextOffset !== undefined || (source.offset !== undefined && source.offset !== 0)) return undefined;
+  const content = source.content;
+  if (typeof content !== 'string' || content.length > Math.ceil(WORKSPACE_FILES.maxReadBytes / 3) * 4 || !BASE64.test(content)) return undefined;
+  const bytes = base64Bytes(content);
+  if (bytes > WORKSPACE_FILES.maxReadBytes || source.size !== bytes) return undefined;
+  return { path: file, kind: 'image', mimeType, size: bytes, ...(typeof source.modifiedAt === 'string' && source.modifiedAt.length <= 64 ? { modifiedAt: source.modifiedAt } : {}), encoding: 'base64', content };
 }

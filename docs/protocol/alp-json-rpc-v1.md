@@ -161,6 +161,7 @@ runs before all of them pass**:
 | `too_large` | 1000 | `workspace.files.read`: the file is over 1 MiB (§12.4) |
 | `outside` | 1003 | `workspace.files.list`/`preview` with `internalLinks`: the path goes through a link whose real path is outside the workspace (§12.11) |
 | `changed` | 1004 | `workspace.files.preview`: a later chunk's `revision` is not the file's now; read it again from offset 0 (§12.11) |
+| `not_image` | 1003 | `workspace.files.preview` through the gateway, `host.files.preview` of the dashboard owner: the path is not a raster image by extension (png, jpg, jpeg, gif, webp; SVG never is); alpd itself never answers it (docs/alp/remote-gateway.md §5.10) |
 | `unsafe_path` | 1003 | a symlink where a project's `.alp`, its tasks or a library entry would be read or written |
 | `revision_conflict` | 1004 | a library `revision` or task `ifRev` that is no longer current; an entry that already exists where a new one was asked |
 | `task_state` | 1004 | the task's state refuses the change: already closed or open, open children, a closed parent, a gate already clear or missing |
@@ -677,7 +678,7 @@ connection on the local socket acts as the owner.
 | `session.attention.mark` | sets a finished attention on an idle root for every client; told as an `attention` event (§12.2) | yes (a second call answers `marked: false`) | -32602, 1001, `persistence_failed` | session.write |
 | `workspace.files.search` | read: file names under `projectRoot` (§12.3) | yes | -32602, 1001 | project.read |
 | `workspace.files.list` / `workspace.files.read` | read: a directory's entries; a text file's content (§12.4) | yes | -32602, 1000, 1001, 1003 | files.read (never a default; docs/alp/remote-gateway.md §5.10) |
-| `workspace.files.find` / `workspace.files.preview` | read: every name under `projectRoot` in pages; a file's preview in chunks (§12.11) | yes (`find` pages one snapshot) | -32602, 1000, 1001, 1003, 1004 `changed` | none: the daemon host's own clients only (the gateway denies both) |
+| `workspace.files.find` / `workspace.files.preview` | read: every name under `projectRoot` in pages; a file's preview in chunks (§12.11) | yes (`find` pages one snapshot) | -32602, 1000, 1001, 1003, 1004 `changed` | `find`: none, the daemon host's own clients only (the gateway denies it). `preview`: files.read through the gateway, narrowed to one whole raster image (png, jpg, jpeg, gif, webp; never SVG) of at most 1 MiB from offset 0 (docs/alp/remote-gateway.md §5.10) |
 | `host.directories.search` | read: the host's directory names for a typed path or a word under home (§12.11) | yes | -32602 | none: never remote (host) |
 | `attachment.begin` | reserves quota, creates an upload bound to the caller (§12.6) | with `requestId` (same params answer the same upload and what it holds) | -32602, 1001, 1004, 1005, `persistence_failed` | attachments.write + session.write |
 | `attachment.chunk` | writes decoded bytes at `offset` | yes (the same bytes at the same offset) | -32602, 1001, 1004, `persistence_failed` | attachments.write + session.write |
@@ -1551,10 +1552,13 @@ Capabilities `workspace.files.browse` and `host.directories` (t-bb87). What the 
 (integrations/paseo/server/paseo/files.ts) needs to answer Paseo's `directory_suggestions` and
 file explorer from alpd alone, so the bridge reads no file itself: every name of a workspace for
 its own ranking, a file of any kind as a preview, and the host's folders for "add a project".
-**No remote grant covers them**: the gateway denies `workspace.files.find` and
-`workspace.files.preview` and prohibits `host.directories.search`, and drops `cursor` and
-`internalLinks` from `workspace.files.list` (its params allow-list; remote clients keep §12.3 and
-§12.4). On the local socket every connection acts as the owner, as for every method.
+**No remote grant covers them as such**: the gateway denies `workspace.files.find` and prohibits
+`host.directories.search`, and drops `cursor` and `internalLinks` from `workspace.files.list` (its
+params allow-list; remote clients keep §12.3 and §12.4). It exposes `workspace.files.preview` to
+`files.read` only for the file view's images (t-a35b, docs/alp/remote-gateway.md §5.10): a raster
+image by extension (png, jpg, jpeg, gif, webp, any case; never SVG, refused `1003 not_image`),
+offset 0 only, `maxBytes` forced to 1 MiB, the answer checked to be that one whole image. It does
+not pass `workspace.files.browse` on in its hello. On the local socket every connection acts as the owner, as for every method.
 
 - `workspace.files.find { projectRoot, query?, kinds?, matchMode?, limit?, cursor? }` answers
   `{ entries: [{ path, kind: 'file' | 'directory' }], nextCursor?, truncated? }`: every file and

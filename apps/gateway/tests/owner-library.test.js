@@ -28,6 +28,7 @@ const REQUESTS = {
   'host.library.test': { kind: 'hooks', name: 'notify' },
   'host.files.list': { projectRoot: '/w', path: 'src' },
   'host.files.read': { projectRoot: '/w', path: 'src/a.ts' },
+  'host.files.preview': { projectRoot: '/w', path: 'assets/logo.png', includeIgnored: true },
   'host.files.write': { projectRoot: '/w', path: 'src/a.ts', content: 'x', baseSha256: 'a'.repeat(64) },
 };
 const HANDLED = Object.keys(REQUESTS);

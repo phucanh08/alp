@@ -422,6 +422,7 @@ Cột Test dùng các mã sau:
 | `workspace.files.search` | `workspace.files` | `projectRoot` thuộc grant, gửi alpd bản canonical; alpd không đi theo symlink; path trả về phải tương đối thuần | project.read | exposed | P S R I |
 | `workspace.files.list` | `workspace.files.read` | `projectRoot` thuộc grant, gửi bản canonical; `path` tương đối thuần, không bị chặn (gateway kiểm tra trước alpd); entry trả về phải là con trực tiếp của `path`, tương đối thuần, không bị chặn; lỗi alpd thay bằng câu cố định (§5.10) | files.read | exposed | P S R I |
 | `workspace.files.read` | `workspace.files.read` | như `workspace.files.list`; answer phải đúng `path` đã hỏi và ≤ 1 MiB; lỗi alpd thay bằng câu cố định (§5.10) | files.read | exposed | P S R I |
+| `workspace.files.preview` | `workspace.files.browse` của alpd (không forward cho client) | như `workspace.files.read`, chỉ ảnh raster theo đuôi (`png`, `jpg`, `jpeg`, `gif`, `webp`, không phân biệt hoa thường; **không SVG**), sai → `1003 not_image` trước alpd; chỉ offset 0 (`offset` khác 0, `revision`, `internalLinks` → `-32602`); `maxBytes` gateway ép 1 MiB; answer phải là một ảnh trọn vẹn của đúng `path` (`projectImagePreview`), nếu không thì từ chối; lỗi alpd thay bằng câu cố định (§5.10) | files.read | exposed | P S R I + image-only |
 | `workspace.git.status` | `workspace.git` | `workspaceId` của registry, thư mục khớp nguyên chuỗi grant (kể cả managed worktree); chỉ đọc; answer chiếu theo allow-list, dòng có path không tương đối thuần hay bị chặn bị bỏ và đếm vào `hiddenCount`, remote cục bộ → `null`; lỗi alpd thay bằng câu cố định (§5.13) | project.read | exposed | P S R I |
 | `workspace.git.diff` | `workspace.git` | như `workspace.git.status`; `compare` dựng lại từ `mode`, `baseRef`, `ignoreWhitespace`; `path` tương đối thuần, không bị chặn (kiểm tra trước alpd); file quá `WORKSPACE_GIT` → từ chối cả answer; trang cắt cho vừa frame (§5.13) | project.read + files.read | exposed | P S R I |
 | `workspace.git.facts` | `workspace.git.facts` (không forward) | host: đường dẫn host bất kỳ, không theo grant; answer chứa đường dẫn host; chỉ owner cục bộ | — | prohibited | -32601 |
@@ -480,6 +481,7 @@ Cột Test dùng các mã sau:
 | `host.library.save`/`delete` | — (gateway, `handler: true`) | host: ghi agent, skill, team, MCP, hook ở library hoặc project qua `library.save`/`delete` của alpd, có `revision`; marker giữ secret, text mask bị từ chối | — | owner (§5.19), handler của dashboard | owner, owner-library, -32601 |
 | `host.library.test` | — (gateway, `handler: true`) | host: chạy MCP server hoặc hook một lần (`testEntry`) | — | owner (§5.19), handler của dashboard | owner, owner-library, -32601 |
 | `host.files.list`/`read` | — (gateway, `handler: true`) | workspace trong registry của alpd; path tương đối, không chặn; rồi `workspace.files.list/read` của alpd; `read` kèm sha256 | — | owner (§5.19), không cần `files.read` | owner, owner-files, -32601 |
+| `host.files.preview` | — (gateway, `handler: true`) | như `host.files.read`, thu hẹp như `workspace.files.preview` (ảnh raster, không SVG, offset 0, ≤ 1 MiB, answer kiểm bằng `projectImagePreview`); rồi `workspace.files.preview` của alpd; chỉ đọc | — | owner (§5.19), không cần `files.read` | owner, owner-files, image-only, -32601 |
 | `host.files.write` | — (gateway, `handler: true`) | như `host.files.read`; file thường đã có, một tên, không link; `baseSha256` khác → 1004; ≤ 1 MiB; ghi atomic | — | owner (§5.19), handler của dashboard | owner, owner-files, -32601 |
 | `assignment.recall` | — | không kiểm chứng được; gọi model | — | denied | -32601 |
 | `daemon.pause`/`resume`/`pauses` | — | host.admin | — | denied | -32601 |
@@ -693,6 +695,28 @@ như Paseo, nhưng chỉ đọc, với một quyền riêng.
     chặn trên FIFO, process đó có thể còn lại (tối đa 4). Workspace nằm ở filesystem khác bên dưới
     một repo (git dừng ở ranh giới filesystem) thì mọi path bị coi là ignore, trừ khi
     `includeIgnored`.
+
+- **Ảnh (t-a35b)**: `workspace.files.preview` (protocol §12.11) mở cho `files.read` chỉ để tab file
+  hiện ảnh, thu hẹp hơn hẳn bản alpd phục vụ client cục bộ:
+  - Chỉ ảnh raster theo đuôi của `path` (`PREVIEW_IMAGE_TYPES` trong `policy.js`: `png`, `jpg`,
+    `jpeg`, `gif`, `webp`, không phân biệt hoa thường). **SVG bị loại** vì là tài liệu có thể mang
+    script; file `.svg` vẫn đọc như text bằng `workspace.files.read`. Đuôi khác → `1003 not_image`
+    trước alpd.
+  - Một lần đọc trọn vẹn: chỉ offset 0; `offset` khác 0, `revision` hay `internalLinks` → `-32602`
+    (không bao giờ đi qua link nội bộ). `maxBytes` gửi alpd luôn là `WORKSPACE_FILES.maxReadBytes`
+    (1 MiB), bất kể client gửi gì; file lớn hơn → `1000 too_large`.
+  - Phạm vi, block list, `.gitignore`, không theo link, file chứa private key: như `workspace.files.read`
+    (gateway kiểm `path` trước, alpd tự giam lần nữa trên đường dẫn thật).
+  - Answer kiểm lại (`projectImagePreview`): `kind: 'image'`, `encoding: 'base64'`, đúng `path` đã
+    hỏi, không `target`, không `nextOffset`, `mimeType` đúng loại của đuôi, base64 hợp lệ, giải mã
+    ≤ 1 MiB và bằng `size`; nếu không thì từ chối `1000`. Chỉ `path`, `kind`, `mimeType`, `size`,
+    `modifiedAt`, `encoding`, `content` đi qua (không `revision`).
+  - Capability `workspace.files.browse` (cũng phủ `find` và internal link) **không** được forward;
+    client thử gọi và coi `-32601` là host/gateway chưa hỗ trợ.
+  - Token không có `files.read` nhận đúng lỗi của `workspace.files.read` (`1003 grant`). Host owner
+    xem ảnh qua `host.files.preview` (§5.19) với cùng các giới hạn.
+  - Rủi ro còn lại: trình duyệt giải mã byte ảnh do workspace cung cấp (bề mặt tấn công của bộ giải
+    mã ảnh); ảnh hiện bằng `<img src="data:…">`, không bao giờ là DOM.
 
 ### 5.11 Chi tiết tool call có kiểu (t-7679.13)
 
