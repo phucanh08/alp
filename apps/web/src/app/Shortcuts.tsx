@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Search } from 'lucide-react';
 import { Dialog } from '../components/ui/dialog';
 import { helpSections, isEditable, isMacPlatform, matchShortcut, type Binding } from '../lib/shortcuts.js';
+import { isDesktopApp } from '../lib/browser-url.js';
 
 /*
  * Paseo's keyboard shortcuts for the workspace: one window listener that maps a key press to an
@@ -19,11 +20,12 @@ export function useShortcuts(run: ShortcutAction, { enabled = true, allowInModal
   const latest = React.useRef(run);
   latest.current = run;
   const mac = React.useMemo(() => isMacPlatform(), []);
+  const desktop = React.useMemo(() => isDesktopApp(), []);
   React.useEffect(() => {
     if (!enabled) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || event.repeat) return;
-      const match = matchShortcut(event, { mac, editable: isEditable(event.target) });
+      const match = matchShortcut(event, { mac, desktop, editable: isEditable(event.target) });
       if (!match) return;
       const modal = !!document.querySelector('dialog[open]') || !!document.querySelector('[data-modal-overlay]');
       if (modal && !allowInModal.includes(match.binding.action)) return;
@@ -33,14 +35,15 @@ export function useShortcuts(run: ShortcutAction, { enabled = true, allowInModal
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [enabled, mac, allowInModal.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, mac, desktop, allowInModal.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
 export function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [query, setQuery] = React.useState('');
   const mac = React.useMemo(() => isMacPlatform(), []);
+  const desktop = React.useMemo(() => isDesktopApp(), []);
   React.useEffect(() => { if (!open) setQuery(''); }, [open]);
-  const sections = helpSections(mac, query);
+  const sections = helpSections(mac, query, desktop);
   return (
     <Dialog open={open} onClose={onClose} title="Shortcuts" className="w-[min(92vw,36rem)]">
       <div className="space-y-4" data-testid="keyboard-shortcuts-dialog">

@@ -14,7 +14,8 @@ import { ShortcutsDialog, useShortcuts } from './Shortcuts';
 import { TabsProvider, tabKey, useTabs, type Tab } from './tabs';
 import { can } from '../lib/gateway.js';
 import { applyAppearance, applyTheme } from '../lib/theme';
-import { BINDINGS, formatShortcut, isMacPlatform, shortcutKeys, type Binding } from '../lib/shortcuts.js';
+import { isMacPlatform, shortcutLabel, type Binding } from '../lib/shortcuts.js';
+import { isDesktopApp } from '../lib/browser-url.js';
 import { baseName, relativeTime, sessionName } from '../lib/format';
 import { CommandCenter, type CommandScope, type RunnableAction } from './CommandCenter';
 import { workspaceRows } from '../lib/command-center.js';
@@ -147,9 +148,8 @@ function ShellShortcuts({ settings, history, splits, onAction }: { settings: boo
 }
 
 /** A binding's keys for a hint beside a command (the binding with `delta` when given). */
-function hint(action: string, mac: boolean, delta?: number) {
-  const binding = BINDINGS.find(entry => entry.action === action && entry.label && (!entry.mac || mac) && (delta === undefined || entry.delta === delta));
-  return binding ? formatShortcut(shortcutKeys(binding, mac), mac) : undefined;
+function hint(action: string, mac: boolean, delta?: 1 | -1) {
+  return shortcutLabel(action, mac, isDesktopApp(), delta) || undefined;
 }
 
 /**
