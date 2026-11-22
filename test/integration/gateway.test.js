@@ -885,3 +885,76 @@ test('terminals through the gateway on a real alpd with a real PTY: host switch,
   for (const code of ['ALPD_TERMINAL_CREATED', 'ALPD_TERMINAL_ATTACHED', 'ALPD_TERMINAL_ENDED']) assert.ok(log.includes(code), code);
   assert.ok(!log.includes('hi [') && !log.includes('read N'), 'no keystroke or output in alpd\'s log');
 });
+
+test('workspace.files.preview: images only, 1 MiB, in the grant, no link, on a real alpd; the owner\'s host.files.preview too (t-a35b)', { skip, timeout: 60_000 }, async t => {
+  const w = await world(t);
+  const { symlink } = await import('node:fs/promises');
+  const { previewWorkspaceImage } = await import('../../packages/cli/src/dashboard/owner/library.js');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  await mkdir(path.join(w.projects.a, 'assets'), { recursive: true });
+  await writeFile(path.join(w.projects.a, 'assets', 'logo.png'), png);
+  await writeFile(path.join(w.projects.a, 'assets', 'PHOTO.JPG'), png);
+  await writeFile(path.join(w.projects.a, 'assets', 'icon.svg'), '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>');
+  await writeFile(path.join(w.projects.a, 'notes.txt'), 'SENTINEL-text');
+  await writeFile(path.join(w.projects.a, 'big.png'), Buffer.alloc(1024 * 1024 + 1, 7));
+  await writeFile(path.join(w.projects.a, 'exactly.png'), Buffer.alloc(1024 * 1024, 7));
+  await writeFile(path.join(w.projects.a, 'key.png'), '-----BEGIN OPENSSH PRIVATE KEY-----\nSENTINEL-pem\n-----END OPENSSH PRIVATE KEY-----\n');
+  await writeFile(path.join(w.projects.b, 'b.png'), Buffer.concat([png, Buffer.from('SENTINEL-b')]));
+  await mkdir(path.join(w.projects.b, 'shots'));
+  await writeFile(path.join(w.projects.b, 'shots', 'c.png'), Buffer.concat([png, Buffer.from('SENTINEL-c')]));
+  // Links out of a: a file, and a directory on the way.
+  await symlink(path.join(w.projects.b, 'b.png'), path.join(w.projects.a, 'to-b.png'));
+  await symlink(path.join(w.projects.b, 'shots'), path.join(w.projects.a, 'shots'));
+
+  const reader = new AlpRpcClient(await w.open(w.tokens.files));
+  t.after(() => reader.close());
+  await hello(reader);
+  const shown = await reader.request('workspace.files.preview', { projectRoot: w.projects.a, path: 'assets/logo.png', maxBytes: 50 * 1024 * 1024 });
+  assert.deepEqual({ ...shown, modifiedAt: typeof shown.modifiedAt }, { path: 'assets/logo.png', kind: 'image', mimeType: 'image/png', size: png.length, modifiedAt: 'string', encoding: 'base64', content: png.toString('base64') });
+  assert.equal((await reader.request('workspace.files.preview', { projectRoot: w.projects.a, path: 'assets/PHOTO.JPG' })).mimeType, 'image/jpeg', 'any case');
+  assert.equal((await reader.request('workspace.files.preview', { projectRoot: w.projects.a, path: 'exactly.png' })).size, 1024 * 1024, '1 MiB itself is shown');
+  const refusal = async (client, params) => {
+    const error = await client.request('workspace.files.preview', params).then(() => assert.fail(JSON.stringify(params)), caught => caught);
+    const seen = JSON.stringify({ message: error.message, data: error.data });
+    for (const host of [w.projects.a, w.projects.b, w.home]) assert.ok(!seen.includes(host), `no host path: ${seen}`);
+    assert.ok(!seen.includes('SENTINEL') && !seen.includes('onload'), `no file content: ${seen}`);
+    return [error.code, error.data?.reason];
+  };
+  const a = w.projects.a;
+  assert.deepEqual(await refusal(reader, { projectRoot: a, path: 'assets/icon.svg' }), [1003, 'not_image'], 'SVG is never previewed');
+  assert.deepEqual(await refusal(reader, { projectRoot: a, path: 'notes.txt' }), [1003, 'not_image']);
+  assert.deepEqual(await refusal(reader, { projectRoot: a, path: 'big.png' }), [1000, 'too_large'], 'over 1 MiB, whatever maxBytes the client sent');
+  assert.deepEqual(await refusal(reader, { projectRoot: a, path: 'big.png', maxBytes: 50 * 1024 * 1024 }), [1000, 'too_large']);
+  assert.deepEqual(await refusal(reader, { projectRoot: a, path: 'key.png' }), [1003, 'blocked_path'], 'a private key under an image name');
+  assert.deepEqual(await refusal(reader, { projectRoot: a, path: 'to-b.png' }), [1003, 'linked'], 'a link to another workspace');
+  assert.deepEqual(await refusal(reader, { projectRoot: a, path: 'shots/c.png' }), [1003, 'linked'], 'a linked directory on the way');
+  assert.deepEqual(await refusal(reader, { projectRoot: a, path: 'shots/c.png', internalLinks: true }), [-32602, 'invalid_params']);
+  assert.deepEqual(await refusal(reader, { projectRoot: a, path: 'big.png', offset: 8, revision: 'r' }), [-32602, 'invalid_params']);
+  assert.deepEqual(await refusal(reader, { projectRoot: a, path: '../b/b.png' }), [-32602, 'invalid_path']);
+  assert.deepEqual(await refusal(reader, { projectRoot: a, path: path.join(w.projects.b, 'b.png') }), [-32602, 'invalid_path']);
+  assert.deepEqual(await refusal(reader, { projectRoot: w.projects.b, path: 'b.png' }), [1003, 'outside_workspace']);
+  assert.deepEqual(await refusal(reader, { projectRoot: a, path: 'missing.png' }), [1001, 'not_found']);
+  // Without files.read: workspace.files.read's refusal, alpd never asked.
+  const plain = new AlpRpcClient(await w.open(w.tokens.alice));
+  t.after(() => plain.close());
+  await hello(plain);
+  assert.deepEqual(await refusal(plain, { projectRoot: a, path: 'assets/logo.png' }), [1003, 'grant']);
+
+  // The owner's handler, on the owner's own alpd connection (as alp dashboard's gateway calls it).
+  const owner = new AlpRpcClient(await connectSocket(w.socket));
+  t.after(() => owner.close());
+  await hello(owner);
+  const listed = await owner.request('workspace.list', {});
+  await owner.request('project.register', { directory: a, ifRevision: listed.revision, requestId: 'preview-a' });
+  const daemon = { request: (method, params) => owner.request(method, params) };
+  const preview = params => previewWorkspaceImage({ daemon, params: { projectRoot: a, ...params } });
+  const reason = params => preview(params).then(() => assert.fail(JSON.stringify(params)), error => [error.code, error.data?.reason]);
+  assert.equal((await preview({ path: 'assets/logo.png' })).content, png.toString('base64'));
+  assert.deepEqual(await reason({ path: 'assets/icon.svg' }), [1003, 'not_image']);
+  assert.deepEqual(await reason({ path: 'big.png' }), [1000, 'too_large']);
+  assert.deepEqual(await reason({ path: 'to-b.png' }), [1003, 'linked']);
+  assert.deepEqual(await reason({ path: 'shots/c.png' }), [1003, 'linked']);
+  assert.deepEqual(await reason({ path: '../b/b.png' }), [-32602, 'invalid_path']);
+  assert.deepEqual(await reason({ path: path.join(w.projects.b, 'b.png') }), [-32602, 'invalid_path']);
+  assert.deepEqual(await previewWorkspaceImage({ daemon, params: { projectRoot: w.projects.b, path: 'b.png' } }).then(() => 'shown', error => error.data?.reason), 'outside_workspace', 'b is not in the registry');
+});

@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { chmod, link, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { MASK_TEXT, OWNER_LIBRARY_KINDS, TEST_OUTPUT_CHARS, libraryTest, listWorkspaceFiles, maskIn, methods, readWorkspaceFile, writeWorkspaceFile } from '../src/dashboard/owner/library.js';
+import { MASK_TEXT, OWNER_LIBRARY_KINDS, TEST_OUTPUT_CHARS, libraryTest, listWorkspaceFiles, maskIn, methods, previewWorkspaceImage, readWorkspaceFile, writeWorkspaceFile } from '../src/dashboard/owner/library.js';
 import { teardown } from '../../../test/support/teardown.js';
 
 const sha = text => createHash('sha256').update(text).digest('hex');
@@ -149,6 +149,48 @@ test('host.files.list and host.files.read: alpd answers on the owner\'s connecti
   await assert.rejects(listWorkspaceFiles({ daemon, params: { projectRoot: root, path: '.alp' } }), refused(1003, 'blocked_path'));
   await assert.rejects(readWorkspaceFile({ daemon, params: { projectRoot: outside, path: 'notes.txt' } }), refused(1003, 'outside_workspace'));
   assert.deepEqual(daemon.calls.slice(mark).filter(([method]) => method.startsWith('workspace.files')), [], 'nothing refused reached alpd\'s file methods');
+});
+
+test('host.files.preview: a raster image of a registry workspace only, whole, at most 1 MiB, its answer checked; read only (t-a35b)', async t => {
+  const { root, outside } = await workspace(t);
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  const types = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+  let answer = params => ({ path: params.path, kind: 'image', mimeType: types[params.path.slice(params.path.lastIndexOf('.') + 1).toLowerCase()], size: png.length, modifiedAt: '2026-11-22T00:00:00.000Z', revision: 'rX', encoding: 'base64', content: png.toString('base64'), offset: 0 });
+  const daemon = fakeDaemon({ 'workspace.list': { workspaces: [{ id: 'w1', directory: root }], nextCursor: null }, 'workspace.files.preview': params => answer(params) });
+  assert.equal(typeof methods['host.files.preview'], 'function');
+  const shown = await methods['host.files.preview']({ daemon, params: { projectRoot: root, path: 'assets/Logo.PNG', includeIgnored: true } });
+  assert.deepEqual(shown, { path: 'assets/Logo.PNG', kind: 'image', mimeType: 'image/png', size: png.length, modifiedAt: '2026-11-22T00:00:00.000Z', encoding: 'base64', content: png.toString('base64') });
+  assert.deepEqual(daemon.calls.filter(([method]) => method === 'workspace.files.preview'), [['workspace.files.preview', { projectRoot: root, path: 'assets/Logo.PNG', includeIgnored: true, maxBytes: 1024 * 1024 }]], 'from offset 0, 1 MiB, never offset, revision or internalLinks');
+  for (const file of ['a.jpg', 'b.JPEG', 'c.gif', 'd.webp']) assert.equal((await previewWorkspaceImage({ daemon, params: { projectRoot: root, path: file, maxBytes: 99e6, offset: 5, internalLinks: true } })).path, file);
+  assert.ok(daemon.calls.filter(([method]) => method === 'workspace.files.preview').every(([, params]) => params.maxBytes === 1024 * 1024 && !('offset' in params) && !('internalLinks' in params) && !('revision' in params)));
+
+  const mark = daemon.calls.length;
+  for (const file of ['logo.svg', 'LOGO.SVG', 'README.md', 'x.bmp', 'png', '.png', 'image.png.txt']) await assert.rejects(previewWorkspaceImage({ daemon, params: { projectRoot: root, path: file } }), refused(1003, 'not_image'), file);
+  for (const file of ['.git/x.png', '.env.png', '.alp/x.png']) await assert.rejects(previewWorkspaceImage({ daemon, params: { projectRoot: root, path: file } }), error => error.code === 1003 && ['blocked_path', 'not_image'].includes(error.data?.reason), file);
+  for (const file of ['../outside/x.png', '/etc/x.png', `${outside}/x.png`, 'a//b.png', './x.png']) await assert.rejects(previewWorkspaceImage({ daemon, params: { projectRoot: root, path: file } }), refused(-32602, 'invalid_path'), file);
+  await assert.rejects(previewWorkspaceImage({ daemon, params: { projectRoot: outside, path: 'x.png' } }), refused(1003, 'outside_workspace'));
+  await assert.rejects(previewWorkspaceImage({ daemon, params: { projectRoot: root, path: 'x.png', includeIgnored: 'yes' } }), refused(-32602, 'invalid_params'));
+  assert.deepEqual(daemon.calls.slice(mark).filter(([method]) => method === 'workspace.files.preview'), [], 'nothing refused reached alpd');
+
+  // alpd's answer must be the one whole image asked for.
+  const good = answer;
+  const bad = {
+    'another file': params => ({ ...good(params), path: 'other.png' }),
+    'through a link': params => ({ ...good(params), target: 'elsewhere.png' }),
+    'svg': params => ({ ...good(params), mimeType: 'image/svg+xml' }),
+    'text': params => ({ ...good(params), kind: 'text' }),
+    'not base64': params => ({ ...good(params), content: '<svg/>' }),
+    'over 1 MiB': params => ({ ...good(params), size: 1024 * 1024 + 1, content: Buffer.alloc(1024 * 1024 + 1).toString('base64') }),
+  };
+  for (const [label, reply] of Object.entries(bad)) {
+    answer = reply;
+    await assert.rejects(previewWorkspaceImage({ daemon, params: { projectRoot: root, path: 'x.png' } }), refused(1000, 'unreadable'), label);
+  }
+  answer = params => ({ ...good(params), nextOffset: 10 });
+  await assert.rejects(previewWorkspaceImage({ daemon, params: { projectRoot: root, path: 'x.png' } }), refused(1000, 'too_large'));
+  // alpd's own refusal passes through as host.files.read's does.
+  answer = () => { throw Object.assign(new Error('x.png is reached through a link'), { code: 1003, data: { reason: 'linked' } }); };
+  await assert.rejects(previewWorkspaceImage({ daemon, params: { projectRoot: root, path: 'x.png' } }), refused(1003, 'linked'));
 });
 
 test('host.library.save: the keep marker goes to alpd as is; the app\'s mask text is refused and never written', async t => {

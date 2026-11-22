@@ -5,6 +5,7 @@ import path from 'node:path';
 import { ERROR, RPC_ERROR, WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
 import { moveFile } from '@anhlp/alp-core/atomic';
 import { testEntry } from '@anhlp/alp-client/library-test';
+import { imagePreviewType, projectImagePreview } from '@anhlp/alp-gateway/policy';
 
 /**
  * Owner handlers for the user's library and workspace files (t-a95b group C; Settings › Templates,
@@ -22,6 +23,8 @@ import { testEntry } from '@anhlp/alp-client/library-test';
  *   host.library.test    core's testEntry, as `alp mcp test` / `alp hook test`, in this process.
  *   host.files.list      alpd's workspace.files.list / .read for the owner, who holds no files.read:
  *   host.files.read      a registry workspace and a checked path only (listWorkspaceFiles below).
+ *   host.files.preview   alpd's workspace.files.preview for one raster image (PNG, JPEG, GIF, WebP;
+ *                        never SVG) of at most 1 MiB, whole, never through a link (previewWorkspaceImage).
  *   host.files.write     one existing text file of a registry workspace, replaced atomically when it
  *                        still holds what the app read (sha256 of its bytes); see writeWorkspaceFile.
  */
@@ -286,10 +289,33 @@ export async function readWorkspaceFile({ daemon, params }) {
   return { ...result, sha256: sha256(Buffer.from(result.content, 'utf8')) };
 }
 
+/**
+ * host.files.preview: one image of a registry workspace for the owner's file view, as the gateway
+ * narrows workspace.files.preview for files.read (apps/gateway/src/policy.js PREVIEW_IMAGE_TYPES):
+ * a raster image by extension in any case (never SVG, a document that can carry script), checked
+ * as host.files.read checks a path, refused before alpd otherwise; alpd reads it from offset 0 with
+ * maxBytes WORKSPACE_FILES.maxReadBytes and its own confinement (no link, one name, no private
+ * key); its answer must be that one whole image (projectImagePreview), else refused. Read only.
+ * @param {{ daemon: { request: (method: string, params?: Record<string, unknown>) => Promise<unknown> }, params: Record<string, any> }} context
+ */
+export async function previewWorkspaceImage({ daemon, params }) {
+  const projectRoot = rootOf(params.projectRoot, true);
+  const relative = relativeSegments(params.path).join('/');
+  if (!imagePreviewType(relative)) throw new OwnerError(ERROR.forbidden, 'not_image', 'Only PNG, JPEG, GIF and WebP images are previewed; other files are read as text');
+  if (params.includeIgnored !== undefined && typeof params.includeIgnored !== 'boolean') throw invalid('includeIgnored must be true or false');
+  const root = await registryWorkspace(daemon, /** @type {string} */ (projectRoot));
+  const result = /** @type {any} */ (await daemon.request('workspace.files.preview', { projectRoot: root, path: relative, ...(params.includeIgnored ? { includeIgnored: true } : {}), maxBytes: WORKSPACE_FILES.maxReadBytes }));
+  if (result?.path === relative && result?.nextOffset !== undefined) throw new OwnerError(ERROR.failed, 'too_large', `${relative} is larger than ${WORKSPACE_FILES.maxReadBytes} bytes`);
+  const image = projectImagePreview(result, relative);
+  if (!image) throw new OwnerError(ERROR.failed, 'unreadable', `alpd answered the preview of ${relative} in a form the dashboard does not show`);
+  return image;
+}
+
 /** @type {Readonly<Record<string, import('./index.js').DashboardOwnerHandler>>} */
 export const methods = {
   'host.files.list': context => listWorkspaceFiles(context),
   'host.files.read': context => readWorkspaceFile(context),
+  'host.files.preview': context => previewWorkspaceImage(context),
   'host.library.get': libraryGet,
   'host.library.save': librarySave,
   'host.library.delete': libraryDelete,

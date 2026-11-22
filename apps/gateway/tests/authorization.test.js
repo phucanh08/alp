@@ -83,6 +83,7 @@ const OUT_OF_SCOPE = {
   'workspace.files.search': ({ b }) => [{ projectRoot: b, query: 'x' }, 1003, 'outside_workspace'],
   'workspace.files.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
   'workspace.files.read': ({ b }) => [{ projectRoot: b, path: 'README.md' }, 1003, 'outside_workspace'],
+  'workspace.files.preview': ({ b }) => [{ projectRoot: b, path: 'logo.png' }, 1003, 'outside_workspace'],
   'session.create': ({ b }) => [{ spec: { cwd: b } }, 1003, 'outside_workspace'],
   'session.prompt': () => [{ sessionId: 'mix', clientMessageId: 'm', content: text }, 1001],
   'session.interrupt': () => [{ sessionId: 'sb' }, 1001],
@@ -135,7 +136,7 @@ const IN_SCOPE = ({ a }) => ({
   'session.list': {}, 'session.get': { sessionId: 'sa' }, 'session.status': { sessionId: 'sa' }, 'session.log': { sessionId: 'sa' },
   'session.history': { sessionId: 'sa' }, 'session.attach': { sessionId: 'sa' }, 'session.release': { sessionId: 'sa' }, 'session.attention.clear': { sessionId: 'sa' }, 'session.preview': { spec: { cwd: a } },
   'question.list': {}, 'question.watch': {}, 'board.list': { projectRoot: a }, 'workspace.files.search': { projectRoot: a },
-  'workspace.files.list': { projectRoot: a }, 'workspace.files.read': { projectRoot: a, path: 'README.md' },
+  'workspace.files.list': { projectRoot: a }, 'workspace.files.read': { projectRoot: a, path: 'README.md' }, 'workspace.files.preview': { projectRoot: a, path: 'logo.png' },
   'session.create': { spec: { cwd: a } }, 'session.prompt': { sessionId: 'sa', clientMessageId: 'm', content: text },
   'session.interrupt': { sessionId: 'sa' }, 'session.configure': { sessionId: 'sa' }, 'session.close': { sessionId: 'sa' },
   'session.rename': { sessionId: 'sa', title: 't' }, 'session.archive': { sessionId: 'sa' }, 'session.attention.mark': { sessionId: 'sa' }, 'session.update': { sessionId: 'sa', pinned: true }, 'label.list': {}, 'session.message': { sessionId: 'sa', text: 'x' },
@@ -610,6 +611,88 @@ test('workspace.files.list and read: files.read only, never a default; canonical
   ({ client } = await sdk('alice'));
   daemon.state.handlers['workspace.files.read'] = () => { throw new Error(`EACCES: ${canonicalA}/x.txt`); };
   await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: 'x.txt' }), failure => !failure.message.includes(canonicalA));
+});
+
+// A 1x1 PNG, and alpd's preview answer for it (packages/daemon/src/files.ts previewWorkspaceFile).
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+const previewOf = (file, bytes = PNG, extra = {}) => ({ path: file, kind: 'image', mimeType: { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }[file.slice(file.lastIndexOf('.') + 1).toLowerCase()] ?? 'image/svg+xml', size: bytes.length, modifiedAt: '2026-11-22T00:00:00.000Z', revision: 'rABC', encoding: 'base64', content: bytes.toString('base64'), offset: 0, ...extra });
+
+test('workspace.files.preview: files.read only; raster images by extension (never SVG), whole, at most 1 MiB, never through a link; answers checked (t-a35b)', async t => {
+  const { daemon, sdk, a, canonicalA } = await world(t);
+  let { client } = await sdk('alice');
+  // The capability that also covers workspace.files.find and internal links is not passed on.
+  assert.ok(!(await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('workspace.files.browse'));
+  daemon.state.handlers['workspace.files.preview'] = ({ path: file }) => previewOf(file, PNG, { target: undefined, inode: 7, host: '/etc' });
+  const shown = await client.request('workspace.files.preview', { projectRoot: a, path: 'assets/logo.png', includeIgnored: true, maxBytes: 50 * 1024 * 1024, extra: 'dropped' });
+  assert.deepEqual(shown, { path: 'assets/logo.png', kind: 'image', mimeType: 'image/png', size: PNG.length, modifiedAt: '2026-11-22T00:00:00.000Z', encoding: 'base64', content: PNG.toString('base64') }, 'only the image fields; no revision, offset or host detail');
+  assert.deepEqual(daemon.calls('workspace.files.preview').at(-1).params, { projectRoot: canonicalA, path: 'assets/logo.png', includeIgnored: true, maxBytes: 1024 * 1024 }, 'the canonical workspace; maxBytes forced to 1 MiB whatever the client asked');
+  // Any case of an allowed extension.
+  for (const file of ['A.PNG', 'b.Jpg', 'c.JPEG', 'd.gif', 'e.WebP', 'dir.png/f.jpeg']) {
+    assert.equal((await client.request('workspace.files.preview', { projectRoot: a, path: file })).path, file, file);
+    assert.equal(daemon.calls('workspace.files.preview').at(-1).params.maxBytes, 1024 * 1024, file);
+  }
+  const small = await client.request('workspace.files.preview', { projectRoot: a, path: 'small.png', maxBytes: 1 });
+  assert.equal(small.size, PNG.length);
+  assert.equal(daemon.calls('workspace.files.preview').at(-1).params.maxBytes, 1024 * 1024, 'a smaller client maxBytes is not forwarded either');
+
+  // Refused by the gateway before alpd: SVG, other files, no extension, chunks, links, blocked or non-relative paths.
+  const mark = daemon.calls().length;
+  ({ client } = await sdk('alice'));
+  for (const file of ['logo.svg', 'LOGO.SVG', 'icon.svgz', 'README.md', 'archive.zip', 'image.png.txt', 'png', '.png', 'dir.png/file', 'x.bmp', 'x.tiff', 'x.ico', 'x.avif', 'x.heic', 'page.html']) {
+    await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: file }), error => error.code === 1003 && error.data?.reason === 'not_image', file);
+  }
+  for (const params of [{ offset: 4 }, { revision: 'rABC' }, { internalLinks: true }, { offset: 0, revision: 'r' }]) {
+    await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: 'logo.png', ...params }), error => error.code === -32602 && error.data?.reason === 'invalid_params', JSON.stringify(params));
+  }
+  ({ client } = await sdk('alice'));
+  for (const file of ['.env.png', '.git/logo.png', '.alp/x.png', 'id_rsa.png', 'certs/tls.key', 'secrets/credentials.json']) {
+    await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: file }), error => error.code === 1003 && (error.data?.reason === 'blocked_path' || error.data?.reason === 'not_image'), file);
+  }
+  for (const file of ['/etc/x.png', '../b/x.png', 'src/../../x.png', './x.png', 'a//b.png', 'C:/x.png', 'a\\b.png', `${canonicalA}/x.png`]) {
+    await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: file }), error => error.code === -32602 && error.data?.reason === 'invalid_path', file);
+  }
+  await assert.rejects(client.request('workspace.files.preview', { projectRoot: `${a}/`, path: 'x.png' }), error => error.code === 1003 && error.data?.reason === 'outside_workspace');
+  // Without files.read: exactly workspace.files.read's refusal.
+  for (const label of ['both', 'reader', 'sessions']) {
+    const { client: other } = await sdk(label);
+    const read = await other.request('workspace.files.read', { projectRoot: a, path: 'logo.png' }).then(() => assert.fail(label), failure => failure);
+    const preview = await other.request('workspace.files.preview', { projectRoot: a, path: 'logo.png' }).then(() => assert.fail(label), failure => failure);
+    assert.deepEqual([preview.code, preview.message, preview.data], [read.code, read.message, read.data], label);
+    assert.equal(preview.data?.permission, 'files.read', label);
+  }
+  assert.deepEqual(daemon.calls().slice(mark).filter(call => call.method.startsWith('workspace.files.')), [], 'no refused call reached alpd');
+
+  // Answers that are not one whole raster image of the file asked for are refused.
+  const big = Buffer.alloc(1024 * 1024 + 1, 1);
+  const bad = {
+    'another file': file => previewOf(`other/${file}`),
+    'through a link': file => previewOf(file, PNG, { target: 'elsewhere/logo.png' }),
+    'svg kind': file => ({ ...previewOf(file), mimeType: 'image/svg+xml' }),
+    'text kind': file => ({ ...previewOf(file), kind: 'text', mimeType: 'text/plain' }),
+    'binary kind': file => ({ ...previewOf(file), kind: 'binary', encoding: 'none', content: undefined }),
+    'other mime': file => ({ ...previewOf(file), mimeType: 'image/jpeg' }),
+    'not base64': file => ({ ...previewOf(file), content: '<svg onload=alert(1)>' }),
+    'size mismatch': file => ({ ...previewOf(file), size: 1 }),
+    'over 1 MiB': file => previewOf(file, big),
+    'a later chunk': file => ({ ...previewOf(file), offset: 8 }),
+  };
+  ({ client } = await sdk('alice'));
+  for (const [label, answer] of Object.entries(bad)) {
+    daemon.state.handlers['workspace.files.preview'] = ({ path: file }) => answer(file);
+    await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: 'logo.png' }), error => error.code === 1000 && !error.message.includes('svg'), label);
+  }
+  // More to come (nextOffset): too_large, as a file over the limit alpd refuses itself.
+  daemon.state.handlers['workspace.files.preview'] = ({ path: file }) => previewOf(file, PNG, { nextOffset: PNG.length });
+  await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: 'logo.png' }), error => error.code === 1000 && error.data?.reason === 'too_large');
+  // alpd's refusals: code and reason pass, the message is the gateway's fixed text.
+  for (const reason of ['ignored', 'linked', 'not_found', 'too_large', 'blocked_path', 'invalid_path', 'changed', 'something_new']) {
+    daemon.state.handlers['workspace.files.preview'] = () => { throw { code: reason === 'too_large' ? 1000 : 1003, message: `${canonicalA}/logo.png: SENTINEL quote`, data: { reason, file: `${canonicalA}/logo.png` } }; };
+    const caught = await client.request('workspace.files.preview', { projectRoot: a, path: 'logo.png' }).then(() => assert.fail(reason), failure => failure);
+    assert.equal(caught.data?.reason, reason);
+    assert.ok(!caught.message.includes(canonicalA) && !caught.message.includes('SENTINEL') && !JSON.stringify(caught.data).includes(canonicalA), `${reason}: ${caught.message}`);
+  }
+  daemon.state.handlers['workspace.files.preview'] = () => { throw new Error(`EACCES: ${canonicalA}/logo.png`); };
+  await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: 'logo.png' }), failure => !failure.message.includes(canonicalA));
 });
 
 test('question.answer needs an exact id in scope: a prefix that alpd would expand is refused', async t => {
