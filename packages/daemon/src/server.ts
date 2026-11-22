@@ -66,6 +66,8 @@ function crashPoint(name: string) {
   process.kill(process.pid, 'SIGKILL');
 }
 
+/** The most labels one root carries (capability `session.meta`). */
+const SESSION_LABELS_MAX = 20;
 const persistenceFailed = (what: string, error: unknown) =>
   new RpcError(ERROR.failed, `alpd could not record ${what}: ${error instanceof Error ? error.message : String(error)}`, { reason: 'persistence_failed' });
 
@@ -955,7 +957,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     const session = live ?? record?.session;
     if (!session) return undefined;
     const status: SessionStatus = live ? (live.activeTurnId ? 'running' : 'idle') : record?.status === 'error' ? 'error' : 'closed';
-    return { ...session, ...(live ? {} : { busy: false, activeTurnId: undefined }), status, title: record?.title, ...(record?.archived ? { archived: true } : {}), ...(record?.attention && !record.archived ? { attention: record.attention } : {}), lastError: record?.lastError, createdAt: record?.createdAt, updatedAt: record?.updatedAt, ...(record && conversation ? conversation.fields(record, session) : {}) };
+    return { ...session, ...(live ? {} : { busy: false, activeTurnId: undefined }), status, title: record?.title, ...(record?.archived ? { archived: true } : {}), ...(record?.attention && !record.archived ? { attention: record.attention } : {}), ...(record?.pinnedAt ? { pinnedAt: record.pinnedAt } : {}), ...labelsOf(record), lastError: record?.lastError, createdAt: record?.createdAt, updatedAt: record?.updatedAt, ...(record && conversation ? conversation.fields(record, session) : {}) };
   }
 
   /** The record of a root the user acts on. */
@@ -965,6 +967,39 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     if (!record) throw new RpcError(ERROR.notFound, `No session ${sessionId}`);
     if (record.rootId !== record.id) throw new RpcError(-32602, 'Only a root session can be renamed or archived');
     return record;
+  }
+
+  /**
+   * The registry's label catalog by lower-cased name, as alpd last read it (capability `session.meta`);
+   * undefined until read or when the registry cannot be read. Every registry.owner call refreshes it.
+   */
+  let labelCatalog: Map<string, { name: string; color: string }> | undefined;
+  const keepCatalog = (catalog: Array<{ name: string; color: string }>) => { labelCatalog = new Map(catalog.map(label => [label.name.toLowerCase(), { name: label.name, color: label.color }])); };
+  /** A root's labels still in the catalog, in its spelling; a deleted label leaves every session at once. */
+  function labelsOf(record: SessionRecord | undefined): { labels?: string[] } {
+    if (!record?.labels?.length) return {};
+    const labels = labelCatalog ? record.labels.flatMap(name => labelCatalog!.get(name.toLowerCase())?.name ?? []) : record.labels;
+    return labels.length ? { labels } : {};
+  }
+  /** Session label writes and the follow-up of a catalog rename or delete, one at a time. */
+  let labelWrites: Promise<unknown> = Promise.resolve();
+  const serialLabels = <T>(run: () => Promise<T>): Promise<T> => { const next = labelWrites.then(run, run); labelWrites = next.catch(() => {}); return next; };
+  /**
+   * A catalog label renamed or deleted (registry.owner label.update, label.delete): the roots that
+   * carry it follow at once, so a rename keeps the label on them. The read-time filter of labelsOf
+   * still hides a deleted name if this write fails or alpd stops before it.
+   */
+  function followLabel(previousName: string, newName: string | undefined) {
+    return serialLabels(async () => {
+      const key = previousName.toLowerCase();
+      for (const record of records.values()) {
+        if (!record.labels?.some(name => name.toLowerCase() === key)) continue;
+        const next = [...new Map(record.labels.flatMap(name => name.toLowerCase() === key ? (newName ? [newName] : []) : [name]).map(name => [name.toLowerCase(), name])).values()];
+        record.labels = next.length ? next : undefined;
+        try { await store?.put(record); }
+        catch (error) { log.warn('could not keep a session\'s labels after a catalog change', { code: 'ALPD_SESSION_LABELS_FAILED', sessionId: record.id, error }); }
+      }
+    });
   }
 
   function known(sessionId: string) {
@@ -1086,6 +1121,10 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
 
   /** Projects, tasks, library and settings (docs/protocol/alp-json-rpc-v1.md §15); a team save syncs the projects sessions ran in. */
   const registry = home ? createRegistry(home) : undefined;
+  /** The catalog as the registry holds it now, kept for session rows (capability `session.meta`). */
+  const labelList = () => registryCall(async () => { keepCatalog((await registry!.snapshot()).labels.catalog); return labelCatalog!; });
+  // Session rows filter their labels by the catalog: read it before the first request is served.
+  if (registry) restored = Promise.all([restored, registry.snapshot().then(r => keepCatalog(r.labels.catalog), error => log.warn('could not read the label catalog', { code: 'ALPD_LABELS_UNREADABLE', error }))]);
   const worktrees = home && registry && process.platform !== 'win32' ? createWorkspaceWorktrees(home, registry, async (directory, run) => {
     if (!runtime.withWorkspaceMutation) throw new RegistryError(1005, 'Runtime cannot prove safe worktree removal', { reason: 'guard_unavailable' });
     try { return await runtime.withWorkspaceMutation(directory, run); } catch (error: any) { if (error?.data?.reason) throw new RegistryError(1004, 'Workspace is in use or has retained assignment results', error.data); throw error; }
@@ -1366,6 +1405,13 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     'registry.owner': (_c, params) => registryCall(async () => {
       const result = params.operation ? await registry!.mutate(params.operation, params.args ?? {}, { requestId: params.requestId, ifRevision: params.ifRevision }) : undefined;
       const { receipts: _receipts, ...metadata } = await registry!.snapshot();
+      keepCatalog(metadata.labels.catalog);
+      // Roots carry catalog labels too (session.update): they follow a rename and lose a deleted one.
+      // Only while the old name is gone from the catalog: a replayed receipt must not take a label
+      // created again under that name from the roots that carry it now.
+      const gone = (name: unknown): name is string => typeof name === 'string' && !labelCatalog?.has(name.toLowerCase());
+      if (params.operation === 'label.update' && gone(result?.previousName) && typeof result.label?.name === 'string') await followLabel(result.previousName, result.label.name);
+      if (params.operation === 'label.delete' && gone(params.args?.name)) await followLabel(params.args.name, undefined);
       return { ...(result ? { result } : {}), registry: metadata };
     }),
     'registry.worktree': (_c, p) => registryCall(async () => worktrees ? worktrees.grants(p) : { mappings: [], workspaces: [] }),
@@ -1724,6 +1770,41 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       return { session: summary(record.id) };
     },
 
+    /**
+     * Paseo's Pin to top and labels on a root (capability `session.meta`): `pinned` sets or clears
+     * pinnedAt, `labels` replaces the root's labels with names of the registry's catalog. Not
+     * activity, as a name: updatedAt and the place in session.list stay.
+     */
+    async 'session.update'(_connection, { sessionId, pinned, labels }) {
+      if (pinned === undefined && labels === undefined) throw new RpcError(-32602, 'pinned or labels is required');
+      if (pinned !== undefined && typeof pinned !== 'boolean') throw new RpcError(-32602, 'pinned must be a boolean');
+      if (labels !== undefined && (!Array.isArray(labels) || labels.length > SESSION_LABELS_MAX || labels.some(name => typeof name !== 'string' || !name.trim()))) throw new RpcError(-32602, `labels must be at most ${SESSION_LABELS_MAX} names`);
+      const record = rootRecord(sessionId);
+      return serialLabels(async () => {
+        let names: string[] | undefined;
+        if (labels !== undefined) {
+          const catalog = await labelList();
+          names = [];
+          for (const name of labels as string[]) {
+            const label = catalog.get(name.trim().replace(/\s+/g, ' ').toLowerCase());
+            if (!label) throw new RpcError(-32602, `No label ${name} in the label catalog`, { reason: 'unknown_label' });
+            if (!names.includes(label.name)) names.push(label.name);
+          }
+        }
+        const before = { pinnedAt: record.pinnedAt, labels: record.labels };
+        if (pinned !== undefined) record.pinnedAt = pinned ? record.pinnedAt ?? new Date().toISOString() : undefined;
+        if (names) record.labels = names.length ? names : undefined;
+        try { await store?.put(record); }
+        catch (error) { Object.assign(record, before); throw persistenceFailed(`the pin and labels of ${record.id}`, error); }
+        return { session: summary(record.id) };
+      });
+    },
+
+    /** The registry's label catalog, the names session.update takes (capability `session.meta`). */
+    async 'label.list'() {
+      return { labels: [...(await labelList()).values()] };
+    },
+
     /** Sets a root aside: it closes, with its tree, and leaves the lists until unarchived (ALPD §61). */
     async 'session.archive'(_connection, { sessionId, archived = true }) {
       const record = rootRecord(sessionId);
@@ -1957,7 +2038,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [...(runtime.interruptTurn ? [CAPABILITY.sessionInterruptTurn] : []), ...(runtime.commands ? [CAPABILITY.sessionCommands] : []), CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.sessionAttentionMark, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.workspaceFilesBrowse, CAPABILITY.hostDirectories, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), CAPABILITY.workspaceGitFacts, ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...(conversation?.reloads ? [CAPABILITY.sessionReload] : []), ...(conversation?.configures ? [CAPABILITY.sessionConfigureLive] : []), ...(conversation ? [CAPABILITY.sessionResumeCommand] : []), ...(modelCatalog ? [CAPABILITY.catalogLive] : []), ...operations.capabilities];
+  const capabilities = [...(runtime.interruptTurn ? [CAPABILITY.sessionInterruptTurn] : []), ...(runtime.commands ? [CAPABILITY.sessionCommands] : []), CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.sessionAttentionMark, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.workspaceFilesBrowse, CAPABILITY.hostDirectories, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit, CAPABILITY.sessionMeta] : []), CAPABILITY.workspaceGitFacts, ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...(conversation?.reloads ? [CAPABILITY.sessionReload] : []), ...(conversation?.configures ? [CAPABILITY.sessionConfigureLive] : []), ...(conversation ? [CAPABILITY.sessionResumeCommand] : []), ...(modelCatalog ? [CAPABILITY.catalogLive] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {

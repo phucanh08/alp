@@ -143,7 +143,7 @@ runs before all of them pass**:
 | `batch_unsupported` | -32600 | a batch |
 | `frame_too_large` | -32600 | an oversized message on a message transport |
 | `response_too_large` | 1000 | a result over the frame limit |
-| `persistence_failed` | 1000 | `session.create`, `session.prompt`, `session.rename`, `session.archive` when the store cannot write; `session.fork`/`session.rewind` when the journal or the commit cannot be written (§12.7) |
+| `persistence_failed` | 1000 | `session.create`, `session.prompt`, `session.rename`, `session.archive`, `session.update` when the store cannot write; `session.fork`/`session.rewind` when the journal or the commit cannot be written (§12.7) |
 | `outcome_unknown` | 1004 | `session.prompt`: the daemon cannot tell whether the provider received the prompt (§10); `session.fork`/`session.rewind`: whether the runtime made the fork (§12.7) |
 | `key_conflict` | 1004 | `session.prompt`: the `clientMessageId` was used with other content; `task.create`: the `requestId` was used for another task; `session.fork`/`session.rewind`: the `requestId` was used with other parameters (§12.7) |
 | `invalid_path` | -32602 | `projectRoot` is not an absolute, normalized path (§15.1, §12.3); a `workspace.files` `path` that is not plainly relative (§12.4) |
@@ -252,6 +252,7 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 | `question.watch.turns` | `question.watch` accepts `turns`: also every root's `turn.ended` (§12.2). Every alpd lists it. |
 | `session.attention` | `question.watch` accepts `attention`: each root's finished or error attention, kept by alpd for every client, in the answer and as `attention` events; `session.attention.clear` acknowledges one (§12.2). Every alpd lists it. |
 | `session.attention.mark` | `session.attention.mark`: Paseo's Mark as unread, a `finished` attention set on an idle root that has none (§12.2). Every alpd lists it. |
+| `session.meta` | `session.update` (`pinned`, `labels`) and `label.list`: Paseo's Pin to top and labels per root session, the labels from the registry's label catalog; session rows carry `pinnedAt` and `labels` (§12.1). An alpd with a registry (`ALP_HOME`) lists it. |
 | `workspace.files` | `workspace.files.search`: file names under a directory matching a query, read-only (§12.3). Every alpd lists it. |
 | `workspace.files.read` | `workspace.files.list` and `workspace.files.read`: a directory's entries and a UTF-8 text file's content (at most 1 MiB) under a directory, read-only, links never followed, blocked paths refused (§12.4). Every alpd lists it. |
 | `prompt.images` | `session.prompt` takes inline image parts (§10, Prompt content); a session snapshot's `promptImages: true` says its runtime takes them. Every alpd lists it. |
@@ -696,6 +697,8 @@ connection on the local socket acts as the owner.
 | `session.close` | closes | no (second → 1001) | 1001 | session.write |
 | `session.rename` | renames a root; announced as `session.updated` (§8.1) | yes | -32602, 1001, `persistence_failed` | session.write |
 | `session.archive` | archives/unarchives a root, closes it | yes | -32602, 1001, `persistence_failed` | session.write |
+| `session.update` | pins/unpins a root and sets its labels; not activity (§12.1) | yes | -32602 (`unknown_label` too), 1001, 1005 (labels without a registry), `persistence_failed` | session.write |
+| `label.list` | read: the registry's label catalog (§12.1) | yes | 1005 without a registry | session.read |
 | `session.get` / `session.list` | read; `session.list` pages (§12.1) | yes | 1001; -32602 for a cursor alpd did not give | session.read |
 | `session.status` | read (live tree) | yes | 1001 | session.read |
 | `session.message` | posts user mail to a session | no | 1000, 1001 | session.write |
@@ -743,6 +746,28 @@ host's agents (`fetch_agent_history`, Paseo `b63a325`):
   `limit` or `cursor`. The cursors it answers are alpd's sealed with AES-256-GCM under a key of the gateway
   process, bound to the credential. A cursor it did not give that credential (another one's, alpd's
   own, or one from before a gateway restart) answers `-32602`; the client reads again from the start.
+
+**Pin to top and labels** (capability `session.meta`, t-a876), Paseo's per-agent pin and labels:
+
+- **`session.update { sessionId, pinned?, labels? }`** (at least one of them) answers `{ session }`.
+  Only a root (`-32602` for a child, `1001` for an unknown id). `pinned: true` sets `pinnedAt` (now)
+  unless it is set; `false` clears it. `labels` (at most 20 names) replaces the root's labels: each name
+  must be in the registry's label catalog (§16, the catalog workspaces use), matched without case and
+  stored in the catalog's spelling, once each; an unknown name answers `-32602` `unknown_label` and
+  changes nothing; `[]` clears them. Labels need the registry: an alpd without one answers `1005`.
+  Neither is activity: `updatedAt` and the place in `session.list` stay, as with `session.rename`.
+  Kept in the session store; a write that fails answers `persistence_failed` and changes nothing.
+  No event is sent: other clients see it the next time they read the session.
+- **Session rows** (`session.list`, `session.get`, `session.update`) carry
+  `pinnedAt` while pinned and `labels` while the root has one still in the catalog; both are absent
+  otherwise. When the owner renames a catalog label (`registry.owner` `label.update`) alpd rewrites the
+  roots that carry it to the new name at once; when it deletes one (`label.delete`) alpd removes it
+  from them, and a row never lists a name the catalog no longer has, even if that write failed.
+- **`label.list {}`** answers `{ labels: [{ name, color }] }`, the catalog, read-only. Changing it is
+  the owner's (`registry.owner` `label.assign`/`label.update`/`label.delete`).
+- **Through the gateway**: `session.update` needs `session.write` and a root in the grant, only
+  `sessionId`, `pinned` and `labels` reach alpd, and the answer is `{ session }`; `label.list` needs
+  `session.read` and answers only names and colours.
 
 ### 12.2 `question.watch`
 
@@ -1649,6 +1674,10 @@ The Paseo provider sends the list as `session.commands` when a root is ready and
   detail.
 - The `usage` event and the session snapshot's `usage` (§8.5); old clients ignore an unknown event
   type (§7) and unknown snapshot fields.
+- `session.update`, `label.list` and the `pinnedAt` and `labels` of session rows (capability
+  `session.meta`), §12.1 (t-a876). Old clients never call them and ignore the new row fields; a gateway
+  or client sees no capability on an older alpd. `session.attention.mark` now answers `marked: false`
+  for a closed root too.
 - `session.attention.mark` (capability `session.attention.mark`), §12.2 (t-747e). Old clients never
   call it; a gateway or client sees no capability on an older alpd.
 - `question.watch` `attention`, the `attention` event, `session.attention.clear`, the `attention` of

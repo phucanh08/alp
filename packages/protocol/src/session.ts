@@ -106,6 +106,10 @@ export type SessionSummary = SessionSnapshot & {
   archived?: boolean;
   /** A root's turn that ended unseen, until a client acknowledges it (capability `session.attention`). */
   attention?: TurnAttention;
+  /** When the user pinned this root to the top (capability `session.meta`); absent when not pinned. */
+  pinnedAt?: string;
+  /** The root's labels, names of the registry's label catalog (capability `session.meta`); absent when none. */
+  labels?: string[];
   lastError?: SessionError;
   createdAt?: string;
   updatedAt?: string;
