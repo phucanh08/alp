@@ -5,6 +5,18 @@ import type { ConfigureOutcome, ConfigurePreview, ConversationBranch, ForkProven
 import type { EntryName, LanguageSetting, LibraryEntryRow, LibraryKind, LibraryScope, LibrarySource, TaskRow, TeamRow } from './dto.js';
 import type { ScheduleJob, ScheduleStatus } from './schedule.js';
 
+/** One window of daemon.usage: `name` ALP's own, `id`/`label` Paseo's (t-9116). */
+export type UsageWindow = { name: string; usedPercent: number | null; resetsAt: string | null; id?: string; label?: string };
+/** One provider of daemon.usage; fields after `windows` were added by t-9116 and may be missing from an older alpd. */
+export type UsageProvider = Record<string, unknown> & {
+  runtime: string; available?: boolean; checkedAt?: string; plan?: string | null; limited?: boolean; windows?: UsageWindow[];
+  planLabel?: string | null;
+  details?: Array<{ id: string; label: string; value: string }>;
+  balances?: Array<{ id: string; label: string; remaining: number | null; unlimited: boolean }>;
+  account?: { email: string } | null;
+  pause?: unknown; parked?: number;
+};
+
 export type RpcId = string | number | null;
 export type RpcErrorData = { code: number; message: string; data?: unknown };
 export type RpcRequest = { jsonrpc: '2.0'; id?: RpcId; method: string; params?: Record<string, unknown> };
@@ -175,7 +187,8 @@ export type RpcMethodMap = {
   'daemon.pause': { params: { runtime?: RuntimeKind; now?: boolean; reason?: string }; result: PauseState };
   'daemon.resume': { params: { runtime?: RuntimeKind }; result: PauseState };
   'daemon.pauses': { params: Empty; result: PauseState };
-  'daemon.usage': { params: { refresh?: boolean }; result: { providers: Array<Record<string, unknown>> } };
+  /** `account: true` adds each provider's signed-in email (alp dashboard's owner handler only); `disabled` is alp dashboard's answer while host.usage.setting is off (t-9116). */
+  'daemon.usage': { params: { refresh?: boolean; account?: boolean }; result: { providers: Array<UsageProvider>; disabled?: boolean } };
   'catalog.get': { params: Empty; result: { models: Array<Record<string, unknown>>; modes: Array<Record<string, unknown>>; thinkingOptions?: unknown; defaultModel: string; fetchedAt?: string; providers?: Record<string, { status: string; fetchedAt?: string; error?: string }> } };
   'catalog.refresh': { params: Empty; result: { models: Array<Record<string, unknown>>; modes: Array<Record<string, unknown>>; thinkingOptions?: unknown; defaultModel: string; fetchedAt?: string; providers?: Record<string, { status: string; fetchedAt?: string; error?: string }> } };
   'assignment.recall': { params: { assignmentId?: string; taskId?: string; projectRoot?: string; question: string }; result: RecallAnswer };

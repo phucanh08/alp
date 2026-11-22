@@ -1735,6 +1735,147 @@
    }
   },
   {
+   "name": "daemon.usage asking for the account email",
+   "check": "params",
+   "method": "daemon.usage",
+   "valid": true,
+   "value": {
+    "refresh": false,
+    "account": true
+   }
+  },
+  {
+   "name": "daemon.usage with a string account",
+   "check": "params",
+   "method": "daemon.usage",
+   "valid": false,
+   "value": {
+    "account": "yes"
+   }
+  },
+  {
+   "name": "daemon.usage with Paseo's window ids and labels, details, balances and the account",
+   "check": "result",
+   "method": "daemon.usage",
+   "valid": true,
+   "value": {
+    "providers": [
+     {
+      "runtime": "claude",
+      "available": true,
+      "checkedAt": "2026-10-15T00:00:00.000Z",
+      "plan": "max",
+      "planLabel": "Max",
+      "limited": false,
+      "windows": [
+       {
+        "name": "five hour",
+        "usedPercent": 11,
+        "resetsAt": "2026-10-15T00:00:00.000Z",
+        "id": "five_hour",
+        "label": "Session"
+       },
+       {
+        "name": "seven day fable",
+        "usedPercent": 61,
+        "resetsAt": null,
+        "id": "weekly:fable",
+        "label": "Weekly · Fable"
+       }
+      ],
+      "details": [
+       {
+        "id": "extra_usage",
+        "label": "Extra usage",
+        "value": "Enabled"
+       }
+      ],
+      "balances": [],
+      "account": {
+       "email": "owner@example.com"
+      },
+      "pause": null,
+      "parked": 0
+     },
+     {
+      "runtime": "codex",
+      "available": true,
+      "checkedAt": "2026-10-15T00:00:00.000Z",
+      "plan": "plus",
+      "planLabel": "plus",
+      "limited": false,
+      "windows": [
+       {
+        "name": "5 hour window",
+        "usedPercent": 42,
+        "resetsAt": "2026-10-15T00:00:00.000Z",
+        "id": "five_hour",
+        "label": "5-hour"
+       }
+      ],
+      "details": [],
+      "balances": [
+       {
+        "id": "credits",
+        "label": "Credits",
+        "remaining": 0,
+        "unlimited": false
+       }
+      ],
+      "account": null,
+      "pause": null,
+      "parked": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "daemon.usage from alp dashboard while Check usage is off",
+   "check": "result",
+   "method": "daemon.usage",
+   "valid": true,
+   "value": {
+    "disabled": true,
+    "providers": []
+   }
+  },
+  {
+   "name": "daemon.usage with a numeric account email",
+   "check": "result",
+   "method": "daemon.usage",
+   "valid": false,
+   "value": {
+    "providers": [
+     {
+      "runtime": "codex",
+      "account": {
+       "email": 42
+      }
+     }
+    ]
+   }
+  },
+  {
+   "name": "daemon.usage with a text percent",
+   "check": "result",
+   "method": "daemon.usage",
+   "valid": false,
+   "value": {
+    "providers": [
+     {
+      "runtime": "codex",
+      "windows": [
+       {
+        "name": "x",
+        "usedPercent": "high",
+        "resetsAt": null
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
    "name": "catalog.get params",
    "check": "params",
    "method": "catalog.get",

@@ -643,7 +643,8 @@
         },
         "idempotent": true,
         "risks": [
-          "refresh asks every provider (spawns on the daemon host)"
+          "refresh asks every provider (spawns on the daemon host)",
+          "account answers the signed-in account's email: only for the host owner's dashboard"
         ]
       },
       "params": {
@@ -651,6 +652,10 @@
         "properties": {
           "refresh": {
             "type": "boolean"
+          },
+          "account": {
+            "type": "boolean",
+            "description": "Answer each provider's signed-in account email in `account`; without it `account` is null. Only alp dashboard's owner handler asks (t-9116)."
           }
         },
         "required": [],
@@ -662,8 +667,156 @@
           "providers": {
             "type": "array",
             "items": {
-              "type": "object"
+              "type": "object",
+              "properties": {
+                "runtime": {
+                  "type": "string"
+                },
+                "available": {
+                  "type": "boolean"
+                },
+                "checkedAt": {
+                  "type": "string"
+                },
+                "plan": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "planLabel": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "limited": {
+                  "type": "boolean"
+                },
+                "windows": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "usedPercent": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "resetsAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "id": {
+                        "type": "string",
+                        "description": "Stable within a provider (Paseo's window id), e.g. five_hour, weekly, weekly:fable, limit:<limitId>:five_hour."
+                      },
+                      "label": {
+                        "type": "string",
+                        "description": "Paseo's label, e.g. Session, Weekly, Weekly · Fable, 5-hour."
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "usedPercent",
+                      "resetsAt"
+                    ],
+                    "additionalProperties": true
+                  }
+                },
+                "details": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label",
+                      "value"
+                    ],
+                    "additionalProperties": true
+                  }
+                },
+                "balances": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "remaining": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "unlimited": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label",
+                      "remaining",
+                      "unlimited"
+                    ],
+                    "additionalProperties": true
+                  }
+                },
+                "account": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "email": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "email"
+                      ],
+                      "additionalProperties": true
+                    }
+                  ]
+                },
+                "pause": {},
+                "parked": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "runtime"
+              ],
+              "additionalProperties": true
             }
+          },
+          "disabled": {
+            "type": "boolean",
+            "description": "alp dashboard's answer while the host's Check usage switch (host.usage.setting) is off: providers is empty and no provider was asked."
           }
         },
         "required": [
