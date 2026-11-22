@@ -4,8 +4,8 @@
  * process, whatever the dashboard page asks for:
  *
  * - an attach is refused unless its partition is BROWSER_PARTITION and its src is http, https or
- *   about:blank; its preferences are forced (no preload, sandbox, context isolation, no Node, web
- *   security, no devtools);
+ *   about:blank; its preferences are replaced by an allowlist (no preload, sandbox, context isolation,
+ *   no Node, web security, no devtools, nothing else the page set);
  * - a guest navigates (any frame, redirects included) only to http, https or about:blank, never to the
  *   dashboard itself under any loopback or local-host spelling, and none of its requests reach the
  *   dashboard's port on those hosts;
@@ -63,6 +63,29 @@ export type DashboardTarget = { ports: ReadonlySet<number>; hosts: ReadonlySet<s
 
 const DEFAULT_PORTS: Record<string, number> = { 'http:': 80, 'https:': 443, 'ws:': 80, 'wss:': 443 };
 
+/** The port `origin` (http or https) is served on: its explicit port, else the scheme's default. Never 0. */
+export function dashboardPort(origin: string): number | undefined {
+  let url: URL;
+  try { url = new URL(origin); } catch { return undefined; }
+  const port = url.port ? Number(url.port) : DEFAULT_PORTS[url.protocol];
+  return port && Number.isInteger(port) && port > 0 ? port : undefined;
+}
+
+/**
+ * An IPv4-mapped (::ffff:a.b.c.d) or IPv4-compatible (::a.b.c.d) IPv6 host as the IPv4 address it
+ * stands for; the URL parser writes both in hex ([::ffff:7f00:1]). Anything else is returned as is.
+ */
+function embeddedIpv4(host: string): string {
+  const hex = /^\[::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})\]$/.exec(host);
+  if (hex) {
+    const high = parseInt(hex[1], 16);
+    const low = parseInt(hex[2], 16);
+    return `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`;
+  }
+  const dotted = /^\[::(?:ffff:)?(\d{1,3}(?:\.\d{1,3}){3})\]$/.exec(host);
+  return dotted ? dotted[1] : host;
+}
+
 /** Whether `target` is the dashboard (or its gateway) under some local spelling: a guest may not go there. */
 export function isDashboardUrl(target: string, dashboard: DashboardTarget): boolean {
   let url: URL;
@@ -72,7 +95,9 @@ export function isDashboardUrl(target: string, dashboard: DashboardTarget): bool
   const port = url.port ? Number(url.port) : fallback;
   if (!dashboard.ports.has(port)) return false;
   const host = url.hostname.toLowerCase().replace(/\.$/, '');
-  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) || host === 'localhost' || host.endsWith('.localhost') || dashboard.hosts.has(host);
+  const ipv4 = embeddedIpv4(host);
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ipv4) || host === 'localhost' || host.endsWith('.localhost')
+    || dashboard.hosts.has(host) || dashboard.hosts.has(ipv4);
 }
 
 /** will-navigate / will-frame-navigate / will-redirect in a guest: allowed? */
@@ -96,16 +121,23 @@ export type AttachPreferences = Record<string, unknown> & { preload?: string; pa
 export type AttachParams = Record<string, unknown> & { src?: string; partition?: string; preload?: string };
 
 /**
+ * The <webview> attributes that feed a guest's preferences (Electron's guest-view-manager reads them
+ * into webPreferences before will-attach-webview). They are removed so nothing downstream reads them.
+ */
+const PREFERENCE_PARAMS = ['webpreferences', 'disablewebsecurity', 'nodeintegration', 'nodeintegrationinsubframes', 'preload', 'preloadURL', 'plugins', 'blinkfeatures', 'enableblinkfeatures', 'disableblinkfeatures'];
+
+/**
  * Prepares a <webview> attach: false (refuse) unless it asks for BROWSER_PARTITION and a browsable
- * src (or none); otherwise its preferences are forced, whatever the page set.
+ * src (or none). Its preferences are then an allowlist: every key the page could set (directly, through
+ * the webpreferences attribute, or as enableBlinkFeatures, additionalArguments, javascript, …) is
+ * dropped and only the values below remain.
  */
 export function prepareWebview(webPreferences: AttachPreferences, params: AttachParams): boolean {
   if (params.partition !== BROWSER_PARTITION) return false;
   if (params.src !== undefined && params.src !== '' && !isBrowsableUrl(params.src)) return false;
-  delete webPreferences.preload;
-  delete webPreferences.preloadURL;
-  delete params.preload;
-  delete params.preloadURL;
+  const zoomFactor = webPreferences.zoomFactor;
+  for (const key of Object.keys(webPreferences)) delete webPreferences[key];
+  for (const key of PREFERENCE_PARAMS) delete params[key];
   Object.assign(webPreferences, {
     partition: BROWSER_PARTITION,
     sandbox: true,
@@ -117,10 +149,18 @@ export function prepareWebview(webPreferences: AttachPreferences, params: Attach
     allowRunningInsecureContent: false,
     webviewTag: false,
     devTools: false,
-    // The guest needs no plugins; spellcheck would send typed text through the default dictionary service.
     plugins: false,
     experimentalFeatures: false,
+    enableWebSQL: false,
+    // Web pages need scripts; a dialog loop gets Chromium's "prevent more dialogs" box.
+    javascript: true,
+    safeDialogs: true,
+    // window.open must reach the guest's setWindowOpenHandler (main.ts), which denies every window and
+    // asks the dashboard for a tab instead; with popups disabled the page would get nothing.
+    disablePopups: false,
   });
+  // The embedder's zoom, which Electron copies into a guest: a number only, it changes no permission.
+  if (typeof zoomFactor === 'number' && Number.isFinite(zoomFactor) && zoomFactor > 0) webPreferences.zoomFactor = zoomFactor;
   return true;
 }
 
