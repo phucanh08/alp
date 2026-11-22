@@ -401,6 +401,38 @@ bị Paseo đã ghép (`alp terminal allow --paseo`) là của host, Allow ở �
 owner mở lại (đổi grant, khởi động lại); thông báo "may still have run" sau khi rớt kết nối được xoá khi
 danh sách đã đọc lại.
 
+**Open in file manager / Open in editor** (t-747e, t-a876). Ba method owner mở thư mục của một workspace
+trên chính host; trang chỉ gửi id, không bao giờ gửi path hay program. Thư mục chỉ lấy từ workspace còn
+sống (chưa archive, project chưa gỡ) trong registry của alpd mà `workspaceId` gọi tên, và phải qua
+`projectDirectory` (tuyệt đối, đã chuẩn hoá, là thư mục có thật). Mọi lần chạy là argv, `shell: false`,
+detached, stdio ignore.
+
+- `host.workspace.reveal { workspaceId }` → `{ opened: true }`: file manager của host (`/usr/bin/open <dir>`,
+  `explorer.exe <dir>`, `xdg-open <dir>`). `ALP_DASHBOARD_FILE_MANAGER` (program tuyệt đối, trong env của
+  `alp dashboard`) thay program đó và nhận `[dir]`. Không chạy được: 1000 `reveal_failed`.
+- `host.workspace.editors {}` → `{ editors: [{ id, label }] }`: các editor của bảng cố định `EDITORS`
+  (`owner/host.js`) đã cài trên host, theo thứ tự của bảng: `vscode` (Visual Studio Code), `cursor`,
+  `zed`, `xcode` (chỉ macOS), `intellij`, `webstorm`, `pycharm`, `goland`, `rider`, `clion`, `phpstorm`,
+  `rubymine`, `android-studio`, và `finder` luôn có (label `Finder` trên macOS, `File Explorer` trên
+  Windows, `File manager` nơi khác). Tìm ở chỗ cố định, không shell, không `which`: macOS là bundle `.app`
+  (vd. `Visual Studio Code.app`, `IntelliJ IDEA CE.app`) trong `/Applications` hay `~/Applications`;
+  Windows là `.exe` cố định dưới `%LOCALAPPDATA%\Programs` / `%ProgramFiles%` (JetBrains: thư mục
+  `<IDE>*` mới nhất trong `%ProgramFiles%\JetBrains` hay `%LOCALAPPDATA%\Programs`, rồi `bin\<ide>64.exe`),
+  rồi `.exe` đó trên PATH; nơi khác là tên CLI cố định (`code`, `cursor`, `zed`/`zeditor`, `idea`,
+  `pycharm-community`, …) trong các mục **tuyệt đối** của PATH, là file thường có quyền chạy. Không
+  alpd nào được hỏi.
+- `host.workspace.open { workspaceId, editor }` → `{ opened: true }`. `editor` không phải id của bảng (kể
+  cả chữ hoa, khoảng trắng, path, `;`): -32602 `unknown_editor`, trước khi hỏi alpd. Workspace không có,
+  đã archive hay project đã gỡ: 1001 `not_found`; thư mục không còn: -32602 `invalid_params`. Editor của
+  bảng mà host chưa cài (dò lại lúc gọi): 1001 `editor_not_installed`. Chạy: macOS `/usr/bin/open -a
+  <.app tuyệt đối> -- <dir>`, nơi khác `<program tuyệt đối> <dir>` (dir tuyệt đối nên không bao giờ là
+  option); `finder` làm đúng như `host.workspace.reveal`. Không chạy được: 1000 `open_failed`.
+- Cho e2e, chỉ từ env của `alp dashboard` (trang không chạm tới được):
+  `ALP_DASHBOARD_EDITORS="vscode,cursor"` thay việc dò: các id đó (của bảng; id lạ bị bỏ qua) coi là đã
+  cài, ở chỗ dò thấy hoặc chỗ cố định đầu tiên của bảng (`finder` luôn có; `xcode` chỉ trên macOS);
+  `ALP_DASHBOARD_EDITOR_RUNNER` (program tuyệt đối) chạy thay editor với argv `[editorId, dir]`
+  (`finder` vẫn theo `ALP_DASHBOARD_FILE_MANAGER`).
+
 Không có: **placement** (session thuộc workspace nào). alpd chỉ cho `placement.assign` một session chưa
 có workspace và từ chối chuyển nó sang workspace khác (`packages/daemon/src/registry.ts`,
 `placement.assign`: "Session already has another workspace"), nên không có thao tác "chuyển" nào để
