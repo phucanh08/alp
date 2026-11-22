@@ -1,5 +1,7 @@
 // @ts-check
-import { lstat, realpath, stat } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { chmod, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { diagnose } from '@anhlp/alp-client/doctor';
 import { testEntry } from '@anhlp/alp-client/library-test';
@@ -9,8 +11,7 @@ import { TERMINAL_WARNING, terminalCommand } from '../../terminal.js';
 
 /**
  * Owner handlers for the host pages of Settings (t-a95b.1 group B; docs/alp/dashboard.md §4.7):
- * Providers, Terminals, Workspaces and Projects. Usage needs no handler: daemon.usage is alpd's
- * own, forwarded with its `refresh` param. Each method here has a `handler: true` entry in the
+ * Providers, Terminals, Usage, Workspaces and Projects. Each method here has a `handler: true` entry in the
  * `// --- owner: host (group B) ---` block of apps/gateway/src/policy.js, which lists the params
  * that reach it; the values are checked here, before anything runs or reaches alpd.
  *
@@ -22,6 +23,12 @@ import { TERMINAL_WARNING, terminalCommand } from '../../terminal.js';
  *                           only, never --fix);
  *   host.terminal.status / host.terminal.set   alp terminal status / allow --yes / deny
  *                           (terminal.js terminalCommand, the same $ALP_HOME/terminal.json);
+ *   host.usage.setting.get / host.usage.setting.set   Paseo's "Check usage" switch, in
+ *                           $ALP_HOME/usage.json (default on). It belongs to the dashboard alone:
+ *   daemon.usage            alpd's own, forwarded with its `refresh` param while the switch is on;
+ *                           off, answered { disabled: true, providers: [] } without asking alpd, so
+ *                           no provider is queried. `alp usage` and alpd's limit watch talk to alpd
+ *                           directly and never read the switch (t-9116).
  *   host.registry, host.workspace.update, host.workspace.label, host.project.register,
  *   host.project.remove     alpd's registry (registry.owner, workspace.update, project.register,
  *                           project.remove) on the owner's connection, without the gateway's
@@ -165,6 +172,27 @@ function labelColor(value) {
   return value;
 }
 
+/** The dashboard's "Check usage" switch (t-9116). @param {string} home */
+const usageFile = home => path.join(home, 'usage.json');
+
+/**
+ * Whether the dashboard checks usage: $ALP_HOME/usage.json's `enabled`, true when the file is
+ * missing or says nothing else. @param {string} home @returns {Promise<{ enabled: boolean, host: string }>}
+ */
+export async function usageSetting(home) {
+  const value = await readFile(usageFile(home), 'utf8').then(JSON.parse).catch(() => undefined);
+  return { enabled: value?.enabled !== false, host: os.hostname() };
+}
+
+/** Writes the switch as terminal.json is written: private to the user, atomically. @param {string} home @param {boolean} enabled */
+async function writeUsageSetting(home, enabled) {
+  await mkdir(home, { recursive: true, mode: 0o700 });
+  const temporary = `${usageFile(home)}.${randomUUID().slice(0, 8)}.tmp`;
+  await writeFile(temporary, JSON.stringify({ enabled }, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
+  await chmod(temporary, 0o600);
+  await rename(temporary, usageFile(home)).catch(async error => { await rm(temporary, { force: true }); throw error; });
+}
+
 /** @type {Readonly<Record<string, import('./index.js').DashboardOwnerHandler>>} */
 export const methods = {
   async 'host.provider.add'({ params, home }) {
@@ -201,6 +229,21 @@ export const methods = {
     if (params.allow && params.confirm !== true) throw invalid('Allowing remote terminals needs confirm: true, after the warning was shown', { reason: 'confirm_required', warning: TERMINAL_WARNING() });
     await terminal(home, params.allow ? ['allow', '--yes'] : ['deny']);
     return terminalStatus(home);
+  },
+
+  async 'host.usage.setting.get'({ home }) {
+    return usageSetting(home);
+  },
+
+  async 'host.usage.setting.set'({ params, home }) {
+    if (typeof params.enabled !== 'boolean') throw invalid('enabled must be true or false');
+    await writeUsageSetting(home, params.enabled);
+    return usageSetting(home);
+  },
+
+  async 'daemon.usage'({ params, home, daemon }) {
+    if (!(await usageSetting(home)).enabled) return { disabled: true, providers: [] };
+    return daemon.request('daemon.usage', params.refresh === undefined ? {} : { refresh: params.refresh });
   },
 
   async 'host.registry'({ daemon }) {

@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { diagnoseProviders, methods, ownerRegistry, projectDirectory, providerOptions, PROVIDER_CHECKS } from '../src/dashboard/owner/host.js';
@@ -115,6 +115,36 @@ test('host.terminal.set: allow needs confirm, writes what alp terminal allow --y
   status = await call('host.terminal.set', { allow: false }, { home });
   assert.equal(status.allowRemoteTerminal, false);
   assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { version: 1, allowRemoteTerminal: false });
+});
+
+test('host.usage.setting: on by default, off and back on in $ALP_HOME/usage.json, private; names this host', async t => {
+  const { home } = await scratch(t);
+  const file = path.join(home, 'usage.json');
+  assert.deepEqual(await call('host.usage.setting.get', {}, { home }), { enabled: true, host: hostname() });
+  await assert.rejects(call('host.usage.setting.set', { enabled: 'no' }, { home }), invalid(/enabled must be/));
+  await assert.rejects(call('host.usage.setting.set', {}, { home }), invalid(/enabled must be/));
+  await assert.rejects(lstat(file), 'nothing written for a bad value');
+  assert.deepEqual(await call('host.usage.setting.set', { enabled: false }, { home }), { enabled: false, host: hostname() });
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), { enabled: false });
+  assert.equal((await lstat(file)).mode & 0o777, 0o600);
+  assert.deepEqual(await call('host.usage.setting.get', {}, { home }), { enabled: false, host: hostname() });
+  assert.deepEqual(await call('host.usage.setting.set', { enabled: true }, { home }), { enabled: true, host: hostname() });
+  // A file that is not the switch's JSON reads as the default, on.
+  await writeFile(file, 'not json');
+  assert.equal((await call('host.usage.setting.get', {}, { home })).enabled, true);
+});
+
+test('daemon.usage through the dashboard: forwarded with refresh while Check usage is on; off, answered disabled without asking alpd', async t => {
+  const { home } = await scratch(t);
+  const usage = { providers: [{ runtime: 'codex', available: true, windows: [] }] };
+  let daemon = fakeDaemon({ 'daemon.usage': usage });
+  assert.deepEqual(await call('daemon.usage', { refresh: true }, { home, daemon }), usage);
+  assert.deepEqual(await call('daemon.usage', {}, { home, daemon }), usage);
+  assert.deepEqual(daemon.calls, [['daemon.usage', { refresh: true }], ['daemon.usage', {}]]);
+  await call('host.usage.setting.set', { enabled: false }, { home });
+  daemon = fakeDaemon({ 'daemon.usage': usage });
+  assert.deepEqual(await call('daemon.usage', { refresh: true }, { home, daemon }), { disabled: true, providers: [] });
+  assert.deepEqual(daemon.calls, [], 'no provider is asked while the switch is off');
 });
 
 const REGISTRY = {
