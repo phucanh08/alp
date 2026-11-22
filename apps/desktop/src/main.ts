@@ -22,6 +22,7 @@ import { BROWSER_PARTITION, OpenRequests, blockedEventScript, dashboardPort, isA
 import type { DashboardAddress } from './url';
 import { DEFAULT_HEIGHT, DEFAULT_WIDTH, MIN_HEIGHT, MIN_WIDTH, fitWindowState, readWindowState, stateOf, writeWindowState, type WindowState } from './window-state';
 import { attentionBadge, dashboardKeyScript, isCloseWindowKey, isDashboardKey } from './shell-keys';
+import { windowChromeOptions } from './window-chrome';
 
 let win: BrowserWindow | undefined;
 /** The origin the window may show; undefined while it shows a bundled page. */
@@ -144,6 +145,8 @@ function createWindow(): BrowserWindow {
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
     title: 'ALP',
+    // macOS: no separate title bar, the traffic lights sit in the dashboard's top row (./window-chrome.ts).
+    ...windowChromeOptions(process.platform),
     show: false,
     webPreferences: {
       contextIsolation: true,

@@ -645,6 +645,8 @@ export function SettingsScreen({ onClose, mobile, initialPage }: { onClose: () =
 
   const back = (label: string, onBack: () => void) => (
     <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-2 md:h-9">
+      {/* ALP.app on macOS: room for the traffic lights, this row starts the window's top row (styles.css). */}
+      <span aria-hidden className="window-controls-inset" />
       <button type="button" onClick={onBack} className={cn('flex min-h-7 items-center gap-2 rounded-lg px-2 py-1 text-sm text-muted-foreground hover:bg-sidebar-hover hover:text-foreground', focusRing)}>
         <ArrowLeft aria-hidden className="size-4" />{label}
       </button>

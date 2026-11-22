@@ -22,6 +22,26 @@ lệnh. Cửa sổ là một client cùng origin với `alp-dashboard` như mộ
 không đổi gì và không có origin tin cậy mới. Như tab đó, cửa sổ là **host owner** (§9): token của
 dashboard trên loopback.
 
+### 1.1 Khung cửa sổ (t-81b0.12)
+
+Như Paseo (`packages/desktop/src/window/window-manager.ts`, chế độ `native-mac`): trên macOS cửa sổ
+**không có thanh tiêu đề riêng** (`titleBarStyle: 'hidden'`, `src/window-chrome.ts`). Ba nút đỏ/vàng/xanh
+nằm ở `{ x: 16, y: 12 }`, giữa hàng header 36px của dashboard. `titleBarOverlay: true` bật Window
+Controls Overlay: trang biết nút ở đâu qua `navigator.windowControlsOverlay` và `env(titlebar-area-*)`
+(`titlebar-area-x` ≈ 85px), và chỉ dựa vào đó (apps/web `styles.css`):
+
+- `.window-drag` (đầu `<body>` trong `index.html`): dải 36px trên cùng kéo được cửa sổ; mọi control
+  (`button`, `a`, `input`, `[role=tab]`, `[tabindex]`, `[role=separator]`…) là `no-drag`.
+- Sidebar (và sidebar của Settings) có một hàng trống 36px trên cùng cho ba nút; header nằm sát mép trái
+  (sidebar đóng) chừa `titlebar-area-x`.
+- Toàn màn hình: ba nút ẩn, overlay báo không hiển thị, `env()` không còn giá trị, mọi khoảng chừa về 0.
+- Trình duyệt, hay một ALP.app cũ còn thanh tiêu đề: không có overlay, trang y như trước.
+- Trang nội bộ (`src/pages/page.css`) cũng có dải kéo trên cùng.
+
+Windows và Linux giữ khung hệ thống: Paseo tự vẽ nút cửa sổ ở đó (`frame: false`), dashboard của ALP
+không có các nút ấy. Một ALP.app mới mở một `alp dashboard` cũ (chưa có CSS trên) thì ba nút đè lên góc
+trái trang và không có chỗ kéo cửa sổ, cho tới khi cập nhật `alp`.
+
 ## 2. Tìm `alp`
 
 App mở từ Finder chỉ có `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, còn `alp` cài bằng npm chạy bằng

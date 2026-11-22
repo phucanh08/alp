@@ -160,3 +160,32 @@ test('the window keeps its size and place across launches; a place on no display
   await closeWindows(app);
   await waitFor(async () => JSON.parse(await readFile(stateFile, 'utf8')).maximized === true, 'window-state.json to say maximized', 10_000);
 });
+
+// t-81b0.12, Paseo's native-mac chrome: no title bar of its own, the traffic lights over the page's top
+// row, which moves the window (apps/web styles.css .window-drag, its controls carved out); in full
+// screen the lights and the room for them go. What a browser shows is apps/web's e2e.
+test('macOS: no title bar of its own; the page\'s top strip drags, its controls do not; full screen drops it', { ...limit, skip: process.platform !== 'darwin' && 'the hidden title bar is macOS only' }, async t => {
+  const { context, web, alp } = await connectedSetup(t);
+  const app = await launch(t, context, alp.file);
+  await connectedTo(app, web.origin);
+  const frame = await app.evaluate(({ BrowserWindow }) => { const win = BrowserWindow.getAllWindows()[0]; return { bounds: win.getBounds(), content: win.getContentBounds() }; });
+  assert.equal(frame.content.height, frame.bounds.height, 'the page fills the window: no title bar above it');
+  const chrome = () => inPage(app, `(() => {
+    const drag = document.querySelector('.window-drag');
+    const button = document.querySelector('button');
+    return { overlay: navigator.windowControlsOverlay?.visible ?? null, x: navigator.windowControlsOverlay?.getTitlebarAreaRect().x ?? null,
+      dragHeight: drag?.getBoundingClientRect().height ?? null, dragRegion: drag && getComputedStyle(drag).getPropertyValue('-webkit-app-region'),
+      buttonRegion: button && getComputedStyle(button).getPropertyValue('-webkit-app-region') };
+  })()`);
+  const windowed = await waitFor(async () => { const value = await chrome(); return value.dragHeight > 0 && value; }, 'the drag strip');
+  assert.equal(windowed.overlay, true);
+  assert.ok(windowed.x >= 70, `the lights end at ${windowed.x}px`);
+  assert.equal(windowed.dragHeight, 36);
+  assert.equal(windowed.dragRegion, 'drag');
+  assert.equal(windowed.buttonRegion, 'no-drag');
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setFullScreen(true));
+  const full = await waitFor(async () => { const value = await chrome(); return value.overlay === false && value; }, 'full screen');
+  assert.equal(full.dragHeight, 0);
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setFullScreen(false));
+  await waitFor(async () => (await chrome()).overlay === true, 'leaving full screen');
+});

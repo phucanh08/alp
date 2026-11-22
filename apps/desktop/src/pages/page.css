@@ -12,3 +12,6 @@ dd { margin: 0; word-break: break-word; }
 .button { padding: .45rem 1.1rem; border-radius: 6px; border: 1px solid color-mix(in srgb, CanvasText 25%, Canvas); color: CanvasText; text-decoration: none; }
 .button.primary { background: AccentColor; color: AccentColorText; border-color: AccentColor; }
 .warning { padding: .6rem .9rem; border-radius: 6px; border: 1px solid #c80; background: color-mix(in srgb, #c80 12%, Canvas); }
+/* macOS: the window has no title bar of its own (../window-chrome.ts); the top strip moves it. Zero high elsewhere. */
+body::before { content: ""; position: fixed; inset: 0 0 auto 0; height: env(titlebar-area-height, 0px); -webkit-app-region: drag; }
+a, button, input, select, textarea, summary { -webkit-app-region: no-drag; }

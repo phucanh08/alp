@@ -49,6 +49,7 @@ export function TasksScreen({ navOpen, onToggleNav, onClose }: { navOpen: boolea
     <section aria-label="ALP tasks" data-testid="alp-tasks-screen" ref={region}
       className="flex min-h-0 flex-1 flex-col bg-background text-foreground">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-2 md:h-9 md:px-3">
+        {navOpen ? null : <span aria-hidden className="window-controls-inset" />}
         <button type="button" aria-label={navOpen ? 'Close sessions' : 'Open sessions'} aria-expanded={navOpen} title="Toggle sidebar" onClick={onToggleNav} className={cn(headerButton, 'md:-ml-1.5')}>
           <PanelLeft aria-hidden strokeWidth={1.5} />
         </button>
