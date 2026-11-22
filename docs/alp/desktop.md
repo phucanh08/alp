@@ -181,27 +181,35 @@ Một tab Browser là một `<webview>` trong cửa sổ dashboard, có Back, Fo
 không có cổng) nhận `http://`, có scheme thì giữ, còn lại nhận `https://`; không có công cụ tìm kiếm
 (chữ có khoảng trắng bị từ chối). Kết quả phải là http, https hay `about:blank`. Mỗi workspace giữ
 tối đa 20 tab Browser với địa chỉ của chúng trong `alp-web:layout` (kiểm lại khi đọc; không bao giờ là
-địa chỉ hay fragment của dashboard).
+địa chỉ của dashboard; fragment của mọi địa chỉ bị bỏ khi đọc và khi lưu).
 
 **Các chốt (main process, bất kể trang yêu cầu gì):**
 
 - `will-attach-webview` (mọi webContents): chỉ cửa sổ dashboard được gắn webview; partition phải là
   `persist:alp-browser` (không bao giờ session mặc định, nơi dashboard và token của nó ở) và `src`
-  phải là http, https, `about:blank` hoặc trống, nếu không thì từ chối. Preferences bị ép: xóa
-  `preload`/`preloadURL`, `sandbox`, `contextIsolation`, không `nodeIntegration` (kể cả subframe và
-  worker), `webSecurity`, không `webviewTag`, DevTools tắt (mở DevTools bị đóng ngay).
+  phải là http, https, `about:blank` hoặc trống, nếu không thì từ chối. Preferences là một allowlist:
+  mọi key trang đặt (trực tiếp, qua thuộc tính `webpreferences`, hay như `enableBlinkFeatures`,
+  `additionalArguments`, `javascript`…) bị xóa, cùng các thuộc tính `webpreferences`, `preload`,
+  `nodeintegration*`, `disablewebsecurity`, `plugins`, `*blinkfeatures` trong params; chỉ còn
+  `sandbox`, `contextIsolation`, không `nodeIntegration` (kể cả subframe và worker), `webSecurity`,
+  không `webviewTag`, plugins, WebSQL hay experimental features, DevTools tắt (mở DevTools bị đóng
+  ngay), `javascript`, `safeDialogs`, `disablePopups: false` (để `window.open` tới handler bên dưới) và
+  `zoomFactor` nếu là số dương.
 - Điều hướng của guest (`will-navigate`, `will-frame-navigate`, `will-redirect`; main frame và
   subframe): chỉ http, https, `about:blank` (subframe còn được `about:srcdoc`, tài liệu inline của
   iframe). Bị chặn: `file:`, `data:`, `javascript:`, `chrome:`, `devtools:`, `blob:` ở main frame,
   `alp-page:`. Dashboard bị chặn dưới **mọi cách viết** trên cổng của nó: `127.0.0.0/8` (kể cả
   `2130706433`, `0x7f.1`: URL parser viết lại thành `127.0.0.1`), `localhost` và `*.localhost`,
-  `[::1]`, `[::ffff:127.0.0.1]`, `0.0.0.0`, `[::]`, hostname của máy (`os.hostname()`, dạng trơn và
+  `[::1]`, IPv4 viết dạng IPv6 (`[::ffff:127.0.0.1]`, `[::ffff:7f00:1]`, `[::127.0.0.1]`; cũng áp dụng
+  cho địa chỉ interface), `0.0.0.0`, `[::]`, hostname của máy (`os.hostname()`, dạng trơn và
   `.local`) và địa chỉ của các network interface. Cổng là mọi cổng dashboard đã có trong lần chạy này
-  (đổi khi dashboard khởi động lại; cổng mới được thêm lúc tải).
+  (đổi khi dashboard khởi động lại; cổng mới được thêm lúc tải; origin không ghi cổng tính theo cổng
+  mặc định của scheme, không bao giờ là 0).
 - Lần tải do chính trang dashboard bắt đầu (`webview.loadURL`, đổi `src`) không phát các sự kiện
   trên: `<webview>` nhờ main process gọi `loadURL` của guest, và hàm đó (đã bọc) từ chối mọi địa chỉ
   ngoài quy tắc trên. Một điều hướng main frame vẫn lọt thì bị `stop()` ngay sau `did-start-navigation`
-  (gọi `stop()` ngay trong sự kiện làm Electron 44 crash), và partition trả 403 cho mọi `file:`
+  (gọi `stop()` ngay trong sự kiện làm Electron 44 crash); việc `stop()` này chỉ là lớp chặn dự phòng
+  best-effort, đứng sau chốt `loadURL` và `will-navigate`/`will-frame-navigate`, không phải chốt chính. Và partition trả 403 cho mọi `file:`
   (`protocol.handle('file')`), bất kể lần tải bắt đầu từ đâu.
 - `session.webRequest.onBeforeRequest` trên partition `persist:alp-browser`: mọi request (fetch, XHR,
   WebSocket, ảnh, iframe…) tới những host:cổng ấy bị hủy, cùng mọi request `file:`, `chrome:`,
