@@ -227,6 +227,9 @@
     -moz-osx-font-smoothing: grayscale;
   }
   ::selection { background: color-mix(in oklab, var(--primary) 35%, transparent); }
+  /* Find in pane (app/PaneFind.tsx): every match, and the current one apart. */
+  ::highlight(alp-find) { background-color: color-mix(in oklab, #facc15 40%, transparent); color: inherit; }
+  ::highlight(alp-find-current) { background-color: #f97316; color: #fff; }
   :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
   * { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
   dialog::backdrop { background: rgb(5 8 6 / 0.7); backdrop-filter: blur(2px); }

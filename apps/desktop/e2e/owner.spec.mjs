@@ -369,3 +369,130 @@ test('owner: batch 2 menus in ALP.app: pin and labels, Open in editor, the heade
   await waitFor(async () => !(await read('desktop-older'))?.archived, 'Undo to unarchive it');
   await waitFor(async () => await row.count() === 1, 'the row back');
 });
+
+/**
+ * Paseo parity batch 3 in ALP.app as the host owner (t-de48), on a new session over the fake Codex:
+ * ⌘F (a real key press through the window, past the app menu) opens the chat's find bar and counts
+ * the matches; "@" in the composer lists the workspace's files and Enter puts the path in; the command
+ * center's Agent rows change the mode; the tab switcher filters the pane's tabs; two changes leave two
+ * toasts; a render error in the chat shows in its pane only. With ALP_DESKTOP_SHOTS=<dir> it saves
+ * screenshots of the app's own window there.
+ */
+test('owner: batch 3 chat in ALP.app: find, @files, agent rows in the command center, tab switcher, toasts, pane error', { timeout: 240_000 }, async t => {
+  const context = await scratch(t);
+  const host = await ownerHost(context);
+  const app = await launch(t, context, host.wrapper);
+  const info = await waitFor(async () => {
+    const value = JSON.parse(await readFile(path.join(host.home, 'dashboard.json'), 'utf8'));
+    return value?.port ? value : undefined;
+  }, 'alp dashboard to write dashboard.json', 90_000);
+  await connectedTo(app, `http://127.0.0.1:${info.port}`, 90_000);
+  const page = app.windows()[0];
+  const shots = process.env.ALP_DESKTOP_SHOTS;
+  if (shots) await mkdir(shots, { recursive: true });
+  const shot = async name => { if (shots) await page.screenshot({ path: path.join(shots, name) }); };
+  const MOD = process.platform === 'darwin' ? 'meta' : 'control';
+  // A key press as the keyboard sends it: through the window (and its menu), not only the page.
+  const press = (keyCode, modifiers = []) => app.evaluate(({ BrowserWindow }, [code, mods]) => {
+    const contents = BrowserWindow.getAllWindows()[0].webContents;
+    contents.sendInputEvent({ type: 'keyDown', keyCode: code, modifiers: mods });
+    contents.sendInputEvent({ type: 'char', keyCode: code, modifiers: mods });
+    contents.sendInputEvent({ type: 'keyUp', keyCode: code, modifiers: mods });
+  }, [keyCode, modifiers]);
+  const text = locator => locator.innerText().catch(() => '');
+
+  // A new session in shop, on the fake Codex.
+  const project = page.locator(`[data-testid="sidebar-project"][data-path="${host.projects.shop}"]`);
+  await waitFor(async () => await project.count() === 1, 'shop in the sidebar');
+  await project.getByTestId('project-row').hover();
+  await project.getByRole('button', { name: 'Start a session in shop' }).click();
+  const screen = page.getByTestId('new-session-screen');
+  await screen.waitFor();
+  await screen.getByLabel('Title (optional)').fill('Batch three');
+  await waitFor(() => screen.getByRole('button', { name: 'Start session' }).isEnabled(), 'Start session');
+  await screen.getByRole('button', { name: 'Start session' }).click();
+  const composer = page.getByLabel('Message', { exact: true });
+  await waitFor(() => composer.isEnabled().catch(() => false), 'the composer', 60_000);
+  const idle = () => waitFor(async () => await page.getByTestId('working').count() === 0 && await page.getByRole('button', { name: 'Interrupt agent' }).count() === 0, 'the turn to end', 60_000);
+  for (const message of ['alpha one', 'two ALPHA']) {
+    await composer.fill(message);
+    await composer.press('Enter');
+    await waitFor(async () => (await page.getByTestId('assistant-message').allInnerTexts()).includes(`Echo: ${message}`), `the echo of ${message}`, 60_000);
+    await idle();
+  }
+
+  // ⌘F: the find bar, four matches, the current one marked.
+  await composer.focus();
+  await press('F', [MOD]);
+  const find = page.getByTestId('pane-find');
+  await waitFor(async () => await find.isVisible().catch(() => false), 'the find bar');
+  await waitFor(() => find.getByTestId('pane-find-input').evaluate(input => input === document.activeElement).catch(() => false), 'focus in the find field');
+  await page.keyboard.type('alpha');
+  await waitFor(async () => await text(find.getByTestId('pane-find-status')) === '1 of 4', 'four matches').catch(async error => {
+    throw new Error(`${error.message}; status ${JSON.stringify(await text(find.getByTestId('pane-find-status')))}, field ${JSON.stringify(await find.getByTestId('pane-find-input').inputValue().catch(() => ''))}`);
+  });
+  await page.keyboard.press('Enter');
+  await waitFor(async () => await text(find.getByTestId('pane-find-status')) === '2 of 4', 'the next match');
+  assert.equal(await page.evaluate(() => CSS.highlights.get('alp-find')?.size), 4);
+  await shot('batch3-find.png');
+  await page.keyboard.press('Escape');
+  await waitFor(async () => await find.count() === 0, 'the find bar to close');
+
+  // "@" lists shop's files; Enter puts the path in.
+  await composer.fill('see @catal');
+  const popover = page.getByTestId('composer-autocomplete-popover');
+  await waitFor(async () => await popover.getByTestId('composer-file-suggestion').first().getAttribute('data-path').catch(() => '') === 'catalog.txt', 'catalog.txt suggested');
+  await shot('batch3-at-files.png');
+  await page.keyboard.press('Enter');
+  assert.equal(await composer.inputValue(), 'see @catalog.txt ');
+  await composer.fill('');
+
+  // The command center's Agent rows: Mode: Read only.
+  await press('K', [MOD]);
+  const center = page.getByRole('dialog', { name: 'Command center' });
+  await center.getByTestId('command-center-input').fill('mode read');
+  await waitFor(async () => await center.getByRole('option', { name: /Mode: Read only/ }).count() === 1, 'the Mode: Read only row');
+  await shot('batch3-command-center-mode.png');
+  await center.getByRole('option', { name: /Mode: Read only/ }).click();
+  await waitFor(async () => await text(page.getByTestId('mode-control-label')) === 'Read only', 'the mode to change');
+
+  // The tab switcher: Changes opened from the center, then found by typing.
+  await press('K', [MOD]);
+  await center.getByTestId('command-center-input').fill('Open Changes');
+  await page.keyboard.press('Enter');
+  await page.getByTestId('workspace-tab-switcher-trigger').click();
+  const switcher = page.getByTestId('workspace-tab-switcher');
+  await switcher.waitFor();
+  await page.keyboard.type('batch');
+  await waitFor(async () => await switcher.getByTestId('workspace-tab-switcher-option').count() === 1, 'one tab left');
+  await shot('batch3-tab-switcher.png');
+  await page.keyboard.press('Enter');
+  await waitFor(async () => (await page.locator('main [role="tab"][aria-selected="true"]').getAttribute('data-tab').catch(() => ''))?.startsWith('agent:'), 'the session\'s tab in front');
+
+  // Two notices stack: two thinking changes from the command center, each with its own toast.
+  const stack = page.getByTestId('notice-stack').getByTestId('notice');
+  for (let round = 1; round <= 2; round += 1) {
+    await press('K', [MOD]);
+    await center.getByTestId('command-center-input').fill('thinking');
+    const other = center.getByRole('group', { name: 'Agent' }).getByRole('option').filter({ hasNot: page.getByTestId('command-center-action-current') }).first();
+    await waitFor(async () => await other.count() === 1, 'another effort');
+    const effort = (await other.innerText()).replace(/^Thinking: /, '').trim();
+    await other.click();
+    await waitFor(async () => await text(page.getByTestId('session-thinking-label')) === effort, `thinking ${effort}`, 60_000);
+    await waitFor(async () => await stack.count() === round, `${round} toast(s)`, 30_000);
+  }
+  await shot('batch3-toasts.png');
+
+  // A render error in the chat stays in its pane; Try again brings it back.
+  await page.evaluate(() => { globalThis.__clock = Date.prototype.toLocaleTimeString; Date.prototype.toLocaleTimeString = () => { throw new Error('clock broke in a test'); }; });
+  await composer.fill('three');
+  await composer.press('Enter');
+  const fallback = page.getByTestId('pane-error-boundary');
+  await waitFor(async () => await fallback.isVisible().catch(() => false), 'the pane\'s error');
+  assert.equal(await page.getByTestId('root-error-boundary').count(), 0);
+  assert.ok(await page.getByRole('navigation').isVisible());
+  await shot('batch3-pane-error.png');
+  await page.evaluate(() => { Date.prototype.toLocaleTimeString = globalThis.__clock; });
+  await fallback.getByTestId('pane-error-boundary-retry').click();
+  await waitFor(async () => (await page.getByTestId('assistant-message').allInnerTexts()).includes('Echo: three'), 'the chat back', 60_000);
+});

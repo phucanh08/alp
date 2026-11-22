@@ -1,11 +1,16 @@
 import * as React from 'react';
-import { ArrowUp, FileText, Pencil, Plus, Square, X } from 'lucide-react';
+import { ArrowUp, File as FileIcon, FileText, LoaderCircle, Pencil, Plus, Square, X } from 'lucide-react';
 import { IMAGE_TYPES, NO_FILES, fileSize, filesOf, fitFiles, fitImages, imageType, previewUrl, readFiles, readImages, type FileAttachment, type FileLimits, type ImageAttachment } from '../lib/attachments.js';
 import type { QueuedPrompt } from '../lib/controller.js';
 import { insertCommand, matchCommands, slashQuery } from '../lib/slash-commands.js';
 import type { SessionCommand } from '@anhlp/alp-protocol';
 import { cn } from '../lib/utils';
 import { usePaneFocused } from './pane';
+import { insertMention, mentionAt } from '../lib/mentions.js';
+import { useFileSearch, type FileSearchSource } from './CommandCenter';
+
+/** How many files the "@" list shows. */
+const MENTIONS_SHOWN = 8;
 
 /**
  * The message box, with Paseo's composer logic and layout: one rounded surface with the text on
@@ -43,10 +48,15 @@ import { usePaneFocused } from './pane';
  * - Slash commands (t-f628): with `commands`, a "/" at the start of the box lists every command and
  *   skill of the session, filtered as the name is typed; Up/Down move, Enter or Tab inserts `/<name> `,
  *   Escape closes the list. A click inserts too.
+ * - Files (Paseo's @ autocomplete): with `fileSearch`, an "@" word at the caret lists the workspace's
+ *   files that match it (workspace.files.search); the same keys choose one, which goes in as
+ *   `@<path> `. While the host answers the list says so, and a failed search says why.
  */
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
-export function Composer({ meter, imageLimits, images: takesImages = false, imagesUnavailable, files: takesFiles = false, fileLimits, filesUnavailable, onSend, onQueue, onInterruptSend, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', sendShortcut = 'enter', startLabel, startHold, initialText, addText, autoFocus, inputId, commands: loadCommands }: {
+export function Composer({ fileSearch, meter, imageLimits, images: takesImages = false, imagesUnavailable, files: takesFiles = false, fileLimits, filesUnavailable, onSend, onQueue, onInterruptSend, onStop, queued, onEditQueued, onSendQueued, running, stopping, blocked, disabledReason, placeholder, controls, tracks, onCycleMode, sendBehavior = 'steer', sendShortcut = 'enter', startLabel, startHold, initialText, addText, autoFocus, inputId, commands: loadCommands }: {
+  /** The workspace's files, offered after "@" (workspace.files.search). */
+  fileSearch?: FileSearchSource;
   /** Paseo's context window meter, before the primary action (t-7679.12). */
   meter?: React.ReactNode;
   /** The session takes images: the + button, paste and drop add them. */
@@ -176,6 +186,42 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
     area.current?.focus();
   };
   const listId = `${React.useId()}-commands`;
+
+  // The "@" list: the word at the caret, searched as it is typed (debounced, as the command center).
+  const [caret, setCaret] = React.useState(0);
+  const [mentionClosedOn, setMentionClosedOn] = React.useState<string | null>(null);
+  const [activeMention, setActiveMention] = React.useState(0);
+  const mention = fileSearch?.available && !suggestions.length && !reason && caret >= 0 ? mentionAt(text, caret) : null;
+  // Only while the box has focus: a click elsewhere leaves the word as it is.
+  const mentioning = !!mention && focused && mentionClosedOn !== `${text}\0${caret}`;
+  const fileResults = useFileSearch({ enabled: mentioning, source: fileSearch?.source ?? null, query: mention?.query ?? '', search: fileSearch?.search ?? (() => Promise.resolve({ files: [] })) });
+  const mentions = mentioning ? fileResults.entries.slice(0, MENTIONS_SHOWN) : [];
+  const mentionStatus = !mentioning ? null : fileResults.error ? { kind: 'error' as const, text: `Could not search files: ${fileResults.error}` }
+    : fileResults.loading && !mentions.length ? { kind: 'loading' as const, text: 'Searching files…' }
+      : !mentions.length ? { kind: 'empty' as const, text: mention?.query ? `No files match “${mention.query}”` : 'No files' } : null;
+  const mentionSelected = mentions.length ? Math.min(activeMention, mentions.length - 1) : 0;
+  React.useEffect(() => { setActiveMention(0); }, [mention?.query]);
+  const mentionListId = `${listId}-files`;
+  const chooseMention = (path: string) => {
+    if (!mention) return;
+    const next = insertMention(text, mention, path);
+    pendingCaret.current = next.caret;
+    setText(next.text);
+    setCaret(next.caret);
+  };
+  // The caret after a chosen path, placed with the new text before the next key press lands.
+  const pendingCaret = React.useRef<number | null>(null);
+  React.useLayoutEffect(() => {
+    const element = area.current;
+    const at = pendingCaret.current;
+    if (!element || at === null) return;
+    pendingCaret.current = null;
+    element.focus();
+    element.setSelectionRange(at, at);
+  }, [text]);
+  const readCaret = (element: HTMLTextAreaElement) => setCaret(element.selectionStart === element.selectionEnd ? element.selectionStart : -1);
+  // The list the box's keys drive: the commands, else the files.
+  const listShown = suggestions.length > 0 || mentioning;
 
   // Paseo's composer keys outside the box: Cmd/Ctrl+L focuses it; Escape interrupts the agent
   // from the box or from nowhere in particular (not from another field, a menu or a dialog).
@@ -340,6 +386,30 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
               ))}
             </ul>
           ) : null}
+          {mentioning ? (
+            <div className="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg" data-testid="composer-autocomplete-popover">
+              {mentions.length ? (
+                <ul id={mentionListId} role="listbox" aria-label="Files" className="max-h-72 overflow-y-auto p-1" data-testid="composer-files">
+                  {mentions.map((file, index) => (
+                    <li key={file.path} id={`${mentionListId}-${index}`} role="option" aria-selected={index === mentionSelected} data-testid="composer-file-suggestion" data-path={file.path}
+                      onMouseDown={event => { event.preventDefault(); chooseMention(file.path); }}
+                      onMouseEnter={() => setActiveMention(index)}
+                      className={cn('flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm', index === mentionSelected && 'bg-muted')}>
+                      <FileIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+                      <span className="shrink-0 text-foreground">{file.title}</span>
+                      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={file.path}>{file.subtitle}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {mentionStatus ? (
+                <p role={mentionStatus.kind === 'error' ? 'alert' : 'status'} className={cn('flex items-center gap-2 px-3 py-2 text-xs', mentionStatus.kind === 'error' ? 'text-destructive' : 'text-muted-foreground')}
+                  data-testid={mentionStatus.kind === 'error' ? 'composer-autocomplete-error' : mentionStatus.kind === 'loading' ? 'composer-autocomplete-loading' : 'composer-autocomplete-empty'}>
+                  {mentionStatus.kind === 'loading' ? <LoaderCircle aria-hidden className="size-3.5 animate-spin" /> : null}{mentionStatus.text}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           <label htmlFor={boxId} className="sr-only">Message</label>
           <textarea
             id={boxId}
@@ -348,7 +418,8 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
             value={text}
             disabled={!!reason}
             placeholder={reason && !blocked ? reason : placeholder}
-            onChange={event => setText(event.target.value)}
+            onChange={event => { setText(event.target.value); readCaret(event.target); }}
+            onSelect={event => readCaret(event.currentTarget)}
             onPaste={event => {
               const files = filesOf(event.clipboardData).filter(file => takesFiles || file.type.startsWith('image/'));
               if (!files.length) return;
@@ -359,11 +430,11 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
             onBlur={() => setFocused(false)}
             autoFocus={autoFocus}
             aria-keyshortcuts={isMac ? 'Meta+L' : 'Control+L'}
-            role={loadCommands ? 'combobox' : undefined}
-            aria-expanded={loadCommands ? suggestions.length > 0 : undefined}
-            aria-controls={suggestions.length ? listId : undefined}
-            aria-autocomplete={loadCommands ? 'list' : undefined}
-            aria-activedescendant={suggestions.length ? `${listId}-${selected}` : undefined}
+            role={loadCommands || fileSearch ? 'combobox' : undefined}
+            aria-expanded={loadCommands || fileSearch ? listShown : undefined}
+            aria-controls={suggestions.length ? listId : mentions.length ? mentionListId : undefined}
+            aria-autocomplete={loadCommands || fileSearch ? 'list' : undefined}
+            aria-activedescendant={suggestions.length ? `${listId}-${selected}` : mentions.length ? `${mentionListId}-${mentionSelected}` : undefined}
             onKeyDown={event => {
               if (suggestions.length && !event.nativeEvent.isComposing) {
                 if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -382,6 +453,25 @@ export function Composer({ meter, imageLimits, images: takesImages = false, imag
                   event.stopPropagation();
                   event.nativeEvent.stopImmediatePropagation();
                   setClosedOn(text);
+                  return;
+                }
+              }
+              if (mentioning && !event.nativeEvent.isComposing) {
+                if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && mentions.length) {
+                  event.preventDefault();
+                  setActiveMention((mentionSelected + (event.key === 'ArrowDown' ? 1 : mentions.length - 1)) % mentions.length);
+                  return;
+                }
+                if (((event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) || (event.key === 'Tab' && !event.shiftKey)) && mentions.length) {
+                  event.preventDefault();
+                  chooseMention(mentions[mentionSelected].path);
+                  return;
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  event.nativeEvent.stopImmediatePropagation();
+                  setMentionClosedOn(`${text}\0${caret}`);
                   return;
                 }
               }

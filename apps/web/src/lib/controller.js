@@ -111,10 +111,20 @@ const STOP_WAITING = 'Stop is waiting for this message’s outcome.';
  *   busy: Record<string, boolean>,
  *   tasks: Load & { visible: boolean, rows: any[], revision?: string, unreadable: number, creates: TaskCreate[], busy: Record<string, boolean>, message?: { level: 'info' | 'error', text: string } },
  *   settings: Load & { language?: { language: string | null, applies: string, default: string }, models: Model[] },
- *   notice: { id: number, level: 'info' | 'error', text: string, action?: 'new-session' | 'undo-archive', target?: string } | null,
+ *   notice: Notice | null,
+ *   notices: Notice[],
  *   preferences: import('./preferences.js').Preferences,
  * }} State
  */
+
+/**
+ * @typedef {{ id: number, level: 'info' | 'error', text: string, action?: 'new-session' | 'undo-archive', target?: string }} Notice
+ *   `notice` is the latest one; `notices` the stack on screen (Paseo's toasts), oldest first, at most
+ *   NOTICE_STACK. Dismissing one removes it from both.
+ */
+
+/** How many notices stay on screen at once: a newer one pushes the oldest out. */
+export const NOTICE_STACK = 3;
 
 /** Modes the runtime knows, in order of how much they allow; labels for people. */
 /** How long a message the host took counts as working while its turn has not been seen starting. */
@@ -231,6 +241,7 @@ export function initialState(gateway = '') {
     tasks: { status: 'idle', visible: false, rows: [], unreadable: 0, creates: [], busy: {} },
     settings: { status: 'idle', models: [] },
     notice: null,
+    notices: [],
     preferences: parsePreferences(null),
   };
 }
@@ -439,9 +450,25 @@ export class Controller {
    * @param {'info' | 'error'} level @param {string} text
    * @param {{ action?: 'new-session' | 'undo-archive', target?: string }} [extra] what the notice offers to do, and on what (the session Undo brings back)
    */
-  #notify(level, text, extra) { this.#set({ notice: { id: ++this.#noticeId, level, text, ...(extra?.action ? { action: extra.action } : {}), ...(extra?.target ? { target: extra.target } : {}) } }); }
+  #notify(level, text, extra) {
+    /** @type {Notice} */
+    const notice = { id: ++this.#noticeId, level, text, ...(extra?.action ? { action: extra.action } : {}), ...(extra?.target ? { target: extra.target } : {}) };
+    // The same words again replace the earlier notice instead of stacking a copy of it.
+    this.#set(state => ({ notice, notices: [...state.notices.filter(entry => entry.text !== text || entry.level !== level), notice].slice(-NOTICE_STACK) }));
+  }
 
-  dismissNotice() { this.#set({ notice: null }); }
+  /**
+   * Removes a notice: the one with `id`, or without it the latest one (`notice`).
+   * @param {number} [id]
+   */
+  dismissNotice(id) {
+    this.#set(state => {
+      const gone = id ?? state.notice?.id;
+      if (gone === undefined) return {};
+      const notices = state.notices.filter(entry => entry.id !== gone);
+      return { notices, notice: state.notice?.id === gone ? null : state.notice };
+    });
+  }
 
   /** Shows a notice from a screen that cannot show it itself (it closed meanwhile). @param {'info' | 'error'} level @param {string} text */
   notify(level, text) { this.#notify(level, text); }
@@ -2219,7 +2246,8 @@ export class Controller {
 
   /** The archive notice's Undo: the root comes back, and the notice says so (or why not). @param {string} id */
   async undoArchive(id) {
-    this.dismissNotice();
+    const offer = this.#state.notices.find(entry => entry.action === 'undo-archive' && entry.target === id);
+    this.dismissNotice(offer?.id);
     try {
       await this.restoreSession(id);
       const row = this.#state.sessions.list.find(entry => entry.id === id);
@@ -3337,7 +3365,7 @@ export class Controller {
     clearTimeout(intent.retry);
     intent.observer?.stop();
     intent.done();
-    if (this.#state.notice?.text === STOP_WAITING) this.#set({ notice: null });
+    for (const entry of this.#state.notices.filter(notice => notice.text === STOP_WAITING)) this.dismissNotice(entry.id);
     if (this.#state.selected === root) this.#set(state => ({ busy: { ...state.busy, interrupt: false } }));
   }
 

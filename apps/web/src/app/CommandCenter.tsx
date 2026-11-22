@@ -1,9 +1,12 @@
 import * as React from 'react';
-import { File, Folder, LoaderCircle, X } from 'lucide-react';
+import { Check, File, Folder, LoaderCircle, X } from 'lucide-react';
 import { commandResults, type CommandAction, type CommandSession, type CommandWorkspace } from '../lib/command-center.js';
 import { EMPTY_FILE_SEARCH, FileSearch, type FileSearchRequest, type FileSearchState } from '../lib/file-search.js';
 import { cn } from '../lib/utils';
 import { StatusIndicator } from './status';
+import { useAppState, useController } from './store';
+import { can } from '../lib/gateway.js';
+import { FILE_SEARCH_LIMIT } from '../lib/controller.js';
 
 export type CommandScope = 'files' | null;
 
@@ -16,8 +19,23 @@ export type FileSearchSource = {
   search: FileSearchRequest;
 };
 
+/**
+ * The open workspace's file search, where the host offers it (workspace.files). `readable` also asks
+ * that the token may search (project.read): the composer's "@" list stays away rather than fail.
+ */
+export function useWorkspaceFileSource({ readable = false }: { readable?: boolean } = {}): FileSearchSource {
+  const controller = useController();
+  const { connection, workspace, principal } = useAppState();
+  const granted = !readable || can(principal ?? undefined, 'project.read');
+  return React.useMemo(() => ({
+    available: connection.capabilities.includes('workspace.files') && granted,
+    source: workspace,
+    search: (query: string) => controller.searchWorkspaceFiles({ query, limit: FILE_SEARCH_LIMIT }),
+  }), [connection.capabilities, workspace, controller, granted]);
+}
+
 /** Paseo's useWorkspaceFileSearch over lib/file-search.js: debounced, stale answers dropped. */
-function useFileSearch({ enabled, source, query, search }: { enabled: boolean; source: string | null; query: string; search: FileSearchRequest }): FileSearchState {
+export function useFileSearch({ enabled, source, query, search }: { enabled: boolean; source: string | null; query: string; search: FileSearchRequest }): FileSearchState {
   const [state, setState] = React.useState<FileSearchState>(EMPTY_FILE_SEARCH);
   const latest = React.useRef(search);
   latest.current = search;
@@ -213,11 +231,12 @@ export function CommandCenter({ open, scope: openScope = null, onClose, actions,
                   const action = byId.get(row.item.id);
                   const Icon = action?.icon;
                   return (
-                    <div key={`action:${row.item.id}`} id={`${listId}-${at}`} role="option" aria-selected={selected} data-index={at} data-testid={`command-center-action-${row.item.id}`}
+                    <div key={`action:${row.item.id}`} id={`${listId}-${at}`} role="option" aria-selected={selected} data-index={at} data-testid={`command-center-action-${row.item.id}`} aria-current={row.item.checked ? 'true' : undefined}
                       onMouseMove={() => { if (!selected) setActiveIndex(at); }} onClick={() => choose(at)}
                       className={cn('flex min-h-9 cursor-pointer items-center gap-3 px-4 py-2', selected && 'bg-secondary')}>
                       <span className="flex w-4 shrink-0 justify-center text-muted-foreground">{Icon ? <Icon aria-hidden className="size-4" /> : null}</span>
                       <span className="min-w-0 flex-1 truncate text-sm leading-[18px] text-foreground">{row.item.label}</span>
+                      {row.item.checked ? <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground" data-testid="command-center-action-current"><Check aria-hidden className="size-3.5" />Current</span> : null}
                       {row.item.shortcut ? <kbd className="shrink-0 rounded bg-secondary px-1.5 py-px font-sans text-xs text-muted-foreground">{row.item.shortcut}</kbd> : null}
                     </div>
                   );

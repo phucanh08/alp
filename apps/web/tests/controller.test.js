@@ -1888,3 +1888,25 @@ for (const refused of [false, true]) {
     else assert.ok(w.host.root(root).running, 'create returns while the runtime turn still runs');
   });
 }
+
+test('notices stack (t-de48): at most three, newest last; one dismissed by id leaves the others; the same words replace their copy', async t => {
+  const { NOTICE_STACK } = await import('../src/lib/controller.js');
+  const w = setup(t);
+  w.controller.notify('info', 'one');
+  w.controller.notify('error', 'two');
+  w.controller.notify('info', 'three');
+  assert.deepEqual(w.state().notices.map(notice => notice.text), ['one', 'two', 'three']);
+  assert.equal(w.state().notice.text, 'three');
+  w.controller.notify('info', 'four');
+  assert.equal(NOTICE_STACK, 3);
+  assert.deepEqual(w.state().notices.map(notice => notice.text), ['two', 'three', 'four']);
+  w.controller.notify('error', 'two');
+  assert.deepEqual(w.state().notices.map(notice => notice.text), ['three', 'four', 'two'], 'a repeat moves to the end instead of stacking twice');
+  const four = w.state().notices.find(notice => notice.text === 'four');
+  w.controller.dismissNotice(four.id);
+  assert.deepEqual(w.state().notices.map(notice => notice.text), ['three', 'two']);
+  assert.equal(w.state().notice.text, 'two', 'the latest stays the latest');
+  w.controller.dismissNotice();
+  assert.deepEqual(w.state().notices.map(notice => notice.text), ['three']);
+  assert.equal(w.state().notice, null);
+});

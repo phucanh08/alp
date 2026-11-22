@@ -13,6 +13,7 @@ import { Composer } from './Composer';
 import { ModeControl, controlClass } from './SessionView';
 import { useAppState, useController } from './store';
 import { useTabs } from './tabs';
+import { useWorkspaceFileSource } from './CommandCenter';
 
 /*
  * Paseo's new agent tab (composer/draft/workspace-tab.tsx) for ALP sessions: an open area above
@@ -62,6 +63,7 @@ export function NewSessionScreen() {
   const controller = useController();
   const { finishDraft } = useTabs();
   const { catalog, workspace, preferences, busy, connection, principal } = useAppState();
+  const fileSearch = useWorkspaceFileSource({ readable: true });
   // Files of the first message (#121 J) wait here until the session exists; its runtime is checked then.
   const fileGate = controller.fileGate(null);
   const remembered = preferences.newSession;
@@ -230,6 +232,7 @@ export function NewSessionScreen() {
         </div>
       </div>
       <Composer
+        fileSearch={fileSearch}
         onSend={start}
         sendShortcut={preferences.sendShortcut}
         onQueue={() => {}}

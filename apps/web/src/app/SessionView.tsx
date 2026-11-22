@@ -12,6 +12,7 @@ import { modeLabel } from '../lib/format';
 import { liveModels } from '../lib/configure.js';
 import { effortLabel, effortOptions } from '../lib/new-session.js';
 import { Composer } from './Composer';
+import { useWorkspaceFileSource } from './CommandCenter';
 import { ContextMeter } from './ContextMeter';
 import { ArchivedCallout } from './History';
 import { QuestionCard } from './QuestionCard';
@@ -139,6 +140,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
   const [refill, setRefill] = React.useState<{ id: number; text: string } | undefined>(undefined);
   const projectionForTurns = tree?.projection;
   const hasOlder = !!tree?.older?.hasOlder;
+  const fileSearch = useWorkspaceFileSource({ readable: true });
   const turns = React.useMemo(() => projectionForTurns ? turnsByMessage(projectionForTurns, { hasOlder }) : new Map<string, TurnInfo>(), [projectionForTurns, hasOlder]);
   if (!tree) return null;
   const projection = tree.projection;
@@ -237,6 +239,7 @@ export function ChatPanel({ sessionId }: { sessionId: string }) {
         <>
           {closed && !running ? <p className="mx-auto w-full max-w-(--content-width) px-4 pb-2 text-center text-xs text-muted-foreground">This session is closed on the host. Sending a message reopens it.</p> : null}
           <Composer
+            fileSearch={fileSearch}
             meter={<ContextMeter usage={rootSession?.usage} />}
             images={rootSession?.promptImages === true && connection.capabilities.includes('prompt.images') && !!connection.promptImageLimits?.maxBytes}
             imageLimits={connection.promptImageLimits}

@@ -19,7 +19,8 @@
  */
 
 /**
- * @typedef {{ id: string, label: string, group: 'workspace' | 'actions' | 'alp', always?: boolean, keywords?: string[], shortcut?: string, disabled?: boolean }} CommandAction
+ * @typedef {{ id: string, label: string, group: 'workspace' | 'agent' | 'actions' | 'alp', always?: boolean, keywords?: string[], shortcut?: string, disabled?: boolean, checked?: boolean }} CommandAction
+ *   group 'agent': the open session's model, thinking and mode, one row per choice; `checked` marks the current one.
  * @typedef {{ id: string, title: string, subtitle?: string, bucket: 'running' | 'needs_input' | 'failed' | 'attention' | 'done', attention?: boolean, updatedAt?: string }} CommandSession
  *   attention: its last turn finished or failed unseen (Paseo's requiresAttention).
  * @typedef {{ path: string, title: string, subtitle: string, current?: boolean }} CommandWorkspace
@@ -144,6 +145,8 @@ export function commandResults({ actions, sessions, query, workspaces = [], file
   /** @type {{ id: string, title: string, rank: number, rows: { row: CommandRow, score: number }[] }[]} */
   const groups = [
     { id: 'workspace', title: 'Workspace actions', rank: -1, rows: [] },
+    // The open session's agent (model, thinking, mode): only when searched for.
+    { id: 'agent', title: 'Agent', rank: -0.5, rows: [] },
     { id: 'actions', title: 'Actions', rank: 0, rows: [] },
     // Paseo lists a plugin's commands in a section of the plugin's own: ALP's (its alp-provider
     // plugin's Open ALP tasks…) come after the app's.
