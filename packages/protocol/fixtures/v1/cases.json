@@ -5043,6 +5043,173 @@
    "value": {}
   },
   {
+   "name": "session.update pin",
+   "check": "params",
+   "method": "session.update",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "pinned": true
+   }
+  },
+  {
+   "name": "session.update labels",
+   "check": "params",
+   "method": "session.update",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture",
+    "labels": [
+     "Bug",
+     "Đang làm"
+    ]
+   }
+  },
+  {
+   "name": "session.update with neither pinned nor labels",
+   "check": "params",
+   "method": "session.update",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture"
+   }
+  },
+  {
+   "name": "session.update without sessionId",
+   "check": "params",
+   "method": "session.update",
+   "valid": false,
+   "value": {
+    "pinned": false
+   }
+  },
+  {
+   "name": "session.update with an empty label",
+   "check": "params",
+   "method": "session.update",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "labels": [
+     ""
+    ]
+   }
+  },
+  {
+   "name": "session.update with more than 20 labels",
+   "check": "params",
+   "method": "session.update",
+   "valid": false,
+   "value": {
+    "sessionId": "ses_fixture",
+    "labels": [
+     "l0",
+     "l1",
+     "l2",
+     "l3",
+     "l4",
+     "l5",
+     "l6",
+     "l7",
+     "l8",
+     "l9",
+     "l10",
+     "l11",
+     "l12",
+     "l13",
+     "l14",
+     "l15",
+     "l16",
+     "l17",
+     "l18",
+     "l19",
+     "l20"
+    ]
+   }
+  },
+  {
+   "name": "session.update result",
+   "check": "result",
+   "method": "session.update",
+   "valid": true,
+   "value": {
+    "session": {
+     "id": "ses_fixture",
+     "projectRoot": "/work/project",
+     "agent": "main",
+     "runtime": "codex",
+     "model": "gpt-6.1-sol",
+     "mode": "workspace-write",
+     "thinking": "low",
+     "workflow": {
+      "mode": "pho",
+      "maxPeers": 2,
+      "supervisor": false
+     },
+     "teamLabel": "Phở",
+     "threadId": "thread-1",
+     "persistent": true,
+     "busy": false,
+     "status": "idle",
+     "title": "Sửa lỗi 😀",
+     "createdAt": "2026-10-15T00:00:00.000Z",
+     "updatedAt": "2026-10-15T00:00:00.000Z",
+     "pinnedAt": "2026-10-15T00:00:00.000Z",
+     "labels": [
+      "Bug"
+     ]
+    }
+   }
+  },
+  {
+   "name": "session.update without session",
+   "check": "result",
+   "method": "session.update",
+   "valid": false,
+   "value": {}
+  },
+  {
+   "name": "label.list params",
+   "check": "params",
+   "method": "label.list",
+   "valid": true,
+   "value": {}
+  },
+  {
+   "name": "label.list result",
+   "check": "result",
+   "method": "label.list",
+   "valid": true,
+   "value": {
+    "labels": [
+     {
+      "name": "Bug",
+      "color": "red"
+     }
+    ]
+   }
+  },
+  {
+   "name": "label.list result without labels",
+   "check": "result",
+   "method": "label.list",
+   "valid": false,
+   "value": {}
+  },
+  {
+   "name": "label.list result with a label without color",
+   "check": "result",
+   "method": "label.list",
+   "valid": false,
+   "value": {
+    "labels": [
+     {
+      "name": "Bug"
+     }
+    ]
+   }
+  },
+  {
    "name": "history params",
    "check": "params",
    "method": "session.history",

@@ -1749,6 +1749,15 @@
         "attention": {
           "$ref": "#/$defs/attention"
         },
+        "pinnedAt": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "lastError": {
           "type": "object",
           "properties": {

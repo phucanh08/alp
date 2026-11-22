@@ -332,6 +332,18 @@ cases.push({"name":"session.attention.mark without sessionId","check":"params","
 cases.push({"name":"session.attention.mark result","check":"result","method":"session.attention.mark","valid":true,"value":{"marked":true,"attention":{"reason":"finished","at":"2026-10-15T00:00:00.000Z"}}});
 cases.push({"name":"session.attention.mark not marked","check":"result","method":"session.attention.mark","valid":true,"value":{"marked":false}});
 cases.push({"name":"session.attention.mark without marked","check":"result","method":"session.attention.mark","valid":false,"value":{}});
+cases.push({"name":"session.update pin","check":"params","method":"session.update","valid":true,"value":{"sessionId":"ses_fixture","pinned":true}});
+cases.push({"name":"session.update labels","check":"params","method":"session.update","valid":true,"value":{"sessionId":"ses_fixture","labels":["Bug","Đang làm"]}});
+cases.push({"name":"session.update with neither pinned nor labels","check":"params","method":"session.update","valid":false,"value":{"sessionId":"ses_fixture"}});
+cases.push({"name":"session.update without sessionId","check":"params","method":"session.update","valid":false,"value":{"pinned":false}});
+cases.push({"name":"session.update with an empty label","check":"params","method":"session.update","valid":false,"value":{"sessionId":"ses_fixture","labels":[""]}});
+cases.push({"name":"session.update with more than 20 labels","check":"params","method":"session.update","valid":false,"value":{"sessionId":"ses_fixture","labels":Array.from({ length: 21 }, (_, i) => `l${i}`)}});
+cases.push({ name: 'session.update result', check: 'result', method: 'session.update', valid: true, value: { session: { ...summary, pinnedAt: ts, labels: ['Bug'] } } });
+cases.push({"name":"session.update without session","check":"result","method":"session.update","valid":false,"value":{}});
+cases.push({"name":"label.list params","check":"params","method":"label.list","valid":true,"value":{}});
+cases.push({"name":"label.list result","check":"result","method":"label.list","valid":true,"value":{"labels":[{"name":"Bug","color":"red"}]}});
+cases.push({"name":"label.list result without labels","check":"result","method":"label.list","valid":false,"value":{}});
+cases.push({"name":"label.list result with a label without color","check":"result","method":"label.list","valid":false,"value":{"labels":[{"name":"Bug"}]}});
 cases.push({"name":"history params","check":"params","method":"session.history","valid":true,"value":{"sessionId":"r","limit":200}});
 cases.push({"name":"history oversized result","check":"result","method":"session.history","valid":true,"value":{"generation":"g","items":[{"cursor":2,"oversized":{"bytes":800000}}],"hasOlder":false,"tipCursor":2}});
 cases.push({"name":"history limit refuses unbounded page","check":"params","method":"session.history","valid":false,"value":{"sessionId":"r","limit":501}});

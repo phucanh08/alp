@@ -43,6 +43,10 @@ export type SessionRecord = {
   title?: string;
   /** Set aside by the user: closed, and listed only when asked (ALPD §61). */
   archived?: boolean;
+  /** When the user pinned this root to the top (capability `session.meta`). */
+  pinnedAt?: string;
+  /** The root's labels: names of the registry's label catalog, in its spelling (capability `session.meta`). */
+  labels?: string[];
   /** A root's last turn that ended unseen, until a client acknowledges it or another turn starts (Paseo's requiresAttention). */
   attention?: TurnAttention;
   /** Claude: the conversation `session.threadId` is made from on its first prompt, after a fork or rewind (§12.7). */

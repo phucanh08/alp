@@ -53,7 +53,7 @@ export type HistoryPage = { generation: string; items: HistoryItem[]; olderCurso
 /** One entry of session.commands: inserted as `/<name>` into the composer. */
 export type SessionCommand = { name: string; description: string; argumentHint?: string; kind: 'command' | 'skill' };
 
-export type Capability = 'host.owner' | 'session.interrupt.turn' | 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.commands' | 'session.configure.live' | 'terminal' | 'terminal.capture' | 'terminal.watch' | 'attachments' | 'workspace.git' | 'workspace.git.facts' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'session.attention.mark' | 'workspace.files' | 'workspace.files.read' | 'workspace.files.browse' | 'host.directories' | 'prompt.images' | 'schedule' | 'catalog.live';
+export type Capability = 'host.owner' | 'session.interrupt.turn' | 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.commands' | 'session.configure.live' | 'terminal' | 'terminal.capture' | 'terminal.watch' | 'attachments' | 'workspace.git' | 'workspace.git.facts' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'session.attention.mark' | 'session.meta' | 'workspace.files' | 'workspace.files.read' | 'workspace.files.browse' | 'host.directories' | 'prompt.images' | 'schedule' | 'catalog.live';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -244,6 +244,10 @@ export type RpcMethodMap = {
   };
   'session.close': { params: { sessionId: string }; result: Empty };
   'session.rename': { params: { sessionId: string; title: string }; result: { session: SessionSummary } };
+  /** Capability `session.meta`: Paseo's Pin to top and labels on a root. `pinned` sets or clears `pinnedAt`; `labels` replaces the root's labels with names of the registry's label catalog (case-insensitive, stored in the catalog's spelling, at most 20). Not activity: `updatedAt` stays. */
+  'session.update': { params: { sessionId: string; pinned?: boolean; labels?: string[] }; result: { session: SessionSummary } };
+  /** Capability `session.meta`: the registry's label catalog, the names `session.update` takes. */
+  'label.list': { params: Empty; result: { labels: Array<{ name: string; color: string }> } };
   /**
    * A new root whose conversation is the source's up to a completed turn (capability `session.fork`, §12.7).
    * Answered once per (sessionId, requestId): a repeat answers the first result with `duplicate: true`.
