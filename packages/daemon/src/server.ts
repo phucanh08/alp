@@ -995,8 +995,10 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     return serialLabels(async () => {
       const key = previousName.toLowerCase();
       for (const record of records.values()) {
-        if (!record.labels?.some(name => name.toLowerCase() === key)) continue;
-        const next = [...new Map(record.labels.flatMap(name => name.toLowerCase() === key ? (newName ? [newName] : []) : [name]).map(name => [name.toLowerCase(), name])).values()];
+        // Strings only, as labelsOf reads them: a record edited by hand never stops the follow-up of the others.
+        const names = (record.labels ?? []).filter((name): name is string => typeof name === 'string');
+        if (!names.some(name => name.toLowerCase() === key)) continue;
+        const next = [...new Map(names.flatMap(name => name.toLowerCase() === key ? (newName ? [newName] : []) : [name]).map(name => [name.toLowerCase(), name])).values()];
         const before = record.labels;
         record.labels = next.length ? next : undefined;
         // Once more on a failed write; then memory goes back to what the disk holds, so the session
