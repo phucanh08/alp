@@ -34,11 +34,12 @@ const CLI = path.join(ROOT, 'packages/cli/dist/cli.js');
 const run = promisify(execFile);
 
 /** A scratch host with alpd and one registered project, and the `alp` wrapper the app runs. */
-async function browserHost(context) {
+async function browserHost(context, step = () => {}) {
   const { dir, defer } = context;
   const home = path.join(dir, 'h', '.alp');
   await mkdir(home, { recursive: true, mode: 0o700 });
   await mkdir(path.join(dir, 'ht'), { recursive: true });
+  step('host: fixture processes');
   const processes = await fixtureProcesses(home);
   defer(() => processes.stop());
   const bin = path.join(dir, 'hb');
@@ -55,22 +56,42 @@ async function browserHost(context) {
   const port = await freePort();
   await writeFile(path.join(home, 'settings.json'), JSON.stringify({ dashboard: { port }, web: { relay: { enabled: false } } }));
   const alp = (...args) => run(process.execPath, [CLI, ...args], { env, timeout: 60_000 });
+  step('host: alp init');
   await alp('init', directory);
+  step('host: alp daemon start');
   await alp('daemon', 'start');
   defer(() => alp('daemon', 'stop').catch(() => {}));
   const lock = JSON.parse(await readFile(path.join(home, 'alpd.lock'), 'utf8'));
   assert.ok(lock.ready && lock.socket.startsWith(`${dir}${path.sep}`));
-  const client = await hostConnect(lock.socket);
+  step('host: connecting to alpd');
+  const client = await bounded('connecting to alpd', hostConnect(lock.socket));
   try {
-    const { revision } = await client.request('project.list', {});
-    await client.request('project.register', { directory, ifRevision: revision, requestId: 'desktop-browser-site' });
+    step('host: registering the project');
+    const { revision } = await bounded('project.list', client.request('project.list', {}));
+    await bounded('project.register', client.request('project.register', { directory, ifRevision: revision, requestId: 'desktop-browser-site' }));
   } finally { client.close(); }
+  step('host: writing the alp wrapper');
   const wrapper = path.join(bin, 'alp');
   const exports = Object.entries(env).filter(([name]) => /^(ALP_[A-Z0-9_]+|PATH|HOME|TMPDIR|NODE_OPTIONS|USER|LOGNAME|LANG)$/.test(name)).map(([name, value]) => `${name}='${String(value).replaceAll("'", "'\\''")}'`);
   await writeFile(wrapper, `#!/bin/sh\nexec env -i ${exports.join(' ')} '${process.execPath}' '${CLI}' "$@"\n`);
   await chmod(wrapper, 0o755);
   defer(() => alp('dashboard', '--stop').catch(() => {}));
   return { home, directory, wrapper, dir };
+}
+
+/** The tail of every log under the scratch host's ALP home, for a failure report (tokens masked). */
+async function hostLogs(dir) {
+  const logs = path.join(dir, 'h', '.alp', 'logs');
+  const found = [];
+  const walk = async at => {
+    for (const entry of await readdir(at, { withFileTypes: true }).catch(() => [])) {
+      const file = path.join(at, entry.name);
+      if (entry.isDirectory()) await walk(file);
+      else found.push(`--- ${path.relative(logs, file)}\n${(await readFile(file, 'utf8').catch(error => error.message)).slice(-3_000)}`);
+    }
+  };
+  await walk(logs);
+  return (found.join('\n') || '(no logs)').replace(/alpgw1\.[A-Za-z0-9_.-]+/g, 'alpgw1.<masked>');
 }
 
 const PAGE_STYLE = '<style>body{font:16px -apple-system,system-ui,sans-serif;background:#101418;color:#e8edf2;margin:0;padding:40px}h1{font-weight:600}code{color:#8ab4f8}</style>';
@@ -106,18 +127,26 @@ const capture = async (app, file) => {
 };
 
 test('browser: a Browser tab shows a local page and is held to its guards', { timeout: 300_000 }, async t => {
-  const context = await scratch(t);
-  const host = await browserHost(context);
-  const site = await localSite(context);
-  const app = await launch(t, context, host.wrapper);
-  // Which step the test reached: logged as it goes, and reported with the guests and the app's output
-  // when the test ends before its last step (registered after launch, so it runs before the app closes).
-  let reached = 'launch';
+  // Which step the test reached: logged as it goes, and reported (with the host's logs, and once the
+  // app runs, its guests and output) when the test ends before its last step.
+  let reached = 'start';
+  let app;
   const step = what => { reached = what; console.log(`# browser.spec ${new Date().toISOString()} ${what}`); };
+  const context = await scratch(t);
+  context.defer(async () => {
+    if (reached === 'done') return;
+    t.diagnostic(`browser.spec stopped at: ${reached}`);
+    t.diagnostic(`host logs:\n${await hostLogs(context.dir)}`);
+  });
+  step('host');
+  const host = await browserHost(context, step);
+  const site = await localSite(context);
+  step('launching ALP.app');
+  app = await launch(t, context, host.wrapper);
   context.defer(async () => {
     if (reached === 'done') return;
     const states = await guestStates(app).catch(error => error.message);
-    t.diagnostic(`browser.spec stopped at: ${reached}\nguests: ${JSON.stringify(states)}\napp output:\n${app.alpOutput().slice(-8_000)}`);
+    t.diagnostic(`guests: ${JSON.stringify(states)}\napp output:\n${app.alpOutput().slice(-8_000)}`);
   });
   step('waiting for dashboard.json');
   const info = await waitFor(async () => {
