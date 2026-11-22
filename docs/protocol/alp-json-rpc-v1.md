@@ -416,6 +416,31 @@ when the process does); an ACP agent's `usage_update` (context, window, `cost` i
 prompt response's unstable `usage` (tokens); Antigravity its steps' tokens. No secret, path or
 account data is in it. Account-wide usage (plan windows) is `daemon.usage`, which is local only.
 
+`daemon.usage { refresh?, account? }` answers the account-wide plan usage of each runtime (Codex,
+Claude) as `{ providers: UsageProvider[] }`. A provider has `runtime`, `available`, `checkedAt`,
+`plan` (the runtime's own plan name, e.g. `max`, `plus`), `limited`, `windows`, `pause`, `parked`,
+and since t-9116, all optional for a client of an older alpd:
+
+- `windows[]`: `{ name, usedPercent, resetsAt, id, label }`. `name` is ALP's own name, unchanged
+  (`five hour`, `seven day`, `Codex · 5 hour window`); `id` is stable within the provider and
+  `label` is the text Paseo's Usage page shows. Claude: `five_hour` "Session", `weekly` "Weekly",
+  `weekly:<model>` "Weekly · <Model>" (rate_limits.model_scoped, and the older seven_day_opus /
+  seven_day_sonnet keys reconciled with it by name); seven_day_oauth_apps is not shown, as in Paseo.
+  Codex: the default bucket by length (`five_hour` "5-hour", `weekly` "Weekly", `<n>s` "<n>-<unit>",
+  `unknown_primary` "Primary limit" when no length is reported), another bucket
+  `limit:<limitId>:<length id>` "<limitName> · <length>".
+- `planLabel`: Claude's subscription capitalised (`Max`; the tier such as 5x is not in what the
+  Claude SDK answers), Codex's planType as is (`plus`); null when unknown.
+- `details[]`: `{ id, label, value }`; Claude's `{ id: "extra_usage", label: "Extra usage",
+  value: "Enabled" | "Disabled" }`. Extra usage is not a window and never makes a provider `limited`.
+- `balances[]`: `{ id: "credits", label: "Credits", remaining: number | null, unlimited }`, Codex's
+  credits when the snapshot has them.
+- `account`: `{ email }` of the signed-in account only when the request has `account: true`, else
+  null. Only `alp dashboard`'s owner handler asks for it; no runtime context, log or error carries it.
+
+`disabled: true` with no providers is `alp dashboard`'s own answer while the host's Check usage switch
+(`host.usage.setting`, docs/alp/dashboard.md §4.7) is off; alpd never answers it.
+
 ### 8.6 Tool-call details
 
 A `tool_call` item (`{ kind: "tool_call", id, callId, name, status: "running" | "completed" | "failed",
@@ -640,7 +665,7 @@ connection on the local socket acts as the owner.
 | `daemon.shutdown` | stops alpd after answering | yes | — | host.admin |
 | `daemon.pause` / `daemon.resume` | pause state, notices | yes (same state) | -32602 | host.admin |
 | `daemon.pauses` | read | yes | — | host.admin |
-| `daemon.usage` | read; `refresh` probes providers | yes | — | session.read |
+| `daemon.usage` | read; `refresh` probes providers; `account` adds the signed-in email (§8.5) | yes | — | session.read |
 | `catalog.get` | read | yes | — | session.read |
 | `assignment.recall` | asks a finished assignment's thread (a model call) | no | 1000, -32602 | session.write |
 | `board.list` | read | yes | -32602 | session.read |

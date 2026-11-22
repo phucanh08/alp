@@ -373,11 +373,27 @@ alpd, không chép lại:
 
 | Trang | Owner làm được | Method | Dùng lại |
 | --- | --- | --- | --- |
-| Usage | xem hạn mức của từng provider (gói, cửa sổ, % đã dùng, giờ reset, việc đang park), **Refresh** hỏi lại provider trên host | `daemon.usage { refresh }` (alpd) | cách trình bày của màn Usage trong plugin Paseo (`integrations/paseo/client/usage.tsx`) |
+| Usage | xem hạn mức của từng provider (gói, cửa sổ, % đã dùng, giờ reset, việc đang park, extra usage, credits, email tài khoản), **Refresh** hỏi lại provider trên host; công tắc **Check usage** của host ("Applies to <host> on every device") | `daemon.usage { refresh }` (handler của dashboard gửi tới alpd kèm `account: true`), `host.usage.setting.get`, `host.usage.setting.set { enabled }` | trang Usage của Paseo (`plugins/claude-usage-source`, `plugins/codex-usage-source`: id và label của cửa sổ, `planLabel`, `details`, `balances`); công tắc lưu ở `$ALP_HOME/usage.json` (0600) |
 | Providers | **thêm** provider (id, command, args, env, label, description, models): trước khi lưu, bước xác nhận hiện đúng lệnh và args sẽ chạy và **tên** biến env, giá trị luôn là `‹hidden on the host›`; chỉ tạo mới, không ghi đè provider đã có. **Test** một provider (host chạy nó và hỏi `initialize`). **Diagnose**: các check về runtime và provider của `alp doctor` (codex, claude, antigravity cài và đăng nhập chưa, command của từng provider có không), chỉ đọc, không `--fix`, mất vài giây | `host.provider.add`, `host.provider.test`, `host.provider.diagnose` | `alp provider add` (`edited` + `saveEntry`, scope library, `revision: null`), `alp provider test` (`testEntry`), `alp doctor` (`diagnose`, lọc các check trên) |
 | Terminals | trạng thái công tắc terminal từ xa của host; **Allow…** hiện nguyên văn cảnh báo của `alp terminal allow` (`TERMINAL_WARNING`) và chỉ bật khi bấm xác nhận (handler từ chối `allow` thiếu `confirm: true`); **Turn off** tắt | `host.terminal.status`, `host.terminal.set { allow, confirm }` | `terminalCommand` của `alp terminal status/allow --yes/deny` (cùng file `$ALP_HOME/terminal.json`, 0600) |
 | Workspaces | mọi workspace của các project còn sống, kể cả đã archive (**Show archived**): **Archive/Unarchive**, gắn và bỏ **label** (tên, màu), đổi màu và xoá label trong danh mục | `host.registry`, `host.workspace.update { archived }`, `host.workspace.label` | `registry.owner` (không operation: đọc; `label.assign/update/delete`), `workspace.update` của alpd, không có roots của credential |
 | Projects | **đăng ký** bất kỳ thư mục nào có thật (đường dẫn tuyệt đối, đã chuẩn hoá, là thư mục: kiểm trên host trước khi tới alpd), **gỡ** một project (workspace của nó bị archive, file không đổi) | `host.project.register`, `host.project.remove` | `project.register`/`project.remove` của alpd; grant của dashboard theo registry (`grant.js`, watcher trên `state/`) nên trang nhận project mới ngay |
+
+**Usage và Check usage** (t-9116). `daemon.usage` (docs/protocol/alp-json-rpc-v1.md §8.5) trả mỗi provider
+với `windows[].id`/`label` theo Paseo (Claude: Session, Weekly, Weekly · <Model>; Codex: 5-hour, Weekly,
+<limitName> · <length>), `planLabel` (Claude `Max`, Codex `plus`), `details` (Extra usage
+Enabled/Disabled), `balances` (Credits của Codex) và `account: { email }`. `name` cũ giữ nguyên.
+Email chỉ có khi hỏi `account: true`, và chỉ handler `daemon.usage` của dashboard (host.js) hỏi: bridge
+Paseo (chuyển câu trả lời cho thiết bị đã ghép) và client cục bộ khác nhận `account: null`; email không
+vào `orchestrationContext` (catalog agent thấy), log hay lỗi.
+
+`host.usage.setting.get` → `{ enabled, host }` (`host` là `os.hostname()`), `host.usage.setting.set
+{ enabled }` → cùng dạng; lưu ở `$ALP_HOME/usage.json`, mặc định bật (file thiếu hay hỏng đọc là bật).
+Công tắc nằm ở **lớp owner của dashboard**, không ở alpd: tắt thì handler `daemon.usage` của dashboard
+trả `{ disabled: true, providers: [] }` mà không gọi alpd, nên không provider nào bị hỏi và app không
+có số liệu nào trên mọi thiết bị mở dashboard này. alpd không đọc file đó: việc theo dõi hạn mức của alpd
+(tạm dừng và tự chạy lại runtime khi hết hạn mức) và mọi client nói thẳng với alpd (bridge Paseo, plugin
+Usage của Paseo) vẫn chạy như cũ.
 
 Trang Terminals còn hiện dòng **Paired Paseo app devices** khi công tắc bật: quyền mở terminal của thiết
 bị Paseo đã ghép (`alp terminal allow --paseo`) là của host, Allow ở đây giữ nguyên nó như

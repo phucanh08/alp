@@ -3,6 +3,29 @@
 Những chỗ ALP cố ý khác Paseo (upstream `getpaseo/paseo`) hoặc khác bản ALP trước, theo thứ tự mới
 nhất trước. Mỗi mục nói cái gì đổi, ai bị ảnh hưởng, và vì sao.
 
+## 2026-11-22: Dữ liệu Usage như Paseo; công tắc Check usage của host (t-9116)
+
+- **`daemon.usage` thêm field** (cộng thêm, `name` cũ không đổi): `windows[].id`/`label`, `planLabel`,
+  `details`, `balances`, `account`. Client cũ bỏ qua field lạ.
+- **Extra usage của Claude không còn là một cửa sổ** (khác ALP trước): trước đây `extra usage` hiện như
+  một thanh % (tiền overage đã tiêu trong tháng so với trần), và khi nó tới 100% thì provider bị coi là
+  `limited` và việc theo dõi hạn mức của alpd coi runtime chưa được làm lại. Nay nó là một dòng
+  `Extra usage: Enabled/Disabled` như Paseo, không bao giờ làm provider `limited`. Catalog mà agent thấy
+  cũng không còn cửa sổ `extra_usage` (có `extraUsage: true/false`).
+- **`seven_day_oauth_apps` không hiện** trong `daemon.usage` (như Paseo); alpd vẫn tính nó khi xét hạn
+  mức như trước.
+- **Cửa sổ theo model** (`model_scoped` của Claude SDK, như "Weekly · Fable") nay hiện, nhưng alpd không
+  dùng nó để giữ runtime tạm dừng (chỉ `seven_day_opus`/`seven_day_sonnet` cũ vẫn được tính, như trước).
+- **Khác Paseo**: id cửa sổ theo model là `weekly:<model>` (Paseo: `weekly_model_<model>`); gói Claude
+  là `Max`, không có hạng `5x` (Paseo đọc credential OAuth; ALP không đọc file hay keychain credential,
+  Claude SDK không trả hạng); Codex đọc qua app-server (`account/rateLimits/read`, `account/read`)
+  thay vì API `wham/usage`, nên bucket khác mặc định được định danh bằng `limitId`
+  (`limit:<limitId>:<length>`); không có `code_review` riêng. Email chỉ có trong câu trả lời cho
+  dashboard của host owner (Paseo gửi email làm nhãn tài khoản, `account.label`, cho client của daemon).
+- **Check usage** (`host.usage.setting.*`, như Paseo "Applies to <host> on every device"): tắt thì
+  dashboard trả `{ disabled: true, providers: [] }` và không hỏi provider nào. Khác Paseo: chỉ áp
+  dụng cho `alp dashboard`; bridge Paseo và việc theo dõi hạn mức của alpd không đọc công tắc.
+
 ## 2026-11-21: Sidebar như Paseo: session dưới mọi workspace, diff/PR/CI, Schedules, usage (t-ff83)
 
 - **Mọi client**: nhóm theo Project, sidebar liệt kê session của **mọi** workspace (trước chỉ
