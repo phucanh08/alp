@@ -333,7 +333,9 @@ test('owner: batch 2 menus in ALP.app: pin and labels, Open in editor, the heade
   await labelsPage.getByRole('menuitemcheckbox', { name: 'urgent' }).click();
   await waitFor(async () => JSON.stringify((await read('desktop-older'))?.labels) === '["urgent"]', 'alpd to keep the label');
   await shot('batch2-session-labels.png');
-  await page.keyboard.press('Escape');
+  // Escape goes back from the Labels page, then closes the menu.
+  for (let tries = 0; tries < 3 && await page.getByRole('menu').count(); tries++) await page.keyboard.press('Escape');
+  await waitFor(async () => await page.getByRole('menu').count() === 0, 'the menu to close');
 
   // Open in editor from the project's ⋮: the host's editors; Zed opens shop's directory.
   const project = page.locator(`[data-testid="sidebar-project"][data-path="${host.projects.shop}"]`).getByTestId('project-row');
@@ -361,6 +363,7 @@ test('owner: batch 2 menus in ALP.app: pin and labels, Open in editor, the heade
   await page.locator('main header').getByRole('button', { name: 'Session actions' }).click();
   await page.getByRole('menu', { name: 'Session actions' }).getByRole('menuitem', { name: 'Archive' }).click();
   await waitFor(async () => (await read('desktop-older'))?.archived === true, 'alpd to archive it');
+  await waitFor(async () => await row.count() === 0 && await page.getByTestId('notice-undo-archive').count() === 1, 'the row gone and the toast\'s Undo');
   await shot('batch2-archive-undo.png');
   await page.getByTestId('notice-undo-archive').click();
   await waitFor(async () => !(await read('desktop-older'))?.archived, 'Undo to unarchive it');
