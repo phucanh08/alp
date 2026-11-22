@@ -65,12 +65,19 @@ export function browserLabel(value) {
   } catch { return 'Browser'; }
 }
 
+/** The page's own origin, when it has one. */
+const pageOrigin = () => (typeof location === 'undefined' ? undefined : location.origin);
+
 /**
  * Saved Browser tabs, checked: ids like `b1`, http/https/about:blank addresses of bounded length,
- * at most MAX_BROWSERS, no id twice. Anything else is dropped.
- * @param {unknown} value @returns {Array<{ id: string, url: string }>}
+ * at most MAX_BROWSERS, no id twice. Anything else is dropped, and so is a tab showing the dashboard's
+ * own origin (`ownOrigin`, the page's location.origin): that address carries the dashboard's token in
+ * its fragment, and ALP.app refuses to load it in a guest anyway. Addresses are kept without their
+ * #fragment, so no fragment (a token among them) is written to storage. Load and save both pass here
+ * (layout.js parseLayout, serializeLayout).
+ * @param {unknown} value @param {string | undefined} [ownOrigin] @returns {Array<{ id: string, url: string }>}
  */
-export function parseBrowsers(value) {
+export function parseBrowsers(value, ownOrigin = pageOrigin()) {
   if (!Array.isArray(value)) return [];
   /** @type {Array<{ id: string, url: string }>} */
   const out = [];
@@ -80,8 +87,11 @@ export function parseBrowsers(value) {
     if (!entry || typeof entry !== 'object') continue;
     const { id, url } = /** @type {Record<string, unknown>} */ (entry);
     if (typeof id !== 'string' || !/^b\d{1,6}$/.test(id) || seen.has(id) || !isBrowsableUrl(url)) continue;
+    const parsed = new URL(/** @type {string} */ (url));
+    if (ownOrigin && parsed.origin === ownOrigin) continue;
+    parsed.hash = '';
     seen.add(id);
-    out.push({ id, url: /** @type {string} */ (url) });
+    out.push({ id, url: parsed.href });
   }
   return out;
 }
