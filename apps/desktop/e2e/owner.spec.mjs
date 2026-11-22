@@ -258,7 +258,7 @@ test('owner: a session row\'s ⋮ menu has Paseo\'s items, and Open in file mana
   const labels = () => menu.getByRole('menuitem').evaluateAll(items => items.map(item => item.querySelector('span')?.textContent?.trim()));
   await row.hover();
   await page.getByRole('button', { name: 'Actions for Older shop work' }).click();
-  await waitFor(async () => JSON.stringify(await labels().catch(() => [])) === JSON.stringify(['Copy path', 'Copy branch name', 'Rename', 'Mark as unread', 'Open in file manager', 'Archive']),
+  await waitFor(async () => JSON.stringify(await labels().catch(() => [])) === JSON.stringify(['Copy path', 'Copy branch name', 'Rename', 'Pin to top', 'Labels', 'Mark as unread', 'Open in file manager', 'Archive']),
     `the menu's items (now ${JSON.stringify(await labels().catch(() => []))})`, 30_000);
   assert.match(await menu.getByTestId('sidebar-workspace-menu-archive').innerText(), /⇧⌘⌫/);
   const shots = process.env.ALP_DESKTOP_SHOTS;

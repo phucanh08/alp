@@ -32,13 +32,11 @@ test('tab title, attention on every session, History with archived sessions and 
   await expect(row(page, 'Notes').locator('[data-status]')).toHaveAttribute('data-status', 'done');
   await expect(row(page, 'Release check').locator('[data-status]')).toHaveAttribute('data-status', 'needs_input');
 
-  // Archive the open session with Paseo's shortcut; it leaves the list.
+  // Archive the open, idle session with Paseo's shortcut: it leaves the list at once, the toast offers Undo (t-a876).
   await page.locator('body').click({ position: { x: 700, y: 300 } });
   await page.keyboard.press('ControlOrMeta+Shift+Backspace');
-  const confirm = page.getByRole('dialog', { name: 'Archive session?' });
-  await expect(confirm).toContainText('Notes');
-  await confirm.getByRole('button', { name: 'Archive' }).click();
-  await expect(confirm).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Archive session?' })).toHaveCount(0);
+  await expect(page.getByRole('status').filter({ hasText: 'Archived “Notes”' })).toBeVisible();
   await expect(row(page, 'Notes')).toHaveCount(0);
 
   // History lists both, the archived one with its badge, the waiting one marked.
