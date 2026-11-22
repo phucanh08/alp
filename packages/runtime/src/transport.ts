@@ -1,4 +1,4 @@
-import { optionalRead, codexUsage } from './runtime-context.js';
+import { optionalRead, codexUsage, codexAccount } from './runtime-context.js';
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { scriptCommand } from '@anhlp/alp-core/packaged';
@@ -93,6 +93,17 @@ export class CodexTransport {
       catalogAvailable: Array.isArray(catalog?.data), catalogComplete: catalog ? !catalog.nextCursor : false,
       models: (catalog?.data ?? []).map((model: any) => ({ id: `codex:${model.model}`, description: model.description,
         label: model.displayName, thinking: model.supportedReasoningEfforts })), usage: codexUsage(usage) };
+  }
+  /**
+   * The usage report and the ChatGPT login's email (account/read), for daemon.usage only (owner-only;
+   * ALPD §58). The email never enters orchestrationContext, which agents see in their catalog.
+   */
+  async usageReport() {
+    const [usage, account] = await Promise.all([
+      optionalRead(() => this.request('account/rateLimits/read', {}, 1200, false)),
+      optionalRead(() => this.request('account/read', { refreshToken: false }, 1200, false)),
+    ]);
+    return { usage: codexUsage(usage), account: codexAccount(account) };
   }
   async initialize() {
     await this.request('initialize', { clientInfo: { name: 'alp', title: 'ALP', version: '0.0.0' }, capabilities: { experimentalApi: true } });

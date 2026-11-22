@@ -26,8 +26,8 @@ test('daemon usage normalizes provider windows, strips account data and shares c
   assert.deepEqual(first, second);
   assert.deepEqual(first.providers.map(provider => [provider.runtime, provider.plan, provider.limited]), [['codex', 'pro', true], ['claude', 'max', false]]);
   assert.deepEqual(first.providers[0].windows, [
-    { name: 'Codex · 5 hour window', usedPercent: 42, resetsAt: '2027-01-15T08:00:00.000Z' },
-    { name: 'Codex · 7 day window', usedPercent: 100, resetsAt: null },
+    { name: 'Codex · 5 hour window', usedPercent: 42, resetsAt: '2027-01-15T08:00:00.000Z', id: 'five_hour', label: '5-hour' },
+    { name: 'Codex · 7 day window', usedPercent: 100, resetsAt: null, id: 'weekly', label: 'Weekly' },
   ]);
   assert.equal(first.providers[1].windows[1].usedPercent, null);
   assert.doesNotMatch(JSON.stringify(first), /private@example|email/);
@@ -60,4 +60,25 @@ test('explicit refresh bypasses the usage cache but concurrent refreshes share a
   assert.deepEqual(first, second);
   assert.equal(first.providers[0].windows[0].usedPercent, 25);
   assert.equal(calls.filter(call => call.endsWith(':usage')).length, 4);
+});
+
+test("daemon usage carries the account email and Paseo's fields from usageReport (t-9116)", async t => {
+  const calls = [];
+  const factory = transport({ codex: { available: true, limits: [{ main: true, plan: 'plus', windows: [{ slot: 'primary', usedPercent: 5, windowMinutes: 300 }] }] }, claude: { available: false } }, calls);
+  const runtime = createAlpRuntime({ transport: (...args) => Object.assign(factory(...args), {
+    async usageReport() { calls.push(`${args[2]}:account`); return args[2] === 'codex'
+      ? { usage: { available: true, limits: [{ main: true, plan: 'plus', windows: [{ slot: 'primary', usedPercent: 5, windowMinutes: 300 }] }] }, account: { email: 'owner@example.com' } }
+      : { usage: { available: false }, account: null }; },
+  }), supervisor: false });
+  t.after(() => runtime.shutdown());
+  const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test' });
+  const client = daemon.local();
+  t.after(() => client.close());
+  const { providers } = await client.request('daemon.usage');
+  assert.deepEqual(providers.map(provider => [provider.runtime, provider.account, provider.planLabel]), [['codex', { email: 'owner@example.com' }, 'plus'], ['claude', null, null]]);
+  assert.deepEqual(providers[0].windows, [{ name: '5 hour window', usedPercent: 5, resetsAt: null, id: 'five_hour', label: '5-hour' }]);
+  assert.deepEqual(providers[0].details, []);
+  assert.deepEqual(providers[0].balances, []);
+  assert.equal(calls.filter(call => call.endsWith(':usage')).length, 0, 'daemon.usage reads usageReport, not orchestrationContext, when the transport has it');
+  assert.equal(calls.filter(call => call.endsWith(':account')).length, 2);
 });
