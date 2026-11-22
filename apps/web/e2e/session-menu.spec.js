@@ -79,7 +79,7 @@ test('a writer\'s menu: Paseo\'s items in order; copy, rename, mark unread then 
 
   let menu = await openMenu(page, 'Menu first');
   // Not the owner: no file manager. The checkout's branch is known. Not in front and idle: Mark as unread.
-  expect(await labels(menu)).toEqual(['Copy path', 'Copy branch name', 'Rename', 'Mark as unread', 'Archive']);
+  expect(await labels(menu)).toEqual(['Copy path', 'Copy branch name', 'Rename', 'Pin to top', 'Labels', 'Mark as unread', 'Archive']);
   await expect(menu.getByTestId('sidebar-workspace-menu-archive')).toContainText(/⇧⌘⌫|Ctrl\+Shift\+⌫/);
 
   // Copy path: the session's directory on the host.
@@ -97,7 +97,7 @@ test('a writer\'s menu: Paseo\'s items in order; copy, rename, mark unread then 
   await expect(row(page, 'Menu first').locator('[data-status]')).toHaveAttribute('data-status', 'attention');
   // …and the menu offers Mark as read in its place, which clears it on the host.
   menu = await openMenu(page, 'Menu first');
-  expect(await labels(menu)).toEqual(['Copy path', 'Copy branch name', 'Rename', 'Mark as read', 'Archive']);
+  expect(await labels(menu)).toEqual(['Copy path', 'Copy branch name', 'Rename', 'Pin to top', 'Labels', 'Mark as read', 'Archive']);
   await menu.getByRole('menuitem', { name: 'Mark as read' }).click();
   await expect.poll(async () => (await sessionOf('Menu first'))?.attention).toBeUndefined();
   await expect(row(page, 'Menu first').locator('[data-status]')).toHaveAttribute('data-status', 'done');
@@ -119,11 +119,9 @@ test('a writer\'s menu: Paseo\'s items in order; copy, rename, mark unread then 
   await expect(row(page, 'Menu renamed')).toHaveCount(1);
   await expect.poll(async () => !!(await sessionOf('Menu renamed'))).toBe(true);
 
-  // Archive: after Paseo's confirmation the row leaves the list and the host archives it.
+  // Archive: an idle session leaves the list at once (Undo in the toast, menus.spec.js) and the host archives it.
   menu = await openMenu(page, 'Menu renamed');
   await menu.getByRole('menuitem', { name: 'Archive' }).click();
-  const confirm = page.getByRole('dialog', { name: 'Archive session?' });
-  await confirm.getByRole('button', { name: 'Archive' }).click();
   await expect(row(page, 'Menu renamed')).toHaveCount(0);
   const archived = await sessionOf('Menu renamed', { includeArchived: true });
   expect(archived?.archived).toBe(true);
@@ -150,7 +148,7 @@ test.describe('the host owner\'s ALP.app', () => {
     await newSession(page, 'Owner menu', { from: start() });
     await newSession(page, 'Owner other', { from: start() });
     let menu = await openMenu(page, 'Owner menu');
-    await expect.poll(() => labels(menu)).toEqual(['Copy path', 'Copy branch name', 'Rename', 'Mark as unread', 'Open in file manager', 'Archive']);
+    await expect.poll(() => labels(menu)).toEqual(['Copy path', 'Copy branch name', 'Rename', 'Pin to top', 'Labels', 'Mark as unread', 'Open in file manager', 'Archive']);
     await menu.getByRole('menuitem', { name: 'Copy branch name' }).click();
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('feature/session-menu');
     menu = await openMenu(page, 'Owner menu');
@@ -164,7 +162,7 @@ test.describe('the host owner\'s ALP.app', () => {
     await plain.goto(dashboard.url);
     await expect(plain.getByLabel('Access token')).toHaveCount(0);
     const menu = await openMenu(plain, 'Owner menu');
-    await expect.poll(() => labels(menu)).toEqual(['Copy path', 'Copy branch name', 'Rename', 'Mark as unread', 'Archive']);
+    await expect.poll(() => labels(menu)).toEqual(['Copy path', 'Copy branch name', 'Rename', 'Pin to top', 'Labels', 'Mark as unread', 'Archive']);
     await plain.close();
   });
 });
