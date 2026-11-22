@@ -77,14 +77,19 @@ test('the Files panel: tree, folders on demand, hidden files, never .env; Markdo
   await entry(page, 'src').click();
   await entry(page, 'src/checkout').click();
   await expect(entry(page, 'src/checkout/cart-total.ts')).toBeVisible();
+  // Paseo's rows (t-81b0.12): a folder is its chevron, a file its file-type icon.
+  await expect(entry(page, 'src').locator('img')).toHaveCount(0);
+  await expect(entry(page, 'src/checkout/cart-total.ts').locator('img')).toHaveAttribute('src', /^data:image\/svg\+xml/);
   await entry(page, 'src/checkout/cart-total.ts').click();
   await expect(fileTab(page, 'src/checkout/cart-total.ts')).toHaveAttribute('aria-selected', 'true');
   await expect(fileView(page).getByTestId('file-view-content')).toContainText('export const total = 0;');
 
-  // The sort cycles name → modified → size.
+  // The sort label cycles name → modified → size (Paseo's "Name ⌄").
   await expect(dock(page).getByTestId('files-sort')).toHaveAttribute('data-sort', 'name');
+  await expect(dock(page).getByTestId('files-sort-label')).toHaveText('Name');
   await dock(page).getByTestId('files-sort').click();
   await expect(dock(page).getByTestId('files-sort')).toHaveAttribute('data-sort', 'modified');
+  await expect(dock(page).getByTestId('files-sort-label')).toHaveText('Modified');
   await dock(page).getByTestId('files-sort').click();
   await expect(dock(page).getByTestId('files-sort')).toHaveAttribute('data-sort', 'size');
   await expect(entries.filter({ hasText: /^(big\.txt|logo\.png|NOTES\.md)$/ })).toHaveText(['big.txt', 'NOTES.md', 'logo.png']);
@@ -101,6 +106,13 @@ test('the Files panel: tree, folders on demand, hidden files, never .env; Markdo
   await expect(dock(page)).not.toContainText('.env');
   await dock(page).getByTestId('files-show-hidden').click();
   await expect(entry(page, 'debug.log')).toHaveCount(0);
+
+  // Refresh lists the open folders again; the tree stays while it runs, and it comes back enabled.
+  await writeFile(path.join(world.projects.main, 'src', 'checkout', 'added.ts'), 'export {};\n');
+  await dock(page).getByTestId('files-refresh').click();
+  await expect(entry(page, 'src/checkout/added.ts')).toBeVisible();
+  await expect(entry(page, 'src/checkout/cart-total.ts')).toBeVisible();
+  await expect(dock(page).getByTestId('files-refresh')).toBeEnabled();
 
   // Markdown opens on its preview; Source shows the text.
   await entry(page, 'NOTES.md').click();
