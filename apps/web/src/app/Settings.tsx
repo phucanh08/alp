@@ -87,43 +87,55 @@ function AppearancePreview() {
 
 // ---- pages ----------------------------------------------------------------------------------
 
-/** Browser notifications when a session waits for an answer: the browser asks on this click. */
+/**
+ * Paseo's Settings › Notifications (desktop-notifications-section.tsx): the permission with its
+ * Refresh, Play sound, and Test notification. The browser asks on the Enable click.
+ */
 function NotificationsSection() {
-  // One permission for both rows: the Test row turns on as soon as Enable is answered.
-  const { permission, request } = useNotificationPermission();
+  // One permission for every row: the Test row turns on as soon as Enable is answered.
+  const notifications = useNotificationPermission();
+  const controller = useController();
+  const { preferences } = useAppState();
   return (
     <Section title="Notifications">
-      <NotificationsRow permission={permission} request={request} />
-      <TestNotificationRow permission={permission} />
+      <NotificationsRow {...notifications} />
+      <Row title="Play sound" hint="Notifications play the system's sound. Off, they arrive silently.">
+        <Switch checked={preferences.notificationSound} aria-label="Play sound" data-testid="notification-sound"
+          onCheckedChange={notificationSound => controller.updatePreferences({ notificationSound })} />
+      </Row>
+      <TestNotificationRow permission={notifications.permission} sound={preferences.notificationSound} />
     </Section>
   );
 }
 
-function NotificationsRow({ permission, request }: ReturnType<typeof useNotificationPermission>) {
+function NotificationsRow({ permission, request, refresh }: ReturnType<typeof useNotificationPermission>) {
   const hint = permission === 'unsupported' ? 'This browser cannot show notifications.'
-    : permission === 'denied' ? 'Blocked in this browser. Allow notifications for this site in the browser settings to get them.'
+    : permission === 'denied' ? 'Blocked. Allow notifications for ALP in the system or browser settings, then Refresh.'
     : permission === 'granted' ? 'On: a notification when a session waits for your answer while you are elsewhere. The tab icon shows it too.'
     : 'Get a notification when a session waits for your answer while you are elsewhere. The browser asks first.';
   return (
     <Row first title="Notifications" hint={hint}>
-      {permission === 'default' ? <Button size="sm" variant="secondary" onClick={() => { void request(); }}>Enable</Button>
-        : <span className="text-sm text-muted-foreground" data-testid="notification-permission">{permission === 'granted' ? 'Allowed' : permission === 'denied' ? 'Blocked' : 'Unavailable'}</span>}
+      <div className="flex items-center gap-2">
+        {permission === 'default' ? <Button size="sm" variant="secondary" onClick={() => { void request(); }}>Enable</Button>
+          : <span className="text-sm text-muted-foreground" data-testid="notification-permission">{permission === 'granted' ? 'Allowed' : permission === 'denied' ? 'Blocked' : 'Unavailable'}</span>}
+        {permission !== 'unsupported' ? <Button size="sm" variant="ghost" onClick={refresh} data-testid="notification-permission-refresh" aria-label="Refresh notification permission">Refresh</Button> : null}
+      </div>
     </Row>
   );
 }
 
 /**
  * Paseo's "Test notification" (desktop-notifications-section.tsx): sends one now, once notifications
- * are allowed, and says whether it was handed over.
+ * are allowed, and says whether it was handed over. It plays the sound as Play sound says.
  */
-function TestNotificationRow({ permission }: { permission: ReturnType<typeof useNotificationPermission>['permission'] }) {
+function TestNotificationRow({ permission, sound }: { permission: ReturnType<typeof useNotificationPermission>['permission']; sound: boolean }) {
   const [result, setResult] = React.useState<{ ok: boolean; message: string } | null>(null);
   const granted = permission === 'granted';
   return (
     <Row title="Test notification" hint={granted ? 'Send a notification to check how they appear.' : 'Allow notifications before testing.'}>
       <div className="flex flex-col items-end gap-1">
         <Button size="sm" variant="secondary" disabled={!granted} data-testid="notification-test"
-          onClick={() => setResult(sendTestNotification() ? { ok: true, message: 'Test notification sent.' } : { ok: false, message: 'Unable to send a test notification.' })}>Send</Button>
+          onClick={() => setResult(sendTestNotification(sound) ? { ok: true, message: 'Test notification sent.' } : { ok: false, message: 'Unable to send a test notification.' })}>Send</Button>
         {result ? <span role="status" className={cn('text-xs', result.ok ? 'text-muted-foreground' : 'text-destructive')} data-testid="notification-test-result">{result.message}</span> : null}
       </div>
     </Row>
