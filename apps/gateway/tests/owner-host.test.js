@@ -21,6 +21,8 @@ const HOST = {
   'host.provider.diagnose': {},
   'host.terminal.status': {},
   'host.terminal.set': { allow: true, confirm: true },
+  'host.usage.setting.get': {},
+  'host.usage.setting.set': { enabled: false },
   'host.registry': {},
   'host.workspace.update': { workspaceId: 'wks_1', archived: true, ifRevision: 3, requestId: 'r1' },
   'host.workspace.label': { action: 'assign', workspaceId: 'wks_1', name: 'Client', color: 'sky', ifRevision: 3, requestId: 'r2' },
