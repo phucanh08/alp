@@ -1,3 +1,89 @@
+# ALP 0.0.1-beta.11 — release notes
+
+Prepared 2026-11-22 from the commits `v0.0.1-beta.10..3b0f96ae` (task t-81b0.11 bumped the
+version). npm (8 packages, `beta` tag) and the GitHub release (archives, installers and the two
+macOS DMGs) carry the same version from one main SHA, as in beta.10. Release acceptance runs the
+repository's fake Codex and fake Claude on the packed tarballs; macOS decides it, Linux and Windows
+are reported. **The gate's real-provider rows (§6.1 of [beta-scope.md](beta-scope.md)) were not run
+for beta.11;** none of them is claimed as passed here. The known R1 (Codex) failure is unchanged
+(below).
+
+This release is mostly the dashboard and ALP.app catching up with Paseo (plan: board decision
+p-3974fce3, compared with Paseo 0.16.2; the full table with every deviation is
+[apps/web/docs/paseo-parity.md](../../apps/web/docs/paseo-parity.md), the deliberate differences
+are in [docs/breaking-changes.md](../breaking-changes.md)).
+
+**Upgrading from beta.10:**
+
+1. `alp update` (bundle) or `npm install -g @anhlp/alp@beta` (npm), then `alp daemon restart` and
+   restart `alp dashboard` (`alp dashboard --stop`, then `alp dashboard`): the new pages call
+   methods that the beta.10 alpd and dashboard do not have.
+2. ALP.app: download `ALP-0.0.1-beta.11-<arch>.dmg` and replace `/Applications/ALP.app`. It is still
+   ad-hoc signed and not notarized, so the first open needs the same Gatekeeper step as beta.10
+   ([desktop.md](desktop.md) §8).
+
+Changes that affect an existing user:
+
+- **The host owner can use every Settings page in ALP.app** (t-a95b.1, PRs #350–#353, #357). The
+  dashboard's own credential on a direct loopback connection, not an ALP agent session, is the
+  *host owner*: it gets owner-only methods that the alp dashboard process answers itself (Usage,
+  Providers, Terminals, Workspaces, Projects, the skill/lesson library, file editing, the agents'
+  language, model refresh). Any other credential gets the same refusal as before. **Settings no
+  longer shows Voice, Pair device, Plugins or Metadata.** Remote gateway details:
+  [remote-gateway.md](remote-gateway.md) §5.19, [dashboard.md](dashboard.md) §4.6.
+- **The sidebar is laid out like Paseo's** (t-ff83, #354–#356): sessions under every workspace with
+  sort, limit and search; for the owner, the branch, `+a -d`, PR and CI of each workspace, repo
+  icons, a usage footer, a Schedules slot and **New workspace**. The default Show items change to
+  Paseo's (branch on, host off); preferences you saved are kept.
+- **Settings › Usage is Paseo's Usage page** (t-9116 A, #358): per-provider cards, window labels,
+  plan badge, pins and the sidebar summary. `daemon.usage` gains optional fields; the account email
+  is returned only to the owner's dashboard. A host-wide **Check usage** switch (default on) stops
+  the dashboard from querying providers; `alp usage` and alpd's limit watch are not affected.
+  Claude's extra usage is shown as Enabled/Disabled and no longer marks the provider `limited`.
+- **Browser tab in ALP.app** (t-9116 B, #359; batch 4 #365): `+ › Browser` opens a web page in its
+  own sandboxed partition (no preload, no Node, http/https only, the dashboard origin blocked,
+  every permission denied, downloads cancelled). From batch 4 a tab keeps its page across tab
+  switches and pane moves, and a navigation ALP.app stops shows "Blocked navigation to …". Not in a
+  normal browser; no agent browser automation ([desktop.md](desktop.md) §4.1).
+- **Session row ⋮ menu as Paseo's** (t-747e, #360): Copy path, Copy branch name, Rename, Mark as
+  read / unread (new alpd method `session.attention.mark`), Open in file manager (owner, ALP.app),
+  Archive.
+- **Paseo parity batch 1 — desktop feel** (t-0166, #361): notifications for the dashboard origin
+  only (Settings › Notifications, Test notification), ⌘W closes the current tab, Paseo's desktop
+  shortcut set in ALP.app (⌘1–9, ⌘[ ⌘], ⌥⌘1–9), window bounds kept, a Dock dot for attention.
+- **Batch 2 — menus** (t-a876, #362, #363): project ⋮ (Open in file manager, Open in editor for the
+  owner, Remove project), session header ⋯ (copy items, New terminal, New browser tab, Rename, Copy
+  session ID, Archive), Archive with Undo, session pin and labels (new `session.update` and
+  `label.list`), Play sound and Refresh in Settings › Notifications.
+- **Batch 3 — chat** (t-de48, #364): ⌘F / Ctrl+F find in the chat pane, `@` file mentions in the
+  composer, Model / Thinking / Mode rows and Switch tab in the command center, a tab switcher per
+  pane, a stack of up to three notices, and error boundaries (Reload, Try again / Close tab).
+- **Batch 4 — workflow** (t-a35b, #365): New session can run in a new managed worktree; comment on
+  diff lines and send the comments to the agent as one message; a Unified / Side-by-side diff
+  toggle; a non-destructive Files context menu (open, copy path / relative path / name); PNG, JPEG,
+  GIF and WebP previews up to 1 MiB in the file tab (gateway `workspace.files.preview` narrowed to
+  raster images under `files.read`; owner `host.files.preview`). **No git or file write action was
+  added** (commit, stage, discard, create, rename, delete stay with the agents; batch 5 is
+  deferred).
+
+Fixes since beta.10 include: a catalog rename that cannot be written to a session leaves it as its
+disk has it (a160d6f6, 9fcf1495); Mark as unread stays on closed roots (e6464fd8); owner library
+pages work in a workspace that is not an ALP project (570241c0); an address typed before a Browser
+tab is ready loads once it is (fc8b48fa); the desktop e2e no longer hangs on a busy Browser spec or
+a slow bundled page (d57f2533, fa54f98c, 2c8f10e0).
+
+Known issues, carried from beta.10:
+
+- **R1 (Codex) of the real-provider gate does not pass** (t-beb5), as in beta.9 and beta.10.
+- **Paseo 0.16 and later** (t-1af7): the plugin fails to typecheck against the newest Paseo SDK.
+- **Two alpd supervisors:** the Paseo plugin and `alp dashboard` each restart a crashed alpd with
+  their own entry, so after a crash the alpd build can change to whichever restarts first.
+- Windows keeps alpd on the bundled Node; npm installs always run alpd on Node. The desktop app is
+  macOS only, not notarized, has no auto-update, and does not stop `alp dashboard` when it quits.
+- Still as before: the Claude Agent SDK's own bundled zod is inside the advisory range (accepted
+  residual risk, [zod-advisory.md](zod-advisory.md)); Antigravity's own read tools are not confined
+  to the workspace; remote mode (`@anhlp/alp-gateway`) is not published.
+
 # ALP 0.0.1-beta.10 — release notes
 
 Prepared 2026-11-21 from the commits `v0.0.1-beta.9..ddd8ac80` (task t-81b0.10 bumped the version
