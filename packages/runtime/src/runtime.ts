@@ -1434,14 +1434,25 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
   /** Reads usage from an open session, or a short-lived process without sending a prompt. */
   async function readUsage(kind: RuntimeKind): Promise<unknown> {
+    return (await readUsageReport(kind, false))?.usage;
+  }
+
+  /**
+   * As readUsage; with `account`, also the signed-in account's email (usageReport), for daemon.usage
+   * alone. The limit watch never asks for it, and the email goes nowhere else (ALPD §58).
+   */
+  async function readUsageReport(kind: RuntimeKind, account: boolean): Promise<{ usage: unknown; account: { email: string } | null } | undefined> {
+    const read = async (runtime: RuntimeTransport) => account && runtime.usageReport
+      ? await runtime.usageReport()
+      : { usage: ((await runtime.orchestrationContext?.()) as any)?.usage, account: null };
     const open = [...sessions.values()].find(session => !session.closed && !session.pending && session.runtimeKind === kind);
-    if (open) return ((await optionalRead(() => open.runtime.orchestrationContext?.() ?? Promise.resolve(undefined), 20_000)) as any)?.usage;
+    if (open) return optionalRead(() => read(open.runtime), 20_000);
     const transport = createTransport(options, kind, os.tmpdir(), nativeEnvironment(options));
     transport.onFailure(() => {});
     try {
       return await optionalRead(async () => {
         await transport.initialize();
-        return ((await transport.orchestrationContext?.()) as any)?.usage;
+        return read(transport);
       }, 20_000);
     } catch {
       return undefined;
@@ -1458,7 +1469,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   function cachedUsage(kind: 'codex' | 'claude', refresh = false) {
     const cached = usageCache.get(kind);
     if (cached && (cached.pending || (!refresh && Date.now() - cached.at < 30_000))) return cached.value;
-    const value = readUsage(kind).then(usage => providerUsage(kind, usage), () => providerUsage(kind, undefined));
+    const value = readUsageReport(kind, true).then(report => providerUsage(kind, report?.usage, undefined, report?.account ?? null), () => providerUsage(kind, undefined));
     const entry = { at: Date.now(), pending: true, value };
     usageCache.set(kind, entry);
     void value.then(() => { entry.pending = false; entry.at = Date.now(); });

@@ -2,7 +2,7 @@ import { writablePath } from './permission-path.js';
 import { accessSync, constants, existsSync, mkdirSync, realpathSync, rmdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { optionalRead, claudeUsage } from './runtime-context.js';
+import { optionalRead, claudeUsage, claudeAccount } from './runtime-context.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { BOARD_KINDS_INPUT, PIN_BODY_CHARS, PIN_KINDS, PIN_PATH_CHARS, PIN_PATHS, PIN_PATHS_INPUT } from './board.js';
@@ -33,6 +33,7 @@ type ClaudeQuery = AsyncGenerator<SDKMessage, void> & {
   supportedModels(): Promise<Array<{ value: string; displayName: string; description: string; supportedEffortLevels?: string[] }>>;
   supportedCommands(): Promise<Array<{ name: string; description: string; argumentHint?: string; builtin?: boolean }>>;
   usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(options: { skipBehaviors: boolean }): Promise<any>;
+  accountInfo(): Promise<{ email?: string }>;
   getContextUsage(options: { detail: 'summary' | 'full' }): Promise<any>;
   interrupt(): Promise<unknown>;
   setPermissionMode(mode: 'default' | 'acceptEdits' | 'bypassPermissions'): Promise<void>;
@@ -520,7 +521,7 @@ export class ClaudeTransport {
       // Without a session yet, a short-lived Claude process answers (ALPD §58); it takes a second or two.
       this.query
         ? optionalRead(async () => this.query!.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }))
-        : optionalRead(() => this.probeUsage(), 15_000),
+        : optionalRead(() => this.probe(probe => probe.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true })), 15_000),
     ]);
     return { runtime: 'claude', observedAt: new Date().toISOString(), catalogAvailable: Array.isArray(catalog),
       models: (catalog ?? []).map(model => ({ id: `claude:${model.value}`, label: model.displayName,
@@ -569,13 +570,29 @@ export class ClaudeTransport {
     }
   }
 
-  /** The plan's usage windows before a session starts, from a Claude process that sends no prompt and is closed after. */
-  private async probeUsage() {
+  /**
+   * The usage report and the signed-in account's email, for daemon.usage only (owner-only; ALPD §58).
+   * The email never enters orchestrationContext, which agents see in their catalog.
+   */
+  async usageReport(): Promise<{ usage: ReturnType<typeof claudeUsage>; account: { email: string } | null }> {
+    const read = async (query: ClaudeQuery, timeout?: number) => {
+      const [usage, info] = await Promise.all([
+        optionalRead(async () => query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true }), timeout),
+        optionalRead(async () => query.accountInfo(), timeout),
+      ]);
+      return { usage: claudeUsage(usage), account: claudeAccount(info) };
+    };
+    if (this.query) return read(this.query);
+    return (await optionalRead(() => this.probe(probe => read(probe, 15_000)), 15_000)) ?? { usage: claudeUsage(undefined), account: null };
+  }
+
+  /** Reads from a Claude process that sends no prompt and is closed after: the plan's usage before a session starts. */
+  private async probe<T>(read: (probe: ClaudeQuery) => Promise<T>): Promise<T | undefined> {
     if (this.closed) return undefined;
     const { query } = await claudeSdk();
     const probe = query({ prompt: new InputQueue(), options: { cwd: this.cwd, env: this.env, settingSources: [], persistSession: false, strictMcpConfig: true, mcpServers: {}, pathToClaudeCodeExecutable: this.command, ...scriptExecutable(this.command) } }) as ClaudeQuery;
     try {
-      return await probe.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true });
+      return await read(probe);
     } finally {
       probe.close();
     }

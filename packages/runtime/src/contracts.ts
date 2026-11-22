@@ -16,6 +16,8 @@ export type RuntimeTransport = {
   request(method: string, params: any): Promise<any>;
   initialize(): Promise<void>;
   orchestrationContext?: () => Promise<unknown>;
+  /** The usage report and the signed-in account's email, for daemon.usage only; omitted, daemon.usage reads orchestrationContext's usage and no account. */
+  usageReport?: () => Promise<{ usage: unknown; account: { email: string } | null }>;
   /** The runtime's own slash commands and skills for the composer (t-f628); omitted, the runtime offers none. */
   commands?: () => Promise<RuntimeCommand[]>;
   /** Claude: the aliases of /clear (new, reset) that run a command of the user's, so they are not refused (t-5ac5). */
