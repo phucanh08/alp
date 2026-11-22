@@ -152,7 +152,7 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
 - Workspace được `realpath` **lúc cấp credential, trên host, bởi chủ máy**. Grant giữ cả đường
   dẫn đã nhập lẫn đường dẫn canonical.
 - Permission cấp được:
-  - `session.read`, `session.write`: sessions, câu hỏi, board; kèm `catalog.get`, `library.models`
+  - `session.read`, `session.write`: sessions, câu hỏi, board; kèm `catalog.get`, `library.models`, `label.list`
     và `settings.language.get`;
   - `project.read`, `project.write`: tài nguyên khác của project: tasks, danh sách teams, danh
     sách tên entry của library, và nội dung một entry (`library.get`, chỉ đọc, đã redaction §5.7).
@@ -446,6 +446,8 @@ Cột Test dùng các mã sau:
 | `session.configure.preview` | `session.configure.live` | root thuộc grant (tra mới); chỉ đọc; answer chiếu `projectConfigurePreview` (tên, boolean, số đếm; MCP chỉ tên và loại, không lệnh hay đường dẫn; message cố định theo reason) | session.read | exposed | P S R |
 | `session.close` | — | session; **stop** như `interrupt` | session.write | exposed | P S M |
 | `session.rename` | — | session | session.write | exposed | P S |
+| `session.update` | `session.meta` | session; Pin to top và labels của một root thuộc grant (alpd từ chối session con); chỉ `sessionId`, `pinned`, `labels` tới alpd; answer chỉ còn `{ session }` qua phép chiếu session như `session.get` (`pinnedAt` là chuỗi, `labels` là tên chuỗi) | session.write | exposed | P S R |
+| `label.list` | `session.meta` | không (catalogue label của registry host); answer chỉ còn `name`, `color` của từng label | session.read | exposed | P R |
 | `session.archive` | — | session | session.write | exposed | P S |
 | `session.message` | — | session; **drive** (đánh thức hoặc steer; của assignment thì requester được báo) | session.write | exposed | P S M I |
 | `session.fork` | `session.fork` | root nguồn thuộc grant (tra mới; con → `1003 not_root`); `workspaceId` đích là registry workspace mà grant nêu đúng thư mục, không có thì ở workspace của nguồn; `newSessionId` không thuộc workspace khác; context principal do gateway đặt; `requestId` theo credential; root mới được kiểm lại trước khi trả; `forkedFrom` chỉ khi nguồn thuộc grant (§5.15). Không đổi file; **chỉ user**: credential đánh dấu agent bị từ chối 1003 `user_only` (cả gateway lẫn alpd) | session.write + session.read | exposed | P S R I |
@@ -739,7 +741,7 @@ trong `apps/gateway/src/policy.js`):
 | Bề mặt | Field |
 |---|---|
 | Lỗi JSON-RPC của mọi method forward (`#errorOf`), trừ lỗi của gateway và lỗi đã viết lại theo t-70c4 (§5.7) | `error.message` (ví dụ `session.attach` khi đọc timeline lỗi; `session.interrupt`, `close`, `message`, `prompt`... với message thô của runtime) |
-| `session.get`, `session.list`, `session.attach`, `session.rename`, `session.archive`, `session.create`, `session.configure` | `session(s).lastError` (`safeAlpError`), `session(s).parked` |
+| `session.get`, `session.list`, `session.attach`, `session.rename`, `session.update`, `session.archive`, `session.create`, `session.configure` | `session(s).lastError` (`safeAlpError`), `session(s).parked` |
 | `session.status` | `status.sessions[].parked` (và `lastError` nếu có); `workdir` vẫn như §5.6 |
 | `session.prompt` (receipt) | `error` |
 | Event `session.failed`, `prompt.failed`, `turn.ended` (kể cả bản sao không cursor của `question.watch` turns) | `error` |

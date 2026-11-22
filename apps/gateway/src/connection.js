@@ -622,9 +622,15 @@ export class ClientConnection {
   #safeSession(session) {
     if (!session || typeof session !== 'object' || Array.isArray(session)) return session;
     const conversational = Object.hasOwn(session, 'conversation') || Object.hasOwn(session, 'forkedFrom') || Object.hasOwn(session, 'branches');
-    if (session.lastError === undefined && typeof session.parked !== 'string' && session.attention?.message === undefined && !conversational) return session;
+    // pinnedAt and labels (capability session.meta) only in their shapes: a time, catalogue names.
+    const meta = Object.hasOwn(session, 'pinnedAt') || Object.hasOwn(session, 'labels');
+    if (session.lastError === undefined && typeof session.parked !== 'string' && session.attention?.message === undefined && !conversational && !meta) return session;
+    const { pinnedAt, labels, ...unpinned } = session;
+    const names = Array.isArray(labels) ? labels.filter((/** @type {unknown} */ name) => typeof name === 'string').slice(0, 20) : [];
     const safe = {
-      ...session,
+      ...unpinned,
+      ...(typeof pinnedAt === 'string' ? { pinnedAt } : {}),
+      ...(names.length ? { labels: names } : {}),
       ...(session.lastError !== undefined ? { lastError: safeAlpError(session.lastError, this.#grant.workspaces, { home: HOME }) } : {}),
       ...(typeof session.parked === 'string' ? { parked: this.#safeText(session.parked) } : {}),
       ...(session.attention?.message !== undefined ? { attention: this.#safeAttention(session.attention) } : {}),
@@ -1627,6 +1633,17 @@ export class ClientConnection {
     },
     'session.close': async params => { await this.#drive(params.sessionId, { stop: true }); return this.#call('session.close', params); },
     'session.rename': async params => { await this.#resolve(params.sessionId); return this.#shownResult(await this.#call('session.rename', params)); },
+    // Pin to top and labels (capability session.meta): the root must be in the grant; only { session } back.
+    'session.update': async params => {
+      await this.#resolve(params.sessionId);
+      const { session } = await this.#shownResult({ session: (await this.#call('session.update', params))?.session });
+      return { session };
+    },
+    // The registry's label catalogue: names and colours only, nothing else alpd might add.
+    'label.list': async () => {
+      const result = await this.#call('label.list', {});
+      return { labels: (Array.isArray(result?.labels) ? result.labels : []).filter((/** @type {any} */ label) => typeof label?.name === 'string' && typeof label?.color === 'string').slice(0, 1000).map((/** @type {any} */ label) => ({ name: label.name, color: label.color })) };
+    },
     'session.archive': async params => { await this.#resolve(params.sessionId); return this.#shownResult(await this.#call('session.archive', params)); },
     // Conversation fork and rewind (docs/protocol/alp-json-rpc-v1.md §12.7, docs/alp/remote-gateway.md
     // §5.15, issue #121 C): conversation only, never a file. The source is a root in the grant, looked
