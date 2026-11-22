@@ -13,6 +13,8 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   </head>
   <body>
+    <!-- ALP.app on macOS: the window's drag strip, first so every control after it stays clickable (styles.css .window-drag). -->
+    <div class="window-drag" aria-hidden="true"></div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

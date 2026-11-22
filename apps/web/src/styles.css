@@ -235,6 +235,36 @@
   dialog::backdrop { background: rgb(5 8 6 / 0.7); backdrop-filter: blur(2px); }
 }
 
+/*
+ * ALP.app on macOS has no title bar of its own (apps/desktop/src/window-chrome.ts, as Paseo's): the
+ * traffic lights sit at the start of the top row and that row moves the window. The app turns on
+ * the Window Controls Overlay, whose env(titlebar-area-*) values say where the lights end
+ * (titlebar-area-x) and how tall the bar is. In a browser, an older ALP.app with its own title bar,
+ * or full screen (the lights hidden), those values are undefined, so everything here is zero wide
+ * and the page looks as it always did.
+ *
+ * - .window-drag (index.html, first in <body>): a strip over the top row that drags the window.
+ *   It takes no pointer events; controls are carved out of it below (Paseo's public/index.html
+ *   backstop: interactive elements are no-drag).
+ * - .window-controls-inset: the room left for the lights at the start of the leftmost header.
+ * - .window-controls-row: a top row, as tall as a header, above a column that starts at the top
+ *   left (the sidebar, Settings' sidebar), where the lights sit.
+ */
+.window-drag {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: clamp(0px, env(titlebar-area-height, 0px), 2.25rem);
+  pointer-events: none;
+  -webkit-app-region: drag;
+}
+.window-controls-inset { flex: none; width: calc(env(titlebar-area-x, 0.75rem) - 0.75rem); }
+.window-controls-row { flex: none; height: clamp(0px, env(titlebar-area-height, 0px), 2.25rem); }
+a, button, input, textarea, select, summary, dialog, iframe, webview,
+[role="button"], [role="link"], [role="tab"], [role="textbox"], [role="combobox"], [role="switch"],
+[role="checkbox"], [role="slider"], [role="menuitem"], [role="separator"], [tabindex], [contenteditable="true"] {
+  -webkit-app-region: no-drag;
+}
+
 @layer utilities {
   .scroll-fade { mask-image: linear-gradient(to bottom, transparent, black 12px, black calc(100% - 12px), transparent); }
 }

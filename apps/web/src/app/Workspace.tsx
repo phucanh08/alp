@@ -87,6 +87,8 @@ export function WorkspaceHeader({ navOpen, onToggleNav, explorerOpen, onToggleEx
   ];
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-2 md:h-9 md:px-3">
+      {/* ALP.app on macOS: room for the traffic lights when this header starts the window's top row (styles.css). */}
+      {navOpen ? null : <span aria-hidden className="window-controls-inset" />}
       <div className="flex min-w-0 flex-1 items-center gap-1 md:gap-2">
         <button type="button" aria-label={navOpen ? 'Close sessions' : 'Open sessions'} aria-expanded={navOpen} title="Toggle sidebar" onClick={onToggleNav} className={cn(headerButton, 'md:-ml-1.5')}>
           <PanelLeft aria-hidden strokeWidth={1.5} />

@@ -165,3 +165,24 @@ test('Settings › Notifications: Enable, then Send shows a test notification th
   });
   expect(clicked).toEqual({ focused: true, closed: true });
 });
+
+// t-81b0.12: ALP.app on macOS has no title bar of its own and the page leaves the traffic lights room
+// through the Window Controls Overlay (styles.css .window-drag); a browser has no overlay, so the
+// drag strip, the sidebar's top row and the header's inset are all zero and the page is unchanged.
+test('a browser, even with the ALP.app marker, has no window chrome room: no drag strip, no inset', async ({ browser }) => {
+  const context = await browser.newContext({ userAgent: DESKTOP_UA, viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  await connect(page, world);
+  const sizes = await page.evaluate(() => {
+    const box = selector => { const element = document.querySelector(selector); const rect = element?.getBoundingClientRect(); return rect ? [rect.width, rect.height] : null; };
+    return { drag: box('.window-drag'), row: box('nav[aria-label="Workspaces and sessions"] .window-controls-row') };
+  });
+  expect(sizes.drag).toEqual([1440, 0]);
+  expect(sizes.row?.[1]).toBe(0);
+  // The sidebar closed: the header starts at its usual place, no room kept.
+  await page.getByRole('button', { name: 'Close sessions' }).first().click();
+  const inset = page.locator('main header .window-controls-inset');
+  await expect(inset).toHaveCount(1);
+  expect((await inset.evaluate(element => element.getBoundingClientRect().width))).toBe(0);
+  await context.close();
+});

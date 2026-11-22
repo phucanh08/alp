@@ -819,6 +819,8 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
 
   return (
     <nav aria-label="Workspaces and sessions" className="relative flex h-full min-h-0 flex-col bg-sidebar">
+      {/* ALP.app on macOS: the top row the traffic lights sit in, as Paseo's sidebar (styles.css). */}
+      <div aria-hidden className="window-controls-row" />
       <div className="flex shrink-0 flex-col gap-0.5 border-b border-border pb-1.5 pt-2">
         {/* Settings › Sidebar › Header orders these and hides any of them (Paseo's sidebar nav items). */}
         {preferences.sidebar.header.filter(item => item.visible).map(item => <React.Fragment key={item.id}>{navItem(item.id)}</React.Fragment>)}
