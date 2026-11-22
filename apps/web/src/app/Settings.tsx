@@ -18,7 +18,7 @@ import { Spinner } from '../components/ui/spinner';
 import { modeLabel } from '../lib/format';
 import { cn } from '../lib/utils';
 import { useAppState, useController, useOwner } from './store';
-import { useNotificationPermission } from './attention';
+import { sendTestNotification, useNotificationPermission } from './attention';
 import { Row, Section, Select, focusRing, type Page } from './settings/parts';
 import { ProjectsPage, ProvidersPage, TerminalsPage, UsagePage, WorkspacesPage } from './settings/HostPages';
 import { EditorPage, LibraryPage } from './settings/LibraryPages';
@@ -88,16 +88,44 @@ function AppearancePreview() {
 // ---- pages ----------------------------------------------------------------------------------
 
 /** Browser notifications when a session waits for an answer: the browser asks on this click. */
-function NotificationsRow() {
+function NotificationsSection() {
+  // One permission for both rows: the Test row turns on as soon as Enable is answered.
   const { permission, request } = useNotificationPermission();
+  return (
+    <Section title="Notifications">
+      <NotificationsRow permission={permission} request={request} />
+      <TestNotificationRow permission={permission} />
+    </Section>
+  );
+}
+
+function NotificationsRow({ permission, request }: ReturnType<typeof useNotificationPermission>) {
   const hint = permission === 'unsupported' ? 'This browser cannot show notifications.'
     : permission === 'denied' ? 'Blocked in this browser. Allow notifications for this site in the browser settings to get them.'
     : permission === 'granted' ? 'On: a notification when a session waits for your answer while you are elsewhere. The tab icon shows it too.'
     : 'Get a notification when a session waits for your answer while you are elsewhere. The browser asks first.';
   return (
-    <Row title="Notifications" hint={hint}>
+    <Row first title="Notifications" hint={hint}>
       {permission === 'default' ? <Button size="sm" variant="secondary" onClick={() => { void request(); }}>Enable</Button>
         : <span className="text-sm text-muted-foreground" data-testid="notification-permission">{permission === 'granted' ? 'Allowed' : permission === 'denied' ? 'Blocked' : 'Unavailable'}</span>}
+    </Row>
+  );
+}
+
+/**
+ * Paseo's "Test notification" (desktop-notifications-section.tsx): sends one now, once notifications
+ * are allowed, and says whether it was handed over.
+ */
+function TestNotificationRow({ permission }: { permission: ReturnType<typeof useNotificationPermission>['permission'] }) {
+  const [result, setResult] = React.useState<{ ok: boolean; message: string } | null>(null);
+  const granted = permission === 'granted';
+  return (
+    <Row title="Test notification" hint={granted ? 'Send a notification to check how they appear.' : 'Allow notifications before testing.'}>
+      <div className="flex flex-col items-end gap-1">
+        <Button size="sm" variant="secondary" disabled={!granted} data-testid="notification-test"
+          onClick={() => setResult(sendTestNotification() ? { ok: true, message: 'Test notification sent.' } : { ok: false, message: 'Unable to send a test notification.' })}>Send</Button>
+        {result ? <span role="status" className={cn('text-xs', result.ok ? 'text-muted-foreground' : 'text-destructive')} data-testid="notification-test-result">{result.message}</span> : null}
+      </div>
     </Row>
   );
 }
@@ -189,8 +217,8 @@ function General({ mobile }: { mobile: boolean }) {
         <Row first title="Saved settings" hint="Every App setting and your last New session choices (team, model, thinking, permissions) stay in this browser. The access token never does.">
           <Button size="sm" variant="secondary" onClick={() => controller.resetPreferences()}>Reset</Button>
         </Row>
-        <NotificationsRow />
       </Section>
+      <NotificationsSection />
     </>
   );
 }

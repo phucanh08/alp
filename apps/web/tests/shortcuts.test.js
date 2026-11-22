@@ -51,6 +51,40 @@ test('keys display as Paseo shows them', () => {
   assert.deepEqual(helpSections(true, 'previous').flatMap(section => section.rows.map(row => row.label)), ['Previous session', 'Previous tab']);
 });
 
+test('ALP.app uses Paseo\'s desktop set; a browser keeps the web set', () => {
+  const desktop = { mac: true, desktop: true };
+  // Cmd+W closes the tab in ALP.app; a browser keeps Cmd+W for itself and closes with Alt+Shift+W.
+  assert.equal(matchShortcut(press('KeyW', 'w', { metaKey: true }), desktop)?.binding.action, 'tab.close');
+  assert.equal(matchShortcut(press('KeyW', 'w', { metaKey: true }), { mac: true }), null);
+  assert.equal(matchShortcut(press('KeyW', '„', { altKey: true, shiftKey: true }), desktop), null);
+  assert.equal(matchShortcut(press('KeyW', 'w', { ctrlKey: true }), { mac: false, desktop: true })?.binding.action, 'tab.close');
+  // Cmd+1-9 jumps to a session, Cmd+Alt+1-9 to a tab (Alt+1-9 off a Mac); Cmd+[ ] steps sessions.
+  const session = matchShortcut(press('Digit4', '4', { metaKey: true }), desktop);
+  assert.deepEqual([session?.binding.action, session?.index], ['session.index', 4]);
+  const tab = matchShortcut(press('Digit2', '™', { metaKey: true, altKey: true }), desktop);
+  assert.deepEqual([tab?.binding.action, tab?.index], ['tab.index', 2]);
+  const otherTab = matchShortcut(press('Digit2', '2', { altKey: true }), { mac: false, desktop: true });
+  assert.deepEqual([otherTab?.binding.action, otherTab?.index], ['tab.index', 2]);
+  assert.equal(matchShortcut(press('Digit2', '™', { altKey: true }), desktop), null);
+  assert.equal(matchShortcut(press('Digit2', '€', { altKey: true, shiftKey: true }), desktop), null);
+  assert.deepEqual(matchShortcut(press('BracketRight', ']', { metaKey: true }), desktop)?.binding.delta, 1);
+  assert.equal(matchShortcut(press('BracketLeft', '“', { altKey: true }), desktop), null);
+  // The browser set does not take Cmd+1-9 (the browser's own tab keys).
+  assert.equal(matchShortcut(press('Digit4', '4', { metaKey: true }), { mac: true }), null);
+  // Labels and the dialog follow the set in use.
+  assert.equal(shortcutLabel('tab.close', true, true), '⌘W');
+  assert.equal(shortcutLabel('tab.close', true), '⌥⇧W');
+  assert.equal(shortcutLabel('session.index', true, true), '⌘1-9');
+  assert.equal(shortcutLabel('session.relative', true, true, -1), '⌘[');
+  const rows = (/** @type {boolean} */ isDesktop) => helpSections(true, '', isDesktop).flatMap(section => section.rows);
+  assert.deepEqual(rows(true).filter(row => row.label === 'Jump to tab').map(row => row.keys), ['⌥⌘1-9']);
+  assert.deepEqual(rows(false).filter(row => row.label === 'Jump to tab').map(row => row.keys), ['⌥⇧1-9']);
+  assert.deepEqual(helpSections(false, '', true).flatMap(section => section.rows).filter(row => row.label === 'Jump to tab').map(row => row.keys), ['Alt+1-9']);
+  assert.equal(rows(true).filter(row => row.label === 'Close current tab').length, 1);
+  assert.equal(rows(true).find(row => row.label === 'Close pane')?.note, undefined);
+  assert.ok(rows(false).find(row => row.label === 'Close pane')?.note);
+});
+
 test('text fields are editable; buttons and checkboxes are not', () => {
   const element = (tagName, extra = {}) => ({ tagName, closest: () => null, ...extra });
   assert.equal(isEditable(element('TEXTAREA')), true);

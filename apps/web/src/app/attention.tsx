@@ -33,6 +33,21 @@ export function useNotificationPermission() {
 }
 
 /**
+ * Shows the test notification of Settings › Notifications; clicking it brings the window forward.
+ * Returns whether it was handed to the browser (false: not allowed, or not possible here).
+ */
+export function sendTestNotification(): boolean {
+  if (!notificationsSupported() || Notification.permission !== 'granted') return false;
+  try {
+    const note = new Notification('Test notification', { body: 'ALP shows a notification like this when a session waits for your answer.', tag: 'alp-test', icon: FAVICONS.attention });
+    note.onclick = () => { window.focus(); note.close(); };
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Paseo's page status for the workspace's sessions: the favicon (running, waiting, or plain),
  * the window title (the open session, else the workspace), and a browser notification when a
  * session starts waiting for an answer while the user does not see it. Clicking the notification
