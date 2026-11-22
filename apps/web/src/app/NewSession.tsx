@@ -201,6 +201,8 @@ export function NewSessionScreen() {
         ...(files.length ? { files } : {}),
         ...(where && worktreeSource ? { worktree: { mappingId: where, key: `${worktreeKey.current}:${where}` } } : {}),
       }, text, { mounted: () => mounted.current, describe, nameOf: baseName });
+      // A worktree a start used is that session's: a later start here makes its own.
+      if (where) worktreeKey.current = globalThis.crypto.randomUUID();
       finishDraft(id);
     } finally {
       starting.current = false;

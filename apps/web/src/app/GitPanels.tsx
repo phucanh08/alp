@@ -353,7 +353,12 @@ function ReviewBar({ scope, label }: { scope: string; label: string }) {
   const [sending, setSending] = React.useState(false);
   if (!comments.length) return null;
   const online = app.connection.phase === 'open';
-  const blocked = !app.selected ? 'Open a session to send the review to its agent.' : !online ? 'Not connected.' : controller.driveBlock();
+  // Only a session of this workspace (its session or history list, both read for it): a session of
+  // another workspace can be open here (a fork's source), and these comments are not about its files.
+  const inWorkspace = !!app.selected && [...app.sessions.list, ...app.history.list].some(session => session.id === app.selected);
+  const blocked = !app.selected ? 'Open a session to send the review to its agent.'
+    : !inWorkspace ? 'Open a session of this workspace to send the review to its agent.'
+    : !online ? 'Not connected.' : controller.driveBlock();
   const send = async () => {
     const ids = comments.map(comment => comment.id);
     setSending(true);
