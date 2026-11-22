@@ -196,6 +196,8 @@ export function Composer({ fileSearch, meter, imageLimits, images: takesImages =
   const mentioning = !!mention && focused && mentionClosedOn !== `${text}\0${caret}`;
   const fileResults = useFileSearch({ enabled: mentioning, source: fileSearch?.source ?? null, query: mention?.query ?? '', search: fileSearch?.search ?? (() => Promise.resolve({ files: [] })) });
   const mentions = mentioning ? fileResults.entries.slice(0, MENTIONS_SHOWN) : [];
+  // While the host answers a newer word the list is the last word's: Enter and Tab do not choose from it.
+  const mentionsCurrent = mentions.length > 0 && !fileResults.loading;
   const mentionStatus = !mentioning ? null : fileResults.error ? { kind: 'error' as const, text: `Could not search files: ${fileResults.error}` }
     : fileResults.loading && !mentions.length ? { kind: 'loading' as const, text: 'Searching files…' }
       : !mentions.length ? { kind: 'empty' as const, text: mention?.query ? `No files match “${mention.query}”` : 'No files' } : null;
@@ -462,10 +464,10 @@ export function Composer({ fileSearch, meter, imageLimits, images: takesImages =
                   setActiveMention((mentionSelected + (event.key === 'ArrowDown' ? 1 : mentions.length - 1)) % mentions.length);
                   return;
                 }
-                if (((event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) || (event.key === 'Tab' && !event.shiftKey)) && mentions.length) {
-                  event.preventDefault();
-                  chooseMention(mentions[mentionSelected].path);
-                  return;
+                if ((event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey) || (event.key === 'Tab' && !event.shiftKey)) {
+                  if (mentionsCurrent) { event.preventDefault(); chooseMention(mentions[mentionSelected].path); return; }
+                  // Still searching: wait for the answer rather than send or pick a stale row.
+                  if (fileResults.loading) { event.preventDefault(); return; }
                 }
                 if (event.key === 'Escape') {
                   event.preventDefault();

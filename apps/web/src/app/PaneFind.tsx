@@ -79,7 +79,7 @@ export function PaneFind({ scroller, onReveal }: { scroller: React.RefObject<HTM
   React.useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.isComposing || !isFindShortcut(event, mac) || !latest.current.focused) return;
-      if (document.querySelector('dialog[open], [data-modal-overlay], [role="menu"]')) return;
+      if (document.querySelector('dialog[open], [data-modal-overlay], [role="menu"], [role="dialog"]')) return;
       event.preventDefault();
       event.stopPropagation();
       if (!latest.current.open) returnTo.current = document.activeElement as HTMLElement | null;
