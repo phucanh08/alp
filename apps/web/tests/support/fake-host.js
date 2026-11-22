@@ -635,6 +635,15 @@ export class FakeHost {
         this.#setAttention(root, undefined);
         return { cleared: true };
       }
+      case 'session.attention.mark': {
+        if (!this.capabilities.includes('session.attention.mark')) throw Object.assign(new Error('unknown method session.attention.mark'), { code: -32601 });
+        const root = this.roots.get(params.sessionId);
+        if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
+        if (root.summary.attention || root.summary.status === 'running' || root.summary.busy) return { marked: false };
+        const attention = { reason: 'finished', at: new Date().toISOString() };
+        this.#setAttention(root, attention);
+        return { marked: true, attention: structuredClone(attention) };
+      }
       case 'question.answer': {
         const question = this.questions.get(params.questionId);
         if (!question) throw Object.assign(new Error('no such question'), { code: 1001 });

@@ -374,8 +374,8 @@ export class Controller {
    * on the session in front of a user who looks at it asks for nothing. Seen until told otherwise.
    */
   #presence = { visible: true, focused: true };
-  /** The root the user just marked unread while it is in front: kept until their next look (selecting it, or coming back to the page), as Paseo keeps it. @type {string | null} */
-  #keptUnread = null;
+  /** Roots the user just marked unread: kept even while in front until their next look (selecting a session, or coming back to the page). @type {Set<string>} */
+  #keptUnread = new Set();
   #noticeId = 0;
   /** The Terminal tab's terminal of each registry workspace (#121 H), for this connection. @type {Map<string, TerminalSession>} */
   #terminals = new Map();
@@ -993,7 +993,7 @@ export class Controller {
     this.#acks.delete(root);
     const entry = hostEntry(attention);
     if (!entry) { this.#forgetAttention(root); return; }
-    if (this.#seen(root) && this.#keptUnread !== root) { this.#forgetAttention(root); this.#acknowledge(root, entry); return; }
+    if (this.#seen(root) && !this.#keptUnread.has(root)) { this.#forgetAttention(root); this.#acknowledge(root, entry); return; }
     if (this.#state.history.list.some(row => row.id === root && row.archived)) return;
     if (this.#state.turnAttention[root]?.hostAt === entry.hostAt) return;
     this.#set(state => ({ turnAttention: { ...state.turnAttention, [root]: entry } }));
@@ -1073,7 +1073,7 @@ export class Controller {
    * @param {{ visible: boolean, focused: boolean }} presence
    */
   setPresence({ visible, focused }) {
-    if ((!this.#presence.visible || !this.#presence.focused) && visible && focused) this.#keptUnread = null;
+    if ((!this.#presence.visible || !this.#presence.focused) && visible && focused) this.#keptUnread.clear();
     this.#presence = { visible: !!visible, focused: !!focused };
     const shown = this.#state.focus ?? this.#state.selected;
     if (shown && this.#seen(shown)) this.clearAttention(shown);
@@ -1099,20 +1099,24 @@ export class Controller {
    */
   async markUnread(root) {
     if (!this.canMarkUnread) return;
+    // Kept before asking: the host's attention event may come before its answer.
+    this.#keptUnread.add(root);
     try {
-      this.#keptUnread = root;
       const result = await this.#client().request('session.attention.mark', { sessionId: root });
       if (result?.marked && result.attention) this.#hostAttention(root, result.attention);
-      else if (!this.#state.turnAttention[root]) this.#notify('info', 'Only an idle session can be marked unread.');
+      else {
+        this.#keptUnread.delete(root);
+        if (!this.#state.turnAttention[root]) this.#notify('info', 'Only an idle session can be marked unread.');
+      }
     } catch (/** @type {any} */ error) {
-      if (this.#keptUnread === root) this.#keptUnread = null;
+      this.#keptUnread.delete(root);
       this.#notify('error', `Could not mark the session unread: ${error?.message ?? error}`);
     }
   }
 
   /** Paseo's Mark as read: as a look at the root (session.attention.clear for every client). @param {string} root */
   markRead(root) {
-    if (this.#keptUnread === root) this.#keptUnread = null;
+    this.#keptUnread.delete(root);
     this.clearAttention(root);
   }
 
@@ -1634,7 +1638,7 @@ export class Controller {
     for (const [root, attention] of host) {
       const entry = hostEntry(attention);
       if (!entry || this.#state.history.list.some(row => row.id === root && row.archived)) continue;
-      if (this.#seen(root)) { this.#acknowledge(root, entry); continue; }
+      if (this.#seen(root) && !this.#keptUnread.has(root)) { this.#acknowledge(root, entry); continue; }
       // The same ending keeps its local time, so it is not notified again.
       const known = this.#state.turnAttention[root];
       turnAttention[root] = known?.hostAt === entry.hostAt ? known : entry;
@@ -1974,7 +1978,7 @@ export class Controller {
   /** Opens a root of the list (or nothing). Its tree is attached after its cursor. @param {string | null} root */
   selectSession(root) {
     // Opened (or chosen again): the user looks at it now.
-    this.#keptUnread = null;
+    this.#keptUnread.clear();
     this.clearAttention(root);
     if (root === this.#state.selected) return;
     const tree = root ? this.#ensureTree(root) : undefined;

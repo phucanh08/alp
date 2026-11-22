@@ -136,7 +136,7 @@ const IN_SCOPE = ({ a }) => ({
   'workspace.files.list': { projectRoot: a }, 'workspace.files.read': { projectRoot: a, path: 'README.md' },
   'session.create': { spec: { cwd: a } }, 'session.prompt': { sessionId: 'sa', clientMessageId: 'm', content: text },
   'session.interrupt': { sessionId: 'sa' }, 'session.configure': { sessionId: 'sa' }, 'session.close': { sessionId: 'sa' },
-  'session.rename': { sessionId: 'sa', title: 't' }, 'session.archive': { sessionId: 'sa' }, 'session.message': { sessionId: 'sa', text: 'x' },
+  'session.rename': { sessionId: 'sa', title: 't' }, 'session.archive': { sessionId: 'sa' }, 'session.attention.mark': { sessionId: 'sa' }, 'session.message': { sessionId: 'sa', text: 'x' },
   'session.fork': { sessionId: 'sa', requestId: 'r', ifGeneration: '0'.repeat(32) }, 'session.rewind': { sessionId: 'sa', requestId: 'r', ifGeneration: '0'.repeat(32), beforeTurnId: 't' },
   'session.reload': { sessionId: 'sa', requestId: 'r', ifGeneration: '0'.repeat(32) }, 'session.resumeCommand': { sessionId: 'sa' }, 'session.commands': { sessionId: 'sa' },
   'session.compact': { sessionId: 'sa' },
