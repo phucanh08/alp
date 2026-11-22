@@ -221,6 +221,9 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
 
   // (5) Permissions are denied; devtools stay shut; downloads are cancelled.
   assert.equal(await inGuest(app, guest.id, 'Notification.requestPermission()'), 'denied');
+  // The dashboard page may show notifications (t-0166); its Browser tabs still may not.
+  assert.equal(await inGuest(app, guest.id, 'Notification.permission'), 'denied');
+  assert.equal(await inGuest(app, guest.id, "navigator.permissions.query({ name: 'notifications' }).then(s => s.state)"), 'denied');
   assert.equal(await inGuest(app, guest.id, `navigator.permissions.query({ name: 'geolocation' }).then(s => s.state)`), 'denied');
   assert.equal(await inGuest(app, guest.id, `navigator.mediaDevices.getUserMedia({ audio: true }).then(() => 'granted', () => 'denied')`), 'denied');
   assert.equal(await inGuest(app, guest.id, `navigator.clipboard.readText().then(() => 'granted', () => 'denied')`), 'denied');

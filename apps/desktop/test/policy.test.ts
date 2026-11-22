@@ -27,13 +27,17 @@ describe('isAllowedExternal', () => {
 });
 
 describe('isAllowedPermission', () => {
-  test('clipboard writes from the shown origin only', () => {
-    expect(isAllowedPermission('clipboard-sanitized-write', `${ORIGIN}/`, ORIGIN)).toBe(true);
-    expect(isAllowedPermission('clipboard-sanitized-write', 'http://127.0.0.1:9999/', ORIGIN)).toBe(false);
-    expect(isAllowedPermission('clipboard-sanitized-write', undefined, ORIGIN)).toBe(false);
-    expect(isAllowedPermission('clipboard-sanitized-write', `${ORIGIN}/`, undefined)).toBe(false);
+  test.each(['clipboard-sanitized-write', 'notifications'])('%s from the shown origin only', permission => {
+    expect(isAllowedPermission(permission, `${ORIGIN}/`, ORIGIN)).toBe(true);
+    expect(isAllowedPermission(permission, ORIGIN, ORIGIN)).toBe(true);
+    expect(isAllowedPermission(permission, 'http://127.0.0.1:9999/', ORIGIN)).toBe(false);
+    expect(isAllowedPermission(permission, 'http://localhost:7433/', ORIGIN)).toBe(false);
+    expect(isAllowedPermission(permission, 'https://example.com/', ORIGIN)).toBe(false);
+    expect(isAllowedPermission(permission, 'alp-page://app/error.html', ORIGIN)).toBe(false);
+    expect(isAllowedPermission(permission, undefined, ORIGIN)).toBe(false);
+    expect(isAllowedPermission(permission, `${ORIGIN}/`, undefined)).toBe(false);
   });
-  test.each(['media', 'notifications', 'geolocation', 'clipboard-read', 'openExternal', 'fileSystem'])('denies %s', permission => {
+  test.each(['media', 'geolocation', 'clipboard-read', 'openExternal', 'fileSystem'])('denies %s', permission => {
     expect(isAllowedPermission(permission, `${ORIGIN}/`, ORIGIN)).toBe(false);
   });
 });
