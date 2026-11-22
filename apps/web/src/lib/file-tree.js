@@ -2,10 +2,12 @@
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
 
 /**
- * The Files panel's tree, as Paseo's file explorer (file-explorer/tree.ts at b63a325): one listing
- * per directory, read when it is expanded (workspace.files.list), shown as rows of a flat list,
- * directories first, sorted by name, modified time or size (the sort button cycles), dot-names
- * hidden unless asked. Pure, no React.
+ * The Files panel's tree, as Paseo's file explorer (file-explorer/tree.ts at b63a325, unchanged in
+ * v0.17.3): one listing per directory, read when it is expanded (workspace.files.list), shown as
+ * rows of a flat list, directories first, sorted by name, modified time or size (the sort button
+ * cycles), dot-names hidden unless asked. An open folder whose listing is on its way shows a
+ * spinner in its chevron's place and nothing under it yet; an empty one shows nothing under it
+ * (Paseo's flattenExplorerTree). Pure, no React.
  *
  * Paths are workspace-relative, '/'-separated, as the host gives them (docs/protocol §12.4).
  */
@@ -14,7 +16,7 @@ import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
  * @typedef {{ name: string, path: string, kind: 'file' | 'directory', size?: number, modifiedAt?: string }} FileEntry
  * @typedef {{ status: 'loading' | 'ready' | 'error', entries?: FileEntry[], truncated?: boolean, error?: string }} Listing
  * @typedef {'name' | 'modified' | 'size'} SortOption
- * @typedef {{ kind: 'entry', entry: FileEntry, depth: number, open: boolean }
+ * @typedef {{ kind: 'entry', entry: FileEntry, depth: number, open: boolean, loading?: boolean }
  *   | { kind: 'status', path: string, depth: number, status: 'loading' | 'error' | 'empty' | 'truncated', message?: string }} TreeRow
  */
 
@@ -108,7 +110,8 @@ export function toggleExpanded(expanded, path) {
 
 /**
  * The rows the panel shows: the root's entries, and under each open directory its own (when
- * listed), with a status row where a listing is loading, failed, empty or cut short.
+ * listed). A status row where the root is loading or empty, or a listing failed or was cut short;
+ * an open directory still loading is marked on its own row (`loading`), as Paseo's spinner.
  * @param {Record<string, Listing>} listings by directory path ('' the root)
  * @param {string[]} expanded
  * @param {{ sort: SortOption, showHidden: boolean }} options
@@ -121,13 +124,14 @@ export function flattenTree(listings, expanded, { sort, showHidden }) {
   /** @param {string} directory @param {number} depth */
   const walk = (directory, depth) => {
     const listing = listings[directory];
-    if (!listing || listing.status === 'loading') { rows.push({ kind: 'status', path: directory, depth, status: 'loading' }); return; }
+    if (!listing || listing.status === 'loading') { if (!directory) rows.push({ kind: 'status', path: directory, depth, status: 'loading' }); return; }
     if (listing.status === 'error') { rows.push({ kind: 'status', path: directory, depth, status: 'error', ...(listing.error ? { message: listing.error } : {}) }); return; }
     const entries = sortEntries((listing.entries ?? []).filter(entry => showHidden || !hiddenName(entry.name)), sort);
-    if (!entries.length) rows.push({ kind: 'status', path: directory, depth, status: 'empty' });
+    if (!entries.length && !directory) rows.push({ kind: 'status', path: directory, depth, status: 'empty' });
     for (const entry of entries) {
       const isOpen = entry.kind === 'directory' && open.has(entry.path);
-      rows.push({ kind: 'entry', entry, depth, open: isOpen });
+      const pending = isOpen && (!listings[entry.path] || listings[entry.path].status === 'loading');
+      rows.push({ kind: 'entry', entry, depth, open: isOpen, ...(pending ? { loading: true } : {}) });
       if (isOpen) walk(entry.path, depth + 1);
     }
     if (listing.truncated) rows.push({ kind: 'status', path: directory, depth, status: 'truncated' });

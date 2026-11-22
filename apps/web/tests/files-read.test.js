@@ -199,7 +199,12 @@ test('file tree: flatten shows open directories under their parent, hides dot-na
   const rows = flattenTree(listings, ['src'], { sort: 'name', showHidden: false });
   assert.deepEqual(rows.map(row => row.kind === 'entry' ? `${row.depth}:${row.entry.path}${row.open ? '/' : ''}` : `${row.depth}:[${row.status}]`), ['0:src/', '1:src/x.ts', '1:[truncated]', '0:a.ts', '0:b.ts']);
   const hidden = flattenTree(listings, ['.github'], { sort: 'name', showHidden: true });
-  assert.deepEqual(hidden.map(row => row.kind === 'entry' ? row.entry.path : `[${row.status}]`), ['.github', '[loading]', 'src', '.hidden', 'a.ts', 'b.ts']);
+  // An open folder still loading: a spinner on its own row (Paseo), no status row under it.
+  assert.deepEqual(hidden.map(row => row.kind === 'entry' ? `${row.entry.path}${row.loading ? '…' : ''}` : `[${row.status}]`), ['.github…', 'src', '.hidden', 'a.ts', 'b.ts']);
+  // An open empty folder shows nothing under it; only the root says it is empty.
+  assert.deepEqual(flattenTree({ '': { status: 'ready', entries: [{ name: 'e', path: 'e', kind: 'directory' }] }, e: { status: 'ready', entries: [] } }, ['e'], { sort: 'name', showHidden: false })
+    .map(row => row.kind === 'entry' ? row.entry.path : `[${row.status}]`), ['e']);
+  assert.deepEqual(flattenTree({}, [], { sort: 'name', showHidden: false }).map(row => row.kind === 'status' && row.status), ['loading']);
   assert.deepEqual(flattenTree({ '': { status: 'ready', entries: [] } }, [], { sort: 'name', showHidden: false }).map(row => row.kind === 'status' && row.status), ['empty']);
   assert.deepEqual(flattenTree({ '': { status: 'error', error: 'nope' } }, [], { sort: 'name', showHidden: false }), [{ kind: 'status', path: '', depth: 0, status: 'error', message: 'nope' }]);
   assert.deepEqual(toggleExpanded(['a'], 'b'), ['a', 'b']);

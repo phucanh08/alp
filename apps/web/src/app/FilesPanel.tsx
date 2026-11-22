@@ -1,11 +1,12 @@
 import * as React from 'react';
-import { ArrowDownUp, ChevronRight, Copy, Eye, EyeOff, File, FileText, Files, Folder, FolderOpen, Lock, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronRight, Copy, Eye, EyeOff, FileText, Files, Folder, FolderOpen, Lock, RotateCw } from 'lucide-react';
 import { ContextMenu, type MenuItem } from '../components/ui/menu';
 import { isDesktopApp } from '../lib/browser-url.js';
 import { registryWorkspaceOf } from '../lib/git.js';
 import { revealWorkspace } from '../lib/owner-host.js';
 import { FILES_READ_FORBIDDEN, FILES_READ_UNAVAILABLE } from '../lib/controller.js';
 import { FileAccessError } from '../lib/errors.js';
+import { fileIconUrl } from '../lib/file-icons.js';
 import { SORT_LABELS, flattenTree, nextSort, toggleExpanded, type Listing, type SortOption } from '../lib/file-tree.js';
 import { can } from '../lib/gateway.js';
 import { listOwnerFiles } from '../lib/owner-library.js';
@@ -14,11 +15,16 @@ import { useAppState, useController, useOwner } from './store';
 import { useTabs } from './tabs';
 
 /*
- * Paseo's Files panel (components/file-explorer-pane.tsx at b63a325), read-only: the open
- * workspace's tree, each directory listed when it is opened (workspace.files.list, files.read);
- * a file opens in a file tab. The sort button cycles name, modified, size; Refresh lists the open
- * directories again. One toggle, "Show hidden files", shows dot-names and also lists what
- * .gitignore hides (includeIgnored). Blocked paths (secrets, .git, .alp) and links never show.
+ * Paseo's Files panel (components/file-explorer-pane.tsx at b63a325, its look as of v0.17.3,
+ * t-81b0.12), read-only: the open workspace's tree, each directory listed when it is opened
+ * (workspace.files.list, files.read); a file opens in a file tab. The toolbar is Paseo's: the sort
+ * label ("Name ⌄") cycles name, modified, size; Eye/EyeOff shows or hides hidden files; Refresh
+ * (a spinner while it runs) lists the open directories again, the tree kept meanwhile. A folder row
+ * is its chevron (a spinner while it loads) and name, a file row its material file icon
+ * (lib/file-icons.js) and name. Paseo's New file / New folder are left out: nothing here writes.
+ * ALP's hidden toggle, off by default, shows dot-names and also lists what .gitignore hides
+ * (includeIgnored, docs/alp/remote-gateway.md); Paseo's is on by default and has no .gitignore to
+ * respect. Blocked paths (secrets, .git, .alp) and links never show.
  * The host owner's own dashboard (state.owner) lists through host.files.list instead, without
  * files.read on its credential (t-a95b, docs/alp/dashboard.md §4.8); every other token as above.
  *
@@ -30,7 +36,13 @@ import { useTabs } from './tabs';
  */
 
 const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset';
-const tool = cn('flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground [&_svg]:size-4', focusRing);
+// Paseo's ToolbarButton: a glyph in a larger hit box, extra-muted, brighter on hover.
+const tool = cn('flex size-7 items-center justify-center rounded-md text-extra-muted hover:bg-sidebar-hover hover:text-foreground disabled:opacity-60 disabled:hover:bg-transparent [&_svg]:size-3.5', focusRing);
+
+/** Paseo's LoadingSpinner in a 14px glyph's place. */
+function Spinner() {
+  return <span aria-hidden className="block size-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent text-extra-muted" data-testid="files-spinner" />;
+}
 
 function Note({ testId, children }: { testId: string; children: React.ReactNode }) {
   return (
@@ -53,15 +65,17 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
   const [expanded, setExpanded] = React.useState<string[]>([]);
   const [sort, setSort] = React.useState<SortOption>('name');
   const [showHidden, setShowHidden] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
   const [menu, setMenu] = React.useState<{ path: string; name: string; directory: boolean; at: { x: number; y: number } } | null>(null);
   // Each listing pass: answers of an older one (another workspace, before a refresh) are dropped.
   const pass = React.useRef(0);
 
-  const list = React.useCallback((directory: string, includeIgnored: boolean) => {
+  // A listing shown stays until its new answer replaces it (Paseo keeps the tree while it refreshes).
+  const list = React.useCallback((directory: string, includeIgnored: boolean): Promise<unknown> => {
     const at = pass.current;
     setListings(current => ({ ...current, [directory]: current[directory]?.status === 'ready' ? current[directory] : { status: 'loading' } }));
     const request = { ...(directory ? { path: directory } : {}), includeIgnored };
-    (owner && workspace ? listOwnerFiles(controller, workspace, request) : controller.listWorkspaceFiles(request)).then(
+    return (owner && workspace ? listOwnerFiles(controller, workspace, request) : controller.listWorkspaceFiles(request)).then(
       result => { if (pass.current === at) setListings(current => ({ ...current, [directory]: { status: 'ready', entries: result.entries, truncated: result.truncated } })); },
       error => { if (pass.current === at) setListings(current => ({ ...current, [directory]: { status: 'error', error: error instanceof FileAccessError || error instanceof Error ? error.message : 'Could not list this folder.' } })); },
     );
@@ -78,6 +92,7 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
     pass.current += 1;
     const keep = lastScope.current === scope;
     lastScope.current = scope;
+    setRefreshing(false);
     setListings({});
     if (!keep) setExpanded([]);
     list('', showHidden);
@@ -102,10 +117,12 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
     if (opening && listings[directory]?.status !== 'ready') list(directory, showHidden);
   };
   const refresh = () => {
+    if (refreshing) return;
     pass.current += 1;
-    setListings({});
-    list('', showHidden);
-    for (const directory of expanded) list(directory, showHidden);
+    const at = pass.current;
+    setRefreshing(true);
+    void Promise.allSettled([list('', showHidden), ...expanded.map(directory => list(directory, showHidden))])
+      .then(() => { if (pass.current === at) setRefreshing(false); });
   };
   const shownFile = active?.kind === 'file' ? active.id : undefined;
   const copy = (text: string, what: string) => {
@@ -135,17 +152,26 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
 
   return (
     <div className="flex min-h-full flex-col" data-testid="files-panel">
-      <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
-        <span className="min-w-0 flex-1 truncate px-1 text-xs text-muted-foreground">Sorted by {SORT_LABELS[sort].toLowerCase()}</span>
-        <button type="button" className={tool} onClick={() => setSort(nextSort)} aria-label={`Sort by ${SORT_LABELS[nextSort(sort)].toLowerCase()}`} title={`Sort: ${SORT_LABELS[sort]}`} data-testid="files-sort" data-sort={sort}><ArrowDownUp aria-hidden /></button>
-        <button type="button" className={tool} onClick={() => setShowHidden(value => !value)} aria-pressed={showHidden} aria-label="Show hidden files" title={showHidden ? 'Hide hidden files' : 'Show hidden files'} data-testid="files-show-hidden">{showHidden ? <Eye aria-hidden /> : <EyeOff aria-hidden />}</button>
-        <button type="button" className={tool} onClick={refresh} aria-label="Refresh files" title="Refresh" data-testid="files-refresh"><RefreshCw aria-hidden /></button>
+      <div className="flex h-9 shrink-0 items-center justify-between border-b border-border bg-sidebar pr-1" data-testid="files-pane-header">
+        <button type="button" onClick={() => setSort(nextSort)} data-testid="files-sort" data-sort={sort}
+          aria-label={`Sorted by ${SORT_LABELS[sort].toLowerCase()}; sort by ${SORT_LABELS[nextSort(sort)].toLowerCase()}`} title={`Sort by ${SORT_LABELS[nextSort(sort)].toLowerCase()}`}
+          className={cn('ml-2 flex h-6 items-center gap-1 rounded-md px-1 text-[length:calc(13px*var(--ui-scale))] text-muted-foreground hover:bg-sidebar-hover', focusRing)}>
+          <span data-testid="files-sort-label">{SORT_LABELS[sort]}</span>
+          <ChevronDown aria-hidden className="size-3" />
+        </button>
+        <div className="flex items-center gap-px">
+          <button type="button" className={tool} onClick={() => setShowHidden(value => !value)} aria-pressed={showHidden} aria-label="Show hidden files" title={showHidden ? 'Hide hidden files' : 'Show hidden files'} data-testid="files-show-hidden">{showHidden ? <Eye aria-hidden /> : <EyeOff aria-hidden />}</button>
+          <button type="button" className={tool} onClick={refresh} disabled={refreshing} aria-busy={refreshing || undefined} aria-label={refreshing ? 'Refreshing files' : 'Refresh files'} title={refreshing ? 'Refreshing files' : 'Refresh files'} data-testid="files-refresh">
+            {refreshing ? <Spinner /> : <RotateCw aria-hidden />}
+          </button>
+        </div>
       </div>
-      <ul className="py-1" role="tree" aria-label="Workspace files">
+      <ul className="pb-4 pt-2" role="tree" aria-label="Workspace files">
         {rows.map(row => {
-          const indent = { paddingLeft: 8 + row.depth * 14 };
+          // Paseo's treeRowPaddingLeft: 12px, then 12px a level.
+          const indent = { paddingLeft: 12 + row.depth * 12 };
           if (row.kind === 'status') {
-            const text = row.status === 'loading' ? 'Loading…' : row.status === 'empty' ? (row.path ? 'Empty folder' : 'No files to show') : row.status === 'truncated' ? 'Only the first 1000 entries are shown.' : row.message ?? 'Could not list this folder.';
+            const text = row.status === 'loading' ? 'Loading files…' : row.status === 'empty' ? (showHidden ? 'No files' : 'No visible files') : row.status === 'truncated' ? 'Only the first 1000 entries are shown.' : row.message ?? 'Could not list this folder.';
             return (
               <li key={`status:${row.path}`} role="none" style={indent} className={cn('py-1 pr-3 text-xs', row.status === 'error' ? 'text-destructive' : 'text-muted-foreground')} data-testid={`files-${row.status}`}>
                 {text}
@@ -156,7 +182,6 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
           const { entry } = row;
           const directory = entry.kind === 'directory';
           const current = !directory && shownFile === entry.path;
-          const Icon = directory ? (row.open ? FolderOpen : Folder) : File;
           return (
             <li key={entry.path} role="treeitem" aria-expanded={directory ? row.open : undefined} aria-selected={current || undefined}>
               <button type="button" style={indent} title={entry.path}
@@ -169,11 +194,15 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
                     openMenu({ path: entry.path, name: entry.name, directory }, { x: box.left + 24, y: box.bottom });
                   }
                 }}
-                className={cn('flex w-full min-w-0 items-center gap-1.5 py-1 pr-3 text-left text-[length:calc(13px*var(--ui-scale))]', current ? 'bg-sidebar-selected text-foreground' : 'text-foreground/85 hover:bg-sidebar-hover', focusRing)}
+                className={cn('group flex w-full min-w-0 items-center gap-2 py-1.5 pr-2 text-left text-[length:calc(14px*var(--ui-scale))] text-foreground', current ? 'bg-sidebar-selected' : 'hover:bg-sidebar-hover', focusRing)}
                 data-testid="files-entry" data-path={entry.path} data-kind={entry.kind}>
-                <ChevronRight aria-hidden className={cn('size-3.5 shrink-0 text-extra-muted transition-transform', !directory && 'invisible', row.open && 'rotate-90')} />
-                <Icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-                <span className="truncate">{entry.name}</span>
+                {/* Paseo's tree row: a folder is its chevron (a spinner while it loads), a file its icon. */}
+                <span aria-hidden className="flex size-4 shrink-0 items-center justify-center">
+                  {directory
+                    ? (row.loading ? <Spinner /> : <ChevronRight className={cn('size-4 text-extra-muted transition-transform', row.open && 'rotate-90')} />)
+                    : <img src={fileIconUrl(entry.name)} alt="" width={16} height={16} draggable={false} className="size-4" />}
+                </span>
+                <span className={cn('truncate', current ? 'opacity-100' : 'opacity-[0.76] group-hover:opacity-100')}>{entry.name}</span>
               </button>
             </li>
           );
