@@ -152,6 +152,11 @@ export const setTerminal = (controller, allow, confirm = false) => controller.ow
 
 /** @param {OwnerController} controller @returns {Promise<OwnerRegistry>} */
 export const ownerRegistry = controller => controller.ownerRequest('host.registry', {});
+/**
+ * Paseo's Open in file manager: the host's file manager opens a registry workspace's directory (ALP.app on the host only, t-747e).
+ * @param {OwnerController} controller @param {string} workspaceId @returns {Promise<{ opened: boolean }>}
+ */
+export const revealWorkspace = (controller, workspaceId) => controller.ownerRequest('host.workspace.reveal', { workspaceId });
 /** @param {OwnerController} controller @param {string} workspaceId @param {boolean} archived @param {number} ifRevision */
 export const archiveWorkspace = (controller, workspaceId, archived, ifRevision) => controller.ownerRequest('host.workspace.update', { workspaceId, archived, ifRevision, requestId: requestId() });
 /**
