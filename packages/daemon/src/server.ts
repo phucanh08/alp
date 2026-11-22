@@ -1300,7 +1300,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     'daemon.pauses'() {
       return runtime.pauses();
     },
-    'daemon.usage': (_connection, { refresh = false } = {}) => runtime.usage(refresh === true),
+    // The account email only for a caller that asks (alp dashboard's owner handler, t-9116): the Paseo
+    // bridge and other local clients pass the answer on to devices and get account: null.
+    'daemon.usage': (_connection, { refresh = false, account = false } = {}) => runtime.usage(refresh === true, account === true),
 
     /** Asks a finished assignment, or the last one on a task, about its work (ALPD §27). */
     async 'assignment.recall'(_connection, { assignmentId, taskId, projectRoot, question } = {}) {

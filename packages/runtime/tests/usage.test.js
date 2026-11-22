@@ -190,7 +190,8 @@ test('the limit watch reads orchestrationContext, never usageReport: no email on
   await until(() => reads >= 2, 'two limit checks');
   assert.equal(accounts, 0, 'the limit watch never asks for the account');
   assert.ok(runtime.pauses().runtimes.codex);
-  const { providers } = await runtime.usage(true);
+  const { providers } = await runtime.usage(true, true);
   assert.equal(accounts, 2, 'daemon.usage asks each runtime once');
   assert.deepEqual(providers.find(provider => provider.runtime === 'codex').account, { email: EMAIL });
+  assert.equal((await runtime.usage()).providers.find(provider => provider.runtime === 'codex').account, null, 'no email unless asked');
 });
