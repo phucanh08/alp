@@ -29,17 +29,19 @@ export function useNotificationPermission() {
     if (!notificationsSupported()) return;
     try { setPermission(await Notification.requestPermission()); } catch { setPermission(Notification.permission); }
   }, []);
-  return { permission, request };
+  /** Paseo's Refresh beside the permission: reads it again after a change in the system or browser settings. */
+  const refresh = React.useCallback(() => { setPermission(notificationsSupported() ? Notification.permission : 'unsupported'); }, []);
+  return { permission, request, refresh };
 }
 
 /**
  * Shows the test notification of Settings › Notifications; clicking it brings the window forward.
  * Returns whether it was handed to the browser (false: not allowed, or not possible here).
  */
-export function sendTestNotification(): boolean {
+export function sendTestNotification(sound = true): boolean {
   if (!notificationsSupported() || Notification.permission !== 'granted') return false;
   try {
-    const note = new Notification('Test notification', { body: 'ALP shows a notification like this when a session waits for your answer.', tag: 'alp-test', icon: FAVICONS.attention });
+    const note = new Notification('Test notification', { body: 'ALP shows a notification like this when a session waits for your answer.', tag: 'alp-test', icon: FAVICONS.attention, silent: !sound });
     note.onclick = () => { window.focus(); note.close(); };
     return true;
   } catch {
@@ -57,6 +59,8 @@ export function usePageAttention({ onOpenSession }: { onOpenSession: (id: string
   const state = useAppState();
   const controller = useController();
   const { workspace, sessions, tree, attention, selected, focus } = state;
+  // Settings › Notifications › Play sound: off, every notification is silent (Notification's `silent`).
+  const silent = !state.preferences.notificationSound;
   // A root not listed yet waits: its notification comes once its row does (visibleAttention).
   const turnAttention = React.useMemo(() => visibleAttention(state), [state.turnAttention, sessions, tree]);
 
@@ -138,13 +142,14 @@ export function usePageAttention({ onOpenSession }: { onOpenSession: (id: string
           body: `${name}: ${latest?.body ? notificationBody(latest.body) : 'Waiting for your answer.'}`,
           tag: `alp-question-${id}`,
           icon: FAVICONS.attention,
+          silent,
         });
         note.onclick = () => { window.focus(); open.current(id); note.close(); };
       } catch {
         // Some browsers allow notifications only from a service worker: nothing to show then.
       }
     }
-  }, [counts, workspace, tree, sessions, selected, focus]);
+  }, [counts, workspace, tree, sessions, selected, focus, silent]);
 
   // A root whose turn finished or failed unseen (the controller left out the one the user sees):
   // Paseo's "Agent finished" / "Agent needs attention", one per root and reason.
@@ -160,11 +165,11 @@ export function usePageAttention({ onOpenSession }: { onOpenSession: (id: string
       const name = sessionName(sessions.list.find(session => session.id === id) ?? { id, title: tree?.rootId === id ? tree.projection.sessions[id]?.title : undefined });
       const { title, body, tag } = turnNotification({ root: id, name, reason: entry.reason, message: entry.message });
       try {
-        const note = new Notification(title, { body, tag, icon: FAVICONS.attention });
+        const note = new Notification(title, { body, tag, icon: FAVICONS.attention, silent });
         note.onclick = () => { window.focus(); open.current(id); note.close(); };
       } catch {
         // As above: no notification outside a service worker on some browsers.
       }
     }
-  }, [turnAttention, workspace, sessions, tree]);
+  }, [turnAttention, workspace, sessions, tree, silent]);
 }

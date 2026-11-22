@@ -44,7 +44,7 @@ export const PREFERENCES_VERSION = 1;
  *   sendBehavior: SendBehavior, sendShortcut: SendShortcut, theme: ThemePreference,
  *   uiFontFamily: string, monoFontFamily: string, uiFontSize: number, contentFontSize: number, codeFontSize: number,
  *   contentMaxWidth: number | null, syntaxTheme: SyntaxTheme,
- *   chatDisplay: ChatDisplay, chatOutline: boolean, terminalScrollback: number,
+ *   chatDisplay: ChatDisplay, chatOutline: boolean, terminalScrollback: number, notificationSound: boolean,
  *   sidebar: SidebarItems, sidebarDisplay: SidebarDisplay, newSession: NewSessionChoices,
  * }} Preferences
  */
@@ -127,6 +127,8 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   uiFontFamily: '', monoFontFamily: '', uiFontSize: 14, contentFontSize: 15, codeFontSize: 12,
   contentMaxWidth: null, syntaxTheme: 'one',
   chatDisplay: 'collapseTurns', chatOutline: true, terminalScrollback: 10_000,
+  // Paseo's Settings › Notifications › Play sound (on by default): a notification plays the system's sound.
+  notificationSound: true,
   sidebar: Object.freeze({ header: defaultSidebarSection('header'), footer: defaultSidebarSection('footer') }),
   sidebarDisplay: DEFAULT_SIDEBAR_DISPLAY,
   newSession: Object.freeze({}),
@@ -219,6 +221,7 @@ export function parsePreferences(raw) {
     chatDisplay: pick(CHAT_DISPLAYS, 'chatDisplay'),
     chatOutline: typeof value.chatOutline === 'boolean' ? value.chatOutline : DEFAULT_PREFERENCES.chatOutline,
     terminalScrollback: clamped(value.terminalScrollback, LIMITS.terminalScrollback),
+    notificationSound: typeof value.notificationSound === 'boolean' ? value.notificationSound : DEFAULT_PREFERENCES.notificationSound,
     sidebar: { header: parseSidebarSection(sidebar.header, 'header'), footer: parseSidebarSection(sidebar.footer, 'footer') },
     sidebarDisplay: parseSidebarDisplay(value.sidebarDisplay),
     newSession: parseNewSession(value.newSession),
@@ -226,7 +229,7 @@ export function parsePreferences(raw) {
 }
 
 /** The fields stored, in order: the known ones only, never anything else on the object. */
-const STORED_FIELDS = /** @type {const} */ (['sendBehavior', 'sendShortcut', 'theme', 'uiFontFamily', 'monoFontFamily', 'uiFontSize', 'contentFontSize', 'codeFontSize', 'contentMaxWidth', 'syntaxTheme', 'chatDisplay', 'chatOutline', 'terminalScrollback', 'sidebar', 'sidebarDisplay', 'newSession']);
+const STORED_FIELDS = /** @type {const} */ (['sendBehavior', 'sendShortcut', 'theme', 'uiFontFamily', 'monoFontFamily', 'uiFontSize', 'contentFontSize', 'codeFontSize', 'contentMaxWidth', 'syntaxTheme', 'chatDisplay', 'chatOutline', 'terminalScrollback', 'notificationSound', 'sidebar', 'sidebarDisplay', 'newSession']);
 
 /**
  * The string stored for `preferences`: its known fields only, re-validated.
