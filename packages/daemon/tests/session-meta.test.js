@@ -2,7 +2,7 @@
 // session.update and label.list over the registry's label catalog, kept in the session store.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
@@ -39,7 +39,14 @@ async function setup(t) {
     await writeFile(dir, 'not a directory');
     return async () => { await rm(dir, { force: true }); await rename(`${dir}.saved`, dir); };
   }
-  return { project, start, breakSessions };
+  /** The store's record file of a session, to edit while alpd is stopped. */
+  async function recordFile(id) {
+    const dir = path.join(state, 'sessions');
+    const name = (await readdir(dir)).find(entry => entry === `${id}.json`);
+    assert.ok(name, `no record file for ${id}`);
+    return path.join(dir, name);
+  }
+  return { project, start, breakSessions, recordFile };
 }
 
 /** Adds labels to the registry's catalog as the owner's workspace label menu does. */
@@ -187,4 +194,65 @@ test('a case-only rename shows the new spelling; a replayed delete leaves a labe
   await daemon.request('session.update', { sessionId: session.id, labels: ['BUG'] });
   await daemon.request('registry.owner', deletion);
   assert.deepEqual((await daemon.request('session.get', { sessionId: session.id })).session.labels, ['bug'], 'the replay answered its receipt and changed nothing');
+});
+
+test('session.update refuses a child session and changes nothing', async t => {
+  const { project, start, recordFile } = await setup(t);
+  let daemon = await start();
+  await catalog(daemon, project, [{ name: 'Bug', color: 'red' }]);
+  const { session: root } = await daemon.request('session.create', { spec: { cwd: project, workflow: 'pho', persist: true } });
+  await daemon.stop();
+  // A child of that root, as alpd keeps one after a delegation (rootId and parentId name the root).
+  const file = await recordFile(root.id);
+  const record = JSON.parse(await readFile(file, 'utf8'));
+  const childId = 'ses_00000000000c41d0';
+  const child = { ...record, id: childId, rootId: root.id, parentId: root.id, session: { ...record.session, id: childId, parentId: root.id } };
+  await writeFile(path.join(path.dirname(file), `${childId}.json`), JSON.stringify(child));
+  daemon = await start();
+  await assert.rejects(daemon.request('session.update', { sessionId: childId, pinned: true, labels: ['Bug'] }), invalid);
+  const kept = JSON.parse(await readFile(path.join(path.dirname(file), `${childId}.json`), 'utf8'));
+  assert.equal(kept.pinnedAt, undefined);
+  assert.equal(kept.labels, undefined);
+  const after = (await daemon.request('session.get', { sessionId: root.id })).session;
+  assert.equal(after.pinnedAt, undefined, 'the root is untouched too');
+});
+
+test('a session.update racing a catalog rename never leaves the old name on the session', async t => {
+  const { project, start } = await setup(t);
+  let daemon = await start();
+  await catalog(daemon, project, [{ name: 'Bug', color: 'red' }]);
+  const { session } = await daemon.request('session.create', { spec: { cwd: project, workflow: 'pho', persist: true } });
+  const { registry } = await daemon.request('registry.owner', {});
+  const [update, rename] = await Promise.allSettled([
+    daemon.request('session.update', { sessionId: session.id, labels: ['Bug'] }),
+    daemon.request('registry.owner', { operation: 'label.update', args: { name: 'Bug', newName: 'Defect' }, ifRevision: registry.revision, requestId: 'race-rename' }),
+  ]);
+  assert.equal(rename.status, 'fulfilled', rename.reason?.message);
+  // Either the update ran first and the rename followed it, or the rename ran first and the update
+  // was refused for a name the catalog no longer has; never a session holding 'Bug'.
+  if (update.status === 'fulfilled') assert.deepEqual((await daemon.request('session.get', { sessionId: session.id })).session.labels, ['Defect']);
+  else assert.equal(update.reason.data?.reason, 'unknown_label', update.reason.message);
+  const shown = (await daemon.request('session.get', { sessionId: session.id })).session.labels;
+  await daemon.stop();
+  daemon = await start();
+  assert.deepEqual((await daemon.request('session.get', { sessionId: session.id })).session.labels, shown, 'the disk agrees with what was shown');
+});
+
+test('a catalog rename follows past a hand-edited record whose labels are not all strings', async t => {
+  const { project, start, recordFile } = await setup(t);
+  let daemon = await start();
+  await catalog(daemon, project, [{ name: 'Bug', color: 'red' }]);
+  const { session } = await daemon.request('session.create', { spec: { cwd: project, workflow: 'pho', persist: true } });
+  await daemon.request('session.update', { sessionId: session.id, labels: ['Bug'] });
+  await daemon.stop();
+  const file = await recordFile(session.id);
+  const record = JSON.parse(await readFile(file, 'utf8'));
+  await writeFile(file, JSON.stringify({ ...record, labels: [42, null, 'Bug'] }));
+  daemon = await start();
+  assert.deepEqual((await daemon.request('session.get', { sessionId: session.id })).session.labels, ['Bug']);
+  const { registry } = await daemon.request('registry.owner', {});
+  await daemon.request('registry.owner', { operation: 'label.update', args: { name: 'Bug', newName: 'Defect' }, ifRevision: registry.revision, requestId: 'rename-mixed' });
+  assert.deepEqual((await daemon.request('session.get', { sessionId: session.id })).session.labels, ['Defect']);
+  await daemon.stop();
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).labels, ['Defect'], 'the record on disk followed and dropped what was not a name');
 });
