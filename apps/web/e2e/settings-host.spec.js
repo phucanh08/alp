@@ -66,7 +66,8 @@ test('a standalone gateway credential (not the owner) still sees every host page
     await settings.getByTestId(`settings-${tab}`).click();
     await expect(settings).toContainText(text);
   }
-  await expect(settings.getByRole('button', { name: 'Refresh usage' })).toHaveCount(0);
+  await expect(settings.getByRole('button', { name: 'Refresh all' })).toHaveCount(0);
+  await expect(settings.getByTestId('usage-options-menu')).toHaveCount(0);
   await expect(settings.getByTestId('terminals-switch')).toHaveCount(0);
   await expect(settings.getByTestId('owner-workspace-row')).toHaveCount(0);
   await expect(settings.getByTestId('owner-project-row')).toHaveCount(0);
@@ -79,12 +80,11 @@ test('owner › Usage shows each provider\'s usage from the host and refreshes i
   const providers = settings.getByTestId('usage-provider');
   await expect(providers).toHaveCount(2);
   await expect(settings.locator('[data-testid="usage-provider"][data-runtime="codex"]')).toContainText('Codex');
-  await expect(settings.locator('[data-testid="usage-provider"][data-runtime="claude"]').getByTestId('usage-status')).toHaveText(/Unavailable|Available|Paused|Limit reached/);
-  const before = await settings.locator('[data-testid="usage-provider"][data-runtime="codex"]').textContent();
-  await settings.getByRole('button', { name: 'Refresh usage' }).click();
-  await expect(settings.getByRole('button', { name: 'Refresh usage' })).toHaveText('Refresh');
+  await expect(settings.locator('[data-testid="usage-provider"][data-runtime="claude"]')).toContainText('Claude');
+  const refresh = settings.getByRole('button', { name: 'Refresh all' });
+  await refresh.click();
+  await expect(refresh).toBeEnabled();
   await expect(providers).toHaveCount(2);
-  expect(before).toContain('Checked');
 });
 
 test('owner › Providers adds a provider after showing what will run (env value masked), tests and diagnoses it', async ({ page }) => {

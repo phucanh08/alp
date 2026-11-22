@@ -7,15 +7,16 @@ import { Input, Label, Textarea } from '../../components/ui/input';
 import { Spinner } from '../../components/ui/spinner';
 import { describe } from '../../lib/errors.js';
 import {
-  LABEL_COLORS, addProvider, archiveWorkspace, changeLabel, dateLabel, diagnoseProviders, ownerRegistry, providerParams, providerPreview, readUsage,
-  registerDirectory, removeProject, resetLabel, runtimeName, setTerminal, terminalStatus, testProvider, testSummary, usageStatus, windowLevel,
-  type OwnerRegistry as OwnerRegistryData, type OwnerWorkspace as OwnerWorkspaceData, type UsageProvider,
+  LABEL_COLORS, addProvider, archiveWorkspace, changeLabel, diagnoseProviders, ownerRegistry, providerParams, providerPreview,
+  registerDirectory, removeProject, setTerminal, terminalStatus, testProvider, testSummary,
+  type OwnerRegistry as OwnerRegistryData, type OwnerWorkspace as OwnerWorkspaceData,
 } from '../../lib/owner-host.js';
 import { baseName } from '../../lib/format';
 import { cn } from '../../lib/utils';
 import { useAppState, useController, useOwner } from '../store';
 import { Row, Section, Select, Unavailable, focusRing, type Page } from './parts';
 import { LibraryPage } from './LibraryPages';
+import { OwnerUsage } from './usage/UsagePage';
 
 /*
  * Settings' host pages (t-a95b; docs/alp/dashboard.md §4.7): Usage, Providers, Terminals, Workspaces
@@ -247,68 +248,6 @@ function Failure({ error }: { error: string | null }) {
 const tones = { success: 'bg-primary/15 text-highlight', warning: 'bg-amber-500/15 text-amber-600 dark:text-amber-400', muted: 'bg-secondary text-muted-foreground' } as const;
 function Pill({ label, tone, testId }: { label: string; tone: keyof typeof tones; testId?: string }) {
   return <span data-testid={testId} className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-xs', tones[tone])}>{label}</span>;
-}
-
-// ---- Usage
-
-function OwnerUsage() {
-  const controller = useController();
-  const [data, setData] = React.useState<{ providers: UsageProvider[] } | null>(null);
-  const { pending, error, run } = useAction();
-  const load = React.useCallback((refresh: boolean) => run(async () => setData(await readUsage(controller, refresh))), [controller, run]);
-  const online = useOwnerOnline();
-  // Read again whenever the owner's connection opens (a grant change or a restart reconnects it).
-  React.useEffect(() => { if (online) void load(false); }, [online, load]);
-  const providers = data?.providers ?? [];
-  const parked = providers.reduce((sum, provider) => sum + (provider.parked ?? 0), 0);
-  const now = Date.now();
-  return (
-    <>
-      <Section title="Account usage on this host"
-        action={<Button size="sm" variant="ghost" className="h-7 text-xs" disabled={pending} onClick={() => void load(true)} aria-label="Refresh usage">{pending ? 'Refreshing…' : 'Refresh'}</Button>}>
-        {!data && pending ? <div className="p-4"><Spinner label="Checking Codex and Claude usage…" className="text-xs" /></div> : null}
-        {error ? <p role="alert" className="px-4 py-3 text-xs text-destructive">Could not refresh usage: {error}{data ? ' Showing the last received data.' : ''}</p> : null}
-        {parked > 0 ? <Row first={!error} title={`${parked} ${parked === 1 ? 'assignment waiting' : 'assignments waiting'}`} hint="Parked work stays saved while its runtime is paused." /> : null}
-        {data && !providers.length ? <Row first title="No providers reported usage" /> : null}
-        {providers.map((provider, index) => {
-          const status = usageStatus(provider);
-          return (
-            <div key={provider.runtime} className={cn('flex flex-col gap-3 p-4', (index > 0 || error || parked > 0) && 'border-t border-border')} data-testid="usage-provider" data-runtime={provider.runtime}>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-sm text-foreground">{runtimeName(provider.runtime)}</div>
-                  <div className="text-xs text-muted-foreground">{provider.plan ? `${provider.plan} plan` : 'Plan not reported'}</div>
-                </div>
-                <Pill label={status.label} tone={status.tone} testId="usage-status" />
-              </div>
-              {provider.pause ? <div className="text-xs text-muted-foreground">{provider.pause.reason}{provider.pause.resetsAt ? ` · ${resetLabel(provider.pause.resetsAt, now)}` : ''} · {provider.parked} parked</div> : null}
-              {!provider.available ? <p className="text-xs text-muted-foreground">The provider did not return usage data. Check that its CLI is installed and signed in on the host, then refresh.</p>
-                : !provider.windows.length ? <p className="text-xs text-muted-foreground">The provider has not reported any usage windows.</p>
-                : provider.windows.map((window, at) => {
-                  const used = window.usedPercent;
-                  const level = windowLevel(used);
-                  return (
-                    <div key={`${window.name}-${at}`} className="flex flex-col gap-1" data-testid="usage-window">
-                      <div className="flex items-baseline justify-between gap-3 text-sm">
-                        <span className="capitalize text-foreground">{window.name.replace(/_/g, ' ')}</span>
-                        <span className={cn('tabular-nums', level === 'danger' ? 'text-destructive' : level === 'warning' ? 'text-amber-600 dark:text-amber-400' : 'text-foreground')}>{used === null ? '—' : `${Math.round(used)}%`}</span>
-                      </div>
-                      <div role="progressbar" aria-label={`${runtimeName(provider.runtime)} ${window.name} used`} aria-valuemin={0} aria-valuemax={100} {...(used === null ? { 'aria-valuetext': 'Usage unknown' } : { 'aria-valuenow': used })}
-                        className="h-1.5 overflow-hidden rounded-full bg-secondary">
-                        <div className={cn('h-1.5 rounded-full', level === 'danger' ? 'bg-destructive' : level === 'warning' ? 'bg-amber-500' : 'bg-primary')} style={{ width: `${Math.max(0, Math.min(100, used ?? 0))}%` }} />
-                      </div>
-                      <div className="text-xs text-muted-foreground">{used === null ? 'Usage percentage unavailable' : `${Math.round(100 - used)}% remaining`} · {resetLabel(window.resetsAt, now)}</div>
-                    </div>
-                  );
-                })}
-              <div className="text-xs text-muted-foreground">Checked {dateLabel(provider.checkedAt)}</div>
-            </div>
-          );
-        })}
-      </Section>
-      <p className="mb-6 ml-1 text-xs text-muted-foreground">Account limits each provider reports (alp usage), shared with use outside ALP; not a billing report. Refresh asks the providers again on the host.</p>
-    </>
-  );
 }
 
 // ---- Providers

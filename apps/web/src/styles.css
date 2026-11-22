@@ -19,6 +19,10 @@
   --dot-warning: #db932e;
   --dot-danger: #f7796d;
   --dot-success: #35c264;
+  /* Paseo's status colours (styles/theme.ts statusSuccess/Warning/Danger): usage meters' fills. */
+  --status-success: #6cb17b;
+  --status-warning: #c09664;
+  --status-danger: #d8847b;
   --card: #1e2120;
   --card-foreground: #e8ebea;
   --popover: #1e2120;
@@ -76,6 +80,9 @@
   --dot-warning: #c27a12;
   --dot-danger: #d4473b;
   --dot-success: #1f9a4c;
+  --status-success: #3e704a;
+  --status-warning: #7b5d39;
+  --status-danger: #9d433b;
   --card: #fafafa;
   --card-foreground: #1a1a1e;
   --popover: #ffffff;
@@ -174,6 +181,9 @@
   --color-dot-warning: var(--dot-warning);
   --color-dot-danger: var(--dot-danger);
   --color-dot-success: var(--dot-success);
+  --color-status-success: var(--status-success);
+  --color-status-warning: var(--status-warning);
+  --color-status-danger: var(--status-danger);
   --color-bubble: var(--bubble);
   --color-stop: var(--stop);
   --color-secondary: var(--secondary);
