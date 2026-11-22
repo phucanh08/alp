@@ -27,8 +27,12 @@ export function isAllowedExternal(target: string): boolean {
   } catch { return false; }
 }
 
-/** Permissions the alp dashboard page may have: only writing plain text to the clipboard (Copy buttons). */
-const PERMITTED = new Set(['clipboard-sanitized-write']);
+/**
+ * Permissions the alp dashboard page may have: writing plain text to the clipboard (Copy buttons) and
+ * showing notifications (a session waits for an answer or finished its turn, t-0166). The Browser
+ * tabs' partition is not the default session's and denies everything (main.ts setupBrowserSession).
+ */
+const PERMITTED = new Set(['clipboard-sanitized-write', 'notifications']);
 
 /** Whether a permission request or check from `requestingUrl` is granted while showing `origin`. */
 export function isAllowedPermission(permission: string, requestingUrl: string | undefined, origin: string | undefined): boolean {
