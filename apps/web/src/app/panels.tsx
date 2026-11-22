@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Bot, FileDiff, Files, ListTodo, SquareTerminal } from 'lucide-react';
+import { Bot, FileDiff, Files, Globe, ListTodo, SquareTerminal } from 'lucide-react';
 import { members } from '../lib/timeline.js';
 import { modeLabel } from '../lib/format';
 import { cn } from '../lib/utils';
@@ -32,6 +32,13 @@ export const PANELS: Record<PanelKind, { label: string; icon: typeof Bot; unavai
   agents: { label: 'Agents', icon: Bot },
   tasks: { label: 'Tasks', icon: ListTodo },
 };
+
+/**
+ * Paseo's Browser entry (a globe, after Diff in the + menu). Not a panel: any number of Browser
+ * tabs can be open, each with its own address (tabs.tsx, BrowserPanel). Offered only in ALP.app
+ * (lib/browser-url.js isDesktopApp).
+ */
+export const BROWSER = { label: 'Browser', icon: Globe };
 
 const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset';
 const row = cn('flex w-full min-w-0 items-start gap-2 rounded-lg py-2 pl-2 pr-3 text-left', focusRing);

@@ -11,7 +11,9 @@ import { baseName, sessionName } from '../lib/format';
 import { cn } from '../lib/utils';
 import { COMPACT_NOTE, RELOAD_NOTE } from '../lib/conversation.js';
 import { newConversationRequestId } from '../lib/ids.js';
-import { PANELS, PanelView, type PanelKind } from './panels';
+import { BROWSER, PANELS, PanelView, type PanelKind } from './panels';
+import { BrowserPanel } from './BrowserPanel';
+import { browserLabel, isDesktopApp } from '../lib/browser-url.js';
 import { NewSessionScreen } from './NewSession';
 import { ChatPanel, Empty } from './SessionView';
 import { StatusRing } from './status';
@@ -79,6 +81,7 @@ export function WorkspaceHeader({ navOpen, onToggleNav, explorerOpen, onToggleEx
 
 function useTabPresentation(tab: Tab) {
   const { tree, tasks, sessions } = useAppState();
+  const { browserUrl } = useTabs();
   if (tab.kind === 'agent') {
     const projection = tree?.projection;
     const session = projection?.sessions[tab.id];
@@ -107,6 +110,10 @@ function useTabPresentation(tab: Tab) {
   if (tab.kind === 'draft') return { label: 'New session', icon: <SquarePen aria-hidden className="size-3.5" />, title: 'New session' };
   if (tab.kind === 'launcher') return { label: 'New tab', icon: <Plus aria-hidden className="size-3.5" />, title: 'New tab' };
   if (tab.kind === 'file') return { label: baseName(tab.id), icon: <FileText aria-hidden className="size-3.5" />, title: tab.id };
+  if (tab.kind === 'browser') {
+    const url = browserUrl(tab.id);
+    return { label: browserLabel(url), icon: <BROWSER.icon aria-hidden className="size-3.5" />, title: url && url !== 'about:blank' ? url : BROWSER.label };
+  }
   if (tab.kind === 'panel') {
     const panel = PANELS[tab.id];
     return { label: panel.label, icon: <panel.icon aria-hidden className="size-3.5" />, title: panel.label };
@@ -288,7 +295,7 @@ const toolbarButton = cn('flex size-7 shrink-0 items-center justify-center round
  * right / down.
  */
 export function TabsRow({ paneId = MAIN_PANE, whole = false, onNewSession, onRename, menuRequest, onMenuRequestHandled }: { paneId?: string; whole?: boolean; onNewSession: () => void; onRename: (session: SessionSummary) => void; menuRequest?: number; onMenuRequestHandled?: () => void }) {
-  const { activeOf, activate, close, openPanel, focusedPane, panes, splitEmpty, canSplitEmpty, maximized, toggleMaximized } = useTabs();
+  const { activeOf, activate, close, openPanel, openBrowser, focusedPane, panes, splitEmpty, canSplitEmpty, maximized, toggleMaximized } = useTabs();
   const drag = useTabDrag(paneId, whole);
   const drop = React.useContext(DropContext);
   const menuItems = useTabMenuItems(paneId, onRename, whole);
@@ -320,6 +327,8 @@ export function TabsRow({ paneId = MAIN_PANE, whole = false, onNewSession, onRen
           items={[
             { label: 'Agent', icon: <SquarePen aria-hidden />, onSelect: onNewSession, disabled: !canWrite || connection.phase !== 'open' },
             ...PRIMARY_PANELS.map(kind => item(kind)),
+            // Paseo's Browser after Diff; ALP.app only (docs/alp/desktop.md).
+            ...(isDesktopApp() ? [{ label: BROWSER.label, icon: <BROWSER.icon aria-hidden />, onSelect: () => { openBrowser(); }, group: false }] : []),
             ...ALP_PANELS.map((kind, index) => item(kind, index === 0)),
           ]} />
       </div>
@@ -354,6 +363,7 @@ export function TabContent({ paneId = MAIN_PANE, onNewSession }: { paneId?: stri
   if (active?.kind === 'task') return <TaskDetail id={active.id} />;
   // Keyed by the workspace too: the same path in another workspace is another file.
   if (active?.kind === 'file') return <FileView key={`${workspace ?? ''}\n${active.id}`} path={active.id} />;
+  if (active?.kind === 'browser') return <BrowserPanel key={`${workspace ?? ''}\n${active.id}`} id={active.id} />;
   if (active?.kind === 'panel') return <div className={cn('min-h-0 flex-1', active.id === 'terminal' ? 'overflow-hidden' : 'overflow-y-auto')}><PanelView kind={active.id} /></div>;
   if (active?.kind === 'agent' && tree) return <ChatPanel key={active.id} sessionId={active.id} />;
   return <Empty onNewSession={onNewSession} />;
@@ -366,7 +376,7 @@ export function TabContent({ paneId = MAIN_PANE, onNewSession }: { paneId?: stri
  */
 function PaneLauncher({ launcher }: { launcher: string }) {
   // The draft opens in the same update as the New tab closes, so the pane is never left empty.
-  const { launch, openPanel, openDraft } = useTabs();
+  const { launch, openPanel, openBrowser, openDraft } = useTabs();
   const { principal, connection } = useAppState();
   const canWrite = can(principal ?? undefined, 'session.write');
   const first = React.useRef<HTMLButtonElement>(null);
@@ -385,6 +395,7 @@ function PaneLauncher({ launcher }: { launcher: string }) {
     [
       { id: 'agent', label: 'Agent', icon: <SquarePen aria-hidden className="size-4 shrink-0 text-muted-foreground" />, disabled: !canWrite || connection.phase !== 'open', run: openDraft },
       ...PRIMARY_PANELS.map(kind => { const panel = PANELS[kind]; return { id: kind, label: panel.label, icon: <panel.icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />, run: () => openPanel(kind) }; }),
+      ...(isDesktopApp() ? [{ id: 'browser', label: BROWSER.label, icon: <BROWSER.icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />, run: () => { openBrowser(); } }] : []),
     ],
     ALP_PANELS.map(kind => { const panel = PANELS[kind]; return { id: kind, label: panel.label, icon: <panel.icon aria-hidden className="size-4 shrink-0 text-muted-foreground" />, run: () => openPanel(kind) }; }),
   ];
