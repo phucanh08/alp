@@ -7,13 +7,16 @@
  * Per workspace (scoped by gateway address and workspace path): the open session, the other
  * agent tabs of that session, the task, file and panel tabs, the tabs' order (tab keys, see
  * app/tabs.tsx), the active tab and, once the center is split, its panes (lib/panes.js: the split
- * tree, which pane each tab sits in and shows, the focused pane). Widths: the sidebar and the explorer dock. Ids only: no
- * token, no titles, nothing else the host sent.
+ * tree, which pane each tab sits in and shows, the focused pane), and ALP.app's Browser tabs with the
+ * address each shows (lib/browser-url.js: http, https or about:blank only; never the dashboard's
+ * own address). Widths: the sidebar and the explorer dock. Ids only: no token, no titles, nothing
+ * else the host sent.
  */
 
 import { blockedFilePath } from '@anhlp/alp-protocol';
 import { parsePanes } from './panes.js';
 import { relativeFilePath } from './file-tree.js';
+import { parseBrowsers } from './browser-url.js';
 
 export const LAYOUT_KEY = 'alp-web:layout';
 export const LAYOUT_VERSION = 1;
@@ -32,7 +35,7 @@ const PATH_CHARS = 1024;
 const KEY_CHARS = PATH_CHARS + 5;
 
 /**
- * @typedef {{ session?: string, agents: string[], tasks: string[], files?: string[], panels: string[], order: string[], active?: string, panes?: import('./panes.js').Panes, at: number }} WorkspaceTabs
+ * @typedef {{ session?: string, agents: string[], tasks: string[], files?: string[], browsers?: Array<{ id: string, url: string }>, panels: string[], order: string[], active?: string, panes?: import('./panes.js').Panes, at: number }} WorkspaceTabs
  * @typedef {{ sidebarWidth?: number, dockWidth?: number, workspaces: Record<string, WorkspaceTabs> }} Layout
  * @typedef {{ getItem(key: string): string | null, setItem(key: string, value: string): void }} LayoutStorage
  */
@@ -68,6 +71,7 @@ function parseWorkspace(value) {
   const panes = parsePanes(record.panes);
   // File tabs: workspace-relative paths only, never one the host would refuse as blocked.
   const files = ids(record.files, entry => relativeFilePath(entry) === entry && !blockedFilePath(entry), pathId);
+  const browsers = parseBrowsers(record.browsers);
   return {
     ...(session ? { session } : {}),
     agents: session ? ids(record.agents, entry => entry !== session) : [],
@@ -75,6 +79,7 @@ function parseWorkspace(value) {
     panels: ids(record.panels, entry => /** @type {readonly string[]} */ (PANEL_KINDS).includes(entry)),
     order: ids(record.order, undefined, keyId),
     ...(files.length ? { files } : {}),
+    ...(browsers.length ? { browsers } : {}),
     ...(active ? { active } : {}),
     ...(panes ? { panes } : {}),
     at: typeof record.at === 'number' && Number.isFinite(record.at) ? record.at : 0,

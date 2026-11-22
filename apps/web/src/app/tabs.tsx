@@ -6,6 +6,7 @@ import { layoutStorage } from './layoutStorage';
 import { relativeFilePath } from '../lib/file-tree.js';
 import { blockedFilePath } from '@anhlp/alp-protocol';
 import { closeRange, planClose } from '../lib/tab-close.js';
+import { BLANK_URL, MAX_BROWSERS, isBrowsableUrl, nextBrowserId } from '../lib/browser-url.js';
 import { adjacentPane, moveToPane, nearestPane, paneIds, paneOf, removePane, resizeGroup, singlePane, splitPane, tabsByPane, type Direction, type Panes, type SplitPosition } from '../lib/panes.js';
 
 /*
@@ -31,9 +32,13 @@ import { adjacentPane, moveToPane, nearestPane, paneIds, paneOf, removePane, res
  * other panes show their own). New tabs open in the focused pane; a pane whose last tab closes
  * goes away (the last pane stays). Splitting a pane opens a New tab in the new pane, as Paseo's:
  * a launcher (Agent, the panels) that turns into what is picked.
+ *
+ * Browser tabs (ALP.app only, t-9116): any number per workspace, each with the address it shows
+ * (lib/browser-url.js), kept with the workspace's other tabs. A page in one that opens a new
+ * window gets a new Browser tab instead (BrowserPanel).
  */
 
-export type Tab = { kind: 'agent'; id: string } | { kind: 'task'; id: string } | { kind: 'file'; id: string } | { kind: 'panel'; id: PanelKind } | { kind: 'draft'; id: 'new' } | { kind: 'launcher'; id: string };
+export type Tab = { kind: 'agent'; id: string } | { kind: 'task'; id: string } | { kind: 'file'; id: string } | { kind: 'panel'; id: PanelKind } | { kind: 'browser'; id: string } | { kind: 'draft'; id: 'new' } | { kind: 'launcher'; id: string };
 
 /** Tabs that are not kept across reloads (Paseo's ephemeral tabs): the draft and New tab launchers. */
 const ephemeral = (tab: Tab) => tab.kind === 'draft' || tab.kind === 'launcher';
@@ -89,6 +94,12 @@ type TabsValue = {
   fileTarget: (path: string) => { line?: number; nonce: number } | undefined;
   openAgent: (id: string) => void;
   openPanel: (kind: PanelKind) => void;
+  /** Opens a new Browser tab showing `url` (about:blank when not given); false at the cap. */
+  openBrowser: (url?: string) => boolean;
+  /** The address Browser tab `id` shows. */
+  browserUrl: (id: string) => string | undefined;
+  /** Browser tab `id` navigated: its address is kept. */
+  setBrowserUrl: (id: string, url: string) => void;
   openDraft: () => void;
   /** The draft's session started: the draft closes and the session's tab comes to the front. */
   finishDraft: (id: string) => void;
@@ -111,6 +122,7 @@ const parseKey = (key: string | undefined): Tab | null => {
   if (kind === 'agent' || kind === 'task') return { kind, id };
   if (kind === 'file') return relativeFilePath(id) === id && !blockedFilePath(id) ? { kind, id } : null;
   if (kind === 'panel') return { kind, id: id as PanelKind };
+  if (kind === 'browser') return /^b\d{1,6}$/.test(id) ? { kind, id } : null;
   return null;
 };
 
@@ -122,6 +134,7 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
   const [files, setFiles] = React.useState<string[]>([]);
   const [fileTargets, setFileTargets] = React.useState<Record<string, { line?: number; nonce: number }>>({});
   const [panels, setPanels] = React.useState<PanelKind[]>([]);
+  const [browsers, setBrowsers] = React.useState<Array<{ id: string; url: string }>>([]);
   const [draft, setDraft] = React.useState(false);
   const [launchers, setLaunchers] = React.useState<string[]>([]);
   const [active, setActive] = React.useState<Tab | null>(null);
@@ -179,6 +192,7 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
     setFiles(saved?.files ?? []);
     setFileTargets({});
     setPanels((saved?.panels ?? []) as PanelKind[]);
+    setBrowsers(saved?.browsers ?? []);
     setOrder(saved?.order ?? []);
     // A saved pane left with no tab kept (it held a New tab or the draft) gets a New tab, as
     // Paseo's restoreEmptyPanesInNode.
@@ -195,7 +209,7 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
     // The focused pane's fresh New tab is in front when nothing else is.
     const focusedFresh = fresh.find(entry => entry.pane === savedPanes.focused);
     setActive(current => {
-      if (savedActive && savedActive.kind !== 'agent' && (savedActive.kind === 'task' ? saved?.tasks.includes(savedActive.id) : savedActive.kind === 'file' ? saved?.files?.includes(savedActive.id) : saved?.panels.includes(savedActive.id))) return savedActive;
+      if (savedActive && savedActive.kind !== 'agent' && (savedActive.kind === 'task' ? saved?.tasks.includes(savedActive.id) : savedActive.kind === 'file' ? saved?.files?.includes(savedActive.id) : savedActive.kind === 'browser' ? saved?.browsers?.some(entry => entry.id === savedActive.id) : saved?.panels.includes(savedActive.id))) return savedActive;
       const next = current && current.kind !== 'agent' ? null : current;
       return next ?? (focusedFresh ? { kind: 'launcher', id: focusedFresh.id } : null);
     });
@@ -250,9 +264,10 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
     ...tasks.map(id => ({ kind: 'task' as const, id })),
     ...files.map(id => ({ kind: 'file' as const, id })),
     ...panels.map(id => ({ kind: 'panel' as const, id })),
+    ...browsers.map(entry => ({ kind: 'browser' as const, id: entry.id })),
     ...(draft ? [DRAFT_TAB] : []),
     ...launchers.map(id => ({ kind: 'launcher' as const, id })),
-  ], tabKey, order), [agents, tasks, files, panels, draft, launchers, order]);
+  ], tabKey, order), [agents, tasks, files, panels, browsers, draft, launchers, order]);
 
   // The panes: which tabs each holds, which has focus (the active tab's), what each shows.
   const ids = React.useMemo(() => paneIds(panes.root), [panes.root]);
@@ -322,14 +337,14 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
         [scope]: {
           ...(session ? { session } : {}),
           agents: session ? [...agents.filter(id => id !== session), ...(restore.current?.agents ?? [])] : [],
-          tasks, files, panels, order: shown,
+          tasks, files, panels, ...(browsers.length ? { browsers } : {}), order: shown,
           ...(active && !ephemeral(active) ? { active: tabKey(active) } : restore.current?.active ? { active: restore.current.active } : {}),
           ...(split ? { panes: split } : {}),
           at: Date.now(),
         },
       },
     }));
-  }, [scope, loaded, selected, agents, tasks, files, panels, tabs, active, ids, panes, focusedPane]);
+  }, [scope, loaded, selected, agents, tasks, files, panels, browsers, tabs, active, ids, panes, focusedPane]);
 
   /** A tab the user brings forward while a saved session is still to open: that tab stays in front. */
   const userChose = (tab: Tab) => { const pending = restore.current; if (pending && !ephemeral(tab)) pending.active = tabKey(tab); };
@@ -376,6 +391,7 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
     setTasks(current => current.filter(id => !keys.has(`task:${id}`)));
     setFiles(current => current.filter(id => !keys.has(`file:${id}`)));
     setPanels(current => current.filter(id => !keys.has(`panel:${id}`)));
+    setBrowsers(current => current.filter(entry => !keys.has(`browser:${entry.id}`)));
     // Closing the Terminal tab ends its shell on the host (terminal.close, #121 H).
     if (keys.has('panel:terminal')) void controller.closeTerminal();
     if (keys.has(tabKey(DRAFT_TAB))) setDraft(false);
@@ -529,6 +545,25 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
     setActive({ kind: 'panel', id: kind });
   }, []);
 
+  // The Browser tabs as of the last open, so two opens in one update (a page opening two windows)
+  // take two ids.
+  const browserIds = React.useRef<string[]>([]);
+  browserIds.current = browsers.map(entry => entry.id);
+  const openBrowser = React.useCallback((url?: string) => {
+    if (browserIds.current.length >= MAX_BROWSERS) return false;
+    const id = nextBrowserId(browserIds.current);
+    browserIds.current = [...browserIds.current, id];
+    setBrowsers(current => [...current, { id, url: url && isBrowsableUrl(url) ? url : BLANK_URL }]);
+    userChose({ kind: 'browser', id });
+    setActive({ kind: 'browser', id });
+    return true;
+  }, []);
+  const browserUrl = React.useCallback((id: string) => browsers.find(entry => entry.id === id)?.url, [browsers]);
+  const setBrowserUrl = React.useCallback((id: string, url: string) => {
+    if (!isBrowsableUrl(url)) return;
+    setBrowsers(current => current.some(entry => entry.id === id && entry.url !== url) ? current.map(entry => entry.id === id ? { id, url } : entry) : current);
+  }, []);
+
   const openDraft = React.useCallback(() => {
     setDraft(true);
     setActive(DRAFT_TAB);
@@ -541,8 +576,8 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
 
   const value = React.useMemo(() => ({
     tabs, row, active, panes, byPane, focusedPane, activeOf, focusPane, splitEmpty, canSplitEmpty, launch, splitWith, moveTabToPane, closePane, focusAdjacent, moveTabAdjacent, resize, maximized, toggleMaximized,
-    activate, close, closeOthers, move, openTask, openFile, fileTarget, openAgent, openPanel, openDraft, finishDraft,
+    activate, close, closeOthers, move, openTask, openFile, fileTarget, openAgent, openPanel, openBrowser, browserUrl, setBrowserUrl, openDraft, finishDraft,
   }), [tabs, row, active, panes, byPane, focusedPane, activeOf, focusPane, splitEmpty, canSplitEmpty, launch, splitWith, moveTabToPane, closePane, focusAdjacent, moveTabAdjacent, resize, maximized, toggleMaximized,
-    activate, close, closeOthers, move, openTask, openFile, fileTarget, openAgent, openPanel, openDraft, finishDraft]);
+    activate, close, closeOthers, move, openTask, openFile, fileTarget, openAgent, openPanel, openBrowser, browserUrl, setBrowserUrl, openDraft, finishDraft]);
   return <TabsContext.Provider value={value}>{children}</TabsContext.Provider>;
 }
