@@ -192,6 +192,70 @@ export function diffRows(file) {
   return rows;
 }
 
+/**
+ * Paseo's split (side-by-side) diff: the unified rows of diffRows paired into old | new cells. A
+ * hunk header spans both sides; a context row shows on both; a run of removals followed by a run
+ * of additions is paired line by line (the shorter side padded with empty cells), as GitHub and
+ * Paseo's split view do. Nothing is re-diffed: the pairing only follows the hunk's own order.
+ * @param {ReturnType<typeof diffRows>} rows
+ * @returns {Array<{ type: 'hunk', text: string } | { type: 'pair', old?: { type: 'remove' | 'context', text: string, line: number, noNewline?: boolean }, new?: { type: 'add' | 'context', text: string, line: number, noNewline?: boolean } }>}
+ */
+export function splitRows(rows) {
+  /** @type {ReturnType<typeof splitRows>} */
+  const out = [];
+  /** @type {any[]} */ let removes = [];
+  /** @type {any[]} */ let adds = [];
+  const flush = () => {
+    for (let index = 0; index < Math.max(removes.length, adds.length); index++) {
+      const removed = removes[index];
+      const added = adds[index];
+      out.push({
+        type: 'pair',
+        ...(removed ? { old: { type: 'remove', text: removed.text, line: removed.oldLine, ...(removed.noNewline ? { noNewline: true } : {}) } } : {}),
+        ...(added ? { new: { type: 'add', text: added.text, line: added.newLine, ...(added.noNewline ? { noNewline: true } : {}) } } : {}),
+      });
+    }
+    removes = [];
+    adds = [];
+  };
+  for (const row of rows) {
+    if (row.type === 'remove') {
+      // A removal after additions starts a new block: the additions before it pair with earlier removals only.
+      if (adds.length) flush();
+      removes.push(row);
+    } else if (row.type === 'add') adds.push(row);
+    else {
+      flush();
+      if (row.type === 'hunk') out.push({ type: 'hunk', text: row.text });
+      else out.push({ type: 'pair', old: { type: 'context', text: row.text, line: /** @type {number} */ (row.oldLine), ...(row.noNewline ? { noNewline: true } : {}) }, new: { type: 'context', text: row.text, line: /** @type {number} */ (row.newLine), ...(row.noNewline ? { noNewline: true } : {}) } });
+    }
+  }
+  flush();
+  return out;
+}
+
+/** The most review comments kept for one workspace, and the longest one (characters). */
+export const REVIEW_LIMITS = Object.freeze({ maxComments: 50, maxCommentLength: 4000, maxExcerptLength: 300 });
+
+/**
+ * The message a diff review sends to the session's agent (Paseo's "Send review to agent"): each
+ * comment under its file and line, the line it is about quoted, in file then line order. Plain
+ * text only: nothing here is run or linked; the agent reads it as the user's message.
+ * @param {Array<{ path: string, side: 'old' | 'new', line: number, excerpt: string, text: string }>} comments
+ * @param {string} [label] the comparison, such as "Uncommitted"
+ */
+export function formatReviewComments(comments, label) {
+  const sorted = [...comments].sort((a, b) => a.path === b.path ? a.line - b.line || (a.side === b.side ? 0 : a.side === 'old' ? -1 : 1) : a.path < b.path ? -1 : 1);
+  const lines = [`Review comments on the diff${label ? ` (${label})` : ''}. Please address each one:`];
+  let file = '';
+  for (const comment of sorted) {
+    if (comment.path !== file) { file = comment.path; lines.push('', `## ${file}`); }
+    const excerpt = comment.excerpt.length > REVIEW_LIMITS.maxExcerptLength ? `${comment.excerpt.slice(0, REVIEW_LIMITS.maxExcerptLength)}…` : comment.excerpt;
+    lines.push('', `Line ${comment.line}${comment.side === 'old' ? ' (removed line, old numbering)' : ''}:`, `> ${excerpt}`, comment.text.trim());
+  }
+  return lines.join('\n');
+}
+
 /** Additions and deletions of a list of diff files. @param {Array<{ additions: number, deletions: number }>} files */
 export function diffTotals(files) {
   let additions = 0;
