@@ -16,7 +16,7 @@ const DEFAULTS = {
   sendBehavior: 'steer', sendShortcut: 'enter', theme: 'system',
   uiFontFamily: '', monoFontFamily: '', uiFontSize: 14, contentFontSize: 15, codeFontSize: 12,
   contentMaxWidth: null, syntaxTheme: 'one',
-  chatDisplay: 'collapseTurns', chatOutline: true, terminalScrollback: 10_000,
+  chatDisplay: 'collapseTurns', chatOutline: true, terminalScrollback: 10_000, notificationSound: true,
   sidebar: {
     header: [{ id: 'new-session', visible: true }, { id: 'history', visible: true }, { id: 'search', visible: true }, { id: 'schedules', visible: true }],
     footer: [{ id: 'tasks', visible: false }],
@@ -47,6 +47,9 @@ test('every theme, chat display and syntax theme Paseo offers is kept', () => {
   assert.equal(parse({ chatDisplay: 'overview', syntaxTheme: 'monokai', chatOutline: 'yes' }).chatDisplay, 'collapseTurns');
   assert.equal(parse({ chatOutline: false }).chatOutline, false);
   assert.equal(parse({ chatOutline: 'no' }).chatOutline, true);
+  // Settings › Notifications › Play sound (t-a876): a boolean, else on.
+  assert.equal(parse({ notificationSound: false }).notificationSound, false);
+  assert.equal(parse({ notificationSound: 'off' }).notificationSound, true);
 });
 
 test('sizes, scrollback and content width are clamped to Paseo\'s limits; non-numbers give the default', () => {

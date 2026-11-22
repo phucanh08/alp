@@ -158,6 +158,8 @@ test('a case-only rename shows the new spelling; a replayed delete leaves a labe
   let registry = await catalog(daemon, project, [{ name: 'Bug', color: 'red' }]);
   const { session } = await daemon.request('session.create', { spec: { cwd: project, workflow: 'pho', persist: true } });
   await daemon.request('session.update', { sessionId: session.id, labels: ['Bug'] });
+  // session.create places the session in the registry, which moves its revision: read it again.
+  ({ registry } = await daemon.request('registry.owner', {}));
   ({ registry } = await daemon.request('registry.owner', { operation: 'label.update', args: { name: 'Bug', newName: 'BUG' }, ifRevision: registry.revision, requestId: 'case' }));
   assert.deepEqual((await daemon.request('session.get', { sessionId: session.id })).session.labels, ['BUG']);
   const deletion = { operation: 'label.delete', args: { name: 'BUG' }, ifRevision: registry.revision, requestId: 'delete' };
