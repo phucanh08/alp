@@ -5,12 +5,14 @@ import { HIDDEN } from './library.js';
  * The host owner's requests of Settings' host pages (t-a95b.1 group B; docs/alp/dashboard.md §4.7),
  * on controller.ownerRequest: refused in the page when the connection is not the owner's, and by
  * the gateway in any case. Plus the pure helpers those pages render with (usage windows, the
- * provider confirm step). Usage's presentation follows the Paseo integration's Usage screen
- * (integrations/paseo/client/usage.tsx).
+ * provider confirm step). Usage's page and its preferences are in app/settings/usage and
+ * lib/usage-prefs.js (Paseo's packages/app/src/usage).
  *
  * @typedef {{ ownerRequest: (method: string, params?: Record<string, unknown>, options?: { timeoutMs?: number }) => Promise<any> }} OwnerController
- * @typedef {{ name: string, usedPercent: number | null, resetsAt: string | null }} UsageWindow
- * @typedef {{ runtime: string, available: boolean, checkedAt: string, plan: string | null, limited: boolean, windows: UsageWindow[], pause: { reason: string, since: string, resetsAt?: string } | null, parked: number }} UsageProvider
+ * @typedef {{ name: string, usedPercent: number | null, resetsAt: string | null, id?: string, label?: string, summary?: boolean }} UsageWindow
+ * @typedef {{ runtime: string, available: boolean, checkedAt: string, plan: string | null, limited: boolean, windows: UsageWindow[], pause: { reason: string, since: string, resetsAt?: string } | null, parked: number,
+ *   planLabel?: string | null, details?: Array<{ id: string, label: string, value: string }>, balances?: Array<{ id: string, label: string, remaining: number | null, unlimited: boolean }>, account?: { email?: string } | null }} UsageProvider
+ * @typedef {{ enabled: boolean, host: string }} UsageSetting
  * @typedef {{ id: string, projectId: string, directory: string, title: string | null, pinnedAt: string | null, archivedAt: string | null, labels: string[], createdAt: string, managedWorktree: boolean, sessions: number }} OwnerWorkspace
  * @typedef {{ revision: number, projects: Array<{ id: string, root: string, customName?: string, addedAt: string }>, workspaces: OwnerWorkspace[], labels: Array<{ name: string, color: string }> }} OwnerRegistry
  */
@@ -22,16 +24,36 @@ const requestId = () => globalThis.crypto.randomUUID();
 
 // ---- Usage -------------------------------------------------------------------------------------
 
-/** daemon.usage: refresh asks every provider again on the host. @param {OwnerController} controller @param {boolean} [refresh] */
+/**
+ * daemon.usage: refresh asks every provider again on the host. `disabled` when the host's Check
+ * usage setting is off (it then answers no providers). The optional fields (planLabel, details,
+ * balances, account, a window's id/label) come from newer hosts; the page falls back without them.
+ * @param {OwnerController} controller @param {boolean} [refresh]
+ */
 export async function readUsage(controller, refresh = false) {
   const result = await controller.ownerRequest('daemon.usage', { refresh }, { timeoutMs: 60_000 });
-  return { providers: /** @type {UsageProvider[]} */ (Array.isArray(result?.providers) ? result.providers : []) };
+  return { providers: /** @type {UsageProvider[]} */ (Array.isArray(result?.providers) ? result.providers : []), disabled: result?.disabled === true };
+}
+
+/** host.usage.setting.get: whether the host checks usage, and its name. @param {OwnerController} controller @returns {Promise<UsageSetting>} */
+export async function readUsageSetting(controller) {
+  const result = await controller.ownerRequest('host.usage.setting.get', {});
+  return { enabled: result?.enabled !== false, host: typeof result?.host === 'string' ? result.host : '' };
+}
+/** host.usage.setting.set: Check usage on or off, for every device of the host. @param {OwnerController} controller @param {boolean} enabled @returns {Promise<UsageSetting>} */
+export async function setUsageSetting(controller, enabled) {
+  const result = await controller.ownerRequest('host.usage.setting.set', { enabled });
+  return { enabled: result?.enabled !== false, host: typeof result?.host === 'string' ? result.host : '' };
 }
 
 /** @param {string} runtime */
 export const runtimeName = runtime => runtime === 'codex' ? 'Codex' : runtime === 'claude' ? 'Claude' : runtime;
 
-/** A provider's state, as the Paseo Usage screen names it. @param {UsageProvider} provider @returns {{ label: string, tone: 'warning' | 'success' | 'muted' }} */
+/**
+ * A provider's state when it is not plainly available, as a dot and word beside its name (Paseo
+ * shows none for an available report). @param {UsageProvider} provider
+ * @returns {{ label: string, tone: 'warning' | 'success' | 'muted' }}
+ */
 export function usageStatus(provider) {
   if (provider.pause) return { label: 'Paused', tone: 'warning' };
   if (!provider.available) return { label: 'Unavailable', tone: 'muted' };
@@ -39,23 +61,10 @@ export function usageStatus(provider) {
   return { label: 'Available', tone: 'success' };
 }
 
-/** @param {number | null} used @returns {'unknown' | 'danger' | 'warning' | 'normal'} */
-export const windowLevel = used => used === null ? 'unknown' : used >= 95 ? 'danger' : used >= 80 ? 'warning' : 'normal';
-
 /** @param {string} value */
 export function dateLabel(value) {
   const date = new Date(value);
   return Number.isFinite(date.getTime()) ? date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'Unknown';
-}
-
-/** "Resets in 2h 5m · Nov 21, 3:00 PM". @param {string | null | undefined} value @param {number} [now] */
-export function resetLabel(value, now = Date.now()) {
-  if (!value) return 'Reset time unavailable';
-  const minutes = Math.ceil((Date.parse(value) - now) / 60_000);
-  if (!Number.isFinite(minutes)) return 'Reset time unavailable';
-  if (minutes <= 0) return 'Reset time passed · awaiting provider update';
-  const duration = minutes >= 1440 ? `${Math.floor(minutes / 1440)}d ${Math.floor(minutes % 1440 / 60)}h` : minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
-  return `Resets in ${duration} · ${dateLabel(value)}`;
 }
 
 // ---- Providers ---------------------------------------------------------------------------------
