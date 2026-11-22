@@ -2,7 +2,7 @@ import * as React from 'react';
 import {
   Archive, Circle, FolderOpen, CalendarClock, CircleCheck, CircleDashed, CircleGauge, CircleHelp, CircleX, Clock, Copy, Folder, FolderCog, FolderPlus, GitBranch, GitMerge, GitPullRequest,
   GitPullRequestClosed, GitPullRequestDraft, History, ListChecks, LogOut, MoreHorizontal, MoreVertical, Network, Pencil, Pin, PinOff, Plus, Search, Server, Settings,
-  Settings2, Tag, Type, X,
+  Settings2, SquareCode, Tag, Trash2, Type, X,
 } from 'lucide-react';
 import { attentionReason, needsInput, type SessionSummary } from '../lib/controller.js';
 import { sessionBucket } from '../lib/attention.js';
@@ -18,7 +18,7 @@ import { isMacPlatform, shortcutLabel } from '../lib/shortcuts.js';
 import type { SidebarDisplay, SidebarItemId } from '../lib/preferences.js';
 import { filterProjects, groupByStatus, limitRows, resolveProjectFilters, sortSessions } from '../lib/sidebar-model.js';
 import { FACTS_REFRESH_MS, formatDiffCount, mostRecentSession, prLabel, readFacts, usageLine, type WorkspaceFacts } from '../lib/sidebar-facts.js';
-import { ownerRegistry, readUsage, registerDirectory, revealWorkspace, USAGE_EVENT, runtimeName, type UsageProvider } from '../lib/owner-host.js';
+import { openInEditor, ownerRegistry, readUsage, registerDirectory, revealWorkspace, USAGE_EVENT, runtimeName, workspaceEditors, type UsageProvider } from '../lib/owner-host.js';
 import { isDesktopApp } from '../lib/browser-url.js';
 import { useUsagePrefs } from './settings/usage/prefs';
 import { ProviderIcon } from './ProviderIcon';
@@ -99,6 +99,49 @@ export function bucketOf(session: SessionSummary, waiting: boolean, reason?: 'fi
   return sessionBucket({ status: session.status, waiting, reason });
 }
 
+/** A session's pin and labels (session.meta), kept by the host for every client. */
+export function metaOf(session: SessionSummary): { pinnedAt?: string; labels: string[] } {
+  const value = session as SessionSummary & { pinnedAt?: unknown; labels?: unknown };
+  return {
+    pinnedAt: typeof value.pinnedAt === 'string' && value.pinnedAt ? value.pinnedAt : undefined,
+    labels: Array.isArray(value.labels) ? value.labels.filter((label): label is string => typeof label === 'string') : [],
+  };
+}
+
+/** Pinned sessions first pinned first, as they were pinned. */
+export function pinnedOrder(a: SessionSummary, b: SessionSummary) {
+  return (metaOf(a).pinnedAt ?? '').localeCompare(metaOf(b).pinnedAt ?? '') || a.id.localeCompare(b.id);
+}
+
+/** Label colours (registry labelColors) as dots, as Settings › Workspaces draws them. */
+const LABEL_DOTS: Record<string, string> = {
+  violet: '#8b5cf6', sky: '#0ea5e9', emerald: '#10b981', orange: '#f97316', pink: '#ec4899', indigo: '#6366f1', teal: '#14b8a6', red: '#ef4444', amber: '#f59e0b', blue: '#3b82f6',
+};
+function LabelDot({ color }: { color: string }) {
+  return <span aria-hidden className="inline-block size-2.5 shrink-0 rounded-full" style={{ backgroundColor: LABEL_DOTS[color] ?? LABEL_DOTS.violet }} />;
+}
+
+/** Remove project, confirmed: the host archives its workspaces; no file and no session changes. */
+function RemoveProjectDialog({ target, onClose }: { target: { projectId: string; name: string } | null; onClose: () => void }) {
+  const controller = useController();
+  const [pending, setPending] = React.useState(false);
+  React.useEffect(() => { if (target) setPending(false); }, [target]);
+  const remove = async () => {
+    if (!target || pending) return;
+    setPending(true);
+    const removed = await controller.removeProject(target.projectId);
+    setPending(false);
+    if (removed) { controller.notify('info', `Removed “${target.name}” from projects`); onClose(); }
+  };
+  return (
+    <Dialog open={!!target} onClose={onClose} title="Remove project?"
+      description={<>“{target?.name}” leaves the host's project list and its workspaces are archived. No file changes, and its sessions stay on the host.</>}
+      footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="destructive" disabled={pending} onClick={() => void remove()} data-testid="remove-project-confirm">Remove</Button></>}>
+      <p className="text-sm text-muted-foreground">Add it back any time with Add project.</p>
+    </Dialog>
+  );
+}
+
 /** Paseo's section label ("Pinned", "Workspaces", a status), with its actions at the trailing edge. */
 function SectionHeader({ title, children, testId }: { title: string; children?: React.ReactNode; testId?: string }) {
   return (
@@ -138,9 +181,9 @@ function DiffCounts({ facts, className }: { facts: WorkspaceFacts; className?: s
 }
 
 /** Paseo's workspace row: status slot, title at 76% that lifts on hover, trailing time, the Show facts under it, kebab on hover. */
-function SessionRow({ session, title, meta, trailing, facts, bucket, selected, actions, onSelect }: {
+function SessionRow({ session, title, meta, trailing, facts, bucket, selected, actions, pages, onSelect }: {
   session: SessionSummary; title: string; meta: MetaItem[]; trailing: string; facts?: WorkspaceFacts; bucket: Bucket; selected: boolean;
-  /** Paseo's workspace menu, as this session has it (sessionActions). */ actions: MenuItem[];
+  /** Paseo's workspace menu, as this session has it (sessionActions), and the pages its rows open (Labels). */ actions: MenuItem[]; pages?: Record<string, MenuPage>;
   onSelect: () => void;
 }) {
   const hasMenu = actions.length > 0;
@@ -148,7 +191,7 @@ function SessionRow({ session, title, meta, trailing, facts, bucket, selected, a
   const when = session.status === 'closed' ? 'Closed' : `Updated ${relativeTime(session.updatedAt ?? session.createdAt)}`;
   return (
     <li className={cn('group relative mb-0.5 rounded-lg', selected ? 'bg-sidebar-selected' : 'hover:bg-sidebar-hover active:bg-secondary', menuOpen && !selected && 'bg-sidebar-hover')}>
-      <button type="button" onClick={onSelect} aria-current={selected ? 'true' : undefined} data-testid="session-row" data-session-id={session.id} data-facts={facts ? 'true' : undefined} title={`${title} · ${when}`}
+      <button type="button" onClick={onSelect} aria-current={selected ? 'true' : undefined} data-testid="session-row" data-session-id={session.id} data-facts={facts ? 'true' : undefined} data-pinned={metaOf(session).pinnedAt ? 'true' : undefined} title={`${title} · ${when}`}
         className={cn('flex min-h-11 w-full min-w-0 items-start gap-2 rounded-lg py-2 pl-4 pr-3 text-left md:min-h-9', hasMenu && 'max-md:pr-8', focusRing)}>
         <StatusIndicator bucket={bucket} />
         <span className="min-w-0 flex-1">
@@ -175,7 +218,7 @@ function SessionRow({ session, title, meta, trailing, facts, bucket, selected, a
           <Menu label={`Actions for ${title}`} onOpenChange={setMenuOpen} align="end" width={260} testId="sidebar-workspace-menu"
             trigger={<MoreVertical aria-hidden className="size-3.5" />}
             triggerClassName={cn('flex size-[18px] items-center justify-center rounded text-muted-foreground hover:bg-secondary hover:text-foreground', selected ? 'bg-sidebar-selected' : 'bg-sidebar-hover', focusRing)}
-            items={actions} />
+            items={actions} pages={pages} />
         </div>
       ) : null}
     </li>
@@ -183,8 +226,8 @@ function SessionRow({ session, title, meta, trailing, facts, bucket, selected, a
 }
 
 /** Paseo's project row: letter tile (a branch glyph for a worktree) that turns into the chevron on hover, muted name, + and the project's actions on hover. */
-function ProjectRow({ path, name, worktree, icon, expanded, canWrite, actions, onToggle, onNewSession }: {
-  path: string; name: string; worktree: boolean; icon?: string; expanded: boolean; canWrite: boolean; actions: MenuItem[]; onToggle: () => void; onNewSession: () => void;
+function ProjectRow({ path, name, worktree, icon, expanded, canWrite, actions, pages, onToggle, onNewSession }: {
+  path: string; name: string; worktree: boolean; icon?: string; expanded: boolean; canWrite: boolean; actions: MenuItem[]; pages?: Record<string, MenuPage>; onToggle: () => void; onNewSession: () => void;
 }) {
   const [menuOpen, setMenuOpen] = React.useState(false);
   return (
@@ -204,7 +247,7 @@ function ProjectRow({ path, name, worktree, icon, expanded, canWrite, actions, o
       <div className={cn('absolute right-1.5 flex items-center gap-0.5 md:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100', menuOpen && 'opacity-100')}>
         {actions.length ? (
           <Menu label={`Project actions for ${name}`} title="Project actions" onOpenChange={setMenuOpen} testId="project-actions"
-            trigger={<MoreHorizontal aria-hidden className="size-[15px]" />} items={actions}
+            trigger={<MoreHorizontal aria-hidden className="size-[15px]" />} items={actions} pages={pages}
             triggerClassName={cn('flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground', focusRing)} />
         ) : null}
         {canWrite ? (
@@ -423,6 +466,7 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
   const [addingProject, setAddingProject] = React.useState(false);
   const [renaming, setRenaming] = React.useState<RegistryRow | null>(null);
   const [worktree, setWorktree] = React.useState<{ row: RegistryRow } | null>(null);
+  const [removing, setRemoving] = React.useState<{ projectId: string; name: string } | null>(null);
   const canWrite = can(principal ?? undefined, 'session.write');
   const canWriteWorkspaces = can(principal ?? undefined, 'workspace.write');
   const canManage = connection.capabilities.includes('workspace.worktree') && can(principal ?? undefined, 'workspace.manage');
@@ -485,6 +529,35 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     return () => { live = false; clearInterval(timer); globalThis.removeEventListener(USAGE_EVENT, announced); };
   }, [controller, ownerLive]);
 
+  // The host's label catalog (label.list) for the Labels page of a session's menu, read again after
+  // each change from here and every 60 s, so labels made in Settings › Workspaces appear.
+  const metaWritable = controller.canSessionMeta && online;
+  const [catalog, setCatalog] = React.useState<Array<{ name: string; color: string }>>([]);
+  const readCatalog = React.useCallback(() => { void controller.labelCatalog().then(setCatalog, () => {}); }, [controller]);
+  React.useEffect(() => {
+    if (!online || !connection.capabilities.includes('session.meta')) { setCatalog([]); return; }
+    readCatalog();
+    const timer = setInterval(readCatalog, FACTS_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [online, connection.capabilities, readCatalog]);
+  // Paseo's Open in editor: the host's installed editors, for the owner's ALP.app on the host only.
+  const editorsHere = owner && online && isDesktopApp();
+  const [editors, setEditors] = React.useState<Array<{ id: string; label: string }>>([]);
+  React.useEffect(() => {
+    if (!editorsHere) { setEditors([]); return; }
+    let live = true;
+    void workspaceEditors(controller).then(list => { if (live) setEditors(list); }, () => { if (live) setEditors([]); });
+    return () => { live = false; };
+  }, [controller, editorsHere]);
+  /** A pin or label change, kept by the host; the other workspaces' lists take its answer at once. */
+  const changeMeta = async (session: SessionSummary, change: { pinned?: boolean; labels?: string[] }) => {
+    const updated = await controller.updateSessionMeta(session.id, change);
+    if (!updated) return;
+    const take = (row: SessionSummary) => row.id === session.id ? { ...row, pinnedAt: metaOf(updated).pinnedAt, labels: metaOf(updated).labels } as SessionSummary : row;
+    setOthers(current => Object.fromEntries(Object.entries(current).map(([path, list]) => [path, list.map(take)])));
+    if (change.labels) readCatalog();
+  };
+
   const updateDisplay = (change: Partial<SidebarDisplay>) => controller.updatePreferences({ sidebarDisplay: { ...display, ...change } });
   const setFold = (path: string, value: boolean) => setFolded(current => ({ ...current, [path]: value }));
   const toggle = (path: string) => {
@@ -529,7 +602,9 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     if (display.rowItems.branch && branch) meta.push({ key: 'branch', icon: GitBranch, text: branch });
     if (display.rowItems.project) meta.push({ key: 'project', icon: Folder, text: projectName(path) });
     if (display.rowItems.host) meta.push({ key: 'host', icon: Server, text: hostName });
-    if (display.rowItems.labels && row?.labels.length) meta.push({ key: 'labels', icon: Tag, text: row.labels.join(', ') });
+    // The session's own labels, then its workspace's (Settings › Workspaces), each once.
+    const labels = [...new Set([...metaOf(session).labels, ...(row?.labels ?? [])])];
+    if (display.rowItems.labels && labels.length) meta.push({ key: 'labels', icon: Tag, text: labels.join(', ') });
     return {
       title: display.titleSource === 'branch' && branch ? branch : sessionName(session),
       meta,
@@ -550,9 +625,9 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
   };
   /**
    * Paseo's workspace menu (sidebar-workspace-menu.tsx), on a session row: Copy path, Copy branch name,
-   * Rename, Mark as read or unread, Open in file manager, Archive. Pin to top and Labels act on a whole
-   * workspace in Paseo; an ALP row is one session, so they stay on the project's menu (t-747e).
-   * Readers get the copy items only.
+   * Rename, Pin to top, Labels, Mark as read or unread, Open in file manager, Archive. An ALP row is one
+   * session, so its pin and labels are the session's own, kept by the host (session.update, t-a876);
+   * the labels are the host's one catalog. Readers get the copy items only.
    */
   const sessionActions = (path: string, session: SessionSummary): MenuItem[] => {
     const row = mainRow(path);
@@ -565,9 +640,17 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     ];
     if (!canWrite) return items;
     items.push({ id: 'rename', label: 'Rename', icon: <Pencil aria-hidden />, onSelect: () => onRename(session), testId: 'sidebar-workspace-menu-rename' });
+    if (metaWritable) {
+      const pinnedAt = metaOf(session).pinnedAt;
+      items.push(
+        { id: pinnedAt ? 'unpin' : 'pin', label: pinnedAt ? 'Unpin' : 'Pin to top', icon: pinnedAt ? <PinOff aria-hidden /> : <Pin aria-hidden />, onSelect: () => void changeMeta(session, { pinned: !pinnedAt }), testId: pinnedAt ? 'sidebar-workspace-menu-unpin' : 'sidebar-workspace-menu-pin' },
+        { id: 'labels', label: 'Labels', icon: <Tag aria-hidden />, page: `labels:${session.id}`, value: metaOf(session).labels.length ? String(metaOf(session).labels.length) : undefined, onSelect: () => {}, testId: 'sidebar-workspace-menu-labels' },
+      );
+    }
     if (attentionReason(state, session.id)) {
       items.push({ id: 'mark-as-read', label: 'Mark as read', icon: <CircleCheck aria-hidden />, onSelect: () => controller.markRead(session.id), testId: 'sidebar-workspace-menu-mark-as-read' });
-    } else if (controller.canMarkUnread && online && session.status !== 'running' && !session.busy && !needsInput(state, session.id)) {
+    } else if (controller.canMarkUnread && online && session.status !== 'running' && session.status !== 'closed' && !session.busy && !needsInput(state, session.id)) {
+      // Only a live idle root: a closed one has no turn to come back to (alpd answers marked: false for it).
       items.push({ id: 'mark-as-unread', label: 'Mark as unread', icon: <Circle aria-hidden />, onSelect: () => void controller.markUnread(session.id), testId: 'sidebar-workspace-menu-mark-as-unread' });
     }
     // The host's own file manager: only the owner's ALP.app on the host itself, by the workspace's id.
@@ -577,6 +660,17 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     }
     items.push({ id: 'archive', label: 'Archive', icon: <Archive aria-hidden />, hint: shortcutLabel('session.archive', mac) || undefined, onSelect: () => onArchive(session), destructive: true, testId: 'sidebar-workspace-menu-archive' });
     return items;
+  };
+  /** The Labels page of a session's menu: the host's catalog, each label a check that stays open. */
+  const sessionPages = (session: SessionSummary): Record<string, MenuPage> | undefined => {
+    if (!metaWritable) return undefined;
+    const own = metaOf(session).labels;
+    const has = (name: string) => own.some(label => label.toLowerCase() === name.toLowerCase());
+    const items: MenuItem[] = catalog.length ? catalog.map(label => ({
+      id: `label-${label.name}`, label: label.name, icon: <LabelDot color={label.color} />, checked: has(label.name), keepOpen: true, testId: 'sidebar-workspace-menu-label',
+      onSelect: () => void changeMeta(session, { labels: has(label.name) ? own.filter(name => name.toLowerCase() !== label.name.toLowerCase()) : [...own, label.name] }),
+    })) : [{ id: 'no-labels', label: 'No labels yet', disabled: true, title: owner ? 'Make labels in Settings › Workspaces.' : 'The host owner makes labels in Settings › Workspaces.', onSelect: () => {}, testId: 'sidebar-workspace-menu-no-labels' }];
+    return { [`labels:${session.id}`]: { title: 'Labels', items } };
   };
   const sessionRow = (path: string, session: SessionSummary, shown: readonly SessionSummary[]) => {
     const row = rowFor(path, session);
@@ -589,7 +683,7 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     }
     return (
       <SessionRow key={session.id} session={session} title={row.title} meta={row.meta} trailing={row.trailing} facts={own} selected={session.id === selected && !historyOpen && !schedulesOpen}
-        actions={sessionActions(path, session)} bucket={bucketFor(session)} onSelect={() => openSession(path, session.id)} />
+        actions={sessionActions(path, session)} pages={sessionPages(session)} bucket={bucketFor(session)} onSelect={() => openSession(path, session.id)} />
     );
   };
 
@@ -609,10 +703,29 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     }
     items.push({ label: 'Copy path', icon: <Copy aria-hidden />, group: items.length > 0, onSelect: () => copy(path, 'Path'), testId: 'project-copy-path' });
     if (row?.branch) items.push({ label: 'Copy branch name', icon: <GitBranch aria-hidden />, onSelect: () => copy(row.branch!, 'Branch name'), testId: 'project-copy-branch' });
+    // The host's own file manager and editors: only the owner's ALP.app on the host itself, by the workspace's id.
+    if (row && editorsHere) {
+      items.push({ label: 'Open in file manager', icon: <FolderOpen aria-hidden />, group: true, testId: 'project-open-folder',
+        onSelect: () => void revealWorkspace(controller, row.id).catch(error => controller.notify('error', `Couldn't open folder: ${error?.message ?? error}`)) });
+      if (editors.some(editor => editor.id !== 'finder')) items.push({ label: 'Open in editor', icon: <SquareCode aria-hidden />, page: `editors:${row.id}`, onSelect: () => {}, testId: 'project-open-editor' });
+    }
     if (row && canManage) items.push({ label: row.managedWorktree ? 'Remove worktree' : 'Create worktree', icon: <GitBranch aria-hidden />, group: true, disabled: !online,
       onSelect: () => setWorktree({ row }), testId: row.managedWorktree ? 'project-remove-worktree' : 'project-create-worktree' });
     items.push({ label: 'Open project settings', icon: <FolderCog aria-hidden />, group: true, onSelect: () => onSettings('projects'), testId: 'project-settings' });
+    // Paseo's Remove project: the shared registry's project (workspace.write), after a confirmation.
+    if (row && !row.managedWorktree && connection.capabilities.includes('workspace.registry') && canWriteWorkspaces) {
+      items.push({ label: 'Remove project', icon: <Trash2 aria-hidden />, destructive: true, disabled: !online, onSelect: () => setRemoving({ projectId: row.projectId, name: projectName(path) }), testId: 'project-remove' });
+    }
     return items;
+  };
+  /** The Open in editor page of a project's menu: the host's installed editors. */
+  const projectPages = (path: string): Record<string, MenuPage> | undefined => {
+    const row = mainRow(path);
+    if (!row || !editorsHere) return undefined;
+    return { [`editors:${row.id}`]: { title: 'Open in editor', items: editors.filter(editor => editor.id !== 'finder').map(editor => ({
+      id: `editor-${editor.id}`, label: editor.label, testId: 'project-open-editor-item',
+      onSelect: () => void openInEditor(controller, row.id, editor.id).catch(error => controller.notify('error', `Couldn't open ${editor.label}: ${error?.message ?? error}`)),
+    })) } };
   };
 
   const projectBlock = (path: string) => {
@@ -620,7 +733,8 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     const expanded = !folded[path] || !!needle;
     const row = mainRow(path);
     const all = sessionsOf(path);
-    const list = sortSessions(all.filter(matches), display.sort);
+    // A pinned session sits in the Pinned section instead (Paseo's pinned workspaces).
+    const list = sortSessions(all.filter(session => matches(session) && !metaOf(session).pinnedAt), display.sort);
     const limited = limitRows(list, !!showAll[path] || !!needle, bucketFor);
     // Searching hides a project none of whose sessions match (the open one keeps its message).
     if (needle && !current && !list.length) return null;
@@ -628,7 +742,7 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     return (
       <div key={path} className={cn(expanded && (current || list.length > 0) && 'pb-3')} data-testid="sidebar-project" data-path={path} data-workspace-id={row?.id} data-pinned={row?.pinnedAt ? 'true' : undefined}
         data-branch={row?.branch ?? undefined} data-worktree={row?.managedWorktree ? 'true' : undefined} data-current={current ? 'true' : undefined}>
-        <ProjectRow path={path} name={projectName(path)} worktree={!!row?.managedWorktree} icon={icon} expanded={expanded} canWrite={canWrite && online} actions={projectActions(path)}
+        <ProjectRow path={path} name={projectName(path)} worktree={!!row?.managedWorktree} icon={icon} expanded={expanded} canWrite={canWrite && online} actions={projectActions(path)} pages={projectPages(path)}
           onToggle={() => toggle(path)} onNewSession={() => startIn(path)} />
         {expanded ? (
           <div>
@@ -665,14 +779,17 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     );
   };
 
+  // Every project's pinned sessions, matching Search, first pinned first.
+  const pinnedSessions = projects.flatMap(path => sessionsOf(path).filter(session => !!metaOf(session).pinnedAt && matches(session)).map(session => ({ path, session })))
+    .sort((a, b) => pinnedOrder(a.session, b.session));
   const statusSections = () => {
     const all = [
       ...(workspace ? sessions.list.map(session => ({ path: workspace, session })) : []),
       ...Object.entries(others).filter(([path]) => projects.includes(path) && path !== workspace).flatMap(([path, list]) => list.map(session => ({ path, session }))),
-    ].filter(entry => projects.includes(entry.path) && matches(entry.session));
+    ].filter(entry => projects.includes(entry.path) && matches(entry.session) && !metaOf(entry.session).pinnedAt);
     const sorted = sortSessions(all.map(entry => entry.session), 'lastPrompt').map(session => all.find(entry => entry.session === session)!);
     const groups = groupByStatus(sorted.map(entry => entry.session), bucketFor);
-    if (!groups.length) return <p className="px-2 py-3 text-sm text-muted-foreground">{needle ? `No sessions match “${query.trim()}”` : 'No sessions yet'}</p>;
+    if (!groups.length) return pinnedSessions.length ? null : <p className="px-2 py-3 text-sm text-muted-foreground">{needle ? `No sessions match “${query.trim()}”` : 'No sessions yet'}</p>;
     return groups.map(group => (
       <div key={group.bucket} data-testid={`sidebar-status-${group.bucket}`}>
         <SectionHeader title={group.label} />
@@ -714,10 +831,12 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 pt-0.5">
-        {display.grouping === 'project' && pinned.length ? (
+        {pinnedSessions.length || (display.grouping === 'project' && pinned.length) ? (
           <div data-testid="sidebar-pinned">
             <SectionHeader title="Pinned" testId="sidebar-pinned-header" />
-            {pinned.map(projectBlock)}
+            {/* Pinned sessions (session.update), in either grouping, then pinned projects. */}
+            {pinnedSessions.length ? <ul data-testid="sidebar-pinned-sessions" className="pb-2">{pinnedSessions.map(({ path, session }) => sessionRow(path, session, pinnedSessions.filter(entry => entry.path === path).map(entry => entry.session)))}</ul> : null}
+            {display.grouping === 'project' ? pinned.map(projectBlock) : null}
           </div>
         ) : null}
         <SectionHeader title="Workspaces">
@@ -765,6 +884,7 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
       <AddProjectDialog open={addingProject} onClose={() => setAddingProject(false)} unregistered={unregistered} />
       {owner ? <NewWorkspaceDialog open={addingWorkspace} onClose={() => setAddingWorkspace(false)} /> : null}
       <RenameWorkspaceDialog row={renaming} onClose={() => setRenaming(null)} />
+      <RemoveProjectDialog target={removing} onClose={() => setRemoving(null)} />
       {worktree ? <WorktreeDialog workspaceId={worktree.row.id} managed={!!worktree.row.managedWorktree} online={online} open onClose={() => setWorktree(null)} /> : null}
     </nav>
   );

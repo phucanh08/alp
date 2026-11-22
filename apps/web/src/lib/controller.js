@@ -111,7 +111,7 @@ const STOP_WAITING = 'Stop is waiting for this message’s outcome.';
  *   busy: Record<string, boolean>,
  *   tasks: Load & { visible: boolean, rows: any[], revision?: string, unreadable: number, creates: TaskCreate[], busy: Record<string, boolean>, message?: { level: 'info' | 'error', text: string } },
  *   settings: Load & { language?: { language: string | null, applies: string, default: string }, models: Model[] },
- *   notice: { id: number, level: 'info' | 'error', text: string, action?: 'new-session' } | null,
+ *   notice: { id: number, level: 'info' | 'error', text: string, action?: 'new-session' | 'undo-archive', target?: string } | null,
  *   preferences: import('./preferences.js').Preferences,
  * }} State
  */
@@ -435,8 +435,11 @@ export class Controller {
     });
   }
 
-  /** @param {'info' | 'error'} level @param {string} text @param {{ action?: 'new-session' }} [extra] what the notice offers to do */
-  #notify(level, text, extra) { this.#set({ notice: { id: ++this.#noticeId, level, text, ...(extra?.action ? { action: extra.action } : {}) } }); }
+  /**
+   * @param {'info' | 'error'} level @param {string} text
+   * @param {{ action?: 'new-session' | 'undo-archive', target?: string }} [extra] what the notice offers to do, and on what (the session Undo brings back)
+   */
+  #notify(level, text, extra) { this.#set({ notice: { id: ++this.#noticeId, level, text, ...(extra?.action ? { action: extra.action } : {}), ...(extra?.target ? { target: extra.target } : {}) } }); }
 
   dismissNotice() { this.#set({ notice: null }); }
 
@@ -1091,6 +1094,43 @@ export class Controller {
   }
 
   /** Whether the host marks a root unread for every client (Paseo's Mark as unread, capability `session.attention.mark`). */
+  /** Per-session Pin to top and Labels (capability session.meta), for a writer. */
+  get canSessionMeta() { return this.hasCapability('session.meta') && can(this.#state.principal ?? undefined, 'session.write'); }
+
+  /**
+   * The host's label catalog (label.list, any reader), the one Settings › Workspaces edits; empty on
+   * a host without session.meta. @returns {Promise<Array<{ name: string, color: string }>>}
+   */
+  async labelCatalog() {
+    if (!this.hasCapability('session.meta') || this.#state.connection.phase !== 'open') return [];
+    const result = await this.#client().request('label.list', {});
+    return (Array.isArray(result?.labels) ? result.labels : []).filter((/** @type {any} */ label) => label && typeof label.name === 'string').map((/** @type {any} */ label) => ({ name: label.name, color: typeof label.color === 'string' ? label.color : 'violet' }));
+  }
+
+  /**
+   * Paseo's Pin to top and Labels, on one root session for every client (session.update). The
+   * lists take the host's answer. Answers the updated summary, or undefined when it failed (the
+   * notice says why). @param {string} id @param {{ pinned?: boolean, labels?: string[] }} change
+   */
+  async updateSessionMeta(id, change) {
+    if (!this.canSessionMeta) { this.#notify('error', 'This host or access token cannot pin or label sessions.'); return undefined; }
+    try {
+      const result = await this.#client().request('session.update', { sessionId: id, ...change });
+      const session = result?.session && typeof result.session === 'object' ? /** @type {SessionSummary} */ (result.session) : undefined;
+      if (!session) return undefined;
+      const update = (/** @type {SessionSummary} */ row) => {
+        if (row.id !== id) return row;
+        const { pinnedAt: _pinned, labels: _labels, ...rest } = /** @type {any} */ (row);
+        return /** @type {SessionSummary} */ ({ ...rest, ...('pinnedAt' in session ? { pinnedAt: /** @type {any} */ (session).pinnedAt } : {}), ...('labels' in session ? { labels: /** @type {any} */ (session).labels } : {}) });
+      };
+      this.#set(state => ({ sessions: { ...state.sessions, list: state.sessions.list.map(update) }, history: { ...state.history, list: state.history.list.map(update) } }));
+      return session;
+    } catch (error) {
+      this.#notify('error', `${change.pinned === undefined ? 'Labels were' : 'Pin was'} not saved: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
+    }
+  }
+
   get canMarkUnread() { return this.#sharedAttention && this.hasCapability('session.attention.mark'); }
 
   /**
@@ -1522,6 +1562,27 @@ export class Controller {
       await this.#client().request('project.register', { directory, ifRevision: this.#state.registry.revision, requestId: globalThis.crypto.randomUUID() });
       await this.refreshRegistry();
     } catch (error) { this.#notify('error', `Project was not added. ${error instanceof Error ? error.message : String(error)} Refresh and try again.`); await this.refreshRegistry(); }
+  }
+
+  /**
+   * Paseo's Remove project: the project leaves the host's list (project.remove; its workspaces are
+   * archived, no file changes and no session is touched). Answers whether the host took it.
+   * @param {string} projectId
+   */
+  async removeProject(projectId) {
+    if (!can(this.#state.principal ?? undefined, 'workspace.write')) { this.#notify('error', 'Ask the host owner to add workspace.write to your credential to remove projects.'); return false; }
+    const remove = () => this.#client().request('project.remove', { projectId, ifRevision: this.#state.registry.revision, requestId: globalThis.crypto.randomUUID() });
+    try {
+      try { await remove(); }
+      catch (error) {
+        // The list changed since it was read: removing sets a state, so read it again and ask once more.
+        if (/** @type {any} */ (error)?.data?.reason !== 'stale_revision') throw error;
+        await this.refreshRegistry();
+        await remove();
+      }
+      await this.refreshRegistry();
+      return true;
+    } catch (error) { this.#notify('error', `Project was not removed. ${error instanceof Error ? error.message : String(error)} Refresh and try again.`); await this.refreshRegistry(); return false; }
   }
 
   /**
@@ -2134,12 +2195,17 @@ export class Controller {
     }
   }
 
-  /** Archives a root: alpd closes it and hides it from the list (data is kept). @param {string} id */
+  /**
+   * Archives a root: alpd closes it and hides it from the list (data is kept). Paseo's toast follows
+   * with Undo, which unarchives it (restoreSession). @param {string} id
+   */
   async archiveSession(id) {
     const client = this.#client();
     const context = this.#context;
+    const known = this.#state.sessions.list.find(row => row.id === id) ?? this.#state.history.list.find(row => row.id === id);
     await client.request('session.archive', { sessionId: id, archived: true });
     if (context !== this.#context) return;
+    this.#notify('info', `Archived “${known?.title || 'session'}”`, { action: 'undo-archive', target: id });
     if (this.#state.selected === id) this.selectSession(null);
     const { [id]: _gone, ...attention } = this.#state.attention;
     const { [id]: _ended, ...turnAttention } = this.#state.turnAttention;
@@ -2149,6 +2215,18 @@ export class Controller {
       history: { ...state.history, list: state.history.list.map(row => row.id === id ? { ...row, archived: true } : row) },
       attention,
     }));
+  }
+
+  /** The archive notice's Undo: the root comes back, and the notice says so (or why not). @param {string} id */
+  async undoArchive(id) {
+    this.dismissNotice();
+    try {
+      await this.restoreSession(id);
+      const row = this.#state.sessions.list.find(entry => entry.id === id);
+      this.#notify('info', `Restored “${row?.title || 'session'}”`);
+    } catch (error) {
+      this.#notify('error', `Could not restore the session: ${/** @type {any} */ (error)?.message ?? error}`);
+    }
   }
 
   /** Brings an archived root back into the list (Paseo's Unarchive). @param {string} id */
