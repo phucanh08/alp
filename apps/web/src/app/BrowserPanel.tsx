@@ -1,7 +1,9 @@
 import * as React from 'react';
 import { ArrowLeft, ArrowRight, Globe, RotateCw } from 'lucide-react';
-import { BLANK_URL, OPEN_EVENT, isBrowsableUrl, isDesktopApp, readAddress } from '../lib/browser-url.js';
+import { BLANK_URL, BLOCKED_EVENT, OPEN_EVENT, blockedNotice, isBrowsableUrl, isDesktopApp, readAddress } from '../lib/browser-url.js';
 import { cn } from '../lib/utils';
+import { ErrorBoundary, PaneErrorFallback } from './ErrorBoundary';
+import { useAppState } from './store';
 import { useTabs } from './tabs';
 
 /*
@@ -14,7 +16,17 @@ import { useTabs } from './tabs';
  *
  * A page that opens a new window (window.open, target=_blank) gets a new Browser tab: the main
  * process refuses the window and dispatches OPEN_EVENT with the page's webContents id and the
- * address; the tab whose page that is opens it. Outside ALP.app the tab says where it works.
+ * address; the tab whose page that is opens it. A navigation of the page's own (a link, a redirect, a
+ * location change) that the main process stops gets BLOCKED_EVENT the same way, and only the tab whose
+ * page it was says so, as text. Outside ALP.app the tab says where it works.
+ *
+ * The pages stay alive while other tabs are in front (t-a35b): every Browser tab of the workspace is
+ * rendered once, by BrowserHost, in a layer over the panes, and laid over the BrowserSlot its pane
+ * shows; a tab that is not shown is hidden (invisible, inert, no pointer events) but keeps its
+ * <webview>. Moving the tab to another pane moves only the slot, never the <webview> element (Electron
+ * reloads a guest whose element moves in the DOM). Closing the tab removes the <webview>, which
+ * destroys its page; another workspace (or the Tasks, History or Schedules screen) drops them all, and
+ * the tabs load their kept addresses again when shown.
  */
 
 export const BROWSER_PARTITION = 'persist:alp-browser';
@@ -107,6 +119,8 @@ function DesktopBrowser({ id }: { id: string }) {
       setError(`${validatedURL} did not load (${errorDescription || errorCode}).`);
     };
     const ready = () => {
+      // A late dom-ready from a <webview> this tab no longer shows loads nothing into it.
+      if (view.current !== webview) return;
       try { guest = webview.getWebContentsId(); } catch { guest = undefined; }
       attached.current = true;
       const url = pending.current;
@@ -121,6 +135,12 @@ function DesktopBrowser({ id }: { id: string }) {
       if (!detail || guest === undefined || detail.guest !== guest || !isBrowsableUrl(detail.url)) return;
       keep.current.openBrowser(detail.url as string);
     };
+    const blocked = (event: Event) => {
+      const detail = (event as CustomEvent<{ guest?: unknown; url?: unknown }>).detail;
+      if (!detail || guest === undefined || detail.guest !== guest) return;
+      const notice = blockedNotice(detail.url);
+      if (notice) setError(notice);
+    };
     webview.addEventListener('did-navigate', navigated);
     webview.addEventListener('did-navigate-in-page', navigated);
     webview.addEventListener('did-fail-load', failed);
@@ -128,11 +148,13 @@ function DesktopBrowser({ id }: { id: string }) {
     webview.addEventListener('did-start-loading', start);
     webview.addEventListener('did-stop-loading', stop);
     window.addEventListener(OPEN_EVENT, opened);
+    window.addEventListener(BLOCKED_EVENT, blocked);
     container.appendChild(webview);
     view.current = webview;
     if (initial.current === BLANK_URL) input.current?.focus({ preventScroll: true });
     return () => {
       window.removeEventListener(OPEN_EVENT, opened);
+      window.removeEventListener(BLOCKED_EVENT, blocked);
       view.current = null;
       attached.current = false;
       pending.current = null;
@@ -168,5 +190,101 @@ function DesktopBrowser({ id }: { id: string }) {
       {error ? <p role="alert" className="shrink-0 border-b border-border bg-card px-3 py-1.5 text-xs text-muted-foreground" data-testid="browser-error">{error}</p> : null}
       <div ref={host} className="relative flex min-h-0 flex-1 bg-background" />
     </div>
+  );
+}
+
+type Slot = { element: HTMLElement; pane: string };
+type Box = { left: number; top: number; width: number; height: number };
+const SlotsContext = React.createContext<{ register: (id: string, element: HTMLElement, pane: string | null) => void } | null>(null);
+
+/**
+ * Where a pane shows Browser tab `id`: an empty box the tab's page (rendered by BrowserHost) is laid
+ * over. Outside a BrowserHost, or outside ALP.app, the tab is rendered here as before.
+ */
+export function BrowserSlot({ id, paneId }: { id: string; paneId: string }) {
+  const slots = React.useContext(SlotsContext);
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useLayoutEffect(() => {
+    const element = ref.current;
+    if (!slots || !element) return;
+    slots.register(id, element, paneId);
+    return () => slots.register(id, element, null);
+  }, [slots, id, paneId]);
+  if (!slots || !isDesktopApp()) return <BrowserPanel id={id} />;
+  return <div ref={ref} className="flex min-h-0 min-w-0 flex-1" data-testid="browser-slot" data-browser={id} />;
+}
+
+const sameBox = (a: Box | undefined, b: Box) => !!a && a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height;
+
+/**
+ * The panes (`children`) and, over them, every Browser tab of the workspace that has been shown: each
+ * over its slot when a pane shows it, hidden otherwise. The parent is the positioned box both fill.
+ */
+export function BrowserHost({ children }: { children: React.ReactNode }) {
+  const { tabs, focusedPane, focusPane } = useTabs();
+  const { workspace } = useAppState();
+  const layer = React.useRef<HTMLDivElement>(null);
+  const slots = React.useRef(new Map<string, Slot>());
+  const [version, setVersion] = React.useState(0);
+  const [boxes, setBoxes] = React.useState<Record<string, Box>>({});
+  // The tabs (workspace and id) whose page has been shown: a kept tab never shown loads nothing.
+  const [seen, setSeen] = React.useState<ReadonlySet<string>>(() => new Set());
+  const scope = workspace ?? '';
+  const context = React.useMemo(() => ({
+    register(id: string, element: HTMLElement, pane: string | null) {
+      if (pane === null) {
+        if (slots.current.get(id)?.element !== element) return;
+        slots.current.delete(id);
+      } else slots.current.set(id, { element, pane });
+      setVersion(value => value + 1);
+    },
+  }), []);
+  const measure = React.useCallback(() => {
+    const base = layer.current?.getBoundingClientRect();
+    if (!base) return;
+    setBoxes(current => {
+      let changed = false;
+      const next = { ...current };
+      for (const [id, slot] of slots.current) {
+        const rect = slot.element.getBoundingClientRect();
+        const box = { left: rect.left - base.left, top: rect.top - base.top, width: rect.width, height: rect.height };
+        if (!sameBox(current[id], box)) { next[id] = box; changed = true; }
+      }
+      return changed ? next : current;
+    });
+  }, []);
+  React.useLayoutEffect(() => {
+    measure();
+    const shown = [...slots.current.keys()].map(id => `${scope}\n${id}`);
+    setSeen(current => shown.every(key => current.has(key)) ? current : new Set([...current, ...shown]));
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => measure());
+    if (layer.current) observer.observe(layer.current);
+    for (const slot of slots.current.values()) observer.observe(slot.element);
+    return () => observer.disconnect();
+  }, [version, measure, scope]);
+  const browsers = isDesktopApp() ? tabs.filter(tab => tab.kind === 'browser').map(tab => tab.id) : [];
+  return (
+    <SlotsContext.Provider value={context}>
+      {children}
+      <div ref={layer} className="pointer-events-none absolute inset-0 overflow-hidden" data-testid="browser-layer">
+        {browsers.filter(id => seen.has(`${scope}\n${id}`)).map(id => {
+          const slot = slots.current.get(id);
+          const box = boxes[id];
+          const shown = !!slot && !!box;
+          const claim = () => { if (slot && slot.pane !== focusedPane) focusPane(slot.pane); };
+          return (
+            <div key={`${scope}\n${id}`} data-testid="browser-resident" data-browser={id} data-shown={shown ? 'true' : 'false'}
+              inert={!shown} aria-hidden={shown ? undefined : true} onPointerDownCapture={claim} onFocusCapture={claim}
+              className="absolute flex flex-col overflow-hidden bg-background"
+              style={{ left: box?.left ?? 0, top: box?.top ?? 0, width: box?.width ?? '100%', height: box?.height ?? '100%', visibility: shown ? 'visible' : 'hidden', pointerEvents: shown ? 'auto' : 'none' }}>
+              <ErrorBoundary where={`browser:${id}`} resetKey={id} fallback={(error, reset) => <PaneErrorFallback error={error} onRetry={reset} />}>
+                <BrowserPanel id={id} />
+              </ErrorBoundary>
+            </div>
+          );
+        })}
+      </div>
+    </SlotsContext.Provider>
   );
 }

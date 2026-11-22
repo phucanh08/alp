@@ -21,6 +21,10 @@ export const BROWSER_PARTITION = 'persist:alp-browser';
 export const DESKTOP_MARKER = 'ALPDesktop/1';
 /** The DOM event the dashboard page receives for a guest's window.open (apps/web BrowserPanel). */
 export const OPEN_EVENT = 'alp-desktop:browser-open';
+/** The DOM event the dashboard page receives when a guest's own navigation is stopped (apps/web BrowserPanel). */
+export const BLOCKED_EVENT = 'alp-desktop:browser-blocked';
+/** The longest address a blocked-navigation event carries. */
+export const MAX_BLOCKED_URL = 300;
 
 /** Whether a Browser tab may show `target` as its page: http, https or about:blank. */
 export function isBrowsableUrl(target: string | undefined): boolean {
@@ -189,6 +193,15 @@ export class OpenRequests {
 export function openEventScript(guest: number, url: string): string {
   const detail = JSON.stringify({ guest, url });
   return `window.dispatchEvent(new CustomEvent(${JSON.stringify(OPEN_EVENT)}, { detail: ${detail} })); undefined;`;
+}
+
+/**
+ * The script that tells the dashboard page a guest's own navigation to `url` was stopped: data only, as
+ * JSON, the address cut to MAX_BLOCKED_URL. The page shows it as text, in the tab of that guest only.
+ */
+export function blockedEventScript(guest: number, url: string): string {
+  const detail = JSON.stringify({ guest, url: url.slice(0, MAX_BLOCKED_URL) });
+  return `window.dispatchEvent(new CustomEvent(${JSON.stringify(BLOCKED_EVENT)}, { detail: ${detail} })); undefined;`;
 }
 
 /** The dashboard window's user agent: Chromium's, with DESKTOP_MARKER once. */

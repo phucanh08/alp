@@ -195,6 +195,30 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   await sleep(300);
   if (shots) await capture(app, path.join(shots, 'browser-tab-local-page.png'));
 
+  step('(1b) another tab in front keeps the page');
+  // (1b) t-a35b: the page stays alive behind another tab (same guest, no new navigation, its scroll,
+  // input and script state kept); hidden, it is invisible and inert.
+  await app.evaluate(({ webContents }, id) => {
+    globalThis.keptProbe = { navigations: 0 };
+    webContents.fromId(id).on('did-start-navigation', details => { if (details.isMainFrame && !details.isSameDocument) globalThis.keptProbe.navigations += 1; });
+  }, guest.id);
+  const scrolled = await inGuest(app, guest.id, `document.body.style.height = '4000px'; const field = document.createElement('input'); field.id = 'kept'; document.body.prepend(field); field.value = 'typed'; window.__kept = 'yes'; window.scrollTo(0, 900); window.scrollY`);
+  assert.equal(scrolled, 900);
+  const resident = page.locator('[data-testid="browser-resident"]').first();
+  await newTab.click();
+  await page.getByRole('menuitem', { name: 'Tasks' }).click();
+  await waitFor(async () => (await resident.getAttribute('data-shown')) === 'false', 'the Browser tab to be hidden behind Tasks');
+  const hidden = await resident.evaluate(element => ({ inert: element.inert, visibility: getComputedStyle(element).visibility, pointer: getComputedStyle(element).pointerEvents }));
+  assert.deepEqual(hidden, { inert: true, visibility: 'hidden', pointer: 'none' });
+  assert.deepEqual((await guests(app)).map(entry => entry.id), [guest.id], 'the hidden tab lost its guest');
+  await sleep(300);
+  await page.locator('[data-tab^="browser:"]').first().click();
+  await waitFor(async () => (await resident.getAttribute('data-shown')) === 'true', 'the Browser tab to be shown again');
+  assert.deepEqual(JSON.parse(await inGuest(app, guest.id, `JSON.stringify({ kept: window.__kept ?? null, field: document.getElementById('kept')?.value ?? null, scroll: window.scrollY })`)), { kept: 'yes', field: 'typed', scroll: 900 });
+  assert.deepEqual((await guests(app)).map(entry => entry.id), [guest.id]);
+  assert.equal((await app.evaluate(() => globalThis.keptProbe)).navigations, 0, 'the page loaded again');
+  await inGuest(app, guest.id, `document.getElementById('kept').remove(); document.body.style.height = ''; window.scrollTo(0, 0); 'ok'`);
+
   step('(2) partition and isolation');
   // (2) Its own partition, and nothing of the dashboard's: no token, storage, cookies, Node or parent.
   const where = await app.evaluate(({ webContents, session }, id) => {
@@ -225,13 +249,24 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
     contents.on('did-redirect-navigation', details => globalThis.browserProbe.redirects.push(details.url));
   }, guest.id);
   const probeLog = () => app.evaluate(() => globalThis.browserProbe);
-  const blocked = ['file:///etc/hosts', 'data:text/html,<p>x</p>', 'chrome://version', 'devtools://devtools/bundled/inspector.html', ...dashboardSpellings, `${site.origin}/redirect?to=${encodeURIComponent(`http://localhost:${info.port}/`)}`];
+  // The tab says which navigation the main process stopped (BLOCKED_EVENT, as text): every http one
+  // here, as the address the guest asked for. file:, data:, chrome: and devtools: never reach the guard
+  // (Chromium refuses them in the page), so the tab has nothing to say about them.
+  const redirect = `${site.origin}/redirect?to=${encodeURIComponent(`http://localhost:${info.port}/`)}`;
+  const noticed = new Map([...dashboardSpellings.map(target => [target, new URL(target).href]), [redirect, `http://localhost:${info.port}/`]]);
+  const noticeOf = async () => {
+    const line = page.locator('[data-testid="browser-resident"][data-shown="true"]').getByTestId('browser-error');
+    return (await line.count()) ? line.innerText({ timeout: 2_000 }).catch(() => '') : '';
+  };
+  const blocked = ['file:///etc/hosts', 'data:text/html,<p>x</p>', 'chrome://version', 'devtools://devtools/bundled/inspector.html', ...dashboardSpellings, redirect];
   for (const target of blocked) {
     step(`(3) navigation to ${target}`);
     await inGuest(app, guest.id, `location.href = ${JSON.stringify(target)}; 'ok'`).catch(() => undefined);
     await sleep(400);
     const now = (await guests(app)).find(entry => entry.id === guest.id)?.url;
     assert.equal(now, pageUrl, `navigation to ${target} was not blocked (guest at ${now})`);
+    // A redirect to the dashboard is said as the address it was redirected to.
+    if (noticed.has(target)) await waitFor(async () => (await noticeOf()) === `Blocked navigation to ${noticed.get(target)}`, `the tab to say the navigation to ${target} was blocked`, 10_000);
   }
   const log = await probeLog();
   assert.deepEqual(log.failed.filter(entry => entry.code === -20), [], 'a navigation reached the request guard: the navigation guard did not stop it');
@@ -315,6 +350,24 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   await waitFor(async () => (await page.locator('[data-tab^="browser:"]').count()) === 3, 'a third Browser tab from target=_blank');
   await sleep(500);
   assert.equal(await page.locator('[data-tab^="browser:"]').count(), 3);
+  assert.equal(await windowCount(app), 1);
+
+  step('(6b) a hidden tab opens a tab and is told of its own blocked navigation');
+  // t-a35b: the first tab is now behind the others, its page alive: its window.open still opens a tab,
+  // and its blocked navigation is said in its own tab, not in the one shown.
+  await inGuest(app, guest.id, `location.hash = 'fresh'; 'ok'`);
+  await inGuest(app, guest.id, `setTimeout(() => window.open(${JSON.stringify(`${site.origin}/page2?hidden-opener`)})); 'ok'`);
+  await waitFor(async () => (await page.locator('[data-tab^="browser:"]').count()) === 4, 'a Browser tab from the hidden opener');
+  await waitFor(async () => (await guests(app)).some(entry => entry.url === `${site.origin}/page2?hidden-opener`), 'the new tab to show its page');
+  await inGuest(app, guest.id, `location.href = ${JSON.stringify(`http://localhost:${info.port}/`)}; 'ok'`).catch(() => undefined);
+  await sleep(600);
+  assert.equal((await guests(app)).find(entry => entry.id === guest.id)?.url, `${pageUrl}#fresh`);
+  const shownNotice = await page.locator('[data-testid="browser-resident"][data-shown="true"]').getByTestId('browser-error').count();
+  assert.equal(shownNotice, 0, 'the shown tab was told of another tab\'s blocked navigation');
+  await page.locator('[data-tab^="browser:"]').first().click();
+  await waitFor(async () => (await noticeOf()) === `Blocked navigation to http://localhost:${info.port}/`, 'the first tab to say its navigation was blocked');
+  await page.locator('[data-tab^="browser:"]').last().click();
+  await waitFor(async () => (await page.locator('[data-testid="browser-resident"][data-shown="true"]').count()) === 1, 'the last Browser tab to be shown');
   assert.equal(await windowCount(app), 1);
 
   step('(7) page-made webviews');

@@ -20,6 +20,26 @@ export const MAX_BROWSERS = 20;
 export const MAX_URL_CHARS = 2048;
 /** The event ALP.app's main process dispatches when a page in a Browser tab opens a new window. */
 export const OPEN_EVENT = 'alp-desktop:browser-open';
+/**
+ * The event ALP.app's main process dispatches when it stops a page's own navigation (a link, a
+ * redirect, a location change) to an address a Browser tab may not show: `{ guest, url }`.
+ */
+export const BLOCKED_EVENT = 'alp-desktop:browser-blocked';
+/** The longest address a blocked-navigation notice shows. */
+export const MAX_NOTICE_URL_CHARS = 200;
+
+/**
+ * The text a Browser tab shows for a blocked navigation: the address as plain text, without control
+ * characters and cut to MAX_NOTICE_URL_CHARS. @param {unknown} url @returns {string | null}
+ */
+export function blockedNotice(url) {
+  if (typeof url !== 'string' || !url) return null;
+  // eslint-disable-next-line no-control-regex
+  const clean = url.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '');
+  if (!clean) return null;
+  const shown = clean.length > MAX_NOTICE_URL_CHARS ? `${clean.slice(0, MAX_NOTICE_URL_CHARS)}…` : clean;
+  return `Blocked navigation to ${shown}`;
+}
 
 /** Whether this page runs in ALP.app's dashboard window. @param {string | undefined} [userAgent] */
 export function isDesktopApp(userAgent = typeof navigator === 'undefined' ? undefined : navigator.userAgent) {

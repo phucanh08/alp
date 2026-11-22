@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  BROWSER_PARTITION, DESKTOP_MARKER, OPEN_EVENT, OpenRequests, isAllowedGuestNavigation, isAllowedGuestRequest, isBrowsableUrl,
+  BLOCKED_EVENT, BROWSER_PARTITION, DESKTOP_MARKER, MAX_BLOCKED_URL, OPEN_EVENT, blockedEventScript, OpenRequests, isAllowedGuestNavigation, isAllowedGuestRequest, isBrowsableUrl,
   dashboardPort, isDashboardUrl, localHosts, markUserAgent, openEventScript, prepareWebview,
 } from '../src/browser';
 
@@ -155,6 +155,20 @@ describe('openEventScript', () => {
     const detail = new Function('window', 'CustomEvent', `let got; window = { dispatchEvent: e => { got = e; } }; ${script.replace('window.dispatchEvent', 'window.dispatchEvent')}; return got;`);
     const got = detail(undefined, class { type: string; detail: unknown; constructor(type: string, init: { detail: unknown }) { this.type = type; this.detail = init.detail; } });
     expect(got.detail).toEqual({ guest: 12, url: 'https://x.example/"});alert(1);// ' });
+  });
+});
+
+describe('blockedEventScript', () => {
+  const run = (script: string) => new Function('window', 'CustomEvent', `let got; window = { dispatchEvent: e => { got = e; } }; ${script}; return got;`)(undefined, class { type: string; detail: unknown; constructor(type: string, init: { detail: unknown }) { this.type = type; this.detail = init.detail; } });
+  test('carries the guest and the address as data', () => {
+    const url = 'file:///etc/hosts"});alert(1);//\u2028</script>';
+    const got = run(blockedEventScript(9, url));
+    expect(got.type).toBe(BLOCKED_EVENT);
+    expect(got.detail).toEqual({ guest: 9, url });
+  });
+  test('cuts a long address', () => {
+    const got = run(blockedEventScript(3, `https://x.example/${'a'.repeat(5_000)}`));
+    expect(got.detail.url.length).toBe(MAX_BLOCKED_URL);
   });
 });
 
