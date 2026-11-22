@@ -111,6 +111,62 @@ export async function readOwnerFile(client, workspace, { path, includeIgnored = 
   };
 }
 
+// ---- images (the file view's image preview, t-a35b) -------------------------------------------
+
+/**
+ * The raster images the file view shows as images, by extension in any case, with their MIME type
+ * (the gateway's PREVIEW_IMAGE_TYPES). SVG is not one: it stays text, never rendered as a document.
+ */
+export const PREVIEW_IMAGE_TYPES = Object.freeze({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' });
+
+/** The MIME type of a path the file view shows as an image, else undefined. @param {unknown} path */
+export function previewImageType(path) {
+  if (typeof path !== 'string') return undefined;
+  const name = path.slice(path.lastIndexOf('/') + 1);
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0) return undefined;
+  const extension = name.slice(dot + 1).toLowerCase();
+  return Object.hasOwn(PREVIEW_IMAGE_TYPES, extension) ? PREVIEW_IMAGE_TYPES[/** @type {keyof typeof PREVIEW_IMAGE_TYPES} */ (extension)] : undefined;
+}
+
+/** @typedef {{ path: string, mimeType: string, size: number, modifiedAt?: string, content: string }} ImagePreview  content: base64 */
+
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+/**
+ * A workspace.files.preview / host.files.preview answer as the file view shows it: one whole image
+ * of `path`, its MIME type the one its extension names, base64 of at most 1 MiB. Anything else is a
+ * FileAccessError (too_large when the host sent more).
+ * @param {unknown} raw @param {string} path @returns {ImagePreview}
+ */
+export function imagePreview(raw, path) {
+  const result = /** @type {any} */ (raw);
+  const mimeType = previewImageType(path);
+  const content = result?.content;
+  const fits = typeof content === 'string' && content.length <= Math.ceil(WORKSPACE_FILES.maxReadBytes / 3) * 4;
+  if (result?.path === path && (result.nextOffset !== undefined || (typeof content === 'string' && !fits))) throw new FileAccessError({ message: 'This file is too large to display', reason: 'too_large', sent: 'yes', terminal: true });
+  if (!mimeType || result?.path !== path || result.kind !== 'image' || result.encoding !== 'base64' || result.mimeType !== mimeType || !fits || !BASE64.test(content)) {
+    throw new FileAccessError({ message: 'The host sent something this app does not understand.', sent: 'yes', terminal: false });
+  }
+  const size = Math.floor(content.length * 3 / 4) - (content.endsWith('==') ? 2 : content.endsWith('=') ? 1 : 0);
+  return { path, mimeType, size, content, ...(typeof result.modifiedAt === 'string' ? { modifiedAt: result.modifiedAt } : {}) };
+}
+
+/**
+ * One image of the workspace for the owner's file view, through host.files.preview (no files.read
+ * needed on the owner's dashboard), as previewWorkspaceImage answers it.
+ * @param {OwnerClient} client @param {string} workspace @param {{ path: string, includeIgnored?: boolean }} input
+ * @returns {Promise<ImagePreview>}
+ */
+export async function previewOwnerImage(client, workspace, { path, includeIgnored = false }) {
+  const relative = /** @type {string} */ (filePath(path, true));
+  if (!previewImageType(relative)) throw new FileAccessError({ message: 'Only PNG, JPEG, GIF and WebP images are shown as images.', reason: 'not_image', sent: 'no', terminal: true });
+  let result;
+  try { result = await client.ownerRequest('host.files.preview', { projectRoot: workspace, path: relative, ...(includeIgnored ? { includeIgnored: true } : {}) }); }
+  catch (error) { throw fileFailure(error); }
+  return imagePreview(result, relative);
+}
+
 /**
  * Saves a file the owner edited (host.files.write): only while the host still holds `base`, the
  * text that was read; else 1004 revision_conflict and nothing is written.

@@ -14,6 +14,7 @@ import { effortLabel, normalizeModels, parsePreview } from './new-session.js';
 import { CONFIGURE_LIVE, CONFIGURE_MESSAGES, NEW_SESSION_REFUSALS, configuredNotice, configuredSummary, describeConfigureError, liveConfigureGate } from './configure.js';
 import { loadPreferences, parsePreferences, rememberChoices, savePreferences } from './preferences.js';
 import { TerminalSession, terminalGate, terminalLimits } from './terminal.js';
+import { imagePreview, previewImageType } from './owner-library.js';
 
 /** @typedef {{ messageId?: string, turnId?: string, observer?: ReconnectingClient, observed?: Projection, sending?: boolean, warned?: boolean, exhausted?: boolean, attempts?: number, retry?: ReturnType<typeof setTimeout>, done: () => void, promise: Promise<void> }} StopIntent */
 
@@ -1902,6 +1903,27 @@ export class Controller {
       size: typeof result?.size === 'number' && Number.isFinite(result.size) ? result.size : content.length,
       ...(typeof result?.modifiedAt === 'string' ? { modifiedAt: result.modifiedAt } : {}),
     };
+  }
+
+  /**
+   * One raster image of the open workspace (PNG, JPEG, GIF or WebP by extension, at most 1 MiB)
+   * for the file view, through workspace.files.preview with files.read, as the gateway narrows it
+   * (docs/alp/remote-gateway.md §5.10): from offset 0, never through a link. Answers the image's
+   * MIME type and base64 bytes, checked again here (imagePreview in owner-library.js). Throws a
+   * FileAccessError as readWorkspaceFile does; a host or gateway without it answers -32601.
+   * @param {{ path: string, includeIgnored?: boolean }} input
+   * @returns {Promise<import('./owner-library.js').ImagePreview>}
+   */
+  async previewWorkspaceImage({ path, includeIgnored = false }) {
+    const request = this.#fileRequest(path, true);
+    if (!previewImageType(/** @type {string} */ (request.path))) throw new FileAccessError({ message: 'Only PNG, JPEG, GIF and WebP images are shown as images.', reason: 'not_image', sent: 'no', terminal: true });
+    let result;
+    try {
+      result = await this.#client().request('workspace.files.preview', { projectRoot: request.workspace, path: request.path, ...(includeIgnored ? { includeIgnored: true } : {}) });
+    } catch (error) {
+      throw this.#fileFailure(error);
+    }
+    return imagePreview(result, /** @type {string} */ (request.path));
   }
 
   // ---- Git (Paseo's Changes and Diff panels, read only; §12.5) ----------------------------------
