@@ -1020,21 +1020,33 @@ test('alpd keeps a root\'s attention for every client: a reconnecting client rea
   assert.deepEqual(await second.client.request('session.attention.clear', { sessionId: session.id }), { cleared: false }, 'once');
   await assert.rejects(second.client.request('session.attention.clear', { sessionId: 'missing' }), error => error.code === 1001);
 
+  // Mark as unread (session.attention.mark) sets a finished attention again, once, and tells the watchers.
+  const marked = await first.client.request('session.attention.mark', { sessionId: session.id });
+  assert.equal(marked.marked, true);
+  assert.equal(marked.attention.reason, 'finished');
+  await until(() => told(late.events).length === 2);
+  assert.deepEqual(told(late.events).at(-1), [session.id, 'finished', undefined]);
+  assert.equal((await owner.client.request('session.list', { projectRoot: project })).sessions[0].attention.at, marked.attention.at);
+  assert.deepEqual(await second.client.request('session.attention.mark', { sessionId: session.id }), { marked: false }, 'already asks');
+  await assert.rejects(second.client.request('session.attention.mark', { sessionId: 'missing' }), error => error.code === 1001);
+  assert.deepEqual(await second.client.request('session.attention.clear', { sessionId: session.id, at: marked.attention.at }), { cleared: true });
+  await until(() => told(late.events).length === 3);
+
   // A failed turn asks with its error; the next turn of the root ends it, as in Paseo.
   await owner.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm2', content: text('Again') });
   runtimes[0].notification('turn/completed', { threadId: runtimes[0].threadId, turn: { id: runtimes[0].turnId, status: 'failed', error: { message: 'boom' } } });
-  await until(() => told(late.events).length === 2);
+  await until(() => told(late.events).length === 4);
   const failed = late.events.filter(e => e.event.type === 'attention').at(-1).event.attention;
   assert.deepEqual([failed.reason, failed.message, failed.turnId], ['error', 'boom', runtimes[0].turnId]);
   await owner.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm3', content: text('Third') });
-  await until(() => told(late.events).length === 3);
+  await until(() => told(late.events).length === 5);
   assert.deepEqual(told(late.events).at(-1), [session.id, null, undefined]);
   runtimes[0].finish();
-  await until(() => told(late.events).length === 4);
+  await until(() => told(late.events).length === 6);
 
   // An archived root never asks.
   await owner.client.request('session.archive', { sessionId: session.id });
-  await until(() => told(late.events).length === 5);
+  await until(() => told(late.events).length === 7);
   assert.deepEqual(told(late.events).at(-1), [session.id, null, undefined]);
   assert.deepEqual((await late.client.request('question.watch', { projectRoot: project, attention: true })).attention, []);
 });

@@ -251,6 +251,7 @@ a missing `capabilities` (alpd before this revision) means none. Unknown names a
 | `question.watch` | `question.watch`: questions of trees the connection is not attached to (§12.2). Every alpd lists it. |
 | `question.watch.turns` | `question.watch` accepts `turns`: also every root's `turn.ended` (§12.2). Every alpd lists it. |
 | `session.attention` | `question.watch` accepts `attention`: each root's finished or error attention, kept by alpd for every client, in the answer and as `attention` events; `session.attention.clear` acknowledges one (§12.2). Every alpd lists it. |
+| `session.attention.mark` | `session.attention.mark`: Paseo's Mark as unread, a `finished` attention set on an idle root that has none (§12.2). Every alpd lists it. |
 | `workspace.files` | `workspace.files.search`: file names under a directory matching a query, read-only (§12.3). Every alpd lists it. |
 | `workspace.files.read` | `workspace.files.list` and `workspace.files.read`: a directory's entries and a UTF-8 text file's content (at most 1 MiB) under a directory, read-only, links never followed, blocked paths refused (§12.4). Every alpd lists it. |
 | `prompt.images` | `session.prompt` takes inline image parts (§10, Prompt content); a session snapshot's `promptImages: true` says its runtime takes them. Every alpd lists it. |
@@ -672,6 +673,7 @@ connection on the local socket acts as the owner.
 | `question.list` | read | yes | — | session.read |
 | `question.watch` | read, then question events of every tree, roots' turn ends with `turns`, roots' attention with `attention` (§12.2) | yes (a second call replaces the filter) | -32602 | session.read |
 | `session.attention.clear` | acknowledges a root's attention for every client; told as an `attention` event (§12.2) | yes (a second call answers `cleared: false`) | -32602, 1001, `persistence_failed` | session.read (a look is a read) |
+| `session.attention.mark` | sets a finished attention on an idle root for every client; told as an `attention` event (§12.2) | yes (a second call answers `marked: false`) | -32602, 1001, `persistence_failed` | session.write |
 | `workspace.files.search` | read: file names under `projectRoot` (§12.3) | yes | -32602, 1001 | project.read |
 | `workspace.files.list` / `workspace.files.read` | read: a directory's entries; a text file's content (§12.4) | yes | -32602, 1000, 1001, 1003 | files.read (never a default; docs/alp/remote-gateway.md §5.10) |
 | `workspace.files.find` / `workspace.files.preview` | read: every name under `projectRoot` in pages; a file's preview in chunks (§12.11) | yes (`find` pages one snapshot) | -32602, 1000, 1001, 1003, 1004 `changed` | none: the daemon host's own clients only (the gateway denies both) |
@@ -785,6 +787,15 @@ connection lasts, alpd sends it every `question` and `question.resolved` event o
   while the write was on its way. apps/web acknowledges when the user opens, focuses or writes to
   the root, or when an ending arrives on the root in front of them; when the host refuses, the page
   shows the attention again and acknowledges it on the next look or watch read.
+- **`session.attention.mark { sessionId }`** (capability `session.attention.mark`): Paseo's Mark as
+  unread. On a root that is idle, not archived and has no attention, alpd sets
+  `{ reason: "finished", at }`, persists it without changing `updatedAt`, tells the watchers as an
+  `attention` event and answers `{ marked: true, attention }`; it answers `{ marked: false }` for a
+  root that is running, archived or already has one, and for a session that is not a root. A session
+  alpd does not know answers `1001`; a failed write answers `persistence_failed` and tells nobody.
+  It drops an acknowledgement on its way, as a turn ending would. apps/web offers it in a session
+  row's ⋮ menu as "Mark as unread", and "Mark as read" (`session.attention.clear`) while the root has
+  attention.
 
 The gateway forwards it with no `projectRoot` (and `turns: true` when the client sent it), filters the
 answer as `question.list`'s, and lets each event out only if its session's tree lies in the grant and,
@@ -1638,6 +1649,8 @@ The Paseo provider sends the list as `session.commands` when a root is ready and
   detail.
 - The `usage` event and the session snapshot's `usage` (§8.5); old clients ignore an unknown event
   type (§7) and unknown snapshot fields.
+- `session.attention.mark` (capability `session.attention.mark`), §12.2 (t-747e). Old clients never
+  call it; a gateway or client sees no capability on an older alpd.
 - `question.watch` `attention`, the `attention` event, `session.attention.clear`, the `attention` of
   session rows and the `origin` of `user_message` (capability `session.attention`), §8.1, §12.2 (issue
   #120). Old clients ignore the event type and properties; an old alpd ignores the param.

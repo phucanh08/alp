@@ -327,6 +327,11 @@ cases.push({"name":"session.attention.clear with at","check":"params","method":"
 cases.push({"name":"session.attention.clear without sessionId","check":"params","method":"session.attention.clear","valid":false,"value":{}});
 cases.push({"name":"session.attention.clear result","check":"result","method":"session.attention.clear","valid":true,"value":{"cleared":true}});
 cases.push({"name":"session.attention.clear without cleared","check":"result","method":"session.attention.clear","valid":false,"value":{}});
+cases.push({"name":"session.attention.mark params","check":"params","method":"session.attention.mark","valid":true,"value":{"sessionId":"ses_fixture"}});
+cases.push({"name":"session.attention.mark without sessionId","check":"params","method":"session.attention.mark","valid":false,"value":{}});
+cases.push({"name":"session.attention.mark result","check":"result","method":"session.attention.mark","valid":true,"value":{"marked":true,"attention":{"reason":"finished","at":"2026-10-15T00:00:00.000Z"}}});
+cases.push({"name":"session.attention.mark not marked","check":"result","method":"session.attention.mark","valid":true,"value":{"marked":false}});
+cases.push({"name":"session.attention.mark without marked","check":"result","method":"session.attention.mark","valid":false,"value":{}});
 cases.push({"name":"history params","check":"params","method":"session.history","valid":true,"value":{"sessionId":"r","limit":200}});
 cases.push({"name":"history oversized result","check":"result","method":"session.history","valid":true,"value":{"generation":"g","items":[{"cursor":2,"oversized":{"bytes":800000}}],"hasOlder":false,"tipCursor":2}});
 cases.push({"name":"history limit refuses unbounded page","check":"params","method":"session.history","valid":false,"value":{"sessionId":"r","limit":501}});

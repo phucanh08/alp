@@ -4998,6 +4998,51 @@
    "value": {}
   },
   {
+   "name": "session.attention.mark params",
+   "check": "params",
+   "method": "session.attention.mark",
+   "valid": true,
+   "value": {
+    "sessionId": "ses_fixture"
+   }
+  },
+  {
+   "name": "session.attention.mark without sessionId",
+   "check": "params",
+   "method": "session.attention.mark",
+   "valid": false,
+   "value": {}
+  },
+  {
+   "name": "session.attention.mark result",
+   "check": "result",
+   "method": "session.attention.mark",
+   "valid": true,
+   "value": {
+    "marked": true,
+    "attention": {
+     "reason": "finished",
+     "at": "2026-10-15T00:00:00.000Z"
+    }
+   }
+  },
+  {
+   "name": "session.attention.mark not marked",
+   "check": "result",
+   "method": "session.attention.mark",
+   "valid": true,
+   "value": {
+    "marked": false
+   }
+  },
+  {
+   "name": "session.attention.mark without marked",
+   "check": "result",
+   "method": "session.attention.mark",
+   "valid": false,
+   "value": {}
+  },
+  {
    "name": "history params",
    "check": "params",
    "method": "session.history",
