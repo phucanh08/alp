@@ -1,7 +1,7 @@
 // @ts-check
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmod, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { diagnose } from '@anhlp/alp-client/doctor';
@@ -34,6 +34,9 @@ import { TERMINAL_WARNING, terminalCommand } from '../../terminal.js';
  *   host.workspace.reveal   Open in file manager (Paseo's): the host's file manager opens the
  *                           directory of a registry workspace named by id, never a path from the
  *                           page; argv without a shell (open / explorer.exe / xdg-open).
+ *   host.workspace.editors / host.workspace.open   Open in editor (Paseo's): the editors of a fixed
+ *                           table (EDITORS) installed on this host, and one of them opens the
+ *                           directory of a registry workspace named by id; argv without a shell.
  *   host.registry, host.workspace.update, host.workspace.label, host.project.register,
  *   host.project.remove     alpd's registry (registry.owner, workspace.update, project.register,
  *                           project.remove) on the owner's connection, without the gateway's
@@ -194,6 +197,196 @@ export const revealer = {
   }),
 };
 
+/**
+ * Open in editor (Paseo's): a FIXED table of editors, the only ones host.workspace.editors lists and
+ * host.workspace.open starts. Nothing from the page names a program or a path: the page names an id
+ * of this table and a registry workspace. Per platform each editor is found at fixed places only:
+ *   mac    an .app bundle under /Applications or ~/Applications (fs stat), opened with
+ *          `/usr/bin/open -a <absolute .app> -- <dir>`;
+ *   win32  a fixed .exe under %LOCALAPPDATA%\Programs or %ProgramFiles% (JetBrains: the newest
+ *          `<prefix>*` folder under %ProgramFiles%\JetBrains or %LOCALAPPDATA%\Programs, then bin\<exe>),
+ *          or that .exe on PATH; started as `<absolute .exe> <dir>`;
+ *   other  a fixed CLI name on PATH (each absolute PATH entry stat'ed, executable regular file; no
+ *          `which`, no shell); started as `<absolute cli> <dir>`.
+ * 'finder' is the host's file manager, always present, and does exactly what host.workspace.reveal does.
+ * @typedef {{ id: string, label: string, mac?: string[], cli?: string[], exe?: string[], win?: string[], jetbrains?: { prefixes: string[], exe: string } }} EditorEntry
+ */
+/** @type {ReadonlyArray<EditorEntry>} */
+export const EDITORS = Object.freeze([
+  { id: 'vscode', label: 'Visual Studio Code', mac: ['Visual Studio Code.app'], cli: ['code'], exe: ['Code.exe'], win: ['%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe', '%ProgramFiles%\\Microsoft VS Code\\Code.exe'] },
+  { id: 'cursor', label: 'Cursor', mac: ['Cursor.app'], cli: ['cursor'], exe: ['Cursor.exe'], win: ['%LOCALAPPDATA%\\Programs\\cursor\\Cursor.exe'] },
+  { id: 'zed', label: 'Zed', mac: ['Zed.app'], cli: ['zed', 'zeditor'], exe: ['Zed.exe'], win: ['%LOCALAPPDATA%\\Programs\\Zed\\Zed.exe'] },
+  { id: 'xcode', label: 'Xcode', mac: ['Xcode.app'] },
+  { id: 'intellij', label: 'IntelliJ IDEA', mac: ['IntelliJ IDEA.app', 'IntelliJ IDEA Ultimate.app', 'IntelliJ IDEA CE.app'], cli: ['idea', 'intellij-idea-ultimate', 'intellij-idea-community'], exe: ['idea64.exe'], jetbrains: { prefixes: ['IntelliJ IDEA'], exe: 'idea64.exe' } },
+  { id: 'webstorm', label: 'WebStorm', mac: ['WebStorm.app'], cli: ['webstorm'], exe: ['webstorm64.exe'], jetbrains: { prefixes: ['WebStorm'], exe: 'webstorm64.exe' } },
+  { id: 'pycharm', label: 'PyCharm', mac: ['PyCharm.app', 'PyCharm Professional Edition.app', 'PyCharm CE.app', 'PyCharm Community Edition.app'], cli: ['pycharm', 'pycharm-professional', 'pycharm-community'], exe: ['pycharm64.exe'], jetbrains: { prefixes: ['PyCharm'], exe: 'pycharm64.exe' } },
+  { id: 'goland', label: 'GoLand', mac: ['GoLand.app'], cli: ['goland'], exe: ['goland64.exe'], jetbrains: { prefixes: ['GoLand'], exe: 'goland64.exe' } },
+  { id: 'rider', label: 'Rider', mac: ['Rider.app'], cli: ['rider'], exe: ['rider64.exe'], jetbrains: { prefixes: ['JetBrains Rider', 'Rider'], exe: 'rider64.exe' } },
+  { id: 'clion', label: 'CLion', mac: ['CLion.app'], cli: ['clion'], exe: ['clion64.exe'], jetbrains: { prefixes: ['CLion'], exe: 'clion64.exe' } },
+  { id: 'phpstorm', label: 'PhpStorm', mac: ['PhpStorm.app'], cli: ['phpstorm'], exe: ['phpstorm64.exe'], jetbrains: { prefixes: ['PhpStorm'], exe: 'phpstorm64.exe' } },
+  { id: 'rubymine', label: 'RubyMine', mac: ['RubyMine.app'], cli: ['rubymine'], exe: ['rubymine64.exe'], jetbrains: { prefixes: ['RubyMine'], exe: 'rubymine64.exe' } },
+  { id: 'android-studio', label: 'Android Studio', mac: ['Android Studio.app'], cli: ['android-studio'], exe: ['studio64.exe'], win: ['%ProgramFiles%\\Android\\Android Studio\\bin\\studio64.exe', '%LOCALAPPDATA%\\Programs\\Android Studio\\bin\\studio64.exe'] },
+  { id: 'finder', label: 'File manager' },
+].map(entry => Object.freeze(entry)));
+
+/** The file manager's label on `platform`. @param {NodeJS.Platform} platform */
+const fileManagerLabel = platform => platform === 'darwin' ? 'Finder' : platform === 'win32' ? 'File Explorer' : 'File manager';
+
+/**
+ * The file-system questions detection asks; replaced in tests. Each answers false on any error.
+ * @typedef {{ isDirectory: (file: string) => Promise<boolean>, isExecutable: (file: string, platform: NodeJS.Platform) => Promise<boolean>, list: (directory: string) => Promise<string[]> }} EditorProbe
+ */
+/** @type {EditorProbe} */
+const fsProbe = {
+  isDirectory: file => stat(file).then(info => info.isDirectory(), () => false),
+  isExecutable: (file, platform) => stat(file).then(info => info.isFile() && (platform === 'win32' || (info.mode & 0o111) !== 0), () => false),
+  list: directory => readdir(directory).catch(() => []),
+};
+
+/**
+ * Where detection looks; alp dashboard's own environment, never the page. Replaced in tests.
+ * @type {{ platform: NodeJS.Platform, env: NodeJS.ProcessEnv, home: string, probe: EditorProbe }}
+ */
+export const editorHost = { platform: process.platform, env: process.env, home: os.homedir(), probe: fsProbe };
+
+/** A Windows environment variable, case-insensitively. @param {NodeJS.ProcessEnv} env @param {string} name */
+function winEnv(env, name) {
+  const key = Object.keys(env).find(candidate => candidate.toLowerCase() === name.toLowerCase());
+  return key ? env[key] : undefined;
+}
+
+/**
+ * The absolute PATH entries of `env` (relative ones, such as `.`, are never searched).
+ * @param {NodeJS.Platform} platform @param {NodeJS.ProcessEnv} env
+ */
+function pathEntries(platform, env) {
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  const value = platform === 'win32' ? winEnv(env, 'PATH') : env.PATH;
+  return String(value ?? '').split(platform === 'win32' ? ';' : ':').filter(entry => entry && pathApi.isAbsolute(entry));
+}
+
+/**
+ * Where `entry` is installed on this host, or undefined: the absolute program (an .app bundle on mac)
+ * found at the table's fixed places only.
+ * @param {EditorEntry} entry @param {{ platform: NodeJS.Platform, env: NodeJS.ProcessEnv, home: string, probe: EditorProbe }} host
+ * @returns {Promise<string | undefined>}
+ */
+export async function locateEditor(entry, { platform, env, home, probe }) {
+  if (platform === 'darwin') {
+    for (const bundle of entry.mac ?? []) {
+      for (const root of ['/Applications', ...(path.posix.isAbsolute(home) ? [path.posix.join(home, 'Applications')] : [])]) {
+        const candidate = path.posix.join(root, bundle);
+        if (await probe.isDirectory(candidate)) return candidate;
+      }
+    }
+    return undefined;
+  }
+  if (platform === 'win32') {
+    const local = winEnv(env, 'LOCALAPPDATA');
+    const programs = winEnv(env, 'ProgramFiles');
+    const expand = (/** @type {string} */ template) => {
+      const value = template.replace('%LOCALAPPDATA%', local ?? '\0').replace('%ProgramFiles%', programs ?? '\0');
+      return value.includes('\0') || !path.win32.isAbsolute(value) ? undefined : value;
+    };
+    for (const template of entry.win ?? []) {
+      const candidate = expand(template);
+      if (candidate && await probe.isExecutable(candidate, platform)) return candidate;
+    }
+    if (entry.jetbrains) {
+      for (const root of [expand('%ProgramFiles%\\JetBrains'), expand('%LOCALAPPDATA%\\Programs')]) {
+        if (!root) continue;
+        const folders = (await probe.list(root)).filter(name => entry.jetbrains?.prefixes.some(prefix => name.startsWith(prefix))).sort().reverse();
+        for (const folder of folders) {
+          const candidate = path.win32.join(root, folder, 'bin', entry.jetbrains.exe);
+          if (await probe.isExecutable(candidate, platform)) return candidate;
+        }
+      }
+    }
+    for (const directory of pathEntries(platform, env)) {
+      for (const name of entry.exe ?? []) {
+        const candidate = path.win32.join(directory, name);
+        if (await probe.isExecutable(candidate, platform)) return candidate;
+      }
+    }
+    return undefined;
+  }
+  for (const name of entry.cli ?? []) {
+    for (const directory of pathEntries(platform, env)) {
+      const candidate = path.posix.join(directory, name);
+      if (await probe.isExecutable(candidate, platform)) return candidate;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The editors of the table installed on this host, in the table's order, each with where it is
+ * ('finder' always, without one). ALP_DASHBOARD_EDITORS, a comma-separated list of table ids in alp
+ * dashboard's own environment, replaces detection (e2e): those ids count as installed, at the place
+ * detection finds or else the table's first fixed place; unknown ids are ignored.
+ * @param {{ platform: NodeJS.Platform, env: NodeJS.ProcessEnv, home: string, probe: EditorProbe }} [host]
+ * @returns {Promise<Array<{ id: string, label: string, program?: string }>>}
+ */
+export async function installedEditors(host = editorHost) {
+  const { platform, env } = host;
+  const forced = typeof env.ALP_DASHBOARD_EDITORS === 'string' ? new Set(env.ALP_DASHBOARD_EDITORS.split(',').map(id => id.trim()).filter(Boolean)) : undefined;
+  /** @type {Array<{ id: string, label: string, program?: string }>} */
+  const found = [];
+  for (const entry of EDITORS) {
+    if (entry.id === 'finder') { found.push({ id: 'finder', label: fileManagerLabel(platform) }); continue; }
+    if (entry.id === 'xcode' && platform !== 'darwin') continue;
+    if (forced && !forced.has(entry.id)) continue;
+    const program = await locateEditor(entry, host) ?? (forced ? fallbackProgram(entry, platform, env) : undefined);
+    if (program) found.push({ id: entry.id, label: entry.label, program });
+  }
+  return found;
+}
+
+/** The table's first fixed place for `entry`, for an id ALP_DASHBOARD_EDITORS forces. @param {EditorEntry} entry @param {NodeJS.Platform} platform @param {NodeJS.ProcessEnv} env */
+function fallbackProgram(entry, platform, env) {
+  if (platform === 'darwin') return entry.mac?.[0] ? path.posix.join('/Applications', entry.mac[0]) : undefined;
+  if (platform === 'win32') {
+    const template = entry.win?.[0] ?? (entry.jetbrains ? `%ProgramFiles%\\JetBrains\\${entry.jetbrains.prefixes[0]}\\bin\\${entry.jetbrains.exe}` : undefined);
+    const value = template?.replace('%LOCALAPPDATA%', winEnv(env, 'LOCALAPPDATA') ?? '\0').replace('%ProgramFiles%', winEnv(env, 'ProgramFiles') ?? '\0');
+    return value && !value.includes('\0') && path.win32.isAbsolute(value) ? value : undefined;
+  }
+  return entry.cli?.[0] ? path.posix.join('/usr/bin', entry.cli[0]) : undefined;
+}
+
+/**
+ * How `editor` (an installed entry of installedEditors) opens `directory`: a program and its
+ * arguments, run without a shell. The directory is absolute and normalized (projectDirectory), so it
+ * never reads as an option; on mac `open` also gets `--` before it. ALP_DASHBOARD_EDITOR_RUNNER, an
+ * absolute program in alp dashboard's own environment, replaces the editor (e2e records the call):
+ * it gets [editorId, directory]. 'finder' is revealCommand (ALP_DASHBOARD_FILE_MANAGER applies).
+ * @param {NodeJS.Platform} platform @param {{ id: string, program?: string }} editor @param {string} directory @param {NodeJS.ProcessEnv} [env]
+ * @returns {[string, string[]]}
+ */
+export function editorCommand(platform, editor, directory, env = process.env) {
+  if (editor.id === 'finder') return revealCommand(platform, directory, env);
+  const runner = env.ALP_DASHBOARD_EDITOR_RUNNER;
+  if (runner && path.isAbsolute(runner)) return [runner, [editor.id, directory]];
+  if (!editor.program) throw new Error(`No program for ${editor.id}`);
+  if (platform === 'darwin') return ['/usr/bin/open', ['-a', editor.program, '--', directory]];
+  return [editor.program, [directory]];
+}
+
+/** @param {string} message @param {string} reason */
+const notFound = (message, reason) => Object.assign(new Error(message), { code: 1001, data: { reason } });
+
+/**
+ * The directory of the live (unarchived) workspace of alpd's registry that params.workspaceId names,
+ * checked by projectDirectory; never a path from params.
+ * @param {Record<string, any>} params @param {any} daemon
+ */
+async function liveWorkspaceDirectory(params, daemon) {
+  const workspaceId = text(params.workspaceId, 'workspaceId', { max: 200 });
+  const registry = ownerRegistry((/** @type {any} */ (await daemon.request('registry.owner', {})))?.registry);
+  const workspace = registry.workspaces.find((/** @type {any} */ entry) => entry.id === workspaceId && !entry.archivedAt);
+  if (!workspace) throw notFound(`No workspace ${workspaceId}`, 'not_found');
+  return projectDirectory(workspace.directory);
+}
+
 /** @param {unknown} value */
 const labelName = value => text(value, 'name', { max: 64 }).trim().replace(/\s+/g, ' ');
 /** @param {unknown} value */
@@ -283,13 +476,25 @@ export const methods = {
   },
 
   async 'host.workspace.reveal'({ params, daemon }) {
-    const workspaceId = text(params.workspaceId, 'workspaceId', { max: 200 });
-    const registry = ownerRegistry((/** @type {any} */ (await daemon.request('registry.owner', {})))?.registry);
-    const workspace = registry.workspaces.find((/** @type {any} */ entry) => entry.id === workspaceId && !entry.archivedAt);
-    if (!workspace) throw Object.assign(new Error(`No workspace ${workspaceId}`), { code: 1001, data: { reason: 'not_found' } });
-    const [file, args] = revealCommand(process.platform, await projectDirectory(workspace.directory));
+    const [file, args] = revealCommand(process.platform, await liveWorkspaceDirectory(params, daemon));
     try { await revealer.run(file, args); }
     catch { throw Object.assign(new Error('Could not open the file manager on the host'), { code: 1000, data: { reason: 'reveal_failed' } }); }
+    return { opened: true };
+  },
+
+  async 'host.workspace.editors'() {
+    return { editors: (await installedEditors()).map(({ id, label }) => ({ id, label })) };
+  },
+
+  async 'host.workspace.open'({ params, daemon }) {
+    const entry = typeof params.editor === 'string' ? EDITORS.find(candidate => candidate.id === params.editor) : undefined;
+    if (!entry) throw invalid(`editor must be one of ${EDITORS.map(candidate => candidate.id).join(', ')}`, { reason: 'unknown_editor' });
+    const directory = await liveWorkspaceDirectory(params, daemon);
+    const editor = (await installedEditors()).find(candidate => candidate.id === entry.id);
+    if (!editor) throw notFound(`${entry.label} is not installed on this host`, 'editor_not_installed');
+    const [file, args] = editorCommand(editorHost.platform, editor, directory, editorHost.env);
+    try { await revealer.run(file, args); }
+    catch { throw Object.assign(new Error(`Could not open ${editor.label} on the host`), { code: 1000, data: { reason: 'open_failed' } }); }
     return { opened: true };
   },
 

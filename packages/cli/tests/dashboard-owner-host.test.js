@@ -7,7 +7,7 @@ import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs
 import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { diagnoseProviders, methods, ownerRegistry, projectDirectory, providerOptions, PROVIDER_CHECKS, revealCommand, revealer } from '../src/dashboard/owner/host.js';
+import { diagnoseProviders, editorCommand, editorHost, EDITORS, installedEditors, locateEditor, methods, ownerRegistry, projectDirectory, providerOptions, PROVIDER_CHECKS, revealCommand, revealer } from '../src/dashboard/owner/host.js';
 import { TERMINAL_WARNING, terminalCommand } from '../src/terminal.js';
 
 const FAKE_ACP = fileURLToPath(new URL('../../../test/support/fake-acp.js', import.meta.url));
@@ -209,6 +209,163 @@ test('host.workspace.reveal opens a live registry workspace\'s directory by id w
   assert.deepEqual(revealCommand('darwin', '/p/a', { ALP_DASHBOARD_FILE_MANAGER: 'fm' }), ['/usr/bin/open', ['/p/a']], 'only an absolute program');
   assert.deepEqual(revealCommand('linux', '/p/a', {}), ['xdg-open', ['/p/a']]);
   assert.deepEqual(revealCommand('win32', 'C:\\p', {}), ['explorer.exe', ['C:\\p']]);
+});
+
+/** A probe of a fake file system: `dirs` are directories, `files` executable files, `listing` folder entries. */
+function fakeProbe({ dirs = [], files = [], listing = {} } = {}) {
+  const asked = [];
+  return {
+    asked,
+    isDirectory: async file => { asked.push(file); return dirs.includes(file); },
+    isExecutable: async file => { asked.push(file); return files.includes(file); },
+    list: async directory => { asked.push(directory); return listing[directory] ?? []; },
+  };
+}
+
+test('editor table: fixed ids in a stable order, finder last; detection looks only at fixed places', async () => {
+  assert.deepEqual(EDITORS.map(entry => entry.id), ['vscode', 'cursor', 'zed', 'xcode', 'intellij', 'webstorm', 'pycharm', 'goland', 'rider', 'clion', 'phpstorm', 'rubymine', 'android-studio', 'finder']);
+  assert.ok(Object.isFrozen(EDITORS) && EDITORS.every(Object.isFrozen));
+  // mac: .app bundles under /Applications and ~/Applications only.
+  const mac = fakeProbe({ dirs: ['/Applications/Visual Studio Code.app', '/Users/u/Applications/WebStorm.app', '/Applications/Xcode.app'] });
+  assert.deepEqual(await installedEditors({ platform: 'darwin', env: { PATH: '/usr/local/bin' }, home: '/Users/u', probe: mac }), [
+    { id: 'vscode', label: 'Visual Studio Code', program: '/Applications/Visual Studio Code.app' },
+    { id: 'xcode', label: 'Xcode', program: '/Applications/Xcode.app' },
+    { id: 'webstorm', label: 'WebStorm', program: '/Users/u/Applications/WebStorm.app' },
+    { id: 'finder', label: 'Finder' },
+  ]);
+  assert.ok(mac.asked.every(file => /^(\/Applications|\/Users\/u\/Applications)\/[^/]+\.app$/.test(file)), 'no PATH, no other place on mac');
+  // linux: fixed CLI names in absolute PATH entries; relative entries are never searched.
+  const linux = fakeProbe({ files: ['/opt/bin/cursor', './code', '/usr/bin/zeditor', '/snap/bin/pycharm-community', '/usr/bin/xcode'] });
+  assert.deepEqual(await installedEditors({ platform: 'linux', env: { PATH: '.:/opt/bin::/usr/bin:/snap/bin:relative' }, home: '/home/u', probe: linux }), [
+    { id: 'cursor', label: 'Cursor', program: '/opt/bin/cursor' },
+    { id: 'zed', label: 'Zed', program: '/usr/bin/zeditor' },
+    { id: 'pycharm', label: 'PyCharm', program: '/snap/bin/pycharm-community' },
+    { id: 'finder', label: 'File manager' },
+  ]);
+  assert.ok(linux.asked.every(file => /^\/(opt\/bin|usr\/bin|snap\/bin)\/[a-z-]+$/.test(file)), 'absolute PATH entries only');
+  assert.ok(!linux.asked.some(file => file.endsWith('/xcode')), 'no Xcode off mac');
+  // win32: fixed .exe paths, the newest JetBrains folder, then the .exe on PATH.
+  const env = { LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local', ProgramFiles: 'C:\\Program Files', Path: 'C:\\tools;relative' };
+  const win = fakeProbe({
+    files: ['C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe', 'C:\\Program Files\\JetBrains\\GoLand 2024.2\\bin\\goland64.exe', 'C:\\Program Files\\JetBrains\\GoLand 2023.1\\bin\\goland64.exe', 'C:\\tools\\Zed.exe'],
+    listing: { 'C:\\Program Files\\JetBrains': ['GoLand 2023.1', 'GoLand 2024.2', 'IntelliJ IDEA 2024.1'] },
+  });
+  assert.deepEqual(await installedEditors({ platform: 'win32', env, home: 'C:\\Users\\u', probe: win }), [
+    { id: 'vscode', label: 'Visual Studio Code', program: 'C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe' },
+    { id: 'zed', label: 'Zed', program: 'C:\\tools\\Zed.exe' },
+    { id: 'goland', label: 'GoLand', program: 'C:\\Program Files\\JetBrains\\GoLand 2024.2\\bin\\goland64.exe' },
+    { id: 'finder', label: 'File Explorer' },
+  ]);
+  assert.ok(!win.asked.some(file => file.startsWith('relative')));
+  // Without LOCALAPPDATA/ProgramFiles nothing is guessed.
+  assert.equal(await locateEditor(EDITORS[0], { platform: 'win32', env: {}, home: 'C:\\', probe: fakeProbe({ files: ['\\Programs\\Microsoft VS Code\\Code.exe'] }) }), undefined);
+});
+
+test('editor overrides: ALP_DASHBOARD_EDITORS replaces detection with table ids; ALP_DASHBOARD_EDITOR_RUNNER replaces the program with [editorId, dir]', async () => {
+  const none = fakeProbe();
+  assert.deepEqual(await installedEditors({ platform: 'darwin', env: { ALP_DASHBOARD_EDITORS: 'cursor, vscode,../x,code;rm -rf /,finder' }, home: '/Users/u', probe: none }), [
+    { id: 'vscode', label: 'Visual Studio Code', program: '/Applications/Visual Studio Code.app' },
+    { id: 'cursor', label: 'Cursor', program: '/Applications/Cursor.app' },
+    { id: 'finder', label: 'Finder' },
+  ]);
+  // Forced ids not in the list are not detected even when installed; xcode never off mac.
+  const linux = fakeProbe({ files: ['/usr/bin/code'] });
+  assert.deepEqual(await installedEditors({ platform: 'linux', env: { PATH: '/usr/bin', ALP_DASHBOARD_EDITORS: 'zed,xcode' }, home: '/h', probe: linux }), [
+    { id: 'zed', label: 'Zed', program: '/usr/bin/zed' },
+    { id: 'finder', label: 'File manager' },
+  ]);
+  assert.deepEqual(await installedEditors({ platform: 'linux', env: { ALP_DASHBOARD_EDITORS: '' }, home: '/h', probe: none }), [{ id: 'finder', label: 'File manager' }]);
+  // argv per platform: no shell, the directory never an option.
+  assert.deepEqual(editorCommand('darwin', { id: 'vscode', program: '/Applications/Visual Studio Code.app' }, '/p/a', {}), ['/usr/bin/open', ['-a', '/Applications/Visual Studio Code.app', '--', '/p/a']]);
+  assert.deepEqual(editorCommand('linux', { id: 'zed', program: '/usr/bin/zed' }, '/p/a', {}), ['/usr/bin/zed', ['/p/a']]);
+  assert.deepEqual(editorCommand('win32', { id: 'vscode', program: 'C:\\VS\\Code.exe' }, 'C:\\p\\a', {}), ['C:\\VS\\Code.exe', ['C:\\p\\a']]);
+  assert.deepEqual(editorCommand('darwin', { id: 'finder' }, '/p/a', {}), revealCommand('darwin', '/p/a', {}));
+  assert.deepEqual(editorCommand('linux', { id: 'finder' }, '/p/a', { ALP_DASHBOARD_FILE_MANAGER: '/opt/fm', ALP_DASHBOARD_EDITOR_RUNNER: '/opt/run' }), ['/opt/fm', ['/p/a']]);
+  assert.deepEqual(editorCommand('darwin', { id: 'cursor', program: '/Applications/Cursor.app' }, '/p/a', { ALP_DASHBOARD_EDITOR_RUNNER: '/opt/run' }), ['/opt/run', ['cursor', '/p/a']]);
+  assert.deepEqual(editorCommand('linux', { id: 'zed', program: '/usr/bin/zed' }, '/p/a', { ALP_DASHBOARD_EDITOR_RUNNER: 'run' }), ['/usr/bin/zed', ['/p/a']], 'only an absolute runner');
+});
+
+test('host.workspace.editors and host.workspace.open: a fixed, installed editor opens a live registry workspace by id; argv, no shell, never a path or program from params', async t => {
+  const { directory } = await scratch(t);
+  const project = path.join(directory, 'project');
+  await mkdir(project);
+  const registry = {
+    ...REGISTRY,
+    projects: [...REGISTRY.projects, { id: 'prj_s', root: project, addedAt: 't' }],
+    workspaces: [...REGISTRY.workspaces, { id: 'wks_s', projectId: 'prj_s', directory: project, labels: [], createdAt: 't' }, { id: 'wks_missing', projectId: 'prj_s', directory: path.join(directory, 'missing'), labels: [], createdAt: 't' }],
+  };
+  const daemon = fakeDaemon({ 'registry.owner': { registry } });
+  const runs = [];
+  const original = { run: revealer.run, ...editorHost };
+  revealer.run = async (file, args) => { runs.push([file, args]); };
+  Object.assign(editorHost, { platform: 'darwin', env: {}, home: '/Users/u', probe: fakeProbe({ dirs: ['/Applications/Cursor.app', '/Applications/Zed.app'] }) });
+  t.after(() => { revealer.run = original.run; Object.assign(editorHost, { platform: original.platform, env: original.env, home: original.home, probe: original.probe }); });
+  assert.deepEqual(await call('host.workspace.editors', { extra: 1 }, { home: '/h', daemon }), { editors: [{ id: 'cursor', label: 'Cursor' }, { id: 'zed', label: 'Zed' }, { id: 'finder', label: 'Finder' }] });
+  assert.deepEqual(daemon.calls, [], 'editors never asks alpd');
+
+  assert.deepEqual(await call('host.workspace.open', { workspaceId: 'wks_s', editor: 'cursor', directory: '/etc', path: '/etc', program: '/bin/sh' }, { home: '/h', daemon }), { opened: true });
+  assert.deepEqual(runs, [['/usr/bin/open', ['-a', '/Applications/Cursor.app', '--', project]]]);
+  assert.deepEqual(daemon.calls, [['registry.owner', {}]], 'reads the registry only');
+  assert.deepEqual(await call('host.workspace.open', { workspaceId: 'wks_s', editor: 'finder' }, { home: '/h', daemon }), { opened: true });
+  assert.deepEqual(runs[1], revealCommand('darwin', project, {}), 'finder does what host.workspace.reveal does');
+
+  const refused = [
+    // Unknown editors and injection attempts in the id: -32602, before alpd is asked.
+    [{ workspaceId: 'wks_s', editor: 'vscode;rm -rf /' }, -32602, 'unknown_editor'],
+    [{ workspaceId: 'wks_s', editor: 'visual studio code' }, -32602, 'unknown_editor'],
+    [{ workspaceId: 'wks_s', editor: '../../bin/sh' }, -32602, 'unknown_editor'],
+    [{ workspaceId: 'wks_s', editor: '/Applications/Cursor.app' }, -32602, 'unknown_editor'],
+    [{ workspaceId: 'wks_s', editor: 'Cursor' }, -32602, 'unknown_editor'],
+    [{ workspaceId: 'wks_s', editor: 'cursor ' }, -32602, 'unknown_editor'],
+    [{ workspaceId: 'wks_s', editor: ['cursor'] }, -32602, 'unknown_editor'],
+    [{ workspaceId: 'wks_s' }, -32602, 'unknown_editor'],
+    [{ workspaceId: 'wks_s', editor: 'toString' }, -32602, 'unknown_editor'],
+    // The workspace: by id of a live registry workspace only.
+    [{ workspaceId: project, editor: 'cursor' }, 1001, 'not_found'],
+    [{ workspaceId: '../wks_s', editor: 'cursor' }, 1001, 'not_found'],
+    [{ workspaceId: 'wks_b', editor: 'cursor' }, 1001, 'not_found'], // archived
+    [{ workspaceId: 'wks_gone', editor: 'cursor' }, 1001, 'not_found'], // removed project
+    [{ workspaceId: 'wks_nope', editor: 'cursor' }, 1001, 'not_found'],
+    [{ workspaceId: 'wks_missing', editor: 'cursor' }, -32602, 'invalid_params'], // directory gone
+    [{ workspaceId: 7, editor: 'cursor' }, -32602, 'invalid_params'],
+    // A table editor that is not installed.
+    [{ workspaceId: 'wks_s', editor: 'vscode' }, 1001, 'editor_not_installed'],
+    [{ workspaceId: 'wks_s', editor: 'xcode' }, 1001, 'editor_not_installed'],
+  ];
+  for (const [params, code, reason] of refused) {
+    await assert.rejects(call('host.workspace.open', params, { home: '/h', daemon }), error => error.code === code && error.data.reason === reason, JSON.stringify(params));
+  }
+  assert.equal(runs.length, 2, 'nothing opened for a refused request');
+
+  // The env overrides, from alp dashboard's environment only.
+  editorHost.env = { ALP_DASHBOARD_EDITORS: 'vscode', ALP_DASHBOARD_EDITOR_RUNNER: '/opt/record' };
+  assert.deepEqual(await call('host.workspace.editors', {}, { home: '/h', daemon }), { editors: [{ id: 'vscode', label: 'Visual Studio Code' }, { id: 'finder', label: 'Finder' }] });
+  assert.deepEqual(await call('host.workspace.open', { workspaceId: 'wks_s', editor: 'vscode' }, { home: '/h', daemon }), { opened: true });
+  assert.deepEqual(runs[2], ['/opt/record', ['vscode', project]]);
+  await assert.rejects(call('host.workspace.open', { workspaceId: 'wks_s', editor: 'cursor' }, { home: '/h', daemon }), error => error.code === 1001 && error.data.reason === 'editor_not_installed');
+
+  revealer.run = async () => { throw new Error('spawn ENOENT'); };
+  await assert.rejects(call('host.workspace.open', { workspaceId: 'wks_s', editor: 'vscode' }, { home: '/h', daemon }), error => error.code === 1000 && error.data.reason === 'open_failed');
+});
+
+test('host.workspace.open really spawns with argv and no shell: a directory with shell metacharacters reaches the program as one argument', async t => {
+  const { directory } = await scratch(t);
+  const project = path.join(directory, 'p $(touch pwned); `x` & y');
+  await mkdir(project);
+  const record = path.join(directory, 'record.json');
+  const runner = path.join(directory, 'runner.mjs');
+  await writeFile(runner, `#!${process.execPath}\nimport { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(record)}, JSON.stringify(process.argv.slice(2)));\n`, { mode: 0o755 });
+  const registry = { ...REGISTRY, projects: [{ id: 'prj_s', root: project, addedAt: 't' }], workspaces: [{ id: 'wks_s', projectId: 'prj_s', directory: project, labels: [], createdAt: 't' }] };
+  const original = { ...editorHost };
+  Object.assign(editorHost, { env: { ALP_DASHBOARD_EDITORS: 'zed', ALP_DASHBOARD_EDITOR_RUNNER: runner }, probe: fakeProbe() });
+  t.after(() => Object.assign(editorHost, original));
+  if (process.platform === 'win32') return t.skip('a shebang runner is POSIX only');
+  assert.deepEqual(await call('host.workspace.open', { workspaceId: 'wks_s', editor: 'zed' }, { home: '/h', daemon: fakeDaemon({ 'registry.owner': { registry } }) }), { opened: true });
+  let argv;
+  for (let i = 0; i < 100 && !argv; i++) argv = await readFile(record, 'utf8').then(JSON.parse, () => new Promise(resolve => setTimeout(resolve, 50)));
+  assert.deepEqual(argv, ['zed', project]);
+  await assert.rejects(lstat(path.join(directory, 'pwned')));
+  await assert.rejects(lstat(path.join(process.cwd(), 'pwned')));
 });
 
 test('host.workspace.label maps to registry.owner label operations only, never placement', async () => {
