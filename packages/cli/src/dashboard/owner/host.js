@@ -1,4 +1,5 @@
 // @ts-check
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -30,6 +31,9 @@ import { TERMINAL_WARNING, terminalCommand } from '../../terminal.js';
  *                           off, answered { disabled: true, providers: [] } without asking alpd, so
  *                           no provider is queried. `alp usage` and alpd's limit watch talk to alpd
  *                           directly and never read the switch (t-9116).
+ *   host.workspace.reveal   Open in file manager (Paseo's): the host's file manager opens the
+ *                           directory of a registry workspace named by id, never a path from the
+ *                           page; argv without a shell (open / explorer.exe / xdg-open).
  *   host.registry, host.workspace.update, host.workspace.label, host.project.register,
  *   host.project.remove     alpd's registry (registry.owner, workspace.update, project.register,
  *                           project.remove) on the owner's connection, without the gateway's
@@ -165,6 +169,31 @@ export function ownerRegistry(registry) {
   };
 }
 
+/**
+ * How the host's file manager opens `directory`: a program and its arguments, run without a shell.
+ * The directory is absolute and normalized (projectDirectory), so it never reads as an option.
+ * ALP_DASHBOARD_FILE_MANAGER, an absolute program path in alp dashboard's own environment, replaces
+ * the platform's (another file manager; the e2e records the call instead of opening a window).
+ * @param {NodeJS.Platform} platform @param {string} directory @param {NodeJS.ProcessEnv} [env] @returns {[string, string[]]}
+ */
+export function revealCommand(platform, directory, env = process.env) {
+  const chosen = env.ALP_DASHBOARD_FILE_MANAGER;
+  if (chosen && path.isAbsolute(chosen)) return [chosen, [directory]];
+  if (platform === 'darwin') return ['/usr/bin/open', [directory]];
+  if (platform === 'win32') return ['explorer.exe', [directory]];
+  return ['xdg-open', [directory]];
+}
+
+/** Starts the file manager and leaves it running; replaced in tests. */
+export const revealer = {
+  /** @param {string} file @param {string[]} args @returns {Promise<void>} */
+  run: (file, args) => new Promise((resolve, reject) => {
+    const child = spawn(file, args, { stdio: 'ignore', detached: true, shell: false, windowsHide: true });
+    child.once('error', reject);
+    child.once('spawn', () => { child.unref(); resolve(); });
+  }),
+};
+
 /** @param {unknown} value */
 const labelName = value => text(value, 'name', { max: 64 }).trim().replace(/\s+/g, ' ');
 /** @param {unknown} value */
@@ -251,6 +280,17 @@ export const methods = {
   async 'host.registry'({ daemon }) {
     const result = /** @type {any} */ (await daemon.request('registry.owner', {}));
     return ownerRegistry(result?.registry);
+  },
+
+  async 'host.workspace.reveal'({ params, daemon }) {
+    const workspaceId = text(params.workspaceId, 'workspaceId', { max: 200 });
+    const registry = ownerRegistry((/** @type {any} */ (await daemon.request('registry.owner', {})))?.registry);
+    const workspace = registry.workspaces.find(entry => entry.id === workspaceId && !entry.archivedAt);
+    if (!workspace) throw Object.assign(new Error(`No workspace ${workspaceId}`), { code: 1001, data: { reason: 'not_found' } });
+    const [file, args] = revealCommand(process.platform, await projectDirectory(workspace.directory));
+    try { await revealer.run(file, args); }
+    catch { throw Object.assign(new Error('Could not open the file manager on the host'), { code: 1000, data: { reason: 'reveal_failed' } }); }
+    return { opened: true };
   },
 
   async 'host.workspace.update'({ params, daemon }) {

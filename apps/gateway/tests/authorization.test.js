@@ -73,6 +73,7 @@ const OUT_OF_SCOPE = {
   'session.attach': () => [{ sessionId: 'sb', after: 0 }, 1001],
   'session.release': () => [{ sessionId: 'sb' }, 1001],
   'session.attention.clear': () => [{ sessionId: 'sb' }, 1001],
+  'session.attention.mark': () => [{ sessionId: 'sb' }, 1001],
   'session.preview': ({ b }) => [{ spec: { cwd: b } }, 1003, 'outside_workspace'],
   'question.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
   'question.watch': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
@@ -459,6 +460,20 @@ test('session.attention: question.watch answers and tells the grant\'s attention
   const mark = daemon.calls().length;
   for (const method of ['session.attention.set', 'session.attention', 'attention.clear']) await assert.rejects(client.request(method, { sessionId: 'sa' }), error => error.code === -32601, method);
   assert.deepEqual(daemon.calls().slice(mark), [], 'nothing reached alpd');
+});
+
+test('session.attention.mark: Mark as unread needs session.write and a root in the grant; only sessionId reaches alpd; the answer projected', async t => {
+  const { daemon, sdk } = await world(t);
+  const reader = (await sdk('reader')).client;
+  await assert.rejects(reader.request('session.attention.mark', { sessionId: 'sa' }), error => error.code === 1003, 'a reader only clears, by looking');
+  const { client } = await sdk('alice');
+  const marked = await client.request('session.attention.mark', { sessionId: 'sa', at: 'x', sessionIds: ['sb'] });
+  assert.deepEqual(Object.keys(marked).sort(), ['attention', 'marked']);
+  assert.deepEqual(Object.keys(marked.attention).sort(), ['at', 'reason'], 'projected: nothing else alpd answers');
+  assert.deepEqual(daemon.calls('session.attention.mark').at(-1).params, { sessionId: 'sa' });
+  assert.deepEqual(await client.request('session.attention.mark', { sessionId: 'sa' }), { marked: false }, 'already asks');
+  await assert.rejects(client.request('session.attention.mark', { sessionId: 'sb' }), error => error.code === 1001, 'outside the grant');
+  assert.equal(daemon.state.sessions.get('sb').attention, undefined, 'untouched');
 });
 
 test('session.attention through a gateway to an alpd without it: not offered, and the watch works as before', async t => {

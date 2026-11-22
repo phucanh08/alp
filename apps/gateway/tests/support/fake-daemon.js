@@ -136,6 +136,15 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
       for (const link of state.links) if (link.watching?.attention) link.send({ jsonrpc: '2.0', method: 'event', params: { sessionId, epoch: 'attention', seq: 0, ts: new Date().toISOString(), event: { type: 'attention' } } });
       return { cleared: true };
     },
+    // As alpd: Mark as unread sets a finished attention on an idle root that has none.
+    'session.attention.mark': ({ sessionId }) => {
+      const found = state.sessions.get(sessionId);
+      if (!found) throw error(1001, `No session ${sessionId}`);
+      if (found.attention || found.parentId || found.busy) return { marked: false };
+      found.attention = { reason: 'finished', at: new Date().toISOString() };
+      for (const link of state.links) if (link.watching?.attention) link.send({ jsonrpc: '2.0', method: 'event', params: { sessionId, epoch: 'attention', seq: 0, ts: new Date().toISOString(), event: { type: 'attention', attention: found.attention } } });
+      return { marked: true, attention: { ...found.attention, secret: '/host/path' } };
+    },
     'question.answer': ({ questionId }) => {
       const matches = state.questions.filter(question => question.id === questionId || question.id.startsWith(questionId));
       if (matches.length !== 1) throw error(1001, `No question ${questionId} waits for an answer`);
