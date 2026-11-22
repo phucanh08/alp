@@ -3,6 +3,20 @@
 Những chỗ ALP cố ý khác Paseo (upstream `getpaseo/paseo`) hoặc khác bản ALP trước, theo thứ tự mới
 nhất trước. Mỗi mục nói cái gì đổi, ai bị ảnh hưởng, và vì sao.
 
+## 2026-11-22: Tab Browser chỉ trong ALP.app, không tự động hóa, không download (t-9116)
+
+- **Chỉ ALP.app** (khác Paseo, nơi Browser là tính năng của app desktop của Paseo): menu "+" có
+  Browser khi trang chạy trong cửa sổ dashboard của ALP.app; trình duyệt thường không có mục này, và
+  một tab Browser đã lưu hiện "Only available in ALP.app".
+- **Không có tự động hóa trình duyệt cho agent** (các tool `browser_*` của Paseo), không favicon/tiêu
+  đề, không chọn phần tử, không chụp màn hình, không cài đặt dữ liệu trình duyệt.
+- **Download bị hủy** và mọi quyền (camera, micro, notification, vị trí, clipboard…) bị từ chối;
+  dashboard (mọi cách viết của loopback và tên máy, trên cổng của nó) bị chặn cả điều hướng lẫn
+  request. Paseo cho phép popup thật cho OAuth; ALP mở mọi `window.open` thành tab Browser không có
+  `window.opener`, nên đăng nhập kiểu popup có thể không xong.
+- Tab không ở phía trước được tải lại khi quay lại (Paseo giữ webview chạy nền). Xem
+  docs/alp/desktop.md §4.1.
+
 ## 2026-11-22: Dữ liệu Usage như Paseo; công tắc Check usage của host (t-9116)
 
 - **`daemon.usage` thêm field** (cộng thêm, `name` cũ không đổi): `windows[].id`/`label`, `planLabel`,
@@ -30,6 +44,7 @@ nhất trước. Mỗi mục nói cái gì đổi, ai bị ảnh hưởng, và v
   không ghim; nút refresh của từng thẻ làm mới mọi provider (`daemon.usage` chỉ có một `refresh`);
   không kéo đổi thứ tự thẻ, không dự báo nhịp dùng; "Summary in sidebar" là công tắc riêng của trình
   duyệt (Settings › Sidebar của ALP không có dòng Usage).
+
 
 ## 2026-11-21: Sidebar như Paseo: session dưới mọi workspace, diff/PR/CI, Schedules, usage (t-ff83)
 

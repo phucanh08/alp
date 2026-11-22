@@ -142,8 +142,9 @@ bản sao cục bộ, **chỉ** khi app chạy từ source (`app.isPackaged` là
 
 ## 4. Bảo mật của cửa sổ
 
-- `contextIsolation`, `sandbox`, không `nodeIntegration`, không preload, không `webview`;
-  `app.enableSandbox()`.
+- `contextIsolation`, `sandbox`, không `nodeIntegration`, không preload; `app.enableSandbox()`.
+  `webviewTag` bật chỉ cho cửa sổ dashboard, cho tab Browser (§4.1); mọi `webview` khác, ở bất kỳ
+  webContents nào, bị từ chối.
 - Chỉ điều hướng trong đúng origin của `alp-dashboard` (`will-navigate`, `will-frame-navigate`,
   `will-redirect`), ở cả frame chính lẫn subframe. Trang nội bộ (đang kết nối, lỗi, chưa cài) không
   được điều hướng đi đâu. Subframe `about:blank` và `about:srcdoc` bị từ chối như mọi đích khác (origin
@@ -166,6 +167,66 @@ bản sao cục bộ, **chỉ** khi app chạy từ source (`app.isPackaged` là
   mà main process chặn (`will-frame-navigate`, chỉ main frame) và đọc. Nonce là ngẫu nhiên, chỉ có trong
   địa chỉ của trang xác nhận đang hiện, dùng một lần; câu trả lời khác hoặc cũ bị bỏ qua. Trang vẫn không
   có preload hay Node.
+
+### 4.1 Tab Browser (t-9116)
+
+Menu "+" của workspace có **Browser** (icon quả địa cầu, sau Diff, như Paseo) **chỉ trong ALP.app**:
+main process thêm `ALPDesktop/1` vào user agent của cửa sổ dashboard và `apps/web` chỉ hiện mục này
+khi thấy nó. Dấu đó không phải quyền: ranh giới bảo mật là các chốt của main process
+(`apps/desktop/src/browser.ts`), không phải trang web. Ngoài ALP.app (trình duyệt thường) mục này không
+có, và một tab Browser đã lưu chỉ hiện "Only available in ALP.app".
+
+Một tab Browser là một `<webview>` trong cửa sổ dashboard, có Back, Forward, Reload và ô địa chỉ.
+Địa chỉ gõ vào được đọc như `normalizeBrowserUrl` của Paseo: `localhost`, IPv4 hay `[IPv6]` (có hoặc
+không có cổng) nhận `http://`, có scheme thì giữ, còn lại nhận `https://`; không có công cụ tìm kiếm
+(chữ có khoảng trắng bị từ chối). Kết quả phải là http, https hay `about:blank`. Mỗi workspace giữ
+tối đa 20 tab Browser với địa chỉ của chúng trong `alp-web:layout` (kiểm lại khi đọc; không bao giờ là
+địa chỉ hay fragment của dashboard).
+
+**Các chốt (main process, bất kể trang yêu cầu gì):**
+
+- `will-attach-webview` (mọi webContents): chỉ cửa sổ dashboard được gắn webview; partition phải là
+  `persist:alp-browser` (không bao giờ session mặc định, nơi dashboard và token của nó ở) và `src`
+  phải là http, https, `about:blank` hoặc trống, nếu không thì từ chối. Preferences bị ép: xóa
+  `preload`/`preloadURL`, `sandbox`, `contextIsolation`, không `nodeIntegration` (kể cả subframe và
+  worker), `webSecurity`, không `webviewTag`, DevTools tắt (mở DevTools bị đóng ngay).
+- Điều hướng của guest (`will-navigate`, `will-frame-navigate`, `will-redirect`; main frame và
+  subframe): chỉ http, https, `about:blank` (subframe còn được `about:srcdoc`, tài liệu inline của
+  iframe). Bị chặn: `file:`, `data:`, `javascript:`, `chrome:`, `devtools:`, `blob:` ở main frame,
+  `alp-page:`. Dashboard bị chặn dưới **mọi cách viết** trên cổng của nó: `127.0.0.0/8` (kể cả
+  `2130706433`, `0x7f.1`: URL parser viết lại thành `127.0.0.1`), `localhost` và `*.localhost`,
+  `[::1]`, `[::ffff:127.0.0.1]`, `0.0.0.0`, `[::]`, hostname của máy (`os.hostname()`, dạng trơn và
+  `.local`) và địa chỉ của các network interface. Cổng là mọi cổng dashboard đã có trong lần chạy này
+  (đổi khi dashboard khởi động lại; cổng mới được thêm lúc tải).
+- Lần tải do chính trang dashboard bắt đầu (`webview.loadURL`, đổi `src`) không phát các sự kiện
+  trên: `<webview>` nhờ main process gọi `loadURL` của guest, và hàm đó (đã bọc) từ chối mọi địa chỉ
+  ngoài quy tắc trên. Một điều hướng main frame vẫn lọt thì bị `stop()` ngay sau `did-start-navigation`
+  (gọi `stop()` ngay trong sự kiện làm Electron 44 crash), và partition trả 403 cho mọi `file:`
+  (`protocol.handle('file')`), bất kể lần tải bắt đầu từ đâu.
+- `session.webRequest.onBeforeRequest` trên partition `persist:alp-browser`: mọi request (fetch, XHR,
+  WebSocket, ảnh, iframe…) tới những host:cổng ấy bị hủy, cùng mọi request `file:`, `chrome:`,
+  `devtools:`; không chỉ điều hướng.
+- Quyền của partition (`setPermissionRequestHandler`, `setPermissionCheckHandler`,
+  `setDevicePermissionHandler`): từ chối hết. Download (`will-download`): bị hủy ở v1.
+- `window.open` / `target=_blank` từ guest: không bao giờ có cửa sổ. Main process từ chối cửa sổ và gửi
+  cho trang dashboard sự kiện `alp-desktop:browser-open` (`executeJavaScript` chỉ chứa dữ liệu JSON:
+  id webContents của guest và địa chỉ); tab Browser có guest đó mở một tab Browser mới trong cùng
+  workspace. Tối đa 5 lần mỗi 10 giây cho mỗi guest, và địa chỉ phải qua cùng chốt điều hướng.
+
+**Guest với tới được gì:** mọi trang http/https mà máy với tới được, kể cả server khác trên loopback
+(dev server của người dùng là mục đích chính), với cookie và storage riêng trong `persist:alp-browser`
+(giữ qua lần khởi động sau). Không: token, `localStorage`/`sessionStorage`/cookie của dashboard (khác
+session, khác origin), Node, preload, cửa sổ mới, quyền, file trên đĩa.
+
+**Rủi ro còn lại:**
+
+- Một XSS trong trang dashboard có thể tự tạo webview. Các chốt trên ép partition và bỏ preload, nên
+  một webview như vậy không mạnh hơn một iframe: nó vẫn không đọc được gì của dashboard.
+- DNS rebinding (một tên miền trỏ về `127.0.0.1`) vượt qua chốt theo tên host; gateway của dashboard
+  tự kiểm tra header `Host` (`apps/gateway/src/server.js`), và mọi request vẫn cần token.
+- Guest với tới các dịch vụ loopback khác của máy (không phải dashboard), như một trình duyệt thường.
+- Tab không ở phía trước bị gỡ khỏi DOM, nên quay lại tab thì trang được tải lại từ địa chỉ đã lưu
+  (Paseo giữ webview "resident").
 
 ## 5. Build và chạy từ source
 
@@ -242,8 +303,19 @@ HOME, TMPDIR; provider là `fake-codex.js` của `apps/web/e2e/support`:
 - một thao tác owner trong Settings: General › Agents' language đặt English, `settings.json` ghi lại,
   `alp language` đọc ra, vẫn còn sau khi tải lại trang.
 
+`apps/desktop/e2e/browser.spec.mjs` (t-9116) dựng host giống vậy (alpd thật, một project, không
+session, không provider) cùng một server http cục bộ của test, rồi kiểm tab Browser (§4.1): menu "+"
+có Browser sau Diff; tab tải trang cục bộ gõ không có scheme; guest ở `persist:alp-browser`, không
+preload, không đọc được token, storage, cookie, Node hay `window.top` của dashboard; điều hướng tới
+`file:`, `data:`, `chrome:`, `devtools:`, `blob:` và dashboard dưới mọi cách viết (kể cả qua redirect
+và iframe) bị chặn; fetch/XHR/WebSocket tới cổng dashboard bị `onBeforeRequest` hủy (fetch tới server
+của test thì đi); quyền bị từ chối, DevTools không mở, download bị hủy; `window.open` và
+`target=_blank` mở tab Browser mới, không bao giờ thêm cửa sổ; webview không partition, partition khác
+hay `src` `file:` bị từ chối, và preload bị bỏ. Với `ALP_DESKTOP_SHOTS=<thư mục>` test lưu hai ảnh
+chụp (menu "+" và tab Browser). Phía trình duyệt thường là `apps/web/e2e/browser-tab.spec.js`.
+
 Teardown dùng `defer` của `test/support/teardown.js`: đóng Electron (quá 15 giây thì SIGKILL), dừng
-host (với `owner.spec.mjs`: `alp dashboard --stop`, rồi `alp daemon stop`), rồi mới xóa thư mục. App chạy với `HOME` tạm.
+host (với `owner.spec.mjs` và `browser.spec.mjs`: `alp dashboard --stop`, rồi `alp daemon stop`), rồi mới xóa thư mục. App chạy với `HOME` tạm.
 
 ```sh
 npm ci && node scripts/build-workspace.mjs cli   # ở gốc repo
