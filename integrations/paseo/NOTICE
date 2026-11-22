@@ -6,6 +6,11 @@ Licensed under the Apache License, Version 2.0 (see LICENSE).
 Where a package's bundled files include third-party code, its
 THIRD-PARTY-NOTICES.txt names each package and reproduces its licence.
 
+apps/web/src/lib/file-icons.js copies file icon SVGs from material-icon-theme
+(https://github.com/material-extensions/vscode-material-icon-theme), MIT License,
+Copyright (c) 2025 Material Extensions, by way of Paseo (Apache License 2.0); the
+file reproduces the MIT permission notice.
+
 ---
 
 This package includes software from Paseo (https://github.com/getpaseo/paseo),
