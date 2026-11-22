@@ -319,6 +319,14 @@ phân biệt được trang của `alp dashboard` với bản tự phục vụ, 
 - Changes và Diff đọc Git của workspace qua gateway, chỉ đọc (`workspace.git.status`/`diff`, #121 G1;
   nội dung diff cần thêm `files.read`); Files liệt kê và đọc file text (`workspace.files.*`, cần
   `files.read`). Không commit, push hay sửa file.
+- Tab file hiện **ảnh** (t-a35b): file `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp` (không phân biệt hoa
+  thường) đọc qua `workspace.files.preview` (cần `files.read`; gateway thu hẹp về ảnh raster ≤ 1 MiB,
+  remote-gateway.md §5.10) và hiện bằng `<img src="data:…">`, header ghi dung lượng và kích thước
+  pixel (`3 × 2`). Copy path và Refresh vẫn chạy; ảnh không có Edit. Ảnh quá 1 MiB báo "too large";
+  byte trình duyệt không giải mã được báo "Binary preview unavailable" như trước. **SVG không bao giờ
+  được render** (có thể mang script): vẫn hiện như text. Host hay gateway cũ chưa có (`-32601`) thì
+  tab đọc file như trước. Token không có `files.read` giữ nguyên hành vi cũ. Host owner xem ảnh qua
+  `host.files.preview` (§4.8).
 - Panel Tasks liệt kê task và có form tạo task.
 - Bấm một task mở **tab chi tiết** ở cột giữa, gồm:
   - mô tả, handoff, closed;
@@ -477,7 +485,9 @@ các trang y như trước, kể cả thông báo Unavailable. Các method owner
 - **Files panel và Editor** (`host.files.list/read/write`): credential của dashboard **không** có
   `files.read` và không được nới; owner đọc qua `host.files.list/read` (alpd `workspace.files.list/read`
   trên kết nối của owner, sau khi handler kiểm projectRoot là workspace trong registry của alpd và
-  path tương đối, không `.`/`..`, không bị chặn). Mở file, bấm **Edit**, rồi **Save** (⌘/Ctrl+S).
+  path tương đối, không `.`/`..`, không bị chặn). Ảnh raster (png, jpg, jpeg, gif, webp; không SVG,
+  ≤ 1 MiB) đọc qua `host.files.preview` (alpd `workspace.files.preview` từ offset 0, cùng kiểm tra như
+  gateway, chỉ đọc, không Edit). Mở file, bấm **Edit**, rồi **Save** (⌘/Ctrl+S).
   `host.files.write` nằm ở handler của dashboard, không phải RPC mới của alpd: không đổi protocol, handler
   chạy bằng đúng user đó, alpd vẫn là nguồn danh tính workspace (`workspace.list`). Nó từ chối: path tuyệt
   đối, có `..`, thư mục trên đường đi là link (realpath phải trùng path), file là symlink hay hard link,

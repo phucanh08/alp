@@ -2,8 +2,8 @@ import * as React from 'react';
 import { Copy, Eye, FileCode, Pencil, RefreshCw } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Spinner } from '../components/ui/spinner';
-import { FileAccessError, describe, type Failure } from '../lib/errors.js';
-import { readOwnerFile, writeOwnerFile } from '../lib/owner-library.js';
+import { FILE_MESSAGES, FileAccessError, describe, type Failure } from '../lib/errors.js';
+import { previewImageType, previewOwnerImage, readOwnerFile, writeOwnerFile, type ImagePreview } from '../lib/owner-library.js';
 import { formatSize, isMarkdown, lineCount } from '../lib/file-tree.js';
 import { cn } from '../lib/utils';
 import { RichText } from './RichText';
@@ -20,8 +20,16 @@ import { useTabs } from './tabs';
  *
  * Markdown over PREVIEW_MAX_BYTES shows its source only.
  *
- * Deviations: no image or HTML preview, no live watch; it reads again when the tab comes back to
- * the front, or with Refresh.
+ * Images (t-a35b): a PNG, JPEG, GIF or WebP file (by extension, any case; previewImageType) is shown
+ * as an image, read through workspace.files.preview (files.read; host.files.preview on the owner's
+ * dashboard), at most 1 MiB, as an <img> from a data: URL of the checked raster MIME type, with its
+ * size and pixel dimensions in the header; bytes the browser cannot decode say "Binary preview
+ * unavailable", as before. SVG is never rendered: it stays text. A host or gateway
+ * without image previews (-32601) reads the file as before, so it says it is not text. Images are
+ * never edited.
+ *
+ * Deviations: no HTML preview, no live watch; it reads again when the tab comes back to the front,
+ * or with Refresh.
  *
  * Editing (t-a95b, docs/alp/dashboard.md §4.8): only on the host owner's own dashboard (state.owner),
  * which reads through host.files.read and saves through host.files.write. Edit turns the text into
@@ -34,7 +42,7 @@ const lineHeightFor = (codeFontSize: number) => Math.round(codeFontSize * 5 / 3)
 /** Markdown larger than this shows its source only: the preview parses every line on the main thread. */
 const PREVIEW_MAX_BYTES = 200 * 1024;
 
-type Read = { status: 'loading' } | { status: 'ready'; content: string; size: number; modifiedAt?: string } | { status: 'error'; failure: Failure };
+type Read = { status: 'loading' } | { status: 'ready'; content: string; size: number; modifiedAt?: string } | { status: 'image'; image: ImagePreview } | { status: 'error'; failure: Failure };
 
 const failureOf = (error: unknown): Failure => error instanceof FileAccessError ? error.failure : { message: error instanceof Error ? error.message : 'Something went wrong.', sent: 'unknown', terminal: false };
 
@@ -46,6 +54,8 @@ export function FileView({ path }: { path: string }) {
   const [includeIgnored, setIncludeIgnored] = React.useState(false);
   const [mode, setMode] = React.useState<'preview' | 'source'>(() => target?.line ? 'source' : 'preview');
   const [copied, setCopied] = React.useState(false);
+  // The drawn image's pixel size, for the content it was measured from (a newer read measures again).
+  const [measured, setMeasured] = React.useState<{ content: string; width: number; height: number } | null>(null);
   const [attempt, setAttempt] = React.useState(0);
   const scroller = React.useRef<HTMLDivElement>(null);
   const { preferences, workspace } = useAppState();
@@ -59,15 +69,27 @@ export function FileView({ path }: { path: string }) {
 
   React.useEffect(() => {
     let live = true;
-    setRead(current => current.status === 'ready' ? current : { status: 'loading' });
-    (owner && workspace ? readOwnerFile(controller, workspace, { path, includeIgnored }) : controller.readWorkspaceFile({ path, includeIgnored })).then(
+    setRead(current => current.status === 'ready' || current.status === 'image' ? current : { status: 'loading' });
+    const readText = () => (owner && workspace ? readOwnerFile(controller, workspace, { path, includeIgnored }) : controller.readWorkspaceFile({ path, includeIgnored })).then(
       result => { if (live) setRead({ status: 'ready', content: result.content, size: result.size, ...(result.modifiedAt ? { modifiedAt: result.modifiedAt } : {}) }); },
       error => { if (live) setRead({ status: 'error', failure: failureOf(error) }); },
+    );
+    if (!previewImageType(path)) { void readText(); return () => { live = false; }; }
+    (owner && workspace ? previewOwnerImage(controller, workspace, { path, includeIgnored }) : controller.previewWorkspaceImage({ path, includeIgnored })).then(
+      image => { if (live) setRead({ status: 'image', image }); },
+      error => {
+        if (!live) return;
+        const failure = failureOf(error);
+        // A host or gateway without image previews: the file reads as it always did.
+        if (failure.code === -32601) void readText();
+        else setRead({ status: 'error', failure });
+      },
     );
     return () => { live = false; };
   }, [controller, owner, workspace, path, includeIgnored, attempt]);
   // Another file or workspace: any draft is dropped.
   React.useEffect(() => { setDraft(null); setSaveError(null); }, [path, workspace]);
+  const dimensions = read.status === 'image' && measured?.content === read.image.content ? measured : null;
 
   const editing = draft !== null && read.status === 'ready';
   const save = async () => {
@@ -108,6 +130,8 @@ export function FileView({ path }: { path: string }) {
         <span className="min-w-0 flex-1 truncate font-mono text-(length:--code-font-size) text-foreground" title={path} data-testid="file-view-path">{path}</span>
         {read.status === 'ready' ? (
           <span data-testid="file-view-meta">{formatSize(read.size)} · {lines} {lines === 1 ? 'line' : 'lines'}</span>
+        ) : read.status === 'image' ? (
+          <span data-testid="file-view-meta">{formatSize(read.image.size)}{dimensions ? ` · ${dimensions.width} × ${dimensions.height}` : ''}</span>
         ) : null}
         {markdown && read.status === 'ready' ? (
           <span className="flex rounded-md border border-border p-0.5" role="group" aria-label="View">
@@ -134,6 +158,13 @@ export function FileView({ path }: { path: string }) {
           className="min-h-0 flex-1 resize-none bg-background p-4 font-mono text-(length:--code-font-size) text-foreground outline-none" style={{ lineHeight: `${LINE_HEIGHT}px` }} data-testid="file-view-editor" />
       ) : read.status === 'loading' ? (
         <div className="flex flex-1 items-center justify-center" data-testid="file-view-loading"><Spinner label="Reading the file…" /></div>
+      ) : read.status === 'image' ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-background p-4" data-testid="file-view-image">
+          <img src={`data:${read.image.mimeType};base64,${read.image.content}`} alt={path} draggable={false}
+            onLoad={event => { const content = read.image.content; setMeasured({ content, width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); }}
+            onError={() => setRead({ status: 'error', failure: { message: FILE_MESSAGES.binary, reason: 'binary', sent: 'yes', terminal: true } })}
+            className="max-h-full max-w-full object-contain [image-rendering:auto]" data-testid="file-view-image-img" />
+        </div>
       ) : read.status === 'error' ? (
         <FileError failure={read.failure} onRetry={refresh} onShowIgnored={() => setIncludeIgnored(true)} />
       ) : !showSource ? (
@@ -161,7 +192,7 @@ export function FileView({ path }: { path: string }) {
 
 /** Why the file cannot be shown: Paseo's binary and too-large states; otherwise the reason and Retry. */
 function FileError({ failure, onRetry, onShowIgnored }: { failure: Failure; onRetry: () => void; onShowIgnored: () => void }) {
-  const finalState = failure.reason === 'binary' || failure.reason === 'too_large' || failure.reason === 'blocked_path' || failure.reason === 'grant' || failure.reason === 'capability';
+  const finalState = failure.reason === 'binary' || failure.reason === 'too_large' || failure.reason === 'blocked_path' || failure.reason === 'grant' || failure.reason === 'capability' || failure.reason === 'not_image';
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center" data-testid="file-view-error" data-reason={failure.reason ?? ''}>
       <p className="max-w-sm text-sm text-muted-foreground" role={finalState ? 'note' : 'alert'}>{failure.message}</p>
