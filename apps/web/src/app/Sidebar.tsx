@@ -567,7 +567,7 @@ export function Sidebar({ onNewSession, onRename, onArchive, onSettings, onShort
     items.push({ id: 'rename', label: 'Rename', icon: <Pencil aria-hidden />, onSelect: () => onRename(session), testId: 'sidebar-workspace-menu-rename' });
     if (attentionReason(state, session.id)) {
       items.push({ id: 'mark-as-read', label: 'Mark as read', icon: <CircleCheck aria-hidden />, onSelect: () => controller.markRead(session.id), testId: 'sidebar-workspace-menu-mark-as-read' });
-    } else if (controller.canMarkUnread && online && session.status !== 'running' && session.status !== 'closed' && !session.busy && !needsInput(state, session.id)) {
+    } else if (controller.canMarkUnread && online && session.status !== 'running' && !session.busy && !needsInput(state, session.id)) {
       items.push({ id: 'mark-as-unread', label: 'Mark as unread', icon: <Circle aria-hidden />, onSelect: () => void controller.markUnread(session.id), testId: 'sidebar-workspace-menu-mark-as-unread' });
     }
     // The host's own file manager: only the owner's ALP.app on the host itself, by the workspace's id.

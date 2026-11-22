@@ -254,6 +254,42 @@ test('shared attention: an acknowledgement the host refuses shows the attention 
   assert.equal(one.state().turnAttention.ses_b, undefined, 'not brought back over the newer word of the host');
 });
 
+// t-747e: Paseo's Mark as unread on the session in front stays until the user looks at it again,
+// through the host's attention event and a later watch read (reconnect); Mark as read clears it.
+test('Mark as unread: the session in front keeps it through events and a re-list until the next look; Mark as read clears it', async t => {
+  const w = setup(t);
+  w.host.capabilities.push(...SHARED, 'session.attention.mark');
+  w.host.seed('ses_a', { title: 'Alpha' });
+  w.host.seed('ses_b', { title: 'Bee' });
+  await connected(w);
+  await until(() => watchCalls(w.host).length >= 1, 'watched');
+  assert.ok(w.controller.canMarkUnread);
+  w.controller.selectSession('ses_b');
+  await w.controller.markUnread('ses_b');
+  await until(() => attentionReason(w.state(), 'ses_b') === 'finished', 'unread');
+  await settle();
+  assert.equal(w.host.calls.filter(call => call.method === 'session.attention.clear').length, 0, 'not acknowledged while in front');
+  // A re-list (the watch read after a reconnect) keeps it too.
+  w.host.drop();
+  await until(() => w.state().connection.phase === 'open' && watchCalls(w.host).length >= 2, 'reconnected and watched');
+  await settle();
+  assert.equal(attentionReason(w.state(), 'ses_b'), 'finished');
+  assert.equal(w.host.root('ses_b').summary.attention?.reason, 'finished');
+  // The next look clears it for every client.
+  w.controller.selectSession('ses_b');
+  await until(() => w.host.root('ses_b').summary.attention === undefined, 'cleared on the host');
+  // A second session marked, then read from the menu.
+  await w.controller.markUnread('ses_a');
+  await until(() => attentionReason(w.state(), 'ses_a') === 'finished', 'ses_a unread');
+  w.controller.markRead('ses_a');
+  await until(() => w.host.root('ses_a').summary.attention === undefined && attentionReason(w.state(), 'ses_a') === undefined, 'ses_a read');
+  // A refused mark (already unread) keeps nothing: a later look clears as before.
+  await w.controller.markUnread('ses_a');
+  await until(() => attentionReason(w.state(), 'ses_a') === 'finished', 'ses_a unread again');
+  await w.controller.markUnread('ses_a');
+  assert.equal(w.host.calls.filter(call => call.method === 'session.attention.mark').length, 4);
+});
+
 test('shared attention: a turn that ended while the page was disconnected asks once it is back', async t => {
   const w = setup(t);
   w.host.capabilities.push(...SHARED);
