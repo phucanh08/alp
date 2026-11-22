@@ -50,3 +50,50 @@ test('Browser is offered only in ALP.app; elsewhere a kept Browser tab says so',
   await expect(page.getByTestId('workspace-pane-new-tab-diff')).toBeVisible();
   await plain.close();
 });
+
+test('an address submitted before the Browser tab guest is ready loads once it is (t-a876)', async ({ browser }) => {
+  // ALP.app's <webview> as the page sees it: loadURL throws, synchronously, until the guest has
+  // emitted dom-ready. On a slow start (a cold machine) a user types an address before then.
+  const marked = await browser.newContext({ userAgent: 'Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/140 Safari/537.36 ALPDesktop/1', viewport: { width: 1440, height: 900 } });
+  await marked.addInitScript(() => {
+    const views = [];
+    window.__loads = [];
+    window.__thrown = 0;
+    const create = Document.prototype.createElement;
+    Document.prototype.createElement = function (name, options) {
+      const element = create.call(this, name, options);
+      if (String(name).toLowerCase() !== 'webview') return element;
+      let ready = false;
+      Object.assign(element, {
+        loadURL(url) {
+          if (!ready) { window.__thrown += 1; throw new Error('The WebView must be attached to the DOM and the dom-ready event emitted before this method can be called.'); }
+          window.__loads.push(url);
+          return Promise.resolve();
+        },
+        getWebContentsId: () => 7, canGoBack: () => false, canGoForward: () => false,
+        __ready() { ready = true; element.dispatchEvent(new Event('dom-ready')); },
+      });
+      views.push(element);
+      return element;
+    };
+    window.__readyAll = () => { for (const view of views) if (view.isConnected) view.__ready(); };
+  });
+  const desktop = await marked.newPage();
+  await connect(desktop, world);
+  await desktop.getByRole('button', { name: 'New tab' }).click();
+  await desktop.getByRole('menuitem', { name: 'Browser' }).click();
+  const address = desktop.getByTestId('browser-address');
+  await address.fill('127.0.0.1:5173/early');
+  await address.press('Enter');
+  // Not loaded, not thrown, not refused: it waits for the guest.
+  await expect(desktop.getByTestId('browser-error')).toHaveCount(0);
+  expect(await desktop.evaluate(() => [window.__loads, window.__thrown])).toEqual([[], 0]);
+  await desktop.evaluate(() => window.__readyAll());
+  await expect.poll(() => desktop.evaluate(() => window.__loads)).toEqual(['http://127.0.0.1:5173/early']);
+  // Once ready, an address loads at once.
+  await address.fill('127.0.0.1:5173/later');
+  await address.press('Enter');
+  await expect.poll(() => desktop.evaluate(() => window.__loads)).toEqual(['http://127.0.0.1:5173/early', 'http://127.0.0.1:5173/later']);
+  expect(await desktop.evaluate(() => window.__thrown)).toBe(0);
+  await marked.close();
+});

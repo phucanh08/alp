@@ -61,6 +61,17 @@ function DesktopBrowser({ id }: { id: string }) {
   const [error, setError] = React.useState<string | null>(null);
   const keep = React.useRef({ setBrowserUrl, openBrowser });
   keep.current = { setBrowserUrl, openBrowser };
+  /**
+   * Whether the guest has emitted dom-ready, before which <webview>.loadURL throws (synchronously,
+   * not as a rejected promise); an address submitted before then waits in `pending` and loads at
+   * dom-ready. On a slow start (a cold machine) a user can type an address first (t-a876).
+   */
+  const attached = React.useRef(false);
+  const pending = React.useRef<string | null>(null);
+  const load = React.useCallback((webview: Webview, url: string) => {
+    const refused = () => setError(`${url} is blocked in Browser or did not load.`);
+    try { webview.loadURL(url).catch(refused); } catch { refused(); }
+  }, []);
 
   React.useEffect(() => {
     const container = host.current;
@@ -75,6 +86,8 @@ function DesktopBrowser({ id }: { id: string }) {
     webview.setAttribute('data-testid', 'browser-webview');
     webview.className = 'flex size-full';
     let guest: number | undefined;
+    attached.current = false;
+    pending.current = null;
     const sync = () => {
       try { setHistory({ back: webview.canGoBack(), forward: webview.canGoForward() }); } catch { /* not attached yet */ }
     };
@@ -95,6 +108,10 @@ function DesktopBrowser({ id }: { id: string }) {
     };
     const ready = () => {
       try { guest = webview.getWebContentsId(); } catch { guest = undefined; }
+      attached.current = true;
+      const url = pending.current;
+      pending.current = null;
+      if (url !== null) load(webview, url);
       sync();
     };
     const start = () => setLoading(true);
@@ -117,9 +134,11 @@ function DesktopBrowser({ id }: { id: string }) {
     return () => {
       window.removeEventListener(OPEN_EVENT, opened);
       view.current = null;
+      attached.current = false;
+      pending.current = null;
       webview.remove();
     };
-  }, [id]);
+  }, [id, load]);
 
   const go = (event: React.FormEvent) => {
     event.preventDefault();
@@ -128,7 +147,10 @@ function DesktopBrowser({ id }: { id: string }) {
     setError(null);
     setAddress(result.url === BLANK_URL ? '' : result.url);
     // The main process refuses what a Browser tab may not show (file:, the dashboard itself…).
-    view.current?.loadURL(result.url).catch(() => setError(`${result.url} is blocked in Browser or did not load.`));
+    const webview = view.current;
+    if (!webview) return;
+    if (attached.current) load(webview, result.url);
+    else pending.current = result.url;
   };
 
   const act = (run: (webview: Webview) => void) => () => { const webview = view.current; if (webview) try { run(webview); } catch { /* not attached */ } };
