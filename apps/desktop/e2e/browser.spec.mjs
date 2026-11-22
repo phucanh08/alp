@@ -27,7 +27,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { connect as hostConnect } from '@anhlp/alp-client';
 import { fixtureProcesses } from '../../../test/support/fixture-processes.js';
-import { APP, cleanEnv, connectedTo, freePort, launch, scratch, waitFor } from './support.mjs';
+import { APP, bounded, cleanEnv, connectedTo, freePort, launch, scratch, waitFor } from './support.mjs';
 
 const ROOT = path.resolve(APP, '..', '..');
 const CLI = path.join(ROOT, 'packages/cli/dist/cli.js');
@@ -94,10 +94,12 @@ async function localSite(context) {
 }
 
 /** The Browser tab guests: id and address. */
-const guests = app => app.evaluate(({ webContents }) => webContents.getAllWebContents().filter(contents => contents.getType() === 'webview' && !contents.isDestroyed()).map(contents => ({ id: contents.id, url: contents.getURL() })));
+const guests = app => bounded('listing the Browser tab guests', app.evaluate(({ webContents }) => webContents.getAllWebContents().filter(contents => contents.getType() === 'webview' && !contents.isDestroyed()).map(contents => ({ id: contents.id, url: contents.getURL() }))));
 /** Runs `code` in guest `id` (as a user gesture, so window.open and permission prompts are honest). */
-const inGuest = (app, id, code) => app.evaluate(({ webContents }, [guest, script]) => webContents.fromId(guest).executeJavaScript(script, true), [id, code]);
-const windowCount = app => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+const inGuest = (app, id, code) => bounded(`running ${code.slice(0, 80)} in guest ${id}`, app.evaluate(({ webContents }, [guest, script]) => webContents.fromId(guest).executeJavaScript(script, true), [id, code]));
+const windowCount = app => bounded('counting windows', app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length));
+/** What every guest is doing, for a failure report: a step stuck on a guest shows here. */
+const guestStates = app => bounded('reading the guest states', app.evaluate(({ webContents }) => webContents.getAllWebContents().filter(contents => contents.getType() === 'webview').map(contents => contents.isDestroyed() ? { destroyed: true } : { id: contents.id, url: contents.getURL(), loading: contents.isLoading(), waiting: contents.isWaitingForResponse(), crashed: contents.isCrashed(), focused: contents.isFocused() })), 5_000);
 const capture = async (app, file) => {
   const png = await app.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].capturePage()).toPNG().toString('base64'));
   await writeFile(file, Buffer.from(png, 'base64'));
@@ -108,21 +110,40 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   const host = await browserHost(context);
   const site = await localSite(context);
   const app = await launch(t, context, host.wrapper);
+  // Which step the test reached: logged as it goes, and reported with the guests and the app's output
+  // when the test ends before its last step (registered after launch, so it runs before the app closes).
+  let reached = 'launch';
+  const step = what => { reached = what; console.log(`# browser.spec ${new Date().toISOString()} ${what}`); };
+  context.defer(async () => {
+    if (reached === 'done') return;
+    const states = await guestStates(app).catch(error => error.message);
+    t.diagnostic(`browser.spec stopped at: ${reached}\nguests: ${JSON.stringify(states)}\napp output:\n${app.alpOutput().slice(-8_000)}`);
+  });
+  step('waiting for dashboard.json');
   const info = await waitFor(async () => {
     const value = JSON.parse(await readFile(path.join(host.home, 'dashboard.json'), 'utf8'));
     return value?.port ? value : undefined;
   }, 'alp dashboard to write dashboard.json', 90_000);
   const dashboard = `http://127.0.0.1:${info.port}`;
+  step('waiting for the window to connect');
   await connectedTo(app, dashboard, 90_000);
   const page = app.windows()[0];
+  page.setDefaultTimeout(30_000);
+  // No evaluate in the app's main process or in the dashboard page may hang the test without a word.
+  const appEvaluate = app.evaluate.bind(app);
+  app.evaluate = (fn, arg) => bounded(`a main-process evaluate during ${reached}`, appEvaluate(fn, arg));
+  const pageEvaluate = page.evaluate.bind(page);
+  page.evaluate = (fn, arg) => bounded(`a dashboard page evaluate during ${reached}`, pageEvaluate(fn, arg));
   await page.emulateMedia({ colorScheme: 'dark' });
   const shots = process.env.ALP_DESKTOP_SHOTS;
   if (shots) await mkdir(shots, { recursive: true });
 
+  step('connected; checking the dashboard page');
   // The marker is in the dashboard window's user agent; the page holds its token.
   assert.match(await page.evaluate(() => navigator.userAgent), /ALPDesktop\/1/);
   assert.equal(await page.evaluate(() => sessionStorage.getItem('alp-web:link-token') !== null), true);
 
+  step('the + menu');
   // The + menu offers Browser after Diff.
   await page.getByTestId('project-row').first().waitFor({ timeout: 60_000 });
   const newTab = page.getByRole('button', { name: 'New tab' });
@@ -133,6 +154,7 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   if (shots) await capture(app, path.join(shots, 'plus-menu-browser.png'));
   await page.getByRole('menuitem', { name: 'Browser' }).click();
 
+  step('(1) loading the local page');
   // (1) The tab loads a local http page typed without a scheme (127.x gets http://).
   const address = page.getByTestId('browser-address');
   await address.fill(`${site.origin.replace('http://', '')}/page`);
@@ -144,6 +166,7 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   await sleep(300);
   if (shots) await capture(app, path.join(shots, 'browser-tab-local-page.png'));
 
+  step('(2) partition and isolation');
   // (2) Its own partition, and nothing of the dashboard's: no token, storage, cookies, Node or parent.
   const where = await app.evaluate(({ webContents, session }, id) => {
     const contents = webContents.fromId(id);
@@ -154,6 +177,7 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   const seen = await inGuest(app, guest.id, `JSON.stringify({ local: localStorage.length, session: sessionStorage.length, cookie: document.cookie, top: window.top === window, parent: window.parent === window, require: typeof require, process: typeof process, token: document.documentElement.outerHTML.includes('alpgw1') || location.href.includes('token') })`);
   assert.deepEqual(JSON.parse(seen), { local: 0, session: 0, cookie: '', top: true, parent: true, require: 'undefined', process: 'undefined', token: false });
 
+  step('(3) navigation guards');
   // (3) Navigation, top level and redirects: only http/https/about:blank, never the dashboard in any spelling.
   const hostname = os.hostname().toLowerCase();
   const bare = hostname.replace(/\.local$/, '');
@@ -174,6 +198,7 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   const probeLog = () => app.evaluate(() => globalThis.browserProbe);
   const blocked = ['file:///etc/hosts', 'data:text/html,<p>x</p>', 'chrome://version', 'devtools://devtools/bundled/inspector.html', ...dashboardSpellings, `${site.origin}/redirect?to=${encodeURIComponent(`http://localhost:${info.port}/`)}`];
   for (const target of blocked) {
+    step(`(3) navigation to ${target}`);
     await inGuest(app, guest.id, `location.href = ${JSON.stringify(target)}; 'ok'`).catch(() => undefined);
     await sleep(400);
     const now = (await guests(app)).find(entry => entry.id === guest.id)?.url;
@@ -182,24 +207,29 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   const log = await probeLog();
   assert.deepEqual(log.failed.filter(entry => entry.code === -20), [], 'a navigation reached the request guard: the navigation guard did not stop it');
   assert.ok(log.redirects.every(url => !url.includes(`:${info.port}`)), `a redirect to the dashboard was followed: ${log.redirects}`);
+  step('(3) blob: navigation');
   // blob: top level too.
   await inGuest(app, guest.id, `location.href = URL.createObjectURL(new Blob(['<p>x</p>'], { type: 'text/html' })); 'ok'`).catch(() => undefined);
   await sleep(400);
   assert.equal((await guests(app))[0].url, pageUrl, 'a blob: page was not blocked');
+  step('(3) iframe to the dashboard');
   // Frames: an iframe pointed at the dashboard never shows it.
   await inGuest(app, guest.id, `const f = document.createElement('iframe'); f.id = 'probe'; f.src = ${JSON.stringify(`http://localhost:${info.port}/`)}; document.body.append(f); 'ok'`);
   await sleep(800);
   const frames = await app.evaluate(({ webContents }, id) => webContents.fromId(id).mainFrame.frames.map(frame => ({ url: frame.url, origin: frame.origin })), guest.id);
   assert.ok(!frames.some(frame => frame.origin === `http://localhost:${info.port}`), JSON.stringify(frames));
+  step('(3) webview.loadURL from the dashboard page');
   // Loads the dashboard page starts itself (webview.loadURL, as an XSS there could) emit no
   // will-navigate: they are stopped when they start, and file: is refused by the partition.
   for (const target of ['file:///etc/hosts', 'chrome://version', 'devtools://devtools/bundled/inspector.html', `http://localhost:${info.port}/`, `http://[::1]:${info.port}/`, 'data:text/html,<p>x</p>']) {
+    step(`(3) loadURL ${target}`);
     await page.evaluate(url => document.querySelector('[data-testid="browser-webview"]').loadURL(url).catch(() => undefined), target);
     await sleep(600);
     const now = (await guests(app)).find(entry => entry.id === guest.id)?.url;
     assert.equal(now, pageUrl, `a load of ${target} from the dashboard page was not stopped (guest at ${now})`);
   }
   assert.equal(await inGuest(app, guest.id, 'document.getElementById("title")?.textContent ?? null'), 'Local page');
+  step('(3) address bar refusals');
   // The address bar refuses file: and says why; the dashboard's address is refused by the main process.
   await address.fill('file:///etc/hosts');
   await address.press('Enter');
@@ -209,6 +239,7 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   await waitFor(async () => /blocked/.test(await page.getByTestId('browser-error').innerText().catch(() => '')), 'the address bar to say the dashboard is blocked');
   assert.equal((await guests(app))[0].url, pageUrl);
 
+  step('(4) requests to the dashboard port');
   // (4) Requests: fetch, XHR and WebSocket to the dashboard's port are cancelled by onBeforeRequest
   // (no-cors fetch resolves whenever a request went out; the control request to the site does).
   const probe = target => inGuest(app, guest.id, `fetch(${JSON.stringify(target)}, { mode: 'no-cors' }).then(() => 'sent', () => 'blocked')`);
@@ -219,6 +250,7 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   const socket = await inGuest(app, guest.id, `new Promise(resolve => { const s = new WebSocket(${JSON.stringify(`ws://127.0.0.1:${info.port}/`)}); s.onopen = () => resolve('open'); s.onerror = () => resolve('blocked'); })`);
   assert.equal(socket, 'blocked');
 
+  step('(5) permissions');
   // (5) Permissions are denied; devtools stay shut; downloads are cancelled.
   assert.equal(await inGuest(app, guest.id, 'Notification.requestPermission()'), 'denied');
   // The dashboard page may show notifications (t-0166); its Browser tabs still may not.
@@ -227,8 +259,10 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   assert.equal(await inGuest(app, guest.id, `navigator.permissions.query({ name: 'geolocation' }).then(s => s.state)`), 'denied');
   assert.equal(await inGuest(app, guest.id, `navigator.mediaDevices.getUserMedia({ audio: true }).then(() => 'granted', () => 'denied')`), 'denied');
   assert.equal(await inGuest(app, guest.id, `navigator.clipboard.readText().then(() => 'granted', () => 'denied')`), 'denied');
+  step('(5) devtools');
   const devtools = await app.evaluate(async ({ webContents }, id) => { const contents = webContents.fromId(id); contents.openDevTools(); await new Promise(resolve => setTimeout(resolve, 500)); return contents.isDevToolsOpened(); }, guest.id);
   assert.equal(devtools, false);
+  step('(5) download');
   await inGuest(app, guest.id, `location.href = '/download'; 'ok'`);
   await waitFor(() => site.hits.includes('/download'), 'the download request');
   await sleep(800);
@@ -236,6 +270,7 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   assert.deepEqual(await readdir(downloads).catch(() => []), [], 'nothing was downloaded');
   assert.equal((await guests(app))[0].url, pageUrl);
 
+  step('(6) window.open');
   // (6) window.open and target=_blank: new Browser tabs in the workspace, never a window.
   await inGuest(app, guest.id, `window.open(${JSON.stringify(`${site.origin}/page2`)}); 'ok'`);
   await waitFor(async () => (await page.locator('[data-tab^="browser:"]').count()) === 2, 'a second Browser tab');
@@ -250,6 +285,7 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   assert.equal(await page.locator('[data-tab^="browser:"]').count(), 3);
   assert.equal(await windowCount(app), 1);
 
+  step('(7) page-made webviews');
   // (7) A <webview> the page makes itself: another partition, no partition or a file: src is refused;
   // a preload is dropped (the preload would mark the document).
   const preload = path.join(context.dir, 'preload.js');
@@ -279,6 +315,7 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   await page.evaluate(() => { for (const view of document.querySelectorAll('webview[data-probe]')) view.remove(); });
   assert.equal(await windowCount(app), 1);
 
+  step('(8) keys in a Browser tab');
   // (8) t-0166: ⌘W pressed in a Browser tab's page closes that tab (the dashboard's key), not the
   // window; ⌘C stays the page's.
   if (process.platform === 'darwin') {
@@ -314,4 +351,5 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
     const workspaceTabs = page.getByTestId('workspace-tab');
     await waitFor(async () => (await workspaceTabs.first().getAttribute('aria-selected')) === 'true', 'the first tab to be shown', 10_000);
   }
+  step('done');
 });
