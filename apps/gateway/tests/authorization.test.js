@@ -74,6 +74,8 @@ const OUT_OF_SCOPE = {
   'session.release': () => [{ sessionId: 'sb' }, 1001],
   'session.attention.clear': () => [{ sessionId: 'sb' }, 1001],
   'session.attention.mark': () => [{ sessionId: 'sb' }, 1001],
+  'session.update': () => [{ sessionId: 'sb', pinned: true }, 1001],
+  'label.list': null, // the host's label catalogue: names and colours, as catalog.get (label projection test)
   'session.preview': ({ b }) => [{ spec: { cwd: b } }, 1003, 'outside_workspace'],
   'question.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
   'question.watch': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
@@ -136,7 +138,7 @@ const IN_SCOPE = ({ a }) => ({
   'workspace.files.list': { projectRoot: a }, 'workspace.files.read': { projectRoot: a, path: 'README.md' },
   'session.create': { spec: { cwd: a } }, 'session.prompt': { sessionId: 'sa', clientMessageId: 'm', content: text },
   'session.interrupt': { sessionId: 'sa' }, 'session.configure': { sessionId: 'sa' }, 'session.close': { sessionId: 'sa' },
-  'session.rename': { sessionId: 'sa', title: 't' }, 'session.archive': { sessionId: 'sa' }, 'session.attention.mark': { sessionId: 'sa' }, 'session.message': { sessionId: 'sa', text: 'x' },
+  'session.rename': { sessionId: 'sa', title: 't' }, 'session.archive': { sessionId: 'sa' }, 'session.attention.mark': { sessionId: 'sa' }, 'session.update': { sessionId: 'sa', pinned: true }, 'label.list': {}, 'session.message': { sessionId: 'sa', text: 'x' },
   'session.fork': { sessionId: 'sa', requestId: 'r', ifGeneration: '0'.repeat(32) }, 'session.rewind': { sessionId: 'sa', requestId: 'r', ifGeneration: '0'.repeat(32), beforeTurnId: 't' },
   'session.reload': { sessionId: 'sa', requestId: 'r', ifGeneration: '0'.repeat(32) }, 'session.resumeCommand': { sessionId: 'sa' }, 'session.commands': { sessionId: 'sa' },
   'session.compact': { sessionId: 'sa' },
@@ -194,7 +196,7 @@ test('the exposure matrix agrees with the daemon\'s x-alp annotations', t => {
   // session.create's exec risk (spec.env, stdio spec.mcpServers) is removed by the spec allow-list,
   // which 'session.create: spec fields are allow-listed' below proves.
   // Host-level reads the gateway exposes on purpose: static catalogues and the user's language.
-  const hostReads = new Set(['catalog.get', 'library.models', 'settings.language.get']);
+  const hostReads = new Set(['catalog.get', 'library.models', 'settings.language.get', 'label.list']);
   for (const [method, entry] of annotated) {
     const { effect, scope, risks = [] } = entry['x-alp'];
     const exposure = EXPOSURE[method];
@@ -474,6 +476,36 @@ test('session.attention.mark: Mark as unread needs session.write and a root in t
   assert.deepEqual(await client.request('session.attention.mark', { sessionId: 'sa' }), { marked: false }, 'already asks');
   await assert.rejects(client.request('session.attention.mark', { sessionId: 'sb' }), error => error.code === 1001, 'outside the grant');
   assert.equal(daemon.state.sessions.get('sb').attention, undefined, 'untouched');
+});
+
+test('session.update: Pin to top and labels need session.write and a root in the grant; only its params reach alpd; the answer is { session }; label.list is names and colours', async t => {
+  const { daemon, sdk } = await world(t);
+  const reader = (await sdk('reader')).client;
+  const mark = daemon.calls().length;
+  await assert.rejects(reader.request('session.update', { sessionId: 'sa', pinned: true }), error => error.code === 1003, 'a reader may not pin');
+  assert.deepEqual(reached(daemon, mark, 'session.update'), [], 'nothing reached alpd');
+  assert.deepEqual(await reader.request('label.list', {}), { labels: [{ name: 'Bug', color: 'red' }] }, 'a reader lists the catalogue, projected');
+  const { client } = await sdk('alice');
+  const updated = await client.request('session.update', { sessionId: 'sa', pinned: true, labels: ['Bug'], projectRoot: '/elsewhere', sessionIds: ['sb'] });
+  assert.deepEqual(Object.keys(updated), ['session'], 'projected: nothing else alpd answers');
+  assert.equal(updated.session.id, 'sa');
+  assert.match(updated.session.pinnedAt, /^\d{4}-/);
+  assert.deepEqual(updated.session.labels, ['Bug']);
+  assert.deepEqual(daemon.calls('session.update').at(-1).params, { sessionId: 'sa', pinned: true, labels: ['Bug'] });
+  // The row shows them on session.get and session.list too.
+  assert.deepEqual((await client.request('session.get', { sessionId: 'sa' })).session.labels, ['Bug']);
+  assert.equal((await client.request('session.list', {})).sessions.find(s => s.id === 'sa').pinnedAt, updated.session.pinnedAt);
+  await assert.rejects(client.request('session.update', { sessionId: 'sb', pinned: true }), error => error.code === 1001, 'outside the grant');
+  assert.equal(daemon.state.sessions.get('sb').pinnedAt, undefined, 'untouched');
+  const cleared = await client.request('session.update', { sessionId: 'sa', pinned: false, labels: [] });
+  assert.deepEqual([cleared.session.pinnedAt, cleared.session.labels], [undefined, undefined]);
+});
+
+test('session.meta is offered only when alpd lists it', async t => {
+  const plain = await startGateway(t, { daemon: fakeDaemon({ sessions: [summary('sa', process.cwd())] }), credentials: { alice: { workspaces: [process.cwd()] } } });
+  assert.ok(!(await plain.sdk('alice')).hello.capabilities.includes('session.meta'));
+  const meta = await startGateway(t, { daemon: fakeDaemon({ capabilities: ['session.meta'], sessions: [summary('sa', process.cwd())] }), credentials: { alice: { workspaces: [process.cwd()] } } });
+  assert.ok((await meta.sdk('alice')).hello.capabilities.includes('session.meta'));
 });
 
 test('session.attention through a gateway to an alpd without it: not offered, and the watch works as before', async t => {

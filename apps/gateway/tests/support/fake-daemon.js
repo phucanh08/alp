@@ -117,6 +117,16 @@ export function fakeDaemon({ sessions = [], questions = [], capabilities = ['att
       return { session: found };
     },
     'session.rename': ({ sessionId, title }) => { const found = state.sessions.get(sessionId); found.title = title; return { session: found }; },
+    // As alpd (capability session.meta): a root's pin and catalogue labels; extra fields to prove the projection.
+    'session.update': ({ sessionId, pinned, labels }) => {
+      const found = state.sessions.get(sessionId);
+      if (!found) throw error(1001, `No session ${sessionId}`);
+      if (found.parentId) throw error(-32602, 'Only a root session can be renamed or archived');
+      if (pinned !== undefined) found.pinnedAt = pinned ? found.pinnedAt ?? new Date().toISOString() : undefined;
+      if (labels !== undefined) found.labels = labels.length ? labels : undefined;
+      return { session: found, secret: '/host/path' };
+    },
+    'label.list': () => ({ labels: [{ name: 'Bug', color: 'red', workspaces: ['/host/path'] }, { name: 7, color: 'sky' }], registry: '/host/registry.json' }),
     'session.archive': ({ sessionId, archived = true }) => { const found = state.sessions.get(sessionId); found.archived = archived; return { session: found }; },
     'question.list': ({ projectRoot }) => ({ questions: state.questions.filter(question => projectRoot === undefined || state.sessions.get(question.rootId)?.projectRoot === projectRoot) }),
     'question.watch': ({ projectRoot, turns, attention }, link) => {
