@@ -68,6 +68,39 @@ test('browser: saved tabs are checked and capped', () => {
   assert.deepEqual(parseBrowsers('nope'), []);
 });
 
+test('browser: saved tabs never hold the dashboard itself, nor any #fragment', () => {
+  const own = 'http://127.0.0.1:7433';
+  assert.deepEqual(parseBrowsers([
+    { id: 'b1', url: 'http://127.0.0.1:7433/#token=secret' },
+    { id: 'b2', url: 'http://127.0.0.1:7433/v1/tickets' },
+    { id: 'b3', url: 'http://127.0.0.1:3000/app#/route?x=1' },
+    { id: 'b4', url: 'https://example.com/a?b=1#c' },
+    { id: 'b5', url: 'http://localhost:7433/' },
+    { id: 'b6', url: 'about:blank' },
+  ], own), [
+    { id: 'b3', url: 'http://127.0.0.1:3000/app' },
+    { id: 'b4', url: 'https://example.com/a?b=1' },
+    { id: 'b5', url: 'http://localhost:7433/' },
+    { id: 'b6', url: 'about:blank' },
+  ]);
+  // Without an origin of its own (no location, as in node), only the fragment goes.
+  assert.deepEqual(parseBrowsers([{ id: 'b1', url: 'http://127.0.0.1:7433/#token=secret' }]), [{ id: 'b1', url: 'http://127.0.0.1:7433/' }]);
+});
+
+test('browser: saving drops the dashboard tab and fragments too', () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  Object.defineProperty(globalThis, 'location', { value: { origin: 'http://127.0.0.1:7433' }, configurable: true });
+  try {
+    const layout = { workspaces: { w: { tasks: [], panels: [], order: [], browsers: [{ id: 'b1', url: 'http://127.0.0.1:7433/#token=secret' }, { id: 'b2', url: 'https://example.com/#x' }], at: 1 } } };
+    const saved = serializeLayout(/** @type {any} */ (layout));
+    assert.ok(!saved.includes('secret') && !saved.includes('7433') && !saved.includes('#'), saved);
+    assert.deepEqual(JSON.parse(saved).workspaces.w.browsers, [{ id: 'b2', url: 'https://example.com/' }]);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'location', previous);
+    else delete (/** @type {any} */ (globalThis)).location;
+  }
+});
+
 test('browser: layout keeps Browser tabs with their addresses, and nothing else', () => {
   const raw = JSON.stringify({ v: 1, workspaces: { w: { tasks: [], panels: [], order: ['browser:b1'], active: 'browser:b1', browsers: [{ id: 'b1', url: 'http://localhost:3000/', title: 'x' }, { id: 'b2', url: 'file:///etc/passwd' }], at: 1 } } });
   const layout = parseLayout(raw);
