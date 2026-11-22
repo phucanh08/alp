@@ -18,7 +18,7 @@ import { isPageUrl, PAGE_SCHEME, pageUrl, resolvePage } from './pages';
 import { readSettings } from './settings';
 import { confirmAction, confirmQuery, homeWarning, installArgs, installEnv, installFailure, installPlan, installSource, installWarnings, latestRelease, type InstallPlan } from './install';
 import { run } from './run';
-import { BROWSER_PARTITION, OpenRequests, isAllowedGuestNavigation, isAllowedGuestRequest, isBrowsableUrl, localHosts, markUserAgent, openEventScript, prepareWebview, type DashboardTarget } from './browser';
+import { BROWSER_PARTITION, OpenRequests, dashboardPort, isAllowedGuestNavigation, isAllowedGuestRequest, isBrowsableUrl, localHosts, markUserAgent, openEventScript, prepareWebview, type DashboardTarget } from './browser';
 import type { DashboardAddress } from './url';
 
 let win: BrowserWindow | undefined;
@@ -96,7 +96,8 @@ function loadRemote(window: BrowserWindow, address: DashboardAddress) {
   allowedOrigin = address.origin;
   shownAddress = address;
   remoteLoad = id;
-  try { dashboardPorts.add(Number(new URL(address.origin).port)); } catch { /* validated by url.ts */ }
+  const port = dashboardPort(address.origin);
+  if (port !== undefined) dashboardPorts.add(port);
   committed = false;
   // Only the fragment differs (alp dashboard rotated its token on the same port): Chromium navigates within
   // the page, and apps/web reads the token only when it loads, so the page is reloaded after it.

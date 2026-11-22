@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   BROWSER_PARTITION, DESKTOP_MARKER, OPEN_EVENT, OpenRequests, isAllowedGuestNavigation, isAllowedGuestRequest, isBrowsableUrl,
-  isDashboardUrl, localHosts, markUserAgent, openEventScript, prepareWebview,
+  dashboardPort, isDashboardUrl, localHosts, markUserAgent, openEventScript, prepareWebview,
 } from '../src/browser';
 
 const hosts = localHosts('Anh-MacBook.local', { en0: [{ address: '192.168.1.20', family: 'IPv4' } as never, { address: 'fe80::1%en0', family: 'IPv6' } as never] });
@@ -32,6 +32,24 @@ describe('isDashboardUrl', () => {
   });
   test('default ports count', () => {
     expect(isDashboardUrl('http://localhost/', { ports: new Set([80]), hosts })).toBe(true);
+  });
+  test.each([
+    'http://[::ffff:127.0.0.5]:7433/', 'http://[::ffff:7f00:1]:7433/', 'http://[::ffff:7f01:203]:7433/', 'http://[0:0:0:0:0:ffff:127.1.2.3]:7433/',
+    'http://[::ffff:7fff:ffff]:7433/', 'http://[::127.0.0.1]:7433/', 'http://[::7f00:1]:7433/', 'http://[::ffff:0:0]:7433/',
+    'http://[::ffff:192.168.1.20]:7433/', 'http://[::ffff:c0a8:114]:7433/',
+  ])('an IPv4-mapped or -compatible loopback or local address is the dashboard: %s', target => expect(isDashboardUrl(target, dashboard)).toBe(true));
+  test.each(['http://[::ffff:8.8.8.8]:7433/', 'http://[::ffff:7f00:1]:7434/', 'http://[2001:db8::7f00:1]:7433/'])('a mapped address elsewhere is not: %s', target => {
+    expect(isDashboardUrl(target, dashboard)).toBe(false);
+  });
+});
+
+describe('dashboardPort', () => {
+  test('the explicit port, else the scheme default; never 0', () => {
+    expect(dashboardPort('http://127.0.0.1:7433')).toBe(7433);
+    expect(dashboardPort('http://127.0.0.1')).toBe(80);
+    expect(dashboardPort('https://localhost')).toBe(443);
+    expect(dashboardPort('http://127.0.0.1:80')).toBe(80);
+    for (const origin of ['', 'garbage', 'file:///x', 'alp-page://app']) expect(dashboardPort(origin)).toBeUndefined();
   });
 });
 
@@ -88,6 +106,31 @@ describe('prepareWebview', () => {
     [{ src: 'data:text/html,x', partition: BROWSER_PARTITION }],
     [{ src: 'http://127.0.0.1:7433/x', partition: 'persist:other' }],
   ])('refuses %o', params => expect(prepareWebview({}, params as never)).toBe(false));
+  test('keeps only allowlisted preferences: a hostile page sets nothing else', () => {
+    const prefs: Record<string, unknown> = {
+      enableBlinkFeatures: 'FileSystemAccess', disableBlinkFeatures: 'X', additionalArguments: ['--remote-debugging-port=1'], javascript: false,
+      nativeWindowOpen: true, safeDialogs: false, experimentalFeatures: true, allowRunningInsecureContent: true, webviewTag: true, plugins: true,
+      enableWebSQL: true, nodeIntegrationInWorker: true, disablePopups: true, partition: 'persist:other', session: {}, zoomFactor: 1.5,
+      v8CacheOptions: 'none', backgroundThrottling: false, offscreen: true, spellcheck: true, scrollBounce: true, unknownFutureKey: 'x',
+    };
+    const params: Record<string, unknown> = {
+      src: 'https://example.com/', partition: BROWSER_PARTITION, allowpopups: 'true', webpreferences: 'nodeIntegration=yes,contextIsolation=no',
+      disablewebsecurity: 'true', nodeintegration: 'true', nodeintegrationinsubframes: 'true', preload: 'file:///tmp/evil.js', plugins: 'true',
+      blinkfeatures: 'X', enableblinkfeatures: 'X', disableblinkfeatures: 'Y',
+    };
+    expect(prepareWebview(prefs, params)).toBe(true);
+    expect(prefs).toEqual({
+      partition: BROWSER_PARTITION, sandbox: true, contextIsolation: true, nodeIntegration: false, nodeIntegrationInSubFrames: false,
+      nodeIntegrationInWorker: false, webSecurity: true, allowRunningInsecureContent: false, webviewTag: false, devTools: false, plugins: false,
+      experimentalFeatures: false, enableWebSQL: false, javascript: true, safeDialogs: true, disablePopups: false, zoomFactor: 1.5,
+    });
+    expect(params).toEqual({ src: 'https://example.com/', partition: BROWSER_PARTITION, allowpopups: 'true' });
+  });
+  test.each([0, -1, Number.NaN, Infinity, '2', null])('drops a zoomFactor that is not a positive number: %p', zoomFactor => {
+    const prefs: Record<string, unknown> = { zoomFactor };
+    expect(prepareWebview(prefs, { partition: BROWSER_PARTITION })).toBe(true);
+    expect('zoomFactor' in prefs).toBe(false);
+  });
   test('accepts about:blank and no src', () => {
     expect(prepareWebview({}, { src: 'about:blank', partition: BROWSER_PARTITION })).toBe(true);
     expect(prepareWebview({}, { partition: BROWSER_PARTITION })).toBe(true);
