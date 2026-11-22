@@ -978,7 +978,9 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   /** A root's labels still in the catalog, in its spelling; a deleted label leaves every session at once. */
   function labelsOf(record: SessionRecord | undefined): { labels?: string[] } {
     if (!record?.labels?.length) return {};
-    const labels = labelCatalog ? record.labels.flatMap(name => labelCatalog!.get(name.toLowerCase())?.name ?? []) : record.labels;
+    // Strings only: a record edited by hand never breaks every summary of its session.
+    const names = record.labels.filter((name): name is string => typeof name === 'string');
+    const labels = labelCatalog ? names.flatMap(name => labelCatalog!.get(name.toLowerCase())?.name ?? []) : names;
     return labels.length ? { labels } : {};
   }
   /** Session label writes and the follow-up of a catalog rename or delete, one at a time. */
@@ -995,9 +997,16 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       for (const record of records.values()) {
         if (!record.labels?.some(name => name.toLowerCase() === key)) continue;
         const next = [...new Map(record.labels.flatMap(name => name.toLowerCase() === key ? (newName ? [newName] : []) : [name]).map(name => [name.toLowerCase(), name])).values()];
+        const before = record.labels;
         record.labels = next.length ? next : undefined;
-        try { await store?.put(record); }
-        catch (error) { log.warn('could not keep a session\'s labels after a catalog change', { code: 'ALPD_SESSION_LABELS_FAILED', sessionId: record.id, error }); }
+        // Once more on a failed write; then memory goes back to what the disk holds, so the session
+        // shows after a restart what it shows now: a renamed label it could not keep is gone from it
+        // either way (labelsOf hides a name the catalog no longer has), never there until a restart.
+        let saved = false;
+        for (let attempt = 0; attempt < 2 && !saved; attempt++) {
+          try { await store?.put(record); saved = true; }
+          catch (error) { if (attempt === 1) { record.labels = before; log.error('could not keep a session\'s labels after a catalog change; the label is no longer shown on it', { code: 'ALPD_SESSION_LABELS_FAILED', sessionId: record.id, error }); } }
+        }
       }
     });
   }

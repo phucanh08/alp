@@ -152,6 +152,24 @@ test('a session.update that cannot be saved fails with persistence_failed and ch
   assert.equal(after.labels, undefined);
 });
 
+test('a catalog rename whose session write fails leaves the session as its disk has it, before and after a restart', async t => {
+  const { project, start, breakSessions } = await setup(t);
+  let daemon = await start();
+  await catalog(daemon, project, [{ name: 'Bug', color: 'red' }, { name: 'Idea', color: 'teal' }]);
+  const { session } = await daemon.request('session.create', { spec: { cwd: project, workflow: 'pho', persist: true } });
+  await daemon.request('session.update', { sessionId: session.id, labels: ['Bug', 'Idea'] });
+  const undo = await breakSessions();
+  try {
+    const { registry } = await daemon.request('registry.owner', {});
+    await daemon.request('registry.owner', { operation: 'label.update', args: { name: 'Bug', newName: 'Defect' }, ifRevision: registry.revision, requestId: 'rename-broken' });
+    // The write failed twice: memory went back to the disk's ['Bug', 'Idea'], and Bug is no longer in the catalog.
+    assert.deepEqual((await daemon.request('session.get', { sessionId: session.id })).session.labels, ['Idea']);
+  } finally { await undo(); }
+  await daemon.stop();
+  daemon = await start();
+  assert.deepEqual((await daemon.request('session.get', { sessionId: session.id })).session.labels, ['Idea'], 'the same after a restart');
+});
+
 test('a case-only rename shows the new spelling; a replayed delete leaves a label created again under that name', async t => {
   const { project, start } = await setup(t);
   const daemon = await start();
