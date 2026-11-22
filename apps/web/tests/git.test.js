@@ -161,3 +161,36 @@ test('labels: branch line, base, counts, comparisons and request paths', () => {
   assert.deepEqual([gitRequestPath('./a/b.ts'), gitRequestPath('.git/config'), gitRequestPath('/etc/passwd'), gitRequestPath('')], ['a/b.ts', undefined, undefined, undefined]);
   assert.equal(describeGitError({ code: 1003, message: 'x', data: { reason: 'grant', permission: 'project.read' } }).message, GIT_MESSAGES.projectRead);
 });
+
+test('splitRows pairs a run of removals with the additions after it, context on both sides, hunks across (t-a35b)', async () => {
+  const { splitRows } = await import('../src/lib/git.js');
+  const rows = diffRows({ path: 'a.ts', change: 'modified', kind: 'text', additions: 3, deletions: 2, hunks: [{ oldStart: 1, oldCount: 4, newStart: 1, newCount: 5, lines: [
+    { type: 'context', content: 'keep' }, { type: 'remove', content: 'old1' }, { type: 'remove', content: 'old2' }, { type: 'add', content: 'new1' }, { type: 'add', content: 'new2' }, { type: 'add', content: 'new3' }, { type: 'context', content: 'tail' },
+  ] }] });
+  const pairs = splitRows(rows);
+  assert.equal(pairs[0].type, 'hunk');
+  assert.deepEqual(pairs[1], { type: 'pair', old: { type: 'context', text: 'keep', line: 1 }, new: { type: 'context', text: 'keep', line: 1 } });
+  assert.deepEqual(pairs[2], { type: 'pair', old: { type: 'remove', text: 'old1', line: 2 }, new: { type: 'add', text: 'new1', line: 2 } });
+  assert.deepEqual(pairs[3], { type: 'pair', old: { type: 'remove', text: 'old2', line: 3 }, new: { type: 'add', text: 'new2', line: 3 } });
+  assert.deepEqual(pairs[4], { type: 'pair', new: { type: 'add', text: 'new3', line: 4 } });
+  assert.deepEqual(pairs[5], { type: 'pair', old: { type: 'context', text: 'tail', line: 4 }, new: { type: 'context', text: 'tail', line: 5 } });
+  // An addition before a removal does not pair with it: order is kept.
+  const reversed = splitRows([{ type: 'add', text: 'a', newLine: 1 }, { type: 'remove', text: 'r', oldLine: 1 }]);
+  assert.deepEqual(reversed, [{ type: 'pair', new: { type: 'add', text: 'a', line: 1 } }, { type: 'pair', old: { type: 'remove', text: 'r', line: 1 } }]);
+});
+
+test('formatReviewComments groups by file in line order and quotes each line (t-a35b)', async () => {
+  const { formatReviewComments, REVIEW_LIMITS } = await import('../src/lib/git.js');
+  const text = formatReviewComments([
+    { path: 'src/b.ts', side: 'new', line: 9, excerpt: 'const b = 1;', text: 'rename b' },
+    { path: 'src/a.ts', side: 'new', line: 3, excerpt: 'x', text: '  second  ' },
+    { path: 'src/a.ts', side: 'old', line: 1, excerpt: 'gone', text: 'why removed?' },
+  ], 'Uncommitted');
+  assert.equal(text, [
+    'Review comments on the diff (Uncommitted). Please address each one:',
+    '', '## src/a.ts', '', 'Line 1 (removed line, old numbering):', '> gone', 'why removed?', '', 'Line 3:', '> x', 'second',
+    '', '## src/b.ts', '', 'Line 9:', '> const b = 1;', 'rename b',
+  ].join('\n'));
+  const long = formatReviewComments([{ path: 'a', side: 'new', line: 1, excerpt: 'y'.repeat(REVIEW_LIMITS.maxExcerptLength + 5), text: 't' }]);
+  assert.match(long, new RegExp(`> y{${REVIEW_LIMITS.maxExcerptLength}}…`));
+});

@@ -1,8 +1,9 @@
 import * as React from 'react';
-import { ChevronRight, FileDiff, GitBranch, GitCompareArrows, Lock, RefreshCw, Space } from 'lucide-react';
+import { ChevronRight, Columns2, FileDiff, GitBranch, GitCompareArrows, Lock, MessageSquarePlus, RefreshCw, Rows2, Send, Space, Trash2 } from 'lucide-react';
 import type { GitDiffFile, GitStatus, GitStatusFile } from '@anhlp/alp-protocol';
 import { LINE_LIMIT, clipLines } from '../lib/tool-calls.js';
-import { CHANGE_LABELS, CHANGE_LETTERS, GIT_ERROR_MESSAGES, GIT_MODES, KIND_MESSAGES, appendDiffPage, baseLabel, branchLine, describeGitError, diffRows, diffTotals, formatDiffCount, restartsDiff, type DiffView } from '../lib/git.js';
+import { CHANGE_LABELS, CHANGE_LETTERS, GIT_ERROR_MESSAGES, GIT_MODES, KIND_MESSAGES, REVIEW_LIMITS, appendDiffPage, baseLabel, branchLine, describeGitError, diffRows, diffTotals, formatDiffCount, formatReviewComments, restartsDiff, splitRows, type DiffView } from '../lib/git.js';
+import { can } from '../lib/gateway.js';
 import { cn } from '../lib/utils';
 import { useAppState, useController } from './store';
 
@@ -15,14 +16,26 @@ import { useAppState, useController } from './store';
  * Binary, too large, withheld, symlink and submodule files say so instead of hunks. A token
  * without files.read sees the status (paths, no content). Commit, push, pull, merge and branch
  * switching are not offered: the note says they stay on the host.
+ *
+ * t-a35b (Paseo parity batch 4): Unified or Split (side by side) layout, remembered in this
+ * browser; and review comments: a comment on any diff line (either layout), kept in this page for
+ * the workspace, sent together as one message to the open session's agent (Send to agent), through
+ * the composer's path (sendPrompt: the token's session.write and mode limits apply). Nothing is
+ * written to the workspace.
  */
 
 type Mode = 'uncommitted' | 'base' | 'staged' | 'unstaged';
-type ViewState = { mode: Mode; ignoreWhitespace: boolean; focus: string | null; focusScope: string };
+type Layout = 'unified' | 'split';
+type ViewState = { mode: Mode; ignoreWhitespace: boolean; focus: string | null; focusScope: string; layout: Layout };
 
-/** The view both panels share (mode, whitespace, the file Changes asked Diff to show), as Paseo's changes preferences. */
+/** Where the layout is remembered (this browser only). */
+const LAYOUT_KEY = 'alp.diff.layout';
+const savedLayout = (): Layout => { try { return globalThis.localStorage?.getItem(LAYOUT_KEY) === 'split' ? 'split' : 'unified'; } catch { return 'unified'; } };
+const saveLayout = (layout: Layout) => { try { globalThis.localStorage?.setItem(LAYOUT_KEY, layout); } catch { /* private mode: this page only */ } };
+
+/** The view both panels share (mode, whitespace, the file Changes asked Diff to show, layout), as Paseo's changes preferences. */
 const view = (() => {
-  let state: ViewState = { mode: 'uncommitted', ignoreWhitespace: false, focus: null, focusScope: '' };
+  let state: ViewState = { mode: 'uncommitted', ignoreWhitespace: false, focus: null, focusScope: '', layout: savedLayout() };
   const listeners = new Set<() => void>();
   return {
     get: () => state,
@@ -34,6 +47,38 @@ const useView = () => React.useSyncExternalStore(view.subscribe, view.get, view.
 
 /** The file the Diff panel shows (Changes' "Open in Diff"), for the workspace `scope` names only; null for every file. */
 function focusDiff(path: string | null, scope = '') { view.set({ focus: path, focusScope: scope }); }
+
+/** A review comment on one diff line: the side's numbering (old for a removed line), the line quoted. */
+type ReviewComment = { id: string; path: string; side: 'old' | 'new'; line: number; excerpt: string; text: string };
+type ReviewDraft = { path: string; side: 'old' | 'new'; line: number; excerpt: string };
+
+/**
+ * The review comments of each workspace (by panel scope: connection, workspace, registry id), in
+ * this page only, shared by Changes and Diff; one comment being written at a time.
+ */
+const review = (() => {
+  let state: { comments: Record<string, ReviewComment[]>; draft: (ReviewDraft & { scope: string }) | null } = { comments: {}, draft: null };
+  const listeners = new Set<() => void>();
+  const set = (next: Partial<typeof state>) => { state = { ...state, ...next }; for (const listener of [...listeners]) listener(); };
+  let counter = 0;
+  return {
+    get: () => state,
+    subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    draft(scope: string, draft: ReviewDraft | null) { set({ draft: draft ? { ...draft, scope } : null }); },
+    add(scope: string, comment: Omit<ReviewComment, 'id'>) {
+      const list = state.comments[scope] ?? [];
+      if (list.length >= REVIEW_LIMITS.maxComments) return false;
+      set({ comments: { ...state.comments, [scope]: [...list, { ...comment, id: `c${++counter}` }] }, draft: null });
+      return true;
+    },
+    remove(scope: string, id: string) { set({ comments: { ...state.comments, [scope]: (state.comments[scope] ?? []).filter(comment => comment.id !== id) } }); },
+    clear(scope: string, ids?: string[]) { set({ comments: { ...state.comments, [scope]: ids ? (state.comments[scope] ?? []).filter(comment => !ids.includes(comment.id)) : [] } }); },
+  };
+})();
+const useReview = () => React.useSyncExternalStore(review.subscribe, review.get, review.get);
+
+/** What a diff file's rows need to take comments: the panel's scope, whether comments may be written. */
+const ReviewContext = React.createContext<{ scope: string; enabled: boolean }>({ scope: '', enabled: false });
 
 /** How long after the last load a page coming back (focus, visibility) loads again. */
 const REFRESH_AFTER_MS = 15_000;
@@ -130,36 +175,203 @@ function DiffStat({ additions, deletions, testId }: { additions: number; deletio
 const ROW: Record<string, string> = { add: 'bg-[rgba(46,160,67,0.15)]', remove: 'bg-[rgba(248,81,73,0.15)]', context: '', hunk: 'bg-muted/60 text-muted-foreground' };
 const SIGN: Record<string, string> = { add: '+', remove: '-', context: ' ' };
 
-/** One file's hunks, Paseo's unified diff with old and new line numbers; at most LINE_LIMIT rows until asked for more. */
-function Hunks({ file }: { file: GitDiffFile }) {
+/** The comment button of a diff line, shown on hover or focus (when comments may be written). */
+function CommentButton({ path, side, line, excerpt }: { path: string; side: 'old' | 'new'; line: number; excerpt: string }) {
+  const { scope, enabled } = React.useContext(ReviewContext);
+  if (!enabled) return null;
+  return (
+    <button type="button" aria-label={`Comment on ${side === 'old' ? 'removed ' : ''}line ${line}`} title="Add a review comment" data-testid="git-line-comment" data-side={side} data-line={line}
+      onClick={() => review.draft(scope, { path, side, line, excerpt })}
+      className={cn('absolute left-0.5 top-0 flex size-[1.5em] items-center justify-center rounded text-highlight opacity-0 hover:bg-secondary focus-visible:opacity-100 group-hover/line:opacity-100 [&_svg]:size-3.5', focusRing)}>
+      <MessageSquarePlus aria-hidden />
+    </button>
+  );
+}
+
+/** The comments on one line, and the editor when that line's comment is being written. */
+function LineComments({ path, side, line }: { path: string; side: 'old' | 'new'; line: number }) {
+  const { scope } = React.useContext(ReviewContext);
+  const state = useReview();
+  const comments = (state.comments[scope] ?? []).filter(comment => comment.path === path && comment.side === side && comment.line === line);
+  const draft = state.draft && state.draft.scope === scope && state.draft.path === path && state.draft.side === side && state.draft.line === line ? state.draft : null;
+  if (!comments.length && !draft) return null;
+  return (
+    <div className="sticky left-0 w-[min(100%,40rem)] px-3 py-1 font-sans" data-testid="git-line-comments" data-side={side} data-line={line}>
+      {comments.map(comment => <CommentCard key={comment.id} comment={comment} />)}
+      {draft ? <CommentEditor draft={draft} /> : null}
+    </div>
+  );
+}
+
+function CommentCard({ comment }: { comment: ReviewComment }) {
+  const { scope } = React.useContext(ReviewContext);
+  return (
+    <div className="mb-1 flex items-start gap-2 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground" data-testid="git-comment" data-path={comment.path} data-side={comment.side} data-line={comment.line}>
+      <p className="min-w-0 flex-1 whitespace-pre-wrap break-words" data-testid="git-comment-text">{comment.text}</p>
+      <button type="button" className={cn(tool, 'size-6')} aria-label="Delete comment" title="Delete comment" onClick={() => review.remove(scope, comment.id)} data-testid="git-comment-delete"><Trash2 aria-hidden /></button>
+    </div>
+  );
+}
+
+function CommentEditor({ draft }: { draft: ReviewDraft }) {
+  const { scope } = React.useContext(ReviewContext);
+  const controller = useController();
+  const [text, setText] = React.useState('');
+  const field = React.useRef<HTMLTextAreaElement>(null);
+  React.useEffect(() => { field.current?.focus({ preventScroll: false }); }, []);
+  const add = () => {
+    const value = text.trim();
+    if (!value) return;
+    if (!review.add(scope, { ...draft, text: value.slice(0, REVIEW_LIMITS.maxCommentLength) })) controller.notify('error', `At most ${REVIEW_LIMITS.maxComments} review comments; send or delete some first.`);
+  };
+  return (
+    <div className="mb-1 rounded-md border border-ring bg-background p-1.5" data-testid="git-comment-editor">
+      <textarea ref={field} value={text} onChange={event => setText(event.target.value)} rows={3} maxLength={REVIEW_LIMITS.maxCommentLength}
+        aria-label={`Comment on ${draft.path} line ${draft.line}`} placeholder="Leave a comment for the agent"
+        onKeyDown={event => {
+          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); add(); }
+          else if (event.key === 'Escape') { event.preventDefault(); review.draft(scope, null); }
+        }}
+        className="block w-full resize-y rounded bg-transparent p-1 text-xs text-foreground outline-none placeholder:text-muted-foreground" data-testid="git-comment-input" />
+      <div className="mt-1 flex justify-end gap-1">
+        <button type="button" className="rounded-md px-2 py-0.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground" onClick={() => review.draft(scope, null)} data-testid="git-comment-cancel">Cancel</button>
+        <button type="button" disabled={!text.trim()} className="rounded-md bg-primary px-2 py-0.5 text-xs text-primary-foreground disabled:opacity-50" onClick={add} data-testid="git-comment-add">Add comment</button>
+      </div>
+    </div>
+  );
+}
+
+/** Comments of this file whose line is no longer shown (the diff changed since). */
+function OutdatedComments({ path, rows }: { path: string; rows: ReturnType<typeof diffRows> }) {
+  const { scope } = React.useContext(ReviewContext);
+  const state = useReview();
+  const shown = new Set<string>();
+  for (const row of rows) {
+    if (row.type === 'hunk') continue;
+    if (row.type !== 'add' && row.oldLine !== undefined) shown.add(`old:${row.oldLine}`);
+    if (row.type !== 'remove' && row.newLine !== undefined) shown.add(`new:${row.newLine}`);
+  }
+  // A context line's comment is anchored on its new side; a removed line's on its old side.
+  const outdated = (state.comments[scope] ?? []).filter(comment => comment.path === path && !shown.has(`${comment.side}:${comment.line}`));
+  if (!outdated.length) return null;
+  return (
+    <div className="px-3 py-1 font-sans text-xs text-muted-foreground" data-testid="git-comments-outdated">
+      <p className="mb-1">Comments on lines no longer in this diff (still sent):</p>
+      {outdated.map(comment => <CommentCard key={comment.id} comment={comment} />)}
+    </div>
+  );
+}
+
+/** One file's hunks, Paseo's unified or split diff with old and new line numbers; at most LINE_LIMIT rows until asked for more. */
+function Hunks({ file, layout }: { file: GitDiffFile; layout: Layout }) {
   const rows = React.useMemo(() => diffRows(file), [file]);
   const [limit, setLimit] = React.useState(LINE_LIMIT);
   const { shown, hidden } = clipLines(rows, limit);
+  const pairs = React.useMemo(() => layout === 'split' ? splitRows(shown) : [], [layout, shown]);
   if (file.kind !== 'text') return <p className="px-3 py-2 text-xs text-muted-foreground" data-testid="git-file-kind" data-kind={file.kind}>{KIND_MESSAGES[file.kind]}</p>;
   if (!rows.length && file.change === 'renamed' && file.oldPath) return <p className="px-3 py-2 text-xs text-muted-foreground" data-testid="git-file-rename">Renamed {file.oldPath} → {file.path}</p>;
   if (!rows.length) return <p className="px-3 py-2 text-xs text-muted-foreground" data-testid="git-file-empty">No changes to display</p>;
   const width = String(Math.max(0, ...rows.map(row => ('oldLine' in row ? Math.max(row.oldLine ?? 0, row.newLine ?? 0) : 0)))).length;
   const gutter = (value: number | undefined) => <span aria-hidden className="shrink-0 select-none pr-2 text-right text-muted-foreground tabular-nums" style={{ minWidth: `${width + 1}ch` }}>{value ?? ''}</span>;
-  return (
-    <div className="overflow-auto bg-card font-mono text-(length:--code-font-size) leading-[1.5] text-foreground" data-testid="git-hunks">
-      <div className="min-w-max py-1">
-        {shown.map((row, index) => row.type === 'hunk' ? (
-          <div key={index} className={cn('whitespace-pre px-3', ROW.hunk)} data-diff="hunk">{row.text}</div>
-        ) : (
-          <div key={index} className={cn('flex whitespace-pre px-3', ROW[row.type])} data-diff={row.type}>
-            {gutter(row.oldLine)}{gutter(row.newLine)}
-            <span aria-hidden className={cn('w-[2ch] shrink-0 select-none', row.type === 'add' ? 'text-dot-success' : row.type === 'remove' ? 'text-destructive' : 'text-muted-foreground')}>{SIGN[row.type]}</span>
-            <span>{row.text || ' '}</span>
-            {row.noNewline ? <span className="ml-2 select-none text-muted-foreground" title="No newline at end of file">⏎̸</span> : null}
-          </div>
-        ))}
+  const more = hidden ? (
+    <button type="button" data-testid="git-hunks-more" onClick={() => setLimit(value => value + LINE_LIMIT)}
+      className="sticky left-0 block px-3 py-1.5 font-sans text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+      {`Show ${Math.min(hidden, LINE_LIMIT)} more line${Math.min(hidden, LINE_LIMIT) === 1 ? '' : 's'}`}{hidden > LINE_LIMIT ? ` (${hidden} hidden)` : ''}
+    </button>
+  ) : null;
+  const outdated = <OutdatedComments path={file.path} rows={shown} />;
+  if (layout === 'split') {
+    type Cell = { type: 'remove' | 'add' | 'context'; text: string; line: number; noNewline?: boolean } | undefined;
+    const cell = (value: Cell, side: 'old' | 'new') => (
+      <div className={cn('group/line relative flex min-w-0 whitespace-pre pl-6 pr-3', value ? ROW[value.type] : 'bg-muted/30')} data-diff={value?.type ?? 'empty'} data-side={side}>
+        {value ? <>
+          {/* A context line is commented once, on its new numbering (the right column). */}
+          {value.type !== 'context' || side === 'new' ? <CommentButton path={file.path} side={side} line={value.line} excerpt={value.text} /> : null}
+          {gutter(value.line)}
+          <span aria-hidden className={cn('w-[2ch] shrink-0 select-none', value.type === 'add' ? 'text-dot-success' : value.type === 'remove' ? 'text-destructive' : 'text-muted-foreground')}>{SIGN[value.type]}</span>
+          <span className="min-w-0 overflow-hidden text-ellipsis">{value.text || ' '}</span>
+          {value.noNewline ? <span className="ml-2 select-none text-muted-foreground" title="No newline at end of file">⏎̸</span> : null}
+        </> : ' '}
       </div>
-      {hidden ? (
-        <button type="button" data-testid="git-hunks-more" onClick={() => setLimit(value => value + LINE_LIMIT)}
-          className="sticky left-0 block px-3 py-1.5 font-sans text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-          {`Show ${Math.min(hidden, LINE_LIMIT)} more line${Math.min(hidden, LINE_LIMIT) === 1 ? '' : 's'}`}{hidden > LINE_LIMIT ? ` (${hidden} hidden)` : ''}
-        </button>
-      ) : null}
+    );
+    return (
+      <div className="overflow-auto bg-card font-mono text-(length:--code-font-size) leading-[1.5] text-foreground" data-testid="git-hunks" data-layout="split">
+        {outdated}
+        <div className="py-1">
+          {pairs.map((row, index) => row.type === 'hunk' ? (
+            <div key={index} className={cn('whitespace-pre px-3', ROW.hunk)} data-diff="hunk">{row.text}</div>
+          ) : (
+            <React.Fragment key={index}>
+              <div className="grid grid-cols-2 divide-x divide-border/60" data-testid="git-split-row">{cell(row.old, 'old')}{cell(row.new, 'new')}</div>
+              {row.old && row.old.type === 'remove' ? <LineComments path={file.path} side="old" line={row.old.line} /> : null}
+              {row.new ? <LineComments path={file.path} side="new" line={row.new.line} /> : null}
+            </React.Fragment>
+          ))}
+        </div>
+        {more}
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-auto bg-card font-mono text-(length:--code-font-size) leading-[1.5] text-foreground" data-testid="git-hunks" data-layout="unified">
+      {outdated}
+      <div className="min-w-max py-1">
+        {shown.map((row, index) => {
+          if (row.type === 'hunk') return <div key={index} className={cn('whitespace-pre px-3', ROW.hunk)} data-diff="hunk">{row.text}</div>;
+          // A removed line is commented on its old numbering; an added or context line on its new one.
+          const side = row.type === 'remove' ? 'old' : 'new';
+          const line = (side === 'old' ? row.oldLine : row.newLine) as number;
+          return (
+            <React.Fragment key={index}>
+              <div className={cn('group/line relative flex whitespace-pre pl-6 pr-3', ROW[row.type])} data-diff={row.type}>
+                <CommentButton path={file.path} side={side} line={line} excerpt={row.text} />
+                {gutter(row.oldLine)}{gutter(row.newLine)}
+                <span aria-hidden className={cn('w-[2ch] shrink-0 select-none', row.type === 'add' ? 'text-dot-success' : row.type === 'remove' ? 'text-destructive' : 'text-muted-foreground')}>{SIGN[row.type]}</span>
+                <span>{row.text || ' '}</span>
+                {row.noNewline ? <span className="ml-2 select-none text-muted-foreground" title="No newline at end of file">⏎̸</span> : null}
+              </div>
+              <LineComments path={file.path} side={side} line={line} />
+            </React.Fragment>
+          );
+        })}
+      </div>
+      {more}
+    </div>
+  );
+}
+
+/**
+ * The review bar: how many comments this workspace's diff holds, Send to agent (one message to
+ * the open session, as the composer sends it) and Discard. Sending is refused here, with the
+ * reason, when there is no session or the token cannot drive it.
+ */
+function ReviewBar({ scope, label }: { scope: string; label: string }) {
+  const controller = useController();
+  const app = useAppState();
+  const state = useReview();
+  const comments = state.comments[scope] ?? [];
+  const [sending, setSending] = React.useState(false);
+  if (!comments.length) return null;
+  const online = app.connection.phase === 'open';
+  const blocked = !app.selected ? 'Open a session to send the review to its agent.' : !online ? 'Not connected.' : controller.driveBlock();
+  const send = async () => {
+    const ids = comments.map(comment => comment.id);
+    setSending(true);
+    try {
+      await controller.sendPrompt(formatReviewComments(comments, label));
+      review.clear(scope, ids);
+      controller.notify('info', `Sent ${ids.length} review comment${ids.length === 1 ? '' : 's'} to the agent.`);
+    } catch (error) {
+      controller.notify('error', error instanceof Error ? error.message : 'Could not send the review.');
+    } finally { setSending(false); }
+  };
+  return (
+    <div className="sticky bottom-0 z-[2] mt-auto flex flex-wrap items-center gap-2 border-t border-border bg-background px-3 py-1.5 text-xs" data-testid="git-review-bar">
+      <span className="min-w-0 flex-1 text-muted-foreground" data-testid="git-review-count">{`${comments.length} review comment${comments.length === 1 ? '' : 's'}`}{blocked ? <span className="ml-2" data-testid="git-review-blocked">{blocked}</span> : null}</span>
+      <button type="button" className="rounded-md px-2 py-1 text-muted-foreground hover:bg-secondary hover:text-foreground" disabled={sending} onClick={() => review.clear(scope)} data-testid="git-review-discard">Discard</button>
+      <button type="button" className="flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-primary-foreground disabled:opacity-50" disabled={sending || !!blocked} onClick={() => { void send(); }} data-testid="git-review-send">
+        <Send aria-hidden className="size-3.5" />{sending ? 'Sending…' : 'Send to agent'}
+      </button>
     </div>
   );
 }
@@ -182,7 +394,7 @@ function FileName({ path, oldPath }: { path: string; oldPath?: string }) {
 }
 
 /** A file of the diff: its header (badge, name, +/-), its hunks when open. */
-function DiffFileRow({ file, open, onToggle, onOpenDiff }: { file: GitDiffFile; open: boolean; onToggle: () => void; onOpenDiff?: () => void }) {
+function DiffFileRow({ file, open, layout, onToggle, onOpenDiff }: { file: GitDiffFile; open: boolean; layout: Layout; onToggle: () => void; onOpenDiff?: () => void }) {
   return (
     <li className="border-b border-border/60" data-testid="git-file" data-path={file.path} data-kind={file.kind} data-change={file.change}>
       <div className="flex items-center">
@@ -195,7 +407,7 @@ function DiffFileRow({ file, open, onToggle, onOpenDiff }: { file: GitDiffFile; 
         </button>
         {onOpenDiff ? <button type="button" className={cn(tool, 'mr-1')} onClick={onOpenDiff} aria-label={`Open ${file.path} in Diff`} title="Open in Diff" data-testid="git-file-open-diff"><GitCompareArrows aria-hidden /></button> : null}
       </div>
-      {open ? <Hunks file={file} /> : null}
+      {open ? <Hunks file={file} layout={layout} /> : null}
     </li>
   );
 }
@@ -230,7 +442,7 @@ function BranchHeader({ status, mode }: { status: GitStatus; mode: Mode }) {
   );
 }
 
-function Toolbar({ mode, setMode, content, ignoreWhitespace, totals, refreshing, onRefresh, testId }: { mode: Mode; setMode: (mode: Mode) => void; content: boolean; ignoreWhitespace: boolean; totals?: { additions: number; deletions: number }; refreshing: boolean; onRefresh: () => void; testId: string }) {
+function Toolbar({ mode, setMode, content, ignoreWhitespace, layout, totals, refreshing, onRefresh, testId }: { mode: Mode; setMode: (mode: Mode) => void; content: boolean; ignoreWhitespace: boolean; layout: Layout; totals?: { additions: number; deletions: number }; refreshing: boolean; onRefresh: () => void; testId: string }) {
   return (
     <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1" data-testid={testId}>
       {content ? (
@@ -241,6 +453,12 @@ function Toolbar({ mode, setMode, content, ignoreWhitespace, totals, refreshing,
       ) : <span className="px-1 text-xs text-muted-foreground">Uncommitted</span>}
       <span className="min-w-0 flex-1" />
       {totals ? <DiffStat additions={totals.additions} deletions={totals.deletions} testId="git-totals" /> : null}
+      {content ? (
+        <button type="button" className={tool} onClick={() => { const next: Layout = layout === 'split' ? 'unified' : 'split'; saveLayout(next); view.set({ layout: next }); }}
+          aria-pressed={layout === 'split'} aria-label={layout === 'split' ? 'Unified view' : 'Side-by-side view'} title={layout === 'split' ? 'Unified view' : 'Side-by-side view'} data-testid="git-layout" data-layout={layout}>
+          {layout === 'split' ? <Rows2 aria-hidden /> : <Columns2 aria-hidden />}
+        </button>
+      ) : null}
       {content ? (
         <button type="button" className={cn(tool, ignoreWhitespace && 'bg-secondary text-foreground')} onClick={() => view.set({ ignoreWhitespace: !ignoreWhitespace })}
           aria-pressed={ignoreWhitespace} aria-label={ignoreWhitespace ? 'Show whitespace' : 'Hide whitespace'} title={ignoreWhitespace ? 'Show whitespace' : 'Hide whitespace'} data-testid="git-whitespace"><Space aria-hidden /></button>
@@ -286,7 +504,7 @@ function GitPanel({ variant, onOpenDiff }: { variant: 'changes' | 'diff'; onOpen
     );
   }
   const toolbar = (totals?: { additions: number; deletions: number }) => (
-    <Toolbar mode={shared.mode} setMode={mode => view.set({ mode })} content={!!content} ignoreWhitespace={shared.ignoreWhitespace} totals={totals}
+    <Toolbar mode={shared.mode} setMode={mode => view.set({ mode })} content={!!content} ignoreWhitespace={shared.ignoreWhitespace} layout={shared.layout} totals={totals}
       refreshing={status.loading || diff.loading} onRefresh={refresh} testId={`${variant}-toolbar`} />
   );
   if (!status.status) {
@@ -327,7 +545,12 @@ function GitPanel({ variant, onOpenDiff }: { variant: 'changes' | 'diff'; onOpen
   const opened = (path: string) => variant === 'diff' || open.includes(path);
   const toggle = (path: string) => setOpen(current => current.includes(path) ? current.filter(entry => entry !== path) : [...current, path]);
   const otherMode: Mode = shared.mode === 'uncommitted' ? 'base' : 'uncommitted';
+  const modeLabel = GIT_MODES.find(entry => entry.id === shared.mode)?.label ?? shared.mode;
+  const reviewLabel = shared.mode === 'base' ? `${modeLabel}, against ${baseLabel(status.status.baseRef)}` : modeLabel;
+  // Comments may be written with a diff shown and a token that can send messages at all.
+  const commenting = can(app.principal ?? undefined, 'session.write');
   return (
+    <ReviewContext.Provider value={{ scope, enabled: commenting }}>
     <div className="flex min-h-full flex-col" data-testid={testId} data-content="diff">
       {toolbar(diff.diff ? diffTotals(files) : undefined)}
       <BranchHeader status={status.status} mode={shared.mode} />
@@ -349,7 +572,7 @@ function GitPanel({ variant, onOpenDiff }: { variant: 'changes' | 'diff'; onOpen
       {files.length ? (
         <ul aria-label={variant === 'diff' ? 'Diff' : 'Changed files'}>
           {files.map(file => (
-            <DiffFileRow key={`${file.oldPath ?? ''}\n${file.path}`} file={file} open={opened(file.path)} onToggle={() => toggle(file.path)}
+            <DiffFileRow key={`${file.oldPath ?? ''}\n${file.path}`} file={file} open={opened(file.path)} layout={shared.layout} onToggle={() => toggle(file.path)}
               onOpenDiff={variant === 'changes' && onOpenDiff ? () => { focusDiff(file.path, scope); onOpenDiff(); } : undefined} />
           ))}
         </ul>
@@ -360,7 +583,9 @@ function GitPanel({ variant, onOpenDiff }: { variant: 'changes' | 'diff'; onOpen
           {diff.more ? 'Loading…' : 'Load more'}
         </button>
       ) : diff.diff?.truncated ? <p className="px-3 py-2 text-xs text-muted-foreground" data-testid="git-truncated">Only some untracked files are shown: the host limits how many it reads.</p> : null}
+      <ReviewBar scope={scope} label={reviewLabel} />
     </div>
+    </ReviewContext.Provider>
   );
 }
 

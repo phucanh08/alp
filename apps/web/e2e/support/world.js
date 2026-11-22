@@ -166,6 +166,8 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     // Sessions only, without project.read: workspace.files.search is refused (1003).
     sessionsOnly: await credential('sessions-only', ['--workspace', projects.main, '--permission', 'session.read']),
     // File reading (files.read) is never a default: only this credential has it, the owner does not.
+    // Reads files and diffs, sends nothing (t-a35b: no review comment control).
+    filesViewer: await credential('files-viewer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'project.read', '--permission', 'files.read']),
     filesReader: await credential('files-reader', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'files.read']),
     // Uploading files into alpd's attachment store (attachments.write, #121 J) is never a default either.
     fileWriter: await credential('file-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'attachments.write']),
