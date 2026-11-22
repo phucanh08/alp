@@ -53,7 +53,7 @@ export type HistoryPage = { generation: string; items: HistoryItem[]; olderCurso
 /** One entry of session.commands: inserted as `/<name>` into the composer. */
 export type SessionCommand = { name: string; description: string; argumentHint?: string; kind: 'command' | 'skill' };
 
-export type Capability = 'host.owner' | 'session.interrupt.turn' | 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.commands' | 'session.configure.live' | 'terminal' | 'terminal.capture' | 'terminal.watch' | 'attachments' | 'workspace.git' | 'workspace.git.facts' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'workspace.files' | 'workspace.files.read' | 'workspace.files.browse' | 'host.directories' | 'prompt.images' | 'schedule' | 'catalog.live';
+export type Capability = 'host.owner' | 'session.interrupt.turn' | 'session.fork' | 'session.rewind' | 'session.reload' | 'session.resumeCommand' | 'session.commands' | 'session.configure.live' | 'terminal' | 'terminal.capture' | 'terminal.watch' | 'attachments' | 'workspace.git' | 'workspace.git.facts' | 'workspace.worktree' | 'workspace.registry' | 'session.history' | 'attach.after' | 'prompt.receipts' | 'extension.methods' | 'team' | 'task' | 'library' | 'library.project.write' | 'settings.language' | 'session.list.page' | 'question.watch' | 'question.watch.turns' | 'session.attention' | 'session.attention.mark' | 'workspace.files' | 'workspace.files.read' | 'workspace.files.browse' | 'host.directories' | 'prompt.images' | 'schedule' | 'catalog.live';
 
 /** `data.reason` values alpd sets on errors (docs/protocol/alp-json-rpc-v1.md §5.3). */
 export type ErrorReason =
@@ -198,6 +198,8 @@ export type RpcMethodMap = {
   'question.watch': { params: { projectRoot?: string; turns?: boolean; attention?: boolean }; result: { questions: UserQuestion[]; attention?: Array<{ sessionId: string; attention: TurnAttention }> } };
   /** Capability `session.attention`: acknowledges a root's attention for every client; with `at`, only that one (a later turn's stays). */
   'session.attention.clear': { params: { sessionId: string; at?: string }; result: { cleared: boolean } };
+  /** Capability `session.attention.mark`: Paseo's Mark as unread. Sets a finished attention on an idle root that has none, for every client; `marked: false` when it is running or already has one. */
+  'session.attention.mark': { params: { sessionId: string }; result: { marked: boolean; attention?: TurnAttention } };
   /** Capability `workspace.files`: files under `projectRoot` whose relative path matches `query`, best first; read-only, links not followed. */
   'workspace.files.search': { params: { projectRoot: string; query?: string; limit?: number }; result: { files: Array<{ path: string }>; truncated?: boolean } };
   /** Capability `workspace.files.read`: the entries of a directory under `projectRoot` (its root when `path` is left out); links, blocked and (unless `includeIgnored`) .gitignore'd entries left out. With `workspace.files.browse`: `cursor` pages past 1000 entries; `internalLinks` lists links inside the root as what they lead to (`target`). */

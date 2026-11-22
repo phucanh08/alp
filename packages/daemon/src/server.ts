@@ -1236,6 +1236,31 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     },
 
     /**
+     * Paseo's Mark as unread (its daemon's markUnread): a finished attention on an idle root that has
+     * none, kept for every client as a turn ending unseen would be (§12.2). `marked: false` for a root
+     * that is running, archived or already asks, and for a session that is not a root.
+     */
+    async 'session.attention.mark'(_connection, { sessionId }) {
+      if (typeof sessionId !== 'string') throw new RpcError(-32602, 'sessionId is required');
+      const record = records.get(sessionId);
+      if (!record) throw new RpcError(ERROR.notFound, `No session ${sessionId}`);
+      if (record.id !== record.rootId || record.archived || record.attention || record.status === 'running' || runtime.snapshot(record.id)?.busy) return { marked: false };
+      const attention: TurnAttention = { reason: 'finished', at: new Date().toISOString() };
+      // It decides the attention, so an acknowledgement on its way can no longer bring an older one back.
+      pendingAcks.delete(record.id);
+      // Not a change of the session: its place in session.list stays.
+      record.attention = attention;
+      try { await store?.put(record); }
+      catch (error) {
+        if (record.attention === attention) record.attention = undefined;
+        throw persistenceFailed(`the attention of ${record.id}`, error);
+      }
+      if (record.attention !== attention) return { marked: false };
+      tellAttention(record.id, attention);
+      return { marked: true, attention };
+    },
+
+    /**
      * The files of a directory whose path matches a query, read-only and confined to it: no link
      * is followed, only names are read (docs/protocol/alp-json-rpc-v1.md §12.3, ALPD §15).
      */
@@ -1932,7 +1957,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /** What this daemon lists in daemon.hello: only features it serves now (docs/protocol/alp-json-rpc-v1.md §6). */
-  const capabilities = [...(runtime.interruptTurn ? [CAPABILITY.sessionInterruptTurn] : []), ...(runtime.commands ? [CAPABILITY.sessionCommands] : []), CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.workspaceFilesBrowse, CAPABILITY.hostDirectories, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), CAPABILITY.workspaceGitFacts, ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...(conversation?.reloads ? [CAPABILITY.sessionReload] : []), ...(conversation?.configures ? [CAPABILITY.sessionConfigureLive] : []), ...(conversation ? [CAPABILITY.sessionResumeCommand] : []), ...(modelCatalog ? [CAPABILITY.catalogLive] : []), ...operations.capabilities];
+  const capabilities = [...(runtime.interruptTurn ? [CAPABILITY.sessionInterruptTurn] : []), ...(runtime.commands ? [CAPABILITY.sessionCommands] : []), CAPABILITY.attachAfter, CAPABILITY.extensionMethods, CAPABILITY.sessionListPage, CAPABILITY.questionWatch, CAPABILITY.questionWatchTurns, CAPABILITY.sessionAttention, CAPABILITY.sessionAttentionMark, CAPABILITY.workspaceFiles, CAPABILITY.workspaceFilesRead, CAPABILITY.workspaceFilesBrowse, CAPABILITY.hostDirectories, CAPABILITY.promptImages, ...(store ? [CAPABILITY.promptReceipts, CAPABILITY.sessionHistory] : []), ...(schedules ? [CAPABILITY.schedule] : []), ...(registry ? ['workspace.registry', CAPABILITY.workspaceGit] : []), CAPABILITY.workspaceGitFacts, ...(worktrees ? ['workspace.worktree'] : []), ...(attachments ? [CAPABILITY.attachments] : []), ...(conversation?.enabled ? [CAPABILITY.sessionFork, CAPABILITY.sessionRewind] : []), ...(conversation?.reloads ? [CAPABILITY.sessionReload] : []), ...(conversation?.configures ? [CAPABILITY.sessionConfigureLive] : []), ...(conversation ? [CAPABILITY.sessionResumeCommand] : []), ...(modelCatalog ? [CAPABILITY.catalogLive] : []), ...operations.capabilities];
 
   /** A response too large for the wire becomes an error the client can read. */
   function fits(response: { jsonrpc: '2.0'; id: string | number | null; result?: unknown; error?: unknown }) {
