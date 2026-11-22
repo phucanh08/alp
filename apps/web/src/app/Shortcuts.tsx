@@ -39,9 +39,9 @@ export function useShortcuts(run: ShortcutAction, { enabled = true, allowInModal
 }
 
 /**
- * ALP.app only: ⌘W (Ctrl+W off a Mac) that nothing took (no tab to close, History, Settings) closes
- * the window, as it did before the page took the key (t-0166); ALP.app's menu no longer has it. Not
- * while a dialog is open.
+ * ALP.app only: ⌘W (Ctrl+W off a Mac) that nothing took (no tab to close, History) closes the window,
+ * as it did before the page took the key (t-0166); ALP.app's menu no longer has it. Not while a dialog,
+ * a menu or Settings (an overlay) is open.
  */
 export function useDesktopCloseFallback() {
   const mac = React.useMemo(() => isMacPlatform(), []);
@@ -53,8 +53,8 @@ export function useDesktopCloseFallback() {
       if (mac ? !event.metaKey || event.ctrlKey : !event.ctrlKey || event.metaKey) return;
       // After every other listener of this key press has had its turn.
       setTimeout(() => {
-        const modal = !!document.querySelector('dialog[open]') || !!document.querySelector('[data-modal-overlay]');
-        if (!event.defaultPrevented && !modal) window.close();
+        const open = !!document.querySelector('dialog[open], [data-modal-overlay], [role="menu"]');
+        if (!event.defaultPrevented && !open) window.close();
       }, 0);
     };
     window.addEventListener('keydown', onKey);

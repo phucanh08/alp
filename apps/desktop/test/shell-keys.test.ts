@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { attentionBadge, isCloseWindowKey, isDashboardKey } from '../src/shell-keys';
+import { attentionBadge, dashboardKeyScript, isCloseWindowKey, isDashboardKey } from '../src/shell-keys';
 
 const key = (key: string, mods: Partial<{ meta: boolean; control: boolean; alt: boolean; shift: boolean }> = {}, type = 'keyDown') =>
   ({ type, key, meta: false, control: false, alt: false, shift: false, ...mods });
@@ -44,5 +44,13 @@ describe('isDashboardKey', () => {
     expect(isDashboardKey(press('KeyC', { meta: true }))).toBe(false);
     expect(isDashboardKey(press('KeyW'))).toBe(false);
     expect(isDashboardKey(press('KeyW', { meta: true }, 'keyUp'))).toBe(false);
+  });
+});
+
+describe('dashboardKeyScript', () => {
+  test('a keydown built from the key alone; anything else is refused', () => {
+    expect(dashboardKeyScript('KeyW', false)).toBe(`window.dispatchEvent(new KeyboardEvent('keydown', {"code":"KeyW","key":"w","metaKey":true,"altKey":false,"bubbles":true,"cancelable":true})); 1`);
+    expect(dashboardKeyScript('Digit3', true)).toContain('"code":"Digit3","key":"3","metaKey":true,"altKey":true');
+    for (const code of ['Digit0', 'KeyC', "KeyW'); alert(1); ('", '']) expect(() => dashboardKeyScript(code, false)).toThrow();
   });
 });
