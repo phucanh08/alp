@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ArrowLeftToLine, ArrowRightToLine, Bot, CircleAlert, CircleDot, Columns2, Copy, CopyX, Ellipsis, FileText, ListTodo, Maximize, Minimize, PanelBottom, PanelLeft, PanelRight, PanelTop, Pencil, Plus, RotateCw, Rows2, Shrink, ShieldAlert, SquarePen, Archive, X } from 'lucide-react';
+import { GitBranch, SquareTerminal, ArrowLeftToLine, ArrowRightToLine, Bot, CircleAlert, CircleDot, Columns2, Copy, CopyX, Ellipsis, FileText, ListTodo, Maximize, Minimize, PanelBottom, PanelLeft, PanelRight, PanelTop, Pencil, Plus, RotateCw, Rows2, Shrink, ShieldAlert, SquarePen, Archive, X } from 'lucide-react';
 import type { SessionSummary } from '../lib/controller.js';
 import { can } from '../lib/gateway.js';
 import { ContextMenu, Menu, type MenuItem } from '../components/ui/menu';
@@ -22,6 +22,7 @@ import { PaneContext } from './pane';
 import { TaskDetail } from './TaskDetail';
 import { FileView } from './FileView';
 import { useAppState, useController } from './store';
+import { readFacts } from '../lib/sidebar-facts.js';
 import { tabKey, useTabs, type Tab } from './tabs';
 
 const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-ring';
@@ -39,7 +40,9 @@ export function WorkspaceHeader({ navOpen, onToggleNav, explorerOpen, onToggleEx
   onRename: (session: SessionSummary) => void;
   onArchive: (session: SessionSummary) => void;
 }) {
-  const { tree, sessions, workspace, connection, principal } = useAppState();
+  const controller = useController();
+  const { tree, sessions, workspace, connection, principal, registry, owner } = useAppState();
+  const { openPanel, openBrowser } = useTabs();
   const root = tree?.rootId;
   const snapshot = root ? tree.projection.sessions[root] : undefined;
   const listed = root ? sessions.list.find(session => session.id === root) : undefined;
@@ -47,7 +50,39 @@ export function WorkspaceHeader({ navOpen, onToggleNav, explorerOpen, onToggleEx
   const running = !!root && root in tree.projection.running;
   const closed = !!root && !!tree.projection.closed[root];
   const canWrite = can(principal ?? undefined, 'session.write');
+  const online = connection.phase === 'open';
   const summary: SessionSummary | undefined = listed ?? (root ? { id: root, title: snapshot?.title } as SessionSummary : undefined);
+  // The workspace's branch: the registry's (a managed worktree's), else the checkout's own (host.workspace.facts, owner only).
+  const row = workspace ? registry.workspaces.find(entry => !entry.archivedAt && (entry.directory === workspace || principal?.workspaceRoots?.some(grant => grant.path === workspace && grant.canonical === entry.directory))) : undefined;
+  const [factsBranch, setFactsBranch] = React.useState<{ id: string; branch?: string } | null>(null);
+  React.useEffect(() => {
+    if (!owner || !online || !row?.id || row.branch) return;
+    let live = true;
+    void readFacts(controller, [row.id]).then(facts => { if (live) setFactsBranch({ id: row.id, branch: facts[row.id]?.branch }); }, () => {});
+    return () => { live = false; };
+  }, [controller, owner, online, row?.id, row?.branch]);
+  const branch = row?.branch || (factsBranch && factsBranch.id === row?.id ? factsBranch.branch : undefined) || undefined;
+  const directory = listed?.projectRoot || workspace || '';
+  const copy = (text: string, what: string) => {
+    void navigator.clipboard?.writeText(text).then(() => controller.notify('info', `${what} copied`), () => controller.notify('error', `Could not copy the ${what.toLowerCase()}.`));
+  };
+  /**
+   * Paseo's workspace header menu: Copy path and Copy branch name, New terminal and New browser tab
+   * (ALP.app only), then the session's own Rename, Copy session ID and Archive.
+   */
+  const items: MenuItem[] = [
+    ...(directory ? [{ id: 'copy-path', label: 'Copy path', icon: <Copy aria-hidden />, onSelect: () => copy(directory, 'Path'), testId: 'workspace-header-copy-path' }] : []),
+    ...(branch ? [{ id: 'copy-branch-name', label: 'Copy branch name', icon: <GitBranch aria-hidden />, onSelect: () => copy(branch, 'Branch name'), testId: 'workspace-header-copy-branch-name' }] : []),
+    // A shell on the host: only for a token that may run one (terminal.exec); the tab says why when the host refuses.
+    ...(can(principal ?? undefined, 'terminal.exec') ? [{ id: 'new-terminal', label: 'New terminal', icon: <SquareTerminal aria-hidden />, group: true, onSelect: () => openPanel('terminal'), testId: 'workspace-header-new-terminal' }] : []),
+    ...(isDesktopApp() ? [{ id: 'new-browser-tab', label: 'New browser tab', icon: <BROWSER.icon aria-hidden />, onSelect: () => { if (!openBrowser()) controller.notify('info', 'Close a browser tab before opening another.'); }, testId: 'workspace-header-new-browser-tab' }] : []),
+    // The session's own items; a reader gets Copy session ID only.
+    ...(root && summary ? [
+      ...(canWrite ? [{ id: 'rename', label: 'Rename', icon: <Pencil aria-hidden />, group: true, onSelect: () => onRename(summary), testId: 'workspace-header-rename' }] : []),
+      { id: 'copy-session-id', label: 'Copy session ID', icon: <Copy aria-hidden />, group: !canWrite, onSelect: () => copy(root, 'Session ID'), testId: 'workspace-header-copy-session-id' },
+      ...(canWrite ? [{ id: 'archive', label: 'Archive', icon: <Archive aria-hidden />, onSelect: () => onArchive(summary), destructive: true, testId: 'workspace-header-archive' }] : []),
+    ] : []),
+  ];
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-2 md:h-9 md:px-3">
       <div className="flex min-w-0 flex-1 items-center gap-1 md:gap-2">
@@ -58,15 +93,11 @@ export function WorkspaceHeader({ navOpen, onToggleNav, explorerOpen, onToggleEx
           <h1 className="min-w-0 truncate text-sm font-normal text-foreground md:font-light" title={title} data-testid="workspace-header-title">{title}</h1>
           {root && workspace ? <span className="min-w-0 truncate text-xs text-muted-foreground md:text-sm" title={workspace}>{baseName(workspace)}</span> : null}
         </div>
-        {root && summary ? (
-          <Menu label="Session actions" align="start"
+        {workspace ? (
+          <Menu label="Session actions" align="start" testId="workspace-header-menu"
             trigger={<Ellipsis aria-hidden className="size-[18px]" />}
             triggerClassName={headerButton}
-            items={[
-              { label: 'Rename', icon: <Pencil aria-hidden />, onSelect: () => onRename(summary), disabled: !canWrite },
-              { label: 'Copy session ID', icon: <Copy aria-hidden />, onSelect: () => { void navigator.clipboard?.writeText(root); } },
-              { label: 'Archive', icon: <Archive aria-hidden />, onSelect: () => onArchive(summary), disabled: !canWrite, destructive: true },
-            ]} />
+            items={items} />
         ) : null}
         <span className="sr-only" aria-live="polite">{connection.phase !== 'open' ? 'Reconnecting' : !root ? '' : running ? 'Agent is working' : closed ? 'Session closed' : 'Agent is idle'}</span>
       </div>

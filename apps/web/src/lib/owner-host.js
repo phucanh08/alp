@@ -157,6 +157,20 @@ export const ownerRegistry = controller => controller.ownerRequest('host.registr
  * @param {OwnerController} controller @param {string} workspaceId @returns {Promise<{ opened: boolean }>}
  */
 export const revealWorkspace = (controller, workspaceId) => controller.ownerRequest('host.workspace.reveal', { workspaceId });
+/**
+ * Paseo's Open in editor: the editors installed on the host (a fixed list there: VS Code, Cursor, Zed,
+ * Xcode, JetBrains IDEs, and the file manager), ALP.app on the host only (t-a876).
+ * @param {OwnerController} controller @returns {Promise<Array<{ id: string, label: string }>>}
+ */
+export async function workspaceEditors(controller) {
+  const result = await controller.ownerRequest('host.workspace.editors', {});
+  return (Array.isArray(result?.editors) ? result.editors : []).filter((/** @type {any} */ editor) => editor && typeof editor.id === 'string' && typeof editor.label === 'string');
+}
+/**
+ * Opens a registry workspace (by id, never a path) in one of those editors on the host.
+ * @param {OwnerController} controller @param {string} workspaceId @param {string} editor @returns {Promise<{ opened: boolean }>}
+ */
+export const openInEditor = (controller, workspaceId, editor) => controller.ownerRequest('host.workspace.open', { workspaceId, editor });
 /** @param {OwnerController} controller @param {string} workspaceId @param {boolean} archived @param {number} ifRevision */
 export const archiveWorkspace = (controller, workspaceId, archived, ifRevision) => controller.ownerRequest('host.workspace.update', { workspaceId, archived, ifRevision, requestId: requestId() });
 /**

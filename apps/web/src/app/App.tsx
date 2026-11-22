@@ -55,6 +55,8 @@ function Notice() {
       {notice.level === 'error' ? <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" /> : <Info aria-hidden className="mt-0.5 size-4 shrink-0 text-info" />}
       <span className="min-w-0 flex-1">{notice.text}</span>
       {notice.action === 'new-session' ? <Button size="sm" variant="secondary" className="h-7 shrink-0 text-xs" onClick={() => { controller.dismissNotice(); openDraft(); }}>New session</Button> : null}
+      {/* Paseo's archive toast: Undo unarchives the session it names. */}
+      {notice.action === 'undo-archive' && notice.target ? <Button size="sm" variant="secondary" className="h-7 shrink-0 text-xs" data-testid="notice-undo-archive" onClick={() => void controller.undoArchive(notice.target!)}>Undo</Button> : null}
       <Button size="icon-sm" variant="ghost" aria-label="Dismiss" onClick={() => controller.dismissNotice()}><X aria-hidden /></Button>
     </div>
   );
@@ -285,6 +287,15 @@ function Shell() {
   const [settings, setSettings] = React.useState<boolean | SettingsTarget>(false);
   const [renaming, setRenaming] = React.useState<SessionSummary | null>(null);
   const [archiving, setArchiving] = React.useState<SessionSummary | null>(null);
+  /**
+   * Archive, as Paseo's: an idle or closed session goes at once and the toast offers Undo; one whose
+   * agent is working asks first, since archiving stops that work (Undo brings the session back, not the turn).
+   */
+  const archive = (summary: SessionSummary) => {
+    const working = summary.status === 'running' || !!summary.busy || (tree?.rootId === summary.id && summary.id in tree.projection.running);
+    if (working) { setArchiving(summary); return; }
+    void controller.archiveSession(summary.id).catch(error => controller.notify('error', `Could not archive the session: ${error?.message ?? error}`));
+  };
   const [history, setHistory] = React.useState(false);
   const [shortcuts, setShortcuts] = React.useState(false);
   const [searchRequest, setSearchRequest] = React.useState(0);
@@ -338,7 +349,7 @@ function Shell() {
       case 'session.archive': {
         const summary = currentSummary();
         if (!summary || !canWrite || controller.isArchived(summary.id)) return false;
-        setArchiving(summary);
+        archive(summary);
         return;
       }
       case 'session.opened': case 'tab.shown':
@@ -395,7 +406,7 @@ function Shell() {
           style={medium ? { width: sidebarWidth.width } : undefined} data-testid="sidebar-column"
           {...(!medium && !navOpen ? { inert: true } : {})}>
           {medium ? <ResizeHandle which="sidebar" side="right" width={sidebarWidth.width} onWidth={sidebarWidth.setWidth} onCommit={sidebarWidth.save} testId="left-sidebar-resize-handle" /> : null}
-          <Sidebar onNewSession={() => { toWorkspace(); newSession(); }} onRename={setRenaming} onArchive={setArchiving} onSettings={page => setSettings(page ?? true)} onShortcuts={() => setShortcuts(true)} onNavigate={() => setNavOpen(false)} onClose={medium ? undefined : () => setNavOpen(false)}
+          <Sidebar onNewSession={() => { toWorkspace(); newSession(); }} onRename={setRenaming} onArchive={archive} onSettings={page => setSettings(page ?? true)} onShortcuts={() => setShortcuts(true)} onNavigate={() => setNavOpen(false)} onClose={medium ? undefined : () => setNavOpen(false)}
             onHistory={() => openHistory()} historyOpen={history} onTasks={() => { if (workspace) { setHistory(false); setSchedulesScreen(false); setTasksScreen(true); } }} tasksOpen={tasksScreen}
             onSchedules={() => { setHistory(false); setTasksScreen(false); setSchedulesScreen(true); }} schedulesOpen={schedulesScreen} onOpenSession={() => toWorkspace()} searchRequest={searchRequest} onSearchRequestHandled={() => setSearchRequest(0)} />
         </div>
@@ -422,7 +433,7 @@ function Shell() {
           <>
             <WorkspaceHeader navOpen={navShown} onToggleNav={toggleNav}
               explorerOpen={explorerShown} onToggleExplorer={toggleExplorer}
-              onRename={setRenaming} onArchive={setArchiving} />
+              onRename={setRenaming} onArchive={archive} />
             <ReconnectBanner />
             <SplitView splits={medium} onNewSession={newSession} onRename={setRenaming} menuRequest={tabMenuRequest} onMenuRequestHandled={() => setTabMenuRequest(0)} />
           </>
