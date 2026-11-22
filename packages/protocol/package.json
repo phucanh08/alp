@@ -1,6 +1,6 @@
 {
   "name": "@anhlp/alp-protocol",
-  "version": "0.0.1-beta.10",
+  "version": "0.0.1-beta.11",
   "type": "module",
   "description": "ALP protocol module",
   "files": [
