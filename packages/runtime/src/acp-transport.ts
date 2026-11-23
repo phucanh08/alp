@@ -10,7 +10,7 @@ import { commandDecision, unwrapShell, type PermissionProfile } from '@anhlp/alp
 import { launchCommand } from '@anhlp/alp-core/providers';
 import { bridgeCommand } from '@anhlp/alp-core/bridges';
 import { acpText, acpToolDetail, type AcpCall } from './tool-detail.js';
-import { credentialPaths, namesCredential } from './claude-transport.js';
+import { caseInsensitive, credentialPaths, namesCredential } from './claude-transport.js';
 import { feedAcpSession } from './model-catalog.js';
 
 /**
@@ -87,13 +87,15 @@ export function acpDecision(request: AcpPermission, mode: string, profile: Permi
 
 /**
  * Whether a request reaches the Paseo credentials: a path in their directory or one of their files,
- * a search from a directory that holds them, or a command that names them. ALP sees only what an
- * agent asks for: an agent that reads without asking is not stopped here.
+ * a search from a directory that holds them, or a command that names them, in any case where the
+ * filesystem ignores it. ALP sees only what an agent asks for: an agent that reads without asking is
+ * not stopped here.
  */
 function touchesCredentials(request: AcpPermission, home?: string) {
   const { directories, files } = credentialPaths(home);
   const secrets = [...directories, ...files];
-  const inside = (file: string, root: string) => { const relative = path.relative(root, path.resolve(file)); return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative)); };
+  const fold = caseInsensitive() ? (file: string) => file.toLowerCase() : (file: string) => file;
+  const inside = (file: string, root: string) => { const relative = path.relative(fold(root), fold(path.resolve(file))); return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative)); };
   if (request.paths.some(file => secrets.some(secret => inside(file, secret)))) return true;
   if (request.kind === 'search' && request.paths.some(file => secrets.some(secret => inside(secret, file)))) return true;
   return request.command !== undefined && namesCredential(request.command, secrets);

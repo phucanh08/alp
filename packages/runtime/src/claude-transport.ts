@@ -3,7 +3,7 @@ import { accessSync, constants, existsSync, mkdirSync, realpathSync, rmdirSync, 
 import os from 'node:os';
 import path from 'node:path';
 import { optionalRead, claudeUsage, claudeAccount } from './runtime-context.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { BOARD_KINDS_INPUT, PIN_BODY_CHARS, PIN_KINDS, PIN_PATH_CHARS, PIN_PATHS, PIN_PATHS_INPUT } from './board.js';
 import { RESULT_OUTCOMES } from './assignment-results.js';
@@ -382,18 +382,35 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
 }
 
 /**
+ * The directory of the Paseo integration's token socket when `<home>/paseo/token.sock` is too long
+ * for a socket address: `/tmp/alp-paseo-<uid>-<hash>`, as /tmp names it and as it resolves (macOS:
+ * /private/tmp). Must match tokenSocketPath in integrations/paseo/server/web.ts and
+ * paseoTokenSocketPath in packages/cli/src/interfaces.js. None on Windows (a named pipe).
+ */
+export function tokenSocketFallback(home: string, { platform = process.platform, uid = process.getuid?.() }: { platform?: NodeJS.Platform; uid?: number } = {}) {
+  if (platform === 'win32' || Buffer.byteLength(path.join(home, 'paseo', 'token.sock')) < 100) return [];
+  const name = `alp-paseo-${uid ?? 'user'}-${createHash('sha256').update(home).digest('hex').slice(0, 12)}`;
+  let tmp = '/tmp';
+  try { tmp = realpathSync('/tmp'); } catch {}
+  return [...new Set([path.posix.join('/tmp', name), path.posix.join(tmp, name)])];
+}
+
+/**
  * Where the Paseo integration keeps the user's credentials (t-cde5): its credential directory
- * `<home>/paseo/` (the password Paseo's app signs in with, and the relay's secret key) and the
- * relay key's location before t-cde5. A read-only session may not read them. Each path is given as
- * ALP_HOME names it and, when that differs, as the filesystem resolves it.
+ * `<home>/paseo/` (the password Paseo's app signs in with, and the relay's secret key), the /tmp
+ * directory of its token socket for a long home, and the relay key's location before t-cde5. A
+ * read-only session may not read them. Each path is given as ALP_HOME names it and, when that
+ * differs (a symlinked home), as the filesystem resolves it.
  * @param home ALP's home (alpd's own by default)
  */
 export function credentialPaths(home: string = alpHome()) {
-  const named = [path.join(home, 'paseo'), path.join(home, 'relay-keypair.json')];
   let real = home;
   try { real = realpathSync(home); } catch {}
-  const resolved = real === home ? [] : [path.join(real, 'paseo'), path.join(real, 'relay-keypair.json')];
-  return { directories: [named[0], ...(resolved.length ? [resolved[0]] : [])], files: [named[1], ...(resolved.length ? [resolved[1]] : [])] };
+  const homes = real === home ? [home] : [home, real];
+  return {
+    directories: [...new Set([...homes.map(each => path.join(each, 'paseo')), ...homes.flatMap(each => tokenSocketFallback(each))])],
+    files: homes.map(each => path.join(each, 'relay-keypair.json')),
+  };
 }
 
 /** An absolute path as a Claude permission rule spells it: `//` and the path, with `/c/…` for a Windows drive. */
@@ -412,15 +429,21 @@ export function credentialDenials(home?: string) {
   };
 }
 
+/** Whether the platform's usual filesystems ignore case (macOS, Windows): there `~/.ALP/paseo` is `~/.alp/paseo`. */
+export const caseInsensitive = (platform: NodeJS.Platform = process.platform) => platform === 'darwin' || platform === 'win32';
+
 /**
  * Whether a command's text names one of the credential paths: as given, from the user's home as `~`,
- * or by the names only they use (`relay-keypair.json`, a `paseo/` directory beside the home's files).
+ * or by the names only they use (`relay-keypair.json`, a `paseo/` directory beside the home's files),
+ * in any case where the filesystem ignores it.
  * Text only: a command may still build a path at run time, which only the OS sandbox stops.
  */
-export function namesCredential(command: string, paths: string[]) {
+export function namesCredential(command: string, paths: string[], platform: NodeJS.Platform = process.platform) {
   const home = os.homedir();
+  const fold = caseInsensitive(platform) ? (text: string) => text.toLowerCase() : (text: string) => text;
   const spelled = paths.flatMap(file => [file, ...(file.startsWith(`${home}${path.sep}`) ? [`~${file.slice(home.length)}`, `$HOME${file.slice(home.length)}`] : [])]);
-  return spelled.some(file => command.includes(file)) || /relay-keypair\.json|(^|[\s'"=/])\.alp\/paseo(\/|[\s'"]|$)|\$\{?ALP_HOME\}?\/paseo\b/.test(command);
+  const text = fold(command);
+  return spelled.some(file => text.includes(fold(file))) || new RegExp(String.raw`relay-keypair\.json|(^|[\s'"=/])\.alp\/paseo(\/|[\s'"]|$)|\$\{?ALP_HOME\}?\/paseo\b`, caseInsensitive(platform) ? 'i' : '').test(command);
 }
 
 /** Claude's permission mode for an ALP mode; full-access skips every permission check. */

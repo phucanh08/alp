@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { acpDecision, claudePermissions } from '@anhlp/alp-runtime';
-import { credentialDenials, namesCredential } from '@anhlp/alp-runtime/claude-transport';
+import { caseInsensitive, credentialDenials, credentialPaths, namesCredential, tokenSocketFallback } from '@anhlp/alp-runtime/claude-transport';
 
 /**
  * t-cde5, a permission narrowing: read-only Claude and ACP sessions may not read the Paseo
@@ -87,6 +89,61 @@ test('t-cde5: a session merely started read-only keeps the way out of the sandbo
   const plain = claudePermissions('read-only', () => 'read-only', { allow: [], deny: [], floor: 'read-only', floorRoot: root }, undefined, home);
   assert.equal(plain.sandbox.allowUnsandboxedCommands, true);
   assert.equal((await plain.canUseTool('Bash', { command: 'cat README.md', dangerouslyDisableSandbox: true }, {})).behavior, 'deny');
+});
+
+test('t-cde5 M2: where the filesystem ignores case (macOS, Windows), a case variant of the credential paths is refused too', () => {
+  const variant = path.join(path.dirname(home), path.basename(home).toUpperCase(), 'PASEO', 'Token.json');
+  const command = `cat ${variant}`;
+  const paths = credentialDenials(home).denyRead;
+  assert.equal(namesCredential(command, paths, 'darwin'), true);
+  assert.equal(namesCredential(command, paths, 'win32'), true);
+  assert.equal(namesCredential('cat ~/.ALP/Paseo/token.json', paths, 'darwin'), true);
+  assert.equal(namesCredential('cat ~/.ALP/Paseo/token.json', paths, 'linux'), false, 'on Linux that is another file');
+  assert.equal(namesCredential(command, paths, 'linux'), false);
+  // ACP read-only sessions, on this platform.
+  const read = acpDecision({ kind: 'read', title: 'read', paths: [variant], alpTool: false }, 'read-only', null, root, home);
+  assert.equal(read, caseInsensitive() ? 'deny' : 'allow');
+  // Claude's own deny rules matched a case variant in a real read-only session on macOS (PR #386, T12).
+});
+
+test('t-cde5 M2: a symlinked home is denied as named and as resolved', t => {
+  const scratch = mkdtempSync(path.join(os.tmpdir(), 'alp-cde5-link-'));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const real = path.join(scratch, 'real-home');
+  mkdirSync(real);
+  const link = path.join(scratch, 'linked-home');
+  symlinkSync(real, link, 'dir');
+  const resolved = realpathSync(real);
+  const { rules, denyRead } = credentialDenials(link);
+  for (const root of [link, resolved]) {
+    assert.ok(denyRead.includes(path.join(root, 'paseo')), root);
+    assert.ok(denyRead.includes(path.join(root, 'relay-keypair.json')), root);
+    assert.ok(rules.includes(`Read(${rule(path.join(root, 'paseo'))}/**)`), root);
+    assert.ok(rules.includes(`Read(${rule(path.join(root, 'relay-keypair.json'))})`), root);
+  }
+  assert.equal(new Set(denyRead).size, denyRead.length, 'no duplicates');
+});
+
+test('t-cde5 M3: the /tmp directory of a long home\'s token socket is denied, as /tmp names it and as it resolves', () => {
+  const uid = process.getuid?.() ?? 'user';
+  const long = path.join(os.tmpdir(), 'x'.repeat(100), '.alp');
+  const name = `alp-paseo-${uid}-${createHash('sha256').update(long).digest('hex').slice(0, 12)}`;
+  if (process.platform === 'win32') {
+    assert.deepEqual(tokenSocketFallback(long), [], 'a named pipe on Windows');
+    return;
+  }
+  const expected = [...new Set([path.posix.join('/tmp', name), path.posix.join(realpathSync('/tmp'), name)])];
+  assert.deepEqual(tokenSocketFallback(long), expected);
+  assert.deepEqual(tokenSocketFallback(home), [], 'a short home keeps its socket in <home>/paseo/');
+  const { rules, denyRead } = credentialDenials(long);
+  for (const directory of expected) {
+    assert.ok(denyRead.includes(directory), directory);
+    assert.ok(rules.includes(`Read(/${directory}/**)`), directory);
+  }
+  assert.ok(credentialPaths(long).directories.includes(path.join(long, 'paseo')));
+  // ACP read-only sessions refuse it too.
+  const request = { kind: 'read', title: 'read', paths: [path.join(expected[0], 'token.sock')], alpTool: false };
+  assert.equal(acpDecision(request, 'read-only', null, root, long), 'deny');
 });
 
 test('t-cde5: ACP read-only sessions refuse reads and searches of the credentials and commands naming them, whatever a rule allows', () => {
