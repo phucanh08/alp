@@ -2,7 +2,8 @@
 
 - **A delegated agent with no model profile runs on its own model** (t-3aad): when none is passed,
   `alp_delegate` uses the current team's `team.json` member, then the agent's `agent.json`, before
-  the requester's model, and says in `modelNote` when it inherits; the oracle takes `thinking`,
+  the requester's model (a team member's generated profile follows the same order), and says in
+  `modelNote` when it inherits; the oracle takes `thinking`,
   checked against its lens ([team-workflow.md](team-workflow.md), "Assignment and model selection").
 
 # ALP 0.0.1-beta.12 — release notes
