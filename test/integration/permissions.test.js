@@ -89,6 +89,17 @@ test('a command is allowed only when allow rules cover every part of it, and den
   assert.equal(unwrapShell(`/bin/bash -c 'echo '\\''hi'\\'''`), "echo 'hi'");
   // The quotes must enclose the rest of the line: a quoted word after `;` does not make it one script (t-cde5 review).
   for (const line of [`sh -c 'git log' ; touch /tmp/pwn 'b'`, `bash -c "git log" ; touch x "b"`, `sh -c 'a' 'b'`]) assert.equal(unwrapShell(line), line, line);
+  // The shell's path is plain path characters, and only spaces or tabs separate its words: shell syntax before `sh`, or a
+  // new line after it, is run by the shell, so such a line is no wrapper (t-cde5 review 5, reproduced on bash 3.2 and sh).
+  for (const line of ["/bin/echo;touch${IFS}X;/bin/sh -c 'echo hi'", "/bin/echo;{touch,X};/bin/sh -c 'echo hi'", "/tmp/$(touch${IFS}X)/sh -c 'echo hi'",
+    "/b`touch X`/sh -c 'echo hi'", "/b'in'/sh -c 'echo hi'", "/bin/sh\n-c 'echo hi'", "/bin/sh -c\n'echo hi'", "/bin/a&touch X&/bin/sh -c 'echo hi'"]) {
+    assert.equal(unwrapShell(line), line, JSON.stringify(line));
+    assert.notEqual(commandDecision({ allow: ['Bash(echo:*)'], deny: [] }, line), 'allow', JSON.stringify(line));
+  }
+  for (const wrapper of ['/bin/zsh -lc', '/usr/local/bin/bash -c', '/opt/homebrew/bin/zsh -lc', 'sh -c', '/bin/dash -c', "/bin/bash\t-lc"]) assert.equal(unwrapShell(`${wrapper} 'echo hi'`), 'echo hi', wrapper);
+  // The line as given is checked as well as the script inside its wrapper: a wrapper never makes a line looser. A '\''
+  // carries an unquoted backslash, so the line is not plain and is asked about, though its script `echo 'hi'` is.
+  assert.equal(commandDecision({ allow: ['Bash(echo:*)'], deny: [] }, `/bin/bash -c 'echo '\\''hi'\\'''`), undefined);
   assert.equal(unwrapShell(`bash -c "echo \\"a\\" b"`), 'echo "a" b');
   // In double quotes the outer shell expands $(…) first: such a script is not unwrapped (t-cde5 re-review).
   assert.equal(unwrapShell(`sh -c "git log '$(id)'"`), `sh -c "git log '$(id)'"`);

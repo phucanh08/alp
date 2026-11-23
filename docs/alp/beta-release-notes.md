@@ -8,11 +8,14 @@
 - **A plain Bash allow rule covers only a line of plain words** (t-cde5, user decision g5): bash and
   zsh ran a second command hidden in lines such as ``echo $'\'' ; touch X ; echo '\'`` or
   `echo ${x:='a[$(touch X)]'} $[x]`, which ALP read as one `echo` that `Bash(echo:*)` allowed
-  (Claude, Codex and ACP; released versions including beta.12 are affected). A line with `$`, an
+  (Claude, Codex and ACP). The parser of released versions allows these lines too (checked on the
+  beta.12 tag at the parser level; not run in a real session there). A line with `$`, an
   unquoted glob, brace or bracket, a leading `~`, a comment, a redirect other than to a descriptor
   or `/dev/null`, or `$`, backtick, `\` or `!` in double quotes now gets no decision from a plain
   allow rule: ALP asks, or the mode refuses. Deny rules and checked `Bash(@…)` rules are
-  unchanged. Every profile with a Bash allow rule is affected (custom agents, user profiles,
+  unchanged. A shell wrapper counts only when both the line and its script are plain, and when
+  the shell's path holds nothing but path characters: before, `/bin/echo;touch X;/bin/sh -c 'echo hi'`
+  was read as `echo hi`. Every profile with a Bash allow rule is affected (custom agents, user profiles,
   lead/peer/main when given one); the built-in reviewer, oracle and supervisor profiles have none.
   The rule and the list are in [team-workflow.md](team-workflow.md) ("Permission profiles").
 

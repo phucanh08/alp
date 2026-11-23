@@ -176,7 +176,9 @@ export const capMode = (mode, base) => (RANK[mode] ?? 0) <= (RANK[base] ?? 0) ? 
 export function unwrapShell(command) {
   // The quotes must enclose the whole rest of the line: `sh -c '<a>' ; <b> 'c'` is two commands, not one
   // script (a greedy match read `<a>' ; <b> 'c` as the script, so a rule covering <a> covered <b>).
-  const match = /^(?:\/\S*\/)?(?:ba|z|da)?sh\s+-l?c\s+(?:'((?:[^']|'\\'')*)'|"((?:[^"\\]|\\[\s\S])*)")\s*$/.exec(command.trim());
+  // The shell's path is plain path characters only, and spaces or tabs separate the words: shell syntax before `sh`
+  // (`/bin/echo;touch X;/bin/sh -c '…'`) or a new line after it would be run, not read as part of the wrapper (t-cde5 review 5).
+  const match = /^(?:(?:\/[A-Za-z0-9_.+-]+)*\/)?(?:ba|z|da)?sh[ \t]+-l?c[ \t]+(?:'((?:[^']|'\\'')*)'|"((?:[^"\\]|\\[\s\S])*)")\s*$/.exec(command.trim());
   if (!match) return command.trim();
   // In double quotes the outer shell expands `$…` and backticks before sh runs: the script read here is not
   // the one that runs, so the line stays as it is (Codex escapes them in its own wrapper).
@@ -692,7 +694,8 @@ export function commandDecision(profile, command) {
   const ask = bashRules(profile.ask ?? []);
   if (ask.some(rule => rule.specifier === undefined) || parts.some(part => !checkedAllow(part) && ask.some(rule => covers(rule.specifier, part)))) return 'ask';
   // A plain allow rule vouches only for a line of plain words (plainCommands, g5 A'), split the same way here.
-  const plain = plainCommands(line);
+  // The line as given must be plain too, before any wrapper is taken off: a wrapper only ever makes a line stricter.
+  const plain = plainCommands(command.trim()) !== null ? plainCommands(line) : null;
   const plainLine = plain !== null && plain.length === parts.length && plain.every((part, i) => part === parts[i]);
   // A rule that names a path covers only commands whose paths are in normal form: `x/../y` leaves any prefix.
   const allowed = part => allow.some(rule => rule.specifier?.startsWith('@') ? covers(rule.specifier, part)
