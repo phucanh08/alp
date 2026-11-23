@@ -1,3 +1,108 @@
+# ALP 0.0.1-beta.12 — release notes
+
+> **DRAFT (t-81b0.14, t-a5d8).** Lines marked `TODO(lead)` must be resolved, and this banner
+> removed, before the bump PR merges.
+
+Prepared 2026-11-23 from the commits `v0.0.1-beta.11..2124587b` (`TODO(lead): extend the range to
+the release SHA once t-81b0.14 and t-a5d8 are merged, and name the task that bumps the version`).
+npm (8 packages, `beta` tag) and the GitHub release (archives, installers and the two macOS DMGs)
+carry the same version from one main SHA, as in beta.11. Release acceptance runs the repository's
+fake Codex and fake Claude on the packed tarballs; macOS decides it, Linux and Windows are
+reported. **The gate's real-provider rows (§6.1 of [beta-scope.md](beta-scope.md)) were not run
+for beta.12;** none of them is claimed as passed here (`TODO(lead): confirm at release time`). The
+known R1 (Codex) failure is unchanged (below).
+
+This release continues the dashboard and ALP.app parity with Paseo, now compared with Paseo
+v0.17.3 (tasks t-81b0.12, t-81b0.13, t-81b0.14; the full table with every deviation is
+[apps/web/docs/paseo-parity.md](../../apps/web/docs/paseo-parity.md)). It adds no daemon or gateway
+method and no git or file write action.
+
+**Upgrading from beta.11:**
+
+1. `alp update` (bundle) or `npm install -g @anhlp/alp@beta` (npm), then `alp daemon restart` and
+   restart `alp dashboard` (`alp dashboard --stop`, then `alp dashboard`), so that the dashboard
+   serves the new pages.
+2. ALP.app: download `ALP-0.0.1-beta.12-<arch>.dmg` and replace `/Applications/ALP.app`. It is still
+   ad-hoc signed and not notarized, so the first open needs the same Gatekeeper step as before
+   ([desktop.md](desktop.md) §8). **Update `alp` too:** the new ALP.app has no title bar of its own,
+   and against an older `alp dashboard` its traffic lights sit over the top-left of the page with no
+   drag strip until the dashboard is beta.12 ([desktop.md](desktop.md) §1.1).
+
+Changes that affect an existing user:
+
+- **ALP.app has no separate title bar on macOS** (t-81b0.12, PR #367): as Paseo's macOS window, the
+  traffic lights sit in the dashboard's 36px header row and that row drags the window. The page
+  reserves their room only through the Window Controls Overlay, so a browser, full screen and
+  Windows/Linux (system frame) look as before. From PR #368 the window owns the **sidebar and
+  explorer toggles** when the lights are in the page and the panels are docked: they stay right
+  after the lights and at the far right, in every state ([desktop.md](desktop.md) §1.1).
+- **The Files panel is Paseo's explorer** (t-81b0.12 #367, t-81b0.13 #371): a "Name ⌄" sort label
+  (Name / Modified / Size), a refresh that keeps the tree, chevron-only folder rows, file icons from
+  material-icon-theme (MIT, recorded in `NOTICE` of every package) and Paseo's spacing. From #371
+  the sort, the Show hidden toggle and each workspace's open folders are kept across reloads (stored
+  in this browser or ALP.app). Show hidden stays **off** by default, unlike Paseo, because ALP's
+  toggle also lists `.gitignore`d files. The panel stays read only (no New file / New folder).
+- **Changes in the explorer is Paseo's sidebar** (t-81b0.12 round 3, #369): a branch row, a mode
+  menu (Uncommitted / Committed / Staged / Unstaged; no "All changes"), the diff stat next to the
+  mode, a changed-files tree with merged single-child folders and Paseo's change icons. Clicking a
+  file opens the Diff panel on it; the "…" menu has Open Diff tab and Inline diff (Split and Hide
+  whitespace appear with Inline diff). A right click copies paths or opens the file or diff. Still
+  read only: no stage, discard, commit, revert or pull request.
+  `TODO(lead): t-81b0.14 — Changes remembers Hide whitespace across reloads, as Paseo v0.17.3 does
+  (one global preference). The Changes mode is intentionally NOT remembered: Paseo keeps it in
+  memory only (board p-c4337f7a). Fill in the PR number and the storage (browser / ALP.app) once
+  merged.`
+- **Settings › App as Paseo's** (t-81b0.12 round 4, #370): theme **tiles** with a preview of each
+  theme (System first); content width **Default / Wide / Full** (an older custom width still applies
+  and is shown as custom); **Notifications** is its own page; **Open location** chooses whether
+  files from the explorer, Changes and chat open in the main panel or on the side (a reused pane at
+  the right; stored per browser); a **Star** link to the repository.
+- **Settings › Shortcuts rebinds the keyboard shortcuts** (t-81b0.13, #371): press the new keys to
+  capture them (Escape or Cancel stops), **Clear** leaves a shortcut "Not set", **Reset** one or
+  all. Keys another shortcut already uses are refused with its name, and Reset is refused when the
+  default keys were taken since. The Shift+? dialog, the hints and ALP.app's ⌘W fallback follow
+  your keys. The composer keys and Find in chat cannot be rebound. In a browser, keys the browser
+  keeps (⌘W, ⌘T, ⌘N in Chrome) cannot be captured.
+  `TODO(lead): t-81b0.14 — ALP.app turns its menu keys off while Settings › Shortcuts captures a
+  key. The brief said: one minimal preload exposing only setCapturingShortcut (gate t-81b0.14/g1).
+  The board (claim p-9ac2d60e, 2026-11-23) now says "g2 option A, no preload". Describe the
+  mechanism that actually merged. Before it, in ALP.app the menu took ⌘Q, ⌘H, ⌥⌘H, ⌘Z, ⇧⌘Z, ⌘X,
+  ⌘C, ⌘V, ⌥⇧⌘V, ⌘A, ⌘R, ⌘0, ⌘+, ⌘-, ⌃⌘F, ⌘M, ⇧⌘R (dev build also ⌥⌘I) before the page, so they
+  ran the menu item and were not recorded. State the PR number and which of these keys can now be
+  captured. If a preload was added, add a security note pointing to desktop.md §4, because the
+  window had no preload before.`
+
+Fixes since beta.11 include: the Files panel ends a refresh when the connection or workspace
+changes (6c85c7d2); every package's `NOTICE` carries the icon attribution with the full MIT text
+(505e5e33, 984f7f2e); the workspace header keeps the traffic lights' room outside the title group
+(b1ad84a2); Changes tree rows carry `aria-level` and a new workspace opens its folders again
+(e62497a1); a closed side pane is forgotten, so a later pane with its id is not taken for it
+(fd1fec8f).
+
+- `TODO(lead): t-a5d8 — the desktop e2e Browser-tab flake (browser.spec: the guest stayed
+  about:blank, seen on the beta.11 PR CI) and the Windows alpd lock (windows-daemon:
+  ALP_LOCK_HELD after SIGKILL). The causes are not established yet; describe the fixes and their
+  commits once merged, or drop this bullet if they change only tests.`
+- `TODO(lead): unplaced commits — none in the range check (all 18 commits of
+  v0.0.1-beta.11..2124587b are placed above); re-check every commit added after 2124587b.`
+
+Known issues, carried from beta.11:
+
+- **R1 (Codex) of the real-provider gate does not pass** (t-beb5), as in beta.9 to beta.11.
+- **Paseo 0.16 and later** (t-1af7): the plugin fails to typecheck against the newest Paseo SDK.
+- **Two alpd supervisors:** the Paseo plugin and `alp dashboard` each restart a crashed alpd with
+  their own entry, so after a crash the alpd build can change to whichever restarts first.
+- Windows keeps alpd on the bundled Node; npm installs always run alpd on Node. The desktop app is
+  macOS only, not notarized, has no auto-update, and does not stop `alp dashboard` when it quits.
+- The desktop e2e has no workspace, so the window-owned sidebar and explorer toggles are tested
+  only in the web e2e, not in a real ALP.app on CI.
+- Still as before: the Claude Agent SDK's own bundled zod is inside the advisory range (accepted
+  residual risk, [zod-advisory.md](zod-advisory.md)); Antigravity's own read tools are not confined
+  to the workspace; remote mode (`@anhlp/alp-gateway`) is not published.
+- `TODO(lead): the GitHub release body is still release-binaries.yml's "Draft binary release built
+  from …" template and does not link these notes (board p-2220d2c3, as in beta.9–beta.11). Fix the
+  workflow, edit the body after un-draft, or leave it; this is not a user-facing known issue.`
+
 # ALP 0.0.1-beta.11 — release notes
 
 Prepared 2026-11-22 from the commits `v0.0.1-beta.10..3b0f96ae` (task t-81b0.11 bumped the
