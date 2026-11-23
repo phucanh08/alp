@@ -108,6 +108,13 @@ test('a command is allowed only when allow rules cover every part of it, and den
   assert.equal(commandDecision(guarded, "/opt/a@1/bin/zsh -lc 'echo $(git push)'"), 'deny');
   assert.equal(commandDecision(guarded, "/opt/a@1/bin/zsh -lc 'git clone x'"), 'ask');
   assert.equal(commandDecision(guarded, "/opt/a@1/bin/zsh -lc 'git status'"), undefined);
+  // T18 (vi): Codex runs the user's login shell (`/bin/zsh -lc '…'` on macOS). One from a Nix profile is outside the system
+  // directories: a plain allow rule gives no decision (the mode refuses, or the user is asked), and no deny follows from it.
+  for (const shell of ['/nix/var/nix/profiles/default/bin/zsh', '/run/current-system/sw/bin/zsh']) {
+    assert.equal(commandDecision({ allow: ['Bash(git status:*)'], deny: [] }, `${shell} -lc 'git status'`), undefined, shell);
+    assert.equal(commandDecision({ allow: ['Bash(git status:*)'], deny: ['Bash(git push:*)'] }, `${shell} -lc 'git status'`), undefined, shell);
+    assert.equal(commandDecision({ allow: ['Bash(git status:*)'], ask: ['Bash(git status:*)'], deny: [] }, `${shell} -lc 'git status'`), 'ask', shell);
+  }
   assert.equal(unwrapShell(`bash -c "echo \\"a\\" b"`), 'echo "a" b');
   // In double quotes the outer shell expands $(…) first: such a script is not unwrapped (t-cde5 re-review).
   assert.equal(unwrapShell(`sh -c "git log '$(id)'"`), `sh -c "git log '$(id)'"`);
