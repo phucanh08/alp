@@ -99,6 +99,22 @@ test('t-cde5: an older home\'s password (paseo.json), pre-rename identity (web.j
   if (posix) assert.equal(await mode(relayKeyFile(home)), 0o600);
 });
 
+test('t-cde5: a kept password or relay key someone widened is set back to 0600 when read', { skip: !posix && 'POSIX modes' }, async t => {
+  const { defer, home } = await scratch(t);
+  const first = createWebServer({ home });
+  const info = await first.listen();
+  await first.close();
+  await relayKeyPair(home);
+  await chmod(tokenFile(home), 0o644);
+  await chmod(relayKeyFile(home), 0o644);
+  const web = createWebServer({ home });
+  assert.equal((await web.listen()).token === info.token, true, 'the same password is kept');
+  defer(() => web.close());
+  assert.equal(await mode(tokenFile(home)), 0o600);
+  await relayKeyPair(home);
+  assert.equal(await mode(relayKeyFile(home)), 0o600);
+});
+
 test('t-cde5: a home with only a pre-rename web.json carries its password into <home>/paseo/ and strips web.json', async t => {
   const { defer, home } = await scratch(t);
   const token = 'c'.repeat(64);
@@ -119,7 +135,8 @@ test('t-cde5: the token socket answers only a request line, with the password, a
   const socketPath = tokenSocketPath(home);
   assert.equal(web.tokenSocket, socketPath);
   const preferred = path.join(home, 'paseo', 'token.sock');
-  assert.equal(socketPath, Buffer.byteLength(preferred) < 100 ? preferred : tokenSocketPath(home));
+  if (Buffer.byteLength(preferred) < 100) assert.equal(socketPath, preferred);
+  else assert.match(socketPath, new RegExp(`^/tmp/alp-paseo-${process.getuid()}-[0-9a-f]{12}/token\\.sock$`), 'a long home: under /tmp, not TMPDIR');
   assert.equal((await stat(socketPath)).isSocket(), true);
   assert.equal(await mode(socketPath), 0o600);
   assert.equal(await mode(path.dirname(socketPath)), 0o700);

@@ -111,6 +111,11 @@ export async function writePrivate(file: string, text: string, { create = false 
   } finally { await unlink(temporary).catch(() => {}); }
 }
 
+/** Sets a kept credential file back to 0600 (POSIX); a file that cannot be changed is left as it is. */
+export async function keepPrivate(file: string) {
+  if (process.platform !== 'win32') await chmod(file, 0o600).catch(() => {});
+}
+
 /** Makes the credential directory, or refuses one that is not the user's with mode 0700. */
 export async function ensureCredentialDir(home: string) {
   await mkdir(home, { recursive: true, mode: 0o700 });
@@ -151,6 +156,8 @@ async function lastIdentity(home: string, log: (message: string) => void) {
   // As before t-cde5: web.json speaks only for a home without paseo.json.
   const carried = publishedObject ? publishedObject : await lstat(webFile(home)).then(() => undefined, () => legacyIdentity);
   let token = validToken((await readJson(tokenFile(home)))?.token);
+  // A kept file someone widened is narrowed again (the directory is checked 0700 above it).
+  if (token) await keepPrivate(tokenFile(home));
   if (!token) {
     const previous = validToken(carried?.token);
     token = previous ?? randomBytes(32).toString('hex');
