@@ -96,7 +96,8 @@ test('security: Bash allow rules reach canUseTool; every role keeps the outcome 
   const review = { allow: ['Bash(npm test:*)', 'Bash(node --test:*)', 'Bash(node scripts/test.mjs:*)', 'Bash(git diff:*)'], ask: ['Bash(npm install *)'], deny: ['Bash(rm:*)', 'Bash(git push:*)'], beyondMode: 'refuse' };
   const reviewing = claudePermissions('read-only', () => 'read-only', { ...review, floor: 'read-only', floorRoot: root });
   assert.equal(reviewing.allowedTools, undefined, 'no Bash allow rule goes to Claude');
-  assert.deepEqual(reviewing.disallowedTools.slice(-2), ['Bash(rm:*)', 'Bash(git push:*)'], 'deny rules stay native');
+  // The user's deny rules stay native, followed (a read-only session, t-cde5) by the Paseo credentials' denials.
+  assert.deepEqual(reviewing.disallowedTools.filter(rule => rule.startsWith('Bash(')), ['Bash(rm:*)', 'Bash(git push:*)'], 'deny rules stay native');
   for (const command of ['npm test', 'node scripts/test.mjs unit', 'git diff --stat']) {
     assert.equal(await bash(reviewing, command), 'allow', command);
     assert.equal(await bash(reviewing, command, true), 'allow', `${command} outside the sandbox`);
