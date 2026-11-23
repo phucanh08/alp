@@ -1425,7 +1425,7 @@ the configuration the open root runs with and the one the change would resolve t
 `not_root`, `not_persistent`, `runtime_unsupported`, `runtime_mismatch`, `agent_mismatch`,
 `permission_escalation`, `team_not_found`, `invalid_params`), and the teams the host defines for the
 project. An `EffectiveConfig` is `{ team, teamLabel?, agent, runtime, model, thinking, mode,
-permissionProfile?, supervisor, maxPeers?, delegates, tools, mcpServers: [{ name, kind }], hooks,
+permissionProfile?, supervisor, maxPeers?, maxLeads?, delegates, tools, mcpServers: [{ name, kind }], hooks,
 instructionsSha? }`: names, booleans and counts, never a path, command, credential or the instructions.
 
 The gateway exposes `session.configure` with model or thinking under `session.write` (a root in the
