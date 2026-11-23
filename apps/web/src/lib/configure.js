@@ -121,7 +121,7 @@ export function configuredSummary(session, effective) {
   return {
     ...session,
     model: effective.model, thinking: effective.thinking, mode: effective.mode, runtime: effective.runtime,
-    workflow: { ...workflow, mode: effective.team, supervisor: effective.supervisor, ...(typeof effective.maxPeers === 'number' ? { maxPeers: effective.maxPeers } : {}) },
+    workflow: { ...workflow, mode: effective.team, supervisor: effective.supervisor, ...(typeof effective.maxPeers === 'number' ? { maxPeers: effective.maxPeers } : {}), ...(typeof effective.maxLeads === 'number' ? { maxLeads: effective.maxLeads } : {}) },
     // A team without a label (custom) has none: an old label must not stay.
     teamLabel: effective.teamLabel ?? session?.teamLabel ?? (effective.team === 'custom' ? undefined : effective.team),
   };

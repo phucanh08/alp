@@ -104,6 +104,8 @@ when all of these hold, checked together so two parallel calls cannot both pass:
 - it takes a `taskId` whose task declares `paths`, every running lead holds such a
   task too, and no two of those tasks' paths overlap.
 
+A read-only lead writes nothing, so only the count and task rules apply to it.
+
 A refusal says what to do, for example `Another lead is running; a second lead needs
 isolation "worktree" and a taskId with its own paths (maxLeads 2)` or `Lead limit
 reached: 2 leads are already running or parked (maxLeads 2); wait for a handoff, or

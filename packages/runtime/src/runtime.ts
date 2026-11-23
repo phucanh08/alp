@@ -3681,13 +3681,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       }
       const needs = `Another lead is running; a second lead needs isolation "worktree" and a taskId with its own paths (maxLeads ${maxLeads})`;
       if (clashes) return toolResult(false, { error: needs, ...parkedNext() });
-      if (!task) return toolResult(false, { error: needs });
-      if (!task.paths.length) return toolResult(false, { error: `Task ${task.id} declares no paths; a lead beside another lead needs a task with paths, so their work can be told apart. Add paths to the task, or wait for the running lead's handoff` });
+      if (!task) return toolResult(false, { error: needs, ...parkedNext() });
+      if (!task.paths.length) return toolResult(false, { error: `Task ${task.id} declares no paths; a lead beside another lead needs a task with paths, so their work can be told apart. Add paths to the task, or wait for the running lead's handoff`, ...parkedNext() });
       for (const other of leads) {
         const paths = other.taskPaths ?? (other.taskId ? knownTasks.find(candidate => candidate.id === other.taskId)?.paths : undefined) ?? [];
         if (!paths.length) return toolResult(false, { error: `${other.agent} ${other.id} runs without a task of its own paths; a second lead starts only beside leads that each hold one. Wait for its handoff`, ...parkedNext() });
         const shared = overlapping(task.paths, paths);
-        if (shared.length) return toolResult(false, { error: `Task ${task.id} overlaps the task of ${other.agent} ${other.id} on ${shared.join(', ')}; parallel leads need independent tasks with separate paths. Wait for its handoff, or choose another task`, conflicts: shared });
+        if (shared.length) return toolResult(false, { error: `Task ${task.id} overlaps the task of ${other.agent} ${other.id} on ${shared.join(', ')}; parallel leads need independent tasks with separate paths. Wait for its handoff, or choose another task`, conflicts: shared, ...parkedNext() });
       }
     } else if (session.assignments.size && (!['peer', 'advisor', 'reviewer', 'lead'].includes(childRole) || clashes)) {
       return toolResult(false, {

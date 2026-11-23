@@ -37,7 +37,7 @@ export function toSessionSpec(config: ProviderSessionConfig, persistence?: Provi
   if (Object.keys(config.settings).some(key => key !== 'workflow')) throw new Error('Unknown ALP session setting');
   if (config.settings.workflow !== undefined && typeof config.settings.workflow !== 'string') throw new Error('workflow must be a string');
   if (config.toolPolicy) throw new Error('Per-tool approval policy is unsupported by this prototype');
-  const restored = persistence?.version === 2 ? undefined : persistence?.data as { agent?: string; cwd?: string; threadId?: string; runtime?: string; model?: string; workflow?: { mode: string; maxPeers: number } } | undefined;
+  const restored = persistence?.version === 2 ? undefined : persistence?.data as { agent?: string; cwd?: string; threadId?: string; runtime?: string; model?: string; workflow?: { mode: string; maxPeers: number; maxLeads?: number } } | undefined;
   if (persistence?.version === 2) alpdSessionOf(config, persistence);
   else if (persistence && (persistence.version !== 1 || !restored || typeof restored.agent !== 'string' || typeof restored.threadId !== 'string' || restored.cwd !== path.resolve(config.cwd))) throw new Error('Invalid ALP persistence or project mismatch');
   if (options.workflow !== undefined && typeof options.workflow !== 'string') throw new Error('providerOptions.workflow must be a string');
