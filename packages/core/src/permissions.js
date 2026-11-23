@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { lstatSync, realpathSync } from 'node:fs';
+import { lstatSync, mkdirSync, realpathSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { moveFile } from './atomic.js';
@@ -56,7 +57,7 @@ export function parseRule(rule, source = 'rule') {
   if (specifier !== undefined && !specifier.trim()) fail(source, `${JSON.stringify(rule)} has an empty specifier`);
   if (specifier !== undefined && specifier.trim().startsWith('@')) {
     const checked = checkedRule(specifier.trim());
-    if (tool !== 'Bash' || !checked) fail(source, `${JSON.stringify(rule)}: a checked rule is Bash(@git-clone-public <root>), Bash(@git-read <root>) or Bash(@git-unsafe), with <root> an absolute, normalised path`);
+    if (tool !== 'Bash' || !checked) fail(source, `${JSON.stringify(rule)}: a checked rule is Bash(@git-clone-public <root>), Bash(@git-read <root>) or Bash(@git-unsafe), with <root> an absolute, normalised path or ~/<dir>`);
   }
   return { tool, ...(specifier !== undefined && specifier.trim() !== '*' ? { specifier: specifier.trim() } : {}) };
 }
@@ -213,18 +214,20 @@ export function simpleCommands(line) {
 
 // --- checked git rules ----------------------------------------------------------
 //
-// A prefix rule cannot say "a directory under /tmp/alp-librarian": `Bash(git -C /tmp/alp-librarian/*)` also
-// covers `git -C /tmp/alp-librarian/../x push`. A checked rule names a command shape ALP parses into words
+// A prefix rule cannot say "a directory under <root>": `Bash(git -C /r/*)` also covers `git -C /r/../x push`.
+// A checked rule names a command shape ALP parses into words
 // and checks argument by argument. Its specifier starts with `@`, so a runtime that matches rules itself as
 // written (Claude's allowedTools, disallowedTools) matches it against no real command: it holds only where ALP
-// decides (commandDecision), and never widens anything elsewhere.
+// decides (commandDecision), and never widens anything elsewhere. <root> is absolute, or `~/<dir>` in the home of
+// the user ALP runs as; it must be that user's own 0700 directory (safeRoot).
 //
 //   Bash(@git-clone-public <root>)  allow `git clone [--depth N|--shallow-since=D|--filter=F|--single-branch|
 //                                   --no-tags|-b B|-q|-n|--progress] https://(github|gitlab).com/<o>/<r>[.git] <dest>`,
 //                                   <dest> absolute, normalised and strictly below <root>, also once links are resolved
 //   Bash(@git-read <root>)          allow `git [--no-pager] -C <dir> <fetch|log|show|grep|rev-parse|ls-files|cat-file|
 //                                   blame|diff|branch> ...`, <dir> strictly below <root> the same way; fetch only from
-//                                   origin with listed options; branch only lists; no option that writes or runs a program
+//                                   origin with listed options; branch only lists; the others only with the options
+//                                   GIT_OPTIONS lists for them, matched exactly (no abbreviation, no unlisted letter)
 //   Bash(@git-unsafe)               deny any git invocation that pushes, configures, edits remotes, runs hooks, or
 //                                   carries -c/--config-env, --upload-pack, --receive-pack, --config, --template, --exec,
 //                                   or -u to clone/fetch/pull/ls-remote; a git command ALP cannot split into words too
@@ -237,7 +240,8 @@ function checkedRule(specifier) {
   if (!match || !CHECKED_KINDS.includes(match[1])) return null;
   const [, kind, root] = match;
   if (kind === 'git-unsafe') return root === undefined ? { kind } : null;
-  if (root === undefined || !cleanAbsolute(root) || root === '/') return null;
+  // <root> is an absolute path in normal form, or `~/<dir>`: <dir> in the home of the user ALP runs as.
+  if (root === undefined || !cleanAbsolute(root.startsWith('~/') ? root.slice(1) : root) || ['/', '~/'].includes(root)) return null;
   return { kind, root };
 }
 
@@ -331,18 +335,48 @@ function realForm(target) {
   return path.join(realpathSync.native(existing), ...rest);
 }
 
+/** Whether `target`, written in normal form, lies strictly below `base`, also once links are resolved. */
+function inside(target, base) {
+  if (!cleanAbsolute(target) || !target.startsWith(`${base}/`)) return false;
+  try { return realForm(target).startsWith(`${realForm(base)}${path.sep}`); } catch { return false; }
+}
+
 /**
- * Whether `target` lies strictly below `root`: written in normal form, and still below it once links are
- * resolved. An existing root must be this user's own directory, not someone else's in a shared /tmp.
+ * The directory a checked rule's root names, once it is safe to write below; null when it is not.
+ * `~/<dir>` is that directory in the home of the user ALP runs as (os.homedir()): per user, so another local
+ * user can neither squat its name, as anyone may in a shared /tmp, nor reach into it. The root must be a real
+ * directory (not a link) owned by this user with no group or other access (mode 0700), in a parent that no one
+ * else may rename it in. `create` (a clone) makes a missing root with mode 0700 first; a read needs it to exist.
+ * Windows has no uid or POSIX mode to check, and its paths cannot be written in a command ALP splits (a
+ * backslash or drive letter): there no root is safe and the checked allow rules allow nothing, so clones ask.
  */
-function below(target, root) {
-  if (!cleanAbsolute(target) || !target.startsWith(`${root}/`)) return false;
+function safeRoot(rule, create) {
+  if (process.platform === 'win32' || typeof process.getuid !== 'function') return null;
+  let root = rule;
+  if (rule.startsWith('~/')) {
+    const home = homedir();
+    if (!cleanAbsolute(home) || home === '/') return null;
+    root = `${home}${rule.slice(1)}`;
+  }
+  if (!cleanAbsolute(root) || root === '/') return null;
   try {
-    const info = lstatSync(root, { throwIfNoEntry: false });
-    if (info && (!info.isDirectory() || (typeof process.getuid === 'function' && info.uid !== process.getuid()))) return false;
-    const realRoot = realForm(root);
-    return realForm(target).startsWith(`${realRoot}${path.sep}`);
-  } catch { return false; }
+    // Others who may write the parent could rename the root away and put their own in its place, unless it is sticky (/tmp).
+    const parent = statSync(realpathSync.native(path.dirname(root)));
+    if ((parent.mode & 0o022) !== 0 && (parent.mode & 0o1000) === 0) return null;
+    let info = lstatSync(root, { throwIfNoEntry: false });
+    if (!info && create) {
+      try { mkdirSync(root, { mode: 0o700 }); } catch (error) { if (error.code !== 'EEXIST') return null; }
+      info = lstatSync(root, { throwIfNoEntry: false });
+    }
+    if (!info || info.isSymbolicLink() || !info.isDirectory() || info.uid !== process.getuid() || (info.mode & 0o077) !== 0) return null;
+    return root;
+  } catch { return null; }
+}
+
+/** Whether `target` lies strictly below a checked rule's root, and that root is safe to write below (safeRoot). */
+function below(target, rule, create = false) {
+  const root = safeRoot(rule, create);
+  return root !== null && inside(target, root);
 }
 
 const PUBLIC_REPO = /^https:\/\/(?:github\.com|gitlab\.com)\/([A-Za-z0-9][\w.-]*)\/([\w.-]+?)(?:\.git)?$/;
@@ -367,14 +401,104 @@ function cloneAllowed({ globals, sub, args }, root) {
   const [url, destination] = positional;
   const repo = PUBLIC_REPO.exec(url);
   if (!repo || ['.', '..'].includes(repo[1]) || ['.', '..', ''].includes(repo[2])) return false;
-  return below(destination, root);
+  return below(destination, root, true);
 }
 
 const READS = ['fetch', 'log', 'show', 'grep', 'rev-parse', 'ls-files', 'cat-file', 'blame', 'diff', 'branch'];
 const FETCH_FLAGS = ['--unshallow', '--tags', '--no-tags', '--prune', '-p', '--prune-tags', '--all', '-q', '--quiet', '-v', '--verbose', '--force', '-f', '--no-recurse-submodules', '--progress'];
 const BRANCH_FLAGS = ['-a', '-r', '--all', '--remotes', '-v', '-vv', '--verbose', '--list', '--no-color'];
-/** Options of the reading subcommands that write a file, run a program, or read outside the repository. */
-const WRITES_OR_RUNS = /^(?:--output(?:=|$)|--ext-diff$|--open-files-in-pager|-O|--no-index$|--textconv$|--filters$)/;
+
+// The options each reading subcommand may carry: an ALLOWLIST, matched exactly. git's parse-options accepts any
+// unambiguous abbreviation of a long option (`grep --open=sh` is --open-files-in-pager) and clusters of short
+// ones (`grep -iOsh`), so a word is allowed only when it is one of these names as written, or a cluster of
+// listed short letters. Nothing here writes a file, runs a program, or names a file to read (no --output,
+// -O, --open-files-in-pager, --ext-diff, --textconv, --no-index, -f/--file, --contents, -S <file> for blame,
+// --ignore-revs-file, --exclude-from, -X, --orderfile/-O); the values the listed options take are checked too.
+//   long: name -> 'flag' (`--x`), 'optional' (`--x` or `--x=v`), 'value' (`--x=v` or `--x v`)
+//   flags: short letters with no value; optional: short letters whose value, if any, is attached digits;
+//   values: short letters that take a value, attached or the next word; numeric: `-<n>` is allowed
+const longs = (kind, names) => Object.fromEntries(names.split(/\s+/).filter(Boolean).map(name => [`--${name}`, kind]));
+const DIFF_LONG = {
+  ...longs('flag', 'patch no-patch raw numstat shortstat summary name-only name-status patch-with-stat compact-summary full-index binary no-abbrev minimal patience histogram ignore-all-space ignore-space-change ignore-space-at-eol ignore-blank-lines ignore-cr-at-eol function-context no-color no-renames text no-ext-diff no-textconv irreversible-delete pickaxe-all pickaxe-regex exit-code quiet no-prefix check'),
+  ...longs('optional', 'stat dirstat abbrev word-diff color-words find-renames find-copies break-rewrites color'),
+  ...longs('value', 'unified diff-filter inter-hunk-context diff-algorithm word-diff-regex anchored'),
+};
+const LOG_LONG = {
+  ...DIFF_LONG,
+  ...longs('flag', 'oneline graph all branches tags remotes reverse first-parent no-merges merges follow abbrev-commit no-abbrev-commit no-decorate source left-right boundary date-order topo-order author-date-order regexp-ignore-case extended-regexp fixed-strings basic-regexp perl-regexp all-match invert-grep full-history simplify-merges simplify-by-decoration ancestry-path cherry-pick cherry-mark no-walk do-walk parents children log-size mailmap use-mailmap no-mailmap cc combined-all-paths dense sparse'),
+  ...longs('optional', 'decorate pretty'),
+  ...longs('value', 'max-count skip since after until before author committer grep format date min-parents max-parents'),
+};
+const DIFF_SHORT = { flags: 'puswbWRaz', optional: 'MCB', values: 'USG' };
+const GIT_OPTIONS = {
+  log: { long: LOG_LONG, flags: `${DIFF_SHORT.flags}iEFPm`, optional: DIFF_SHORT.optional, values: `${DIFF_SHORT.values}nL`, numeric: true },
+  show: { long: LOG_LONG, flags: `${DIFF_SHORT.flags}iEFPm`, optional: DIFF_SHORT.optional, values: `${DIFF_SHORT.values}nL`, numeric: true },
+  diff: { long: { ...DIFF_LONG, ...longs('flag', 'cached staged merge-base') }, ...DIFF_SHORT, numeric: false },
+  grep: {
+    long: {
+      ...longs('flag', 'cached untracked exclude-standard no-exclude-standard text ignore-case word-regexp invert-match full-name extended-regexp basic-regexp fixed-strings perl-regexp line-number column name-only files-with-matches files-without-match count only-matching null heading break show-function function-context all-match and or not quiet no-color recursive no-recursive'),
+      ...longs('optional', 'color'),
+      ...longs('value', 'max-depth max-count context after-context before-context threads'),
+    },
+    flags: 'aiIwvhHnlLcoqzpWEGFPr', optional: '', values: 'eABCm', numeric: true,
+  },
+  blame: {
+    long: { ...longs('flag', 'root show-stats porcelain line-porcelain incremental show-name show-number show-email minimal reverse first-parent'), ...longs('optional', 'abbrev'), ...longs('value', 'date ignore-rev') },
+    flags: 'bltsewnfpc', optional: 'MC', values: 'L', numeric: false,
+  },
+  'rev-parse': {
+    long: { ...longs('flag', 'verify quiet symbolic symbolic-full-name show-toplevel show-prefix show-cdup is-inside-work-tree is-inside-git-dir is-bare-repository is-shallow-repository git-dir absolute-git-dir all branches tags remotes'), ...longs('optional', 'short abbrev-ref'), ...longs('value', 'default') },
+    flags: 'q', optional: '', values: '', numeric: false,
+  },
+  'ls-files': {
+    long: { ...longs('flag', 'cached deleted modified others stage killed directory no-empty-directory unmerged full-name error-unmatch eol deduplicate sparse'), ...longs('optional', 'abbrev'), ...longs('value', 'format') },
+    flags: 'cdmoskutvfz', optional: '', values: '', numeric: false,
+  },
+  'cat-file': {
+    long: { ...longs('flag', 'batch-all-objects unordered buffer'), ...longs('optional', 'batch batch-check') },
+    flags: 'tsep', optional: '', values: '', numeric: false,
+  },
+};
+
+/** A word that names something inside the clone: an absolute path below it, or a relative one with no `..`, `//` or `.` segment. */
+function insideClone(word, dir) {
+  if (word.startsWith('~')) return false;
+  if (word.startsWith('/')) return inside(word, dir);
+  // `rev:path` and `-L 1,2:path` name a path after a colon: it is checked as a segment too.
+  return !word.replace(/^\.\//, '').split(/[/:]/).some((segment, i, all) => segment === '..' || (segment === '.' && all.length > 1) || (segment === '' && i > 0));
+}
+
+/** Whether every option of a reading subcommand is on its allowlist, and every value and path stays in the clone. */
+function readOptionsAllowed(spec, args, dir) {
+  let paths = false;
+  for (let i = 0; i < args.length; i++) {
+    const word = args[i];
+    if (paths || !word.startsWith('-') || word === '-') { if (!insideClone(word, dir)) return false; continue; }
+    if (word === '--') { paths = true; continue; }
+    // A value given as the next word must not itself look like an option: git and ALP then agree on what it is.
+    const next = () => { const value = args[++i]; return value !== undefined && !value.startsWith('-') && insideClone(value, dir); };
+    if (word.startsWith('--')) {
+      const equals = word.indexOf('=');
+      const name = equals > 0 ? word.slice(0, equals) : word;
+      const kind = Object.hasOwn(spec.long, name) ? spec.long[name] : undefined;
+      if (kind === undefined) return false;
+      if (equals > 0) { if (kind === 'flag' || !insideClone(word.slice(equals + 1), dir)) return false; continue; }
+      if (kind === 'value' && !next()) return false;
+      continue;
+    }
+    if (spec.numeric && /^-\d+$/.test(word)) continue;
+    // A cluster of short options: every letter listed; a value letter takes the rest of the word, or the next word.
+    for (let j = 1; j < word.length; j++) {
+      const letter = word[j];
+      if (spec.flags.includes(letter)) continue;
+      const rest = word.slice(j + 1);
+      if (spec.optional.includes(letter)) { if (!/^\d*%?$/.test(rest)) return false; break; }
+      if (spec.values.includes(letter)) { if (rest ? !insideClone(rest, dir) : !next()) return false; break; }
+      return false;
+    }
+  }
+  return true;
+}
 
 function readAllowed({ globals, sub, args }, root) {
   const dirs = globals.filter(option => option.name === '-C');
@@ -395,13 +519,7 @@ function readAllowed({ globals, sub, args }, root) {
     return positional.slice(1).every(spec => spec.split(':').every(goodRef));
   }
   if (sub === 'branch') return args.every(word => BRANCH_FLAGS.includes(word));
-  for (const word of args) {
-    if (WRITES_OR_RUNS.test(word)) return false;
-    // A path argument stays inside the clone, in normal form (a revision range a..b is no path).
-    if (word.startsWith('/') && !below(word, dirs[0].value)) return false;
-    if (word.replace(/^\.\//, '').split('/').some((segment, i, all) => segment === '..' || (segment === '.' && all.length > 1) || (segment === '' && i > 0))) return false;
-  }
-  return true;
+  return readOptionsAllowed(GIT_OPTIONS[sub], args, dirs[0].value);
 }
 
 /** Whether a checked rule covers one simple command (deny: also git ALP cannot split into words). */
@@ -410,8 +528,9 @@ function coversChecked(checked, command) {
   const words = shellWords(command);
   if (checked.kind === 'git-unsafe') {
     if (!words) {
-      // Words the shell would still change: judged on their face, and a git subcommand ALP cannot read is denied.
-      const git = gitWords(raw.map(word => word.replace(/^['"]+|['"]+$/g, '')));
+      // Words the shell would still change: judged on their face once quotes and escaping backslashes are taken
+      // out (`pu\sh`, `p'u'sh` are push), and a git subcommand ALP cannot read is denied.
+      const git = gitWords(raw.map(word => word.replace(/\\(.)/g, '$1').replace(/['"]/g, '')));
       if (git === null) return false;
       const parsed = parseGit(git);
       return gitUnsafe(parsed) || git.includes('push') || parsed.sub === undefined || /[^\w-]/.test(parsed.sub);

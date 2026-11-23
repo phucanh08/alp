@@ -245,8 +245,8 @@ user.
   `path:line — symbol — why`. A coordinator calls it instead of pulling a lot of
   unrelated source into its own context.
 - **librarian** researches external repositories: it clones public github.com and gitlab.com
-  repositories into `/tmp/alp-librarian/`, or reads their source at a fixed SHA through
-  WebFetch (github.com, raw.githubusercontent.com, gitlab.com), and cites `repo@sha:path:line`.
+  repositories into `~/.alp-librarian-cache/` (in the home of the user ALP runs as), or reads
+  their source at a fixed SHA through WebFetch (github.com, raw.githubusercontent.com, gitlab.com), and cites `repo@sha:path:line`.
 
 In `pho-research` main may call both. In `cafe-research` lead may call both and
 main may call librarian only. Oracle may suggest that its coordinator run one of
@@ -265,7 +265,7 @@ profile is:
 ```json
 {
   "base": "read-only",
-  "allow": ["Bash(@git-clone-public /tmp/alp-librarian)", "Bash(@git-read /tmp/alp-librarian)",
+  "allow": ["Bash(@git-clone-public ~/.alp-librarian-cache)", "Bash(@git-read ~/.alp-librarian-cache)",
             "WebFetch(domain:github.com)", "WebFetch(domain:raw.githubusercontent.com)", "WebFetch(domain:gitlab.com)"],
   "ask": ["Bash(git clone:*)", "Bash(git fetch:*)", "Bash(git -C:*)", "Bash(gh repo clone:*)"],
   "deny": ["Bash(@git-unsafe)", "Bash(git push:*)", "Bash(rm:*)"]
@@ -274,14 +274,16 @@ profile is:
 
 - **Allowed** (and run outside the read-only sandbox when librarian asks to leave it, which a
   network command needs): a clone of a public github.com or gitlab.com repository into
-  `/tmp/alp-librarian/<name>`, then `git -C /tmp/alp-librarian/<name>` fetch, log, show, grep,
-  rev-parse, ls-files, cat-file, blame, diff and branch listing; WebFetch to github.com,
+  `$HOME/.alp-librarian-cache/<name>`, then `git -C $HOME/.alp-librarian-cache/<name>` fetch, log,
+  show, grep, rev-parse, ls-files, cat-file, blame, diff and branch listing, each written with the
+  home path in full (ALP does not expand `~` or `$HOME` in a command); WebFetch to github.com,
   raw.githubusercontent.com and gitlab.com. Why: reading history and searching many files of
   an external library needs a clone, and a clone below one scratch root changes nothing of
   the project.
 - **Asked** each time: any other clone, fetch or `git -C` (another host, `git@`, `ssh://`,
   `file://` or a local path, a destination elsewhere, `--recurse-submodules`, a non-normal
-  path such as `/tmp/alp-librarian/../x` or `/tmp/alp-librarianX`) and `gh repo clone`. Why:
+  path such as `$HOME/.alp-librarian-cache/../x`, an option not on the list below) and `gh repo
+  clone`. Why:
   these may reach private code or write outside the scratch root; the user decides.
 - **Denied**: `git push` in every form, git config, remote edits, hooks, config overrides and
   the options that run a program (`@git-unsafe`), and `rm`. Why: none is reading.
@@ -292,9 +294,30 @@ profile is:
 - Limits: a URL does not say whether a repository is private. A clone of a private
   repository works only if the environment holds credentials for it (a git credential helper,
   a token in `~/.netrc`); ALP passes none and does not set `GIT_TERMINAL_PROMPT=0`, so keep
-  no such credentials where librarian runs if private code must stay out. `/tmp/alp-librarian`
-  is in the shared `/tmp`: ALP refuses a root that another user owns or a destination that a
-  link leads out of, but checks this when it decides, not when git writes.
+  no such credentials where librarian runs if private code must stay out.
+
+`Bash(@git-read <root>)` allows each reading subcommand only the options on its allowlist
+(`GIT_OPTIONS` in `packages/core/src/permissions.js`), matched exactly: git accepts any
+unambiguous abbreviation of a long option (`grep --open=sh` is `--open-files-in-pager`) and
+clusters of short ones (`grep -iOsh`), so an abbreviation, or a cluster with a letter not on the
+list, is refused. No listed option writes a file, runs a program or names a file to read
+(`--output`, `-O`, `--ext-diff`, `--textconv`, `--no-index`, `grep -f`/`--file`, `blame
+--contents`/`-S`/`--ignore-revs-file`, `ls-files --exclude-from`/`-X` are all left out), and a value
+or path argument that is absolute must lie inside the clone.
+
+The root `~/.alp-librarian-cache` is per user: `<root>` in a checked rule may be `~/<dir>`, which
+ALP reads as `<dir>` in the home of the user it runs as. Why not `/tmp`: in a shared `/tmp`
+another local user can create the name first, or replace a missing root with a link between the
+check and the clone. ALP allows a command below the root only when the root is a real directory
+(not a link), owned by the user ALP runs as, with mode 0700, in a parent no one else may rename
+it in; the first allowed clone creates a missing root with mode 0700. Nobody else can then add
+or swap anything below it, so what ALP checked is what git writes to. Clones stay until you
+delete that directory (librarian may not run `rm`). On Windows there is no uid or POSIX mode to
+check and a Windows path cannot be written in a command ALP can split, so the checked allow
+rules allow nothing there: every clone and `git -C` asks. A profile installed before this
+change still names `/tmp/alp-librarian`; such a root is allowed only if it is yours with mode
+0700, which a root git created (0755) is not, so those commands ask until you replace that
+profile with the pack's (installing again keeps a profile you already have).
 
 A delegated advisor runs on the model its coordinator passes; without one it runs on
 the coordinator's own model, not on the model in its `agent.json`
