@@ -100,6 +100,14 @@ test('a command is allowed only when allow rules cover every part of it, and den
   // The line as given is checked as well as the script inside its wrapper: a wrapper never makes a line looser. A '\''
   // carries an unquoted backslash, so the line is not plain and is asked about, though its script `echo 'hi'` is.
   assert.equal(commandDecision({ allow: ['Bash(echo:*)'], deny: [] }, `/bin/bash -c 'echo '\\''hi'\\'''`), undefined);
+  // A shell outside the system directories may be any program: an allow rule does not judge its script (review 6).
+  for (const line of ["/tmp/x/sh -c 'echo hi'", "/bin/../bin/sh -c 'echo hi'", "/nix/store/x/bin/zsh -lc 'echo hi'"]) assert.equal(commandDecision({ allow: ['Bash(echo:*)'], deny: [] }, line), undefined, line);
+  // Deny and ask rules still judge the script of any wrapper-looking line, as before (review 6: no deny regression).
+  const guarded = { allow: ['Bash(git status:*)'], ask: ['Bash(git clone:*)'], deny: ['Bash(git push:*)'] };
+  assert.equal(commandDecision(guarded, "/opt/a@1/bin/zsh -lc 'git push origin'"), 'deny');
+  assert.equal(commandDecision(guarded, "/opt/a@1/bin/zsh -lc 'echo $(git push)'"), 'deny');
+  assert.equal(commandDecision(guarded, "/opt/a@1/bin/zsh -lc 'git clone x'"), 'ask');
+  assert.equal(commandDecision(guarded, "/opt/a@1/bin/zsh -lc 'git status'"), undefined);
   assert.equal(unwrapShell(`bash -c "echo \\"a\\" b"`), 'echo "a" b');
   // In double quotes the outer shell expands $(…) first: such a script is not unwrapped (t-cde5 re-review).
   assert.equal(unwrapShell(`sh -c "git log '$(id)'"`), `sh -c "git log '$(id)'"`);
