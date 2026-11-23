@@ -122,21 +122,18 @@ test('the path hardening leaves plain allowed commands allowed, and stops x/.. f
 test('the installed librarian profile, through canUseTool: reads below its per-user root, never an abbreviated or path option', { skip: process.platform === 'win32' }, async t => {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-librarian-gate-'));
-  const realHome = process.env.HOME;
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
-  defer(() => { process.env.HOME = realHome; });
-  // ~/.alp-librarian-cache is in the home of the user ALP runs as: a throwaway home here.
-  process.env.HOME = path.join(directory, 'user');
-  await mkdir(process.env.HOME);
   const root = path.join(directory, 'project');
   const library = path.join(directory, 'library');
   await initProject(root);
   await installPack('research', { scope: 'library', library });
-  const profile = await profileFor(root, library, 'librarian', { readOnly: true });
-  assert.ok(profile.allow.includes('Bash(@git-read ~/.alp-librarian-cache)'));
+  const installed = await profileFor(root, library, 'librarian', { readOnly: true });
+  assert.ok(installed.allow.includes('Bash(@git-read /tmp/alp-librarian)'));
+  // The shipped root /tmp/alp-librarian is shared by every local user: a scratch root takes its place here.
+  const cache = path.join(directory, 'alp-librarian');
+  const profile = { ...installed, allow: installed.allow.map(rule => rule.replace('/tmp/alp-librarian', cache)) };
   const gate = claudePermissions('read-only', () => 'read-only', { ...profile, floor: 'read-only', floorRoot: root });
   const bash = (command, leave = false) => gate.canUseTool('Bash', { command, ...(leave ? { dangerouslyDisableSandbox: true } : {}) }).then(result => result.behavior);
-  const cache = `${process.env.HOME}/.alp-librarian-cache`;
   // Its job: clone a public repository (which makes the root 0700), then read it, outside the sandbox.
   assert.equal(await bash(`git clone --depth 50 https://github.com/a/b ${cache}/a-b`, true), 'allow');
   assert.equal((await stat(cache)).mode & 0o777, 0o700);
@@ -148,7 +145,7 @@ test('the installed librarian profile, through canUseTool: reads below its per-u
     assert.equal(commandDecision(profile, `git -C ${cache}/a-b ${args}`), 'ask', args);
     assert.equal(await bash(`git -C ${cache}/a-b ${args}`, true), 'deny', args);
   }
-  // The old shared root is not this profile's, and a deny rule holds in the sandbox as well.
+  // A path outside the (scratch) root is not this profile's, and a deny rule holds in the sandbox as well.
   assert.equal(await bash('git clone https://github.com/a/b /tmp/alp-librarian/a-b', true), 'deny');
   assert.equal(await bash('g\\it push $X'), 'deny');
 });

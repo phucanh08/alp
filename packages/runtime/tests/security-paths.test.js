@@ -118,7 +118,7 @@ test('security: Bash allow rules reach canUseTool; every role keeps the outcome 
   assert.equal(await bash(builder, 'npm install left-pad', true), 'allow');
 
   // The research pack's librarian: its checked rules decide; Claude gets only the WebFetch allow rules.
-  // A scratch 0700 directory stands in for its per-user root (~/.alp-librarian-cache), so nothing is made in /tmp or ~.
+  // A scratch 0700 directory stands in for its root (/tmp/alp-librarian), so the real one is never made or read.
   const clones = await mkdtemp(path.join(os.tmpdir(), 'alp-librarian-gate-'));
   try {
     const librarian = {

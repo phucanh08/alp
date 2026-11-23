@@ -343,22 +343,29 @@ function inside(target, base) {
 
 /**
  * The directory a checked rule's root names, once it is safe to write below; null when it is not.
- * `~/<dir>` is that directory in the home of the user ALP runs as (os.homedir()): per user, so another local
- * user can neither squat its name, as anyone may in a shared /tmp, nor reach into it. The root must be a real
+ * `~/<dir>` is that directory in the home of the user ALP runs as (os.homedir()). A root in a shared /tmp (the research
+ * pack's /tmp/alp-librarian) can be squatted by another local user: then it fails the checks below and every command
+ * asks (denial of service, never a hijack). The root must be a real
  * directory (not a link) owned by this user with no group or other access (mode 0700), in a parent that no one
  * else may rename it in. `create` (a clone) makes a missing root with mode 0700 first; a read needs it to exist.
  * Windows has no uid or POSIX mode to check, and its paths cannot be written in a command ALP splits (a
  * backslash or drive letter): there no root is safe and the checked allow rules allow nothing, so clones ask.
  */
-function safeRoot(rule, create) {
-  if (process.platform === 'win32' || typeof process.getuid !== 'function') return null;
+/** The absolute directory a checked rule's root names (`~/<dir>` in the home ALP runs as), or null. No I/O. */
+function rootPath(rule) {
   let root = rule;
   if (rule.startsWith('~/')) {
     const home = homedir();
     if (!cleanAbsolute(home) || home === '/') return null;
     root = `${home}${rule.slice(1)}`;
   }
-  if (!cleanAbsolute(root) || root === '/') return null;
+  return cleanAbsolute(root) && root !== '/' ? root : null;
+}
+
+function safeRoot(rule, create) {
+  if (process.platform === 'win32' || typeof process.getuid !== 'function') return null;
+  const root = rootPath(rule);
+  if (root === null) return null;
   try {
     // Others who may write the parent could rename the root away and put their own in its place, unless it is sticky (/tmp).
     const parent = statSync(realpathSync.native(path.dirname(root)));
@@ -375,6 +382,9 @@ function safeRoot(rule, create) {
 
 /** Whether `target` lies strictly below a checked rule's root, and that root is safe to write below (safeRoot). */
 function below(target, rule, create = false) {
+  // Written below the root first, so a command for anywhere else never makes the root (safeRoot's mkdir).
+  const named = rootPath(rule);
+  if (named === null || !cleanAbsolute(target) || !target.startsWith(`${named}/`)) return false;
   const root = safeRoot(rule, create);
   return root !== null && inside(target, root);
 }

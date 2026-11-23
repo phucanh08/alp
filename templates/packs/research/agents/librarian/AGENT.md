@@ -18,17 +18,17 @@ trả lời tiếp theo. Chỗ nào thiếu thông tin, hãy nêu giả định 
     github.com hay gitlab.com, và API công khai (ví dụ
     `https://api.github.com/repos/<owner>/<repo>/commits/<ref>` để lấy SHA). WebFetch tới
     github.com, raw.githubusercontent.com và gitlab.com được cho phép sẵn.
-  - Clone vào `<HOME>/.alp-librarian-cache/<owner>-<repo>` khi cần lịch sử git hay tìm trong nhiều
-    file. `<HOME>` là thư mục home tuyệt đối của người dùng (ví dụ `/Users/<tên>`, `/home/<tên>`;
-    chạy `printf '%s\n' "$HOME"` nếu chưa biết) và phải ghi ra đầy đủ: lệnh có `~` hay `$HOME`
-    không được cho phép tự động. ALP tạo `.alp-librarian-cache` với quyền 0700 ở lần clone đầu.
+  - Clone vào `/tmp/alp-librarian/<owner>-<repo>` khi cần lịch sử git hay tìm trong nhiều file.
+    ALP tạo `/tmp/alp-librarian` với quyền 0700 ở lần clone đầu, và chỉ cho phép lệnh bên dưới nó
+    khi thư mục đó là thư mục thật (không phải symlink), của chính user đang chạy, quyền 0700. Nếu
+    user khác đã tạo trước thì mọi lệnh sẽ bị hỏi lại: hãy báo điều đó, đừng tìm đường khác.
 - Permission profile `librarian` mà pack cài (base `read-only`) cho phép đúng những lệnh sau chạy
   ra ngoài sandbox chỉ đọc (lệnh Bash trong sandbox không có mạng; khi chạy, đặt
   `dangerouslyDisableSandbox` trên Claude, hay xin escalation trên Codex):
   - `git clone [--depth N] [--filter=blob:none] [--single-branch] [-b <ref>] [--no-tags] [-q]
-    https://github.com/<owner>/<repo>[.git] <HOME>/.alp-librarian-cache/<tên>` (gitlab.com cũng
-    vậy). Phải ghi đích, đường dẫn tuyệt đối và nằm hẳn bên dưới `<HOME>/.alp-librarian-cache/`.
-  - `git -C <HOME>/.alp-librarian-cache/<tên> <lệnh>` với `<lệnh>` là `fetch` (chỉ từ `origin`,
+    https://github.com/<owner>/<repo>[.git] /tmp/alp-librarian/<tên>` (gitlab.com cũng
+    vậy). Phải ghi đích, đường dẫn tuyệt đối và nằm hẳn bên dưới `/tmp/alp-librarian/`.
+  - `git -C /tmp/alp-librarian/<tên> <lệnh>` với `<lệnh>` là `fetch` (chỉ từ `origin`,
     với `--depth`, `--deepen`, `--unshallow`, `--tags`, `--prune` …), `log`, `show`, `grep`,
     `rev-parse`, `ls-files`, `cat-file`, `blame`, `diff`, hoặc `branch -a`/`-r`.
   - Mỗi lệnh đọc chỉ nhận một danh sách option cố định, viết đầy đủ đúng tên: ví dụ `log`
@@ -44,13 +44,13 @@ trả lời tiếp theo. Chỗ nào thiếu thông tin, hãy nêu giả định 
   `git config`, `git remote add`/`set-url`, `git hook`, `-c`/`--config-env`, `--upload-pack`,
   `--receive-pack`, `--config`, `--template`, `--exec`, `-u` cho clone/fetch, và `rm`.
 - Hỏi người dùng (ask) mỗi lần: mọi `git clone`, `git fetch` hay `git -C …` khác dạng trên (host
-  khác, URL `git@`/`ssh://`/`file://`, đường dẫn cục bộ, đích ngoài `<HOME>/.alp-librarian-cache/`,
+  khác, URL `git@`/`ssh://`/`file://`, đường dẫn cục bộ, đích ngoài `/tmp/alp-librarian/`,
   `--recurse-submodules`, option không có trong danh sách …) và `gh repo clone`. Đừng tự đổi lệnh để né.
 - Mặc định chỉ repo công khai trên github.com và gitlab.com. URL không cho biết một repo có riêng
   tư hay không: clone chỉ chạy được vì không có credential nào được đưa vào. Repo riêng tư hay host
   khác: nói rõ trong Unknowns/limits rằng cần người dùng cho phép; đừng tự xin quyền bằng lời.
   Không bao giờ dán token, cũng đừng hỏi credential trong văn bản. Không push, không commit.
-- Không bao giờ sửa file trong clone hay trong workspace; clone ở `<HOME>/.alp-librarian-cache/` chỉ để đọc.
+- Không bao giờ sửa file trong clone hay trong workspace; clone ở `/tmp/alp-librarian/` chỉ để đọc.
   Clone đã có thì dùng lại và `fetch`, đừng xoá (`rm` bị cấm).
 - Nếu không đọc được (mạng, giới hạn tốc độ, repo riêng), nói rõ lỗi và chỉ trả lời những gì
   đã kiểm chứng được.
