@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Archive, Bot, ChevronLeft, ChevronRight, PanelLeft, RefreshCw, Search, X } from 'lucide-react';
+import { Archive, Bot, ChevronLeft, ChevronRight, RefreshCw, Search, X } from 'lucide-react';
 import type { SessionSummary } from '../lib/controller.js';
 import { attentionReason, needsInput } from '../lib/controller.js';
 import { groupHistory } from '../lib/history.js';
@@ -7,6 +7,7 @@ import { Button } from '../components/ui/button';
 import { Spinner } from '../components/ui/spinner';
 import { baseName, relativeTime, sessionName } from '../lib/format';
 import { cn } from '../lib/utils';
+import { HeaderSidebarToggle } from './WindowChrome';
 import { useAppState, useController } from './store';
 
 /*
@@ -89,10 +90,7 @@ export function HistoryScreen({ navOpen, onToggleNav, onOpen, onBack }: { navOpe
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="history-screen">
       <header className="flex h-14 shrink-0 items-center gap-1 border-b border-border bg-background px-2 md:h-9 md:gap-2 md:px-3">
-        {navOpen ? null : <span aria-hidden className="window-controls-inset" />}
-        <button type="button" aria-label={navOpen ? 'Close sessions' : 'Open sessions'} aria-expanded={navOpen} title="Toggle sidebar" onClick={onToggleNav} className={cn(headerButton, 'md:-ml-1.5')}>
-          <PanelLeft aria-hidden strokeWidth={1.5} />
-        </button>
+        <HeaderSidebarToggle navOpen={navOpen} onToggleNav={onToggleNav} />
         <h1 className="min-w-0 flex-1 truncate text-sm font-normal text-foreground md:font-light">History</h1>
         <button type="button" aria-label="Refresh history" title="Refresh" onClick={() => void controller.loadHistory()} disabled={!online} className={cn(headerButton, 'md:-mr-1.5 disabled:opacity-45')}>
           <RefreshCw aria-hidden strokeWidth={1.5} className={cn(history.status === 'loading' && 'animate-spin')} />

@@ -186,3 +186,54 @@ test('a browser, even with the ALP.app marker, has no window chrome room: no dra
   expect((await inset.evaluate(element => element.getBoundingClientRect().width))).toBe(0);
   await context.close();
 });
+
+// t-81b0.12 follow-up, Paseo's desktop titlebar: with the traffic lights in the page (the Window Controls
+// Overlay visible, stubbed here; ALP.app's real one is apps/desktop's e2e), the window owns the sidebar
+// toggle, right after the lights, and the explorer toggle, at the right edge. They stay put while the
+// panels open and close, the headers keep a slot instead of a second button, and when the overlay goes
+// (full screen) the headers draw their own toggles again.
+test('ALP.app on macOS: the sidebar and explorer toggles stay in the top row as the panels open and close', async ({ browser }) => {
+  const context = await browser.newContext({ userAgent: DESKTOP_UA, viewport: { width: 1440, height: 900 } });
+  await context.addInitScript(() => {
+    const overlay = new EventTarget();
+    overlay.visible = true;
+    overlay.getTitlebarAreaRect = () => new DOMRect(overlay.visible ? 85 : 0, 0, overlay.visible ? 1300 : 0, overlay.visible ? 38 : 0);
+    Object.defineProperty(navigator, 'windowControlsOverlay', { value: overlay, configurable: true });
+  });
+  const page = await context.newPage();
+  await connect(page, world);
+  const sidebar = page.getByTestId('window-sidebar-toggle');
+  const explorer = page.getByTestId('workspace-explorer-toggle');
+  const at = async locator => { const box = await locator.boundingBox(); return box && [Math.round(box.x), Math.round(box.y)]; };
+  await expect(sidebar).toHaveAttribute('aria-label', 'Close sessions');
+  await expect(explorer).toHaveCount(1);
+  const start = { sidebar: await at(sidebar), explorer: await at(explorer) };
+  // The explorer toggle at the window's right edge, in the explorer's tab row, which keeps it a slot.
+  expect(start.explorer[0]).toBe(1440 - 6 - 32);
+  await expect(page.getByRole('complementary', { name: 'Explorer' }).getByTestId('window-explorer-toggle-slot')).toHaveCount(1);
+  await expect(page.locator('main header').getByRole('button', { name: /sessions$/ })).toHaveCount(0);
+
+  await sidebar.click();
+  await expect(page.getByTestId('sidebar-column')).toHaveCount(0);
+  await expect(sidebar).toHaveAttribute('aria-label', 'Open sessions');
+  await expect(sidebar).toBeFocused();
+  expect(await at(sidebar)).toEqual(start.sidebar);
+  await expect(page.locator('main header').getByTestId('window-sidebar-toggle-slot')).toHaveCount(1);
+
+  await explorer.click();
+  await expect(page.getByTestId('explorer-column')).toHaveCount(0);
+  await expect(explorer).toHaveAttribute('aria-expanded', 'false');
+  expect(await at(explorer)).toEqual(start.explorer);
+  await expect(page.locator('main header').getByTestId('window-explorer-toggle-slot')).toHaveCount(1);
+  await explorer.click();
+  await sidebar.click();
+  await expect(page.getByTestId('explorer-column')).toHaveCount(1);
+  await expect(page.getByTestId('sidebar-column')).toHaveCount(1);
+
+  // Full screen: no lights, so the headers own the toggles again, as in a browser.
+  await page.evaluate(() => { navigator.windowControlsOverlay.visible = false; navigator.windowControlsOverlay.dispatchEvent(new Event('geometrychange')); });
+  await expect(sidebar).toHaveCount(0);
+  await expect(page.locator('main header').getByRole('button', { name: 'Close sessions' })).toHaveCount(1);
+  await expect(page.locator('main header').getByTestId('workspace-explorer-toggle')).toHaveCount(1);
+  await context.close();
+});

@@ -1,8 +1,9 @@
 import * as React from 'react';
-import { CalendarClock, PanelLeft, RefreshCw, X } from 'lucide-react';
+import { CalendarClock, RefreshCw, X } from 'lucide-react';
 import type { ScheduleJob } from '@anhlp/alp-protocol';
 import { baseName } from '../lib/format';
 import { cn } from '../lib/utils';
+import { HeaderSidebarToggle } from './WindowChrome';
 import { FACTS_REFRESH_MS, excerpt, scheduleRows } from '../lib/sidebar-facts.js';
 import { dateLabel } from '../lib/owner-host.js';
 import { Spinner } from '../components/ui/spinner';
@@ -75,10 +76,7 @@ export function SchedulesScreen({ navOpen, onToggleNav, onClose, onOpenSession }
   return (
     <section aria-label="Schedules" data-testid="schedules-screen" className="flex min-h-0 flex-1 flex-col bg-background text-foreground">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-2 md:h-9 md:px-3">
-        {navOpen ? null : <span aria-hidden className="window-controls-inset" />}
-        <button type="button" aria-label={navOpen ? 'Close sessions' : 'Open sessions'} aria-expanded={navOpen} title="Toggle sidebar" onClick={onToggleNav} className={cn(headerButton, 'md:-ml-1.5')}>
-          <PanelLeft aria-hidden strokeWidth={1.5} />
-        </button>
+        <HeaderSidebarToggle navOpen={navOpen} onToggleNav={onToggleNav} />
         <CalendarClock aria-hidden className="size-4 shrink-0 text-muted-foreground" />
         <h1 className="min-w-0 truncate text-sm">Schedules</h1>
         <span className="flex-1" />

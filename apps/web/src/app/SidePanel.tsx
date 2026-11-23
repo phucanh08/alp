@@ -5,6 +5,7 @@ import { cn } from '../lib/utils';
 import { PANELS, PanelView, type PanelKind } from './panels';
 import { useAppState } from './store';
 import { TabChip } from './TabChip';
+import { ExplorerTabsToggleSlot } from './WindowChrome';
 
 /*
  * The right panel, as Paseo 0.14's explorer dock: Files then Changes by default, both kept (no
@@ -96,6 +97,7 @@ export function SidePanel({ dock, onClose }: { dock: Dock; onClose?: () => void 
               return { label: panel.label, icon: <panel.icon aria-hidden />, testId: `workspace-new-tab-menu-${kind}`, onSelect: () => dock.launch(kind) };
             })} />
         </div>
+        <ExplorerTabsToggleSlot />
         {onClose ? (
           <button type="button" aria-label="Close panel" onClick={onClose} className={cn(railButton, 'mr-1.5 size-8 rounded-lg')}>
             <X aria-hidden className="size-4" />

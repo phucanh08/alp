@@ -259,6 +259,23 @@
 }
 .window-controls-inset { flex: none; width: calc(env(titlebar-area-x, 0.75rem) - 0.75rem); }
 .window-controls-row { flex: none; height: clamp(0px, env(titlebar-area-height, 0px), 2.25rem); }
+/*
+ * The window's own toggles in the top row (app/WindowChrome.tsx), only drawn while the traffic lights
+ * are in the page: the sidebar toggle where a leftmost header's would be (after the lights' room and
+ * the header's gap), the explorer toggle where the workspace header's is, at the right edge. Centred
+ * in a header row: as tall, with the same (transparent) bottom border.
+ */
+.window-toggle {
+  position: fixed;
+  top: 0;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  height: 2.25rem;
+  border-bottom: 1px solid transparent;
+}
+.window-toggle-start { left: calc(env(titlebar-area-x, 0.75rem) + 0.5rem); }
+.window-toggle-end { right: 0.75rem; }
 a, button, input, textarea, select, summary, dialog, iframe, webview,
 [role="button"], [role="link"], [role="tab"], [role="textbox"], [role="combobox"], [role="switch"],
 [role="checkbox"], [role="slider"], [role="menuitem"], [role="separator"], [tabindex], [contenteditable="true"] {

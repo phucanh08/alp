@@ -1,7 +1,8 @@
 import * as React from 'react';
-import { ArrowLeft, ListTodo, PanelLeft, X } from 'lucide-react';
+import { ArrowLeft, ListTodo, X } from 'lucide-react';
 import { baseName } from '../lib/format';
 import { cn } from '../lib/utils';
+import { HeaderSidebarToggle } from './WindowChrome';
 import { Tasks } from './TaskBoard';
 import { TaskDetail } from './TaskDetail';
 import { useAppState } from './store';
@@ -49,10 +50,7 @@ export function TasksScreen({ navOpen, onToggleNav, onClose }: { navOpen: boolea
     <section aria-label="ALP tasks" data-testid="alp-tasks-screen" ref={region}
       className="flex min-h-0 flex-1 flex-col bg-background text-foreground">
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-2 md:h-9 md:px-3">
-        {navOpen ? null : <span aria-hidden className="window-controls-inset" />}
-        <button type="button" aria-label={navOpen ? 'Close sessions' : 'Open sessions'} aria-expanded={navOpen} title="Toggle sidebar" onClick={onToggleNav} className={cn(headerButton, 'md:-ml-1.5')}>
-          <PanelLeft aria-hidden strokeWidth={1.5} />
-        </button>
+        <HeaderSidebarToggle navOpen={navOpen} onToggleNav={onToggleNav} />
         <ListTodo aria-hidden className="size-4 shrink-0 text-muted-foreground" />
         <h1 className="min-w-0 truncate text-sm">ALP tasks</h1>
         {workspace ? <span className="min-w-0 truncate text-xs text-muted-foreground md:text-sm" title={workspace}>{baseName(workspace)}</span> : null}
