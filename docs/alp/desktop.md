@@ -87,7 +87,7 @@ Khi trang của `alp-dashboard` đã tải xong, app theo dõi nó (`src/reconne
 | Dấu hiệu | Nghĩa |
 |---|---|
 | `GET <origin>/readyz` mỗi 3 giây không có trả lời HTTP nào (từ chối kết nối, quá 2 giây) hai lần liền | `alp-dashboard` dừng, crash hoặc đổi port. |
-| Trang gặp 401 ở `POST <origin>/v1/tickets` | Token bị `alp dashboard rotate` hoặc revoke. |
+| Trang gặp 401 ở `POST <origin>/v1/tickets` | Token bị `alp dashboard rotate` hoặc revoke, hoặc `alp-dashboard` đã khởi động lại: mỗi lần khởi động nó tạo token mới và thu hồi token cũ (t-cee3). |
 | Tải lại trang (View › Reload, hay lần tải do app kết nối lại) thất bại | Như trên. |
 
 Khi đó app chạy lại `alp dashboard --print` (lệnh này khởi động `alp-dashboard` nếu nó không chạy) và tải địa chỉ
@@ -355,6 +355,9 @@ Các ca kiểm tra:
 - instance thứ hai khi không có cửa sổ;
 - `alp-dashboard` khởi động lại trên port khác;
 - `alp dashboard rotate` trên cùng port.
+- `alp-dashboard` khởi động lại trên cùng port, không rotate (t-cee3): `alp` giả hỏi token qua socket của
+  service đang chạy như `alp dashboard --print` thật, nên chỉ việc app chạy lại `--print` mới đưa được token
+  mới vào cửa sổ; test kiểm token cũ bị 401 ở `/v1/tickets` và fail khi tắt `Reconnector.trigger`.
 
 `apps/desktop/e2e/install.spec.mjs` (t-81b0.8) chạy app với `HOME`, `ALP_HOME`, `TMPDIR` tạm, một login
 shell giả không tìm thấy `alp`, và một bản sao phát hành cục bộ (`releaseMirror`: `SHA256SUMS` và archive
