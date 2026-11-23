@@ -16,7 +16,7 @@ export interface RawSettings {
   /** Legacy settings key; use team. */
   profile?: Record<string, Record<string, AgentProfilesConfig>>;
   defaultAgent?: string;
-  workflow?: { mode?: 'pho' | 'cafe' | 'smart' | 'supervised'; maxPeers?: number; supervisor?: boolean };
+  workflow?: { mode?: 'pho' | 'cafe' | 'smart' | 'supervised'; maxPeers?: number; maxLeads?: number; supervisor?: boolean };
   delegation?: Record<string, string[]>;
   runtime?: { provider?: string; model?: string; reasoning?: string };
   compact?: { auto?: boolean; threshold?: number };

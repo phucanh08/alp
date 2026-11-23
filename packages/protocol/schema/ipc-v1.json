@@ -70,6 +70,9 @@
             "maxPeers": {
               "type": "integer"
             },
+            "maxLeads": {
+              "type": "integer"
+            },
             "supervisor": {
               "type": "boolean"
             }
@@ -1693,6 +1696,9 @@
             "maxPeers": {
               "type": "integer"
             },
+            "maxLeads": {
+              "type": "integer"
+            },
             "supervisor": {
               "type": "boolean"
             }
@@ -2036,6 +2042,9 @@
                     "type": "string"
                   },
                   "maxPeers": {
+                    "type": "integer"
+                  },
+                  "maxLeads": {
                     "type": "integer"
                   },
                   "supervisor": {
@@ -2971,6 +2980,9 @@
           "type": "boolean"
         },
         "maxPeers": {
+          "type": "integer"
+        },
+        "maxLeads": {
           "type": "integer"
         },
         "delegates": {

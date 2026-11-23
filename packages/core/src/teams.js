@@ -12,7 +12,7 @@ import { settingsKeys, unknownMessage } from './validation.js';
  */
 
 export const BUILTIN_TEAMS = ['pho', 'cafe'];
-export const TEAM_SETTINGS = ['$schema', 'label', 'description', 'main', 'members', 'delegation', 'maxPeers', 'supervisor', 'oracleModels', 'oracleThinking', 'modelSetup'];
+export const TEAM_SETTINGS = ['$schema', 'label', 'description', 'main', 'members', 'delegation', 'maxPeers', 'maxLeads', 'supervisor', 'oracleModels', 'oracleThinking', 'modelSetup'];
 export const TEAM_ROLES = ['lead', 'peer', 'advisor', 'reviewer'];
 const MEMBER_SETTINGS = ['role', 'model', 'thinking'];
 const SUPERVISOR_SETTINGS = ['agent', 'model', 'thinking'];
@@ -82,6 +82,7 @@ export function validateTeam(config, source) {
     for (const [provider, effort] of Object.entries(config.oracleThinking)) check((['codex', 'claude', 'antigravity', 'acp'].includes(provider) || /^(codex|claude|antigravity|acp):[^\s]+$/.test(provider)) && ['none', 'off', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode'].includes(effort), 'oracleThinking requires a provider or model ID and a supported effort');
   }
   if (config.maxPeers !== undefined) check(Number.isSafeInteger(config.maxPeers) && config.maxPeers >= 1, 'maxPeers must be a positive integer');
+  if (config.maxLeads !== undefined) check(Number.isSafeInteger(config.maxLeads) && config.maxLeads >= 1, 'maxLeads must be a positive integer');
   if (config.supervisor !== undefined && config.supervisor !== false) {
     check(object(config.supervisor), 'supervisor must be false or { agent, model, thinking }');
     keys(config.supervisor, SUPERVISOR_SETTINGS, check, 'supervisor: ');
@@ -127,7 +128,7 @@ export async function teamSources(root, { library, templates } = {}) {
  * @param {{ library?: string, templates?: Record<string, string> }} [options]
  * @returns {Promise<{ id: string, source: 'builtin' | 'library' | 'project', label: string, description?: string, main: string,
  *   members: Record<string, { role?: string, model?: string, thinking?: string }>, delegation: Record<string, string[]>,
- *   oracleThinking?: Record<string, string>, oracleModels?: string[], maxPeers?: number, supervisor: false | { agent: string, model?: string, thinking?: string }, houseRules: string }>}
+ *   oracleThinking?: Record<string, string>, oracleModels?: string[], maxPeers?: number, maxLeads?: number, supervisor: false | { agent: string, model?: string, thinking?: string }, houseRules: string }>}
  */
 export async function resolveTeam(root, id, { library, templates } = {}) {
   const team = teamOf(id);
@@ -146,6 +147,7 @@ export async function resolveTeam(root, id, { library, templates } = {}) {
     ...(config.description !== undefined ? { description: config.description } : {}),
     main: config.main, members: config.members, delegation: config.delegation,
     ...(config.maxPeers !== undefined ? { maxPeers: config.maxPeers } : {}),
+    ...(config.maxLeads !== undefined ? { maxLeads: config.maxLeads } : {}),
     supervisor: config.supervisor ?? false,
     oracleModels: config.oracleModels,
     oracleThinking: config.oracleThinking,

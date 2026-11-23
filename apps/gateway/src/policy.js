@@ -307,6 +307,7 @@ export function projectEffective(raw) {
     ...(name(source.permissionProfile) ? { permissionProfile: source.permissionProfile } : {}),
     supervisor: source.supervisor === true,
     ...(Number.isSafeInteger(source.maxPeers) && source.maxPeers >= 0 ? { maxPeers: source.maxPeers } : {}),
+    ...(Number.isSafeInteger(source.maxLeads) && source.maxLeads >= 0 ? { maxLeads: source.maxLeads } : {}),
     delegates: names(source.delegates), tools: names(source.tools),
     mcpServers: Array.isArray(source.mcpServers) ? source.mcpServers.slice(0, 64).filter(server => plain(server) && name(server.name) && ['stdio', 'http'].includes(server.kind)).map(server => ({ name: server.name, kind: server.kind })) : [],
     hooks: Number.isSafeInteger(source.hooks) && source.hooks >= 0 ? source.hooks : 0,
@@ -418,7 +419,7 @@ const LIBRARY_CONTENT = Object.freeze({
   hooks: { hook: { description: isString, event: isString, command: 'secret', blocking: isBoolean, timeoutSec: isNumber, match: { agent: isString, label: isString } } },
   teams: {
     team: {
-      label: isString, description: isString, main: isString, maxPeers: isNumber, oracleModels: isStrings,
+      label: isString, description: isString, main: isString, maxPeers: isNumber, maxLeads: isNumber, oracleModels: isStrings,
       members: { $each: MEMBER }, delegation: { $each: isStrings }, oracleThinking: { $each: isString },
       modelSetup: { mode: isString, preset: isString },
       supervisor: { $orFalse: { agent: isString, model: isString, thinking: isString } },

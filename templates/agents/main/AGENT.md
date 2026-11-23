@@ -51,6 +51,11 @@ Hãy đọc team mà runtime đã chọn. Nó giữ nguyên trong suốt session
   triển khai hoặc giao việc cho peer. Hãy xử lý phạm vi, ưu tiên, và những quyết định còn
   thiếu của người dùng. Đưa các chỉnh sửa đi qua lead; đừng phát ra một luồng chỉ dẫn thứ
   hai cho các peer của nó. Hãy chuyển quyền ghi trước khi can thiệp vào phần triển khai.
+- Cafe với `maxLeads` > 1 (instruction runtime nêu con số hiện tại): chỉ chia việc cho nhiều
+  lead khi các task độc lập: không có quan hệ blocked-by giữa chúng, paths tách biệt, mỗi lead
+  một worktree (`isolation: "worktree"`) và một `taskId`. Merge từng worktree một bằng
+  alp_merge và chạy lại test sau mỗi lần merge; xung đột vẫn để lại dạng marker cho bạn xử
+  lý như hiện nay. Đừng gửi chỉ dẫn trực tiếp cho peer của bất kỳ lead nào.
 - Đừng đổi team giữa session. Hãy khuyến nghị một session mới nếu người dùng cần một team
   khác; đừng tạo thêm một tầng điều phối ẩn.
 - Mặc định bạn chạy với toàn quyền truy cập máy này. Chỉ dùng nó cho task của người dùng;
@@ -72,8 +77,9 @@ bạn đoán; mỗi lượt người dùng đổi được một lần. Đổi s
   chứng, phân tích luồng thực thi/dữ liệu, so sánh phương án, cân nhắc oracle (hai model khi
   đáng) TRƯỚC khi sửa.
 - large: nhiều module: phân rã, ghi phụ thuộc bằng task graph, giao việc song song trong
-  giới hạn (Phở: main giao tối đa maxPeers peer; Cafe: main → lead → peer), tránh nghiên cứu
-  trùng, tổng hợp và kiểm chứng. Không vượt maxPeers, ngân sách 16+16 hay độ sâu 4.
+  giới hạn (Phở: main giao tối đa maxPeers peer; Cafe: main → lead → peer, tối đa maxLeads
+  lead song song cho các task độc lập), tránh nghiên cứu trùng, tổng hợp và kiểm chứng.
+  Không vượt maxPeers, maxLeads, ngân sách 16+16 hay độ sâu 4.
 
 ## Thực thi và lời khuyên
 

@@ -3630,6 +3630,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
     const checkout = await checkoutKey(writeRoot ?? session.mapping.workdir);
     let task: Task | undefined;
+    let knownTasks: Task[] = [];
     if (args.taskId !== undefined) {
       if (session.parent || session.mapping.agent.name !== mainOf(session.mapping)) return toolResult(false, { error: 'Only main gives tasks to assignments' });
       if (readOnlyMember(session.mapping, args.agent)) return toolResult(false, { error: 'taskId gives a task to lead or peer; for advice about a task, name it in the brief' });
@@ -3637,6 +3638,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       // Checked here for a clear refusal; the start below checks again under the task lock.
       try {
         const { tasks } = await loadTasks(project);
+        knownTasks = tasks;
         task = tasks.find(candidate => candidate.id === args.taskId);
         if (!task) return toolResult(false, { error: `No task ${args.taskId}` });
         const refusal = startRefusal(task, tasks);
@@ -3657,11 +3659,40 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     // Writers of the same repository need separate worktrees. Different repositories
     // are independent; a parked writer still owns its repository.
     const writers = [...session.assignments.values()].filter(assignment => writes(assignment.mode));
-    if (session.assignments.size && (!['peer', 'advisor', 'reviewer'].includes(roleOf(session.mapping, args.agent) ?? '') || (writes(childMode) && writers.some(assignment => (!parallel(assignment.mode, assignment.isolation) || !parallel(childMode, isolation)) && (!assignment.writeCheckout || sameCheckout(assignment.writeCheckout)))))) {
+    const childRole = roleOf(session.mapping, args.agent) ?? '';
+    const clashes = writes(childMode) && writers.some(assignment => (!parallel(assignment.mode, assignment.isolation) || !parallel(childMode, isolation)) && (!assignment.writeCheckout || sameCheckout(assignment.writeCheckout)));
+    const parkedNext = () => {
       const parkedOnes = [...session.assignments.values()].filter(assignment => sessions.get(assignment.id)?.parked);
+      return parkedOnes.length ? { next: `${parkedOnes.map(assignment => `${assignment.agent} ${assignment.id}`).join(', ')} is parked; to go on without it, stop it with alp_cancel and delegate the rest, on another runtime if its runtime is limited` } : {};
+    };
+    // Leads (ALPD §74): one runs beside read-only assignments; up to workflow.maxLeads run together when
+    // each has its own worktree (or repository) and a task whose paths no other lead's task overlaps.
+    // A parked lead still counts; alp_cancel frees its place.
+    const leads = childRole === 'lead' ? [...session.assignments.values()].filter(assignment => roleOf(session.mapping, assignment.agent) === 'lead') : [];
+    if (leads.length) {
+      const { maxLeads } = session.mapping.workflow;
+      if (leads.length >= maxLeads) {
+        return toolResult(false, {
+          error: maxLeads === 1
+            ? 'A lead is already running (maxLeads 1); wait for its handoff, or ask the user to raise workflow.maxLeads for a new session'
+            : `Lead limit reached: ${leads.length} leads are already running or parked (maxLeads ${maxLeads}); wait for a handoff, or ask the user to raise workflow.maxLeads for a new session`,
+          ...parkedNext(),
+        });
+      }
+      const needs = `Another lead is running; a second lead needs isolation "worktree" and a taskId with its own paths (maxLeads ${maxLeads})`;
+      if (clashes) return toolResult(false, { error: needs, ...parkedNext() });
+      if (!task) return toolResult(false, { error: needs });
+      if (!task.paths.length) return toolResult(false, { error: `Task ${task.id} declares no paths; a lead beside another lead needs a task with paths, so their work can be told apart. Add paths to the task, or wait for the running lead's handoff` });
+      for (const other of leads) {
+        const paths = other.taskPaths ?? (other.taskId ? knownTasks.find(candidate => candidate.id === other.taskId)?.paths : undefined) ?? [];
+        if (!paths.length) return toolResult(false, { error: `${other.agent} ${other.id} runs without a task of its own paths; a second lead starts only beside leads that each hold one. Wait for its handoff`, ...parkedNext() });
+        const shared = overlapping(task.paths, paths);
+        if (shared.length) return toolResult(false, { error: `Task ${task.id} overlaps the task of ${other.agent} ${other.id} on ${shared.join(', ')}; parallel leads need independent tasks with separate paths. Wait for its handoff, or choose another task`, conflicts: shared });
+      }
+    } else if (session.assignments.size && (!['peer', 'advisor', 'reviewer', 'lead'].includes(childRole) || clashes)) {
       return toolResult(false, {
         error: 'A child assignment is already running; wait for its handoff. Only read-only peers and advisors (reviewer, oracle), and writers in different repositories or their own worktrees, run beside it',
-        ...(parkedOnes.length ? { next: `${parkedOnes.map(assignment => `${assignment.agent} ${assignment.id}`).join(', ')} is parked; to go on without it, stop it with alp_cancel and delegate the rest, on another runtime if its runtime is limited` } : {}),
+        ...parkedNext(),
       });
     }
 
@@ -3695,7 +3726,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
 
     const peer = roleOf(session.mapping, args.agent) === 'peer';
-    if (peer && root.peerCount >= session.mapping.workflow.maxPeers) return toolResult(false, { error: 'Concurrent peer limit reached; wait or ask the user to increase workflow.maxPeers for a new session' });
+    // Each lead may run maxPeers peers, so the tree's cap grows with maxLeads.
+    const peerCap = session.mapping.workflow.maxPeers * session.mapping.workflow.maxLeads;
+    if (peer && root.peerCount >= peerCap) return toolResult(false, { error: `Concurrent peer limit reached (${peerCap} in this session tree); wait or ask the user to increase workflow.maxPeers for a new session` });
     const sharedWriter = writes(childMode) && isolation === 'shared';
     const holder = sharedWriter ? [...leases].find(([key]) => sameCheckout(key))?.[1] : undefined;
     if (holder && !lineage(sessionId).includes(holder.assignment)) {
@@ -3710,7 +3743,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     const childId = `alp-child-${randomUUID()}`;
     const startedAt = Date.now();
-    const assignment: Assignment = { id: childId, agent: args.agent, mode: childMode, isolation, rootId, startedAt, warned: false, finished: false, ...(writes(childMode) ? { writeCheckout: checkout } : {}), ...(args.etaMinutes ? { eta: startedAt + args.etaMinutes * 60_000 } : {}) };
+    const assignment: Assignment = { id: childId, agent: args.agent, mode: childMode, isolation, rootId, startedAt, warned: false, finished: false, ...(writes(childMode) ? { writeCheckout: checkout } : {}), ...(task ? { taskPaths: task.paths } : {}), ...(args.etaMinutes ? { eta: startedAt + args.etaMinutes * 60_000 } : {}) };
     if (sharedWriter && !holder) {
       assignment.lease = checkout;
       leases.set(checkout, { assignment: childId, agent: args.agent });

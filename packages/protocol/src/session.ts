@@ -23,7 +23,7 @@ export type SessionSpec = {
   /** Keep the native thread on disk though the session cannot be resumed: an assignment, which alp_recall may question later. */
   keepThread?: boolean;
   restore?: {
-    agent: string; threadId: string; runtime?: string; model?: string; workflow?: { mode: string; maxPeers: number; supervisor?: boolean };
+    agent: string; threadId: string; runtime?: string; model?: string; workflow?: { mode: string; maxPeers: number; maxLeads?: number; supervisor?: boolean };
     /** Claude: `threadId` does not exist yet and is made from this conversation on its first prompt (a fork or rewind, §12.7). */
     base?: NativeBase;
   };
@@ -184,6 +184,7 @@ export type EffectiveConfig = {
   permissionProfile?: string;
   supervisor: boolean;
   maxPeers?: number;
+  maxLeads?: number;
   delegates: string[];
   tools: string[];
   mcpServers: Array<{ name: string; kind: 'stdio' | 'http' }>;
