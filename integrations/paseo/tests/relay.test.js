@@ -14,6 +14,7 @@ import { createDaemonServer } from '@anhlp/alp-daemon';
 import { createWebServer } from '@anhlp/alp-paseo';
 import { createPaseoBridge } from '@anhlp/alp-paseo';
 import { fakeTransport, until } from '../../../test/support/fake-agent.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 /**
  * A relay as Paseo's (protocol v2) behaves: the daemon's control socket hears which devices
@@ -93,11 +94,11 @@ function frames(t, send) {
 }
 
 /** A device as Paseo's app pairs: it reads the link, opens the relay as a client and runs the E2EE handshake. */
-async function device(t, url) {
+async function device(t, url, release = step => t.after(step)) {
   const offer = parseConnectionOfferFromUrl(url);
   assert.ok(offer, 'the pairing link carries an offer');
   const ws = new WebSocket(`ws://${offer.relay.endpoint}/ws?serverId=${encodeURIComponent(offer.serverId)}&role=client&v=2`);
-  t.after(() => ws.terminate());
+  release(() => ws.terminate());
   await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
   const transport = { send: data => ws.send(data), close: (code, reason) => ws.close(code, reason), onmessage: null, onclose: null, onerror: null };
   ws.on('message', (data, isBinary) => transport.onmessage?.({ data: isBinary ? new Uint8Array(data).buffer : String(data), isBinary }));
@@ -120,10 +121,15 @@ test('the pairing link is a Paseo offer with alpd\'s server id, its kept public 
   const offer = parseConnectionOfferFromUrl(url);
   assert.equal(offer.serverId, info.serverId);
   assert.deepEqual(offer.relay, { endpoint: relay.endpoint, useTls: false });
-  const kept = JSON.parse(await readFile(path.join(home, 'relay-keypair.json'), 'utf8'));
+  // The key pair is kept in the credential directory (t-cde5), never beside the home's other files.
+  const kept = JSON.parse(await readFile(path.join(home, 'paseo', 'relay-keypair.json'), 'utf8'));
   assert.equal(kept.publicKeyB64, offer.daemonPublicKeyB64);
+  await assert.rejects(stat(path.join(home, 'relay-keypair.json')), { code: 'ENOENT' });
   // Windows files carry no POSIX mode bits.
-  if (process.platform !== 'win32') assert.equal((await stat(path.join(home, 'relay-keypair.json'))).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(path.join(home, 'paseo', 'relay-keypair.json'))).mode & 0o777, 0o600);
+    assert.equal((await stat(path.join(home, 'paseo'))).mode & 0o777, 0o700);
+  }
   assert.equal(parseConnectionOfferFromUrl((await gateway.relay.offer()).url).daemonPublicKeyB64, offer.daemonPublicKeyB64, 'the key is kept');
   assert.equal(url.includes(info.token), false, 'the link carries no token');
 });
@@ -186,4 +192,71 @@ test('the web app turns the relay on and off, kept in settings.json; other confi
   await ask({ type: 'set_daemon_config_request', requestId: 'c4', config: { relay: { enabled: false } } });
   await until(() => !gateway.relay.connected);
   assert.equal(JSON.parse(await readFile(path.join(home, 'settings.json'), 'utf8')).web.relay.enabled, false);
+});
+
+// ---- t-cde5: the password and the relay key live in <home>/paseo/; a restart keeps them, a rotation replaces the password ----
+
+/** The integration's listener and bridge on `home`, as main.ts wires them (the rotation also restarts the relay). */
+async function startIntegration(defer, home, relay) {
+  const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false, libraryDir: home });
+  defer(() => runtime.shutdown());
+  const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test', home });
+  let web;
+  const gateway = createPaseoBridge({ clientFactory: async (onEvent) => {
+    const client = daemon.local();
+    client.onEvent(onEvent);
+    return { request: client.request.bind(client), close: client.close.bind(client), onClose: client.onClose.bind(client) };
+  }, version: 'test', home, token: () => web.token, serverId: () => web.serverId, relay, listen: () => 'here' });
+  web = createWebServer({ home, port: 0, gateway, onRotate: async () => { await gateway.relay.stop(); await gateway.relay.start(); } });
+  const info = await web.listen();
+  await gateway.relay.start();
+  let stopped = false;
+  const stop = async () => { if (stopped) return; stopped = true; await web.close(); await gateway.relay.stop(); };
+  defer(stop);
+  return { info, gateway, web, stop };
+}
+
+/** A paired device's sign-in through the relay: the server_info frame, or the rejection. */
+async function signIn(t, url, password) {
+  const phone = await device(t, url, teardown(t));
+  phone.send(hello(password));
+  const answer = await phone.next(frame => frame.type === 'hello.rejected' || frame.message?.payload?.status === 'server_info');
+  return { phone, answer, accepted: answer.type !== 'hello.rejected' };
+}
+
+test('t-cde5: a paired device signs in through the relay after a restart (same key, server id and password); a rotation ends it and refuses the old password', async t => {
+  // The relay's own after hook comes first, so the one teardown list below (integration, then directory) follows it.
+  const relay = await fakeRelay(t);
+  const defer = teardown(t);
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-relay-cde5-'));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  const home = path.join(directory, 'home');
+  const settings = { enabled: true, endpoint: relay.endpoint, useTls: false };
+
+  const first = await startIntegration(defer, home, settings);
+  await until(() => first.gateway.relay.connected);
+  const { url } = await first.gateway.relay.offer();
+  const password = first.info.token;
+  assert.equal((await signIn(t, url, password)).accepted, true, 'paired before the restart');
+  await first.stop();
+
+  // The restart: a new process would read the same home.
+  const second = await startIntegration(defer, home, settings);
+  await until(() => second.gateway.relay.connected);
+  assert.equal(second.info.serverId, first.info.serverId, 'the server id is kept');
+  assert.equal(second.info.token === password, true, 'the password is kept');
+  assert.equal((await second.gateway.relay.offer()).url, url, 'the pairing link (key and server id) is unchanged');
+  const paired = await signIn(t, url, password);
+  assert.equal(paired.accepted, true, 'the device paired before the restart signs in with its password');
+
+  // A rotation over the token socket, as `alp dashboard pair --rotate` asks for it.
+  const rotated = await second.web.rotate();
+  assert.equal(rotated !== password && /^[a-f0-9]{64}$/.test(rotated), true);
+  assert.equal(await paired.phone.closed > 0, true, 'the signed-in device was ended');
+  await until(() => second.gateway.relay.connected);
+  const old = await signIn(t, url, password);
+  assert.equal(old.accepted, false);
+  assert.equal(old.answer.reason, 'incorrect_password', 'the old password is refused');
+  assert.equal((await signIn(t, url, rotated)).accepted, true, 'the new password signs in');
+  assert.equal(JSON.parse(await readFile(path.join(home, 'paseo', 'token.json'), 'utf8')).token === rotated, true, 'the new password is kept for the next start');
 });

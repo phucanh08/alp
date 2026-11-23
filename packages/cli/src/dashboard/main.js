@@ -27,11 +27,11 @@
  */
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, openSync, watch, writeSync } from 'node:fs';
-import { chmod, link, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { alpHome, connectSocket, daemonPaths } from '@anhlp/alp-client/index';
+import { alpHome, assertPrivateDirectory, connectSocket, daemonPaths } from '@anhlp/alp-client/index';
 import { createIntegrationLock } from '@anhlp/alp-client/integration-lock';
 import { superviseDaemon } from '@anhlp/alp-client/supervise';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
@@ -118,35 +118,58 @@ async function publish(home, info) {
 const LOCK_HELD = 3;
 
 /**
+ * Writes `text` to `file` private (0600) and whole, through a fresh temporary file: linked into place
+ * when `create` (an existing file is kept; returns false then), else renamed over it.
+ * @param {string} file @param {string} text @param {{ create?: boolean }} [options]
+ */
+async function writePrivate(file, text, { create = false } = {}) {
+  const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    await writeFile(temporary, text, { mode: 0o600, flag: 'wx' });
+    await chmod(temporary, 0o600);
+    if (!create) { await renameWithRetry(temporary, file); return true; }
+    try { await link(temporary, file); return true; }
+    catch (error) { if (/** @type {any} */ (error)?.code === 'EEXIST') return false; throw error; }
+  } finally { await unlink(temporary).catch(() => {}); }
+}
+
+/**
  * Before the rename, the Paseo integration ran as integration `web` and kept its identity (the token
  * paired devices sign in with, and its server id) in web.json, without `app`. When such a file is
- * still there, and only when the Paseo integration has no paseo.json yet, that identity
- * is written to paseo.json, where the integration looks for it, so paired devices stay paired. The
- * file appears whole (written aside, then linked into place) and an existing paseo.json is never
- * replaced. Returns whether it carried anything.
+ * still there, and only when the Paseo integration has no paseo.json yet, that identity is carried
+ * where the integration looks for it, so paired devices stay paired: the server id to paseo.json and
+ * the token to the integration's credential directory `<home>/paseo/token.json` (t-cde5; mode 0700
+ * and 0600, never paseo.json, which agents may read). Files appear whole (written aside, then linked
+ * into place) and an existing one is never replaced. The token then leaves web.json, carried or not
+ * (with a paseo.json, the integration's own token wins and web.json's is dead). Returns whether it
+ * carried anything.
  * @param {string} home @param {import('@anhlp/alp-core/log').Logger} log
  */
 async function carryPaseoIdentity(home, log) {
   let legacy;
   try { legacy = JSON.parse(await readFile(legacyWebFile(home), 'utf8')); } catch { return false; }
   if (!legacy || typeof legacy !== 'object' || legacy.app !== undefined) return false;
-  const identity = {
-    ...(typeof legacy.token === 'string' && /^[a-f0-9]{64}$/.test(legacy.token) ? { token: legacy.token } : {}),
-    ...(typeof legacy.serverId === 'string' && /^alp-[a-f0-9]{16}$/.test(legacy.serverId) ? { serverId: legacy.serverId } : {}),
-  };
-  if (!Object.keys(identity).length) return false;
+  const token = typeof legacy.token === 'string' && /^[a-f0-9]{64}$/.test(legacy.token) ? legacy.token : undefined;
+  const serverId = typeof legacy.serverId === 'string' && /^alp-[a-f0-9]{16}$/.test(legacy.serverId) ? legacy.serverId : undefined;
   const target = path.join(home, 'paseo.json');
-  const temporary = `${target}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  const credentials = path.join(home, 'paseo');
+  let carried = false;
   try {
-    await writeFile(temporary, `${JSON.stringify(identity)}\n`, { mode: 0o600, flag: 'wx' });
-    await chmod(temporary, 0o600);
-    await link(temporary, target);
+    const hasPaseoJson = await lstat(target).then(() => true, () => false);
+    if (!hasPaseoJson && token) {
+      await assertPrivateDirectory(credentials, { create: true });
+      carried = await writePrivate(path.join(credentials, 'token.json'), `${JSON.stringify({ v: 1, token })}\n`, { create: true }) || carried;
+    }
+    if (!hasPaseoJson && serverId) carried = await writePrivate(target, `${JSON.stringify({ serverId })}\n`, { create: true }) || carried;
+    if ('token' in legacy) {
+      const { token: _token, ...rest } = legacy;
+      await writePrivate(legacyWebFile(home), `${JSON.stringify(rest)}\n`);
+    }
   } catch (error) {
-    if (/** @type {any} */ (error)?.code === 'EEXIST') return false;
-    throw new Error(`the Paseo integration's identity in ${legacyWebFile(home)} could not be kept in ${target}, so alp dashboard does not start: ${/** @type {any} */ (error)?.message ?? error}`, { cause: error });
-  } finally { await unlink(temporary).catch(() => {}); }
-  log.info(`kept the Paseo integration's identity from web.json in ${target}, so paired devices stay paired`, { code: 'ALP_DASHBOARD_PASEO_IDENTITY' });
-  return true;
+    throw new Error(`the Paseo integration's identity in ${legacyWebFile(home)} could not be kept in ${credentials} and ${target}, so alp dashboard does not start: ${/** @type {any} */ (error)?.message ?? error}`, { cause: error });
+  }
+  if (carried) log.info(`kept the Paseo integration's identity from web.json (its password in ${credentials}), so paired devices stay paired`, { code: 'ALP_DASHBOARD_PASEO_IDENTITY' });
+  return carried;
 }
 
 /**
