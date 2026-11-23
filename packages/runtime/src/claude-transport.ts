@@ -422,7 +422,10 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
       const leaving = Boolean(rules?.floor) && name === 'Bash' && input.dangerouslyDisableSandbox === true;
       // A Bash allow rule inside the sandbox too, as Claude's allowedTools did (it never gets them; see above).
       // Only allow is decided here: what a sandboxed command may do otherwise is unchanged.
-      if (name === 'Bash' && !leaving && typeof input.command === 'string' && rules?.allow.length && commandDecision(rules, input.command) === 'allow') return { behavior: 'allow', updatedInput: input };
+      // Deny holds there too: Claude matches deny rules as written, so a checked one (Bash(@git-unsafe)) only ALP can apply.
+      const inside = name === 'Bash' && !leaving && typeof input.command === 'string' && rules && (rules.allow.length || rules.deny.length) ? commandDecision(rules, input.command as string) : undefined;
+      if (inside === 'deny') return { behavior: 'deny', message: 'A deny rule of your permission profile covers it' };
+      if (inside === 'allow') return { behavior: 'allow', updatedInput: input };
       // Inside a read-only floor the OS keeps Bash from writing, so it may run.
       const sandboxed = rules?.floor === 'read-only' && name === 'Bash' && !leaving;
       const beyond = (mode === 'read-only' && !readers.includes(name) && !name.startsWith('mcp__alp__') && !sandboxed) ||
