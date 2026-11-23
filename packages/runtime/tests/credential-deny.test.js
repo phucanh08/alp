@@ -38,7 +38,7 @@ test('t-cde5: a read-only Claude session denies Read of the credentials, in its 
 test('t-cde5: a user-written read-only profile with a broad Read allow: the deny wins (Claude applies deny before allow), its other rules are unchanged', () => {
   const profile = { name: 'reader', base: 'read-only', allow: ['Read', 'Grep', 'Bash(git diff:*)', `Read(${rule(home)}/**)`], ask: ['Bash(npm test:*)'], deny: ['WebFetch'], beyondMode: 'ask' };
   const gate = claudePermissions('read-only', () => 'read-only', { ...profile, floor: 'read-only', floorRoot: root }, undefined, home);
-  assert.deepEqual(gate.allowedTools, profile.allow, 'every allow rule is passed as before');
+  assert.deepEqual(gate.allowedTools, profile.allow.filter(rule => !rule.startsWith('Bash(')), 'every non-Bash allow rule is passed as before (Bash allow rules are decided in canUseTool, t-6dc5)');
   assert.deepEqual(gate.disallowedTools, [...BUILT_IN, 'WebFetch', ...DENY], 'the user\'s deny rules, then the credentials\'');
   assert.deepEqual(gate.settings, { permissions: { ask: profile.ask } });
 });
@@ -59,7 +59,7 @@ test('t-cde5 g2: a read-only profile\'s Bash never leaves the sandbox, even unde
   // Claude itself lets an allow rule's command out of the sandbox without asking canUseTool, so the SDK must refuse the way out.
   const gate = claudePermissions('read-only', () => 'read-only', { base: 'read-only', allow: ['Bash(cat:*)'], deny: [], floor: 'read-only', floorRoot: root }, undefined, home);
   assert.equal(gate.sandbox.allowUnsandboxedCommands, false);
-  assert.deepEqual(gate.allowedTools, ['Bash(cat:*)'], 'the allow rule is passed as before');
+  assert.equal(gate.allowedTools, undefined, 'Bash allow rules are decided by ALP in canUseTool (t-6dc5), not handed to Claude');
   // canUseTool decides such a call as the sandboxed command it is, without the parameter Claude ignores.
   for (const command of [`cat ${path.join(home, 'paseo', 'token.json')}`, 'cat README.md', 'git diff']) {
     assert.deepEqual(await gate.canUseTool('Bash', { command, dangerouslyDisableSandbox: true }, {}), { behavior: 'allow', updatedInput: { command } }, command);
@@ -163,4 +163,32 @@ test('t-cde5: ACP read-only sessions refuse reads and searches of the credential
   // Writable and full-access sessions are not narrowed.
   assert.equal(acpDecision(request('read', [token]), 'workspace-write', null, root, home), 'allow');
   assert.equal(acpDecision(request('read', [token]), 'full-access', null, root, home), 'allow');
+});
+
+test('t-cde5 g4: a read-only profile leaves the sandbox only for a command its checked rules (Bash(@…)) cover entirely; nothing else does', async t => {
+  // The librarian's shape: read-only base, a checked clone rule, and a plain allow rule beside it. Its root is a scratch 0700 dir.
+  const libRoot = mkdtempSync(path.join(os.tmpdir(), 'alp-g4-lib-'));
+  t.after(() => rmSync(libRoot, { recursive: true, force: true }));
+  const profile = { base: 'read-only', allow: [`Bash(@git-clone-public ${libRoot})`, 'Bash(cat:*)'], ask: [], deny: [], beyondMode: 'refuse', floor: 'read-only', floorRoot: root };
+  const gate = claudePermissions('read-only', () => 'read-only', profile, async () => ({ allow: true, always: true }), home);
+  assert.equal(gate.sandbox.allowUnsandboxedCommands, true, 'the SDK must let the checked clone out');
+  assert.equal(gate.allowedTools, undefined, 'no Bash rule goes to Claude, so Claude never lets a command out by itself');
+  // A public clone below the root, covered by the checked rule: it leaves the sandbox (it needs the network).
+  const clone = `git clone --depth 1 https://github.com/sindresorhus/is-plain-obj ${libRoot}/is-plain-obj`;
+  assert.deepEqual(await gate.canUseTool('Bash', { command: clone, dangerouslyDisableSandbox: true }, {}), { behavior: 'allow', updatedInput: { command: clone, dangerouslyDisableSandbox: true } });
+  // Everything else is decided as the sandboxed command it is: the parameter is dropped.
+  const token = `cat ${path.join(home, 'paseo', 'token.json')}`;
+  for (const command of [token, 'cat README.md', 'git diff', `${clone}; ${token}`, `${clone} && curl https://example.com`, `git clone https://github.com/a/b ${path.join(os.tmpdir(), 'elsewhere')}`]) {
+    const decided = await gate.canUseTool('Bash', { command, dangerouslyDisableSandbox: true }, {});
+    assert.equal(decided.updatedInput?.dangerouslyDisableSandbox, undefined, command);
+  }
+  // A plain allow rule alone never opens the way out.
+  const plain = claudePermissions('read-only', () => 'read-only', { ...profile, allow: ['Bash(cat:*)', 'Bash(git clone:*)'] }, undefined, home);
+  assert.equal(plain.sandbox.allowUnsandboxedCommands, false);
+  assert.deepEqual(await plain.canUseTool('Bash', { command: clone, dangerouslyDisableSandbox: true }, {}), { behavior: 'allow', updatedInput: { command: clone } });
+  // "Always allow" in a confined session adds no native Bash rule Claude could use to let a command out unchecked.
+  const asked = claudePermissions('read-only', () => 'read-only', { ...profile, ask: ['Bash(touch *)'], beyondMode: 'ask' }, async () => ({ allow: true, always: true }), home);
+  const answer = await asked.canUseTool('Bash', { command: 'touch x' }, { decisionReasonType: 'rule', suggestions: [] });
+  assert.equal(answer.behavior, 'allow');
+  assert.equal(answer.updatedPermissions, undefined);
 });

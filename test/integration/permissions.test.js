@@ -164,10 +164,18 @@ test('the installed librarian profile, through canUseTool: reads below its per-u
   // What the security review ran through real git: refused (asked, with no one to ask here).
   for (const args of ["grep --open-f='touch /tmp/pwn #' hi", "grep --open='sh -c id' hi", 'grep -iOtouch hi', 'grep -nOtouch hi', 'grep --file=/etc/passwd', 'blame --contents=/etc/passwd a.js', 'blame --ignore-revs-file=/etc/passwd a.js', 'ls-files --exclude-from=/etc/passwd']) {
     assert.equal(commandDecision(profile, `git -C ${cache}/a-b ${args}`), 'ask', args);
-    assert.equal(await bash(`git -C ${cache}/a-b ${args}`, true), 'deny', args);
+    // The librarian's profile is read-only, so a command its checked rules do not cover never leaves the
+    // sandbox (t-cde5 g2/g4): it runs as the sandboxed command it is (no network, no writes, no credentials).
+    const decided = await gate.canUseTool('Bash', { command: `git -C ${cache}/a-b ${args}`, dangerouslyDisableSandbox: true });
+    assert.notEqual(decided.updatedInput?.dangerouslyDisableSandbox, true, args);
   }
   // A path outside the (scratch) root is not this profile's, and a deny rule holds in the sandbox as well.
-  assert.equal(await bash('git clone https://github.com/a/b /tmp/alp-librarian/a-b', true), 'deny');
+  // A clone outside the (scratch) root is not this profile's: it does not leave the sandbox, so it has no network.
+  const outside = await gate.canUseTool('Bash', { command: 'git clone https://github.com/a/b /tmp/alp-librarian/a-b', dangerouslyDisableSandbox: true });
+  assert.notEqual(outside.updatedInput?.dangerouslyDisableSandbox, true);
+  // The checked clone itself leaves (it needs the network).
+  const inRoot = await gate.canUseTool('Bash', { command: `git clone --depth 1 https://github.com/a/c ${cache}/a-c`, dangerouslyDisableSandbox: true });
+  assert.equal(inRoot.updatedInput?.dangerouslyDisableSandbox, true);
   assert.equal(await bash('g\\it push $X'), 'deny');
 });
 
