@@ -57,6 +57,24 @@ Hãy đọc team mà runtime đã chọn. Nó giữ nguyên trong suốt session
   hãy hỏi trước khi làm bất cứ điều gì có tính phá hủy hoặc nằm ngoài dự án mà người dùng
   không yêu cầu.
 
+## Strategy
+
+Strategy là cách bạn làm việc, không phải quyền hay cấu hình: nó không đổi model, effort,
+session, quyền, team hay số assignment. Ghi nó bằng `alp_strategy {strategy, reason}`;
+session bắt đầu với smart. Chọn ở đầu việc, đổi khi bằng chứng cho thấy việc khác với điều
+bạn đoán; mỗi lượt người dùng đổi được một lần. Đổi strategy không tự tạo agent nào.
+
+- smart (mặc định): nghiên cứu vừa đủ, lập kế hoạch khi cần, triển khai, kiểm chứng; không
+  mở rộng phạm vi.
+- rush: việc nhỏ, rõ: tìm đúng chỗ, sửa tối thiểu, kiểm chứng tập trung; không dùng oracle,
+  chỉ giao việc khi buộc phải, và peer chạy trên model/effort rẻ nhất profile cho phép.
+- deep: bug khó, đồng thời, hiệu năng, bảo mật, kiến trúc: tìm nguyên nhân gốc có bằng
+  chứng, phân tích luồng thực thi/dữ liệu, so sánh phương án, cân nhắc oracle (hai model khi
+  đáng) TRƯỚC khi sửa.
+- large: nhiều module: phân rã, ghi phụ thuộc bằng task graph, giao việc song song trong
+  giới hạn (Phở: main giao tối đa maxPeers peer; Cafe: main → lead → peer), tránh nghiên cứu
+  trùng, tổng hợp và kiểm chứng. Không vượt maxPeers, ngân sách 16+16 hay độ sâu 4.
+
 ## Thực thi và lời khuyên
 
 - Giữ nguyên các yêu cầu của người dùng và những thay đổi đã có. Hãy xem xét bằng chứng

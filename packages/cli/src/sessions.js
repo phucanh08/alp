@@ -270,7 +270,7 @@ async function answer(args) {
 
 /** One tree as text: sessions by depth, then questions, unmerged worktrees and leases. */
 
-function renderStatus(status, root) {
+function renderStatus(status, root, strategies = new Map()) {
   const lines = [`${root?.title ? `"${root.title}"  ` : ''}${status.rootId}  ${status.sessions[0]?.projectRoot ?? ''}`];
   const depth = new Map();
   const assignments = new Map(status.assignments.map(assignment => [assignment.id, assignment]));
@@ -279,7 +279,9 @@ function renderStatus(status, root) {
     const assignment = assignments.get(session.id);
     const where = assignment?.worktree ? `  worktree ${assignment.worktree.branch}` : '';
     const mail = session.unreadMail ? `  ✉${session.unreadMail}` : '';
-    lines.push(`${'  '.repeat(depth.get(session.id) + 1)}${session.agent.padEnd(9)} ${session.state.padEnd(14)} idle ${duration(session.idleMs).padEnd(7)} ${session.runtime}:${session.model}  ${session.mode}${where}${mail}`);
+    const strategy = strategies.get(session.id) ?? (!session.parentId || session.agent === 'lead' ? { strategy: 'smart' } : undefined);
+    const chosen = strategy ? `  strategy ${strategy.strategy}${strategy.reason ? `: ${strategy.reason.split('\n')[0].slice(0, 80)}` : ''}` : '';
+    lines.push(`${'  '.repeat(depth.get(session.id) + 1)}${session.agent.padEnd(9)} ${session.state.padEnd(14)} idle ${duration(session.idleMs).padEnd(7)} ${session.runtime}:${session.model}  ${session.mode}${where}${mail}${chosen}`);
   }
   for (const question of status.questions) lines.push(`  ? ${question.id} ${question.agent} asks (${ago(question.askedAt)}): ${question.body.split('\n')[0]}`);
   for (const worktree of status.worktrees) lines.push(`  ⎇ unmerged ${worktree.branch} from ${worktree.agent}: ${worktree.files.length} files${worktree.stat ? ` (${worktree.stat.trim()})` : ''}`);
@@ -288,12 +290,32 @@ function renderStatus(status, root) {
   return lines.join('\n');
 }
 
+/** The latest alp_strategy entry of each session in a run log (t-003a); a session without one works with smart. */
+export function latestStrategies(entries) {
+  const latest = new Map();
+  for (const entry of entries) if (entry?.event === 'strategy' && typeof entry.sessionId === 'string') latest.set(entry.sessionId, entry);
+  return latest;
+}
+
+/** How long alp top reuses a tree's strategies before it reads the run log again. */
+export const STRATEGY_REFRESH_MS = 5000;
+
 /** A live dashboard of every tree, or of one, refreshed every second. */
 
 async function top(args) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { once: { type: 'boolean' } } });
   if (positionals.length > 1) throw new UsageError();
   const client = await running();
+  // Strategies live only in the run log, which alpd reads whole: read it at most every STRATEGY_REFRESH_MS per tree.
+  const strategies = new Map();
+  const strategiesOf = async rootId => {
+    const cached = strategies.get(rootId);
+    if (cached && Date.now() - cached.at < STRATEGY_REFRESH_MS) return cached.latest;
+    const { entries } = await client.request('session.log', { sessionId: rootId }).catch(() => ({ entries: cached ? undefined : [] }));
+    const latest = entries ? latestStrategies(entries) : cached.latest;
+    strategies.set(rootId, { at: Date.now(), latest });
+    return latest;
+  };
   const frame = async () => {
     const { sessions } = await client.request('session.list', { rootsOnly: true });
     const roots = positionals.length ? sessions.filter(session => session.id === positionals[0]) : sessions;
@@ -301,7 +323,7 @@ async function top(args) {
     const blocks = [];
     for (const root of roots) {
       const { status } = await client.request('session.status', { sessionId: root.id }).catch(() => ({}));
-      if (status) blocks.push(renderStatus(status, root));
+      if (status) blocks.push(renderStatus(status, root, await strategiesOf(root.id)));
     }
     return `alp top  ${new Date().toLocaleTimeString()}  ${roots.length} live ${roots.length === 1 ? 'tree' : 'trees'}\n\n${blocks.join('\n\n') || 'No live sessions'}`;
   };

@@ -58,6 +58,9 @@ export function renderLog(rootId, entries) {
       case 'task':
         text = `☐ ${entry.agent} ${TASK_PAST[entry.action] ?? entry.action} ${entry.id} "${entry.title}" → ${entry.status}${entry.detail ? `: ${entry.detail.split('\n')[0].slice(0, 120)}` : ''}`;
         break;
+      case 'strategy':
+        text = `◇ ${entry.agent} strategy ${entry.previous ?? 'smart'} → ${entry.strategy}: ${String(entry.reason ?? '').split('\n')[0].slice(0, 120)}`;
+        break;
       case 'board.unpin':
         text = `⚐ ${entry.pinId} by ${entry.agent} ${entry.reason === 'session_ended' ? 'released when its session ended' : 'taken down'}`;
         break;

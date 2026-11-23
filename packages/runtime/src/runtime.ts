@@ -14,7 +14,7 @@ import { claudeCut, codexForkEnd, codexForkRefusal, pendingChain, type ChainEntr
 export type { RuntimeTransport, RuntimeOptions, OpenOptions, PromptContent, PromptInput, AlpRuntime, SessionPreview, RecoveryOutcome, Pause, PauseState, RecallAnswer } from './contracts.js';
 export { DEFAULT_TEAM } from './contracts.js';
 import { verdictLine, parseHandoff, type Handoff } from './handoff.js';
-import { TASK_ACTIONS, TASK_PAST, TASK_FIELDS, mainOf, readOnlyMember, roleOf, taskActions, taskBrief, type TaskAction } from './tools.js';
+import { TASK_ACTIONS, TASK_PAST, TASK_FIELDS, mainOf, readOnlyMember, roleOf, taskActions, taskBrief, type TaskAction, STRATEGIES, DEFAULT_STRATEGY, STRATEGY_REASON_CHARS, choosesStrategy, type Strategy } from './tools.js';
 import { nativeEnvironment, createTransport } from './providers.js';
 import { nativeMode, codexApproval, profileEfforts, nativeSessionConfig } from './session-config.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -977,6 +977,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       : entry.event === 'human.answer' ? `user ${entry.outcome} ${entry.questionId}${entry.answer ? `: ${clip(entry.answer)}` : ''}`
       : entry.event === 'board.pin' ? `${entry.agent} pinned ${entry.kind}${entry.paths ? ` ${entry.paths.join(', ')}` : ''}: ${clip(entry.body)}`
       : entry.event === 'lesson' ? `${entry.agent} recorded a ${entry.scope} lesson: ${clip(entry.lesson)}`
+      : entry.event === 'strategy' ? `${entry.agent} changed strategy ${entry.previous} → ${entry.strategy}: ${clip(entry.reason)}`
       // Two entries share the name: alp_skill saving one (name, roles), and an agent using one (skill, via), which skillUse journals itself.
       : entry.event === 'skill' && Array.isArray(entry.roles) ? `${entry.agent} saved skill ${entry.name} for ${entry.roles.join(', ')} with the user's approval`
       : entry.event === 'task' ? `${entry.agent} ${TASK_PAST[entry.action] ?? entry.action} task ${entry.id} "${clip(entry.title, 120)}"${entry.status ? ` (now ${entry.status})` : ''}${entry.detail ? `: ${clip(entry.detail)}` : ''}`
@@ -2439,6 +2440,29 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     return toolResult(true, { status: 'pending_approval', approvalId, next: 'Continue other work or end your turn. ALP sends the decision and creation result by mail; do not resubmit this draft.' });
   }
 
+  /**
+   * alp_strategy: main or lead records how it works (rush, smart, deep or large). Guidance only:
+   * it changes nothing but the session's strategy, the run log and what alp top shows. One change
+   * per user turn of the root, so a lead's mail wakes do not renew it.
+   */
+  function strategyTool(sessionId: string, session: Session, args: any) {
+    if (!choosesStrategy(session.mapping, session.parentAgent, session.role)) return toolResult(false, { error: 'Only main and lead choose a strategy' });
+    if (!plainObject(args, ['strategy', 'reason']) || !STRATEGIES.includes(args.strategy)) return toolResult(false, { error: `strategy must be one of ${STRATEGIES.join(', ')}` });
+    const reason = typeof args.reason === 'string' ? args.reason.trim() : '';
+    if (!reason || reason.length > STRATEGY_REASON_CHARS) return toolResult(false, { error: `reason is required: one line, at most ${STRATEGY_REASON_CHARS} characters` });
+    const current = session.strategy?.name ?? DEFAULT_STRATEGY;
+    if (args.strategy === current) return toolResult(true, { strategy: current, unchanged: true });
+    const rootId = rootOf(sessionId);
+    const turn = sessions.get(rootId)?.userTurns ?? 0;
+    if (session.strategy && session.strategy.turn === turn) {
+      return toolResult(false, { error: `The strategy already changed in this user turn (to ${current}: ${session.strategy.reason}). Keep ${current} for now; you can change it in a later user turn.` });
+    }
+    const at = new Date().toISOString();
+    session.strategy = { name: args.strategy as Strategy, reason, at, turn };
+    runLog(rootId, { event: 'strategy', agent: session.mapping.agent.name, sessionId, strategy: args.strategy, previous: current, reason });
+    return toolResult(true, { strategy: args.strategy, previous: current, reason });
+  }
+
   async function issueTool(sessionId: string, session: Session, args: unknown) {
     const cancellation = approvalCancellation.get(session) ?? 0;
     args = structuredClone(args);
@@ -2948,7 +2972,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
 
     if (
-      !['alp_delegate', 'alp_handoff', 'alp_wait', 'alp_cancel', 'alp_send', 'alp_ask', 'alp_merge', 'alp_discard', 'alp_resolve', 'alp_recall', 'alp_verify', 'alp_pin', 'alp_board', 'alp_unpin', 'alp_lesson', 'alp_lesson_curate', 'alp_skill', 'alp_skill_retire', 'alp_issue', 'alp_task', 'alp_schedule'].includes(params.tool) ||
+      !['alp_delegate', 'alp_handoff', 'alp_wait', 'alp_cancel', 'alp_send', 'alp_ask', 'alp_merge', 'alp_discard', 'alp_resolve', 'alp_recall', 'alp_verify', 'alp_pin', 'alp_board', 'alp_unpin', 'alp_lesson', 'alp_lesson_curate', 'alp_skill', 'alp_skill_retire', 'alp_issue', 'alp_task', 'alp_schedule', 'alp_strategy'].includes(params.tool) ||
       params.namespace != null ||
       typeof params.callId !== 'string'
     ) {
@@ -2975,6 +2999,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       : params.tool === 'alp_skill_retire' ? skillRetireTool(sessionId, session, args)
       : params.tool === 'alp_issue' ? issueTool(sessionId, session, args)
       : params.tool === 'alp_schedule' ? scheduleTool(sessionId, session, args)
+      : params.tool === 'alp_strategy' ? Promise.resolve(strategyTool(sessionId, session, args))
       : params.tool === 'alp_task' ? taskToolCall(sessionId, session, args)
       : params.tool === 'alp_delegate' ? runDelegation(sessionId, session, params)
       : params.tool === 'alp_wait' ? waitTool(sessionId, session, args)
@@ -5158,6 +5183,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (!session.parent && origin === 'user') {
         session.calls = 0;
         session.advisorCalls = 0;
+        session.userTurns = (session.userTurns ?? 0) + 1;
       }
 
       session.seen.add(

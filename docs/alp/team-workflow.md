@@ -975,6 +975,37 @@ unmerged worktree changes, write leases and board claims. `alp log <session>`
 prints the tree's assignment log: delegations, results with handoffs, mail,
 worktree events, board pins, and questions to the user with their answers.
 
+## Strategy
+
+Main (Phở and Cafe) and lead (Cafe) record how they work with
+`alp_strategy {strategy, reason}`. A strategy is behaviour guidance only: it never
+changes the model, effort, session, permission mode, team or number of assignments,
+and choosing one starts no agent. Peers, oracle, reviewer and the supervisor have no
+strategy and no `alp_strategy` tool; ALP refuses the call from them.
+
+| Strategy | For | How |
+|---|---|---|
+| `smart` (default) | ordinary work | research enough, plan if needed, implement, verify, no scope creep |
+| `rush` | small, clear work | find the spot, minimal fix, focused verification, no oracle, delegate only if required, peers on the cheapest model/effort their profile allows |
+| `deep` | hard bugs, concurrency, performance, security, architecture | root cause with evidence, execution and data-flow analysis, compare options, consider oracle (two models when worth it) before fixing |
+| `large` | work across many modules | decompose, record dependencies in the task graph, delegate in parallel within `maxPeers`, the 16+16 budgets and depth 4; avoid duplicate research; synthesise and verify |
+
+Every session starts with `smart`. `strategy` must be one of the four and `reason`
+a non-empty line of at most 300 characters. One change per user turn of the root:
+a second change in the same turn is refused with a suggestion to keep the current
+strategy; a new accepted user prompt (including steering) allows the next one. A
+lead's mail wakes do not renew it. Choosing the current strategy again is accepted
+as unchanged and is not a change.
+
+Each change writes one `strategy` record to the assignment log (`agent`,
+`sessionId`, `strategy`, `previous`, `reason`), which `alp log` shows as
+`◇ main strategy smart → deep: <reason>` and the supervisor's journal includes.
+`alp top` shows `strategy <name>: <reason>` on each main and lead line (`smart`
+until they choose); it reads the run log through `session.log` at most every five
+seconds per tree. The house rules of both teams ask main and lead to choose a
+strategy at the start of the work and to change it when evidence shows the work
+differs from the guess.
+
 ## Assignment and model selection
 
 `alp_delegate` accepts `agent`, `task`, and optional `mode` (`read-only`,

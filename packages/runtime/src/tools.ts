@@ -464,3 +464,28 @@ export const SCHEDULE_TOOL = {
     }, required: ['action'], additionalProperties: false,
   },
 };
+
+/** The strategies main and lead choose between: behaviour guidance only, never a model, effort, permission or team. */
+export const STRATEGIES = ['rush', 'smart', 'deep', 'large'] as const;
+export type Strategy = typeof STRATEGIES[number];
+export const DEFAULT_STRATEGY: Strategy = 'smart';
+export const STRATEGY_REASON_CHARS = 300;
+
+/** Whether a session chooses a strategy: a team's main at the root, or a lead. */
+export const choosesStrategy = (mapping: Pick<ResolvedSession, 'agent' | 'team'>, parentAgent?: string, role?: 'supervisor') =>
+  role !== 'supervisor' && (parentAgent ? roleOf(mapping, mapping.agent.name) === 'lead' : mapping.agent.name === mainOf(mapping));
+
+export const STRATEGY_TOOL = {
+  type: 'function',
+  name: 'alp_strategy',
+  description: 'Record the strategy you work with: rush (small, clear work), smart (the default), deep (hard bugs, security, architecture) or large (many modules, decomposed and delegated in parallel). It is guidance for how you work and changes nothing else: no model, effort, permission, team or assignment. Choose at the start of the work; change it when evidence shows the work differs from your guess. At most one change per user turn.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      strategy: { type: 'string', enum: STRATEGIES },
+      reason: { type: 'string', description: `Why this strategy fits the work, in one line (at most ${STRATEGY_REASON_CHARS} characters).` },
+    },
+    required: ['strategy', 'reason'],
+    additionalProperties: false,
+  },
+};
