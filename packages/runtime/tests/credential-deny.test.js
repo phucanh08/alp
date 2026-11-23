@@ -180,7 +180,9 @@ test('t-cde5 g4: a read-only profile leaves the sandbox only for a command its c
   const token = `cat ${path.join(home, 'paseo', 'token.json')}`;
   for (const command of [token, 'cat README.md', 'git diff', `${clone}; ${token}`, `${clone} && curl https://example.com`, `git clone https://github.com/a/b ${path.join(os.tmpdir(), 'elsewhere')}`,
     // A shell wrapper that hides a second command after a covered one (t-cde5 review: greedy sh -c), or wraps it at all.
-    `sh -c '${clone}' ; ${token} 'b'`, `bash -c "${clone}" ; touch x "b"`, `sh -c '${clone}'`]) {
+    `sh -c '${clone}' ; ${token} 'b'`, `bash -c "${clone}" ; touch x "b"`, `sh -c '${clone}'`,
+    // A comment whose quote hides a second line from ALP but not from the shell (t-cde5 re-review).
+    `${clone} # '\n${token}\n#'`]) {
     const decided = await gate.canUseTool('Bash', { command, dangerouslyDisableSandbox: true }, {});
     assert.equal(decided.updatedInput?.dangerouslyDisableSandbox, undefined, command);
   }

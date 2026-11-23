@@ -178,6 +178,9 @@ export function unwrapShell(command) {
   // script (a greedy match read `<a>' ; <b> 'c` as the script, so a rule covering <a> covered <b>).
   const match = /^(?:\/\S*\/)?(?:ba|z|da)?sh\s+-l?c\s+(?:'((?:[^']|'\\'')*)'|"((?:[^"\\]|\\[\s\S])*)")\s*$/.exec(command.trim());
   if (!match) return command.trim();
+  // In double quotes the outer shell expands `$…` and backticks before sh runs: the script read here is not
+  // the one that runs, so the line stays as it is (Codex escapes them in its own wrapper).
+  if (match[2] !== undefined && /(?:^|[^\\])(?:\\\\)*[$`]/.test(match[2])) return command.trim();
   return match[1] !== undefined ? match[1].replace(/'\\''/g, "'") : match[2].replace(/\\(["\\$`])/g, '$1');
 }
 
@@ -201,6 +204,9 @@ export function simpleCommands(line) {
     }
     if (char === '\\') { current += char + (line[++i] ?? ''); continue; }
     if (char === "'" || char === '"') { quote = char; current += char; continue; }
+    // A `#` that starts a word begins a comment the shell skips: what follows (a quote, a new line) is read
+    // differently by the shell than here, so no rule can vouch for the line (t-cde5 review).
+    if (char === '#' && (i === 0 || /[\s;|&()]/.test(line[i - 1]))) return null;
     if (char === '`' || (char === '$' && line[i + 1] === '(') || ((char === '<' || char === '>') && line[i + 1] === '(')) return null;
     const two = line.slice(i, i + 2);
     // 2>&1 and &>file redirect; they do not end a command.
@@ -275,7 +281,7 @@ function shellWords(command) {
       if (/[$`\\]/.test(inner)) return null;
       word = (word ?? '') + inner; i = end; continue;
     }
-    if (/[$*?[\]{}<>\\&|;()`!]/.test(char) || (char === '~' && word === null)) return null;
+    if (/[$*?[\]{}<>\\&|;()`!]/.test(char) || ((char === '~' || char === '#') && word === null)) return null;
     word = (word ?? '') + char;
   }
   if (word !== null) words.push(word);

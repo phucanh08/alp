@@ -90,6 +90,12 @@ test('a command is allowed only when allow rules cover every part of it, and den
   // The quotes must enclose the rest of the line: a quoted word after `;` does not make it one script (t-cde5 review).
   for (const line of [`sh -c 'git log' ; touch /tmp/pwn 'b'`, `bash -c "git log" ; touch x "b"`, `sh -c 'a' 'b'`]) assert.equal(unwrapShell(line), line, line);
   assert.equal(unwrapShell(`bash -c "echo \\"a\\" b"`), 'echo "a" b');
+  // In double quotes the outer shell expands $(…) first: such a script is not unwrapped (t-cde5 re-review).
+  assert.equal(unwrapShell(`sh -c "git log '$(id)'"`), `sh -c "git log '$(id)'"`);
+  // A word-start `#` is a comment to the shell: no rule vouches for the line; a `#` inside a word is text.
+  assert.equal(simpleCommands("git log # '\necho HIDDEN\n#'"), null);
+  assert.equal(simpleCommands('git log # note'), null);
+  assert.deepEqual(simpleCommands('echo a#b'), ['echo a#b']);
   assert.deepEqual(simpleCommands('a && b || c; d | e\nf & g'), ['a', 'b', 'c', 'd', 'e', 'f', 'g']);
 });
 
@@ -177,9 +183,9 @@ test('the installed librarian profile, through canUseTool: reads below its per-u
   const outside = await gate.canUseTool('Bash', { command: 'git clone https://github.com/a/b /tmp/alp-librarian/a-b', dangerouslyDisableSandbox: true });
   assert.notEqual(outside.updatedInput?.dangerouslyDisableSandbox, true);
   // A shell wrapper around a covered command, followed by anything, never leaves (t-cde5 review: greedy sh -c).
-  for (const command of [`sh -c 'git clone https://github.com/a/b ${cache}/a-b' ; touch ${directory}/pwned 'b'`, `bash -c "git -C ${cache}/a-b log --author=a" ; touch ${directory}/pwned "b"`, `sh -c 'git -C ${cache}/a-b log'`]) {
+  for (const command of [`sh -c 'git clone https://github.com/a/b ${cache}/a-b' ; touch ${directory}/pwned 'b'`, `bash -c "git -C ${cache}/a-b log --author=a" ; touch ${directory}/pwned "b"`, `sh -c 'git -C ${cache}/a-b log'`, `git -C ${cache}/a-b log # '\ntouch ${directory}/pwned\n#'`]) {
     // The compound ones are not covered at all; a lone wrapped command is (Codex wraps commands so), but it still never leaves.
-    if (command.includes(';')) assert.notEqual(commandDecision(profile, command), 'allow', command);
+    if (command.includes(';') || command.includes('#')) assert.notEqual(commandDecision(profile, command), 'allow', command);
     const wrapped = await gate.canUseTool('Bash', { command, dangerouslyDisableSandbox: true });
     assert.notEqual(wrapped.updatedInput?.dangerouslyDisableSandbox, true, command);
   }
