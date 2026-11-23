@@ -58,7 +58,7 @@ async function lab(t) {
 }
 
 /** A custom delegation graph: no team, so no target has a model profile. */
-async function graph(t) {
+async function graph(t, settings = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-delegate-graph-'));
   const agents = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(agents), libraryDir: root, supervisor: false });
@@ -66,7 +66,9 @@ async function graph(t) {
   await agentDir(root, 'scout', { model: 'claude:claude-haiku-4-5-20251001' });
   await agentDir(root, 'helper', { provider: 'claude', model: 'claude-sonnet-5', thinking: 'low' });
   await agentDir(root, 'plain');
-  await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['scout', 'helper', 'plain'] } }));
+  // GPT-6 Astra takes effort low only.
+  await agentDir(root, 'astra', { model: 'codex:gpt-6-astra', thinking: 'high' });
+  await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['scout', 'helper', 'plain', 'astra'] }, ...settings }));
   await runtime.open('root', { cwd: root, model: 'codex:gpt-6.1-sol', thinking: 'high' });
   const main = agents[0];
   await runtime.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Go' }] });
@@ -148,4 +150,16 @@ test('oracle takes a thinking its model offers, refuses another with the list, a
   const snapshot = runtime.snapshot('root');
   assert.equal(snapshot.model, 'gpt-6.1-sol');
   assert.equal(snapshot.thinking, 'high');
+});
+
+test('an agent.json effort the model does not take gives way to the model\'s own', async t => {
+  const { agents, main } = await graph(t);
+  const { answer, child } = await start(agents, main, { agent: 'astra' });
+  assert.deepEqual([child.runtime, child.model, child.thinking], ['codex', 'gpt-6-astra', 'low'], JSON.stringify(answer));
+});
+
+test('settings.json\'s runtime, every agent\'s choice, comes before agent.json as in resolveSession', async t => {
+  const { agents, main } = await graph(t, { runtime: { provider: 'claude', model: 'claude-sonnet-5', reasoning: 'medium' } });
+  const { answer, child } = await start(agents, main, { agent: 'scout' });
+  assert.deepEqual([child.runtime, child.model, child.thinking], ['claude', 'claude-sonnet-5', 'medium'], JSON.stringify(answer));
 });
