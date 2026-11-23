@@ -282,7 +282,7 @@ RPC.
 
 Optional packs ship specialist skills, the `architect` and `docs-maintainer` agents and
 the Blueprint team without seeding them. The `research` pack adds the read-only advisors
-`librarian` (external repositories, shallow clones in `/tmp`) and `scout` (code
+`librarian` (external repositories, read at a fixed SHA through WebFetch) and `scout` (code
 locations in the workspace) and the `pho-research` and `cafe-research` teams that call
 them ([Librarian and scout](team-workflow.md#librarian-and-scout-research-pack)).
 `alp packs` lists the packs, `alp pack install <id> [--project] [--assign]` copies one in

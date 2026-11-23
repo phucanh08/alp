@@ -50,7 +50,7 @@ test('installing the pack adds librarian and scout, read-only, and both variant 
   assert.deepEqual(librarian.skills, []);
   const scout = await resolveAgent(root, { agent: 'scout', library });
   assert.equal(scout.mode, 'read-only');
-  assert.deepEqual(scout.runtime, { model: 'claude:claude-sonnet-5', reasoning: 'low' });
+  assert.deepEqual(scout.runtime, { model: 'claude:haiku', reasoning: 'low' });
   assert.match(scout.instructions.agent, /^# Scout/);
   assert.match(scout.instructions.agent, /Không tìm thấy \/ chưa chắc/);
   assert.deepEqual(scout.skills, []);
@@ -129,36 +129,18 @@ test('serving as a team advisor, librarian and scout stay read-only even when se
   }
 });
 
-// What librarian needs beyond read-only (clone and fetch into /tmp/alp-librarian, nothing pushed). pack.json can
-// carry only a base mode (packs.js validatePack), so this profile is the user's to add in settings for now; the
-// test pins what it decides once given, and that a team advisor's cap keeps its rules (permissions.js profileFor).
-const LIBRARIAN_PROFILE = {
-  base: 'read-only',
-  allow: ['Bash(git clone:*)', 'Bash(git -C /tmp/alp-librarian/*)', 'Bash(git fetch:*)', 'WebFetch(domain:github.com)', 'WebFetch(domain:raw.githubusercontent.com)', 'WebFetch(domain:gitlab.com)'],
-  ask: ['Bash(gh repo clone:*)'],
-  deny: ['Bash(git push:*)', 'Bash(rm:*)'],
-};
-
-test('a librarian profile in settings keeps its rules under the advisor cap: clone and fetch run, push is refused, nothing writes the workspace', async t => {
+// t-6dc5: the pack installs librarian with the plain read-only profile and no allow/ask rules. pack.json carries
+// only a base mode (packs.js validatePack), and a prefix rule such as Bash(git -C /tmp/alp-librarian*) would also
+// cover `git -C /tmp/alp-librarian/../<path> <any subcommand>`; a safe clone path is an open question (PR body).
+test('the installed librarian has no rule that lets a command leave the read-only sandbox', async t => {
   const { root, library } = await scratch(t);
   await installPack('research', { scope: 'library', library });
-  await writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify({ permissions: { profiles: { librarian: LIBRARIAN_PROFILE }, agents: { librarian: 'librarian' } } }));
-  const profile = await profileFor(root, library, 'librarian', { readOnly: true });
-  assert.equal(profile.base, 'read-only');
-  assert.deepEqual(profile.allow, LIBRARIAN_PROFILE.allow);
-  assert.deepEqual(profile.ask, LIBRARIAN_PROFILE.ask);
-  assert.deepEqual(profile.deny, LIBRARIAN_PROFILE.deny);
-  const decide = command => commandDecision(profile, command);
-  assert.equal(decide('git clone --depth 50 https://github.com/getpaseo/paseo /tmp/alp-librarian/getpaseo-paseo'), 'allow');
-  assert.equal(decide('git -C /tmp/alp-librarian/getpaseo-paseo log -S needle --oneline'), 'allow');
-  assert.equal(decide('git -C /tmp/alp-librarian/getpaseo-paseo fetch --depth 50'), 'allow');
-  assert.equal(decide('git fetch --filter=blob:none origin'), 'allow');
-  assert.equal(decide('gh repo clone owner/private /tmp/alp-librarian/owner-private'), 'ask');
-  assert.equal(decide('git push origin main'), 'deny');
-  assert.equal(decide('git clone https://github.com/a/b /tmp/alp-librarian/a-b && git push'), 'deny');
-  assert.equal(decide('rm -rf /tmp/alp-librarian'), 'deny');
-  // Not covered: the read-only base decides, so writes to the workspace stay refused.
-  assert.equal(decide('git -C . commit -m x'), undefined);
-  assert.equal(decide('git -C /tmp/alp-librarian/a-b log > notes.txt'), undefined, 'a redirect is never allowed by a rule');
-  assert.equal(decide('touch src/x.js'), undefined);
+  for (const name of ADVISORS_OF_PACK) {
+    const profile = await profileFor(root, library, name, { readOnly: true });
+    assert.equal(profile.base, 'read-only');
+    assert.deepEqual([profile.allow ?? [], profile.ask ?? []], [[], []], `${name} has no allow or ask rule`);
+    for (const command of ['git clone --depth 50 https://github.com/a/b /tmp/alp-librarian/a-b', 'git fetch origin', 'git push origin main', 'touch src/x.js']) {
+      assert.notEqual(commandDecision(profile, command), 'allow', `${name}: ${command}`);
+    }
+  }
 });
