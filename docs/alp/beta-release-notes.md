@@ -5,6 +5,16 @@
   the requester's model (a team member's generated profile follows the same order), and says in
   `modelNote` when it inherits; the oracle takes `thinking`,
   checked against its lens ([team-workflow.md](team-workflow.md), "Assignment and model selection").
+- **A plain Bash allow rule covers only a line of plain words** (t-cde5, user decision g5): bash and
+  zsh ran a second command hidden in lines such as ``echo $'\'' ; touch X ; echo '\'`` or
+  `echo ${x:='a[$(touch X)]'} $[x]`, which ALP read as one `echo` that `Bash(echo:*)` allowed
+  (Claude, Codex and ACP; released versions including beta.12 are affected). A line with `$`, an
+  unquoted glob, brace or bracket, a leading `~`, a comment, a redirect other than to a descriptor
+  or `/dev/null`, or `$`, backtick, `\` or `!` in double quotes now gets no decision from a plain
+  allow rule: ALP asks, or the mode refuses. Deny rules and checked `Bash(@…)` rules are
+  unchanged. Every profile with a Bash allow rule is affected (custom agents, user profiles,
+  lead/peer/main when given one); the built-in reviewer, oracle and supervisor profiles have none.
+  The rule and the list are in [team-workflow.md](team-workflow.md) ("Permission profiles").
 
 # ALP 0.0.1-beta.12 — release notes
 

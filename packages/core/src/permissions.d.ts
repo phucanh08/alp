@@ -12,4 +12,5 @@ export function profileFor(projectRoot: string, home: string | undefined, agent:
 export function capMode(mode: string, base: string): string;
 export function unwrapShell(command: string): string;
 export function simpleCommands(line: string): string[] | null;
+export function plainCommands(line: string): string[] | null;
 export function commandDecision(profile: Pick<PermissionProfile, 'allow' | 'deny'> & { ask?: string[] }, command: string): 'allow' | 'ask' | 'deny' | undefined;

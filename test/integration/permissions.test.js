@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initProject } from '../../packages/core/src/init.js';
 import { installPack } from '../../packages/core/src/packs.js';
-import { addAllowRule, commandDecision, parseRule, profileFor, simpleCommands, unwrapShell, validatePermissions } from '../../packages/core/src/permissions.js';
+import { addAllowRule, commandDecision, parseRule, plainCommands, profileFor, simpleCommands, unwrapShell, validatePermissions } from '../../packages/core/src/permissions.js';
 import { claudePermissions, createAlpRuntime, createCopy, reclaimCopies, removeCopy, resolveSession } from '../../dist/runtime/index.js';
 import { teardown } from '../support/teardown.js';
 import { setProfiles } from '../support/fake-agent.js';
@@ -97,6 +97,60 @@ test('a command is allowed only when allow rules cover every part of it, and den
   assert.equal(simpleCommands('git log # note'), null);
   assert.deepEqual(simpleCommands('echo a#b'), ['echo a#b']);
   assert.deepEqual(simpleCommands('a && b || c; d | e\nf & g'), ['a', 'b', 'c', 'd', 'e', 'f', 'g']);
+});
+
+// t-cde5 g5 (the user's decision A'): a plain allow rule vouches only for a line of plain words; deny and checked rules are as before.
+test('a plain allow rule covers only a line of plain words: what bash or zsh reads differently is asked about', () => {
+  const echo = { allow: ['Bash(echo:*)'], deny: [] };
+  // The two HIGHs of security review 4 on 2a36f6ce: bash and zsh run `touch X`; ALP read one echo.
+  for (const line of [String.raw`echo $'\'' ; touch X ; echo '\'`, "echo ${x:='a[$(touch X)]'} $[x]"]) {
+    assert.deepEqual(simpleCommands(line)?.length, 1, line);
+    assert.equal(plainCommands(line), null, line);
+    assert.equal(commandDecision(echo, line), undefined, line);
+  }
+  // The earlier ones, and the rest of what a shell expands or runs: never vouched for by a plain rule.
+  for (const line of ['echo =(touch X)', 'echo *(e:touch X:)', 'echo $(touch X)', 'echo `touch X`', 'echo <(touch X)', 'echo $HOME', 'echo "$HOME"', 'echo ${HOME}', 'echo $[1+1]', 'echo $"x"',
+    "echo a # '\ntouch X\n#'", 'echo a\0b', 'echo a\rb', 'echo a & touch X', 'echo a |& touch X', 'echo a\\;touch X', 'echo !!', 'echo "a!b"', 'echo "a\\"b"', 'echo "a`b`"', 'cat <<EOF', 'echo a > out', 'echo a >> out',
+    'echo a &> out', 'echo a 2> err', 'echo a >/dev/nullx', 'echo ~/x', 'echo =ls', 'echo a*', 'echo a?', 'echo [ab]', 'echo {a,b}', 'echo a b', 'echo ‘a’', 'echo (a)', 'echo a; (touch X)', 'echo "unclosed', "echo 'unclosed"]) {
+    assert.equal(plainCommands(line), null, JSON.stringify(line));
+    assert.notEqual(commandDecision(echo, line), 'allow', JSON.stringify(line));
+  }
+  // Codex wraps a command in /bin/zsh -lc '…': the script inside is judged.
+  assert.equal(commandDecision(echo, String.raw`/bin/zsh -lc "echo \$'x'"`), undefined);
+  assert.equal(commandDecision(echo, `/bin/zsh -lc 'echo \${x}'`), undefined);
+  // Quoted text is plain whatever it holds in single quotes, and in double quotes without $ ` \ !.
+  const quoted = `echo 'a$b \`c\` "d" (e) #f' "g (h) #i 'j' Sửa" HEAD~1 HEAD^ --x=y:z,w@v%u+t >/dev/null 2>&1`;
+  assert.deepEqual(plainCommands(`${quoted}\ngit status && npm test || true; a | b`), [quoted, 'git status', 'npm test', 'true', 'a', 'b']);
+  // A redirect is plain only as a whole word: `a2>&1` is not one.
+  assert.equal(plainCommands('echo a2>&1'), null);
+});
+
+test('the plain-word allow table: common commands that stay allowed, and those that now ask (t-cde5 g5)', () => {
+  const profile = {
+    allow: ['Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git status:*)', 'Bash(npm test:*)', 'Bash(node scripts/test.mjs:*)', 'Bash(node --test:*)',
+      'Bash(cd:*)', 'Bash(find:*)', 'Bash(grep:*)', 'Bash(tail:*)', 'Bash(echo:*)', 'Bash(ls:*)', 'Bash(cat:*)', 'Bash(git commit:*)'],
+    deny: ['Bash(git push:*)'],
+  };
+  const allowed = ['git diff', 'git diff --stat', 'git diff HEAD~1 -- src/a.js', 'git diff origin/main...HEAD', 'git log --oneline -3', 'git log --format=%h%x09%s -5', 'git log v1..v2',
+    'git show --stat HEAD', 'git show HEAD^', 'git show HEAD:packages/core/src/permissions.js', 'git status --short', 'npm test', 'npm test 2>&1 | tail -20', 'npm test >/dev/null 2>&1',
+    'npm test > /dev/null', 'cd pkg && npm test', 'node scripts/test.mjs unit', 'node scripts/test.mjs unit 2>&1', 'node --test test/x.test.js', "find . -name '*.js'", "grep -rn 'a|b' src",
+    'grep -rn "createServer(" src', 'echo "(a)"', "git commit -m 'fix: a $b'", 'git commit -m "Sửa lỗi"', 'git status\nnpm test', "/bin/zsh -lc 'git status'", '/bin/zsh -lc "npm test 2>&1"',
+    "/bin/bash -lc 'cd pkg && npm test'", `/bin/zsh -lc 'git log --oneline -3 | tail -1'`];
+  for (const command of allowed) assert.equal(commandDecision(profile, command), 'allow', JSON.stringify(command));
+  // Allowed before g5, asked about now: a variable, an unquoted glob, a home path, braces, brackets, a comment,
+  // a $ ` \ or ! in double quotes, a backslash, a word-start =.
+  const asked = ['echo $HOME', 'npm test -- --grep $NAME', 'ls *.js', 'cat src/*.ts', 'cat ~/notes.txt', 'echo a.{js,map}', 'git diff HEAD@{1}', 'ls [ab].js', 'echo "cost $5"',
+    'git commit -m "fix: \\"x\\""', 'echo a\\ b', 'echo =x', "/bin/zsh -lc 'echo $HOME'", 'git log --grep="a$"'];
+  for (const command of asked) assert.equal(commandDecision(profile, command), undefined, JSON.stringify(command));
+  // Deny rules match as before, plain line or not; a line ALP cannot split is refused when the profile has deny rules.
+  assert.equal(commandDecision(profile, 'npm test; git push'), 'deny');
+  assert.equal(commandDecision(profile, 'echo $HOME; git push origin'), 'deny');
+  assert.equal(commandDecision(profile, 'echo $(git push)'), 'deny');
+  // A rule with no specifier is a plain rule too.
+  assert.equal(commandDecision({ allow: ['Bash'], deny: [] }, 'ls'), 'allow');
+  assert.equal(commandDecision({ allow: ['Bash'], deny: [] }, String.raw`echo $'\'' ; touch X ; echo '\'`), undefined);
+  // An ask rule asks as before, for a plain line or not.
+  assert.equal(commandDecision({ allow: ['Bash(git:*)'], ask: ['Bash(git push:*)'], deny: [] }, 'git push $REMOTE'), 'ask');
 });
 
 test('profiles merge the project and the user, cap modes, and keep advisors read-only', async t => {
@@ -234,6 +288,8 @@ test('Codex asks ALP before leaving its sandbox, and ALP answers by the profile'
   // zsh runs what `=(…)` and a glob qualifier `*(e…)` name: an allow rule never covers an unquoted `(` (t-cde5 review).
   assert.deepEqual(await ask(reviewer, "/bin/zsh -lc 'npm test =(touch x)'"), { decision: 'decline' });
   assert.deepEqual(await ask(reviewer, "/bin/zsh -lc 'npm test *(e.touch x.)'"), { decision: 'decline' });
+  // A line that is not plain words gets nothing from an allow rule (t-cde5 g5): zsh would run `touch X` here too.
+  assert.deepEqual(await ask(reviewer, String.raw`/bin/zsh -lc "npm test \$'\\'' ; touch X ; echo '\\'"`), { decision: 'decline' });
   assert.deepEqual(await reviewer.serverRequest('item/fileChange/requestApproval', { threadId: reviewer.threadId }), { decision: 'decline' });
   await assert.rejects(reviewer.serverRequest('item/permissions/requestApproval', {}), /Unsupported runtime request/);
   reviewer.call('alp_handoff', { outcome: 'complete', summary: 'Tests pass' });
@@ -251,12 +307,14 @@ test('Codex asks ALP before leaving its sandbox, and ALP answers by the profile'
   main.finish('Done');
 
   const read = async () => (await readFile(path.join(directory, 'runs', 'root.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(entry => entry.event === 'permission');
-  await until(async () => (await read()).length === 8);
+  await until(async () => (await read()).length === 9);
   assert.deepEqual((await read()).map(entry => [entry.agent, entry.request, entry.decision, entry.rule ?? null]), [
     ['main', 'command', 'decline', 'deny'], ['main', 'command', 'accept', null],
     ['reviewer', 'command', 'accept', 'allow'], ['reviewer', 'command', 'decline', 'deny'], ['reviewer', 'command', 'decline', null],
     // The two zsh lines: ALP cannot split them and the profile has deny rules, so they are refused as deny.
-    ['reviewer', 'command', 'decline', 'deny'], ['reviewer', 'command', 'decline', 'deny'], ['reviewer', 'file change', 'decline', null],
+    ['reviewer', 'command', 'decline', 'deny'], ['reviewer', 'command', 'decline', 'deny'],
+    // The $'…' line splits, no deny rule covers it, and it is not plain: no rule decides, and read-only refuses it.
+    ['reviewer', 'command', 'decline', null], ['reviewer', 'file change', 'decline', null],
   ]);
 });
 
