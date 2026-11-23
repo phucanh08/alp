@@ -104,7 +104,7 @@ export function bindingApplies(binding, { mac, desktop }) {
 }
 
 /** The physical key code of a combo's key; Digit stands for 1-9. */
-const CODES = /** @type {Record<string, string>} */ ({ '[': 'BracketLeft', ']': 'BracketRight', ',': 'Comma', '.': 'Period', '`': 'Backquote', '?': 'Slash', '\\': 'Backslash' });
+const CODES = /** @type {Record<string, string>} */ ({ '[': 'BracketLeft', ']': 'BracketRight', ',': 'Comma', '.': 'Period', '`': 'Backquote', '?': 'Slash', '/': 'Slash', '\\': 'Backslash', '-': 'Minus', '=': 'Equal', ';': 'Semicolon', "'": 'Quote', Space: 'Space' });
 
 /** @param {string} combo @param {boolean} mac */
 function parse(combo, mac) {
@@ -128,9 +128,9 @@ function parse(combo, mac) {
  * @param {{ mac: boolean, desktop?: boolean, editable?: boolean, bindings?: Binding[] }} context
  * @returns {{ binding: Binding, index?: number } | null}
  */
-export function matchShortcut(event, { mac, desktop = false, editable = false, bindings = BINDINGS }) {
+export function matchShortcut(event, { mac, desktop = false, editable = false, bindings = effectiveBindings() }) {
   for (const binding of bindings) {
-    if (binding.handledElsewhere || !bindingApplies(binding, { mac, desktop })) continue;
+    if (binding.handledElsewhere || !binding.combo || !bindingApplies(binding, { mac, desktop })) continue;
     if (binding.scope === 'other' && editable) continue;
     const { key, mods } = parse(binding.combo, mac);
     if (event.metaKey !== mods.meta || event.ctrlKey !== mods.ctrl || event.altKey !== mods.alt || event.shiftKey !== mods.shift) continue;
@@ -139,7 +139,7 @@ export function matchShortcut(event, { mac, desktop = false, editable = false, b
       if (digit) return { binding, index: Number(digit[1]) };
       continue;
     }
-    if (key.length === 1 && /[A-Za-z]/.test(key) ? event.code === `Key${key.toUpperCase()}` : CODES[key] ? event.code === CODES[key] || event.key === key : event.key === key) return { binding };
+    if (/^[A-Za-z]$/.test(key) ? event.code === `Key${key.toUpperCase()}` : /^[0-9]$/.test(key) ? event.code === `Digit${key}` : CODES[key] ? event.code === CODES[key] || event.key === key : event.key === key) return { binding };
   }
   return null;
 }
@@ -147,13 +147,15 @@ export function matchShortcut(event, { mac, desktop = false, editable = false, b
 /** The keys of a binding as the dialog lists them: modifiers, then the key. @param {Binding} binding @param {boolean} mac */
 export function shortcutKeys(binding, mac) {
   if (binding.display) return binding.display;
+  if (!binding.combo) return [];
   const { key, mods } = parse(binding.combo, mac);
   const keys = [];
   if (mods.ctrl) keys.push('ctrl');
-  if (mods.meta) keys.push('mod');
+  // ⌘ on a Mac; elsewhere Cmd is the Windows or Super key (Mod is Ctrl there).
+  if (mods.meta) keys.push(mac ? 'mod' : 'meta');
   if (mods.alt) keys.push('alt');
   if (mods.shift && key !== '?') keys.push('shift');
-  keys.push(key);
+  keys.push(key === 'Digit' ? '1-9' : key);
   return keys;
 }
 
@@ -167,31 +169,254 @@ export function formatShortcut(keys, mac) {
     const symbols = /** @type {Record<string, string>} */ ({ ctrl: '⌃', alt: '⌥', shift: '⇧', mod: '⌘' });
     return order.filter(key => keys.includes(key)).map(key => symbols[key]).join('') + keys.filter(key => !order.includes(key)).map(normal).join('');
   }
-  const labels = /** @type {Record<string, string>} */ ({ mod: 'Ctrl', ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift' });
+  const labels = /** @type {Record<string, string>} */ ({ mod: 'Ctrl', ctrl: 'Ctrl', meta: 'Meta', alt: 'Alt', shift: 'Shift' });
   return keys.map(key => labels[key] ?? normal(key)).join('+');
 }
 
 /**
- * The first binding of an action, formatted, for hints beside the controls it drives.
+ * The first binding of an action, formatted, for hints beside the controls it drives: the user's
+ * keys when they rebound it, "" when they cleared it.
  * @param {string} action @param {boolean} mac @param {boolean} [desktop] @param {1 | -1} [delta]
  */
 export function shortcutLabel(action, mac, desktop = false, delta) {
-  const binding = BINDINGS.find(entry => entry.action === action && entry.label && bindingApplies(entry, { mac, desktop }) && (delta === undefined || entry.delta === delta));
+  const binding = effectiveBindings().find(entry => entry.action === action && entry.label && bindingApplies(entry, { mac, desktop }) && (delta === undefined || entry.delta === delta));
   return binding ? formatShortcut(shortcutKeys(binding, mac), mac) : '';
 }
 
 /**
- * The dialog's sections, filtered by a query on the label or the keys.
+ * The dialog's sections, filtered by a query on the label or the keys, with the user's keys.
+ * A cleared shortcut lists "Not set".
  * @param {boolean} mac @param {string} [query] @param {boolean} [desktop]
  */
 export function helpSections(mac, query = '', desktop = false) {
   const needle = query.trim().toLowerCase();
-  return SECTIONS.map(section => ({
+  return shortcutSections(mac, desktop).map(section => ({
     ...section,
-    rows: BINDINGS.filter(binding => binding.section === section.id && binding.label && bindingApplies(binding, { mac, desktop }))
-      .map(binding => ({ id: `${binding.action}:${binding.combo}`, label: /** @type {string} */ (binding.label), keys: formatShortcut(shortcutKeys(binding, mac), mac), ...(binding.note ? { note: binding.note } : {}) }))
+    rows: section.rows
+      .map(row => ({ id: row.id, label: row.label, keys: row.keys || NOT_SET, ...(row.note ? { note: row.note } : {}) }))
       .filter(row => !needle || row.label.toLowerCase().includes(needle) || row.keys.toLowerCase().includes(needle)),
   })).filter(section => section.rows.length);
+}
+
+// ---- the user's keys (Paseo's ShortcutOverrides, Settings › Shortcuts) --------------------------
+//
+// Paseo keeps a map from a binding's id to the combo the user chose, or null when they cleared it
+// (UNASSIGNED_COMBO: the row stays, it matches nothing); a binding without an entry keeps its
+// default. ALP keeps that map in the app preferences (preferences.js shortcutOverrides). Rebindable
+// here: every row of the dialog but the ones another component handles (the composer's keys and
+// Find in chat, which read their own keys). An alias (Ctrl+` for the Explorer sidebar) follows its
+// row: once the row is rebound or cleared, the alias no longer fires.
+
+/** What the dialog and Settings show for a cleared shortcut (Paseo's "Not set"). */
+export const NOT_SET = 'Not set';
+
+/** @typedef {Record<string, string | null>} ShortcutOverrides */
+
+/**
+ * A binding's id, the key of its override: the action, Previous/Next for the relative ones, and
+ * which build it is for when ALP.app and a browser have different defaults. Stable: renaming one
+ * drops the user's keys for it.
+ * @param {Binding} binding
+ */
+export function bindingId(binding) {
+  const delta = binding.delta === -1 ? ':previous' : binding.delta === 1 ? ':next' : '';
+  const build = binding.desktop === true ? '@desktop' : binding.desktop === false ? '@browser' : '';
+  return `${binding.action}${delta}${build}`;
+}
+
+/** Whether Settings › Shortcuts can change a binding's keys. @param {Binding} binding */
+export function isRebindable(binding) {
+  return !!binding.label && !binding.handledElsewhere;
+}
+
+/** Whether a binding takes a number 1-9 (its key is the Digit wildcard). @param {Binding} binding */
+const isIndexBinding = (/** @type {Binding} */ binding) => binding.combo.endsWith('+Digit') || binding.combo === 'Digit';
+
+/** The rebindable ids, with whether each takes a number. */
+const REBINDABLE = new Map(BINDINGS.filter(isRebindable).map(binding => [bindingId(binding), isIndexBinding(binding)]));
+
+const MODIFIERS = ['Mod', 'Cmd', 'Ctrl', 'Alt', 'Shift'];
+const NAMED_KEYS = ['Space', 'Enter', 'Tab', 'Backspace', 'Delete', 'Escape', 'Insert', 'Home', 'End', 'PageUp', 'PageDown', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+  ...Array.from({ length: 12 }, (_, index) => `F${index + 1}`)];
+const KEYS = new Set([...'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789[],.`?/\\-=;\'', ...NAMED_KEYS, 'Digit']);
+const MAX_COMBO_LENGTH = 64;
+const MAX_OVERRIDES = 64;
+
+/**
+ * A combo in its stored form (modifiers as Mod, Cmd, Ctrl, Alt, Shift, then one known key; a
+ * letter upper case), or null when it is not one.
+ * @param {unknown} value @returns {string | null}
+ */
+export function normalizeCombo(value) {
+  if (typeof value !== 'string' || !value || value.length > MAX_COMBO_LENGTH) return null;
+  const parts = value.split('+');
+  const raw = parts.pop() ?? '';
+  const key = raw.length === 1 ? raw.toUpperCase() : raw;
+  if (!KEYS.has(key) || parts.some(part => !MODIFIERS.includes(part)) || new Set(parts).size !== parts.length) return null;
+  return [...MODIFIERS.filter(modifier => parts.includes(modifier)), key].join('+');
+}
+
+/**
+ * The user's keys from storage, tolerantly: known rebindable ids only, each a valid combo (one
+ * ending in a number for the 1-9 shortcuts, never for the others) or null; anything else dropped.
+ * @param {unknown} value @returns {ShortcutOverrides}
+ */
+export function parseShortcutOverrides(value) {
+  /** @type {ShortcutOverrides} */
+  const overrides = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return overrides;
+  for (const [id, combo] of Object.entries(value).slice(0, MAX_OVERRIDES * 4)) {
+    if (!REBINDABLE.has(id) || Object.keys(overrides).length >= MAX_OVERRIDES) continue;
+    if (combo === null) { overrides[id] = null; continue; }
+    const normalized = normalizeCombo(combo);
+    if (normalized && normalized.endsWith('Digit') === REBINDABLE.get(id)) overrides[id] = normalized;
+  }
+  return overrides;
+}
+
+/** @type {ShortcutOverrides} */
+let currentOverrides = {};
+/** @type {{ overrides: ShortcutOverrides, bindings: Binding[] } | null} */
+let effectiveCache = null;
+/** @type {unknown} */
+let lastApplied;
+
+/**
+ * Makes the user's keys the ones every shortcut uses (the window listener, the dialog, the hints).
+ * The app calls it with the preferences' map whenever they change.
+ * @param {unknown} overrides
+ */
+export function setShortcutOverrides(overrides) {
+  if (overrides === lastApplied) return;
+  lastApplied = overrides;
+  const next = parseShortcutOverrides(overrides);
+  if (JSON.stringify(next) !== JSON.stringify(currentOverrides)) currentOverrides = next;
+}
+
+/**
+ * The bindings with the user's keys: a rebound one with its new combo, a cleared one with an empty
+ * combo (it keeps its row, nothing matches it), an alias of a changed row left out.
+ * @param {ShortcutOverrides} [overrides] @returns {Binding[]}
+ */
+export function effectiveBindings(overrides = currentOverrides) {
+  if (effectiveCache?.overrides === overrides) return effectiveCache.bindings;
+  const bindings = BINDINGS.flatMap(binding => {
+    const id = bindingId(binding);
+    if (!Object.hasOwn(overrides, id)) return [binding];
+    if (!isRebindable(binding)) return [];
+    const { display: _display, ...rest } = binding;
+    return [{ ...rest, combo: overrides[id] ?? '' }];
+  });
+  effectiveCache = { overrides, bindings };
+  return bindings;
+}
+
+/**
+ * The rows of the dialog and of Settings › Shortcuts: each section's labelled bindings for this
+ * platform, with the keys now and by default.
+ * @param {boolean} mac @param {boolean} [desktop] @param {ShortcutOverrides} [overrides]
+ */
+export function shortcutSections(mac, desktop = false, overrides = currentOverrides) {
+  const effective = effectiveBindings(overrides);
+  return SECTIONS.map(section => ({
+    ...section,
+    rows: BINDINGS.flatMap((binding, index) => {
+      if (binding.section !== section.id || !binding.label || !bindingApplies(binding, { mac, desktop })) return [];
+      const id = bindingId(binding);
+      const now = /** @type {Binding} */ (effective.find(entry => entry.action === binding.action && entry.label && bindingId(entry) === id && bindingApplies(entry, { mac, desktop })) ?? BINDINGS[index]);
+      return [{
+        id, label: binding.label, binding: now,
+        keys: formatShortcut(shortcutKeys(now, mac), mac),
+        defaultKeys: formatShortcut(shortcutKeys(binding, mac), mac),
+        defaultCombo: binding.combo,
+        rebindable: isRebindable(binding),
+        overridden: Object.hasOwn(overrides, id),
+        ...(binding.note ? { note: binding.note } : {}),
+      }];
+    }),
+  })).filter(section => section.rows.length);
+}
+
+const MODIFIER_CODES = new Set(['MetaLeft', 'MetaRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'ShiftLeft', 'ShiftRight', 'OSLeft', 'OSRight', 'CapsLock', 'Fn']);
+const CODE_KEYS = Object.fromEntries(Object.entries(CODES).filter(([key]) => key !== '?').map(([key, code]) => [code, key]));
+
+/**
+ * The combo a key press spells, by physical key as the matcher reads it (Paseo's
+ * keyboardEventToComboString): "" while only modifiers are held, null for a key ALP cannot bind.
+ * The platform's main modifier (⌘ on a Mac, Ctrl elsewhere) is recorded as Mod.
+ * @param {{ key: string, code: string, metaKey: boolean, ctrlKey: boolean, altKey: boolean, shiftKey: boolean }} event
+ * @param {boolean} mac @returns {string | null}
+ */
+export function comboFromEvent(event, mac) {
+  if (MODIFIER_CODES.has(event.code) || ['Meta', 'Control', 'Alt', 'Shift', 'OS'].includes(event.key)) return '';
+  const letter = /^Key([A-Z])$/.exec(event.code);
+  const digit = /^Digit([0-9])$/.exec(event.code);
+  const key = letter ? letter[1] : digit ? digit[1] : CODE_KEYS[event.code] ?? (NAMED_KEYS.includes(event.code) ? event.code : null);
+  if (!key) return null;
+  const parts = [];
+  if (mac ? event.metaKey : event.ctrlKey) parts.push('Mod');
+  if (!mac && event.metaKey) parts.push('Cmd');
+  if (mac && event.ctrlKey) parts.push('Ctrl');
+  if (event.altKey) parts.push('Alt');
+  if (event.shiftKey) parts.push('Shift');
+  return normalizeCombo([...parts, key].join('+'));
+}
+
+/** The modifiers held while a capture waits for its key, formatted (Paseo's heldModifiers). @param {{ metaKey: boolean, ctrlKey: boolean, altKey: boolean, shiftKey: boolean }} event @param {boolean} mac */
+export function heldModifiers(event, mac) {
+  const keys = [];
+  if (event.ctrlKey) keys.push(mac ? 'ctrl' : 'mod');
+  if (event.metaKey) keys.push(mac ? 'mod' : 'meta');
+  if (event.altKey) keys.push('alt');
+  if (event.shiftKey) keys.push('shift');
+  return formatShortcut(keys, mac);
+}
+
+/** The physical key a combo's key stands for, "Digit*" for the 1-9 wildcard. @param {string} key */
+const keyIdentity = key => key === 'Digit' ? 'Digit*' : /^[A-Za-z]$/.test(key) ? `Key${key.toUpperCase()}` : /^[0-9]$/.test(key) ? `Digit${key}` : CODES[key] ?? key;
+
+/** Whether two combos fire on the same key press here. @param {string} a @param {string} b @param {boolean} mac */
+export function combosCollide(a, b, mac) {
+  if (!a || !b) return false;
+  const left = parse(a, mac);
+  const right = parse(b, mac);
+  if (Object.keys(left.mods).some(mod => left.mods[/** @type {keyof typeof left.mods} */ (mod)] !== right.mods[/** @type {keyof typeof left.mods} */ (mod)])) return false;
+  const [l, r] = [keyIdentity(left.key), keyIdentity(right.key)];
+  return l === r || (l === 'Digit*' && /^Digit[1-9]$/.test(r)) || (r === 'Digit*' && /^Digit[1-9]$/.test(l));
+}
+
+/**
+ * Checks the keys captured for a row (Paseo's capture rules, and two of ALP's): the 1-9 shortcuts
+ * end in a number (stored as the Digit wildcard); a key without ⌘, Ctrl or Alt is refused unless
+ * it is F1-F12, or the shortcut only fires outside text fields; and keys another shortcut here
+ * already uses are refused with its name (Paseo has no such check; ALP does not let two
+ * shortcuts share one key press). Returns the combo to store, or the reason it is refused.
+ * @param {string} id @param {string} combo
+ * @param {{ mac: boolean, desktop?: boolean, overrides?: ShortcutOverrides }} context
+ * @returns {{ combo: string } | { error: string }}
+ */
+export function checkCapture(id, combo, { mac, desktop = false, overrides = currentOverrides }) {
+  const where = { mac, desktop };
+  const binding = BINDINGS.find(entry => bindingId(entry) === id && isRebindable(entry) && bindingApplies(entry, where));
+  if (!binding) return { error: 'This shortcut cannot be changed.' };
+  let next = normalizeCombo(combo);
+  if (!next) return { error: 'That key cannot be used for a shortcut.' };
+  const { key, mods } = parse(next, mac);
+  if (isIndexBinding(binding)) {
+    if (!/^[1-9]$/.test(key)) return { error: 'End with a number from 1 to 9.' };
+    next = next.replace(/[1-9]$/, 'Digit');
+  }
+  const strong = mods.meta || mods.ctrl || mods.alt;
+  const typing = key.length === 1 || key === 'Digit';
+  if (!strong && !/^F([1-9]|1[0-2])$/.test(key) && !(binding.scope === 'other' && typing)) {
+    return { error: mac ? 'Add ⌘, ⌃ or ⌥: without one the key would type or move focus.' : 'Add Ctrl or Alt: without one the key would type or move focus.' };
+  }
+  const taken = effectiveBindings(overrides).find(entry => bindingId(entry) !== id && bindingApplies(entry, where) && combosCollide(entry.combo, next, mac));
+  if (taken) {
+    const owner = taken.label ?? BINDINGS.find(entry => entry.label && entry.action === taken.action && entry.delta === taken.delta)?.label ?? taken.action;
+    return { error: `${formatShortcut(shortcutKeys({ ...taken, display: undefined, combo: next }, mac), mac)} is already used by ${owner}.` };
+  }
+  return { combo: next };
 }
 
 /** Whether keys typed into this element are text. @param {EventTarget | null} target */

@@ -10,6 +10,8 @@
  * an extra property on the input cannot reach storage.
  */
 
+import { parseShortcutOverrides } from './shortcuts.js';
+
 export const PREFERENCES_KEY = 'alp-web:preferences';
 export const PREFERENCES_VERSION = 1;
 
@@ -50,6 +52,7 @@ export const PREFERENCES_VERSION = 1;
  *   chatDisplay: ChatDisplay, chatOutline: boolean, terminalScrollback: number, notificationSound: boolean,
  *   openInSidePane: OpenInSidePane,
  *   sidebar: SidebarItems, sidebarDisplay: SidebarDisplay, newSession: NewSessionChoices,
+ *   shortcutOverrides: import('./shortcuts.js').ShortcutOverrides,
  * }} Preferences
  */
 
@@ -142,6 +145,8 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   sidebar: Object.freeze({ header: defaultSidebarSection('header'), footer: defaultSidebarSection('footer') }),
   sidebarDisplay: DEFAULT_SIDEBAR_DISPLAY,
   newSession: Object.freeze({}),
+  // Paseo's Settings › Shortcuts: the user's keys by binding id, null for a cleared one (lib/shortcuts.js).
+  shortcutOverrides: Object.freeze({}),
 });
 
 /** A whole number within [min, max] (clamped, as Paseo's clampedNumber), else the default. @param {unknown} value @param {readonly number[]} limits */
@@ -236,11 +241,12 @@ export function parsePreferences(raw) {
     sidebar: { header: parseSidebarSection(sidebar.header, 'header'), footer: parseSidebarSection(sidebar.footer, 'footer') },
     sidebarDisplay: parseSidebarDisplay(value.sidebarDisplay),
     newSession: parseNewSession(value.newSession),
+    shortcutOverrides: parseShortcutOverrides(value.shortcutOverrides),
   };
 }
 
 /** The fields stored, in order: the known ones only, never anything else on the object. */
-const STORED_FIELDS = /** @type {const} */ (['sendBehavior', 'sendShortcut', 'theme', 'uiFontFamily', 'monoFontFamily', 'uiFontSize', 'contentFontSize', 'codeFontSize', 'contentMaxWidth', 'syntaxTheme', 'chatDisplay', 'chatOutline', 'terminalScrollback', 'notificationSound', 'openInSidePane', 'sidebar', 'sidebarDisplay', 'newSession']);
+const STORED_FIELDS = /** @type {const} */ (['sendBehavior', 'sendShortcut', 'theme', 'uiFontFamily', 'monoFontFamily', 'uiFontSize', 'contentFontSize', 'codeFontSize', 'contentMaxWidth', 'syntaxTheme', 'chatDisplay', 'chatOutline', 'terminalScrollback', 'notificationSound', 'openInSidePane', 'sidebar', 'sidebarDisplay', 'newSession', 'shortcutOverrides']);
 
 /**
  * The string stored for `preferences`: its known fields only, re-validated.

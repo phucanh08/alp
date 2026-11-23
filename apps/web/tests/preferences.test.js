@@ -24,6 +24,7 @@ const DEFAULTS = {
   },
   sidebarDisplay: { grouping: 'project', sort: 'created', titleSource: 'title', rowItems: { branch: true, project: false, host: false, labels: true }, trailing: 'none', projectFilters: [], revision: 2 },
   newSession: {},
+  shortcutOverrides: {},
 };
 
 test('nothing stored, garbage, another version or a non-object give Paseo\'s defaults', () => {
@@ -166,4 +167,14 @@ test('sidebar Show items default to Paseo\'s (branch on, host off, no time); a s
   const partial = parse({ sidebarDisplay: { rowItems: { labels: false } } }).sidebarDisplay;
   assert.deepEqual([partial.rowItems, partial.trailing], [{ branch: true, project: false, host: false, labels: false }, 'none']);
   assert.equal(parse({ sidebarDisplay: { trailing: 'sometimes' } }).sidebarDisplay.trailing, 'none');
+});
+
+test('Settings › Shortcuts keys are stored: known ids with valid combos or null, nothing else', () => {
+  const parsed = parse({ shortcutOverrides: { 'sidebar.left': 'Mod+J', 'sidebar.right': null, 'composer.focus': 'Mod+J', nope: 'Mod+K', 'tab.menu': 'Mod+Banana' } });
+  assert.deepEqual(parsed.shortcutOverrides, { 'sidebar.left': 'Mod+J', 'sidebar.right': null });
+  assert.deepEqual(parse({ shortcutOverrides: 'Mod+J' }).shortcutOverrides, {});
+  const stored = memory();
+  assert.equal(savePreferences(stored, { ...parsed, shortcutOverrides: { ...parsed.shortcutOverrides, extra: 'Mod+X' } }), true);
+  assert.deepEqual(JSON.parse(stored.entries.get(PREFERENCES_KEY)).shortcutOverrides, { 'sidebar.left': 'Mod+J', 'sidebar.right': null });
+  assert.deepEqual(loadPreferences(stored).shortcutOverrides, { 'sidebar.left': 'Mod+J', 'sidebar.right': null });
 });
