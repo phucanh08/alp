@@ -29,7 +29,6 @@ test('scratchDaemon refuses the user daemon and the real ALP home; a declared sc
     'a remote host': { ALP_TEST_PASEO_URL: 'ws://10.0.0.5:16767/ws', ALP_TEST_ALP_HOME: scratchHome },
     'a relative home': { ALP_TEST_ALP_HOME: 'scratch/.alp' },
     'the real ~/.alp': { ALP_TEST_ALP_HOME: realAlp },
-    '~/.alp in another case': { ALP_TEST_ALP_HOME: path.join(home, '.ALP') },
     'a directory inside ~/.alp': { ALP_TEST_ALP_HOME: path.join(realAlp, 'sub') },
     'a "..foo" child of ~/.alp': { ALP_TEST_ALP_HOME: path.join(realAlp, '..foo') },
     'the home that contains ~/.alp': { ALP_TEST_ALP_HOME: home },
@@ -37,6 +36,9 @@ test('scratchDaemon refuses the user daemon and the real ALP home; a declared sc
     'a relative run-log directory': { ALP_TEST_ALP_HOME: scratchHome, ALP_TEST_RUN_LOG_DIR: 'runs' },
     'the real ~/.paseo': { ALP_TEST_ALP_HOME: scratchHome, ALP_TEST_PASEO_HOME: path.join(home, '.paseo') },
   };
+  // Case-insensitive file systems (macOS, Windows): another case of ~/.alp is the same directory. On
+  // Linux it is a different one, and the guard rightly allows it.
+  if (process.platform === 'darwin' || process.platform === 'win32') refusedCases['~/.alp in another case'] = { ALP_TEST_ALP_HOME: path.join(home, '.ALP') };
   // A symlink into ~/.alp resolves only where ~/.alp exists (realpath); a fresh machine or CI runner
   // has none, and then there is no real home behind the link to protect.
   if (existsSync(realAlp)) {
