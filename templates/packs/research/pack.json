@@ -1,7 +1,36 @@
 {
   "label": "Research",
-  "description": "Hai cố vấn chỉ đọc cho điều phối viên: librarian đọc source và lịch sử git của repo bên ngoài, scout tìm code trong workspace; kèm hai team biến thể Phở + Research và Cafe + Research. Phở và Cafe mặc định không đổi.",
-  "agents": ["librarian", "scout"],
-  "teams": ["pho-research", "cafe-research"],
-  "permissions": { "librarian": "read-only", "scout": "read-only" }
+  "description": "Hai cố vấn chỉ đọc cho điều phối viên: librarian đọc source và lịch sử git của repo công khai bên ngoài (clone vào /tmp/alp-librarian), scout tìm code trong workspace; kèm hai team biến thể Phở + Research và Cafe + Research. Phở và Cafe mặc định không đổi.",
+  "agents": [
+    "librarian",
+    "scout"
+  ],
+  "teams": [
+    "pho-research",
+    "cafe-research"
+  ],
+  "permissions": {
+    "librarian": {
+      "base": "read-only",
+      "allow": [
+        "Bash(@git-clone-public /tmp/alp-librarian)",
+        "Bash(@git-read /tmp/alp-librarian)",
+        "WebFetch(domain:github.com)",
+        "WebFetch(domain:raw.githubusercontent.com)",
+        "WebFetch(domain:gitlab.com)"
+      ],
+      "ask": [
+        "Bash(git clone:*)",
+        "Bash(git fetch:*)",
+        "Bash(git -C:*)",
+        "Bash(gh repo clone:*)"
+      ],
+      "deny": [
+        "Bash(@git-unsafe)",
+        "Bash(git push:*)",
+        "Bash(rm:*)"
+      ]
+    },
+    "scout": "read-only"
+  }
 }

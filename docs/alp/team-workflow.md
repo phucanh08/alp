@@ -122,6 +122,28 @@ which is committed with the project, and in the user's `$ALP_HOME/settings.json`
   (split at `&&`, `||`, `;`, `|`), and none writes a file through a redirect;
   `2>&1` and `2>/dev/null` are fine. It is denied when a deny rule covers any one of them,
   or when it substitutes a command (`$(...)`, backticks) while deny rules exist.
+- An allow rule that names a path (`Bash(cat /srv/data/*)`, `Bash(node scripts/test.mjs:*)`)
+  covers a command only when the paths in it are in normal form: no `..` or `.` segment
+  (a leading `./` aside), no `//`, no leading `~`. `/srv/data/../x` leaves any prefix.
+- Checked rules, for what a prefix cannot say. Their specifier starts with `@`; ALP parses
+  the command into words and checks each argument, and a runtime that matches rules as
+  written matches them against nothing:
+  - `Bash(@git-clone-public <root>)` allows `git clone` of `https://github.com/<owner>/<repo>`
+    or `https://gitlab.com/<owner>/<repo>` (optionally `.git`) with a few listed options
+    (`--depth`, `--filter`, `--single-branch`, `-b`, `--no-tags`, `-q`, `-n`), into a destination
+    given in normal form strictly below `<root>`, also once links are resolved; an existing
+    `<root>` must be your own directory.
+  - `Bash(@git-read <root>)` allows `git -C <dir> fetch|log|show|grep|rev-parse|ls-files|
+    cat-file|blame|diff|branch`, with `<dir>` below `<root>` the same way; fetch only from
+    `origin` with listed options, branch only lists, and no `--output`, `--ext-diff`, `-O`,
+    `--no-index`.
+  - `Bash(@git-unsafe)` denies any git command that pushes, configures, edits remotes or runs
+    hooks, or carries `-c`/`--config-env`, `--upload-pack`, `--receive-pack`, `--config`,
+    `--template`, `--exec`, or `-u` to clone/fetch; also through `env`, `/usr/bin/git`,
+    `--git-dir` or `sh -c`, and a git command ALP cannot split into words.
+  - A command a checked allow rule covers is allowed even when a broader ask rule covers it
+    too; deny still wins. Checked commands are written plainly: no variables, globs, `~`,
+    backslashes or redirects.
 - An agent names a profile, or one of the bases `read-only`,
   `workspace-write` and `full-access` for a cap with no rules. A profile defined in
   both files takes its base from the project and the rules of both; the
@@ -131,8 +153,11 @@ which is committed with the project, and in the user's `$ALP_HOME/settings.json`
 - A delegated child gets its own profile's cap. It still never exceeds its
   requester's mode.
 - How each runtime enforces the rules:
-  - Claude gets them as its own allowed and disallowed tools. Deny rules hold
-    even with full access, and allowed commands run without asking.
+  - Claude gets deny rules, and allow rules for tools other than Bash, as its own
+    disallowed and allowed tools. Deny rules hold even with full access. Bash allow rules
+    are not given to Claude, which would match them as written and run the command, even
+    outside the sandbox, without asking ALP: ALP decides every Bash call by them in
+    `canUseTool` (`commandDecision`), and allowed commands still run without asking.
   - Codex runs commands inside its sandbox without asking. With allow rules in a
     read-only or workspace-write session, Codex asks ALP before a command leaves
     the sandbox; ALP accepts only what an allow rule covers. A full-access
@@ -219,9 +244,9 @@ user.
 - **scout** finds code in the current workspace and returns one line per hit:
   `path:line — symbol — why`. A coordinator calls it instead of pulling a lot of
   unrelated source into its own context.
-- **librarian** researches external repositories: it reads their source at a fixed SHA
-  through WebFetch (github.com, raw.githubusercontent.com, gitlab.com) and cites
-  `repo@sha:path:line`.
+- **librarian** researches external repositories: it clones public github.com and gitlab.com
+  repositories into `/tmp/alp-librarian/`, or reads their source at a fixed SHA through
+  WebFetch (github.com, raw.githubusercontent.com, gitlab.com), and cites `repo@sha:path:line`.
 
 In `pho-research` main may call both. In `cafe-research` lead may call both and
 main may call librarian only. Oracle may suggest that its coordinator run one of
@@ -231,13 +256,45 @@ a gate) on a coordinator that reads lots of unrelated source where scout could
 return locations, or asserts an external library's behaviour without evidence
 while librarian is available.
 
-Both run with the plain `read-only` profile the pack installs. Read-only Bash is
-offline (the OS sandbox), so librarian does not `git clone` or `git fetch`: it reads
-remote files with WebFetch, which read-only sessions keep on Claude
-(`claude-transport.ts` readers); run librarian on Claude. A pack can only set a base mode for its agents
-(`permissions.<agent>` in pack.json), not allow/ask/deny rules, and a prefix rule such
-as `Bash(git -C /tmp/alp-librarian*)` would also match `git -C /tmp/alp-librarian/../<path>`;
-a clone path that is safe outside the sandbox is an open question.
+scout runs with the plain `read-only` profile. librarian gets the profile `librarian`,
+which the pack writes to `permissions.profiles.librarian` of the settings it installs into
+(the library's, or the project's), with `permissions.agents.librarian: "librarian"`. A profile
+or agent entry of that name you already have is kept and reported, never replaced. The
+profile is:
+
+```json
+{
+  "base": "read-only",
+  "allow": ["Bash(@git-clone-public /tmp/alp-librarian)", "Bash(@git-read /tmp/alp-librarian)",
+            "WebFetch(domain:github.com)", "WebFetch(domain:raw.githubusercontent.com)", "WebFetch(domain:gitlab.com)"],
+  "ask": ["Bash(git clone:*)", "Bash(git fetch:*)", "Bash(git -C:*)", "Bash(gh repo clone:*)"],
+  "deny": ["Bash(@git-unsafe)", "Bash(git push:*)", "Bash(rm:*)"]
+}
+```
+
+- **Allowed** (and run outside the read-only sandbox when librarian asks to leave it, which a
+  network command needs): a clone of a public github.com or gitlab.com repository into
+  `/tmp/alp-librarian/<name>`, then `git -C /tmp/alp-librarian/<name>` fetch, log, show, grep,
+  rev-parse, ls-files, cat-file, blame, diff and branch listing; WebFetch to github.com,
+  raw.githubusercontent.com and gitlab.com. Why: reading history and searching many files of
+  an external library needs a clone, and a clone below one scratch root changes nothing of
+  the project.
+- **Asked** each time: any other clone, fetch or `git -C` (another host, `git@`, `ssh://`,
+  `file://` or a local path, a destination elsewhere, `--recurse-submodules`, a non-normal
+  path such as `/tmp/alp-librarian/../x` or `/tmp/alp-librarianX`) and `gh repo clone`. Why:
+  these may reach private code or write outside the scratch root; the user decides.
+- **Denied**: `git push` in every form, git config, remote edits, hooks, config overrides and
+  the options that run a program (`@git-unsafe`), and `rm`. Why: none is reading.
+- Everything else stays read-only: other commands run in the read-only sandbox, offline.
+- A pack can give a read-only agent rules but never a wider base: `validatePack` refuses a
+  `permissions.<agent>` whose base is wider than the agent's `agent.json` mode, and a team
+  advisor stays read-only whatever settings say.
+- Limits: a URL does not say whether a repository is private. A clone of a private
+  repository works only if the environment holds credentials for it (a git credential helper,
+  a token in `~/.netrc`); ALP passes none and does not set `GIT_TERMINAL_PROMPT=0`, so keep
+  no such credentials where librarian runs if private code must stay out. `/tmp/alp-librarian`
+  is in the shared `/tmp`: ALP refuses a root that another user owns or a destination that a
+  link leads out of, but checks this when it decides, not when git writes.
 
 A delegated advisor runs on the model its coordinator passes; without one it runs on
 the coordinator's own model, not on the model in its `agent.json`
