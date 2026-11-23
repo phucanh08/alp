@@ -8,6 +8,8 @@ import { FILES_READ_FORBIDDEN, FILES_READ_UNAVAILABLE } from '../lib/controller.
 import { FileAccessError } from '../lib/errors.js';
 import { fileIconUrl } from '../lib/file-icons.js';
 import { SORT_LABELS, flattenTree, nextSort, toggleExpanded, type Listing, type SortOption } from '../lib/file-tree.js';
+import { workspaceScope } from '../lib/layout.js';
+import { expandedFor, loadFilesPanelState, updateFilesPanelState, withExpanded, type FilesPanelState } from '../lib/files-panel-state.js';
 import { can } from '../lib/gateway.js';
 import { listOwnerFiles } from '../lib/owner-library.js';
 import { cn } from '../lib/utils';
@@ -25,6 +27,8 @@ import { useTabs } from './tabs';
  * ALP's hidden toggle, off by default, shows dot-names and also lists what .gitignore hides
  * (includeIgnored, docs/alp/remote-gateway.md); Paseo's is on by default and has no .gitignore to
  * respect. Blocked paths (secrets, .git, .alp) and links never show.
+ * The sort, the hidden toggle and each workspace's open folders are kept across reloads, as Paseo's
+ * panel-store keeps them (lib/files-panel-state.js); a workspace opened again shows its own folders.
  * The host owner's own dashboard (state.owner) lists through host.files.list instead, without
  * files.read on its credential (t-a95b, docs/alp/dashboard.md §4.8); every other token as above.
  *
@@ -44,6 +48,11 @@ function Spinner() {
   return <span aria-hidden className="block size-3.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent text-extra-muted" data-testid="files-spinner" />;
 }
 
+/** The browser's localStorage for the panel's kept choices, when the page may use it. */
+const panelStorage = () => { try { return window.localStorage; } catch { return undefined; } };
+/** Keeps a change of the panel's choices; storage refusing it leaves them for this page only. */
+const remember = (change: (state: FilesPanelState) => FilesPanelState) => { updateFilesPanelState(panelStorage(), change); };
+
 function Note({ testId, children }: { testId: string; children: React.ReactNode }) {
   return (
     <div className="flex min-h-full flex-col items-center justify-center gap-2 p-6 text-center" role="note" data-testid={testId}>
@@ -62,9 +71,13 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
   const readable = owner || connection.capabilities.includes('workspace.files.read');
   const granted = owner || can(principal ?? undefined, 'files.read');
   const [listings, setListings] = React.useState<Record<string, Listing>>({});
-  const [expanded, setExpanded] = React.useState<string[]>([]);
-  const [sort, setSort] = React.useState<SortOption>('name');
-  const [showHidden, setShowHidden] = React.useState(false);
+  // A new workspace, connection or hidden setting: the tree starts again from the root, open
+  // folders kept (a workspace change opens that workspace's own kept folders).
+  const scope = workspaceScope(connection.gateway, workspace ?? '');
+  const [kept] = React.useState(() => loadFilesPanelState(panelStorage()));
+  const [expanded, setExpanded] = React.useState<string[]>(() => expandedFor(kept, scope));
+  const [sort, setSort] = React.useState<SortOption>(kept.sort);
+  const [showHidden, setShowHidden] = React.useState(kept.showHidden);
   const [refreshing, setRefreshing] = React.useState(false);
   const [menu, setMenu] = React.useState<{ path: string; name: string; directory: boolean; at: { x: number; y: number } } | null>(null);
   // Each listing pass: answers of an older one (another workspace, before a refresh) are dropped.
@@ -81,9 +94,6 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
     );
   }, [controller, owner, workspace]);
 
-  // A new workspace, connection or hidden setting: the tree starts again from the root, open
-  // folders kept (except on a workspace change).
-  const scope = `${connection.gateway}\n${workspace ?? ''}`;
   const lastScope = React.useRef(scope);
   const expandedRef = React.useRef(expanded);
   expandedRef.current = expanded;
@@ -95,9 +105,10 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
     const keep = lastScope.current === scope;
     lastScope.current = scope;
     setListings({});
-    if (!keep) setExpanded([]);
+    const open = keep ? expandedRef.current : expandedFor(loadFilesPanelState(panelStorage()), scope);
+    if (!keep) setExpanded(open);
     list('', showHidden);
-    if (keep) for (const directory of expandedRef.current) list(directory, showHidden);
+    for (const directory of open) list(directory, showHidden);
   }, [readable, granted, workspace, scope, connection.phase, showHidden, list]);
 
   if (!readable) return <Note testId="files-unavailable"><p className="max-w-[300px] text-sm text-muted-foreground">{FILES_READ_UNAVAILABLE}</p></Note>;
@@ -114,7 +125,9 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
   const rows = flattenTree(listings, expanded, { sort, showHidden });
   const toggle = (directory: string) => {
     const opening = !expanded.includes(directory);
-    setExpanded(current => toggleExpanded(current, directory));
+    const next = toggleExpanded(expanded, directory);
+    setExpanded(next);
+    remember(state => withExpanded(state, scope, next));
     if (opening && listings[directory]?.status !== 'ready') list(directory, showHidden);
   };
   const refresh = () => {
@@ -154,14 +167,14 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
   return (
     <div className="flex min-h-full flex-col" data-testid="files-panel">
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-border bg-sidebar pr-1" data-testid="files-pane-header">
-        <button type="button" onClick={() => setSort(nextSort)} data-testid="files-sort" data-sort={sort}
+        <button type="button" onClick={() => { const next = nextSort(sort); setSort(next); remember(state => ({ ...state, sort: next })); }} data-testid="files-sort" data-sort={sort}
           aria-label={`Sorted by ${SORT_LABELS[sort].toLowerCase()}; sort by ${SORT_LABELS[nextSort(sort)].toLowerCase()}`} title={`Sort by ${SORT_LABELS[nextSort(sort)].toLowerCase()}`}
           className={cn('ml-2 flex h-6 items-center gap-1 rounded-md px-1 text-[length:calc(13px*var(--ui-scale))] text-muted-foreground hover:bg-sidebar-hover', focusRing)}>
           <span data-testid="files-sort-label">{SORT_LABELS[sort]}</span>
           <ChevronDown aria-hidden className="size-3" />
         </button>
         <div className="flex items-center gap-px">
-          <button type="button" className={tool} onClick={() => setShowHidden(value => !value)} aria-pressed={showHidden} aria-label="Show hidden files" title={showHidden ? 'Hide hidden files' : 'Show hidden files'} data-testid="files-show-hidden">{showHidden ? <Eye aria-hidden /> : <EyeOff aria-hidden />}</button>
+          <button type="button" className={tool} onClick={() => { const next = !showHidden; setShowHidden(next); remember(state => ({ ...state, showHidden: next })); }} aria-pressed={showHidden} aria-label="Show hidden files" title={showHidden ? 'Hide hidden files' : 'Show hidden files'} data-testid="files-show-hidden">{showHidden ? <Eye aria-hidden /> : <EyeOff aria-hidden />}</button>
           <button type="button" className={tool} onClick={refresh} disabled={refreshing} aria-busy={refreshing || undefined} aria-label={refreshing ? 'Refreshing files' : 'Refresh files'} title={refreshing ? 'Refreshing files' : 'Refresh files'} data-testid="files-refresh">
             {refreshing ? <Spinner /> : <RotateCw aria-hidden />}
           </button>

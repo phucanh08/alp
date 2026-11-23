@@ -3,14 +3,17 @@
 // browses the tree, a file link in an agent's reply opens the file, and a token without files.read
 // (the default, as the owner's here) keeps the clipboard fallback and plain-text links.
 import { execFileSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
+import { connect as hostConnect } from '@anhlp/alp-client';
 import { startWorld } from './support/world.js';
 import { assistant, connect, idle, newSession, send, users } from './support/app.js';
 
 /** @type {Awaited<ReturnType<typeof startWorld>>} */
 let world;
+/** A files.read token for both 'shop' (main) and 'plain' (custom). */
+let twoWorkspaces = '';
 test.beforeAll(async () => {
   world = await startWorld();
   const root = world.projects.main;
@@ -27,6 +30,24 @@ test.beforeAll(async () => {
   await writeFile(path.join(root, 'debug.log'), 'a log line\n');
   await writeFile(path.join(root, 'logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]));
   await writeFile(path.join(root, 'big.txt'), 'x'.repeat(1024 * 1024 + 10));
+  // A second workspace ('plain') under one files.read token: each keeps its own open folders.
+  const plain = world.projects.custom;
+  await mkdir(path.join(plain, 'docs'), { recursive: true });
+  await writeFile(path.join(plain, 'docs', 'guide.md'), '# Guide\n');
+  await mkdir(path.join(plain, 'gone'), { recursive: true });
+  await writeFile(path.join(plain, 'gone', 'soon.txt'), 'bye\n');
+  const owner = await hostConnect(world.socket);
+  try {
+    for (const directory of [world.projects.main, plain]) {
+      const { revision } = await owner.request('project.list', {});
+      await owner.request('project.register', { directory, ifRevision: revision, requestId: `files-${path.basename(directory)}` });
+    }
+  } finally { owner.close(); }
+  const made = JSON.parse(await world.gatewayCli('credential', 'create', '--label', 'files-two', '--workspace', world.projects.main, '--workspace', plain,
+    ...['session.read', 'session.write', 'project.read', 'files.read'].flatMap(permission => ['--permission', permission]), '--json'));
+  twoWorkspaces = made.token;
+  // The gateway started before this credential was created.
+  await world.restartGateway();
 });
 test.afterAll(async () => { await world?.close(); });
 
@@ -175,4 +196,67 @@ test('a token without files.read: the Files panel says how to get it, links stay
   await expect(page.getByRole('status').filter({ hasText: 'Copied src/checkout/cart-total.ts (this access token cannot read files)' })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('src/checkout/cart-total.ts');
   await expect(page.getByRole('main').locator('[data-tab^="file:"]')).toHaveCount(0);
+});
+
+test('the Files panel keeps its sort, hidden toggle and each workspace\'s open folders across a reload, as Paseo', async ({ page }) => {
+  const workspaceRow = name => page.getByTestId('project-row').filter({ hasText: name });
+  const sort = () => dock(page).getByTestId('files-sort');
+  const hidden = () => dock(page).getByTestId('files-show-hidden');
+  await connect(page, world, twoWorkspaces);
+  await workspaceRow('shop').click();
+  await openFilesPanel(page);
+  await expect(sort()).toHaveAttribute('data-sort', 'name');
+  await expect(hidden()).toHaveAttribute('aria-pressed', 'false');
+  await entry(page, 'src').click();
+  await entry(page, 'src/checkout').click();
+  await expect(entry(page, 'src/checkout/cart-total.ts')).toBeVisible();
+  await sort().click();
+  await expect(sort()).toHaveAttribute('data-sort', 'modified');
+  await hidden().click();
+  await expect(entry(page, '.editorconfig')).toBeVisible();
+
+  // Another workspace starts with none of shop's folders open, and keeps its own.
+  await workspaceRow('plain').click();
+  await expect(entry(page, 'docs')).toBeVisible();
+  await expect(entry(page, 'src')).toHaveCount(0);
+  await entry(page, 'docs').click();
+  await entry(page, 'gone').click();
+  await expect(entry(page, 'docs/guide.md')).toBeVisible();
+  await expect(entry(page, 'gone/soon.txt')).toBeVisible();
+  // The sort and the hidden toggle are the panel's, not the workspace's.
+  await expect(sort()).toHaveAttribute('data-sort', 'modified');
+  await expect(hidden()).toHaveAttribute('aria-pressed', 'true');
+
+  // Back to shop: its folders are open again, plain's are not shown.
+  await workspaceRow('shop').click();
+  await expect(entry(page, 'src/checkout/cart-total.ts')).toBeVisible();
+  await expect(entry(page, 'docs')).toHaveCount(0);
+
+  // A reload keeps all three.
+  await page.reload();
+  await connect(page, world, twoWorkspaces);
+  await workspaceRow('shop').click();
+  await openFilesPanel(page);
+  await expect(sort()).toHaveAttribute('data-sort', 'modified');
+  await expect(sort()).toHaveAttribute('aria-label', /^Sorted by modified/);
+  await expect(hidden()).toHaveAttribute('aria-pressed', 'true');
+  await expect(entry(page, '.editorconfig')).toBeVisible();
+  await expect(entry(page, 'src/checkout/cart-total.ts')).toBeVisible();
+  await expect(entry(page, 'docs/guide.md')).toHaveCount(0);
+
+  // A kept folder deleted on the host since: the tree shows without it, no error row, nothing stuck.
+  await rm(path.join(world.projects.custom, 'gone'), { recursive: true, force: true });
+  await workspaceRow('plain').click();
+  await expect(entry(page, 'docs/guide.md')).toBeVisible();
+  await expect(entry(page, 'gone')).toHaveCount(0);
+  await expect(entry(page, 'gone/soon.txt')).toHaveCount(0);
+  await expect(dock(page).getByTestId('files-error')).toHaveCount(0);
+  await expect(dock(page).getByTestId('files-loading')).toHaveCount(0);
+  await expect(dock(page).getByTestId('files-spinner')).toHaveCount(0);
+
+  // Only these fields are stored, under the panel's own key.
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('alp-web:files-panel') ?? 'null'));
+  expect(Object.keys(stored).sort()).toEqual(['showHidden', 'sort', 'v', 'workspaces']);
+  expect(stored).toMatchObject({ v: 1, sort: 'modified', showHidden: true });
+  expect(Object.values(stored.workspaces).map(workspace => workspace.expanded).sort()).toEqual([['docs', 'gone'], ['src', 'src/checkout']]);
 });
