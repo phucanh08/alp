@@ -94,12 +94,27 @@ async function resolved(root, home, spec) {
   return [session.mode, session.permissions?.name];
 }
 
-test('Claude enforces allow and deny rules itself', () => {
-  const options = claudePermissions('read-only', () => 'read-only', { allow: ['Bash(npm test:*)'], deny: ['Bash(git push:*)'] });
-  assert.deepEqual(options.allowedTools, ['Bash(npm test:*)']);
+test('Claude enforces deny rules and non-Bash allow rules itself; ALP decides Bash allow rules in canUseTool', () => {
+  // A Bash allow rule handed to Claude would be matched as written and skip canUseTool (t-6dc5 G5-B).
+  const options = claudePermissions('read-only', () => 'read-only', { allow: ['Bash(npm test:*)', 'Bash', 'WebFetch(domain:github.com)'], deny: ['Bash(git push:*)'] });
+  assert.deepEqual(options.allowedTools, ['WebFetch(domain:github.com)']);
   assert.deepEqual(options.disallowedTools.slice(-1), ['Bash(git push:*)']);
   assert.ok(options.disallowedTools.includes('Agent'));
+  assert.equal(claudePermissions('read-only', () => 'read-only', { allow: ['Bash(npm test:*)'], deny: [] }).allowedTools, undefined);
   assert.equal(claudePermissions('full-access', () => 'full-access', null).allowedTools, undefined);
+});
+
+test('the path hardening leaves plain allowed commands allowed, and stops x/.. from leaving a path rule', () => {
+  // Profiles that allow these today (the docs' review profile, and rules a reviewer is commonly given).
+  const review = { allow: ['Bash(npm test:*)', 'Bash(node --test:*)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(node scripts/test.mjs:*)', 'Bash(./gradlew test:*)'], ask: ['Bash(npm install *)'], deny: ['Bash(rm:*)', 'Bash(git push:*)'] };
+  for (const command of ['npm test', 'node --test packages/core/tests/research-pack.test.js', 'git diff', 'git diff HEAD~1 -- src/a.js', 'git diff origin/main...HEAD', 'git log --oneline -5', 'git log v1..v2', 'git show HEAD:packages/core/src/permissions.js',
+    'node scripts/test.mjs unit', 'node scripts/test.mjs unit 2>&1', './gradlew test --info', 'git diff && npm test']) assert.equal(commandDecision(review, command), 'allow', command);
+  assert.equal(commandDecision(review, 'npm install left-pad'), 'ask');
+  assert.equal(commandDecision(review, 'git push'), 'deny');
+  // A rule that names a path covers only paths in normal form.
+  const scoped = { allow: ['Bash(cat /srv/data/*)', 'Bash(node scripts/test.mjs:*)'], deny: [] };
+  assert.equal(commandDecision(scoped, 'cat /srv/data/a.txt'), 'allow');
+  for (const command of ['cat /srv/data/../../etc/passwd', 'cat /srv/data//x', 'cat /srv/data/./x', 'node scripts/test.mjs ../../x', 'node scripts/test.mjs ~/x', 'node scripts/test.mjs --out=../x']) assert.equal(commandDecision(scoped, command), undefined, command);
 });
 
 test('Codex asks ALP before leaving its sandbox, and ALP answers by the profile', async t => {

@@ -381,6 +381,9 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
 /** Claude's permission mode for an ALP mode; full-access skips every permission check. */
 export const claudePermissionMode = (sandbox: string) => sandbox === 'read-only' ? 'default' : sandbox === 'full-access' ? 'bypassPermissions' : 'acceptEdits';
 
+/** A Bash rule: `Bash` or `Bash(...)`. */
+const BASH_RULE = /^\s*Bash\s*(?:\(|$)/;
+
 export function claudePermissions(sandbox: string, currentSandbox?: () => string, rules?: PermissionRules | null, ask?: (request: PermissionRequest) => Promise<PermissionAnswer>) {
   const readOnly = sandbox === 'read-only';
   // A skill only adds instructions; what they lead to is checked as itself (ALPD §59).
@@ -394,7 +397,10 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
     allowDangerouslySkipPermissions: true,
     ...(readOnly && !currentSandbox ? { tools: [...readers, ...(rules?.floor === 'read-only' ? ['Bash'] : [])] } : {}),
     // Allow rules run without asking, even in a read-only session; deny rules hold even with full access.
-    ...(rules?.allow.length ? { allowedTools: rules.allow } : {}),
+    // Bash allow rules are not handed to Claude: it would match them as written, approve the call before
+    // canUseTool and let it leave the sandbox, so `x/../y` and checked rules (Bash(@git-read <root>)) would
+    // never reach commandDecision. canUseTool decides every Bash call by them instead.
+    ...(rules?.allow.some(rule => !BASH_RULE.test(rule)) ? { allowedTools: rules.allow.filter(rule => !BASH_RULE.test(rule)) } : {}),
     disallowedTools: ['Agent', 'Task', 'TeamCreate', 'EnterPlanMode', 'ExitPlanMode', ...(rules?.deny ?? [])],
     // Ask rules make Claude consult canUseTool in every mode, which asks the user.
     ...(rules?.ask?.length ? { settings: { permissions: { ask: rules.ask } } } : {}),
@@ -402,7 +408,7 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
     // Keep the SDK's restrictive host-network defaults. Broad Unix socket/localhost
     // access lets host services act outside this floor; the SDK cannot scope local
     // binding to a test server, and scoped Unix sockets are not portable to Linux.
-    // A command leaves it only with dangerouslyDisableSandbox, which Claude allows itself for allow rules and asks canUseTool otherwise.
+    // A command leaves it only with dangerouslyDisableSandbox, which Claude refers to canUseTool: ALP's commandDecision decides it.
     ...(rules?.floor ? {
       sandbox: {
         enabled: true,
@@ -414,6 +420,9 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
     canUseTool: async (name: string, input: Record<string, unknown>, context?: { decisionReasonType?: string; suggestions?: unknown }) => {
       const mode = currentSandbox ? currentSandbox() : sandbox;
       const leaving = Boolean(rules?.floor) && name === 'Bash' && input.dangerouslyDisableSandbox === true;
+      // A Bash allow rule inside the sandbox too, as Claude's allowedTools did (it never gets them; see above).
+      // Only allow is decided here: what a sandboxed command may do otherwise is unchanged.
+      if (name === 'Bash' && !leaving && typeof input.command === 'string' && rules?.allow.length && commandDecision(rules, input.command) === 'allow') return { behavior: 'allow', updatedInput: input };
       // Inside a read-only floor the OS keeps Bash from writing, so it may run.
       const sandboxed = rules?.floor === 'read-only' && name === 'Bash' && !leaving;
       const beyond = (mode === 'read-only' && !readers.includes(name) && !name.startsWith('mcp__alp__') && !sandboxed) ||
