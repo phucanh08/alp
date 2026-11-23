@@ -1,0 +1,6 @@
+{
+  "description": "Cố vấn chỉ đọc: trả lời câu hỏi về code bên ngoài workspace bằng cách đọc source và lịch sử git thật, kèm trích dẫn repo@sha",
+  "mode": "read-only",
+  "model": "claude:claude-sonnet-5",
+  "thinking": "medium"
+}

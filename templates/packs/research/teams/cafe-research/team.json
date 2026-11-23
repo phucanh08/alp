@@ -1,0 +1,17 @@
+{
+  "label": "Cafe + Research",
+  "description": "Như Cafe, thêm hai cố vấn chỉ đọc: lead gọi được scout và librarian, main chỉ gọi librarian.",
+  "main": "main",
+  "members": {
+    "main": { "model": "claude:claude-opus-5-5", "thinking": "high" },
+    "lead": { "role": "lead" },
+    "peer": { "role": "peer" },
+    "oracle": { "role": "advisor" },
+    "reviewer": { "role": "reviewer" },
+    "librarian": { "role": "advisor" },
+    "scout": { "role": "advisor" }
+  },
+  "delegation": { "main": ["lead", "oracle", "reviewer", "librarian"], "lead": ["peer", "oracle", "reviewer", "librarian", "scout"] },
+  "maxPeers": 2,
+  "supervisor": { "agent": "supervisor", "model": "claude:claude-sonnet-5", "thinking": "medium" }
+}
