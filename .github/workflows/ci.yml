@@ -23,8 +23,15 @@ jobs:
       fail-fast: false
       matrix:
         node: [22, 24]
+    # t-cc9e: packages/core/tests/teamv1-history.test.js holds teamV1 to every list it has had on
+    # main, read from git history; this lane checks out that history and makes its absence a failure.
+    # Other lanes keep the shallow checkout and rely on the committed snapshot.
+    env:
+      ALP_REQUIRE_TEAMV1_HISTORY: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
