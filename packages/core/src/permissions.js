@@ -172,18 +172,29 @@ export const capMode = (mode, base) => (RANK[mode] ?? 0) <= (RANK[base] ?? 0) ? 
 
 // --- commands --------------------------------------------------------------------
 
-/** Removes a shell wrapper such as `/bin/zsh -lc '...'` that Codex puts around a command. */
-export function unwrapShell(command) {
+// The script a wrapper runs: in single quotes ('\'' is a quote), or in double quotes (backslash escapes).
+const SCRIPT = String.raw`(?:'((?:[^']|'\\'')*)'|"((?:[^"\\]|\\[\s\S])*)")\s*$`;
+// A wrapper whose script an allow rule may judge: a bare sh, bash, zsh or dash, or one in a system directory, with only spaces
+// or tabs between its words. Shell syntax before `sh` (`/bin/echo;touch X;/bin/sh -c '…'`), a new line after it, or a shell
+// in any other directory (`/tmp/x/sh`, which may be any program) is not such a wrapper (t-cde5 reviews 5 and 6).
+const WRAPPER = new RegExp(String.raw`^(?:/bin/|/usr/bin/|/usr/local/bin/|/opt/homebrew/bin/)?(?:ba|z|da)?sh[ \t]+-l?c[ \t]+` + SCRIPT);
+// Any wrapper-looking line, as ALP read it before: deny and ask rules see through it, so they never weaken (review 6).
+const ANY_WRAPPER = new RegExp(String.raw`^(?:/\S*/)?(?:ba|z|da)?sh\s+-l?c\s+` + SCRIPT);
+
+function unwrap(command, wrapper) {
   // The quotes must enclose the whole rest of the line: `sh -c '<a>' ; <b> 'c'` is two commands, not one
   // script (a greedy match read `<a>' ; <b> 'c` as the script, so a rule covering <a> covered <b>).
-  // The shell's path is plain path characters only, and spaces or tabs separate the words: shell syntax before `sh`
-  // (`/bin/echo;touch X;/bin/sh -c '…'`) or a new line after it would be run, not read as part of the wrapper (t-cde5 review 5).
-  const match = /^(?:(?:\/[A-Za-z0-9_.+-]+)*\/)?(?:ba|z|da)?sh[ \t]+-l?c[ \t]+(?:'((?:[^']|'\\'')*)'|"((?:[^"\\]|\\[\s\S])*)")\s*$/.exec(command.trim());
+  const match = wrapper.exec(command.trim());
   if (!match) return command.trim();
   // In double quotes the outer shell expands `$…` and backticks before sh runs: the script read here is not
   // the one that runs, so the line stays as it is (Codex escapes them in its own wrapper).
   if (match[2] !== undefined && /(?:^|[^\\])(?:\\\\)*[$`]/.test(match[2])) return command.trim();
   return match[1] !== undefined ? match[1].replace(/'\\''/g, "'") : match[2].replace(/\\(["\\$`])/g, '$1');
+}
+
+/** Removes a shell wrapper such as `/bin/zsh -lc '...'` that Codex puts around a command (WRAPPER). */
+export function unwrapShell(command) {
+  return unwrap(command, WRAPPER);
 }
 
 /**
@@ -682,17 +693,22 @@ const bashRules = rules => rules.map(rule => parseRule(rule)).filter(rule => rul
 export function commandDecision(profile, command) {
   const line = unwrapShell(command);
   const parts = simpleCommands(line);
+  // Deny and ask rules also judge the script of any wrapper-looking line (ANY_WRAPPER), as before: the stricter
+  // WRAPPER, which decides what an allow rule may judge, must not hide a script from them.
+  const loose = unwrap(command, ANY_WRAPPER);
+  const looseParts = loose === line ? parts : simpleCommands(loose);
   const deny = bashRules(profile.deny);
   if (deny.some(rule => rule.specifier === undefined)) return 'deny';
   // A command ALP cannot split may hide anything a deny rule names.
-  if (!parts) return deny.length ? 'deny' : (profile.ask ?? []).length ? 'ask' : undefined;
-  if (parts.some(part => deny.some(rule => covers(rule.specifier, part)))) return 'deny';
+  if (!parts || !looseParts) return deny.length ? 'deny' : (profile.ask ?? []).length ? 'ask' : undefined;
+  const judged = loose === line ? parts : [...parts, ...looseParts];
+  if (judged.some(part => deny.some(rule => covers(rule.specifier, part)))) return 'deny';
   const allow = bashRules(profile.allow);
   // A checked allow rule names exactly what it lets through, so it wins over a broader ask rule
   // (`Bash(git clone:*)` asks about every clone but the checked one); deny still wins over both.
   const checkedAllow = part => allow.some(rule => rule.specifier?.startsWith('@') && covers(rule.specifier, part));
   const ask = bashRules(profile.ask ?? []);
-  if (ask.some(rule => rule.specifier === undefined) || parts.some(part => !checkedAllow(part) && ask.some(rule => covers(rule.specifier, part)))) return 'ask';
+  if (ask.some(rule => rule.specifier === undefined) || judged.some(part => !checkedAllow(part) && ask.some(rule => covers(rule.specifier, part)))) return 'ask';
   // A plain allow rule vouches only for a line of plain words (plainCommands, g5 A'), split the same way here.
   // The line as given must be plain too, before any wrapper is taken off: a wrapper only ever makes a line stricter.
   const plain = plainCommands(command.trim()) !== null ? plainCommands(line) : null;
