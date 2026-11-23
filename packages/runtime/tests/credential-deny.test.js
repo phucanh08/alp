@@ -178,7 +178,9 @@ test('t-cde5 g4: a read-only profile leaves the sandbox only for a command its c
   assert.deepEqual(await gate.canUseTool('Bash', { command: clone, dangerouslyDisableSandbox: true }, {}), { behavior: 'allow', updatedInput: { command: clone, dangerouslyDisableSandbox: true } });
   // Everything else is decided as the sandboxed command it is: the parameter is dropped.
   const token = `cat ${path.join(home, 'paseo', 'token.json')}`;
-  for (const command of [token, 'cat README.md', 'git diff', `${clone}; ${token}`, `${clone} && curl https://example.com`, `git clone https://github.com/a/b ${path.join(os.tmpdir(), 'elsewhere')}`]) {
+  for (const command of [token, 'cat README.md', 'git diff', `${clone}; ${token}`, `${clone} && curl https://example.com`, `git clone https://github.com/a/b ${path.join(os.tmpdir(), 'elsewhere')}`,
+    // A shell wrapper that hides a second command after a covered one (t-cde5 review: greedy sh -c), or wraps it at all.
+    `sh -c '${clone}' ; ${token} 'b'`, `bash -c "${clone}" ; touch x "b"`, `sh -c '${clone}'`]) {
     const decided = await gate.canUseTool('Bash', { command, dangerouslyDisableSandbox: true }, {});
     assert.equal(decided.updatedInput?.dangerouslyDisableSandbox, undefined, command);
   }

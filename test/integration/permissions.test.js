@@ -87,6 +87,9 @@ test('a command is allowed only when allow rules cover every part of it, and den
   // A line ALP cannot split is asked about when there are ask rules and no deny rules.
   assert.equal(commandDecision({ allow: [], ask: ['Bash(git push *)'], deny: [] }, 'echo $(x)'), 'ask');
   assert.equal(unwrapShell(`/bin/bash -c 'echo '\\''hi'\\'''`), "echo 'hi'");
+  // The quotes must enclose the rest of the line: a quoted word after `;` does not make it one script (t-cde5 review).
+  for (const line of [`sh -c 'git log' ; touch /tmp/pwn 'b'`, `bash -c "git log" ; touch x "b"`, `sh -c 'a' 'b'`]) assert.equal(unwrapShell(line), line, line);
+  assert.equal(unwrapShell(`bash -c "echo \\"a\\" b"`), 'echo "a" b');
   assert.deepEqual(simpleCommands('a && b || c; d | e\nf & g'), ['a', 'b', 'c', 'd', 'e', 'f', 'g']);
 });
 
@@ -173,6 +176,13 @@ test('the installed librarian profile, through canUseTool: reads below its per-u
   // A clone outside the (scratch) root is not this profile's: it does not leave the sandbox, so it has no network.
   const outside = await gate.canUseTool('Bash', { command: 'git clone https://github.com/a/b /tmp/alp-librarian/a-b', dangerouslyDisableSandbox: true });
   assert.notEqual(outside.updatedInput?.dangerouslyDisableSandbox, true);
+  // A shell wrapper around a covered command, followed by anything, never leaves (t-cde5 review: greedy sh -c).
+  for (const command of [`sh -c 'git clone https://github.com/a/b ${cache}/a-b' ; touch ${directory}/pwned 'b'`, `bash -c "git -C ${cache}/a-b log --author=a" ; touch ${directory}/pwned "b"`, `sh -c 'git -C ${cache}/a-b log'`]) {
+    // The compound ones are not covered at all; a lone wrapped command is (Codex wraps commands so), but it still never leaves.
+    if (command.includes(';')) assert.notEqual(commandDecision(profile, command), 'allow', command);
+    const wrapped = await gate.canUseTool('Bash', { command, dangerouslyDisableSandbox: true });
+    assert.notEqual(wrapped.updatedInput?.dangerouslyDisableSandbox, true, command);
+  }
   // The checked clone itself leaves (it needs the network).
   const inRoot = await gate.canUseTool('Bash', { command: `git clone --depth 1 https://github.com/a/c ${cache}/a-c`, dangerouslyDisableSandbox: true });
   assert.equal(inRoot.updatedInput?.dangerouslyDisableSandbox, true);
