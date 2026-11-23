@@ -1,7 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { fstatSync, readFileSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, readFileSync, unlinkSync, constants as fsConstants } from 'node:fs';
 import { open, readFile, writeFile, realpath, stat, lstat, mkdir, readlink, unlink, readdir, chmod, rename, rmdir, link } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
@@ -31,7 +31,7 @@ export function daemonPaths(home) {
     : Buffer.byteLength(preferred) < 100
     ? preferred
     : path.join(os.tmpdir(), `alpd-${process.getuid?.() ?? 'user'}-${createHash('sha256').update(home).digest('hex').slice(0, 12)}`, 'rpc.sock');
-  return { home, lock: path.join(home, 'alpd.lock'), socket, log: path.join(home, 'logs', 'alpd.log'), install: path.join(home, 'alpd.json') };
+  return { home, lock: path.join(home, 'alpd.lock'), hold: path.join(home, 'alpd.lock.held'), socket, log: path.join(home, 'logs', 'alpd.log'), install: path.join(home, 'alpd.json') };
 }
 
 /** IPC trusts the OS user, not every local process. Existing unsafe directories fail closed.
@@ -268,14 +268,49 @@ export async function readLock(home) {
   }
 }
 
-export function lockAlive(lock) {
+/**
+ * The Windows hold on alpd's lock: a handle on `alpd.lock.held` opened with share mode 0
+ * (libuv's UV_FS_O_EXLOCK, 0x10000000 in uv/win.h; Node does not export it). Windows closes it
+ * when the owner exits, however it exits, and a child does not inherit it, so a pid Windows has
+ * already given to another process does not keep a crashed owner's lock alive (t-a5d8).
+ */
+const UV_FS_O_EXLOCK = 0x10000000;
+export const holdOps = {
+  /** Opens the hold; throws EBUSY while another handle has it open. */
+  take(file) {
+    for (let attempt = 0; ; attempt++) {
+      try { return openSync(file, fsConstants.O_RDWR | fsConstants.O_CREAT | UV_FS_O_EXLOCK, 0o600); }
+      catch (error) {
+        // A reader probing it (`taken`) holds it for a moment; a real owner keeps it.
+        if (attempt >= 10 || !['EBUSY', 'EPERM', 'EACCES'].includes(error?.code)) throw error;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+      }
+    }
+  },
+  /** True while some handle has the hold open; a missing file is free. */
+  taken(file) {
+    try { closeSync(openSync(file, 'r')); return false; }
+    catch (error) { return error?.code !== 'ENOENT'; }
+  },
+  close(fd) { closeSync(fd); },
+};
+/** home → the hold this process has: its descriptor and how to close it. */
+const holds = new Map();
+
+/**
+ * True while the lock's owner runs: same boot, its pid exists, and on Windows, when the lock
+ * names a hold, that hold is still open. A lock without `hold` (an older alpd) is judged by its
+ * pid alone.
+ */
+export function lockAlive(lock, { platform = process.platform, taken = holdOps.taken } = {}) {
   if (!lock || !Number.isSafeInteger(lock.pid) || !isSameBoot(lock)) return false;
   try {
     process.kill(lock.pid, 0);
-    return true;
   } catch (error) {
-    return error?.code === 'EPERM';
+    if (error?.code !== 'EPERM') return false;
   }
+  if (platform === 'win32' && typeof lock.hold === 'string') return taken(lock.hold);
+  return true;
 }
 
 /**
@@ -285,8 +320,40 @@ export function lockAlive(lock) {
  * @param {string} home
  * @param {{ version: string, protocolVersion: number, socket: string, maintenance?: string }} contents
  */
-export async function acquireDaemonLock(home, contents) {
-  const file = daemonPaths(home).lock;
+export async function acquireDaemonLock(home, contents, { platform = process.platform, ops = holdOps } = {}) {
+  const { lock: file, hold } = daemonPaths(home);
+  const busy = current => new Error(current.maintenance ? `ALP is busy: alp ${current.maintenance} runs (pid ${current.pid}); try again when it finishes` : `ALP daemon already running (pid ${current.pid})`);
+  // On Windows the hold comes first: whoever has it is the only one that may write the lock.
+  let fd;
+  if (platform === 'win32' && !holds.has(home)) {
+    try { fd = ops.take(hold); }
+    catch (error) {
+      if (!['EBUSY', 'EPERM', 'EACCES'].includes(error?.code)) throw error;
+      const current = await readLock(home);
+      if (lockAlive(current, { platform, taken: ops.taken })) throw busy(current);
+      throw new Error(`ALP daemon lock ${file} is held: another start is in progress. Try again when it finishes`);
+    }
+    // The hold counts only if a second open really fails; else go on by pid alone, unmarked.
+    if (!ops.taken(hold)) { ops.close(fd); fd = undefined; }
+  }
+  try {
+    const lock = await takeLockFile(home, file, contents, fd === undefined ? undefined : hold, platform, ops, busy);
+    if (fd !== undefined) holds.set(home, { fd, close: ops.close });
+    return lock;
+  } catch (error) {
+    if (fd !== undefined) { try { ops.close(fd); } catch {} }
+    throw error;
+  }
+}
+
+/** Our own hold, named by `current`: its owner is gone, since we could take it. */
+function ownHold(current, hold, platform) {
+  if (!hold || typeof current?.hold !== 'string') return false;
+  const a = path.resolve(current.hold), b = path.resolve(hold);
+  return platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+async function takeLockFile(home, file, contents, hold, platform, ops, busy) {
   const currentBootId = bootId();
   const lock = {
     pid: process.pid,
@@ -297,6 +364,7 @@ export async function acquireDaemonLock(home, contents) {
     uid: process.getuid?.() ?? -1,
     ready: false,
     ...contents,
+    ...(hold ? { hold } : {}),
   };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -321,14 +389,15 @@ export async function acquireDaemonLock(home, contents) {
     } catch (error) {
       if (error?.code !== 'EEXIST') throw error;
       const current = await readLock(home);
-      if (lockAlive(current)) throw new Error(current.maintenance ? `ALP is busy: alp ${current.maintenance} runs (pid ${current.pid}); try again when it finishes` : `ALP daemon already running (pid ${current.pid})`);
+      const alive = candidate => !ownHold(candidate, hold, platform) && lockAlive(candidate, { platform, taken: ops.taken });
+      if (alive(current)) throw busy(current);
       // Remove the stale lock only if nobody replaced it meanwhile. A lock that cannot be read may
       // be one another start is writing now: it stays, and this start says so.
       const again = await readFile(file, 'utf8').catch(() => undefined);
       let parsed;
       try { parsed = again === undefined ? undefined : JSON.parse(again); }
       catch { throw new Error(`ALP daemon lock ${file} cannot be read: another start may be writing it. If no alpd or alp command is starting, remove it and try again`); }
-      if (again === undefined || JSON.stringify(current) === again || !lockAlive(parsed)) await unlink(file).catch(() => {});
+      if (again === undefined || JSON.stringify(current) === again || !alive(parsed)) await unlink(file).catch(() => {});
     }
   }
   throw new Error('Could not acquire the ALP daemon lock');
@@ -336,8 +405,12 @@ export async function acquireDaemonLock(home, contents) {
 
 /** Lets go of alpd's lock if this process holds it. */
 export async function releaseDaemonLock(home) {
-  const current = await readLock(home);
-  if (current?.pid === process.pid) await unlink(daemonPaths(home).lock).catch(() => {});
+  const current = await readLock(home).catch(() => undefined);
+  // The lock goes first, then the hold, in one tick: no start sees our lock with the hold free
+  // and no one else's lock is removed.
+  if (current?.pid === process.pid) { try { unlinkSync(daemonPaths(home).lock); } catch {} }
+  const held = holds.get(home);
+  if (held) { holds.delete(home); try { held.close(held.fd); } catch {} }
 }
 
 /**

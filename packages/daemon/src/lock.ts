@@ -1,5 +1,5 @@
-import { unlink, utimes, writeFile, rename } from 'node:fs/promises';
-import { acquireDaemonLock, daemonPaths, readLock } from '@anhlp/alp-client/index';
+import { utimes, writeFile, rename } from 'node:fs/promises';
+import { acquireDaemonLock, daemonPaths, readLock, releaseDaemonLock } from '@anhlp/alp-client/index';
 
 export type LockContents = {
   pid: number;
@@ -10,6 +10,8 @@ export type LockContents = {
   protocolVersion: number;
   socket: string;
   ready: boolean;
+  /** Windows: the file whose open handle proves the owner runs (t-a5d8). updateLock keeps it. */
+  hold?: string;
 };
 
 /** Single-instance lock (Paseo acquirePidLock, simplified): exclusive create, stale when its pid or boot is gone. */
@@ -48,6 +50,5 @@ export async function heartbeat(home: string) {
 }
 
 export async function releaseLock(home: string) {
-  const current = await readLock(home);
-  if (current?.pid === process.pid) await unlink(daemonPaths(home).lock).catch(() => {});
+  await releaseDaemonLock(home);
 }

@@ -10,8 +10,10 @@ import path from 'node:path';
 
 test('a failed fstat after the exclusive create leaves no lock behind', async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-lock-fstat-'));
-  t.after(() => rm(home, { recursive: true, force: true }));
-  const { acquireDaemonLock, daemonPaths } = await import('../src/index.js');
+  const { acquireDaemonLock, daemonPaths, releaseDaemonLock } = await import('../src/index.js');
+  // The lock this test takes (and on Windows its open hold) goes before its home: Windows cannot
+  // remove a directory holding an open file. One hook, so a failed release cannot skip the rm.
+  t.after(async () => { try { await releaseDaemonLock(home); } finally { await rm(home, { recursive: true, force: true }); } });
   const lockFile = daemonPaths(home).lock;
   await fs.promises.mkdir(path.dirname(lockFile), { recursive: true });
   const open = fs.promises.open;
