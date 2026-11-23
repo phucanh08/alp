@@ -597,8 +597,9 @@ test('an assignment with workdir copy writes, builds and tests in its copy, whic
   await until(() => runtimes.length === 4 && runtimes[3].started.length === 1);
   const claude = runtimes[3];
   assert.deepEqual([claude.config.sandbox, claude.config.floor], ['workspace-write', 'workspace-write']);
-  assert.match(claude.config.developerInstructions, /Bash runs in an OS sandbox: it writes only .*copies.* and temporary files, and has no network\. Run any command you need for your work in it\. To run a command outside it .* set dangerouslyDisableSandbox/);
-  assert.match(claude.config.developerInstructions, /A sandbox error \(Operation not permitted, no network\) is not a refusal by the user: run that same command again with dangerouslyDisableSandbox/);
+  // t-cde5 g2: a read-only profile's Bash never leaves the sandbox, so the note offers no way out.
+  assert.match(claude.config.developerInstructions, /Bash runs in an OS sandbox: it writes only .*copies.* and temporary files, and has no network\. Run any command you need for your work in it\. Your profile is read-only, so every command runs in it, also one your profile allows or the user approves/);
+  assert.doesNotMatch(claude.config.developerInstructions, /dangerouslyDisableSandbox/);
   claude.call('alp_handoff', { outcome: 'complete', summary: 'Done' });
   claude.finish('Done');
   await main.call('alp_wait', {});

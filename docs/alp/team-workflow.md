@@ -104,15 +104,25 @@ which is committed with the project, and in the user's `$ALP_HOME/settings.json`
       "review": {
         "base": "read-only",
         "allow": ["Bash(npm test:*)", "Bash(node --test:*)"],
+        "deny": ["Bash(rm:*)", "Bash(git push:*)"]
+      },
+      "careful": {
+        "base": "workspace-write",
         "ask": ["Bash(npm install *)"],
-        "deny": ["Bash(rm:*)", "Bash(git push:*)"],
         "beyondMode": "ask"
       }
     },
-    "agents": { "reviewer": "review", "auditor": "review", "lead": "workspace-write" }
+    "agents": { "reviewer": "review", "auditor": "review", "lead": "workspace-write", "peer": "careful" }
   }
 }
 ```
+
+On Claude, a profile with base `read-only` keeps every Bash command inside the read-only
+OS sandbox (see the sandbox floor below): its allow rules run there, without writes or
+network, and an `ask` rule or `"beyondMode": "ask"` cannot approve a write or a network
+command, which would still fail there. For a session in which the user may approve such
+commands, give the profile base `workspace-write` and start the session read-only
+(`alp run --mode read-only`), as `careful` above allows.
 
 - Rules use Claude Code's syntax, for both runtimes:
   - `Bash(npm test:*)` covers `npm test` and anything after it; `Bash(git status)` covers exactly that command; `Bash` alone covers every command.
@@ -200,7 +210,14 @@ socat on Linux.
 - File tools (Edit, Write) follow the same floor.
 - A command leaves the sandbox only with `dangerouslyDisableSandbox`. Claude
   allows that itself for allow rules; otherwise ALP asks the user
-  (`beyondMode: "ask"`) or refuses.
+  (an `ask` rule, or `beyondMode: "ask"`) or refuses.
+- A session whose profile has base `read-only` never leaves it: oracle, reviewer,
+  the supervisor, read-only team members, a review copy, and a user's read-only
+  profile. Claude ignores `dangerouslyDisableSandbox` there, so its allow rules and
+  the commands the user approves run inside the floor, without writes or network.
+  Outside the sandbox nothing would keep such a session from the Paseo credentials
+  (t-cde5). A session merely started read-only, under a wider profile or none,
+  keeps the way out, which it needs once switched to a wider mode.
 - Without the sandbox (another OS, or Linux without bubblewrap), sessions behave
   as before, and `ALP_CLAUDE_SANDBOX=0` turns it off.
 
