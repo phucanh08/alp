@@ -10,7 +10,7 @@ import { RESULT_OUTCOMES } from './assignment-results.js';
 import { inputLimitError, POUR_VARS, VAR_NAME, type InputLimits } from './input-limits.js';
 import { claudeToolDetail, resultText } from './tool-detail.js';
 import { CLOSE_REASONS, GATE_KINDS, TASK_STATUSES, TASK_TYPES } from '@anhlp/alp-core/tasks';
-import { commandDecision } from '@anhlp/alp-core/permissions';
+import { commandDecision, unwrapShell } from '@anhlp/alp-core/permissions';
 import { alpHome } from '@anhlp/alp-core/library';
 import { isScript, nativeDaemon, nodeExecutable } from '@anhlp/alp-core/packaged';
 
@@ -464,7 +464,8 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
   // Except a command every part of which a checked allow rule covers (Bash(@…), such as the librarian's
   // public clone): ALP verifies it in commandDecision before it leaves (t-cde5 g4). Nothing else leaves.
   const checked = rules?.allow.filter(rule => /^Bash\(\s*@/.test(rule.trim())) ?? [];
-  const checkedOnly = (command: string) => Boolean(rules && checked.length) && commandDecision({ ...rules!, allow: checked }, command) === 'allow';
+  // Only a plain command line leaves: one a shell wrapper hides (sh -c '…') never does, whatever it covers.
+  const checkedOnly = (command: string) => Boolean(rules && checked.length) && unwrapShell(command) === command.trim() && commandDecision({ ...rules!, allow: checked }, command) === 'allow';
   // A skill only adds instructions; what they lead to is checked as itself (ALPD §59).
   const readers = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Skill'];
   return {

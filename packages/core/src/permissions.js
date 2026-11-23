@@ -174,9 +174,11 @@ export const capMode = (mode, base) => (RANK[mode] ?? 0) <= (RANK[base] ?? 0) ? 
 
 /** Removes a shell wrapper such as `/bin/zsh -lc '...'` that Codex puts around a command. */
 export function unwrapShell(command) {
-  const match = /^(?:\/\S*\/)?(?:ba|z|da)?sh\s+-l?c\s+(['"])([\s\S]*)\1\s*$/.exec(command.trim());
+  // The quotes must enclose the whole rest of the line: `sh -c '<a>' ; <b> 'c'` is two commands, not one
+  // script (a greedy match read `<a>' ; <b> 'c` as the script, so a rule covering <a> covered <b>).
+  const match = /^(?:\/\S*\/)?(?:ba|z|da)?sh\s+-l?c\s+(?:'((?:[^']|'\\'')*)'|"((?:[^"\\]|\\[\s\S])*)")\s*$/.exec(command.trim());
   if (!match) return command.trim();
-  return match[1] === "'" ? match[2].replace(/'\\''/g, "'") : match[2].replace(/\\(["\\$`])/g, '$1');
+  return match[1] !== undefined ? match[1].replace(/'\\''/g, "'") : match[2].replace(/\\(["\\$`])/g, '$1');
 }
 
 /**
