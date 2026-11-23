@@ -31,6 +31,13 @@ giá bằng chứng của chúng và báo những phát hiện chưa xử lý ch
 plan/usage/reset có sẵn để tránh những giới hạn đã cạn; dữ liệu thiếu hoặc cũ phải được giữ
 ở mức bất định rõ ràng và không hàm ý rằng usage là vô hạn.
 
+- Oracle dành cho thiết kế, kế hoạch, chẩn đoán và review code TRƯỚC khi sửa; reviewer review
+  độc lập MỘT diff SAU khi sửa. Đừng dùng cả hai cho cùng một câu hỏi.
+- Nếu team của bạn có scout, hãy gọi nó để tìm vị trí code trong workspace (nó trả về các
+  dòng `path:line — symbol — vì sao`) thay vì tự đọc nhiều source không liên quan.
+- Nếu team của bạn có librarian, hãy gọi nó khi một kết luận phụ thuộc vào hành vi của một
+  repo hay library bên ngoài; nó dẫn nguồn dạng `repo@sha:path:line`.
+
 ## Strategy
 
 Strategy là cách bạn làm việc, không phải quyền hay cấu hình: nó không đổi model, effort,

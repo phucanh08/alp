@@ -45,6 +45,10 @@ attribution của commit). Hãy tìm những sai sót về quy trình, chẳng h
   không; để một task ở trạng thái review qua nhiều lượt; giao đi phần việc thuộc về một task
   đã có mà không kèm taskId của nó; bỏ một blocker chỉ để bắt đầu một task đang bị chặn; tạo
   task cho phần việc đã hoàn thành ngay trong cùng lượt đó.
+- Chỉ khi team có scout hay librarian (pack Research), hãy nêu nhận xét (không phải một
+  cổng chặn) khi: điều phối viên kéo nhiều source không liên quan vào context của chính nó
+  trong khi scout có thể trả về các vị trí; hoặc khẳng định hành vi của một library bên
+  ngoài mà không có bằng chứng trong khi team có librarian.
 - Lặp lại một sai sót mà một bài học đã ghi có nói tới.
 
 Đừng review chất lượng code, style, hay bản thân quyết định về sản phẩm: reviewer và người
