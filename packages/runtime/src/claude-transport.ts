@@ -434,6 +434,10 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
   // A session that starts read-only, runs Bash in a read-only floor or has a read-only profile (an
   // advisor working in a copy) cannot read the Paseo credentials (t-cde5).
   const secrets = readOnly || rules?.floor === 'read-only' || rules?.base === 'read-only' ? credentialDenials(home) : undefined;
+  // A read-only profile never widens, so its Bash never leaves the sandbox (t-cde5 g2): outside it no
+  // OS rule keeps the credentials, and Claude lets an allow rule's command out without asking canUseTool.
+  // A session merely started read-only keeps the way out, which it needs once switched to full access.
+  const confined = Boolean(rules?.floor && secrets && rules.base === 'read-only');
   // A skill only adds instructions; what they lead to is checked as itself (ALPD §59).
   const readers = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Skill'];
   return {
@@ -457,17 +461,20 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
     // access lets host services act outside this floor; the SDK cannot scope local
     // binding to a test server, and scoped Unix sockets are not portable to Linux.
     // A command leaves it only with dangerouslyDisableSandbox, which Claude refers to canUseTool: ALP's commandDecision decides it.
+    // A confined session cannot leave it at all (Claude ignores the parameter).
     ...(rules?.floor ? {
       sandbox: {
         enabled: true,
         autoAllowBashIfSandboxed: false,
-        allowUnsandboxedCommands: true,
+        allowUnsandboxedCommands: !confined,
         ...(rules.floor === 'read-only' && rules.floorRoot ? { filesystem: { denyWrite: [rules.floorRoot], ...(secrets ? { denyRead: secrets.denyRead } : {}) } }
           : secrets ? { filesystem: { denyRead: secrets.denyRead } } : {}),
       },
     } : {}),
     canUseTool: async (name: string, input: Record<string, unknown>, context?: { decisionReasonType?: string; suggestions?: unknown }) => {
       const mode = currentSandbox ? currentSandbox() : sandbox;
+      // A confined session's command runs in the sandbox whatever it asks: decide it as sandboxed.
+      if (confined && name === 'Bash' && 'dangerouslyDisableSandbox' in input) input = Object.fromEntries(Object.entries(input).filter(([key]) => key !== 'dangerouslyDisableSandbox'));
       const leaving = Boolean(rules?.floor) && name === 'Bash' && input.dangerouslyDisableSandbox === true;
       // A Bash allow rule inside the sandbox too, as Claude's allowedTools did (it never gets them; see above).
       // Only allow is decided here: what a sandboxed command may do otherwise is unchanged.
@@ -500,8 +507,8 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
         const answer = await ask({ tool: name, input, reason, ...(rule ? { rule } : {}) });
         if (!answer.allow) return { behavior: 'deny', message: answer.message ?? 'The user did not allow it' };
         const [, toolName, ruleContent] = /^([^(]+)(?:\((.*)\))?$/s.exec(rule ?? '') ?? [];
-        // The read-only floor would refuse the very write the user just allowed: run that command outside it.
-        const approved = sandboxed && reason === 'rule' ? { ...input, dangerouslyDisableSandbox: true } : input;
+        // The read-only floor would refuse the very write the user just allowed: run that command outside it (unless confined).
+        const approved = sandboxed && reason === 'rule' && !confined ? { ...input, dangerouslyDisableSandbox: true } : input;
         return { behavior: 'allow', updatedInput: approved, ...(answer.always && toolName ? { updatedPermissions: [{ type: 'addRules', rules: [{ toolName, ...(ruleContent ? { ruleContent } : {}) }], behavior: 'allow', destination: 'session' }] } : {}) };
       }
       if (leaving && beyond) return { behavior: 'deny', message: 'Bash runs inside the sandbox; leaving it needs an allow rule in your permission profile' };

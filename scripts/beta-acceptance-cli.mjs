@@ -149,8 +149,10 @@ try {
       return;
     }
     const original = readFileSync(settingsFile, 'utf8');
-    // An ask rule (two choices, asks each time) and beyond the read-only mode (three choices).
-    const profile = { profiles: { review: { base: 'read-only', ask: ['Bash(touch *)'], beyondMode: 'ask' } }, agents: { main: 'review' } };
+    // An ask rule (two choices, asks each time) and beyond the read-only mode (three choices). The
+    // session is started read-only under a workspace-write profile: a read-only profile keeps every
+    // command in the read-only sandbox, so an approved write could not run (t-cde5 g3).
+    const profile = { profiles: { review: { base: 'workspace-write', ask: ['Bash(touch *)'], beyondMode: 'ask' } }, agents: { main: 'review' } };
     writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(original), permissions: profile }, null, 2));
     try {
       const say = command => `Tự chạy đúng một lệnh shell này, không giao cho ai và không dùng cách khác: \`${command}\`. Nếu bị từ chối thì báo lại là bị từ chối, đừng thử cách khác.`;
@@ -245,7 +247,8 @@ process.exit(run.summary());
  * null it expects no question at all.
  */
 async function permission(label, prompt, key, choices) {
-  const stream = start(label, prompt);
+  // C6 runs main read-only (its profile allows up to workspace-write), so writes are beyond its mode.
+  const stream = start(label, prompt, ['--mode', 'read-only']);
   const question = stream.next(envelope => envelope.event?.type === 'question', 'a permission question', 5 * 60_000);
   if (key === null) {
     const code = await stream.exit;
