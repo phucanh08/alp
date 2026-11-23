@@ -132,7 +132,13 @@ test('rebind, conflicts, typing keys, clear, reset one and all; persisted and us
   await act(page, settings, 'sidebar.both', 'bind');
   await page.keyboard.press('ControlOrMeta+E');
   await expect(row(settings, 'sidebar.both').getByTestId('shortcut-keys')).toHaveText(keys('E'));
+  // Resetting the Explorer's now would put two shortcuts on its default keys: refused, with why.
+  await act(page, settings, 'sidebar.right', 'reset');
+  await expect(row(settings, 'sidebar.right').getByTestId('shortcut-reset-error')).toHaveText(`Its default ${keys('E')} is now used by Toggle both sidebars. Change that shortcut first.`);
+  await expect(row(settings, 'sidebar.right').getByTestId('shortcut-keys')).toHaveText('Not set');
+  expect(await stored(page)).toEqual({ 'sidebar.right': null, 'sidebar.both': 'Mod+E' });
   await settings.getByTestId('shortcuts-reset-all').click();
+  await expect(row(settings, 'sidebar.right').getByTestId('shortcut-reset-error')).toHaveCount(0);
   await expect(row(settings, 'sidebar.right').getByTestId('shortcut-keys')).toHaveText(keys('E'));
   await expect(row(settings, 'sidebar.both').getByTestId('shortcut-keys')).toHaveText(keys('.'));
   await expect(settings.getByTestId('shortcuts-reset-all')).toHaveCount(0);
