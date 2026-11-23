@@ -1,0 +1,16 @@
+{
+  "label": "Phở + Research",
+  "description": "Như Phở, thêm hai cố vấn chỉ đọc mà main có thể gọi: scout tìm code trong workspace, librarian đọc source của repo bên ngoài.",
+  "main": "main",
+  "members": {
+    "main": { "model": "claude:claude-opus-5-5", "thinking": "high" },
+    "peer": { "role": "peer" },
+    "oracle": { "role": "advisor" },
+    "reviewer": { "role": "reviewer" },
+    "librarian": { "role": "advisor" },
+    "scout": { "role": "advisor" }
+  },
+  "delegation": { "main": ["peer", "oracle", "reviewer", "librarian", "scout"] },
+  "maxPeers": 2,
+  "supervisor": { "agent": "supervisor", "model": "claude:claude-sonnet-5", "thinking": "medium" }
+}

@@ -1,0 +1,7 @@
+{
+  "label": "Research",
+  "description": "Hai cố vấn chỉ đọc cho điều phối viên: librarian đọc source và lịch sử git của repo bên ngoài, scout tìm code trong workspace; kèm hai team biến thể Phở + Research và Cafe + Research. Phở và Cafe mặc định không đổi.",
+  "agents": ["librarian", "scout"],
+  "teams": ["pho-research", "cafe-research"],
+  "permissions": { "librarian": "read-only", "scout": "read-only" }
+}
