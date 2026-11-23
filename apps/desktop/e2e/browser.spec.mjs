@@ -158,6 +158,19 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   await connectedTo(app, dashboard, 90_000);
   const page = app.windows()[0];
   page.setDefaultTimeout(30_000);
+  // On a failure, what the Browser tab itself shows (t-a5d8): the address bar, its error line, the
+  // focused element and the <webview> elements, as the guests alone did not tell an address never
+  // submitted from one that did not load.
+  context.defer(async () => {
+    if (reached === 'done') return;
+    const state = await bounded('reading the Browser tab state', page.evaluate(() => ({
+      addresses: [...document.querySelectorAll('[data-testid="browser-address"]')].map(element => element.value),
+      errors: [...document.querySelectorAll('[data-testid="browser-error"]')].map(element => element.textContent),
+      focused: document.activeElement?.getAttribute('data-testid') ?? document.activeElement?.tagName ?? null,
+      webviews: [...document.querySelectorAll('webview')].map(element => element.getAttribute('src')),
+    })), 5_000).catch(error => error.message);
+    t.diagnostic(`Browser tab: ${JSON.stringify(state)}`);
+  });
   // No evaluate in the app's main process or in the dashboard page may hang the test without a word.
   const appEvaluate = app.evaluate.bind(app);
   app.evaluate = (fn, arg) => bounded(`a main-process evaluate during ${reached}`, appEvaluate(fn, arg));
