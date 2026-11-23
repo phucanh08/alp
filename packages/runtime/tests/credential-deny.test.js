@@ -196,3 +196,19 @@ test('t-cde5 g4: a read-only profile leaves the sandbox only for a command its c
   assert.equal(answer.behavior, 'allow');
   assert.equal(answer.updatedPermissions, undefined);
 });
+
+test('t-cde5 review: a plain allow rule never covers an unquoted ( (zsh =(…), *(e…), subshells) on Claude and ACP', async () => {
+  const profile = { base: 'workspace-write', allow: ['Bash(echo:*)'], ask: [], deny: [], beyondMode: 'refuse' };
+  // Claude, a session that may leave its floor: only a covered command keeps dangerouslyDisableSandbox.
+  const gate = claudePermissions('workspace-write', () => 'workspace-write', { ...profile, floor: 'workspace-write', floorRoot: root }, undefined, home);
+  assert.deepEqual(await gate.canUseTool('Bash', { command: 'echo hi', dangerouslyDisableSandbox: true }, {}), { behavior: 'allow', updatedInput: { command: 'echo hi', dangerouslyDisableSandbox: true } });
+  for (const command of ['echo =(touch X)', "echo *(e:'touch X':)", '(echo hi; touch X)']) {
+    const decided = await gate.canUseTool('Bash', { command, dangerouslyDisableSandbox: true }, {});
+    assert.notEqual(decided.behavior === 'allow' && decided.updatedInput?.dangerouslyDisableSandbox, true, command);
+  }
+  // ACP: the rule does not allow it, so the read-only mode decides.
+  const execute = command => ({ kind: 'execute', title: command, command, paths: [], alpTool: false });
+  assert.equal(acpDecision(execute('echo hi'), 'read-only', profile, root, home), 'allow');
+  assert.equal(acpDecision(execute('echo =(touch X)'), 'read-only', profile, root, home), 'mode');
+  assert.equal(acpDecision(execute("echo *(e:'touch X':)"), 'read-only', profile, root, home), 'mode');
+});

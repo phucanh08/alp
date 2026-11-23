@@ -231,6 +231,9 @@ test('Codex asks ALP before leaving its sandbox, and ALP answers by the profile'
   assert.deepEqual(await ask(reviewer, "/bin/zsh -lc 'npm test 2>&1'"), { decision: 'accept' });
   assert.deepEqual(await ask(reviewer, "/bin/zsh -lc 'npm test && rm -rf dist'"), { decision: 'decline' });
   assert.deepEqual(await ask(reviewer, "/bin/zsh -lc 'touch x'"), { decision: 'decline' });
+  // zsh runs what `=(…)` and a glob qualifier `*(e…)` name: an allow rule never covers an unquoted `(` (t-cde5 review).
+  assert.deepEqual(await ask(reviewer, "/bin/zsh -lc 'npm test =(touch x)'"), { decision: 'decline' });
+  assert.deepEqual(await ask(reviewer, "/bin/zsh -lc 'npm test *(e.touch x.)'"), { decision: 'decline' });
   assert.deepEqual(await reviewer.serverRequest('item/fileChange/requestApproval', { threadId: reviewer.threadId }), { decision: 'decline' });
   await assert.rejects(reviewer.serverRequest('item/permissions/requestApproval', {}), /Unsupported runtime request/);
   reviewer.call('alp_handoff', { outcome: 'complete', summary: 'Tests pass' });
@@ -248,10 +251,12 @@ test('Codex asks ALP before leaving its sandbox, and ALP answers by the profile'
   main.finish('Done');
 
   const read = async () => (await readFile(path.join(directory, 'runs', 'root.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(entry => entry.event === 'permission');
-  await until(async () => (await read()).length === 6);
+  await until(async () => (await read()).length === 8);
   assert.deepEqual((await read()).map(entry => [entry.agent, entry.request, entry.decision, entry.rule ?? null]), [
     ['main', 'command', 'decline', 'deny'], ['main', 'command', 'accept', null],
-    ['reviewer', 'command', 'accept', 'allow'], ['reviewer', 'command', 'decline', 'deny'], ['reviewer', 'command', 'decline', null], ['reviewer', 'file change', 'decline', null],
+    ['reviewer', 'command', 'accept', 'allow'], ['reviewer', 'command', 'decline', 'deny'], ['reviewer', 'command', 'decline', null],
+    // The two zsh lines: ALP cannot split them and the profile has deny rules, so they are refused as deny.
+    ['reviewer', 'command', 'decline', 'deny'], ['reviewer', 'command', 'decline', 'deny'], ['reviewer', 'file change', 'decline', null],
   ]);
 });
 
