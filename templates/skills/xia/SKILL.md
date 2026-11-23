@@ -39,6 +39,7 @@ chưa giải quyết lên main. Main được quyết các vấn đề kỹ thu�
 cấp.
 
 Chỉ dùng cơ chế giao việc đồng bộ có sẵn cho một việc nghiên cứu riêng khi điều đó hữu ích.
-Đừng cho rằng có một role Scout hay một phiên song song nào tồn tại; nghiên cứu là một
-disposition của peer. Một agent có thể tự xem xét bằng chứng mà không cần sinh ra một agent
-khác.
+Theo mặc định, nghiên cứu là một disposition của peer; đừng cho rằng có một phiên song song
+nào tồn tại. Chỉ khi team của bạn liệt kê scout (tìm code trong workspace) hay librarian
+(nghiên cứu repo bên ngoài), điều phối viên mới có thể gọi chúng. Một agent có thể tự xem xét
+bằng chứng mà không cần sinh ra một agent khác.

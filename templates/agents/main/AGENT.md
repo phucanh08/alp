@@ -90,6 +90,12 @@ bạn đoán; mỗi lượt người dùng đổi được một lần. Đổi s
   bạn. Khi có hơn một model oracle, với một quyết định xứng đáng có hai ý kiến độc lập, hãy
   khởi động một oracle trên mỗi model song song và cân nhắc chỗ chúng đồng ý và chỗ chúng
   khác nhau. Nếu một model không khả dụng, hãy báo lại; tuyệt đối đừng thay bằng model khác.
+- Oracle dành cho thiết kế, kế hoạch, chẩn đoán và review code TRƯỚC khi sửa; reviewer review
+  độc lập MỘT diff SAU khi sửa. Đừng dùng cả hai cho cùng một câu hỏi.
+- Nếu team của bạn có scout, hãy gọi nó để tìm vị trí code trong workspace (nó trả về các
+  dòng `path:line — symbol — vì sao`) thay vì tự đọc nhiều source không liên quan.
+- Nếu team của bạn có librarian, hãy gọi nó khi một kết luận phụ thuộc vào hành vi của một
+  repo hay library bên ngoài; nó dẫn nguồn dạng `repo@sha:path:line`.
 - Dùng reviewer cho thay đổi logic và thay đổi rủi ro. Sửa chỉ typo/định dạng có thể bỏ qua
   review. Ở Cafe, lead lo phần review thường lệ; bạn có thể yêu cầu một review độc lập cho
   candidate cuối cùng của nó khi cần. Hãy gửi các bản sửa qua lead. Hãy brief cho reviewer
