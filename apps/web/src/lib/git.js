@@ -286,7 +286,127 @@ export function branchLine(status) {
   return parts.join(' · ');
 }
 
-/** The base a Committed diff compares to, as Paseo's computeBaseRefLabel. @param {string | null | undefined} baseRef */
+/** The base a Committed diff compares to, as Paseo's computeBaseRefLabel (origin/ left out too). @param {string | null | undefined} baseRef */
 export function baseLabel(baseRef) {
-  return baseRef ? baseRef.replace(/^refs\/(heads|remotes)\//, '').trim() : 'base';
+  if (!baseRef) return 'base';
+  const trimmed = baseRef.replace(/^refs\/(heads|remotes)\//, '').trim();
+  return trimmed.startsWith('origin/') ? trimmed.slice('origin/'.length) : trimmed;
+}
+
+/**
+ * Paseo's file-change icon kind (FileChangeIcon via diffFileChangeKind): new (added, untracked),
+ * deleted, or modified (every other change, renames included).
+ * @param {string} change @returns {'added' | 'deleted' | 'modified'}
+ */
+export function changeKind(change) {
+  if (change === 'added' || change === 'untracked') return 'added';
+  if (change === 'deleted') return 'deleted';
+  return 'modified';
+}
+
+/**
+ * Paseo's changed-files tree (git/diff-tree.ts at v0.17.3): directories before files, plain
+ * code-unit order (not the locale's); a chain of single-child directories is one row
+ * ("packages/app/src") keyed by its deepest directory's full path, so a collapsed folder stays
+ * collapsed when the chain later splits. Each folder row carries its whole subtree's +/-,
+ * collapsed or not; the rows of a collapsed folder's descendants are left out.
+ * @template {{ path: string, additions?: number, deletions?: number }} F
+ * @param {F[]} files @param {ReadonlySet<string> | string[]} [collapsed]
+ * @returns {Array<{ kind: 'folder', dirPath: string, name: string, depth: number, additions: number, deletions: number } | { kind: 'file', file: F, name: string, depth: number }>}
+ */
+export function changesTree(files, collapsed = []) {
+  const closed = collapsed instanceof Set ? collapsed : new Set(collapsed);
+  /** @typedef {{ kind: 'dir', dirPath: string, name: string, children: Node[] }} Dir */
+  /** @typedef {Dir | { kind: 'file', file: F, name: string }} Node */
+  /** @type {Dir} */
+  const root = { kind: 'dir', dirPath: '', name: '', children: [] };
+  /** @type {Map<string, Dir>} */
+  const dirs = new Map([['', root]]);
+  /** @param {string} dirPath @returns {Dir} */
+  const ensure = dirPath => {
+    const known = dirs.get(dirPath);
+    if (known) return known;
+    const parts = dirPath.split('/');
+    /** @type {Dir} */
+    const node = { kind: 'dir', dirPath, name: parts[parts.length - 1], children: [] };
+    ensure(parts.slice(0, -1).join('/')).children.push(node);
+    dirs.set(dirPath, node);
+    return node;
+  };
+  for (const file of files) {
+    const parts = file.path.split('/');
+    ensure(parts.slice(0, -1).join('/')).children.push({ kind: 'file', file, name: parts[parts.length - 1] });
+  }
+  /** @param {Dir} node */
+  const sort = node => {
+    node.children.sort((a, b) => a.kind !== b.kind ? (a.kind === 'dir' ? -1 : 1) : a.name === b.name ? 0 : a.name < b.name ? -1 : 1);
+    for (const child of node.children) if (child.kind === 'dir') sort(child);
+  };
+  sort(root);
+  /** @param {Dir} node @returns {Dir} */
+  const compress = node => {
+    let { name, dirPath } = node;
+    let children = node.children.map(child => child.kind === 'dir' ? compress(child) : child);
+    while (children.length === 1 && children[0].kind === 'dir') {
+      const only = children[0];
+      name = name ? `${name}/${only.name}` : only.name;
+      dirPath = only.dirPath;
+      children = only.children;
+    }
+    return { kind: 'dir', dirPath, name, children };
+  };
+  const top = root.children.map(child => child.kind === 'dir' ? compress(child) : child);
+  /** @type {Map<Dir, { additions: number, deletions: number }>} */
+  const stats = new Map();
+  /** @param {Node[]} children */
+  const sum = children => {
+    let additions = 0;
+    let deletions = 0;
+    for (const child of children) {
+      if (child.kind === 'file') { additions += child.file.additions || 0; deletions += child.file.deletions || 0; continue; }
+      const inner = sum(child.children);
+      stats.set(child, inner);
+      additions += inner.additions;
+      deletions += inner.deletions;
+    }
+    return { additions, deletions };
+  };
+  sum(top);
+  /** @type {ReturnType<typeof changesTree<F>>} */
+  const rows = [];
+  /** @param {Node[]} children @param {number} depth */
+  const walk = (children, depth) => {
+    for (const child of children) {
+      if (child.kind === 'file') { rows.push({ kind: 'file', file: child.file, name: child.name, depth }); continue; }
+      const { additions, deletions } = stats.get(child) ?? { additions: 0, deletions: 0 };
+      rows.push({ kind: 'folder', dirPath: child.dirPath, name: child.name, depth, additions, deletions });
+      if (!closed.has(child.dirPath)) walk(child.children, depth + 1);
+    }
+  };
+  walk(top, 0);
+  return rows;
+}
+
+/**
+ * The Committed item's description in the mode menu, as Paseo's computeCommittedDiffDescription:
+ * "branch -> base", nothing when either is unknown or they are the same branch.
+ * @param {string | null | undefined} branch @param {string | null | undefined} baseRef
+ */
+export function committedDescription(branch, baseRef) {
+  const base = baseRef ? baseLabel(baseRef) : '';
+  return branch && base && branch !== base ? `${branch} -> ${base}` : undefined;
+}
+
+/**
+ * The empty state's offer, as Paseo's computeChangesEmptyAction: none while whitespace is hidden;
+ * Committed with nothing in it but a dirty checkout offers Uncommitted; Uncommitted with nothing
+ * in it but commits ahead of the base offers Committed.
+ * @param {{ mode: string, ignoreWhitespace: boolean, status: { dirty?: boolean, aheadBehind?: { ahead: number } | null } | null | undefined }} input
+ * @returns {'uncommitted' | 'base' | null}
+ */
+export function changesEmptyAction({ mode, ignoreWhitespace, status }) {
+  if (ignoreWhitespace || !status) return null;
+  if (mode === 'base' && status.dirty) return 'uncommitted';
+  if (mode === 'uncommitted' && (status.aheadBehind?.ahead ?? 0) > 0) return 'base';
+  return null;
 }
