@@ -85,7 +85,10 @@ test('an address submitted before the Browser tab guest is ready loads once it i
   const address = desktop.getByTestId('browser-address');
   await address.fill('127.0.0.1:5173/early');
   await address.press('Enter');
-  // Not loaded, not thrown, not refused: it waits for the guest.
+  // Not loaded, not thrown, not refused: it waits for the guest. The guest's first about:blank,
+  // arriving meanwhile, leaves the submitted address in the bar (t-a5d8).
+  await desktop.evaluate(() => document.querySelector('webview').dispatchEvent(Object.assign(new Event('did-navigate'), { url: 'about:blank' })));
+  await expect(address).toHaveValue('http://127.0.0.1:5173/early');
   await expect(desktop.getByTestId('browser-error')).toHaveCount(0);
   expect(await desktop.evaluate(() => [window.__loads, window.__thrown])).toEqual([[], 0]);
   await desktop.evaluate(() => window.__readyAll());
@@ -190,6 +193,15 @@ test('an address typed before the guest\'s first page arrives is kept and loads 
   await expect(address).toHaveValue('http://127.0.0.1:5173/typed');
   await navigate('http://127.0.0.1:5173/next');
   await expect(address).toHaveValue('http://127.0.0.1:5173/next');
+  // Typing again, the page moves on: the bar keeps the typed text, and leaving the bar unsubmitted
+  // shows where the page is now (as Chrome).
+  await address.fill('half typed');
+  await navigate('http://127.0.0.1:5173/moved');
+  await expect(address).toHaveValue('half typed');
+  await address.blur();
+  await expect(address).toHaveValue('http://127.0.0.1:5173/moved');
+  await navigate('http://127.0.0.1:5173/after');
+  await expect(address).toHaveValue('http://127.0.0.1:5173/after');
   await marked.close();
 });
 
