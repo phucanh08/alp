@@ -21,6 +21,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { _electron } from 'playwright-core';
 import { fixtureProcesses } from '../../../test/support/fixture-processes.js';
+import { readToken } from '../../../packages/cli/src/dashboard-service.js';
 import { teardown } from '../../../test/support/teardown.js';
 import { hermeticEnv } from '../../../scripts/test-lib.mjs';
 import { spawnCommand } from '../../../scripts/spawn-command.mjs';
@@ -93,8 +94,10 @@ export function cleanEnv() {
 
 /**
  * A disposable alp dashboard host. `start(port)` runs the service on that dashboard.port and resolves once
- * dashboard.json names it; `stop()` ends it (SIGTERM, its graceful exit); `rotate()` replaces the token
- * the way `alp dashboard rotate` does (the service must be stopped).
+ * dashboard.json names it, with the token it hands over its token socket (no file holds it, t-cee3);
+ * `stop()` ends it (SIGTERM, its graceful exit); `rotate()` revokes every credential the way
+ * `alp dashboard rotate` does (the service must be stopped; the next `start()` mints a new token, as
+ * every start does).
  */
 export async function host(t, { dir, defer }) {
   const home = path.join(dir, 'home');
@@ -119,7 +122,9 @@ export async function host(t, { dir, defer }) {
         if (started.exitCode !== null) throw new Error(`alp-dashboard exited ${started.exitCode}:\n${await log()}`);
         const lock = await readJson(path.join(home, 'integrations', 'dashboard.lock')).catch(() => undefined);
         const info = await readJson(path.join(home, 'dashboard.json')).catch(() => undefined);
-        return lock?.ready && lock.pid === started.pid && info?.pid === started.pid ? info : undefined;
+        if (!(lock?.ready && lock.pid === started.pid && info?.pid === started.pid)) return undefined;
+        const answer = await readToken(home);
+        return answer.pid === started.pid ? { ...info, token: answer.token } : undefined;
       }, 'alp-dashboard to become ready');
       return self;
     },
@@ -136,7 +141,6 @@ export async function host(t, { dir, defer }) {
       const rotating = spawn(process.execPath, [SERVICE, '--rotate'], { env, stdio: 'ignore' });
       const [code] = await once(rotating, 'exit');
       if (code !== 0) throw new Error(`alp-dashboard --rotate exited ${code}:\n${await log()}`);
-      self.web = await readJson(path.join(home, 'dashboard.json'));
     },
   };
   defer(() => self.stop());
