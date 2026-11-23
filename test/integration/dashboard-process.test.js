@@ -374,6 +374,27 @@ test('stale web.json and a dead owner\'s web lock are replaced by a live alp-das
   assert.notEqual(printedUrl(served).token, `alpgw1.${'0'.repeat(16)}.${'A'.repeat(43)}`, 'a token without a credential is not reused');
 });
 
+test('--stop removes a token an older alp dashboard left in dashboard.json, and revokes it (t-cee3 review)', async t => {
+  const { home } = await createHome(t);
+  const first = await run(['dashboard', '--print'], home);
+  assert.equal(first.code, 0, first.stderr || first.stdout);
+  const { token } = printedUrl(first);
+  assert.equal((await run(['dashboard', '--stop'], home)).code, 0);
+  // What a beta.12 or older alp dashboard published: the token in plain text next to its address.
+  const info = await webJson(home);
+  await writeFile(path.join(home, 'dashboard.json'), JSON.stringify({ ...info, version: 2, token }), { mode: 0o600 });
+  const stopped = await run(['dashboard', '--stop'], home);
+  assert.equal(stopped.code, 0, stopped.stderr || stopped.stdout);
+  assert.match(stopped.stdout, /Removed the token an older alp dashboard left in dashboard\.json and revoked it\./);
+  assert.equal('token' in (await webJson(home)), false, 'the token left dashboard.json');
+  assert.deepEqual(await filesContaining(home, token), [], 'no file under the home holds the token');
+  // Revoked: the next start's gateway refuses it.
+  const next = await run(['dashboard', '--print'], home);
+  assert.equal(next.code, 0, next.stderr || next.stdout);
+  assert.equal(await ticketStatus(printedUrl(next).port, token), 401);
+  assert.equal((await run(['dashboard', '--stop'], home)).code, 0);
+});
+
 test('alp dashboard rotate replaces the token: the old one gets 401, never while the service writes', async t => {
   const { home } = await createHome(t);
   const first = await run(['dashboard', '--print'], home);

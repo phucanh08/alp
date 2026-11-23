@@ -236,10 +236,12 @@ phân biệt được trang của `alp dashboard` với bản tự phục vụ, 
   - Mỗi lần khởi động, service (`packages/cli/src/dashboard/main.js`, `grant.ensure`) tạo credential mới,
     thu hồi mọi credential khác trong `<home>/dashboard/credentials.json`, và giữ token trong bộ nhớ.
     `dashboard.json` (`version: 3`) không có khoá `token`; một `token` do bản cũ để lại bị xoá khỏi file
-    khi service khởi động (credential của nó bị thu hồi cùng lúc).
+    khi service khởi động hoặc khi chạy `alp dashboard --stop` (credential của nó bị thu hồi cùng lúc).
   - `alp dashboard [--print]` lấy token qua socket của service (`packages/cli/src/dashboard/token-socket.js`,
     phía client ở `packages/cli/src/dashboard-service.js`): client ghi một dòng `{"op":"token"}`, service
-    trả một dòng JSON `{token, credentialId, pid}` rồi đóng; client kiểm `pid` khớp với lock của service.
+    trả một dòng JSON `{token, credentialId, pid}` rồi đóng; client kiểm `pid` khớp với lock của service
+    (một kiểm tra nhất quán để bỏ qua socket cũ của service đã chết, không phải ranh giới bảo mật: ranh
+    giới là thư mục 0700).
     - macOS/Linux: socket Unix `<home>/dashboard/token.sock` (home có đường dẫn quá dài cho địa chỉ socket
       thì `<tmpdir>/alp-dashboard-<uid>-<hash>/token.sock`), mode 0600, trong thư mục của user mode 0700,
       tổ tiên không cho user khác ghi. Service kiểm cả hai ngay sau khi listen và **từ chối chạy** nếu sai;
@@ -253,8 +255,11 @@ phân biệt được trang của `alp dashboard` với bản tự phục vụ, 
       LocalSystem/Administrators, vốn đã làm chủ máy). Chưa kiểm trên máy Windows.
   - Agent read-only không lấy được token: nó đọc được `dashboard.json` nhưng file không có token, và
     sandbox của OS chặn nó kết nối tới socket Unix (Claude giữ mặc định chặn socket của SDK; Codex
-    read-only chạy không có mạng). `alp dashboard` còn từ chối process có `ALP_AGENT_SESSION` (t-1c59),
-    nhưng đó là dấu tự khai, không phải ranh giới.
+    read-only chạy không có mạng). Đã kiểm bằng session thật trên macOS (Claude và Codex read-only nhận
+    `EPERM` khi kết nối). **Linux chưa kiểm:** ở đó `connect()` tới socket Unix chỉ cần quyền ghi trên
+    file socket, mount chỉ đọc không chặn được; agent read-only chỉ bị chặn nếu sandbox của runtime chặn
+    kết nối `AF_UNIX` (seccomp/landlock) hay không cho thấy `<home>/dashboard`. `alp dashboard` còn từ
+    chối process có `ALP_AGENT_SESSION` (t-1c59), nhưng đó là dấu tự khai, không phải ranh giới.
   - **Ngoài phạm vi:** agent `full-access` (hay bất kỳ chương trình nào) chạy bằng chính tài khoản của
     user mà không có sandbox của OS kết nối được tới socket như user, nên lấy được token. Chặn việc đó cần
     tách uid; người dùng đã chấp nhận giới hạn này ở gate g2 của t-cee3.
