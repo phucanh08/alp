@@ -1,19 +1,21 @@
-// Opt-in: uses real models and an already running Paseo daemon with the rebuilt plugin.
+// Opt-in: uses real models and a declared scratch Paseo daemon with the rebuilt plugin (scratch-daemon.mjs).
+// It refuses the user's own daemon and ~/.alp before connecting or creating fixtures.
 // Scenarios: ask (question/answer), wake (idle requester woken by mail), steer (mail into a busy turn),
 // long (alp_ask and alp_wait held for minutes; ALP_TEST_WAIT_SECONDS, default 360).
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFile, readdir, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createPaseoApi } from '@getpaseo/client';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
 import { initProject } from '../../packages/core/src/init.js';
+import { readRunLog, requireScratchDaemon } from './scratch-daemon.mjs';
+
+const { url, runLogDir } = requireScratchDaemon();
 
 const scenario = process.argv[2] ?? 'ask';
 const provider = process.env.ALP_TEST_PROVIDER ?? 'alp/pho';
 const runtime = provider.includes('/claude:') ? 'claude' : 'codex';
-const runLogDir = process.env.ALP_RUN_LOG_DIR || path.join(homedir(), '.alp', 'runs');
 assert.ok(['ask', 'wake', 'steer', 'long'].includes(scenario));
 const waitSeconds = Number(process.env.ALP_TEST_WAIT_SECONDS ?? 360);
 
@@ -32,15 +34,9 @@ const prompts = {
 };
 
 const text = item => item?.text ?? '';
-async function runLog() {
-  for (const name of await readdir(runLogDir).catch(() => [])) {
-    const lines = (await readFile(path.join(runLogDir, name), 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
-    if (lines.some(line => line.project === root)) return lines;
-  }
-  return [];
-}
+const runLog = () => readRunLog(runLogDir, root);
 
-const driver = new DaemonClient({ url: process.env.ALP_TEST_PASEO_URL ?? 'ws://127.0.0.1:6767/ws', clientId: `alp-mailbox-${Date.now()}` });
+const driver = new DaemonClient({ url, clientId: `alp-mailbox-${Date.now()}` });
 const client = createPaseoApi(driver);
 let agent;
 try {
