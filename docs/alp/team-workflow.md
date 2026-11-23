@@ -138,6 +138,8 @@ commands, give the profile base `workspace-write` and start the session read-onl
   digits and `_ - . / = : , @ % +` (no `=` starting a word), `~` or `^` right after a letter or
   digit (`HEAD~1`, `HEAD^`), the separators above, and the redirects `2>&1`, `>&2`,
   `>/dev/null`, `2>/dev/null`; `'…'` with any text; and `"…"` with no `$`, backtick, `\` or `!`.
+  A shell wrapper (`/bin/zsh -lc '…'`, as Codex sends commands) is judged twice: the line as
+  given and the script inside must both be plain, and the shell's path is plain path characters.
   Any other line (`echo $HOME`, `ls *.js`, `cat ~/x`, `git diff HEAD@{1}`, `npm test # x`)
   gets no decision from a plain allow rule: ALP asks, or the mode refuses it. Quote the word
   to keep it allowed (`ls '*.js'` lists that name only; `git diff 'HEAD@{1}'` works).
