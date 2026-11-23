@@ -76,15 +76,26 @@ const withEffort = (model, effort) => {
 async function agentJsonChoice(sources, name, templates) {
   const source = sources.get(name);
   if (!source) return undefined;
-  const text = source.directory ? await optionalText(path.join(source.directory, 'agent.json')) : await builtinText(`agents/${name}/agent.json`, templates);
   let config;
-  try { config = text === undefined ? undefined : JSON.parse(text); } catch { return undefined; }
+  try {
+    const text = source.directory ? await optionalText(path.join(source.directory, 'agent.json')) : await builtinText(`agents/${name}/agent.json`, templates);
+    config = text === undefined ? undefined : JSON.parse(text);
+  } catch { return undefined; }
   if (typeof config?.model !== 'string' || !config.model.trim()) return undefined;
-  const prefixed = /^(codex|claude|antigravity|acp)[:/]/.exec(config.model);
-  const kind = typeof config.provider === 'string' ? config.provider : 'codex';
-  const model = prefixed ? `${prefixed[1]}:${config.model.slice(prefixed[0].length)}`
-    : ['codex', 'claude', 'antigravity', 'acp'].includes(kind) ? `${kind}:${config.model}` : `acp:${kind}/${config.model}`;
-  return { model, ...(typeof config.thinking === 'string' ? { thinking: config.thinking } : {}) };
+  return { model: runtimeModelId(typeof config.provider === 'string' ? config.provider : undefined, config.model), ...(typeof config.thinking === 'string' ? { thinking: config.thinking } : {}) };
+}
+
+/** A runtime-prefixed model ID from an agent.json, settings.json or team.json choice, as resolving a session reads one.
+ * @param {string | undefined} provider
+ * @param {string} model
+ * @returns {string}
+ */
+export function runtimeModelId(provider, model) {
+  const prefixed = /^(codex|claude|antigravity|acp)[:/]/.exec(model);
+  if (prefixed) return `${prefixed[1]}:${model.slice(prefixed[0].length)}`;
+  const kind = provider ?? 'codex';
+  // Another provider names an ACP provider of the library.
+  return ['codex', 'claude', 'antigravity', 'acp'].includes(kind) ? `${kind}:${model}` : `acp:${kind}/${model}`;
 }
 
 export async function projectProfiles({ root, library = userLibrary(), templates, runtime, teamIds } = {}) {

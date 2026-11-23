@@ -37,7 +37,7 @@ import { hookMatches } from '@anhlp/alp-core/hooks';
 import { isTrusted, trustProject } from '@anhlp/alp-core/trust';
 import { listTeams, teamOf } from '@anhlp/alp-core/teams';
 import { CONFIGURABLE, changesOf, effectiveOf, executablesOf, nativeModelOf, offered, type ConfigureChange, type ConfigureChanges, type EffectiveConfig } from './configure.js';
-import { anyModel, fitEffort, offers, profileModel, selectedProfile } from '@anhlp/alp-core/profiles';
+import { anyModel, fitEffort, offers, profileModel, runtimeModelId, selectedProfile } from '@anhlp/alp-core/profiles';
 import { LESSONS_FILE, resolveSession, skillDescription, type ResolvedSession, type RuntimeKind, type SessionSpec } from './resolve.js';
 import { MAIL_BODY_CHARS, MAIL_HEADER, publicEvent, renderMail, takeBatch, USER, type MailEvent } from './mailbox.js';
 import type { AlpEvent, AssignmentSnapshot, Envelope, SessionSnapshot, TurnOrigin, UserQuestion } from './events.js';
@@ -192,15 +192,6 @@ export class WorkspaceMutationError extends Error {
     this.name = 'WorkspaceMutationError';
     this.data = { reason };
   }
-}
-
-/** A runtime-prefixed model ID from an agent.json or team.json choice, as resolveSession reads one. */
-function runtimeModelId(provider: string | undefined, model: string) {
-  const prefixed = /^(codex|claude|antigravity|acp)[:/]/.exec(model);
-  if (prefixed) return `${prefixed[1]}:${model.slice(prefixed[0].length)}`;
-  const kind = provider ?? 'codex';
-  // Another provider names an ACP provider of the library.
-  return ['codex', 'claude', 'antigravity', 'acp'].includes(kind) ? `${kind}:${model}` : `acp:${kind}/${model}`;
 }
 
 export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
