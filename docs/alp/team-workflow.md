@@ -219,8 +219,9 @@ user.
 - **scout** finds code in the current workspace and returns one line per hit:
   `path:line — symbol — why`. A coordinator calls it instead of pulling a lot of
   unrelated source into its own context.
-- **librarian** researches external repositories. It clones them shallow into
-  `/tmp/alp-librarian*` and cites `repo@sha:path:line`.
+- **librarian** researches external repositories: it reads their source at a fixed SHA
+  through WebFetch (github.com, raw.githubusercontent.com, gitlab.com) and cites
+  `repo@sha:path:line`.
 
 In `pho-research` main may call both. In `cafe-research` lead may call both and
 main may call librarian only. Oracle may suggest that its coordinator run one of
@@ -230,13 +231,17 @@ a gate) on a coordinator that reads lots of unrelated source where scout could
 return locations, or asserts an external library's behaviour without evidence
 while librarian is available.
 
-Librarian's permission profile:
+Both run with the plain `read-only` profile the pack installs. Read-only Bash is
+offline (the OS sandbox), so librarian does not `git clone` or `git fetch`: it reads
+remote files with WebFetch, which read-only sessions keep on Claude (Codex has no
+WebFetch, so run librarian on Claude). A pack can only set a base mode for its agents
+(`permissions.<agent>` in pack.json), not allow/ask/deny rules, and a prefix rule such
+as `Bash(git -C /tmp/alp-librarian*)` would also match `git -C /tmp/alp-librarian/../<path>`;
+a clone path that is safe outside the sandbox is an open question.
 
-- base `read-only`;
-- allows `git clone`, `git fetch` and `git -C` on `/tmp/alp-librarian*`, and
-  `WebFetch` for `github.com`, `raw.githubusercontent.com` and `gitlab.com`;
-- asks before `gh repo clone` and any other host;
-- denies `git push`.
+A delegated advisor runs on the model its coordinator passes; without one it runs on
+the coordinator's own model, not on the model in its `agent.json`
+(`claude:haiku` for scout, `claude:claude-sonnet-5` for librarian).
 
 Scout keeps the plain read-only base.
 

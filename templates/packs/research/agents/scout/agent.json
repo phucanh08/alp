@@ -1,6 +1,6 @@
 {
   "description": "Cố vấn chỉ đọc: tìm code bên trong workspace và trả về danh sách vị trí path:line ngắn gọn",
   "mode": "read-only",
-  "model": "claude:claude-sonnet-5",
+  "model": "claude:haiku",
   "thinking": "low"
 }
