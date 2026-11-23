@@ -233,8 +233,8 @@ while librarian is available.
 
 Both run with the plain `read-only` profile the pack installs. Read-only Bash is
 offline (the OS sandbox), so librarian does not `git clone` or `git fetch`: it reads
-remote files with WebFetch, which read-only sessions keep on Claude (Codex has no
-WebFetch, so run librarian on Claude). A pack can only set a base mode for its agents
+remote files with WebFetch, which read-only sessions keep on Claude
+(`claude-transport.ts` readers); run librarian on Claude. A pack can only set a base mode for its agents
 (`permissions.<agent>` in pack.json), not allow/ask/deny rules, and a prefix rule such
 as `Bash(git -C /tmp/alp-librarian*)` would also match `git -C /tmp/alp-librarian/../<path>`;
 a clone path that is safe outside the sandbox is an open question.
@@ -242,8 +242,6 @@ a clone path that is safe outside the sandbox is an open question.
 A delegated advisor runs on the model its coordinator passes; without one it runs on
 the coordinator's own model, not on the model in its `agent.json`
 (`claude:haiku` for scout, `claude:claude-sonnet-5` for librarian).
-
-Scout keeps the plain read-only base.
 
 ## Parallel writers
 
