@@ -579,7 +579,7 @@ function ChangedFilesTree({ files, onOpen, onOpenFile, workspace, selected, onSe
             const open = !collapsed.includes(row.dirPath);
             const active = selected === row.dirPath;
             return (
-              <li key={`folder:${row.dirPath}`} role="treeitem" aria-expanded={open} aria-selected={active || undefined} data-testid="git-folder" data-path={row.dirPath}>
+              <li key={`folder:${row.dirPath}`} role="treeitem" aria-level={row.depth + 1} aria-expanded={open} aria-selected={active || undefined} data-testid="git-folder" data-path={row.dirPath}>
                 <button type="button" style={indent} title={row.dirPath} className={rowClass(active)} data-testid="git-folder-toggle"
                   onClick={() => { onSelect(row.dirPath); toggle(row.dirPath); }}
                   onContextMenu={event => { event.preventDefault(); onSelect(row.dirPath); setMenu({ path: row.dirPath, folder: true, at: { x: event.clientX, y: event.clientY } }); }}
@@ -607,7 +607,7 @@ function ChangedFilesTree({ files, onOpen, onOpenFile, workspace, selected, onSe
           const title = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
           const contextMenu = (event: React.MouseEvent) => { event.preventDefault(); onSelect(file.path); setMenu({ path: file.path, folder: false, at: { x: event.clientX, y: event.clientY } }); };
           return (
-            <li key={`file:${file.oldPath ?? ''}\n${file.path}`} role="treeitem" aria-selected={active || undefined}
+            <li key={`file:${file.oldPath ?? ''}\n${file.path}`} role="treeitem" aria-level={row.depth + 1} aria-selected={active || undefined}
               data-testid={onOpen ? 'git-file' : 'git-status-file'} data-path={file.path} data-change={file.change} data-kind={file.kind} data-old-path={file.oldPath}>
               {onOpen ? (
                 <button type="button" style={indent} title={title} className={rowClass(active)} data-testid="git-file-open"
@@ -615,7 +615,7 @@ function ChangedFilesTree({ files, onOpen, onOpenFile, workspace, selected, onSe
                   {content}
                 </button>
               ) : (
-                <div style={indent} title={title} tabIndex={0} className={cn(rowClass(active), 'cursor-default')} onClick={() => onSelect(file.path)} onContextMenu={contextMenu} onKeyDown={menuKeys({ path: file.path, folder: false })}>
+                <div role="button" aria-label={`${title}, ${CHANGE_LABELS[file.change as keyof typeof CHANGE_LABELS] ?? file.change}`} style={indent} title={title} tabIndex={0} className={cn(rowClass(active), 'cursor-default')} onClick={() => onSelect(file.path)} onContextMenu={contextMenu} onKeyDown={menuKeys({ path: file.path, folder: false })}>
                   {content}
                 </div>
               )}
@@ -753,7 +753,7 @@ function GitPanel({ variant, onOpenDiff, onPicked }: { variant: 'changes' | 'dif
       body = (
         <>
           <p className="flex items-start gap-1.5 px-3 py-2 text-xs text-muted-foreground" data-testid="git-content-forbidden"><Lock aria-hidden className="mt-0.5 size-3.5 shrink-0" />{access.contentMessage}</p>
-          {current.files.length ? <ChangedFilesTree files={current.files} workspace={app.workspace ?? ''} selected={selected} onSelect={setSelected} />
+          {current.files.length ? <ChangedFilesTree key={scope} files={current.files} workspace={app.workspace ?? ''} selected={selected} onSelect={setSelected} />
             : <div className={centerState} data-testid="git-empty"><p className="text-sm text-muted-foreground">No changes to display</p></div>}
           <Hidden count={current.hiddenCount} />
           {current.truncated ? <p className="px-3 py-2 text-xs text-muted-foreground" data-testid="git-truncated">Only the first {current.files.length} changed files are shown.</p> : null}
@@ -779,7 +779,7 @@ function GitPanel({ variant, onOpenDiff, onPicked }: { variant: 'changes' | 'dif
             <ul aria-label="Changed files">
               {files.map(file => <DiffFileRow key={`${file.oldPath ?? ''}\n${file.path}`} file={file} open={open.includes(file.path)} layout={shared.layout} onToggle={() => toggle(file.path)} onOpenDiff={onOpenDiff ? () => openDiff(file.path) : undefined} />)}
             </ul>
-          ) : <ChangedFilesTree files={files} onOpen={openDiff} onOpenFile={path => { openFile(path); onPicked?.(); }} workspace={app.workspace ?? ''} selected={selected} onSelect={setSelected} />}
+          ) : <ChangedFilesTree key={scope} files={files} onOpen={openDiff} onOpenFile={path => { openFile(path); onPicked?.(); }} workspace={app.workspace ?? ''} selected={selected} onSelect={setSelected} />}
           <Hidden count={diff.diff?.hiddenCount ?? 0} />
           {diff.diff?.nextCursor ? (
             <button type="button" onClick={diff.loadMore} disabled={diff.more} className={cn('mx-3 my-2 self-start rounded-md px-2 py-1 text-xs text-highlight hover:bg-secondary disabled:opacity-60', focusRing)} data-testid="git-load-more">

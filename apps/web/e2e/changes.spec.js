@@ -79,6 +79,8 @@ test('with files.read: the branch, the changed files as a tree with counts and c
   await expect(tree.locator('[role="treeitem"]').first()).toHaveAttribute('data-path', 'docs');
   await expect(tree.locator('[data-testid="git-folder"][data-path="src"]').getByTestId('git-folder-stat')).toHaveText('+2-1');
   await expect(file(panel, 'src/cart.ts')).toHaveAttribute('data-change', 'modified');
+  await expect(tree.locator('[data-testid="git-folder"][data-path="src"]')).toHaveAttribute('aria-level', '1');
+  await expect(file(panel, 'src/cart.ts')).toHaveAttribute('aria-level', '2');
   await expect(file(panel, 'src/cart.ts').getByTestId('git-file-stat')).toHaveText('+2-1');
   await expect(file(panel, 'src/cart.ts').getByTestId('git-change-icon')).toHaveAttribute('data-kind', 'modified');
   await expect(file(panel, 'src/cart.ts').locator('img')).toHaveAttribute('src', /^data:image\/svg\+xml/);
