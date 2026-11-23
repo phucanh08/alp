@@ -425,7 +425,10 @@ run one at a time, across all sessions; writing peers can run in parallel in the
 git worktrees (`isolation: "worktree"`) and are merged with `alp_merge`. Oracle runs
 on Fable (`claude:claude-fable-5-1`) or Astra (`codex:gpt-6-astra`); main may ask
 both in parallel for two opinions. Runtime catalog and available plan/usage snapshots
-inform coordination. See [team configuration and migration](docs/alp/team-workflow.md).
+inform coordination. The optional Research pack adds read-only librarian (external
+repositories) and scout (code locations) advisors and the `pho-research` and
+`cafe-research` teams that use them, leaving Phở and Cafe unchanged:
+`alp pack install research`. See [team configuration and migration](docs/alp/team-workflow.md).
 
 ## Modular monorepo development
 
