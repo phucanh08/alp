@@ -210,6 +210,12 @@ test('ALP.app on macOS: the sidebar and explorer toggles stay in the top row as 
   const start = { sidebar: await at(sidebar), explorer: await at(explorer) };
   // The explorer toggle at the window's right edge, in the explorer's tab row, which keeps it a slot.
   expect(start.explorer[0]).toBe(1440 - 6 - 32);
+  // The sidebar toggle where a leftmost header's would be: the lights' room (titlebar-area-x, 0.75rem
+  // here: the stub has no env() values) and the header's gap, less its -0.375rem; over the sidebar's top row.
+  expect(start.sidebar).toEqual([12 + 8 - 6, 2]);
+  // The tab row's + ends before the explorer toggle's slot: nothing in the row is under the toggle.
+  const plus = await page.getByTestId('workspace-new-tab-button').boundingBox();
+  expect(plus.x + plus.width).toBeLessThanOrEqual(start.explorer[0]);
   await expect(page.getByRole('complementary', { name: 'Explorer' }).getByTestId('window-explorer-toggle-slot')).toHaveCount(1);
   await expect(page.locator('main header').getByRole('button', { name: /sessions$/ })).toHaveCount(0);
 

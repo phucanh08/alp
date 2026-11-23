@@ -26,7 +26,7 @@ import { ErrorBoundary, PaneErrorFallback } from './ErrorBoundary';
 import { useAppState, useController } from './store';
 import { readFacts } from '../lib/sidebar-facts.js';
 import { tabKey, useTabs, type Tab } from './tabs';
-import { HeaderExplorerToggle, HeaderSidebarToggle } from './WindowChrome';
+import { HeaderExplorerToggle, HeaderInset, HeaderSidebarToggle } from './WindowChrome';
 
 const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-ring';
 const headerButton = cn('flex size-8 shrink-0 items-center justify-center rounded-lg text-extra-muted hover:bg-secondary hover:text-foreground [&_svg]:size-[18px]', focusRing);
@@ -89,8 +89,9 @@ export function WorkspaceHeader({ navOpen, onToggleNav, explorerOpen, onToggleEx
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-background px-2 md:h-9 md:px-3">
       {/* ALP.app on macOS: room for the traffic lights when this header starts the window's top row, and the window's toggles (WindowChrome.tsx). */}
+      <HeaderInset navOpen={navOpen} />
       <div className="flex min-w-0 flex-1 items-center gap-1 md:gap-2">
-        <HeaderSidebarToggle navOpen={navOpen} onToggleNav={onToggleNav} />
+        <HeaderSidebarToggle navOpen={navOpen} onToggleNav={onToggleNav} inset={false} />
         <div className="flex min-w-0 flex-1 flex-col md:flex-none md:flex-row md:items-center md:gap-2">
           <h1 className="min-w-0 truncate text-sm font-normal text-foreground md:font-light" title={title} data-testid="workspace-header-title">{title}</h1>
           {root && workspace ? <span className="min-w-0 truncate text-xs text-muted-foreground md:text-sm" title={workspace}>{baseName(workspace)}</span> : null}
