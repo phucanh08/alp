@@ -1,15 +1,11 @@
 # ALP 0.0.1-beta.12 — release notes
 
-> **DRAFT (t-81b0.14, t-a5d8).** Lines marked `TODO(lead)` must be resolved, and this banner
-> removed, before the bump PR merges.
-
-Prepared 2026-11-23 from the commits `v0.0.1-beta.11..2124587b` (`TODO(lead): extend the range to
-the release SHA once t-81b0.14 and t-a5d8 are merged, and name the task that bumps the version`).
-npm (8 packages, `beta` tag) and the GitHub release (archives, installers and the two macOS DMGs)
+Prepared 2026-11-23 from the commits `v0.0.1-beta.11..a040dba8` (task t-a5d8 G4 bumped the
+version). npm (8 packages, `beta` tag) and the GitHub release (archives, installers and the two macOS DMGs)
 carry the same version from one main SHA, as in beta.11. Release acceptance runs the repository's
 fake Codex and fake Claude on the packed tarballs; macOS decides it, Linux and Windows are
 reported. **The gate's real-provider rows (§6.1 of [beta-scope.md](beta-scope.md)) were not run
-for beta.12;** none of them is claimed as passed here (`TODO(lead): confirm at release time`). The
+for beta.12;** none of them is claimed as passed here. The
 known R1 (Codex) failure is unchanged (below).
 
 This release continues the dashboard and ALP.app parity with Paseo, now compared with Paseo
@@ -78,11 +74,12 @@ changes (6c85c7d2); every package's `NOTICE` carries the icon attribution with t
   blank page arrived a moment later and wiped what had been typed, so Enter did nothing (the
   intermittent desktop e2e failure since beta.11). Leaving the address bar unsubmitted now shows
   the page's address again, as in Chrome.
-- `TODO(lead): t-a5d8 part b — Windows alpd lock after a crash (ALP_LOCK_HELD while Windows reuses
-  the dead alpd's pid): fill in once its PR merges, or move it to Known issues if beta.12 ships
-  without it.`
-- `TODO(lead): unplaced commits — none in the range check (all 18 commits of
-  v0.0.1-beta.11..2124587b are placed above); re-check every commit added after 2124587b.`
+- **Windows: alpd starts again after a crash** (t-a5d8, #376): Windows soon gives a dead process's
+  pid to another program, and the next alpd then refused to start ("ALP daemon already running",
+  `ALP_LOCK_HELD`) for as long as that program ran. On Windows alpd now also holds
+  `alpd.lock.held` open while it runs; Windows closes it when alpd exits, however it exits, so a
+  reused pid no longer counts as a running alpd. A lock written by an older alpd is judged as
+  before. macOS and Linux are unchanged.
 
 Known issues, carried from beta.11:
 
