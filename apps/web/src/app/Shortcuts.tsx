@@ -1,14 +1,25 @@
 import * as React from 'react';
 import { Search } from 'lucide-react';
 import { Dialog } from '../components/ui/dialog';
-import { helpSections, isEditable, isMacPlatform, matchShortcut, type Binding } from '../lib/shortcuts.js';
+import { helpSections, isEditable, isMacPlatform, matchShortcut, NOT_SET, setShortcutOverrides, type Binding } from '../lib/shortcuts.js';
 import { isDesktopApp } from '../lib/browser-url.js';
+import { useAppState } from './store';
 
 /*
  * Paseo's keyboard shortcuts for the workspace: one window listener that maps a key press to an
  * action of the shell (lib/shortcuts.js holds the bindings), and the "Shortcuts" dialog that
  * Shift+? opens (packages/app/src/components/keyboard-shortcuts-dialog.tsx).
  */
+
+/**
+ * Applies the user's keys (Settings › Shortcuts, preferences.shortcutOverrides) to every shortcut:
+ * the window listener, the dialog and the hints read them from lib/shortcuts.js. Called by the app
+ * root while it renders, so the components under it render with the current keys.
+ */
+export function useShortcutOverrides() {
+  const { preferences } = useAppState();
+  setShortcutOverrides(preferences.shortcutOverrides);
+}
 
 export type ShortcutAction = (binding: Binding, index?: number) => boolean | void;
 
@@ -67,6 +78,8 @@ export function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () 
   const mac = React.useMemo(() => isMacPlatform(), []);
   const desktop = React.useMemo(() => isDesktopApp(), []);
   React.useEffect(() => { if (!open) setQuery(''); }, [open]);
+  // The user's keys: the dialog renders on its own state, the overrides come from the app root.
+  useAppState();
   const sections = helpSections(mac, query, desktop);
   return (
     <Dialog open={open} onClose={onClose} title="Shortcuts" className="w-[min(92vw,36rem)]">
@@ -87,7 +100,8 @@ export function ShortcutsDialog({ open, onClose }: { open: boolean; onClose: () 
                     <span className="block text-sm text-foreground">{row.label}</span>
                     {'note' in row && row.note ? <span className="mt-0.5 block text-xs text-muted-foreground">{row.note}</span> : null}
                   </span>
-                  <kbd className="shrink-0 rounded-md bg-secondary/60 px-1.5 py-0.5 font-sans text-xs text-muted-foreground">{row.keys}</kbd>
+                  {row.keys === NOT_SET ? <span className="shrink-0 text-xs text-muted-foreground">{row.keys}</span>
+                    : <kbd className="shrink-0 rounded-md bg-secondary/60 px-1.5 py-0.5 font-sans text-xs text-muted-foreground">{row.keys}</kbd>}
                 </div>
               ))}
             </div>

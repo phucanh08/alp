@@ -10,7 +10,7 @@ import { cn } from '../../lib/utils';
  */
 
 export type Page =
-  | 'general' | 'appearance' | 'sidebar' | 'chat' | 'terminal' | 'editor' | 'files' | 'notifications' | 'diagnostics' | 'about'
+  | 'general' | 'appearance' | 'sidebar' | 'chat' | 'terminal' | 'editor' | 'files' | 'shortcuts' | 'notifications' | 'diagnostics' | 'about'
   | 'host' | 'projects' | 'connections' | 'alp-templates' | 'alp-agents' | 'alp-skills' | 'alp-hooks' | 'alp-mcp'
   | 'workspaces' | 'providers' | 'usage' | 'terminals';
 

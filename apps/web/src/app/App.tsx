@@ -10,7 +10,7 @@ import { SidePanel, useDock } from './SidePanel';
 import { Sidebar, type SettingsTarget } from './Sidebar';
 import { useAppState, useController } from './store';
 import { HistoryScreen } from './History';
-import { ShortcutsDialog, useDesktopCloseFallback, useShortcuts } from './Shortcuts';
+import { ShortcutsDialog, useDesktopCloseFallback, useShortcutOverrides, useShortcuts } from './Shortcuts';
 import { TabsProvider, tabKey, useTabs, type Tab } from './tabs';
 import { can } from '../lib/gateway.js';
 import { applyAppearance, applyTheme } from '../lib/theme';
@@ -559,6 +559,7 @@ export function App() {
   React.useLayoutEffect(() => applyAppearance({ uiFontFamily, monoFontFamily, uiFontSize, contentFontSize, codeFontSize, contentMaxWidth }),
     [uiFontFamily, monoFontFamily, uiFontSize, contentFontSize, codeFontSize, contentMaxWidth]);
   useDesktopCloseFallback();
+  useShortcutOverrides();
   const connected = !!principal && (connection.phase === 'open' || connection.phase === 'reconnecting');
   return connected ? <Shell /> : <ConnectScreen />;
 }

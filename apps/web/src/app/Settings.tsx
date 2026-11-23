@@ -2,7 +2,7 @@ import * as React from 'react';
 import {
   ArrowDown, ArrowLeft, ArrowUp, Ban, Bell, BookOpen, Bot, Boxes, CalendarClock, ChevronRight, CircleCheck, Code, Files as FilesIcon, FolderGit2, Gauge, History, Info,
   ListChecks, MessageSquare, Network, PanelLeft, Palette, Plug, Plus, Search, Server, Settings as SettingsIcon, SquareTerminal,
-  Github, Stethoscope, Users, Webhook,
+  Github, Keyboard, Stethoscope, Users, Webhook,
 } from 'lucide-react';
 import { can } from '../lib/gateway.js';
 import { describe } from '../lib/errors.js';
@@ -23,6 +23,7 @@ import { sendTestNotification, useNotificationPermission } from './attention';
 import { Row, Section, Select, focusRing, type Page } from './settings/parts';
 import { ProjectsPage, ProvidersPage, TerminalsPage, UsagePage, WorkspacesPage } from './settings/HostPages';
 import { EditorPage, LibraryPage } from './settings/LibraryPages';
+import { ShortcutsPage } from './settings/ShortcutsPage';
 
 /*
  * Settings as the old ALP web (the Paseo fork) lays them out: a full screen with its own sidebar
@@ -45,6 +46,8 @@ const APP_PAGES: Array<{ id: Page; label: string; icon: Icon }> = [
   { id: 'terminal', label: 'Terminal', icon: SquareTerminal },
   { id: 'editor', label: 'Editor', icon: Code },
   { id: 'files', label: 'Files', icon: FilesIcon },
+  // Paseo's Settings › Shortcuts (keyboard-shortcuts-section.tsx): rebind, clear and reset the keys.
+  { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
   // Paseo's Notifications page (desktop-notifications-section.tsx); ALP's browser has it too.
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'diagnostics', label: 'Diagnostics', icon: Stethoscope },
@@ -665,6 +668,7 @@ function PageContent({ page, mobile, onNavigate }: { page: Page; mobile: boolean
     case 'chat': return <Chat />;
     case 'terminal': return <Terminal />;
     case 'files': return <Files />;
+    case 'shortcuts': return <ShortcutsPage />;
     case 'notifications': return <NotificationsSection />;
     case 'editor': return <EditorPage />;
     case 'diagnostics': return <Diagnostics />;
