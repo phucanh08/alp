@@ -15,8 +15,9 @@
   allow rule: ALP asks, or the mode refuses. Deny rules and checked `Bash(@…)` rules are
   unchanged. A shell wrapper counts only when both the line and its script are plain and its
   shell is a bare `sh`/`bash`/`zsh`/`dash` or one in `/bin`, `/usr/bin`, `/usr/local/bin` or
-  `/opt/homebrew/bin`: before, `/bin/echo;touch X;/bin/sh -c 'echo hi'` was read as `echo hi`. Every profile with a Bash allow rule is affected (custom agents, user profiles,
-  lead/peer/main when given one); the built-in reviewer, oracle and supervisor profiles have none.
+  `/opt/homebrew/bin`: before, `/bin/echo;touch X;/bin/sh -c 'echo hi'` was read as `echo hi`.
+  Every profile with a Bash allow rule is affected (custom agents, user profiles, lead/peer/main
+  when given one); the built-in reviewer, oracle and supervisor profiles have none.
   The rule and the list are in [team-workflow.md](team-workflow.md) ("Permission profiles").
 
 # ALP 0.0.1-beta.12 — release notes
