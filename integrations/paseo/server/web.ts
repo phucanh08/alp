@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { chmod, link, lstat, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, readFile, rename, rmdir, unlink, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
@@ -243,6 +243,8 @@ export async function serveToken({ home, answer, afterListen }: {
     for (const socket of connections) socket.destroy();
     await new Promise(resolve => server.close(() => resolve(undefined)));
     if (posix) await unlink(socketPath).catch(() => {});
+    // The /tmp directory of a long home's socket goes with it (only when empty); the credential directory stays.
+    if (posix && path.dirname(socketPath) !== credentialDir(home)) await rmdir(path.dirname(socketPath)).catch(() => {});
   };
   // The socket is created 0600 (umask), then chmod'ed: no moment where it is wider.
   const umask = posix ? process.umask(0o077) : 0;

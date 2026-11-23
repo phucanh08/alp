@@ -41,9 +41,15 @@ async function fakeIntegration(t, answers) {
       socket.end(`${JSON.stringify(answers[line] ?? {})}\n`);
     });
   });
-  await new Promise(resolve => server.listen(paseoTokenSocketPath(home), resolve));
+  // A home whose socket path is too long (a long TMPDIR, as on macOS CI) is served under /tmp.
+  const socketPath = paseoTokenSocketPath(home);
+  if (path.dirname(socketPath) !== path.join(home, 'paseo')) {
+    await mkdir(path.dirname(socketPath), { recursive: true, mode: 0o700 });
+    defer(() => rm(path.dirname(socketPath), { recursive: true, force: true }));
+  }
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
   defer(() => new Promise(resolve => server.close(resolve)));
-  await chmod(paseoTokenSocketPath(home), 0o600);
+  await chmod(socketPath, 0o600);
   return { home, requests };
 }
 
@@ -70,7 +76,7 @@ test('t-cde5: readPaseoToken refuses a socket that is not 0600 in a 0700 directo
   const socketPath = path.join(shared, 'token.sock');
   const answered = [];
   const server = net.createServer(socket => { answered.push(socket); socket.end(`${JSON.stringify({ token: 'a'.repeat(64) })}\n`); });
-  await new Promise(resolve => server.listen(socketPath, resolve));
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
   defer(() => new Promise(resolve => server.close(resolve)));
   await chmod(socketPath, 0o600);
   await chmod(shared, 0o755);

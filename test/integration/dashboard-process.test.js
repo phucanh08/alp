@@ -1005,7 +1005,9 @@ test('alp dashboard pair prints the password it gets over the token socket; --ro
   assert.deepEqual((await filesContaining(home, legacy)).map(file => path.relative(home, file)), [path.join('paseo', 'token.json')], 'the password is only in the credential directory');
   if (process.platform !== 'win32') {
     assert.equal((await stat(path.join(home, 'paseo'))).mode & 0o777, 0o700);
-    const socket = await stat(path.join(home, 'paseo', 'token.sock'));
+    // <home>/paseo/token.sock, or under /tmp for a home whose path is too long (macOS CI's TMPDIR).
+    const { paseoTokenSocketPath } = await import('../../packages/cli/src/interfaces.js');
+    const socket = await stat(paseoTokenSocketPath(home));
     assert.equal(socket.isSocket() && (socket.mode & 0o777) === 0o600, true, 'the token socket is 0600');
   }
 
