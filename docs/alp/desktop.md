@@ -34,7 +34,15 @@ Controls Overlay: trang biết nút ở đâu qua `navigator.windowControlsOverl
   (`button`, `a`, `input`, `[role=tab]`, `[tabindex]`, `[role=separator]`…) là `no-drag`.
 - Sidebar (và sidebar của Settings) có một hàng trống 36px trên cùng cho ba nút; header nằm sát mép trái
   (sidebar đóng) chừa `titlebar-area-x`.
-- Toàn màn hình: ba nút ẩn, overlay báo không hiển thị, `env()` không còn giá trị, mọi khoảng chừa về 0.
+- Hai nút bật/tắt của hàng trên cùng thuộc về cửa sổ, như titlebar desktop của Paseo
+  (`app/_layout.tsx` `WindowSidebarMenuToggle`, `screens/workspace/workspace-explorer-toggle.tsx`
+  `titlebarAction`; apps/web `WindowChrome.tsx`, `lib/window-controls.js`): nút sidebar ngay sau ba nút
+  (x ≈ 87px), nút panel phải ở mép phải cửa sổ, trong hàng tab Files/Changes khi panel mở và cuối
+  header khi panel đóng. Đóng/mở sidebar hay panel thì hai nút đứng yên (và giữ focus); header chỉ chừa
+  một ô trống chỗ nút đè lên. Chỉ khi overlay hiển thị và panel được dock (cửa sổ ≥ 768px cho sidebar,
+  ≥ 1024px cho panel phải, ở màn hình workspace, Settings không mở); còn lại header tự vẽ nút như trước.
+- Toàn màn hình: ba nút ẩn, overlay báo không hiển thị, `env()` không còn giá trị, mọi khoảng chừa về 0,
+  hai nút bật/tắt về lại header.
 - Trình duyệt, hay một ALP.app cũ còn thanh tiêu đề: không có overlay, trang y như trước.
 - Trang nội bộ (`src/pages/page.css`) cũng có dải kéo trên cùng.
 

@@ -31,6 +31,8 @@ import { TasksScreen } from './TasksScreen';
 import { SchedulesScreen } from './SchedulesScreen';
 import { paneIds, type Direction } from '../lib/panes.js';
 import { ResizeHandle, usePanelWidth } from './ResizeHandle';
+import { WindowExplorerToggle, WindowSidebarToggle, WindowTogglesContext, useWindowControlsVisible } from './WindowChrome';
+import { windowToggles } from '../lib/window-controls.js';
 
 function useMedia(query: string) {
   const subscribe = React.useCallback((listener: () => void) => {
@@ -393,6 +395,9 @@ function Shell() {
   // The explorer's room is the window less the docked sidebar (Paseo's container width).
   const dockWidth = usePanelWidth('dock', medium && navShown ? sidebarWidth.width : 0);
   const explorerShown = wide ? !explorerHidden : panelOpen;
+  // ALP.app on macOS: the top row's toggles belong to the window, as Paseo's titlebar (WindowChrome.tsx).
+  const windowControls = useWindowControlsVisible();
+  const toggles = React.useMemo(() => windowToggles({ overlay: windowControls, medium, wide, workspace: !away, settings: !!settings }), [windowControls, medium, wide, away, settings]);
   React.useEffect(() => {
     if (!navOpen && !panelOpen) return;
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') { setNavOpen(false); setPanelOpen(false); } };
@@ -472,7 +477,9 @@ function Shell() {
 
   return (
     <TabsProvider>
+    <WindowTogglesContext.Provider value={toggles}>
     <div className="flex h-dvh overflow-hidden" {...(settings ? { inert: true, 'aria-hidden': true } : {})}>
+      {toggles.sidebarToggle ? <WindowSidebarToggle navOpen={navShown} onToggleNav={toggleNav} /> : null}
       {/* Navigation: a docked column from md up, a drawer below. */}
       {!medium && navOpen ? <div className="fixed inset-0 z-30 bg-black/60" aria-hidden onClick={() => setNavOpen(false)} /> : null}
       {medium && navHidden ? null : (
@@ -517,6 +524,7 @@ function Shell() {
         <Notices />
       </main>
 
+      {toggles.explorerToggle ? <WindowExplorerToggle explorerOpen={explorerShown} onToggleExplorer={toggleExplorer} /> : null}
       {explorerShown && !away ? (
         <>
           {!wide ? <div className="fixed inset-0 z-30 bg-black/60" aria-hidden onClick={() => setPanelOpen(false)} /> : null}
@@ -538,6 +546,7 @@ function Shell() {
       <ShellShortcuts settings={!!settings} history={away} splits={medium} onAction={onShortcut} />
     </div>
     {settings ? <div className="fixed inset-0 z-50" data-modal-overlay><SettingsScreen mobile={!medium} initialPage={typeof settings === 'string' ? settings : undefined} onClose={() => setSettings(false)} /></div> : null}
+    </WindowTogglesContext.Provider>
     </TabsProvider>
   );
 }
