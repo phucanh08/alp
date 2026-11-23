@@ -465,7 +465,7 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
   // public clone): ALP verifies it in commandDecision before it leaves (t-cde5 g4). Nothing else leaves.
   const checked = rules?.allow.filter(rule => /^Bash\(\s*@/.test(rule.trim())) ?? [];
   // Only a plain command line leaves: one a shell wrapper hides (sh -c '…') never does, whatever it covers.
-  const checkedOnly = (command: string) => Boolean(rules && checked.length) && !/[\r\n]/.test(command) && unwrapShell(command) === command.trim() && commandDecision({ ...rules!, allow: checked }, command) === 'allow';
+  const checkedOnly = (command: string) => Boolean(rules && checked.length) && !/[\r\n\0]/.test(command) && unwrapShell(command) === command.trim() && commandDecision({ ...rules!, allow: checked }, command) === 'allow';
   // A skill only adds instructions; what they lead to is checked as itself (ALPD §59).
   const readers = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Skill'];
   return {

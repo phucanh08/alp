@@ -207,7 +207,9 @@ export function simpleCommands(line) {
     // A `#` that starts a word begins a comment the shell skips: what follows (a quote, a new line) is read
     // differently by the shell than here, so no rule can vouch for the line (t-cde5 review).
     if (char === '#' && (i === 0 || /[\s;|&()]/.test(line[i - 1]))) return null;
-    if (char === '`' || (char === '$' && line[i + 1] === '(') || ((char === '<' || char === '>') && line[i + 1] === '(')) return null;
+    // Any unquoted `(`: command and process substitution, zsh's `=(…)` and glob qualifiers `*(e:…)`, subshells.
+    // ALP cannot say what such a line runs, so no rule vouches for it (t-cde5 review).
+    if (char === '`' || char === '(') return null;
     const two = line.slice(i, i + 2);
     // 2>&1 and &>file redirect; they do not end a command.
     if (two === '>&' || two === '<&' || two === '&>') { current += two; i++; continue; }
