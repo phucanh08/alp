@@ -440,7 +440,7 @@ Ghi lại các session id và kết quả vào §6.4.
 | W1 | `alp daemon start`; `paseo plugin add "/tmp/alp-beta/consumer/node_modules/@anhlp/alp-paseo"` (đường dẫn tuyệt đối) | thêm được plugin |
 | W2 | `paseo plugin ls`; `paseo provider models alp` | `alp-provider` đang chạy; có Phở và Cafe |
 | W3 | Trong Paseo: tạo session ALP · Phở ở `/tmp/alp-beta/project`, gửi prompt dài, bấm Stop | stream; Stop dừng turn; prompt tiếp theo chạy được |
-| W4 | Dùng profile ở C6; trong Paseo gửi "Chạy đúng lệnh: touch w4-once.txt" → Allow once, rồi "touch w4-deny.txt" → Deny | câu hỏi quyền hiện thành question card trong Paseo; `w4-once.txt` có, `w4-deny.txt` không có |
+| W4 | Dùng profile ở C6 (base `workspace-write`); tạo session Paseo mới với chế độ quyền "Read only" (như `--mode read-only` của C6), rồi gửi "Chạy đúng lệnh: touch w4-once.txt" → Allow once, rồi "touch w4-deny.txt" → Deny | câu hỏi quyền hiện thành question card trong Paseo; `w4-once.txt` có, `w4-deny.txt` không có |
 | W5 | Tasks panel: thêm, đóng, mở lại một task | `.alp/tasks` đổi đúng; panel làm mới |
 | W6 | `alp web --print` (service `alp-web`, không cần plugin); mở địa chỉ trên máy đó (Linux headless: `ssh -L <port>:127.0.0.1:<port> <host>`, mở trên máy mình) | in `http://127.0.0.1:<port>/#token=alpgw1.…`; `GET /` trả app; `POST /v1/tickets` trả 401 khi không có token hoặc token sai, 201 với token đã in (`scripts/beta-acceptance-web.mjs`); trên trình duyệt thấy project và session của W3, hỏi đáp và Tasks hoạt động |
 

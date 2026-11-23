@@ -77,9 +77,11 @@ try {
 
     await run.step('W4', 'permission question in Paseo (C6 profile)', async () => {
       const original = readFileSync(settingsFile, 'utf8');
-      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(original), permissions: { profiles: { review: { base: 'read-only', ask: ['Bash(touch *)'], beyondMode: 'ask' } }, agents: { main: 'review' } } }, null, 2));
+      // As C6: a workspace-write profile and a session started read-only. A read-only profile keeps
+      // every command in the read-only sandbox, so an approved write could not run (t-cde5 g3).
+      writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(original), permissions: { profiles: { review: { base: 'workspace-write', ask: ['Bash(touch *)'], beyondMode: 'ask' } }, agents: { main: 'review' } } }, null, 2));
       try {
-        await manual(run, 'W4', `The project now has the C6 profile. In a NEW Paseo session (ALP · Phở, ${project}) send:\n  Tự chạy đúng một lệnh shell này, không giao cho ai: \`touch w4-once.txt\`. Nếu bị từ chối thì báo lại.\nAnswer the question card with "${CHOICES.once.join('" / "')}". Then send the same with w4-deny.txt and answer "${CHOICES.deny.join('" / "')}".`,
+        await manual(run, 'W4', `The project now has the C6 profile. In a NEW Paseo session (ALP · Phở, ${project}), with the permission mode set to "Read only" before the first prompt, send:\n  Tự chạy đúng một lệnh shell này, không giao cho ai: \`touch w4-once.txt\`. Nếu bị từ chối thì báo lại.\nAnswer the question card with "${CHOICES.once.join('" / "')}". Then send the same with w4-deny.txt and answer "${CHOICES.deny.join('" / "')}".`,
           'each time a question card with Allow once and Deny appears in Paseo; the answer reaches the agent, which reports it ran or was refused');
         const once = existsSync(path.join(project, 'w4-once.txt'));
         const deny = existsSync(path.join(project, 'w4-deny.txt'));

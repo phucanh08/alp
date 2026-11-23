@@ -214,12 +214,19 @@ socat on Linux.
 - A session whose profile has base `read-only` never leaves it: oracle, reviewer,
   the supervisor, read-only team members, a review copy, and a user's read-only
   profile. Claude ignores `dangerouslyDisableSandbox` there, so its allow rules and
-  the commands the user approves run inside the floor, without writes or network.
+  the commands the user approves run inside the floor, without network; they write
+  nothing but temporary files, and a review copy writes only its copy.
   Outside the sandbox nothing would keep such a session from the Paseo credentials
   (t-cde5). A session merely started read-only, under a wider profile or none,
-  keeps the way out, which it needs once switched to a wider mode.
+  keeps the way out, which it needs once switched to a wider mode. Such a session
+  is not protected from the Paseo credentials: Claude lets a Bash allow rule's
+  command leave the sandbox without asking ALP, so give it `ask` rules rather than
+  allow rules.
 - Without the sandbox (another OS, or Linux without bubblewrap), sessions behave
-  as before, and `ALP_CLAUDE_SANDBOX=0` turns it off.
+  as before, and `ALP_CLAUDE_SANDBOX=0` turns it off. The protection of a
+  read-only profile from the Paseo credentials needs the floor: with none (Windows,
+  Linux without bubblewrap, `ALP_CLAUDE_SANDBOX=0`), a user read-only profile's
+  Bash allow rules run unsandboxed and nothing checks them.
 
 Read-only Claude assignments retain Read, Glob and Grep. Bash inspection (including git history) runs inside the read-only OS sandbox. If the platform lacks sandbox support, or `ALP_CLAUDE_SANDBOX=0` disables it, Bash remains unavailable unless the permission profile permits it; the coordinator must arrange shell inspection before delegating.
 
