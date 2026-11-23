@@ -55,7 +55,7 @@ test('the service hands its token over a 0600 socket in a 0700 directory, only t
   const served = await serveToken({ home, token: () => TOKEN, credentialId: () => 'a'.repeat(16) });
   defer(() => served.close());
   if (posix) {
-    assert.equal(served.path, path.join(home, 'dashboard', 'token.sock'));
+    assert.equal(served.path, tokenSocketPath(home));
     assert.equal((await stat(served.path)).mode & 0o777, 0o600);
     assert.equal((await stat(path.dirname(served.path))).mode & 0o777, 0o700);
   }
@@ -74,23 +74,23 @@ test('the service refuses to run when its socket is not 0600 (t-cee3)', { skip: 
     serveToken({ home, token: () => TOKEN, credentialId: () => undefined, afterListen: socketPath => chmod(socketPath, 0o666) }),
     /token socket .* must have mode 0600, not 0666/,
   );
-  assert.equal(existsSync(path.join(home, 'dashboard', 'token.sock')), false, 'no socket is left listening');
+  assert.equal(existsSync(tokenSocketPath(home)), false, 'no socket is left listening');
 });
 
 test('the service refuses to run when the socket directory is not 0700 (t-cee3)', { skip: !posix && 'POSIX file modes' }, async t => {
   const { home, defer } = await scratchHome(t);
   // A directory that holds something is never tightened by ALP: it must be fixed by the user.
-  await mkdir(path.join(home, 'dashboard', 'kept'), { recursive: true });
-  await chmod(path.join(home, 'dashboard'), 0o755);
+  await mkdir(path.join(path.dirname(tokenSocketPath(home)), 'kept'), { recursive: true });
+  await chmod(path.dirname(tokenSocketPath(home)), 0o755);
   await assert.rejects(serveToken({ home, token: () => TOKEN, credentialId: () => undefined }), /must be a directory owned by you with private permissions \(0700\)/);
-  assert.equal(existsSync(path.join(home, 'dashboard', 'token.sock')), false);
+  assert.equal(existsSync(tokenSocketPath(home)), false);
   // And a directory widened after the socket was made.
-  await chmod(path.join(home, 'dashboard'), 0o700);
+  await chmod(path.dirname(tokenSocketPath(home)), 0o700);
   await assert.rejects(
     serveToken({ home, token: () => TOKEN, credentialId: () => undefined, afterListen: socketPath => chmod(path.dirname(socketPath), 0o750) }),
     /token socket must be in a directory owned by you with mode 0700/,
   );
-  assert.equal(existsSync(path.join(home, 'dashboard', 'token.sock')), false);
+  assert.equal(existsSync(tokenSocketPath(home)), false);
 });
 
 test('the client refuses a socket that is not private, before it connects', { skip: !posix && 'POSIX file modes' }, async t => {
