@@ -37,10 +37,28 @@ test.afterAll(async () => { await world?.close(); });
 const dock = page => page.getByRole('complementary', { name: 'Explorer' });
 const file = (scope, name) => scope.locator(`[data-testid="git-file"][data-path="${name}"]`);
 
+/** Picks a row of the Changes options menu (Paseo's "…"); the menu is closed after. */
+async function option(page, panel, id) {
+  await panel.getByTestId('changes-options-menu').click();
+  await page.getByTestId(id).click();
+  if (await page.getByRole('menu', { name: 'Diff options' }).count()) await page.keyboard.press('Escape');
+}
+/** Whether Split is on, as the options menu shows it. */
+async function split(page, panel) {
+  await panel.getByTestId('changes-options-menu').click();
+  const checked = await page.getByTestId('git-layout').getAttribute('aria-checked');
+  await page.keyboard.press('Escape');
+  return checked;
+}
+
 async function openCart(page) {
   await dock(page).getByRole('tab', { name: 'Changes' }).click();
   const panel = dock(page).getByTestId('changes-panel');
   await expect(panel).toHaveAttribute('data-content', 'diff');
+  // Hunks in the side panel are Paseo's Inline diff (off by default, remembered in this browser).
+  await expect(file(panel, 'src/cart.ts')).toBeVisible();
+  if (await panel.getAttribute('data-presentation') === 'tree') await option(page, panel, 'changes-toggle-inline-diff');
+  await expect(panel).toHaveAttribute('data-presentation', 'inline');
   await file(panel, 'src/cart.ts').getByTestId('git-file-toggle').click();
   await expect(file(panel, 'src/cart.ts').getByTestId('git-hunks')).toBeVisible();
   return panel;
@@ -51,9 +69,9 @@ test('side by side: removed and added lines pair across two columns, and the cho
   let panel = await openCart(page);
   const hunks = () => file(panel, 'src/cart.ts').getByTestId('git-hunks');
   await expect(hunks()).toHaveAttribute('data-layout', 'unified');
-  await expect(panel.getByTestId('git-layout')).toHaveAttribute('aria-pressed', 'false');
-  await panel.getByTestId('git-layout').click();
-  await expect(panel.getByTestId('git-layout')).toHaveAttribute('aria-pressed', 'true');
+  expect(await split(page, panel)).toBe('false');
+  await option(page, panel, 'git-layout');
+  expect(await split(page, panel)).toBe('true');
   await expect(hunks()).toHaveAttribute('data-layout', 'split');
   const rows = hunks().getByTestId('git-split-row');
   // keep | keep, then tax 0.1 | tax 0.2, then (empty) | sum.
@@ -72,7 +90,7 @@ test('side by side: removed and added lines pair across two columns, and the cho
   await connect(page, world, world.tokens.filesReader);
   panel = await openCart(page);
   await expect(hunks()).toHaveAttribute('data-layout', 'split');
-  await panel.getByTestId('git-layout').click();
+  await option(page, panel, 'git-layout');
   await expect(hunks()).toHaveAttribute('data-layout', 'unified');
 });
 
@@ -95,7 +113,7 @@ test('review comments: written on lines in either layout, sent as one message to
   await newSession(page, 'Review target');
   // The comment is still there; one more on the removed line, written in the split layout.
   await expect(panel.getByTestId('git-review-count')).toContainText('1 review comment');
-  await panel.getByTestId('git-layout').click();
+  await option(page, panel, 'git-layout');
   await expect(cart.getByTestId('git-hunks')).toHaveAttribute('data-layout', 'split');
   await expect(cart.getByTestId('git-comment')).toHaveCount(1);
   await cart.locator('[data-testid="git-line-comment"][data-side="old"][data-line="2"]').click();
@@ -124,7 +142,7 @@ test('review comments: written on lines in either layout, sent as one message to
   // The fake agent echoes the message's last line: it got the whole review.
   await expect(assistant(page).last()).toContainText('Name this subtotal');
   await idle(page);
-  await panel.getByTestId('git-layout').click();
+  await option(page, panel, 'git-layout');
 });
 
 test('a token that cannot send messages sees no comment control', async ({ page }) => {

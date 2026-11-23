@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Controller } from '../src/lib/controller.js';
-import { GIT_ERROR_MESSAGES, GIT_MESSAGES, GitAccessError, appendDiffPage, baseLabel, branchLine, describeGitError, diffRows, diffTotals, formatDiffCount, gitAccess, gitCompare, gitRequestPath, registryWorkspaceOf, restartsDiff } from '../src/lib/git.js';
+import { GIT_ERROR_MESSAGES, GIT_MESSAGES, GitAccessError, appendDiffPage, baseLabel, branchLine, changeKind, changesEmptyAction, changesTree, committedDescription, describeGitError, diffRows, diffTotals, formatDiffCount, gitAccess, gitCompare, gitRequestPath, registryWorkspaceOf, restartsDiff } from '../src/lib/git.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 const READER = { id: 'p1', label: 'tests', permissions: ['session.read', 'session.write', 'project.read', 'files.read'], workspaces: ['/w/a'], workspaceRoots: [{ path: '/w/a', canonical: '/real/a' }] };
@@ -153,7 +153,9 @@ test('labels: branch line, base, counts, comparisons and request paths', () => {
   assert.equal(branchLine(STATUS), 'feature · origin/feature (↑2 ↓1)');
   assert.equal(branchLine({ ...STATUS, branch: null, detached: true, upstream: null }), 'Detached at abcdef1');
   assert.equal(branchLine({ ...STATUS, branch: null, head: null, upstream: null }), 'No commits yet');
-  assert.equal(baseLabel('refs/remotes/origin/main'), 'origin/main');
+  assert.equal(baseLabel('refs/remotes/origin/main'), 'main');
+  assert.equal(baseLabel('origin/release'), 'release');
+  assert.equal(baseLabel('refs/heads/develop'), 'develop');
   assert.equal(baseLabel(null), 'base');
   assert.deepEqual([formatDiffCount(12), formatDiffCount(1234), formatDiffCount(45678)], ['12', '1.2k', '46k']);
   assert.deepEqual(gitCompare({ mode: 'staged', baseRef: 'main', ignoreWhitespace: false }), { mode: 'staged' });
@@ -193,4 +195,48 @@ test('formatReviewComments groups by file in line order and quotes each line (t-
   ].join('\n'));
   const long = formatReviewComments([{ path: 'a', side: 'new', line: 1, excerpt: 'y'.repeat(REVIEW_LIMITS.maxExcerptLength + 5), text: 't' }]);
   assert.match(long, new RegExp(`> y{${REVIEW_LIMITS.maxExcerptLength}}…`));
+});
+
+test("changesTree: Paseo's tree, folders first in code-unit order, single-child chains as one row, subtree totals, collapsed folders keep their totals (t-81b0.12)", () => {
+  const files = [
+    { path: 'packages/app/src/b.ts', additions: 1, deletions: 2 },
+    { path: 'packages/app/src/a.ts', additions: 3, deletions: 0 },
+    { path: 'README.md', additions: 5, deletions: 5 },
+    { path: 'Zeta/x.md', additions: 1, deletions: 0 },
+    { path: 'apps/web/one.js', additions: 2, deletions: 1 },
+    { path: 'apps/cli/two.js', additions: 0, deletions: 4 },
+  ];
+  const shape = rows => rows.map(row => `${'  '.repeat(row.depth)}${row.kind === 'folder' ? `${row.name}/ +${row.additions} -${row.deletions}` : row.name}`);
+  assert.deepEqual(shape(changesTree(files)), [
+    'Zeta/ +1 -0', '  x.md',
+    'apps/ +2 -5', '  cli/ +0 -4', '    two.js', '  web/ +2 -1', '    one.js',
+    'packages/app/src/ +4 -2', '  a.ts', '  b.ts',
+    'README.md',
+  ]);
+  // The chain is keyed by its deepest directory; collapsing it hides its files, not its totals.
+  const collapsed = changesTree(files, ['packages/app/src', 'apps/cli']);
+  assert.deepEqual(shape(collapsed), ['Zeta/ +1 -0', '  x.md', 'apps/ +2 -5', '  cli/ +0 -4', '  web/ +2 -1', '    one.js', 'packages/app/src/ +4 -2', 'README.md']);
+  assert.equal(collapsed.find(row => row.kind === 'folder' && row.name === 'packages/app/src').dirPath, 'packages/app/src');
+  // Files without counts (the status list) still build; a root file only is one row.
+  assert.deepEqual(shape(changesTree([{ path: 'a/b/c.txt' }, { path: 'top' }])), ['a/b/ +0 -0', '  c.txt', 'top']);
+  assert.deepEqual(changesTree([]), []);
+});
+
+test("changes labels: change kinds as Paseo's icons, the Committed description, the empty state's offer (t-81b0.12)", () => {
+  assert.equal(changeKind('added'), 'added');
+  assert.equal(changeKind('untracked'), 'added');
+  assert.equal(changeKind('deleted'), 'deleted');
+  for (const change of ['modified', 'renamed', 'copied', 'typechange', 'conflicted']) assert.equal(changeKind(change), 'modified');
+  assert.equal(committedDescription('feature', 'refs/remotes/origin/main'), 'feature -> main');
+  assert.equal(committedDescription('main', 'origin/main'), undefined);
+  assert.equal(committedDescription(null, 'main'), undefined);
+  assert.equal(committedDescription('feature', null), undefined);
+  const status = (dirty, ahead) => ({ dirty, aheadBehind: ahead === undefined ? null : { ahead, behind: 0 } });
+  assert.equal(changesEmptyAction({ mode: 'base', ignoreWhitespace: false, status: status(true) }), 'uncommitted');
+  assert.equal(changesEmptyAction({ mode: 'base', ignoreWhitespace: false, status: status(false) }), null);
+  assert.equal(changesEmptyAction({ mode: 'uncommitted', ignoreWhitespace: false, status: status(false, 2) }), 'base');
+  assert.equal(changesEmptyAction({ mode: 'uncommitted', ignoreWhitespace: false, status: status(false, 0) }), null);
+  assert.equal(changesEmptyAction({ mode: 'uncommitted', ignoreWhitespace: true, status: status(false, 2) }), null);
+  assert.equal(changesEmptyAction({ mode: 'staged', ignoreWhitespace: false, status: status(true, 2) }), null);
+  assert.equal(changesEmptyAction({ mode: 'base', ignoreWhitespace: false, status: null }), null);
 });

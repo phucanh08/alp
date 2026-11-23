@@ -55,26 +55,55 @@ async function openChanges(page) {
   await expect(dock(page).getByTestId('changes-panel')).toBeVisible();
 }
 
-test('with files.read: the branch, the changed files with counts, hunks on demand, binary and renamed files labelled, the secret never shown', async ({ page }) => {
+/** Opens the Changes options menu (Paseo's "…") and picks one of its rows; the menu is closed after. */
+async function option(page, panel, id) {
+  await panel.getByTestId('changes-options-menu').click();
+  await page.getByTestId(id).click();
+  if (await page.getByRole('menu', { name: 'Diff options' }).count()) await page.keyboard.press('Escape');
+}
+
+test('with files.read: the branch, the changed files as a tree with counts and change icons, Diff on a click, hunks inline on demand, the secret never shown', async ({ page }) => {
   await connect(page, world, world.tokens.filesReader);
   await openChanges(page);
   const panel = dock(page).getByTestId('changes-panel');
   await expect(panel).toHaveAttribute('data-content', 'diff');
-  await expect(panel.getByTestId('git-branch-name')).toHaveText('main');
-  await expect(panel.getByTestId('git-read-only')).toBeVisible();
+  await expect(panel).toHaveAttribute('data-presentation', 'tree');
+  // Paseo's two rows: the branch, then the mode menu, the totals, Refresh and the options.
+  await expect(panel.getByTestId('changes-repository-header').getByTestId('git-branch-name')).toHaveText('main');
+  await expect(panel.getByTestId('git-branch-name')).toHaveAttribute('title', /stay on the host/);
+  await expect(panel.getByTestId('changes-header').getByTestId('git-mode-label')).toHaveText('Uncommitted');
+  await expect(panel.getByTestId('git-totals')).toContainText('+');
+
+  // The tree: folders first (docs, notes, src), then root files; a folder carries its subtree's +/-.
+  const tree = panel.getByTestId('changes-file-tree');
+  await expect(tree.locator('[role="treeitem"]').first()).toHaveAttribute('data-path', 'docs');
+  await expect(tree.locator('[data-testid="git-folder"][data-path="src"]').getByTestId('git-folder-stat')).toHaveText('+2-1');
   await expect(file(panel, 'src/cart.ts')).toHaveAttribute('data-change', 'modified');
-  await expect(file(panel, 'src/cart.ts')).toContainText('+2');
-  await expect(file(panel, 'src/cart.ts')).toContainText('-1');
+  await expect(file(panel, 'src/cart.ts').getByTestId('git-file-stat')).toHaveText('+2-1');
+  await expect(file(panel, 'src/cart.ts').getByTestId('git-change-icon')).toHaveAttribute('data-kind', 'modified');
+  await expect(file(panel, 'src/cart.ts').locator('img')).toHaveAttribute('src', /^data:image\/svg\+xml/);
   await expect(file(panel, 'notes/todo.md')).toHaveAttribute('data-change', 'untracked');
+  await expect(file(panel, 'notes/todo.md').getByTestId('git-change-icon')).toHaveAttribute('data-kind', 'added');
   await expect(file(panel, 'logo.png')).toHaveAttribute('data-kind', 'binary');
+  await expect(file(panel, 'logo.png').getByTestId('git-file-kind-label')).toHaveText('Binary file');
   await expect(file(panel, 'docs/new-name.md')).toHaveAttribute('data-change', 'renamed');
-  await expect(file(panel, 'docs/new-name.md')).toContainText('docs/old-name.md');
+  await expect(file(panel, 'docs/new-name.md')).toHaveAttribute('data-old-path', 'docs/old-name.md');
+  await expect(file(panel, 'docs/new-name.md').getByTestId('git-file-open')).toHaveAttribute('title', 'docs/old-name.md → docs/new-name.md');
   await expect(panel.locator('[data-testid="git-file"][data-path=".env"]')).toHaveCount(0);
   await expect(panel).not.toContainText('never-shown');
   await expect(panel.getByTestId('git-hidden')).toBeVisible();
-
-  // Hunks open one file at a time, numbered, added and removed lines marked.
   await expect(panel.getByTestId('git-hunks')).toHaveCount(0);
+
+  // A folder collapses and opens again.
+  await tree.locator('[data-testid="git-folder"][data-path="src"]').getByTestId('git-folder-toggle').click();
+  await expect(file(panel, 'src/cart.ts')).toHaveCount(0);
+  await tree.locator('[data-testid="git-folder"][data-path="src"]').getByTestId('git-folder-toggle').click();
+  await expect(file(panel, 'src/cart.ts')).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('changes-tree.png') });
+
+  // Inline diff (the options menu): hunks open one file at a time, numbered, lines marked.
+  await option(page, panel, 'changes-toggle-inline-diff');
+  await expect(panel).toHaveAttribute('data-presentation', 'inline');
   await file(panel, 'src/cart.ts').getByTestId('git-file-toggle').click();
   const hunks = file(panel, 'src/cart.ts').getByTestId('git-hunks');
   await expect(hunks.locator('[data-diff="hunk"]').first()).toContainText('@@ -1,2 +1,3 @@');
@@ -89,31 +118,42 @@ test('with files.read: the branch, the changed files with counts, hunks on deman
   await expect(file(panel, 'notes/todo.md').locator('[data-diff="add"]')).toContainText(['ship the cart']);
 
   // Hide whitespace and Refresh ask again; a change on the host shows after Refresh.
-  await panel.getByTestId('git-whitespace').click();
-  await expect(panel.getByTestId('git-whitespace')).toHaveAttribute('aria-pressed', 'true');
+  await option(page, panel, 'git-whitespace');
+  await panel.getByTestId('changes-options-menu').click();
+  await expect(page.getByTestId('git-whitespace')).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('Escape');
   await expect(file(panel, 'src/cart.ts')).toBeVisible();
   await writeFile(path.join(world.projects.main, 'notes', 'later.md'), 'one more\n');
   await panel.getByTestId('git-refresh').click();
   await expect(file(panel, 'notes/later.md')).toBeVisible();
+  await option(page, panel, 'git-whitespace');
+  await option(page, panel, 'changes-toggle-inline-diff');
+  await expect(panel).toHaveAttribute('data-presentation', 'tree');
 
-  // Whitespace shown again (the empty state offers the other mode only then, as Paseo's).
-  await panel.getByTestId('git-whitespace').click();
-  await expect(panel.getByTestId('git-whitespace')).toHaveAttribute('aria-pressed', 'false');
-
-  // Committed (against the base branch): nothing committed beyond main here.
-  await panel.getByTestId('git-mode').selectOption('base');
+  // Committed (against the base branch): nothing committed beyond main here, and the checkout is
+  // dirty, so the empty state offers Uncommitted (Paseo's computeChangesEmptyAction).
+  await panel.getByTestId('git-mode').click();
+  await page.getByTestId('changes-diff-mode-committed').click();
+  await expect(panel.getByTestId('git-mode-label')).toHaveText('Committed');
   await expect(panel.getByTestId('git-empty')).toContainText('No changes to display');
+  await expect(panel.getByTestId('changes-empty-switch-mode')).toHaveText('See uncommitted changes');
   await panel.getByTestId('changes-empty-switch-mode').click();
   await expect(file(panel, 'src/cart.ts')).toBeVisible();
 
-  // Open in Diff: the Diff panel shows that file, opened.
-  await file(panel, 'src/cart.ts').getByTestId('git-file-open-diff').click();
+  // A click on a file opens Diff on that file, opened.
+  await file(panel, 'src/cart.ts').getByTestId('git-file-open').click();
+  await expect(file(panel, 'src/cart.ts')).toHaveAttribute('aria-selected', 'true');
   const diff = page.getByTestId('diff-panel');
   await expect(diff.getByTestId('git-focus')).toContainText('src/cart.ts');
   await expect(diff.getByTestId('git-file')).toHaveCount(1);
   await expect(file(diff, 'src/cart.ts').getByTestId('git-hunks')).toBeVisible();
   await diff.getByTestId('git-focus-clear').click();
   await expect(file(diff, 'notes/todo.md').getByTestId('git-hunks')).toBeVisible();
+  // Open Diff tab (the options menu): every file.
+  await file(diff, 'src/cart.ts').waitFor();
+  await openChanges(page);
+  await option(page, panel, 'changes-open-tab');
+  await expect(diff.getByTestId('git-focus')).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath('changes-with-files-read.png') });
 });
 
@@ -124,7 +164,9 @@ test('without files.read: the status list, no content, and the token is told wha
   await expect(panel).toHaveAttribute('data-content', 'none');
   await expect(panel.getByTestId('git-content-forbidden')).toContainText('needs files.read');
   await expect(panel.locator('[data-testid="git-status-file"][data-path="src/cart.ts"]')).toHaveAttribute('data-change', 'modified');
-  await expect(panel.locator('[data-testid="git-status-file"][data-path="docs/new-name.md"]')).toContainText('docs/old-name.md');
+  await expect(panel.locator('[data-testid="git-status-file"][data-path="docs/new-name.md"]')).toHaveAttribute('data-old-path', 'docs/old-name.md');
+  await expect(panel.locator('[data-testid="git-folder"][data-path="src"]')).toBeVisible();
+  await expect(panel.getByTestId('git-file-stat')).toHaveCount(0);
   await expect(panel.locator('[data-testid="git-status-file"][data-path=".env"]')).toHaveCount(0);
   await expect(panel.getByTestId('git-hunks')).toHaveCount(0);
   await expect(panel.getByTestId('git-mode')).toHaveCount(0);

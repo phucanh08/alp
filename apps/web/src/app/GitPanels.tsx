@@ -1,11 +1,14 @@
 import * as React from 'react';
-import { ChevronRight, Columns2, FileDiff, GitBranch, GitCompareArrows, Lock, MessageSquarePlus, RefreshCw, Rows2, Send, Space, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Columns2, Copy, FileDiff, FileText, GitBranch, GitCompareArrows, Lock, Maximize, MessageSquarePlus, MoreHorizontal, Pilcrow, RotateCw, Rows2, Send, Space, SquareDot, SquareMinus, SquarePlus, Trash2 } from 'lucide-react';
 import type { GitDiffFile, GitStatus, GitStatusFile } from '@anhlp/alp-protocol';
 import { LINE_LIMIT, clipLines } from '../lib/tool-calls.js';
-import { CHANGE_LABELS, CHANGE_LETTERS, GIT_ERROR_MESSAGES, GIT_MODES, KIND_MESSAGES, REVIEW_LIMITS, appendDiffPage, baseLabel, branchLine, describeGitError, diffRows, diffTotals, formatDiffCount, formatReviewComments, restartsDiff, splitRows, type DiffView } from '../lib/git.js';
+import { CHANGE_LABELS, CHANGE_LETTERS, GIT_ERROR_MESSAGES, GIT_MODES, KIND_MESSAGES, REVIEW_LIMITS, appendDiffPage, baseLabel, branchLine, changeKind, changesEmptyAction, changesTree, committedDescription, describeGitError, diffRows, diffTotals, formatDiffCount, formatReviewComments, restartsDiff, splitRows, type DiffView } from '../lib/git.js';
+import { fileIconUrl } from '../lib/file-icons.js';
+import { ContextMenu, Menu, type MenuItem } from '../components/ui/menu';
 import { can } from '../lib/gateway.js';
 import { cn } from '../lib/utils';
 import { useAppState, useController } from './store';
+import { useTabs } from './tabs';
 
 /*
  * Paseo's Changes and Diff panels (packages/app/src/panels/diff-panel.tsx and git/diff-pane.tsx at
@@ -22,20 +25,35 @@ import { useAppState, useController } from './store';
  * the workspace, sent together as one message to the open session's agent (Send to agent), through
  * the composer's path (sendPrompt: the token's session.write and mode limits apply). Nothing is
  * written to the workspace.
+ *
+ * t-81b0.12 (round 3): Changes in the explorer is Paseo v0.17.3's sidebar presentation ("tree",
+ * git/diff-pane.tsx ChangesSurface): a branch row; a comparison row with Paseo's mode menu
+ * (Uncommitted, Committed "branch -> base", then the host's Staged and Unstaged), the comparison's
+ * +/-, Refresh (RotateCw, a spinner while it runs) and the options menu ("…": Open Diff tab, Inline
+ * diff); the changed files as Paseo's tree (git/changed-files-tree.tsx, lib/git.js changesTree):
+ * folders first, single-child chains as one row, each folder with its subtree's +/-, a file with
+ * its material icon, +/- and Paseo's change icon. A click on a file opens it in Diff. Inline diff
+ * (off by default, remembered in this browser) lists the files with their hunks in place, the
+ * layout and whitespace toggles in the options menu. Paseo's branch switcher, base picker, pull
+ * request link, All changes mode, commits section and every Git write are not offered.
  */
 
 type Mode = 'uncommitted' | 'base' | 'staged' | 'unstaged';
 type Layout = 'unified' | 'split';
-type ViewState = { mode: Mode; ignoreWhitespace: boolean; focus: string | null; focusScope: string; layout: Layout };
+type ViewState = { mode: Mode; ignoreWhitespace: boolean; focus: string | null; focusScope: string; layout: Layout; inlineDiff: boolean };
 
 /** Where the layout is remembered (this browser only). */
 const LAYOUT_KEY = 'alp.diff.layout';
 const savedLayout = (): Layout => { try { return globalThis.localStorage?.getItem(LAYOUT_KEY) === 'split' ? 'split' : 'unified'; } catch { return 'unified'; } };
 const saveLayout = (layout: Layout) => { try { globalThis.localStorage?.setItem(LAYOUT_KEY, layout); } catch { /* private mode: this page only */ } };
+/** Paseo's Inline diff preference (off by default): Changes lists the files' hunks in place of the tree. */
+const INLINE_KEY = 'alp.changes.inlineDiff';
+const savedInline = () => { try { return globalThis.localStorage?.getItem(INLINE_KEY) === 'true'; } catch { return false; } };
+const saveInline = (inline: boolean) => { try { globalThis.localStorage?.setItem(INLINE_KEY, String(inline)); } catch { /* private mode: this page only */ } };
 
 /** The view both panels share (mode, whitespace, the file Changes asked Diff to show, layout), as Paseo's changes preferences. */
 const view = (() => {
-  let state: ViewState = { mode: 'uncommitted', ignoreWhitespace: false, focus: null, focusScope: '', layout: savedLayout() };
+  let state: ViewState = { mode: 'uncommitted', ignoreWhitespace: false, focus: null, focusScope: '', layout: savedLayout(), inlineDiff: savedInline() };
   const listeners = new Set<() => void>();
   return {
     get: () => state,
@@ -469,8 +487,204 @@ function Toolbar({ mode, setMode, content, ignoreWhitespace, layout, totals, ref
           aria-pressed={ignoreWhitespace} aria-label={ignoreWhitespace ? 'Show whitespace' : 'Hide whitespace'} title={ignoreWhitespace ? 'Show whitespace' : 'Hide whitespace'} data-testid="git-whitespace"><Space aria-hidden /></button>
       ) : null}
       <button type="button" className={tool} onClick={onRefresh} disabled={refreshing} aria-label={refreshing ? 'Refreshing' : 'Refresh'} title={refreshing ? 'Refreshing' : 'Refresh'} data-testid="git-refresh">
-        <RefreshCw aria-hidden className={cn(refreshing && 'animate-spin')} />
+        {refreshing ? <Spinner /> : <RotateCw aria-hidden />}
       </button>
+    </div>
+  );
+}
+
+/** Paseo's LoadingSpinner in a 14px glyph's place. */
+function Spinner({ large }: { large?: boolean }) {
+  return <span aria-hidden className={cn('block animate-spin rounded-full border-current border-t-transparent text-extra-muted', large ? 'size-6 border-2' : 'size-3.5 border-[1.5px]')} data-testid="git-spinner" />;
+}
+
+// Paseo's pane toolbar row (PaneContentToolbar on the sidebar surface): 36px, the sidebar's fill.
+const toolbarRow = 'flex h-9 shrink-0 items-center gap-2 border-b border-border bg-sidebar pl-2 pr-1';
+// Paseo's ToolbarButton: a 14px glyph, extra-muted, in a larger hit box.
+const glyph = cn('flex size-7 items-center justify-center rounded-md text-extra-muted hover:bg-sidebar-hover hover:text-foreground disabled:opacity-60 disabled:hover:bg-transparent [&_svg]:size-3.5', focusRing);
+// Paseo's toolbar label trigger: 12px muted text, brighter on hover.
+const labelTrigger = cn('flex h-6 min-w-0 items-center gap-1 rounded-md px-1 text-[length:calc(12px*var(--ui-scale))] text-muted-foreground hover:bg-sidebar-hover hover:text-foreground', focusRing);
+const centerState = 'flex flex-1 flex-col items-center justify-center gap-2 px-6 pb-6 pt-16 text-center';
+
+/** Paseo's DiffStat: +a -d at 12px in the status colours. */
+function TreeStat({ additions, deletions, testId }: { additions: number; deletions: number; testId?: string }) {
+  return (
+    <span className="flex h-5 shrink-0 items-center gap-1 text-[length:calc(12px*var(--ui-scale))] tabular-nums" data-testid={testId}>
+      <span className="text-status-success">+{formatDiffCount(additions)}</span>
+      <span className="text-status-danger">-{formatDiffCount(deletions)}</span>
+    </span>
+  );
+}
+
+/** Paseo's FileChangeIcon: a plus, minus or dot square in the success, danger or warning colour. */
+function ChangeIcon({ change }: { change: string }) {
+  const kind = changeKind(change);
+  const Icon = kind === 'added' ? SquarePlus : kind === 'deleted' ? SquareMinus : SquareDot;
+  const label = kind === 'added' ? 'New' : kind === 'deleted' ? 'Deleted' : 'Modified';
+  return <Icon role="img" aria-label={CHANGE_LABELS[change as keyof typeof CHANGE_LABELS] ?? label} className={cn('size-3.5 shrink-0', kind === 'added' ? 'text-status-success' : kind === 'deleted' ? 'text-status-danger' : 'text-status-warning')} data-testid="git-change-icon" data-kind={kind} />;
+}
+
+type TreeFile = { path: string; oldPath?: string; change: string; kind?: GitDiffFile['kind']; additions?: number; deletions?: number };
+
+/**
+ * Paseo's changed-files tree (git/changed-files-tree.tsx): a folder row is its chevron, its name
+ * (a chain of single-child folders as one) and its subtree's +/-; a file row its material icon,
+ * name, +/- and change icon. A click on a file opens it in Diff (`onOpen`); without content
+ * (`onOpen` absent) the rows only list. A right click offers what changes nothing on the host.
+ */
+function ChangedFilesTree({ files, onOpen, onOpenFile, workspace, selected, onSelect }: {
+  files: TreeFile[]; onOpen?: (path: string) => void; onOpenFile?: (path: string) => void; workspace: string;
+  selected: string | null; onSelect: (path: string) => void;
+}) {
+  const controller = useController();
+  const [collapsed, setCollapsed] = React.useState<string[]>([]);
+  const [menu, setMenu] = React.useState<{ path: string; folder: boolean; at: { x: number; y: number } } | null>(null);
+  const rows = React.useMemo(() => changesTree(files, collapsed), [files, collapsed]);
+  const toggle = (dirPath: string) => setCollapsed(current => current.includes(dirPath) ? current.filter(entry => entry !== dirPath) : [...current, dirPath]);
+  const copy = (text: string, what: string) => {
+    const done = navigator.clipboard?.writeText(text);
+    if (!done) { controller.notify('error', `Could not copy the ${what}.`); return; }
+    done.then(() => controller.notify('info', `Copied the ${what}.`), () => controller.notify('error', `Could not copy the ${what}.`));
+  };
+  const menuItems = (target: NonNullable<typeof menu>): MenuItem[] => {
+    const items: MenuItem[] = [];
+    if (target.folder) items.push({ id: 'toggle', label: collapsed.includes(target.path) ? 'Expand' : 'Collapse', icon: <ChevronRight aria-hidden />, onSelect: () => toggle(target.path), testId: 'git-menu-toggle' });
+    else {
+      if (onOpen) items.push({ id: 'diff', label: 'Open diff', icon: <FileDiff aria-hidden />, onSelect: () => onOpen(target.path), testId: 'git-menu-open-diff' });
+      const file = files.find(entry => entry.path === target.path);
+      if (onOpenFile && file && file.change !== 'deleted') items.push({ id: 'open', label: 'Open file', icon: <FileText aria-hidden />, onSelect: () => onOpenFile(target.path), testId: 'git-menu-open-file' });
+    }
+    items.push(
+      { id: 'copy-path', label: 'Copy path', icon: <Copy aria-hidden />, group: items.length > 0, onSelect: () => copy(`${workspace.replace(/\/+$/, '')}/${target.path}`, 'path'), testId: 'git-menu-copy-path' },
+      { id: 'copy-relative', label: 'Copy relative path', icon: <Copy aria-hidden />, onSelect: () => copy(target.path, 'relative path'), testId: 'git-menu-copy-relative' },
+    );
+    return items;
+  };
+  const menuKeys = (target: Omit<NonNullable<typeof menu>, 'at'>) => (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+      event.preventDefault();
+      const box = event.currentTarget.getBoundingClientRect();
+      setMenu({ ...target, at: { x: box.left + 24, y: box.bottom } });
+    }
+  };
+  const rowClass = (active: boolean) => cn('group flex w-full min-w-0 items-center gap-2 py-1.5 pr-2 text-left text-[length:calc(14px*var(--ui-scale))] text-foreground', active ? 'bg-sidebar-selected' : 'hover:bg-sidebar-hover', focusRing);
+  const nameClass = (active: boolean) => cn('min-w-0 truncate', active ? 'opacity-100' : 'opacity-[0.76] group-hover:opacity-100');
+  return (
+    <>
+      <ul className="pb-8" role="tree" aria-label="Changed files" data-testid="changes-file-tree">
+        {rows.map(row => {
+          // Paseo's treeRowPaddingLeft: 12px, then 12px a level.
+          const indent = { paddingLeft: 12 + row.depth * 12 };
+          if (row.kind === 'folder') {
+            const open = !collapsed.includes(row.dirPath);
+            const active = selected === row.dirPath;
+            return (
+              <li key={`folder:${row.dirPath}`} role="treeitem" aria-expanded={open} aria-selected={active || undefined} data-testid="git-folder" data-path={row.dirPath}>
+                <button type="button" style={indent} title={row.dirPath} className={rowClass(active)} data-testid="git-folder-toggle"
+                  onClick={() => { onSelect(row.dirPath); toggle(row.dirPath); }}
+                  onContextMenu={event => { event.preventDefault(); onSelect(row.dirPath); setMenu({ path: row.dirPath, folder: true, at: { x: event.clientX, y: event.clientY } }); }}
+                  onKeyDown={menuKeys({ path: row.dirPath, folder: true })}>
+                  <span aria-hidden className="flex size-4 shrink-0 items-center justify-center"><ChevronRight className={cn('size-4 text-extra-muted transition-transform', open && 'rotate-90')} /></span>
+                  <span className={cn(nameClass(active), 'flex-1')}>{row.name}</span>
+                  <TreeStat additions={row.additions} deletions={row.deletions} testId="git-folder-stat" />
+                </button>
+              </li>
+            );
+          }
+          const { file } = row;
+          const active = selected === file.path;
+          const counted = file.kind === undefined ? null : file.kind === 'text' ? 'stat' : 'kind';
+          const content = (
+            <>
+              <img aria-hidden src={fileIconUrl(row.name)} alt="" width={16} height={16} draggable={false} className="size-4 shrink-0" />
+              <span className={nameClass(active)}>{row.name}</span>
+              <span className="min-w-0 flex-1" />
+              {counted === 'stat' ? <TreeStat additions={file.additions ?? 0} deletions={file.deletions ?? 0} testId="git-file-stat" />
+                : counted === 'kind' ? <span className="shrink-0 text-[length:calc(12px*var(--ui-scale))] text-muted-foreground" data-testid="git-file-kind-label">{KIND_MESSAGES[file.kind as keyof typeof KIND_MESSAGES].split(':')[0]}</span> : null}
+              <ChangeIcon change={file.change} />
+            </>
+          );
+          const title = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
+          const contextMenu = (event: React.MouseEvent) => { event.preventDefault(); onSelect(file.path); setMenu({ path: file.path, folder: false, at: { x: event.clientX, y: event.clientY } }); };
+          return (
+            <li key={`file:${file.oldPath ?? ''}\n${file.path}`} role="treeitem" aria-selected={active || undefined}
+              data-testid={onOpen ? 'git-file' : 'git-status-file'} data-path={file.path} data-change={file.change} data-kind={file.kind} data-old-path={file.oldPath}>
+              {onOpen ? (
+                <button type="button" style={indent} title={title} className={rowClass(active)} data-testid="git-file-open"
+                  onClick={() => { onSelect(file.path); onOpen(file.path); }} onContextMenu={contextMenu} onKeyDown={menuKeys({ path: file.path, folder: false })}>
+                  {content}
+                </button>
+              ) : (
+                <div style={indent} title={title} tabIndex={0} className={cn(rowClass(active), 'cursor-default')} onClick={() => onSelect(file.path)} onContextMenu={contextMenu} onKeyDown={menuKeys({ path: file.path, folder: false })}>
+                  {content}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <ContextMenu label="Change actions" at={menu?.at ?? null} items={menu ? menuItems(menu) : []} onClose={() => setMenu(null)} testId="git-context-menu" />
+    </>
+  );
+}
+
+/**
+ * Paseo's Changes header (git/diff-pane.tsx ChangesHeader, the sidebar's "tree" presentation):
+ * the repository row (the current branch; Paseo's switcher, base picker and pull request link
+ * are writes or forge features ALP does not offer, so the branch is a label) and the comparison
+ * row (the mode menu, the comparison's +/-, Refresh and the options menu).
+ */
+function ChangesHeader({ status, mode, content, totals, refreshing, onRefresh, inline, layout, ignoreWhitespace, onOpenDiff }: {
+  status: GitStatus | undefined; mode: Mode; content: boolean; totals?: { additions: number; deletions: number }; refreshing: boolean; onRefresh: () => void;
+  inline: boolean; layout: Layout; ignoreWhitespace: boolean; onOpenDiff?: () => void;
+}) {
+  const label = GIT_MODES.find(entry => entry.id === mode)?.label ?? mode;
+  const description = committedDescription(status?.branch, status?.baseRef);
+  const modeItems: MenuItem[] = [
+    { id: 'uncommitted', label: 'Uncommitted', checked: mode === 'uncommitted', onSelect: () => view.set({ mode: 'uncommitted' }), testId: 'changes-diff-mode-uncommitted' },
+    { id: 'base', label: 'Committed', checked: mode === 'base', group: true, value: description, title: description, onSelect: () => view.set({ mode: 'base' }), testId: 'changes-diff-mode-committed' },
+    // The host's two more comparisons (ALP's; Paseo has none).
+    { id: 'staged', label: 'Staged', checked: mode === 'staged', group: true, onSelect: () => view.set({ mode: 'staged' }), testId: 'changes-diff-mode-staged' },
+    { id: 'unstaged', label: 'Unstaged', checked: mode === 'unstaged', onSelect: () => view.set({ mode: 'unstaged' }), testId: 'changes-diff-mode-unstaged' },
+  ];
+  const toggleInline = () => { saveInline(!inline); view.set({ inlineDiff: !inline }); };
+  const options: MenuItem[] = inline ? [
+    { id: 'layout', label: 'Split', icon: <Columns2 aria-hidden />, checked: layout === 'split', keepOpen: true, testId: 'git-layout',
+      onSelect: () => { const next: Layout = layout === 'split' ? 'unified' : 'split'; saveLayout(next); view.set({ layout: next }); } },
+    { id: 'whitespace', label: ignoreWhitespace ? 'Show whitespace' : 'Hide whitespace', icon: <Pilcrow aria-hidden />, checked: ignoreWhitespace, keepOpen: true, testId: 'git-whitespace',
+      onSelect: () => view.set({ ignoreWhitespace: !ignoreWhitespace }) },
+    { id: 'inline', label: 'Inline diff', checked: true, keepOpen: true, group: true, onSelect: toggleInline, testId: 'changes-toggle-inline-diff' },
+  ] : [
+    ...(onOpenDiff ? [{ id: 'open-tab', label: 'Open Diff tab', icon: <Maximize aria-hidden />, onSelect: onOpenDiff, testId: 'changes-open-tab' }] : []),
+    { id: 'inline', label: 'Inline diff', checked: false, keepOpen: true, group: !!onOpenDiff, onSelect: toggleInline, testId: 'changes-toggle-inline-diff' },
+  ];
+  const branch = status?.state === 'repository' ? branchLine(status) : null;
+  return (
+    <div className="shrink-0">
+      {status?.state === 'repository' ? (
+        <div className={toolbarRow} data-testid="changes-repository-header">
+          <span className="flex min-w-0 flex-1 items-center" data-testid="git-branch">
+            <span className="min-w-0 truncate px-1 text-[length:calc(12px*var(--ui-scale))] text-muted-foreground"
+              title={`${branch}. Switching branches, commit, push and pull stay on the host.`} data-testid="git-branch-name">{status.branch ?? branch}</span>
+          </span>
+        </div>
+      ) : null}
+      <div className={toolbarRow} data-testid="changes-header">
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          {content ? (
+            <Menu label="Diff mode" title="Diff mode" align="start" width={260} testId="git-mode" items={modeItems}
+              trigger={<><span className="min-w-0 truncate" data-testid="git-mode-label">{label}</span><ChevronDown aria-hidden className="size-3 shrink-0 text-extra-muted" /></>}
+              triggerClassName={labelTrigger} />
+          ) : <span className="px-1 text-[length:calc(12px*var(--ui-scale))] text-muted-foreground">Uncommitted</span>}
+          {totals ? <TreeStat additions={totals.additions} deletions={totals.deletions} testId="git-totals" /> : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-px">
+          <button type="button" className={glyph} onClick={onRefresh} disabled={refreshing} aria-busy={refreshing || undefined} aria-label={refreshing ? 'Refreshing' : 'Refresh'} title={refreshing ? 'Refreshing' : 'Refresh'} data-testid="git-refresh">
+            {refreshing ? <Spinner /> : <RotateCw aria-hidden />}
+          </button>
+          {content ? <Menu label="Diff options" align="end" width={240} testId="changes-options-menu" items={options} trigger={<MoreHorizontal aria-hidden />} triggerClassName={glyph} /> : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -479,9 +693,12 @@ function Toolbar({ mode, setMode, content, ignoreWhitespace, layout, totals, ref
  * Changes (`variant` changes) and Diff (`variant` diff): the same comparison, Changes with files
  * opened one at a time and "Open in Diff", Diff with every file open, or only the file Changes sent.
  */
-function GitPanel({ variant, onOpenDiff }: { variant: 'changes' | 'diff'; onOpenDiff?: () => void }) {
+function GitPanel({ variant, onOpenDiff, onPicked }: { variant: 'changes' | 'diff'; onOpenDiff?: () => void; onPicked?: () => void }) {
   const controller = useController();
   const app = useAppState();
+  const { openFile } = useTabs();
+  // The tree's selected row (Paseo's selectedPath), this panel only.
+  const [selected, setSelected] = React.useState<string | null>(null);
   const access = controller.gitAccess;
   const shared = useView();
   const online = app.connection.phase === 'open';
@@ -496,16 +713,96 @@ function GitPanel({ variant, onOpenDiff }: { variant: 'changes' | 'diff'; onOpen
   const key = `${scope}\n${request.mode}\n${request.baseRef ?? ''}\n${request.ignoreWhitespace}\n${focus ?? ''}\n${status.at}`;
   const diff = useGitDiff(online && !!content && repository, key, request);
   const [open, setOpen] = React.useState<string[]>([]);
-  React.useEffect(() => setOpen([]), [scope, shared.mode]);
+  React.useEffect(() => { setOpen([]); setSelected(null); }, [scope, shared.mode]);
   const refresh = React.useCallback(() => { status.load(); }, [status.load]);
   useComeBack(refresh, status.at, online && access.status);
 
   const testId = `${variant}-panel`;
+  const toggle = (path: string) => setOpen(current => current.includes(path) ? current.filter(entry => entry !== path) : [...current, path]);
   if (!access.status) {
     return (
       <Note testId={`panel-unavailable-${variant}`} reason={access.reason}>
         {access.reason === 'projectRead' ? <p className="flex max-w-[300px] items-start gap-2 text-sm text-foreground"><Lock aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />{access.message}</p> : <p className="max-w-[300px] text-sm text-muted-foreground">{access.message}</p>}
       </Note>
+    );
+  }
+  if (variant === 'changes') {
+    const current = status.status;
+    const inline = shared.inlineDiff && !!content;
+    const files = diff.diff?.files ?? [];
+    const otherMode = changesEmptyAction({ mode: shared.mode, ignoreWhitespace: shared.ignoreWhitespace, status: current });
+    const modeLabel = GIT_MODES.find(entry => entry.id === shared.mode)?.label ?? shared.mode;
+    const reviewLabel = shared.mode === 'base' && current ? `${modeLabel}, against ${baseLabel(current.baseRef)}` : modeLabel;
+    const commenting = can(app.principal ?? undefined, 'session.write');
+    const openDiff = (path: string) => { focusDiff(path, scope); onOpenDiff?.(); };
+    const retry = (run: () => void) => <button type="button" className="text-xs text-highlight hover:underline" onClick={run}>Retry</button>;
+    let body: React.ReactNode;
+    if (!current) {
+      body = status.error
+        ? <div className={centerState} role="alert" data-testid="git-error"><p className="text-sm text-destructive">{status.error}</p>{retry(refresh)}</div>
+        : <div className={centerState} role="progressbar" aria-label="Loading" data-testid="git-loading"><Spinner large /><p className="text-sm text-muted-foreground">Checking repository...</p></div>;
+    } else if (current.state !== 'repository') {
+      body = (
+        <div className={centerState} data-testid="changes-not-git" data-reason={current.state}>
+          <p className="max-w-[300px] text-sm text-muted-foreground">{current.state === 'unsupported' ? 'This workspace is inside a Git repository but is not its top level, so its changes are not shown.' : 'Not a git repository'}</p>
+          <button type="button" className="text-xs text-highlight hover:underline" onClick={refresh}>Refresh</button>
+        </div>
+      );
+    } else if (!content) {
+      // Without files.read: the status's files as the tree, no counts, nothing to open.
+      body = (
+        <>
+          <p className="flex items-start gap-1.5 px-3 py-2 text-xs text-muted-foreground" data-testid="git-content-forbidden"><Lock aria-hidden className="mt-0.5 size-3.5 shrink-0" />{access.contentMessage}</p>
+          {current.files.length ? <ChangedFilesTree files={current.files} workspace={app.workspace ?? ''} selected={selected} onSelect={setSelected} />
+            : <div className={centerState} data-testid="git-empty"><p className="text-sm text-muted-foreground">No changes to display</p></div>}
+          <Hidden count={current.hiddenCount} />
+          {current.truncated ? <p className="px-3 py-2 text-xs text-muted-foreground" data-testid="git-truncated">Only the first {current.files.length} changed files are shown.</p> : null}
+        </>
+      );
+    } else if (diff.loading && !diff.diff) {
+      body = <div className={centerState} role="progressbar" aria-label="Loading" data-testid="git-loading"><Spinner large /></div>;
+    } else if (diff.error && !files.length) {
+      body = <div className={centerState} role="alert" data-testid="git-error"><p className="text-sm text-destructive">{diff.error}</p>{retry(() => diff.load())}</div>;
+    } else if (diff.diff && !files.length) {
+      body = (
+        <div className={centerState} data-testid="git-empty">
+          <p className="text-sm text-muted-foreground">No changes to display</p>
+          {otherMode ? <button type="button" className={cn('rounded-md px-2 py-1 text-xs text-foreground hover:bg-sidebar-hover', focusRing)} onClick={() => view.set({ mode: otherMode })} data-testid="changes-empty-switch-mode">{otherMode === 'base' ? 'See committed changes' : 'See uncommitted changes'}</button> : null}
+        </div>
+      );
+    } else {
+      body = (
+        <>
+          {diff.notice ? <p className="px-3 py-2 text-xs text-muted-foreground" role="status" data-testid="git-notice">{diff.notice}</p> : null}
+          {diff.error ? <p className="px-3 py-2 text-sm text-destructive" role="alert" data-testid="git-error">{diff.error} {retry(() => diff.load())}</p> : null}
+          {inline ? (
+            <ul aria-label="Changed files">
+              {files.map(file => <DiffFileRow key={`${file.oldPath ?? ''}\n${file.path}`} file={file} open={open.includes(file.path)} layout={shared.layout} onToggle={() => toggle(file.path)} onOpenDiff={onOpenDiff ? () => openDiff(file.path) : undefined} />)}
+            </ul>
+          ) : <ChangedFilesTree files={files} onOpen={openDiff} onOpenFile={path => { openFile(path); onPicked?.(); }} workspace={app.workspace ?? ''} selected={selected} onSelect={setSelected} />}
+          <Hidden count={diff.diff?.hiddenCount ?? 0} />
+          {diff.diff?.nextCursor ? (
+            <button type="button" onClick={diff.loadMore} disabled={diff.more} className={cn('mx-3 my-2 self-start rounded-md px-2 py-1 text-xs text-highlight hover:bg-secondary disabled:opacity-60', focusRing)} data-testid="git-load-more">
+              {diff.more ? 'Loading…' : 'Load more'}
+            </button>
+          ) : diff.diff?.truncated ? <p className="px-3 py-2 text-xs text-muted-foreground" data-testid="git-truncated">Only some untracked files are shown: the host limits how many it reads.</p> : null}
+        </>
+      );
+    }
+    return (
+      <ReviewContext.Provider value={{ scope, enabled: commenting }}>
+        <div className="flex min-h-full flex-col" data-testid={testId} data-content={content ? 'diff' : 'none'} data-presentation={inline ? 'inline' : 'tree'}>
+          {current?.state === 'repository' ? (
+            <ChangesHeader status={current} mode={content ? shared.mode : 'uncommitted'} content={!!content}
+              // Paseo's selected diff stat: the comparison's totals once it has loaded.
+              totals={content && diff.diff && !diff.loading ? diffTotals(files) : undefined}
+              refreshing={status.loading || diff.loading} onRefresh={refresh} inline={inline} layout={shared.layout} ignoreWhitespace={shared.ignoreWhitespace}
+              onOpenDiff={onOpenDiff ? () => { focusDiff(null); onOpenDiff(); } : undefined} />
+          ) : null}
+          {body}
+          <ReviewBar scope={scope} label={reviewLabel} />
+        </div>
+      </ReviewContext.Provider>
     );
   }
   const toolbar = (totals?: { additions: number; deletions: number }) => (
@@ -548,7 +845,6 @@ function GitPanel({ variant, onOpenDiff }: { variant: 'changes' | 'diff'; onOpen
 
   const files = diff.diff?.files ?? [];
   const opened = (path: string) => variant === 'diff' || open.includes(path);
-  const toggle = (path: string) => setOpen(current => current.includes(path) ? current.filter(entry => entry !== path) : [...current, path]);
   const otherMode: Mode = shared.mode === 'uncommitted' ? 'base' : 'uncommitted';
   const modeLabel = GIT_MODES.find(entry => entry.id === shared.mode)?.label ?? shared.mode;
   const reviewLabel = shared.mode === 'base' ? `${modeLabel}, against ${baseLabel(status.status.baseRef)}` : modeLabel;
@@ -577,8 +873,7 @@ function GitPanel({ variant, onOpenDiff }: { variant: 'changes' | 'diff'; onOpen
       {files.length ? (
         <ul aria-label={variant === 'diff' ? 'Diff' : 'Changed files'}>
           {files.map(file => (
-            <DiffFileRow key={`${file.oldPath ?? ''}\n${file.path}`} file={file} open={opened(file.path)} layout={shared.layout} onToggle={() => toggle(file.path)}
-              onOpenDiff={variant === 'changes' && onOpenDiff ? () => { focusDiff(file.path, scope); onOpenDiff(); } : undefined} />
+            <DiffFileRow key={`${file.oldPath ?? ''}\n${file.path}`} file={file} open={opened(file.path)} layout={shared.layout} onToggle={() => toggle(file.path)} />
           ))}
         </ul>
       ) : null}
@@ -594,8 +889,8 @@ function GitPanel({ variant, onOpenDiff }: { variant: 'changes' | 'diff'; onOpen
   );
 }
 
-export function ChangesPanel({ onOpenDiff }: { onOpenDiff?: () => void }) {
-  return <GitPanel variant="changes" onOpenDiff={onOpenDiff} />;
+export function ChangesPanel({ onOpenDiff, onPicked }: { onOpenDiff?: () => void; onPicked?: () => void }) {
+  return <GitPanel variant="changes" onOpenDiff={onOpenDiff} onPicked={onPicked} />;
 }
 
 export function DiffPanel() {
