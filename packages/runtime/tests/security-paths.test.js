@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { acpDecision, acpEnv, claudePermissions } from '@anhlp/alp-runtime';
+import { credentialDenials } from '@anhlp/alp-runtime/claude-transport';
 
 test('security: permission gates resolve symlinks and refuse malformed writer paths', { skip: process.platform === 'win32' }, async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-gate-'));
@@ -54,6 +55,8 @@ test('security: claude sandbox floors do not grant broad host socket access', as
     allowUnsandboxedCommands: true,
     filesystem: {
       denyWrite: [root],
+      // t-cde5: a read-only session may not read the Paseo credentials.
+      denyRead: credentialDenials().denyRead,
     },
   });
 

@@ -10,6 +10,7 @@ import { commandDecision, unwrapShell, type PermissionProfile } from '@anhlp/alp
 import { launchCommand } from '@anhlp/alp-core/providers';
 import { bridgeCommand } from '@anhlp/alp-core/bridges';
 import { acpText, acpToolDetail, type AcpCall } from './tool-detail.js';
+import { credentialPaths, namesCredential } from './claude-transport.js';
 import { feedAcpSession } from './model-catalog.js';
 
 /**
@@ -67,8 +68,10 @@ export function acpPermission(toolCall: any, tools: string[]): AcpPermission {
  * only the agent's own sandbox, if it has one, contains; full access allows everything.
  * 'mode' is beyond the mode: the profile decides whether ALP asks the user.
  */
-export function acpDecision(request: AcpPermission, mode: string, profile: PermissionProfile | null | undefined, workdir: string): 'allow' | 'deny' | 'rule' | 'mode' {
+export function acpDecision(request: AcpPermission, mode: string, profile: PermissionProfile | null | undefined, workdir: string, home?: string): 'allow' | 'deny' | 'rule' | 'mode' {
   if (request.alpTool) return 'allow';
+  // A read-only session never reads the Paseo credentials (t-cde5), whatever a rule allows.
+  if ((mode === 'read-only' || profile?.base === 'read-only') && touchesCredentials(request, home)) return 'deny';
   const rule = request.command !== undefined && profile ? commandDecision(profile, request.command) : undefined;
   if (rule === 'deny') return 'deny';
   if (rule === 'allow') return 'allow';
@@ -80,6 +83,20 @@ export function acpDecision(request: AcpPermission, mode: string, profile: Permi
     if (!outside) return 'allow';
   }
   return 'mode';
+}
+
+/**
+ * Whether a request reaches the Paseo credentials: a path in their directory or one of their files,
+ * a search from a directory that holds them, or a command that names them. ALP sees only what an
+ * agent asks for: an agent that reads without asking is not stopped here.
+ */
+function touchesCredentials(request: AcpPermission, home?: string) {
+  const { directories, files } = credentialPaths(home);
+  const secrets = [...directories, ...files];
+  const inside = (file: string, root: string) => { const relative = path.relative(root, path.resolve(file)); return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative)); };
+  if (request.paths.some(file => secrets.some(secret => inside(file, secret)))) return true;
+  if (request.kind === 'search' && request.paths.some(file => secrets.some(secret => inside(secret, file)))) return true;
+  return request.command !== undefined && namesCredential(request.command, secrets);
 }
 
 /** The text ALP shows the user when an ACP agent asks for a permission. */

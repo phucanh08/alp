@@ -11,6 +11,7 @@ import { inputLimitError, POUR_VARS, VAR_NAME, type InputLimits } from './input-
 import { claudeToolDetail, resultText } from './tool-detail.js';
 import { CLOSE_REASONS, GATE_KINDS, TASK_STATUSES, TASK_TYPES } from '@anhlp/alp-core/tasks';
 import { commandDecision } from '@anhlp/alp-core/permissions';
+import { alpHome } from '@anhlp/alp-core/library';
 import { isScript, nativeDaemon, nodeExecutable } from '@anhlp/alp-core/packaged';
 
 // Keep the Claude SDK behind the runtime boundary. Paseo inspects static
@@ -309,6 +310,8 @@ export function skillPlugin(directory: string, skills: Array<{ name: string; pat
 
 type PermissionRules = {
   allow: string[]; ask?: string[]; deny: string[]; beyondMode?: 'refuse' | 'ask';
+  /** The profile's base: a read-only profile stays away from the Paseo credentials even in a copy it may write. */
+  base?: string;
   /** The OS sandbox ALP puts Bash in, and the directory it may write besides temp files. */
   floor?: 'read-only' | 'workspace-write'; floorRoot?: string;
 };
@@ -378,14 +381,59 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
   }
 }
 
+/**
+ * Where the Paseo integration keeps the user's credentials (t-cde5): its credential directory
+ * `<home>/paseo/` (the password Paseo's app signs in with, and the relay's secret key) and the
+ * relay key's location before t-cde5. A read-only session may not read them. Each path is given as
+ * ALP_HOME names it and, when that differs, as the filesystem resolves it.
+ * @param home ALP's home (alpd's own by default)
+ */
+export function credentialPaths(home: string = alpHome()) {
+  const named = [path.join(home, 'paseo'), path.join(home, 'relay-keypair.json')];
+  let real = home;
+  try { real = realpathSync(home); } catch {}
+  const resolved = real === home ? [] : [path.join(real, 'paseo'), path.join(real, 'relay-keypair.json')];
+  return { directories: [named[0], ...(resolved.length ? [resolved[0]] : [])], files: [named[1], ...(resolved.length ? [resolved[1]] : [])] };
+}
+
+/** An absolute path as a Claude permission rule spells it: `//` and the path, with `/c/…` for a Windows drive. */
+const rulePath = (file: string) => `/${process.platform === 'win32' ? file.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, drive: string) => `/${drive.toLowerCase()}`) : file}`;
+
+/**
+ * The deny rules and sandbox read denials that keep a read-only Claude session away from the user's
+ * Paseo credentials (t-cde5). Deny rules win over every allow rule, a user's broad `Read` included,
+ * and Claude also applies Read denials to Grep, Glob and its sandbox's filesystem.
+ */
+export function credentialDenials(home?: string) {
+  const { directories, files } = credentialPaths(home);
+  return {
+    rules: [...directories.map(directory => `Read(${rulePath(directory)}/**)`), ...files.map(file => `Read(${rulePath(file)})`)],
+    denyRead: [...directories, ...files],
+  };
+}
+
+/**
+ * Whether a command's text names one of the credential paths: as given, from the user's home as `~`,
+ * or by the names only they use (`relay-keypair.json`, a `paseo/` directory beside the home's files).
+ * Text only: a command may still build a path at run time, which only the OS sandbox stops.
+ */
+export function namesCredential(command: string, paths: string[]) {
+  const home = os.homedir();
+  const spelled = paths.flatMap(file => [file, ...(file.startsWith(`${home}${path.sep}`) ? [`~${file.slice(home.length)}`, `$HOME${file.slice(home.length)}`] : [])]);
+  return spelled.some(file => command.includes(file)) || /relay-keypair\.json|(^|[\s'"=/])\.alp\/paseo(\/|[\s'"]|$)|\$\{?ALP_HOME\}?\/paseo\b/.test(command);
+}
+
 /** Claude's permission mode for an ALP mode; full-access skips every permission check. */
 export const claudePermissionMode = (sandbox: string) => sandbox === 'read-only' ? 'default' : sandbox === 'full-access' ? 'bypassPermissions' : 'acceptEdits';
 
 /** A Bash rule: `Bash` or `Bash(...)`. */
 const BASH_RULE = /^\s*Bash\s*(?:\(|$)/;
 
-export function claudePermissions(sandbox: string, currentSandbox?: () => string, rules?: PermissionRules | null, ask?: (request: PermissionRequest) => Promise<PermissionAnswer>) {
+export function claudePermissions(sandbox: string, currentSandbox?: () => string, rules?: PermissionRules | null, ask?: (request: PermissionRequest) => Promise<PermissionAnswer>, home?: string) {
   const readOnly = sandbox === 'read-only';
+  // A session that starts read-only, runs Bash in a read-only floor or has a read-only profile (an
+  // advisor working in a copy) cannot read the Paseo credentials (t-cde5).
+  const secrets = readOnly || rules?.floor === 'read-only' || rules?.base === 'read-only' ? credentialDenials(home) : undefined;
   // A skill only adds instructions; what they lead to is checked as itself (ALPD §59).
   const readers = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Skill'];
   return {
@@ -401,7 +449,7 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
     // canUseTool and let it leave the sandbox, so `x/../y` and checked rules (Bash(@git-read <root>)) would
     // never reach commandDecision. canUseTool decides every Bash call by them instead.
     ...(rules?.allow.some(rule => !BASH_RULE.test(rule)) ? { allowedTools: rules.allow.filter(rule => !BASH_RULE.test(rule)) } : {}),
-    disallowedTools: ['Agent', 'Task', 'TeamCreate', 'EnterPlanMode', 'ExitPlanMode', ...(rules?.deny ?? [])],
+    disallowedTools: ['Agent', 'Task', 'TeamCreate', 'EnterPlanMode', 'ExitPlanMode', ...(rules?.deny ?? []), ...(secrets?.rules ?? [])],
     // Ask rules make Claude consult canUseTool in every mode, which asks the user.
     ...(rules?.ask?.length ? { settings: { permissions: { ask: rules.ask } } } : {}),
     // The floor: Bash runs in the OS sandbox, which writes only the workspace (or nothing, read-only) and temp files, offline.
@@ -414,7 +462,8 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
         enabled: true,
         autoAllowBashIfSandboxed: false,
         allowUnsandboxedCommands: true,
-        ...(rules.floor === 'read-only' && rules.floorRoot ? { filesystem: { denyWrite: [rules.floorRoot] } } : {}),
+        ...(rules.floor === 'read-only' && rules.floorRoot ? { filesystem: { denyWrite: [rules.floorRoot], ...(secrets ? { denyRead: secrets.denyRead } : {}) } }
+          : secrets ? { filesystem: { denyRead: secrets.denyRead } } : {}),
       },
     } : {}),
     canUseTool: async (name: string, input: Record<string, unknown>, context?: { decisionReasonType?: string; suggestions?: unknown }) => {
@@ -435,6 +484,10 @@ export function claudePermissions(sandbox: string, currentSandbox?: () => string
         // With a floor, file tools write only the workspace and temp files, like Bash.
         (Boolean(rules?.floor && rules.floorRoot) && WRITERS.includes(name) && !writablePath(name === 'NotebookEdit' ? input.notebook_path : input.file_path, rules!.floorRoot!)) ||
         (leaving && mode !== 'full-access');
+      // Outside the sandbox nothing denies the credentials' paths: a command that names one is refused (best effort, by its text).
+      if (leaving && secrets && typeof input.command === 'string' && namesCredential(input.command, secrets.denyRead)) {
+        return { behavior: 'deny', message: 'A read-only session may not read the Paseo credentials' };
+      }
       if (leaving && typeof input.command === 'string' && rules) {
         const decision = commandDecision(rules, input.command);
         if (decision === 'deny') return { behavior: 'deny', message: 'A deny rule of your permission profile covers it' };
