@@ -430,6 +430,27 @@ export function isEditable(target) {
   return !['button', 'checkbox', 'radio', 'submit', 'reset', 'range', 'color', 'file'].includes(String(element.type ?? '').toLowerCase());
 }
 
+/**
+ * Checks Reset to default for a row: its default keys (and its alias's) come back, so they must
+ * not be keys another shortcut has taken since (the user cleared this row, then gave its keys to
+ * another). Reset all needs no check: the defaults never share a key press.
+ * @param {string} id @param {{ mac: boolean, desktop?: boolean, overrides?: ShortcutOverrides }} context
+ * @returns {{ ok: true } | { error: string }}
+ */
+export function checkReset(id, { mac, desktop = false, overrides = currentOverrides }) {
+  const where = { mac, desktop };
+  const { [id]: _dropped, ...rest } = overrides;
+  const effective = effectiveBindings(rest).filter(entry => bindingApplies(entry, where));
+  for (const restored of effective.filter(entry => bindingId(entry) === id)) {
+    const taken = effective.find(entry => bindingId(entry) !== id && combosCollide(entry.combo, restored.combo, mac));
+    if (taken) {
+      const owner = taken.label ?? BINDINGS.find(entry => entry.label && entry.action === taken.action && entry.delta === taken.delta)?.label ?? taken.action;
+      return { error: `Its default ${formatShortcut(shortcutKeys(restored, mac), mac)} is now used by ${owner}. Change that shortcut first.` };
+    }
+  }
+  return { ok: true };
+}
+
 /** Whether this browser runs on a Mac (Cmd is the modifier). */
 export function isMacPlatform() {
   const nav = /** @type {any} */ (globalThis.navigator);

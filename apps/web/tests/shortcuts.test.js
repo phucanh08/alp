@@ -211,3 +211,21 @@ test('capture refuses keys that would type, keys taken by another shortcut, and 
   assert.equal(combosCollide('Mod+K', 'Ctrl+K', true), false);
   assert.equal(combosCollide('Mod+K', 'Ctrl+K', false), true);
 });
+
+import { checkReset } from '../src/lib/shortcuts.js';
+
+test('Reset to default is refused while another shortcut holds the default keys (row or alias)', () => {
+  const mac = { mac: true };
+  // Nothing changed elsewhere: the defaults come back.
+  assert.deepEqual(checkReset('sidebar.left', { mac: true, overrides: { 'sidebar.left': 'Mod+J' } }), { ok: true });
+  // Explorer cleared, its ⌘E given to the left sidebar: resetting Explorer would put two shortcuts on ⌘E.
+  const taken = { 'sidebar.right': null, 'sidebar.left': 'Mod+E' };
+  assert.equal(/** @type {any} */ (checkReset('sidebar.right', { ...mac, overrides: taken })).error, 'Its default ⌘E is now used by Toggle left sidebar. Change that shortcut first.');
+  // The alias's keys count too: Ctrl+` given to another row.
+  const alias = { 'sidebar.right': null, 'sidebar.both': 'Ctrl+`' };
+  assert.match(/** @type {any} */ (checkReset('sidebar.right', { ...mac, overrides: alias })).error, /now used by Toggle both sidebars/);
+  // Freed again: allowed.
+  assert.deepEqual(checkReset('sidebar.right', { ...mac, overrides: { 'sidebar.right': null, 'sidebar.left': 'Mod+J' } }), { ok: true });
+  // A 1-9 row: its digits are checked against the other rows.
+  assert.match(/** @type {any} */ (checkReset('session.index@browser', { ...mac, overrides: { 'session.index@browser': null, 'sidebar.left': 'Alt+4' } })).error, /Toggle left sidebar/);
+});

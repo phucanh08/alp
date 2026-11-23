@@ -2,7 +2,7 @@ import * as React from 'react';
 import { MoreHorizontal, Pencil, Undo2, X } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Menu, type MenuItem } from '../../components/ui/menu';
-import { checkCapture, comboFromEvent, heldModifiers, isMacPlatform, NOT_SET, shortcutSections, type ShortcutOverrides } from '../../lib/shortcuts.js';
+import { checkCapture, checkReset, comboFromEvent, heldModifiers, isMacPlatform, NOT_SET, shortcutSections, type ShortcutOverrides } from '../../lib/shortcuts.js';
 import { isDesktopApp } from '../../lib/browser-url.js';
 import { cn } from '../../lib/utils';
 import { useAppState, useController } from '../store';
@@ -18,7 +18,8 @@ import { Section } from './parts';
  * Capture as Paseo's: the next key press with its modifiers, a held modifier shown while it waits.
  * ALP's differences: Escape cancels (Paseo records it as a key), the keys are saved on the press
  * (ALP has no multi-key chords, so no Done), and keys another shortcut uses, or a key that would
- * type, are refused with the reason (lib/shortcuts.js checkCapture).
+ * type, are refused with the reason (lib/shortcuts.js checkCapture). Reset to default is refused,
+ * with the reason, when another shortcut has taken the default keys since (checkReset).
  */
 
 type Capture = { id: string; held: string; error: string };
@@ -32,6 +33,8 @@ export function ShortcutsPage() {
   const mac = React.useMemo(() => isMacPlatform(), []);
   const desktop = React.useMemo(() => isDesktopApp(), []);
   const [capture, setCapture] = React.useState<Capture | null>(null);
+  // A refused Reset to default: the row and why.
+  const [refused, setRefused] = React.useState<{ id: string; error: string } | null>(null);
   const sections = shortcutSections(mac, desktop, overrides);
   const save = React.useCallback((next: ShortcutOverrides) => controller.updatePreferences({ shortcutOverrides: next }), [controller]);
   const captureId = capture?.id;
@@ -71,19 +74,26 @@ export function ShortcutsPage() {
     };
   }, [captureId, overrides, mac, desktop, save, sections]);
 
-  const clear = (id: string) => save({ ...overrides, [id]: null });
-  const reset = (id: string) => { const next = { ...overrides }; delete next[id]; save(next); };
+  const clear = (id: string) => { setRefused(null); save({ ...overrides, [id]: null }); };
+  const reset = (id: string) => {
+    const check = checkReset(id, { mac, desktop, overrides });
+    if ('error' in check) { setRefused({ id, error: check.error }); return; }
+    setRefused(null);
+    const next = { ...overrides };
+    delete next[id];
+    save(next);
+  };
   const hasOverrides = Object.keys(overrides).length > 0;
 
   return (
     <div data-testid="shortcuts-page">
       {sections.map((section, sectionIndex) => (
         <Section key={section.id} title={section.title}
-          action={sectionIndex === 0 && hasOverrides ? <Button size="sm" variant="ghost" className="h-7 text-xs" data-testid="shortcuts-reset-all" onClick={() => { setCapture(null); save({}); }}>Reset all</Button> : undefined}>
+          action={sectionIndex === 0 && hasOverrides ? <Button size="sm" variant="ghost" className="h-7 text-xs" data-testid="shortcuts-reset-all" onClick={() => { setCapture(null); setRefused(null); save({}); }}>Reset all</Button> : undefined}>
           {section.rows.map((row, index) => {
             const capturing = capture?.id === row.id;
             const items: MenuItem[] = [
-              { id: 'bind', label: row.keys ? 'Rebind' : 'Bind', icon: <Pencil aria-hidden />, testId: `shortcut-bind-${row.id}`, onSelect: () => setCapture({ id: row.id, held: '', error: '' }) },
+              { id: 'bind', label: row.keys ? 'Rebind' : 'Bind', icon: <Pencil aria-hidden />, testId: `shortcut-bind-${row.id}`, onSelect: () => { setRefused(null); setCapture({ id: row.id, held: '', error: '' }); } },
               ...(row.keys ? [{ id: 'clear', label: 'Clear', icon: <X aria-hidden />, testId: `shortcut-clear-${row.id}`, onSelect: () => clear(row.id) }] : []),
               ...(row.overridden ? [{ id: 'reset', label: 'Reset to default', icon: <Undo2 aria-hidden />, testId: `shortcut-reset-${row.id}`, onSelect: () => reset(row.id) }] : []),
             ];
@@ -93,6 +103,7 @@ export function ShortcutsPage() {
                 <div className="min-w-0 flex-1">
                   <div className="text-sm text-foreground">{row.label}</div>
                   {capturing && capture.error ? <div role="alert" className="mt-1 text-xs text-warning" data-testid="shortcut-capture-error">{capture.error}</div>
+                    : refused?.id === row.id ? <div role="alert" className="mt-1 text-xs text-warning" data-testid="shortcut-reset-error">{refused.error}</div>
                     : !row.rebindable ? <div className="mt-1 text-xs text-muted-foreground">{UNCHANGEABLE}</div>
                     : row.note ? <div className="mt-1 text-xs text-muted-foreground">{row.note}</div> : null}
                 </div>
