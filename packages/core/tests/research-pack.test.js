@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -19,19 +19,20 @@ async function scratch(t) {
   return { root, library: path.join(directory, 'home') };
 }
 
-// The librarian's root is per user, ~/.alp-librarian-cache: this file runs with a throwaway HOME, so no check here
-// creates anything in the real home (t-6dc5 G5-B round 2).
-const realHome = process.env.HOME;
-const HOME = mkdtempSync(path.join(tmpdir(), 'alp-research-home-'));
-process.env.HOME = HOME;
-test.after(() => { process.env.HOME = realHome; rmSync(HOME, { recursive: true, force: true }); });
-const CACHE = `${HOME}/.alp-librarian-cache`;
+// The shipped rules name /tmp/alp-librarian (the user's choice, t-6dc5 g1), which every local user shares: the
+// tests put a scratch root in its place (librarianProfile, scoped), so nothing here makes or reads the real one.
+const ROOT = '/tmp/alp-librarian';
+const SCRATCH = mkdtempSync(path.join(tmpdir(), 'alp-research-root-'));
+test.after(() => rmSync(SCRATCH, { recursive: true, force: true }));
+const CACHE = `${SCRATCH}/alp-librarian`;
+/** The profile with its checked rules moved from /tmp/alp-librarian to `root`. */
+const scopedTo = (profile, root) => ({ ...profile, allow: profile.allow.map(rule => rule.replace(ROOT, root)) });
 
 const ADVISORS_OF_PACK = ['librarian', 'scout'];
 // The librarian's profile, as pack.json carries it and the install writes it (t-6dc5 G5-B).
 const LIBRARIAN = {
   base: 'read-only',
-  allow: ['Bash(@git-clone-public ~/.alp-librarian-cache)', 'Bash(@git-read ~/.alp-librarian-cache)', 'WebFetch(domain:github.com)', 'WebFetch(domain:raw.githubusercontent.com)', 'WebFetch(domain:gitlab.com)'],
+  allow: ['Bash(@git-clone-public /tmp/alp-librarian)', 'Bash(@git-read /tmp/alp-librarian)', 'WebFetch(domain:github.com)', 'WebFetch(domain:raw.githubusercontent.com)', 'WebFetch(domain:gitlab.com)'],
   ask: ['Bash(git clone:*)', 'Bash(git fetch:*)', 'Bash(git -C:*)', 'Bash(gh repo clone:*)'],
   deny: ['Bash(@git-unsafe)', 'Bash(git push:*)', 'Bash(rm:*)'],
 };
@@ -147,12 +148,12 @@ test('serving as a team advisor, librarian and scout stay read-only even when se
   }
 });
 
-// t-6dc5 G5-B: the librarian may clone and fetch public repositories into ~/.alp-librarian-cache, and read them
+// t-6dc5 G5-B: the librarian may clone and fetch public repositories into /tmp/alp-librarian, and read them
 // there, through checked rules (permissions.js coversChecked); everything else stays read-only or asks.
 async function librarianProfile(t) {
   const { root, library } = await scratch(t);
   await installPack('research', { scope: 'library', library });
-  return { root, library, profile: await profileFor(root, library, 'librarian', { readOnly: true }) };
+  return { root, library, profile: scopedTo(await profileFor(root, library, 'librarian', { readOnly: true }), CACHE) };
 }
 
 // Each was allowed by a prefix rule the old matcher could express (Bash(git -C <root>*), Bash(git clone:*),
@@ -169,7 +170,7 @@ const BYPASSES = [
   [`git clone https://github.com/a/b ${CACHE}//a-b`, 'ask'],
   [`git clone https://github.com/a/b ${CACHE}/./a-b`, 'ask'],
   [`git clone https://github.com/a/b ${CACHE}/a-b/`, 'ask'],
-  ['git clone https://github.com/a/b ~/.alp-librarian-cache/a-b', 'ask'],
+  ['git clone https://github.com/a/b ~/alp-librarian/a-b', 'ask'],
   [`git clone https://github.com/a/b ${CACHE}`, 'ask'],
   [`git clone https://evil.example/a/b ${CACHE}/a-b`, 'ask'],
   [`git clone https://github.com.evil.example/a/b ${CACHE}/a-b`, 'ask'],
@@ -227,9 +228,11 @@ const ALLOWED = [
   `/bin/zsh -lc 'git -C ${CACHE}/a-b log -1 && git -C ${CACHE}/a-b rev-parse HEAD'`,
 ];
 
-test('the librarian clones and reads public repositories only below ~/.alp-librarian-cache; every bypass asks or is denied', async t => {
+test('the librarian clones and reads public repositories only below /tmp/alp-librarian; every bypass asks or is denied', async t => {
   const { profile } = await librarianProfile(t);
   assert.equal(profile.base, 'read-only');
+  // The root as the first clone leaves it (a clone elsewhere no longer creates it): reads are judged below it.
+  mkdirSync(CACHE, { recursive: true, mode: 0o700 });
   for (const [command, expected] of BYPASSES) assert.equal(commandDecision(profile, command), expected, command);
   for (const command of ALLOWED) assert.equal(commandDecision(profile, command), 'allow', command);
   // Workspace commands keep the read-only base: no rule covers them.
@@ -238,7 +241,7 @@ test('the librarian clones and reads public repositories only below ~/.alp-libra
 
 test('a link below the librarian root that leads elsewhere is not below it', { skip: process.platform === 'win32' }, async t => {
   const { profile } = await librarianProfile(t);
-  // A scratch root stands in for ~/.alp-librarian-cache: the rules are the shipped ones with another root, mode 0700.
+  // A scratch root stands in for /tmp/alp-librarian: the rules are the shipped ones with another root, mode 0700.
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-librarian-link-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const root = path.join(directory, 'clones');
@@ -246,7 +249,7 @@ test('a link below the librarian root that leads elsewhere is not below it', { s
   await chmod(root, 0o700);
   await mkdir(path.join(directory, 'workspace'));
   await symlink(path.join(directory, 'workspace'), path.join(root, 'escape'));
-  const scoped = { ...profile, allow: profile.allow.map(rule => rule.replace('~/.alp-librarian-cache', root)) };
+  const scoped = { ...profile, allow: profile.allow.map(rule => rule.replace(CACHE, root)) };
   assert.equal(commandDecision(scoped, `git -C ${root}/real log`), 'allow');
   assert.equal(commandDecision(scoped, `git clone https://github.com/a/b ${root}/new`), 'allow');
   assert.equal(commandDecision(scoped, `git -C ${root}/escape log`), 'ask');
@@ -284,7 +287,7 @@ test('@git-read allows only the options it lists, exactly: no abbreviation, clus
   const root = path.join(directory, 'clones');
   await mkdir(path.join(root, 'a-b'), { recursive: true, mode: 0o700 });
   await chmod(root, 0o700);
-  const scoped = { ...profile, allow: profile.allow.map(rule => rule.replace('~/.alp-librarian-cache', root)) };
+  const scoped = { ...profile, allow: profile.allow.map(rule => rule.replace(CACHE, root)) };
   for (const args of OPTION_BYPASSES) assert.equal(commandDecision(scoped, `git -C ${root}/a-b ${args}`), 'ask', args);
   for (const args of OPTION_READS) assert.equal(commandDecision(scoped, `git -C ${root}/a-b ${args}`), 'allow', args);
   // A path inside the clone may be named absolutely.
@@ -292,7 +295,7 @@ test('@git-read allows only the options it lists, exactly: no abbreviation, clus
   assert.equal(commandDecision(scoped, `git -C ${root}/a-b grep --max-depth=${root}/x foo`), 'ask');
 });
 
-test('the librarian root is per user: ~/ is the home ALP runs as, created 0700 by the first clone, refused when another could reach it', { skip: process.platform === 'win32' }, async t => {
+test('the librarian root (/tmp/alp-librarian): created 0700 by the first clone; refused when a link, a file, not 0700 (0755/0777) or under a parent others may write', { skip: process.platform === 'win32' }, async t => {
   const { profile } = await librarianProfile(t);
   const clone = target => commandDecision(profile, `git clone https://github.com/a/b ${target}`);
   const read = target => commandDecision(profile, `git -C ${target} log --oneline`);
@@ -311,7 +314,7 @@ test('the librarian root is per user: ~/ is the home ALP runs as, created 0700 b
   // here is one this user does not hold as 0700: open to others, a link, or a file).
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-librarian-root-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const scoped = root => ({ ...profile, allow: profile.allow.map(rule => rule.replace('~/.alp-librarian-cache', root)) });
+  const scoped = root => ({ ...profile, allow: profile.allow.map(rule => rule.replace(CACHE, root)) });
   const decide = (root, command) => commandDecision(scoped(root), command);
   const squatted = path.join(directory, 'squatted');
   mkdirSync(squatted, { mode: 0o777 });
@@ -334,11 +337,16 @@ test('the librarian root is per user: ~/ is the home ALP runs as, created 0700 b
     assert.equal(decide(root, `git -C ${root}/a-b log`), 'ask', root);
   }
   assert.equal(decide(mine, `git clone https://github.com/a/b ${mine}/a-b`), 'allow');
+  // A clone for anywhere else never makes the root: the shipped rule, with a target outside /tmp/alp-librarian.
+  const absent = path.join(directory, 'absent');
+  assert.equal(decide(absent, `git clone https://github.com/a/b ${directory}/elsewhere/a-b`), 'ask');
+  assert.equal(existsSync(absent), false, 'a clone outside the root does not create it');
   // A missing root whose parent is open to others is not created.
   assert.equal(decide(path.join(parent, 'new'), `git clone https://github.com/a/b ${parent}/new/a-b`), 'ask');
   // A rule names an absolute root or ~/<dir>, nothing else.
   const files = { 'packs/x/agents/a/AGENT.md': '# A', 'packs/x/agents/a/agent.json': JSON.stringify({ mode: 'read-only' }) };
   const pack = rule => validatePack('x', { label: 'X', description: 'x', agents: ['a'], permissions: { a: { base: 'read-only', allow: [rule] } } }, files);
+  assert.ok(pack('Bash(@git-read /tmp/alp-librarian)'));
   assert.ok(pack('Bash(@git-read ~/.alp-librarian-cache)'));
   for (const rule of ['Bash(@git-read ~)', 'Bash(@git-read ~/)', 'Bash(@git-read ~/../x)', 'Bash(@git-read ~user/x)', 'Bash(@git-read x)']) assert.throws(() => pack(rule), /a checked rule is/, rule);
 });
@@ -352,7 +360,7 @@ test('the deny path reads a git command the way the shell will: escaping backsla
 test('the librarian stays read-only under a full-access parent and settings that try to widen it', async t => {
   const { root, library } = await librarianProfile(t);
   await writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify({ permissions: { profiles: { librarian: { base: 'full-access' } }, agents: { librarian: 'librarian' } } }));
-  const profile = await profileFor(root, library, 'librarian', { readOnly: true });
+  const profile = scopedTo(await profileFor(root, library, 'librarian', { readOnly: true }), CACHE);
   assert.equal(profile.base, 'read-only');
   assert.equal(profile.cappedFrom, 'full-access');
   // Its rules still hold under the cap: push is denied, the checked clone allowed.
