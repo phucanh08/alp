@@ -196,7 +196,7 @@ export function nativeSessionConfig(
       // Only an agent that can delegate to oracle is told how to; two opinions need two oracle models.
       [
         ...(targets.includes('oracle')
-          ? [`Oracle runs on ${mapping.oracleModels.join(' or ')}; pass one as model (effort follows the team's oracle settings, otherwise high).` +
+          ? [`Oracle runs on ${mapping.oracleModels.join(' or ')}; pass one as model, and as thinking an effort that model takes when the question needs another than the team's oracle setting (otherwise high).` +
             (mapping.oracleModels.length > 1 ? ' For two independent opinions, start one oracle on each model with wait: false and compare their advice.' : '') +
             ' If the model you need is unavailable, say so rather than choosing another.']
           : []),

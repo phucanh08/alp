@@ -983,8 +983,26 @@ are runtime-prefixed (`codex:…`, `claude:…`, `antigravity:…`, `acp:…`). 
 model/effort in Phở; lead chooses them in Cafe. A target's model profiles are the models
 that may be passed for it: one named profile is used when `model` is omitted and is the only
 model accepted; several, or a `provider:*`, require a model and an effort for each assignment.
-A target with no model profiles (a custom delegation graph) runs on the parent's model unless
-one is passed. An effort the model does not take is refused; an effort ALP cannot check is
+A target with no model profiles (a custom delegation graph) chooses its own model when none is
+passed. The order, first match wins:
+
+1. the `model` the requester passes (within the target's profiles when it has any);
+2. the target's single named profile;
+3. `.alp/settings.json`'s `runtime`, which applies to every agent, then the current team's
+   `team.json` member `model`;
+4. the target's `agent.json` `model` (with its `provider`);
+5. none of these: the requester's own model and effort. The answer carries `modelNote`, which
+   says so and names where to configure one (`team.<team>.<agent>.profiles` in
+   `.alp/settings.json`, the team's `team.json`, or the agent's `agent.json`). It is not refused.
+
+The effort comes from the same source as the model (`thinking` passed, the profile's effort, the
+member's `thinking`, `agent.json`'s `thinking`), fitted to an effort the model takes; only step 5
+brings the requester's effort. Inside a team every member has a profile ALP writes from its
+`team.json` model, or from main's when the member names none, so steps 3–5 matter mostly for
+custom graphs. Delegating never changes the requester's own model or effort. The oracle runs on
+the lens passed as `model`; `thinking` chooses its effort per call and is checked against that
+lens's efforts (refused with the list), and without it the team's `oracleThinking` applies
+(otherwise high). An effort the model does not take is refused; an effort ALP cannot check is
 passed on, and the answer's `thinkingNote` says so. A refused model is answered with the
 allowed ones and the remedy: add the model, or `provider:*`, to
 `team.<team>.<agent>.profiles` in `.alp/settings.json` (or, for Phở and Cafe and a Claude or

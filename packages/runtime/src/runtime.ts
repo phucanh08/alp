@@ -26,7 +26,7 @@ import { moveFile, writeAtomic } from '@anhlp/alp-core/atomic';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveDelegation } from '@anhlp/alp-core/delegation';
-import { agentSources, builtinText, discoverAgents } from '@anhlp/alp-core/resolver';
+import { agentSources, builtinText, discoverAgents, resolveAgent } from '@anhlp/alp-core/resolver';
 
 import { acpDecision, acpWhat, type AcpPermission } from './acp-transport.js';
 
@@ -37,7 +37,7 @@ import { hookMatches } from '@anhlp/alp-core/hooks';
 import { isTrusted, trustProject } from '@anhlp/alp-core/trust';
 import { listTeams, teamOf } from '@anhlp/alp-core/teams';
 import { CONFIGURABLE, changesOf, effectiveOf, executablesOf, nativeModelOf, offered, type ConfigureChange, type ConfigureChanges, type EffectiveConfig } from './configure.js';
-import { anyModel, offers, profileModel, selectedProfile } from '@anhlp/alp-core/profiles';
+import { anyModel, fitEffort, offers, profileModel, selectedProfile } from '@anhlp/alp-core/profiles';
 import { LESSONS_FILE, resolveSession, skillDescription, type ResolvedSession, type RuntimeKind, type SessionSpec } from './resolve.js';
 import { MAIL_BODY_CHARS, MAIL_HEADER, publicEvent, renderMail, takeBatch, USER, type MailEvent } from './mailbox.js';
 import type { AlpEvent, AssignmentSnapshot, Envelope, SessionSnapshot, TurnOrigin, UserQuestion } from './events.js';
@@ -192,6 +192,15 @@ export class WorkspaceMutationError extends Error {
     this.name = 'WorkspaceMutationError';
     this.data = { reason };
   }
+}
+
+/** A runtime-prefixed model ID from an agent.json or team.json choice, as resolveSession reads one. */
+function runtimeModelId(provider: string | undefined, model: string) {
+  const prefixed = /^(codex|claude|antigravity|acp)[:/]/.exec(model);
+  if (prefixed) return `${prefixed[1]}:${model.slice(prefixed[0].length)}`;
+  const kind = provider ?? 'codex';
+  // Another provider names an ACP provider of the library.
+  return ['codex', 'claude', 'antigravity', 'acp'].includes(kind) ? `${kind}:${model}` : `acp:${kind}/${model}`;
 }
 
 export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
@@ -3410,6 +3419,22 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     });
   }
 
+  /**
+   * The model and effort a delegated target chooses for itself when it has no single profile and none is
+   * passed (t-3aad), in resolveSession's order: settings.json's runtime (every agent's), then the current
+   * team's member, then the target's agent.json. Undefined when none names a model.
+   */
+  async function targetChoice(session: Session, target: string): Promise<{ model: string; thinking?: string } | undefined> {
+    const agent = await resolveAgent(session.mapping.agent.projectRoot, { agent: target, library: options.libraryDir, templates: options.templates });
+    const own = (runtime: { provider?: string; model?: string; reasoning?: string }) => runtime.model
+      ? { model: runtimeModelId(runtime.provider, runtime.model), ...(runtime.reasoning ? { thinking: runtime.reasoning } : {}) }
+      : undefined;
+    if (agent.projectRuntime?.model) return own(agent.runtime);
+    const member = session.mapping.team?.members?.[target];
+    if (member?.model) return { model: runtimeModelId(undefined, member.model), ...(member.thinking ? { thinking: member.thinking } : {}) };
+    return own(agent.runtime);
+  }
+
   async function runDelegation(sessionId: string, session: Session, params: any): Promise<unknown> {
     if (workspaceMutation) refuseMutation('workspace_busy', 'A workspace mutation is in progress; retry after it finishes');
     admitting++;
@@ -3485,16 +3510,32 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       });
     }
     const configuredDefault = !choosing && listed.length === 1 ? listed[0] : undefined;
-    const delegatedModel = args.model ?? configuredDefault ?? `${session.runtimeKind}:${session.mapping.model}`;
+    // Without a model passed or a single profile, the target's own choice comes before yours (t-3aad):
+    // the current team's member, then its agent.json; only then your model, and modelNote says so.
+    let ownChoice: { model: string; thinking?: string } | undefined;
+    if (args.model === undefined && configuredDefault === undefined && args.agent !== 'oracle') {
+      try { ownChoice = await targetChoice(session, args.agent); }
+      catch (error) { return toolResult(false, { error: errorData(error).message }); }
+    }
+    const parentModel = `${session.runtimeKind}:${session.mapping.model}`;
+    const delegatedModel = args.model ?? configuredDefault ?? ownChoice?.model ?? parentModel;
+    const modelNote = args.model === undefined && configuredDefault === undefined && !ownChoice && args.agent !== 'oracle'
+      ? `${args.agent} runs on your model ${parentModel}${args.thinking === undefined ? ` at your effort ${session.mapping.thinking}` : ''}: it has no model of its own. ` +
+        `Pass model for it, or have the user set one in team.${session.mapping.workflow.mode}.${args.agent}.profiles in ${path.join(session.mapping.agent.projectRoot, '.alp', 'settings.json')}, the team's team.json, or its agent.json`
+      : undefined;
     // An effort is checked against the model's wherever the target has profiles; where ALP cannot check it
     // (a model the catalog lists without efforts, antigravity:, acp:, or a target without profiles) it is
     // passed on, and the answer says so instead of staying silent.
-    const efforts = args.thinking !== undefined && listed.length ? profileEfforts(delegatedModel) : [];
+    // The oracle's lens is checked as a profile is: its effort must be one the lens takes.
+    const checked = listed.length > 0 || args.agent === 'oracle';
+    const efforts = args.thinking !== undefined && checked ? profileEfforts(delegatedModel) : [];
     if (efforts.length && !efforts.includes(args.thinking)) return toolResult(false, { error: `${delegatedModel} takes effort ${efforts.join(', ')}`, efforts });
     const thinkingNote = args.thinking !== undefined && !efforts.length
-      ? (listed.length ? `effort ${args.thinking} was not checked: ALP does not know which efforts ${delegatedModel} takes` : `effort ${args.thinking} was not checked: no model profile of ${args.agent} names a model`)
+      ? (checked ? `effort ${args.thinking} was not checked: ALP does not know which efforts ${delegatedModel} takes` : `effort ${args.thinking} was not checked: no model profile of ${args.agent} names a model`)
       : undefined;
-    const delegatedThinking = args.thinking ?? selectedProfile(configuredModels, delegatedModel)?.effort ?? (args.model || configuredDefault ? undefined : session.mapping.thinking);
+    // The effort comes from where the model did; only a model inherited from you brings your effort.
+    const delegatedThinking = args.thinking ?? selectedProfile(configuredModels, delegatedModel)?.effort ??
+      (args.model || configuredDefault ? undefined : ownChoice ? (ownChoice.thinking === undefined ? undefined : fitEffort(delegatedModel, ownChoice.thinking)) : session.mapping.thinking);
     // A paused runtime takes no new assignments; another runtime may.
     const childRuntime = delegatedModel.split(':')[0] as RuntimeKind;
     // A limit may have lifted since the last check: ask the runtime before refusing (ALPD §58).
@@ -3518,6 +3559,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       ...(childProfile && childMode !== (args.mode ?? session.mapping.mode) ? { mode: childMode, modeNote: `${args.agent} runs ${childMode}: its permission profile ${childProfile.name} caps it` } : {}),
       ...(childProfile?.workdir === 'copy' && isolationOf(args) === 'shared' ? { workdirNote: `${args.agent} works in a disposable copy of your tree; nothing it changes reaches yours` } : {}),
       ...(thinkingNote ? { thinkingNote } : {}),
+      ...(modelNote ? { modelNote } : {}),
     };
     let sharedContinuation: RecallEntry | undefined;
     if (args.continueFrom !== undefined) {
