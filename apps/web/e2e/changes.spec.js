@@ -128,6 +128,22 @@ test('with files.read: the branch, the changed files as a tree with counts and c
   await writeFile(path.join(world.projects.main, 'notes', 'later.md'), 'one more\n');
   await panel.getByTestId('git-refresh').click();
   await expect(file(panel, 'notes/later.md')).toBeVisible();
+
+  // A reload keeps Hide whitespace (and Inline diff), as Paseo's changes preferences; the mode is
+  // not kept, as Paseo's comparison (git/working-diff-comparison, in memory): Committed goes back
+  // to Uncommitted.
+  await panel.getByTestId('git-mode').click();
+  await page.getByTestId('changes-diff-mode-committed').click();
+  await expect(panel.getByTestId('git-mode-label')).toHaveText('Committed');
+  await page.reload();
+  await connect(page, world, world.tokens.filesReader);
+  await openChanges(page);
+  await expect(panel).toHaveAttribute('data-presentation', 'inline');
+  await expect(panel.getByTestId('git-mode-label')).toHaveText('Uncommitted');
+  await panel.getByTestId('changes-options-menu').click();
+  await expect(page.getByTestId('git-whitespace')).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('Escape');
+  await expect(file(panel, 'notes/later.md')).toBeVisible();
   await option(page, panel, 'git-whitespace');
   await option(page, panel, 'changes-toggle-inline-diff');
   await expect(panel).toHaveAttribute('data-presentation', 'tree');
