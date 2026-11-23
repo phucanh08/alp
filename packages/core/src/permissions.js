@@ -222,6 +222,61 @@ export function simpleCommands(line) {
   return parts.map(part => part.trim()).filter(Boolean);
 }
 
+/** Characters a plain word may carry outside quotes (t-cde5 g5, A'). */
+const PLAIN_CHAR = /[A-Za-z0-9_\-./=:,@%+]/;
+/** Text a quoted string may hold: no NUL and no control character but tab and new line. */
+const QUOTED_TEXT = /^[^\0-\x08\x0b-\x1f\x7f]*$/;
+/** The redirects a plain line may carry, at a word's start and as a whole word: to a descriptor or to /dev/null. */
+const PLAIN_REDIRECT = /^(?:[12]?>&[12]|[12]?>[ \t]*\/dev\/null)(?=[ \t\n;|&]|$)/;
+
+/**
+ * The simple commands of a line made only of plain words, or null for any other line. A plain allow rule
+ * (one that is not a checked `Bash(@…)` rule) vouches only for such a line (t-cde5, the user's decision g5 A'):
+ * every way a shell reads a line differently from ALP found so far ($'…', ${…}, $[…], =(…), *(e:…), `#`
+ * comments) lies outside it, so an allow rule no longer depends on ALP's split agreeing with bash or zsh.
+ * A plain line holds:
+ *   - unquoted letters, digits and _ - . / = : , @ % + (but no `=` starting a word: zsh's =cmd), and `~` or `^`
+ *     right after a letter or digit (HEAD~1, HEAD^), with spaces and tabs between words;
+ *   - '…' with any text but NUL or a control character other than tab and new line;
+ *   - "…" with the same text and no $ ` \ or !;
+ *   - the separators && || ; | and new line;
+ *   - the redirects 2>&1 1>&2 >&2 >/dev/null 2>/dev/null (1> forms too), each a whole word.
+ * Anything else, such as $, a glob or brace, ~ at a word's start, (, ), <, other redirects, &, #, !, \ or a
+ * non-ASCII character outside quotes, makes the line not plain: no plain rule covers it, and ALP asks.
+ */
+export function plainCommands(line) {
+  const parts = [];
+  let current = '';
+  let start = true;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === "'" || char === '"') {
+      const end = line.indexOf(char, i + 1);
+      if (end < 0) return null;
+      const text = line.slice(i + 1, end);
+      if (!QUOTED_TEXT.test(text) || (char === '"' && /[$`\\!]/.test(text))) return null;
+      current += line.slice(i, end + 1);
+      i = end;
+      start = false;
+      continue;
+    }
+    if (char === ' ' || char === '\t') { current += char; start = true; continue; }
+    if (start) {
+      const redirect = PLAIN_REDIRECT.exec(line.slice(i));
+      if (redirect) { current += redirect[0]; i += redirect[0].length - 1; continue; }
+    }
+    const two = line.slice(i, i + 2);
+    if (two === '&&' || two === '||') { parts.push(current); current = ''; start = true; i++; continue; }
+    if (char === ';' || char === '|' || char === '\n') { parts.push(current); current = ''; start = true; continue; }
+    const afterWord = !start && /[A-Za-z0-9]/.test(line[i - 1]);
+    if (!(PLAIN_CHAR.test(char) && !(start && char === '=')) && !((char === '~' || char === '^') && afterWord)) return null;
+    current += char;
+    start = false;
+  }
+  parts.push(current);
+  return parts.map(part => part.trim()).filter(Boolean);
+}
+
 // --- checked git rules ----------------------------------------------------------
 //
 // A prefix rule cannot say "a directory under <root>": `Bash(git -C /r/*)` also covers `git -C /r/../x push`.
@@ -619,7 +674,8 @@ const bashRules = rules => rules.map(rule => parseRule(rule)).filter(rule => rul
  * What a profile says about running a command: 'deny' when a deny rule covers any
  * of its simple commands, 'ask' when an ask rule covers any, 'allow' when allow
  * rules cover every one of them and none writes through a redirect, otherwise
- * undefined (the base mode decides).
+ * undefined (the base mode decides). A plain allow rule covers a command only in a
+ * line of plain words (plainCommands); a checked rule checks its words itself.
  */
 export function commandDecision(profile, command) {
   const line = unwrapShell(command);
@@ -635,8 +691,12 @@ export function commandDecision(profile, command) {
   const checkedAllow = part => allow.some(rule => rule.specifier?.startsWith('@') && covers(rule.specifier, part));
   const ask = bashRules(profile.ask ?? []);
   if (ask.some(rule => rule.specifier === undefined) || parts.some(part => !checkedAllow(part) && ask.some(rule => covers(rule.specifier, part)))) return 'ask';
+  // A plain allow rule vouches only for a line of plain words (plainCommands, g5 A'), split the same way here.
+  const plain = plainCommands(line);
+  const plainLine = plain !== null && plain.length === parts.length && plain.every((part, i) => part === parts[i]);
   // A rule that names a path covers only commands whose paths are in normal form: `x/../y` leaves any prefix.
-  const allowed = part => allow.some(rule => covers(rule.specifier, part) && (rule.specifier === undefined || rule.specifier.startsWith('@') || !/[/~]/.test(rule.specifier) || normalPaths(part)));
+  const allowed = part => allow.some(rule => rule.specifier?.startsWith('@') ? covers(rule.specifier, part)
+    : plainLine && covers(rule.specifier, part) && (rule.specifier === undefined || !/[/~]/.test(rule.specifier) || normalPaths(part)));
   if (parts.every(part => !redirects(part) && allowed(part))) return 'allow';
   return undefined;
 }

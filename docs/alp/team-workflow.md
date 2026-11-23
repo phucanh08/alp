@@ -129,9 +129,18 @@ commands, give the profile base `workspace-write` and start the session read-onl
   - `Edit(src/**)`, `Read(...)`, `WebFetch(domain:example.com)` and `mcp__server__tool` name other tools.
   - A misspelt tool name is refused when the settings load.
 - A command line is allowed only when allow rules cover each of its commands
-  (split at `&&`, `||`, `;`, `|`), and none writes a file through a redirect;
+  (split at `&&`, `||`, `;`, `|` and new lines), and none writes a file through a redirect;
   `2>&1` and `2>/dev/null` are fine. It is denied when a deny rule covers any one of them,
   or when it substitutes a command (`$(...)`, backticks) while deny rules exist.
+- A plain allow rule (any rule but the checked ones below) covers only a line of plain
+  words, because bash and zsh read other lines in ways ALP cannot follow
+  (`$'…'`, `${…}`, `=(…)`, glob qualifiers). A plain line has, outside quotes, only letters,
+  digits and `_ - . / = : , @ % +` (no `=` starting a word), `~` or `^` right after a letter or
+  digit (`HEAD~1`, `HEAD^`), the separators above, and the redirects `2>&1`, `>&2`,
+  `>/dev/null`, `2>/dev/null`; `'…'` with any text; and `"…"` with no `$`, backtick, `\` or `!`.
+  Any other line (`echo $HOME`, `ls *.js`, `cat ~/x`, `git diff HEAD@{1}`, `npm test # x`)
+  gets no decision from a plain allow rule: ALP asks, or the mode refuses it. Quote the word
+  to keep it allowed (`ls '*.js'` lists that name only; `git diff 'HEAD@{1}'` works).
 - An allow rule that names a path (`Bash(cat /srv/data/*)`, `Bash(node scripts/test.mjs:*)`)
   covers a command only when the paths in it are in normal form: no `..` or `.` segment
   (a leading `./` aside), no `//`, no leading `~`. `/srv/data/../x` leaves any prefix.
