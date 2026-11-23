@@ -1,4 +1,5 @@
-// Opt-in: uses real models and an already running Paseo daemon.
+// Opt-in: uses real models and a declared scratch Paseo daemon (scratch-daemon.mjs). It refuses the
+// user's own daemon and ~/.alp before connecting or creating fixtures.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile, readdir } from 'node:fs/promises';
@@ -6,6 +7,9 @@ import path from 'node:path';
 import { createPaseoApi } from '@getpaseo/client';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
 import { initProject } from '../../packages/core/src/init.js';
+import { readRunLog, requireScratchDaemon } from './scratch-daemon.mjs';
+
+const { url, runLogDir } = requireScratchDaemon();
 
 // The Paseo model picker selects the profile; main runs on its fixed model.
 const workflow = process.argv[2] ?? 'pho';
@@ -25,7 +29,7 @@ async function snapshot(directory) {
   return output;
 }
 const before = await snapshot(root);
-const driver = new DaemonClient({ url: process.env.ALP_TEST_PASEO_URL ?? 'ws://127.0.0.1:6767/ws', clientId: `alp-workflow-${Date.now()}` });
+const driver = new DaemonClient({ url, clientId: `alp-workflow-${Date.now()}` });
 const client = createPaseoApi(driver);
 let agent;
 try {
@@ -39,13 +43,30 @@ try {
     ? `Bounded integration test: delegate exactly one lead and pass it this complete brief verbatim, including the reviewer step: ${assignment} Lead calls both peer and reviewer. Main must not call peer or reviewer directly. Return the proof token and handoffs.`
     : `Bounded integration test in Phở. ${assignment} Also ask two oracles in parallel, one on each oracle model, to confirm the simplest approach to verifying a single token file. Include both oracle handoffs. Do not create lead. Finish once these calls complete.`;
   const result = await agent.run(prompt, { timeoutMs: 360_000 });
-  const children = await driver.listProviderSubagents(agent.id);
+  // The proof is the peer's handoff, not main's last message: in Cafe main delegates lead in the
+  // background and may end its turn before lead returns (t-0336). Wait for the tree to finish and the
+  // peer and reviewer handoffs to reach the scratch home's run log.
+  const finishedBy = (lines, role) => lines.filter(line => line.event === 'assignment.finished' && line.agent === role);
+  let children;
+  let log = [];
+  for (const deadline = Date.now() + 360_000; ;) {
+    children = await driver.listProviderSubagents(agent.id);
+    log = await readRunLog(runLogDir, root);
+    const settled = !children.subagents?.some(child => child.status === 'running' && !child.title?.startsWith('ALP supervisor'));
+    if (settled && finishedBy(log, 'peer').length && finishedBy(log, 'reviewer').length) break;
+    if (Date.now() > deadline) break;
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
   const timeline = await agent.timeline.refetch({ limit: 100 });
-  const evidence = { workflow, provider, project: root, agent: agent.id, result, children, timeline };
+  const evidence = { workflow, provider, project: root, agent: agent.id, result, children, log, timeline };
   const evidencePath = `.alp-test/workflow-${workflow}-${runtime}-e2e.json`;
   await writeFile(evidencePath, JSON.stringify(evidence, null, 2));
   console.log(JSON.stringify({ workflow, status: result.status, error: result.error, children: children.subagents?.map(child => ({ title: child.title, status: child.status, parent: child.parentSubagentId })), evidencePath }));
-  assert.ok(result.lastMessage?.includes(token), 'Missing real peer proof');
+  const handoffs = role => finishedBy(log, role).map(line => ({ status: line.status, handoff: line.handoff }));
+  console.log(JSON.stringify({ workflow, peer: handoffs('peer'), reviewer: handoffs('reviewer') }));
+  assert.ok(log.length, `No run log for ${root} in ${runLogDir}: is ALP_TEST_ALP_HOME the scratch daemon's ALP home?`);
+  assert.ok(finishedBy(log, 'peer').some(line => line.status === 'completed' && line.handoff?.summary?.includes(token)), 'Missing real peer proof: no completed peer handoff carries the token');
+  assert.ok(finishedBy(log, 'reviewer').some(line => line.status === 'completed' && line.handoff), 'No completed reviewer handoff');
   assert.equal(children.error, null);
   const find = name => children.subagents.find(child => child.title?.startsWith(`ALP ${name}`));
   assert.ok(find('peer'), 'No real peer');
