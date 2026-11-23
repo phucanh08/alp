@@ -16,19 +16,6 @@ export const ROOT = path.resolve(fileURLToPath(new URL('../../..', import.meta.u
 /** Every path upgrade.js has lived at on main, newest first. */
 export const UPGRADE_PATHS = ['packages/core/src/upgrade.js', 'src/core/upgrade.js'];
 
-/**
- * The only hashes ever on main that today's teamV1 does not list. Both were ALP.md contents written
- * and then edited away inside PR #330 before any release: ee64975f… appeared in d5a8738f (kept by
- * c118f5e3), 6562f9c9… replaced it in 80ba6253, and 1cbb15d1 replaced that with 48c6a0f8… (the
- * hash PR #330 merged). Frozen: the test fails if this list grows or an entry reappears in teamV1.
- */
-export const EDITED_AWAY_IN_PR_330 = Object.freeze({
-  'ALP.md': Object.freeze([
-    'ee64975f96b8f6c9275037d2a19e86407de8354bddd6c49428070efe53ce5c7d',
-    '6562f9c9712a800eb2a20278eb0f2093e5f499494c951984ec163126d3b5def7',
-  ]),
-});
-
 /** The teamV1 object literal of one upgrade.js text: { path: [hash, …] } in source order; undefined when it has none. */
 export function parseTeamV1(text) {
   const start = text.indexOf('const teamV1 = {');
@@ -97,7 +84,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const main = mainHistory();
   if (!main.available) throw new Error(`no main history to snapshot: ${main.reason}`);
   const hashes = union(main.history);
-  for (const [name, edited] of Object.entries(EDITED_AWAY_IN_PR_330)) hashes[name] = hashes[name].filter(hash => !edited.includes(hash));
   process.stdout.write(`${JSON.stringify({
     about: 'Every teamV1 hash ever on main (t-cc9e). Append-only: regenerate with node packages/core/tests/teamv1-history.js',
     through: main.ref,
