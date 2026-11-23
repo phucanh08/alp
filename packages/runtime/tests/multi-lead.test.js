@@ -102,6 +102,18 @@ test('maxLeads 1: a lead starts beside a reviewer, a second lead is refused as b
   assert.doesNotMatch(runtimes[2].config.developerInstructions, /workflow\.maxLeads/);
 });
 
+test('a read-only lead counts toward maxLeads like any other lead', async t => {
+  const { main, task } = await setup(t);
+  const first = await main.call('alp_delegate', lead('Survey the code', { mode: 'read-only' }));
+  assert.equal(first.status, 'running', JSON.stringify(first));
+  // maxLeads 1: a second lead is refused, read-only or writing, whatever its task and isolation.
+  const api = await task('API', ['api']);
+  const readOnly = await main.call('alp_delegate', lead('Survey the API', { mode: 'read-only', taskId: api.id }));
+  assert.match(readOnly.error, /A lead is already running \(maxLeads 1\)/);
+  const writer = await main.call('alp_delegate', isolatedLead('Build the API', api.id));
+  assert.match(writer.error, /A lead is already running \(maxLeads 1\)/);
+});
+
 test('maxLeads 2: two isolated leads with separate task paths run together, and main merges both', async t => {
   const { root, runtimes, main, task } = await setup(t, { maxLeads: 2 });
   assert.match(main.config.developerInstructions, /At most 4 peers may run concurrently in this session tree \(2 for each of up to 2 leads\)/);
@@ -119,7 +131,9 @@ test('maxLeads 2: two isolated leads with separate task paths run together, and 
   const leads = runtimes.slice(1);
   assert.notEqual(leads[0].cwd, leads[1].cwd);
   for (const one of leads) assert.ok(!one.cwd.startsWith(root), `${one.cwd} is a worktree`);
-  const byTask = Object.fromEntries(leads.map(one => [one.started[0].params.input.at(-1).text.includes(api.id) ? 'api' : 'web', one]));
+  // By brief: the board digest in a lead's prompt can name the other lead's task.
+  const byTask = Object.fromEntries(leads.map(one => [one.started[0].params.input.at(-1).text.includes('Build the API') ? 'api' : 'web', one]));
+  assert.deepEqual(Object.keys(byTask).sort(), ['api', 'web']);
   await writeFile(path.join(byTask.api.cwd, 'api', 'index.txt'), 'api v2\n');
   await writeFile(path.join(byTask.web.cwd, 'web', 'index.txt'), 'web v2\n');
   for (const one of leads) one.finish();
