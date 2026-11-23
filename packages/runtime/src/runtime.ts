@@ -3420,16 +3420,17 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   }
 
   /**
-   * The model and effort a delegated target chooses for itself when it has no single profile and none is
-   * passed (t-3aad), in resolveSession's order: settings.json's runtime (every agent's), then the current
-   * team's member, then the target's agent.json. Undefined when none names a model.
+   * The model and effort a delegated target without model profiles chooses for itself when none is passed
+   * (t-3aad), in resolveSession's order: settings.json's runtime (every agent's), then the current team's
+   * member, then the target's agent.json. Undefined when none names a model: a provider alone is not one.
    */
   async function targetChoice(session: Session, target: string): Promise<{ model: string; thinking?: string } | undefined> {
     const agent = await resolveAgent(session.mapping.agent.projectRoot, { agent: target, library: options.libraryDir, templates: options.templates });
     const own = (runtime: { provider?: string; model?: string; reasoning?: string }) => runtime.model
       ? { model: runtimeModelId(runtime.provider, runtime.model), ...(runtime.reasoning ? { thinking: runtime.reasoning } : {}) }
       : undefined;
-    if (agent.projectRuntime?.model) return own(agent.runtime);
+    // As in resolveSession, settings.json's runtime (a provider alone too) puts the team's member aside.
+    if (agent.projectRuntime?.model || agent.projectRuntime?.provider) return own(agent.runtime);
     const member = session.mapping.team?.members?.[target];
     if (member?.model) return { model: runtimeModelId(undefined, member.model), ...(member.thinking ? { thinking: member.thinking } : {}) };
     return own(agent.runtime);
@@ -3510,16 +3511,17 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       });
     }
     const configuredDefault = !choosing && listed.length === 1 ? listed[0] : undefined;
-    // Without a model passed or a single profile, the target's own choice comes before yours (t-3aad):
+    // Without a model passed or any profile, the target's own choice comes before yours (t-3aad):
     // the current team's member, then its agent.json; only then your model, and modelNote says so.
     let ownChoice: { model: string; thinking?: string } | undefined;
-    if (args.model === undefined && configuredDefault === undefined && args.agent !== 'oracle') {
+    // A target with profiles keeps the earlier behaviour, a legacy profile that names only an effort too.
+    if (args.model === undefined && !configuredModels.length && args.agent !== 'oracle') {
       try { ownChoice = await targetChoice(session, args.agent); }
       catch (error) { return toolResult(false, { error: errorData(error).message }); }
     }
     const parentModel = `${session.runtimeKind}:${session.mapping.model}`;
     const delegatedModel = args.model ?? configuredDefault ?? ownChoice?.model ?? parentModel;
-    const modelNote = args.model === undefined && configuredDefault === undefined && !ownChoice && args.agent !== 'oracle'
+    const modelNote = args.model === undefined && !configuredModels.length && !ownChoice && args.agent !== 'oracle'
       ? `${args.agent} runs on your model ${parentModel}${args.thinking === undefined ? ` at your effort ${session.mapping.thinking}` : ''}: it has no model of its own. ` +
         `Pass model for it, or have the user set one in team.${session.mapping.workflow.mode}.${args.agent}.profiles in ${path.join(session.mapping.agent.projectRoot, '.alp', 'settings.json')}, the team's team.json, or its agent.json`
       : undefined;

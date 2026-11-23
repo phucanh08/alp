@@ -984,7 +984,7 @@ model/effort in Phở; lead chooses them in Cafe. A target's model profiles are 
 that may be passed for it: one named profile is used when `model` is omitted and is the only
 model accepted; several, or a `provider:*`, require a model and an effort for each assignment.
 A target with no model profiles (a custom delegation graph) chooses its own model when none is
-passed. The order, first match wins:
+passed; a target with any profile, even a legacy one naming only an effort, is unchanged. The order, first match wins:
 
 1. the `model` the requester passes (within the target's profiles when it has any);
 2. the target's single named profile;
@@ -994,6 +994,7 @@ passed. The order, first match wins:
 5. none of these: the requester's own model and effort. The answer carries `modelNote`, which
    says so and names where to configure one (`team.<team>.<agent>.profiles` in
    `.alp/settings.json`, the team's `team.json`, or the agent's `agent.json`). It is not refused.
+   A `provider` named without a `model` is not a model of its own here.
 
 The effort comes from the same source as the model (`thinking` passed, the profile's effort, the
 member's `thinking`, `agent.json`'s `thinking`), fitted to an effort the model takes; only step 5
