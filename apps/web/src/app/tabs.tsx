@@ -529,6 +529,8 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
   // the center when there is none; remembered while it stays, forgotten with the workspace.
   const sidePane = React.useRef<string | null>(null);
   React.useEffect(() => { sidePane.current = null; }, [scope]);
+  // A side pane that closed is forgotten, so a later pane that takes its id is not mistaken for it.
+  React.useEffect(() => { if (sidePane.current && !ids.includes(sidePane.current)) sidePane.current = null; }, [ids]);
   const sideRef = React.useRef({ tabs, ids, panes });
   sideRef.current = { tabs, ids, panes };
   /** Places a tab not open yet in the side pane; false (it opens as usual) when it is open, the screen is narrow (one pane shows) or no pane can be made. */
@@ -538,6 +540,7 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
     if (open.some(entry => tabKey(entry) === key)) return false;
     if (typeof window.matchMedia === 'function' && !window.matchMedia('(min-width: 768px)').matches) return false;
     const remembered = sidePane.current && known.includes(sidePane.current) ? sidePane.current : null;
+    // The tab is assigned before it exists: the caller adds it in the same event, so both land in one render.
     if (remembered) { setPanes(state => ({ ...state, focused: remembered, assign: { ...state.assign, [key]: remembered } })); return true; }
     const next = splitRootRight(current, key);
     if (!next) return false;
