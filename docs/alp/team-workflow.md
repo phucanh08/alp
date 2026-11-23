@@ -47,7 +47,8 @@ can use. New project `.alp/settings.json`:
 ```
 
 `workflow.mode` names the team new sessions use. `workflow.maxPeers` overrides the
-team's peer limit for this project.
+team's peer limit for this project. `workflow.maxLeads` (Cafe; default 1) is how many
+leads main may run at once; see [Several leads](#several-leads-workflowmaxleads).
 
 `workflow.mode` also accepts `smart` and `supervised`, the profiles' names before
 0.4; `alp update-template` renames them. Set `workflow.supervisor` to `false` to start no
@@ -62,7 +63,7 @@ const agent = await client.agents.create({
 ```
 
 The provider still accepts `options.workflow` and `settings.workflow` from older
-clients; conflicting selections fail. Profile and peer limit are persisted; resume
+clients; conflicting selections fail. Profile, peer limit and lead limit are persisted; resume
 cannot change the profile, and child sessions inherit the parent's snapshot. Start
 a new session for changes; changing the model, effort, or profile of an open
 session is refused.
@@ -83,8 +84,35 @@ A permission profile can cap an agent's mode and add rules (below).
 
 Default maximum simultaneous peers is **2**. Increase `workflow.maxPeers` only at
 the user's request, then start a new session. Peer limits count across the root
-session's live tree. Advisors and lead do not consume peer slots. Concurrent peers
-must be read-only or isolated.
+session's live tree, which may run `maxPeers × maxLeads` peers. Advisors and lead do
+not consume peer slots. Concurrent peers must be read-only or isolated.
+
+### Several leads: workflow.maxLeads
+
+In Cafe, main runs one lead at a time by default. A lead may start while only
+read-only assignments run (reviewer, oracle, a read-only peer). Set
+`workflow.maxLeads` (a positive integer; `maxLeads` in a `team.json`) to let main run
+up to that many leads at once, then start a new session; a resumed session keeps the
+number it started with, and a strategy never changes it. A second lead starts only
+when all of these hold, checked together so two parallel calls cannot both pass:
+
+- main's running or parked leads are fewer than `maxLeads`; a parked lead counts
+  until `alp_cancel` stops it;
+- the new lead and every running writer of the same repository use
+  `isolation: "worktree"`, or write a different repository (`writeRoot`): a lead in
+  the shared checkout beside another writer is refused;
+- it takes a `taskId` whose task declares `paths`, every running lead holds such a
+  task too, and no two of those tasks' paths overlap.
+
+A refusal says what to do, for example `Another lead is running; a second lead needs
+isolation "worktree" and a taskId with its own paths (maxLeads 2)` or `Lead limit
+reached: 2 leads are already running or parked (maxLeads 2); wait for a handoff, or
+ask the user to raise workflow.maxLeads for a new session`, with an `alp_cancel` hint
+when one of them is parked. Main splits work over several leads only for independent
+tasks (no blocked-by between them, separate paths), merges their worktrees one at a
+time with `alp_merge` and re-runs tests after each merge; a conflict is left as markers
+for main, as before. Main never instructs a lead's peers directly. The 16 + 16 start
+budgets stay per root user turn, shared by all leads.
 
 ## Permission profiles
 
@@ -1147,7 +1175,7 @@ strategy and no `alp_strategy` tool; ALP refuses the call from them.
 | `smart` (default) | ordinary work | research enough, plan if needed, implement, verify, no scope creep |
 | `rush` | small, clear work | find the spot, minimal fix, focused verification, no oracle, delegate only if required, peers on the cheapest model/effort their profile allows |
 | `deep` | hard bugs, concurrency, performance, security, architecture | root cause with evidence, execution and data-flow analysis, compare options, consider oracle (two models when worth it) before fixing |
-| `large` | work across many modules | decompose, record dependencies in the task graph, delegate in parallel within `maxPeers`, the 16+16 budgets and depth 4; avoid duplicate research; synthesise and verify |
+| `large` | work across many modules | decompose, record dependencies in the task graph, delegate in parallel within `maxPeers` (in Cafe, up to `maxLeads` leads for independent tasks), the 16+16 budgets and depth 4; avoid duplicate research; synthesise and verify |
 
 Every session starts with `smart`. `strategy` must be one of the four and `reason`
 a non-empty line of at most 300 characters. One change per user turn of the root:
