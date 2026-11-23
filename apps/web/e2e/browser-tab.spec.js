@@ -163,6 +163,36 @@ test('a load refused after the Browser tab guest is ready shows the error line (
   await marked.close();
 });
 
+test('an address typed before the guest\'s first page arrives is kept and loads (t-a5d8)', async ({ browser }) => {
+  // ALP.app's guest starts on about:blank and says so (did-navigate) a moment after the tab opens.
+  // On a slow machine the user (or a test) has typed an address by then: that first navigation must
+  // not wipe it, or Enter submits an empty bar ("Type an address.") and the page never loads.
+  const marked = await browser.newContext({ userAgent: DESKTOP_UA, viewport: { width: 1440, height: 900 } });
+  await marked.addInitScript(fakeWebview);
+  const desktop = await marked.newPage();
+  await connect(desktop, world);
+  await desktop.getByRole('button', { name: 'New tab' }).click();
+  await desktop.getByRole('menuitem', { name: 'Browser' }).click();
+  const address = desktop.getByTestId('browser-address');
+  await address.fill('127.0.0.1:5173/typed');
+  const navigate = url => desktop.evaluate(target => {
+    const view = window.__views.at(-1);
+    view.dispatchEvent(Object.assign(new Event('did-navigate'), { url: target }));
+  }, url);
+  await navigate('about:blank');
+  await desktop.evaluate(() => window.__readyAll());
+  await expect(address).toHaveValue('127.0.0.1:5173/typed');
+  await address.press('Enter');
+  await expect.poll(() => desktop.evaluate(() => window.__loads.map(([, url]) => url))).toEqual(['http://127.0.0.1:5173/typed']);
+  await expect(desktop.getByTestId('browser-error')).toHaveCount(0);
+  // Once submitted, the page's own navigation is shown again.
+  await navigate('http://127.0.0.1:5173/typed');
+  await expect(address).toHaveValue('http://127.0.0.1:5173/typed');
+  await navigate('http://127.0.0.1:5173/next');
+  await expect(address).toHaveValue('http://127.0.0.1:5173/next');
+  await marked.close();
+});
+
 test('Browser tab pages stay alive behind other tabs and across panes; blocked navigation is said in its own tab (t-a35b)', async ({ browser }) => {
   const marked = await browser.newContext({ userAgent: DESKTOP_UA, viewport: { width: 1440, height: 900 } });
   await marked.addInitScript(fakeWebview);

@@ -80,6 +80,13 @@ function DesktopBrowser({ id }: { id: string }) {
    */
   const attached = React.useRef(false);
   const pending = React.useRef<string | null>(null);
+  /**
+   * Whether the address bar holds text the user typed and has not submitted. The page's own
+   * navigation never overwrites it (t-a5d8): the guest's first about:blank arrives a moment after the
+   * tab opens, and on a slow machine an address is typed by then; wiping it made Enter submit an
+   * empty bar. Submitting, or leaving the bar, hands it back to the page.
+   */
+  const typing = React.useRef(false);
   const load = React.useCallback((webview: Webview, url: string) => {
     const refused = () => setError(`${url} is blocked in Browser or did not load.`);
     try { webview.loadURL(url).catch(refused); } catch { refused(); }
@@ -107,7 +114,7 @@ function DesktopBrowser({ id }: { id: string }) {
       const url = (event as Event & { url?: string }).url ?? '';
       const main = (event as Event & { isMainFrame?: boolean }).isMainFrame;
       if (main === false) return;
-      setAddress(url === BLANK_URL ? '' : url);
+      if (!typing.current) setAddress(url === BLANK_URL ? '' : url);
       setError(null);
       if (isBrowsableUrl(url)) keep.current.setBrowserUrl(id, url);
       sync();
@@ -166,6 +173,7 @@ function DesktopBrowser({ id }: { id: string }) {
     event.preventDefault();
     const result = readAddress(address);
     if ('error' in result) { setError(result.error); return; }
+    typing.current = false;
     setError(null);
     setAddress(result.url === BLANK_URL ? '' : result.url);
     // The main process refuses what a Browser tab may not show (file:, the dashboard itself…).
@@ -183,7 +191,7 @@ function DesktopBrowser({ id }: { id: string }) {
         <button type="button" className={tool} aria-label="Back" title="Back" disabled={!history.back} onClick={act(webview => webview.goBack())} data-testid="browser-back"><ArrowLeft aria-hidden /></button>
         <button type="button" className={tool} aria-label="Forward" title="Forward" disabled={!history.forward} onClick={act(webview => webview.goForward())} data-testid="browser-forward"><ArrowRight aria-hidden /></button>
         <button type="button" className={tool} aria-label={loading ? 'Stop' : 'Reload'} title={loading ? 'Stop' : 'Reload'} onClick={act(webview => (loading ? webview.stop() : webview.reload()))} data-testid="browser-reload"><RotateCw aria-hidden className={cn(loading && 'animate-spin')} /></button>
-        <input ref={input} value={address} onChange={event => setAddress(event.target.value)} aria-label="Address" placeholder="Type an address, such as localhost:3000"
+        <input ref={input} value={address} onChange={event => { typing.current = true; setAddress(event.target.value); }} onBlur={() => { typing.current = false; }} aria-label="Address" placeholder="Type an address, such as localhost:3000"
           spellCheck={false} autoCapitalize="off" autoCorrect="off" data-testid="browser-address"
           className={cn('h-7 min-w-0 flex-1 rounded-md border border-border bg-card px-2 text-sm text-foreground placeholder:text-muted-foreground', 'outline-none focus-visible:border-ring')} />
       </form>
