@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
@@ -17,14 +18,18 @@ const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.u
 
 /**
  * What a read-only Claude session is denied besides its profile's rules (t-cde5): the Paseo
- * credentials under ALP_HOME, as named and as resolved, as rules and as sandbox read denials.
+ * credentials under ALP_HOME, as named and as resolved, and the /tmp directory of the token socket
+ * of a home too long for a socket address, as rules and as sandbox read denials.
  */
 function credentialDenials() {
   const home = path.resolve(process.env.ALP_HOME || path.join(homedir(), '.alp'));
   let real = home;
   try { real = realpathSync(home); } catch {}
   const homes = real === home ? [home] : [home, real];
-  const directories = homes.map(root => path.join(root, 'paseo'));
+  const tmp = process.platform === 'win32' ? '/tmp' : realpathSync('/tmp');
+  const fallback = root => process.platform === 'win32' || Buffer.byteLength(path.join(root, 'paseo', 'token.sock')) < 100 ? []
+    : [...new Set(['/tmp', tmp].map(dir => path.posix.join(dir, `alp-paseo-${process.getuid()}-${createHash('sha256').update(root).digest('hex').slice(0, 12)}`)))];
+  const directories = [...new Set([...homes.map(root => path.join(root, 'paseo')), ...homes.flatMap(fallback)])];
   const files = homes.map(root => path.join(root, 'relay-keypair.json'));
   return { rules: [...directories.map(directory => `Read(/${directory}/**)`), ...files.map(file => `Read(/${file})`)], denyRead: [...directories, ...files] };
 }

@@ -1038,9 +1038,15 @@ test('alp dashboard pair prints the password it gets over the token socket; --ro
 test('t-cde5: the CLI finds the Paseo integration\'s token socket where the integration serves it, on every platform', async () => {
   const { tokenSocketPath } = await import('../../integrations/paseo/server/dist/web.js');
   const { paseoTokenSocketPath } = await import('../../packages/cli/src/interfaces.js');
+  const { tokenSocketFallback } = await import('@anhlp/alp-runtime/claude-transport');
   for (const home of ['/Users/someone/.alp', `/home/someone/${'y'.repeat(110)}/.alp`, '/tmp/a b/.alp', 'C:\\Users\\someone\\.alp']) {
     for (const platform of ['darwin', 'linux', 'win32']) {
       assert.equal(paseoTokenSocketPath(home, { platform, uid: 501 }), tokenSocketPath(home, { platform, uid: 501 }), `${platform} ${home}`);
+      // A read-only session is denied the /tmp directory the socket falls back to (t-cde5 M3).
+      const served = tokenSocketPath(home, { platform, uid: 501 });
+      const denied = tokenSocketFallback(home, { platform, uid: 501 });
+      if (platform === 'win32' || !served.startsWith('/tmp/alp-paseo-')) assert.deepEqual(denied, [], `${platform} ${home}`);
+      else assert.ok(denied.includes(path.posix.dirname(served)), `${platform} ${home}: ${denied}`);
     }
   }
 });
