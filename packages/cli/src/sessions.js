@@ -321,6 +321,8 @@ async function top(args) {
     const roots = positionals.length ? sessions.filter(session => session.id === positionals[0]) : sessions;
     if (positionals.length && !roots.length) throw new Error(`Session ${positionals[0]} is not a live root`);
     const blocks = [];
+    // Trees that ended leave the cache.
+    for (const rootId of strategies.keys()) if (!roots.some(root => root.id === rootId)) strategies.delete(rootId);
     for (const root of roots) {
       const { status } = await client.request('session.status', { sessionId: root.id }).catch(() => ({}));
       if (status) blocks.push(renderStatus(status, root, await strategiesOf(root.id)));

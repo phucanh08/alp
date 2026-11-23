@@ -478,7 +478,7 @@ export const choosesStrategy = (mapping: Pick<ResolvedSession, 'agent' | 'team'>
 export const STRATEGY_TOOL = {
   type: 'function',
   name: 'alp_strategy',
-  description: 'Record the strategy you work with: rush (small, clear work), smart (the default), deep (hard bugs, security, architecture) or large (many modules, decomposed and delegated in parallel). It is guidance for how you work and changes nothing else: no model, effort, permission, team or assignment. Choose at the start of the work; change it when evidence shows the work differs from your guess. At most one change per user turn.',
+  description: 'Record the strategy you work with: rush (small, clear work), smart (the default), deep (hard bugs, security, architecture) or large (many modules, decomposed and delegated in parallel). It is guidance for how you work and changes nothing else: no model, effort, permission, team or assignment. Choose at the start of the work; change it when evidence shows the work differs from your guess. At most one change per user turn; choosing the current strategy again changes nothing, not even its reason.',
   inputSchema: {
     type: 'object',
     properties: {
