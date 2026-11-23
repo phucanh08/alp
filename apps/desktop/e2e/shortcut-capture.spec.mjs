@@ -195,9 +195,10 @@ async function canPostKeys(t, app, page) {
     window.__seen = [];
     window.addEventListener('keydown', event => { window.__seen.push(event.code); if (event.code === 'KeyA' && !event.metaKey) window.__probe += 1; }, true);
   });
-  const reached = await press(app, page, 'a', 0, () => page.evaluate(() => window.__probe > 0), 'a posted key').catch(() => false);
-  if (!reached) t.skip('this host does not deliver posted key events (no Accessibility permission for the test runner)');
-  return reached;
+  // The skip says what failed, so a window that never got focus is not mistaken for a missing permission.
+  const reached = await press(app, page, 'a', 0, () => page.evaluate(() => window.__probe > 0), 'a posted key').catch(error => error);
+  if (reached !== true) t.skip(`this host does not deliver posted key events (no Accessibility permission for the test runner?): ${reached instanceof Error ? reached.message : 'the key never reached the page'}`);
+  return reached === true;
 }
 
 /** Presses `key` while row `id` captures and checks that the row recorded it and no menu item ran. */

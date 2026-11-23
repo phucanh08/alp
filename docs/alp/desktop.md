@@ -400,7 +400,7 @@ chụp (menu "+" và tab Browser). Phía trình duyệt thường là `apps/web/
 resident qua đổi tab và chuyển pane, thông báo chặn điều hướng chỉ dạng chữ, dòng lỗi khi lần tải bị
 từ chối sau `dom-ready`).
 
-`apps/desktop/e2e/shortcut-capture.spec.mjs` (t-81b0.14) dựng host giống vậy (alpd thật, chưa đăng ký
+`apps/desktop/e2e/shortcut-capture.spec.mjs` (t-81b0.14; chạy tay trên một Mac cho phép gửi phím: `bun run build && node --test e2e/shortcut-capture.spec.mjs`, chưa nằm trong `bun run e2e` hay CI) dựng host giống vậy (alpd thật, chưa đăng ký
 project) và gửi phím thật qua `osascript -l JavaScript` (CoreGraphics `CGEventCreateKeyboardEvent` +
 `CGEventPostToPid`, chỉ tới pid của app đang test): trong lúc Settings › Shortcuts chờ phím, mỗi phím
 menu (§4, trừ ⌥⌘H) được dòng đó ghi và cửa sổ không reload, zoom, thu nhỏ, ẩn, full screen hay mở
