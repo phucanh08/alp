@@ -27,7 +27,7 @@ async function dirs(t) {
 
 test('ALP ships its optional packs valid, and seeding a library installs none of them', async t => {
   const packs = await listPacks();
-  assert.deepEqual(packs.map(pack => pack.id), ['architecture', 'backend', 'design', 'frontend', 'integration', 'operations', 'quality']);
+  assert.deepEqual(packs.map(pack => pack.id), ['architecture', 'backend', 'design', 'frontend', 'integration', 'operations', 'quality', 'research']);
   const { root, library } = await dirs(t);
   await seedLibrary(library);
   const seeded = await readdir(path.join(library, 'skills'));
@@ -119,6 +119,57 @@ test('in the Blueprint team, main delegating to the architect gets a read-only a
   assert.match(agents[1].config.developerInstructions, /- feature-architecture \(/);
   // Main itself never delegates to docs-maintainer in Blueprint: that is lead's member.
   assert.match((await main.call('alp_delegate', { agent: 'docs-maintainer', task: 'Docs', wait: false })).error ?? '', /unauthorized target/);
+});
+
+test('research pack: in Phở + Research, main reaches scout and librarian read-only beside its peers, and they delegate to nobody', async t => {
+  const { directory, root, library } = await dirs(t);
+  await installPack('research', { scope: 'library', library });
+  const agents = [];
+  const runtime = createAlpRuntime({ transport: fakeTransport(agents), supervisor: false, libraryDir: library, runLogDir: path.join(directory, 'runs') });
+  teardown(t)(() => runtime.shutdown());
+  await runtime.open('root', { cwd: root, workflow: 'pho-research', mode: 'full-access' });
+  await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Research' }] });
+  const main = agents[0];
+  // maxPeers is 2: both peer slots taken, the advisors still start.
+  for (const task of ['one', 'two']) assert.ok((await main.call('alp_delegate', { agent: 'peer', task, mode: 'read-only', wait: false })).assignmentId);
+  assert.match((await main.call('alp_delegate', { agent: 'peer', task: 'three', mode: 'read-only', wait: false })).error ?? '', /Concurrent peer limit/);
+  for (const name of ['scout', 'librarian']) {
+    const advice = await main.call('alp_delegate', { agent: name, task: `Where is X? (${name})`, mode: 'full-access', wait: false });
+    assert.ok(advice.assignmentId, JSON.stringify(advice));
+    assert.equal(advice.mode, 'read-only', `${name} stays read-only under a full-access main`);
+  }
+  await until(() => agents.length === 5, 'two peers and two advisors');
+  const scout = agents.find(agent => /# Scout/.test(agent.config?.developerInstructions ?? ''));
+  const librarian = agents.find(agent => /# Librarian/.test(agent.config?.developerInstructions ?? ''));
+  assert.ok(scout && librarian);
+  for (const advisor of [scout, librarian]) assert.equal(advisor.config.sandbox, 'read-only');
+  for (const advisor of [scout, librarian]) assert.match((await advisor.call('alp_delegate', { agent: 'peer', task: 'help', wait: false })).error ?? '', /unauthorized target/);
+});
+
+test('research pack: in Cafe + Research, main reaches librarian but not scout, and lead reaches both', async t => {
+  const { directory, root, library } = await dirs(t);
+  await installPack('research', { scope: 'library', library });
+  const agents = [];
+  const runtime = createAlpRuntime({ transport: fakeTransport(agents), supervisor: false, libraryDir: library, runLogDir: path.join(directory, 'runs') });
+  teardown(t)(() => runtime.shutdown());
+  await runtime.open('root', { cwd: root, workflow: 'cafe-research' });
+  await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Research' }] });
+  const main = agents[0];
+  assert.match((await main.call('alp_delegate', { agent: 'scout', task: 'Find X', wait: false })).error ?? '', /unauthorized target/);
+  // Lead first: lead never starts beside another child of main; an advisor starts beside lead.
+  const led = await main.call('alp_delegate', { agent: 'lead', task: 'Lead the work', mode: 'read-only', wait: false });
+  assert.ok(led.assignmentId, JSON.stringify(led));
+  await until(() => agents.length === 2, 'lead');
+  const lead = agents[1];
+  assert.ok((await main.call('alp_delegate', { agent: 'librarian', task: 'How does lib Y retry?', wait: false })).assignmentId);
+  await until(() => agents.length === 3, 'librarian');
+  await until(() => lead.started.length === 1, 'lead\'s turn');
+  for (const name of ['scout', 'librarian']) {
+    const advice = await lead.call('alp_delegate', { agent: name, task: `Look (${name})`, wait: false });
+    assert.ok(advice.assignmentId, JSON.stringify(advice));
+  }
+  await until(() => agents.length === 5, 'scout and librarian under lead');
+  for (const child of [agents[2], agents[3], agents[4]]) assert.equal(child.config.sandbox, 'read-only');
 });
 
 test('a project reached through a linked directory installs there and is reported by the path given (macOS /var)', async t => {
