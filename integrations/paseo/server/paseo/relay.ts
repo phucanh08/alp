@@ -4,7 +4,7 @@ import { exportPublicKey, exportSecretKey, generateKeyPair, importPublicKey, imp
 import { setWebRelay } from '@anhlp/alp-core/user-settings';
 import { NOT_IMPLEMENTED, type Handler, type Outbound } from './gateway.js';
 import { startRelayTransport, type RelaySocketLike, type RelayTransportController, type RelayWebSocketFactory } from './relay-transport.js';
-import { ensureCredentialDir, moveLegacyRelayKey, relayKeyFile, writePrivate } from '../web.js';
+import { ensureCredentialDir, keepPrivate, moveLegacyRelayKey, relayKeyFile, writePrivate } from '../web.js';
 
 /**
  * Paseo's relay for alpd (D32, ALPD §64): with it on, alpd keeps a socket open to the relay, and
@@ -32,6 +32,7 @@ export async function relayKeyPair(home: string): Promise<{ keyPair: KeyPair; pu
     const kept = JSON.parse(await readFile(file, 'utf8'));
     if (kept?.v === 2 && typeof kept.publicKeyB64 === 'string' && typeof kept.secretKeyB64 === 'string') {
       const keyPair = { publicKey: importPublicKey(kept.publicKeyB64), secretKey: importSecretKey(kept.secretKeyB64) };
+      await keepPrivate(file);
       return { keyPair, publicKeyB64: exportPublicKey(keyPair.publicKey) };
     }
   } catch {}
