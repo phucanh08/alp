@@ -24,6 +24,9 @@ async function scratch(t) {
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const home = path.join(directory, 'home');
   await mkdir(home, { recursive: true, mode: 0o700 });
+  // A home whose socket path is too long (a long TMPDIR, as on macOS CI) has its socket under /tmp.
+  const socketDirectory = path.dirname(tokenSocketPath(home));
+  if (socketDirectory !== credentialDir(home)) defer(() => rm(socketDirectory, { recursive: true, force: true }));
   return { defer, home };
 }
 
@@ -115,7 +118,8 @@ test('t-cde5: the token socket answers only a request line, with the password, a
   defer(() => web.close());
   const socketPath = tokenSocketPath(home);
   assert.equal(web.tokenSocket, socketPath);
-  assert.equal(socketPath, path.join(home, 'paseo', 'token.sock'));
+  const preferred = path.join(home, 'paseo', 'token.sock');
+  assert.equal(socketPath, Buffer.byteLength(preferred) < 100 ? preferred : tokenSocketPath(home));
   assert.equal((await stat(socketPath)).isSocket(), true);
   assert.equal(await mode(socketPath), 0o600);
   assert.equal(await mode(path.dirname(socketPath)), 0o700);
@@ -130,6 +134,7 @@ test('t-cde5: the token socket answers only a request line, with the password, a
   const other = (await scratch(t)).home;
   await assert.rejects(serveToken({ home: other, answer: async () => ({}), afterListen: file => chmod(file, 0o644) }), /must have mode 0600, not 0644/);
   await assert.rejects(stat(tokenSocketPath(other)), { code: 'ENOENT' });
+  if (path.dirname(tokenSocketPath(other)) !== credentialDir(other)) await assert.rejects(stat(path.dirname(tokenSocketPath(other))), { code: 'ENOENT' }, 'the /tmp directory goes too');
   // A credential directory that is not 0700 (and holds something) stops the start.
   const shared = (await scratch(t)).home;
   await mkdir(credentialDir(shared), { mode: 0o755 });
