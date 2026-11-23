@@ -190,6 +190,20 @@ bản sao cục bộ, **chỉ** khi app chạy từ source (`app.isPackaged` là
   tắt. Trong trang của tab Browser, ⌘W, ⌘1-9 và ⌥⌘1-9 bị giữ lại (`before-input-event` của guest) và
   cửa sổ dashboard nhận cùng phím đó: một `keydown` dựng chỉ từ tên phím cố định (`shell-keys.ts`
   `dashboardKeyScript`), không dữ liệu nào của trang đi theo.
+- Settings › Shortcuts ghi phím mà không cần cầu nối nào tới main process (không preload, không
+  `setCapturingShortcut`; quyết định của người dùng ở gate t-81b0.14/g2, 2026-11-23). Trên macOS,
+  Electron đưa phím Cmd (key equivalent) cho trang đang có focus trước; chỉ khi trang không xử lý thì
+  mục menu mới chạy. Trong lúc một dòng chờ phím, listener của trang (`apps/web`
+  `settings/ShortcutsPage.tsx`, window, capture phase) gọi `preventDefault` với mọi phím, nên ⌘Q, ⌘H,
+  ⌘Z, ⇧⌘Z, ⌘X, ⌘C, ⌘V, ⌥⇧⌘V, ⌘A, ⌘R, ⌘0, ⌘=, ⌘-, ⌃⌘F, ⌘M, ⇧⌘R (và ⌥⌘I ở bản dev) được ghi vào dòng đó
+  và mục menu không chạy; hết capture thì menu nhận phím lại như cũ. Paseo cần `setCapturingShortcut`
+  chỉ để tắt ba mục Zoom (`enabled: false`, dựng lại menu; `dist/features/menu.js` trong app.asar
+  của Paseo). E2E `apps/desktop/e2e/shortcut-capture.spec.mjs` kiểm bằng phím thật (CoreGraphics
+  `CGEventPostToPid` chỉ tới process của app đang test; `webContents.sendInputEvent` không đi qua
+  menu), và skip, kèm lý do, khi máy không cho process gửi phím (thiếu quyền Accessibility). ⌥⌘H
+  không được bấm vì nó sẽ ẩn các app khác của người dùng. Ngoại lệ đã đo: khi focus nằm trong guest
+  của một tab Browser, phím thuộc trang đó, dòng vẫn chờ, và menu chạy (⌘M thu nhỏ cửa sổ); giao diện
+  không dẫn tới trạng thái này vì Settings phủ cả cửa sổ.
 - Kích thước, vị trí và trạng thái phóng to của cửa sổ được lưu ở `<userData>/window-state.json` (0600)
   và dùng lại khi mở app, chỉ khi vẫn thấy ít nhất 100×80 của cửa sổ trên một màn hình đang nối.
 - Dock hiện chấm (•) khi favicon của dashboard là favicon attention; đọc qua `page-favicon-updated`,
@@ -386,8 +400,18 @@ chụp (menu "+" và tab Browser). Phía trình duyệt thường là `apps/web/
 resident qua đổi tab và chuyển pane, thông báo chặn điều hướng chỉ dạng chữ, dòng lỗi khi lần tải bị
 từ chối sau `dom-ready`).
 
+`apps/desktop/e2e/shortcut-capture.spec.mjs` (t-81b0.14) dựng host giống vậy (alpd thật, chưa đăng ký
+project) và gửi phím thật qua `osascript -l JavaScript` (CoreGraphics `CGEventCreateKeyboardEvent` +
+`CGEventPostToPid`, chỉ tới pid của app đang test): trong lúc Settings › Shortcuts chờ phím, mỗi phím
+menu (§4, trừ ⌥⌘H) được dòng đó ghi và cửa sổ không reload, zoom, thu nhỏ, ẩn, full screen hay mở
+DevTools; hết capture thì ⌘=, ⌘M, ⌘R chạy mục menu của chúng; một capture vẫn còn sau khi cửa sổ mất
+rồi lấy lại focus thì vẫn ghi ⌘R, ⌘M; focus trong guest của tab Browser thì dòng không thấy phím (menu
+làm gì thì chỉ báo lại). Một phím đầu tiên (A) phải tới được trang, nếu không test skip kèm lý do (máy
+không cho process gửi phím: thiếu quyền Accessibility, có thể là CI). Một lần bấm chỉ được lặp lại (tối
+đa ba lần) khi cửa sổ mất focus trong lúc bấm; phím bị mất khi cửa sổ vẫn giữ focus thì test fail.
+
 Teardown dùng `defer` của `test/support/teardown.js`: đóng Electron (quá 15 giây thì SIGKILL), dừng
-host (với `owner.spec.mjs` và `browser.spec.mjs`: `alp dashboard --stop`, rồi `alp daemon stop`), rồi mới xóa thư mục. App chạy với `HOME` tạm.
+host (với `owner.spec.mjs`, `browser.spec.mjs` và `shortcut-capture.spec.mjs`: `alp dashboard --stop`, rồi `alp daemon stop`), rồi mới xóa thư mục. App chạy với `HOME` tạm.
 
 ```sh
 npm ci && node scripts/build-workspace.mjs cli   # ở gốc repo
