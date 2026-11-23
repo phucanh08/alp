@@ -1,11 +1,10 @@
-import { randomUUID } from 'node:crypto';
-import { readFile, rename, writeFile, mkdir } from 'node:fs/promises';
-import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import type { SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
 import { exportPublicKey, exportSecretKey, generateKeyPair, importPublicKey, importSecretKey, type KeyPair } from '@getpaseo/relay/e2ee';
 import { setWebRelay } from '@anhlp/alp-core/user-settings';
 import { NOT_IMPLEMENTED, type Handler, type Outbound } from './gateway.js';
 import { startRelayTransport, type RelaySocketLike, type RelayTransportController, type RelayWebSocketFactory } from './relay-transport.js';
+import { ensureCredentialDir, moveLegacyRelayKey, relayKeyFile, writePrivate } from '../web.js';
 
 /**
  * Paseo's relay for alpd (D32, ALPD §64): with it on, alpd keeps a socket open to the relay, and
@@ -17,14 +16,18 @@ import { startRelayTransport, type RelaySocketLike, type RelayTransportControlle
 export const DEFAULT_RELAY_ENDPOINT = 'relay.paseo.sh:443';
 /** Paseo's app opens a link of this site with an #offer= fragment; the phone's camera hands it over. */
 const PAIRING_APP_URL = 'https://app.paseo.sh';
-const KEYPAIR_FILE = 'relay-keypair.json';
 
 type Inbound<T extends SessionInboundMessage['type']> = Extract<SessionInboundMessage, { type: T }>;
 export type RelaySettings = { enabled?: boolean; endpoint?: string; useTls?: boolean };
 
-/** alpd's relay key pair, made once and kept beside its token; a new one unpairs every device. */
+/**
+ * alpd's relay key pair, made once and kept beside its token in the credential directory
+ * `<home>/paseo/` (t-cde5; one at `<home>/relay-keypair.json` moves there); a new one unpairs every device.
+ */
 export async function relayKeyPair(home: string): Promise<{ keyPair: KeyPair; publicKeyB64: string }> {
-  const file = path.join(home, KEYPAIR_FILE);
+  await ensureCredentialDir(home);
+  await moveLegacyRelayKey(home);
+  const file = relayKeyFile(home);
   try {
     const kept = JSON.parse(await readFile(file, 'utf8'));
     if (kept?.v === 2 && typeof kept.publicKeyB64 === 'string' && typeof kept.secretKeyB64 === 'string') {
@@ -34,10 +37,7 @@ export async function relayKeyPair(home: string): Promise<{ keyPair: KeyPair; pu
   } catch {}
   const keyPair = generateKeyPair();
   const publicKeyB64 = exportPublicKey(keyPair.publicKey);
-  await mkdir(home, { recursive: true, mode: 0o700 });
-  const temporary = `${file}.${randomUUID().slice(0, 8)}.tmp`;
-  await writeFile(temporary, JSON.stringify({ v: 2, publicKeyB64, secretKeyB64: exportSecretKey(keyPair.secretKey) }, null, 2) + '\n', { mode: 0o600 });
-  await rename(temporary, file);
+  await writePrivate(file, JSON.stringify({ v: 2, publicKeyB64, secretKeyB64: exportSecretKey(keyPair.secretKey) }, null, 2) + '\n');
   return { keyPair, publicKeyB64 };
 }
 

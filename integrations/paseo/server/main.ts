@@ -63,7 +63,13 @@ async function run(home: string) {
   let listening: string | null = null;
   const gateway = createPaseoBridge({ version: VERSION, home, token: () => web?.token ?? '', serverId: () => web?.serverId ?? '', relay: settings?.web?.relay, listen: () => listening, log: webLog });
   // Port 0: `dashboard.port` belongs to alp dashboard; this listener serves only daemon.get_status and Paseo sockets with the token.
-  const web = createWebServer({ gateway, home, port: 0, log: webLog });
+  // A rotated token (alp dashboard pair --rotate) also ends the relay's devices: the relay restarts, and each signs in again.
+  const web = createWebServer({ gateway, home, port: 0, log: webLog, onRotate: async () => {
+    const current = gateway.relay;
+    if (!current.config().enabled) return;
+    await current.stop();
+    await current.start().catch(error => webLog(`relay not restarted after the rotation: ${error?.message ?? error}`));
+  } });
   // Ready is published only after web.pairing is registered (below), so a caller that waits for the
   // ready lock can rely on the RPC being served; marking ready here would race callers of web.pairing.
   await web.listen().then(info => { listening = `127.0.0.1:${info.port}`; log.info(`Paseo bridge on ${info.url}`, { event: 'web.listening' }); })

@@ -7,6 +7,10 @@ import path from 'node:path';
 import WebSocket from 'ws';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { webFile, createWebServer } from '@anhlp/alp-paseo';
+import { tokenFile } from '@anhlp/alp-paseo/web';
+
+/** What paseo.json names: listen()'s answer without the token, which stays in the credential directory (t-cde5). */
+const published = ({ token: _token, ...rest }) => rest;
 
 /** The Paseo integration's local listener (ALPD §62): a token-guarded socket, no page (paseo-web was removed in t-55ce.3). */
 async function setup(t, options = {}) {
@@ -29,7 +33,7 @@ const upgrade = (info, headers) => new Promise(resolve => {
 test('the listener serves no page at any address, on 127.0.0.1 only, and without the bridge refuses the socket', async t => {
   const { home, info, origin } = await setup(t);
   assert.equal(info.url, `${origin}/`);
-  assert.deepEqual(JSON.parse(await readFile(webFile(home), 'utf8')), info);
+  assert.deepEqual(JSON.parse(await readFile(webFile(home), 'utf8')), published(info));
   assert.match(info.serverId, /^alp-[0-9a-f]{16}$/);
   for (const address of ['/', '/workspace/abc', '/index.html', '/alp-plugins.js', '/_expo/static/js/web/index-1.js']) {
     const page = await fetch(`${origin}${address}`);
@@ -82,18 +86,20 @@ test('the integration records itself in paseo.json and carries over only its own
   const carried = path.join(directory, 'carried');
   const info = await start(carried, old);
   assert.equal(webFile(carried), path.join(carried, 'paseo.json'));
-  assert.deepEqual(JSON.parse(await readFile(webFile(carried), 'utf8')), info);
+  assert.deepEqual(JSON.parse(await readFile(webFile(carried), 'utf8')), published(info));
   assert.deepEqual([info.token, info.serverId], [old.token, old.serverId], 'a paired device keeps its password across the rename');
-  assert.deepEqual(JSON.parse(await readFile(path.join(carried, 'web.json'), 'utf8')), old, 'web.json is never written');
+  assert.equal(JSON.parse(await readFile(tokenFile(carried), 'utf8')).token === old.token, true, 'the password is kept in the credential directory');
+  assert.deepEqual(JSON.parse(await readFile(path.join(carried, 'web.json'), 'utf8')), published(old), 'web.json keeps everything but the token (t-cde5)');
   assert.ok(info.port > 0 && info.port !== 7433, 'the default listener is ephemeral, not web.port');
   // alp-web's own web.json is not the integration's identity.
   const alpWeb = path.join(directory, 'alp-web');
   const fresh = await start(alpWeb, { ...old, app: 'alp-web' });
-  assert.notEqual(fresh.token, old.token);
+  assert.ok(fresh.token !== old.token);
+  assert.deepEqual(JSON.parse(await readFile(path.join(alpWeb, 'web.json'), 'utf8')), { ...old, app: 'alp-web' }, 'alp web\'s web.json is not the integration\'s to change');
   assert.notEqual(fresh.serverId, old.serverId);
   // Once paseo.json exists it wins over web.json.
   const again = await start(carried, { ...old, token: 'b'.repeat(64) });
-  assert.equal(again.token, old.token);
+  assert.ok(again.token === old.token);
 });
 
 test('settings may turn the web app off or move its port', () => {
