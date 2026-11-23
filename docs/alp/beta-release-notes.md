@@ -48,10 +48,9 @@ Changes that affect an existing user:
   file opens the Diff panel on it; the "…" menu has Open Diff tab and Inline diff (Split and Hide
   whitespace appear with Inline diff). A right click copies paths or opens the file or diff. Still
   read only: no stage, discard, commit, revert or pull request.
-  `TODO(lead): t-81b0.14 — Changes remembers Hide whitespace across reloads, as Paseo v0.17.3 does
-  (one global preference). The Changes mode is intentionally NOT remembered: Paseo keeps it in
-  memory only (board p-c4337f7a). Fill in the PR number and the storage (browser / ALP.app) once
-  merged.`
+  From #375 (t-81b0.14) **Hide whitespace is remembered** across reloads (stored in this browser or
+  ALP.app), as Paseo v0.17.3 keeps it in its changes preferences; the mode is intentionally not
+  remembered, as in Paseo, so a reload starts on Uncommitted.
 - **Settings › App as Paseo's** (t-81b0.12 round 4, #370): theme **tiles** with a preview of each
   theme (System first); content width **Default / Wide / Full** (an older custom width still applies
   and is shown as custom); **Notifications** is its own page; **Open location** chooses whether
@@ -63,14 +62,10 @@ Changes that affect an existing user:
   default keys were taken since. The Shift+? dialog, the hints and ALP.app's ⌘W fallback follow
   your keys. The composer keys and Find in chat cannot be rebound. In a browser, keys the browser
   keeps (⌘W, ⌘T, ⌘N in Chrome) cannot be captured.
-  `TODO(lead): t-81b0.14 — ALP.app turns its menu keys off while Settings › Shortcuts captures a
-  key. The brief said: one minimal preload exposing only setCapturingShortcut (gate t-81b0.14/g1).
-  The board (claim p-9ac2d60e, 2026-11-23) now says "g2 option A, no preload". Describe the
-  mechanism that actually merged. Before it, in ALP.app the menu took ⌘Q, ⌘H, ⌥⌘H, ⌘Z, ⇧⌘Z, ⌘X,
-  ⌘C, ⌘V, ⌥⇧⌘V, ⌘A, ⌘R, ⌘0, ⌘+, ⌘-, ⌃⌘F, ⌘M, ⇧⌘R (dev build also ⌥⌘I) before the page, so they
-  ran the menu item and were not recorded. State the PR number and which of these keys can now be
-  captured. If a preload was added, add a security note pointing to desktop.md §4, because the
-  window had no preload before.`
+  In ALP.app the menu keys (⌘Q, ⌘H, ⌘Z, ⇧⌘Z, ⌘X, ⌘C, ⌘V, ⌥⇧⌘V, ⌘A, ⌘R, ⌘0, ⌘+, ⌘-, ⌃⌘F, ⌘M,
+  ⇧⌘R) are recorded during capture and their menu items do not run: Electron gives a ⌘ key to the
+  page first. An earlier parity-table note said otherwise; real key presses showed it was wrong
+  (#375, t-81b0.14), so ALP.app still has no preload ([desktop.md](desktop.md) §4).
 
 Fixes since beta.11 include: the Files panel ends a refresh when the connection or workspace
 changes (6c85c7d2); every package's `NOTICE` carries the icon attribution with the full MIT text
@@ -79,10 +74,13 @@ changes (6c85c7d2); every package's `NOTICE` carries the icon attribution with t
 (e62497a1); a closed side pane is forgotten, so a later pane with its id is not taken for it
 (fd1fec8f).
 
-- `TODO(lead): t-a5d8 — the desktop e2e Browser-tab flake (browser.spec: the guest stayed
-  about:blank, seen on the beta.11 PR CI) and the Windows alpd lock (windows-daemon:
-  ALP_LOCK_HELD after SIGKILL). The causes are not established yet; describe the fixes and their
-  commits once merged, or drop this bullet if they change only tests.`
+- **A Browser tab keeps an address typed right after it opens** (t-a5d8, #374): the tab's first
+  blank page arrived a moment later and wiped what had been typed, so Enter did nothing (the
+  intermittent desktop e2e failure since beta.11). Leaving the address bar unsubmitted now shows
+  the page's address again, as in Chrome.
+- `TODO(lead): t-a5d8 part b — Windows alpd lock after a crash (ALP_LOCK_HELD while Windows reuses
+  the dead alpd's pid): fill in once its PR merges, or move it to Known issues if beta.12 ships
+  without it.`
 - `TODO(lead): unplaced commits — none in the range check (all 18 commits of
   v0.0.1-beta.11..2124587b are placed above); re-check every commit added after 2124587b.`
 
@@ -99,9 +97,6 @@ Known issues, carried from beta.11:
 - Still as before: the Claude Agent SDK's own bundled zod is inside the advisory range (accepted
   residual risk, [zod-advisory.md](zod-advisory.md)); Antigravity's own read tools are not confined
   to the workspace; remote mode (`@anhlp/alp-gateway`) is not published.
-- `TODO(lead): the GitHub release body is still release-binaries.yml's "Draft binary release built
-  from …" template and does not link these notes (board p-2220d2c3, as in beta.9–beta.11). Fix the
-  workflow, edit the body after un-draft, or leave it; this is not a user-facing known issue.`
 
 # ALP 0.0.1-beta.11 — release notes
 
