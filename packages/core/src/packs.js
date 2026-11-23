@@ -20,6 +20,7 @@ import { validateAgentConfig } from './validation.js';
  * installed or run besides copying files, and no dependency is fetched.
  *
  *   packs/<id>/pack.json   { label, description, skills?, agents?, teams?, assign?, permissions? }
+ *   permissions.<agent>: a base mode, or { base, allow?, ask?, deny? }, installed as permissions.profiles.<agent>
  *   packs/<id>/skills/<name>/...   packs/<id>/agents/<name>/...   packs/<id>/teams/<name>/...
  */
 
@@ -68,10 +69,21 @@ export function validatePack(id, manifest, files) {
     }
   }
   if (manifest.permissions !== undefined) {
-    if (!object(manifest.permissions)) bad('permissions must map agents to a base mode');
-    for (const [agent, base] of Object.entries(manifest.permissions)) {
+    if (!object(manifest.permissions)) bad('permissions must map agents to a base mode or a profile');
+    for (const [agent, entry] of Object.entries(manifest.permissions)) {
       if (!(manifest.agents ?? []).includes(agent)) bad(`permissions names '${agent}', which is not one of this pack's agents`);
-      if (!BASES.includes(base)) bad(`permissions.${agent} must be one of ${BASES.join(', ')}`);
+      // A base mode, or a profile of its own: { base, allow?, ask?, deny? }, installed as permissions.profiles.<agent>.
+      if (object(entry)) {
+        for (const key of Object.keys(entry)) if (!['base', 'allow', 'ask', 'deny'].includes(key)) bad(`permissions.${agent}: unsupported field '${key}'; expected base, allow, ask, deny`);
+        if (!BASES.includes(entry.base)) bad(`permissions.${agent}.base must be one of ${BASES.join(', ')}`);
+        try { validatePermissions({ profiles: { [agent]: entry } }, where); } catch (error) { bad(`permissions.${agent}: ${error.message.replace(`${where}: `, '')}`); }
+      } else if (!BASES.includes(entry)) bad(`permissions.${agent} must be one of ${BASES.join(', ')}, or an object { base, allow?, ask?, deny? }`);
+      // A read-only agent's profile stays read-only: the pack may add rules to it, never a wider base.
+      const config = files[`packs/${id}/agents/${agent}/agent.json`];
+      let mode;
+      try { mode = config === undefined ? undefined : JSON.parse(config).mode; } catch { mode = undefined; }
+      const base = object(entry) ? entry.base : entry;
+      if (mode === 'read-only' && base !== 'read-only') bad(`permissions.${agent}: ${agent} is read-only (agent.json), so its base must be read-only, not ${base}`);
     }
   }
   return manifest;
@@ -79,7 +91,7 @@ export function validatePack(id, manifest, files) {
 
 /**
  * The packs ALP ships.
- * @returns {Promise<Array<{ id: string, label: string, description: string, skills: string[], agents: string[], teams: string[], assign: Record<string, string[]>, permissions: Record<string, string> }>>}
+ * @returns {Promise<Array<{ id: string, label: string, description: string, skills: string[], agents: string[], teams: string[], assign: Record<string, string[]>, permissions: Record<string, string | { base: string, allow?: string[], ask?: string[], deny?: string[] }> }>>}
  */
 export async function listPacks(options = {}) {
   const files = await shippedPackFiles(options);
@@ -202,16 +214,28 @@ export async function installPack(id, { scope, root, library, assign = false, te
     }
     const current = object(settings.permissions) ? settings.permissions : {};
     const agents = object(current.agents) ? current.agents : {};
+    const profiles = object(current.profiles) ? current.profiles : {};
+    const same = (a, b) => JSON.stringify(['base', 'allow', 'ask', 'deny'].map(key => a?.[key] ?? (key === 'base' ? undefined : []))) === JSON.stringify(['base', 'allow', 'ask', 'deny'].map(key => b?.[key] ?? (key === 'base' ? undefined : [])));
     let changed = false;
-    for (const [agent, required] of Object.entries(pack.permissions)) {
+    for (const [agent, entry] of Object.entries(pack.permissions)) {
+      // A base mode names itself; a pack profile is installed under the agent's name.
+      const profile = object(entry) ? { base: entry.base, ...Object.fromEntries(['allow', 'ask', 'deny'].filter(key => entry[key]?.length).map(key => [key, entry[key]])) } : undefined;
+      const required = profile ? agent : entry;
+      const shown = profile ? `profile ${agent}` : `'${required}'`;
       // An agent of that name that was already there is the user's: its permissions are theirs to set.
-      if (!installed.some(entry => entry.kind === 'agents' && entry.name === agent)) { if (!Object.hasOwn(agents, agent) || agents[agent] !== required) permissions.conflicts.push(`${agent}: your own ${agent} agent was kept, so its permissions were left as they are; the pack's ${agent} expects '${required}'`); continue; }
-      if (!Object.hasOwn(agents, agent)) { agents[agent] = required; permissions.set.push(`${agent}: ${required}`); changed = true; }
-      else if (agents[agent] === required) permissions.kept.push(`${agent}: ${required}`);
-      else permissions.conflicts.push(`${agent}: ${file} gives '${agents[agent]}', the pack expects '${required}'; left as it is`);
+      if (!installed.some(entry => entry.kind === 'agents' && entry.name === agent)) { if (!Object.hasOwn(agents, agent) || agents[agent] !== required || (profile && !same(profiles[agent], profile))) permissions.conflicts.push(`${agent}: your own ${agent} agent was kept, so its permissions were left as they are; the pack's ${agent} expects ${shown}`); continue; }
+      // A profile of that name the user already has is theirs: kept, never replaced.
+      if (profile && Object.hasOwn(profiles, agent) && !same(profiles[agent], profile)) { permissions.conflicts.push(`${agent}: ${file} already defines permissions.profiles.${agent}, which differs from the pack's; left as it is`); continue; }
+      if (Object.hasOwn(agents, agent) && agents[agent] !== required) { permissions.conflicts.push(`${agent}: ${file} gives '${agents[agent]}', the pack expects ${shown}; left as it is`); continue; }
+      const newProfile = profile && !Object.hasOwn(profiles, agent);
+      if (newProfile) profiles[agent] = profile;
+      if (!Object.hasOwn(agents, agent)) agents[agent] = required;
+      else if (!newProfile) { permissions.kept.push(`${agent}: ${shown}`); continue; }
+      permissions.set.push(`${agent}: ${profile ? `profile ${agent} (${profile.base}${['allow', 'ask', 'deny'].map(key => profile[key] ? `, ${profile[key].length} ${key}` : '').join('')})` : required}`);
+      changed = true;
     }
     if (changed) {
-      const next = { ...settings, permissions: { ...current, agents } };
+      const next = { ...settings, permissions: { ...current, ...(Object.keys(profiles).length ? { profiles } : {}), agents } };
       validatePermissions(next.permissions, file);
       await guard('settings.json');
       await writeJsonAtomic(file, next);

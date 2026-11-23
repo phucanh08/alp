@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { lstatSync, realpathSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { moveFile } from './atomic.js';
@@ -17,8 +18,10 @@ import { AlpError } from './errors.js';
  * rule makes ALP ask the user every time. With `beyondMode: "ask"`, what the mode
  * refuses and no rule covers is asked too, and the user may allow it always.
  *
- * ALP enforces rules natively where it can: Claude receives them as its own
- * allowed and disallowed tools, which hold in every permission mode. Codex runs
+ * ALP enforces rules natively where it can: Claude receives deny rules, and allow
+ * rules for tools other than Bash, as its own disallowed and allowed tools, which hold
+ * in every permission mode; Bash allow rules it would match as written, so ALP decides
+ * them in canUseTool (commandDecision). Codex runs
  * commands inside its sandbox without asking, so for Codex an allow rule lets a
  * command leave the sandbox when Codex asks to, and a deny rule refuses that.
  */
@@ -51,6 +54,10 @@ export function parseRule(rule, source = 'rule') {
   const [, tool, specifier] = match;
   if (!TOOLS.includes(tool) && !/^mcp__[\w-]+(__[\w-]+)?$/.test(tool)) fail(source, `${JSON.stringify(rule)} names unknown tool ${tool}; use ${TOOLS.join(', ')} or mcp__<server>__<tool>`);
   if (specifier !== undefined && !specifier.trim()) fail(source, `${JSON.stringify(rule)} has an empty specifier`);
+  if (specifier !== undefined && specifier.trim().startsWith('@')) {
+    const checked = checkedRule(specifier.trim());
+    if (tool !== 'Bash' || !checked) fail(source, `${JSON.stringify(rule)}: a checked rule is Bash(@git-clone-public <root>), Bash(@git-read <root>) or Bash(@git-unsafe), with <root> an absolute, normalised path`);
+  }
   return { tool, ...(specifier !== undefined && specifier.trim() !== '*' ? { specifier: specifier.trim() } : {}) };
 }
 
@@ -204,9 +211,248 @@ export function simpleCommands(line) {
   return parts.map(part => part.trim()).filter(Boolean);
 }
 
+// --- checked git rules ----------------------------------------------------------
+//
+// A prefix rule cannot say "a directory under /tmp/alp-librarian": `Bash(git -C /tmp/alp-librarian/*)` also
+// covers `git -C /tmp/alp-librarian/../x push`. A checked rule names a command shape ALP parses into words
+// and checks argument by argument. Its specifier starts with `@`, so a runtime that matches rules itself as
+// written (Claude's allowedTools, disallowedTools) matches it against no real command: it holds only where ALP
+// decides (commandDecision), and never widens anything elsewhere.
+//
+//   Bash(@git-clone-public <root>)  allow `git clone [--depth N|--shallow-since=D|--filter=F|--single-branch|
+//                                   --no-tags|-b B|-q|-n|--progress] https://(github|gitlab).com/<o>/<r>[.git] <dest>`,
+//                                   <dest> absolute, normalised and strictly below <root>, also once links are resolved
+//   Bash(@git-read <root>)          allow `git [--no-pager] -C <dir> <fetch|log|show|grep|rev-parse|ls-files|cat-file|
+//                                   blame|diff|branch> ...`, <dir> strictly below <root> the same way; fetch only from
+//                                   origin with listed options; branch only lists; no option that writes or runs a program
+//   Bash(@git-unsafe)               deny any git invocation that pushes, configures, edits remotes, runs hooks, or
+//                                   carries -c/--config-env, --upload-pack, --receive-pack, --config, --template, --exec,
+//                                   or -u to clone/fetch/pull/ls-remote; a git command ALP cannot split into words too
+
+const CHECKED_KINDS = ['git-clone-public', 'git-read', 'git-unsafe'];
+
+/** Parses a checked specifier: { kind, root? } or null. */
+function checkedRule(specifier) {
+  const match = /^@([a-z-]+)(?:\s+(\S+))?$/.exec(specifier);
+  if (!match || !CHECKED_KINDS.includes(match[1])) return null;
+  const [, kind, root] = match;
+  if (kind === 'git-unsafe') return root === undefined ? { kind } : null;
+  if (root === undefined || !cleanAbsolute(root) || root === '/') return null;
+  return { kind, root };
+}
+
+/** An absolute POSIX path in normal form: no `.`/`..` segment, no `//`, no trailing `/`, no `~`. */
+function cleanAbsolute(value) {
+  return typeof value === 'string' && value.startsWith('/') && path.posix.normalize(value) === value && (value === '/' || !value.endsWith('/'));
+}
+
+/**
+ * Splits a simple command into words for a checked rule. Returns null for anything whose words the shell
+ * would still change: an unquoted `$`, glob, brace, `~` at a word's start, redirect, backslash or `&`, or a
+ * `$`/backtick inside double quotes.
+ */
+function shellWords(command) {
+  const words = [];
+  let word = null;
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+    if (char === ' ' || char === '\t') { if (word !== null) words.push(word); word = null; continue; }
+    if (char === "'") {
+      const end = command.indexOf("'", i + 1);
+      if (end < 0) return null;
+      word = (word ?? '') + command.slice(i + 1, end); i = end; continue;
+    }
+    if (char === '"') {
+      const end = command.indexOf('"', i + 1);
+      if (end < 0) return null;
+      const inner = command.slice(i + 1, end);
+      if (/[$`\\]/.test(inner)) return null;
+      word = (word ?? '') + inner; i = end; continue;
+    }
+    if (/[$*?[\]{}<>\\&|;()`!]/.test(char) || (char === '~' && word === null)) return null;
+    word = (word ?? '') + char;
+  }
+  if (word !== null) words.push(word);
+  return words;
+}
+
+const WRAPPERS = ['env', 'command', 'exec', 'nice', 'nohup', 'time'];
+const ASSIGNMENT = /^[A-Za-z_]\w*=/;
+
+/** The words of a git invocation, from `git` on, past assignments and simple wrappers; null when it is not git. */
+function gitWords(words) {
+  let i = 0;
+  while (i < words.length && (ASSIGNMENT.test(words[i]) || WRAPPERS.includes(words[i]) || (i > 0 && WRAPPERS.includes(words[i - 1]) && words[i].startsWith('-')))) i++;
+  return words[i] !== undefined && path.posix.basename(words[i]) === 'git' ? words.slice(i) : null;
+}
+
+const GIT_VALUE_OPTIONS = ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--super-prefix', '--config-env', '--attr-source', '--list-cmds'];
+
+/** Splits `git <global options> <subcommand> <args>`. */
+function parseGit(words) {
+  const globals = [];
+  let i = 1;
+  for (; i < words.length && words[i].startsWith('-'); i++) {
+    const word = words[i];
+    const equals = word.indexOf('=');
+    const name = word.startsWith('--') && equals > 0 ? word.slice(0, equals) : word;
+    if (word.startsWith('--') && equals > 0) globals.push({ name, value: word.slice(equals + 1) });
+    else if (GIT_VALUE_OPTIONS.includes(word)) globals.push({ name, value: words[++i] });
+    else if (/^-[Cc]./.test(word)) globals.push({ name: word.slice(0, 2), value: word.slice(2) });
+    else globals.push({ name });
+  }
+  return { globals, sub: words[i], args: words.slice(i + 1) };
+}
+
+const NETWORK = ['clone', 'fetch', 'pull', 'ls-remote', 'submodule'];
+const SAFE_REMOTE = [[], ['-v'], ['--verbose']];
+
+/** Whether a parsed git invocation pushes, configures, runs a program, or overrides config. */
+function gitUnsafe({ globals, sub, args }) {
+  if (globals.some(option => option.name === '-c' || option.name === '--config-env' || option.name === '--exec-path' && option.value !== undefined)) return true;
+  if (['push', 'send-pack', 'config', 'hook'].includes(sub)) return true;
+  if (sub === 'remote' && !SAFE_REMOTE.some(safe => safe.length === args.length && safe.every((word, i) => word === args[i])) && !['get-url', 'show'].includes(args[0])) return true;
+  if (args.some(word => /^--(upload-pack|receive-pack|config|template|exec)(=|$)/.test(word))) return true;
+  if (NETWORK.includes(sub) && args.some(word => /^-[A-Za-z]*[uc]/.test(word))) return true;
+  return false;
+}
+
+/** The real form of a path that may not exist yet: its deepest existing ancestor resolved, the rest appended. */
+function realForm(target) {
+  let existing = target;
+  const rest = [];
+  for (;;) {
+    try { lstatSync(existing); break; } catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+    const parent = path.dirname(existing);
+    if (parent === existing) break;
+    rest.unshift(path.basename(existing));
+    existing = parent;
+  }
+  return path.join(realpathSync.native(existing), ...rest);
+}
+
+/**
+ * Whether `target` lies strictly below `root`: written in normal form, and still below it once links are
+ * resolved. An existing root must be this user's own directory, not someone else's in a shared /tmp.
+ */
+function below(target, root) {
+  if (!cleanAbsolute(target) || !target.startsWith(`${root}/`)) return false;
+  try {
+    const info = lstatSync(root, { throwIfNoEntry: false });
+    if (info && (!info.isDirectory() || (typeof process.getuid === 'function' && info.uid !== process.getuid()))) return false;
+    const realRoot = realForm(root);
+    return realForm(target).startsWith(`${realRoot}${path.sep}`);
+  } catch { return false; }
+}
+
+const PUBLIC_REPO = /^https:\/\/(?:github\.com|gitlab\.com)\/([A-Za-z0-9][\w.-]*)\/([\w.-]+?)(?:\.git)?$/;
+const REF = /^[A-Za-z0-9_][\w./-]*$/;
+const goodRef = value => typeof value === 'string' && REF.test(value) && !value.split('/').includes('..') && !value.includes('..');
+
+function cloneAllowed({ globals, sub, args }, root) {
+  if (globals.length || sub !== 'clone') return false;
+  const positional = [];
+  for (let i = 0; i < args.length; i++) {
+    const word = args[i];
+    if (word === '--') { positional.push(...args.slice(i + 1)); break; }
+    if (!word.startsWith('-')) { positional.push(word); continue; }
+    if (['--single-branch', '--no-single-branch', '--no-tags', '-q', '--quiet', '-n', '--no-checkout', '--progress'].includes(word)) continue;
+    if (word === '--depth') { if (!/^\d+$/.test(args[++i] ?? '')) return false; continue; }
+    if (/^--depth=\d+$/.test(word) || /^--shallow-since=[\w:+.-]+$/.test(word) || /^--filter=(?:blob:none|tree:0|blob:limit=\d+[kmg]?)$/.test(word)) continue;
+    if (word === '-b' || word === '--branch') { if (!goodRef(args[++i])) return false; continue; }
+    if (word.startsWith('--branch=') && goodRef(word.slice(9))) continue;
+    return false;
+  }
+  if (positional.length !== 2) return false;
+  const [url, destination] = positional;
+  const repo = PUBLIC_REPO.exec(url);
+  if (!repo || ['.', '..'].includes(repo[1]) || ['.', '..', ''].includes(repo[2])) return false;
+  return below(destination, root);
+}
+
+const READS = ['fetch', 'log', 'show', 'grep', 'rev-parse', 'ls-files', 'cat-file', 'blame', 'diff', 'branch'];
+const FETCH_FLAGS = ['--unshallow', '--tags', '--no-tags', '--prune', '-p', '--prune-tags', '--all', '-q', '--quiet', '-v', '--verbose', '--force', '-f', '--no-recurse-submodules', '--progress'];
+const BRANCH_FLAGS = ['-a', '-r', '--all', '--remotes', '-v', '-vv', '--verbose', '--list', '--no-color'];
+/** Options of the reading subcommands that write a file, run a program, or read outside the repository. */
+const WRITES_OR_RUNS = /^(?:--output(?:=|$)|--ext-diff$|--open-files-in-pager|-O|--no-index$|--textconv$|--filters$)/;
+
+function readAllowed({ globals, sub, args }, root) {
+  const dirs = globals.filter(option => option.name === '-C');
+  if (dirs.length !== 1 || globals.some(option => !['-C', '--no-pager', '-P'].includes(option.name))) return false;
+  if (!below(dirs[0].value, root) || !READS.includes(sub)) return false;
+  if (sub === 'fetch') {
+    const positional = [];
+    for (let i = 0; i < args.length; i++) {
+      const word = args[i];
+      if (!word.startsWith('-')) { positional.push(word); continue; }
+      if (FETCH_FLAGS.includes(word)) continue;
+      if (word === '--depth' || word === '--deepen') { if (!/^\d+$/.test(args[++i] ?? '')) return false; continue; }
+      if (/^--(?:depth|deepen)=\d+$/.test(word) || /^--shallow-since=[\w:+.-]+$/.test(word) || /^--filter=(?:blob:none|tree:0|blob:limit=\d+[kmg]?)$/.test(word)) continue;
+      return false;
+    }
+    // Only from origin, the repository it was cloned from: never a URL or a local path.
+    if (positional.length && positional[0] !== 'origin') return false;
+    return positional.slice(1).every(spec => spec.split(':').every(goodRef));
+  }
+  if (sub === 'branch') return args.every(word => BRANCH_FLAGS.includes(word));
+  for (const word of args) {
+    if (WRITES_OR_RUNS.test(word)) return false;
+    // A path argument stays inside the clone, in normal form (a revision range a..b is no path).
+    if (word.startsWith('/') && !below(word, dirs[0].value)) return false;
+    if (word.replace(/^\.\//, '').split('/').some((segment, i, all) => segment === '..' || (segment === '.' && all.length > 1) || (segment === '' && i > 0))) return false;
+  }
+  return true;
+}
+
+/** Whether a checked rule covers one simple command (deny: also git ALP cannot split into words). */
+function coversChecked(checked, command) {
+  const raw = command.trim().split(/\s+/);
+  const words = shellWords(command);
+  if (checked.kind === 'git-unsafe') {
+    if (!words) {
+      // Words the shell would still change: judged on their face, and a git subcommand ALP cannot read is denied.
+      const git = gitWords(raw.map(word => word.replace(/^['"]+|['"]+$/g, '')));
+      if (git === null) return false;
+      const parsed = parseGit(git);
+      return gitUnsafe(parsed) || git.includes('push') || parsed.sub === undefined || /[^\w-]/.test(parsed.sub);
+    }
+    // `sh -c '...'`: the script is checked as commands of its own.
+    if (/^(?:\/\S*\/)?(?:ba|z|da)?sh$/.test(words[0] ?? '') && /^-\w*c\w*$/.test(words[1] ?? '') && typeof words[2] === 'string') {
+      const inner = simpleCommands(words[2]);
+      return !inner || inner.some(part => coversChecked(checked, part));
+    }
+    const git = gitWords(words);
+    return git !== null && gitUnsafe(parseGit(git));
+  }
+  if (!words) return false;
+  // Allowed only as plain `git ...`: no assignment, wrapper or other git binary in front.
+  if (words[0] !== 'git') return false;
+  const parsed = parseGit(words);
+  if (gitUnsafe(parsed)) return false;
+  return checked.kind === 'git-clone-public' ? cloneAllowed(parsed, checked.root) : readAllowed(parsed, checked.root);
+}
+
+/**
+ * Whether the paths a command names are in normal form, for an allow rule whose specifier names a path:
+ * no `..` or `.` segment (a leading `./` aside), no `//`, no `~` at the start. `x/..` can leave any prefix.
+ */
+function normalPaths(command) {
+  for (const raw of command.split(/\s+/)) {
+    const word = raw.replace(/^['"]+|['"]+$/g, '').replace(/^--?[\w-]+=/, '');
+    if (word.startsWith('~')) return false;
+    const url = /^[a-z][a-z0-9+.-]*:\/\/[^/]*(.*)$/i.exec(word);
+    const pathPart = url ? url[1] : word;
+    if (!pathPart.includes('/') && pathPart !== '..') continue;
+    const segments = pathPart.replace(/^\.\//, '').split('/');
+    if (segments.some((segment, i) => segment === '..' || segment === '.' || (segment === '' && i > 0 && i < segments.length - 1))) return false;
+  }
+  return true;
+}
+
 /** Whether a Bash rule's specifier covers one simple command. */
 function covers(specifier, command) {
   if (specifier === undefined) return true;
+  if (specifier.startsWith('@')) { const checked = checkedRule(specifier); return Boolean(checked) && coversChecked(checked, command); }
   const normalized = command.replace(/\s+/g, ' ');
   // `npm test:*` and `npm test *` both cover npm test and anything after it.
   if (specifier.endsWith(':*') || specifier.endsWith(' *')) {
@@ -244,9 +490,14 @@ export function commandDecision(profile, command) {
   // A command ALP cannot split may hide anything a deny rule names.
   if (!parts) return deny.length ? 'deny' : (profile.ask ?? []).length ? 'ask' : undefined;
   if (parts.some(part => deny.some(rule => covers(rule.specifier, part)))) return 'deny';
-  const ask = bashRules(profile.ask ?? []);
-  if (ask.some(rule => rule.specifier === undefined) || parts.some(part => ask.some(rule => covers(rule.specifier, part)))) return 'ask';
   const allow = bashRules(profile.allow);
-  if (parts.every(part => !redirects(part) && allow.some(rule => covers(rule.specifier, part)))) return 'allow';
+  // A checked allow rule names exactly what it lets through, so it wins over a broader ask rule
+  // (`Bash(git clone:*)` asks about every clone but the checked one); deny still wins over both.
+  const checkedAllow = part => allow.some(rule => rule.specifier?.startsWith('@') && covers(rule.specifier, part));
+  const ask = bashRules(profile.ask ?? []);
+  if (ask.some(rule => rule.specifier === undefined) || parts.some(part => !checkedAllow(part) && ask.some(rule => covers(rule.specifier, part)))) return 'ask';
+  // A rule that names a path covers only commands whose paths are in normal form: `x/../y` leaves any prefix.
+  const allowed = part => allow.some(rule => covers(rule.specifier, part) && (rule.specifier === undefined || rule.specifier.startsWith('@') || !/[/~]/.test(rule.specifier) || normalPaths(part)));
+  if (parts.every(part => !redirects(part) && allowed(part))) return 'allow';
   return undefined;
 }
