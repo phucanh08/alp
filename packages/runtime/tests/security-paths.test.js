@@ -98,6 +98,8 @@ test('security: Bash allow rules reach canUseTool; every role keeps the outcome 
     assert.equal(await bash(reviewing, command), 'allow', command);
     assert.equal(await bash(reviewing, command, true), 'allow', `${command} outside the sandbox`);
   }
+  // Plain deny rules stay Claude's own: a command ALP cannot split still runs in the sandbox (t-6dc5 review).
+  for (const command of ['echo $(date)', 'echo `date`']) assert.equal(await bash(reviewing, command), 'allow', command);
   assert.equal(await bash(reviewing, 'touch x', true), 'deny');
   assert.equal(await bash(reviewing, 'npm test; git push', true), 'deny');
   // Read-only without a floor (no OS sandbox): an allowed command still runs, anything else is refused.
