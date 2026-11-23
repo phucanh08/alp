@@ -17,6 +17,7 @@ const DEFAULTS = {
   uiFontFamily: '', monoFontFamily: '', uiFontSize: 14, contentFontSize: 15, codeFontSize: 12,
   contentMaxWidth: null, syntaxTheme: 'one',
   chatDisplay: 'collapseTurns', chatOutline: true, terminalScrollback: 10_000, notificationSound: true,
+  openInSidePane: { explorerFiles: false, diffs: false, chatFiles: false },
   sidebar: {
     header: [{ id: 'new-session', visible: true }, { id: 'history', visible: true }, { id: 'search', visible: true }, { id: 'schedules', visible: true }],
     footer: [{ id: 'tasks', visible: false }],
@@ -50,6 +51,9 @@ test('every theme, chat display and syntax theme Paseo offers is kept', () => {
   // Settings › Notifications › Play sound (t-a876): a boolean, else on.
   assert.equal(parse({ notificationSound: false }).notificationSound, false);
   assert.equal(parse({ notificationSound: 'off' }).notificationSound, true);
+  // Open location (t-81b0.12): each source on only when stored as true; unknown sources dropped.
+  assert.deepEqual(parse({ openInSidePane: { explorerFiles: true, diffs: 'yes', chatFiles: true, subagents: true } }).openInSidePane, { explorerFiles: true, diffs: false, chatFiles: true });
+  assert.deepEqual(parse({ openInSidePane: 'side' }).openInSidePane, { explorerFiles: false, diffs: false, chatFiles: false });
 });
 
 test('sizes, scrollback and content width are clamped to Paseo\'s limits; non-numbers give the default', () => {
@@ -62,6 +66,9 @@ test('sizes, scrollback and content width are clamped to Paseo\'s limits; non-nu
   const junk = parse({ uiFontSize: '16', codeFontSize: null, contentMaxWidth: 'wide', terminalScrollback: Infinity });
   assert.deepEqual([junk.uiFontSize, junk.codeFontSize, junk.contentMaxWidth, junk.terminalScrollback], [14, 12, null, 10_000]);
   assert.equal(parse({ contentMaxWidth: null }).contentMaxWidth, null);
+  // Paseo's Full (t-81b0.12): no limit, stored as 'full'; Wide is 1200 px.
+  assert.equal(parse({ contentMaxWidth: 'full' }).contentMaxWidth, 'full');
+  assert.equal(parse({ contentMaxWidth: 1200 }).contentMaxWidth, 1200);
 });
 
 test('font families are kept as typed (trimmed, up to 200 characters), never CSS-breaking text', () => {

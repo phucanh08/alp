@@ -186,7 +186,7 @@ export function FilesPanel({ onPicked }: { onPicked?: () => void }) {
           return (
             <li key={entry.path} role="treeitem" aria-expanded={directory ? row.open : undefined} aria-selected={current || undefined}>
               <button type="button" style={indent} title={entry.path}
-                onClick={() => { if (directory) toggle(entry.path); else { openFile(entry.path); onPicked?.(); } }}
+                onClick={() => { if (directory) toggle(entry.path); else { openFile(entry.path, undefined, { side: app.preferences.openInSidePane.explorerFiles }); onPicked?.(); } }}
                 onContextMenu={event => { event.preventDefault(); openMenu({ path: entry.path, name: entry.name, directory }, { x: event.clientX, y: event.clientY }); }}
                 onKeyDown={event => {
                   if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {

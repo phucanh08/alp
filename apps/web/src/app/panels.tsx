@@ -90,10 +90,11 @@ function Unavailable({ kind }: { kind: PanelKind }) {
 /** A panel's content; `onPicked` runs after an agent or task was opened (an overlay closes). */
 export function PanelView({ kind, onPicked }: { kind: PanelKind; onPicked?: () => void }) {
   const { openPanel } = useTabs();
+  const { preferences } = useAppState();
   if (kind === 'agents') return <Agents onPicked={onPicked} />;
   if (kind === 'tasks') return <Tasks onPicked={onPicked} />;
   if (kind === 'files') return <FilesPanel onPicked={onPicked} />;
-  if (kind === 'changes') return <ChangesPanel onOpenDiff={() => { openPanel('diff'); onPicked?.(); }} onPicked={onPicked} />;
+  if (kind === 'changes') return <ChangesPanel onOpenDiff={change => { openPanel('diff', { side: !!change && preferences.openInSidePane.diffs }); onPicked?.(); }} onPicked={onPicked} />;
   if (kind === 'diff') return <DiffPanel />;
   if (kind === 'terminal') return <React.Suspense fallback={<p className="px-4 py-6 text-sm text-muted-foreground">Loading the terminal…</p>}><TerminalPanel /></React.Suspense>;
   return <Unavailable kind={kind} />;

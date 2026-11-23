@@ -693,7 +693,7 @@ function ChangesHeader({ status, mode, content, totals, refreshing, onRefresh, i
  * Changes (`variant` changes) and Diff (`variant` diff): the same comparison, Changes with files
  * opened one at a time and "Open in Diff", Diff with every file open, or only the file Changes sent.
  */
-function GitPanel({ variant, onOpenDiff, onPicked }: { variant: 'changes' | 'diff'; onOpenDiff?: () => void; onPicked?: () => void }) {
+function GitPanel({ variant, onOpenDiff, onPicked }: { variant: 'changes' | 'diff'; onOpenDiff?: (change?: boolean) => void; onPicked?: () => void }) {
   const controller = useController();
   const app = useAppState();
   const { openFile } = useTabs();
@@ -734,7 +734,8 @@ function GitPanel({ variant, onOpenDiff, onPicked }: { variant: 'changes' | 'dif
     const modeLabel = GIT_MODES.find(entry => entry.id === shared.mode)?.label ?? shared.mode;
     const reviewLabel = shared.mode === 'base' && current ? `${modeLabel}, against ${baseLabel(current.baseRef)}` : modeLabel;
     const commenting = can(app.principal ?? undefined, 'session.write');
-    const openDiff = (path: string) => { focusDiff(path, scope); onOpenDiff?.(); };
+    // A change clicked (Open location's "Clicking a change"); Open Diff tab is not one.
+    const openDiff = (path: string) => { focusDiff(path, scope); onOpenDiff?.(true); };
     const retry = (run: () => void) => <button type="button" className="text-xs text-highlight hover:underline" onClick={run}>Retry</button>;
     let body: React.ReactNode;
     if (!current) {
@@ -889,7 +890,7 @@ function GitPanel({ variant, onOpenDiff, onPicked }: { variant: 'changes' | 'dif
   );
 }
 
-export function ChangesPanel({ onOpenDiff, onPicked }: { onOpenDiff?: () => void; onPicked?: () => void }) {
+export function ChangesPanel({ onOpenDiff, onPicked }: { onOpenDiff?: (change?: boolean) => void; onPicked?: () => void }) {
   return <GitPanel variant="changes" onOpenDiff={onOpenDiff} onPicked={onPicked} />;
 }
 

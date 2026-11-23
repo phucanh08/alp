@@ -1,19 +1,20 @@
 import * as React from 'react';
 import {
-  ArrowDown, ArrowLeft, ArrowUp, Ban, BookOpen, Bot, Boxes, CalendarClock, ChevronRight, CircleCheck, Code, Files as FilesIcon, FolderGit2, Gauge, History, Info,
+  ArrowDown, ArrowLeft, ArrowUp, Ban, Bell, BookOpen, Bot, Boxes, CalendarClock, ChevronRight, CircleCheck, Code, Files as FilesIcon, FolderGit2, Gauge, History, Info,
   ListChecks, MessageSquare, Network, PanelLeft, Palette, Plug, Plus, Search, Server, Settings as SettingsIcon, SquareTerminal,
-  Stethoscope, Users, Webhook,
+  Github, Stethoscope, Users, Webhook,
 } from 'lucide-react';
 import { can } from '../lib/gateway.js';
 import { describe } from '../lib/errors.js';
 import { diagnosticsSections, diagnosticsText, type DiagnosticsInput } from '../lib/diagnostics.js';
-import { LIMITS, type ChatDisplay, type SendBehavior, type SendShortcut, type SidebarItem, type SidebarItemId, type SyntaxTheme, type ThemePreference } from '../lib/preferences.js';
-import { DEFAULT_MONO_FONT_STACK, DEFAULT_UI_FONT_STACK, THEME_OPTIONS, contentWidth } from '../lib/theme';
+import { CONTENT_WIDTH_WIDE, LIMITS, type ChatDisplay, type Preferences, type SendBehavior, type SendShortcut, type SidebarItem, type SidebarItemId, type SyntaxTheme, type ThemePreference } from '../lib/preferences.js';
+import { DEFAULT_MONO_FONT_STACK, DEFAULT_UI_FONT_STACK, THEME_OPTIONS, contentWidthPreset } from '../lib/theme';
+import { THEME_PREVIEWS } from '../lib/theme-previews.js';
 import { SYNTAX_THEME_OPTIONS } from '../lib/syntax';
 import { Switch } from '../components/ui/switch';
 import { RichText } from './RichText';
 import { Button } from '../components/ui/button';
-import { Input, NativeSelect } from '../components/ui/input';
+import { Input } from '../components/ui/input';
 import { Spinner } from '../components/ui/spinner';
 import { modeLabel } from '../lib/format';
 import { cn } from '../lib/utils';
@@ -44,6 +45,8 @@ const APP_PAGES: Array<{ id: Page; label: string; icon: Icon }> = [
   { id: 'terminal', label: 'Terminal', icon: SquareTerminal },
   { id: 'editor', label: 'Editor', icon: Code },
   { id: 'files', label: 'Files', icon: FilesIcon },
+  // Paseo's Notifications page (desktop-notifications-section.tsx); ALP's browser has it too.
+  { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'diagnostics', label: 'Diagnostics', icon: Stethoscope },
   { id: 'about', label: 'About', icon: Info },
 ];
@@ -225,13 +228,41 @@ function General({ mobile }: { mobile: boolean }) {
             options={[{ value: 'interrupt', label: 'Interrupt' }, { value: 'steer', label: 'Steer' }, { value: 'queue', label: 'Queue' }]} />
         </Row>
       </Section>
+      {!mobile ? <OpenLocationSection /> : null}
       <Section title="This browser">
         <Row first title="Saved settings" hint="Every App setting and your last New session choices (team, model, thinking, permissions) stay in this browser. The access token never does.">
           <Button size="sm" variant="secondary" onClick={() => controller.resetPreferences()}>Reset</Button>
         </Row>
       </Section>
-      <NotificationsSection />
     </>
+  );
+}
+
+/** Paseo's Open location rows ALP has: where a file or change opens when clicked. */
+const OPEN_LOCATION_ROWS: Array<{ source: keyof Preferences['openInSidePane']; title: string; hint: string }> = [
+  { source: 'explorerFiles', title: 'Clicking a file in the Explorer sidebar', hint: 'Open files selected in the Explorer sidebar beside your work' },
+  { source: 'diffs', title: 'Clicking a change in the Explorer sidebar', hint: 'Open diffs from Changes beside your work' },
+  { source: 'chatFiles', title: 'Clicking a file in an agent chat', hint: 'Open file links and tool-call files beside the conversation' },
+];
+
+/**
+ * Paseo's Settings › General › Open location (open-location-section.tsx), for the sources ALP has:
+ * Main panel opens in the focused pane, On the side in the side pane (made at the right of the
+ * center when there is none). Not offered on a narrow screen, which shows one pane.
+ */
+function OpenLocationSection() {
+  const controller = useController();
+  const { preferences } = useAppState();
+  return (
+    <Section title="Open location">
+      {OPEN_LOCATION_ROWS.map((row, index) => (
+        <Row key={row.source} first={index === 0} title={row.title} hint={row.hint}>
+          <Select<'main' | 'side'> label={row.title} value={preferences.openInSidePane[row.source] ? 'side' : 'main'}
+            onChange={value => controller.updatePreferences({ openInSidePane: { ...preferences.openInSidePane, [row.source]: value === 'side' } })}
+            options={[{ value: 'main', label: 'Main panel' }, { value: 'side', label: 'On the side' }]} />
+        </Row>
+      ))}
+    </Section>
   );
 }
 
@@ -271,24 +302,63 @@ function SizeRow({ title, hint, label, value, limits, onCommit }: { title: strin
   );
 }
 
+/** Paseo's theme tile sketch (ThemePicker ThemePreview): a sidebar, lines of text and an accent bubble in a theme's colours. */
+function ThemeSketch({ theme }: { theme: Exclude<ThemePreference, 'system'> }) {
+  const colors = THEME_PREVIEWS[theme];
+  const line = (width: string, color: string, height = 4) => <span className="block rounded-sm opacity-60" style={{ width, height, backgroundColor: color }} />;
+  return (
+    <span className="flex aspect-video w-full overflow-hidden" style={{ backgroundColor: colors.background }}>
+      <span className="flex w-9 shrink-0 flex-col gap-[5px] px-1.5 py-2" style={{ backgroundColor: colors.sidebar }}>
+        {line('100%', colors.muted)}{line('60%', colors.muted)}{line('80%', colors.muted)}
+      </span>
+      <span className="flex flex-1 flex-col gap-[5px] p-2">
+        <span className="block h-[5px] w-[55%] rounded-sm" style={{ backgroundColor: colors.foreground }} />
+        {line('90%', colors.muted)}{line('65%', colors.muted)}
+        <span className="mt-auto block h-2.5 w-[45%] self-end rounded-[5px]" style={{ backgroundColor: colors.accent }} />
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Paseo's ThemePicker (Settings › Appearance › Theme): every theme as a tile with a small preview
+ * in its own colours, System first (light on the left half, dark on the right); a tile applies
+ * its theme at once. Two columns, four from medium screens.
+ */
+function ThemePicker({ value, onChange }: { value: ThemePreference; onChange: (theme: ThemePreference) => void }) {
+  const options = [...THEME_OPTIONS.filter(option => option.value === 'system'), ...THEME_OPTIONS.filter(option => option.value !== 'system')];
+  return (
+    <div role="radiogroup" aria-label="Theme" className="grid grid-cols-2 gap-3 p-4 md:grid-cols-4" data-testid="theme-picker">
+      {options.map(option => {
+        const selected = option.value === value;
+        return (
+          <button key={option.value} type="button" role="radio" aria-checked={selected} aria-label={option.label} data-testid={`theme-tile-${option.value}`}
+            onClick={() => onChange(option.value)}
+            className={cn('flex min-w-0 flex-col gap-1 rounded-lg border-2 p-1 text-left', selected ? 'border-primary' : 'border-transparent hover:bg-secondary', focusRing)}>
+            <span className="block overflow-hidden rounded-md border border-border">
+              {option.value === 'system' ? (
+                <span className="relative block">
+                  <ThemeSketch theme="light" />
+                  <span className="absolute inset-y-0 left-1/2 w-1/2 overflow-hidden"><span className="block w-[200%] -translate-x-1/2"><ThemeSketch theme="dark" /></span></span>
+                </span>
+              ) : <ThemeSketch theme={option.value} />}
+            </span>
+            <span className="truncate px-1 text-xs text-foreground">{option.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Appearance() {
   const controller = useController();
   const { preferences } = useAppState();
-  const swatch = THEME_OPTIONS.find(option => option.value === preferences.theme)?.swatch;
+  const preset = contentWidthPreset(preferences);
   return (
     <>
       <Section title="Theme">
-        <Row first title="Theme">
-          <span className="flex items-center gap-2">
-            {swatch ? <span aria-hidden className="size-3 rounded-full border border-border" style={{ backgroundColor: swatch }} data-testid="theme-swatch" /> : null}
-            <NativeSelect aria-label="Theme" value={preferences.theme} onChange={event => controller.setTheme(event.target.value as ThemePreference)}
-              className="h-8 w-auto rounded-lg border-border bg-transparent pl-3 text-sm text-foreground">
-              {THEME_OPTIONS.filter(option => option.group === 'primary').map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-              <option disabled>──────</option>
-              {THEME_OPTIONS.filter(option => option.group === 'variant').map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </NativeSelect>
-          </span>
-        </Row>
+        <ThemePicker value={preferences.theme} onChange={theme => controller.setTheme(theme)} />
       </Section>
       <Section title="Fonts">
         <Row first title="Interface font" hint="Used across the app. Leave empty for the system default">
@@ -307,13 +377,15 @@ function Appearance() {
           onCommit={codeFontSize => controller.updatePreferences({ codeFontSize })} />
       </Section>
       <Section title="Layout">
-        <Row first title="Content width" hint="Max width of chat and Markdown files on wide screens">
-          <span className="flex items-center gap-2">
-            {preferences.contentMaxWidth !== null ? <Button size="sm" variant="ghost" aria-label="Reset content width to default" onClick={() => controller.updatePreferences({ contentMaxWidth: null })}>Reset</Button> : null}
-            <CommitField label="Content width in pixels" value={String(contentWidth(preferences))} numeric limits={LIMITS.contentMaxWidth} width="w-20"
-              onCommit={next => controller.updatePreferences({ contentMaxWidth: Number(next) })} />
-            <span className="text-xs">px</span>
-          </span>
+        <Row first title="Content width" hint={preset === null && typeof preferences.contentMaxWidth === 'number' ? `Custom width · ${preferences.contentMaxWidth} px` : 'Width of chat, composer, and Markdown previews'}>
+          {/* Paseo's SegmentedControl: Default, Wide, Full; a custom width from before selects none. */}
+          <div role="radiogroup" aria-label="Content width" className="flex rounded-lg bg-muted p-0.5" data-testid="content-width-options">
+            {([['default', 'Default', null], ['wide', 'Wide', CONTENT_WIDTH_WIDE], ['full', 'Full', 'full']] as const).map(([id, label, value]) => (
+              <button key={id} type="button" role="radio" aria-checked={preset === id} data-testid={`content-width-${id}`}
+                onClick={() => controller.updatePreferences({ contentMaxWidth: value })}
+                className={cn('rounded-md px-3 py-1 text-xs', preset === id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground', focusRing)}>{label}</button>
+            ))}
+          </div>
         </Row>
       </Section>
       <Section title="Syntax">
@@ -484,6 +556,8 @@ const normalizeVersion = (version: string | undefined) => version?.trim().replac
 
 /** ALP's release notes, as Paseo's What's new opens its changelog. */
 const RELEASES_URL = 'https://github.com/phucanh08/alp/releases';
+/** ALP's repository: Paseo's community links (components/community-links.tsx) keep only the one ALP has, Star. */
+const REPOSITORY_URL = 'https://github.com/phucanh08/alp';
 
 function About() {
   const { connection } = useAppState();
@@ -504,6 +578,12 @@ function About() {
           <span data-testid="connected-host-version">{hostVersion ? `v${hostVersion}` : 'unknown'}</span>
         </Row>
       </Section>
+      <div className="flex flex-wrap items-center justify-center" data-testid="community-links">
+        <a href={REPOSITORY_URL} target="_blank" rel="noopener noreferrer" data-testid="community-links-github-star"
+          className={cn('flex h-8 items-center gap-1.5 rounded-md px-3 text-sm text-foreground hover:bg-secondary', focusRing)}>
+          <Github aria-hidden className="size-3.5" />Star
+        </a>
+      </div>
     </>
   );
 }
@@ -585,6 +665,7 @@ function PageContent({ page, mobile, onNavigate }: { page: Page; mobile: boolean
     case 'chat': return <Chat />;
     case 'terminal': return <Terminal />;
     case 'files': return <Files />;
+    case 'notifications': return <NotificationsSection />;
     case 'editor': return <EditorPage />;
     case 'diagnostics': return <Diagnostics />;
     case 'about': return <About />;

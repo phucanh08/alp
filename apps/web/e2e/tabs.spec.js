@@ -255,6 +255,7 @@ test('favicon, title and a browser notification when a session waits for an answ
   expect(await page.evaluate(() => window.__asked ?? 0)).toBe(0);
   await page.keyboard.press('ControlOrMeta+Comma');
   const settings = page.getByRole('region', { name: 'Settings' });
+  await settings.getByTestId('settings-notifications').click();
   await settings.getByRole('button', { name: 'Enable' }).click();
   await expect(settings.getByTestId('notification-permission')).toHaveText('Allowed');
   expect(await page.evaluate(() => window.__asked)).toBe(1);

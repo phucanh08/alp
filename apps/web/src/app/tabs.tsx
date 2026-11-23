@@ -7,7 +7,7 @@ import { relativeFilePath } from '../lib/file-tree.js';
 import { blockedFilePath } from '@anhlp/alp-protocol';
 import { closeRange, planClose } from '../lib/tab-close.js';
 import { BLANK_URL, MAX_BROWSERS, isBrowsableUrl, nextBrowserId } from '../lib/browser-url.js';
-import { adjacentPane, moveToPane, nearestPane, paneIds, paneOf, removePane, resizeGroup, singlePane, splitPane, tabsByPane, type Direction, type Panes, type SplitPosition } from '../lib/panes.js';
+import { adjacentPane, moveToPane, nearestPane, paneIds, paneOf, removePane, resizeGroup, singlePane, splitPane, splitRootRight, tabsByPane, type Direction, type Panes, type SplitPosition } from '../lib/panes.js';
 
 /*
  * The center column's tabs, as in Paseo's workspace: one tab per agent of the open session that
@@ -88,12 +88,15 @@ type TabsValue = {
   /** Drag reorder: `tab` moves to index `to` of its pane's row (of all tabs when `whole`). */
   move: (tab: Tab, to: number, whole?: boolean) => void;
   openTask: (id: string) => void;
-  /** Opens a file tab (or brings it forward), scrolled to `line` when given. */
-  openFile: (path: string, line?: number) => void;
+  /**
+   * Opens a file tab (or brings it forward), scrolled to `line` when given. `side` (Settings ›
+   * General › Open location: On the side) opens a new tab in the side pane, as Paseo's.
+   */
+  openFile: (path: string, line?: number, options?: { side?: boolean }) => void;
   /** The line a file tab was last asked to show, with a count that changes on each ask. */
   fileTarget: (path: string) => { line?: number; nonce: number } | undefined;
   openAgent: (id: string) => void;
-  openPanel: (kind: PanelKind) => void;
+  openPanel: (kind: PanelKind, options?: { side?: boolean }) => void;
   /** Opens a new Browser tab showing `url` (about:blank when not given); false at the cap. */
   openBrowser: (url?: string) => boolean;
   /** The address Browser tab `id` shows. */
@@ -522,14 +525,36 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
     setActive({ kind: 'task', id });
   }, []);
 
-  const openFile = React.useCallback((path: string, line?: number) => {
+  // Paseo's side pane (Open location: On the side): the pane such tabs open in, made at the right of
+  // the center when there is none; remembered while it stays, forgotten with the workspace.
+  const sidePane = React.useRef<string | null>(null);
+  React.useEffect(() => { sidePane.current = null; }, [scope]);
+  const sideRef = React.useRef({ tabs, ids, panes });
+  sideRef.current = { tabs, ids, panes };
+  /** Places a tab not open yet in the side pane; false (it opens as usual) when it is open, the screen is narrow (one pane shows) or no pane can be made. */
+  const toSide = React.useCallback((tab: Tab) => {
+    const { tabs: open, ids: known, panes: current } = sideRef.current;
+    const key = tabKey(tab);
+    if (open.some(entry => tabKey(entry) === key)) return false;
+    if (typeof window.matchMedia === 'function' && !window.matchMedia('(min-width: 768px)').matches) return false;
+    const remembered = sidePane.current && known.includes(sidePane.current) ? sidePane.current : null;
+    if (remembered) { setPanes(state => ({ ...state, focused: remembered, assign: { ...state.assign, [key]: remembered } })); return true; }
+    const next = splitRootRight(current, key);
+    if (!next) return false;
+    sidePane.current = next.id;
+    setPanes(next.panes);
+    return true;
+  }, []);
+
+  const openFile = React.useCallback((path: string, line?: number, options?: { side?: boolean }) => {
     const id = relativeFilePath(path);
     if (!id || blockedFilePath(id)) return;
+    if (options?.side) toSide({ kind: 'file', id });
     setFiles(current => current.includes(id) ? current : [...current, id]);
     setFileTargets(current => ({ ...current, [id]: { ...(line ? { line } : {}), nonce: (current[id]?.nonce ?? 0) + 1 } }));
     userChose({ kind: 'file', id });
     setActive({ kind: 'file', id });
-  }, []);
+  }, [toSide]);
   const fileTarget = React.useCallback((path: string) => fileTargets[path], [fileTargets]);
 
   const openAgent = React.useCallback((id: string) => {
@@ -539,11 +564,12 @@ export function TabsProvider({ children }: { children: React.ReactNode }) {
     setActive({ kind: 'agent', id });
   }, [controller]);
 
-  const openPanel = React.useCallback((kind: PanelKind) => {
+  const openPanel = React.useCallback((kind: PanelKind, options?: { side?: boolean }) => {
+    if (options?.side) toSide({ kind: 'panel', id: kind });
     setPanels(current => current.includes(kind) ? current : [...current, kind]);
     userChose({ kind: 'panel', id: kind });
     setActive({ kind: 'panel', id: kind });
-  }, []);
+  }, [toSide]);
 
   // The Browser tabs as of the last open, so two opens in one update (a page opening two windows)
   // take two ids.

@@ -24,9 +24,9 @@ test('Default send and the theme survive a reload; the token does not; garbage a
   await expect(settings).toContainText('Enter steers the active turn. Command/Ctrl+Enter queues.');
   await settings.getByLabel('Default send').selectOption('queue');
   await settings.getByTestId('settings-appearance').click();
-  await expect(settings.getByLabel('Theme', { exact: true })).toHaveValue('system');
+  await expect(settings.getByTestId('theme-tile-system')).toHaveAttribute('aria-checked', 'true');
   expect(await theme(page)).toBe('dark');
-  await settings.getByLabel('Theme', { exact: true }).selectOption('light');
+  await settings.getByTestId('theme-tile-light').click();
   expect(await theme(page)).toBe('light');
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
 
@@ -47,10 +47,10 @@ test('Default send and the theme survive a reload; the token does not; garbage a
   await expect(settings.getByLabel('Default send')).toHaveValue('queue');
   await expect(settings).toContainText('Enter queues. Command/Ctrl+Enter submits.');
   await settings.getByTestId('settings-appearance').click();
-  await expect(settings.getByLabel('Theme', { exact: true })).toHaveValue('light');
+  await expect(settings.getByTestId('theme-tile-light')).toHaveAttribute('aria-checked', 'true');
 
   // System follows the device.
-  await settings.getByLabel('Theme', { exact: true }).selectOption('system');
+  await settings.getByTestId('theme-tile-system').click();
   expect(await theme(page)).toBe('dark');
   await page.emulateMedia({ colorScheme: 'light' });
   await expect.poll(() => theme(page)).toBe('light');
@@ -75,17 +75,19 @@ const stored = page => page.evaluate(() => JSON.parse(localStorage.getItem('alp-
 
 const css = (page, name) => page.evaluate(variable => getComputedStyle(document.documentElement).getPropertyValue(variable).trim(), name);
 
-test('Appearance as Paseo 0.14: every theme, fonts and sizes, content width in px with Reset, highlight theme with a live preview', async ({ page }) => {
+test('Appearance as Paseo: theme tiles, fonts and sizes, content width Default / Wide / Full, highlight theme with a live preview', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' });
   await connect(page, world);
   let settings = await openSettings(page);
   await settings.getByTestId('settings-appearance').click();
-  // Paseo's theme menu: Light, Dark, System, then the variants.
-  const themes = await settings.getByLabel('Theme', { exact: true }).locator('option:not([disabled])').allTextContents();
-  expect(themes).toEqual(['Light', 'Dark', 'System', 'Zinc', 'Midnight', 'Claude', 'Ghostty', 'Pure black']);
+  // Paseo's ThemePicker (v0.17.3): a tile per theme, System first, each previewed in its own colours.
+  const picker = settings.getByRole('radiogroup', { name: 'Theme' });
+  expect(await picker.getByRole('radio').evaluateAll(tiles => tiles.map(tile => tile.getAttribute('aria-label')))).toEqual(['System', 'Light', 'Dark', 'Zinc', 'Midnight', 'Claude', 'Ghostty', 'Pure black']);
+  await expect(settings.getByTestId('theme-tile-midnight').locator('span[style]').first()).toHaveCSS('background-color', 'rgb(22, 24, 32)');
   for (const [value, background] of [['zinc', 'rgb(24, 24, 27)'], ['midnight', 'rgb(22, 24, 32)'], ['claude', 'rgb(31, 31, 30)'], ['ghostty', 'rgb(40, 44, 52)'], ['pureBlack', 'rgb(0, 0, 0)']]) {
-    await settings.getByLabel('Theme', { exact: true }).selectOption(value);
+    await settings.getByTestId(`theme-tile-${value}`).click();
     expect(await theme(page)).toBe(value);
+    await expect(settings.getByTestId(`theme-tile-${value}`)).toHaveAttribute('aria-checked', 'true');
     await expect(page.locator('body')).toHaveCSS('background-color', background);
   }
   await page.screenshot({ path: test.info().outputPath('settings-appearance-pure-black.png') });
@@ -105,30 +107,43 @@ test('Appearance as Paseo 0.14: every theme, fonts and sizes, content width in p
   await settings.getByLabel('Code font size').press('Enter');
   await expect.poll(() => css(page, '--code-font-size')).toBe('14px');
 
-  // Content width: px, clamped, with Reset back to 820.
-  await expect(settings.getByLabel('Content width in pixels')).toHaveValue('820');
-  await expect(settings.getByRole('button', { name: 'Reset content width to default' })).toHaveCount(0);
-  await settings.getByLabel('Content width in pixels').fill('1100');
-  await settings.getByLabel('Content width in pixels').press('Enter');
-  await expect.poll(() => css(page, '--content-width')).toBe('1100px');
-  expect(await page.evaluate(() => {
+  // Content width: Paseo's Default / Wide / Full.
+  const maxWidth = () => page.evaluate(() => {
     const probe = Object.assign(document.createElement('div'), { className: 'max-w-(--content-width)' });
     document.body.append(probe);
     try { return getComputedStyle(probe).maxWidth; } finally { probe.remove(); }
-  })).toBe('1100px');
+  });
+  await expect(settings.getByTestId('content-width-default')).toHaveAttribute('aria-checked', 'true');
+  await expect(settings).toContainText('Width of chat, composer, and Markdown previews');
+  await settings.getByTestId('content-width-wide').click();
+  await expect.poll(() => css(page, '--content-width')).toBe('1200px');
+  expect(await maxWidth()).toBe('1200px');
+  await settings.getByTestId('content-width-full').click();
+  await expect(settings.getByTestId('content-width-full')).toHaveAttribute('aria-checked', 'true');
+  await expect.poll(() => css(page, '--content-width')).toBe('none');
+  expect(await maxWidth()).toBe('none');
 
   // The highlight theme colors the preview's code once the highlighter is in.
   await settings.getByLabel('Highlight theme').selectOption('dracula');
   const keyword = settings.getByTestId('appearance-preview').locator('pre span').filter({ hasText: /^export$/ });
   await expect(keyword).toHaveCSS('color', 'rgb(255, 121, 198)');
-  expect(await stored(page)).toMatchObject({ theme: 'pureBlack', uiFontSize: 16, contentFontSize: 21, codeFontSize: 14, monoFontFamily: '"Fira Code", monospace', contentMaxWidth: 1100, syntaxTheme: 'dracula' });
+  expect(await stored(page)).toMatchObject({ theme: 'pureBlack', uiFontSize: 16, contentFontSize: 21, codeFontSize: 14, monoFontFamily: '"Fira Code", monospace', contentMaxWidth: 'full', syntaxTheme: 'dracula' });
 
+  await page.reload();
+  expect(await css(page, '--content-width')).toBe('none');
+  await connect(page, world);
+  settings = await openSettings(page);
+  await settings.getByTestId('settings-appearance').click();
+  // A custom width kept from before selects no preset and says so.
+  await page.evaluate(() => { const value = JSON.parse(localStorage.getItem('alp-web:preferences')); localStorage.setItem('alp-web:preferences', JSON.stringify({ ...value, contentMaxWidth: 1100 })); });
   await page.reload();
   expect(await css(page, '--content-width')).toBe('1100px');
   await connect(page, world);
   settings = await openSettings(page);
   await settings.getByTestId('settings-appearance').click();
-  await settings.getByRole('button', { name: 'Reset content width to default' }).click();
+  await expect(settings).toContainText('Custom width · 1100 px');
+  await expect(settings.getByTestId('content-width-options').getByRole('radio', { checked: true })).toHaveCount(0);
+  await settings.getByTestId('content-width-default').click();
   await expect.poll(() => css(page, '--content-width')).toBe('820px');
   await settings.getByTestId('settings-general').click();
   await settings.getByRole('button', { name: 'Reset' }).click();

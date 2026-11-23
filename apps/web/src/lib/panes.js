@@ -137,6 +137,31 @@ export function splitPane(panes, { target, position, key }) {
 }
 
 /**
+ * Paseo's side pane (workspace-layout-store ensureSidePane, splitWorkspaceRootRightInLayout): a new
+ * pane at the right of the whole center, holding `key`, gets the focus. A root that is already a
+ * row gains a last child (the others keep their proportions); otherwise the root and the new pane
+ * become a row, half each. Null when the tree would get too deep or hold too many panes.
+ * @param {Panes} panes @param {string} [key] @returns {{ panes: Panes, id: string } | null}
+ */
+export function splitRootRight(panes, key) {
+  if (paneIds(panes.root).length >= MAX_PANES) return null;
+  const id = nextId(panes.root, 'pane');
+  /** @type {PaneNode} */
+  const pane = { kind: 'pane', id };
+  /** @type {SplitNode} */
+  let root;
+  if (panes.root.kind === 'group' && panes.root.direction === 'horizontal') {
+    const count = panes.root.children.length;
+    const share = 1 / (count + 1);
+    root = { ...panes.root, children: [...panes.root.children, pane], sizes: [...panes.root.sizes.map(size => size * (1 - share)), share] };
+  } else {
+    root = { kind: 'group', id: nextId(panes.root, 'group'), direction: 'horizontal', children: [panes.root, pane], sizes: [0.5, 0.5] };
+  }
+  if (treeDepth(root) > MAX_TREE_DEPTH) return null;
+  return { panes: { ...panes, root, focused: id, assign: key ? { ...panes.assign, [key]: id } : panes.assign }, id };
+}
+
+/**
  * The pane next to `id` in its tree: the nearest one before it at the lowest level, else the
  * nearest after (Paseo's findNearestSiblingPaneId). Null for the only pane.
  * @param {SplitNode} root @param {string} id

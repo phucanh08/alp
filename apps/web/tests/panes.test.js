@@ -2,7 +2,7 @@
 // navigates and keeps them; and the pane keys of lib/shortcuts.js.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_TREE_DEPTH, adjacentPane, clampSizes, dropPosition, moveToPane, nearestPane, paneIds, paneOf, parsePanes, removePane, resizeGroup, singlePane, splitPane, tabsByPane, treeDepth } from '../src/lib/panes.js';
+import { MAX_TREE_DEPTH, adjacentPane, clampSizes, dropPosition, moveToPane, nearestPane, paneIds, paneOf, parsePanes, removePane, resizeGroup, singlePane, splitPane, splitRootRight, tabsByPane, treeDepth } from '../src/lib/panes.js';
 import { LAYOUT_KEY, loadLayout, updateLayout } from '../src/lib/layout.js';
 import { helpSections, matchShortcut, shortcutLabel } from '../src/lib/shortcuts.js';
 
@@ -138,4 +138,26 @@ test("command center: ALP's commands in a section of their own, after the app's 
     [['Workspace actions', ['new']], ['Actions', ['history']], ['ALP', ['alp-open-tasks']]]);
   assert.deepEqual(commandResults({ actions, sessions: [], query: 'tasks' }).map(section => section.title), ['ALP']);
   assert.deepEqual(commandResults({ actions, sessions: [], query: 'split' }).flatMap(section => section.rows.map(row => row.item.id)), ['split']);
+});
+
+test('splitRootRight: Paseo\'s side pane at the right of the whole center, holding the tab, focused (t-81b0.12)', () => {
+  const one = splitRootRight(singlePane(), 'file:a.md');
+  assert.equal(one.id, 'pane-1');
+  assert.deepEqual(one.panes.root, { kind: 'group', id: 'group-1', direction: 'horizontal', children: [{ kind: 'pane', id: 'main' }, { kind: 'pane', id: 'pane-1' }], sizes: [0.5, 0.5] });
+  assert.equal(one.panes.focused, 'pane-1');
+  assert.equal(one.panes.assign['file:a.md'], 'pane-1');
+  // A row already: a last child, the others keep their proportions.
+  const two = splitRootRight(one.panes);
+  assert.deepEqual(two.panes.root.children.map(child => child.id), ['main', 'pane-1', 'pane-2']);
+  assert.deepEqual(two.panes.root.sizes.map(size => Math.round(size * 1000) / 1000), [0.333, 0.333, 0.333]);
+  // A column at the root becomes the left of a new row.
+  const column = splitPane(singlePane(), { target: 'main', position: 'bottom' });
+  const beside = splitRootRight(column);
+  assert.equal(beside.panes.root.direction, 'horizontal');
+  assert.equal(beside.panes.root.children[0].direction, 'vertical');
+  // No more than the pane cap.
+  let many = singlePane();
+  for (let index = 0; index < 15; index += 1) many = splitRootRight(many).panes;
+  assert.equal(paneIds(many.root).length, 16);
+  assert.equal(splitRootRight(many), null);
 });
