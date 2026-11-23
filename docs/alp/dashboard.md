@@ -114,7 +114,8 @@ alp desktop                   # mở app desktop (docs/alp/desktop.md)
   2. `<home>/web/` (kho credential) → `<home>/dashboard/`;
   3. `<home>/web.json` có `app: "alp-web"` bị xoá: pid, port, URL trong đó đã chết cùng `alp web`, còn token
      trong đó bị lần khởi động kế tiếp của alp-dashboard thu hồi (t-cee3: không file nào giữ token);
-     `web.json` không có `app` là danh tính của integration Paseo cũ và vẫn được chép sang `paseo.json`;
+     `web.json` không có `app` là danh tính của integration Paseo cũ: server id được chép sang `paseo.json`,
+     token sang thư mục credential riêng `<home>/paseo/` (t-cde5), rồi token bị xoá khỏi `web.json`;
   4. `logs/integrations/alp-web.log` → `alp-dashboard.log`;
   5. `settings.json`: `web.enabled`, `web.port`, `web.permissions` chuyển sang `dashboard.*`;
      `web.relay` (của Paseo) ở lại `web`.
@@ -165,8 +166,9 @@ alp desktop                   # mở app desktop (docs/alp/desktop.md)
 - Nâng cấp từ `alp web` dựa trên Paseo (trước `0.0.1-beta.4`): nếu integration Paseo cũ vẫn giữ
   `integrations/web.lock` (`web.json` không có `app`), `alp dashboard` gửi SIGTERM cho nó, chỉ khi chứng
   minh được đó là process của chính user, cùng lần boot, và pid không bị dùng lại (macOS/Linux; Windows
-  không dừng nó). alp-dashboard chép token và server id của integration cũ từ `web.json` sang
-  `<home>/paseo.json` một lần, chỉ khi `paseo.json` chưa có, để thiết bị đã pair vẫn dùng được.
+  không dừng nó). alp-dashboard chép server id của integration cũ từ `web.json` sang `<home>/paseo.json`
+  và token sang `<home>/paseo/token.json` (thư mục 0700, t-cde5) một lần, chỉ khi `paseo.json` chưa có,
+  để thiết bị đã pair vẫn dùng được; token rời `web.json`.
 - **Windows:** macOS vẫn là nền tảng chính; trình duyệt E2E chạy trên Linux và macOS. Service
   alp-dashboard và gateway được kiểm thử trong CI Windows (`windows-daemon` trên Node 22 và 24). Thao tác
   ghi đè `credentials.json` và `dashboard.json` có cơ chế retry/backoff để xử lý lỗi `EPERM`/`EBUSY` khi

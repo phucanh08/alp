@@ -1042,8 +1042,24 @@ Quyết định (main, theo quyền người dùng, 2026-11-21): ALP.app và `al
 - **Relay của Paseo** (`alp dashboard pair --on`) không bao giờ tới listener này: relay thuộc process
   riêng của integration Paseo, gắn socket relay vào bridge Paseo
   (`integrations/paseo/server/paseo/index.ts`, `createRelay` → `gateway.attach`) và nói với alpd qua
-  socket IPC riêng (`connect(lock.socket)`), với token riêng trong `paseo.json`; nó không có địa chỉ hay
+  socket IPC riêng (`connect(lock.socket)`), với token riêng của nó; nó không có địa chỉ hay
   credential của dashboard.
+- **Mật khẩu Paseo và khoá relay (t-cde5)**: token của integration Paseo (cũng là mật khẩu app Paseo hỏi)
+  được tạo một lần và giữ ổn định qua restart, nhưng chỉ nằm trong thư mục credential `<home>/paseo/`
+  (0700): `token.json` và `relay-keypair.json` (0600). `paseo.json` chỉ còn pid, port, url, serverId.
+  Lần khởi động đầu sau khi nâng cấp chuyển token cũ trong `paseo.json` (hoặc `web.json` trước khi đổi tên)
+  và `<home>/relay-keypair.json` vào thư mục đó rồi xoá bản cũ. `alp dashboard pair` lấy mật khẩu qua
+  socket 0600 trong thư mục 0700 (`<home>/paseo/token.sock`, hoặc `/tmp/alp-paseo-<uid>-<hash>/` khi
+  đường dẫn quá dài; named pipe `\\.\pipe\alp-paseo-<hash>` trên Windows, chỉ trả lời sau một dòng
+  request), sau khi `web.pairing` của alpd đã từ chối caller là agent; CLI cũng tự từ chối khi
+  `ALP_AGENT_SESSION` có giá trị. `alp dashboard pair --rotate` tạo token mới: token cũ bị từ chối ngay,
+  socket của thiết bị đang kết nối (local và relay) bị đóng. Session **read-only** của Claude (reviewer,
+  oracle, supervisor, member read-only của team, profile read-only do người dùng viết) có rule deny
+  `Read(//<home>/paseo/**)` và `Read(//<home>/relay-keypair.json)`, thắng cả allow `Read` rộng, và
+  `sandbox.filesystem.denyRead` cho Bash; ACP read-only từ chối request đọc/tìm/lệnh chạm tới các
+  đường dẫn đó (chỉ những gì agent xin phép). Ngoài phạm vi: full-access, workspace-write, Codex
+  readOnly (không có đường read-deny) và Antigravity (t-ffa1/t-c8ee); một session đổi sang read-only
+  giữa chừng giữ rule lúc khởi động.
 - **Client biết mình là owner**: `daemon.hello` của gateway liệt kê capability `host.owner` (chỉ của
   gateway, alpd không bao giờ liệt kê; nếu có thì `FORWARDED_CAPABILITIES` bỏ). Web giữ nó trong
   `state.owner` và gửi việc của owner bằng `controller.ownerRequest`, từ chối ngay ở client khi không phải

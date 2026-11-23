@@ -231,13 +231,16 @@ available independently of this standalone web process.
 
 Core upgrades no longer update a bundled plugin: upgrade `@anhlp/alp-paseo`
 separately, and re-register if its installation location changes. Keep existing
-`web` settings and ALP session storage. The integration is named `paseo`: it keeps its token and
-server identity in `paseo.json` (carried over once from a `dashboard.json` written before the rename),
+`web` settings and ALP session storage. The integration is named `paseo`: it keeps its server
+identity in `paseo.json` and its token (the password) and relay key pair in the private directory
+`paseo/` (0700, files 0600; carried over once from a `dashboard.json` written before the rename, and
+moved there from `paseo.json` and `relay-keypair.json` by the first start of t-cde5 or later),
 locks `integrations/paseo.lock`, registers `integrations/paseo.json` and binds a port the system
 picks, since `dashboard.port` and `dashboard.json` now belong to `alp-dashboard`. `alp-web-integration` remains an
 alias of `alp-paseo-integration` for one release, and a home that has only the old
 `integrations/web.json` descriptor still starts it, with a hint to re-register.
-When Paseo's app asks for a password, give it the one `alp dashboard pair` prints.
+When Paseo's app asks for a password, give it the one `alp dashboard pair` prints; the CLI gets it
+from the running integration over a private socket. `alp dashboard pair --rotate` replaces it.
 `ALP_PASEO_INTEGRATION` names the integration's entry; `ALP_WEB_INTEGRATION` is read for it too,
 after `ALP_PASEO_INTEGRATION`, for one release, and never selects what `alp dashboard` runs.
 `alp dashboard pair --on/--off`, `ALP_INTEGRATION_ENTRY`, `ALP_DAEMON_ENTRY`, `ALP_SUPERVISE` and
