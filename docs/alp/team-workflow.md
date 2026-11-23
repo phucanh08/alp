@@ -998,9 +998,10 @@ passed; a target with any profile, even a legacy one naming only an effort, is u
 
 The effort comes from the same source as the model (`thinking` passed, the profile's effort, the
 member's `thinking`, `agent.json`'s `thinking`), fitted to an effort the model takes; only step 5
-brings the requester's effort. Inside a team every member has a profile ALP writes from its
-`team.json` model, or from main's when the member names none, so steps 3–5 matter mostly for
-custom graphs. Delegating never changes the requester's own model or effort. The oracle runs on
+brings the requester's effort. Inside a team every member has a profile ALP writes in the same
+order: its `team.json` model, else its `agent.json` model (with its effort), else main's. ALP
+rewrites only entries it wrote itself (their fingerprint in `templateDefaults` is unchanged), so a
+profile written by hand stays; steps 3–5 above matter mostly for custom graphs. Delegating never changes the requester's own model or effort. The oracle runs on
 the lens passed as `model`; `thinking` chooses its effort per call and is checked against that
 lens's efforts (refused with the list), and without it the team's `oracleThinking` applies
 (otherwise high). An effort the model does not take is refused; an effort ALP cannot check is

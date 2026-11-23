@@ -3,6 +3,7 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { knownModel } from './models.js';
 import { resolveTeam, teamSources } from './teams.js';
+import { agentSources, builtinText, optionalText } from './resolver.js';
 
 export const userLibrary = () => process.env.ALP_HOME ?? path.join(os.homedir(), '.alp');
 /** Accept the original provider map as well as the model list.
@@ -68,8 +69,28 @@ const withEffort = (model, effort) => {
 };
 
 /** Snapshot current user team choices into editable project profiles. */
+/**
+ * The model and effort an agent's own agent.json names, as a runtime-prefixed model ID, or undefined.
+ * An unreadable agent.json is left for resolving the session to report.
+ */
+async function agentJsonChoice(sources, name, templates) {
+  const source = sources.get(name);
+  if (!source) return undefined;
+  const text = source.directory ? await optionalText(path.join(source.directory, 'agent.json')) : await builtinText(`agents/${name}/agent.json`, templates);
+  let config;
+  try { config = text === undefined ? undefined : JSON.parse(text); } catch { return undefined; }
+  if (typeof config?.model !== 'string' || !config.model.trim()) return undefined;
+  const prefixed = /^(codex|claude|antigravity|acp)[:/]/.exec(config.model);
+  const kind = typeof config.provider === 'string' ? config.provider : 'codex';
+  const model = prefixed ? `${prefixed[1]}:${config.model.slice(prefixed[0].length)}`
+    : ['codex', 'claude', 'antigravity', 'acp'].includes(kind) ? `${kind}:${config.model}` : `acp:${kind}/${config.model}`;
+  return { model, ...(typeof config.thinking === 'string' ? { thinking: config.thinking } : {}) };
+}
+
 export async function projectProfiles({ root, library = userLibrary(), templates, runtime, teamIds } = {}) {
   const profiles = {};
+  // A member the team.json gives no model runs on its agent.json's before main's (t-3aad).
+  const sources = await agentSources(root, { library, templates });
   for (const id of (await teamSources(root, { library, templates })).keys()) {
     if (teamIds && !teamIds.includes(id)) continue;
     const team = await resolveTeam(root, id, { library, templates });
@@ -77,8 +98,11 @@ export async function projectProfiles({ root, library = userLibrary(), templates
     const profile = {};
     for (const [name, member] of Object.entries(team.members)) {
       if (name === 'oracle') continue;
-      const chosen = runtime?.model ? (runtime.model.includes(':') ? runtime.model : `${runtime.provider ?? 'codex'}:${runtime.model}`) : runtime?.provider ? (runtime.provider === 'claude' ? 'claude:claude-opus-5-5' : 'codex:gpt-6.1-sol') : member.model ?? fallback;
-      profile[name] = { profiles: [withEffort(chosen, runtime?.reasoning ?? member.thinking ?? team.members[team.main].thinking ?? 'medium')], autocompact: 'auto' };
+      const own = member.model ? undefined : await agentJsonChoice(sources, name, templates);
+      const chosen = runtime?.model ? (runtime.model.includes(':') ? runtime.model : `${runtime.provider ?? 'codex'}:${runtime.model}`) : runtime?.provider ? (runtime.provider === 'claude' ? 'claude:claude-opus-5-5' : 'codex:gpt-6.1-sol') : member.model ?? own?.model ?? fallback;
+      // The effort comes with the model: the member's, its agent.json's, else main's.
+      const effort = runtime?.reasoning ?? member.thinking ?? (runtime?.model || runtime?.provider ? undefined : own?.thinking);
+      profile[name] = { profiles: [withEffort(chosen, effort ?? team.members[team.main].thinking ?? 'medium')], autocompact: 'auto' };
     }
     if (team.supervisor) profile[team.supervisor.agent] = { profiles: [withEffort(team.supervisor.model ?? fallback, team.supervisor.thinking ?? 'medium')], autocompact: 'auto' };
     if (team.members.oracle) profile.oracle = { profiles: (team.oracleModels ?? ['claude:claude-fable-5-1', 'codex:gpt-6-astra'])
