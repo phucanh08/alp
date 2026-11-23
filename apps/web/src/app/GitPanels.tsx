@@ -55,9 +55,12 @@ const INLINE_KEY = 'alp.changes.inlineDiff';
 const savedInline = () => { try { return globalThis.localStorage?.getItem(INLINE_KEY) === 'true'; } catch { return false; } };
 const saveInline = (inline: boolean) => { try { globalThis.localStorage?.setItem(INLINE_KEY, String(inline)); } catch { /* private mode: this page only */ } };
 
+/** This browser's localStorage, or none where reading it throws (storage disabled for the page). */
+const browserStorage = () => { try { return globalThis.localStorage; } catch { return undefined; } };
+
 /** The view both panels share (mode, whitespace, the file Changes asked Diff to show, layout), as Paseo's changes preferences. */
 const view = (() => {
-  let state: ViewState = { mode: 'uncommitted', ignoreWhitespace: loadHideWhitespace(globalThis.localStorage), focus: null, focusScope: '', layout: savedLayout(), inlineDiff: savedInline() };
+  let state: ViewState = { mode: 'uncommitted', ignoreWhitespace: loadHideWhitespace(browserStorage()), focus: null, focusScope: '', layout: savedLayout(), inlineDiff: savedInline() };
   const listeners = new Set<() => void>();
   return {
     get: () => state,
@@ -67,10 +70,10 @@ const view = (() => {
 })();
 const useView = () => React.useSyncExternalStore(view.subscribe, view.get, view.get);
 
-/** The file the Diff panel shows (Changes' "Open in Diff"), for the workspace `scope` names only; null for every file. */
 /** Hide whitespace, remembered in this browser as Paseo's changes preference (lib/git.js). */
-function setIgnoreWhitespace(hide: boolean) { saveHideWhitespace(globalThis.localStorage, hide); view.set({ ignoreWhitespace: hide }); }
+function setIgnoreWhitespace(hide: boolean) { saveHideWhitespace(browserStorage(), hide); view.set({ ignoreWhitespace: hide }); }
 
+/** The file the Diff panel shows (Changes' "Open in Diff"), for the workspace `scope` names only; null for every file. */
 function focusDiff(path: string | null, scope = '') { view.set({ focus: path, focusScope: scope }); }
 
 /** A review comment on one diff line: the side's numbering (old for a removed line), the line quoted. */
