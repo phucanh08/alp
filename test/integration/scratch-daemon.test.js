@@ -4,6 +4,7 @@
 // its own scratch directory.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -32,12 +33,16 @@ test('scratchDaemon refuses the user daemon and the real ALP home; a declared sc
     'a directory inside ~/.alp': { ALP_TEST_ALP_HOME: path.join(realAlp, 'sub') },
     'a "..foo" child of ~/.alp': { ALP_TEST_ALP_HOME: path.join(realAlp, '..foo') },
     'the home that contains ~/.alp': { ALP_TEST_ALP_HOME: home },
-    'a symlink to ~/.alp': { ALP_TEST_ALP_HOME: link },
-    'a missing child of a symlink to ~/.alp': { ALP_TEST_ALP_HOME: path.join(link, 'sub', 'deeper') },
     'a run-log directory inside ~/.alp': { ALP_TEST_ALP_HOME: scratchHome, ALP_TEST_RUN_LOG_DIR: path.join(realAlp, 'runs') },
     'a relative run-log directory': { ALP_TEST_ALP_HOME: scratchHome, ALP_TEST_RUN_LOG_DIR: 'runs' },
     'the real ~/.paseo': { ALP_TEST_ALP_HOME: scratchHome, ALP_TEST_PASEO_HOME: path.join(home, '.paseo') },
   };
+  // A symlink into ~/.alp resolves only where ~/.alp exists (realpath); a fresh machine or CI runner
+  // has none, and then there is no real home behind the link to protect.
+  if (existsSync(realAlp)) {
+    refusedCases['a symlink to ~/.alp'] = { ALP_TEST_ALP_HOME: link };
+    refusedCases['a missing child of a symlink to ~/.alp'] = { ALP_TEST_ALP_HOME: path.join(link, 'sub', 'deeper') };
+  } else t.diagnostic(`${realAlp} does not exist here: the symlink cases are not checked`);
   for (const [name, env] of Object.entries(refusedCases)) assert.equal(refused(env), true, `refused: ${name}`);
 
   const accepted = scratchDaemon({ ALP_TEST_ALP_HOME: scratchHome });
