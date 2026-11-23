@@ -265,6 +265,11 @@ test('alpd tells a clean stop from a crash by the marker it keeps while running'
   assert.equal(JSON.parse(await readFile(marker, 'utf8')).pid, pid);
   process.kill(pid, 'SIGKILL');
   await until(() => { try { process.kill(pid, 0); return false; } catch { return true; } });
+  if (process.platform === 'win32') {
+    // Windows soon gives a killed pid to another process (t-a5d8); this test's own pid stands in for
+    // it. The killed alpd's hold went with it, so its lock is stale and a new alpd starts.
+    await writeFile(daemonPaths(home).lock, JSON.stringify({ ...(await readLock(home)), pid: process.pid }));
+  }
   const after = await status();
   assert.equal(after.previousExit.kind, 'crash');
   assert.ok(Date.parse(after.previousExit.at) > 0);
