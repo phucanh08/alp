@@ -150,37 +150,52 @@ export function createGrant({ home, store, permissions, project, socket, log = (
     return existingWorkspaces([placeholder]);
   }
 
+  /** Refuses an agent's process and a credentials directory that is not the user's and private. */
+  async function guard() {
+    // Only the user holds alp dashboard's user credential (t-1c59): a process an ALP agent started gets no token.
+    if (isAgentProcess()) throw new Error('alp dashboard hands out a user credential; this process was started by an ALP agent (ALP_AGENT_SESSION is set), so it is refused');
+    // Throws unless the directory is the user's and private; creates it (0700) on the first start.
+    await assertPrivateDirectory(credentialsHome, { create: true }).catch(error => {
+      throw new Error(`alp dashboard keeps its credentials in ${credentialsHome}, which must be a directory owned by you with private permissions (0700); run chmod 700 on it (${error?.message ?? error})`, { cause: error });
+    });
+    await store.reload();
+  }
+
+  /** Revokes every live credential but the current one. */
+  async function revokeOthers() {
+    for (const entry of await listCredentials(credentialsHome)) {
+      if (entry.id !== id && !entry.revokedAt) { await revokeCredential(credentialsHome, entry.id); log(`revoked stale credential ${entry.id}`); }
+    }
+  }
+
   return {
     get id() { return id; },
     /** Resolves once every queued credentials write has finished. */
     settled: () => tail.then(() => undefined),
     /**
-     * Reuses the credential of `token` when it still verifies, else creates one; revokes every other
-     * live credential in alp dashboard's file. Returns the token to publish.
-     * @param {{ token?: unknown, credentialId?: unknown }} previous what dashboard.json held
+     * Creates a fresh credential and revokes every other live one in alp dashboard's file (t-cee3):
+     * each start of the service mints its own token, which it keeps in memory only, so the token of
+     * an earlier start (copied into a transcript, a mail or a file) no longer opens the host. Returns
+     * the token; the caller never writes it to disk.
      */
-    ensure: previous => serial(async () => {
-      // Only the user holds alp dashboard's user credential (t-1c59): a process an ALP agent started gets no token.
-      if (isAgentProcess()) throw new Error('alp dashboard hands out a user credential; this process was started by an ALP agent (ALP_AGENT_SESSION is set), so it is refused');
-      // Throws unless the directory is the user's and private; creates it (0700) on the first start.
-      await assertPrivateDirectory(credentialsHome, { create: true }).catch(error => {
-        throw new Error(`alp dashboard keeps its credentials in ${credentialsHome}, which must be a directory owned by you with private permissions (0700); run chmod 700 on it (${error?.message ?? error})`, { cause: error });
-      });
+    ensure: () => serial(async () => {
+      await guard();
+      const created = await createCredential(credentialsHome, { label: LABEL, workspaces: (await wanted()).map(entry => entry.path), permissions });
+      id = created.credential.id;
+      log(`created credential ${id}`);
+      await revokeOthers();
       await store.reload();
-      const reused = typeof previous.token === 'string' ? store.verify(previous.token) : undefined;
-      let token;
-      if (reused && reused.id === previous.credentialId) { id = reused.id; token = /** @type {string} */ (previous.token); }
-      else {
-        const created = await createCredential(credentialsHome, { label: LABEL, workspaces: (await wanted()).map(entry => entry.path), permissions });
-        id = created.credential.id;
-        token = created.token;
-        log(`created credential ${id}`);
-      }
-      for (const entry of await listCredentials(credentialsHome)) {
-        if (entry.id !== id && !entry.revokedAt) { await revokeCredential(credentialsHome, entry.id); log(`revoked stale credential ${entry.id}`); }
-      }
+      return created.token;
+    }),
+    /**
+     * Revokes every live credential in alp dashboard's file (`alp dashboard rotate` while the service
+     * is stopped): no token of an earlier start opens the host until the service starts again.
+     */
+    revokeAll: () => serial(async () => {
+      await guard();
+      id = undefined;
+      await revokeOthers();
       await store.reload();
-      return token;
     }),
     /** Brings the credential's workspaces and permissions in line; keeps its token. Never throws. */
     refresh: () => refreshing ??= serial(async () => {

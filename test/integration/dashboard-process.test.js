@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { createServer as createNetServer } from 'node:net';
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
-import { cp, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -85,6 +85,17 @@ function printedUrl(result) {
   const match = /^http:\/\/127\.0\.0\.1:(\d+)\/#token=(alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43})$/m.exec(result.stdout);
   assert.ok(match, `no loopback address with an alpgw1 token in: ${result.stdout}${result.stderr}`);
   return { url: match[0], port: Number(match[1]), token: match[2] };
+}
+
+/** Every regular file under `directory` whose bytes contain `needle`: the token is in no file (t-cee3). */
+async function filesContaining(directory, needle) {
+  const found = [];
+  for (const entry of await readdir(directory, { withFileTypes: true, recursive: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath ?? entry.path, entry.name);
+    if ((await readFile(file).catch(() => Buffer.alloc(0))).includes(needle)) found.push(file);
+  }
+  return found;
 }
 
 /** POST /v1/tickets with `token`: 201 for a live credential, 401 otherwise. */
@@ -231,7 +242,9 @@ test('cold alp dashboard starts alpd and alp-dashboard on dashboard.port, prints
   assert.ok(info.pid !== daemon.pid && info.pid > 0, 'alp-dashboard is its own process');
   assert.equal(info.port, webPort, 'alp-dashboard listens on dashboard.port');
   assert.equal(printed.port, webPort);
-  assert.equal(printed.token, info.token, 'the printed fragment carries web.json\'s token');
+  // t-cee3: the token comes from the service's memory, over its token socket; no file holds it.
+  assert.equal('token' in info, false, 'dashboard.json has no token');
+  assert.deepEqual(await filesContaining(home, printed.token), [], 'no file under the home holds the printed token');
   assert.equal(await paseoLock(home), undefined, 'alp dashboard no longer starts the Paseo integration');
 
   const page = await fetch(`http://127.0.0.1:${printed.port}/`);
@@ -275,11 +288,12 @@ test('two concurrent cold alp dashboard invocations converge on one alp-dashboar
   assert.equal(b.code, 0, b.stderr || b.stdout);
   const info = await webJson(home);
   assert.equal((await webLock(home)).pid, info.pid, 'the web lock and web.json name the one winner');
-  assert.equal(printedUrl(a).url, `${info.url}#token=${info.token}`);
+  assert.ok(printedUrl(a).url.startsWith(`${info.url}#token=`));
+  assert.equal(await ticketStatus(info.port, printedUrl(a).token), 201, 'the winner\'s live token');
   assert.equal(printedUrl(b).url, printedUrl(a).url, 'both callers print the winner');
 });
 
-test('a killed alp-dashboard keeps its token when alp dashboard starts it again', async t => {
+test('a killed alp-dashboard starts again with a new token, and the token of the last start gets 401 (t-cee3)', async t => {
   const { home } = await createHome(t);
   const first = await run(['dashboard', '--print'], home);
   assert.equal(first.code, 0, first.stderr || first.stdout);
@@ -293,13 +307,15 @@ test('a killed alp-dashboard keeps its token when alp dashboard starts it again'
   assert.equal(again.code, 0, again.stderr || again.stdout);
   const info2 = await webJson(home);
   assert.notEqual(info2.pid, info1.pid, 'a new alp-dashboard took the dead owner\'s lock');
-  assert.equal(info2.token, info1.token, 'the token is kept, so open pages keep working');
-  assert.equal(info2.credentialId, info1.credentialId);
-  assert.equal(printedUrl(again).token, info1.token);
-  assert.equal(await ticketStatus(info2.port, info1.token), 201);
+  const before = printedUrl(first).token;
+  const after = printedUrl(again).token;
+  assert.notEqual(after, before, 'every start mints its own token');
+  assert.notEqual(info2.credentialId, info1.credentialId);
+  assert.equal(await ticketStatus(info2.port, before), 401, 'the token of the last start is refused at the ticket endpoint');
+  assert.equal(await ticketStatus(info2.port, after), 201);
 });
 
-test('dashboard.enabled=false: alp dashboard refuses without starting anything, and rotate still replaces the token', async t => {
+test('dashboard.enabled=false: alp dashboard refuses without starting anything, and rotate still revokes the token', async t => {
   const { home } = await createHome(t, { enabled: false });
   const refused = await run(['dashboard', '--print'], home);
   assert.notEqual(refused.code, 0);
@@ -309,11 +325,8 @@ test('dashboard.enabled=false: alp dashboard refuses without starting anything, 
 
   const rotated = await run(['dashboard', 'rotate'], home);
   assert.equal(rotated.code, 0, rotated.stderr || rotated.stdout);
-  assert.match(rotated.stdout, /new token[\s\S]*disabled by settings[\s\S]*not started/);
-  const info = await webJson(home);
-  assert.equal(info.app, 'alp-dashboard');
-  assert.match(info.token, /^alpgw1\./, 'the new token waits in web.json for the next start');
-  assert.equal(info.pid, undefined, 'no service runs');
+  assert.match(rotated.stdout, /token is revoked[\s\S]*disabled by settings[\s\S]*not started/);
+  assert.equal(await webJson(home), undefined, 'no token waits in a file (t-cee3)');
   assert.equal(await webLock(home), undefined, 'the rotation released the lock');
 });
 
@@ -357,8 +370,8 @@ test('stale web.json and a dead owner\'s web lock are replaced by a live alp-das
   const info = await webJson(home);
   assert.notEqual(info.pid, dead);
   assert.ok(alive(info.pid));
-  assert.notEqual(info.token, `alpgw1.${'0'.repeat(16)}.${'A'.repeat(43)}`, 'a token without a credential is not reused');
-  assert.equal(printedUrl(served).token, info.token);
+  assert.equal('token' in info, false, 'the old token left dashboard.json');
+  assert.notEqual(printedUrl(served).token, `alpgw1.${'0'.repeat(16)}.${'A'.repeat(43)}`, 'a token without a credential is not reused');
 });
 
 test('alp dashboard rotate replaces the token: the old one gets 401, never while the service writes', async t => {
@@ -375,7 +388,7 @@ test('alp dashboard rotate replaces the token: the old one gets 401, never while
   assert.equal(direct.code, 3, direct.stderr || direct.stdout);
   assert.match(direct.stderr, new RegExp(`alp dashboard runs \\(pid ${info1.pid}\\)`));
   assert.equal(await readFile(credentials, 'utf8'), stored, 'credentials untouched while the service runs');
-  assert.equal((await webJson(home)).token, before.token);
+  assert.equal('token' in (await webJson(home)), false);
 
   const rotated = await run(['dashboard', 'rotate'], home);
   assert.equal(rotated.code, 0, rotated.stderr || rotated.stdout);
@@ -383,7 +396,6 @@ test('alp dashboard rotate replaces the token: the old one gets 401, never while
   await waitGone(info1.pid);
   const info2 = await webJson(home);
   assert.notEqual(info2.pid, info1.pid, 'the service was stopped and started again');
-  assert.equal(after.token, info2.token);
   assert.notEqual(after.token, before.token, 'a new token');
   assert.equal(after.port, before.port, 'on the same port');
   assert.equal(await ticketStatus(after.port, before.token), 401, 'an open page with the old token loses access');
@@ -433,7 +445,7 @@ test('a live pre-rename Paseo integration is stopped, alp-dashboard takes over, 
   const info = await webJson(home);
   assert.equal(info.app, 'alp-dashboard');
   assert.equal((await webLock(home)).pid, info.pid);
-  assert.equal(printedUrl(served).token, info.token);
+  assert.equal(await ticketStatus(info.port, printedUrl(served).token), 201);
   assert.deepEqual(await paseoJson(home), IDENTITY, 'paired devices keep the token and server id');
 
   // The Paseo integration, started by alp dashboard pair, picks the identity up.
@@ -469,25 +481,25 @@ test('the identity moves only into a home without paseo.json, and rotate moves i
  * Turns a stopped alp dashboard home into the layout alp web of 0.0.1-beta.8 left: web/ (its
  * credential store), web.json with `app: 'alp-web'`, web.* settings and alp-web.log.
  */
-async function toBeta8Layout(home) {
+async function toBeta8Layout(home, token) {
   await rename(path.join(home, 'dashboard'), path.join(home, 'web'));
   const info = await homeJson(home, 'dashboard.json');
   await rm(path.join(home, 'dashboard.json'));
   await rename(path.join(home, 'logs', 'integrations', 'alp-dashboard.log'), path.join(home, 'logs', 'integrations', 'alp-web.log'));
   const settings = await homeJson(home, 'settings.json');
   await writeFile(path.join(home, 'settings.json'), JSON.stringify({ ...settings, dashboard: undefined, web: { ...settings.web, ...settings.dashboard } }));
-  const beta8 = { version: info.version, app: 'alp-web', token: info.token, credentialId: info.credentialId };
+  const beta8 = { version: 2, app: 'alp-web', token, credentialId: info.credentialId };
   await writeFile(path.join(home, 'web.json'), JSON.stringify(beta8), { mode: 0o600 });
   return beta8;
 }
 
-test('a running alp web of 0.0.1-beta.8 is replaced by alp dashboard: same token, same port, settings moved, once', async t => {
+test('a running alp web of 0.0.1-beta.8 is replaced by alp dashboard: same port, settings moved, a new token (t-cee3), once', async t => {
   const { home } = await createHome(t);
   const { port } = (await homeJson(home, 'settings.json')).dashboard;
   const first = await run(['dashboard', '--print'], home);
   assert.equal(first.code, 0, first.stderr || first.stdout);
   assert.equal((await run(['dashboard', '--stop'], home)).code, 0);
-  const beta8 = await toBeta8Layout(home);
+  const beta8 = await toBeta8Layout(home, printedUrl(first).token);
   // alp web still running under its old lock, as an upgrade finds it.
   const old = await preRenamePaseo(t, home, beta8);
   const exited = new Promise(resolve => old.once('exit', code => resolve(code)));
@@ -496,11 +508,14 @@ test('a running alp web of 0.0.1-beta.8 is replaced by alp dashboard: same token
   assert.equal(served.code, 0, served.stderr || served.stdout);
   assert.equal(await exited, 0, 'the old service was stopped with SIGTERM');
   assert.match(served.stderr, new RegExp(`Stopped alp web from before its rename to alp dashboard \\(pid ${old.pid}\\)`));
-  assert.equal(printedUrl(served).token, beta8.token, 'the token of alp web works on');
+  const token = printedUrl(served).token;
+  assert.notEqual(token, beta8.token, 'a new token: tokens live in no file now');
   assert.equal(printedUrl(served).port, port, 'on the same port');
+  assert.equal(await ticketStatus(port, beta8.token), 401, 'the token alp web wrote to web.json is revoked');
+  assert.equal(await ticketStatus(port, token), 201);
   const info = await webJson(home);
   assert.equal(info.app, 'alp-dashboard');
-  assert.equal(info.credentialId, beta8.credentialId);
+  assert.equal('token' in info, false);
   const settings = await homeJson(home, 'settings.json');
   assert.deepEqual(settings.dashboard, { port }, 'web.port moved to dashboard.port');
   assert.deepEqual(settings.web, { relay: { enabled: false } }, 'Paseo\'s web.relay stays');
@@ -512,14 +527,14 @@ test('a running alp web of 0.0.1-beta.8 is replaced by alp dashboard: same token
   const again = await run(['dashboard', '--print'], home);
   assert.equal(again.code, 0, again.stderr || again.stdout);
   assert.doesNotMatch(again.stderr, /Moved|Stopped/);
-  assert.equal(printedUrl(again).token, beta8.token);
+  assert.equal(printedUrl(again).token, token, 'the running service hands out the same token');
   assert.equal((await webJson(home)).pid, info.pid);
   assert.equal(await readFile(path.join(home, 'settings.json'), 'utf8'), before);
 
   const status = await run(['dashboard', '--status'], home);
   assert.equal(status.code, 0);
   assert.equal(status.stdout, `1 alp dashboard process running:\n    PID ${info.pid} [dashboard]: ${info.url} (port ${port})\n`);
-  assert.ok(!status.stdout.includes(info.token), 'status never prints the token');
+  assert.ok(!status.stdout.includes(token), 'status never prints the token');
   const stopped = await run(['dashboard', '--stop'], home);
   assert.equal(stopped.stdout, `Stopped alp dashboard (pid ${info.pid}).\n`);
   await waitGone(info.pid);
@@ -538,12 +553,11 @@ test('web.enabled=false of alp web keeps alp dashboard off after the move', asyn
   assert.equal(await webLock(home), undefined, 'nothing started');
 });
 
-test('a home with both names keeps the new ones and leaves the old ones untouched', async t => {
+test('a home with both names keeps the new ones; alp web\'s web.json, which held a token, is removed (t-cee3)', async t => {
   const { home } = await createHome(t);
   const first = await run(['dashboard', '--print'], home);
   assert.equal(first.code, 0, first.stderr || first.stdout);
   assert.equal((await run(['dashboard', '--stop'], home)).code, 0);
-  const current = await readFile(path.join(home, 'dashboard.json'), 'utf8');
   // An old store and web.json (another token) beside the new ones, and both web.port and dashboard.port.
   await mkdir(path.join(home, 'web'), { mode: 0o700 });
   await writeFile(path.join(home, 'web', 'credentials.json'), '{"credentials":[]}', { mode: 0o600 });
@@ -554,13 +568,13 @@ test('a home with both names keeps the new ones and leaves the old ones untouche
 
   const served = await run(['dashboard', '--print'], home);
   assert.equal(served.code, 0, served.stderr || served.stdout);
-  assert.equal(printedUrl(served).token, JSON.parse(current).token, 'dashboard.json wins');
+  assert.notEqual(printedUrl(served).token, JSON.parse(stale).token);
   assert.equal(printedUrl(served).port, settings.dashboard.port, 'dashboard.port wins');
-  assert.equal(await readFile(path.join(home, 'web.json'), 'utf8'), stale, 'web.json is left as it was');
+  assert.equal(existsSync(path.join(home, 'web.json')), false, 'web.json, with its token, is removed');
   assert.equal(await readFile(path.join(home, 'web', 'credentials.json'), 'utf8'), '{"credentials":[]}');
   assert.equal((await homeJson(home, 'settings.json')).web.port, 1024, 'web.port is not merged over dashboard.port');
   const status = await run(['dashboard', '--status'], home);
-  assert.match(status.stdout, /Left from before the rename to alp dashboard, not used: .*web\.json/);
+  assert.match(status.stdout, /Left from before the rename to alp dashboard, not used: .*[/\\]web\b/);
   assert.match(status.stdout, /settings\.json web\.port \(dashboard\.port is set and wins\)/);
 });
 
@@ -568,7 +582,7 @@ test('--status changes nothing in a beta.8 home: it names the running alp web an
   const { home } = await createHome(t);
   assert.equal((await run(['dashboard', '--print'], home)).code, 0);
   assert.equal((await run(['dashboard', '--stop'], home)).code, 0);
-  const beta8 = await toBeta8Layout(home);
+  const beta8 = await toBeta8Layout(home, `alpgw1.${'0'.repeat(16)}.${'A'.repeat(43)}`);
   const old = await preRenamePaseo(t, home, beta8);
   const settings = await readFile(path.join(home, 'settings.json'), 'utf8');
   const status = await run(['dashboard', '--status'], home);
@@ -583,40 +597,42 @@ test('--status changes nothing in a beta.8 home: it names the running alp web an
   assert.ok(!status.stdout.includes(beta8.token));
 });
 
-test('two alp dashboard runs at once on a beta.8 home converge on one service with the old token', async t => {
+test('two alp dashboard runs at once on a beta.8 home converge on one service', async t => {
   const { home } = await createHome(t);
   const { port } = (await homeJson(home, 'settings.json')).dashboard;
-  assert.equal((await run(['dashboard', '--print'], home)).code, 0);
+  const first = await run(['dashboard', '--print'], home);
+  assert.equal(first.code, 0);
   assert.equal((await run(['dashboard', '--stop'], home)).code, 0);
-  const beta8 = await toBeta8Layout(home);
+  const beta8 = await toBeta8Layout(home, printedUrl(first).token);
   const [a, b] = await Promise.all([run(['dashboard', '--print'], home), run(['dashboard', '--print'], home)]);
   for (const result of [a, b]) {
     assert.equal(result.code, 0, result.stderr || result.stdout);
-    assert.equal(printedUrl(result).token, beta8.token);
+    assert.notEqual(printedUrl(result).token, beta8.token);
     assert.equal(printedUrl(result).port, port);
   }
-  assert.equal((await webJson(home)).credentialId, beta8.credentialId);
+  assert.equal(printedUrl(a).token, printedUrl(b).token, 'one service, one token');
   for (const file of ['web', 'web.json']) assert.equal(existsSync(path.join(home, file)), false, `${file} moved`);
   assert.deepEqual((await homeJson(home, 'settings.json')), { dashboard: { port }, web: { relay: { enabled: false } } });
 });
 
-test('a move stopped halfway (store moved, web.json not) finishes on the next run with the same token', async t => {
+test('a move stopped halfway (store moved, web.json not) finishes on the next run', async t => {
   const { home } = await createHome(t);
-  assert.equal((await run(['dashboard', '--print'], home)).code, 0);
+  const first = await run(['dashboard', '--print'], home);
+  assert.equal(first.code, 0);
   assert.equal((await run(['dashboard', '--stop'], home)).code, 0);
-  const beta8 = await toBeta8Layout(home);
+  const beta8 = await toBeta8Layout(home, printedUrl(first).token);
   await writeFile(path.join(home, 'web.json'), JSON.stringify(beta8), { mode: 0o600 });
   await rename(path.join(home, 'web'), path.join(home, 'dashboard'));
   const served = await run(['dashboard', '--print'], home);
   assert.equal(served.code, 0, served.stderr || served.stdout);
-  assert.equal(printedUrl(served).token, beta8.token);
+  assert.equal(await ticketStatus(printedUrl(served).port, beta8.token), 401, 'the token in web.json is revoked');
   assert.equal(existsSync(path.join(home, 'web.json')), false);
-  // And a crash after dashboard.json was linked but before web.json was removed: the copy goes.
+  // And a web.json written again beside dashboard.json: it goes too.
   assert.equal((await run(['dashboard', '--stop'], home)).code, 0);
   await writeFile(path.join(home, 'web.json'), JSON.stringify(beta8), { mode: 0o600 });
   const again = await run(['dashboard', '--print'], home);
-  assert.equal(printedUrl(again).token, beta8.token);
-  assert.equal(existsSync(path.join(home, 'web.json')), false, 'a web.json with the token dashboard.json already has is only a copy');
+  assert.equal(again.code, 0, again.stderr || again.stdout);
+  assert.equal(existsSync(path.join(home, 'web.json')), false, 'a web.json of alp web is removed');
 });
 
 test('--stop fails while a web.lock holder alp cannot prove keeps running', async t => {
