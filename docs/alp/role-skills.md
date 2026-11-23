@@ -24,6 +24,8 @@ with no Claude-only tools or automatic commit/approval gates.
 | release-readiness | GO / CONDITIONAL / NO-GO verdict with evidence | Yes | Yes | — | Yes |
 
 Main has fifteen skills, lead eleven, peer six, reviewer two; oracle and supervisor none.
+The Research pack's advisors, librarian and scout, get none either: the pack assigns
+them no skills, and their method lives in their own AGENT.md.
 The last seven arrived with skill system v2 ([skill system](skill-system.md)): mapped by
 role authority (peer gets the implementation methods, reviewer only the read-only review
 methods, main alone authors skills), at a measured cost of about 780 extra index tokens

@@ -11,6 +11,8 @@ mode; "profile" is the teams' older name.
 | --- | --- | --- | --- | --- |
 | Phở (`pho`, new project default) | main | main or peer | none | supervisor |
 | Cafe (`cafe`) | lead | lead or peer | main | supervisor |
+| Phở Research (`pho-research`, Research pack) | main | main or peer; main may call librarian and scout | none | supervisor |
+| Cafe Research (`cafe-research`, Research pack) | lead | lead or peer; lead may call librarian and scout, main librarian only | main | supervisor |
 
 Phở does not spawn lead. Cafe main delegates execution to lead, never straight to
 peer. Main and lead can ask oracle or reviewer; these advisors return once to
@@ -21,7 +23,13 @@ both profiles main starts a supervisor that reviews its process (see
 Oracle advises on significant uncertainty, architecture, or difficult bugs.
 Reviewer reviews one diff for logic changes and risky changes; trivial formatting
 or typo changes can skip review. These call decisions are agent instructions, not
-an automatic mandatory review gate.
+an automatic mandatory review gate. Oracle answers design, plan, diagnosis and
+code-review questions before an edit; reviewer reviews one diff after it. One
+question goes to one of them, not both.
+
+The optional Research pack adds two more advisors, librarian and scout, and the
+two teams above that call them; default Phở and Cafe do not change. See
+[Librarian and scout (Research pack)](#librarian-and-scout-research-pack).
 
 ## Select a team
 
@@ -199,6 +207,38 @@ disposable copy of its requester's tree:
 
 `alp permissions` lists every agent's profile. `alp permissions check reviewer "npm test 2>&1"`
 says what a profile decides about a command.
+
+## Librarian and scout (Research pack)
+
+`alp pack install research` adds the agents `librarian` and `scout` and the teams
+`pho-research` and `cafe-research`. Default Phở and Cafe stay as they are; select a
+research team to use them. Both agents are advisors: read-only, they answer once to
+the coordinator that called them, and they never delegate, edit files or contact the
+user.
+
+- **scout** finds code in the current workspace and returns one line per hit:
+  `path:line — symbol — why`. A coordinator calls it instead of pulling a lot of
+  unrelated source into its own context.
+- **librarian** researches external repositories. It clones them shallow into
+  `/tmp/alp-librarian*` and cites `repo@sha:path:line`.
+
+In `pho-research` main may call both. In `cafe-research` lead may call both and
+main may call librarian only. Oracle may suggest that its coordinator run one of
+them when its conclusion depends on facts it has not seen; it never calls them
+itself. When a research team is selected, the supervisor also comments (it is not
+a gate) on a coordinator that reads lots of unrelated source where scout could
+return locations, or asserts an external library's behaviour without evidence
+while librarian is available.
+
+Librarian's permission profile:
+
+- base `read-only`;
+- allows `git clone`, `git fetch` and `git -C` on `/tmp/alp-librarian*`, and
+  `WebFetch` for `github.com`, `raw.githubusercontent.com` and `gitlab.com`;
+- asks before `gh repo clone` and any other host;
+- denies `git push`.
+
+Scout keeps the plain read-only base.
 
 ## Parallel writers
 

@@ -281,10 +281,13 @@ RPC.
 ## Packs and skill checks
 
 Optional packs ship specialist skills, the `architect` and `docs-maintainer` agents and
-the Blueprint team without seeding them: `alp packs` lists them, `alp pack install <id>
-[--project] [--assign]` copies one in and keeps any entry you already have. `alp skill
-check [name|DIR] [--strict]` validates skills against the Agent Skills format, and `alp
-skill cp` copies a skill's whole directory. See [skill system](skill-system.md).
+the Blueprint team without seeding them. The `research` pack adds the read-only advisors
+`librarian` (external repositories, shallow clones in `/tmp`) and `scout` (code
+locations in the workspace) and the `pho-research` and `cafe-research` teams that call
+them ([Librarian and scout](team-workflow.md#librarian-and-scout-research-pack)).
+`alp packs` lists the packs, `alp pack install <id> [--project] [--assign]` copies one in
+and keeps any entry you already have. `alp skill check [name|DIR] [--strict]` validates
+skills against the Agent Skills format, and `alp skill cp` copies a skill's whole directory. See [skill system](skill-system.md).
 
 ## Listing
 
