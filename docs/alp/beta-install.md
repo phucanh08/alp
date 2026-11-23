@@ -216,16 +216,19 @@ in `~/.alp/dashboard.json`. The first `alp dashboard` after the upgrade:
 - stops that integration if it still holds `integrations/web.lock`, with SIGTERM, and only when it
   can prove the process is yours, from this boot, and the one that took the lock (on Windows it
   never stops it: stop it yourself). Any other holder is reported and left running;
-- copies the old token and server id from `dashboard.json` to `~/.alp/paseo.json`, once and only when
-  `paseo.json` does not exist yet, so devices paired through the relay keep working; then alp-dashboard
-  writes its own `dashboard.json`.
+- copies the old server id from `dashboard.json` to `~/.alp/paseo.json` and the old token to the
+  Paseo integration's private credential directory `~/.alp/paseo/`, once and only when `paseo.json`
+  does not exist yet, so devices paired through the relay keep working; then alp-dashboard writes its
+  own `dashboard.json`.
 
 From the CLI, only `alp dashboard pair` starts the Paseo integration now, as integration `paseo`.
 
 ### Paseo's app on another device (optional)
 
 The Paseo integration in `@anhlp/alp-paseo` runs apart from alp-dashboard, as integration `paseo` on a
-port the system picks, and keeps its token in `~/.alp/paseo.json`. You need it only to pair
+port the system picks, and keeps its token (the password) and relay key in the private directory
+`~/.alp/paseo/` (mode 0700; read-only agents may not read it). A token or relay key an older version
+left in `~/.alp/paseo.json` or `~/.alp/relay-keypair.json` moves there on the next start. You need it only to pair
 Paseo's app on another device through the relay, which is **experimental** and off by default:
 
 ```sh
@@ -237,8 +240,9 @@ alp dashboard pair --on                         # turns the relay on and prints 
 Normal npm installs bring the plugin's required peers (`@getpaseo/*`, `ws`); React and React
 Native are optional peers that the Paseo app provides, so npm does not install them. Do not add
 `--legacy-peer-deps`. Open the link `alp dashboard pair` prints on the device that runs Paseo's app;
-when Paseo's app asks for a password, give it the one `alp dashboard pair` prints (the token in
-`~/.alp/paseo.json`). This package no longer ships Paseo's web app (removed in t-55ce.3). `alp-web-integration` remains an alias of
+when Paseo's app asks for a password, give it the one `alp dashboard pair` prints (it asks the
+running integration over a private socket). `alp dashboard pair --rotate` replaces the password: the old
+one stops working and paired devices sign in again. This package no longer ships Paseo's web app (removed in t-55ce.3). `alp-web-integration` remains an alias of
 `alp-paseo-integration`, and `ALP_WEB_INTEGRATION` of `ALP_PASEO_INTEGRATION`, for one release.
 
 A plugin directory managed by `paseo plugin add npm:…` is not a standalone web
