@@ -199,7 +199,8 @@ test('alp-dashboard serves the app and the gateway on one loopback listener, wit
   // The token socket: 0600, in the 0700 directory; no file under the home holds the token.
   if (posix) {
     const socketFile = tokenSocketPath(context.home);
-    assert.equal(socketFile, path.join(context.home, 'dashboard', 'token.sock'));
+    // <home>/dashboard/token.sock, or the private temp directory when that path is too long for a socket (a deep TMPDIR, as on macOS CI).
+    assert.equal(path.basename(socketFile), 'token.sock');
     const info = await stat(socketFile);
     assert.ok(info.isSocket());
     assert.equal(info.mode & 0o777, 0o600, 'the token socket is private');
