@@ -210,7 +210,7 @@ async function serveDashboard(home, entry, { port } = {}) {
   }
   let answer;
   try { answer = await readToken(home); }
-  catch (error) { throw new Error(`alp dashboard did not hand over its token: ${error?.message ?? error}; see ${path.join(home, 'logs', 'integrations', 'alp-dashboard.log')}`, { cause: error }); }
+  catch (error) { throw new Error(`alp dashboard did not hand over its token: ${error?.message ?? error}; see ${path.join(home, 'logs', 'integrations', 'alp-dashboard.log')}. A service started by an older alp keeps no token socket: run \`alp dashboard --stop\`, then \`alp dashboard\` again`, { cause: error }); }
   // The socket's answer must come from the process the lock and dashboard.json name.
   if (answer.pid !== lock.pid) throw new Error(`the token socket of alp dashboard is held by pid ${answer.pid}, not by the service (pid ${lock.pid}); stop it, then run alp dashboard again`);
   if (port !== undefined && info.port !== port) {
@@ -273,11 +273,31 @@ async function stopCommand(home) {
   const owner = await serviceOwner(home);
   if (!owner.alive && !('pid' in owner)) {
     if (!report.stopped) console.log('No alp dashboard running for this ALP home.');
-    return;
+  } else {
+    const pid = await stopService(home);
+    if (pid) console.log(`Stopped alp dashboard (pid ${pid}).`);
+    else console.log('No alp dashboard running for this ALP home.');
   }
-  const pid = await stopService(home);
-  if (pid) console.log(`Stopped alp dashboard (pid ${pid}).`);
-  else console.log('No alp dashboard running for this ALP home.');
+  await dropLeftToken(home);
+}
+
+/**
+ * A token an older alp dashboard (before t-cee3) wrote into dashboard.json stays readable there, and
+ * its credential live, until the service starts again. --stop clears it too: the service's own
+ * `--rotate` revokes every credential and strips the token, under the dashboard lock.
+ * @param {string} home
+ */
+async function dropLeftToken(home) {
+  let published;
+  try { published = JSON.parse(await readFile(path.join(home, DASHBOARD.info), 'utf8')); } catch { return; }
+  if (!published || typeof published !== 'object' || !('token' in published)) return;
+  const rotate = entryCommand(dashboardEntry(), 'dashboard', ['--rotate']);
+  const code = await new Promise(resolve => {
+    execFile(rotate.command, rotate.args, { env: { ...process.env, ALP_HOME: home }, encoding: 'utf8', timeout: 60_000, killSignal: 'SIGTERM' },
+      error => resolve(error ? (typeof error.code === 'number' ? error.code : 1) : 0));
+  });
+  if (code === 0) console.log(`Removed the token an older alp dashboard left in ${DASHBOARD.info} and revoked it.`);
+  else { console.log(`${DASHBOARD.info} still holds a token from an older alp dashboard; run \`alp dashboard rotate\` to revoke it.`); process.exitCode = 1; }
 }
 
 async function dashboardCommand(args) {

@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { serveToken } from '../src/dashboard/token-socket.js';
 import { readToken, tokenSocketPath } from '../src/dashboard-service.js';
+import { teardown } from '../../../test/support/teardown.js';
 
 /**
  * The token socket of alp dashboard (t-cee3): the only way to the token of the running service. It is
@@ -16,12 +17,14 @@ import { readToken, tokenSocketPath } from '../src/dashboard-service.js';
 const posix = process.platform !== 'win32';
 const TOKEN = `alpgw1.${'a'.repeat(16)}.${'B'.repeat(43)}`;
 
+/** A scratch home and its `defer`: teardown runs in reverse order (ALP.md), so a socket closes before its directory goes. */
 async function scratchHome(t) {
+  const defer = teardown(t);
   const directory = await mkdtemp(path.join(os.tmpdir(), 'alp-token-socket-'));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  return home;
+  defer(() => rm(directory, { recursive: true, force: true }));
+  return { home, defer };
 }
 
 /** Connects and returns everything the server sends before it closes, after writing `request` (if any). */
@@ -48,9 +51,9 @@ test('the token socket path: <home>/dashboard/token.sock, a private temp directo
 });
 
 test('the service hands its token over a 0600 socket in a 0700 directory, only to a written request', async t => {
-  const home = await scratchHome(t);
+  const { home, defer } = await scratchHome(t);
   const served = await serveToken({ home, token: () => TOKEN, credentialId: () => 'a'.repeat(16) });
-  t.after(() => served.close());
+  defer(() => served.close());
   if (posix) {
     assert.equal(served.path, path.join(home, 'dashboard', 'token.sock'));
     assert.equal((await stat(served.path)).mode & 0o777, 0o600);
@@ -66,7 +69,7 @@ test('the service hands its token over a 0600 socket in a 0700 directory, only t
 });
 
 test('the service refuses to run when its socket is not 0600 (t-cee3)', { skip: !posix && 'POSIX file modes' }, async t => {
-  const home = await scratchHome(t);
+  const { home, defer } = await scratchHome(t);
   await assert.rejects(
     serveToken({ home, token: () => TOKEN, credentialId: () => undefined, afterListen: socketPath => chmod(socketPath, 0o666) }),
     /token socket .* must have mode 0600, not 0666/,
@@ -75,7 +78,7 @@ test('the service refuses to run when its socket is not 0600 (t-cee3)', { skip: 
 });
 
 test('the service refuses to run when the socket directory is not 0700 (t-cee3)', { skip: !posix && 'POSIX file modes' }, async t => {
-  const home = await scratchHome(t);
+  const { home, defer } = await scratchHome(t);
   // A directory that holds something is never tightened by ALP: it must be fixed by the user.
   await mkdir(path.join(home, 'dashboard', 'kept'), { recursive: true });
   await chmod(path.join(home, 'dashboard'), 0o755);
@@ -91,9 +94,9 @@ test('the service refuses to run when the socket directory is not 0700 (t-cee3)'
 });
 
 test('the client refuses a socket that is not private, before it connects', { skip: !posix && 'POSIX file modes' }, async t => {
-  const home = await scratchHome(t);
+  const { home, defer } = await scratchHome(t);
   const served = await serveToken({ home, token: () => TOKEN, credentialId: () => undefined });
-  t.after(() => served.close());
+  defer(() => served.close());
   await chmod(served.path, 0o666);
   await assert.rejects(readToken(home), /must have mode 0600/);
 });
