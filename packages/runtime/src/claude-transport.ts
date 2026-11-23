@@ -126,6 +126,10 @@ export const toolShapes: Record<string, Record<string, z.ZodType>> = {
     issue: z.number().int().positive().optional(),
     labels: z.array(z.string().min(1).max(50)).max(10).optional(),
   },
+  alp_strategy: {
+    strategy: z.enum(['rush', 'smart', 'deep', 'large']),
+    reason: z.string().min(1).max(300),
+  },
   alp_schedule: {
     action: z.enum(['create', 'list', 'get', 'cancel']),
     dueAt: z.string().min(1).max(80).optional(),

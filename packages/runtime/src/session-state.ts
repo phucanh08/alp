@@ -44,6 +44,10 @@ export type Session = {
   calls: number;
   /** Separate finite budget for mandatory read-only reviewer/oracle starts. */
   advisorCalls: number;
+  /** A root: accepted user prompts so far; alp_strategy allows one change per value. */
+  userTurns?: number;
+  /** Main's or lead's strategy (alp_strategy) and the root user turn it changed in; absent means smart. */
+  strategy?: { name: 'rush' | 'smart' | 'deep' | 'large'; reason: string; at: string; turn: number };
 
   mail: MailEvent[];
   waiters: Waiter[];
