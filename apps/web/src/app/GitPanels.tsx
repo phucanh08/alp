@@ -2,7 +2,7 @@ import * as React from 'react';
 import { ChevronDown, ChevronRight, Columns2, Copy, FileDiff, FileText, GitBranch, GitCompareArrows, Lock, Maximize, MessageSquarePlus, MoreHorizontal, Pilcrow, RotateCw, Rows2, Send, Space, SquareDot, SquareMinus, SquarePlus, Trash2 } from 'lucide-react';
 import type { GitDiffFile, GitStatus, GitStatusFile } from '@anhlp/alp-protocol';
 import { LINE_LIMIT, clipLines } from '../lib/tool-calls.js';
-import { CHANGE_LABELS, CHANGE_LETTERS, GIT_ERROR_MESSAGES, GIT_MODES, KIND_MESSAGES, REVIEW_LIMITS, appendDiffPage, baseLabel, branchLine, changeKind, changesEmptyAction, changesTree, committedDescription, describeGitError, diffRows, diffTotals, formatDiffCount, formatReviewComments, restartsDiff, splitRows, type DiffView } from '../lib/git.js';
+import { CHANGE_LABELS, CHANGE_LETTERS, GIT_ERROR_MESSAGES, GIT_MODES, KIND_MESSAGES, REVIEW_LIMITS, appendDiffPage, baseLabel, branchLine, changeKind, changesEmptyAction, changesTree, committedDescription, describeGitError, diffRows, diffTotals, formatDiffCount, formatReviewComments, loadHideWhitespace, restartsDiff, saveHideWhitespace, splitRows, type DiffView } from '../lib/git.js';
 import { fileIconUrl } from '../lib/file-icons.js';
 import { ContextMenu, Menu, type MenuItem } from '../components/ui/menu';
 import { can } from '../lib/gateway.js';
@@ -36,6 +36,10 @@ import { useTabs } from './tabs';
  * (off by default, remembered in this browser) lists the files with their hunks in place, the
  * layout and whitespace toggles in the options menu. Paseo's branch switcher, base picker, pull
  * request link, All changes mode, commits section and every Git write are not offered.
+ *
+ * t-81b0.14: Hide whitespace is remembered in this browser (`alp.changes.hideWhitespace`), as Paseo's
+ * global changes preferences (hooks/use-changes-preferences/storage.ts); the mode is not, as Paseo's
+ * comparison is kept in memory (git/working-diff-comparison): a reload starts on Uncommitted.
  */
 
 type Mode = 'uncommitted' | 'base' | 'staged' | 'unstaged';
@@ -53,7 +57,7 @@ const saveInline = (inline: boolean) => { try { globalThis.localStorage?.setItem
 
 /** The view both panels share (mode, whitespace, the file Changes asked Diff to show, layout), as Paseo's changes preferences. */
 const view = (() => {
-  let state: ViewState = { mode: 'uncommitted', ignoreWhitespace: false, focus: null, focusScope: '', layout: savedLayout(), inlineDiff: savedInline() };
+  let state: ViewState = { mode: 'uncommitted', ignoreWhitespace: loadHideWhitespace(globalThis.localStorage), focus: null, focusScope: '', layout: savedLayout(), inlineDiff: savedInline() };
   const listeners = new Set<() => void>();
   return {
     get: () => state,
@@ -64,6 +68,9 @@ const view = (() => {
 const useView = () => React.useSyncExternalStore(view.subscribe, view.get, view.get);
 
 /** The file the Diff panel shows (Changes' "Open in Diff"), for the workspace `scope` names only; null for every file. */
+/** Hide whitespace, remembered in this browser as Paseo's changes preference (lib/git.js). */
+function setIgnoreWhitespace(hide: boolean) { saveHideWhitespace(globalThis.localStorage, hide); view.set({ ignoreWhitespace: hide }); }
+
 function focusDiff(path: string | null, scope = '') { view.set({ focus: path, focusScope: scope }); }
 
 /** A review comment on one diff line: the side's numbering (old for a removed line), the line quoted. */
@@ -483,7 +490,7 @@ function Toolbar({ mode, setMode, content, ignoreWhitespace, layout, totals, ref
         </button>
       ) : null}
       {content ? (
-        <button type="button" className={cn(tool, ignoreWhitespace && 'bg-secondary text-foreground')} onClick={() => view.set({ ignoreWhitespace: !ignoreWhitespace })}
+        <button type="button" className={cn(tool, ignoreWhitespace && 'bg-secondary text-foreground')} onClick={() => setIgnoreWhitespace(!ignoreWhitespace)}
           aria-pressed={ignoreWhitespace} aria-label={ignoreWhitespace ? 'Show whitespace' : 'Hide whitespace'} title={ignoreWhitespace ? 'Show whitespace' : 'Hide whitespace'} data-testid="git-whitespace"><Space aria-hidden /></button>
       ) : null}
       <button type="button" className={tool} onClick={onRefresh} disabled={refreshing} aria-label={refreshing ? 'Refreshing' : 'Refresh'} title={refreshing ? 'Refreshing' : 'Refresh'} data-testid="git-refresh">
@@ -652,7 +659,7 @@ function ChangesHeader({ status, mode, content, totals, refreshing, onRefresh, i
     { id: 'layout', label: 'Split', icon: <Columns2 aria-hidden />, checked: layout === 'split', keepOpen: true, testId: 'git-layout',
       onSelect: () => { const next: Layout = layout === 'split' ? 'unified' : 'split'; saveLayout(next); view.set({ layout: next }); } },
     { id: 'whitespace', label: ignoreWhitespace ? 'Show whitespace' : 'Hide whitespace', icon: <Pilcrow aria-hidden />, checked: ignoreWhitespace, keepOpen: true, testId: 'git-whitespace',
-      onSelect: () => view.set({ ignoreWhitespace: !ignoreWhitespace }) },
+      onSelect: () => setIgnoreWhitespace(!ignoreWhitespace) },
     { id: 'inline', label: 'Inline diff', checked: true, keepOpen: true, group: true, onSelect: toggleInline, testId: 'changes-toggle-inline-diff' },
   ] : [
     ...(onOpenDiff ? [{ id: 'open-tab', label: 'Open Diff tab', icon: <Maximize aria-hidden />, onSelect: onOpenDiff, testId: 'changes-open-tab' }] : []),

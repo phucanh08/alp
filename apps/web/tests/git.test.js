@@ -240,3 +240,28 @@ test("changes labels: change kinds as Paseo's icons, the Committed description, 
   assert.equal(changesEmptyAction({ mode: 'staged', ignoreWhitespace: false, status: status(true, 2) }), null);
   assert.equal(changesEmptyAction({ mode: 'base', ignoreWhitespace: false, status: null }), null);
 });
+
+// t-81b0.14: Hide whitespace is remembered in this browser, as Paseo's changes preferences
+// (hooks/use-changes-preferences/storage.ts hideWhitespace); the mode is not (Paseo keeps it in memory).
+test('Hide whitespace: remembered under its own key, anything else is off, storage that throws is ignored', async () => {
+  const { HIDE_WHITESPACE_KEY, loadHideWhitespace, saveHideWhitespace } = await import('../src/lib/git.js');
+  const memory = () => { const items = new Map(); return { items, getItem: key => items.get(key) ?? null, setItem: (key, value) => { items.set(key, String(value)); } }; };
+  const storage = memory();
+  assert.equal(HIDE_WHITESPACE_KEY, 'alp.changes.hideWhitespace');
+  assert.equal(loadHideWhitespace(storage), false);
+  saveHideWhitespace(storage, true);
+  assert.equal(storage.items.get(HIDE_WHITESPACE_KEY), 'true');
+  assert.equal(loadHideWhitespace(storage), true);
+  saveHideWhitespace(storage, false);
+  assert.equal(loadHideWhitespace(storage), false);
+  for (const bad of ['1', 'TRUE', 'yes', '{"hideWhitespace":true}', '']) {
+    storage.items.set(HIDE_WHITESPACE_KEY, bad);
+    assert.equal(loadHideWhitespace(storage), false, bad);
+  }
+  assert.equal(loadHideWhitespace(undefined), false);
+  assert.equal(loadHideWhitespace(null), false);
+  const throwing = { getItem() { throw new Error('SecurityError'); }, setItem() { throw new Error('QuotaExceededError'); } };
+  assert.equal(loadHideWhitespace(throwing), false);
+  assert.doesNotThrow(() => saveHideWhitespace(throwing, true));
+  assert.doesNotThrow(() => saveHideWhitespace(undefined, true));
+});

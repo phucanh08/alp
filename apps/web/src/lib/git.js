@@ -410,3 +410,28 @@ export function changesEmptyAction({ mode, ignoreWhitespace, status }) {
   if (mode === 'uncommitted' && (status.aheadBehind?.ahead ?? 0) > 0) return 'base';
   return null;
 }
+
+/**
+ * Where Hide whitespace is remembered (this browser only), as Paseo keeps `hideWhitespace` in its
+ * global changes preferences (hooks/use-changes-preferences/storage.ts, `@paseo:changes-preferences`).
+ * ALP keeps each Changes preference under its own key, as `alp.diff.layout` and `alp.changes.inlineDiff`.
+ */
+export const HIDE_WHITESPACE_KEY = 'alp.changes.hideWhitespace';
+
+/**
+ * The remembered Hide whitespace: only the stored text 'true' turns it on; anything else, no
+ * storage, or storage that throws (private mode) is the default, off.
+ * @param {{ getItem(key: string): string | null } | null | undefined} storage
+ */
+export function loadHideWhitespace(storage) {
+  try { return storage?.getItem(HIDE_WHITESPACE_KEY) === 'true'; } catch { return false; }
+}
+
+/**
+ * Remembers Hide whitespace; storage that throws keeps it for this page only.
+ * @param {{ setItem(key: string, value: string): void } | null | undefined} storage
+ * @param {boolean} hide
+ */
+export function saveHideWhitespace(storage, hide) {
+  try { storage?.setItem(HIDE_WHITESPACE_KEY, hide ? 'true' : 'false'); } catch { /* private mode: this page only */ }
+}
