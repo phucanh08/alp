@@ -198,11 +198,16 @@ test('maxLeads 2: a third lead is refused, a parked lead still counts, and alp_c
   // The first lead runs on Codex, so a Codex usage limit parks it.
   const parked = await main.call('alp_delegate', isolatedLead('Build the API', api.id, { model: 'codex:gpt-6-astra' }));
   assert.equal(parked.status, 'running', JSON.stringify(parked));
-  const second = await main.call('alp_delegate', isolatedLead('Build the web', web.id));
-  assert.equal(second.status, 'running', JSON.stringify(second));
-  await until(() => runtimes.length === 3 && runtimes[1].started.length === 1);
+  await until(() => runtimes.length === 2 && runtimes[1].started.length === 1);
   runtimes[1].limit();
   await until(() => runtime.pauses().parked.length === 1);
+  // A refusal because of the parked lead names alp_cancel.
+  const apiRoutes = await task('API routes', ['api/routes']);
+  const overlap = await main.call('alp_delegate', isolatedLead('Build the routes', apiRoutes.id));
+  assert.match(overlap.error, /overlaps the task of lead/);
+  assert.match(overlap.next, new RegExp(`lead ${parked.assignmentId} is parked; to go on without it, stop it with alp_cancel`));
+  const second = await main.call('alp_delegate', isolatedLead('Build the web', web.id));
+  assert.equal(second.status, 'running', JSON.stringify(second));
   const third = await main.call('alp_delegate', isolatedLead('Write the docs', docs.id));
   assert.match(third.error, /Lead limit reached: 2 leads are already running or parked \(maxLeads 2\); wait for a handoff, or ask the user to raise workflow\.maxLeads/);
   assert.match(third.next, new RegExp(`lead ${parked.assignmentId} is parked; to go on without it, stop it with alp_cancel`));
