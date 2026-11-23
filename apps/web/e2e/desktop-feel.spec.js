@@ -112,6 +112,19 @@ test('ALP.app: Mod+W that closes no tab closes the window; never while a dialog 
   await expect(page.getByTestId('history-screen')).toBeVisible();
   await page.keyboard.press(`${mod}+KeyW`);
   await expect.poll(closed).toBe(1);
+  // Close tab cleared in Settings › Shortcuts (t-81b0.13): Mod+W is no close key any more, so it
+  // does not close the window either.
+  await page.evaluate(() => {
+    const stored = JSON.parse(localStorage.getItem('alp-web:preferences') ?? 'null') ?? { v: 1 };
+    localStorage.setItem('alp-web:preferences', JSON.stringify({ ...stored, v: 1, shortcutOverrides: { 'tab.close@desktop': null } }));
+  });
+  await page.reload();
+  await connect(page, world);
+  await page.getByRole('navigation', { name: 'Workspaces and sessions' }).getByTestId('sidebar-history').click();
+  await expect(page.getByTestId('history-screen')).toBeVisible();
+  await page.keyboard.press(`${mod}+KeyW`);
+  await page.waitForTimeout(200);
+  expect(await closed()).toBe(0);
   await context.close();
 
   // A browser: Mod+W is the browser's, the page never closes itself.

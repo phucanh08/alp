@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Search } from 'lucide-react';
 import { Dialog } from '../components/ui/dialog';
-import { helpSections, isEditable, isMacPlatform, matchShortcut, NOT_SET, setShortcutOverrides, type Binding } from '../lib/shortcuts.js';
+import { bindingId, effectiveBindings, helpSections, isEditable, isMacPlatform, matchShortcut, NOT_SET, setShortcutOverrides, type Binding } from '../lib/shortcuts.js';
 import { isDesktopApp } from '../lib/browser-url.js';
 import { useAppState } from './store';
 
@@ -62,6 +62,9 @@ export function useDesktopCloseFallback() {
     const onKey = (event: KeyboardEvent) => {
       if (event.isComposing || event.repeat || event.code !== 'KeyW' || event.altKey || event.shiftKey) return;
       if (mac ? !event.metaKey || event.ctrlKey : !event.ctrlKey || event.metaKey) return;
+      // Only while ⌘W is still Close tab: once the user rebinds or clears it (Settings › Shortcuts),
+      // ⌘W is no longer a close key and must not close the window either.
+      if (!effectiveBindings().some(binding => bindingId(binding) === 'tab.close@desktop' && binding.combo === 'Mod+W')) return;
       // After every other listener of this key press has had its turn.
       setTimeout(() => {
         const open = !!document.querySelector('dialog[open], [data-modal-overlay], [role="menu"]');
