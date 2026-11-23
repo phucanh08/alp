@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { createServer as createNetServer } from 'node:net';
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
-import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -77,6 +77,8 @@ const webLock = home => homeJson(home, path.join('integrations', 'dashboard.lock
 const legacyWebJson = home => homeJson(home, 'web.json');
 const legacyWebLock = home => homeJson(home, path.join('integrations', 'web.lock'));
 const paseoJson = home => homeJson(home, 'paseo.json');
+// t-cde5: the Paseo password lives in the integration's credential directory, never in paseo.json.
+const paseoToken = async home => (await homeJson(home, path.join('paseo', 'token.json')))?.token;
 const paseoLock = home => homeJson(home, path.join('integrations', 'paseo.lock'));
 const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
 
@@ -454,7 +456,7 @@ async function preRenamePaseo(t, home, identity) {
 
 const IDENTITY = { token: 'c'.repeat(64), serverId: 'alp-0123456789abcdef' };
 
-test('a live pre-rename Paseo integration is stopped, alp-dashboard takes over, and its identity moves to paseo.json', async t => {
+test('a live pre-rename Paseo integration is stopped, alp-dashboard takes over, and its identity moves to paseo.json and <home>/paseo/', async t => {
   const { home } = await createHome(t);
   const old = await preRenamePaseo(t, home, IDENTITY);
   const exited = new Promise(resolve => old.once('exit', code => resolve(code)));
@@ -467,13 +469,17 @@ test('a live pre-rename Paseo integration is stopped, alp-dashboard takes over, 
   assert.equal(info.app, 'alp-dashboard');
   assert.equal((await webLock(home)).pid, info.pid);
   assert.equal(await ticketStatus(info.port, printedUrl(served).token), 201);
-  assert.deepEqual(await paseoJson(home), IDENTITY, 'paired devices keep the token and server id');
+  // Paired devices keep the token and server id: the server id in paseo.json, the token in the credential directory (t-cde5).
+  assert.deepEqual(await paseoJson(home), { serverId: IDENTITY.serverId });
+  assert.equal(await paseoToken(home) === IDENTITY.token, true);
+  assert.deepEqual((await filesContaining(home, IDENTITY.token)).map(file => path.relative(home, file)), [path.join('paseo', 'token.json')], 'web.json lost the token');
 
   // The Paseo integration, started by alp dashboard pair, picks the identity up.
   const paired = await run(['dashboard', 'pair', '--off'], home);
   assert.equal(paired.code, 0, paired.stderr || paired.stdout);
   const paseo = await paseoJson(home);
-  assert.equal(paseo.token, IDENTITY.token);
+  assert.equal('token' in paseo, false);
+  assert.equal(await paseoToken(home) === IDENTITY.token, true);
   assert.equal(paseo.serverId, IDENTITY.serverId);
   assert.equal((await paseoLock(home)).pid, paseo.pid);
 });
@@ -486,13 +492,16 @@ test('the identity moves only into a home without paseo.json, and rotate moves i
   const served = await run(['dashboard', '--print'], home);
   assert.equal(served.code, 0, served.stderr || served.stdout);
   assert.deepEqual(await paseoJson(home), kept, 'an existing paseo.json is never replaced');
+  assert.equal(await paseoToken(home), undefined, 'its own token is the integration\'s to move');
+  assert.equal('token' in await legacyWebJson(home), false, 'the dead copy in web.json is removed');
 
   const other = await createHome(t);
   const old = await preRenamePaseo(t, other.home, IDENTITY);
   const rotated = await run(['dashboard', 'rotate'], other.home);
   assert.equal(rotated.code, 0, rotated.stderr || rotated.stdout);
   await waitGone(old.pid);
-  assert.deepEqual(await paseoJson(other.home), IDENTITY, 'rotate stops the old integration and keeps its identity');
+  assert.deepEqual(await paseoJson(other.home), { serverId: IDENTITY.serverId }, 'rotate stops the old integration and keeps its identity');
+  assert.equal(await paseoToken(other.home) === IDENTITY.token, true);
   assert.equal((await webJson(other.home)).app, 'alp-dashboard');
 });
 
@@ -978,19 +987,69 @@ test('a missing Paseo integration names the optional package, and alp dashboard 
   });
 });
 
-test('alp dashboard pair prints the password kept in paseo.json', async t => {
+test('alp dashboard pair prints the password it gets over the token socket; --rotate replaces it; an agent gets neither (t-cde5)', async t => {
   // A relay nobody answers: the link is offered whether or not it connects.
   const { home } = await createHome(t, { relay: { enabled: false, endpoint: '127.0.0.1:9' } });
   await startDaemon(home);
+  // An older home: the password in paseo.json, the relay key beside it.
+  const legacy = 'b'.repeat(64);
+  await writeFile(path.join(home, 'paseo.json'), JSON.stringify({ pid: 2 ** 31 - 1, port: 1, token: legacy, serverId: 'alp-0123456789abcdef', url: 'http://127.0.0.1:1/' }), { mode: 0o600 });
   const paired = await run(['dashboard', 'pair', '--on'], home);
   assert.equal(paired.code, 0, paired.stderr || paired.stdout);
-  const info = await paseoJson(home);
-  assert.match(info?.token ?? '', /^[0-9a-f]{64}$/);
-  assert.ok(paired.stdout.includes(`give it: ${info.token}`), paired.stdout);
+  const printed = /give it: ([0-9a-f]{64})$/m.exec(paired.stdout)?.[1];
+  assert.equal(printed === legacy, true, 'the kept password is printed: paired devices stay paired');
   assert.doesNotMatch(paired.stdout, /#token=/);
+  const info = await paseoJson(home);
+  assert.equal('token' in info, false, 'paseo.json names no token');
+  assert.deepEqual((await filesContaining(home, legacy)).map(file => path.relative(home, file)), [path.join('paseo', 'token.json')], 'the password is only in the credential directory');
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(path.join(home, 'paseo'))).mode & 0o777, 0o700);
+    const socket = await stat(path.join(home, 'paseo', 'token.sock'));
+    assert.equal(socket.isSocket() && (socket.mode & 0o777) === 0o600, true, 'the token socket is 0600');
+  }
+
+  // An agent is refused, by the CLI and by alpd's web.pairing (t-d08b), before any password is read.
+  const agent = await run(['dashboard', 'pair'], home, 60_000, { ALP_AGENT_SESSION: 'agent-session' });
+  assert.notEqual(agent.code, 0);
+  assert.doesNotMatch(`${agent.stdout}${agent.stderr}`, /[0-9a-f]{64}/);
+  const agentRotate = await run(['dashboard', 'pair', '--rotate'], home, 60_000, { ALP_AGENT_SESSION: 'agent-session' });
+  assert.notEqual(agentRotate.code, 0);
+  assert.equal(await paseoToken(home) === legacy, true, 'the refused rotation changed nothing');
+
+  // --rotate: a new password, kept; the old one no longer signs in.
+  const rotated = await run(['dashboard', 'pair', '--rotate'], home);
+  assert.equal(rotated.code, 0, rotated.stderr || rotated.stdout);
+  const fresh = /give it: ([0-9a-f]{64})$/m.exec(rotated.stdout)?.[1];
+  assert.ok(fresh && fresh !== legacy, 'a new password is printed');
+  assert.equal(await paseoToken(home) === fresh, true);
+  const port = (await paseoJson(home)).port;
+  assert.equal(await paseoHello(port, legacy), 'hello.rejected', 'the old password is refused');
+  assert.equal(await paseoHello(port, fresh), 'accepted', 'the new password signs in');
+  const again = await run(['dashboard', 'pair'], home);
+  assert.equal(again.code, 0, again.stderr || again.stdout);
+  assert.equal(/give it: ([0-9a-f]{64})$/m.exec(again.stdout)?.[1] === fresh, true, 'pair prints the rotated password');
   const off = await run(['dashboard', 'pair', '--off'], home);
   assert.equal(off.code, 0, off.stderr || off.stdout);
 });
+
+/** A Paseo hello on the integration's local socket at `port` with `password`: 'accepted' or the rejection's type. */
+async function paseoHello(port, password) {
+  const { default: WebSocket } = await import('ws');
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+  try {
+    await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
+    ws.send(JSON.stringify({ type: 'hello', clientId: 'cid-t-cde5', clientType: 'cli', protocolVersion: 1, capabilities: { helloRejection: true }, auth: { kind: 'password', password } }));
+    return await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('no answer to the hello')), 10_000);
+      ws.on('message', data => {
+        const frame = JSON.parse(String(data));
+        if (frame.type === 'hello.rejected') { clearTimeout(timer); resolve('hello.rejected'); }
+        else if (frame.message?.payload?.status === 'server_info') { clearTimeout(timer); resolve('accepted'); }
+      });
+      ws.on('close', () => { clearTimeout(timer); resolve('hello.rejected'); });
+    });
+  } finally { ws.terminate(); }
+}
 
 test('alp-dashboard and the Paseo integration run side by side in one home', async t => {
   const { home } = await createHome(t);

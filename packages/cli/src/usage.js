@@ -20,7 +20,7 @@ const USAGE = `Usage:
   alp dashboard serve [--service|--rotate] [--project DIR] [--port N]   run alp-dashboard in this process (what alp dashboard starts)
   alp bridge <acp|antigravity>           the stdio MCP bridge an agent CLI starts to reach alpd (internal)
   alp dashboard rotate                   give alp dashboard a new token: open pages lose access; prints the new address
-  alp dashboard pair [--on|--off]        the link that pairs Paseo's app on another device through the relay; --on or --off turns the relay on or off
+  alp dashboard pair [--on|--off|--rotate]   the link that pairs Paseo's app on another device through the relay, and its password; --on or --off turns the relay on or off; --rotate replaces the password (paired devices sign in again)
   alp terminal <allow [--paseo] --yes|deny [--paseo]|status> [--json]   remote terminals (a shell as you on this host; a workspace is not a sandbox), off by default
   alp doctor [--project DIR] [--fix] [--json]   check this machine and project; --fix repairs what is safe to
   alp backup [-o FILE] [--project DIR]... [--no-projects] [--stop] [--json]   sessions, settings, library and tasks in one file

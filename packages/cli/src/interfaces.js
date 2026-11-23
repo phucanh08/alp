@@ -1,9 +1,10 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { lstat, readFile, realpath, stat } from 'node:fs/promises';
+import net from 'node:net';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { alpHome, connect, daemonPaths, discoverIntegration, startIntegration } from '@anhlp/alp-client/index';
+import { alpHome, assertPrivateDirectory, connect, daemonPaths, discoverIntegration, startIntegration } from '@anhlp/alp-client/index';
 import { UsageError } from './usage.js';
 import { built, start, running } from './daemon.js';
 import { DAEMON_ENTRY, distributionEntry } from './paths.js';
@@ -374,9 +375,60 @@ async function rotateCommand(args) {
 
 /**
  * alp dashboard pair: the link that pairs Paseo's app on another device with alpd through Paseo's relay
- * (ALPD §64). The device then signs in with the password this command prints (the token kept in
- * ~/.alp/paseo.json).
+ * (ALPD §64). The device then signs in with the password this command prints: the integration's token,
+ * which it keeps in its credential directory `<home>/paseo/` (t-cde5) and hands over only on its
+ * private token socket (integrations/paseo/server/web.ts). `--rotate` makes the integration replace
+ * it: the old password is refused from then on and every paired device must sign in again.
  */
+
+/** The request lines of the Paseo integration's token socket (integrations/paseo/server/web.ts). */
+const PASEO_TOKEN_REQUEST = '{"op":"token"}';
+const PASEO_ROTATE_REQUEST = '{"op":"rotate"}';
+
+/**
+ * Where the Paseo integration of `home` answers for its token. Must match tokenSocketPath in
+ * integrations/paseo/server/web.ts (the CLI does not depend on that package).
+ * @param {string} home @param {{ platform?: NodeJS.Platform, uid?: number }} [options]
+ */
+export function paseoTokenSocketPath(home, { platform = process.platform, uid = process.getuid?.() } = {}) {
+  const hash = createHash('sha256').update(home).digest('hex');
+  if (platform === 'win32') return `\\\\.\\pipe\\alp-paseo-${hash.slice(0, 24)}`;
+  const preferred = path.join(home, PASEO, 'token.sock');
+  return Buffer.byteLength(preferred) < 100 ? preferred : `/tmp/alp-paseo-${uid ?? 'user'}-${hash.slice(0, 12)}/token.sock`;
+}
+
+/**
+ * Asks the Paseo integration of `home` for its password over its token socket, or (`rotate`) for a
+ * new one. Refuses a socket that is not the user's 0600 socket in a 0700 directory of the user's.
+ * @param {string} home @param {{ rotate?: boolean, timeoutMs?: number, socketPath?: string }} [options]
+ * @returns {Promise<{ token: string, serverId: string | undefined, pid: number | undefined }>}
+ */
+export async function readPaseoToken(home, { rotate = false, timeoutMs = 10_000, socketPath = paseoTokenSocketPath(home) } = {}) {
+  if (process.platform !== 'win32') {
+    const directory = path.dirname(socketPath);
+    await assertPrivateDirectory(directory).catch(error => {
+      throw new Error(`the Paseo integration's token socket must be in a directory owned by you with mode 0700: ${directory} is not (${error?.message ?? error})`, { cause: error });
+    });
+    const info = await lstat(socketPath);
+    if (!info.isSocket()) throw new Error(`the Paseo integration's token socket ${socketPath} is not a socket`);
+    if (info.uid !== process.getuid?.()) throw new Error(`the Paseo integration's token socket ${socketPath} is not yours (uid ${info.uid})`);
+    if ((info.mode & 0o777) !== 0o600) throw new Error(`the Paseo integration's token socket ${socketPath} must have mode 0600, not ${(info.mode & 0o777).toString(8).padStart(4, '0')}`);
+  }
+  const text = await new Promise((resolve, reject) => {
+    const socket = net.connect(socketPath);
+    let received = '';
+    const timer = setTimeout(() => { socket.destroy(); reject(new Error(`the Paseo integration did not answer on ${socketPath} within ${timeoutMs} ms`)); }, timeoutMs);
+    socket.setEncoding('utf8');
+    socket.on('connect', () => socket.write(`${rotate ? PASEO_ROTATE_REQUEST : PASEO_TOKEN_REQUEST}\n`));
+    socket.on('data', chunk => { received += chunk; if (received.length > 4_096) socket.destroy(); });
+    socket.on('error', error => { clearTimeout(timer); reject(error); });
+    socket.on('close', () => { clearTimeout(timer); resolve(received); });
+  });
+  let answer;
+  try { answer = JSON.parse(/** @type {string} */ (text)); } catch { answer = undefined; }
+  if (typeof answer?.token !== 'string' || !/^[a-f0-9]{64}$/.test(answer.token)) throw new Error(`the Paseo integration gave no password on ${socketPath}`);
+  return { token: answer.token, serverId: typeof answer.serverId === 'string' ? answer.serverId : undefined, pid: Number.isSafeInteger(answer.pid) ? answer.pid : undefined };
+}
 
 /**
  * `web.pairing` is an extension the integration registers on its alpd connection. Right after an
@@ -398,24 +450,36 @@ export async function requestPairing(client, params, attempts = 50) {
   throw last ?? new Error('alpd did not register web.pairing; run `alp dashboard pair` again to let the integration start');
 }
 
+/** Why the password could not be had, and what to do. @param {string} home @param {unknown} error */
+const noPassword = (home, error) => `the Paseo integration did not give its password (${/** @type {any} */ (error)?.message ?? error}). An integration started by a version of ALP from before t-cde5 has no token socket: stop it (the pid in ${path.join(home, `${PASEO}.json`)}), then run alp dashboard pair again.`;
+
 async function pairCommand(args) {
-  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { on: { type: 'boolean' }, off: { type: 'boolean' } } });
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { on: { type: 'boolean' }, off: { type: 'boolean' }, rotate: { type: 'boolean' } } });
   if (positionals.length || (values.on && values.off)) throw new UsageError();
+  // The password is the user's: an agent gets neither it nor a new one (alpd refuses its web.pairing too, t-d08b).
+  if (isAgentProcess()) throw new Error('alp dashboard pair is the user\'s: it prints and rotates the password of the user\'s Paseo pairing; this process was started by an ALP agent (ALP_AGENT_SESSION is set)');
   await start();
   const home = alpHome();
   await startPaseoIntegration(home);
   const client = await running();
   try {
+    // web.pairing first: alpd marks an agent's call and the integration refuses it before any password is read.
     const pairing = await requestPairing(client, values.on ? { enable: true } : values.off ? { enable: false } : {});
+    if (values.rotate) {
+      const { token } = await readPaseoToken(home, { rotate: true }).catch(error => { throw new Error(noPassword(home, error), { cause: error }); });
+      console.log('The Paseo password is rotated: the old one no longer works, and every paired device must sign in again.');
+      if (pairing.relayEnabled) console.log(`Open this link on the device that runs Paseo's app:\n${pairing.url}`);
+      console.log(`When Paseo's app asks for a password, give it: ${token}`);
+      return;
+    }
     if (!pairing.relayEnabled) {
       console.log(`The relay is off${values.off ? ' now' : ''}. Turn it on with: alp dashboard pair --on`);
       return;
     }
     console.log(`Relay ${pairing.endpoint}: ${pairing.connected ? 'connected' : 'connecting'}`);
     console.log(`Open this link on the device that runs Paseo's app:\n${pairing.url}`);
-    const password = await readFile(path.join(home, `${PASEO}.json`), 'utf8').then(text => JSON.parse(text)?.token).catch(() => undefined);
-    if (typeof password === 'string' && password) console.log(`When Paseo's app asks for a password, give it: ${password}`);
-    else console.log(`When Paseo's app asks for a password, give it the token in ${path.join(home, `${PASEO}.json`)}.`);
+    const { token } = await readPaseoToken(home).catch(error => { throw new Error(noPassword(home, error), { cause: error }); });
+    console.log(`When Paseo's app asks for a password, give it: ${token}`);
   } finally {
     client.close();
   }
