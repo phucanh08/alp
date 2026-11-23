@@ -60,11 +60,16 @@ function ExplorerToggleButton({ explorerOpen, onToggleExplorer, className }: { e
  * or, where the window owns it, an empty slot it sits over (none while the sidebar is open: the toggle
  * is over the sidebar's top row then).
  */
-export function HeaderSidebarToggle({ navOpen, onToggleNav }: { navOpen: boolean; onToggleNav: () => void }) {
+export function HeaderSidebarToggle({ navOpen, onToggleNav, inset: withInset = true }: { navOpen: boolean; onToggleNav: () => void; inset?: boolean }) {
   const { sidebarToggle } = React.useContext(WindowTogglesContext);
-  const inset = navOpen ? null : <span aria-hidden className="window-controls-inset" />;
+  const inset = navOpen || !withInset ? null : <HeaderInset navOpen={navOpen} />;
   if (sidebarToggle) return navOpen ? null : <>{inset}<span aria-hidden className="size-8 shrink-0 md:-ml-1.5" data-testid="window-sidebar-toggle-slot" /></>;
   return <>{inset}<SidebarToggleButton navOpen={navOpen} onToggleNav={onToggleNav} className="md:-ml-1.5" /></>;
+}
+
+/** The traffic lights' room at a header's start, when the header starts the window's top row (sidebar closed). */
+export function HeaderInset({ navOpen }: { navOpen: boolean }) {
+  return navOpen ? null : <span aria-hidden className="window-controls-inset" />;
 }
 
 /** The workspace header's end: the explorer toggle, or the slot the window's sits over while the explorer is closed. */
