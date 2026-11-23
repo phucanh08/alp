@@ -79,7 +79,7 @@ alp dashboard --port 7500     # lần chạy này dùng port 7500 (không đổi
 alp dashboard --host localhost   # in link với localhost; chỉ nhận 127.0.0.1 hoặc localhost
 alp dashboard --status        # service có chạy không: pid, link KHÔNG kèm token, port; luôn exit 0, không đổi gì
 alp dashboard --stop          # dừng service của ALP home này; không chạy thì báo và exit 0
-alp dashboard rotate          # thay token; trang đang mở mất quyền
+alp dashboard rotate          # thu hồi token, chạy lại service với token mới; trang đang mở mất quyền
 alp dashboard pair [--on|--off]   # link pair app Paseo qua relay
 alp desktop                   # mở app desktop (docs/alp/desktop.md)
 ```
@@ -100,17 +100,20 @@ alp desktop                   # mở app desktop (docs/alp/desktop.md)
 - Service: `alp dashboard` chạy `dist/alp-dashboard.js` của CLI (source `packages/cli/src/dashboard/`). Một
   listener trên `127.0.0.1` tại `--port`, nếu không thì `dashboard.port` (mặc định **7433**; port bận thì thử
   chín port kế tiếp) phục vụ file của app (`dist/alp-dashboard/`) và gateway nhúng trên cùng origin.
-  Service giữ `integrations/dashboard.lock`, ghi `<home>/dashboard.json` (`version: 2`,
-  `app: "alp-dashboard"`, pid, port, URL, token) và log ở `<home>/logs/integrations/alp-dashboard.log`.
+  Service giữ `integrations/dashboard.lock`, ghi `<home>/dashboard.json` (`version: 3`,
+  `app: "alp-dashboard"`, pid, port, URL, credential id; **không có token**, xem §4.2) và log ở
+  `<home>/logs/integrations/alp-dashboard.log`.
   Service giữ alpd chạy (`ALP_SUPERVISE=0` thì không), trừ sau `alp daemon stop`.
 - **Nâng cấp từ `alp web` (`0.0.1-beta.8` trở về trước).** `alp dashboard` (khởi động), `alp dashboard rotate` và
-  `alp dashboard --stop` tự chuyển trước khi đọc hay chạy gì, giữ token, port và trạng thái bật/tắt
+  `alp dashboard --stop` tự chuyển trước khi đọc hay chạy gì, giữ kho credential, port và trạng thái bật/tắt
+  (không giữ token: mỗi lần service khởi động là một token mới, §4.2)
   (`pair` dùng integration Paseo và không cần chuyển):
   1. `alp web` cũ còn chạy dưới `integrations/web.lock` (hoặc integration Paseo trước khi đổi tên) được
      dừng bằng SIGTERM với cùng các bằng chứng như `--stop`; nếu không chứng minh được process giữ lock
      thì không dừng, không chuyển gì, và lệnh khởi động báo lỗi;
   2. `<home>/web/` (kho credential) → `<home>/dashboard/`;
-  3. `<home>/web.json` có `app: "alp-web"` → `<home>/dashboard.json` (giữ token và credential id);
+  3. `<home>/web.json` có `app: "alp-web"` bị xoá: pid, port, URL trong đó đã chết cùng `alp web`, còn token
+     trong đó bị lần khởi động kế tiếp của alp-dashboard thu hồi (t-cee3: không file nào giữ token);
      `web.json` không có `app` là danh tính của integration Paseo cũ và vẫn được chép sang `paseo.json`;
   4. `logs/integrations/alp-web.log` → `alp-dashboard.log`;
   5. `settings.json`: `web.enabled`, `web.port`, `web.permissions` chuyển sang `dashboard.*`;
@@ -119,7 +122,7 @@ alp desktop                   # mở app desktop (docs/alp/desktop.md)
   `--stop` chuyển như các lệnh khác và exit 1 nếu `alp web` cũ còn giữ lock mà alp không chứng minh được.
   Windows: alp không dừng `alp web` cũ đang chạy; dừng process có pid trong `<home>/web.json`
   (`taskkill /F /PID <pid>`) rồi chạy `alp dashboard`.
-  Mỗi bước chỉ chuyển tên cũ sang tên mới còn trống: chạy lần hai không làm gì; khi có cả hai thì tên mới
+  Các bước còn lại chỉ chuyển tên cũ sang tên mới còn trống: chạy lần hai không làm gì; khi có cả hai thì tên mới
   thắng, tên cũ giữ nguyên (không gộp, không xoá) và `--status` liệt kê chúng. Settings được **chuyển tại
   chỗ** để file của người dùng chỉ còn một nơi đúng; nếu không ghi được (file sai, chỉ đọc) thì
   `dashboard.*` vẫn được đọc trước rồi tới `web.*`, nên setting cũ không bao giờ bị bỏ qua lặng lẽ.
@@ -129,14 +132,17 @@ alp desktop                   # mở app desktop (docs/alp/desktop.md)
   không phải service); RPC `web.pairing` (extension của integration Paseo, đổi là đổi giao thức);
   kênh gate `'web'` (được ghi vào log task đã lưu); `state/web-workspaces.json` (registry của alpd và đơn
   vị backup/restore); `web.relay` trong settings (của Paseo); job CI `alp-web` (test app trình duyệt).
-- Link: `http://127.0.0.1:<port>/#token=alpgw1.…`. Token là credential gateway thật, lưu trong
+- Link: `http://127.0.0.1:<port>/#token=alpgw1.…`. Token là credential gateway thật; kho
   `<home>/dashboard/credentials.json` (thư mục 0700, file 0600 của user; sai quyền thì service không
-  chạy). Đây là kho riêng của alp-dashboard: `alp-gateway credential list/create/revoke` (đọc
-  `<home>/gateway`) không thấy credential này. Lần chạy sau dùng lại token trong `dashboard.json` khi nó
-  còn hợp lệ.
-- `alp dashboard rotate`: dừng alp-dashboard, tạo credential mới, revoke mọi credential khác trong kho đó (token
-  cũ hết hiệu lực, trang đang mở nhận 401 và báo chạy `alp dashboard` lại), rồi chạy lại service và in link
-  mới. Với `"dashboard": { "enabled": false }`, rotate vẫn thay token nhưng không chạy lại service.
+  chạy) chỉ giữ hash của nó. Đây là kho riêng của alp-dashboard: `alp-gateway credential list/create/revoke`
+  (đọc `<home>/gateway`) không thấy credential này. **Mỗi lần service khởi động** tạo credential mới,
+  thu hồi mọi credential cũ, và chỉ giữ token trong bộ nhớ; `alp dashboard` lấy token qua socket riêng
+  của service (§4.2). Tab đang mở với token cũ nhận 401 và báo chạy `alp dashboard` lại; app desktop tự
+  chạy lại `alp dashboard --print`.
+- `alp dashboard rotate`: dừng alp-dashboard, thu hồi mọi credential trong kho đó (token cũ hết hiệu lực,
+  trang đang mở nhận 401 và báo chạy `alp dashboard` lại), rồi chạy lại service (với token mới, như mọi lần
+  khởi động) và in link mới. Với `"dashboard": { "enabled": false }`, rotate vẫn thu hồi token nhưng không
+  chạy lại service. Khác với khởi động lại thường, rotate thu hồi token ngay cả khi service không chạy lại.
 - Quyền mặc định: `DEFAULT_PERMISSIONS` của gateway cộng `workspace.write`, tức `session.read`,
   `session.write`, `project.read`, `project.write`, `workspace.write`. Các quyền khác (ví dụ
   `files.read`, `attachments.write`, `session.team.write`, `terminal.exec`) chỉ có khi thêm vào
@@ -154,9 +160,8 @@ alp desktop                   # mở app desktop (docs/alp/desktop.md)
   vẫn chạy. Relay của Paseo vẫn tuân theo `web.relay.enabled` (và `alp dashboard pair --off`).
 - Setting: `dashboard.port`, `dashboard.permissions`, `dashboard.enabled` chỉ được đọc khi service khởi động.
   `alp daemon stop` không dừng alp-dashboard. Muốn áp dụng thay đổi: `alp dashboard --stop` (Windows: dừng
-  process có pid trong `<home>/dashboard.json` bằng `taskkill /F /PID <pid>`), rồi chạy `alp dashboard`; token
-  được giữ.
-  `alp dashboard rotate` cũng khởi động lại service, nhưng với token mới.
+  process có pid trong `<home>/dashboard.json` bằng `taskkill /F /PID <pid>`), rồi chạy `alp dashboard`; service
+  chạy lại với token mới và tab trình duyệt đang mở bị đăng xuất (người dùng chấp nhận ở gate g2 của t-cee3).
 - Nâng cấp từ `alp web` dựa trên Paseo (trước `0.0.1-beta.4`): nếu integration Paseo cũ vẫn giữ
   `integrations/web.lock` (`web.json` không có `app`), `alp dashboard` gửi SIGTERM cho nó, chỉ khi chứng
   minh được đó là process của chính user, cùng lần boot, và pid không bị dùng lại (macOS/Linux; Windows
@@ -227,6 +232,32 @@ phân biệt được trang của `alp dashboard` với bản tự phục vụ, 
     `redirect: 'error'`, `referrerPolicy: 'no-referrer'`.
   - Không bao giờ lưu vào localStorage hay cookie.
 - Token gõ vào form chỉ nằm trong bộ nhớ: reload hay đóng tab là mất.
+- Token của alp-dashboard không nằm trong file nào (t-cee3, phương án A do người dùng chọn ở gate g2):
+  - Mỗi lần khởi động, service (`packages/cli/src/dashboard/main.js`, `grant.ensure`) tạo credential mới,
+    thu hồi mọi credential khác trong `<home>/dashboard/credentials.json`, và giữ token trong bộ nhớ.
+    `dashboard.json` (`version: 3`) không có khoá `token`; một `token` do bản cũ để lại bị xoá khỏi file
+    khi service khởi động (credential của nó bị thu hồi cùng lúc).
+  - `alp dashboard [--print]` lấy token qua socket của service (`packages/cli/src/dashboard/token-socket.js`,
+    phía client ở `packages/cli/src/dashboard-service.js`): client ghi một dòng `{"op":"token"}`, service
+    trả một dòng JSON `{token, credentialId, pid}` rồi đóng; client kiểm `pid` khớp với lock của service.
+    - macOS/Linux: socket Unix `<home>/dashboard/token.sock` (home có đường dẫn quá dài cho địa chỉ socket
+      thì `<tmpdir>/alp-dashboard-<uid>-<hash>/token.sock`), mode 0600, trong thư mục của user mode 0700,
+      tổ tiên không cho user khác ghi. Service kiểm cả hai ngay sau khi listen và **từ chối chạy** nếu sai;
+      client kiểm trước khi kết nối.
+    - Windows: named pipe `\\.\pipe\alp-dashboard-<sha256(home)[:24]>`, đặt tên theo cách của pipe alpd
+      (`packages/client` `daemonPaths`). Node (libuv) tạo pipe với `FILE_FLAG_FIRST_PIPE_INSTANCE` và
+      security descriptor mặc định: DACL cho LocalSystem, Administrators và creator owner (chính user)
+      toàn quyền, Everyone và anonymous chỉ quyền **đọc**; Node không cho đặt DACL riêng. Vì vậy service
+      không bao giờ gửi token khi vừa kết nối: nó chỉ trả lời sau khi client **ghi** dòng yêu cầu, việc mà
+      handle chỉ có quyền đọc không làm được. Token do đó chỉ tới principal có quyền ghi: user (và
+      LocalSystem/Administrators, vốn đã làm chủ máy). Chưa kiểm trên máy Windows.
+  - Agent read-only không lấy được token: nó đọc được `dashboard.json` nhưng file không có token, và
+    sandbox của OS chặn nó kết nối tới socket Unix (Claude giữ mặc định chặn socket của SDK; Codex
+    read-only chạy không có mạng). `alp dashboard` còn từ chối process có `ALP_AGENT_SESSION` (t-1c59),
+    nhưng đó là dấu tự khai, không phải ranh giới.
+  - **Ngoài phạm vi:** agent `full-access` (hay bất kỳ chương trình nào) chạy bằng chính tài khoản của
+    user mà không có sandbox của OS kết nối được tới socket như user, nên lấy được token. Chặn việc đó cần
+    tách uid; người dùng đã chấp nhận giới hạn này ở gate g2 của t-cee3.
 - Link của `alp dashboard` (`http://127.0.0.1:<port>/#token=alpgw1.…`, `src/lib/link-token.js`):
   - Khi trang load, `main.tsx` đọc `#token=` và kiểm tra dạng `alpgw1.<16 hex>.<43 base64url>`.
   - Fragment bị xóa ngay bằng `history.replaceState`, trước khi render, kể cả khi token hỏng.
@@ -354,9 +385,11 @@ riêng, thiết bị Paseo qua relay, proxy hay tunnel (có header chuyển ti�
 đúng lỗi như trước (`-32601 not_exposed`). App biết mình là owner qua capability `host.owner` trong
 hello (`state.owner`, `useOwner()`), và gửi việc của owner bằng `controller.ownerRequest`.
 
-Giới hạn đã biết: một ALP agent chạy bằng cùng tài khoản mà đọc được `<ALP_HOME>/dashboard.json` thì có
-token và là host owner (nó chỉ không được tự khai là agent). Việc này không thêm quyền so với trước:
-token đó vốn đã tạo được session `full-access`. Bộ chuyển TCP trơn trên cùng máy (`ssh -R`, `socat`)
+Giới hạn đã biết: `<ALP_HOME>/dashboard.json` không còn chứa token (t-cee3, §4.2), nên agent chỉ đọc file
+không lấy được token. Một ALP agent chạy bằng cùng tài khoản mà **không có sandbox của OS** (ví dụ
+`full-access`) vẫn kết nối được tới socket token như user, có token và là host owner (nó chỉ không được tự
+khai là agent); trường hợp này ngoài phạm vi. Việc này không thêm quyền so với trước: token đó vốn đã tạo
+được session `full-access`. Bộ chuyển TCP trơn trên cùng máy (`ssh -R`, `socat`)
 không thêm header nên cũng không phân biệt được với client trực tiếp; nó vẫn cần token. Chi tiết ở
 remote-gateway.md §5.19.
 
@@ -603,7 +636,7 @@ thì bỏ qua, hàng giữ dữ liệu cũ. Schedules đọc khi mở màn và m
 |---|---|
 | "allows this page's origin" | Thêm đúng origin của trang: `alp-gateway serve --origin <scheme://host:port>`. |
 | "refused this access token" | Token sai, đã bị rotate hoặc revoke: `alp-gateway credential list`; cấp token mới. |
-| "This link's access token is no longer valid" | Token của `alp dashboard` đã bị `alp dashboard rotate`: chạy `alp dashboard` lại để mở link mới. Credential này không có trong `alp-gateway credential list` (§3.1). |
+| "This link's access token is no longer valid" | Service alp-dashboard đã khởi động lại (mỗi lần là token mới) hoặc `alp dashboard rotate`: chạy `alp dashboard` lại để mở link mới. Credential này không có trong `alp-gateway credential list` (§3.1). |
 | `alp dashboard` báo `dashboard.lock` (hoặc `web.lock` khi nâng cấp) "is held by a process that alp cannot prove…" | Một process khác giữ lock (của user khác, lần boot khác, hoặc trên Windows). Dừng nó rồi chạy `alp dashboard` lại. |
 | `tls_required` | Truy cập từ ngoài loopback mà không có HTTPS: dùng reverse proxy TLS hoặc SSH tunnel. |
 | Banner "Reconnecting…" kéo dài | Gateway hoặc alpd đang dừng. Work trên host vẫn chạy; app tự nối lại và tiếp tục sau cursor. |
