@@ -143,6 +143,8 @@ test('Settings › Notifications: Enable, then Send shows a test notification th
   await connect(page, world);
   await page.getByRole('button', { name: 'Settings' }).click();
   const settings = page.getByRole('region', { name: 'Settings' });
+  // Notifications is its own page, as Paseo's (t-81b0.12).
+  await settings.getByTestId('settings-notifications').click();
   const section = settings.locator('section', { hasText: 'Test notification' });
   await expect(section).toContainText('Test notification');
   await expect(section.getByTestId('notification-test')).toBeDisabled();

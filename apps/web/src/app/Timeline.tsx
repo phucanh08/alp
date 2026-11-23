@@ -199,8 +199,9 @@ function UserBubble({ text, ts, images, files = [], entryKey }: { text: string; 
  * (files.read), paths of the open workspace open in a file tab; otherwise they stay text.
  */
 function useFileLinks(): FileLinks | null {
-  const { workspace, principal, connection } = useAppState();
+  const { workspace, principal, connection, preferences } = useAppState();
   const { openFile } = useTabs();
+  const side = preferences.openInSidePane.chatFiles;
   const readable = connection.capabilities.includes('workspace.files.read') && can(principal ?? undefined, 'files.read');
   return React.useMemo(() => {
     if (!readable || !workspace) return null;
@@ -208,9 +209,9 @@ function useFileLinks(): FileLinks | null {
     const roots = [workspace, ...(principal?.workspaceRoots ?? []).filter(root => root.path === workspace).map(root => root.canonical)];
     return {
       resolve: (raw, kind) => parseFileLink(raw, { roots, kind }),
-      open: target => openFile(target.path, target.line),
+      open: target => openFile(target.path, target.line, { side }),
     };
-  }, [readable, workspace, principal, openFile]);
+  }, [readable, workspace, principal, openFile, side]);
 }
 
 function AssistantText({ text }: { text: string }) {

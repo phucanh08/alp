@@ -39,12 +39,16 @@ export const PREFERENCES_VERSION = 1;
  */
 /**
  * Paseo 0.14's app settings that apply in a browser (hooks/use-settings/storage.ts), with its
- * defaults and limits. `contentMaxWidth` null follows the default width.
+ * defaults and limits. `contentMaxWidth` null follows the default width, 'full' has none (Paseo's
+ * contentWidth: Default, Wide 1200 px, Full; any other number a custom width kept from before).
+ * `openInSidePane` (Paseo's Open location): whether a file from the Files panel, a change from
+ * Changes, or a file from a chat opens in a pane on the side instead of the main one.
  * @typedef {{
  *   sendBehavior: SendBehavior, sendShortcut: SendShortcut, theme: ThemePreference,
  *   uiFontFamily: string, monoFontFamily: string, uiFontSize: number, contentFontSize: number, codeFontSize: number,
- *   contentMaxWidth: number | null, syntaxTheme: SyntaxTheme,
+ *   contentMaxWidth: number | null | 'full', syntaxTheme: SyntaxTheme,
  *   chatDisplay: ChatDisplay, chatOutline: boolean, terminalScrollback: number, notificationSound: boolean,
+ *   openInSidePane: OpenInSidePane,
  *   sidebar: SidebarItems, sidebarDisplay: SidebarDisplay, newSession: NewSessionChoices,
  * }} Preferences
  */
@@ -53,6 +57,11 @@ export const SEND_BEHAVIORS = /** @type {const} */ (['interrupt', 'steer', 'queu
 export const SEND_SHORTCUTS = /** @type {const} */ (['enter', 'mod-enter']);
 export const THEMES = /** @type {const} */ (['system', 'light', 'dark', 'zinc', 'midnight', 'claude', 'ghostty', 'pureBlack']);
 export const CHAT_DISPLAYS = /** @type {const} */ (['full', 'collapseToolCalls', 'collapseTurns']);
+/** Paseo's Open location sources ALP has (hooks/use-settings/storage.ts OpenInSidePanePreferences). */
+export const OPEN_IN_SIDE_PANE_SOURCES = /** @type {const} */ (['explorerFiles', 'diffs', 'chatFiles']);
+/** @typedef {Record<typeof OPEN_IN_SIDE_PANE_SOURCES[number], boolean>} OpenInSidePane */
+/** Paseo's content width presets: Default is LIMITS.contentMaxWidth's default, Wide 1200 px, Full none. */
+export const CONTENT_WIDTH_WIDE = 1200;
 export const SYNTAX_THEMES = /** @type {const} */ (['github', 'catppuccin', 'dracula', 'tokyo-night', 'one', 'nord', 'gruvbox', 'solarized']);
 
 /** Paseo's limits (storage.ts): [min, max, default]. */
@@ -129,6 +138,7 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   chatDisplay: 'collapseTurns', chatOutline: true, terminalScrollback: 10_000,
   // Paseo's Settings › Notifications › Play sound (on by default): a notification plays the system's sound.
   notificationSound: true,
+  openInSidePane: Object.freeze({ explorerFiles: false, diffs: false, chatFiles: false }),
   sidebar: Object.freeze({ header: defaultSidebarSection('header'), footer: defaultSidebarSection('footer') }),
   sidebarDisplay: DEFAULT_SIDEBAR_DISPLAY,
   newSession: Object.freeze({}),
@@ -216,12 +226,13 @@ export function parsePreferences(raw) {
     uiFontSize: clamped(value.uiFontSize, LIMITS.uiFontSize),
     contentFontSize: clamped(value.contentFontSize, LIMITS.contentFontSize),
     codeFontSize: clamped(value.codeFontSize, LIMITS.codeFontSize),
-    contentMaxWidth: typeof value.contentMaxWidth === 'number' && Number.isFinite(value.contentMaxWidth) ? clamped(value.contentMaxWidth, LIMITS.contentMaxWidth) : null,
+    contentMaxWidth: value.contentMaxWidth === 'full' ? 'full' : typeof value.contentMaxWidth === 'number' && Number.isFinite(value.contentMaxWidth) ? clamped(value.contentMaxWidth, LIMITS.contentMaxWidth) : null,
     syntaxTheme: pick(SYNTAX_THEMES, 'syntaxTheme'),
     chatDisplay: pick(CHAT_DISPLAYS, 'chatDisplay'),
     chatOutline: typeof value.chatOutline === 'boolean' ? value.chatOutline : DEFAULT_PREFERENCES.chatOutline,
     terminalScrollback: clamped(value.terminalScrollback, LIMITS.terminalScrollback),
     notificationSound: typeof value.notificationSound === 'boolean' ? value.notificationSound : DEFAULT_PREFERENCES.notificationSound,
+    openInSidePane: /** @type {OpenInSidePane} */ (Object.fromEntries(OPEN_IN_SIDE_PANE_SOURCES.map(source => [source, isRecord(value.openInSidePane) && value.openInSidePane[source] === true]))),
     sidebar: { header: parseSidebarSection(sidebar.header, 'header'), footer: parseSidebarSection(sidebar.footer, 'footer') },
     sidebarDisplay: parseSidebarDisplay(value.sidebarDisplay),
     newSession: parseNewSession(value.newSession),
@@ -229,7 +240,7 @@ export function parsePreferences(raw) {
 }
 
 /** The fields stored, in order: the known ones only, never anything else on the object. */
-const STORED_FIELDS = /** @type {const} */ (['sendBehavior', 'sendShortcut', 'theme', 'uiFontFamily', 'monoFontFamily', 'uiFontSize', 'contentFontSize', 'codeFontSize', 'contentMaxWidth', 'syntaxTheme', 'chatDisplay', 'chatOutline', 'terminalScrollback', 'notificationSound', 'sidebar', 'sidebarDisplay', 'newSession']);
+const STORED_FIELDS = /** @type {const} */ (['sendBehavior', 'sendShortcut', 'theme', 'uiFontFamily', 'monoFontFamily', 'uiFontSize', 'contentFontSize', 'codeFontSize', 'contentMaxWidth', 'syntaxTheme', 'chatDisplay', 'chatOutline', 'terminalScrollback', 'notificationSound', 'openInSidePane', 'sidebar', 'sidebarDisplay', 'newSession']);
 
 /**
  * The string stored for `preferences`: its known fields only, re-validated.

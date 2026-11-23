@@ -1,4 +1,4 @@
-import { LIMITS, type Preferences, type SyntaxTheme, type ThemePreference } from './preferences.js';
+import { CONTENT_WIDTH_WIDE, LIMITS, type Preferences, type SyntaxTheme, type ThemePreference } from './preferences.js';
 import { applySyntaxTheme } from './syntax';
 
 /** The theme a preference shows: System follows the device between Light and Dark. */
@@ -52,9 +52,18 @@ export function applyTheme(preference: ThemePreference, syntaxTheme: SyntaxTheme
 export const DEFAULT_UI_FONT_STACK = '"Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 export const DEFAULT_MONO_FONT_STACK = '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 
-/** The content width in effect: the chosen one, else Paseo's default 820 px. */
-export function contentWidth(preferences: Pick<Preferences, 'contentMaxWidth'>): number {
+/** The content width in effect: the chosen one, else Paseo's default 820 px; null for Full (no limit). */
+export function contentWidth(preferences: Pick<Preferences, 'contentMaxWidth'>): number | null {
+  if (preferences.contentMaxWidth === 'full') return null;
   return preferences.contentMaxWidth ?? LIMITS.contentMaxWidth[2];
+}
+
+/** Paseo's content width preset of a width (Default, Wide, Full), or null for a custom width. */
+export function contentWidthPreset(preferences: Pick<Preferences, 'contentMaxWidth'>): 'default' | 'wide' | 'full' | null {
+  const value = preferences.contentMaxWidth;
+  if (value === 'full') return 'full';
+  if (value === null || value === LIMITS.contentMaxWidth[2]) return 'default';
+  return value === CONTENT_WIDTH_WIDE ? 'wide' : null;
 }
 
 /**
@@ -69,7 +78,8 @@ export function applyAppearance(preferences: Pick<Preferences, 'uiFontFamily' | 
   style.setProperty('--ui-scale', String(preferences.uiFontSize / LIMITS.uiFontSize[2]));
   style.setProperty('--content-font-size', `${preferences.contentFontSize}px`);
   style.setProperty('--code-font-size', `${preferences.codeFontSize}px`);
-  style.setProperty('--content-width', `${contentWidth(preferences)}px`);
+  const width = contentWidth(preferences);
+  style.setProperty('--content-width', width === null ? 'none' : `${width}px`);
 }
 
 /** Paseo's terminal ANSI colors (styles/theme.ts lightTerminalAnsi, darkTerminalAnsi). */

@@ -77,7 +77,7 @@ test('independent terminal tabs survive settings, search, links, workspace switc
   await settings.getByLabel('Code font family').fill('Consolas, monospace');
   await settings.getByLabel('Code font size').fill('16');
   await settings.getByLabel('Code font size').press('Enter');
-  await settings.getByLabel('Theme', { exact: true }).selectOption('light');
+  await settings.getByTestId('theme-tile-light').click();
   await settings.getByRole('button', { name: 'Back' }).click();
   await expect(screen(page).locator('.xterm-rows')).toHaveCSS('font-size', '16px');
   await expect(screen(page).locator('.xterm-rows')).toHaveCSS('font-family', 'Consolas, monospace');

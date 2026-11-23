@@ -230,6 +230,8 @@ test('Settings › Notifications: Play sound decides a notification\'s silent; R
   await connect(page, world);
   await page.getByRole('button', { name: 'Settings' }).click();
   const settings = page.getByRole('region', { name: 'Settings' });
+  // Notifications is its own page, as Paseo's (t-81b0.12).
+  await settings.getByTestId('settings-notifications').click();
   const section = settings.locator('section', { hasText: 'Test notification' });
   // Blocked in the system, then allowed there: Refresh shows it without a reload.
   await page.evaluate(() => window.__setPermission('denied'));
@@ -254,5 +256,6 @@ test('Settings › Notifications: Play sound decides a notification\'s silent; R
   await page.reload();
   await connect(page, world);
   await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('region', { name: 'Settings' }).getByTestId('settings-notifications').click();
   await expect(page.getByRole('region', { name: 'Settings' }).getByTestId('notification-sound')).toHaveAttribute('aria-checked', 'false');
 });
