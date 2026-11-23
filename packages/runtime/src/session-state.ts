@@ -162,6 +162,8 @@ export type Assignment = {
   writeCheckout?: string;
   /** The task this assignment took with alp_delegate { taskId }. */
   taskId?: string;
+  /** That task's paths when it started: a parallel lead is checked against them without yielding. */
+  taskPaths?: string[];
   /** For a writer in the shared checkout: checkoutFingerprint when it started, to tell whether it changed anything. */
   fingerprint?: string;
   startedAt: number;

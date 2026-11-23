@@ -79,10 +79,12 @@ export function validateSettings(settings, source) {
   if (settings.defaultAgent !== undefined) check(nonempty(settings.defaultAgent), 'defaultAgent must be a nonempty string');
   if (settings.workflow !== undefined) {
     check(object(settings.workflow), 'workflow must be an object');
-    check(Object.keys(settings.workflow).every(key => ['mode', 'maxPeers', 'supervisor'].includes(key)), 'unsupported workflow field');
+    check(Object.keys(settings.workflow).every(key => ['mode', 'maxPeers', 'maxLeads', 'supervisor'].includes(key)), 'unsupported workflow field');
     // The team sessions run in (ALPD §42); a session checks that it exists. smart and supervised are Phở and Cafe's names before 0.4.
     if (settings.workflow.mode !== undefined) check(typeof settings.workflow.mode === 'string' && /^[\w.-]+$/.test(settings.workflow.mode) && settings.workflow.mode !== 'custom', 'workflow.mode must name a team, such as pho or cafe');
     if (settings.workflow.maxPeers !== undefined) check(Number.isSafeInteger(settings.workflow.maxPeers) && settings.workflow.maxPeers > 0, 'workflow.maxPeers must be a positive integer');
+    // Leads main may run at once (Cafe); a second lead needs a worktree and a task of its own paths.
+    if (settings.workflow.maxLeads !== undefined) check(Number.isSafeInteger(settings.workflow.maxLeads) && settings.workflow.maxLeads > 0, 'workflow.maxLeads must be a positive integer');
     if (settings.workflow.supervisor !== undefined) check(typeof settings.workflow.supervisor === 'boolean', 'workflow.supervisor must be true or false');
   }
   if (settings.compact !== undefined) {

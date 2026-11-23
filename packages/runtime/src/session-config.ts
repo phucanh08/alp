@@ -6,7 +6,7 @@ import { models, thinkingOptionsFor } from './catalog.js';
 import { claudeSandboxAvailable, SKILL_PLUGIN } from './claude-transport.js';
 import { languageInstruction } from './language.js';
 import { antigravityModeText } from './antigravity-transport.js';
-import { HANDOFF_TOOL, WAIT_TOOL, SEND_TOOL, MERGE_TOOL, VERIFY_TOOL, DISCARD_TOOL, RESOLVE_TOOL, CANCEL_TOOL, RECALL_TOOL, PIN_TOOL, BOARD_TOOL, UNPIN_TOOL, ASK_TOOL, LESSON_TOOL, LESSON_CURATE_TOOL, SKILL_TOOL, SKILL_RETIRE_TOOL, ISSUE_TOOL, SCHEDULE_TOOL, STRATEGY_TOOL, choosesStrategy, mainOf, taskActions, taskTool } from './tools.js';
+import { HANDOFF_TOOL, WAIT_TOOL, SEND_TOOL, MERGE_TOOL, VERIFY_TOOL, DISCARD_TOOL, RESOLVE_TOOL, CANCEL_TOOL, RECALL_TOOL, PIN_TOOL, BOARD_TOOL, UNPIN_TOOL, ASK_TOOL, LESSON_TOOL, LESSON_CURATE_TOOL, SKILL_TOOL, SKILL_RETIRE_TOOL, ISSUE_TOOL, SCHEDULE_TOOL, STRATEGY_TOOL, choosesStrategy, mainOf, roleOf, taskActions, taskTool } from './tools.js';
 
 import { COMPACT_SHARE } from './runtime-context.js';
 
@@ -57,6 +57,15 @@ export function permissionNote(mapping: Pick<ResolvedSession, 'mode' | 'permissi
     (profile.deny.length ? ` Never: ${profile.deny.join(', ')}.` : '') +
     ' ALP refuses anything else your mode does not allow; do not try to work around a refusal, report it.' +
     (mapping.runtimeKind === 'codex' && mapping.mode !== 'full-access' && (profile.allow.length || profile.ask.length || profile.beyondMode === 'ask') ? ' Other commands run in your sandbox. Run a command that needs more than your sandbox (an allowed one, or one for the user to approve) with escalated permissions from the start: ALP decides, and an approved command runs outside the sandbox.' : '')];
+}
+
+/** How many leads may run at once (workflow.maxLeads), for a coordinator that delegates to one. */
+export function leadInstruction(mapping: ResolvedSession, targets: string[]) {
+  if (!targets.some(agent => roleOf(mapping, agent) === 'lead')) return '';
+  const { maxLeads } = mapping.workflow;
+  return maxLeads > 1
+    ? `Up to ${maxLeads} leads may run at once (workflow.maxLeads ${maxLeads}), only for independent tasks: a lead beside another lead needs isolation "worktree" and a taskId whose paths no other lead's task overlaps; a parked lead still counts until alp_cancel stops it. Merge their worktrees one at a time with alp_merge and verify after each merge. `
+    : 'One lead runs at a time (workflow.maxLeads 1); it may run beside read-only assignments such as reviewer and oracle. ';
 }
 
 /** The profiles of a coordinator's targets that change what it may expect of them. */
@@ -159,7 +168,8 @@ export function nativeSessionConfig(
       'While assignments run, go on with work that does not depend on them; when only their results are left, alp_wait for them (mail from your requester or the user ends the wait early), or end your turn and ALP wakes you with their results and questions. ' +
       'Answer questions with alp_send kind answer and replyTo; use kind steer to change an instruction, note for information. ' +
       'To stop an assignment, for example one parked on a usage limit whose work should go on now, use alp_cancel and delegate the rest, on another runtime (pass a model of claude: or codex:); its changes stay in the checkout or its worktree. ' +
-      `At most ${mapping.workflow.maxPeers} peers may run concurrently. Concurrent peers must be read-only or isolated: pass isolation "worktree" to give a writing peer its own git worktree. ` +
+      `At most ${mapping.workflow.maxPeers * mapping.workflow.maxLeads} peers may run concurrently in this session tree${mapping.workflow.maxLeads > 1 ? ` (${mapping.workflow.maxPeers} for each of up to ${mapping.workflow.maxLeads} leads)` : ''}. Concurrent peers must be read-only or isolated: pass isolation "worktree" to give a writing peer its own git worktree. ` +
+      leadInstruction(mapping, targets) +
       'A worktree result lists its branch and changed files; apply it with alp_merge (uncommitted, conflicts left as markers) or drop it with alp_discard, then verify. ' +
       'Writers in this shared checkout run one at a time. ' +
       "A writer's change outside a worktree stays a result ALP keeps, and its checkout cannot be removed, until you record with alp_resolve that you applied, discarded or acknowledged it. " +

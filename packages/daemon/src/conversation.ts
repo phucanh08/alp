@@ -554,7 +554,7 @@ export function createConversation(ctx: ConversationContext) {
     const { teamLabel: _label, ...snapshot } = record.session!;
     record.session = {
       ...snapshot, model: effective.model, thinking: effective.thinking, mode: effective.mode,
-      workflow: session.workflow ?? { mode: effective.team, maxPeers: effective.maxPeers ?? record.session!.workflow.maxPeers, supervisor: effective.supervisor },
+      workflow: session.workflow ?? { mode: effective.team, maxPeers: effective.maxPeers ?? record.session!.workflow.maxPeers, maxLeads: effective.maxLeads ?? record.session!.workflow.maxLeads ?? 1, supervisor: effective.supervisor },
       ...(teamLabel ? { teamLabel } : {}),
       ...(session.threadId ? { threadId: session.threadId } : {}),
     };

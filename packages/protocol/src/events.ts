@@ -87,7 +87,7 @@ export type SessionSnapshot = {
   model: string;
   mode: string;
   thinking: string;
-  workflow: { mode: string; maxPeers: number; supervisor: boolean };
+  workflow: { mode: string; maxPeers: number; maxLeads?: number; supervisor: boolean };
   /** The label of the session's team, such as Phở (ALPD §42); absent for a custom graph. */
   teamLabel?: string;
   threadId: string;

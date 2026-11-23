@@ -29,10 +29,10 @@ export function defaultTeam(settings, { restored, scaffolded = false } = {}) {
  * back the team session.preview named.
  * @param {string} root
  * @param {string | undefined} selected
- * @param {{ mode: string, maxPeers?: number, supervisor?: boolean } | undefined} restored
+ * @param {{ mode: string, maxPeers?: number, maxLeads?: number, supervisor?: boolean } | undefined} restored
  * @param {{ library?: string, templates?: Record<string, string>, scaffold?: boolean }} [options]
  *   scaffold: a missing settings file will be written by init before the session runs (a preview).
- * @returns {Promise<{ mode: string, maxPeers: number, supervisor: boolean, team?: Awaited<ReturnType<typeof resolveTeam>> }>}
+ * @returns {Promise<{ mode: string, maxPeers: number, maxLeads: number, supervisor: boolean, team?: Awaited<ReturnType<typeof resolveTeam>> }>}
  */
 export async function resolveWorkflow(root, selected, restored, { library, templates, scaffold = false } = {}) {
   const file = path.join(root, '.alp/settings.json');
@@ -47,7 +47,10 @@ export async function resolveWorkflow(root, selected, restored, { library, templ
   const team = mode === 'custom' ? undefined : applyProfile(await resolveTeam(root, mode, { library, templates }), (settings.team ?? settings.profile)?.[mode]);
   const maxPeers = restored?.maxPeers ?? settings.workflow?.maxPeers ?? team?.maxPeers ?? 2;
   if (!Number.isSafeInteger(maxPeers) || maxPeers < 1) throw new Error('workflow.maxPeers must be a positive integer');
+  // Leads main may run at once; a resumed session keeps the number it started with.
+  const maxLeads = restored?.maxLeads ?? settings.workflow?.maxLeads ?? team?.maxLeads ?? 1;
+  if (!Number.isSafeInteger(maxLeads) || maxLeads < 1) throw new Error('workflow.maxLeads must be a positive integer');
   // A custom delegation graph has no main to supervise; settings can turn a team's supervisor off.
   const supervisor = !!team?.supervisor && (restored?.supervisor ?? settings.workflow?.supervisor ?? true);
-  return { mode, maxPeers, supervisor, ...(team ? { team } : {}) };
+  return { mode, maxPeers, maxLeads, supervisor, ...(team ? { team } : {}) };
 }

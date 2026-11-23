@@ -74,6 +74,7 @@ export function effectiveOf(runtime: RuntimeKind, mapping: ResolvedSession, extr
     ...(mapping.permissions?.name ? { permissionProfile: mapping.permissions.name } : {}),
     supervisor: extra.supervisor,
     maxPeers: mapping.workflow.maxPeers,
+    maxLeads: mapping.workflow.maxLeads,
     delegates: [...extra.delegates],
     tools: [...extra.tools],
     mcpServers: mcpOf(mapping),
