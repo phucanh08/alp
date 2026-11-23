@@ -4,8 +4,10 @@
  * alp-dashboard (docs/alp/dashboard.md): the service behind `alp dashboard`. ONE loopback listener at
  * `--port`, else `dashboard.port` (default 7433, then the next nine ports), carries the ALP gateway and
  * the built apps/web files. It owns the `dashboard` integration lock and `<home>/dashboard.json`, which
- * names its pid, port, URL and the
- * `alpgw1.*` token of its credential, so the CLI can open the app with the token in the address.
+ * names its pid, port, URL and credential id. The `alpgw1.*` token of its credential is in no file
+ * (t-cee3): every start mints a fresh credential, revokes the earlier ones, keeps the token in memory
+ * and hands it to `alp dashboard [--print]` over its private token socket (./token-socket.js), so the
+ * CLI can open the app with the token in the address.
  * It keeps alpd running (ALP_SUPERVISE=0 opts out) and keeps the credential's workspaces in step
  * with alpd's project registry.
  *
@@ -17,10 +19,9 @@
  *   node alp-dashboard.js [--service] [--project DIR] [--port N]
  *   node alp-dashboard.js --rotate [--project DIR]
  * `--service` (how startIntegration starts it) writes the log to <home>/logs/integrations/alp-dashboard.log.
- * `--rotate` (how `alp dashboard rotate` replaces the token) takes the dashboard lock, which fails with exit 3
- * while the service runs, creates a new credential, revokes every other one, records the new token
- * in dashboard.json for the next start, releases the lock and exits. It ignores dashboard.enabled:
- * turning alp dashboard off must not keep an old token alive.
+ * `--rotate` (how `alp dashboard rotate` ends the token) takes the dashboard lock, which fails with exit 3
+ * while the service runs, revokes every credential, releases the lock and exits; the next start mints
+ * a new one. It ignores dashboard.enabled: turning alp dashboard off must not keep an old token alive.
  * ALP_DASHBOARD_APP names another directory of built app files (tests); ALP_WEB_APP, its name before
  * the rename, is read when it is not set.
  */
@@ -35,9 +36,10 @@ import { createIntegrationLock } from '@anhlp/alp-client/integration-lock';
 import { superviseDaemon } from '@anhlp/alp-client/supervise';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { dashboardSettings } from '@anhlp/alp-core/user-settings';
-import { CredentialStore, createGateway, createGatewayLogger, parseToken, renameWithRetry, resolveConfig } from '@anhlp/alp-gateway';
+import { CredentialStore, createGateway, createGatewayLogger, renameWithRetry, resolveConfig } from '@anhlp/alp-gateway';
 import { TERMINAL_EXEC_WARNING } from '@anhlp/alp-gateway/policy';
 import { createGrant, grantPermissions, dashboardGatewayHome } from './grant.js';
+import { serveToken } from './token-socket.js';
 import { createStaticServer } from './serve.js';
 import { ownerMethods } from './owner/index.js';
 import { daemonEntry as bundledDaemonEntry } from '@anhlp/alp-core/packaged';
@@ -57,7 +59,8 @@ const PORT_TRIES = 10;
  */
 const env = name => process.env[`ALP_DASHBOARD_${name}`] || process.env[`ALP_WEB_${name}`] || undefined;
 const REFRESH_MS = Number(env('GRANT_REFRESH_MS')) > 0 ? Number(env('GRANT_REFRESH_MS')) : 5_000;
-const WEB_FILE_VERSION = 2;
+/** 3: no `token` (t-cee3); 2 carried it. */
+const WEB_FILE_VERSION = 3;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const appDir = () => path.resolve(env('APP') || path.join(here, 'alp-dashboard'));
@@ -86,13 +89,18 @@ async function userSettings(home, log) {
   catch (error) { log.warn(`ignoring ${file}: ${/** @type {any} */ (error)?.message ?? error}`, { code: 'ALP_SETTINGS_INVALID' }); return {}; }
 }
 
-/** What the last run published, if it was alp-dashboard's. @param {string} home */
-async function previousWeb(home) {
-  try {
-    const kept = JSON.parse(await readFile(webFile(home), 'utf8'));
-    if (kept?.app !== 'alp-dashboard' || kept?.version !== WEB_FILE_VERSION || !parseToken(kept.token)) return {};
-    return { token: kept.token, credentialId: kept.credentialId };
-  } catch { return {}; }
+/**
+ * Removes a `token` that dashboard.json still holds (written by a version before t-cee3, which kept the
+ * token in the file); the rest of the file stays. The credential of that token is revoked by the
+ * same start, so the copy would be dead anyway; this keeps it off the disk.
+ * @param {string} home
+ */
+async function dropPublishedToken(home) {
+  let kept;
+  try { kept = JSON.parse(await readFile(webFile(home), 'utf8')); } catch { return; }
+  if (!kept || typeof kept !== 'object' || !('token' in kept)) return;
+  const { token: _token, ...rest } = kept;
+  await publish(home, rest);
 }
 
 /** Writes dashboard.json whole, private, in one rename. @param {string} home @param {object} info */
@@ -142,10 +150,10 @@ async function carryPaseoIdentity(home, log) {
 }
 
 /**
- * `--rotate`: a new credential and token, recorded in dashboard.json, under the dashboard lock.
- * @param {string} home @param {string | undefined} project @param {{ permissions?: string[] }} dashboard @param {import('@anhlp/alp-core/log').Logger} log
+ * `--rotate`: every credential revoked, under the dashboard lock; the next start mints a new one.
+ * @param {string} home @param {{ permissions?: string[] }} dashboard @param {import('@anhlp/alp-core/log').Logger} log
  */
-async function rotate(home, project, dashboard, log) {
+async function rotate(home, dashboard, log) {
   const lock = createIntegrationLock(home, 'dashboard');
   const { acquired, lock: held } = await lock.acquire();
   if (!acquired) {
@@ -155,16 +163,14 @@ async function rotate(home, project, dashboard, log) {
   let code = 0;
   try {
     await carryPaseoIdentity(home, log);
+    await dropPublishedToken(home);
     const permissions = grantPermissions(dashboard.permissions, message => log.warn(message, { code: 'ALP_DASHBOARD_PERMISSIONS_IGNORED' }));
     const store = new CredentialStore({ home: dashboardGatewayHome(home), logger: log });
     try {
-      const socket = daemonPaths(home).socket;
-      const grant = createGrant({ home, store, permissions, project, socket: () => socket, log: message => log.info(message, { code: 'ALP_DASHBOARD_GRANT' }) });
-      // No previous token to keep: a new credential, and every other one revoked.
-      const token = await grant.ensure({});
+      const grant = createGrant({ home, store, permissions, socket: () => undefined, log: message => log.info(message, { code: 'ALP_DASHBOARD_GRANT' }) });
+      await grant.revokeAll();
       await grant.settled();
-      await publish(home, { version: WEB_FILE_VERSION, app: 'alp-dashboard', token, credentialId: grant.id });
-      log.info(`rotated the token: credential ${grant.id}`, { code: 'ALP_DASHBOARD_ROTATED' });
+      log.info('rotated the token: every credential is revoked; the next start mints a new one', { code: 'ALP_DASHBOARD_ROTATED' });
     } finally { store.close(); }
   } catch (error) {
     log.error('alp dashboard could not rotate its token', { code: 'ALP_DASHBOARD_ROTATE_FAILED', error });
@@ -193,7 +199,7 @@ async function run() {
   if (values.service) serviceLog(home);
   const log = createGatewayLogger();
   const dashboard = dashboardSettings(await userSettings(home, log));
-  if (values.rotate) return rotate(home, values.project ? path.resolve(values.project) : undefined, dashboard, log);
+  if (values.rotate) return rotate(home, dashboard, log);
   if (dashboard.enabled === false) {
     log.info('alp dashboard is disabled by settings ("dashboard.enabled": false)', { code: 'ALP_DASHBOARD_DISABLED' });
     process.exit(0);
@@ -250,7 +256,11 @@ async function run() {
     // Paired devices of the Paseo integration from before its rename stay paired.
     await carryPaseoIdentity(home, log);
     if (shuttingDown) return;
-    const token = await grant.ensure(await previousWeb(home));
+    // A token an earlier version left in dashboard.json leaves the disk; ensure revokes its credential.
+    await dropPublishedToken(home);
+    if (shuttingDown) return;
+    // A fresh credential on every start (t-cee3); its token lives in this process only.
+    const token = await grant.ensure();
     if (shuttingDown) return;
     // The registry, if alpd answers already, before the first page asks for it.
     await grant.refresh();
@@ -293,8 +303,13 @@ async function run() {
       }
     }
     if (shuttingDown) return;
+    // The token goes to `alp dashboard [--print]` over a 0600 socket in a 0700 directory, never to a
+    // file; a socket that is not private stops the start.
+    const tokenSocket = await serveToken({ home, token: () => token, credentialId: () => grant.id });
+    cleanups.push(() => tokenSocket.close());
+    if (shuttingDown) return;
     const url = `http://127.0.0.1:${bound}/`;
-    await publish(home, { version: WEB_FILE_VERSION, app: 'alp-dashboard', pid: process.pid, port: bound, url, token, credentialId: grant.id });
+    await publish(home, { version: WEB_FILE_VERSION, app: 'alp-dashboard', pid: process.pid, port: bound, url, credentialId: grant.id });
     if (shuttingDown) return;
     const timer = setInterval(() => { if (!shuttingDown) void grant.refresh(); }, REFRESH_MS);
     timer.unref();

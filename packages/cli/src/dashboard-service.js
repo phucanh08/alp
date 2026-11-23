@@ -1,11 +1,13 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { bootTime, isSameBoot, readLock } from '@anhlp/alp-client/index';
+import net from 'node:net';
+import { assertPrivateDirectory, bootTime, isSameBoot, readLock } from '@anhlp/alp-client/index';
 import { distributionEntry } from './paths.js';
 import { selfEntry } from '@anhlp/alp-core/packaged';
 
@@ -189,4 +191,66 @@ export async function isServiceClaimed(published, lockPid, held, timeoutMs = 1_0
   if (published?.app !== DASHBOARD.app || published.pid !== lockPid) return false;
   if (held?.kind === 'foreign') return false;
   return isDashboardReady(published.url, timeoutMs);
+}
+
+// ---- The token socket (t-cee3): the service serves it (./dashboard/token-socket.js), `alp dashboard` reads it. ----
+
+/** The request line a client writes to alp dashboard's token socket (./dashboard/token-socket.js). */
+export const TOKEN_REQUEST = '{"op":"token"}';
+/** A token as the gateway issues it. */
+const TOKEN = /^alpgw1\.[a-f0-9]{16}\.[A-Za-z0-9_-]{43}$/;
+
+/**
+ * Where the service answers for `home`.
+ * @param {string} home @param {{ platform?: NodeJS.Platform }} [options]
+ */
+export function tokenSocketPath(home, { platform = process.platform } = {}) {
+  const hash = createHash('sha256').update(home).digest('hex');
+  if (platform === 'win32') return `\\\\.\\pipe\\alp-dashboard-${hash.slice(0, 24)}`;
+  const preferred = path.join(home, 'dashboard', 'token.sock');
+  return Buffer.byteLength(preferred) < 100
+    ? preferred
+    : path.join(os.tmpdir(), `alp-dashboard-${process.getuid?.() ?? 'user'}-${hash.slice(0, 12)}`, 'token.sock');
+}
+
+/**
+ * Throws unless `socketPath` is a socket of the user's with mode 0600 in a directory of the user's
+ * with mode 0700 (POSIX; nothing to check for a Windows pipe).
+ * @param {string} socketPath
+ */
+export async function assertTokenSocket(socketPath) {
+  if (process.platform === 'win32') return;
+  const directory = path.dirname(socketPath);
+  await assertPrivateDirectory(directory).catch(error => {
+    throw new Error(`alp dashboard's token socket must be in a directory owned by you with mode 0700: ${directory} is not (${error?.message ?? error})`, { cause: error });
+  });
+  const info = await lstat(socketPath);
+  if (!info.isSocket()) throw new Error(`alp dashboard's token socket ${socketPath} is not a socket`);
+  if (info.uid !== process.getuid?.()) throw new Error(`alp dashboard's token socket ${socketPath} is not yours (uid ${info.uid})`);
+  if ((info.mode & 0o777) !== 0o600) throw new Error(`alp dashboard's token socket ${socketPath} must have mode 0600, not ${(info.mode & 0o777).toString(8).padStart(4, '0')}`);
+}
+
+/**
+ * Asks the running service of `home` for its token. Throws when there is no service, the socket is
+ * not private, or the answer is not a token.
+ * @param {string} home @param {{ timeoutMs?: number }} [options]
+ * @returns {Promise<{ token: string, credentialId: string | undefined, pid: number | undefined }>}
+ */
+export async function readToken(home, { timeoutMs = 5_000 } = {}) {
+  const socketPath = tokenSocketPath(home);
+  await assertTokenSocket(socketPath);
+  const text = await new Promise((resolve, reject) => {
+    const socket = net.connect(socketPath);
+    let received = '';
+    const timer = setTimeout(() => { socket.destroy(); reject(new Error(`alp dashboard did not answer on ${socketPath} within ${timeoutMs} ms`)); }, timeoutMs);
+    socket.setEncoding('utf8');
+    socket.on('connect', () => socket.write(`${TOKEN_REQUEST}\n`));
+    socket.on('data', chunk => { received += chunk; if (received.length > 4_096) socket.destroy(); });
+    socket.on('error', error => { clearTimeout(timer); reject(error); });
+    socket.on('close', () => { clearTimeout(timer); resolve(received); });
+  });
+  let answer;
+  try { answer = JSON.parse(text); } catch { answer = undefined; }
+  if (typeof answer?.token !== 'string' || !TOKEN.test(answer.token)) throw new Error(`alp dashboard gave no token on ${socketPath}`);
+  return { token: answer.token, credentialId: typeof answer.credentialId === 'string' ? answer.credentialId : undefined, pid: Number.isSafeInteger(answer.pid) ? answer.pid : undefined };
 }

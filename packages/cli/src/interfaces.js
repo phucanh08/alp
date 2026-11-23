@@ -10,7 +10,7 @@ import { DAEMON_ENTRY, distributionEntry } from './paths.js';
 import { entryCommand } from '@anhlp/alp-core/packaged';
 import { isAgentProcess } from '@anhlp/alp-core/tasks';
 import { runRole } from './roles.js';
-import { DASHBOARD, LEGACY_WEB, dashboardEntry, dashboardScript, isDashboardReady, isServiceClaimed, refusal, serviceOwner, stopService } from './dashboard-service.js';
+import { DASHBOARD, LEGACY_WEB, dashboardEntry, dashboardScript, isDashboardReady, isServiceClaimed, readToken, refusal, serviceOwner, stopService } from './dashboard-service.js';
 import { legacyLeftovers, migrateDashboard } from './dashboard-migrate.js';
 import { dashboardSettings } from '@anhlp/alp-core/user-settings';
 
@@ -175,7 +175,8 @@ const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost'];
 
 /**
  * Starts alp-dashboard unless it runs and returns the address to open, the token in its fragment
- * (which the browser never sends to a server).
+ * (which the browser never sends to a server). The token comes from the running service over its
+ * private token socket (t-cee3); no file holds it.
  * @param {string} home @param {string} entry @param {{ port?: number }} [options]
  */
 async function serveDashboard(home, entry, { port } = {}) {
@@ -204,17 +205,22 @@ async function serveDashboard(home, entry, { port } = {}) {
     const owner = await serviceOwner(home);
     throw new Error(`${refusal(home)}${'reason' in owner ? ` (${owner.reason})` : ''}. Stop pid ${lock.pid}, then run alp dashboard again.`);
   }
-  if (typeof info.url !== 'string' || typeof info.token !== 'string' || !(await isDashboardReady(info.url))) {
+  if (typeof info.url !== 'string' || !(await isDashboardReady(info.url))) {
     throw new Error(`alp dashboard published no address; see ${path.join(home, 'logs', 'integrations', 'alp-dashboard.log')}`);
   }
+  let answer;
+  try { answer = await readToken(home); }
+  catch (error) { throw new Error(`alp dashboard did not hand over its token: ${error?.message ?? error}; see ${path.join(home, 'logs', 'integrations', 'alp-dashboard.log')}`, { cause: error }); }
+  // The socket's answer must come from the process the lock and dashboard.json name.
+  if (answer.pid !== lock.pid) throw new Error(`the token socket of alp dashboard is held by pid ${answer.pid}, not by the service (pid ${lock.pid}); stop it, then run alp dashboard again`);
   if (port !== undefined && info.port !== port) {
     throw new Error(`alp dashboard is running on port ${info.port}, not ${port} (port ${port} was busy or alp dashboard was starting already); it was left running there. Stop it with \`alp dashboard --stop\` and free port ${port}, or drop --port`);
   }
   if (project) {
     await registerProject(home, project);
-    await waitForGrant(home, info.credentialId, project);
+    await waitForGrant(home, answer.credentialId ?? info.credentialId, project);
   }
-  return `${info.url}#token=${info.token}`;
+  return `${info.url}#token=${answer.token}`;
 }
 
 /** Reports what the migration from `alp web` did, on stderr (stdout carries only the address). @param {Awaited<ReturnType<typeof migrateDashboard>>} report */
@@ -318,8 +324,8 @@ async function dashboardCommand(args) {
 /**
  * alp dashboard rotate: alp dashboard's token is replaced and the old one revoked, so every open
  * page loses access. Only the process holding the dashboard lock writes its credentials, so the
- * service is stopped first; `alp-dashboard.js --rotate` then takes the lock, replaces the credential,
- * records the new token in dashboard.json and releases the lock, and the service starts again with it.
+ * service is stopped first; `alp-dashboard.js --rotate` then takes the lock, revokes every credential
+ * and releases the lock, and the service starts again with a new one (every start mints one, t-cee3).
  */
 async function rotateCommand(args) {
   if (args.length) throw new UsageError();
@@ -340,7 +346,7 @@ async function rotateCommand(args) {
     if (rotated.code !== 3 || attempt >= 3) throw new Error(`alp dashboard could not rotate its token${rotated.output ? `:\n${rotated.output.slice(-2000)}` : ''}`);
   }
   if (await dashboardDisabled(home)) {
-    console.log(`alp dashboard has a new token; the old one no longer works. ${DISABLED.replace(/\.$/, '')}, so it was not started.`);
+    console.log(`alp dashboard's token is revoked; the old one no longer works and the next start mints a new token. ${DISABLED.replace(/\.$/, '')}, so it was not started.`);
     return;
   }
   console.log(await serveDashboard(home, entry));

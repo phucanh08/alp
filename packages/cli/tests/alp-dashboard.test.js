@@ -13,6 +13,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { connect, daemonPaths, readLock } from '@anhlp/alp-client/index';
 import { fixtureProcesses } from '../../../test/support/fixture-processes.js';
+import { readToken, tokenSocketPath } from '../src/dashboard-service.js';
 
 /**
  * alp-dashboard (packages/cli/dist/alp-dashboard.js), the service behind `alp dashboard`, as a real process under a
@@ -114,7 +115,10 @@ async function fixtureApp(directory) {
   return app;
 }
 
-/** Starts the service; resolves once its lock is ready and dashboard.json names it. */
+/**
+ * Starts the service; resolves once its lock is ready and dashboard.json names it. `web` is
+ * dashboard.json with the token the service hands over its token socket (no file holds it, t-cee3).
+ */
 async function startService(context, { args = [], env = {}, wait = true } = {}) {
   const child = spawn(process.execPath, [SERVICE, '--service', ...args], { stdio: 'ignore', env: { ...process.env, ...context.env, ...env } });
   const exited = once(child, 'exit');
@@ -123,7 +127,10 @@ async function startService(context, { args = [], env = {}, wait = true } = {}) 
     if (child.exitCode !== null) assert.fail(`alp-dashboard exited ${child.exitCode}:\n${await serviceLog(context.home)}`);
     const lock = await readJson(path.join(context.home, 'integrations', 'dashboard.lock'));
     const info = await readJson(path.join(context.home, 'dashboard.json'));
-    return lock.ready && lock.pid === child.pid && info.pid === child.pid ? info : undefined;
+    if (!(lock.ready && lock.pid === child.pid && info.pid === child.pid)) return undefined;
+    const answer = await readToken(context.home);
+    assert.equal(answer.pid, child.pid, 'the token socket is the service\'s');
+    return { ...info, token: answer.token };
   }, 'alp-dashboard to become ready').catch(async error => {
     // What the service was doing, and what it left on disk, when it never became ready.
     const lock = await readFile(path.join(context.home, 'integrations', 'dashboard.lock'), 'utf8').catch(() => '(none)');
@@ -157,6 +164,17 @@ async function stopService(service) {
 
 const credentialsOf = async home => (await readJson(path.join(home, 'dashboard', 'credentials.json'))).credentials;
 
+/** Every regular file under `directory` whose bytes contain `needle` (a token in no file, t-cee3). */
+async function filesContaining(directory, needle) {
+  const found = [];
+  for (const entry of await readdir(directory, { withFileTypes: true, recursive: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath ?? entry.path, entry.name);
+    if ((await readFile(file).catch(() => Buffer.alloc(0))).includes(needle)) found.push(file);
+  }
+  return found;
+}
+
 test('alp-dashboard serves the app and the gateway on one loopback listener, with its own credential', limit, async t => {
   const port = await freePorts();
   const context = await createHome(t, { dashboard: { port } });
@@ -167,9 +185,10 @@ test('alp-dashboard serves the app and the gateway on one loopback listener, wit
   t.after(() => stopService(service).catch(() => {}));
   const { web } = service;
 
-  // dashboard.json v2: where it listens and the alpgw1 token of its credential, private.
-  assert.deepEqual(Object.keys(web).sort(), ['app', 'credentialId', 'pid', 'port', 'token', 'url', 'version']);
-  assert.equal(web.version, 2);
+  // dashboard.json v3: where it listens and its credential id, private; no token (t-cee3).
+  const published = await readJson(path.join(context.home, 'dashboard.json'));
+  assert.deepEqual(Object.keys(published).sort(), ['app', 'credentialId', 'pid', 'port', 'url', 'version']);
+  assert.equal(web.version, 3);
   assert.equal(web.app, 'alp-dashboard');
   assert.equal(web.port, port);
   assert.equal(web.url, `http://127.0.0.1:${port}/`);
@@ -177,6 +196,15 @@ test('alp-dashboard serves the app and the gateway on one loopback listener, wit
   assert.equal(web.token.split('.')[1], web.credentialId);
   if (posix) for (const file of ['dashboard.json', 'dashboard/credentials.json']) assert.equal((await stat(path.join(context.home, file))).mode & 0o777, 0o600, file);
   if (posix) assert.equal((await stat(path.join(context.home, 'dashboard'))).mode & 0o777, 0o700, 'its credentials directory is private');
+  // The token socket: 0600, in the 0700 directory; no file under the home holds the token.
+  if (posix) {
+    const socketFile = tokenSocketPath(context.home);
+    assert.equal(socketFile, path.join(context.home, 'dashboard', 'token.sock'));
+    const info = await stat(socketFile);
+    assert.ok(info.isSocket());
+    assert.equal(info.mode & 0o777, 0o600, 'the token socket is private');
+  }
+  assert.deepEqual(await filesContaining(context.home, web.token), [], 'no file under the home holds the token');
 
   // The credential: the default grant plus workspace.write, the project it was given, nothing else.
   const [credential, ...others] = await credentialsOf(context.home);
@@ -283,7 +311,7 @@ test('alp-dashboard serves the app and the gateway on one loopback listener, wit
   }
 });
 
-test('the token survives a restart, and the built app is served when no override is set', limit, async t => {
+test('every start mints a new token and revokes the last one, and the built app is served when no override is set (t-cee3)', limit, async t => {
   const port = await freePorts();
   const context = await createHome(t, { dashboard: { port } });
   const first = await startService(context, { env: { ALP_SUPERVISE: '0' } });
@@ -291,13 +319,17 @@ test('the token survives a restart, and the built app is served when no override
   const second = await startService(context, { env: { ALP_SUPERVISE: '0' } });
   t.after(() => stopService(second).catch(() => {}));
   assert.notEqual(second.web.pid, first.web.pid);
-  assert.equal(second.web.token, first.web.token);
-  assert.equal(second.web.credentialId, first.web.credentialId);
+  assert.notEqual(second.web.token, first.web.token, 'a new token');
+  assert.notEqual(second.web.credentialId, first.web.credentialId, 'a new credential');
   const credentials = await credentialsOf(context.home);
-  assert.deepEqual(credentials.map(entry => [entry.id, entry.revokedAt ?? null]), [[first.web.credentialId, null]]);
+  assert.ok(credentials.find(entry => entry.id === first.web.credentialId).revokedAt, 'the last start\'s credential is revoked');
+  const live = credentials.filter(entry => !entry.revokedAt);
+  assert.deepEqual(live.map(entry => entry.id), [second.web.credentialId]);
   // With nothing registered and no --project, a private empty directory stands in for a workspace.
-  assert.deepEqual(credentials[0].workspaces.map(entry => entry.path), [path.join(context.home, 'dashboard', 'no-project')]);
-  assert.equal((await tickets(port, first.web.token)).status, 201);
+  assert.deepEqual(live[0].workspaces.map(entry => entry.path), [path.join(context.home, 'dashboard', 'no-project')]);
+  assert.equal((await tickets(port, first.web.token)).status, 401, 'the last start\'s token is refused');
+  assert.equal((await tickets(port, second.web.token)).status, 201);
+  assert.deepEqual(await filesContaining(context.home, second.web.token), [], 'no file under the home holds the token');
 
   // packages/cli/dist/alp-dashboard, as built beside the service, with the notices of its npm packages.
   const page = await request(port, '/');
@@ -312,22 +344,24 @@ test('the token survives a restart, and the built app is served when no override
   for (const name of ['react', 'react-dom', '@xterm/xterm', 'tailwindcss', 'vite']) assert.match(notices, new RegExp(`\\n${name.replace(/[/.]/g, '\\$&')}@\\d`), name);
 });
 
-test('a stale dashboard.json token is replaced and its credential revoked', limit, async t => {
+test('a token an earlier version left in dashboard.json leaves the file and its credential is revoked (t-cee3)', limit, async t => {
   const port = await freePorts();
   const context = await createHome(t, { dashboard: { port } });
   const first = await startService(context, { env: { ALP_SUPERVISE: '0' } });
   assert.equal(await stopService(first), STOPPED);
-  // The token in dashboard.json no longer matches its credential (lost secret, hand edit).
-  const forged = { ...first.web, token: `alpgw1.${first.web.credentialId}.${'A'.repeat(43)}` };
-  await writeFile(path.join(context.home, 'dashboard.json'), JSON.stringify(forged), { mode: 0o600 });
+  // dashboard.json as 0.0.1-beta.12 wrote it: version 2, with the token of its live credential.
+  const old = { ...(await readJson(path.join(context.home, 'dashboard.json'))), version: 2, token: first.web.token };
+  await writeFile(path.join(context.home, 'dashboard.json'), JSON.stringify(old), { mode: 0o600 });
   const second = await startService(context, { env: { ALP_SUPERVISE: '0' } });
   t.after(() => stopService(second).catch(() => {}));
   assert.notEqual(second.web.credentialId, first.web.credentialId);
+  assert.equal('token' in (await readJson(path.join(context.home, 'dashboard.json'))), false, 'dashboard.json has no token');
   const credentials = await credentialsOf(context.home);
   assert.ok(credentials.find(entry => entry.id === first.web.credentialId).revokedAt, 'the old credential is revoked');
   assert.equal(credentials.filter(entry => !entry.revokedAt).length, 1);
   assert.equal((await tickets(port, first.web.token)).status, 401);
   assert.equal((await tickets(port, second.web.token)).status, 201);
+  assert.deepEqual(await filesContaining(context.home, first.web.token), [], 'the old token is in no file either');
 });
 
 test('a SIGTERM while startup waits on alpd exits 0, publishes nothing and releases the lock', { ...limit, skip: !posix && 'a Unix socket stands in for alpd' }, async t => {
@@ -414,7 +448,7 @@ test('the credentials directory and file keep the gateway\'s private-mode checks
   await chmod(path.join(context.home, 'dashboard'), 0o700);
   const again = await startService(context, { env: { ALP_SUPERVISE: '0' } });
   t.after(() => stopService(again).catch(() => {}));
-  assert.equal(again.web.token, first.web.token, 'private again: the same credential');
+  assert.notEqual(again.web.token, first.web.token, 'private again: it starts, with a new credential');
 });
 
 test('without the built files the page says how to build them and the gateway stays up', limit, async t => {
@@ -456,8 +490,7 @@ test('the grant follows alpd\'s project registry without a new token', limit, as
   assert.deepEqual(granted.workspaces.map(entry => entry.path).sort(), [first, second].sort());
   assert.ok(granted.updatedAt, 'updated in place');
   assert.equal(granted.id, service.web.credentialId);
-  const web = await readJson(path.join(context.home, 'dashboard.json'));
-  assert.equal(web.token, service.web.token, 'the token in dashboard.json is unchanged');
+  assert.equal((await readToken(context.home)).token, service.web.token, 'the service hands out the same token');
   const ticket = await tickets(port, service.web.token);
   assert.equal(ticket.status, 201);
   assert.deepEqual(JSON.parse(ticket.body).principal.workspaces.sort(), [first, second].sort());
@@ -541,7 +574,8 @@ test('alp dashboard from another project registers it and adds it to the running
   const workspacesA = credsA[0].workspaces.map(w => w.canonical ?? w.path);
   assert.ok(workspacesA.includes(projectA), 'projectA is in the initial grant');
   assert.ok(!workspacesA.includes(projectB), 'projectB is not yet in the grant');
-  const initialToken = (await readJson(path.join(context.home, 'dashboard.json'))).token;
+  const initialToken = new URL(urlA).hash.slice('#token='.length);
+  assert.equal((await readJson(path.join(context.home, 'dashboard.json'))).token, undefined, 'dashboard.json has no token (t-cee3)');
 
   // 2. Invoke alp dashboard from projectB (service already running)
   const second = await exec(process.execPath, [CLI, 'dashboard', '--print'], { cwd: projectB, env, timeout: 30_000 });
@@ -554,8 +588,8 @@ test('alp dashboard from another project registers it and adds it to the running
   const workspacesB = credsB[0].workspaces.map(w => w.canonical ?? w.path);
   assert.ok(workspacesB.includes(projectA), 'projectA remains in the grant');
   assert.ok(workspacesB.includes(projectB), 'projectB is added to the grant');
-  const web = await readJson(path.join(context.home, 'dashboard.json'));
-  assert.equal(web.token, initialToken, 'token is preserved');
+  const web = { token: new URL(urlB).hash.slice('#token='.length) };
+  assert.equal(web.token, initialToken, 'token is preserved while the service runs');
 
   // 3. Invoking alp dashboard from outside a project does not add outside to grant
   const third = await exec(process.execPath, [CLI, 'dashboard', '--print'], { cwd: outside, env, timeout: 30_000 });
