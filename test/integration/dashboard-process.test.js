@@ -472,7 +472,8 @@ test('a live pre-rename Paseo integration is stopped, alp-dashboard takes over, 
   // Paired devices keep the token and server id: the server id in paseo.json, the token in the credential directory (t-cde5).
   assert.deepEqual(await paseoJson(home), { serverId: IDENTITY.serverId });
   assert.equal(await paseoToken(home) === IDENTITY.token, true);
-  assert.deepEqual((await filesContaining(home, IDENTITY.token)).map(file => path.relative(home, file)), [path.join('paseo', 'token.json')], 'web.json lost the token');
+  // old-paseo.mjs is this test's own fixture script, which writes the identity.
+  assert.deepEqual((await filesContaining(home, IDENTITY.token)).map(file => path.relative(home, file)).filter(file => file !== 'old-paseo.mjs'), [path.join('paseo', 'token.json')], 'web.json lost the token');
 
   // The Paseo integration, started by alp dashboard pair, picks the identity up.
   const paired = await run(['dashboard', 'pair', '--off'], home);
@@ -1030,6 +1031,16 @@ test('alp dashboard pair prints the password it gets over the token socket; --ro
   assert.equal(/give it: ([0-9a-f]{64})$/m.exec(again.stdout)?.[1] === fresh, true, 'pair prints the rotated password');
   const off = await run(['dashboard', 'pair', '--off'], home);
   assert.equal(off.code, 0, off.stderr || off.stdout);
+});
+
+test('t-cde5: the CLI finds the Paseo integration\'s token socket where the integration serves it, on every platform', async () => {
+  const { tokenSocketPath } = await import('../../integrations/paseo/server/dist/web.js');
+  const { paseoTokenSocketPath } = await import('../../packages/cli/src/interfaces.js');
+  for (const home of ['/Users/someone/.alp', `/home/someone/${'y'.repeat(110)}/.alp`, '/tmp/a b/.alp', 'C:\\Users\\someone\\.alp']) {
+    for (const platform of ['darwin', 'linux', 'win32']) {
+      assert.equal(paseoTokenSocketPath(home, { platform, uid: 501 }), tokenSocketPath(home, { platform, uid: 501 }), `${platform} ${home}`);
+    }
+  }
 });
 
 /** A Paseo hello on the integration's local socket at `port` with `password`: 'accepted' or the rejection's type. */
