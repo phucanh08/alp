@@ -284,7 +284,8 @@ the open workspace's registry id: the workspace must be registered on the host.
   tooltip; no switcher); a comparison row with the mode menu (Paseo's Uncommitted and Committed —
   `branch -> base` — plus the host's Staged and Unstaged), the comparison's +/- once loaded, Refresh
   (RotateCw, a spinner while it runs) and a "…" menu: Open Diff tab, Inline diff, and with Inline diff
-  on Split and Hide/Show whitespace. The body is Paseo's changed-files tree (lib/git.js
+  on Split and Hide/Show whitespace (Hide whitespace remembered in this browser,
+  `alp.changes.hideWhitespace`, t-81b0.14). The body is Paseo's changed-files tree (lib/git.js
   `changesTree`): folders first, single-child chains merged, folder +/-, folders collapse (per
   workspace, for the page); file rows with a material file icon, name, +/- (or Binary file / Diff
   too large to display / withheld / Symbolic link / Submodule) and Paseo's square change icon,
@@ -310,9 +311,15 @@ Deviations from Paseo: no commit, push, pull, merge, create PR, branch switcher,
 to chat or forge (PR status, checks) — Git stays read only remotely and those controls are not shown
 ("Read only" says so); no wrap toggle; no syntax highlighting; no commits section; no base picker,
 PR link or "All changes" mode (t-81b0.12, PR #369); no jump-to-file; no per-file diff tab
-target (one Diff panel, focused by Changes); the mode, whitespace and focus are kept for the page
-only (only Split, `alp.diff.layout`, and Inline diff are remembered; Paseo keeps changes
-preferences); no live checkout watch (Paseo's `checkoutRefresh`).
+target (one Diff panel, focused by Changes); Hide whitespace is remembered in this browser
+(`alp.changes.hideWhitespace`, t-81b0.14), as are Split (`alp.diff.layout`) and Inline diff
+(`alp.changes.inlineDiff`): Paseo keeps these in one global changes preference
+(P:hooks/use-changes-preferences/storage.ts, `@paseo:changes-preferences`), ALP one key each; the
+mode (Uncommitted/Committed/Staged/Unstaged) is intentionally not kept, as in Paseo, whose comparison
+lives in memory per checkout (P:git/working-diff-comparison; P:panels/changes/state.ts: "mode
+selection is ephemeral"), so a reload starts on Uncommitted (Paseo's default is All changes, which
+ALP does not offer); the Diff focus is kept for the page only; no live checkout watch (Paseo's
+`checkoutRefresh`).
 
 ## 4. Not in apps/web: protocol, gateway or daemon work
 
