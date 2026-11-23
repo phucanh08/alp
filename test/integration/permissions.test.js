@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
+import { realpathSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initProject } from '../../packages/core/src/init.js';
@@ -13,6 +14,20 @@ import { teardown } from '../support/teardown.js';
 import { setProfiles } from '../support/fake-agent.js';
 
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
+
+/**
+ * What a read-only Claude session is denied besides its profile's rules (t-cde5): the Paseo
+ * credentials under ALP_HOME, as named and as resolved, as rules and as sandbox read denials.
+ */
+function credentialDenials() {
+  const home = path.resolve(process.env.ALP_HOME || path.join(homedir(), '.alp'));
+  let real = home;
+  try { real = realpathSync(home); } catch {}
+  const homes = real === home ? [home] : [home, real];
+  const directories = homes.map(root => path.join(root, 'paseo'));
+  const files = homes.map(root => path.join(root, 'relay-keypair.json'));
+  return { rules: [...directories.map(directory => `Read(/${directory}/**)`), ...files.map(file => `Read(/${file})`)], denyRead: [...directories, ...files] };
+}
 
 async function project(t, permissions, userPermissions) {
   const defer = teardown(t);
@@ -99,7 +114,8 @@ test('Claude enforces deny rules and non-Bash allow rules itself; ALP decides Ba
   // A Bash allow rule handed to Claude would be matched as written and skip canUseTool (t-6dc5 G5-B).
   const options = claudePermissions('read-only', () => 'read-only', { allow: ['Bash(npm test:*)', 'Bash', 'WebFetch(domain:github.com)'], deny: ['Bash(git push:*)'] });
   assert.deepEqual(options.allowedTools, ['WebFetch(domain:github.com)']);
-  assert.deepEqual(options.disallowedTools.slice(-1), ['Bash(git push:*)']);
+  // The user's deny rule, then (a read-only session, t-cde5) the denials of the Paseo credentials.
+  assert.deepEqual(options.disallowedTools.slice(-1 - credentialDenials().rules.length), ['Bash(git push:*)', ...credentialDenials().rules]);
   assert.ok(options.disallowedTools.includes('Agent'));
   assert.equal(claudePermissions('read-only', () => 'read-only', { allow: ['Bash(npm test:*)'], deny: [] }).allowedTools, undefined);
   assert.equal(claudePermissions('full-access', () => 'full-access', null).allowedTools, undefined);
@@ -468,7 +484,7 @@ test('a floor puts Claude Bash in the OS sandbox and keeps file tools in the wor
   const root = path.join(tmpdir(), 'alp-floor-root');
   const asked = [];
   const readOnly = claudePermissions('read-only', () => 'read-only', { allow: ['Bash(npm test *)'], ask: [], deny: ['Bash(rm *)'], beyondMode: 'refuse', floor: 'read-only', floorRoot: root }, async request => { asked.push(request); return { allow: true }; });
-  assert.deepEqual(readOnly.sandbox, { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: true, filesystem: { denyWrite: [root] } });
+  assert.deepEqual(readOnly.sandbox, { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: true, filesystem: { denyWrite: [root], denyRead: credentialDenials().denyRead } });
   // Inside a read-only floor any command runs; the OS stops its writes.
   assert.equal((await readOnly.canUseTool('Bash', { command: 'node -e "1"' }, {})).behavior, 'allow');
   // Leaving the sandbox needs an allow rule; a deny rule refuses even that.
