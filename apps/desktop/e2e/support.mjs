@@ -28,6 +28,8 @@ import { spawnCommand } from '../../../scripts/spawn-command.mjs';
 
 export const APP = path.resolve(import.meta.dirname, '..');
 const ROOT = path.resolve(APP, '..', '..');
+/** The service's own source module, which the live fake alp reads the token socket with. */
+const SERVICE_SOURCE = path.join(ROOT, 'packages/cli/src/dashboard-service.js');
 export const SERVICE = process.env.ALP_DESKTOP_E2E_SERVICE || path.join(ROOT, 'packages/cli/dist/alp-dashboard.js');
 /** The Electron binary of apps/desktop's own install (require('electron') gives its path). */
 const ELECTRON = createRequire(path.join(APP, 'package.json'))('electron');
@@ -189,8 +191,32 @@ export async function fakeAlp({ dir }) {
     // second connect, or the newer connect's run could be the blocked one.
     return { firstStarted: () => exists(count), release: () => writeFile(gate, ''), firstDone: () => exists(done) };
   };
+  /**
+   * What the real `alp dashboard --print` does (t-cee3): asks the running service at `home` over its
+   * token socket and prints dashboard.json's url with that token, so after a restart it prints the
+   * token the new start minted without the test telling it. Every run is counted in <dir>/bin/runs.
+   */
+  const printsLive = async home => {
+    const runs = path.join(dir, 'bin', 'runs');
+    const helper = path.join(dir, 'bin', 'print-live.mjs');
+    await writeFile(helper, [
+      `import { readFile } from 'node:fs/promises';`,
+      `import { readToken } from ${JSON.stringify(SERVICE_SOURCE)};`,
+      `const home = process.argv[2];`,
+      `const info = JSON.parse(await readFile(home + '/dashboard.json', 'utf8'));`,
+      `const { token } = await readToken(home);`,
+      `process.stdout.write(info.url + '#token=' + token + '\\n');`,
+    ].join('\n'));
+    await set([
+      `echo x >> '${runs}'`,
+      // The host runs without TMPDIR (cleanEnv), and a long home's socket falls back to the temp dir.
+      'unset TMPDIR',
+      `exec '${process.execPath}' '${helper}' '${home}'`,
+    ].join('\n'));
+    return { runs: async () => (await readFile(runs, 'utf8').catch(() => '')).split('\n').filter(Boolean).length };
+  };
   await set('exit 70');
-  return { file, set, setVersion, prints, firstGated };
+  return { file, set, setVersion, prints, printsLive, firstGated };
 }
 
 /** A copy of the built app (package.json and dist) that a test may break. */

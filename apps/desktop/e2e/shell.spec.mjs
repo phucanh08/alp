@@ -221,3 +221,37 @@ test('alp dashboard rotate: the window reloads with the new token', limit, async
   await waitFor(async () => (await only(app))?.origin === web.origin && await inPage(app, `sessionStorage.getItem('alp-web:link-token') === ${JSON.stringify(web.web.token)}`), 'the window on the rotated token', 60_000);
   assert.equal(await inPage(app, 'location.hash'), '');
 });
+
+test('t-cee3: alp dashboard restarting on the same port with a fresh token: the window runs --print again and reconnects', limit, async t => {
+  // Every start mints a new credential and revokes the old one (t-cee3), with no `alp dashboard rotate`.
+  // The fake alp asks the live service over its token socket, as the real `alp dashboard --print`
+  // does, so nothing but the app re-running it can bring the window the new token.
+  const context = await scratch(t);
+  const web = await host(t, context);
+  await web.start(await freePort());
+  const alp = await fakeAlp(context);
+  const live = await alp.printsLive(web.home);
+  const app = await launch(t, context, alp.file);
+  await connectedTo(app, web.origin);
+  const old = web.web.token;
+  const origin = web.origin;
+  assert.equal(await inPage(app, `sessionStorage.getItem('alp-web:link-token') === ${JSON.stringify(old)}`), true);
+  const runsBefore = await live.runs();
+  await web.stop();
+  await web.start(web.web.port);
+  assert.equal(web.origin, origin, 'the same port');
+  assert.notEqual(web.web.token, old, 'a new start minted a new token');
+  assert.equal(await ticketStatus(origin, old), 401, 'the token of the last start is refused at the ticket endpoint');
+  await waitFor(async () => (await only(app))?.origin === origin && await inPage(app, `sessionStorage.getItem('alp-web:link-token') === ${JSON.stringify(web.web.token)}`), 'the window on the new start\'s token', 60_000);
+  assert.ok(await live.runs() > runsBefore, 'the app ran `alp dashboard --print` again');
+  assert.equal(await inPage(app, 'location.hash'), '');
+  assert.equal((await only(app))?.page, undefined, 'no bundled (error) page');
+  assert.equal(await ticketStatus(origin, web.web.token), 201, 'the token the window holds is live');
+});
+
+/** POST /v1/tickets with `token`: 201 for a live credential, 401 otherwise. */
+async function ticketStatus(origin, token) {
+  const response = await fetch(`${origin}/v1/tickets`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
+  await response.body?.cancel();
+  return response.status;
+}
