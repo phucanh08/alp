@@ -2440,6 +2440,21 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     return toolResult(true, { status: 'pending_approval', approvalId, next: 'Continue other work or end your turn. ALP sends the decision and creation result by mail; do not resubmit this draft.' });
   }
 
+  /** The latest alp_strategy entry the run log holds for a session; a change is allowed in its next user turn. */
+  async function restoreStrategy(sessionId: string, session: Session) {
+    const directory = options.runLogDir;
+    if (!directory) return;
+    const file = path.join(directory, `${rootOf(sessionId).replace(/[^\w.-]/g, '_')}.jsonl`);
+    const text = await readFile(file, 'utf8').catch(() => '');
+    if (!text.includes('"event":"strategy"')) return;
+    let latest: any;
+    for (const line of text.split('\n')) {
+      if (!line.includes('"event":"strategy"')) continue;
+      try { const entry = JSON.parse(line); if (entry.sessionId === sessionId && STRATEGIES.includes(entry.strategy)) latest = entry; } catch {}
+    }
+    if (latest) session.strategy = { name: latest.strategy, reason: String(latest.reason ?? ''), at: String(latest.ts ?? ''), turn: -1 };
+  }
+
   /**
    * alp_strategy: main or lead records how it works (rush, smart, deep or large). Guidance only:
    * it changes nothing but the session's strategy, the run log and what alp top shows. One change
@@ -4006,6 +4021,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       sessionId,
       session,
     );
+    // A main or lead reopened after a restart keeps the strategy its run log last recorded (t-003a).
+    // A new assignment has none to keep; never waits on pending log writes.
+    if (!session.awaitingBrief && choosesStrategy(session.mapping, session.parentAgent, session.role)) await restoreStrategy(sessionId, session);
 
     wire(sessionId, session, runtime);
 

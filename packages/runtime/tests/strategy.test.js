@@ -172,3 +172,46 @@ test('one strategy change per user turn: a second is refused, a new user turn al
   assert.deepEqual(await main.call('alp_strategy', { strategy: 'large', reason: 'Spans CLI and daemon' }), { strategy: 'large', previous: 'deep', reason: 'Spans CLI and daemon' });
   assert.match((await main.call('alp_strategy', { strategy: 'smart', reason: 'Back' })).error, /already changed in this user turn/);
 });
+
+test('a main reopened after a restart keeps the strategy its run log recorded, and may change it in its next turn', async t => {
+  const defer = teardown(t);
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-strategy-'));
+  defer(() => rm(directory, { recursive: true, force: true }));
+  const root = path.join(directory, 'project');
+  await initProject(root);
+  await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ workflow: { mode: 'pho', supervisor: false } }));
+  const runLogDir = path.join(directory, 'runs');
+  const start = () => {
+    const runtimes = [];
+    const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: path.join(directory, 'home'), runLogDir });
+    return { runtime, runtimes };
+  };
+  const first = start();
+  await first.runtime.open('root', { cwd: root });
+  await first.runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Work' }] });
+  await until(() => first.runtimes[0]?.turnId);
+  assert.equal((await first.runtimes[0].call('alp_strategy', { strategy: 'deep', reason: 'Security bug' })).strategy, 'deep');
+  await first.runtime.shutdown();
+
+  const second = start();
+  defer(() => second.runtime.shutdown());
+  await second.runtime.open('root', { cwd: root });
+  await second.runtime.prompt('root', { clientMessageId: 'm2', delivery: 'auto', content: [{ type: 'text', text: 'Go on' }] });
+  await until(() => second.runtimes[0]?.turnId);
+  const [main] = second.runtimes;
+  assert.deepEqual(await main.call('alp_strategy', { strategy: 'deep', reason: 'Still deep' }), { strategy: 'deep', unchanged: true });
+  assert.deepEqual(await main.call('alp_strategy', { strategy: 'smart', reason: 'Root cause found' }), { strategy: 'smart', previous: 'deep', reason: 'Root cause found' });
+});
+
+test('a steer is a new user turn: it allows the next strategy change', async t => {
+  const { root, runtime, runtimes, runLog } = await setup(t, { workflow: { mode: 'pho', supervisor: false } });
+  await runtime.open('root', { cwd: root });
+  await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Work' }] });
+  await until(() => runtimes[0]?.turnId);
+  const [main] = runtimes;
+  assert.equal((await main.call('alp_strategy', { strategy: 'rush', reason: 'Small' })).strategy, 'rush');
+  assert.match((await main.call('alp_strategy', { strategy: 'deep', reason: 'Not small' })).error, /already changed/);
+  await runtime.prompt('root', { clientMessageId: 's1', delivery: 'steer', content: [{ type: 'text', text: 'It is a security issue' }] });
+  assert.equal((await main.call('alp_strategy', { strategy: 'deep', reason: 'Security' }, 'after-steer')).strategy, 'deep');
+  await until(async () => (await runLog()).filter(entry => entry.event === 'strategy').length === 2);
+});
