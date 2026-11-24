@@ -251,8 +251,13 @@ async function daemonCheck(home) {
   const stale = [];
   if (await exists(paths.lock)) stale.push(paths.lock);
   if (await exists(paths.socket)) stale.push(paths.socket);
-  const crashed = await exists(path.join(home, 'state', 'alpd.running'));
-  const after = crashed ? '; the last alpd stopped unexpectedly, and the next start continues its work' : '';
+  const marker = path.join(home, 'state', 'alpd.running');
+  const crashed = await exists(marker);
+  // A stop that was asked for and cut short says so in the marker (t-11c7): alpd reads that as a restart, not a crash.
+  const cutShort = crashed && await readFile(marker, 'utf8').then(text => typeof JSON.parse(text)?.stopping === 'string').catch(() => false);
+  const after = !crashed ? ''
+    : cutShort ? '; the last alpd was stopped before it had finished stopping, and the next start continues its work'
+    : '; the last alpd stopped unexpectedly, and the next start continues its work';
   if (!stale.length) return { id: 'alpd', status: crashed ? 'info' : 'ok', summary: `not running${after}` };
   return {
     id: 'alpd', status: 'warn', summary: `not running, and left ${stale.map(file => path.basename(file)).join(' and ')} behind${after}`,
