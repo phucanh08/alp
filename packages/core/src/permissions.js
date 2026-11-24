@@ -146,6 +146,159 @@ export async function profileFor(projectRoot, home, agent, { readOnly = false } 
   };
 }
 
+// --- provenance (alp config explain) ---------------------------------------------
+//
+// Nothing below decides what an agent may do: profileFor above does, and it is unchanged. These
+// functions resolve the same two settings files one scope at a time, so that every value of the
+// merged profile carries the scope and file it came from, and so that a project scope that gives
+// more than the user scope can be reported. They explain and warn; they never refuse (t-7d81, the
+// user's decision of 2026-11-06: what a user or a project owner grants is intended).
+
+/**
+ * The permission settings of each scope, in the order profileFor reads them: the project's
+ * .alp/settings.json, then the user's $ALP_HOME/settings.json (absent without a home).
+ * Throws INVALID_SETTINGS for a file profileFor would refuse.
+ */
+export async function permissionScopes(projectRoot, home) {
+  const files = [['project', path.join(projectRoot, '.alp', 'settings.json')], ...(home ? [['user', path.join(home, 'settings.json')]] : [])];
+  const scopes = [];
+  for (const [scope, file] of files) {
+    const { profiles, agents } = await settingsPermissions(file);
+    scopes.push({ scope, file, exists: Boolean(statSync(file, { throwIfNoEntry: false })), profiles, agents });
+  }
+  return scopes;
+}
+
+/**
+ * profileFor's merge over an ordered list of scopes, with where each value came from. With the
+ * project and user scopes it returns the profile profileFor returns (or throws what it throws);
+ * with one scope alone, what that scope would give the agent by itself.
+ */
+function mergeScopes(scopes, agent, readOnly) {
+  const mapped = scopes.find(scope => own(scope.agents, agent));
+  const name = mapped ? own(mapped.agents, agent) : undefined;
+  const advisor = ADVISORS.includes(agent);
+  const from = scope => ({ scope: scope.scope, file: scope.file });
+  if (!name) {
+    if (!(advisor || readOnly)) return { profile: null, provenance: null };
+    const reason = advisor ? `${agent} is an advisor` : 'the member serves in a read-only role';
+    return {
+      profile: { name: 'read-only', base: 'read-only', allow: [], ask: [], deny: [], beyondMode: 'refuse' },
+      provenance: { name: { value: 'read-only', scope: 'default', reason }, base: { value: 'read-only', scope: 'default', reason }, beyondMode: { value: 'refuse', scope: 'default' }, allow: [], ask: [], deny: [] },
+    };
+  }
+  const defined = scopes.filter(scope => own(scope.profiles, name));
+  const profiles = defined.map(scope => own(scope.profiles, name));
+  if (!defined.length && !BASES.includes(name)) {
+    throw new AlpError('INVALID_SETTINGS', `permissions.agents.${agent} names profile '${name}', which no settings file defines`);
+  }
+  const baseScope = defined.find(scope => own(scope.profiles, name).base);
+  const base = baseScope ? own(baseScope.profiles, name).base : BASES.includes(name) ? name : advisor ? 'read-only' : 'full-access';
+  const copyScope = defined.find(scope => own(scope.profiles, name).workdir === 'copy');
+  if (copyScope && base !== 'read-only') throw new AlpError('INVALID_SETTINGS', `Profile '${name}' has workdir copy, which needs base read-only`);
+  if (advisor && base !== 'read-only') throw new AlpError('INVALID_SETTINGS', `${agent} is an advisor; its profile '${name}' must have base read-only`);
+  const modeScope = defined.find(scope => own(scope.profiles, name).beyondMode);
+  const rules = kind => [...new Set(profiles.flatMap(profile => profile[kind] ?? []))];
+  const sources = kind => rules(kind).map(rule => ({ rule, sources: defined.filter(scope => (own(scope.profiles, name)[kind] ?? []).includes(rule)).map(from) }));
+  const shadowed = scopes.filter(scope => scope !== mapped && own(scope.agents, agent)).map(scope => ({ ...from(scope), value: own(scope.agents, agent) }));
+  return {
+    profile: {
+      name, base: readOnly ? 'read-only' : base,
+      ...(readOnly && base !== 'read-only' ? { cappedFrom: base } : {}),
+      allow: rules('allow'), ask: rules('ask'), deny: rules('deny'),
+      beyondMode: modeScope ? own(modeScope.profiles, name).beyondMode : 'refuse',
+      ...(copyScope ? { workdir: 'copy' } : {}),
+    },
+    provenance: {
+      name: { value: name, ...from(mapped), key: `permissions.agents.${agent}`, ...(shadowed.length ? { overrides: shadowed } : {}) },
+      base: {
+        value: readOnly ? 'read-only' : base,
+        ...(baseScope ? { ...from(baseScope), key: `permissions.profiles.${name}.base` }
+          // A bare base name is a profile with no rules: the mapping itself is where the base comes from.
+          : BASES.includes(name) ? { ...from(mapped), key: `permissions.agents.${agent}`, reason: 'a bare base name' }
+          : { scope: 'default', reason: advisor ? `${agent} is an advisor` : `profile '${name}' sets no base` }),
+        ...(readOnly && base !== 'read-only' ? { cappedFrom: base, reason: 'capped: the member serves in a read-only role' } : {}),
+      },
+      beyondMode: modeScope ? { value: own(modeScope.profiles, name).beyondMode, ...from(modeScope), key: `permissions.profiles.${name}.beyondMode` } : { value: 'refuse', scope: 'default' },
+      ...(copyScope ? { workdir: { value: 'copy', ...from(copyScope), key: `permissions.profiles.${name}.workdir` } } : {}),
+      allow: sources('allow'), ask: sources('ask'), deny: sources('deny'),
+    },
+  };
+}
+
+/** What the project scope gives an agent beyond what the user scope says. Warnings only: nothing here refuses. */
+function wideningWarnings(scopes, agent, merged, readOnly) {
+  const project = scopes.find(scope => scope.scope === 'project');
+  const user = scopes.find(scope => scope.scope === 'user');
+  if (!merged.profile || !project || !user) return [];
+  const { profile, provenance } = merged;
+  // What the user scope alone would give this agent. A mapping to a profile only the project defines says nothing alone.
+  let alone = { profile: null, provenance: null };
+  try { alone = mergeScopes([user], agent, readOnly); } catch {}
+  const warnings = [];
+  // The base the project brings, before a read-only role caps it.
+  const base = profile.cappedFrom ?? profile.base;
+  const byProject = provenance.base.scope === 'project';
+  // The user's base for this agent: in the user's definition of the same profile, or in what the user scope alone resolves to.
+  const sameProfile = own(user.profiles, profile.name)?.base;
+  const aloneBase = alone.provenance?.base.scope === 'user' ? alone.provenance.base.cappedFrom ?? alone.profile.base : undefined;
+  const userBase = [sameProfile, aloneBase].filter(Boolean).sort((a, b) => RANK[a] - RANK[b])[0];
+  if (byProject && userBase && RANK[base] > RANK[userBase]) {
+    warnings.push({
+      code: 'project-base-higher', agent, project: base, user: userBase,
+      message: `the project sets base ${base} (${provenance.base.key} in ${project.file}); your settings say ${userBase} (${user.file}). The project's value applies${profile.cappedFrom ? `, capped to ${profile.base} by the member's read-only role` : ''}.`,
+    });
+  }
+  const onlyProject = entry => entry.sources.every(source => source.scope === 'project');
+  const extra = provenance.allow.filter(entry => onlyProject(entry) && !(alone.profile?.allow ?? []).includes(entry.rule)).map(entry => entry.rule);
+  if (extra.length) {
+    warnings.push({
+      code: 'project-allow-rules', agent, rules: extra,
+      message: `the project adds ${extra.length === 1 ? 'an allow rule' : `${extra.length} allow rules`} your settings do not have (${project.file}): ${extra.join(', ')}. ${extra.length === 1 ? 'It applies' : 'They apply'}, also beyond the agent's mode.`,
+    });
+  }
+  if (profile.beyondMode === 'ask' && provenance.beyondMode.scope === 'project' && alone.profile?.beyondMode !== 'ask') {
+    warnings.push({
+      code: 'project-beyond-mode', agent,
+      message: `the project sets beyondMode ask (${provenance.beyondMode.key} in ${project.file}): what the agent's mode refuses is asked instead, and may be allowed always.`,
+    });
+  }
+  // A user profile the project's mapping replaces: its deny and ask rules are not loaded.
+  for (const kind of ['deny', 'ask']) {
+    const dropped = (alone.profile?.[kind] ?? []).filter(rule => !profile[kind].includes(rule));
+    if (!dropped.length) continue;
+    warnings.push({
+      code: `user-${kind}-not-applied`, agent, rules: dropped,
+      message: `the project maps ${agent} to profile ${profile.name} (${project.file}), so the ${kind} rule${dropped.length === 1 ? '' : 's'} of your profile ${alone.profile.name} (${user.file}) ${dropped.length === 1 ? 'does' : 'do'} not apply: ${dropped.join(', ')}.`,
+    });
+  }
+  return warnings;
+}
+
+/**
+ * Explains an agent's permission profile: `profile` is what profileFor returns for the same
+ * arguments (and this throws what profileFor throws), `provenance` names the scope and file of its
+ * name, base, beyondMode, workdir and of every allow, ask and deny rule (null when no profile
+ * applies), `scopes` says what each settings file holds for the agent, and `warnings` lists what
+ * the project scope gives beyond the user scope. A warning never changes the profile.
+ * @param {{ readOnly?: boolean }} [options]
+ */
+export async function explainProfile(projectRoot, home, agent, { readOnly = false } = {}) {
+  const scopes = await permissionScopes(projectRoot, home);
+  const merged = mergeScopes(scopes, agent, readOnly);
+  return {
+    agent,
+    profile: merged.profile,
+    provenance: merged.provenance,
+    scopes: scopes.map(scope => {
+      const name = own(scope.agents, agent);
+      const defined = merged.profile ? own(scope.profiles, merged.profile.name) : undefined;
+      return { scope: scope.scope, file: scope.file, exists: scope.exists, ...(name ? { agentProfile: name } : {}), ...(defined ? { profile: defined } : {}) };
+    }),
+    warnings: wideningWarnings(scopes, agent, merged, readOnly),
+  };
+}
+
 /**
  * Adds an allow rule to a profile, in the settings file that defines it (the
  * project's first), when the user allows something always. Returns the file.
