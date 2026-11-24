@@ -301,6 +301,47 @@ disposable copy of its requester's tree:
 `alp permissions` lists every agent's profile. `alp permissions check reviewer "npm test 2>&1"`
 says what a profile decides about a command.
 
+### Where a value comes from: `alp config explain`
+
+A profile is merged from two files: the project's `.alp/settings.json`, read first, and
+your own `$ALP_HOME/settings.json`. `alp config explain` shows, for every agent, which
+file and scope each value and each rule comes from:
+
+```
+$ alp config explain --agent peer
+Permission settings, in the order ALP reads them (the project first):
+  project /work/app/.alp/settings.json
+  user    /Users/me/.alp/settings.json
+
+peer
+  profile     dev          project  /work/app/.alp/settings.json  (permissions.agents.peer)
+  base        full-access  project  /work/app/.alp/settings.json  (permissions.profiles.dev.base)
+  beyondMode  refuse       default
+  allow Bash(npm test:*)  project  /work/app/.alp/settings.json + user  /Users/me/.alp/settings.json
+  deny  Bash(rm:*)  user  /Users/me/.alp/settings.json
+  warning: the project sets base full-access (permissions.profiles.dev.base in /work/app/.alp/settings.json); your settings say workspace-write (/Users/me/.alp/settings.json). The project's value applies.
+```
+
+- `default` means no file sets the value: ALP's own default applies (an advisor is
+  read-only; a profile without a base is full-access; `beyondMode` is `refuse`).
+- Without `--agent` it lists every agent the project can run and every agent a settings
+  file maps to a profile. `--agent` may be repeated. `--json` prints the same as data:
+  the profile ALP enforces, its `provenance`, each scope's own entry, and the warnings.
+- It warns where the project gives an agent more than your own settings do:
+  - a base higher than the one your settings give the agent or the same profile;
+  - allow rules only the project has;
+  - `beyondMode: ask` set by the project;
+  - deny or ask rules of your own profile that do not apply, because the project maps
+    the agent to a different profile.
+
+A warning only reports. Permissions a project's settings grant are meant to apply, and
+they do, exactly as before: the command changes nothing, refuses nothing, and exits 0
+with warnings. Read the project's file when you did not write it yourself, such as in a
+repository you only cloned. A settings file ALP cannot use (invalid JSON, a mapping to a
+profile no file defines) is an error, as an agent could not start with it: exit 1.
+
+The command explains permissions only; models and teams are not covered yet.
+
 ## Librarian and scout (Research pack)
 
 `alp pack install research` adds the agents `librarian` and `scout` and the teams
