@@ -311,7 +311,7 @@ Decided by the user on 2026-11-20 (task t-81b0.5, gates g1–g4). D30–D32 abov
 - **The service's internals are renamed** (g2): `alp-dashboard.js`, integration and lock `dashboard`, `dashboard.json`, `<home>/dashboard/`, `alp-dashboard.log`, settings `dashboard.enabled|port|permissions`, `ALP_DASHBOARD_*`. Every `alp dashboard` command first moves a beta.8 home to the new names (stops a running `alp web`, keeps its token, port and on/off setting; idempotent; the new name wins when both exist). `web.*` settings and `ALP_WEB_*` variables are still read where the new ones are not set. Not renamed: `apps/web`, the `web.pairing` RPC, the gate channel `web`, `state/web-workspaces.json`, `web.relay`.
 - **`--host` stays loopback**: only `127.0.0.1` or `localhost`; the token is the dashboard's only lock and the gateway accepts only loopback Host and Origin names.
 - **`alp desktop`** (g3) opens `ALP.app` from `/Applications` or `~/Applications`, else the built app in the checkout `ALP_DESKTOP_CHECKOUT` names, else prints how to get it. It passes no token.
-- `alp dashboard --print --json` stays separate (t-81b0.4).
+- `alp dashboard --print --json` was kept out of this decision and shipped separately (t-81b0.4, PR #389): one JSON line on stdout (schema `alp.dashboard.print`, version 1) with stable `error.code` values and exit codes 0–8; the token is only in the success line. The desktop app reads it and falls back to `--print` for an alp from before it (docs/alp/dashboard.md §3.3).
 
 ## D34 — alpd ships as a native executable; `alp` stays on the bundled Node
 

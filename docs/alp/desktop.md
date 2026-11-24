@@ -11,8 +11,10 @@ service `alp-dashboard` ([dashboard.md](dashboard.md) §3.1), rồi mở app web
 ## 1. Luồng
 
 1. Tìm `alp` (§2).
-2. Chạy `alp dashboard --print` bằng `execFile`, không qua shell, với PATH đã tìm được.
-3. Kiểm địa chỉ in ra: phải đúng dạng `http://127.0.0.1:<port>/#token=alpgw1.<16 hex>.<43 base64url>`,
+2. Chạy `alp dashboard --print --json` bằng `execFile`, không qua shell, với PATH đã tìm được, và đọc dòng JSON
+   cuối của stdout (hợp đồng ở [dashboard.md](dashboard.md) §3.3). Một `alp` cũ (`0.0.1-beta.13` trở về trước) không
+   biết `--json` (in usage, không có JSON): app chạy lại `alp dashboard --print` và đọc địa chỉ như trước.
+3. Kiểm `url` (hoặc địa chỉ in ra, với `alp` cũ): phải đúng dạng `http://127.0.0.1:<port>/#token=alpgw1.<16 hex>.<43 base64url>`,
    không có path, query hay userinfo. Sai dạng thì báo lỗi, không mở.
 4. `loadURL` địa chỉ đó. App web lấy token ra khỏi địa chỉ (`history.replaceState`), giữ trong
    sessionStorage của cửa sổ, và kết nối tới chính origin của trang ([dashboard.md](dashboard.md) §4.2).
@@ -73,9 +75,10 @@ Nếu PATH dựng từ (1)–(2) không có `node`, PATH của login shell đư�
 |---|---|
 | Không tìm thấy `alp` (và không đặt `alpPath`/`ALP_DESKTOP_ALP`) | Đề nghị cài ALP (§3.2); trang này cũng ghi lệnh cài từ terminal (`install.sh`, npm) và cách đặt `alpPath`. |
 | `alpPath`/`ALP_DESKTOP_ALP` trỏ tới đường dẫn không chạy được | Trang chưa cài, nêu đúng đường dẫn đó; không đề nghị cài (bản cài vào `~/.alp` sẽ không được dùng). |
-| `alp` báo lỗi (vd. `dashboard.enabled` là false, chạy trong session của agent) | Nguyên văn thông báo lỗi của `alp`. |
+| `alp` báo lỗi (vd. `dashboard.enabled` là false, chạy trong session của agent) | `error.message` trong dòng JSON của `alp` (không có message thì mã lỗi và exit code); với `alp` cũ, nguyên văn thông báo lỗi. |
+| `alp` trả dòng JSON với `version` mà app không biết | Một câu nói app đọc version nào và đề nghị cập nhật ALP desktop app; app không đoán. |
 | `alp` quá cũ, chưa có `alp dashboard` (0.0.1-beta.8 trở về trước: in usage thay vì địa chỉ) | Một câu nói rõ phiên bản (`alp --version`) và đường dẫn của `alp` đó, kèm cách cập nhật (`alp update`, hoặc cài bản build từ main); không dán usage. |
-| `alp dashboard --print` không trả lời trong 90 giây, hoặc in ra thứ không phải địa chỉ ALP dashboard | Thông báo lỗi tương ứng. |
+| `alp dashboard --print --json` (hoặc `--print` với `alp` cũ) không trả lời trong 90 giây, hoặc `url` không phải địa chỉ ALP dashboard | Thông báo lỗi tương ứng. |
 | Trang không tải được | Thông báo lỗi; chọn **File › Connect again** (⇧⌘R) để thử lại. |
 
 **File › Connect again** chạy lại toàn bộ luồng ở §1, kể cả sau `alp dashboard rotate`.
@@ -491,7 +494,7 @@ giây thay vì 60 giây; khi test fail, thông báo lỗi kèm output và trạn
 
 ### 6.3 Chưa có trong bản này
 
-`alp dashboard --print --json`; dừng `alp dashboard` khi thoát app; ký bằng Developer ID và notarize;
+Dừng `alp dashboard` khi thoát app; ký bằng Developer ID và notarize;
 tự cập nhật; Windows và Linux; mang alpd theo app.
 
 ### 6.4 Bài học: cửa sổ trắng của bản đóng gói (t-81b0.7)
