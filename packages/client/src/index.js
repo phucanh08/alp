@@ -501,27 +501,116 @@ async function tail(file, lines = 30) {
   try { return scrubText((await readFile(file, 'utf8')).split('\n').slice(-lines).join('\n'), { max: 8000 }); } catch { return ''; }
 }
 
-/** Immutable admission identities live in filenames, including for service hard links. */
+/**
+ * When the OS says `pid` started, as a letter and digits that stay the same for the life of that
+ * process, or undefined where it cannot tell (Windows, a sandbox, a process that is gone). Linux
+ * reads the start tick in /proc/<pid>/stat ("c…"); other Unix systems ask ps ("b…"), in UTC and
+ * the C locale so that two callers agree whatever their own environment says. ps counts whole
+ * seconds: a pid cannot come back within the second its last owner started in.
+ */
+export function processBirth(pid, { platform = process.platform } = {}) {
+  if (!Number.isSafeInteger(pid) || pid <= 0 || platform === 'win32') return undefined;
+  try {
+    if (platform === 'linux') {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      // The command name may hold spaces and brackets: count fields after its closing one.
+      const ticks = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+      return /^\d+$/.test(ticks) ? `c${ticks}` : undefined;
+    }
+    const text = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], {
+      encoding: 'utf8',
+      env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2000,
+    });
+    // "Tue Nov 24 04:00:02 2026"
+    const match = /^\w+ +(\w{3}) +(\d{1,2}) +(\d\d):(\d\d):(\d\d) +(\d{4})\s*$/.exec(text);
+    const month = match ? 'JanFebMarAprMayJunJulAugSepOctNovDec'.indexOf(match[1]) / 3 : -1;
+    if (!match || !Number.isInteger(month) || month < 0) return undefined;
+    return `b${match[6]}${String(month + 1).padStart(2, '0')}${match[2].padStart(2, '0')}${match[3]}${match[4]}${match[5]}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/** This process's own birth: it never changes, so it is asked for once. */
+let ownBirth = null;
+
+/** How long one check of a lifecycle owner's proof stands before it is made again. */
+const LIFECYCLE_PROOF_TTL_MS = 1_000;
+/** How long admission waits when no alp command holds it and yet it cannot be taken. */
+const LIFECYCLE_STUCK_MS = 30_000;
+
+const lifecycleDirectory = home => path.join(home, 'state', 'alpd.starting');
+/** The Windows hold of a lifecycle owner: outside the directory it publishes, which Windows would not move with an open handle inside. */
+const lifecycleHold = (home, id) => path.join(home, 'state', `alpd.lifecycle-${id}.held`);
+
+/**
+ * Immutable admission identities live in filenames, including for service hard links.
+ *
+ * `owner-<pid>-<boot time>-<start|stop>-<uuid>[-<proof>]`. The proof says how to tell the owner
+ * from another process that later got its pid (t-dc0e): `c<ticks>` or `b<time>` is the owner's
+ * birth as processBirth reads it, `e` a hold the owner keeps open on Windows (lifecycleHold, the
+ * handle of t-a5d8). A name without one comes from an older ALP and is judged by its pid; an
+ * older ALP reads a name with one as it always did, since the proof is hex digits after the uuid.
+ */
 async function lifecycleOwners(home) {
-  const directory = path.join(home, 'state', 'alpd.starting');
-  const names = await readdir(directory).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
+  const names = await readdir(lifecycleDirectory(home)).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
   return names.map(token => {
     const match = /^owner-(\d+)-(\d+)-(start|stop)-[a-f0-9-]+$/.exec(token);
     if (!match) throw new Error('Invalid alpd startup admission owner');
-    return { token, pid: Number(match[1]), bootTime: Number(match[2]), action: match[3] };
+    const proven = /-([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})-(c\d+|b\d{14}|e)$/.exec(token);
+    return { token, pid: Number(match[1]), bootTime: Number(match[2]), action: match[3], ...(proven ? { id: proven[1], proof: proven[2] } : {}) };
   });
 }
 
-export async function readDaemonLifecycle(home) {
-  return (await lifecycleOwners(home)).find(owner => lockAlive(owner));
+/**
+ * Whether a lifecycle owner still runs, and whether that was more than a look at its pid.
+ * A proof that cannot be checked here leaves the owner alive: only a different birth, or a hold
+ * nobody has open, shows that the pid belongs to someone else now.
+ */
+function lifecycleOwnerState(home, owner, { platform = process.platform, ops = holdOps } = {}) {
+  if (!lockAlive(owner)) return { alive: false, proven: true };
+  if (owner.proof === 'e') return platform === 'win32' ? { alive: ops.taken(lifecycleHold(home, owner.id)), proven: true } : { alive: true, proven: false };
+  if (!owner.proof) return { alive: true, proven: false };
+  const birth = processBirth(owner.pid, { platform });
+  if (birth === undefined || birth[0] !== owner.proof[0]) return { alive: true, proven: false };
+  return { alive: birth === owner.proof, proven: true };
+}
+
+/** Removes what a dead owner left: its token, then its hold. */
+async function reapLifecycleOwner(home, owner) {
+  await unlink(path.join(lifecycleDirectory(home), owner.token)).catch(error => { if (error.code !== 'ENOENT') throw error; });
+  if (owner.proof === 'e') await unlink(lifecycleHold(home, owner.id)).catch(() => {});
+}
+
+/** The start or stop that holds the lifecycle of `home` now, if one does. */
+export async function readDaemonLifecycle(home, { platform = process.platform, ops = holdOps } = {}) {
+  return (await lifecycleOwners(home)).find(owner => lifecycleOwnerState(home, owner, { platform, ops }).alive);
+}
+
+/**
+ * How long a start or stop waits behind one unchanged holder of the lifecycle before it gives up:
+ * twice the start timeout (a start waits that long for its launcher and again for readiness) and
+ * half a minute, so 150 s by default. A holder that finishes sooner is never cut short.
+ * @param {NodeJS.ProcessEnv} [env]
+ */
+export function daemonLifecycleWaitMs(env = process.env) {
+  return 2 * daemonStartTimeoutMs(env) + 30_000;
 }
 
 /** Serializes requested starts and stops, including the time before alpd has a lock.
  * Rename publishes a fully populated directory: an existing nonempty directory cannot
  * be replaced. Reaping/release unlinks only its unique owner token, then rmdir; even
  * racing stale reapers cannot remove a successor's nonempty directory.
+ *
+ * An owner is alive while its pid runs AND its proof holds (lifecycleOwners): the token of a
+ * crashed owner is reaped even when another process has its pid. Where no proof can be had, the
+ * wait is bounded instead: after `waitMs` behind the same holder, or LIFECYCLE_STUCK_MS with no
+ * holder at all, this rejects with ALP_LIFECYCLE_BUSY and says what to remove. It never takes the
+ * lifecycle from a holder it cannot show to be gone.
  */
-export async function withDaemonLifecycle(home, action, run, { joinStart = false, signal = /** @type {AbortSignal | undefined} */ (undefined) } = {}) {
+export async function withDaemonLifecycle(home, action, run, { joinStart = false, signal = /** @type {AbortSignal | undefined} */ (undefined), waitMs = daemonLifecycleWaitMs(), platform = process.platform, ops = holdOps } = {}) {
   signal?.throwIfAborted();
   try {
     await assertPrivateDirectory(home, { create: true });
@@ -532,22 +621,36 @@ export async function withDaemonLifecycle(home, action, run, { joinStart = false
   }
   const state = path.join(home, 'state');
   await assertPrivateDirectory(state, { create: true });
-  const directory = path.join(state, 'alpd.starting');
+  const directory = lifecycleDirectory(home);
   const currentBootId = bootId();
-  const token = `owner-${process.pid}-${bootTime()}-${action}-${randomUUID()}`;
+  const id = randomUUID();
+  // The proof comes before the token: whoever can read the token can already check it.
+  let proof, hold, fd;
+  if (platform === 'win32') {
+    hold = lifecycleHold(home, id);
+    try {
+      fd = ops.take(hold);
+      // As for alpd's lock: the hold counts only if a second open really fails.
+      if (ops.taken(hold)) proof = 'e';
+    } catch {}
+  } else {
+    if (ownBirth === null) ownBirth = processBirth(process.pid, { platform });
+    proof = ownBirth;
+  }
+  const token = `owner-${process.pid}-${bootTime()}-${action}-${id}${proof ? `-${proof}` : ''}`;
   const candidate = path.join(state, `alpd.starting-${token}`);
-  await mkdir(candidate, { mode: 0o700 });
-  await writeFile(path.join(candidate, token), JSON.stringify({
-    pid: process.pid,
-    bootTime: bootTime(),
-    ...(currentBootId ? { bootId: currentBootId } : {}),
-    startedUptime: Math.floor(os.uptime()),
-    action,
-  }), { mode: 0o600 });
   try {
+    await mkdir(candidate, { mode: 0o700 });
+    await writeFile(path.join(candidate, token), JSON.stringify({
+      pid: process.pid,
+      bootTime: bootTime(),
+      ...(currentBootId ? { bootId: currentBootId } : {}),
+      startedUptime: Math.floor(os.uptime()),
+      action,
+    }), { mode: 0o600 });
     let joined = false;
     if (joinStart) {
-      const owner = await readDaemonLifecycle(home);
+      const owner = await readDaemonLifecycle(home, { platform, ops });
       if (owner?.action === 'start') {
         try {
           // Linking the unique source token both validates this generation and
@@ -557,15 +660,31 @@ export async function withDaemonLifecycle(home, action, run, { joinStart = false
         } catch (error) { if (error.code !== 'ENOENT') throw error; }
       }
     }
+    // What blocks admission now and since when; the clock restarts whenever that changes.
+    let blocker, since = 0;
+    /** token → its owner's state and when it was read: ps is too slow to ask on every turn. */
+    const checked = new Map();
     while (!joined) {
       signal?.throwIfAborted();
       try { await rename(candidate, directory); break; }
       catch (error) {
         if (!['EEXIST', 'ENOTEMPTY', 'EPERM', 'EACCES'].includes(error.code)) throw error;
+        const holders = [];
         for (const owner of await lifecycleOwners(home)) {
-          if (!lockAlive(owner)) await unlink(path.join(directory, owner.token)).catch(error => { if (error.code !== 'ENOENT') throw error; });
+          let seen = checked.get(owner.token);
+          // A pid that is gone is seen at once; the proof is read again when it is a second old.
+          if (!seen || Date.now() - seen.at >= LIFECYCLE_PROOF_TTL_MS || !lockAlive(owner)) {
+            seen = { at: Date.now(), ...lifecycleOwnerState(home, owner, { platform, ops }) };
+            checked.set(owner.token, seen);
+          }
+          if (seen.alive) holders.push({ ...owner, proven: seen.proven });
+          else await reapLifecycleOwner(home, owner);
         }
         await rmdir(directory).catch(error => { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error; });
+        const now = holders.map(owner => owner.token).sort().join(' ') || `!${error.code}`;
+        if (now !== blocker) { blocker = now; since = Date.now(); }
+        const waited = Date.now() - since;
+        if (waited >= (holders.length ? waitMs : Math.min(waitMs, LIFECYCLE_STUCK_MS))) throw lifecycleBusy(home, action, holders, waited, error);
         await delay(25, undefined, { signal });
       }
     }
@@ -575,9 +694,30 @@ export async function withDaemonLifecycle(home, action, run, { joinStart = false
       await rmdir(directory).catch(error => { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error; });
     }
   } finally {
-    await unlink(path.join(candidate, token)).catch(error => { if (error.code !== 'ENOENT') throw error; });
-    await rmdir(candidate).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    try {
+      await unlink(path.join(candidate, token)).catch(error => { if (error.code !== 'ENOENT') throw error; });
+      await rmdir(candidate).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    } finally {
+      // Our token is gone from both places; only then the hold, so no one sees the token unheld.
+      if (hold) {
+        if (fd !== undefined) { try { ops.close(fd); } catch {} }
+        await unlink(hold).catch(() => {});
+      }
+    }
   }
+}
+
+/** Why admission gave up: who holds the lifecycle, for how long it was watched, and what to do. */
+function lifecycleBusy(home, action, holders, waited, cause) {
+  const directory = lifecycleDirectory(home);
+  const seconds = Math.max(1, Math.round(waited / 1000));
+  const [holder] = holders;
+  const message = !holder
+    ? `Could not ${action} alpd: its lifecycle in ${home} could not be taken for ${seconds} s (${cause.code}) although no alp command holds it. Check the permissions of ${directory} or remove it, then try again`
+    : holder.proven
+      ? `Could not ${action} alpd: waited ${seconds} s for another ${holder.action} of alpd (pid ${holder.pid}) that still runs. Wait for it or stop pid ${holder.pid}, then try again`
+      : `Could not ${action} alpd: waited ${seconds} s for a ${holder.action} of alpd recorded for pid ${holder.pid}, and could not tell whether pid ${holder.pid} is still that command. If pid ${holder.pid} is neither alpd nor an alp command, that command crashed and its pid went to another process: remove ${path.join(directory, holder.token)} and try again`;
+  return Object.assign(new Error(message, { cause }), { code: 'ALP_LIFECYCLE_BUSY', ...(holder ? { pid: holder.pid } : {}) });
 }
 
 /** How long a start waits for alpd to be ready by default: generous, as a loaded host can take a while. */
