@@ -15,7 +15,7 @@ const ANTIGRAVITY_MODES = [
   {
     id: 'read-only',
     label: 'Read only',
-    description: 'agy reads and searches; it denies file edits and terminal commands (--sandbox, request-review).',
+    description: 'agy reads and searches; the terminal allows pwd and nothing else, and every file edit is denied (--sandbox, request-review).',
   },
   {
     id: 'workspace-write',

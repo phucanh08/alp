@@ -321,7 +321,7 @@ alp provider test antigravity
 alp run --model antigravity:gemini-3.8-flash-high --mode full-access "Describe this project"
 ```
 
-A main profile can select `antigravity:gemini-3.8-flash-high` too. Sessions support `read-only`, `workspace-write` and `full-access`. Read-only uses agy's sandbox and permission settings: terminal access allows only `pwd`; native file reading, listing and search remain available. Workspace-write uses `--sandbox --mode accept-edits`; full-access runs without approval. Custom permission rules remain unsupported. Native file reads are not guaranteed to stay inside the workspace.
+A main profile can select `antigravity:gemini-3.8-flash-high` too. Sessions support `read-only`, `workspace-write` and `full-access`. Read-only uses agy's sandbox and permission settings: terminal access allows only `pwd`, so a read-only Antigravity session cannot run a verification command such as `git diff` or a test (a review that has to run commands belongs on another provider); agy's own file reading, listing and search remain available. Workspace-write uses `--sandbox --mode accept-edits`; full-access runs without approval. Custom permission rules remain unsupported. Native file reads are not guaranteed to stay inside the workspace.
 
 The legacy provider setting `readOnlyMode` and CLI flag `--read-only-mode` have been removed. Delete `readOnlyMode` from old provider JSON; ALP tolerates it on load with a migration warning and omits it from the loaded definition. Select permissions with the session's `--mode read-only|workspace-write|full-access` or the agent permission profile. This does not change an existing native session's mode.
 
