@@ -80,8 +80,9 @@ export type NpmShim = { kind: 'script'; flags: string[]; target: string } | { ki
 function shimTarget(target: string): string | undefined {
   const parts = target.split('\\');
   if (parts[0] !== 'node_modules' || parts.length < 3) return `runs ${target}, which is not inside the node_modules directory beside it`;
-  // No way out of that directory, and no name cmd or Windows would read differently from Node.
-  if (parts.some(part => !part || part === '.' || part === '..' || /[/:*?"<>|%^&\x00-\x1f]/.test(part))) return `runs ${target}, which is not a plain path inside the node_modules directory beside it`;
+  // No way out of that directory, and no name cmd or Windows would read differently from Node: Windows
+  // drops a trailing dot or space from a name (so `...` or `pkg.` names another file than Node reads).
+  if (parts.some(part => !part || part === '.' || part === '..' || /[. ]$/.test(part) || /[/:*?"<>|%^&\x00-\x1f]/.test(part))) return `runs ${target}, which is not a plain path inside the node_modules directory beside it`;
   return undefined;
 }
 
@@ -128,7 +129,9 @@ function pathDirectories(env: Record<string, string | undefined>, host: CommandH
   return (value(env) ?? value(host.parentEnv) ?? '').split(';')
     .map(directory => directory.trim().replace(/^"(.*)"$/, '$1'))
     // A relative entry means "under the working directory": a project must not be able to supply the provider.
-    .filter(directory => directory && win.isAbsolute(directory));
+    // Only drive paths count (C:\…): a rooted entry without a drive (\tools) depends on the current drive, and
+    // a UNC entry (\\server\share) on a share; they are skipped like relative ones, never searched.
+    .filter(directory => /^[A-Za-z]:[\\/]/.test(directory));
 }
 
 function refusal(names: ProviderNames, file: string, why: string): Error {
