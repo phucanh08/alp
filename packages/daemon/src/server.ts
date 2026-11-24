@@ -213,7 +213,7 @@ export type DaemonServer = {
  * shape so every viewer agrees; re-exported here to keep `@anhlp/alp-daemon/server`'s API. */
 export type { SessionSummary };
 
-export function createDaemonServer({ runtime, socketPath, version, onShutdown, store, runLogDir, previousExit, retentionSweepMs = RETENTION_SWEEP_MS, home, templates, scheduleTickMs = SCHEDULE_TICK_MS, scheduleDeliveryTimeoutMs, attachmentOptions, terminalOptions, modelCatalog }: {
+export function createDaemonServer({ runtime, socketPath, version, onShutdown, store, runLogDir, previousExit, retentionSweepMs = RETENTION_SWEEP_MS, home, templates, scheduleTickMs = SCHEDULE_TICK_MS, scheduleDeliveryTimeoutMs, attachmentOptions, terminalOptions, modelCatalog, restoreOnListen = false }: {
   /** The live model catalog (t-e5ee); without it catalog.get answers the static rows and catalog.refresh is unavailable. */
   modelCatalog?: ModelCatalog;
   runtime: AlpRuntime;
@@ -226,6 +226,13 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   runLogDir?: string;
   /** How the previous alpd ended, for daemon.status. */
   previousExit?: { kind: 'clean' | 'crash'; at?: string };
+  /**
+   * True starts the recovery (restore()) only once listen() has bound the endpoint, as alpd itself
+   * asks: a start that cannot listen then settles no session record and reopens nothing, so the next
+   * start still finds what the alpd before it left (t-11c7). Default false: at construction, for
+   * hosts that never listen (an embedded server, tests on local()).
+   */
+  restoreOnListen?: boolean;
   /** How often retention runs while alpd runs (ALPD §68); tests shorten it. */
   retentionSweepMs?: number;
   /** The daemon user's ALP_HOME, for the library, team and settings methods; without it alpd does not serve them. */
@@ -417,7 +424,11 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     now: clock,
     ...(scheduleDeliveryTimeoutMs === undefined ? {} : { deliveryTimeoutMs: scheduleDeliveryTimeoutMs }),
   }) : undefined;
-  restored = store ? restore() : Promise.resolve();
+  /** With restoreOnListen: starts the recovery, once; listen() calls it when the endpoint is bound. */
+  let beginRestore: (() => void) | undefined;
+  restored = !store ? Promise.resolve()
+    : restoreOnListen ? new Promise<void>((resolve, reject) => { beginRestore = () => { beginRestore = undefined; restore().then(resolve, reject); }; })
+    : restore();
 
   const deliver = (connection: Connection, envelope: Envelope) => {
     const message = { jsonrpc: '2.0', method: 'event', params: envelope };
@@ -2261,6 +2272,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         }
         catch (error) { await new Promise<void>(resolve => server.close(() => resolve())); throw error; }
       }
+      // The endpoint is bound: only now does a start that asked to wait settle records and reopen trees.
+      beginRestore?.();
     },
 
     local() {

@@ -319,7 +319,8 @@ async function run(home: string) {
   const modelCatalog = process.env.ALP_MODEL_CATALOG === 'static' ? undefined : createModelCatalog(home);
   setActiveCatalog(modelCatalog);
   void modelCatalog?.start().catch(() => {});
-  const server = createDaemonServer({ runtime, socketPath: socket, version: VERSION, store, runLogDir, previousExit: exit, home, templates, attachmentOptions: { limits: attachmentConfig.limits }, modelCatalog, onShutdown: () => void shutdown() });
+  // Recovery waits for the endpoint: a start that fails to listen has then settled nothing (t-11c7).
+  const server = createDaemonServer({ runtime, socketPath: socket, version: VERSION, store, runLogDir, previousExit: exit, home, templates, attachmentOptions: { limits: attachmentConfig.limits }, modelCatalog, restoreOnListen: true, onShutdown: () => void shutdown() });
   const beat = setInterval(() => {
     void heartbeat(home).then(owned => { if (!owned) void shutdown(1); });
     const now = new Date();
