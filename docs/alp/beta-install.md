@@ -1,6 +1,6 @@
 # Installing, upgrading and removing the ALP beta (`0.0.1-beta.13`)
 
-This guide covers the beta (`0.0.1-beta.13`; earlier betas were `0.0.0-beta.1`, `0.0.0-beta.2` and `0.0.1-beta.3` to `0.0.1-beta.13`): a new install, signing in to a provider, the daemon, the
+This guide covers the beta (`0.0.1-beta.13`; earlier betas were `0.0.0-beta.1`, `0.0.0-beta.2` and `0.0.1-beta.3` to `0.0.1-beta.12`): a new install, signing in to a provider, the daemon, the
 Paseo plugin, `alp dashboard` on this machine, upgrading from 0.10.0 or earlier, backups, going back,
 and removing ALP. What the beta includes and what it does not is in the
 [release notes](beta-release-notes.md); the scope, gate and release checklist are in
