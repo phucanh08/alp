@@ -4744,6 +4744,47 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   /** Why recovered sessions were reopened, for what they are told. */
   const restartCause = () => options.previousExit?.kind === 'crash' ? 'alpd stopped unexpectedly' : 'alpd restarted';
 
+  /** The run-log records that say an assignment started, started again, or ended; the last one tells where it stands. */
+  const LIFE_EVENTS = new Set(['assignment.started', 'assignment.recovered', 'assignment.finished']);
+  let inheritedSettled = false;
+  /**
+   * The assignments an earlier alpd left running, without those the tree's run log shows as finished
+   * (t-11c7). The live file alone is not evidence that work was running: an assignment leaves it by a
+   * write nobody waits for, and when that write fails (a full disk) or alpd goes before it lands, a
+   * finished assignment stays listed. Reopening it would run finished work again and tell its agent
+   * that alpd stopped under it. `assignment.finished` is written after the result reached the
+   * requester and the task was settled, so an entry it closes is dropped: not reopened, not failed,
+   * its task untouched. Without a run log there is nothing to check against, and the entries stand.
+   */
+  function inheritedWork() {
+    if (inheritedSettled) return inherited;
+    inheritedSettled = true;
+    const directory = options.runLogDir;
+    if (!directory || !inherited.length) return inherited;
+    const finished = new Set<string>();
+    for (const rootId of new Set(inherited.map(entry => entry.rootId))) {
+      const ids = new Set(inherited.filter(entry => entry.rootId === rootId).map(entry => entry.assignmentId));
+      let text: string;
+      try { text = readFileSync(path.join(directory, `${rootId.replace(/[^\w.-]/g, '_')}.jsonl`), 'utf8'); } catch { continue; }
+      const last = new Map<string, string>();
+      for (const line of text.split('\n')) {
+        if (!line.includes('"assignment.')) continue;
+        let entry: any;
+        try { entry = JSON.parse(line); } catch { continue; }
+        if (typeof entry?.assignmentId === 'string' && ids.has(entry.assignmentId) && LIFE_EVENTS.has(entry.event)) last.set(entry.assignmentId, entry.event);
+      }
+      for (const [id, event] of last) if (event === 'assignment.finished') finished.add(id);
+    }
+    for (const entry of inherited) {
+      if (!finished.has(entry.assignmentId)) continue;
+      log.warn(`assignment ${entry.assignmentId} is still in the live file but its run log shows it finished; it is not reopened`, { code: 'ALP_STALE_LIVE_ENTRY', assignmentId: entry.assignmentId, rootId: entry.rootId });
+      runLog(entry.rootId, { event: 'assignment.stale', assignmentId: entry.assignmentId, agent: entry.agent, ...(entry.taskId ? { taskId: entry.taskId } : {}), reason: 'the run log shows it finished; its entry in the live file had not been removed' });
+      void inFlight.remove(entry.assignmentId);
+    }
+    inherited = inherited.filter(entry => !finished.has(entry.assignmentId));
+    return inherited;
+  }
+
   /**
    * Opens an assignment an earlier alpd left running again, under its own id, in
    * its requester's tree: its thread, worktree or copy, write lease, task and claims.
@@ -4864,7 +4905,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   async function recoverTree(rootId: string, continueRoot: boolean, parkedRoot?: string): Promise<RecoveryOutcome[]> {
     const root = sessions.get(rootId);
     if (!root || root.closed) throw new Error(`Session ${rootId} is not open`);
-    const entries = inherited.filter(entry => entry.rootId === rootId).sort((a, b) => a.ancestry.length - b.ancestry.length);
+    const entries = inheritedWork().filter(entry => entry.rootId === rootId).sort((a, b) => a.ancestry.length - b.ancestry.length);
     inherited = inherited.filter(entry => entry.rootId !== rootId);
     const outcomes: RecoveryOutcome[] = [];
     const resumed = new Map<string, Assignment[]>();
@@ -5681,7 +5722,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     },
 
     recoverable() {
-      return [...inherited];
+      return [...inheritedWork()];
     },
 
     recover(rootId, { continueRoot = false, parkedRoot } = {}) {
@@ -5689,7 +5730,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     },
 
     async abandon(rootId, reason) {
-      const entries = inherited.filter(entry => entry.rootId === rootId);
+      const entries = inheritedWork().filter(entry => entry.rootId === rootId);
       inherited = inherited.filter(entry => entry.rootId !== rootId);
       for (const entry of entries) await abandonEntry(entry, reason);
       return entries.map(entry => ({ assignmentId: entry.assignmentId, agent: entry.agent, outcome: 'failed' as const, error: reason }));
