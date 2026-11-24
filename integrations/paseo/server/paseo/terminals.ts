@@ -496,9 +496,11 @@ export function createTerminals({
    * type: at the floor (0.11.1) the payload's cwd is required, and no app that old subscribes so.
    */
   function directoryMessage(sub: DirectorySub, terminals: ReturnType<typeof listed>, requestId?: string) {
-    const head = { ...(requestId ? { requestId } : {}), ...(sub.workspaceId ? { workspaceId: sub.workspaceId } : {}) };
-    if (sub.cwd === undefined) return { type: 'terminals_changed', payload: { ...head, terminals } };
-    return { type: 'terminals_changed', payload: { ...head, cwd: sub.cwd, terminals } } satisfies Outbound;
+    const request = requestId ? { requestId } : {};
+    const workspace = sub.workspaceId ? { workspaceId: sub.workspaceId } : {};
+    if (sub.cwd === undefined) return { type: 'terminals_changed', payload: { ...request, ...workspace, terminals } };
+    // Key order as before t-1af7, so a cwd subscription's reply stays byte-identical.
+    return { type: 'terminals_changed', payload: { ...request, cwd: sub.cwd, ...workspace, terminals } } satisfies Outbound;
   }
   async function find(terminalId: string) {
     const state = await running();
