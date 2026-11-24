@@ -127,15 +127,15 @@ scripted requester, in a scratch Git repository under `/tmp`, with model
 `gemini-3.8-flash-high` on macOS. agy reported 1.5.16. The supervisor is started by ALP after
 a scripted main turn instead of by `alp_delegate`.
 
-| Role (read-only) | Assignment | Result |
-| :-- | :-- | :-- |
-| reviewer | review a one-file diff | handoff with a verdict and path:line findings |
-| oracle | advise on a design question | handoff with a recommendation and its evidence |
-| peer | research the callers of a function | handoff with a path:line list |
-| scout | locate code | handoff with a path:line list |
-| architect | draft an ADR | handoff with an ADR draft |
-| lead (Cafe) | plan a fix as a peer brief | handoff with a plan and a peer brief; it did not delegate |
-| supervisor | review a main turn's digest | a note to main naming three process faults of that turn. It ran with a team override `thinking: none` because of t-ca83; the shipped team still fails silently, and t-ca83 is open |
+| Role (read-only) | Assignment | ALP assignment id | agy conversation id | Result |
+| :-- | :-- | :-- | :-- | :-- |
+| reviewer | review a one-file diff | `alp-child-b2ce0490-68ac-4b89-86e5-b812c784d2c7` | `301ffc8b-70e5-4822-98be-2e1f795d4de8` | handoff with a verdict and path:line findings |
+| oracle | advise on a design question | `alp-child-0b63b749-0bd9-4fb8-b6c4-06580452484e` | `a80efea4-7e77-44f5-87b6-089939bea470` | handoff with a recommendation and its evidence |
+| peer | research the callers of a function | `alp-child-54dcd362-dc88-40c8-b592-61503cbc8324` | `651ae578-82d7-46a5-a045-50470a360b0f` | handoff with a path:line list |
+| scout | locate code | `alp-child-bf3361eb-b41f-474f-abe1-1e8b8e87809d` | `71ba29a0-a7b0-4ce8-b232-4ca24e9357a6` | handoff with a path:line list |
+| architect | draft an ADR | `alp-child-34f341e3-0d02-4eed-8f6d-f85ba09300ac` | `698b5a63-a6da-4580-b3c7-d4cd4caf9b66` | handoff with an ADR draft |
+| lead (Cafe) | plan a fix as a peer brief | `alp-child-5f753d26-5458-41b0-b10d-bd5c300ad12b` | `bdb5c361-d274-4486-8130-26a42ca8dd0b` | handoff with a plan and a peer brief; it did not delegate |
+| supervisor | review a main turn's digest | `alp-supervisor-83a9b835-7c31-4b19-bddc-8105827fb78c` | `858695f8-a116-4695-a963-65e69e8bc9cf` | a note to main naming three process faults of that turn. It ran with a team override `thinking: none` because of t-ca83; the shipped team still fails silently, and t-ca83 is open |
 
 What the roles read and ran outside their task:
 
