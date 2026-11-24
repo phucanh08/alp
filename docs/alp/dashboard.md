@@ -1,6 +1,6 @@
 # ALP dashboard (Task 10A, beta)
 
-> **Trạng thái (`0.0.1-beta.12`; app này có trong các bản beta sau `0.0.1-beta.3`, tên lệnh là `alp web` đến `0.0.1-beta.8`).** App `apps/web` (`@anhlp/alp-web`,
+> **Trạng thái (`0.0.1-beta.13`; app này có trong các bản beta sau `0.0.1-beta.3`, tên lệnh là `alp web` đến `0.0.1-beta.8`).** App `apps/web` (`@anhlp/alp-web`,
 > private) không phải là package riêng: nó được build vào CLI (`@anhlp/alp`, `@anhlp/alp-cli`,
 > `dist/alp-dashboard/`) và mở bằng `alp dashboard` (§3.1). `@anhlp/alp-gateway` vẫn không phát hành; CLI mang
 > sẵn gateway trong `dist/alp-dashboard.js`. Cách triển khai riêng ở §3.2 cần `alp-gateway` chạy từ
