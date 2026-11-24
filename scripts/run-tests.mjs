@@ -6,7 +6,8 @@
 // Direct node --test calls bypass this session isolation; CI and agent shells should use this entry.
 // Files report their progress and time out after five minutes even with leaked handles; a file that times
 // out first dumps its subtests (and on POSIX its processes and handles; on Windows ALP_WATCHDOG_WIN_PROCS=1).
-// --private-home also removes ALP_*_BIN and gives the run a throwaway HOME/USERPROFILE.
+// Every run gets a throwaway HOME/USERPROFILE, no caller ALP_*_BIN and a PATH without provider commands
+// (runNodeTests, t-a87f); --private-home is still accepted for the lanes that pass it and changes nothing.
 import { runNodeTests } from './test-lib.mjs';
 
 const args = process.argv.slice(2);

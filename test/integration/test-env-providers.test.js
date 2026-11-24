@@ -44,8 +44,20 @@ test('providerFreePath keeps directories without providers and shadows the other
   await writeFile(path.join(providers, 'git'), '');
   const shadowRoot = path.join(root, 'shadow');
   const result = providerFreePath([plain, providers, path.join(root, 'missing')].join(':'), shadowRoot, { platform: 'linux' }).split(':');
-  assert.deepEqual(result, [plain, path.join(shadowRoot, '0'), path.join(root, 'missing')]);
+  assert.deepEqual(result, [plain, path.join(shadowRoot, '0')], 'a directory that cannot be listed is dropped');
   assert.deepEqual(await readdir(path.join(shadowRoot, '0')), ['git'], 'only the non-provider entry is linked');
+});
+
+test('providerFreePath drops a directory it cannot list instead of keeping it (fail closed)', { skip: !posix || process.getuid?.() === 0 ? 'needs POSIX permissions and a non-root user' : false }, async t => {
+  const root = await scratch(t, 'alp-provider-path-locked-');
+  const locked = path.join(root, 'locked');
+  await recordingFakes(locked, path.join(root, 'never.log'));
+  await chmod(locked, 0o111); // execute-only: a program in it can still be started by name, but it cannot be listed
+  teardown(t)(() => chmod(locked, 0o755)); // runs before the scratch removal registered above
+  const plain = path.join(root, 'plain');
+  await mkdir(plain);
+  const result = providerFreePath([locked, plain].join(':'), path.join(root, 'shadow'), { platform: 'linux' }).split(':');
+  assert.deepEqual(result, [plain]);
 });
 
 test('providerFreePath on Windows drops providers with any executable extension, case-insensitively', async t => {

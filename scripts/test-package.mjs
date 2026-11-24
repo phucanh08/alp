@@ -11,7 +11,8 @@ import { buildWorkspace, packageTests, packages, runNodeTests } from './test-lib
  */
 const testSupport = { client: ['runtime'] };
 
-// --private-home: also no ALP_*_BIN and a throwaway HOME/USERPROFILE (runNodeTests, t-bfbd).
+// --private-home is still accepted and changes nothing: runNodeTests always gives a throwaway
+// HOME/USERPROFILE without caller ALP_*_BIN (t-bfbd, t-a87f).
 const privateHome = process.argv.includes('--private-home');
 const [argument] = process.argv.slice(2).filter(arg => arg !== '--private-home');
 const name = argument === 'paseo-plugin' ? 'paseo' : argument;
