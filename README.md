@@ -282,6 +282,7 @@ Finished assignments stay recallable for 14 days: main, or the agent that assign
 ```sh
 alp dashboard            # starts the alp-dashboard service if needed and opens its address with its access token
 alp dashboard --print    # prints the address instead (--no-open does the same)
+alp dashboard --print --json   # the same as one JSON line with exit codes 0-8, for programs (docs/alp/dashboard.md §3.3)
 alp dashboard --status   # whether it runs: pid, address without its token, port
 alp dashboard --stop     # stops it
 alp dashboard rotate     # replaces the access token; open pages lose access

@@ -15,6 +15,7 @@ const USAGE = `Usage:
   alp daemon run [--detach] [--service]  run alpd in this process (what services written by 0.0.1-beta.5/6 start)
   alp acp                                serve ALP to an editor (Zed, JetBrains) over the Agent Client Protocol on stdio
   alp dashboard [--port N] [--host 127.0.0.1|localhost] [--no-open|--print]   open ALP's dashboard in the browser (alp-dashboard, loopback only); --no-open/--print only print its address
+  alp dashboard --print --json           as --print, but one JSON line on stdout (schema alp.dashboard.print: url, origin, token, port, pid; or error.code) and exit codes 0-8, for programs
   alp dashboard --status|--stop          whether alp dashboard runs (address without its token) | stop it
   alp desktop                            open ALP's desktop app (ALP.app, else the checkout in ALP_DESKTOP_CHECKOUT)
   alp dashboard serve [--service|--rotate] [--project DIR] [--port N]   run alp-dashboard in this process (what alp dashboard starts)

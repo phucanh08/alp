@@ -171,6 +171,7 @@ Paseo nor `@anhlp/alp-paseo`.
 ```sh
 alp dashboard              # starts the alp-dashboard service if needed and opens its address with its token
 alp dashboard --print      # prints the address instead
+alp dashboard --print --json   # the same as one JSON line with exit codes, for programs (dashboard.md §3.3)
 alp dashboard rotate       # replaces the token; pages already open lose access
 ```
 
