@@ -3118,7 +3118,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (assignment.taskId) result.task = await settleTask(parent, assignment, state, child?.handoff);
 
     if (child) void runHooks(assignment.id, child, 'assignment.end', { assignment: assignment.id, status: state, handoff: child.handoff ?? null }, assignment.taskId);
-    const relayTo = routeResult(assignment.rootId, parentId, assignment.id, !quiet);
+    // The requester gets the result only while it is open (post() drops mail to a closed session), as in abandonEntry.
+    const relayTo = routeResult(assignment.rootId, parentId, assignment.id, !quiet && !parent.closed);
     runLog(rootOf(parentId), {
       event: 'assignment.finished',
       assignmentId: assignment.id,
