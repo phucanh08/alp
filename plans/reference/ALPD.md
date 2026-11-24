@@ -382,7 +382,7 @@ Step 2 implements a subset of §6 and changes a few shapes. §6 stays the target
 | method | params → result |
 |---|---|
 | `session.create` | `{ sessionId?, spec: SessionSpec, history? = 'skip', delegation? = true }` → `{ session, attached }`. The caller may choose the id (Paseo uses its own); otherwise `ses_` + 16 hex. If that root is still live, the caller attaches to it instead: alpd re-announces the root (and its timeline when `history: 'replay'`), live children, and running turns. |
-| `session.attach` | `{ sessionId, replay? = true }` → `{ session }`. Attaches to the root of `sessionId` and replays the retained tree log (CLI `attach`). |
+| `session.attach` | `{ sessionId, replay? = true }` → `{ session }`. Attaches to the root of `sessionId` and replays the retained tree log (CLI `attach`). A notice read back from history (attach, `session.history`, a reopened root's replay) carries `[issued <time>, replayed]` in front of its text, the time its envelope was written; a notice sent live has no mark (t-2e23). |
 | `session.release` | `{ sessionId }` → `{ closed }`. Detaches; closes the root at once if it is idle. |
 | `session.prompt` | `{ sessionId, clientMessageId, delivery: 'auto' \| 'steer', content }` → `{}`. Results arrive as `prompt.accepted` / `prompt.failed` events. |
 | `session.interrupt`, `session.configure { mode }`, `session.close`, `session.get`, `session.list` | As in §6, without paging. `session.list` returns live sessions, roots first. |

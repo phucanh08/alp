@@ -1434,7 +1434,10 @@ forever. Wakes do not reset the per-turn delegation limit. Steered and wake
 batches are capped at 9,000 characters; bodies at 8,000.
 
 Mail is acknowledged only when the turn that received it completes. If that turn
-fails or is canceled, the mail is delivered again marked `redelivered`. A requester
+fails or is canceled, the mail is delivered again marked `issued <time>, redelivered` (just
+`redelivered` when its posting time is not known);
+mail delivered 10 minutes or more after it was posted is marked `issued <time>, delivered late`
+(t-2e23). A requester
 whose turn ends while its assignments still run is not finished: it is woken by
 their mail and hands off only after a turn ends with nothing outstanding.
 
