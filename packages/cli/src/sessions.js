@@ -24,9 +24,21 @@ export function toolLine(item) {
   return item.name === 'alp_delegate' ? `delegate → ${detail.input?.agent}` : item.name;
 }
 
+/**
+ * How a root's answer is labelled for a person: plain `main:` in a turn the user started, and the
+ * turn's origin otherwise (`main [wake turn]:`), because `alp run` follows the root until it is idle
+ * and can print turns ALP started after the answer, such as a supervisor's check-in (t-beb5).
+ * Children's turns are assignments and keep the plain label. `--json` output does not change.
+ */
+export function answerLabel(agent, { root, origin }) {
+  return root && origin && origin !== 'user' ? `${agent} [${origin} turn]` : agent;
+}
+
 function printer(json) {
   const depth = new Map();
   const agents = new Map();
+  /** The origin of each session's current turn, from its turn.started. */
+  const origins = new Map();
   const printed = new Set();
   const latest = new Map();
   const line = (sessionId, text) => console.log(`${'  '.repeat(depth.get(sessionId) ?? 0)}${text}`);
@@ -59,11 +71,14 @@ function printer(json) {
       line(sessionId, `    answer here, or with: alp answer ${question.id} <text>`);
     } else if (event.type === 'question.resolved') {
       line(sessionId, `  ↳ ${event.questionId} ${event.outcome}${event.answer !== undefined ? `: ${event.answer}` : ''}`);
+    } else if (event.type === 'turn.started') {
+      origins.set(sessionId, event.origin);
     } else if (event.type === 'turn.ended') {
+      const label = answerLabel(agents.get(sessionId) ?? 'agent', { root: (depth.get(sessionId) ?? 0) === 0, origin: origins.get(sessionId) });
       for (const [id, entry] of latest) {
         if (entry.sessionId !== sessionId || printed.has(id) || entry.item.kind !== 'assistant_message') continue;
         printed.add(id);
-        line(sessionId, `  ${agents.get(sessionId) ?? 'agent'}: ${entry.item.text.replace(/\n/g, `\n${'  '.repeat((depth.get(sessionId) ?? 0) + 2)}`)}`);
+        line(sessionId, `  ${label}: ${entry.item.text.replace(/\n/g, `\n${'  '.repeat((depth.get(sessionId) ?? 0) + 2)}`)}`);
       }
       if (event.state !== 'completed') line(sessionId, `  turn ${event.state}${event.error ? `: ${event.error.message}` : ''}`);
     } else if (event.type === 'prompt.failed') {

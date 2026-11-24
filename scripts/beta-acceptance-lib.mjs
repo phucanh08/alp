@@ -263,9 +263,28 @@ export function follow(run, label, args, { env, cwd, alp }) {
         waiting.push(wait);
       });
     },
-    /** The final assistant text of each root turn, for a person to read. */
-    answers() { return envelopes.filter(envelope => envelope.sessionId === this.rootId && envelope.event?.type === 'item' && envelope.event.item?.kind === 'assistant_message').map(envelope => envelope.event.item.text); },
+    /**
+     * The root's assistant texts in the turns the user started (origin 'user'), in order. `alp run`
+     * follows the root until it is idle, so the stream also holds turns ALP started after the answer,
+     * such as a supervisor's check-in; what the root says there is not the answer to the prompt (t-beb5).
+     */
+    answers() { return userTurnAnswers(envelopes, this.rootId); },
+    /** Every assistant text of the root, whoever started its turn: for the evidence, not for judging. */
+    allAnswers() { return envelopes.filter(envelope => envelope.sessionId === this.rootId && envelope.event?.type === 'item' && envelope.event.item?.kind === 'assistant_message').map(envelope => envelope.event.item.text); },
   };
+}
+
+/** The assistant texts `rootId` wrote in turns whose turn.started has origin 'user', in stream order. */
+export function userTurnAnswers(envelopes, rootId) {
+  const answers = [];
+  let origin;
+  for (const { sessionId, event } of envelopes) {
+    if (sessionId !== rootId || !event) continue;
+    if (event.type === 'turn.started') origin = event.origin;
+    else if (event.type === 'turn.ended') origin = undefined;
+    else if (origin === 'user' && event.type === 'item' && event.item?.kind === 'assistant_message') answers.push(event.item.text);
+  }
+  return answers;
 }
 
 /** Exercise C5 against the initial root turn. */

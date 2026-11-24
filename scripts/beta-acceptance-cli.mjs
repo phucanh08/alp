@@ -104,7 +104,11 @@ try {
     if (!ps.includes(c4Root.slice(0, 12))) throw new Error(`alp ps --all does not list ${c4Root}`);
     // What C8 should remember: the project's entries this answer names.
     c4Named = readdirSync(project).filter(entry => entry !== '.git' && answer.toLowerCase().includes(entry.toLowerCase()));
-    run.record('C4', 'pass', `session ${c4Root} answered and is listed`, { session: c4Root, answer: answer.slice(0, 2000) });
+    // The answer is read from the user's turn only (t-beb5); the root's turns, by origin, and what it
+    // said outside the user's turn (a supervisor's check-in, mail) stay in the evidence.
+    const turns = stream.envelopes.filter(e => e.sessionId === c4Root && e.event?.type === 'turn.started').map(e => e.event.origin);
+    const elsewhere = stream.allAnswers().length - stream.answers().length;
+    run.record('C4', 'pass', `session ${c4Root} answered and is listed`, { session: c4Root, answer: answer.slice(0, 2000), turns, otherTurnMessages: elsewhere });
   });
 
   await run.step('C5', 'alp interrupt, then Ctrl-C, then alp send', async () => {
