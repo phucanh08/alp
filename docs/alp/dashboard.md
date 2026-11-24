@@ -74,7 +74,8 @@ Trước t-81b0.5 (đến `0.0.1-beta.8`) lệnh này là `alp web`; `alp web` �
 ```sh
 alp dashboard                 # chạy service alp-dashboard nếu chưa chạy, rồi mở link có token trong trình duyệt
 alp dashboard --no-open       # như trên nhưng không mở trình duyệt, chỉ in link
-alp dashboard --print         # chỉ in link (app desktop dùng lệnh này)
+alp dashboard --print         # chỉ in link
+alp dashboard --print --json  # một dòng JSON cho chương trình đọc (§3.3; app desktop dùng lệnh này)
 alp dashboard --port 7500     # lần chạy này dùng port 7500 (không đổi dashboard.port)
 alp dashboard --host localhost   # in link với localhost; chỉ nhận 127.0.0.1 hoặc localhost
 alp dashboard --status        # service có chạy không: pid, link KHÔNG kèm token, port; luôn exit 0, không đổi gì
@@ -139,7 +140,7 @@ alp desktop                   # mở app desktop (docs/alp/desktop.md)
   (đọc `<home>/gateway`) không thấy credential này. **Mỗi lần service khởi động** tạo credential mới,
   thu hồi mọi credential cũ, và chỉ giữ token trong bộ nhớ; `alp dashboard` lấy token qua socket riêng
   của service (§4.2). Tab đang mở với token cũ nhận 401 và báo chạy `alp dashboard` lại; app desktop tự
-  chạy lại `alp dashboard --print`.
+  chạy lại `alp dashboard --print --json` (§3.3).
 - `alp dashboard rotate`: dừng alp-dashboard, thu hồi mọi credential trong kho đó (token cũ hết hiệu lực,
   trang đang mở nhận 401 và báo chạy `alp dashboard` lại), rồi chạy lại service (với token mới, như mọi lần
   khởi động) và in link mới. Với `"dashboard": { "enabled": false }`, rotate vẫn thu hồi token nhưng không
@@ -209,6 +210,80 @@ Từ máy khác không có HTTPS: `ssh -L 7434:127.0.0.1:7434 -L 7435:127.0.0.1:
 phân biệt được trang của `alp dashboard` với bản tự phục vụ, nên ô gateway lúc đầu là origin của trang
 (`http://127.0.0.1:7435`): gõ `http://127.0.0.1:7434` một lần, app nhớ địa chỉ đó cho lần sau.
 
+### 3.3 `alp dashboard --print --json`: hợp đồng cho chương trình (t-81b0.4)
+
+Dành cho client không phải người (app desktop, script). Lệnh làm đúng việc của `alp dashboard --print`
+(chạy service nếu chưa chạy, không mở trình duyệt) và chỉ khác ở đầu ra. `--json` đứng một mình hoặc đi
+với `--no-open` cũng cho kết quả như vậy; `--port` và `--host` dùng được như thường. `--json` không đi với
+`--status`, `--stop` hay các lệnh con `rotate`, `pair`, `serve`.
+
+**stdout: đúng một dòng, là một object JSON, cả khi thành công lẫn khi lỗi.** Mọi thứ khác (thông báo
+chuyển từ `alp web`, và chính thông báo lỗi dạng `alp: …`) nằm ở stderr.
+
+Thành công (exit 0):
+
+```json
+{"schema":"alp.dashboard.print","version":1,"ok":true,"url":"http://127.0.0.1:7433/#token=alpgw1.…","origin":"http://127.0.0.1:7433","token":"alpgw1.…","port":7433,"pid":4242}
+```
+
+| Field | Ý nghĩa |
+|---|---|
+| `schema` | Luôn là `"alp.dashboard.print"`. |
+| `version` | Số nguyên, hiện là `1` (quy tắc đổi ở dưới). |
+| `ok` | `true`. |
+| `url` | Địa chỉ để mở, token nằm trong fragment; đúng chuỗi mà `alp dashboard --print` in. |
+| `origin` | Origin của service, không có `/` cuối, không có token. Với `--host localhost` là `http://localhost:<port>`. |
+| `token` | Token gateway (`alpgw1.…`) của lần chạy service này; cùng giá trị với fragment của `url`. |
+| `port` | Port service đang nghe trên `127.0.0.1`. |
+| `pid` | Pid của service alp-dashboard (process giữ `integrations/dashboard.lock`). |
+
+Lỗi (exit khác 0):
+
+```json
+{"schema":"alp.dashboard.print","version":1,"ok":false,"error":{"code":"disabled","message":"alp dashboard is disabled by settings (\"dashboard.enabled\": false)."}}
+```
+
+`error.message` là câu cho người đọc (tiếng Anh, có thể đổi chữ); chương trình rẽ nhánh theo `error.code`
+hoặc exit code, hai thứ này ổn định và luôn khớp nhau:
+
+| Exit | `error.code` | Khi nào |
+|---|---|---|
+| 0 | (không có) | Thành công. |
+| 1 | `failed` | Lỗi không thuộc lớp nào bên dưới. Đây cũng là exit code của alp chưa có hợp đồng này (xem "alp cũ"). |
+| 2 | `usage` | Tham số sai: option lạ, có positional, `--port` ngoài 1024–65535, `--host` không phải loopback, `--json` đi với `--status`/`--stop`. Không có gì được khởi động. |
+| 3 | `disabled` | `"dashboard": { "enabled": false }` trong `settings.json`. Không có gì được khởi động. |
+| 4 | `agent` | Process do một agent của ALP khởi động (`ALP_AGENT_SESSION` có giá trị): lệnh là của người dùng (t-1c59). Không có gì được đọc. |
+| 5 | `not_built` | CLI này không có `alp-dashboard.js` (bản build thiếu service). |
+| 6 | `conflict` | Có thứ khác đang chiếm chỗ và người dùng phải dừng nó: lock của dashboard do một process alp không chứng minh được là service giữ, `alp web` cũ không dừng được, service đang chạy ở port khác với `--port`, hoặc port của `--port` đang bận. |
+| 7 | `service` | Service không khởi động được, không công bố địa chỉ, hoặc không trao token qua socket. Xem `<home>/logs/integrations/alp-dashboard.log`. |
+| 8 | `daemon` | alpd không khởi động được. |
+
+Quy tắc tiến hoá: thêm field mới, thêm `error.code` mới (kèm exit code mới) **không** đổi `version`; client
+phải bỏ qua field lạ và coi `error.code` lạ như `failed`. Bỏ field, đổi nghĩa hay kiểu của field, hoặc đổi
+nghĩa của một exit code thì tăng `version`; client gặp `version` nó không biết thì từ chối, không đoán.
+
+**Token và t-cee3 (§4.2).** t-cee3 bỏ token khỏi mọi file; `--json` không đưa nó trở lại nơi nào đã bỏ.
+Token chỉ có trong dòng JSON thành công trên stdout của chính lệnh do người dùng (hoặc app của họ) chạy,
+đúng kênh mà `alp dashboard --print` vốn đã in `url` kèm token: một pipe hoặc terminal thuộc process gọi
+lệnh. Nó không vào file nào, không vào argv của process nào (argv hiện trong `ps`; `--json` không mở trình
+duyệt nên cũng không có lệnh `open <url>`), không vào log, không vào stderr, và dòng JSON lỗi không bao giờ
+có token. Field `token` không tăng mức lộ so với `url`: cùng một bí mật, cùng một dòng. Client phải giữ
+dòng này trong bộ nhớ và không ghi log stdout của lệnh. Lệnh vẫn từ chối process của agent (exit 4) trước
+khi đọc bất cứ thứ gì.
+
+**App desktop** (`apps/desktop/src/dashboard.ts`) chạy `alp dashboard --print --json`, đọc dòng cuối của
+stdout, và chỉ mở `url` sau khi tự kiểm lại rằng đó đúng là `http://127.0.0.1:<port>/#token=alpgw1.…`
+(`validateDashboardUrl`); nó không tin `origin` trong JSON. Khi lỗi, nó hiện `error.message`.
+
+**alp cũ.** `0.0.1-beta.13` trở về trước không biết `--json`: lệnh in usage ra stderr và exit 1, không in
+JSON. Khi gặp đúng trường hợp đó (không có dòng JSON, có `Usage:`), app desktop chạy lại
+`alp dashboard --print` và khớp dòng cuối bằng regex như trước. Fallback này được giữ có chủ ý vì ALP.app
+(DMG) và CLI được cài và cập nhật riêng: một ALP.app mới vẫn phải mở được alp `beta.9`–`beta.13`. Bỏ nó
+khi các bản đó không còn được hỗ trợ.
+
+Test: `test/integration/dashboard-process.test.js` (hai test `t-81b0.4`: định dạng và exit code),
+`apps/desktop/test/dashboard.test.ts`.
+
 ## 4. Thiết kế
 
 ### 4.1 Ranh giới bundle
@@ -239,7 +314,7 @@ phân biệt được trang của `alp dashboard` với bản tự phục vụ, 
     thu hồi mọi credential khác trong `<home>/dashboard/credentials.json`, và giữ token trong bộ nhớ.
     `dashboard.json` (`version: 3`) không có khoá `token`; một `token` do bản cũ để lại bị xoá khỏi file
     khi service khởi động hoặc khi chạy `alp dashboard --stop` (credential của nó bị thu hồi cùng lúc).
-  - `alp dashboard [--print]` lấy token qua socket của service (`packages/cli/src/dashboard/token-socket.js`,
+  - `alp dashboard [--print] [--json]` lấy token qua socket của service (`packages/cli/src/dashboard/token-socket.js`,
     phía client ở `packages/cli/src/dashboard-service.js`): client ghi một dòng `{"op":"token"}`, service
     trả một dòng JSON `{token, credentialId, pid}` rồi đóng; client kiểm `pid` khớp với lock của service
     (một kiểm tra nhất quán để bỏ qua socket cũ của service đã chết, không phải ranh giới bảo mật: ranh
