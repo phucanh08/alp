@@ -5,6 +5,8 @@
 //   (a) a start that failed after writing the marker left it, so the next start read a crash;
 //   (b) a requested stop that outlasted alpd's exit timer left it too;
 //   (c) a finished assignment whose removal from live.json never reached the disk was reopened.
+// And one way a real crash went untold: (e) a start that failed to listen had already begun the
+// recovery, so it could end the root's turn before the alpd that does start had a chance to continue it.
 // Each test sets the situation up for real (alpd processes on a scratch home, or two runtimes on
 // one state directory) and also checks that a real crash is still reported and still reopens work.
 import test from 'node:test';
@@ -12,7 +14,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { openSync, closeSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -110,6 +112,12 @@ async function harness(t) {
       return result;
     },
     create: daemon => daemon.request('session.create', { spec: { cwd: project, persist: true, model: MODEL } }),
+    /** The session records on disk: file name → status. A `.tmp` among them is a write that was cut off. */
+    async records() {
+      const directory = path.join(home, 'state', 'sessions');
+      const names = (await readdir(directory)).sort();
+      return Object.fromEntries(await Promise.all(names.map(async name => [name, JSON.parse(await readFile(path.join(directory, name), 'utf8')).status])));
+    },
     /** The recovery prompts the provider received, across every provider process. */
     async recoveryPrompts() { return (await journal()).filter(entry => entry.method === 'turn/start' && /during your turn/.test(entry.text ?? '')).map(entry => entry.text); },
     /** The notices kept in a root's timeline. */
@@ -133,17 +141,23 @@ test('t-11c7 (a): a start that fails after writing its marker does not make the 
   assert.match(await h.log(), /ALP_IPC_LISTEN_FAILED/);
   assert.equal(await exists(h.marker), false, 'a start that failed leaves no marker of its own');
 
+  // (e) The start that failed settled nothing: the root's record is as the clean stop left it.
+  assert.deepEqual(await h.records(), { [`${session.id}.json`]: 'running' });
+
   const third = await h.start();
   defer(() => third.stop());
   assert.deepEqual((await third.request('daemon.status')).previousExit, { kind: 'clean' });
+  // The root that was working at the clean stop continues, and is told what happened: a restart.
+  await until(async () => (await h.recoveryPrompts()).length === 1, 'the recovery prompt');
+  assert.match((await h.recoveryPrompts())[0], /ALP: alpd restarted during your turn, and reopened this session\./);
+  await until(async () => (await h.notices(session.id)).some(notice => /reopened/.test(notice)), 'the recovery notice');
+  const notices = await h.notices(session.id);
+  assert.deepEqual(notices.filter(notice => /reopened/.test(notice)), ['ALP: alpd restarted. 0 of 0 running assignments reopened, and this session.']);
+  assert.doesNotMatch(notices.join('\n'), /stopped unexpectedly/);
   assert.doesNotMatch(await h.log(), /ALP_PREVIOUS_CRASH/);
-  // Whether the root continues here is not this test's: the start that failed had begun settling the
-  // session records before it failed to listen, so it may already have ended the root's turn. What
-  // the root is told when it does continue follows previousExit alone; test (b) reads it from a real alpd.
-  assert.doesNotMatch((await h.recoveryPrompts()).join('\n'), /stopped unexpectedly/);
 });
 
-test('t-11c7 (a): a failed start after a real crash keeps the crash and its time for the next alpd', { skip }, async t => {
+test('t-11c7 (a, e): after a real crash and a start that failed, the alpd that does start tells the crash with its own time and continues the root', { skip }, async t => {
   const defer = teardown(t);
   const h = await harness(t);
   const first = await h.start();
@@ -158,6 +172,8 @@ test('t-11c7 (a): a failed start after a real crash keeps the crash and its time
   const failedAt = Date.now();
   assert.deepEqual(await h.failedStart(), { code: 1, signal: null });
   assert.equal(await exists(h.marker), true, 'the crash is still on record');
+  // (e) The start that failed settled nothing and left no half-written record: the root is as the crash left it.
+  assert.deepEqual(await h.records(), { [`${session.id}.json`]: 'running' });
 
   const third = await h.start();
   defer(() => third.stop());
@@ -168,7 +184,12 @@ test('t-11c7 (a): a failed start after a real crash keeps the crash and its time
   // Said once more by the alpd that does start, with the time of the crash.
   const said = (await h.log()).split('\n').filter(line => line.includes('ALP_PREVIOUS_CRASH')).map(line => JSON.parse(line).at);
   assert.deepEqual(said, [crashedAt.toISOString(), crashedAt.toISOString()], 'the start that failed and the one after it name the same crash');
-  // The root's own continuation after a crash is in crash-recovery.test.js (killed mid-turn); see (a) above for why not here.
+  // The real crash is told as one, once, and the root that was working continues once.
+  await until(async () => (await h.recoveryPrompts()).length === 1, 'the recovery prompt');
+  assert.match((await h.recoveryPrompts())[0], /ALP: alpd stopped unexpectedly during your turn, and reopened this session\./);
+  await until(async () => (await h.notices(session.id)).some(notice => /reopened/.test(notice)), 'the recovery notice');
+  assert.deepEqual((await h.notices(session.id)).filter(notice => /reopened/.test(notice)), [`ALP: alpd stopped unexpectedly (around ${crashedAt.toISOString()}). 0 of 0 running assignments reopened, and this session.`]);
+  assert.equal((await h.journal()).filter(entry => entry.method === 'turn/start' && entry.text?.includes('bravo')).length, 1, 'the user prompt is not sent again');
 });
 
 test('t-11c7 (b): a requested stop that outlasts the exit timer is a restart to the next alpd, and what it left running is stopped', { skip }, async t => {
