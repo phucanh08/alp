@@ -119,7 +119,7 @@ export function registerRemoteLibraryRpc(server: PluginServerContext, link: Remo
   }
   server.handle(librarySkills, async () => { throw new RemoteUnavailableError('giving skills to roles', ON_HOST); });
   server.handle(libraryTest, async () => { throw new RemoteUnavailableError('testing MCP servers, hooks and providers (they would run on the ALP host)', ON_HOST); });
-  server.handle(languageGet, async () => ({ ...(await link.request('settings.language.get')), readOnly: `${UNAVAILABLE}: changing the language. ${ON_HOST}` }));
+  server.handle(languageGet, async () => ({ ...(await link.request<{ language: string | null; applies: string; default: string }>('settings.language.get')), readOnly: `${UNAVAILABLE}: changing the language. ${ON_HOST}` }));
   server.handle(languageSet, async () => { throw new RemoteUnavailableError('changing the language', ON_HOST); });
 }
 
