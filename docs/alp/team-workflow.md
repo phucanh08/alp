@@ -791,7 +791,11 @@ usage limits and interrupts never count as a death.
 and touches it every 30 seconds; a clean stop removes it last. If alpd finds
 the file at start, the previous alpd crashed around the file's last touch.
 `alp daemon status` says so, and the notices and prompts of recovered sessions
-say "alpd stopped unexpectedly" instead of "alpd restarted". `alp log` shows
+say "alpd stopped unexpectedly" instead of "alpd restarted". Two cases are not
+a crash: a stop you asked for that alpd could not finish in time (the file then
+says `stopping`, and the next alpd treats it as a restart while still ending
+the processes left behind), and a start that failed before alpd listened
+(it puts the file back as it found it). `alp log` shows
 `⏹` interrupted, `↻` reopened or restarted, and `▶` running again.
 
 **Restart after a crash.** Recovery needs an alpd to run. `alp daemon install`
