@@ -1,5 +1,12 @@
 # Antigravity read-only: what agy enforces (measured)
 
+Two sets of measurements, each labelled with the agy version it was taken on: agy 1.5.2
+(2026-11-06) and agy 1.5.15/1.5.16 (2026-11-24, see the version note there). They disagree about reads outside the workspace;
+the newer one is what ALP documents. ALP does not keep agy's own reads inside the workspace:
+it sends no read rule and no `allowNonWorkspaceAccess` setting (workstream t-ffa1 is open).
+
+## agy 1.5.2 (2026-11-06)
+
 Measured by hand on macOS arm64 with **agy 1.5.2**, driving agy exactly as
 `antigravityModeArgs` does (`--input-format stream-json --output-format stream-json
 --add-dir <cwd> --disable-slash-commands --sandbox --settings <json>`), on
@@ -7,7 +14,7 @@ Measured by hand on macOS arm64 with **agy 1.5.2**, driving agy exactly as
 `step_update`/`result` events, not inferred. Anything not listed was not checked:
 no Linux, no Windows, no other agy version.
 
-## The floor a read-only session runs in
+### The floor a read-only session runs in (1.5.2)
 
 | Action | Result |
 | :-- | :-- |
@@ -25,7 +32,7 @@ system paths, the user's VCS config and agy's own state readable. That residual
 is why the read-only terminal allowlist stays `pwd` only (ALP.md, t-c8ee), and
 why a review that must run commands belongs on another provider.
 
-## agy's own file tools (t-ffa1, premise corrected)
+### agy's own file tools (1.5.2)
 
 The earlier premise was that `view_file`, `list_dir` and search still read
 outside the workspace in read-only, and that the permission check happens only
@@ -38,13 +45,10 @@ after the read. On 1.5.2 that is **not** what happens:
 - `list_dir` is advertised in the `init` event but calling it returns
   `Error: Tool 'list_dir' is not available in this environment`.
 
-ALP now pins that behaviour instead of relying on the provider default:
-`allowNonWorkspaceAccess: false` plus a `read_file(<root>)` grant per trusted
-root, and a root whose path cannot be written as a rule meaning that path alone
-is left out rather than sent malformed (agy accepts a malformed rule silently
-and it grants nothing).
+This refusal does not carry over: on 1.5.15, read-only `read_file` outside the workspace
+**succeeds** (next section).
 
-## Two provider behaviours ALP has to live with
+### Two provider behaviours ALP has to live with (1.5.2)
 
 - **A denied tool ends the whole turn.** Headless agy cannot ask, so the first
   tool its mode does not allow ends the turn with an empty response and
@@ -52,11 +56,12 @@ and it grants nothing).
   all (issue #308). An agent instruction that names a command the allowlist does
   not carry therefore costs the whole assignment.
 - **An accepted edit is reported as `edit_file`.** That is the tool name a real
-  workspace-write session emitted; read-only refuses it by name along with the
-  other edit tools, so an edit can never be reported as a completed change in a
-  read-only session.
+  workspace-write session emitted on 1.5.2, while `init` announces `write_to_file`,
+  `replace_file_content` and others. ALP's read-only table (`EDIT_TOOLS`) refuses it by
+  name along with the other edit tools, so a denied edit that agy marks DONE is reported
+  as failed, never as a completed change.
 
-## Checking a settings key without spending a turn
+### Checking a settings key without spending a turn (1.5.2)
 
 `agy --settings '{"someKey": ...}'` is validated before any model call and exits
 with `--settings: unknown setting "someKey"` or an invalid-value error, so the
@@ -65,3 +70,92 @@ accepted schema can be probed at no cost. Accepted keys ALP uses:
 (`allow`/`deny`/`ask`) and `allowNonWorkspaceAccess` (a boolean). Rule *strings*
 inside `permissions.allow` are **not** validated: a malformed rule is accepted
 and grants nothing.
+
+## agy 1.5.15/1.5.16 (2026-11-24)
+
+Version note: `agy --version` read 1.5.15 at about 10:59 (+07:00); agy's updater replaced the
+binary at 11:07, before the runs below (13:01-13:13), and the version was not recorded at run
+time. The same binary reports 1.5.16 later that day. "1.5.15" below means this pair of versions.
+
+Measured for t-9ae1 on macOS arm64 with **agy 1.5.15 or 1.5.16** and one model,
+`gemini-3.8-flash-high`, driving agy as `AntigravityTransport` does. Each row is one prompt
+asking agy to call its own `read_file` once on one absolute path; the result is read from
+agy's `step_update` and `result` events. Two sets of flags were compared:
+
+- **main**: `antigravityModeArgs` of origin/main (what this repository ships; no read rule).
+- **pinned**: an earlier draft of t-9ae1 that added `allowNonWorkspaceAccess: false` and a
+  `read_file(<root>)` allow rule per workspace root. That draft was **not** merged, because
+  of the table below.
+
+| Run | Mode | Flags | `/tmp` marker outside the workspace | `/etc/hosts` | `<ALP_HOME>/skills/bug-loop/SKILL.md` | `~/.gemini/GEMINI.md` (0 bytes) |
+| :-- | :-- | :-- | :-- | :-- | :-- | :-- |
+| M0 | read-only | main | read | read | read | — |
+| M0 | read-only | pinned | read | read | read | — |
+| M0 | workspace-write | main | refused, turn ended | refused, turn ended | refused, turn ended (step reported DONE) | — |
+| M0 | workspace-write | pinned | refused, turn ended | refused, turn ended | refused, turn ended (step reported DONE) | — |
+| M1 (new conversation) | read-only | pinned | read | — | — | read |
+| M1 | read-only | main | — | — | — | read |
+| R1 (`alp run`, main, Phở) | workspace-write | pinned | — | — | refused, turn ended, no handoff | — |
+
+What this shows, on this version and model:
+
+- In **read-only**, agy's own `read_file` reads outside the workspace: a file in `/tmp`,
+  `/etc/hosts`, ALP's library under `<ALP_HOME>` and a file in agy's own `~/.gemini`. The
+  1.5.2 refusal of `~/.gitconfig` above no longer describes agy.
+- In **workspace-write**, the same reads are refused. A refusal ends the whole turn with an
+  empty answer and `denied_actions` set; ALP then reports
+  `Antigravity denied ReadFile in workspace-write mode and ended the turn.` (R1). For the skill
+  file, with both sets of flags, agy reported the refused step as `DONE` with no output,
+  so only `denied_actions` showed the refusal (t-a648). Library skills are outside the workspace, so a
+  workspace-write role that opens its own skill loses its turn (t-4b59).
+- The pinned flags changed **nothing measurable**: every row has the same result with both
+  sets of flags. Whether 1.5.15 reads a `read_file(<path>)` rule at all is unknown.
+- Tool names: `init` announces `view_file`, but the steps report `read_file`. No run
+  edited a file, so the name 1.5.15 **reports** for an edit was not observed; `edit_file`
+  stays in ALP's table on the strength of the 1.5.2 observation.
+
+Limits: one model (`gemini-3.8-flash-high`), macOS only, one agy binary (version note above). The only
+path under the user's home that was read is the empty `~/.gemini/GEMINI.md`, inside agy's own
+directory; the rest of the home directory was not measured. M0 reused one conversation across
+its four launches; M1 started a new one. Raw frames and tables: t-9ae1 task notes (M0, M1,
+R1), evidence kept with the run under `/tmp/t-9ae1-peerA/evidence` on the measuring machine.
+
+## Role runs on agy 1.5.16 (2026-11-24)
+
+Each read-only role was given one normal assignment on Antigravity: one `alp_delegate` from a
+scripted requester, in a scratch Git repository under `/tmp`, with model
+`gemini-3.8-flash-high` on macOS. agy reported 1.5.16. The supervisor is started by ALP after
+a scripted main turn instead of by `alp_delegate`.
+
+| Role (read-only) | Assignment | Result |
+| :-- | :-- | :-- |
+| reviewer | review a one-file diff | handoff with a verdict and path:line findings |
+| oracle | advise on a design question | handoff with a recommendation and its evidence |
+| peer | research the callers of a function | handoff with a path:line list |
+| scout | locate code | handoff with a path:line list |
+| architect | draft an ADR | handoff with an ADR draft |
+| lead (Cafe) | plan a fix as a peer brief | handoff with a plan and a peer brief; it did not delegate |
+| supervisor | review a main turn's digest | a note to main naming three process faults of that turn. It ran with a team override `thinking: none` because of t-ca83; the shipped team still fails silently, and t-ca83 is open |
+
+What the roles read and ran outside their task:
+
+- Reads outside the workspace succeeded in read-only, as in the 1.5.15 table: architect, lead
+  and peer opened their library skills under `<ALP_HOME>/skills/`, and the supervisor tried
+  `<ALP_HOME>/lessons.md`, which did not exist. Every role also read agy's own MCP tool-schema
+  files under `~/.gemini/antigravity-cli/mcp/alp/` before it called an ALP tool. agy recreates
+  those files from the session's ALP tool list each time a session starts. Scout also read
+  agy's built-in `run-workflow` skill and its own conversation transcript under
+  `~/.gemini/antigravity-cli/`.
+- Peer and scout ran `pwd`, the one command on the allowlist. No other command ran.
+- No role tried to edit. So these runs still do not show which name 1.5.16 reports for an edit.
+
+## A denied tool inside an assignment, agy 1.5.16 (2026-11-24, t-a648)
+
+One peer assignment in **workspace-write** was told to `read_file` a file in `/tmp` outside
+its workspace. agy refused it ("user denied permission for read_file(...)"). The next step,
+a `read_file` of a workspace file that did not exist, was reported done with no output, and
+then the turn ended. Nothing was edited and no handoff was filed. The requester's
+`alp_delegate` returned status `completed`, `handoff: null` and the output
+`Antigravity denied ReadFile in workspace-write mode and ended the turn.`: the requester learns
+the tool name and the mode, not the path or the reason.
+`test/integration/antigravity-denied-turn.test.js` asserts the same result.
