@@ -5,7 +5,7 @@
 > khi máy chưa có (§3.2); t-81b0.10: phát hành hai DMG trong GitHub Release từ `0.0.1-beta.10` (§8). Quyết định: D32, D35 (`plans/reference/DECISIONS.md`).
 
 App desktop là một **vỏ mỏng** bằng Electron bọc quanh ALP mà người dùng đã cài. Nó không mang theo
-alpd, gateway hay app web: nó chạy `alp dashboard --print` của người dùng, lệnh này khởi động hoặc gắn vào
+alpd, gateway hay app web: nó chạy `alp dashboard --print --json` của người dùng (`--print` với alp ≤ `0.0.1-beta.13`), lệnh này khởi động hoặc gắn vào
 service `alp-dashboard` ([dashboard.md](dashboard.md) §3.1), rồi mở app web trong cửa sổ riêng.
 
 ## 1. Luồng
@@ -93,9 +93,9 @@ Khi trang của `alp-dashboard` đã tải xong, app theo dõi nó (`src/reconne
 | Trang gặp 401 ở `POST <origin>/v1/tickets` | Token bị `alp dashboard rotate` hoặc revoke, hoặc `alp-dashboard` đã khởi động lại: mỗi lần khởi động nó tạo token mới và thu hồi token cũ (t-cee3). |
 | Tải lại trang (View › Reload, hay lần tải do app kết nối lại) thất bại | Như trên. |
 
-Khi đó app chạy lại `alp dashboard --print` (lệnh này khởi động `alp-dashboard` nếu nó không chạy) và tải địa chỉ
+Khi đó app chạy lại `alp dashboard --print --json` (`--print` với alp cũ, §1; lệnh này khởi động `alp-dashboard` nếu nó không chạy) và tải địa chỉ
 mới. `/readyz` trả 503 (alpd đang khởi động lại) **không** phải dấu hiệu: `alp-dashboard` vẫn chạy và app
-web tự nối lại gateway. Nếu `alp dashboard --print` in lại đúng địa chỉ cũ sau khi `alp-dashboard` sống lại, app
+web tự nối lại gateway. Nếu lệnh đó trả lại đúng địa chỉ cũ sau khi `alp-dashboard` sống lại, app
 không tải lại trang, vì app web tự nối lại; nếu địa chỉ cũ chính là token vừa bị từ chối, app dừng
 ngay và báo lỗi.
 
@@ -359,7 +359,7 @@ Các ca kiểm tra:
 - `alp-dashboard` khởi động lại trên port khác;
 - `alp dashboard rotate` trên cùng port.
 - `alp-dashboard` khởi động lại trên cùng port, không rotate (t-cee3): `alp` giả hỏi token qua socket của
-  service đang chạy như `alp dashboard --print` thật, nên chỉ việc app chạy lại `--print` mới đưa được token
+  service đang chạy như `alp dashboard --print --json` thật, nên chỉ việc app chạy lại `--print --json` mới đưa được token
   mới vào cửa sổ; test kiểm token cũ bị 401 ở `/v1/tickets` và fail khi tắt `Reconnector.trigger`.
 
 `apps/desktop/e2e/install.spec.mjs` (t-81b0.8) chạy app với `HOME`, `ALP_HOME`, `TMPDIR` tạm, một login
@@ -530,7 +530,7 @@ build nó. `e2e/packaged.spec.mjs` kiểm ba trang nội bộ như vậy; DMG c�
 3. không có cả hai: in cách cài (đặt `ALP.app` vào `/Applications`, hoặc đặt `ALP_DESKTOP_CHECKOUT`) và
    exit 1; trong lúc chờ, `alp dashboard` mở ALP trên trình duyệt.
 
-`alp desktop` không đọc và không truyền token: app tự chạy `alp dashboard --print` (§1). Tên biến theo
+`alp desktop` không đọc và không truyền token: app tự chạy `alp dashboard --print --json` (§1). Tên biến theo
 các biến `ALP_DESKTOP_*` khác (`ALP_DESKTOP_ALP`, `ALP_DESKTOP_USER_DATA`). DMG cho `/Applications`: §6.
 
 ## 8. Tải và cài DMG từ GitHub Release (t-81b0.10)
