@@ -39,7 +39,7 @@ import { listTeams, teamOf } from '@anhlp/alp-core/teams';
 import { CONFIGURABLE, changesOf, effectiveOf, executablesOf, nativeModelOf, offered, type ConfigureChange, type ConfigureChanges, type EffectiveConfig } from './configure.js';
 import { anyModel, fitEffort, offers, profileModel, runtimeModelId, selectedProfile } from '@anhlp/alp-core/profiles';
 import { LESSONS_FILE, resolveSession, skillDescription, type ResolvedSession, type RuntimeKind, type SessionSpec } from './resolve.js';
-import { MAIL_BODY_CHARS, MAIL_HEADER, publicEvent, renderMail, takeBatch, USER, type MailEvent } from './mailbox.js';
+import { issued, MAIL_BODY_CHARS, MAIL_HEADER, publicEvent, renderMail, takeBatch, USER, type MailEvent } from './mailbox.js';
 import type { AlpEvent, AssignmentSnapshot, Envelope, SessionSnapshot, TurnOrigin, UserQuestion } from './events.js';
 import { live, normalizePaths, overlapping, renderBoard, type Pin } from './board.js';
 import { verifyConfig } from '@anhlp/alp-core/verify';
@@ -2576,7 +2576,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   }
 
   function post(sessionId: string, event: Omit<MailEvent, 'id'>) {
-    const mail: MailEvent = { id: `#${++mailSequence}`, ...event };
+    // postedAt stays in the runtime (publicEvent strips it): late or redelivered mail says when it was posted (t-2e23).
+    const mail: MailEvent & { postedAt: number } = { id: `#${++mailSequence}`, ...event, postedAt: Date.now() };
     const sender = event.kind === 'note' ? sessions.get(sessionId)?.assignments.get(event.assignment) : undefined;
     if (sender && event.body) sender.lastNote = clip(event.body, 240);
     const { result: _result, ...logged } = publicEvent(mail);
@@ -4926,7 +4927,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       : '';
     const proceed = (sessionId: string, session: Session, text: string) => {
       if (options.recoveryResume === false || pauseOf(session.runtimeKind)) {
-        session.parked = { reason: cause, since: Date.now(), prompt: text, ...(options.recoveryResume !== false ? { pause: { scope: paused.all ? 'all' as const : session.runtimeKind } } : {}) };
+        // The session reads this when it is resumed, which may be days from now: it says when it was written (t-2e23).
+        const since = Date.now();
+        session.parked = { reason: cause, since, prompt: `[${issued(since, 'delivered on resume')}] ${text}`, ...(options.recoveryResume !== false ? { pause: { scope: paused.all ? 'all' as const : session.runtimeKind } } : {}) };
         emit(sessionId, { type: 'session.updated', session: snapshot(sessionId, session) });
         runLog(rootId, { event: 'assignment.parked', assignmentId: sessionId, agent: session.mapping.agent.name, reason: cause });
         const outcome = outcomes.find(entry => entry.assignmentId === sessionId);

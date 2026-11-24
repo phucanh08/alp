@@ -13,6 +13,7 @@ import { AGENT_NAME, AlpRpcError, CAPABILITY, MAX_FRAME, PROMPT_IMAGES, PROTOCOL
 import { validateParams } from '@anhlp/alp-protocol/contract';
 export { ERROR } from '@anhlp/alp-protocol';
 import { DEFAULT_MODEL, models, modes, type ModelCatalog, thinkingOptions, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '@anhlp/alp-runtime/index';
+import { replayedNotice } from '@anhlp/alp-runtime/mailbox';
 import type { Receipt, SessionRecord, SessionStatus, Store, UnreadableReceipt } from './store.js';
 import type { PromptContent, SessionSummary } from '@anhlp/alp-protocol/session';
 import type { ScheduleJob, TurnAttention } from '@anhlp/alp-protocol/index';
@@ -1041,6 +1042,20 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   }
 
   /**
+   * An envelope as history shows it (t-2e23). A notice read from the timeline is not news: its text is
+   * given `[issued <time>, replayed]` in front, the time its envelope was written, so a warning from two
+   * days ago does not read as one of now. Every way history reaches a client goes through here (a reopened
+   * root's replay, session.attach, session.history); an event sent as it happens does not. What is stored
+   * stays as it was written, so nothing is marked twice. The markers of a rewind and of a fork
+   * (`rewind:`, `fork:`) are places in the conversation, not news, and stay as they are.
+   */
+  function replayed(envelope: Envelope): Envelope {
+    const event = envelope.event;
+    if (event.type !== 'item' || event.item.kind !== 'notice' || /^(?:rewind|fork):/.test(event.item.id)) return envelope;
+    return { ...envelope, event: { ...event, item: { ...event.item, text: replayedNotice(event.item.text, envelope.ts) } } };
+  }
+
+  /**
    * Delivers a tree's history: the root's latest items, then the children's events in their
    * original order, so a grandchild opens while its parent is still open.
    */
@@ -1049,8 +1064,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     for (const envelope of log) {
       if (envelope.sessionId === root && envelope.event.type === 'item') items.set(envelope.event.item.id, envelope);
     }
-    for (const item of items.values()) deliver(connection, item);
-    if (children) for (const envelope of log) if (envelope.sessionId !== root && current(envelope)) deliver(connection, envelope);
+    for (const item of items.values()) deliver(connection, replayed(item));
+    if (children) for (const envelope of log) if (envelope.sessionId !== root && current(envelope)) deliver(connection, replayed(envelope));
   }
 
   /** Questions in a log are history; announceQuestions delivers the ones still waiting. */
@@ -1578,7 +1593,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       known(sessionId);
       if (!store) throw new RpcError(1005, 'Durable history unavailable');
       const root = rootOf.get(sessionId) ?? records.get(sessionId)?.rootId ?? sessionId;
-      try { return await store.history(root, sessionId, { before, limit, maxBytes }); }
+      try { const page = await store.history(root, sessionId, { before, limit, maxBytes }); return { ...page, items: page.items.map(item => 'oversized' in item ? item : replayed(item)) }; }
       catch (error) { if (error instanceof HistoryError) throw new RpcError(error.reason === 'stale_cursor' ? 1004 : -32602, error.message, { reason: error.reason }); throw error; }
     },
 
@@ -1624,8 +1639,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
         attach(connection, root);
         if (replay) {
           let last = from;
-          for (const envelope of stored) if ((envelope.cursor ?? 0) > last) { if (current(envelope)) deliver(connection, envelope); last = envelope.cursor ?? last; }
-          for (const envelope of live) if ((envelope.cursor ?? 0) > last) { if (current(envelope)) deliver(connection, envelope); last = envelope.cursor ?? last; }
+          for (const envelope of stored) if ((envelope.cursor ?? 0) > last) { if (current(envelope)) deliver(connection, replayed(envelope)); last = envelope.cursor ?? last; }
+          for (const envelope of live) if ((envelope.cursor ?? 0) > last) { if (current(envelope)) deliver(connection, replayed(envelope)); last = envelope.cursor ?? last; }
         }
         announceQuestions(connection, root);
         // Gate cards are rebuilt from the project's tasks: one changed while nobody watched shows or settles now.
