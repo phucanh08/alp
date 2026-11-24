@@ -63,6 +63,8 @@ const USAGE = `Usage:
   alp trust [--project DIR] | --revoke [--project DIR] | --list [--json]   whether the project's hooks may run
   alp permissions [--project DIR] [--json]   each agent's permission profile
   alp permissions check <agent> "<command>"  what that agent's profile says about a command
+  alp config explain [--agent A]... [--project DIR] [--json]   which settings file each permission value and rule comes from;
+            warns where the project gives more than your own settings (a warning never blocks)
   alp tasks [ready] [--all] [--status S] [--label L] [--project DIR] [--json]
   alp tasks gates [--json]                 open gates; checks GitHub ones
   alp tasks compact [--days 30] [--dry-run]
