@@ -1345,6 +1345,20 @@ the supervisor is still reviewing is sent when that review ends. The tree counts
 busy from the end of main's turn until the review is done, so alpd does not close an
 idle tree in between.
 
+The result of an assignment whose requester is not main (in Cafe, a reviewer or peer
+that lead started) still goes to its requester unchanged, and ALP also sends main a
+short `relay` mail from `ALP`: the agent, the assignment, its requester, its status,
+when it finished, the handoff outcome and verdict line, and the handoff summary, at
+most 1,000 characters in all. A relay is information: it never wakes an idle main and
+never ends main's `alp_wait`; it rides with the next mail main gets, such as lead's
+result, or with main's next turn, so main reads the verdict its supervisor reads
+without asking lead. It is posted once, when the assignment finishes; delivered again,
+it says when it was issued. In the digest, such a result says
+`(also relayed to main)`, or `(result went to lead, not to main)` when main got no
+relay, for example because lead cancelled the assignment, so the supervisor does
+not judge main on a result main never had. `alp log` shows a relay as
+`✉ relay ALP → main`.
+
 The supervisor checks the turn against `ALP.md`, main's `AGENT.md`, the profile and
 the recorded lessons, including leaving the user waiting, building an unclear
 request without asking, and blocking where work could run in the background. A
