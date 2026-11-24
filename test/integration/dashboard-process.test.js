@@ -714,6 +714,105 @@ test('start flags: --host stays loopback, --port is checked, and --status with -
   assert.match(other.stderr, new RegExp(`already runs on port ${port} .*Stop it with \`alp dashboard --stop\`, or drop --port`));
 });
 
+/** The one JSON line `alp dashboard --print --json` puts on stdout (docs/alp/dashboard.md §3.3). */
+function printedJson(result) {
+  const lines = result.stdout.split('\n').filter(Boolean);
+  assert.equal(lines.length, 1, `stdout is exactly one line: ${result.stdout.replace(/alpgw1\.[^"\s]+/g, 'alpgw1.<token>')}${result.stderr}`);
+  const answer = JSON.parse(lines[0]);
+  assert.equal(answer.schema, 'alp.dashboard.print');
+  assert.equal(answer.version, 1);
+  return answer;
+}
+
+test('t-81b0.4: alp dashboard --print --json answers with one JSON line: the address, its parts, and exit 0', async t => {
+  const { home } = await createHome(t);
+  const { port } = (await homeJson(home, 'settings.json')).dashboard;
+  const first = await run(['dashboard', '--print', '--json'], home);
+  assert.equal(first.code, 0, first.stderr);
+  const answer = printedJson(first);
+  assert.deepEqual(Object.keys(answer).sort(), ['ok', 'origin', 'pid', 'port', 'schema', 'token', 'url', 'version']);
+  assert.equal(answer.ok, true);
+  assert.equal(answer.port, port);
+  assert.equal(answer.origin, `http://127.0.0.1:${port}`);
+  assert.match(answer.token, /^alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43}$/);
+  assert.ok(answer.url === `http://127.0.0.1:${port}/#token=${answer.token}`, 'url is origin + /#token= + token');
+  assert.equal(answer.pid, (await webLock(home)).pid, 'pid is the service that holds the lock');
+  assert.equal(await ticketStatus(port, answer.token), 201, 'the token is a live gateway credential');
+  // The token went to stdout only: no file, and not stderr.
+  assert.equal(first.stderr.includes(answer.token), false);
+  assert.deepEqual(await filesContaining(home, answer.token), [], 'no file under the home holds the token');
+
+  // The plain form prints the same address; --json alone and with --no-open print JSON and open nothing.
+  const plain = await run(['dashboard', '--print'], home);
+  assert.ok(printedUrl(plain).url === answer.url, 'plain --print prints the url of the JSON');
+  for (const args of [['dashboard', '--json'], ['dashboard', '--no-open', '--json']]) {
+    const again = await run(args, home);
+    assert.equal(again.code, 0, again.stderr);
+    assert.ok(printedJson(again).url === answer.url, args.join(' '));
+  }
+  const local = printedJson(await run(['dashboard', '--print', '--json', '--host', 'localhost'], home));
+  assert.equal(local.origin, `http://localhost:${port}`);
+  assert.ok(local.url === `http://localhost:${port}/#token=${answer.token}`);
+
+  // conflict (6): the service runs on another port than the one asked for.
+  const other = await run(['dashboard', '--print', '--json', '--port', String(await freePort())], home);
+  assert.equal(other.code, 6, other.stderr);
+  const conflict = printedJson(other);
+  assert.equal(conflict.ok, false);
+  assert.equal(conflict.error.code, 'conflict');
+  assert.match(conflict.error.message, new RegExp(`already runs on port ${port} `));
+  assert.match(other.stderr, /^alp: alp dashboard already runs on port/m, 'the message is on stderr too');
+  assert.equal(other.stdout.includes('alpgw1.'), false, 'a failure prints no token');
+});
+
+test('t-81b0.4: every failure of --print --json is one JSON line with a class, and the class has its exit code', async t => {
+  const { directory, home } = await createHome(t);
+  const nothingStarted = async what => {
+    for (const file of ['dashboard.json', 'integrations/dashboard.lock', 'alpd.lock']) assert.equal(existsSync(path.join(home, file)), false, `${what}: ${file}`);
+  };
+  const failed = async (args, code, kind, message, extraEnv = {}, script = cli) => {
+    const result = await run(args, home, 60_000, extraEnv, script);
+    assert.equal(result.code, code, `${args.join(' ')}: ${result.stderr}${result.stdout}`);
+    const answer = printedJson(result);
+    assert.deepEqual(Object.keys(answer).sort(), ['error', 'ok', 'schema', 'version'], args.join(' '));
+    assert.equal(answer.ok, false);
+    assert.deepEqual(Object.keys(answer.error).sort(), ['code', 'message']);
+    assert.equal(answer.error.code, kind, args.join(' '));
+    assert.match(answer.error.message, message, args.join(' '));
+    assert.ok(result.stderr.includes(`alp: ${answer.error.message}`), 'stderr carries the same message');
+    await nothingStarted(args.join(' '));
+  };
+  // usage (2)
+  await failed(['dashboard', '--print', '--json', '--port', '80'], 2, 'usage', /--port must be a port from 1024 to 65535/);
+  await failed(['dashboard', '--print', '--json', '--host', '0.0.0.0'], 2, 'usage', /--host 0\.0\.0\.0 is refused/);
+  await failed(['dashboard', '--print', '--json', '--nope'], 2, 'usage', /--nope/);
+  await failed(['dashboard', '--print', '--json', 'extra'], 2, 'usage', /^usage: alp dashboard /);
+  await failed(['dashboard', '--status', '--json'], 2, 'usage', /^usage: alp dashboard /);
+  await failed(['dashboard', '--stop', '--json'], 2, 'usage', /^usage: alp dashboard /);
+  // agent (4): refused before anything is read.
+  await failed(['dashboard', '--print', '--json'], 4, 'agent', /started by an ALP agent/, { ALP_AGENT_SESSION: 'session-1' });
+  // not_built (5): a CLI without alp-dashboard.js.
+  const copy = path.join(directory, 'cli');
+  await mkdir(copy);
+  await symlink(path.join(root, 'node_modules'), path.join(copy, 'node_modules'));
+  await cp(cliDist, path.join(copy, 'dist'), { recursive: true, filter: source => !/alp-dashboard(\.js)?$/.test(path.basename(source)) });
+  await failed(['dashboard', '--print', '--json'], 5, 'not_built', /alp dashboard is not built/, {}, path.join(copy, 'dist', 'cli.js'));
+  // disabled (3)
+  const settings = await homeJson(home, 'settings.json');
+  await writeFile(path.join(home, 'settings.json'), JSON.stringify({ ...settings, dashboard: { ...settings.dashboard, enabled: false } }));
+  await failed(['dashboard', '--print', '--json'], 3, 'disabled', /alp dashboard is disabled by settings/);
+
+  // Without --json nothing changed: the message on stderr, nothing on stdout, exit 1.
+  const plain = await run(['dashboard', '--print'], home);
+  assert.equal(plain.code, 1);
+  assert.equal(plain.stdout, '');
+  assert.match(plain.stderr, /alp dashboard is disabled by settings/);
+  // The subcommands have no --json: it is their own usage error, in text.
+  const rotate = await run(['dashboard', 'rotate', '--json'], home);
+  assert.equal(rotate.code, 1);
+  assert.match(rotate.stderr, /^Usage:/m);
+});
+
 test('alp web is gone: the command is unknown', async t => {
   const { home } = await createHome(t);
   const result = await run(['web', '--print'], home);

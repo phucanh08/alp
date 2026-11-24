@@ -14,6 +14,7 @@ import { runRole } from './roles.js';
 import { DASHBOARD, LEGACY_WEB, dashboardEntry, dashboardScript, isDashboardReady, isServiceClaimed, readToken, refusal, serviceOwner, stopService } from './dashboard-service.js';
 import { legacyLeftovers, migrateDashboard } from './dashboard-migrate.js';
 import { dashboardSettings } from '@anhlp/alp-core/user-settings';
+import { scrubText } from '@anhlp/alp-core/log';
 
 /** The Paseo integration (its web app, bridge and relay) runs as integration `paseo`. */
 const PASEO = 'paseo';
@@ -148,6 +149,37 @@ async function dashboardDisabled(home) {
 
 const DISABLED = 'alp dashboard is disabled by settings ("dashboard.enabled": false).';
 
+/**
+ * The contract of `alp dashboard --print --json` (docs/alp/dashboard.md §3.3). Each failure class
+ * has a name (`error.code` in the JSON) and its own exit code; both are stable. `failed` (1) is
+ * everything not classified, and what an alp from before the contract exits with.
+ */
+const PRINT_SCHEMA = 'alp.dashboard.print';
+const PRINT_VERSION = 1;
+const PRINT_EXIT = { failed: 1, usage: 2, disabled: 3, agent: 4, not_built: 5, conflict: 6, service: 7, daemon: 8 };
+
+/**
+ * An Error of failure class `kind` (a key of PRINT_EXIT). Without --json the class changes nothing:
+ * the message is printed and alp exits 1 as before.
+ * @param {keyof typeof PRINT_EXIT} kind @param {string} message @param {ErrorOptions} [options]
+ */
+const failure = (kind, message, options) => Object.assign(new Error(message, options), { kind });
+
+/**
+ * Runs `work`; an error it throws without a class gets `kind`. The error itself is rethrown.
+ * @template T @param {keyof typeof PRINT_EXIT} kind @param {() => T | Promise<T>} work @returns {Promise<T>}
+ */
+async function classed(kind, work) {
+  try { return await work(); }
+  catch (error) { throw classify(error, kind); }
+}
+
+/** `error`, given the class `kind` unless it has one. @param {unknown} error @param {keyof typeof PRINT_EXIT} kind */
+function classify(error, kind) {
+  if (error instanceof Error && !('kind' in error)) Object.assign(error, { kind });
+  return error;
+}
+
 /** A file's JSON, or undefined when it is missing or not JSON (as before: a broken file counts as none). @param {string} file */
 const readJsonFile = file => readFile(file, 'utf8').then(text => { try { return JSON.parse(text); } catch { return undefined; } }, () => undefined);
 /** @param {string} home */
@@ -179,6 +211,7 @@ const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost'];
  * (which the browser never sends to a server). The token comes from the running service over its
  * private token socket (t-cee3); no file holds it.
  * @param {string} home @param {string} entry @param {{ port?: number }} [options]
+ * @returns {Promise<{ base: string, token: string, pid: number, port: number }>} `base` is dashboard.json's url (`http://127.0.0.1:<port>/`)
  */
 async function serveDashboard(home, entry, { port } = {}) {
   // A lock held by a process proven not to be alp dashboard: say so now rather than wait for it. A
@@ -187,10 +220,10 @@ async function serveDashboard(home, entry, { port } = {}) {
   const published = await readPublished(home);
   const lockPid = (await readServiceLock(home))?.pid;
   const claimed = await isServiceClaimed(published, lockPid, held);
-  if ('reason' in held && held.alive && held.kind === 'foreign' && !claimed) throw new Error(`${refusal(home)} (${held.reason}). Stop it, then run alp dashboard again.`);
+  if ('reason' in held && held.alive && held.kind === 'foreign' && !claimed) throw failure('conflict', `${refusal(home)} (${held.reason}). Stop it, then run alp dashboard again.`);
   // `--port` asks for a port; a service already running elsewhere is not silently reused.
   if (port !== undefined && claimed && published.port !== port) {
-    throw new Error(`alp dashboard already runs on port ${published.port} (pid ${published.pid}); you asked for port ${port}. Stop it with \`alp dashboard --stop\`, or drop --port to use the running one.`);
+    throw failure('conflict', `alp dashboard already runs on port ${published.port} (pid ${published.pid}); you asked for port ${port}. Stop it with \`alp dashboard --stop\`, or drop --port to use the running one.`);
   }
   const project = await currentProject();
   let lock;
@@ -198,31 +231,35 @@ async function serveDashboard(home, entry, { port } = {}) {
   catch (error) {
     // Still held by a live process alp cannot prove: name it, as the wait may have been for it.
     const owner = await serviceOwner(home);
-    if ('reason' in owner && owner.alive) throw new Error(`${error?.message ?? error}\n${refusal(home)} (${owner.reason}). If it is not alp dashboard, stop it, then run alp dashboard again.`, { cause: error });
-    throw error;
+    if ('reason' in owner && owner.alive) throw failure('conflict', `${error?.message ?? error}\n${refusal(home)} (${owner.reason}). If it is not alp dashboard, stop it, then run alp dashboard again.`, { cause: error });
+    // startIntegration reads settings.json itself: turned off between this command's check and the start.
+    throw classify(error, await dashboardDisabled(home) ? 'disabled' : 'service');
   }
   const info = await readPublished(home);
   if (info?.app !== DASHBOARD.app || info.pid !== lock.pid) {
     const owner = await serviceOwner(home);
-    throw new Error(`${refusal(home)}${'reason' in owner ? ` (${owner.reason})` : ''}. Stop pid ${lock.pid}, then run alp dashboard again.`);
+    throw failure('conflict', `${refusal(home)}${'reason' in owner ? ` (${owner.reason})` : ''}. Stop pid ${lock.pid}, then run alp dashboard again.`);
   }
   if (typeof info.url !== 'string' || !(await isDashboardReady(info.url))) {
-    throw new Error(`alp dashboard published no address; see ${path.join(home, 'logs', 'integrations', 'alp-dashboard.log')}`);
+    throw failure('service', `alp dashboard published no address; see ${path.join(home, 'logs', 'integrations', 'alp-dashboard.log')}`);
   }
   let answer;
   try { answer = await readToken(home); }
-  catch (error) { throw new Error(`alp dashboard did not hand over its token: ${error?.message ?? error}; see ${path.join(home, 'logs', 'integrations', 'alp-dashboard.log')}. A service started by an older alp keeps no token socket: run \`alp dashboard --stop\`, then \`alp dashboard\` again`, { cause: error }); }
+  catch (error) { throw failure('service', `alp dashboard did not hand over its token: ${error?.message ?? error}; see ${path.join(home, 'logs', 'integrations', 'alp-dashboard.log')}. A service started by an older alp keeps no token socket: run \`alp dashboard --stop\`, then \`alp dashboard\` again`, { cause: error }); }
   // The socket's answer must come from the process the lock and dashboard.json name.
-  if (answer.pid !== lock.pid) throw new Error(`the token socket of alp dashboard is held by pid ${answer.pid}, not by the service (pid ${lock.pid}); stop it, then run alp dashboard again`);
+  if (answer.pid !== lock.pid) throw failure('conflict', `the token socket of alp dashboard is held by pid ${answer.pid}, not by the service (pid ${lock.pid}); stop it, then run alp dashboard again`);
   if (port !== undefined && info.port !== port) {
-    throw new Error(`alp dashboard is running on port ${info.port}, not ${port} (port ${port} was busy or alp dashboard was starting already); it was left running there. Stop it with \`alp dashboard --stop\` and free port ${port}, or drop --port`);
+    throw failure('conflict', `alp dashboard is running on port ${info.port}, not ${port} (port ${port} was busy or alp dashboard was starting already); it was left running there. Stop it with \`alp dashboard --stop\` and free port ${port}, or drop --port`);
   }
   if (project) {
     await registerProject(home, project);
     await waitForGrant(home, answer.credentialId ?? info.credentialId, project);
   }
-  return `${info.url}#token=${answer.token}`;
+  return { base: info.url, token: answer.token, pid: lock.pid, port: info.port };
 }
+
+/** The address to open: the token rides in the fragment, which a browser never sends to a server. @param {{ base: string, token: string }} served */
+const addressOf = served => `${served.base}#token=${served.token}`;
 
 /** Reports what the migration from `alp web` did, on stderr (stdout carries only the address). @param {Awaited<ReturnType<typeof migrateDashboard>>} report */
 function reportMigration(report) {
@@ -301,41 +338,72 @@ async function dropLeftToken(home) {
   else { console.log(`${DASHBOARD.info} still holds a token from an older alp dashboard; run \`alp dashboard rotate\` to revoke it.`); process.exitCode = 1; }
 }
 
+/** `alp dashboard` subcommands, which have their own arguments (and no --json). */
+const DASHBOARD_SUBCOMMANDS = ['pair', 'rotate', 'serve'];
+
+/**
+ * alp dashboard. With --json (docs/alp/dashboard.md §3.3) stdout carries exactly one line, a JSON
+ * object, on success and on every failure, and the exit code names the failure class. The token is
+ * in that line only on success: it goes to the caller's stdout, as the address of --print does, and
+ * nowhere else (no file, no argument, no log; --json never opens a browser).
+ */
 async function dashboardCommand(args) {
+  if (!args.includes('--json') || DASHBOARD_SUBCOMMANDS.includes(args[0])) return runDashboard(args);
+  try {
+    await runDashboard(args);
+  } catch (error) {
+    const usage = error instanceof UsageError || /** @type {any} */ (error)?.code?.startsWith?.('ERR_PARSE_ARGS');
+    const kind = usage ? 'usage' : Object.hasOwn(PRINT_EXIT, /** @type {any} */ (error)?.kind) ? /** @type {keyof typeof PRINT_EXIT} */ (/** @type {any} */ (error).kind) : 'failed';
+    const message = scrubText(String(error instanceof UsageError ? 'usage: alp dashboard [--port N] [--host 127.0.0.1|localhost] [--no-open|--print] [--json]' : /** @type {any} */ (error)?.message ?? error));
+    console.log(JSON.stringify({ schema: PRINT_SCHEMA, version: PRINT_VERSION, ok: false, error: { code: kind, message } }));
+    console.error(`alp: ${message}`);
+    process.exitCode = PRINT_EXIT[kind];
+  }
+}
+
+async function runDashboard(args) {
   // alp dashboard prints, rotates and pairs with the user's own secrets (t-1c59), and stops the
   // user's service: a process an ALP agent started is refused before anything is read, stopped or printed.
-  if (isAgentProcess()) throw new Error('alp dashboard is the user\'s: it prints and rotates the user\'s credential; this process was started by an ALP agent (ALP_AGENT_SESSION is set)');
+  if (isAgentProcess()) throw failure('agent', 'alp dashboard is the user\'s: it prints and rotates the user\'s credential; this process was started by an ALP agent (ALP_AGENT_SESSION is set)');
   if (args[0] === 'pair') return pairCommand(args.slice(1));
   if (args[0] === 'rotate') return rotateCommand(args.slice(1));
   // alp-dashboard itself in this process; its own options (--service, --rotate, --project DIR, --port N) follow.
   if (args[0] === 'serve') return runRole('dashboard', dashboardScript(), args.slice(1));
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     print: { type: 'boolean' }, 'no-open': { type: 'boolean' }, status: { type: 'boolean' }, stop: { type: 'boolean' },
-    port: { type: 'string' }, host: { type: 'string' },
+    port: { type: 'string' }, host: { type: 'string' }, json: { type: 'boolean' },
   } });
   if (positionals.length) throw new UsageError();
   const home = alpHome();
   // As in Hermes, the lifecycle flags win over the start flags: they report or stop, and exit.
   if (values.status && values.stop) throw new UsageError();
+  // --json is the contract of the address only; --status and --stop print text.
+  if (values.json && (values.status || values.stop)) throw new UsageError();
   if (values.status) return statusCommand(home);
   if (values.stop) return stopCommand(home);
   let port;
   if (values.port !== undefined) {
     port = Number(values.port);
-    if (!/^\d+$/.test(values.port) || port < 1024 || port > 65535) throw new Error(`--port must be a port from 1024 to 65535, not ${values.port}`);
+    if (!/^\d+$/.test(values.port) || port < 1024 || port > 65535) throw failure('usage', `--port must be a port from 1024 to 65535, not ${values.port}`);
   }
   // ALP's token is the dashboard's only lock and its gateway accepts only loopback Host and Origin
   // names, so it is never bound beyond this machine (Hermes too refuses a non-loopback bind without
   // an auth provider, which ALP does not have).
   if (values.host !== undefined && !LOOPBACK_HOSTS.includes(values.host)) {
-    throw new Error(`alp dashboard listens on this machine only (127.0.0.1): --host ${values.host} is refused. Reach it from another machine through an SSH tunnel to 127.0.0.1.`);
+    throw failure('usage', `alp dashboard listens on this machine only (127.0.0.1): --host ${values.host} is refused. Reach it from another machine through an SSH tunnel to 127.0.0.1.`);
   }
-  const entry = dashboardEntry();
-  reportMigration(await migrateDashboard(home, { strict: true }));
-  if (await dashboardDisabled(home)) throw new Error(DISABLED);
-  await start();
-  let url = await serveDashboard(home, entry, { port });
-  if (values.host === 'localhost') url = url.replace('://127.0.0.1:', '://localhost:');
+  const entry = await classed('not_built', () => dashboardEntry());
+  // Strict: alp web from before the rename that alp cannot prove and so does not stop is in the way.
+  reportMigration(await classed('conflict', () => migrateDashboard(home, { strict: true })));
+  if (await dashboardDisabled(home)) throw failure('disabled', DISABLED);
+  await classed('daemon', () => start());
+  const served = await serveDashboard(home, entry, { port });
+  if (values.host === 'localhost') served.base = served.base.replace('://127.0.0.1:', '://localhost:');
+  const url = addressOf(served);
+  if (values.json) {
+    console.log(JSON.stringify({ schema: PRINT_SCHEMA, version: PRINT_VERSION, ok: true, url, origin: new URL(served.base).origin, token: served.token, port: served.port, pid: served.pid }));
+    return;
+  }
   console.log(url);
   if (values.print || values['no-open']) return;
   const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
@@ -370,7 +438,7 @@ async function rotateCommand(args) {
     console.log(`alp dashboard's token is revoked; the old one no longer works and the next start mints a new token. ${DISABLED.replace(/\.$/, '')}, so it was not started.`);
     return;
   }
-  console.log(await serveDashboard(home, entry));
+  console.log(addressOf(await serveDashboard(home, entry)));
 }
 
 /**
