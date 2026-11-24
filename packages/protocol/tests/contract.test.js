@@ -40,6 +40,11 @@ test('the two schema files share one set of definitions, and the generated contr
   assert.equal(generated.status, 0, generated.stderr);
 });
 
+test('the mail kinds in the schema are those of the MailKind union in dto.ts', async () => {
+  const union = Array.from((await source('dto.ts')).match(/export type MailKind = ([^;]+);/)[1].matchAll(/'([^']+)'/g), match => match[1]);
+  assert.deepEqual([...ipc.$defs.mail.properties.kind.enum].sort(), union.sort());
+});
+
 test('event types and item kinds in the schema are those of the TypeScript unions', async () => {
   const events = await source('events.ts');
   const eventTypes = Array.from(events.split('export type AlpEvent =')[1].split('export type Envelope')[0].matchAll(/\{ type: '([^']+)'/g), match => match[1]);

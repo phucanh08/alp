@@ -6783,7 +6783,8 @@
             "result",
             "stalled",
             "board",
-            "checkin"
+            "checkin",
+            "relay"
           ]
         },
         "from": {
