@@ -21,9 +21,14 @@ such as `Bash(echo:*)` or `Bash(cat:*)` on beta.12 or older.
    each start now makes a new token, so browser tabs already open are signed out (run
    `alp dashboard` again for the new link). ALP.app re-runs `alp dashboard --print` by itself.
 3. If you use the Paseo integration (`@anhlp/alp-paseo`): `npm install -g @anhlp/alp-paseo@beta`.
-   On its next start it moves its password and relay key into `~/.alp/paseo/` (below); devices
-   already paired keep working, nothing to re-pair.
-4. ALP.app: `ALP-0.0.1-beta.13-<arch>.dmg` has no app change since beta.12 beyond its version; it is
+   Then restart Paseo (or a standalone `alp-paseo-integration`): on its next start the integration
+   moves its password and relay key into `~/.alp/paseo/` (below). Devices already paired keep
+   working, nothing to re-pair. `alp dashboard pair` and `pair --rotate` need the new integration
+   running.
+4. If you wrote a permission profile with base `read-only` and approve write or network commands
+   through its allow or ask rules: those commands now fail inside the read-only sandbox (EPERM).
+   See "A read-only profile's Bash never leaves the sandbox" below.
+5. ALP.app: `ALP-0.0.1-beta.13-<arch>.dmg` has no app change since beta.12 beyond its version; it is
    still ad-hoc signed and not notarized ([desktop.md](desktop.md) §8).
 
 Changes that affect an existing user:
@@ -45,7 +50,8 @@ Changes that affect an existing user:
   `grep -rn foo src/*.js`, `ls [ab].js`; home paths `cat ~/notes.txt`, `ls -la ~`; braces
   `echo a.{js,map}`, `git diff HEAD@{1}`; `$`, `\` or `"` inside double quotes
   (`echo "cost $5"`, `git log --grep="a$"`, `git commit -m "fix: \"x\""`); `echo a\ b`; `echo =x`.
-  Deny rules, ask rules and checked `Bash(@…)` rules are unchanged. Every profile with a Bash allow
+  What deny rules, ask rules and checked `Bash(@…)` rules match is unchanged (deny and ask rules
+  also see the script inside any shell wrapper). Every profile with a Bash allow
   rule is affected (custom agents, user profiles, lead/peer/main when given one); the built-in
   reviewer, oracle and supervisor profiles have none. Details in
   [team-workflow.md](team-workflow.md) ("Permission profiles").
@@ -114,8 +120,9 @@ Known issues:
 
 - **Deny rules are not a hard boundary for lines that are not plain words** (pre-existing,
   beta.12 and earlier too; open, pending a decision): for such a line ALP's split of the command
-  can differ from the shell's, so a deny rule may not match. Rely on the mode and the OS sandbox,
-  not on a deny rule alone, to stop a command.
+  can differ from the shell's, so a deny rule may not match. This was shown at the parser level;
+  its effect in a real session on each runtime has not been run. Rely on the mode and the OS
+  sandbox, not on a deny rule alone, to stop a command.
 - The dashboard and Paseo token sockets keep read-only agents out by the OS sandbox: checked on
   macOS, **not checked on Linux** (where a sandbox must block `AF_UNIX` connects) or on Windows
   (named pipes).
