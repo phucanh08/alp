@@ -80,7 +80,10 @@ type Stream = {
   owner?: ClientContext;
   input: Promise<void>;
 };
-type DirectorySub = { cwd: string; workspaceId?: string; last?: string };
+/** A directory subscription. Without `cwd` (Paseo 0.16+, features.terminalCollection) it is every workspace's terminals. */
+type DirectorySub = { cwd?: string; workspaceId?: string; last?: string };
+/** One subscription per (cwd, workspaceId) and client; an absent cwd is not the directory named "undefined". */
+const subKey = (cwd: string | undefined, workspaceId: string | undefined) => `${cwd === undefined ? '*' : `=${cwd}`}\0${workspaceId ?? ''}`;
 
 const clamp = (value: unknown, min: number, max: number, fallback: number) =>
   typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : fallback;
@@ -117,6 +120,9 @@ export function createTerminals({
   const drainMs = timing.drainMs ?? DRAIN_MS;
   const features: Record<string, boolean> = {
     'terminal-restore-modes': true, 'terminal-input-mode-replay': true, 'terminal-size-ownership': true, workspaceTerminals: false,
+    // Paseo 0.16+ (t-1af7): its client refuses observeTerminals without a cwd unless the host says this,
+    // and then subscribes without one. Older apps never read it.
+    terminalCollection: true,
   };
   const streams = new Map<string, Stream>();
   /** Each client's slots: slot → terminal id. */
@@ -469,14 +475,30 @@ export function createTerminals({
     return { all, terminals: (terminals as TerminalInfo[]).filter(info => info.state === 'running' && byId.has(info.workspaceId)).map(info => ({ info, workspace: byId.get(info.workspaceId)! })) };
   }
   const paseo = (info: TerminalInfo, workspace: TerminalWorkspace) => ({ id: info.terminalId, name: info.title, cwd: workspace.directory, workspaceId: workspace.id, title: info.title });
-  /** Terminals of one directory subscription; none when it names no workspace. */
-  function listed(state: Awaited<ReturnType<typeof running>>, cwd: string, workspaceId?: string) {
+  /**
+   * Terminals of one directory subscription; none when it names no workspace. Without a cwd it is
+   * every workspace's terminals (one workspace's with workspaceId), each with its own cwd, as Paseo
+   * 0.16's daemon answers (its terminal-session-controller.ts, emitTerminalsSnapshotForSubscription).
+   */
+  function listed(state: Awaited<ReturnType<typeof running>>, cwd: string | undefined, workspaceId?: string) {
+    if (cwd === undefined) {
+      return state.terminals.filter(entry => workspaceId === undefined || entry.workspace.id === workspaceId).map(({ info, workspace }) => paseo(info, workspace));
+    }
     let workspace: TerminalWorkspace;
     try { workspace = workspaceOf(state.all, cwd, workspaceId); } catch { return []; }
     return state.terminals.filter(entry => entry.workspace.id === workspace.id).map(({ info }) => {
       const { cwd: _cwd, ...rest } = paseo(info, workspace);
       return rest;
     });
+  }
+  /**
+   * terminals_changed for one subscription. The cwd-less shape is not checked against the SDK's
+   * type: at the floor (0.11.1) the payload's cwd is required, and no app that old subscribes so.
+   */
+  function directoryMessage(sub: DirectorySub, terminals: ReturnType<typeof listed>, requestId?: string) {
+    const head = { ...(requestId ? { requestId } : {}), ...(sub.workspaceId ? { workspaceId: sub.workspaceId } : {}) };
+    if (sub.cwd === undefined) return { type: 'terminals_changed', payload: { ...head, terminals } };
+    return { type: 'terminals_changed', payload: { ...head, cwd: sub.cwd, terminals } } satisfies Outbound;
   }
   async function find(terminalId: string) {
     const state = await running();
@@ -500,7 +522,7 @@ export function createTerminals({
       const text = JSON.stringify(terminals);
       if (text === sub.last) continue;
       sub.last = text;
-      client.emit({ type: 'terminals_changed', payload: { cwd: sub.cwd, ...(sub.workspaceId ? { workspaceId: sub.workspaceId } : {}), terminals } });
+      client.emit(directoryMessage(sub, terminals));
     }
   }
   /** Watch-capable hosts use atomic snapshots; older hosts explicitly fall back to polling. */
@@ -592,20 +614,22 @@ export function createTerminals({
     async subscribe_terminals_request(message: Inbound<'subscribe_terminals_request'>, client) {
       const subs = directories.get(client) ?? new Map<string, DirectorySub>();
       directories.set(client, subs);
-      const sub: DirectorySub = { cwd: message.cwd, ...(message.workspaceId ? { workspaceId: message.workspaceId } : {}) };
-      subs.set(`${message.cwd}\0${message.workspaceId ?? ''}`, sub);
+      // Optional from protocol 0.16; a string in the floor's types.
+      const cwd: string | undefined = message.cwd;
+      const sub: DirectorySub = { ...(cwd !== undefined ? { cwd } : {}), ...(message.workspaceId ? { workspaceId: message.workspaceId } : {}) };
+      subs.set(subKey(cwd, message.workspaceId), sub);
       poll();
       let terminals: ReturnType<typeof listed> = [];
-      try { if (await available()) terminals = listed(await running(), message.cwd, message.workspaceId); } catch (error: any) {
+      try { if (await available()) terminals = listed(await running(), cwd, message.workspaceId); } catch (error: any) {
         log(`terminals: list failed: ${error?.message ?? error}`);
       }
       sub.last = JSON.stringify(terminals);
-      return { type: 'terminals_changed', payload: { ...(message.requestId ? { requestId: message.requestId } : {}), cwd: message.cwd, ...(message.workspaceId ? { workspaceId: message.workspaceId } : {}), terminals } } satisfies Outbound;
+      return directoryMessage(sub, terminals, message.requestId);
     },
 
     unsubscribe_terminals_request(message: Inbound<'unsubscribe_terminals_request'>, client) {
       const subs = directories.get(client);
-      subs?.delete(`${message.cwd}\0${message.workspaceId ?? ''}`);
+      subs?.delete(subKey(message.cwd, message.workspaceId));
       if (subs && !subs.size) directories.delete(client);
       poll();
     },

@@ -141,12 +141,20 @@ function fakeAlpd({ protection, capabilities = ['terminal'], replayBytes = 1024 
 }
 
 /** An app client: every JSON message passes Paseo's validator; binary frames decode as terminal frames. */
+/**
+ * Whether the installed Paseo SDK knows a terminal list of every workspace (protocol 0.16+, t-1af7).
+ * Before it, terminals_changed requires cwd, so Paseo's validator cannot judge the cwd-less list:
+ * the lanes on an older SDK check its shape by the assertions alone, the latest-sdk lane with Paseo's validator too.
+ */
+const COLLECTION = validateWSOutboundMessage({ type: 'session', message: { type: 'terminals_changed', payload: { terminals: [] } } }).success;
+
 function fakeClient(name = 'c1') {
   const log = [];
   let buffered = 0;
   const client = {
     clientId: name, log,
     emit(message) {
+      if (!COLLECTION && message.type === 'terminals_changed' && message.payload.cwd === undefined) { log.push({ json: message }); return; }
       const checked = validateWSOutboundMessage({ type: 'session', message });
       assert.ok(checked.success, `the bridge sent a message Paseo's app drops: ${JSON.stringify(message).slice(0, 300)}\n${checked.error}`);
       log.push({ json: message });
@@ -586,6 +594,49 @@ test('a client that leaves loses its slots and subscriptions; the terminal keeps
   // The size claim went with it: another client's update now applies.
   await world.call(two, { type: 'terminal_input', terminalId: id, message: { type: 'resize', cols: 70, rows: 20, intent: 'update' } });
   await until(() => world.alpd.terminals.get(id).cols === 70, 'the update applied');
+});
+
+test('a subscription without cwd (Paseo 0.16+) lists every workspace\'s terminals, each with its cwd, and hears of changes', async t => {
+  const world = await setup(t, { timing: { pollMs: 20 } });
+  assert.equal(world.terminals.features.terminalCollection, true, 'the 0.16 client subscribes without cwd only to a host that says so');
+  const client = fakeClient();
+  const a = await world.alpd.create('ws-a');
+  const b = await world.alpd.create('ws-b');
+  const row = (id, workspaceId, cwd) => ({ id, name: 'sh', cwd, workspaceId, title: 'sh' });
+  const byId = terminals => [...terminals].sort((x, y) => x.id.localeCompare(y.id));
+  const all = (await world.call(client, { type: 'subscribe_terminals_request', requestId: 'all' })).payload;
+  assert.deepEqual({ ...all, terminals: byId(all.terminals) }, { requestId: 'all', terminals: byId([row(a, 'ws-a', '/w/a'), row(b, 'ws-b', '/w/b')]) });
+  assert.equal('cwd' in all, false, 'the client matches the reply to its cwd-less query by an absent cwd');
+  // One workspace of the collection, and a directory subscription beside them: three subscriptions, not one.
+  const one = (await world.call(client, { type: 'subscribe_terminals_request', requestId: 'one', workspaceId: 'ws-b' })).payload;
+  assert.deepEqual(one, { requestId: 'one', workspaceId: 'ws-b', terminals: [row(b, 'ws-b', '/w/b')] });
+  const dir = (await world.call(client, { type: 'subscribe_terminals_request', requestId: 'dir', cwd: '/w/a' })).payload;
+  assert.deepEqual(dir, { requestId: 'dir', cwd: '/w/a', terminals: [{ id: a, name: 'sh', workspaceId: 'ws-a', title: 'sh' }] });
+  // A terminal made elsewhere reaches the collection and the directory it is in; ws-b's list is unchanged.
+  // (A push may also precede a subscription's own reply, so messages are read by subscription, not counted.)
+  const pushes = from => client.json('terminals_changed').slice(from).map(message => message.payload).filter(payload => payload.requestId === undefined);
+  const of = (payloads, cwd, workspaceId) => payloads.filter(payload => payload.cwd === cwd && payload.workspaceId === workspaceId);
+  await tick(60);
+  let mark = client.json('terminals_changed').length;
+  const c = await world.alpd.create('ws-a');
+  await until(() => of(pushes(mark), undefined, undefined).length && of(pushes(mark), '/w/a', undefined).length, 'the collection and the directory hear of the new terminal');
+  await tick(60);
+  assert.deepEqual(of(pushes(mark), undefined, undefined).map(payload => byId(payload.terminals)), [byId([row(a, 'ws-a', '/w/a'), row(b, 'ws-b', '/w/b'), row(c, 'ws-a', '/w/a')])]);
+  assert.deepEqual(of(pushes(mark), '/w/a', undefined).map(payload => payload.terminals.map(entry => entry.id).sort()), [[a, c].sort()]);
+  assert.deepEqual(of(pushes(mark), undefined, 'ws-b'), [], 'ws-b did not change');
+  // Unsubscribing without cwd ends the collection only.
+  await world.call(client, { type: 'unsubscribe_terminals_request' });
+  mark = client.json('terminals_changed').length;
+  const d = await world.alpd.create('ws-b');
+  await until(() => of(pushes(mark), undefined, 'ws-b').length, 'ws-b\'s subscription hears of its new terminal');
+  await tick(60);
+  assert.deepEqual(pushes(mark), [{ workspaceId: 'ws-b', terminals: byId([row(b, 'ws-b', '/w/b'), row(d, 'ws-b', '/w/b')]) }]);
+});
+
+test('a subscription without cwd is empty while terminals are off', async t => {
+  const world = await setup(t, { config: null });
+  const client = fakeClient();
+  assert.deepEqual((await world.call(client, { type: 'subscribe_terminals_request', requestId: 'all' })).payload, { requestId: 'all', terminals: [] });
 });
 
 test('a watched directory hears of terminals made elsewhere within the poll interval', async t => {
