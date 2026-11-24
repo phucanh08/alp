@@ -59,3 +59,17 @@ test('gateway restart mid-turn, twice while idle, then alpd restart and a reload
   await expect(assistant(page)).toHaveCount(3);
   await expect(users(page)).toHaveCount(3);
 });
+
+test('a notice read back from history says when it was issued (t-2e23)', async ({ page }) => {
+  await connect(page, world);
+  await newSession(page, 'Replayed notice');
+  // alpd stops during a turn, so the reopened root gets its restart notice (an idle restart writes none).
+  await send(page, 'Slow answer please [slow]');
+  await expect(page.getByTestId('working')).toBeVisible();
+  await world.restartDaemon();
+  await expect(page.getByText(/Connection to the host lost/)).toBeHidden({ timeout: 30_000 });
+  await page.reload();
+  await connect(page, world);
+  await page.getByTestId('session-row').filter({ hasText: 'Replayed notice' }).click();
+  await expect(page.getByText(/^\[issued \d{4}-\d\d-\d\dT[^\]]+, replayed\] ALP: alpd restarted/).first()).toBeVisible({ timeout: 30_000 });
+});
