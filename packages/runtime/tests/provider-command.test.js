@@ -74,6 +74,9 @@ test('anything that is not exactly that launcher is refused, never partly read',
     'a target on another drive': nodeShim('node_modules\\D:\\evil.js'),
     'a target with a variable': nodeShim('node_modules\\%TEMP%\\evil.js'),
     'a target with forward slashes': nodeShim('node_modules/../../evil.js'),
+    'a target segment Windows would trim (trailing dot)': nodeShim('node_modules\\pkg.\\codex.js'),
+    'a target segment Windows would trim (trailing space)': nodeShim('node_modules\\pkg \\codex.js'),
+    'a target with a ... segment': nodeShim('node_modules\\...\\codex.js'),
     'a Node argument that is not a flag': nodeShim(SCRIPT, 'C:\\evil.js'),
     'a Node flag with a path': nodeShim(SCRIPT, '--require=./evil.js'),
     'a Node flag with a quote': nodeShim(SCRIPT, '--title="a'),
@@ -129,6 +132,12 @@ test('the working directory and relative PATH entries never supply the provider'
   assert.ok(probe.asked.length > 0 && probe.asked.every(file => path.win32.isAbsolute(file)), `only absolute paths are examined: ${probe.asked.join(', ')}`);
   assert.throws(() => launch('codex', { Path: '.;bin' }, planted), /^Error: Codex was not found: no codex\.exe and no npm launcher codex\.cmd in any directory of PATH\. Install Codex with `npm install -g @openai\/codex`, or set ALP_CODEX_BIN to the full path of the native codex\.exe\.$/);
   assert.throws(() => launch('codex', {}, planted), /Codex was not found/);
+  // Rooted entries without a drive (\bin depends on the current drive) and UNC shares are skipped too.
+  const elsewhere = { '\\bin\\codex.exe': 'MZ', '\\\\server\\share\\codex.exe': 'MZ', '\\\\server\\share\\codex.cmd': nodeShim(SCRIPT) };
+  const skipped = host({ ...elsewhere, ...installed });
+  assert.deepEqual(providerLaunch('codex', { Path: `\\bin;\\\\server\\share;${NPM}` }, CODEX_COMMAND, skipped), viaNode);
+  assert.ok(skipped.asked.every(file => /^[A-Za-z]:\\/.test(file)), `only drive paths are examined: ${skipped.asked.join(', ')}`);
+  assert.throws(() => launch('codex', { Path: '\\bin;\\\\server\\share' }, elsewhere), /Codex was not found/);
   assert.throws(() => launch('codex.exe', { Path: '.' }, planted), /Codex was not found: no codex\.exe in any directory of PATH/);
   // A launcher named by a relative path is refused; it is not looked up anywhere else either.
   for (const command of ['.\\codex.cmd', 'bin\\codex.cmd', 'bin/codex.cmd', 'C:codex.cmd']) {
