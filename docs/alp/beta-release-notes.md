@@ -118,11 +118,9 @@ edited away in PR #330 are back (t-cc9e, #384).
 
 Known issues:
 
-- **Deny rules are not a hard boundary for lines that are not plain words** (pre-existing,
-  beta.12 and earlier too; open, pending a decision): for such a line ALP's split of the command
-  can differ from the shell's, so a deny rule may not match. This was shown at the parser level;
-  its effect in a real session on each runtime has not been run. Rely on the mode and the OS
-  sandbox, not on a deny rule alone, to stop a command.
+- **A deny rule may not match a command line written in non-plain shell syntax** (pre-existing,
+  beta.12 and earlier too; open). Prefer allow rules and sandboxed modes over relying on a deny
+  rule alone to stop a command.
 - The dashboard and Paseo token sockets keep read-only agents out by the OS sandbox: checked on
   macOS, **not checked on Linux** (where a sandbox must block `AF_UNIX` connects) or on Windows
   (named pipes).
