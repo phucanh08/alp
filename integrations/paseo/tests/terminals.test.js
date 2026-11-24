@@ -633,6 +633,23 @@ test('a subscription without cwd (Paseo 0.16+) lists every workspace\'s terminal
   assert.deepEqual(pushes(mark), [{ workspaceId: 'ws-b', terminals: byId([row(b, 'ws-b', '/w/b'), row(d, 'ws-b', '/w/b')]) }]);
 });
 
+test('a subscription without cwd lists exactly the union of every live workspace\'s own list: no archived, removed-project or exited terminal', async t => {
+  const world = await setup(t);
+  const client = fakeClient();
+  const live = { 'ws-a': '/w/a', 'ws-a2': '/w/a', 'ws-b': '/w/b' };
+  for (const workspaceId of [...Object.keys(live), 'ws-old', 'ws-gone']) await world.alpd.create(workspaceId);
+  world.alpd.exit(await world.alpd.create('ws-b'));
+  const key = rows => rows.map(row => `${row.workspaceId}/${row.id}`).sort();
+  const collection = (await world.call(client, { type: 'subscribe_terminals_request', requestId: 'all' })).payload.terminals;
+  const union = [];
+  for (const [workspaceId, cwd] of Object.entries(live)) {
+    union.push(...(await world.call(client, { type: 'subscribe_terminals_request', requestId: workspaceId, cwd, workspaceId })).payload.terminals);
+  }
+  assert.equal(union.length, 3, 'one running terminal per live workspace');
+  assert.deepEqual(key(collection), key(union), 'the cwd-less list is the union of the per-workspace lists, nothing more');
+  for (const row of collection) assert.equal(row.cwd, live[row.workspaceId], 'each row carries its workspace\'s directory');
+});
+
 test('a subscription without cwd is empty while terminals are off', async t => {
   const world = await setup(t, { config: null });
   const client = fakeClient();
