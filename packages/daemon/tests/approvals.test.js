@@ -364,7 +364,9 @@ test('t-43ed (9): an approval whose root is abandoned is dropped, with its log c
   assert.match(output, new RegExp(id));
   assert.deepEqual(await base.held(), [], 'it leaves the file');
   assert.deepEqual(second.runtime.pendingApprovalRoots(), []);
-  const [dropped] = (await runLogOf(base, 'root')).filter(entry => entry.event === 'approval.dropped');
+  // The run log is written in the background: wait for the line rather than read it once.
+  let dropped;
+  await until(async () => { [dropped] = (await runLogOf(base, 'root')).filter(entry => entry.event === 'approval.dropped'); return dropped; }, 'the approval.dropped run-log line');
   assert.deepEqual([dropped.approvalId, dropped.outcome, dropped.reason, dropped.tool], [id, 'not_restored', 'its root session cannot be reopened', 'alp_issue']);
   assert.deepEqual(second.notices(), [], 'its root is not open: no notice, the log is the record');
   await second.runtime.shutdown();
@@ -396,7 +398,7 @@ test('t-43ed (9): through alpd, an approval whose root record is gone is dropped
     assert.deepEqual(second.runtime.questions(), []);
   });
   assert.match(output, /ALP_APPROVAL_DROPPED/);
-  assert.ok((await runLogOf(base, session.id)).some(entry => entry.event === 'approval.dropped' && entry.approvalId === id));
+  await until(async () => (await runLogOf(base, session.id)).some(entry => entry.event === 'approval.dropped' && entry.approvalId === id), 'the approval.dropped run-log line');
 });
 
 test('t-43ed (9): an approval not asked again within its restore window is dropped, and the window is kept across starts', async t => {
