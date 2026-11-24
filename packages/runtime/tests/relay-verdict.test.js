@@ -3,7 +3,7 @@
 // its supervisor reads. A relay never wakes an idle root and never ends the root's alp_wait.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
@@ -12,11 +12,10 @@ import { RELAY_CHARS } from '@anhlp/alp-runtime/mailbox';
 import { fakeTransport, until } from '../../../test/support/fake-agent.js';
 import { teardown } from '../../../test/support/teardown.js';
 
-const settle = () => new Promise(resolve => setTimeout(resolve, 40));
 const criterion = result => ({ criterion: 'Retries stop after three attempts', result, evidence: `src/retry.ts:40 ${result}` });
 const failing = { result: 'fail', criteria: [criterion('fail')], findings: [{ severity: 'high', where: 'src/retry.ts:41', problem: 'Retries forever' }] };
 
-async function setup(t, { supervisor = false } = {}) {
+async function setup(t, { supervisor = false, liveFile } = {}) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-relay-'));
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -24,9 +23,10 @@ async function setup(t, { supervisor = false } = {}) {
   await initProject(root);
   await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ workflow: { mode: 'cafe', supervisor } }));
   const agents = [];
-  const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(agents), libraryDir: path.join(directory, 'home'), runLogDir: path.join(directory, 'runs') });
+  const options = { language: 'English', libraryDir: path.join(directory, 'home'), runLogDir: path.join(directory, 'runs'), ...(liveFile ? { liveFile: path.join(directory, liveFile) } : {}) };
+  const runtime = createAlpRuntime({ ...options, transport: fakeTransport(agents) });
   defer(() => runtime.shutdown());
-  await runtime.open('root', { cwd: root });
+  await runtime.open('root', { cwd: root, ...(liveFile ? { persist: true } : {}) });
   if (supervisor) await until(() => agents.length === 2, 'the supervisor');
   const main = agents[0];
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Fix retries' }] });
@@ -43,11 +43,19 @@ async function setup(t, { supervisor = false } = {}) {
     await until(() => agents.length > count && agents.at(-1).turnId, 'reviewer turn');
     return { id: assignmentId, agent: agents.at(-1) };
   };
-  return { runtime, agents, main, lead, leadId, delegate };
+  // An idle root on the same queue: once recover() of it returns, any wake queued before it has
+  // run, and a steer or an ended wait happens in post() itself. So "nothing woke" is awaited, not timed.
+  let barrierOpen;
+  const barrier = async () => {
+    barrierOpen ??= runtime.open('barrier', { cwd: root });
+    await barrierOpen;
+    await runtime.recover('barrier');
+  };
+  return { runtime, agents, main, lead, leadId, delegate, barrier, defer, directory, root, options };
 }
 
 test('main reads the verdict of a reviewer its lead started in the same turn, without its wait ending early', async t => {
-  const { main, lead, leadId, delegate } = await setup(t);
+  const { main, lead, leadId, delegate, barrier } = await setup(t);
   const reviewer = await delegate('Review the retry change');
   let mainEvents;
   // A catch-all wait, the one a relay could end if it counted as mail for main's assignments.
@@ -62,7 +70,7 @@ test('main reads the verdict of a reviewer its lead started in the same turn, wi
   assert.equal(leadAnswer.events[0].body, undefined);
 
   // The relay neither ends main's wait for its lead nor steers into its turn.
-  await settle();
+  await barrier();
   assert.equal(mainEvents, undefined, 'main\'s wait for its lead ended on the relay');
   assert.deepEqual(main.steered, []);
 
@@ -83,16 +91,16 @@ test('main reads the verdict of a reviewer its lead started in the same turn, wi
 });
 
 test('a relay never wakes an idle root; it rides with the next mail, is bounded, and comes once when delivered again', async t => {
-  const { runtime, main, lead, leadId, delegate } = await setup(t);
+  const { runtime, main, lead, leadId, delegate, barrier } = await setup(t);
   main.finish('Waiting for the lead');
-  await settle();
+  await barrier();
   assert.equal(main.started.length, 1);
   const reviewer = await delegate('Review the retry change');
   const summary = `Long review. ${'x'.repeat(5000)}`;
   await reviewer.agent.call('alp_handoff', { outcome: 'complete', summary, verdict: failing });
   reviewer.agent.finish('Reviewed');
   await lead.call('alp_wait', { assignments: [reviewer.id] });
-  await settle();
+  await barrier();
   // Idle main is not woken by the relay.
   assert.equal(main.started.length, 1, 'the relay woke an idle root');
 
@@ -112,7 +120,7 @@ test('a relay never wakes an idle root; it rides with the next mail, is bounded,
 
   // The turn fails: the same relay comes again with the next prompt, once, saying when it was posted.
   main.notification('turn/completed', { threadId: main.threadId, turn: { id: main.turnId, status: 'failed', error: { message: 'boom' } } });
-  await settle();
+  await until(() => !runtime.snapshot('root').activeTurnId, 'main\'s failed turn ended');
   await runtime.prompt('root', { clientMessageId: 'm2', delivery: 'auto', content: [{ type: 'text', text: 'Go on' }] });
   await until(() => main.started.length === 3, 'main\'s next turn');
   const again = main.started[2].params.input.at(-1).text;
@@ -147,4 +155,56 @@ test('the supervisor digest says which grandchild results main got and which onl
   assert.match(line(leadId), /lead assignment \S+ completed, handoff complete: Reviewed; fixing$/);
   // The relay itself is not a second digest line.
   assert.doesNotMatch(digest, /mail relay/);
+});
+
+test('a grandchild alpd abandons after a restart is relayed to the root once, and the digest says so', async t => {
+  const { runtime: first, agents, main, lead, leadId, delegate, defer, directory, root, options } = await setup(t, { supervisor: true, liveFile: 'live.json' });
+  const reviewer = await delegate('Review the retry change');
+  const live = () => readFile(path.join(directory, 'live.json'), 'utf8').then(JSON.parse, () => []);
+  await until(async () => (await live()).length === 2, 'lead and reviewer in the live file');
+  const { runtime: runtimeKind, model } = first.snapshot('root');
+  // alpd stops while the lead and its reviewer work; both stay in the live file.
+  await first.shutdown();
+  assert.deepEqual((await live()).map(entry => entry.assignmentId).sort(), [leadId, reviewer.id].sort());
+
+  // The next alpd: the lead's thread resumes, the reviewer's cannot, so the reviewer is abandoned.
+  const next = [];
+  const fake = fakeTransport(next);
+  const transport = (...args) => {
+    const agent = fake(...args);
+    const request = agent.request.bind(agent);
+    agent.request = async (method, params) => {
+      if (method === 'thread/resume' && params.threadId === reviewer.agent.threadId) throw new Error('thread not found');
+      return request(method, params);
+    };
+    return agent;
+  };
+  const runtime = createAlpRuntime({ ...options, transport });
+  defer(() => runtime.shutdown());
+  await runtime.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: main.threadId, runtime: runtimeKind, model } });
+  const outcomes = await runtime.recover('root');
+  assert.deepEqual(outcomes.map(outcome => [outcome.assignmentId, outcome.outcome]), [[leadId, 'resumed'], [reviewer.id, 'failed']]);
+  const mainAgain = next.find(agent => agent.threadId === main.threadId);
+  const leadAgain = next.find(agent => agent.threadId === lead.threadId);
+  assert.ok(mainAgain && leadAgain);
+  // The lead gets the failed result; main, idle, is not woken by the relay (same queue barrier as above).
+  await until(() => leadAgain.turnId, 'the lead continues');
+  await runtime.open('barrier', { cwd: root });
+  await runtime.recover('barrier');
+  assert.equal(mainAgain.started.length, 0, 'the relay woke an idle root');
+
+  await leadAgain.call('alp_handoff', { outcome: 'complete', summary: 'Reviewer lost in the restart' });
+  leadAgain.finish('Done');
+  await until(() => mainAgain.started.length === 1, 'main woken by the lead\'s result');
+  const text = mainAgain.started[0].params.input.at(-1).text;
+  // Exactly once, before the lead's result, saying the reviewer failed in the restart.
+  assert.equal(text.split(`relay from ALP, result of assignment ${reviewer.id},`).length - 1, 1, text);
+  assert.match(text, new RegExp(`reviewer assignment ${reviewer.id} for lead failed at [^,]+, no handoff \\(alpd [^)]*could not continue: thread not found\\)`));
+  assert.ok(text.indexOf(`assignment ${reviewer.id},`) < text.indexOf(`result from lead, assignment ${leadId}`), text);
+  mainAgain.finish('Lead reported');
+  // The supervisor is the one other agent that runs a turn.
+  let supervisor;
+  await until(() => (supervisor = next.find(agent => agent !== mainAgain && agent !== leadAgain && agent.started.length)), 'the review of main\'s turn');
+  const digest = supervisor.started[0].params.input.at(-1).text;
+  assert.match(digest.split('\n').find(line => line.includes(`assignment ${reviewer.id} `) && !line.includes(' → ')) ?? digest, /reviewer assignment \S+ failed, no handoff \(.*\) \(also relayed to main\)$/);
 });
