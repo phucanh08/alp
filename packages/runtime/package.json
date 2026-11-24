@@ -145,6 +145,14 @@
       "types": "./dist/process-info.d.ts",
       "default": "./dist/process-info.js"
     },
+    "./provider-command": {
+      "alp-source": {
+        "types": "./src/provider-command.ts",
+        "default": "./src/provider-command.ts"
+      },
+      "types": "./dist/provider-command.d.ts",
+      "default": "./dist/provider-command.js"
+    },
     "./providers": {
       "alp-source": {
         "types": "./src/providers.ts",
