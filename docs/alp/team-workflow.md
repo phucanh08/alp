@@ -1688,9 +1688,14 @@ full final draft (including attribution), return `pending_approval` and an
 `approvalId` promptly, and leave main free to work or finish its turn. ALP sends
 one terminal result as result mail to that same main, waking it if idle. Only an
 explicit approving answer authorizes a GitHub write. Other answers, dismissal,
-timeout (`unanswered`) and cancellation post nothing. Pending issue questions
-survive normal turn completion and fresh prompts; interruption, session close
-and shutdown cancel them. `alp_skill` approvals work the same way (see
+expiry (`expired`, after 30 minutes without an answer; the user also gets a
+notice) and cancellation post nothing. Pending issue questions survive normal
+turn completion, fresh prompts and an alpd restart: alpd keeps them in
+`state/approvals.json`, reopens their root and shows the user the same pending
+approval again, under the same approvalId and with a new 30-minute window; the
+agent submits nothing again. A root whose approval waits is not closed while
+nobody watches it. Interruption and session close cancel them. `alp_schedule`
+proposals are still not restored after a restart. `alp_skill` approvals work the same way (see
 [Skills from lessons](#skills-from-lessons)); `alp_ask` keeps its turn lifetime.
 
 Retries with the same draft return its existing pending or terminal result for
