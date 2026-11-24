@@ -150,8 +150,31 @@ export async function host(t, { dir, defer }) {
 }
 
 /**
+ * /bin/sh lines that answer `alp dashboard --print --json` as the real alp does (docs/alp/dashboard.md
+ * §3.3) from the function `print_address`, which prints an address as plain `alp dashboard --print`
+ * does: one JSON line on stdout with that address when it exits 0, else an error line with the last
+ * line of its stderr, the stderr itself, and its exit code.
+ */
+const JSON_ANSWER = [
+  'if [ "$3" = --json ]; then',
+  '  err=$(mktemp); out=$(print_address 2>"$err"); code=$?',
+  '  url=$(printf \'%s\\n\' "$out" | tail -n 1)',
+  '  if [ "$code" = 0 ]; then',
+  '    origin=${url%%/#*}',
+  '    printf \'{"schema":"alp.dashboard.print","version":1,"ok":true,"url":"%s","origin":"%s","token":"%s","port":%s,"pid":%s}\\n\' "$url" "$origin" "${url##*#token=}" "${origin##*:}" "$$"',
+  '  else',
+  '    cat "$err" >&2',
+  '    printf \'{"schema":"alp.dashboard.print","version":1,"ok":false,"error":{"code":"failed","message":"%s"}}\\n\' "$(tail -n 1 "$err" | sed \'s/^alp: //\')"',
+  '  fi',
+  '  rm -f "$err"; exit "$code"',
+  'fi',
+].join('\n');
+
+/**
  * A fake `alp` at <dir>/bin/alp. `set(script)` replaces what `alp dashboard --print` does (a /bin/sh
- * body); anything other than `dashboard --print` exits 64.
+ * body that prints the address); anything other than `dashboard --print` exits 64. The app asks with
+ * `--print --json`, and the fake then answers in JSON from the same body, as an alp with the contract
+ * does. A body that prints `Usage:` is an alp without `alp dashboard`: it gets no JSON.
  */
 export async function fakeAlp({ dir }) {
   const file = path.join(dir, 'bin', 'alp');
@@ -160,7 +183,9 @@ export async function fakeAlp({ dir }) {
   let current = '';
   const write = async () => {
     const answer = version ? `[ "$1" = --version ] && { printf '%s\\n' '${version}'; exit 0; }\n` : '';
-    await writeFile(file, `#!/bin/sh\n${answer}[ "$1 $2" = "dashboard --print" ] || exit 64\n${current}\n`);
+    // An alp from before `alp dashboard` knows no --json either: its usage text is all it says.
+    const old = /Usage:/.test(current);
+    await writeFile(file, `#!/bin/sh\n${answer}[ "$1 $2" = "dashboard --print" ] || exit 64\n${old ? current : `print_address() {\n${current}\n}\n${JSON_ANSWER}\nprint_address`}\n`);
     await chmod(file, 0o755);
   };
   const set = async body => { current = body; await write(); };
@@ -377,6 +402,8 @@ export async function releaseMirror({ dir }, { version = '9.8.7', address }) {
     await writeFile(path.join(root, 'bin', 'alp'), [
       '#!/bin/sh',
       `[ "$1" = --version ] && { printf '%s\\n' '${version}'; exit 0; }`,
+      // A release with the --json contract (docs/alp/dashboard.md §3.3); plain --print prints the address.
+      `[ "$1 $2 $3" = "dashboard --print --json" ] && { printf '{"schema":"alp.dashboard.print","version":1,"ok":true,"url":"%s"}\\n' '${address}'; exit 0; }`,
       `[ "$1 $2" = "dashboard --print" ] && { printf '%s\\n' '${address}'; exit 0; }`,
       'exit 64',
     ].join('\n') + '\n');
