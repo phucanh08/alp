@@ -248,9 +248,27 @@ test('antigravity never reports an edit as done in read-only mode, even when agy
     assert.equal(completed[2].status, want, mode);
     if (want === 'failed') {
       assert.equal(completed[0].exitCode, 1);
-      assert.match(completed[0].error, /denied.*read-only/);
+      assert.match(completed[0].error, /denied edit_file in read-only/);
       assert.match(completed[2].error, /denied replace_file_content in read-only/);
     }
+    // Every edit name in the table, by the step's tool_name and by tool_info.name alone, and
+    // the two names agy uses for a read (view_file announced, read_file reported by 1.5.15),
+    // which stay as agy reported them.
+    for (const [index, tool_name] of ['write_file', 'write_to_file', 'edit_file', 'replace_file_content', 'multi_replace_file_content', 'sed_file', 'notebook_edit'].entries()) {
+      completed.length = 0;
+      transport.receiveLine(JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 10 + index, tool_name, state: 'DONE', tool_info: { name: tool_name, parameters: { Path: '/w/x.txt' }, output: 'written' } } }));
+      transport.receiveLine(JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 30 + index, state: 'DONE', tool_info: { name: tool_name } } }));
+      assert.deepEqual(completed.map(item => item.status), [want, want], `${mode} ${tool_name}`);
+      if (want === 'failed') for (const item of completed) {
+        assert.equal(item.aggregatedOutput, `Antigravity denied ${tool_name} in read-only mode`, tool_name);
+        assert.equal(item.exitCode, 1, tool_name);
+      }
+    }
+    completed.length = 0;
+    for (const [index, tool_name] of ['view_file', 'read_file'].entries()) {
+      transport.receiveLine(JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 50 + index, tool_name, state: 'DONE', tool_info: { name: tool_name, parameters: { Path: '/w/x.txt' }, output: '1 lines' } } }));
+    }
+    assert.deepEqual(completed.map(item => [item.status, item.aggregatedOutput]), [['completed', '1 lines'], ['completed', '1 lines']], mode);
   }
 });
 

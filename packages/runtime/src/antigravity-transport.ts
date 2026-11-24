@@ -46,9 +46,9 @@ const READ_ONLY_COMMANDS = ['pwd'];
 const SHELL_SYNTAX = /[;&|<>`$(){}\\\n\r]/;
 /**
  * Whether read-only allows a terminal command line, by ALP's own reading of the allowlist:
- * one allowed entry with no shell syntax. agy matches an allow rule by command prefix, so an
- * entry may name a subcommand or a flag ('git diff'), and the line must continue it on a word
- * boundary: 'pwd' allows 'pwd -L' but never 'pwdx'. Unknown input is refused.
+ * one allowed entry with no shell syntax. agy matches an allow rule by command prefix, so the
+ * line must continue an entry on a word boundary: 'pwd' allows 'pwd -L' but never 'pwdx'.
+ * Unknown input is refused.
  */
 export function antigravityReadOnlyCommandAllowed(commandLine: unknown): boolean {
   if (typeof commandLine !== 'string' || SHELL_SYNTAX.test(commandLine)) return false;
@@ -57,8 +57,10 @@ export function antigravityReadOnlyCommandAllowed(commandLine: unknown): boolean
 }
 const COMMAND_TOOLS = new Set(['run_command']);
 /** agy's file-editing tools, which read-only always denies. `edit_file` is the name agy 1.5.2
- * reports for an accepted edit, seen live in a workspace-write session; without it a denied edit
- * marked DONE would be reported as a completed edit (t-faa1). */
+ * reported for an accepted edit, seen live in a workspace-write session; without it a denied edit
+ * marked DONE would be reported as a completed edit (t-9ae1). The names agy announces at init
+ * (write_to_file, replace_file_content, ...) are not always the names its steps report, so this
+ * table carries both kinds: see docs/alp/antigravity-read-only-evidence.md. */
 const EDIT_TOOLS = new Set(['write_file', 'write_to_file', 'edit_file', 'replace_file_content', 'multi_replace_file_content', 'sed_file', 'notebook_edit']);
 const modeOf = (sandbox: unknown) => sandbox === 'danger-full-access' ? 'full-access' : String(sandbox);
 
@@ -97,7 +99,7 @@ export function antigravityEffortArgs(thinking: unknown): string[] {
 /** What each mode lets an Antigravity agent do, for its instructions. */
 export function antigravityModeText(sandbox: unknown): string {
   const mode = modeOf(sandbox);
-  if (mode === 'read-only') return `agy enforces read-only: its own file reading and search tools work inside your workspace, ALP's tools work, and its terminal runs these commands and no others, each with no redirection, pipe or chaining: ${READ_ONLY_COMMANDS.join(', ')}. Its sandbox refuses every write in the workspace, so no edit, build, install or commit can run, and a denied tool ends your turn: attempt nothing outside that list and report work that needs changes to your requester.`;
+  if (mode === 'read-only') return `agy enforces read-only: its own file reading and search tools work, ALP's tools work, and its terminal runs these commands and no others, each with no redirection, pipe or chaining: ${READ_ONLY_COMMANDS.join(', ')} (read files and search with your own tools, not the terminal). It denies every file edit and every other command, so no edit, build, install or commit can run. A tool agy denies ends your turn, and a read outside your workspace may or may not be allowed: attempt nothing outside that list and report work that needs changes to your requester.`;
   if (mode === 'workspace-write') return 'agy accepts file edits and runs terminal commands in its sandbox, which writes only inside your workspace; anything outside the workspace or the sandbox is denied, and a denied tool ends your turn. Report work that needs more to your requester.';
   return 'Antigravity runs with full access: every tool runs without asking.';
 }
