@@ -114,6 +114,13 @@ export type RuntimeOptions = {
   liveFile?: string;
 
   /**
+   * Where approvals waiting for the user (alp_skill, alp_skill_retire, alp_lesson_curate, alp_issue
+   * create/comment) are kept, so the next alpd asks again under the same approvalId with a new
+   * window (t-43ed). Omitted keeps them in memory.
+   */
+  approvalFile?: string;
+
+  /**
    * Told of every failed write to pauseFile, liveFile, recallFile and assignmentResultFile, as it
    * happens, so the host's disk guard pauses work on a full disk at once (t-e80a). Each write still
    * fails as before: pauses and recall go on in memory, live entries are logged, and result
@@ -223,6 +230,8 @@ export type AlpRuntime = {
   recall(target: { assignmentId?: string; taskId?: string; projectRoot?: string }, question: string): Promise<RecallAnswer>;
   /** Assignments an earlier alpd left running, which recover() can continue once their root is open again. */
   recoverable(): LiveEntry[];
+  /** Roots with an approval still waiting for the user, or kept by an earlier alpd and not yet asked again (t-43ed). */
+  pendingApprovalRoots?(): string[];
   /** Continues work in a reopened tree. continueRoot resumes its running turn; parkedRoot restores its held continuation intent. */
   recover(rootId: string, options?: { continueRoot?: boolean; parkedRoot?: string }): Promise<RecoveryOutcome[]>;
   /** Gives up the assignments of a tree whose root cannot be opened again: their tasks go back to open. */

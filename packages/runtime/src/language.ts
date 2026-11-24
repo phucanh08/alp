@@ -28,6 +28,8 @@ const en = {
   lessonAdd: 'Add',
   lessonScope: (scope: string, file: string) => `${scope === 'user' ? 'User lessons' : 'Project lessons'} (${file})`,
   issueLabels: 'Labels',
+  approvalExpired: (agent: string, id: string, minutes: number) =>
+    `The approval ${id} that ${agent} asked for expired: nobody answered within ${minutes} minutes. Nothing was applied, and ${agent} was told it expired (it was not rejected).`,
   trust: (project: string, names: string) => `This project's hooks run shell commands from ${project} on your machine: ${names}. ` +
     'Trust this workspace\'s hooks? ALP asks once: after you agree, its hooks run without asking, including hooks added or changed later.',
   trustYes: 'Trust this workspace',
@@ -82,6 +84,8 @@ const vi: Words = {
   lessonAdd: 'Thêm',
   lessonScope: (scope, file) => `${scope === 'user' ? 'Bài học của người dùng' : 'Bài học của project'} (${file})`,
   issueLabels: 'Nhãn',
+  approvalExpired: (agent, id, minutes) =>
+    `Yêu cầu duyệt ${id} của ${agent} đã hết hạn: không có câu trả lời trong ${minutes} phút. Không có gì được áp dụng, và ${agent} đã được báo là yêu cầu hết hạn (không phải bị từ chối).`,
   trust: (project, names) => `Các hook của project này chạy lệnh shell từ ${project} trên máy của bạn: ${names}. ` +
     'Tin cậy các hook của workspace này? ALP chỉ hỏi một lần: khi bạn đồng ý, các hook chạy mà không hỏi lại, kể cả hook thêm hoặc sửa sau này.',
   trustYes: 'Tin cậy workspace này',
