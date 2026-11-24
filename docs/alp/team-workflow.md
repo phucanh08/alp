@@ -1697,11 +1697,12 @@ agent submits nothing again. A root whose approval waits is not closed while
 nobody watches it. Interruption and session close cancel them. If a kept approval
 cannot be shown again (its root cannot be reopened, its draft no longer passes the
 tool's checks, or it is not asked again within 30 minutes of the first alpd that
-kept it), main gets the outcome `not_restored`: nothing was posted, saved or
+inherited it), main gets the outcome `not_restored`: nothing was posted, saved or
 changed, and it may submit the draft again with a fresh `requestId`. alpd logs
 `ALP_APPROVAL_DROPPED` and the run log `approval.dropped`; the user gets a notice
 only if that root is open. `alp_schedule` proposals expire the same way (`expired`
-and a notice) but are not restored after a restart. `alp_skill`,
+and a notice) but are not restored after a restart, and they do not keep their root
+open: a root closed while nobody watches it cancels its schedule proposal. `alp_skill`,
 `alp_skill_retire` and `alp_lesson_curate` approvals work the same way (see
 [Skills from lessons](#skills-from-lessons)); `alp_ask` keeps its turn lifetime.
 
