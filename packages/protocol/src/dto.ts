@@ -1,6 +1,6 @@
 export type RuntimeKind = 'codex' | 'claude' | 'acp' | 'antigravity';
 
-export type MailKind = 'question' | 'answer' | 'note' | 'steer' | 'result' | 'stalled' | 'board' | 'checkin';
+export type MailKind = 'question' | 'answer' | 'note' | 'steer' | 'result' | 'stalled' | 'board' | 'checkin' | 'relay';
 
 export type MailEvent = {
   id: string;

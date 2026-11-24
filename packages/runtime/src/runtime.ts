@@ -39,7 +39,7 @@ import { listTeams, teamOf } from '@anhlp/alp-core/teams';
 import { CONFIGURABLE, changesOf, effectiveOf, executablesOf, nativeModelOf, offered, type ConfigureChange, type ConfigureChanges, type EffectiveConfig } from './configure.js';
 import { anyModel, fitEffort, offers, profileModel, runtimeModelId, selectedProfile } from '@anhlp/alp-core/profiles';
 import { LESSONS_FILE, resolveSession, skillDescription, type ResolvedSession, type RuntimeKind, type SessionSpec } from './resolve.js';
-import { issued, MAIL_BODY_CHARS, MAIL_HEADER, publicEvent, renderMail, takeBatch, USER, type MailEvent } from './mailbox.js';
+import { informational, issued, MAIL_BODY_CHARS, MAIL_HEADER, publicEvent, RELAY_CHARS, renderMail, takeBatch, USER, withRelays, type MailEvent } from './mailbox.js';
 import type { AlpEvent, AssignmentSnapshot, Envelope, SessionSnapshot, TurnOrigin, UserQuestion } from './events.js';
 import { live, normalizePaths, overlapping, renderBoard, type Pin } from './board.js';
 import { verifyConfig } from '@anhlp/alp-core/verify';
@@ -649,6 +649,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
    */
   const openings = new WeakMap<Session, { failure?: unknown }>();
   const assignmentSessions = new WeakMap<Assignment, Session>();
+  /** Who got the result of an assignment whose requester is not the root, until record() reads its finished entry (t-d8c5). */
+  const resultRoutes = new Map<string, { requester: string; relayed: boolean }>();
   function closeSession(sessionId: string, session = sessions.get(sessionId), notify = true): Promise<void> {
     if (!session) return Promise.resolve();
     const closing = sessionClosures.get(session);
@@ -967,12 +969,16 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   /** Notes a run-log entry in a supervised root's journal; the supervisor's own activity is left out. */
   function record(rootId: string, entry: Record<string, any>) {
     const root = sessions.get(rootId);
+    const route = entry.event === 'assignment.finished' ? resultRoutes.get(entry.assignmentId) : undefined;
+    if (route) resultRoutes.delete(entry.assignmentId);
     const watcher = root?.mapping.team?.supervisor ? root.mapping.team.supervisor.agent : 'supervisor';
     if (!root?.supervisor || entry.from === 'supervisor' || entry.agent === watcher) return;
+    // Whether the root has the result: no mark when it was the requester (t-d8c5).
+    const routed = !route ? '' : route.relayed ? ` (also relayed to ${root.mapping.agent.name})` : ` (result went to ${route.requester}, not to ${root.mapping.agent.name})`;
     const line =
       entry.event === 'assignment.started' ? `${entry.parentAgent} → ${entry.agent} assignment ${entry.assignmentId}${entry.taskId ? ` for task ${entry.taskId}` : ''} (${entry.model}, ${entry.thinking ?? 'default effort'}, ${entry.mode}, ${entry.isolation}${entry.wait ? '' : ', async'}): ${clip(entry.task)}`
-      : entry.event === 'assignment.finished' ? `${entry.agent} assignment ${entry.assignmentId} ${entry.status}${entry.handoff ? `, handoff ${entry.handoff.outcome}${entry.handoff.verdict ? `, ${verdictLine(entry.handoff.verdict)}` : ''}: ${clip(entry.handoff.summary)}` : ', no handoff'}${entry.error ? ` (${clip(entry.error, 200)})` : ''}${entry.handoff?.discovered?.length ? `; discovered: ${clip(entry.handoff.discovered.join('; '))}` : ''}`
-      : entry.event === 'mail' && entry.kind !== 'result' && entry.kind !== 'board' ? `mail ${entry.kind} from ${entry.from}${entry.replyTo ? ` (reply to ${entry.replyTo})` : ''}: ${clip(entry.body ?? '')}`
+      : entry.event === 'assignment.finished' ? `${entry.agent} assignment ${entry.assignmentId} ${entry.status}${entry.handoff ? `, handoff ${entry.handoff.outcome}${entry.handoff.verdict ? `, ${verdictLine(entry.handoff.verdict)}` : ''}: ${clip(entry.handoff.summary)}` : ', no handoff'}${entry.error ? ` (${clip(entry.error, 200)})` : ''}${entry.handoff?.discovered?.length ? `; discovered: ${clip(entry.handoff.discovered.join('; '))}` : ''}${routed}`
+      : entry.event === 'mail' && entry.kind !== 'result' && entry.kind !== 'board' && entry.kind !== 'relay' ? `mail ${entry.kind} from ${entry.from}${entry.replyTo ? ` (reply to ${entry.replyTo})` : ''}: ${clip(entry.body ?? '')}`
       : entry.event === 'human.question' ? `${entry.agent} asked the user: ${clip(entry.body)}`
       : entry.event === 'human.answer' ? `user ${entry.outcome} ${entry.questionId}${entry.answer ? `: ${clip(entry.answer)}` : ''}`
       : entry.event === 'board.pin' ? `${entry.agent} pinned ${entry.kind}${entry.paths ? ` ${entry.paths.join(', ')}` : ''}: ${clip(entry.body)}`
@@ -2734,8 +2740,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   function deliver(sessionId: string, session: Session) {
     if (session.closed) return;
     for (const waiter of [...session.waiters]) {
-      const batch = takeBatch(session.mail, event => event.kind !== 'board' && !event.defer && waiter.accept(event));
-      if (!batch.length) continue;
+      const wanted = takeBatch(session.mail, event => !informational(event) && !event.defer && waiter.accept(event));
+      if (!wanted.length) continue;
+      // Relays to the root ride with the mail that ends its wait, never end it themselves (t-d8c5).
+      const batch = withRelays(session.mail, wanted);
       for (const event of batch) event.deliveredTurn = session.active;
       session.waiters.splice(session.waiters.indexOf(waiter), 1);
       clearTimeout(waiter.timer);
@@ -2835,8 +2843,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     // A check-in ends any wait, and so does mail to the session itself: its requester's
     // steer or the user's words must not sit behind a long wait for its own assignments.
     const accept = (event: MailEvent) => event.kind === 'checkin' || event.assignment === sessionId || wanted(event);
-    const ready = takeBatch(session.mail, event => event.kind !== 'board' && !event.defer && accept(event));
-    if (ready.length) {
+    const taken = takeBatch(session.mail, event => !informational(event) && !event.defer && accept(event));
+    if (taken.length) {
+      const ready = withRelays(session.mail, taken);
       for (const event of ready) event.deliveredTurn = session.active;
       return Promise.resolve<MailEvent[] | null | 'user'>(ready);
     }
@@ -2991,6 +3000,32 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
   }
 
+  /**
+   * The result of an assignment whose requester is not the root also goes to the root, so main reads
+   * a grandchild's verdict that its supervisor reads too (t-d8c5). Notes the route for record() and
+   * returns the root when it gets a relay: its requester got the result (`sent`) and the root is open.
+   */
+  function routeResult(rootId: string, parentId: string, assignmentId: string, sent: boolean) {
+    if (parentId === rootId) return undefined;
+    const root = sessions.get(rootId);
+    const relayed = sent && !!root && !root.closed;
+    resultRoutes.set(assignmentId, { requester: sessions.get(parentId)?.mapping.agent.name ?? parentId, relayed });
+    return relayed ? rootId : undefined;
+  }
+
+  /**
+   * One short passive mail: it never wakes the root, never ends its alp_wait, and rides with the
+   * next mail it gets or its next turn. Posted once, when the assignment finishes: a redelivery
+   * delivers the same mail again, marked with when it was posted.
+   */
+  function relayResult(rootId: string, requester: string, assignmentId: string, result: Record<string, any>) {
+    const handoff = result.handoff as Handoff | null;
+    const body = `${result.agent} assignment ${assignmentId} for ${requester} ${result.status} at ${new Date().toISOString()}` +
+      (handoff ? `, handoff ${handoff.outcome}${handoff.verdict ? `, ${verdictLine(handoff.verdict)}` : ''}: ${clip(handoff.summary, 600)}` : ', no handoff') +
+      (result.error ? ` (${clip(String(result.error), 200)})` : '');
+    post(rootId, { kind: 'relay', from: 'ALP', assignment: assignmentId, passive: true, body: cut(body, RELAY_CHARS) });
+  }
+
   async function finishAssignment(parentId: string, parent: Session, assignment: Assignment, state: string, error?: unknown, quiet = false) {
     if (assignment.finished) return;
     assignment.finished = true;
@@ -3083,6 +3118,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (assignment.taskId) result.task = await settleTask(parent, assignment, state, child?.handoff);
 
     if (child) void runHooks(assignment.id, child, 'assignment.end', { assignment: assignment.id, status: state, handoff: child.handoff ?? null }, assignment.taskId);
+    const relayTo = routeResult(assignment.rootId, parentId, assignment.id, !quiet);
     runLog(rootOf(parentId), {
       event: 'assignment.finished',
       assignmentId: assignment.id,
@@ -3102,6 +3138,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
     parent.mail = parent.mail.filter(event => event.deliveredTurn || event.kind !== 'question' || event.assignment !== assignment.id);
     if (!quiet) post(parentId, { kind: 'result', from: assignment.agent, assignment: assignment.id, result });
+    if (relayTo) relayResult(relayTo, parent.mapping.agent.name, assignment.id, result);
   }
 
   async function toolCall(
@@ -3235,7 +3272,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
   async function waitTool(sessionId: string, session: Session, args: unknown) {
     if (!plainObject(args, ['assignments', 'timeoutMs'])) return toolResult(false, { error: 'Invalid wait' });
-    const known = (id: unknown) => typeof id === 'string' && (session.assignments.has(id) || session.mail.some(event => event.assignment === id));
+    const known = (id: unknown) => typeof id === 'string' && (session.assignments.has(id) || session.mail.some(event => event.kind !== 'relay' && event.assignment === id));
     if (args.assignments !== undefined && (!Array.isArray(args.assignments) || !args.assignments.every(known))) {
       return toolResult(false, { error: 'Unknown assignment, or its result was already delivered' });
     }
@@ -3244,7 +3281,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
     const ids: Set<string> | undefined = args.assignments?.length ? new Set(args.assignments) : undefined;
     const accept = (event: MailEvent) => !ids || ids.has(event.assignment);
-    const pending = [...session.assignments.keys()].some(id => !ids || ids.has(id)) || takeBatch(session.mail, event => event.kind !== 'board' && !event.defer && accept(event)).length > 0;
+    const pending = [...session.assignments.keys()].some(id => !ids || ids.has(id)) || takeBatch(session.mail, event => !informational(event) && !event.defer && accept(event)).length > 0;
     const events = pending ? await waitFor(sessionId, session, accept, Math.min(args.timeoutMs ?? 300_000, 900_000)) : [];
     if (events === 'user') return toolResult(true, { events: [], userMessage: true, running: running(session), next: USER_WROTE });
     if (!events) return toolResult(false, session.closed || session.wakeBlocked ? { error: 'Turn ended' } : { error: TURN_ENDED, running: running(session) });
@@ -5034,8 +5071,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       error: `${restartCause()} while it worked, and it could not continue: ${reason}`,
       ...(entry.worktree ? { worktree: { branch: entry.worktree.branch, kept: true } } : {}), ...(task ? { task } : {}),
     };
+    const relayTo = routeResult(entry.rootId, entry.parentId, entry.assignmentId, !!parent && !parent.closed);
     runLog(entry.rootId, { event: 'assignment.finished', assignmentId: entry.assignmentId, reconciled: true, ...result });
     if (parent && !parent.closed) post(entry.parentId, { kind: 'result', from: entry.agent, assignment: entry.assignmentId, result });
+    if (relayTo) relayResult(relayTo, parent!.mapping.agent.name, entry.assignmentId, result);
   }
 
   /**

@@ -10,6 +10,14 @@ export const USER = 'user';
 
 export const MAIL_BATCH_CHARS = 9000;
 export const MAIL_BODY_CHARS = 8000;
+/** Longest body of a relay: the result of a grandchild that the root receives as information (t-d8c5). */
+export const RELAY_CHARS = 1000;
+
+/**
+ * Information that never ends a wait by itself: a board pin, or a relay (the result of an assignment
+ * whose requester is not the root, copied to the root). Neither wakes an idle session either (passive).
+ */
+export const informational = (event: MailEvent) => event.kind === 'board' || event.kind === 'relay';
 
 /** Mail as the runtime holds it: `postedAt` (ms) is when it was posted. It never leaves the runtime (publicEvent). */
 export type PostedMail = MailEvent & { postedAt?: number };
@@ -54,6 +62,23 @@ export function takeBatch(mail: MailEvent[], accept: (event: MailEvent) => boole
   return batch;
 }
 
+/**
+ * A batch that ends a wait, with the undelivered relays that fit in what is left of the budget, in
+ * the order they were posted: a relay rides with the mail that ends a wait, never ends it itself.
+ */
+export function withRelays(mail: MailEvent[], batch: MailEvent[], limit = MAIL_BATCH_CHARS) {
+  let size = batch.reduce((total, event) => total + JSON.stringify(publicEvent(event)).length, 0);
+  const relays: MailEvent[] = [];
+  for (const event of mail) {
+    if (event.kind !== 'relay' || event.deliveredTurn || event.defer || batch.includes(event)) continue;
+    const length = JSON.stringify(publicEvent(event)).length;
+    if (size + length > limit) break;
+    relays.push(event);
+    size += length;
+  }
+  return relays.length ? [...batch, ...relays].sort((a, b) => mail.indexOf(a) - mail.indexOf(b)) : batch;
+}
+
 /** How rendered mail begins, so a replayed prompt can tell ALP's mail from the user's words. */
 export const MAIL_HEADER = 'ALP mail from other agents.';
 
@@ -74,7 +99,10 @@ export function renderMail(events: PostedMail[], requester?: string, now = Date.
     'Answer a question with alp_send {to: <assignment>, kind: "answer", replyTo: <id>}.';
   const lines = events.map(event => {
     if (event.kind === 'checkin') return `${[`[${event.id}] check-in from ALP`, ...repeat(event)].join(', ')}:\n${event.body}`;
-    const label = [`[${event.id}] ${event.kind} from ${event.from}`, event.kind === 'board' ? `pin ${event.assignment} on the project board` : `assignment ${event.assignment}`]
+    const label = [`[${event.id}] ${event.kind} from ${event.from}`,
+      event.kind === 'board' ? `pin ${event.assignment} on the project board`
+      : event.kind === 'relay' ? `result of assignment ${event.assignment}, which went to its requester; a copy for your information, not one of your assignments`
+      : `assignment ${event.assignment}`]
       .concat(event.replyTo ? [`reply to ${event.replyTo}`] : [], repeat(event))
       .join(', ');
     return `${label}:\n${event.body ?? JSON.stringify(event.result)}`;
