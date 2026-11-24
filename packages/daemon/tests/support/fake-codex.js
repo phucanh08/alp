@@ -8,6 +8,8 @@
 //   [hold]         answer, but never finish the turn
 //   [slow]         answer after 200 ms
 //   [ask]          answer, then ask the user with the alp_ask tool; the turn ends once it is answered
+//   [issue]        answer, then propose an ALP issue with the alp_issue tool (no labels, so gh is not
+//                  called before approval); the turn ends once alpd answers the call (pending_approval)
 //   [usage]        report token usage as Codex does (thread/tokenUsage/updated) before the turn ends
 //   [codewords]    answer with the codewords ("codeword X") of the turns its thread holds, so a fork's or a
 //                  rewind's next reply shows which turns it can see
@@ -116,6 +118,10 @@ lines.on('line', line => {
           const call = `ask-${turnId}`;
           asking.set(call, { threadId: params.threadId, turnId });
           setTimeout(() => send({ id: call, method: 'item/tool/call', params: { threadId: params.threadId, turnId, callId: `call-${turnId}`, namespace: null, tool: 'alp_ask', arguments: { question: 'Go on?', to: 'user' } } }), 20);
+        } else if (text.includes('[issue]')) {
+          const call = `issue-${turnId}`;
+          asking.set(call, { threadId: params.threadId, turnId });
+          setTimeout(() => send({ id: call, method: 'item/tool/call', params: { threadId: params.threadId, turnId, callId: `call-${turnId}`, namespace: null, tool: 'alp_issue', arguments: { action: 'create', target: 'alp', title: 'Fake issue', body: 'A draft from the fake provider.', requestId: `fake-${turnId}` } } }), 20);
         } else if (!text.includes('[hold]')) setTimeout(() => finish(params.threadId, turnId, seen ? `codewords: ${seen.join(' ') || 'none'}` : `ok ${turns}`), 20);
       };
       if (text.includes('[slow]')) setTimeout(start, 200); else start();
