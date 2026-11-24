@@ -84,3 +84,19 @@ for (const outcome of ['timeout', 'interrupt', 'handler_error']) {
     }
   });
 }
+
+test('t-43ed: a schedule approval nobody answers expires: the agent hears \'expired\', not a rejection, and the user gets a notice', async t => {
+  const { runtime, main, calls } = await setup(t);
+  const notices = [];
+  runtime.onEvent(({ event }) => { if (event.type === 'item' && event.item.kind === 'notice') notices.push(event.item.text); });
+  const args = draft();
+  const pending = await main.call('alp_schedule', args);
+  let result;
+  await until(async () => { result = await main.call('alp_schedule', args); return result.status === 'resolved'; });
+  assert.equal(result.outcome, 'expired');
+  assert.equal(result.approved, false);
+  assert.equal(result.created, false);
+  assert.deepEqual(calls, [], 'an expired proposal creates nothing');
+  assert.equal(notices.filter(text => text.includes(pending.approvalId)).length, 1, `one notice names the approval: ${JSON.stringify(notices)}`);
+  assert.match(notices.find(text => text.includes(pending.approvalId)), /expired|hết hạn/);
+});
