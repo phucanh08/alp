@@ -144,7 +144,8 @@ const isProviderEntry = (entry, platform) => {
  * claude and agy) is replaced by a shadow directory under `shadowRoot` that links every OTHER entry,
  * so node, git and the rest still resolve while `codex`, `claude`, `agy`, ... resolve to nothing, as
  * on CI. A test that wants a provider puts its own fake first on its child's PATH, which still works.
- * An entry that cannot be linked is left out of the shadow rather than reaching the original.
+ * An entry that cannot be linked is left out of the shadow rather than reaching the original, and a
+ * directory that cannot be listed is left out of PATH.
  */
 export function providerFreePath(searchPath, shadowRoot, { platform = process.platform } = {}) {
   const delimiter = platform === 'win32' ? ';' : ':';
@@ -153,7 +154,9 @@ export function providerFreePath(searchPath, shadowRoot, { platform = process.pl
   for (const directory of (searchPath ?? '').split(delimiter)) {
     if (!directory) continue;
     let entries;
-    try { entries = readdirSync(directory); } catch { result.push(directory); continue; }
+    // Fail closed: a directory that cannot be listed (missing, not a directory, execute-only) may hold a
+    // provider this run cannot see, so it is dropped rather than kept as it is.
+    try { entries = readdirSync(directory); } catch { continue; }
     if (!entries.some(entry => isProviderEntry(entry, platform))) { result.push(directory); continue; }
     const shadow = path.join(shadowRoot, String(shadows++));
     mkdirSync(shadow, { recursive: true });
