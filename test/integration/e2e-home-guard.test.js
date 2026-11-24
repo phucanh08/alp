@@ -11,9 +11,9 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { teardown } from '../support/teardown.js';
-import { HomeGuardError, checkScratchHome, resolveDeep } from './home-guard.mjs';
+import { HomeGuardError, checkScratchHome, resolveDeep } from '../e2e/home-guard.mjs';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
+const here = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'e2e');
 
 function scene(t) {
   const defer = teardown(t);
