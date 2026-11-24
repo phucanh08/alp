@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { fstatSync, openSync, writeSync } from 'node:fs';
+import { fstatSync, openSync, writeFileSync, writeSync } from 'node:fs';
 import { mkdir, open, readFile, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -140,14 +140,32 @@ async function userSettings(home: string): Promise<any> {
   }
 }
 
+/** What a running alpd keeps in state/alpd.running; `stopping` once it was asked to stop. */
+type Marker = { pid?: number; startedAt?: string; groupLeader?: boolean; stopping?: string };
+
 /**
  * How the previous alpd ended (ALPD §31). A running alpd keeps a marker file and
  * touches it with its heartbeat; a clean stop removes it last. A marker found at
- * start means the previous alpd crashed, around the marker's last touch.
+ * start means the previous alpd did not reach the end of a stop:
+ * - without `stopping`, it crashed, around the marker's last touch;
+ * - with `stopping`, it was asked to stop and went before it had finished (its own exit
+ *   timer, or a service manager that stopped waiting). That is a restart, not a crash, to
+ *   the sessions it left (t-11c7); what it left running is stopped all the same (`left`).
+ * `restore` puts the marker back as it was found: a start that fails must not leave its own
+ * marker for the next start to read as a crash of an alpd that never ran.
  */
-async function previousExit(marker: string): Promise<{ kind: 'clean' | 'crash'; at?: string }> {
+async function previousExit(marker: string): Promise<{ exit: { kind: 'clean' | 'crash'; at?: string }; cutShort?: string; left?: Marker; restore: () => Promise<void> }> {
   const info = await stat(marker).catch(() => undefined);
-  return info ? { kind: 'crash', at: info.mtime.toISOString() } : { kind: 'clean' };
+  if (!info) return { exit: { kind: 'clean' }, restore: () => unlink(marker).catch(() => {}) };
+  const raw = await readFile(marker, 'utf8').catch(() => undefined);
+  let left: Marker | undefined;
+  try { const parsed = raw === undefined ? undefined : JSON.parse(raw); if (parsed && typeof parsed === 'object') left = parsed; } catch {}
+  const restore = async () => {
+    await writeFile(marker, raw ?? '{}', { mode: 0o600 }).catch(() => {});
+    await utimes(marker, info.atime, info.mtime).catch(() => {});
+  };
+  if (typeof left?.stopping === 'string') return { exit: { kind: 'clean' }, cutShort: left.stopping, left, restore };
+  return { exit: { kind: 'crash', at: info.mtime.toISOString() }, ...(left ? { left } : {}), restore };
 }
 
 /** Whether a process group `id` exists; on POSIX a pid is never reused while its group lives. */
@@ -221,13 +239,17 @@ async function run(home: string) {
   phase = 'recovery';
   // First: nothing a crashed alpd left running may still write while this one recovers.
   const marker = path.join(home, 'state', 'alpd.running');
-  const exit = await previousExit(marker);
-  if (exit.kind === 'crash') {
-    log.warn(`the previous alpd stopped unexpectedly around ${exit.at}`, { code: 'ALP_PREVIOUS_CRASH', at: exit.at });
-    await stopLeftovers(await readFile(marker, 'utf8').then(JSON.parse).catch(() => undefined));
-  }
+  const previous = await previousExit(marker);
+  const exit = previous.exit;
+  if (exit.kind === 'crash') log.warn(`the previous alpd stopped unexpectedly around ${exit.at}`, { code: 'ALP_PREVIOUS_CRASH', at: exit.at });
+  else if (previous.cutShort) log.warn(`the previous alpd was asked to stop at ${previous.cutShort} and went before it had finished stopping`, { code: 'ALP_PREVIOUS_STOP_CUT_SHORT', at: previous.cutShort });
+  // Either way it did not end its sessions itself.
+  if (previous.left) await stopLeftovers(previous.left);
   await mkdir(path.dirname(marker), { recursive: true, mode: 0o700 });
-  await writeFile(marker, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), groupLeader: leadsGroup() }), { mode: 0o600 });
+  const own: Marker = { pid: process.pid, startedAt: new Date().toISOString(), groupLeader: leadsGroup() };
+  await writeFile(marker, JSON.stringify(own), { mode: 0o600 });
+  // Until alpd listens, a failure puts back what was found: this start then never ran (t-11c7).
+  restoreMarker = previous.restore;
   const runLogDir = process.env.ALP_RUN_LOG_DIR || path.join(home, 'runs');
   const worktreeDir = path.join(home, 'worktrees');
   // Worktrees of assignments a crash interrupted: their work goes to their branches. What
@@ -262,7 +284,11 @@ async function run(home: string) {
   let stopping: Promise<void> | undefined;
   const shutdown = (code = 0) => {
     stopping ??= (async () => {
-      const force = setTimeout(() => process.exit(code), 10_000);
+      // A stop that was asked for says so in the marker before anything can hold it up: if alpd goes before
+      // the end (the timer below, a service manager that stops waiting), the next alpd reads a stop cut
+      // short, not a crash (t-11c7). A stop after a fatal error (code 1) is not one that was asked for.
+      if (code === 0) try { writeFileSync(marker, JSON.stringify({ ...own, stopping: new Date().toISOString() }), { mode: 0o600 }); } catch {}
+      const force = setTimeout(() => process.exit(code), STOP_TIMEOUT_MS);
       force.unref();
       clearInterval(beat);
       disk.stop();
@@ -312,6 +338,8 @@ async function run(home: string) {
     throw error;
   }
   phase = 'ready';
+  // It listens: from here the marker is this alpd's, whatever follows.
+  restoreMarker = undefined;
   // Web app and relay are owned by the optional Paseo integration process.
   await updateLock(home, { ...lock, ready: true });
   // Clients that cannot locate alpd themselves (the Paseo plugin) start it from here next time.
@@ -334,6 +362,21 @@ function diskStartupReason(error: any, home: string) {
 }
 
 const home = alpHome();
+/**
+ * How long a stop may take before alpd exits anyway: 10 s. ALP_STOP_TIMEOUT_MS sets another whole number of
+ * milliseconds, from 100 to 600000: tests shorten it, a host whose disk is slow may lengthen it. Any other
+ * value is ignored and said so, so a mistyped one cannot cut every stop short.
+ */
+function stopTimeout(value = process.env.ALP_STOP_TIMEOUT_MS) {
+  if (value === undefined || value === '') return 10_000;
+  const ms = /^\d+$/.test(value) ? Number(value) : NaN;
+  if (Number.isSafeInteger(ms) && ms >= 100 && ms <= 600_000) return ms;
+  log.warn(`ignoring ALP_STOP_TIMEOUT_MS=${value}: it takes a whole number of milliseconds from 100 to 600000; alpd keeps 10000`, { code: 'ALP_STOP_TIMEOUT_INVALID' });
+  return 10_000;
+}
+const STOP_TIMEOUT_MS = stopTimeout();
+/** Puts the previous alpd's marker back while this start has not reached listening; see previousExit. */
+let restoreMarker: (() => Promise<void>) | undefined;
 /** Where a failed write to alpd's own output goes once the disk guard exists. */
 let diskReport = (_error: unknown) => {};
 // Before anything logs: a log write the full disk refused must not end alpd (t-2831).
@@ -362,6 +405,8 @@ try {
   }
   // The log says where start-up stopped; alp doctor reads it from there.
   const stoppedIn = phase as Phase;
+  // Before anything else can fail: the next start reads how the alpd before this one ended, not this failure.
+  await restoreMarker?.();
   // A full disk is named as such (t-e80a): alpd cannot take its lock or write its marker, and
   // nothing but freeing space helps. The lock stays exclusive; alpd only says why it stopped.
   const disk = isDiskError(error);
