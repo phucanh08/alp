@@ -646,7 +646,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
       if (removed.has(root)) continue;
       // A root that was closed is not opened again for a job: a job continues a session
       // that is alive, and a closed one fails with the reason.
-      if (head && resumable(head) && (head.status === 'running' || (head.status === 'idle' && head.session?.parked) || tree.some(record => continuing.has(record.id)) || (scheduled.has(head.id) && head.status !== 'closed'))) reopen.push({ record: head, working: head.status === 'running' });
+      if (head && resumable(head) && (head.status === 'running' || (head.status === 'idle' && head.session?.parked) || tree.some(record => continuing.has(record.id)) || (scheduled.has(head.id) && head.status !== 'closed') || runtime.pendingApprovalRoots?.().includes(head.id))) reopen.push({ record: head, working: head.status === 'running' });
       if (tree.some(record => LIVE.includes(record.status))) seen(root, await store!.timeline(root));
       for (const record of tree as Array<SessionRecord & { activeTurnId?: string }>) {
         records.set(record.id, record);
@@ -944,6 +944,8 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     if (closing || attached.get(root)?.size || recovering.has(root)) return false;
     // A root a job waits for stays open: the job is to continue that very session.
     if (scheduler?.holds(root)) return false;
+    // So does a root whose approval waits for the user (t-43ed), until it is decided or expires.
+    if (runtime.pendingApprovalRoots?.().includes(root)) return false;
     const session = runtime.snapshot(root);
     if (!session || session.busy) return false;
     await runtime.close(root).catch(() => {});

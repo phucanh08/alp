@@ -366,7 +366,7 @@ test('skill approvals report refusal, dismissal, timeout and save errors once an
       assert.equal(result.saved, false);
       if (scenario === 'failure') { assert.equal(result.approved, true); assert.ok(result.error); }
       else {
-        assert.equal(result.outcome, scenario === 'timeout' ? 'unanswered' : scenario === 'dismiss' ? 'dismissed' : 'answered');
+        assert.equal(result.outcome, scenario === 'timeout' ? 'expired' : scenario === 'dismiss' ? 'dismissed' : 'answered');
         await assert.rejects(readFile(file, 'utf8'), { code: 'ENOENT' });
       }
       assert.doesNotMatch(await readFile(path.join(library, 'role-skills.json'), 'utf8').catch(() => ''), /quote-output/);
@@ -535,7 +535,7 @@ test('issue approvals report refusal, dismissal, timeout and posting errors once
       assert.equal(result.posted, false);
       assert.equal(writes, scenario === 'failure' ? 1 : 0);
       if (scenario === 'failure') assert.match(result.error, /injected posting failure/);
-      else assert.equal(result.outcome, scenario === 'timeout' ? 'unanswered' : scenario === 'dismiss' ? 'dismissed' : 'answered');
+      else assert.equal(result.outcome, scenario === 'timeout' ? 'expired' : scenario === 'dismiss' ? 'dismissed' : 'answered');
       const replay = await main.call('alp_issue', draft);
       assert.equal(replay.status, 'resolved'); assert.equal(replay.approvalId, q.id);
       await settle(); assert.equal(terminal().length, 1); assert.equal(runtime.questions().length, 0);

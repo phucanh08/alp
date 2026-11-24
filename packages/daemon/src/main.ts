@@ -272,7 +272,7 @@ async function run(home: string) {
     templates, runLogDir, worktreeDir, copyDir, boardDir: path.join(home, 'boards'), libraryDir: home,
     // Read-only copies of attached files for the sessions' tools (§12.6); not on Windows, as the store.
     ...(process.platform !== 'win32' ? { attachmentStageDir: attachmentStageDir(home) } : {}),
-    assignmentResultFile: path.join(home, 'state', 'assignment-results.json'), recallFile: path.join(home, 'state', 'recall.json'), pauseFile: path.join(home, 'state', 'pause.json'), liveFile: path.join(home, 'state', 'live.json'),
+    assignmentResultFile: path.join(home, 'state', 'assignment-results.json'), recallFile: path.join(home, 'state', 'recall.json'), pauseFile: path.join(home, 'state', 'pause.json'), liveFile: path.join(home, 'state', 'live.json'), approvalFile: path.join(home, 'state', 'approvals.json'),
     autoResume: settings?.limits?.autoResume !== false, recoveryResume: settings?.recovery?.autoResume !== false && !opened.restored, previousExit: exit,
     // Pause, live, recall and result writes the disk refused hold work at once, not at the next check (t-e80a).
     onWriteError: error => diskReport(error),

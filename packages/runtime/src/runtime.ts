@@ -17,8 +17,8 @@ import { verdictLine, parseHandoff, type Handoff } from './handoff.js';
 import { TASK_ACTIONS, TASK_PAST, TASK_FIELDS, mainOf, readOnlyMember, roleOf, taskActions, taskBrief, type TaskAction, STRATEGIES, DEFAULT_STRATEGY, STRATEGY_REASON_CHARS, choosesStrategy, type Strategy } from './tools.js';
 import { nativeEnvironment, createTransport } from './providers.js';
 import { nativeMode, codexApproval, profileEfforts, nativeSessionConfig } from './session-config.js';
-import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, realpathSync, watch as watchFiles, type FSWatcher } from 'node:fs';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, watch as watchFiles, writeFileSync, type FSWatcher } from 'node:fs';
 import { appendFile, mkdir, open, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { checkFrontmatter, skillReferences, splitSkill } from '@anhlp/alp-core/skill-validate';
 import { resourceUses } from './skill-resources.js';
@@ -1987,6 +1987,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const result = await askUser(sessionId, session, undefined, body, [say.approve, say.reject], approval) as { contentItems: Array<{ text: string }> };
     let value: any;
     try { value = JSON.parse(result.contentItems[0].text); } catch { value = {}; }
+    // Expired is not rejected (t-43ed): nobody answered in time, and the agent is told so.
+    if (value.status === 'expired') return { approved: false, outcome: 'expired', feedback: `Nobody answered within ${askMinutes()} minutes, so the approval expired; the user did not reject it` };
     if (value.status !== 'answered') return { approved: false, outcome: value.status ?? 'canceled', ...(value.reason ? { feedback: value.reason } : {}) };
     const answer = String(value.answer).trim();
     return APPROVALS.includes(answer.toLowerCase()) ? { approved: true } : { approved: false, outcome: 'answered', feedback: answer };
@@ -2006,7 +2008,82 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   };
   const approvalCanceled = (session: Session, cancellation: number) => closed || session.closed || cancellation !== (approvalCancellation.get(session) ?? 0);
 
-  async function skillTool(sessionId: string, session: Session, args: unknown) {
+  // Approvals waiting for the user, kept in approvalFile (t-43ed): the next alpd reopens their root,
+  // runs the tool again with the same approvalId, and the user gets a new window from then. An
+  // approval leaves the file once decided, expired or canceled, but not when alpd stops: shutdown
+  // cancels nothing it keeps. The file is written whole and atomically on each change; a failed
+  // write is logged and told to the disk guard, and the approval goes on in memory.
+  type ApprovalTool = 'alp_skill' | 'alp_skill_retire' | 'alp_lesson_curate' | 'alp_issue';
+  type HeldApproval = { approvalId: string; sessionId: string; rootId: string; tool: ApprovalTool; args: unknown; askedAt: string };
+  const approvalTools: Record<ApprovalTool, (sessionId: string, session: Session, args: unknown, restoredId?: string) => Promise<ReturnType<typeof toolResult>>> = {
+    alp_skill: (...call) => skillTool(...call),
+    alp_skill_retire: (...call) => skillRetireTool(...call),
+    alp_lesson_curate: (...call) => lessonCurateTool(...call),
+    alp_issue: (...call) => issueTool(...call),
+  };
+  /** By approvalId; `inherited` marks those an earlier alpd kept that are not asked again yet. */
+  const heldApprovals = new Map<string, HeldApproval & { inherited?: boolean }>();
+  if (options.approvalFile) {
+    try {
+      const stored = JSON.parse(readFileSync(options.approvalFile, 'utf8'));
+      for (const entry of Array.isArray(stored) ? stored : []) {
+        if (entry && typeof entry === 'object' && ['approvalId', 'sessionId', 'rootId', 'askedAt'].every(key => typeof entry[key] === 'string') && Object.hasOwn(approvalTools, entry.tool)) {
+          heldApprovals.set(entry.approvalId, { ...entry, inherited: true });
+        }
+      }
+    } catch (error: any) {
+      if (error?.code !== 'ENOENT') log.warn('could not read the pending approvals; they are not asked again', { code: 'ALP_APPROVALS_UNREADABLE', file: options.approvalFile, error });
+    }
+  }
+  function saveApprovals() {
+    const file = options.approvalFile;
+    if (!file) return;
+    const body = JSON.stringify([...heldApprovals.values()].map(({ inherited: _inherited, ...entry }) => entry), null, 2) + '\n';
+    const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+    try {
+      mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+      writeFileSync(temporary, body, { mode: 0o600 });
+      renameSync(temporary, file);
+    } catch (error) {
+      try { rmSync(temporary, { force: true }); } catch {}
+      writeFailed(error);
+      log.error('could not save the pending approvals', { code: 'ALP_PERSISTENCE_WRITE_FAILED', operation: 'pending approvals', file, error });
+    }
+  }
+  function holdApproval(approvalId: string, sessionId: string, tool: ApprovalTool, args: unknown) {
+    heldApprovals.set(approvalId, { approvalId, sessionId, rootId: rootOf(sessionId), tool, args, askedAt: new Date().toISOString() });
+    saveApprovals();
+  }
+  function releaseApproval(approvalId: string) {
+    if (heldApprovals.delete(approvalId)) saveApprovals();
+  }
+  const askMinutes = () => Math.max(1, Math.round(userAskTimeoutMs / 60_000));
+
+  /** Asks again, under the same approvalId, what an earlier alpd kept for this open root (t-43ed). */
+  async function restoreApprovals(rootId: string) {
+    for (const entry of [...heldApprovals.values()]) {
+      if (!entry.inherited || entry.rootId !== rootId) continue;
+      const session = sessions.get(entry.sessionId);
+      let error = 'its session was not reopened';
+      if (session && !session.closed) {
+        const result = await approvalTools[entry.tool](entry.sessionId, session, entry.args, entry.approvalId)
+          .catch(failure => toolResult(false, { error: errorData(failure).message }));
+        let value: any = {};
+        try { value = JSON.parse(result.contentItems[0].text); } catch {}
+        if (value.status === 'pending_approval' && value.approvalId === entry.approvalId) {
+          runLog(rootId, { event: 'approval.restored', approvalId: entry.approvalId, sessionId: entry.sessionId, tool: entry.tool, askedAt: entry.askedAt });
+          continue;
+        }
+        error = typeof value.error === 'string' ? value.error : 'it could not be asked again';
+      }
+      if (heldApprovals.get(entry.approvalId) === entry) releaseApproval(entry.approvalId);
+      const outcome = { status: 'resolved', approvalId: entry.approvalId, approved: false, outcome: 'not_restored', error: `alpd restarted and the approval was not asked again: ${error}`, next: 'Nothing was applied. Propose again with a fresh requestId if it is still needed.' };
+      runLog(rootId, { event: 'approval.restore.failed', sessionId: entry.sessionId, tool: entry.tool, ...outcome });
+      if (session && !session.closed && sessions.get(entry.sessionId) === session) post(entry.sessionId, { kind: 'result', from: 'ALP', assignment: entry.approvalId, body: `Approval result: ${JSON.stringify(outcome)}` });
+    }
+  }
+
+  async function skillTool(sessionId: string, session: Session, args: unknown, restoredId?: string) {
     const cancellation = approvalCancellation.get(session) ?? 0;
     args = structuredClone(args);
     if (
@@ -2058,9 +2135,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     try { await readRoles(); } catch (error) { return toolResult(false, { error: errorData(error).message }); }
     if (approvalCanceled(session, cancellation)) return toolResult(false, { error: 'Skill proposal canceled or session closed; no approval was created' });
     if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId && !pending.gate)) return toolResult(false, { error: 'A question is already waiting for the user; finish it before proposing a skill' });
-    const approvalId = `q-${randomUUID()}`;
+    const approvalId = restoredId ?? `q-${randomUUID()}`;
     const record: { approvalId: string; draftKey: string; result?: Record<string, unknown> } = { approvalId, draftKey };
     approvals.set(key, record);
+    holdApproval(approvalId, sessionId, 'alp_skill', args);
     const say = wordsFor(session);
     // The user sees the whole skill, as it will be saved.
     const decision = confirm(sessionId, session,
@@ -2109,6 +2187,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     };
     void (async () => {
       const answer = await decision;
+      // alpd is stopping: the approval stays in approvalFile for the next alpd to ask again.
+      if (closed) return;
       const canceled = approvalCanceled(session, cancellation);
       const result = !answer.approved || canceled
         ? { approved: false, saved: false, outcome: canceled ? 'canceled' : answer.outcome, ...(answer.feedback ? { feedback: answer.feedback } : {}), next: 'Nothing was saved. Revise from the feedback and propose again with a fresh requestId, or drop it.' }
@@ -2119,6 +2199,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         // Result mail renews the bounded wake allowance and reaches this main only.
         post(sessionId, { kind: 'result', from: 'ALP', assignment: approvalId, body: `Skill approval result: ${JSON.stringify(record.result)}` });
       }
+      releaseApproval(approvalId);
     })();
     return toolResult(true, { status: 'pending_approval', approvalId, file, next: 'Continue other work or end your turn. ALP sends the user\'s decision, and whether the skill was saved, by mail; do not resubmit this draft.' });
   }
@@ -2129,7 +2210,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
    * <library>/retired-skills/<name>-<time> (kept, never deleted) and leaves role-skills.json.
    * A skill an agent.json still names stays, and the result says who uses it.
    */
-  async function skillRetireTool(sessionId: string, session: Session, args: unknown) {
+  async function skillRetireTool(sessionId: string, session: Session, args: unknown, restoredId?: string) {
     const cancellation = approvalCancellation.get(session) ?? 0;
     args = structuredClone(args);
     if (!plainObject(args, ['name', 'reason', 'requestId']) || typeof args.name !== 'string' || !/^[a-z0-9][a-z0-9-]{1,62}$/.test(args.name) || !text(args.reason, 300)) {
@@ -2194,9 +2275,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId && !pending.gate)) return toolResult(false, { error: 'A question is already waiting for the user; finish it before proposing to retire a skill' });
     const retired = path.join(library, 'retired-skills', `${args.name}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
     const restore = `The user restores it with: alp skill restore ${args.name} (or by moving ${retired} back to ${directory} and adding it to the roles again in role-skills.json).`;
-    const approvalId = `q-${randomUUID()}`;
+    const approvalId = restoredId ?? `q-${randomUUID()}`;
     const record: { approvalId: string; draftKey: string; result?: Record<string, unknown> } = { approvalId, draftKey };
     approvals.set(key, record);
+    holdApproval(approvalId, sessionId, 'alp_skill_retire', args);
     const say = wordsFor(session);
     const decision = confirm(sessionId, session,
       say.skillRetire(session.mapping.agent.name, args.name, file, retired, given.join(', '), users.join(', '), reason) +
@@ -2246,6 +2328,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     };
     void (async () => {
       const answer = await decision;
+      // alpd is stopping: the approval stays in approvalFile for the next alpd to ask again.
+      if (closed) return;
       const canceled = approvalCanceled(session, cancellation);
       const result = !answer.approved || canceled
         ? { approved: false, retired: false, outcome: canceled ? 'canceled' : answer.outcome, ...(answer.feedback ? { feedback: answer.feedback } : {}), next: 'Nothing was retired. Revise from the feedback and propose again with a fresh requestId, or drop it.' }
@@ -2255,6 +2339,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (!closed && !session.closed && sessions.get(sessionId) === session) {
         post(sessionId, { kind: 'result', from: 'ALP', assignment: approvalId, body: `Skill retirement result: ${JSON.stringify(record.result)}` });
       }
+      releaseApproval(approvalId);
     })();
     return toolResult(true, { status: 'pending_approval', approvalId, file, next: 'Continue other work or end your turn. ALP sends the user\'s decision, and whether the skill was retired, by mail; do not resubmit this request.' });
   }
@@ -2266,7 +2351,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
    * the user in one approval and applied only when approved. Lessons are matched by their
    * exact rule text; nothing else in a lessons file changes.
    */
-  async function lessonCurateTool(sessionId: string, session: Session, args: unknown) {
+  async function lessonCurateTool(sessionId: string, session: Session, args: unknown, restoredId?: string) {
     const cancellation = approvalCancellation.get(session) ?? 0;
     args = structuredClone(args);
     type Change = { scope: 'project' | 'user'; remove: string[]; add?: string; reason?: string };
@@ -2298,9 +2383,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (missing.length) return toolResult(false, { error: 'These lessons are not recorded; copy their exact text from the lessons files', missing });
     if (approvalCanceled(session, cancellation)) return toolResult(false, { error: 'Lesson proposal canceled or session closed; no approval was created' });
     if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId && !pending.gate)) return toolResult(false, { error: 'A question is already waiting for the user; finish it before proposing lesson changes' });
-    const approvalId = `q-${randomUUID()}`;
+    const approvalId = restoredId ?? `q-${randomUUID()}`;
     const record: { approvalId: string; draftKey: string; result?: Record<string, unknown> } = { approvalId, draftKey };
     approvals.set(key, record);
+    holdApproval(approvalId, sessionId, 'alp_lesson_curate', args);
     const say = wordsFor(session);
     const shown = normalized.map((change, index) =>
       `${index + 1}. ${say.lessonScope(change.scope, fileOf(change.scope))}${change.reason ? ` — ${change.reason}` : ''}\n` +
@@ -2344,6 +2430,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     };
     void (async () => {
       const answer = await decision;
+      // alpd is stopping: the approval stays in approvalFile for the next alpd to ask again.
+      if (closed) return;
       const canceled = approvalCanceled(session, cancellation);
       let result: Record<string, unknown>;
       if (!answer.approved || canceled) result = { approved: false, applied: false, outcome: canceled ? 'canceled' : answer.outcome, ...(answer.feedback ? { feedback: answer.feedback } : {}), next: 'Nothing changed. Revise from the feedback and propose again with a fresh requestId, or drop it.' };
@@ -2354,6 +2442,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       record.result = { status: 'resolved', approvalId, ...result };
       runLog(rootOf(sessionId), { event: 'lesson.curate.approval', agent: session.mapping.agent.name, ...record.result });
       if (!closed && !session.closed && sessions.get(sessionId) === session) post(sessionId, { kind: 'result', from: 'ALP', assignment: approvalId, body: `Lesson curate result: ${JSON.stringify(record.result)}` });
+      releaseApproval(approvalId);
     })();
     return toolResult(true, { status: 'pending_approval', approvalId, next: 'Continue other work or end your turn. ALP sends the decision and what changed by mail; do not resubmit this draft.' });
   }
@@ -2478,7 +2567,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     return toolResult(true, { strategy: args.strategy, previous: current, reason });
   }
 
-  async function issueTool(sessionId: string, session: Session, args: unknown) {
+  async function issueTool(sessionId: string, session: Session, args: unknown, restoredId?: string) {
     const cancellation = approvalCancellation.get(session) ?? 0;
     args = structuredClone(args);
     if (!plainObject(args, ['action', 'target', 'query', 'title', 'body', 'issue', 'labels', 'requestId']) || !['search', 'create', 'comment'].includes(args.action) || !['project', 'alp'].includes(args.target)) {
@@ -2525,9 +2614,10 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (previous && previous.draftKey !== draftKey) return toolResult(false, { error: 'requestId was already used for a different draft' });
     if (previous) return toolResult(true, previous.result ?? { status: 'pending_approval', approvalId: previous.approvalId, repo });
     if ([...userQuestions.values()].some(pending => pending.question.sessionId === sessionId && !pending.gate)) return toolResult(false, { error: 'A question is already waiting for the user; finish it before proposing another issue draft' });
-    const approvalId = `q-${randomUUID()}`;
+    const approvalId = restoredId ?? `q-${randomUUID()}`;
     const record: { approvalId: string; draftKey: string; result?: Record<string, unknown> } = { approvalId, draftKey };
     approvals.set(key, record);
+    holdApproval(approvalId, sessionId, 'alp_issue', args);
     const where = `${repo}${args.target === 'alp' ? ' (ALP itself)' : ''}`;
     const say = wordsFor(session);
     const decision = confirm(sessionId, session,
@@ -2536,6 +2626,8 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       (args.action === 'create' ? `${say.issueTitle}: ${args.title}\n${args.labels?.length ? `${say.issueLabels}: ${args.labels.join(', ')}\n` : ''}\n` : '') + args.body.trim() + ISSUE_FOOTER, { id: approvalId });
     void (async () => {
       const answer = await decision;
+      // alpd is stopping: the approval stays in approvalFile for the next alpd to ask again.
+      if (closed) return;
       let result: Record<string, unknown>;
       const canceled = approvalCanceled(session, cancellation);
       if (!answer.approved || canceled) {
@@ -2557,6 +2649,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         // Result mail renews the bounded wake allowance and reaches this main only.
         post(sessionId, { kind: 'result', from: 'ALP', assignment: approvalId, body: `Issue approval result: ${JSON.stringify(record.result)}` });
       }
+      releaseApproval(approvalId);
     })();
     return toolResult(true, { status: 'pending_approval', approvalId, repo, next: 'Continue other work. ALP sends the decision and posting result by mail; do not resubmit this draft.' });
   }
@@ -3176,7 +3269,12 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         // The requester learns what its assignment settled with the user.
         if (outcome === 'answered' && session.parent) tellRequester(sessionId, session, `I asked the user: "${body}"\nThe user answered: "${answer}"`);
         runLog(rootId, { event: 'human.answer', questionId: question.id, sessionId, agent: question.agent, outcome, ...(answer !== undefined ? { answer } : {}), ...(reason ? { reason } : {}) });
-        resolve(result ?? (outcome === 'answered'
+        // An approval nobody answered expired (t-43ed): the user is told, and the asking agent hears 'expired', not a rejection.
+        const expired = outcome === 'timeout' && !!approval;
+        if (expired && !session.closed) emit(sessionId, { type: 'item', item: { kind: 'notice', id: `notice-${randomUUID().slice(0, 8)}`, level: 'warning', text: wordsFor(session).approvalExpired(question.agent, question.id, askMinutes()) } });
+        resolve(result ?? (expired
+          ? toolResult(true, { status: 'expired', question: question.id })
+          : outcome === 'answered'
           ? toolResult(true, { status: 'answered', from: 'user', answer })
           : toolResult(true, {
             status: outcome === 'dismissed' ? 'dismissed' : 'unanswered',
@@ -5729,7 +5827,11 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     },
 
     recover(rootId, { continueRoot = false, parkedRoot } = {}) {
-      return enqueue(() => recoverTree(rootId, continueRoot, parkedRoot));
+      return enqueue(async () => { const outcomes = await recoverTree(rootId, continueRoot, parkedRoot); await restoreApprovals(rootId); return outcomes; });
+    },
+
+    pendingApprovalRoots() {
+      return [...new Set([...heldApprovals.values()].map(entry => entry.rootId))];
     },
 
     async abandon(rootId, reason) {
