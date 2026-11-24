@@ -1,24 +1,133 @@
-# ALP next beta (unreleased) — changes so far
+# ALP 0.0.1-beta.13 — release notes
 
-- **A delegated agent with no model profile runs on its own model** (t-3aad): when none is passed,
-  `alp_delegate` uses the current team's `team.json` member, then the agent's `agent.json`, before
-  the requester's model (a team member's generated profile follows the same order), and says in
-  `modelNote` when it inherits; the oracle takes `thinking`,
-  checked against its lens ([team-workflow.md](team-workflow.md), "Assignment and model selection").
-- **A plain Bash allow rule covers only a line of plain words** (t-cde5, user decision g5): bash and
-  zsh ran a second command hidden in lines such as ``echo $'\'' ; touch X ; echo '\'`` or
-  `echo ${x:='a[$(touch X)]'} $[x]`, which ALP read as one `echo` that `Bash(echo:*)` allowed
-  (Claude, Codex and ACP). The parser of released versions allows these lines too (checked on the
-  beta.12 tag at the parser level; not run in a real session there). A line with `$`, an
-  unquoted glob, brace or bracket, a leading `~`, a comment, a redirect other than to a descriptor
-  or `/dev/null`, or `$`, backtick, `\` or `!` in double quotes now gets no decision from a plain
-  allow rule: ALP asks, or the mode refuses. Deny rules and checked `Bash(@…)` rules are
-  unchanged. A shell wrapper counts only when both the line and its script are plain and its
-  shell is a bare `sh`/`bash`/`zsh`/`dash` or one in `/bin`, `/usr/bin`, `/usr/local/bin` or
-  `/opt/homebrew/bin`: before, `/bin/echo;touch X;/bin/sh -c 'echo hi'` was read as `echo hi`.
-  Every profile with a Bash allow rule is affected (custom agents, user profiles, lead/peer/main
-  when given one); the built-in reviewer, oracle and supervisor profiles have none.
-  The rule and the list are in [team-workflow.md](team-workflow.md) ("Permission profiles").
+Prepared 2026-11-24 from the commits `v0.0.1-beta.12..e4cfd69c` (PRs #378 to #387; task t-26ab
+bumped the version). npm (8 packages, `beta` tag) and the GitHub release (archives, installers and
+the two macOS DMGs) carry the same version from one main SHA, as in beta.12. Release acceptance
+runs the repository's fake Codex and fake Claude on the packed tarballs; macOS decides it, Linux and
+Windows are reported. **The gate's real-provider rows (§6.1 of [beta-scope.md](beta-scope.md)) were
+not run for beta.13;** none of them is claimed as passed here. The known R1 (Codex) failure is
+unchanged (below).
+
+**This is a security release. Every earlier release, beta.12 included, is affected by the command
+parser issues fixed here** (first item below; checked on the beta.12 tag at the parser level, not
+run in a real session there). Until you upgrade, do not give an agent broad plain Bash allow rules
+such as `Bash(echo:*)` or `Bash(cat:*)` on beta.12 or older.
+
+**Upgrading from beta.12:**
+
+1. `alp update` (bundle) or `npm install -g @anhlp/alp@beta` (npm), then `alp daemon restart`.
+2. Restart `alp dashboard` (`alp dashboard --stop`, then `alp dashboard`). The new CLI gets the
+   dashboard token over a private socket and cannot read it from a beta.12 service still running;
+   each start now makes a new token, so browser tabs already open are signed out (run
+   `alp dashboard` again for the new link). ALP.app re-runs `alp dashboard --print` by itself.
+3. If you use the Paseo integration (`@anhlp/alp-paseo`): `npm install -g @anhlp/alp-paseo@beta`.
+   On its next start it moves its password and relay key into `~/.alp/paseo/` (below); devices
+   already paired keep working, nothing to re-pair.
+4. ALP.app: `ALP-0.0.1-beta.13-<arch>.dmg` has no app change since beta.12 beyond its version; it is
+   still ad-hoc signed and not notarized ([desktop.md](desktop.md) §8).
+
+Changes that affect an existing user:
+
+- **A plain Bash allow rule covers only a line of plain words** (t-cde5, #386, user decision g5
+  A'). Security fix: bash and zsh ran a second command hidden in lines such as
+  ``echo $'\'' ; touch X ; echo '\'``, `echo ${x:='a[$(touch X)]'} $[x]`, zsh `=(cmd)`, glob
+  qualifiers `*(e:…)` or `/bin/echo;touch X;/bin/sh -c 'echo hi'`, which ALP read as one harmless
+  command that a rule such as `Bash(echo:*)` allowed (Claude, Codex and ACP). A plain allow rule
+  (any rule that is not a checked `Bash(@…)` rule, bare `Bash` included) now vouches only for a line
+  made of plain words: outside quotes only `A-Z a-z 0-9 _ - . / = : , @ % +` (no word starting with
+  `=`; `~` or `^` only right after a letter or digit, as in `HEAD~1`), the separators `&&` `||` `;`
+  `|` and new line, the redirects `2>&1`, `>&2`, `>/dev/null`, `2>/dev/null`, single quotes, and
+  double quotes with no `$`, backtick, `\` or `!`. A shell wrapper (`sh -c '…'`) counts only when
+  the line and its script are both plain and the shell is a bare `sh`/`bash`/`zsh`/`dash` or one in
+  `/bin`, `/usr/bin`, `/usr/local/bin` or `/opt/homebrew/bin`. **Commands that a matching plain
+  allow rule no longer allows, so ALP now asks (or the mode refuses):** `echo $HOME`,
+  `npm test -- --grep $NAME`, `/bin/zsh -lc 'echo $HOME'`; globs `ls *.js`, `cat src/*.ts`,
+  `grep -rn foo src/*.js`, `ls [ab].js`; home paths `cat ~/notes.txt`, `ls -la ~`; braces
+  `echo a.{js,map}`, `git diff HEAD@{1}`; `$`, `\` or `"` inside double quotes
+  (`echo "cost $5"`, `git log --grep="a$"`, `git commit -m "fix: \"x\""`); `echo a\ b`; `echo =x`.
+  Deny rules, ask rules and checked `Bash(@…)` rules are unchanged. Every profile with a Bash allow
+  rule is affected (custom agents, user profiles, lead/peer/main when given one); the built-in
+  reviewer, oracle and supervisor profiles have none. Details in
+  [team-workflow.md](team-workflow.md) ("Permission profiles").
+- **Claude Bash allow rules are decided by ALP, not handed to Claude** (#378): ALP no longer passes
+  Bash allow rules to Claude as `allowedTools`, where Claude would match them as written and run
+  them, outside the sandbox too, without ALP's check; ALP decides them in `canUseTool`. The path
+  normal form (no `..`, `//` or `~` path words under a path-naming allow rule) also applies on Codex
+  and ACP. Inside the sandbox ALP applies deny only for a checked `Bash(@…)` rule; plain deny rules
+  stay Claude's own `disallowedTools`.
+- **A read-only profile's Bash never leaves the sandbox** (t-cde5 M1, #386): a session whose profile
+  has base `read-only` now runs every Bash command in the read-only sandbox, including one its
+  allow or ask rules approve, so an approved write or network command fails there (EPERM). For
+  approvals that write, use base `workspace-write` and start the session `--mode read-only`. Only
+  commands covered entirely by checked `Bash(@…)` allow rules (the Research pack's librarian) may
+  still leave it. A session merely started read-only, without a read-only base, keeps the way out.
+- **The Paseo integration's password and relay key moved out of `paseo.json`** (t-cde5, #386): the
+  password Paseo's app signs in with gives owner access to alpd locally and through the relay, and
+  sat in plain text in `~/.alp/paseo.json`, next to the relay's secret key in
+  `~/.alp/relay-keypair.json`; a sandboxed read-only agent could read both. Both now live in
+  `~/.alp/paseo/` (directory 0700, `token.json` and `relay-keypair.json` 0600), moved there once on
+  the integration's next start; `paseo.json` keeps only port, URL, pid and server id. The password
+  stays the same, so paired devices survive. `alp dashboard pair` gets it from the running
+  integration over a private 0600 socket, and **`alp dashboard pair --rotate`** sets a new one (the
+  old one is refused at once and every device signs in again). Read-only Claude and ACP sessions
+  may not read `~/.alp/paseo/` or `~/.alp/relay-keypair.json` (Read deny rules and the sandbox's
+  `denyRead`).
+- **The dashboard token is kept only in memory** (t-cee3, #381, #382): before, its `alpgw1.*` token
+  sat in `~/.alp/dashboard.json` and was reused across starts, so any agent running as you could
+  read it and act as the host owner. Now each `alp-dashboard` start makes a new token, revokes the
+  old ones and keeps the token in memory; `dashboard.json` (version 3) has no token, and one an
+  older version left there is removed (and revoked) on start. `alp dashboard [--print]` reads the
+  token over a 0600 socket in the 0700 directory `~/.alp/dashboard/` (a named pipe on Windows).
+  A sandboxed read-only agent cannot reach it (checked on macOS with real Claude and Codex
+  sessions); a full-access agent, or any unsandboxed program running as you, still can
+  ([dashboard.md](dashboard.md) §4.2).
+- **A delegated agent with no model profile runs on its own model** (t-3aad, #383): when none is
+  passed, `alp_delegate` uses the current team's `team.json` member, then the agent's `agent.json`,
+  before the requester's model (a team member's generated profile follows the same order), and says
+  in `modelNote` when it inherits; the oracle takes `thinking`, checked against its lens
+  ([team-workflow.md](team-workflow.md), "Assignment and model selection").
+- **Strategies for main and lead** (t-003a, #385): a new `alp_strategy` tool lets main (Phở, Cafe)
+  and lead (Cafe) choose `rush`, `smart`, `deep` or `large`, once per user turn, with a reason. It is
+  guidance only: it changes no model, effort, mode, team or assignment. `alp top` and `alp log` show
+  it ([team-workflow.md](team-workflow.md), "Strategy"). The main and lead templates carry the
+  definitions; `alp upgrade` updates projects whose templates you have not edited.
+- **Optional Research pack** (t-6dc5, #378): `alp pack install research` adds two read-only
+  advisors, **librarian** (reads public GitHub/GitLab repositories at a fixed SHA through checked
+  `git` rules below `/tmp/alp-librarian` and WebFetch, and cites `repo@sha:path:line`) and
+  **scout** (finds code in the workspace), and the teams `pho-research` and `cafe-research`. The
+  default Phở and Cafe teams are unchanged ([team-workflow.md](team-workflow.md), "Librarian and
+  scout").
+- **Several leads under one main, when isolated** (t-672e, #387): new setting `workflow.maxLeads`
+  (default 1, so nothing changes unless you raise it). A second lead starts only with
+  `isolation: "worktree"` (or another repository) and a task whose `paths` do not overlap the
+  running leads' tasks; the tree's peer cap becomes `maxPeers × maxLeads`. Also with the default, a
+  lead may now start while only read-only assignments (reviewer, oracle, read-only peer) run
+  ([team-workflow.md](team-workflow.md), "Several leads: workflow.maxLeads").
+
+Test and CI changes with no product effect: the Paseo e2e lanes refuse your own daemon and
+`~/.alp` and need `ALP_TEST_ALP_HOME` (t-0336, #379; [paseo-plugin.md](paseo-plugin.md)); the
+usage-page web spec no longer depends on the wall clock (t-80ad, #380); CI holds `teamV1` (the
+template hashes `alp upgrade` recognises) to every list it has had on main, and two ALP.md hashes
+edited away in PR #330 are back (t-cc9e, #384).
+
+Known issues:
+
+- **Deny rules are not a hard boundary for lines that are not plain words** (pre-existing,
+  beta.12 and earlier too; open, pending a decision): for such a line ALP's split of the command
+  can differ from the shell's, so a deny rule may not match. Rely on the mode and the OS sandbox,
+  not on a deny rule alone, to stop a command.
+- The dashboard and Paseo token sockets keep read-only agents out by the OS sandbox: checked on
+  macOS, **not checked on Linux** (where a sandbox must block `AF_UNIX` connects) or on Windows
+  (named pipes).
+- Carried from beta.12: **R1 (Codex) of the real-provider gate does not pass** (t-beb5); the Paseo
+  plugin fails to typecheck against the newest Paseo SDK (t-1af7); the Paseo plugin and
+  `alp dashboard` each restart a crashed alpd with their own entry; Windows keeps alpd on the
+  bundled Node; the desktop app is macOS only, not notarized, has no auto-update, and does not stop
+  `alp dashboard` when it quits; the window-owned sidebar and explorer toggles are tested only in
+  the web e2e.
+- Still as before: the Claude Agent SDK's own bundled zod is inside the advisory range (accepted
+  residual risk, [zod-advisory.md](zod-advisory.md)); Antigravity's own read tools are not confined
+  to the workspace; remote mode (`@anhlp/alp-gateway`) is not published.
 
 # ALP 0.0.1-beta.12 — release notes
 
