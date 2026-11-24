@@ -17,7 +17,14 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
-import { connect, daemonPaths } from '@anhlp/alp-client';
+import { connect, daemonPaths, readLock } from '@anhlp/alp-client';
+import { initProject } from '@anhlp/alp-core/init';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { closeSync, openSync } from 'node:fs';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 import { fakeTransport, until, workspace } from '../../../test/support/recovery.js';
 import { teardown } from '../../../test/support/teardown.js';
@@ -321,3 +328,206 @@ test('t-43ed (3, 5): an unwatched root is reapable again once its approval expir
   await until(async () => { await sleep(20); return !daemon.runtime.snapshot(session.id); }, 'the root to be reaped');
 });
 
+
+/** The mail a wake turn carried with an approval's outcome, by its approvalId, as `Approval result: {...}`. */
+const approvalMail = (main, id) => main.started.map(call => call.params.input.at(-1).text).find(input => input.includes('Approval result: ') && input.includes(id));
+/** What runtime code wrote to stderr while `body` ran: the log lines with their codes. */
+async function logged(body) {
+  const lines = [];
+  const write = process.stderr.write;
+  process.stderr.write = function (chunk, ...rest) { lines.push(String(chunk)); return write.call(this, chunk, ...rest); };
+  try { await body(); } finally { process.stderr.write = write; }
+  return lines.join('');
+}
+const runLogOf = async (base, root) => (await readFile(path.join(base.options.runLogDir, `${root}.jsonl`), 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
+
+/** One approval kept by a first runtime that then stopped, as an alpd that stopped with it pending. */
+async function keptApproval(t, base, runtimes, extra = {}) {
+  const first = await runtimeOn(t, base, runtimes, extra);
+  await first.runtime.open('root', { cwd: base.root, persist: true });
+  await first.runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: text('Tidy') });
+  const { approvalId } = await runtimes[0].call('alp_issue', draft);
+  runtimes[0].finish('asked');
+  const snapshot = first.runtime.snapshot('root');
+  await first.runtime.shutdown();
+  return { id: approvalId, snapshot };
+}
+
+test('t-43ed (9): an approval whose root is abandoned is dropped, with its log code and run-log event, and not kept for the next start', async t => {
+  const base = await setup(t);
+  const runtimes = [];
+  const { id } = await keptApproval(t, base, runtimes);
+  const second = await runtimeOn(t, base, runtimes);
+  assert.deepEqual(second.runtime.pendingApprovalRoots(), ['root']);
+  const output = await logged(() => second.runtime.abandon('root', 'its root session cannot be reopened'));
+  assert.match(output, /ALP_APPROVAL_DROPPED/);
+  assert.match(output, new RegExp(id));
+  assert.deepEqual(await base.held(), [], 'it leaves the file');
+  assert.deepEqual(second.runtime.pendingApprovalRoots(), []);
+  const [dropped] = (await runLogOf(base, 'root')).filter(entry => entry.event === 'approval.dropped');
+  assert.deepEqual([dropped.approvalId, dropped.outcome, dropped.reason, dropped.tool], [id, 'not_restored', 'its root session cannot be reopened', 'alp_issue']);
+  assert.deepEqual(second.notices(), [], 'its root is not open: no notice, the log is the record');
+  await second.runtime.shutdown();
+  const third = await runtimeOn(t, base, runtimes);
+  assert.deepEqual(third.runtime.pendingApprovalRoots(), [], 'the next alpd does not try it again');
+});
+
+test('t-43ed (9): through alpd, an approval whose root record is gone is dropped at the restore', async t => {
+  const defer = teardown(t);
+  const base = await setup(t);
+  const runtimes = [];
+  const first = await daemonOn(t, base, runtimes);
+  const client = await connect(first.socketPath);
+  defer(() => client.close());
+  const { session } = await client.request('session.create', { spec: { cwd: base.root, persist: true } });
+  await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Tidy') });
+  await until(() => runtimes[0]?.started.length === 1, 'main\'s turn');
+  const { approvalId: id } = await runtimes[0].call('alp_issue', draft);
+  runtimes[0].finish('asked');
+  client.close();
+  await first.stop();
+  // The root cannot be reopened: its record is gone.
+  const sessionsDir = path.join(base.directory, 'state', 'sessions');
+  for (const name of await readdir(sessionsDir)) if (name.startsWith(session.id)) await rm(path.join(sessionsDir, name));
+  const output = await logged(async () => {
+    const second = await daemonOn(t, base, runtimes);
+    await until(async () => { await sleep(20); return (await base.held()).length === 0; }, 'the approval to be dropped');
+    assert.deepEqual(second.runtime.pendingApprovalRoots(), []);
+    assert.deepEqual(second.runtime.questions(), []);
+  });
+  assert.match(output, /ALP_APPROVAL_DROPPED/);
+  assert.ok((await runLogOf(base, session.id)).some(entry => entry.event === 'approval.dropped' && entry.approvalId === id));
+});
+
+test('t-43ed (9): an approval not asked again within its restore window is dropped, and the window is kept across starts', async t => {
+  const base = await setup(t);
+  const runtimes = [];
+  const window = 800;
+  const { id, snapshot } = await keptApproval(t, base, runtimes, { userAskTimeoutMs: window });
+  // The first alpd that inherits it sets its restore deadline and keeps it on disk.
+  const startedAt = Date.now();
+  const second = await runtimeOn(t, base, runtimes, { userAskTimeoutMs: window });
+  const [kept] = await base.held();
+  const restoreBy = Date.parse(kept.restoreBy);
+  assert.ok(restoreBy >= startedAt + window - 5 && restoreBy <= Date.now() + window, `restoreBy ${kept.restoreBy}`);
+  await second.runtime.shutdown();
+  // A later start keeps that deadline: restarting does not renew it.
+  const third = await runtimeOn(t, base, runtimes, { userAskTimeoutMs: window, language: 'en' });
+  assert.equal((await base.held())[0].restoreBy, kept.restoreBy);
+  // Its root is open, but nothing asked it again (recover() never ran): at the deadline it is
+  // dropped, the user sees a notice and main the outcome 'not_restored'.
+  await third.runtime.open('root', { cwd: base.root, persist: true, restore: restoreOf(snapshot) });
+  const main = runtimes.at(-1);
+  const output = await logged(() => until(async () => { await sleep(20); return approvalMail(main, id); }, 'the dropped approval\'s result'));
+  assert.ok(Date.now() >= restoreBy - 5, 'not before its deadline');
+  assert.match(output, /ALP_APPROVAL_DROPPED/);
+  const result = JSON.parse(/Approval result: (\{.*\})/.exec(approvalMail(main, id))[1].replace(/\\"/g, '"'));
+  assert.deepEqual([result.approvalId, result.approved, result.outcome], [id, false, 'not_restored']);
+  assert.match(result.next, /Nothing was posted, saved or changed/);
+  assert.match(result.next, /submit it again/);
+  assert.deepEqual(third.notices(), [`The approval ${id}, kept from before alpd restarted, was dropped: it was not asked again within its restore window. Nothing was applied; the agent can submit it again.`]);
+  assert.deepEqual(await base.held(), []);
+  assert.deepEqual(base.posted, []);
+  await third.runtime.shutdown();
+
+  // One whose deadline passed while no alpd ran is dropped as the next one starts.
+  const runtimes2 = [];
+  const { id: late } = await keptApproval(t, base, runtimes2, { userAskTimeoutMs: window });
+  const stored = await base.held();
+  stored[0].restoreBy = new Date(Date.now() - 1000).toISOString();
+  await writeFile(base.approvalFile, JSON.stringify(stored));
+  const atLoad = await logged(async () => {
+    const fourth = await runtimeOn(t, base, runtimes2, { userAskTimeoutMs: window });
+    assert.deepEqual(fourth.runtime.pendingApprovalRoots(), []);
+  });
+  assert.match(atLoad, /ALP_APPROVAL_DROPPED/);
+  assert.match(atLoad, new RegExp(late));
+  assert.deepEqual(await base.held(), []);
+});
+
+const ALPD = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
+const FAKE_CODEX = fileURLToPath(new URL('./support/fake-codex.js', import.meta.url));
+/** A real alpd and provider are slower than in process: up to 15 s. */
+async function waitLong(check, what) {
+  for (let i = 0; i < 600; i++) { if (await check()) return; await sleep(25); }
+  assert.fail(`${what} did not happen`);
+}
+const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
+
+test('t-43ed (8): a real alpd stopped with SIGTERM while an approval waits: the next alpd on the same home asks the same approvalId again, answerably, with no recovery prompt', { skip: process.platform === 'win32' && 'POSIX processes and sockets only' }, async t => {
+  const defer = teardown(t);
+  const directory = await mkdtemp(path.join(tmpdir(), 'alpd-approvals-'));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  const home = path.join(directory, 'home');
+  await mkdir(home, { mode: 0o700 });
+  await writeFile(path.join(home, 'settings.json'), '{}');
+  const project = path.join(directory, 'project');
+  await initProject(project);
+  await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
+  const journalFile = path.join(directory, 'provider.jsonl');
+  const logFile = path.join(directory, 'alpd.log');
+  const journal = async () => (await readFile(journalFile, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
+  const started = [];
+  // Registered after the removal, so it runs before it: no alpd or provider outlives the test.
+  defer(async () => {
+    for (const child of started) if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    for (const { pid } of await journal()) if (alive(pid)) try { process.kill(pid, 'SIGKILL'); } catch {}
+  });
+  const approvalFile = path.join(home, 'state', 'approvals.json');
+  const held = async () => JSON.parse(await readFile(approvalFile, 'utf8').catch(() => '[]'));
+
+  async function start() {
+    const log = openSync(logFile, 'a');
+    // gh is never found: nothing reaches GitHub, whatever the user answers.
+    const child = spawn(process.execPath, [ALPD], { detached: true, stdio: ['ignore', log, log], env: { ...process.env, ALP_HOME: home, ALP_CODEX_BIN: FAKE_CODEX, FAKE_CODEX_JOURNAL: journalFile, ALP_GH_BIN: path.join(directory, 'no-gh') } });
+    closeSync(log);
+    started.push(child);
+    const exited = once(child, 'exit').then(([code, signal]) => ({ code, signal }));
+    let gone = false;
+    void exited.then(() => { gone = true; });
+    await waitLong(async () => {
+      if (gone) assert.fail(`alpd exited while starting:\n${await readFile(logFile, 'utf8')}`);
+      const lock = await readLock(home);
+      return lock?.ready && lock.pid === child.pid;
+    }, 'alpd to be ready');
+    const client = await connect((await readLock(home)).socket, { name: 'approvals-test', version: '0' });
+    return { child, client, exited, request: (method, params) => client.request(method, params) };
+  }
+
+  const first = await start();
+  defer(() => first.client.close());
+  const { session } = await first.request('session.create', { spec: { cwd: project, persist: true, model: 'codex:gpt-5.6-sol' } });
+  assert.equal((await first.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Propose it [issue]') })).outcome, 'accepted');
+  await waitLong(async () => (await journal()).some(entry => entry.method === 'tool/answered'), 'alpd to answer the alp_issue call');
+  const answered = (await journal()).find(entry => entry.method === 'tool/answered');
+  const id = JSON.parse(JSON.parse(answered.text).contentItems[0].text).approvalId;
+  assert.match(id, /^q-/, answered.text);
+  assert.deepEqual((await first.request('question.list', {})).questions.map(question => question.id), [id]);
+  assert.deepEqual((await held()).map(entry => entry.approvalId), [id]);
+
+  // SIGTERM: alpd stops as it does on a requested stop, and keeps the approval.
+  first.client.close();
+  process.kill(first.child.pid, 'SIGTERM');
+  assert.deepEqual(await first.exited, { code: 0, signal: null });
+  assert.deepEqual((await held()).map(entry => entry.approvalId), [id], 'kept on disk across the stop');
+  const turnsBefore = (await journal()).filter(entry => entry.method === 'turn/start').length;
+
+  const second = await start();
+  defer(() => second.client.close());
+  await waitLong(async () => (await second.request('question.list', {})).questions.some(question => question.id === id), 'the same approval to wait again');
+  const [question] = (await second.request('question.list', {})).questions;
+  assert.deepEqual([question.id, question.sessionId], [id, session.id]);
+  assert.match(question.body, /Fake issue/);
+  await sleep(300);
+  const after = (await journal()).filter(entry => entry.method === 'turn/start').slice(turnsBefore);
+  assert.deepEqual(after, [], 'the reopened root got no recovery prompt (no turn/start after the restart)');
+
+  // The user rejects it through the new alpd: nothing is posted, and it leaves the file.
+  assert.deepEqual(await second.request('question.answer', { questionId: id, text: 'Reject' }), { questionId: id });
+  await waitLong(async () => (await held()).length === 0, 'the decided approval to leave the file');
+  await waitLong(async () => (await journal()).some(entry => entry.method === 'turn/start' && /Issue approval result/.test(entry.text ?? '') && new RegExp(id).test(entry.text)), 'main to hear the decision');
+  assert.deepEqual((await second.request('question.list', {})).questions, []);
+  await second.request('daemon.shutdown').catch(() => {});
+  second.client.close();
+  assert.deepEqual(await second.exited, { code: 0, signal: null });
+});

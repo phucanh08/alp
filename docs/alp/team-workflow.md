@@ -1694,8 +1694,15 @@ turn completion, fresh prompts and an alpd restart: alpd keeps them in
 `state/approvals.json`, reopens their root and shows the user the same pending
 approval again, under the same approvalId and with a new 30-minute window; the
 agent submits nothing again. A root whose approval waits is not closed while
-nobody watches it. Interruption and session close cancel them. `alp_schedule`
-proposals are still not restored after a restart. `alp_skill` approvals work the same way (see
+nobody watches it. Interruption and session close cancel them. If a kept approval
+cannot be shown again (its root cannot be reopened, its draft no longer passes the
+tool's checks, or it is not asked again within 30 minutes of the first alpd that
+kept it), main gets the outcome `not_restored`: nothing was posted, saved or
+changed, and it may submit the draft again with a fresh `requestId`. alpd logs
+`ALP_APPROVAL_DROPPED` and the run log `approval.dropped`; the user gets a notice
+only if that root is open. `alp_schedule` proposals expire the same way (`expired`
+and a notice) but are not restored after a restart. `alp_skill`,
+`alp_skill_retire` and `alp_lesson_curate` approvals work the same way (see
 [Skills from lessons](#skills-from-lessons)); `alp_ask` keeps its turn lifetime.
 
 Retries with the same draft return its existing pending or terminal result for

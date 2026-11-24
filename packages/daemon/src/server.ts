@@ -674,7 +674,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     if (conversation) await conversation.recover().catch(error => recoveryLog.error('could not recover lifecycle operations', { code: 'ALPD_LIFECYCLE_RECOVERY_FAILED', error }));
     // Assignments whose tree cannot be reopened end now, and their tasks go back to open.
     const reopened = new Set(reopen.map(entry => entry.record.id));
-    for (const rootId of new Set(runtime.recoverable().map(entry => entry.rootId))) {
+    for (const rootId of new Set([...runtime.recoverable().map(entry => entry.rootId), ...(runtime.pendingApprovalRoots?.() ?? [])])) {
       if (!reopened.has(rootId)) await runtime.abandon(rootId, 'its root session cannot be reopened').catch(() => {});
     }
     for (const { record, working } of reopen) {

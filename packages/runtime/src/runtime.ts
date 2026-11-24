@@ -2014,7 +2014,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   // cancels nothing it keeps. The file is written whole and atomically on each change; a failed
   // write is logged and told to the disk guard, and the approval goes on in memory.
   type ApprovalTool = 'alp_skill' | 'alp_skill_retire' | 'alp_lesson_curate' | 'alp_issue';
-  type HeldApproval = { approvalId: string; sessionId: string; rootId: string; tool: ApprovalTool; args: unknown; askedAt: string };
+  // restoreBy: set when an alpd first inherits it and kept across later starts; an approval not asked
+  // again by then is dropped, so one whose root never reopens is not retried at every start.
+  type HeldApproval = { approvalId: string; sessionId: string; rootId: string; tool: ApprovalTool; args: unknown; askedAt: string; restoreBy?: string };
   const approvalTools: Record<ApprovalTool, (sessionId: string, session: Session, args: unknown, restoredId?: string) => Promise<ReturnType<typeof toolResult>>> = {
     alp_skill: (...call) => skillTool(...call),
     alp_skill_retire: (...call) => skillRetireTool(...call),
@@ -2028,11 +2030,21 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       const stored = JSON.parse(readFileSync(options.approvalFile, 'utf8'));
       for (const entry of Array.isArray(stored) ? stored : []) {
         if (entry && typeof entry === 'object' && ['approvalId', 'sessionId', 'rootId', 'askedAt'].every(key => typeof entry[key] === 'string') && Object.hasOwn(approvalTools, entry.tool)) {
-          heldApprovals.set(entry.approvalId, { ...entry, inherited: true });
+          const restoreBy = typeof entry.restoreBy === 'string' && Number.isFinite(Date.parse(entry.restoreBy)) ? entry.restoreBy : new Date(Date.now() + userAskTimeoutMs).toISOString();
+          heldApprovals.set(entry.approvalId, { ...entry, restoreBy, inherited: true });
         }
       }
     } catch (error: any) {
       if (error?.code !== 'ENOENT') log.warn('could not read the pending approvals; they are not asked again', { code: 'ALP_APPROVALS_UNREADABLE', file: options.approvalFile, error });
+    }
+    if (heldApprovals.size) {
+      const now = Date.now();
+      for (const entry of [...heldApprovals.values()]) {
+        const left = Date.parse(entry.restoreBy!) - now;
+        if (left <= 0) dropApproval(entry, 'it was not asked again within its restore window', false);
+        else setTimeout(() => { if (!closed && heldApprovals.get(entry.approvalId) === entry) dropApproval(entry, 'it was not asked again within its restore window'); }, left).unref();
+      }
+      saveApprovals();
     }
   }
   function saveApprovals() {
@@ -2058,6 +2070,36 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (heldApprovals.delete(approvalId)) saveApprovals();
   }
   const askMinutes = () => Math.max(1, Math.round(userAskTimeoutMs / 60_000));
+  /** What the agent hears of an approval an earlier alpd kept and that was not asked again (t-43ed). */
+  function notRestored(approvalId: string, reason: string) {
+    return {
+      status: 'resolved', approvalId, approved: false, outcome: 'not_restored',
+      error: `alpd restarted while this approval waited for the user, and it could not be shown to the user again: ${reason}`,
+      next: 'Nothing was posted, saved or changed, and the user did not decide on it. You may submit it again with a fresh requestId if it is still needed.',
+    };
+  }
+
+  /**
+   * Drops an approval an earlier alpd kept and that was not asked again (t-43ed): its root was
+   * abandoned, or its restore window passed. The user is told only when its root is open; for a
+   * closed root the log code and the run log are the record.
+   */
+  function dropApproval(entry: HeldApproval & { inherited?: boolean }, reason: string, save = true) {
+    if (heldApprovals.get(entry.approvalId) !== entry) return;
+    heldApprovals.delete(entry.approvalId);
+    if (save) saveApprovals();
+    const outcome = notRestored(entry.approvalId, reason);
+    log.warn(`dropped the pending approval ${entry.approvalId}: ${reason}`, { code: 'ALP_APPROVAL_DROPPED', approvalId: entry.approvalId, rootId: entry.rootId, sessionId: entry.sessionId, tool: entry.tool, reason });
+    runLog(entry.rootId, { event: 'approval.dropped', sessionId: entry.sessionId, tool: entry.tool, askedAt: entry.askedAt, reason, ...outcome });
+    const root = sessions.get(entry.rootId);
+    if (root && !root.closed) emit(entry.rootId, { type: 'item', item: { kind: 'notice', id: `notice-${randomUUID().slice(0, 8)}`, level: 'warning', text: wordsFor(root).approvalDropped(entry.approvalId, reason) } });
+    const session = sessions.get(entry.sessionId);
+    if (session && !session.closed) post(entry.sessionId, { kind: 'result', from: 'ALP', assignment: entry.approvalId, body: `Approval result: ${JSON.stringify(outcome)}` });
+  }
+  /** Drops the approvals an earlier alpd kept for a root that is abandoned (t-43ed). */
+  function dropApprovals(rootId: string, reason: string) {
+    for (const entry of [...heldApprovals.values()]) if (entry.inherited && entry.rootId === rootId) dropApproval(entry, reason);
+  }
 
   /** Asks again, under the same approvalId, what an earlier alpd kept for this open root (t-43ed). */
   async function restoreApprovals(rootId: string) {
@@ -2077,7 +2119,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         error = typeof value.error === 'string' ? value.error : 'it could not be asked again';
       }
       if (heldApprovals.get(entry.approvalId) === entry) releaseApproval(entry.approvalId);
-      const outcome = { status: 'resolved', approvalId: entry.approvalId, approved: false, outcome: 'not_restored', error: `alpd restarted and the approval was not asked again: ${error}`, next: 'Nothing was applied. Propose again with a fresh requestId if it is still needed.' };
+      const outcome = notRestored(entry.approvalId, error);
       runLog(rootId, { event: 'approval.restore.failed', sessionId: entry.sessionId, tool: entry.tool, ...outcome });
       if (session && !session.closed && sessions.get(entry.sessionId) === session) post(entry.sessionId, { kind: 'result', from: 'ALP', assignment: entry.approvalId, body: `Approval result: ${JSON.stringify(outcome)}` });
     }
@@ -5837,6 +5879,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     async abandon(rootId, reason) {
       const entries = inheritedWork().filter(entry => entry.rootId === rootId);
       inherited = inherited.filter(entry => entry.rootId !== rootId);
+      dropApprovals(rootId, reason);
       for (const entry of entries) await abandonEntry(entry, reason);
       return entries.map(entry => ({ assignmentId: entry.assignmentId, agent: entry.agent, outcome: 'failed' as const, error: reason }));
     },
