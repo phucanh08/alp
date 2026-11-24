@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -112,20 +112,92 @@ export function homelessEnv(env, home) {
 }
 
 /**
+ * The commands that start an AI provider ALP drives or probes (t-a87f). On a developer's machine they
+ * are installed and logged in, and code under test reaches them by bare name: the Paseo provider
+ * snapshot runs `codex --version` / `claude --version` (integrations/paseo/server/paseo/providers.ts),
+ * `alp doctor` runs `codex login status`, `claude auth status`, `agy models`, an alpd started by a test
+ * runs `codex app-server` and the Claude model probe, and ClaudeTransport resolves `claude` on PATH to
+ * its real path before starting it. A test run must reach none of them: CI has none installed, and
+ * that absence is the behaviour the suites are written for.
+ */
+export const PROVIDER_COMMANDS = ['agy', 'claude', 'codex', 'gemini', 'opencode'];
+
+/**
+ * Provider executables the run pins to a path that does not exist, so that code reading them (the
+ * Paseo snapshot, doctor, model probes, alpd's transports) cannot start a provider either by the
+ * variable or by falling back to the bare name. ALP_ANTIGRAVITY_BIN is deliberately NOT pinned: it
+ * overrides the command a library provider configures (packages/runtime/src/providers.ts), so pinning
+ * it would also disable the fake agy test/integration/antigravity.test.js configures; `agy` is kept
+ * out by the PATH guard instead (providerFreePath).
+ */
+export const PINNED_PROVIDER_VARIABLES = ['ALP_CODEX_BIN', 'ALP_CLAUDE_BIN'];
+
+/** Whether a directory entry is a provider command: any case (case-insensitive file systems), and on Windows with an executable extension. */
+const isProviderEntry = (entry, platform) => {
+  const name = entry.toLowerCase();
+  return PROVIDER_COMMANDS.some(command => name === command || (platform === 'win32' && /^\.(exe|cmd|bat|ps1|com)$/.test(name.slice(command.length)) && name.startsWith(command)));
+};
+
+/**
+ * `searchPath` with every provider command taken out of it (t-a87f): a directory that holds none is
+ * kept as it is; one that holds a provider (/usr/local/bin with node and codex, ~/.local/bin with
+ * claude and agy) is replaced by a shadow directory under `shadowRoot` that links every OTHER entry,
+ * so node, git and the rest still resolve while `codex`, `claude`, `agy`, ... resolve to nothing, as
+ * on CI. A test that wants a provider puts its own fake first on its child's PATH, which still works.
+ * An entry that cannot be linked is left out of the shadow rather than reaching the original.
+ */
+export function providerFreePath(searchPath, shadowRoot, { platform = process.platform } = {}) {
+  const delimiter = platform === 'win32' ? ';' : ':';
+  const result = [];
+  let shadows = 0;
+  for (const directory of (searchPath ?? '').split(delimiter)) {
+    if (!directory) continue;
+    let entries;
+    try { entries = readdirSync(directory); } catch { result.push(directory); continue; }
+    if (!entries.some(entry => isProviderEntry(entry, platform))) { result.push(directory); continue; }
+    const shadow = path.join(shadowRoot, String(shadows++));
+    mkdirSync(shadow, { recursive: true });
+    for (const entry of entries) {
+      if (isProviderEntry(entry, platform)) continue;
+      try { symlinkSync(path.join(directory, entry), path.join(shadow, entry)); } catch {}
+    }
+    result.push(shadow);
+  }
+  return result.join(delimiter);
+}
+
+/**
+ * The environment of a test run (t-a87f): the caller's without its ALP session (hermeticEnv), a
+ * private HOME/USERPROFILE/XDG profile `user` with no caller ALP_*_BIN (homelessEnv), the provider
+ * executables pinned under `scratch` to a path that does not exist, and a PATH without any provider
+ * command (providerFreePath). Only the test environment changes; the code under test is untouched.
+ */
+export function testRunEnv({ env = process.env, user, scratch, platform = process.platform }) {
+  const base = homelessEnv(hermeticEnv(env), user);
+  const pathKey = Object.keys(base).find(name => /^path$/i.test(name)) ?? 'PATH';
+  base[pathKey] = providerFreePath(base[pathKey], path.join(scratch, 'provider-free-path'), { platform });
+  for (const name of PINNED_PROVIDER_VARIABLES) base[name] = path.join(scratch, 'no-provider', name.toLowerCase());
+  return base;
+}
+
+/**
  * Runs the files with `node --test` against a throwaway ALP_HOME and TMPDIR, without the caller's
  * ALP session variables, so no run touches the user's ~/.alp or leaves directories in the temp dir.
- * `privateHome` also removes ALP_*_BIN and gives the run a throwaway HOME/USERPROFILE (homelessEnv):
- * the windows-daemon CI lane runs that way (t-bfbd).
+ * Every run also gets a throwaway HOME/USERPROFILE/XDG profile, no caller ALP_*_BIN, provider
+ * executables pinned to a missing path and a PATH without provider commands (testRunEnv, t-a87f): on
+ * a machine where agy, codex, claude and opencode are installed and logged in, no test reaches them.
+ * `privateHome` is accepted for the callers that still pass it (the windows-daemon CI lane, t-bfbd);
+ * the private home is now always given.
  * Each file reports START/PASS/FAIL and has a hard `fileTimeoutMs` (default five
  * minutes), including leaked handles after tests finish. Normal files run without
  * process instrumentation. Timeout termination is best effort for the held root/group;
  * detached descendants may survive. Timeout or coordinator failure retains all scratch.
  */
-export function runNodeTests(files, { extra = [], privateHome = false, fileTimeoutMs = 300_000 } = {}) {
+export function runNodeTests(files, { extra = [], fileTimeoutMs = 300_000 } = {}) {
   if (!files.length) throw new Error('no test files selected');
   if (!Number.isSafeInteger(fileTimeoutMs) || fileTimeoutMs <= 0 || fileTimeoutMs > 2_147_483_647) throw new Error('fileTimeoutMs must be a positive timer interval');
   const home = mkdtempSync(path.join(os.tmpdir(), 'alp-test-'));
-  const user = privateHome ? mkdtempSync(path.join(os.tmpdir(), 'alpu-')) : undefined;
+  const user = mkdtempSync(path.join(os.tmpdir(), 'alpu-'));
   // Every temporary directory the tests (and alpd, providers and Node under them) make goes in one
   // scratch directory that is removed afterwards, also when a test forgets its own (t-bf7f). Short:
   // Unix socket paths under it must stay below 104 bytes on macOS.
@@ -136,8 +208,8 @@ export function runNodeTests(files, { extra = [], privateHome = false, fileTimeo
   try {
     // alpd under test never asks the real providers for models (t-e5ee); a test that wants it unsets this.
     // A per-file hard watchdog also cuts off leaked handles after five minutes.
-    const base = user ? homelessEnv(hermeticEnv(), user) : hermeticEnv();
-    if (user) for (const directory of [base.APPDATA, base.LOCALAPPDATA, ...Object.keys(XDG_BASE_DIRECTORIES).map(name => base[name])]) mkdirSync(directory, { recursive: true });
+    const base = testRunEnv({ user, scratch });
+    for (const directory of [base.APPDATA, base.LOCALAPPDATA, ...Object.keys(XDG_BASE_DIRECTORIES).map(name => base[name])]) mkdirSync(directory, { recursive: true });
     const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts/test-file-watchdog.mjs'), JSON.stringify({ files, extra, fileTimeoutMs })], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...base, ALP_TEST_RETAIN: retain, ALP_HOME: home, TMPDIR: scratch, TMP: scratch, TEMP: scratch } });
     if (result.error || result.signal || result.status === null) writeFileSync(retain, 'coordinator failed\n');
     return result.status ?? 1;
