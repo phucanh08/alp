@@ -98,6 +98,11 @@ jobs:
   windows-daemon:
     runs-on: windows-latest
     timeout-minutes: 50
+    # A file that hangs to its deadline here dumps its process tree too (t-840a0): the WMI listing
+    # costs that one dump up to 8 s (LIST_MS.win32), only after the file's 300 s deadline, and only
+    # that file's worker waits. Only scripts/test-file-watchdog-processes.mjs reads the variable.
+    env:
+      ALP_WATCHDOG_WIN_PROCS: '1'
     strategy:
       fail-fast: false
       matrix:
