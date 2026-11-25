@@ -183,7 +183,7 @@ test('reconnecting over WebSocket resends nothing and reattaches after the last 
 });
 
 test('the portable entries bundle for browsers and React Native with no Node built-in or global', async () => {
-  const allowed = /^packages\/(client\/dist\/(portable|connection\/websocket|rpc\/(client|errors|framing|connection\/handshake|connection\/reconnect|registry|terminal-directory|timers))|protocol\/src\/(public|wire))\.js$/;
+  const allowed = /^packages\/(client\/dist\/(portable|connection\/websocket|rpc\/(client|errors|framing|connection\/handshake|connection\/reconnect|registry|terminal-directory|timers))|protocol\/dist\/(public|wire))\.js$/;
   for (const [platform, conditions] of [['browser', []], ['neutral', ['react-native', 'import']]]) {
     const result = await build({
       absWorkingDir: root, bundle: true, write: false, metafile: true, format: 'esm', platform, conditions, mainFields: ['react-native', 'browser', 'module', 'main'],

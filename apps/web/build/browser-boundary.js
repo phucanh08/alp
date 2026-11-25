@@ -12,7 +12,7 @@ import path from 'node:path';
 const ALLOWED_ALP = [
   /^packages\/client\/dist\/(portable|connection\/websocket)\.js$/,
   /^packages\/client\/dist\/rpc\/(connection\/)?[\w-]+\.js$/,
-  /^packages\/protocol\/src\/(public|wire)\.js$/,
+  /^packages\/protocol\/dist\/(public|wire)\.js$/,
 ];
 
 /** Packages from npm the bundle must never hold. */

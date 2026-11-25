@@ -2,8 +2,13 @@
 export const PROTOCOL_VERSION = 1;
 export const MAX_FRAME = 16 * 1024 * 1024;
 
+/** What a JSON-RPC error object carries; alpd and the client hand it over as they received it. */
+type RpcErrorObject = { message?: string; code?: number; data?: unknown };
+
 export class AlpRpcError extends Error {
-  constructor(error) {
+  declare code: number | undefined;
+  declare data: unknown;
+  constructor(error: RpcErrorObject | null | undefined) {
     super(error?.message ?? 'ALP daemon request failed');
     this.code = error?.code;
     this.data = error?.data;
@@ -25,8 +30,8 @@ export const CAPABILITY = Object.freeze({ sessionInterruptTurn: 'session.interru
  * less (docs/alp/remote-gateway.md).
  */
 export const PROMPT_IMAGES = Object.freeze({ mimeTypes: Object.freeze(['image/png', 'image/jpeg', 'image/gif', 'image/webp']), maxCount: 8, maxBytes: 5 * 1024 * 1024, maxTotalBytes: 11 * 1024 * 1024 });
-/** Decoded bytes of base64 `data` (padding aware), without decoding it. @param {string} data */
-export const base64Bytes = data => Math.floor(data.length * 3 / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
+/** Decoded bytes of base64 `data` (padding aware), without decoding it. */
+export const base64Bytes = (data: string) => Math.floor(data.length * 3 / 4) - (data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0);
 export const RPC_METHODS = Object.freeze(["assignment.recall", "attachment.abort", "attachment.begin", "attachment.chunk", "attachment.commit", "attachment.delete", "attachment.get", "board.list", "catalog.get", "catalog.refresh", "daemon.hello", "daemon.pause", "daemon.pauses", "daemon.resume", "daemon.shutdown", "daemon.status", "daemon.usage", "extension.register", "extension.unregister", "host.directories.search", "label.list", "library.delete", "library.duplicate", "library.get", "library.list", "library.models", "library.rename", "library.save", "library.skills.set", "project.list", "project.register", "project.remove", "question.answer", "question.list", "question.watch", "registry.owner", "registry.worktree", "schedule.cancel", "schedule.create", "schedule.get", "schedule.list", "session.archive", "session.attach", "session.attention.clear", "session.attention.mark", "session.close", "session.commands", "session.compact", "session.configure", "session.configure.preview", "session.create", "session.fork", "session.get", "session.history", "session.interrupt", "session.list", "session.log", "session.message", "session.preview", "session.prompt", "session.release", "session.reload", "session.rename", "session.resumeCommand", "session.rewind", "session.status", "session.update", "settings.language.get", "settings.language.set", "task.create", "task.gate.resolve", "task.list", "task.update", "team.list", "terminal.attach", "terminal.close", "terminal.capture", "terminal.create", "terminal.input", "terminal.list", "terminal.watch", "terminal.unwatch", "terminal.resize", "terminal.revoke", "workspace.files.find", "workspace.files.list", "workspace.files.preview", "workspace.files.read", "workspace.files.search", "workspace.get", "workspace.git.diff", "workspace.git.facts", "workspace.git.status", "workspace.list", "workspace.update", "workspace.worktree.create", "workspace.worktree.options", "workspace.worktree.remove"]);
 
 /**
@@ -103,16 +108,15 @@ export const TERMINAL_LIMIT_KEYS = Object.freeze(['maxPerPrincipal', 'maxPerDaem
  * characters. One pattern for `principal.agent` in daemon.hello and a gateway credential's agent.
  */
 export const AGENT_NAME = /^[a-z](?:[a-z0-9]|-(?=[a-z0-9])){0,63}$/;
-/** An opaque terminal id (§12.10). @param {unknown} id */
-export const isTerminalId = id => typeof id === 'string' && /^term_[0-9a-f]{32}$/.test(id);
+/** An opaque terminal id (§12.10). */
+export const isTerminalId = (id: unknown): id is string => typeof id === 'string' && /^term_[0-9a-f]{32}$/.test(id);
 /** Room an attachment.chunk request needs besides its base64 data. */
 export const ATTACHMENT_CHUNK_OVERHEAD = 64 * 1024;
 /**
  * The decoded bytes one attachment.chunk may carry over frames of at most `maxFrame` bytes:
  * `maxChunkBytes`, lowered so its base64 and ATTACHMENT_CHUNK_OVERHEAD fit. At least 1 byte.
- * @param {number} [maxFrame] @param {number} [maxChunkBytes]
  */
-export function attachmentChunkBytes(maxFrame = MAX_FRAME, maxChunkBytes = ATTACHMENTS.maxChunkBytes) {
+export function attachmentChunkBytes(maxFrame: number = MAX_FRAME, maxChunkBytes: number = ATTACHMENTS.maxChunkBytes): number {
   const fits = Math.floor((maxFrame - ATTACHMENT_CHUNK_OVERHEAD) * 3 / 4);
   return Math.max(1, Math.min(maxChunkBytes, fits));
 }
@@ -142,9 +146,9 @@ const BLOCKED_PATTERN = /^(?:\.env|id_|service[-_]?account)|_history$|\.tfstate\
  * any segment (file or directory) named as a secret is (BLOCKED_* above). Compared without case,
  * as macOS and Windows file systems name files. alpd and the gateway both check it; alpd also
  * refuses a file whose content holds a private key, whatever its name.
- * @param {string} relative a path relative to the workspace, '/'-separated
+ * @param relative a path relative to the workspace, '/'-separated
  */
-export function blockedFilePath(relative) {
+export function blockedFilePath(relative: string): boolean {
   let previous = '';
   for (const segment of String(relative).toLowerCase().split(/[\\/]/)) {
     if (!segment) continue;
@@ -162,10 +166,10 @@ export function blockedFilePath(relative) {
   return false;
 }
 
-/** UTF-8 socket writers use one newline-terminated JSON value per frame. @param {unknown} value */
-export function encodeFrame(value) { return `${JSON.stringify(value)}\n`; }
-/** Parse one complete frame. Buffering and failure handling belong to the socket owner. @param {string} line @returns {unknown} */
-export function decodeFrame(line) { return JSON.parse(line); }
+/** UTF-8 socket writers use one newline-terminated JSON value per frame. */
+export function encodeFrame(value: unknown): string { return `${JSON.stringify(value)}\n`; }
+/** Parse one complete frame. Buffering and failure handling belong to the socket owner. */
+export function decodeFrame(line: string): unknown { return JSON.parse(line); }
 
 /**
  * The command lines of session.resumeCommand (docs/protocol/alp-json-rpc-v1.md §12.8), built from argv
@@ -177,13 +181,13 @@ export function decodeFrame(line) { return JSON.parse(line); }
  */
 const POSIX_SAFE = /^[A-Za-z0-9_@+:,./-]+$/;
 const WINDOWS_SAFE = /^[A-Za-z0-9_@+:./\\-]+$/;
-const assertArgument = (/** @type {unknown} */ arg) => {
+const assertArgument = (arg: unknown): string => {
   if (typeof arg !== 'string') throw new TypeError('A command argument is a string');
   if (/[\u0000-\u001f\u007f]/.test(arg)) throw new TypeError('A command argument has no control characters');
   return arg;
 };
-/** One argument for a POSIX shell: as it is when nothing in it is special, else in single quotes. @param {string} arg */
-export function quotePosix(arg) {
+/** One argument for a POSIX shell: as it is when nothing in it is special, else in single quotes. */
+export function quotePosix(arg: string): string {
   const text = assertArgument(arg);
   return text && POSIX_SAFE.test(text) ? text : `'${text.replace(/'/g, `'\\''`)}'`;
 }
@@ -192,9 +196,8 @@ export function quotePosix(arg) {
  * runtime's split (backslashes before the closing quote doubled), with every cmd.exe metacharacter,
  * the quotes too, escaped with ^ for the interactive parse; the shim's second parse then sees one
  * quoted argument, inside which `&|<>()^` are literal. `"`, `%` and `!` are refused (see above).
- * @param {string} arg
  */
-export function quoteWindows(arg) {
+export function quoteWindows(arg: string): string {
   const text = assertArgument(arg);
   if (text && WINDOWS_SAFE.test(text)) return text;
   if (/["%!]/.test(text)) throw new TypeError('A cmd.exe command argument has no ", % or !');
@@ -202,17 +205,17 @@ export function quoteWindows(arg) {
   return quoted.replace(/([()\][^"`<>&|;, *?])/g, '^$1');
 }
 const SESSION_ID = /^[\w.:-]{1,128}$/;
-/** argv as one command line. @param {string[]} argv @param {'posix' | 'windows'} platform */
-export function commandLine(argv, platform) {
+/** argv as one command line. */
+export function commandLine(argv: string[], platform: 'posix' | 'windows'): string {
   return argv.map(platform === 'windows' ? quoteWindows : quotePosix).join(' ');
 }
 /**
  * session.resumeCommand's answer for a session: `alp attach <sessionId>`, which follows the session in
  * a terminal (a closed one says how to send it a message). ALP keeps the orchestration, so it is never
  * a native runtime's own resume command.
- * @param {string} sessionId @param {'posix' | 'windows'} platform the daemon host's
+ * @param platform the daemon host's
  */
-export function resumeCommandOf(sessionId, platform) {
+export function resumeCommandOf(sessionId: string, platform: 'posix' | 'windows'): { argv: string[]; posix: string; windows: string; display: string; platform: 'posix' | 'windows' } {
   if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) throw new TypeError('A session id is [A-Za-z0-9_.:-], at most 128 characters');
   const argv = ['alp', 'attach', sessionId];
   const posix = commandLine(argv, 'posix');

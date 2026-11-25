@@ -171,7 +171,7 @@ export function createScheduleStore(root: string, { now = () => Date.now() } = {
       if (!path.isAbsolute(projectRoot)) throw new ScheduleStoreError('INVALID_SCHEDULE', 'A job needs the absolute path of the project it continues');
       if (typeof sessionId !== 'string' || !sessionId) throw new ScheduleStoreError('INVALID_SCHEDULE', 'A job needs the session it continues');
       if (typeof prompt !== 'string' || !prompt.trim()) throw new ScheduleStoreError('INVALID_SCHEDULE', 'A job needs a prompt');
-      // The count is in code points, as the v1 contract counts them (packages/protocol/src/validate.js).
+      // The count is in code points, as the v1 contract counts them (packages/protocol/src/validate.ts).
       if ([...prompt].length > PROMPT_CHARS) throw new ScheduleStoreError('INVALID_SCHEDULE', `A job's prompt is at most ${PROMPT_CHARS} characters`);
       const due = new Date(dueAt);
       if (Number.isNaN(due.getTime())) throw new ScheduleStoreError('INVALID_SCHEDULE', 'A job needs the time it is due, as a timestamp');

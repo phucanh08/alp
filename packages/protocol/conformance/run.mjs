@@ -14,7 +14,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { randomUUID } from 'node:crypto';
-import { validateDefinition, validateResult } from '../src/contract.js';
+import { validateDefinition, validateResult } from '../dist/contract.js';
 
 const MAX_FRAME = 16 * 1024 * 1024;
 const TIMEOUT = 10_000;

@@ -42,7 +42,7 @@
         "default": "./src/index.ts"
       },
       "types": "./dist/index.d.ts",
-      "default": "./src/public.js"
+      "default": "./dist/public.js"
     },
     ".": {
       "alp-source": {
@@ -50,23 +50,23 @@
         "default": "./src/index.ts"
       },
       "types": "./dist/index.d.ts",
-      "default": "./src/public.js"
+      "default": "./dist/public.js"
     },
     "./wire": {
       "alp-source": {
-        "types": "./src/wire.js",
-        "default": "./src/wire.js"
+        "types": "./src/wire.ts",
+        "default": "./src/wire.ts"
       },
       "types": "./dist/wire.d.ts",
-      "default": "./src/wire.js"
+      "default": "./dist/wire.js"
     },
     "./contract": {
       "alp-source": {
-        "types": "./src/contract.js",
-        "default": "./src/contract.js"
+        "types": "./src/contract.ts",
+        "default": "./src/contract.ts"
       },
       "types": "./dist/contract.d.ts",
-      "default": "./src/contract.js"
+      "default": "./dist/contract.js"
     },
     "./schema": {
       "default": "./schema/ipc-v1.json"
