@@ -1,7 +1,7 @@
 import type { ProviderFactories, ProviderRegistry } from './providers/providers.js';
 import type { RuntimeKind, SessionSpec } from './resolve.js';
 import type { Envelope, SessionSnapshot, TreeStatus, UserQuestion } from './events.js';
-import type { Pin } from './board.js';
+import type { Pin } from './board/board.js';
 import type { LiveEntry } from './sessions/lifecycle/live.js';
 import type { ProviderUsage } from './usage.js';
 import type { AcpProvider } from './providers/transports/acp-transport.js';

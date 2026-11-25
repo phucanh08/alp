@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, rm, realpath, symlink } from 'node:fs/promis
 import os from 'node:os';
 import path from 'node:path';
 import { createAlpRuntime } from '../dist/runtime.js';
-import { createAssignmentResults } from '../dist/assignment-results.js';
+import { createAssignmentResults } from '../dist/assignments/completion/assignment-results.js';
 
 // t-c1ba: a checkout that predates birth certification is adopted only explicitly, after the removal guard's checks.
 async function fixture(t) {

@@ -3,7 +3,7 @@ import type { RuntimeKind, SessionSpec, ResolvedSession } from '../../resolve.js
 import type { MailEvent } from '../../mailbox.js';
 import type { Worktree, WorktreeChange, Copy } from '../../workspace.js';
 import type { Verification } from '@anhlp/alp-core/verify';
-import type { Handoff } from '../../handoff.js';
+import type { Handoff } from '../../assignments/completion/handoff.js';
 import type { SessionUsage } from '../../events.js';
 
 /** The pause that stopped a turn; a matching resume may arrive before its interruption settles. */

@@ -35,11 +35,11 @@
     },
     "./board": {
       "alp-source": {
-        "types": "./src/board.ts",
-        "default": "./src/board.ts"
+        "types": "./src/board/board.ts",
+        "default": "./src/board/board.ts"
       },
-      "types": "./dist/board.d.ts",
-      "default": "./dist/board.js"
+      "types": "./dist/board/board.d.ts",
+      "default": "./dist/board/board.js"
     },
     "./catalog": {
       "alp-source": {
@@ -83,11 +83,11 @@
     },
     "./handoff": {
       "alp-source": {
-        "types": "./src/handoff.ts",
-        "default": "./src/handoff.ts"
+        "types": "./src/assignments/completion/handoff.ts",
+        "default": "./src/assignments/completion/handoff.ts"
       },
-      "types": "./dist/handoff.d.ts",
-      "default": "./dist/handoff.js"
+      "types": "./dist/assignments/completion/handoff.d.ts",
+      "default": "./dist/assignments/completion/handoff.js"
     },
     "./index": {
       "alp-source": {
@@ -163,11 +163,11 @@
     },
     "./recall": {
       "alp-source": {
-        "types": "./src/recall.ts",
-        "default": "./src/recall.ts"
+        "types": "./src/assignments/recall.ts",
+        "default": "./src/assignments/recall.ts"
       },
-      "types": "./dist/recall.d.ts",
-      "default": "./dist/recall.js"
+      "types": "./dist/assignments/recall.d.ts",
+      "default": "./dist/assignments/recall.js"
     },
     "./resolve": {
       "alp-source": {

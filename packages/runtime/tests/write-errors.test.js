@@ -11,8 +11,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createAlpRuntime } from '../dist/runtime.js';
 import { createLiveBook } from '../dist/sessions/lifecycle/live.js';
-import { createRecallBook } from '../dist/recall.js';
-import { createAssignmentResults } from '../dist/assignment-results.js';
+import { createRecallBook } from '../dist/assignments/recall.js';
+import { createAssignmentResults } from '../dist/assignments/completion/assignment-results.js';
 
 const skip = (process.platform === 'win32' || process.getuid?.() === 0) && 'POSIX permissions, not as root';
 
