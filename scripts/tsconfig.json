@@ -19,6 +19,7 @@
     // checker read packages/cli/src/self-update.ts in its place, without a build.
     "rootDirs": ["../packages/cli/src", "../packages/cli/dist"]
   },
+  // ../apps/web/scripts/*.mjs: the web lib build script carries // @ts-check too.
   // browser-page-globals.d.ts: types only, for the page callbacks of client-sdk-smoke.mjs.
-  "include": ["*.mjs", "*.js", "*.d.ts"]
+  "include": ["*.mjs", "*.js", "*.d.ts", "../apps/web/scripts/*.mjs"]
 }
