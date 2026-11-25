@@ -18,10 +18,12 @@ with the change they belong to; everything else was tested with fake providers o
 2. If you use the Paseo integration (`@anhlp/alp-paseo`): `npm install -g @anhlp/alp-paseo@beta`,
    then restart Paseo (or a standalone `alp-paseo-integration`), so that the terminal list works
    with Paseo 0.16 or later (below).
-3. ALP.app: install `ALP-0.0.1-beta.14-<arch>.dmg` to get the `--json` handshake (below). The old
+3. `alp dashboard`: no change here needs a restart (its gateway and web app did not change);
+   restart it (`alp dashboard --stop`, then `alp dashboard`) if you want it on the new build.
+4. ALP.app: install `ALP-0.0.1-beta.14-<arch>.dmg` to get the `--json` handshake (below). The old
    app keeps working with the new CLI, and the new app keeps working with an older CLI. It is still
    ad-hoc signed and not notarized ([desktop.md](desktop.md) §8).
-4. If your checkout of the ALP repository has an untracked `ALP.md` at its root (only relevant if
+5. If your checkout of the ALP repository has an untracked `ALP.md` at its root (only relevant if
    you work on ALP itself): #403 now tracks that file, so `git pull` refuses to overwrite the
    untracked copy. Move or remove it before pulling (the tracked file has the same content).
 
@@ -51,9 +53,9 @@ Changes that affect an existing user:
   at most 1000 characters). It never wakes an idle root and never ends an `alp_wait`; it arrives with
   the next mail, wake or prompt. `alp_delegate` with `wait: true` now also returns such mail under
   `mail` (with a result) or `events` (with a question) instead of dropping it. The supervisor digest
-  says whether main has received the relay yet. The protocol gains the mail kind `relay`; older
-  Paseo plugins ignore it. Tested with fake providers; #405 came from a real Cafe run on Claude,
-  and the user-authorised re-check on a real chain after the merge is not part of these notes.
+  says whether main has received the relay yet. The protocol gains the mail kind `relay`; the Paseo
+  plugin skips every mail event (every published version), so it ignores a relay. Tested with
+  fake providers; #405 came from a real Cafe run on Claude, and the user-authorised re-check on a real chain after the merge is not part of these notes.
 - **An Antigravity turn that agy denied fails the assignment and says why** (t-a648, #404, #406).
   When agy (headless) refuses a tool and ends the turn with no answer and no handoff, the
   assignment now ends `failed` (before: `completed` with `handoff: null`) with an error naming tool,
