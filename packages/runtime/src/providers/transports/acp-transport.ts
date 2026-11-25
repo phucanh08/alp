@@ -1,4 +1,4 @@
-import { writablePath } from './permission-path.js';
+import { writablePath } from '../../permission-path.js';
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
@@ -9,9 +9,9 @@ import { createInterface } from 'node:readline';
 import { commandDecision, unwrapShell, type PermissionProfile } from '@anhlp/alp-core/permissions';
 import { launchCommand } from '@anhlp/alp-core/providers';
 import { bridgeCommand } from '@anhlp/alp-core/bridges';
-import { acpText, acpToolDetail, type AcpCall } from './tool-detail.js';
+import { acpText, acpToolDetail, type AcpCall } from '../../tool-detail.js';
 import { caseInsensitive, credentialPaths, namesCredential } from './claude-transport.js';
-import { feedAcpSession } from './model-catalog.js';
+import { feedAcpSession } from '../models/model-catalog.js';
 
 /**
  * ACP agents (ALPD §46): a generic transport for any agent that speaks the Agent Client

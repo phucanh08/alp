@@ -15,7 +15,7 @@ export type { RuntimeTransport, RuntimeOptions, OpenOptions, PromptContent, Prom
 export { DEFAULT_TEAM } from './contracts.js';
 import { verdictLine, parseHandoff, type Handoff } from './handoff.js';
 import { TASK_ACTIONS, TASK_PAST, TASK_FIELDS, mainOf, readOnlyMember, roleOf, taskActions, taskBrief, type TaskAction, STRATEGIES, DEFAULT_STRATEGY, STRATEGY_REASON_CHARS, choosesStrategy, type Strategy } from './tools.js';
-import { nativeEnvironment, createTransport } from './providers.js';
+import { nativeEnvironment, createTransport } from './providers/providers.js';
 import { nativeMode, codexApproval, profileEfforts, nativeSessionConfig } from './session-config.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, watch as watchFiles, writeFileSync, type FSWatcher } from 'node:fs';
@@ -28,10 +28,10 @@ import path from 'node:path';
 import { resolveDelegation } from '@anhlp/alp-core/delegation';
 import { agentSources, builtinText, discoverAgents, resolveAgent } from '@anhlp/alp-core/resolver';
 
-import { acpDecision, acpWhat, type AcpPermission } from './acp-transport.js';
+import { acpDecision, acpWhat, type AcpPermission } from './providers/transports/acp-transport.js';
 
 import { models, modes, thinkingOptionsFor, withinMode, writes } from './catalog.js';
-import { feedCatalog } from './model-catalog.js';
+import { feedCatalog } from './providers/models/model-catalog.js';
 import { runHook } from '@anhlp/alp-core/hook-run';
 import { hookMatches } from '@anhlp/alp-core/hooks';
 import { isTrusted, trustProject } from '@anhlp/alp-core/trust';
@@ -50,7 +50,7 @@ import { CHOICES, words, type Words } from './language.js';
 import { OWN_START, sameProcessAlive } from './process-info.js';
 import { createRecallBook, recallPrompt, RECALL_KEEP_MS, RECALL_QUESTION_CHARS, RECALL_TIMEOUT_MS, type RecallEntry } from './recall.js';
 import { branchExists, checkoutFingerprint, checkoutKey, createCopy, createWorktree, reattachWorktree, removeCopy, removeWorktree } from './workspace.js';
-import { claudeSandboxAvailable, nativeCommandRefusal, SKILL_PLUGIN } from './claude-transport.js';
+import { claudeSandboxAvailable, nativeCommandRefusal, SKILL_PLUGIN } from './providers/transports/claude-transport.js';
 import { boundDetail, codexToolCall, toolError } from './tool-detail.js';
 import { ALP_REPO, gh, projectRepo } from './github.js';
 import { optionalRead, usageAllows, COMPACT_SHARE } from './runtime-context.js';

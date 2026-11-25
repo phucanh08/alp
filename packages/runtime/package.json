@@ -11,19 +11,19 @@
   "exports": {
     "./acp-transport": {
       "alp-source": {
-        "types": "./src/acp-transport.ts",
-        "default": "./src/acp-transport.ts"
+        "types": "./src/providers/transports/acp-transport.ts",
+        "default": "./src/providers/transports/acp-transport.ts"
       },
-      "types": "./dist/acp-transport.d.ts",
-      "default": "./dist/acp-transport.js"
+      "types": "./dist/providers/transports/acp-transport.d.ts",
+      "default": "./dist/providers/transports/acp-transport.js"
     },
     "./antigravity-transport": {
       "alp-source": {
-        "types": "./src/antigravity-transport.ts",
-        "default": "./src/antigravity-transport.ts"
+        "types": "./src/providers/transports/antigravity-transport.ts",
+        "default": "./src/providers/transports/antigravity-transport.ts"
       },
-      "types": "./dist/antigravity-transport.d.ts",
-      "default": "./dist/antigravity-transport.js"
+      "types": "./dist/providers/transports/antigravity-transport.d.ts",
+      "default": "./dist/providers/transports/antigravity-transport.js"
     },
     "./attachments": {
       "alp-source": {
@@ -51,11 +51,11 @@
     },
     "./claude-transport": {
       "alp-source": {
-        "types": "./src/claude-transport.ts",
-        "default": "./src/claude-transport.ts"
+        "types": "./src/providers/transports/claude-transport.ts",
+        "default": "./src/providers/transports/claude-transport.ts"
       },
-      "types": "./dist/claude-transport.d.ts",
-      "default": "./dist/claude-transport.js"
+      "types": "./dist/providers/transports/claude-transport.d.ts",
+      "default": "./dist/providers/transports/claude-transport.js"
     },
     "./contracts": {
       "alp-source": {
@@ -155,11 +155,11 @@
     },
     "./providers": {
       "alp-source": {
-        "types": "./src/providers.ts",
-        "default": "./src/providers.ts"
+        "types": "./src/providers/providers.ts",
+        "default": "./src/providers/providers.ts"
       },
-      "types": "./dist/providers.d.ts",
-      "default": "./dist/providers.js"
+      "types": "./dist/providers/providers.d.ts",
+      "default": "./dist/providers/providers.js"
     },
     "./recall": {
       "alp-source": {
@@ -211,11 +211,11 @@
     },
     "./transport": {
       "alp-source": {
-        "types": "./src/transport.ts",
-        "default": "./src/transport.ts"
+        "types": "./src/providers/transports/transport.ts",
+        "default": "./src/providers/transports/transport.ts"
       },
-      "types": "./dist/transport.d.ts",
-      "default": "./dist/transport.js"
+      "types": "./dist/providers/transports/transport.d.ts",
+      "default": "./dist/providers/transports/transport.js"
     },
     "./usage": {
       "alp-source": {

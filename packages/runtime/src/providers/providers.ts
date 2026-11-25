@@ -1,10 +1,10 @@
 import { AGENT_MARKER } from '@anhlp/alp-core/tasks';
-import { CodexTransport } from './transport.js';
-import { ClaudeTransport } from './claude-transport.js';
-import { AcpTransport, type AcpProvider } from './acp-transport.js';
-import { AntigravityTransport, type AntigravityProvider } from './antigravity-transport.js';
-import type { RuntimeKind } from './resolve.js';
-import type { RuntimeOptions, RuntimeTransport } from './contracts.js';
+import { CodexTransport } from './transports/transport.js';
+import { ClaudeTransport } from './transports/claude-transport.js';
+import { AcpTransport, type AcpProvider } from './transports/acp-transport.js';
+import { AntigravityTransport, type AntigravityProvider } from './transports/antigravity-transport.js';
+import type { RuntimeKind } from '../resolve.js';
+import type { RuntimeOptions, RuntimeTransport } from '../contracts.js';
 
 /** The environment a native harness starts with: the host's, without variables that would tie it to the host's own agent session. */
 export function nativeEnvironment(options: RuntimeOptions, extra: Record<string, string> = {}) {
