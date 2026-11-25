@@ -307,7 +307,7 @@ session, khác origin), Node, preload, cửa sổ mới, quyền, file trên đ�
 - Một XSS trong trang dashboard có thể tự tạo webview. Các chốt trên ép partition và bỏ preload, nên
   một webview như vậy không mạnh hơn một iframe: nó vẫn không đọc được gì của dashboard.
 - DNS rebinding (một tên miền trỏ về `127.0.0.1`) vượt qua chốt theo tên host; gateway của dashboard
-  tự kiểm tra header `Host` (`apps/gateway/src/server.js`), và mọi request vẫn cần token.
+  tự kiểm tra header `Host` (`apps/gateway/src/server.ts`), và mọi request vẫn cần token.
 - Guest với tới các dịch vụ loopback khác của máy (không phải dashboard), như một trình duyệt thường.
 - Mỗi tab Browser đã hiện giữ một trang sống (bộ nhớ, timer, kết nối) cho đến khi tab bị đóng hay đổi
   workspace; tối đa 20 tab mỗi workspace.

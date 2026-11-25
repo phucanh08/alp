@@ -140,7 +140,7 @@ export const PROVIDER_COMMANDS = ['agy', 'claude', 'codex', 'gemini', 'opencode'
  * Provider executables the run pins to a path that does not exist, so that code reading them (the
  * Paseo snapshot, doctor, model probes, alpd's transports) cannot start a provider either by the
  * variable or by falling back to the bare name. ALP_ANTIGRAVITY_BIN is deliberately NOT pinned: it
- * overrides the command a library provider configures (packages/runtime/src/providers.ts), so pinning
+ * overrides the command a library provider configures (packages/runtime/src/providers/providers.ts), so pinning
  * it would also disable the fake agy test/integration/antigravity.test.js configures; `agy` is kept
  * out by the PATH guard instead (providerFreePath).
  */
