@@ -14,8 +14,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initProject } from '../../packages/core/src/init.js';
-import { saveEntry } from '../../packages/core/src/library/entries/library-edit.js';
+import { initProject } from '@anhlp/alp-core/init';
+import { saveEntry } from '@anhlp/alp-core/library-edit';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { teardown } from '../support/teardown.js';
 

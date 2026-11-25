@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { runHook } from '../../packages/core/src/hook-run.js';
+import { runHook } from '@anhlp/alp-core/hook-run';
 import { checkBoundaries, globRegExp, importsOf } from '../../templates/skills/feature-architecture/scripts/check-boundaries.mjs';
 
 const CHECKER = fileURLToPath(new URL('../../templates/skills/feature-architecture/scripts/check-boundaries.mjs', import.meta.url));

@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
-import { initProject } from '../../packages/core/src/init.js';
+import { initProject } from '@anhlp/alp-core/init';
 
 assert.ok(process.env.ALP_HOME, 'Set ALP_HOME to the home of Paseo\'s alpd');
 const model = process.env.ALP_TEST_MODEL ?? 'codex:gpt-5.6-sol';

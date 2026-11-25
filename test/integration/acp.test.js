@@ -4,12 +4,12 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initProject } from '../../packages/core/src/init.js';
-import { getEntry, listEntries, saveEntry } from '../../packages/core/src/library/entries/library-edit.js';
+import { initProject } from '@anhlp/alp-core/init';
+import { getEntry, listEntries, saveEntry } from '@anhlp/alp-core/library-edit';
 import { testEntry } from '../../packages/client/src/library-test.js';
 import { diagnose } from '../../packages/client/src/doctor.js';
 import { ModelCatalog, acpDecision, acpPermission, createAlpRuntime, setActiveCatalog } from '../../dist/runtime/index.js';
-import { listProviders } from '../../packages/core/src/providers.js';
+import { listProviders } from '@anhlp/alp-core/providers';
 import { literal, templateBodySentence, templateIndexDescription } from '../support/template-text.js';
 
 const FAKE = fileURLToPath(new URL('../support/fake-acp.js', import.meta.url));

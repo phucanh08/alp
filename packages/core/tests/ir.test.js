@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { validateSettings, normalizeMcp, validateResolvedAgent } from '../src/validation.js';
+import { validateSettings, normalizeMcp, validateResolvedAgent } from '@anhlp/alp-core/validation';
 
 test('resolved IR serializes and is consumed by a provider-neutral fake', () => {
   const root = path.resolve('fixture');

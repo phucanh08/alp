@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 test('curate.monthly is a valid project and user setting, and only a boolean', async () => {
-  const { validateSettings, validateUserSettings } = await import('../src/validation.js');
+  const { validateSettings, validateUserSettings } = await import('@anhlp/alp-core/validation');
   for (const validate of [validateSettings, validateUserSettings]) {
     validate({ curate: { monthly: false } }, 'settings.json');
     validate({ curate: {} }, 'settings.json');

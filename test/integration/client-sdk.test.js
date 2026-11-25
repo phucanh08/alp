@@ -14,7 +14,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createDaemonServer } from '../../dist/daemon/index.js';
-import { initProject } from '../../packages/core/src/init.js';
+import { initProject } from '@anhlp/alp-core/init';
 import { fakeTransport } from '../support/fake-agent.js';
 import { connect, connectSocket, daemonPaths } from '../../packages/client/dist/index.js';
 import { AlpRpcClient, MAX_FRAME, createReconnectingClient, hello, isAlpClientError } from '../../packages/client/dist/portable.js';

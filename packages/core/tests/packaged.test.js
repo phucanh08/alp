@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { bundleDaemon, bundleDist, isBundleDaemon, bundleInfo, bundleNode, daemonEntry, entryCommand, isNativeDaemonName, nativeDaemon, nodeExecutable, registerNativeDaemon, scriptCommand, selfCommand, selfEntry, stablePath } from '../src/packaged.js';
-import { bridgeCommand, isBridgeArgs, ACP_BRIDGE, ANTIGRAVITY_BRIDGE } from '../src/bridges.js';
+import { bundleDaemon, bundleDist, isBundleDaemon, bundleInfo, bundleNode, daemonEntry, entryCommand, isNativeDaemonName, nativeDaemon, nodeExecutable, registerNativeDaemon, scriptCommand, selfCommand, selfEntry, stablePath } from '@anhlp/alp-core/packaged';
+import { bridgeCommand, isBridgeArgs, ACP_BRIDGE, ANTIGRAVITY_BRIDGE } from '@anhlp/alp-core/bridges';
 
 test('ALP starts its roles as scripts under process.execPath, and bridges as -e', () => {
   assert.deepEqual(selfCommand('daemon', { script: '/opt/alp/alpd.js', args: ['--detach'] }), { command: process.execPath, args: ['/opt/alp/alpd.js', '--detach'] });

@@ -1,4 +1,4 @@
-// t-cc9e: teamV1 (packages/core/src/upgrade.js) is append-only. A hash that leaves it, removed or
+// t-cc9e: teamV1 (packages/core/src/upgrade.ts) is append-only. A hash that leaves it, removed or
 // edited, strands every project holding that role definition as customInstructions, and the guard in
 // upgrade.test.js only sees today's templates. These tests hold teamV1 to every list it has had on main:
 //
@@ -11,7 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { shippedRoleHashes } from '../src/upgrade.js';
+import { shippedRoleHashes } from '@anhlp/alp-core/upgrade';
 import { mainHistory, parseTeamV1, union } from './teamv1-history.js';
 
 const snapshot = JSON.parse(await readFile(new URL('fixtures/teamv1-history.json', import.meta.url), 'utf8'));
@@ -22,10 +22,10 @@ function unlisted(lists) {
     .filter(hash => !shippedRoleHashes[name]?.includes(hash))
     .map(hash => `${name} ${hash}`));
 }
-const advice = 'teamV1 in packages/core/src/upgrade.js is append-only: put these hashes back, never edit or remove a line';
+const advice = 'teamV1 in packages/core/src/upgrade.ts is append-only: put these hashes back, never edit or remove a line';
 
 test('teamV1 parser reads today\'s upgrade.js exactly as the module exports it', async () => {
-  const text = await readFile(new URL('../src/upgrade.js', import.meta.url), 'utf8');
+  const text = await readFile(new URL('../src/upgrade.ts', import.meta.url), 'utf8');
   assert.deepEqual(parseTeamV1(text), shippedRoleHashes);
 });
 

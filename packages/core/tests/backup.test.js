@@ -9,14 +9,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import { createBackup, knownProjects, recoverInterruptedRestore, restoreBackup, verifyBackup, readRestoredMarker, clearRestoredMarker } from '../src/backup.js';
-import { MIGRATIONS, migrateState } from '../src/migrations.js';
-import { STATE_SCHEMA, readStateSchema } from '../src/state-schema.js';
-import { createTask, loadTasks } from '../src/tasks/records/tasks.js';
+import { createBackup, knownProjects, recoverInterruptedRestore, restoreBackup, verifyBackup, readRestoredMarker, clearRestoredMarker } from '@anhlp/alp-core/backup';
+import { MIGRATIONS, migrateState } from '@anhlp/alp-core/migrations';
+import { STATE_SCHEMA, readStateSchema } from '@anhlp/alp-core/state-schema';
+import { createTask, loadTasks } from '@anhlp/alp-core/tasks';
 
 const run = promisify(execFile);
-const BACKUP_MODULE = new URL('../src/backup.js', import.meta.url).href;
-const MIGRATIONS_MODULE = new URL('../src/migrations.js', import.meta.url).href;
+const BACKUP_MODULE = new URL('../dist/backup.js', import.meta.url).href;
+const MIGRATIONS_MODULE = new URL('../dist/migrations.js', import.meta.url).href;
 const posix = process.platform !== 'win32';
 
 /** Every file, directory and link under `root` by relative path; `backups/` is left out. */

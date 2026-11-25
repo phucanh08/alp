@@ -5,9 +5,9 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
-import { upgradeProject, shippedRoleHashes } from '../src/upgrade.js';
-import { shippedTemplateRoot } from '../src/template-path.js';
-import { resolveAgent } from '../src/resolver.js';
+import { upgradeProject, shippedRoleHashes } from '@anhlp/alp-core/upgrade';
+import { shippedTemplateRoot } from '@anhlp/alp-core/template-path';
+import { resolveAgent } from '@anhlp/alp-core/resolver';
 import { literal, templateTitle } from '../../../test/support/template-text.js';
 
 async function fixture(t, main = '# Main agent\n\nHelp with tasks in this project.\n') {
@@ -77,7 +77,7 @@ test('every shipped role definition is listed in teamV1', async () => {
     const hash = createHash('sha256').update(text).digest('hex');
     if (!shippedRoleHashes[name].includes(hash)) missing.push(`${name} ${hash}`);
   }
-  assert.deepEqual(missing, [], `append these to teamV1 in packages/core/src/upgrade.js:\n${missing.join('\n')}`);
+  assert.deepEqual(missing, [], `append these to teamV1 in packages/core/src/upgrade.ts:\n${missing.join('\n')}`);
 });
 
 test('malformed settings are rejected before migrating instructions', async t => {

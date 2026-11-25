@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { profileFor } from '../src/permissions.js';
-import { createTask, loadTasks } from '../src/tasks/records/tasks.js';
+import { profileFor } from '@anhlp/alp-core/permissions';
+import { createTask, loadTasks } from '@anhlp/alp-core/tasks';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-security-'));
@@ -51,9 +51,9 @@ test('security: task file symlink is rejected without exposing outside data', as
 });
 
 test('security: first-use library and settings create private ALP_HOME', { skip: process.platform === 'win32' }, async t => {
-  const { seedLibrary } = await import('../src/library/entries/library.js');
-  const { setLanguage } = await import('../src/user-settings.js');
-  const { saveEntry } = await import('../src/library/entries/library-edit.js');
+  const { seedLibrary } = await import('@anhlp/alp-core/library');
+  const { setLanguage } = await import('@anhlp/alp-core/user-settings');
+  const { saveEntry } = await import('@anhlp/alp-core/library-edit');
   const { stat } = await import('node:fs/promises');
   const root = await fixture(t);
   const actions = [

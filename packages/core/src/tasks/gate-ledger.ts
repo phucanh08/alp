@@ -1,0 +1,131 @@
+import { realpathSync } from 'node:fs';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import path from 'node:path';
+import { alpHome } from '../library/entries/library.js';
+import { AlpError } from '../errors.js';
+import type { GateChannel, Task, TaskGate } from './records/tasks.js';
+
+/** One ledgered human gate: when ALP opened it, and the clear ALP itself recorded. */
+export type LedgerEntry = { opened?: string; resolved?: { at: string; by: string; channel?: GateChannel; removed?: true } };
+/** A project's gate ledger as it is stored in $ALP_HOME/gates. */
+export type GateLedger = { project?: string; gates: Record<string, LedgerEntry | undefined> };
+
+/**
+ * A record of the human gates ALP opened and the clears ALP itself made, kept in
+ * $ALP_HOME, outside the project. The task files in .alp/tasks are plain files an
+ * agent can edit; when one shows a ledgered human gate cleared or gone without a
+ * clear here, loadTasks reopens it and marks it `tampered`.
+ *
+ * This detects an edit of the task file only. It is not a security boundary: an
+ * agent running as the same OS user can edit this file too (t-ca1f residual risk).
+ * Human gates from before the ledger enter it the next time ALP writes their task.
+ */
+
+const key = (taskId: string, gate: Pick<TaskGate, 'id' | 'at'>) => `${taskId}/${gate.id}@${gate.at}`;
+
+/** One project's ledger, by its real path: /tmp and /private/tmp are the same project. */
+function realRoot(projectRoot: string): string {
+  try { return realpathSync.native(path.resolve(projectRoot)); } catch { return path.resolve(projectRoot); }
+}
+
+function ledgerFile(projectRoot: string): string {
+  const hash = createHash('sha256').update(realRoot(projectRoot)).digest('hex').slice(0, 24);
+  return path.join(alpHome(), 'gates', `${hash}.json`);
+}
+
+/**
+ * The project's ledger. A missing one is empty. On read (`strict` false) an unreadable or corrupt
+ * one detects nothing and never blocks the task graph; a writer (`strict`) refuses it instead,
+ * so it never overwrites entries it could not read.
+ */
+export async function readLedger(projectRoot: string, { strict = false }: { strict?: boolean } = {}): Promise<GateLedger> {
+  let data;
+  try {
+    data = JSON.parse(await readFile(ledgerFile(projectRoot), 'utf8'));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { gates: {} };
+    if (strict) throw new AlpError('GATE_LEDGER_UNREADABLE', `The gate ledger ${ledgerFile(projectRoot)} is unreadable (${(error as Error).message}); fix or remove it`);
+    return { gates: {} };
+  }
+  if (data && typeof data === 'object' && data.gates && typeof data.gates === 'object') return data;
+  if (strict) throw new AlpError('GATE_LEDGER_UNREADABLE', `The gate ledger ${ledgerFile(projectRoot)} is not a ledger; fix or remove it`);
+  return { gates: {} };
+}
+
+async function writeLedger(projectRoot: string, ledger: GateLedger): Promise<void> {
+  const file = ledgerFile(projectRoot);
+  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  const temporary = `${file}.${randomUUID().slice(0, 8)}.tmp`;
+  await writeFile(temporary, JSON.stringify(ledger, null, 2) + '\n', { mode: 0o600 });
+  await rename(temporary, file);
+}
+
+/** Records the open human gates of a task ALP just wrote (addGate, a formula's human step, a beads import) that it does not hold yet. */
+export async function ledgerAdopt(projectRoot: string, task: Pick<Task, 'id' | 'gates'>): Promise<void> {
+  const open = (task.gates ?? []).filter(gate => gate.kind === 'human' && !gate.resolved && typeof gate.at === 'string' && /^g\d+$/.test(gate.id));
+  if (!open.length) return;
+  const ledger = await readLedger(projectRoot, { strict: true });
+  const missing = open.filter(gate => !ledger.gates[key(task.id, gate)]);
+  if (!missing.length) return;
+  ledger.project = realRoot(projectRoot);
+  for (const gate of missing) ledger.gates[key(task.id, gate)] = { opened: gate.at };
+  await writeLedger(projectRoot, ledger);
+}
+
+/**
+ * Records that ALP cleared or removed a human gate. Written under the task lock once every check
+ * passed and before the task file: should the file write fail, the gate stays open in the file.
+ */
+export async function ledgerResolve(projectRoot: string, taskId: string, gate: Pick<TaskGate, 'id' | 'at'>, { by, channel, removed = false }: { by: string; channel?: GateChannel; removed?: boolean }): Promise<void> {
+  const ledger = await readLedger(projectRoot, { strict: true });
+  const entry = ledger.gates[key(taskId, gate)];
+  if (!entry) return;
+  entry.resolved = { at: new Date().toISOString(), by, ...(channel ? { channel } : {}), ...(removed ? { removed: true as const } : {}) };
+  await writeLedger(projectRoot, ledger);
+}
+
+/**
+ * Reopens, in the loaded tasks, every ledgered human gate the files show cleared or
+ * removed without a clear in the ledger, marking it `tampered`.
+ */
+export function applyLedger(tasks: Task[], ledger: GateLedger): Task[] {
+  const byId = new Map(tasks.map(task => [task.id, task]));
+  for (const [name, entry] of Object.entries(ledger.gates ?? {})) {
+    if (!entry || entry.resolved) continue;
+    const match = /^(.+)\/(g\d+)@(.+)$/.exec(name);
+    if (!match) continue;
+    const [, taskId, gateId, at] = match;
+    const task = byId.get(taskId);
+    if (!task) continue;
+    task.gates = Array.isArray(task.gates) ? task.gates : [];
+    const gate = task.gates.find(item => item.id === gateId);
+    if (gate && gate.at === at && gate.kind === 'human' && !gate.resolved) continue;
+    if (gate) {
+      const { resolved, ...open } = gate;
+      task.gates = task.gates.map(item => item === gate ? { ...open, kind: 'human', at, ...(open.note ? {} : { note: 'restored: this human gate was changed outside ALP' }), tampered: { at: resolved?.at ?? null, by: resolved?.by ?? null } } : item);
+    } else {
+      task.gates = [...task.gates, <TaskGate>{ id: gateId, kind: 'human', note: 'restored: this human gate was removed outside ALP', at, tampered: { removed: true } }];
+    }
+    // A step closed by the forged approval opens again.
+    if (task.step?.human && task.status === 'closed') { task.status = 'open'; task.closed = null; }
+  }
+  return tasks;
+}
+
+/**
+ * Drops the entries that no longer guard anything (t-f438): the cleared ones, which applyLedger
+ * skips. An open entry stays even for a closed or missing task: status and presence are file
+ * state an agent can edit, so only a clear ALP recorded ends an entry. Called from compaction.
+ */
+export async function ledgerPrune(projectRoot: string): Promise<number> {
+  const ledger = await readLedger(projectRoot, { strict: true });
+  let dropped = 0;
+  for (const [name, entry] of Object.entries(ledger.gates)) {
+    if (entry && !entry.resolved) continue;
+    delete ledger.gates[name];
+    dropped += 1;
+  }
+  if (dropped) await writeLedger(projectRoot, ledger);
+  return dropped;
+}

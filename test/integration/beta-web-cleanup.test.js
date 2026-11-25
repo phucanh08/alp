@@ -7,7 +7,7 @@ import { mkdtemp, mkdir, readFile, copyFile, writeFile, rm } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { validateUserSettings } from '../../packages/core/src/validation.js';
+import { validateUserSettings } from '@anhlp/alp-core/validation';
 const exec = promisify(execFile);
 const root = path.resolve(import.meta.dirname, '../..');
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };

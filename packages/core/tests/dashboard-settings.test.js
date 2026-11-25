@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { dashboardSettings, migrateDashboardSettings } from '../src/user-settings.js';
-import { validateUserSettings } from '../src/validation.js';
+import { dashboardSettings, migrateDashboardSettings } from '@anhlp/alp-core/user-settings';
+import { validateUserSettings } from '@anhlp/alp-core/validation';
 
 test('dashboard.* is validated like web.* was, and web keeps the relay', () => {
   validateUserSettings({ dashboard: { enabled: false, port: 7433, permissions: ['files.read'] }, web: { relay: { enabled: false } } }, 'settings.json');

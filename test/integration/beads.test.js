@@ -6,10 +6,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as toml } from 'smol-toml';
-import { initProject } from '../../packages/core/src/init.js';
-import { exportBeads, importBeads, parseJsonl } from '../../packages/core/src/tasks/beads.js';
-import { findFormula, listFormulas, pourFormula, validateFormula } from '../../packages/core/src/tasks/formulas.js';
-import { addGate, closeTask, createTask, getTask, linkTask, loadTasks, readyTasks, resolveGate, startTask, submitTask } from '../../packages/core/src/tasks/records/tasks.js';
+import { initProject } from '@anhlp/alp-core/init';
+import { exportBeads, importBeads, parseJsonl } from '@anhlp/alp-core/beads';
+import { findFormula, listFormulas, pourFormula, validateFormula } from '@anhlp/alp-core/formulas';
+import { addGate, closeTask, createTask, getTask, linkTask, loadTasks, readyTasks, resolveGate, startTask, submitTask } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));

@@ -5,10 +5,10 @@ import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:f
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initProject } from '../../packages/core/src/init.js';
-import { closeTask, createTask, getTask, loadTasks, recordVerification, startTask, submitTask, summarize, taskDigest } from '../../packages/core/src/tasks/records/tasks.js';
-import { describeVerification, runVerify, validateVerify, verifyConfig } from '../../packages/core/src/verify.js';
-import { validateSettings } from '../../packages/core/src/validation.js';
+import { initProject } from '@anhlp/alp-core/init';
+import { closeTask, createTask, getTask, loadTasks, recordVerification, startTask, submitTask, summarize, taskDigest } from '@anhlp/alp-core/tasks';
+import { describeVerification, runVerify, validateVerify, verifyConfig } from '@anhlp/alp-core/verify';
+import { validateSettings } from '@anhlp/alp-core/validation';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { teardown } from '../support/teardown.js';
 

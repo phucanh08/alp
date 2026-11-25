@@ -199,7 +199,6 @@ console.log('plugin runtime imports ok');
   mkdirSync(suite, { recursive: true });
   mkdirSync(path.join(pluginDir, 'test/support'), { recursive: true });
   const support = readFileSync(path.join(root, 'test/support/fake-agent.js'), 'utf8')
-    .replace('../../packages/core/src/init.js', '@anhlp/alp-core/init')
     .replace('../../dist/runtime/index.js', '@anhlp/alp-runtime');
   writeFileSync(path.join(pluginDir, 'test/support/fake-agent.js'), support);
   // Everything else under test/support that a copied suite imports. teardown.js arrived with

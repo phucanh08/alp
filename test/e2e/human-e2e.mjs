@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../../packages/core/src/init.js';
+import { initProject } from '@anhlp/alp-core/init';
 
 const mode = process.argv[2] ?? 'cli';
 assert.ok(['cli', 'paseo', 'relay'].includes(mode), 'usage: human-e2e.mjs cli|paseo|relay');

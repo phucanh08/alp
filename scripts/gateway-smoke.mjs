@@ -48,7 +48,7 @@ try {
   await mkdir(home, { mode: 0o700 });
   await writeFile(path.join(home, 'settings.json'), '{}');
   const project = path.join(work, 'project');
-  const { initProject } = await import(pathToFileURL(path.join(root, 'packages/core/src/init.js')).href);
+  const { initProject } = await import(pathToFileURL(path.join(root, 'packages/core/dist/init.js')).href);
   await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
   const env = { ...process.env, ALP_HOME: home, ALP_GATEWAY_HOME: path.join(work, 'gateway'), ALP_CODEX_BIN: path.join(root, 'packages/daemon/tests/support/fake-codex.js') };

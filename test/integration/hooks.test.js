@@ -4,10 +4,10 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../../packages/core/src/init.js';
-import { addGate, createTask, getTask } from '../../packages/core/src/tasks/records/tasks.js';
-import { saveEntry } from '../../packages/core/src/library/entries/library-edit.js';
-import { isTrusted, trustProject } from '../../packages/core/src/trust.js';
+import { initProject } from '@anhlp/alp-core/init';
+import { addGate, createTask, getTask } from '@anhlp/alp-core/tasks';
+import { saveEntry } from '@anhlp/alp-core/library-edit';
+import { isTrusted, trustProject } from '@anhlp/alp-core/trust';
 import { fileURLToPath } from 'node:url';
 import { renderLog } from '../../packages/client/src/render.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
@@ -130,7 +130,7 @@ test('a project hook asks the user once per workspace; after they agree it runs,
   assert.ok((await log()).some(entry => entry.event === 'hook.trust' && entry.trusted));
   // Later sessions, and hooks added or changed later, do not ask again.
   await saveEntry('hooks', 'started', recorder('session.start', 'started'), { ...scope, scope: 'project' });
-  const main = await import('../../packages/core/src/library/entries/library-edit.js').then(edit => edit.getEntry('agents', 'main', { ...scope, scope: 'project' }));
+  const main = await import('@anhlp/alp-core/library-edit').then(edit => edit.getEntry('agents', 'main', { ...scope, scope: 'project' }));
   await saveEntry('agents', 'main', { ...main.content, config: { hooks: ['ended', 'started'] } }, { ...scope, scope: 'project', revision: main.revision });
   await runtime.shutdown();
   runtime = start();

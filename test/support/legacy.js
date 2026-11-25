@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { initProject } from '../../packages/core/src/init.js';
+import { initProject } from '@anhlp/alp-core/init';
 
 export const BUILTIN = ['main', 'lead', 'peer', 'oracle', 'reviewer', 'supervisor'];
 

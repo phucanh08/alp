@@ -8,9 +8,9 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initProject } from '../../packages/core/src/init.js';
-import { addGate, closeTask, compactTasks, createTask, gateOpen, loadTasks, resolveGate, updateTask } from '../../packages/core/src/tasks/records/tasks.js';
-import { pourFormula } from '../../packages/core/src/tasks/formulas.js';
+import { initProject } from '@anhlp/alp-core/init';
+import { addGate, closeTask, compactTasks, createTask, gateOpen, loadTasks, resolveGate, updateTask } from '@anhlp/alp-core/tasks';
+import { pourFormula } from '@anhlp/alp-core/formulas';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
