@@ -984,8 +984,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (route) resultRoutes.delete(entry.assignmentId);
     const watcher = root?.mapping.team?.supervisor ? root.mapping.team.supervisor.agent : 'supervisor';
     if (!root?.supervisor || entry.from === 'supervisor' || entry.agent === watcher) return;
-    // Whether the root has the result: no mark when it was the requester (t-d8c5).
-    const routed = !route ? '' : route.relayed ? ` (also relayed to ${root.mapping.agent.name})` : ` (result went to ${route.requester}, not to ${root.mapping.agent.name})`;
+    // Whether the root has the result: no mark when it was the requester (t-d8c5). A relay is only
+    // posted here; a later line says when a completed turn of the root took it (relayResult).
+    const routed = !route ? '' : route.relayed ? ` (relay to ${root.mapping.agent.name} posted; not yet in ${root.mapping.agent.name}'s input)` : ` (result went to ${route.requester}, not to ${root.mapping.agent.name})`;
     const line =
       entry.event === 'assignment.started' ? `${entry.parentAgent} → ${entry.agent} assignment ${entry.assignmentId}${entry.taskId ? ` for task ${entry.taskId}` : ''} (${entry.model}, ${entry.thinking ?? 'default effort'}, ${entry.mode}, ${entry.isolation}${entry.wait ? '' : ', async'}): ${clip(entry.task)}`
       : entry.event === 'assignment.finished' ? `${entry.agent} assignment ${entry.assignmentId} ${entry.status}${entry.handoff ? `, handoff ${entry.handoff.outcome}${entry.handoff.verdict ? `, ${verdictLine(entry.handoff.verdict)}` : ''}: ${clip(entry.handoff.summary)}` : ', no handoff'}${entry.error ? ` (${clip(entry.error, 200)})` : ''}${entry.handoff?.discovered?.length ? `; discovered: ${clip(entry.handoff.discovered.join('; '))}` : ''}${routed}`
@@ -3034,7 +3035,17 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const body = `${result.agent} assignment ${assignmentId} for ${requester} ${result.status} at ${new Date().toISOString()}` +
       (handoff ? `, handoff ${handoff.outcome}${handoff.verdict ? `, ${verdictLine(handoff.verdict)}` : ''}: ${clip(handoff.summary, 600)}` : ', no handoff') +
       (result.error ? ` (${clip(String(result.error), 200)})` : '');
-    post(rootId, { kind: 'relay', from: 'ALP', assignment: assignmentId, passive: true, body: cut(body, RELAY_CHARS) });
+    const mail = post(rootId, { kind: 'relay', from: 'ALP', assignment: assignmentId, passive: true, body: cut(body, RELAY_CHARS) });
+    // Received means a completed turn of the root took it: the hook every acknowledged mail passes
+    // (the turn's end calls taken()), whichever way it was shown — a wait, a steer, a wake, a prompt.
+    // A turn that failed or a root that closed never calls it, so the digest never claims receipt.
+    gateMail.set(mail, {
+      key: `relay:${assignmentId}`,
+      taken: () => {
+        const root = sessions.get(rootId);
+        if (root?.supervisor) root.journal.push(stamp(`${root.mapping.agent.name} received the relay of ${result.agent} assignment ${assignmentId} (its result went to ${requester})`));
+      },
+    });
   }
 
   async function finishAssignment(parentId: string, parent: Session, assignment: Assignment, state: string, error?: unknown, quiet = false) {
@@ -4130,12 +4141,15 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     // A result that came with a check-in makes the check-in moot.
     const event = events.find(candidate => candidate.kind === 'result') ?? events.find(candidate => candidate.kind === 'question');
     if (!event) return toolResult(true, { assignmentId: childId, agent: args.agent, status: 'running', events: events.map(publicEvent), next: CHECKED_IN });
-    if (event.kind === 'result') return toolResult(event.result!.status === 'completed', { ...event.result, ...capped });
+    // waitFor marked the whole batch delivered, so all of it is shown here: a relay to the root, mail
+    // to this session itself, a check-in that came with the result (t-d8c5). Nothing leaves unseen.
+    const others = events.filter(candidate => candidate !== event).map(publicEvent);
+    if (event.kind === 'result') return toolResult(event.result!.status === 'completed', { ...event.result, ...capped, ...(others.length ? { mail: others } : {}) });
     return toolResult(true, {
       assignmentId: childId,
       agent: args.agent,
       status: 'running',
-      events: [publicEvent(event)],
+      events: events.map(publicEvent),
       next: 'Answer with alp_send kind answer, then alp_wait for this assignment.',
     });
   }
