@@ -1,6 +1,6 @@
 import { AlpRpcError, ERROR } from '@anhlp/alp-protocol';
-import { AlpRpcClient } from './client.js';
-import { AlpClientError } from './errors.js';
+import { AlpRpcClient } from '../client.js';
+import { AlpClientError } from '../errors.js';
 
 /**
  * Keeps an ALP connection up: connects, runs the caller's `onConnect` (handshake, reattach and
@@ -13,10 +13,10 @@ import { AlpClientError } from './errors.js';
  */
 
 /**
- * @typedef {import('./client.js').AlpTransport} AlpTransport
- * @typedef {import('./client.js').AlpRpcClientOptions} AlpRpcClientOptions
- * @typedef {import('./client.js').RequestOptions} RequestOptions
- * @typedef {import('./client.js').AbortSignalLike} AbortSignalLike
+ * @typedef {import('../client.js').AlpTransport} AlpTransport
+ * @typedef {import('../client.js').AlpRpcClientOptions} AlpRpcClientOptions
+ * @typedef {import('../client.js').RequestOptions} RequestOptions
+ * @typedef {import('../client.js').AbortSignalLike} AbortSignalLike
  * @typedef {'connecting' | 'open' | 'waiting' | 'stopped'} ReconnectState
  * @typedef {{ initialMs?: number, maxMs?: number, factor?: number, jitter?: number }} Backoff
  * @typedef {{

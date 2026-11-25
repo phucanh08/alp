@@ -10,14 +10,14 @@ import path from 'node:path';
 import { scrubText } from '@anhlp/alp-core/log';
 import { entryCommand, isNativeDaemonName, NATIVE_DAEMON } from '@anhlp/alp-core/packaged';
 import { dashboardSettings } from '@anhlp/alp-core/user-settings';
-import { createSocketTransport } from './ipc.js';
+import { createSocketTransport } from './connection/ipc.js';
 import { AlpRpcClient } from './rpc/client.js';
-import { hello } from './rpc/handshake.js';
+import { hello } from './rpc/connection/handshake.js';
 export { PROTOCOL_VERSION, MAX_FRAME, AlpRpcError, encodeFrame } from '@anhlp/alp-protocol';
 // The Node entry carries the whole portable API and the WebSocket transport too, so Node callers need one import.
 export * from './portable.js';
-export { connectWebSocket, createWebSocketTransport, redactUrl, CLOSE_CODE } from './websocket.js';
-export { createSocketTransport } from './ipc.js';
+export { connectWebSocket, createWebSocketTransport, redactUrl, CLOSE_CODE } from './connection/websocket.js';
+export { createSocketTransport } from './connection/ipc.js';
 
 export function alpHome(env = process.env) {
   return path.resolve(env.ALP_HOME || path.join(os.homedir(), '.alp'));
@@ -429,7 +429,7 @@ export class AlpClient extends AlpRpcClient {
   terminalLimits;
   /**
    * @param {import('node:net').Socket} socket a connected or connecting socket; the client owns it
-   * @param {import('./rpc/client.js').AlpRpcClientOptions & import('./ipc.js').SocketTransportOptions} [options]
+   * @param {import('./rpc/client.js').AlpRpcClientOptions & import('./connection/ipc.js').SocketTransportOptions} [options]
    */
   constructor(socket, { maxFrame, maxBufferedBytes, ...options } = {}) {
     super(createSocketTransport(socket, { maxFrame, maxBufferedBytes }), { maxFrame, ...options });
@@ -450,7 +450,7 @@ async function openSocket(socketPath) {
  * The transport to alpd's socket without the handshake, for an AlpRpcClient or a reconnecting
  * client whose onConnect runs `hello`. `connect` is this plus `hello`.
  * @param {string} socketPath
- * @param {import('./ipc.js').SocketTransportOptions} [options]
+ * @param {import('./connection/ipc.js').SocketTransportOptions} [options]
  */
 export async function connectSocket(socketPath, options) {
   return createSocketTransport(await openSocket(socketPath), options);
@@ -460,7 +460,7 @@ export async function connectSocket(socketPath, options) {
  * Connects and performs the version handshake.
  * @param {string} socketPath
  * @param {{ name: string, version: string }} [client]
- * @param {import('./rpc/client.js').AlpRpcClientOptions & import('./ipc.js').SocketTransportOptions} [options]
+ * @param {import('./rpc/client.js').AlpRpcClientOptions & import('./connection/ipc.js').SocketTransportOptions} [options]
  * @returns {Promise<AlpClient>}
  */
 export async function connect(socketPath, client = { name: 'alp', version: '0' }, options = {}) {

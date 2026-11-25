@@ -1,7 +1,7 @@
 import { MAX_FRAME } from '@anhlp/alp-protocol';
-import { AlpClientError } from './rpc/errors.js';
-import { utf8Length } from './rpc/framing.js';
-import { timerDelay } from './rpc/timers.js';
+import { AlpClientError } from '../rpc/errors.js';
+import { utf8Length } from '../rpc/framing.js';
+import { timerDelay } from '../rpc/timers.js';
 
 /**
  * A WebSocket transport for the portable ALP client: the browser's WebSocket, React Native's, or
@@ -17,9 +17,9 @@ import { timerDelay } from './rpc/timers.js';
  */
 
 /**
- * @typedef {import('./rpc/client.js').AlpTransport} AlpTransport
- * @typedef {import('./rpc/client.js').TransportClose} TransportClose
- * @typedef {import('./rpc/client.js').AbortSignalLike} AbortSignalLike
+ * @typedef {import('../rpc/client.js').AlpTransport} AlpTransport
+ * @typedef {import('../rpc/client.js').TransportClose} TransportClose
+ * @typedef {import('../rpc/client.js').AbortSignalLike} AbortSignalLike
  * @typedef {{
  *   readonly readyState: number,
  *   readonly bufferedAmount?: number,

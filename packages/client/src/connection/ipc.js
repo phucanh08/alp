@@ -1,6 +1,6 @@
 import { MAX_FRAME } from '@anhlp/alp-protocol';
-import { AlpClientError } from './rpc/errors.js';
-import { createLineDecoder } from './rpc/framing.js';
+import { AlpClientError } from '../rpc/errors.js';
+import { createLineDecoder } from '../rpc/framing.js';
 
 /**
  * The Node transport of the ALP client: a Unix socket or Windows named pipe carrying
@@ -8,8 +8,8 @@ import { createLineDecoder } from './rpc/framing.js';
  * (`@anhlp/alp-client/portable`) never imports it. Socket discovery, the private-socket checks
  * and daemon startup stay in the Node entry (`connect`, `ensureDaemon`).
  *
- * @typedef {import('./rpc/client.js').AlpTransport} AlpTransport
- * @typedef {import('./rpc/client.js').TransportClose} TransportClose
+ * @typedef {import('../rpc/client.js').AlpTransport} AlpTransport
+ * @typedef {import('../rpc/client.js').TransportClose} TransportClose
  * @typedef {{ maxFrame?: number, maxBufferedBytes?: number }} SocketTransportOptions
  *   `maxBufferedBytes` bounds what may wait in the socket's write buffer; a send beyond it fails
  *   as `send_failed` instead of growing memory while the daemon does not read.

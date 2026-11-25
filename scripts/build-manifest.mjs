@@ -38,7 +38,7 @@ export function assertCoreInputs(metafile, label) {
  * discovery, daemon supervision, library probes), and no import of a module that reads files or
  * starts processes on the client's machine.
  */
-const REMOTE_FORBIDDEN_INPUTS = [/^packages\/(core|runtime|daemon|cli)\//, /^packages\/client\/src\/(?!portable\.js$|websocket\.js$|rpc\/)/, /^integrations\/paseo\/server\/(provider|mapping|index|main|web|tasks|library|usage)\.ts$/, /^integrations\/paseo\/server\/(panel\/(?!session-tasks\.ts$|compat\.ts$)|paseo\/)/];
+const REMOTE_FORBIDDEN_INPUTS = [/^packages\/(core|runtime|daemon|cli)\//, /^packages\/client\/src\/(?!portable\.js$|connection\/websocket\.js$|rpc\/)/, /^integrations\/paseo\/server\/(provider|mapping|index|main|web|tasks|library|usage)\.ts$/, /^integrations\/paseo\/server\/(panel\/(?!session-tasks\.ts$|compat\.ts$)|paseo\/)/];
 const REMOTE_FORBIDDEN_IMPORTS = /^(node:)?(fs|fs\/promises|child_process|worker_threads|cluster|module|vm)$/;
 export function assertRemoteInputs(metafile, label) {
   const offenders = new Set();

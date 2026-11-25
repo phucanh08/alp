@@ -9,9 +9,9 @@ export const AGENT_CAPABILITY = 'principal.agent';
  * The version handshake every ALP connection starts with (plans/reference/ALPD.md §3): alpd
  * answers nothing else before it. Shared by the Node `connect` and portable clients, so a change
  * to the handshake (Task 06) lands in one place.
- * @param {{ request(method: string, params?: unknown, options?: import('./client.js').RequestOptions): Promise<any> }} client
+ * @param {{ request(method: string, params?: unknown, options?: import('../client.js').RequestOptions): Promise<any> }} client
  * @param {ClientInfo} [info]
- * @param {import('./client.js').RequestOptions} [options]
+ * @param {import('../client.js').RequestOptions} [options]
  * @param {{ agent?: boolean }} [principal] `agent`: an ALP agent started this process (the Node entry reads ALP_AGENT_SESSION).
  * @returns {Promise<{ protocolVersion: number } & Record<string, unknown>>}
  */
