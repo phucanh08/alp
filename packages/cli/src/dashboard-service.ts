@@ -28,7 +28,7 @@ import { selfEntry } from '@anhlp/alp-core/packaged';
  */
 
 const execFileAsync = promisify(execFile);
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /** The alp-dashboard service script beside this CLI; a clear error when this CLI was built without it. */
 export function dashboardScript() {
@@ -45,15 +45,18 @@ export const dashboardEntry = () => selfEntry(dashboardScript());
  * The integration lock's name, the file the service publishes, the `app` it writes there, and what
  * messages call it.
  */
+export type Service = { lock: string; info: string; app: string; what: string };
+/** Who owns a service's lock: a process proven safe to stop, or why it is not (see serviceOwner). */
+export type ServiceOwner = { pid: number; app: unknown } | { reason: string; alive: boolean; kind?: 'transient' | 'foreign' | 'unknown' };
 /** @type {Service} */
-export const DASHBOARD = Object.freeze({ lock: 'dashboard', info: 'dashboard.json', app: 'alp-dashboard', what: 'alp dashboard' });
+export const DASHBOARD: Service = Object.freeze({ lock: 'dashboard', info: 'dashboard.json', app: 'alp-dashboard', what: 'alp dashboard' });
 /** alp web as 0.0.1-beta.8 and earlier ran it (and, before that, the Paseo integration). @type {Service} */
-export const LEGACY_WEB = Object.freeze({ lock: 'web', info: 'web.json', app: 'alp-web', what: 'alp web from before its rename to alp dashboard' });
+export const LEGACY_WEB: Service = Object.freeze({ lock: 'web', info: 'web.json', app: 'alp-web', what: 'alp web from before its rename to alp dashboard' });
 
-const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
+const readJson = async (file: string) => JSON.parse(await readFile(file, 'utf8'));
 
 /** When `pid` started and elapsed seconds from ps, or undefined when ps cannot say. @param {number} pid */
-async function processTimes(pid) {
+async function processTimes(pid: number) {
   try {
     const { stdout } = await execFileAsync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8', timeout: 5_000 });
     // [[dd-]hh:]mm:ss
@@ -77,7 +80,7 @@ async function processTimes(pid) {
  * @param {string} home @param {Service} [service]
  * @returns {Promise<{ pid: number, app: unknown } | { reason: string, alive: boolean, kind?: 'transient' | 'foreign' | 'unknown' }>}
  */
-export async function serviceOwner(home, service = DASHBOARD) {
+export async function serviceOwner(home: string, service: Service = DASHBOARD): Promise<ServiceOwner> {
   const lockFile = path.join(home, 'integrations', `${service.lock}.lock`);
   const infoFile = path.join(home, service.info);
   let lock, lockInfo;
@@ -87,11 +90,11 @@ export async function serviceOwner(home, service = DASHBOARD) {
   }
   const { pid } = lock;
   try { process.kill(pid, 0); } catch (error) {
-    if (error?.code === 'ESRCH') return { reason: `its pid ${pid} has exited`, alive: false };
-    if (error?.code === 'EPERM') return { reason: `pid ${pid} belongs to another user`, alive: true, kind: 'foreign' };
-    return { reason: `pid ${pid} cannot be signalled (${error?.code ?? error})`, alive: true, kind: 'unknown' };
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'ESRCH') return { reason: `its pid ${pid} has exited`, alive: false };
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'EPERM') return { reason: `pid ${pid} belongs to another user`, alive: true, kind: 'foreign' };
+    return { reason: `pid ${pid} cannot be signalled (${(error as NodeJS.ErrnoException | undefined)?.code ?? error})`, alive: true, kind: 'unknown' };
   }
-  const refuse = (/** @type {string} */ reason, /** @type {'transient' | 'foreign' | 'unknown'} */ kind) => ({ reason, alive: true, kind });
+  const refuse = (reason: string, kind: 'transient' | 'foreign' | 'unknown') => ({ reason, alive: true, kind });
   if (process.platform === 'win32') return refuse('alp does not stop it on Windows', 'unknown');
   const uid = process.getuid?.();
   if (lockInfo.uid !== uid) return refuse('its lock is not yours', 'foreign');
@@ -117,11 +120,11 @@ export async function serviceOwner(home, service = DASHBOARD) {
  * Sends SIGTERM to a proven owner and waits for it to exit.
  * @param {number} pid @param {string} what @param {number} [timeoutMs]
  */
-async function terminate(pid, what, timeoutMs = 20_000) {
-  try { process.kill(pid, 'SIGTERM'); } catch (error) { if (error?.code === 'ESRCH') return; throw error; }
+async function terminate(pid: number, what: string, timeoutMs = 20_000) {
+  try { process.kill(pid, 'SIGTERM'); } catch (error) { if ((error as NodeJS.ErrnoException | undefined)?.code === 'ESRCH') return; throw error; }
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    try { process.kill(pid, 0); } catch (error) { if (error?.code === 'ESRCH') return; }
+    try { process.kill(pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException | undefined)?.code === 'ESRCH') return; }
     await sleep(100);
   }
   throw new Error(`${what} (pid ${pid}) did not stop within ${timeoutMs / 1000} s of SIGTERM; stop it, then run the command again`);
@@ -130,7 +133,7 @@ async function terminate(pid, what, timeoutMs = 20_000) {
 const PASEO_BEFORE_RENAME = 'The Paseo integration from before its rename';
 
 /** What a proven owner of `service`'s lock is, by the `app` its file names. @param {Service} service @param {unknown} app */
-const ownerName = (service, app) => app === service.app || service === DASHBOARD ? service.what : PASEO_BEFORE_RENAME;
+const ownerName = (service: Service, app: unknown) => app === service.app || service === DASHBOARD ? service.what : PASEO_BEFORE_RENAME;
 
 /**
  * Stops whatever runs as `service` (alp dashboard; for LEGACY_WEB, alp web from before the rename or
@@ -139,7 +142,7 @@ const ownerName = (service, app) => app === service.app || service === DASHBOARD
  * the lock; refuses at once an owner that is foreign or cannot be proven.
  * @param {string} home @param {number} [timeoutMs] @param {Service} [service]
  */
-export async function stopService(home, timeoutMs = 30_000, service = DASHBOARD) {
+export async function stopService(home: string, timeoutMs = 30_000, service: Service = DASHBOARD): Promise<number | undefined> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const owner = await serviceOwner(home, service);
@@ -152,7 +155,7 @@ export async function stopService(home, timeoutMs = 30_000, service = DASHBOARD)
 }
 
 /** The opening of the message for a lock held by a process alp would not stop. @param {string} home @param {Service} [service] */
-export function refusal(home, service = DASHBOARD) {
+export function refusal(home: string, service: Service = DASHBOARD): string {
   const lock = path.join(home, 'integrations', `${service.lock}.lock`);
   return service === DASHBOARD
     ? `${lock} is held by a process that alp cannot prove is alp dashboard, so it was left running`
@@ -165,7 +168,7 @@ export function refusal(home, service = DASHBOARD) {
  * @param {string | undefined} url
  * @param {number} [timeoutMs]
  */
-export async function isDashboardReady(url, timeoutMs = 1_000) {
+export async function isDashboardReady(url: string | undefined, timeoutMs = 1_000): Promise<boolean> {
   if (typeof url !== 'string' || !url) return false;
   try {
     const parsed = new URL(url);
@@ -187,7 +190,14 @@ export async function isDashboardReady(url, timeoutMs = 1_000) {
  * @param {any} held
  * @param {number} [timeoutMs]
  */
-export async function isServiceClaimed(published, lockPid, held, timeoutMs = 1_000) {
+export async function isServiceClaimed(
+  // any: the service's published <name>.json as read from disk; only app, pid and url are checked.
+  published: any,
+  lockPid: number | undefined,
+  // any: serviceOwner's answer, or a caller's stand-in for it; only `kind` is read.
+  held: any,
+  timeoutMs = 1_000,
+): Promise<boolean> {
   if (published?.app !== DASHBOARD.app || published.pid !== lockPid) return false;
   if (held?.kind === 'foreign') return false;
   return isDashboardReady(published.url, timeoutMs);
@@ -204,7 +214,7 @@ const TOKEN = /^alpgw1\.[a-f0-9]{16}\.[A-Za-z0-9_-]{43}$/;
  * Where the service answers for `home`.
  * @param {string} home @param {{ platform?: NodeJS.Platform }} [options]
  */
-export function tokenSocketPath(home, { platform = process.platform } = {}) {
+export function tokenSocketPath(home: string, { platform = process.platform }: { platform?: NodeJS.Platform } = {}): string {
   const hash = createHash('sha256').update(home).digest('hex');
   if (platform === 'win32') return `\\\\.\\pipe\\alp-dashboard-${hash.slice(0, 24)}`;
   const preferred = path.join(home, 'dashboard', 'token.sock');
@@ -218,7 +228,7 @@ export function tokenSocketPath(home, { platform = process.platform } = {}) {
  * with mode 0700 (POSIX; nothing to check for a Windows pipe).
  * @param {string} socketPath
  */
-export async function assertTokenSocket(socketPath) {
+export async function assertTokenSocket(socketPath: string): Promise<void> {
   if (process.platform === 'win32') return;
   const directory = path.dirname(socketPath);
   await assertPrivateDirectory(directory).catch(error => {
@@ -236,10 +246,10 @@ export async function assertTokenSocket(socketPath) {
  * @param {string} home @param {{ timeoutMs?: number }} [options]
  * @returns {Promise<{ token: string, credentialId: string | undefined, pid: number | undefined }>}
  */
-export async function readToken(home, { timeoutMs = 5_000 } = {}) {
+export async function readToken(home: string, { timeoutMs = 5_000 }: { timeoutMs?: number } = {}): Promise<{ token: string; credentialId: string | undefined; pid: number | undefined }> {
   const socketPath = tokenSocketPath(home);
   await assertTokenSocket(socketPath);
-  const text = await new Promise((resolve, reject) => {
+  const text = await new Promise<string>((resolve, reject) => {
     const socket = net.connect(socketPath);
     let received = '';
     const timer = setTimeout(() => { socket.destroy(); reject(new Error(`alp dashboard did not answer on ${socketPath} within ${timeoutMs} ms`)); }, timeoutMs);

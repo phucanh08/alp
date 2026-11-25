@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// @ts-check
 /**
  * alp-dashboard (docs/alp/dashboard.md): the service behind `alp dashboard`. ONE loopback listener at
  * `--port`, else `dashboard.port` (default 7433, then the next nine ports), carries the ALP gateway and
@@ -43,9 +42,10 @@ import { serveToken } from './token-socket.js';
 import { createStaticServer } from './serve.js';
 import { ownerMethods } from './owner/index.js';
 import { daemonEntry as bundledDaemonEntry } from '@anhlp/alp-core/packaged';
+import type { Logger } from '@anhlp/alp-core/log';
 
 // __ALP_VERSION__ is replaced at build time (esbuild define); a run from source reports a placeholder.
-// @ts-ignore -- a build-time constant, not a declared global
+declare const __ALP_VERSION__: string;
 const VERSION = typeof __ALP_VERSION__ === 'string' ? __ALP_VERSION__ : '0.0.0-source';
 
 export const DEFAULT_WEB_PORT = 7433;
@@ -55,9 +55,9 @@ const PORT_TRIES = 10;
 /**
  * An ALP_DASHBOARD_* variable, else the ALP_WEB_* one it was called before the rename (t-81b0.5): an
  * old export keeps working, and the new name wins when both are set.
- * @param {string} name the part after ALP_DASHBOARD_ / ALP_WEB_
+ * @param name the part after ALP_DASHBOARD_ / ALP_WEB_
  */
-const env = name => process.env[`ALP_DASHBOARD_${name}`] || process.env[`ALP_WEB_${name}`] || undefined;
+const env = (name: string): string | undefined => process.env[`ALP_DASHBOARD_${name}`] || process.env[`ALP_WEB_${name}`] || undefined;
 const REFRESH_MS = Number(env('GRANT_REFRESH_MS')) > 0 ? Number(env('GRANT_REFRESH_MS')) : 5_000;
 /** 3: no `token` (t-cee3); 2 carried it. */
 const WEB_FILE_VERSION = 3;
@@ -66,36 +66,35 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const appDir = () => path.resolve(env('APP') || path.join(here, 'alp-dashboard'));
 // The bundle's native alpd when it ships one (t-81b0.9), else alpd.js beside this script.
 const daemonEntry = () => process.env.ALP_DAEMON_ENTRY ?? bundledDaemonEntry(path.join(here, 'alpd.js'));
-const webFile = (/** @type {string} */ home) => path.join(home, 'dashboard.json');
+const webFile = (home: string): string => path.join(home, 'dashboard.json');
 /** Where the Paseo integration kept its identity before its own rename (and alp web, before t-81b0.5, its address). */
-const legacyWebFile = (/** @type {string} */ home) => path.join(home, 'web.json');
+const legacyWebFile = (home: string): string => path.join(home, 'web.json');
 
-/** The service's output goes to its own log: startIntegration starts it detached with stdio ignored. @param {string} home */
-function serviceLog(home) {
+/** The service's output goes to its own log: startIntegration starts it detached with stdio ignored. */
+function serviceLog(home: string): void {
   const file = path.join(home, 'logs', 'integrations', 'alp-dashboard.log');
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const fd = openSync(file, 'a', 0o600);
   for (const stream of [process.stdout, process.stderr]) {
-    stream.write = /** @type {any} */ ((/** @type {any} */ chunk) => { try { if (typeof chunk === 'string') writeSync(fd, chunk); else writeSync(fd, Buffer.from(chunk)); } catch {} return true; });
+    // any: replaces the overloaded stream.write with a sink that takes any chunk the process writes
+    stream.write = ((chunk: any) => { try { if (typeof chunk === 'string') writeSync(fd, chunk); else writeSync(fd, Buffer.from(chunk)); } catch {} return true; }) as any;
   }
 }
 
-/** @param {string} home @param {import('@anhlp/alp-core/log').Logger} log */
-async function userSettings(home, log) {
+async function userSettings(home: string, log: Logger): Promise<Record<string, any>> { // any: settings.json, validated, read loosely by dashboardSettings
   const file = path.join(home, 'settings.json');
   let text;
   try { text = await readFile(file, 'utf8'); } catch { return {}; }
-  try { return /** @type {any} */ (validateUserSettings(JSON.parse(text), file)); }
-  catch (error) { log.warn(`ignoring ${file}: ${/** @type {any} */ (error)?.message ?? error}`, { code: 'ALP_SETTINGS_INVALID' }); return {}; }
+  try { return validateUserSettings(JSON.parse(text), file) as any; } // any: as above
+  catch (error) { log.warn(`ignoring ${file}: ${(error as Error | undefined)?.message ?? error}`, { code: 'ALP_SETTINGS_INVALID' }); return {}; }
 }
 
 /**
  * Removes a `token` that dashboard.json still holds (written by a version before t-cee3, which kept the
  * token in the file); the rest of the file stays. The credential of that token is revoked by the
  * same start, so the copy would be dead anyway; this keeps it off the disk.
- * @param {string} home
  */
-async function dropPublishedToken(home) {
+async function dropPublishedToken(home: string): Promise<void> {
   let kept;
   try { kept = JSON.parse(await readFile(webFile(home), 'utf8')); } catch { return; }
   if (!kept || typeof kept !== 'object' || !('token' in kept)) return;
@@ -103,8 +102,8 @@ async function dropPublishedToken(home) {
   await publish(home, rest);
 }
 
-/** Writes dashboard.json whole, private, in one rename. @param {string} home @param {object} info */
-async function publish(home, info) {
+/** Writes dashboard.json whole, private, in one rename. */
+async function publish(home: string, info: object): Promise<void> {
   const file = webFile(home);
   const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   try {
@@ -120,16 +119,15 @@ const LOCK_HELD = 3;
 /**
  * Writes `text` to `file` private (0600) and whole, through a fresh temporary file: linked into place
  * when `create` (an existing file is kept; returns false then), else renamed over it.
- * @param {string} file @param {string} text @param {{ create?: boolean }} [options]
  */
-async function writePrivate(file, text, { create = false } = {}) {
+async function writePrivate(file: string, text: string, { create = false }: { create?: boolean } = {}): Promise<boolean> {
   const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   try {
     await writeFile(temporary, text, { mode: 0o600, flag: 'wx' });
     await chmod(temporary, 0o600);
     if (!create) { await renameWithRetry(temporary, file); return true; }
     try { await link(temporary, file); return true; }
-    catch (error) { if (/** @type {any} */ (error)?.code === 'EEXIST') return false; throw error; }
+    catch (error) { if ((error as NodeJS.ErrnoException | undefined)?.code === 'EEXIST') return false; throw error; }
   } finally { await unlink(temporary).catch(() => {}); }
 }
 
@@ -143,9 +141,8 @@ async function writePrivate(file, text, { create = false } = {}) {
  * into place) and an existing one is never replaced. The token then leaves web.json, carried or not
  * (with a paseo.json, the integration's own token wins and web.json's is dead). Returns whether it
  * carried anything.
- * @param {string} home @param {import('@anhlp/alp-core/log').Logger} log
  */
-async function carryPaseoIdentity(home, log) {
+async function carryPaseoIdentity(home: string, log: Logger): Promise<boolean> {
   let legacy;
   try { legacy = JSON.parse(await readFile(legacyWebFile(home), 'utf8')); } catch { return false; }
   if (!legacy || typeof legacy !== 'object' || legacy.app !== undefined) return false;
@@ -166,7 +163,7 @@ async function carryPaseoIdentity(home, log) {
       await writePrivate(legacyWebFile(home), `${JSON.stringify(rest)}\n`);
     }
   } catch (error) {
-    throw new Error(`the Paseo integration's identity in ${legacyWebFile(home)} could not be kept in ${credentials} and ${target}, so alp dashboard does not start: ${/** @type {any} */ (error)?.message ?? error}`, { cause: error });
+    throw new Error(`the Paseo integration's identity in ${legacyWebFile(home)} could not be kept in ${credentials} and ${target}, so alp dashboard does not start: ${(error as Error | undefined)?.message ?? error}`, { cause: error });
   }
   if (carried) log.info(`kept the Paseo integration's identity from web.json (its password in ${credentials}), so paired devices stay paired`, { code: 'ALP_DASHBOARD_PASEO_IDENTITY' });
   return carried;
@@ -174,9 +171,8 @@ async function carryPaseoIdentity(home, log) {
 
 /**
  * `--rotate`: every credential revoked, under the dashboard lock; the next start mints a new one.
- * @param {string} home @param {{ permissions?: string[] }} dashboard @param {import('@anhlp/alp-core/log').Logger} log
  */
-async function rotate(home, dashboard, log) {
+async function rotate(home: string, dashboard: { permissions?: string[] }, log: Logger): Promise<void> {
   const lock = createIntegrationLock(home, 'dashboard');
   const { acquired, lock: held } = await lock.acquire();
   if (!acquired) {
@@ -204,15 +200,15 @@ async function rotate(home, dashboard, log) {
   process.exit(code);
 }
 
-/** The page's Content-Security-Policy on `port`: its own origin only, the socket included. @param {number} port */
-const policy = port => {
+/** The page's Content-Security-Policy on `port`: its own origin only, the socket included. */
+const policy = (port: number): string => {
   const origins = [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`];
   return ["default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data:", "font-src 'self'",
     `connect-src 'self' ${origins.map(origin => `http://${origin} ws://${origin}`).join(' ')}`,
     "object-src 'none'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'"].join('; ');
 };
 
-async function run() {
+async function run(): Promise<void> {
   const { values } = parseArgs({ options: { service: { type: 'boolean' }, rotate: { type: 'boolean' }, project: { type: 'string' }, port: { type: 'string' } }, strict: true });
   // `alp dashboard --port N`: this start only; it does not change dashboard.port.
   const portOption = values.port === undefined ? undefined : Number(values.port);
@@ -238,13 +234,11 @@ async function run() {
   // A failed release leaves the lock and its guard in place (fail closed); report it and stop anyway.
   const releaseLock = () => lock.release().catch(error => log.error('dashboard lock not released; alp dashboard stops anyway', { code: 'ALP_LOCK_RELEASE_FAILED', error }));
 
-  /** @type {Array<() => Promise<unknown>>} */
-  const cleanups = [];
+  const cleanups: Array<() => Promise<unknown>> = [];
   let shuttingDown = false;
-  /** Startup, once it began; shutdown waits for it, so nothing it does lands after the lock is released. @type {Promise<unknown>} */
-  let startup = Promise.resolve();
-  /** @param {number} [code] */
-  const shutdown = async (code = 0) => {
+  /** Startup, once it began; shutdown waits for it, so nothing it does lands after the lock is released. */
+  let startup: Promise<unknown> = Promise.resolve();
+  const shutdown = async (code: number = 0): Promise<void> => {
     // A later signal or uncaught exception starts no second shutdown; the first always reaches exit.
     if (shuttingDown) return;
     shuttingDown = true;
@@ -255,13 +249,13 @@ async function run() {
       await releaseLock();
     } finally { process.exit(code); }
   };
-  for (const signal of /** @type {const} */ (['SIGINT', 'SIGTERM'])) process.on(signal, () => void shutdown());
+  for (const signal of (['SIGINT', 'SIGTERM'] as const)) process.on(signal, () => void shutdown());
   process.on('uncaughtException', error => { log.error('uncaught exception; alp dashboard stops', { code: 'ALP_FATAL', error }); void shutdown(1); });
 
   startup = (async () => {
     const stopDaemon = process.env.ALP_SUPERVISE === '0'
       ? async () => {}
-      : superviseDaemon({ home, entry: daemonEntry, by: 'alp dashboard', log: (/** @type {string} */ message) => log.warn(message, { code: 'ALP_DAEMON_SUPERVISION' }) });
+      : superviseDaemon({ home, entry: daemonEntry, by: 'alp dashboard', log: (message: string) => log.warn(message, { code: 'ALP_DAEMON_SUPERVISION' }) });
     cleanups.push(() => stopDaemon());
 
     const permissions = grantPermissions(dashboard.permissions, message => log.warn(message, { code: 'ALP_DASHBOARD_PERMISSIONS_IGNORED' }));
@@ -307,7 +301,7 @@ async function run() {
         origins: [`http://127.0.0.1:${port}`, `http://localhost:${port}`, `http://[::1]:${port}`],
         // One local user's browser: a stale token in an open tab must not lock that user out.
         // (DEFAULT_LIMITS is frozen, so its type has the literal defaults; any positive number is valid.)
-        limits: /** @type {any} */ ({ authFailures: 1_000 }),
+        limits: ({ authFailures: 1_000 }) as any, // any: see the comment above
       });
       const candidate = createGateway({ config, store, logger: log, version: VERSION, openTransport: () => connectSocket(socket), serveStatic, owner });
       try {
@@ -320,7 +314,7 @@ async function run() {
         await candidate.close().catch(() => {});
         // Windows answers EACCES for a port in an excluded range (Hyper-V, WinNAT) or held exclusively by
         // another socket: as unusable as a busy one, so the next port is tried for both.
-        const code = /** @type {any} */ (error)?.code;
+        const code = (error as NodeJS.ErrnoException | undefined)?.code;
         if ((code !== 'EADDRINUSE' && code !== 'EACCES') || attempt + 1 >= PORT_TRIES) throw error;
         log.info(`port ${port} is ${code === 'EACCES' ? 'not available' : 'in use'}; trying ${port + 1}`, { code: 'ALP_DASHBOARD_PORT_BUSY' });
       }
@@ -341,8 +335,7 @@ async function run() {
     const stateDir = path.join(home, 'state');
     try {
       await mkdir(stateDir, { recursive: true, mode: 0o700 });
-      /** @type {NodeJS.Timeout | undefined} */
-      let debounce;
+      let debounce: NodeJS.Timeout | undefined;
       const watcher = watch(stateDir, (_eventType, filename) => {
         const name = typeof filename === 'string' ? filename : undefined;
         if (!name || name === 'web-workspaces.json' || name.startsWith('web-workspaces.json')) {

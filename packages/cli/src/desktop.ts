@@ -19,13 +19,21 @@ import { UsageError } from './commands/usage.js';
 /** The bundle id of the packaged app (apps/desktop/electron-builder.yml, appId). */
 export const DESKTOP_BUNDLE_ID = 'com.anhlp.alp.shell';
 
+/** Where resolveDesktop looks; `onSkip` hears about each ALP.app it passes over. */
+export type DesktopOptions = { platform?: NodeJS.Platform; home?: string; env?: NodeJS.ProcessEnv; applications?: string[]; onSkip?: (message: string) => void };
+/** Where the desktop app is and how to start it, or why it cannot be found. */
+export type DesktopFound =
+  | { kind: 'app'; app: string; command: string; args: string[] }
+  | { kind: 'checkout'; dir: string; command: string; args: string[] }
+  | { kind: 'missing'; reason?: string };
+
 /**
  * The CFBundleIdentifier of the app bundle at `app`, or undefined when it cannot be read. An XML
  * Info.plist (what electron-builder writes) is read directly; any other form through plutil.
  * @param {string} app
  * @returns {Promise<string | undefined>}
  */
-export async function readBundleId(app) {
+export async function readBundleId(app: string): Promise<string | undefined> {
   const plist = path.join(app, 'Contents', 'Info.plist');
   const text = await readFile(plist, 'utf8').catch(() => undefined);
   if (text === undefined) return undefined;
@@ -33,22 +41,22 @@ export async function readBundleId(app) {
     const match = /<key>CFBundleIdentifier<\/key>\s*<string>([^<]*)<\/string>/.exec(text);
     return match ? match[1].trim() : undefined;
   }
-  return new Promise(resolve => {
+  return new Promise<string | undefined>(resolve => {
     execFile('/usr/bin/plutil', ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', plist], (error, stdout) => resolve(error ? undefined : stdout.trim() || undefined));
   });
 }
 
 /** @param {string} file */
-const isDirectory = file => stat(file).then(info => info.isDirectory(), () => false);
+const isDirectory = (file: string) => stat(file).then(info => info.isDirectory(), () => false);
 /** @param {string} file */
-const isFile = file => stat(file).then(info => info.isFile(), () => false);
+const isFile = (file: string) => stat(file).then(info => info.isFile(), () => false);
 
 /**
  * The desktop app's directory in a checkout: `dir` itself or `dir/apps/desktop`, whichever holds the
  * package named alp-desktop.
  * @param {string} dir
  */
-async function desktopPackage(dir) {
+async function desktopPackage(dir: string) {
   for (const candidate of [path.join(dir, 'apps', 'desktop'), dir]) {
     const manifest = await readFile(path.join(candidate, 'package.json'), 'utf8').then(text => { try { return JSON.parse(text); } catch { return undefined; } }, () => undefined);
     if (manifest?.name === 'alp-desktop') return candidate;
@@ -64,7 +72,7 @@ async function desktopPackage(dir) {
  *   | { kind: 'checkout', dir: string, command: string, args: string[] }
  *   | { kind: 'missing', reason?: string }>}
  */
-export async function resolveDesktop({ platform = process.platform, home = os.homedir(), env = process.env, applications, onSkip = () => {} } = {}) {
+export async function resolveDesktop({ platform = process.platform, home = os.homedir(), env = process.env, applications, onSkip = () => {} }: DesktopOptions = {}): Promise<DesktopFound> {
   if (platform === 'darwin') {
     for (const directory of applications ?? ['/Applications', path.join(home, 'Applications')]) {
       const app = path.join(directory, 'ALP.app');
@@ -96,7 +104,7 @@ Meanwhile, \`alp dashboard\` opens ALP in your browser.`;
  * @param {string[]} args
  * @param {{ resolve?: typeof resolveDesktop, launch?: (command: string, args: string[], env: NodeJS.ProcessEnv) => Promise<void> }} [deps]
  */
-export async function desktopCommand(args, { resolve = resolveDesktop, launch = start } = {}) {
+export async function desktopCommand(args: string[], { resolve = resolveDesktop, launch = start }: { resolve?: typeof resolveDesktop; launch?: (command: string, args: string[], env: NodeJS.ProcessEnv) => Promise<void> } = {}) {
   if (args.length) throw new UsageError();
   const found = await resolve({ onSkip: message => console.error(message) });
   if (found.kind === 'missing') {
@@ -113,8 +121,8 @@ export async function desktopCommand(args, { resolve = resolveDesktop, launch = 
 }
 
 /** Starts `command` detached, resolving once it spawned. @param {string} command @param {string[]} args @param {NodeJS.ProcessEnv} env */
-function start(command, args, env) {
-  return new Promise((resolve, reject) => {
+function start(command: string, args: string[], env: NodeJS.ProcessEnv) {
+  return new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, { stdio: 'ignore', detached: true, env });
     child.once('error', reject);
     child.once('spawn', () => { child.unref(); resolve(); });

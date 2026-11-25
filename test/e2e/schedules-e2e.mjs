@@ -39,7 +39,7 @@ async function until(check, label, timeout = 120000) {
   throw new Error(`Timed out: ${label}; daemon diagnostics: ${diagnostics.slice(-2000)}`);
 }
 const cli = (...args) => {
-  const result = spawnSync(process.execPath, [fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url)), 'schedule', ...args, '--project', project, '--json'], { env, encoding: 'utf8', timeout: 15000 });
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url)), 'schedule', ...args, '--project', project, '--json'], { env, encoding: 'utf8', timeout: 15000 });
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
 };

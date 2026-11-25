@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { answerLabel, printer } from '../src/commands/sessions.js';
+import { answerLabel, printer } from '../dist/commands/sessions.js';
 
 // t-beb5: `alp run` follows the root until it is idle, so its human output can show a turn ALP
 // started after the answer (a supervisor's check-in, mail). A person must tell the answer to their

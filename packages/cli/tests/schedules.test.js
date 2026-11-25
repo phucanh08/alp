@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const CLI = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
 test('schedule rejects ambiguous times and incomplete commands before contacting or starting alpd', async t => {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-cli-schedule-'));
   t.after(() => rm(home, { recursive: true, force: true }));

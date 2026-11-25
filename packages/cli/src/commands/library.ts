@@ -11,8 +11,12 @@ import { installPack, listPacks, packStatus } from '@anhlp/alp-core/packs';
 import { alpHome } from '@anhlp/alp-client/index';
 import { UsageError } from './usage.js';
 import { taskProject } from './tasks.js';
+import type { ResolvedTeam, TeamRow } from '@anhlp/alp-core/teams';
 
-async function libraryCommand(kind, args) {
+/** The library kinds an entry command edits. */
+type EntryKind = 'agents' | 'skills' | 'mcp' | 'hooks' | 'teams' | 'providers';
+
+async function libraryCommand(kind: string, args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, json: { type: 'boolean' }, ...(kind === 'skills' ? { retired: { type: 'boolean' } } : {}) } });
   if (positionals.length) throw new UsageError();
   if (values.retired) {
@@ -44,19 +48,19 @@ async function libraryCommand(kind, args) {
 
 /** `--project` may stand alone, meaning the current directory. */
 
-function projectFlag(args) {
+function projectFlag(args: string[]): string[] {
   const result = [...args];
   for (let i = 0; i < result.length; i++) if (result[i] === '--project' && (i + 1 === result.length || result[i + 1].startsWith('-'))) result.splice(i + 1, 0, '.');
   return result;
 }
 
-const pairs = (list, what) => Object.fromEntries((list ?? []).map(item => {
+const pairs = (list: string[] | undefined, what: string): Record<string, string> => Object.fromEntries((list ?? []).map(item => {
   const at = item.indexOf('=');
   if (at <= 0) throw new Error(`${what} takes name=value, not '${item}'`);
   return [item.slice(0, at), item.slice(at + 1)];
 }));
 
-const names = text => text === undefined ? undefined : text.split(',').map(name => name.trim()).filter(Boolean);
+const names = (text: string | undefined) => text === undefined ? undefined : text.split(',').map(name => name.trim()).filter(Boolean);
 
 const EDIT_OPTIONS = {
   project: { type: 'string' }, json: { type: 'boolean' }, from: { type: 'string' }, description: { type: 'string', short: 'd' },
@@ -74,13 +78,22 @@ const EDIT_OPTIONS = {
   // provider
   kind: { type: 'string' },
   models: { type: 'string' },
-};
+} as const;
 
 /** The content of an entry after a CLI new or edit: the current content with the options applied. */
 
-async function edited(kind, name, current, values) {
+async function edited(
+  kind: string,
+  name: string,
+  // any: the entry's content as the library stores it (agent, team, skill, mcp, hook or provider JSON).
+  current: any,
+  // any: the parsed EDIT_OPTIONS, or the same names from the dashboard owner's request params.
+  values: any,
+  // any: the new content, of the same shape as `current`.
+): Promise<any> {
   const content = structuredClone(current ?? {});
-  const set = (target, key, value) => { if (value !== undefined) { if (value === '') delete target[key]; else target[key] = value; } };
+  // any: a part of that content.
+  const set = (target: any, key: string, value: unknown) => { if (value !== undefined) { if (value === '') delete target[key]; else target[key] = value; } };
   if (kind === 'agents') {
     if (values.instructions !== undefined) content.instructions = await readFile(values.instructions, 'utf8');
     content.instructions ??= `# ${name}\n\nDescribe what this agent does, and how.\n`;
@@ -165,7 +178,7 @@ async function edited(kind, name, current, values) {
     if (values.arg?.length) provider.args = values.arg;
     if (values.env?.length) provider.env = pairs(values.env, '--env');
     const models = names(values.models);
-    if (models) { if (models.length) provider.models = models.map(id => provider.models?.find(model => model.id === id) ?? { id }); else delete provider.models; }
+    if (models) { if (models.length) provider.models = models.map(id => provider.models?.find((model: { id: string }) => model.id === id) ?? { id }); else delete provider.models; }
     content.provider = provider;
   }
   return content;
@@ -177,19 +190,20 @@ async function edited(kind, name, current, values) {
  * library hold; a name, the one that applies; a path, that directory. Existing skills are checked in
  * legacy mode (format problems are warnings) unless --strict. Reads only; exit 1 on an error.
  */
-async function checkSkills(name, positionals, values) {
+async function checkSkills(name: string | undefined, positionals: string[], values: { project?: string; strict?: boolean; json?: boolean }) {
   if (positionals.length > 2) throw new UsageError();
   const root = path.resolve(values.project ?? process.cwd());
   const mode = values.strict ? 'strict' : 'legacy';
-  let targets;
+  let targets: string[];
   if (name !== undefined && (name.includes('/') || name.includes(path.sep) || name.startsWith('.'))) targets = [path.resolve(name)];
   else {
     const rows = await libraryEntries('skills', root, { library: alpHome() });
     const chosen = name === undefined ? rows : rows.filter(row => row.name === name);
     if (name !== undefined && !chosen.length) throw new Error(`No skill '${name}' in ${path.join(root, '.alp', 'skills')} or ${path.join(alpHome(), 'skills')}`);
-    targets = chosen.map(row => path.dirname(row.path));
+    // Every skill entry is a file on disk (SKILL.md), so it has a path.
+    targets = chosen.map(row => path.dirname(row.path!));
   }
-  const reports = [];
+  const reports: Awaited<ReturnType<typeof validateSkill>>[] = [];
   for (const target of targets) reports.push(await validateSkill(target, { mode }));
   if (values.json) console.log(JSON.stringify(reports));
   else {
@@ -203,7 +217,7 @@ async function checkSkills(name, positionals, values) {
 
 /** alp agent|team|skill|mcp|hook: create, change, copy, rename, remove and test library entries. */
 
-async function editCommand(kind, args) {
+async function editCommand(kind: EntryKind, args: string[]) {
   if (kind === 'providers' && args.some(arg => arg === '--read-only-mode' || arg.startsWith('--read-only-mode='))) throw new Error('--read-only-mode was removed; delete readOnlyMode from provider JSON and choose the session --mode read-only, workspace-write or full-access. Existing native sessions keep their mode.');
   const { values, positionals } = parseArgs({ args: projectFlag(args), allowPositionals: true, options: EDIT_OPTIONS });
   const [action, name, target] = positionals;
@@ -216,7 +230,7 @@ async function editCommand(kind, args) {
   }
   if (kind === 'skills' && action === 'check') { await checkSkills(name, positionals, values); return; }
   if (kind === 'providers' && action !== 'add') await seedLibrary(alpHome());
-  const creates = { agents: 'new', teams: 'new', skills: 'new', mcp: 'add', hooks: 'add', providers: 'add' }[kind];
+  const creates = ({ agents: 'new', teams: 'new', skills: 'new', mcp: 'add', hooks: 'add', providers: 'add' } as Record<string, string | undefined>)[kind];
   if (!name || positionals.length > (['cp', 'mv'].includes(action) ? 3 : 2) || (['cp', 'mv'].includes(action) && !target)) throw new UsageError();
   const scope = values.project !== undefined ? 'project' : 'library';
   let root = values.project !== undefined ? path.resolve(values.project) : undefined;
@@ -224,7 +238,7 @@ async function editCommand(kind, args) {
   // A library edit still sees the current project, for what it uses.
   root ??= await access(path.join(process.cwd(), '.alp')).then(() => process.cwd(), () => undefined);
   const options = { scope, root, library: alpHome() };
-  const done = (result, line) => console.log(values.json ? JSON.stringify(result) : line);
+  const done = (result: unknown, line: string) => console.log(values.json ? JSON.stringify(result) : line);
   const where = scope === 'project' ? `the project ${root}` : `your library ${alpHome()}`;
   if (action === 'show') {
     const entry = await getEntry(kind, name, { root, library: alpHome(), ...(values.project !== undefined ? { scope } : {}) });
@@ -238,7 +252,8 @@ async function editCommand(kind, args) {
   if (action === 'cp') { done(await duplicateEntry(kind, name, target, options), `Copied ${name} to ${target} in ${where}.`); return; }
   if (action === 'test') {
     if (!['mcp', 'hooks', 'providers'].includes(kind)) throw new UsageError();
-    const result = await testEntry(kind, name, { root, library: alpHome(), ...(values.project !== undefined ? { scope } : {}) });
+    // any: testEntry answers per kind (provider probe, MCP listing or hook run); each branch below reads its own kind's fields.
+    const result: any = await testEntry(kind, name, { root, library: alpHome(), ...(values.project !== undefined ? { scope } : {}) });
     if (values.json) console.log(JSON.stringify(result));
     else if (kind === 'providers') {
       if (result.agent?.name === 'antigravity') {
@@ -247,13 +262,14 @@ async function editCommand(kind, args) {
         console.log(`${name}: ${result.agent?.title ?? result.agent?.name ?? 'agent'} ${result.agent?.version ?? ''} speaks ACP ${result.protocolVersion}; ${result.loadSession ? 'resumes sessions' : 'cannot resume sessions'}${result.mcpHttp ? '; takes HTTP MCP servers' : ''}${result.authMethods?.length ? `; signs in with ${result.authMethods.join(', ')}` : ''}`);
       }
     }
-    else if (kind === 'mcp') console.log(`${name}: ${result.server?.name ?? 'server'} ${result.server?.version ?? ''} offers ${result.tools.length} tools${result.tools.length ? `:\n${result.tools.map(tool => `  ${tool.name}${tool.description ? `  ${tool.description.split('\n')[0]}` : ''}`).join('\n')}` : ''}`);
+    else if (kind === 'mcp') console.log(`${name}: ${result.server?.name ?? 'server'} ${result.server?.version ?? ''} offers ${result.tools.length} tools${result.tools.length ? `:\n${result.tools.map((tool: { name: string; description?: string }) => `  ${tool.name}${tool.description ? `  ${tool.description.split('\n')[0]}` : ''}`).join('\n')}` : ''}`);
     else console.log(`${name}: ${result.timedOut ? 'timed out' : `exit ${result.exitCode ?? result.signal}`} in ${result.durationMs} ms${result.wouldBlock ? '; as a blocking hook it would refuse the action' : ''}${result.stdout.trim() ? `\nstdout: ${result.stdout.trim()}` : ''}${result.stderr.trim() ? `\nstderr: ${result.stderr.trim()}` : ''}`);
     if (!result.ok) process.exitCode = 1;
     return;
   }
   if (action !== creates && action !== 'edit') throw new UsageError();
-  let current;
+  // any: the entry's content as the library stores it (see edited).
+  let current: any;
   let revision = null;
   if (action === creates) {
     if (values.from !== undefined) current = (await getEntry(kind, values.from, { root, library: alpHome() })).content;
@@ -261,7 +277,7 @@ async function editCommand(kind, args) {
     if (kind === 'skills' && current?.body !== undefined) current = { ...current, body: withSkillName(current.body, name) };
   } else {
     // Editing an entry that only a lower layer has makes this scope's copy of it.
-    const entry = await getEntry(kind, name, { root, library: alpHome() }).catch(error => { if (error.code === 'NOT_FOUND') throw new Error(`No ${kind} entry '${name}'; create it with alp ${kind.replace(/s$/, '')} ${creates}`); throw error; });
+    const entry = await getEntry(kind, name, { root, library: alpHome() }).catch((error: { code?: string }) => { if (error.code === 'NOT_FOUND') throw new Error(`No ${kind} entry '${name}'; create it with alp ${kind.replace(/s$/, '')} ${creates}`); throw error; });
     const own = await getEntry(kind, name, { root, library: alpHome(), scope }).catch(() => undefined);
     current = (own ?? entry).content;
     revision = own ? own.revision : null;
@@ -270,7 +286,8 @@ async function editCommand(kind, args) {
   const result = await saveEntry(kind, name, await edited(kind, name, current, values), { ...options, revision, strict: kind === 'skills' && action === creates });
   done(result, `${action === 'edit' ? 'Saved' : 'Created'} ${name} in ${where}.`);
   if (kind === 'skills' && !values.json) {
-    const directory = path.join(scope === 'project' ? path.join(root, '.alp') : alpHome(), 'skills', name);
+    // A project scope has a root: taskProject(root) checked it above.
+    const directory = path.join(scope === 'project' ? path.join(root!, '.alp') : alpHome(), 'skills', name);
     const report = await validateSkill(directory);
     const notes = [...(result.warnings ?? []), ...report.errors.map(finding => finding.message), ...report.warnings.map(finding => finding.message)];
     for (const note of [...new Set(notes)]) console.log(`note: ${note}`);
@@ -279,22 +296,23 @@ async function editCommand(kind, args) {
 
 /** alp trust: the workspaces whose hooks run without asking (ALPD §45). */
 
-async function teamsCommand(args) {
+async function teamsCommand(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, json: { type: 'boolean' } } });
   if (positionals.length) throw new UsageError();
   const root = path.resolve(values.project ?? process.cwd());
   const options = { library: alpHome() };
-  const rows = [];
+  const rows: Array<TeamRow & { team?: ResolvedTeam }> = [];
   for (const row of await listTeams(root, options)) rows.push(row.error ? row : { ...row, team: await resolveTeam(root, row.id, options) });
   if (values.json) { console.log(JSON.stringify(rows.map(({ team, ...row }) => ({ ...row, ...(team ? { main: team.main, members: team.members, delegation: team.delegation, maxPeers: team.maxPeers, supervisor: team.supervisor } : {}) })))); return; }
   for (const { team, ...row } of rows) {
     const where = row.source === 'builtin' ? 'built-in' : row.source;
     console.log(`${row.id}  ${row.label ?? ''}  ${where}${row.overrides ? `, overrides the ${row.overrides === 'builtin' ? 'built-in' : row.overrides} one` : ''}`);
     if (row.error) { console.log(`  error: ${row.error}`); continue; }
-    const member = (name, { role, model, thinking }) => `${name}${role ? ` (${role})` : ' (main)'}${model ? ` on ${model}${thinking ? `, ${thinking}` : ''}` : ''}`;
-    console.log(`  members: ${Object.entries(team.members).map(([name, value]) => member(name, value)).join(', ')}`);
-    console.log(`  delegation: ${Object.entries(team.delegation).map(([owner, targets]) => `${owner} → ${targets.join(', ')}`).join('; ') || 'none'}`);
-    console.log(`  supervisor: ${team.supervisor ? member(team.supervisor.agent, { role: 'watches main', model: team.supervisor.model, thinking: team.supervisor.thinking }) : 'none'}${team.maxPeers ? `; at most ${team.maxPeers} peers` : ''}`);
+    const member = (name: string, { role, model, thinking }: { role?: string; model?: string; thinking?: string }) => `${name}${role ? ` (${role})` : ' (main)'}${model ? ` on ${model}${thinking ? `, ${thinking}` : ''}` : ''}`;
+    // A row without an error was resolved above, so it has its team.
+    console.log(`  members: ${Object.entries(team!.members).map(([name, value]) => member(name, value)).join(', ')}`);
+    console.log(`  delegation: ${Object.entries(team!.delegation).map(([owner, targets]) => `${owner} → ${targets.join(', ')}`).join('; ') || 'none'}`);
+    console.log(`  supervisor: ${team!.supervisor ? member(team!.supervisor.agent, { role: 'watches main', model: team!.supervisor.model, thinking: team!.supervisor.thinking }) : 'none'}${team!.maxPeers ? `; at most ${team!.maxPeers} peers` : ''}`);
   }
 }
 
@@ -304,11 +322,11 @@ async function teamsCommand(args) {
  * skills, agents and teams into the library (or the project's .alp/), keeping any entry already
  * there; --assign (library) gives its suggested skills to roles in role-skills.json.
  */
-async function packsCommand(args) {
+async function packsCommand(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, json: { type: 'boolean' } } });
   if (positionals.length) throw new UsageError();
   const root = path.resolve(values.project ?? process.cwd());
-  const rows = [];
+  const rows: Array<Awaited<ReturnType<typeof listPacks>>[number] & { installed: Awaited<ReturnType<typeof packStatus>> }> = [];
   for (const pack of await listPacks()) rows.push({ ...pack, installed: await packStatus(pack, { root, library: alpHome() }) });
   if (values.json) { console.log(JSON.stringify(rows)); return; }
   const width = Math.max(...rows.map(row => row.id.length));
@@ -320,7 +338,7 @@ async function packsCommand(args) {
   console.log('Install one with: alp pack install <id> [--project] [--assign]');
 }
 
-async function packCommand(args) {
+async function packCommand(args: string[]) {
   const { values, positionals } = parseArgs({ args: projectFlag(args), allowPositionals: true, options: { project: { type: 'string' }, json: { type: 'boolean' }, assign: { type: 'boolean' } } });
   const [action, id] = positionals;
   if (action !== 'install' || !id || positionals.length > 2) throw new UsageError();

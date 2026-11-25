@@ -1,4 +1,3 @@
-// @ts-check
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -9,6 +8,7 @@ import { testEntry } from '@anhlp/alp-client/library-test';
 import { saveEntry } from '@anhlp/alp-core/library-edit';
 import { edited } from '../../commands/library.js';
 import { TERMINAL_WARNING, terminalCommand } from '../../terminal.js';
+import type { DashboardOwnerContext, DashboardOwnerHandler } from './index.js';
 
 /**
  * Owner handlers for the host pages of Settings (t-a95b.1 group B; docs/alp/dashboard.md §4.7):
@@ -43,28 +43,27 @@ import { TERMINAL_WARNING, terminalCommand } from '../../terminal.js';
  *                           per-credential roots. Session placement is never offered.
  */
 
-/** @param {string} message @param {Record<string, unknown>} [data] */
-const invalid = (message, data = {}) => Object.assign(new Error(message), { code: -32602, data: { reason: 'invalid_params', ...data } });
+const invalid = (message: string, data: Record<string, unknown> = {}) => Object.assign(new Error(message), { code: -32602, data: { reason: 'invalid_params', ...data } });
 
-/** An ALP error with a string code (core, client) as a JSON-RPC error the app can show. @param {any} error */
-function rpcError(error) {
+/** An ALP error with a string code (core, client) as a JSON-RPC error the app can show. */
+function rpcError(error: any) { // any: whatever was thrown; its code and message are checked here
   if (typeof error?.code === 'number') return error;
   const code = typeof error?.code === 'string' ? error.code : undefined;
   const number = code === 'REVISION_CONFLICT' ? 1004 : code === 'NOT_FOUND' ? 1001 : code?.startsWith('INVALID') ? -32602 : 1000;
   return Object.assign(new Error(error?.message ?? String(error)), { code: number, data: { reason: code ? code.toLowerCase() : 'failed' } });
 }
 
-/** A required string param. @param {unknown} value @param {string} name @param {{ max?: number }} [options] @returns {string} */
-function text(value, name, { max = 4096 } = {}) {
+/** A required string param. */
+function text(value: unknown, name: string, { max = 4096 }: { max?: number } = {}): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max || value.includes('\0')) throw invalid(`${name} must be a non-empty string of at most ${max} characters`);
   return value;
 }
 
-/** An optional string param. @param {unknown} value @param {string} name @param {{ max?: number }} [options] */
-const optionalText = (value, name, options) => value === undefined ? undefined : text(value, name, options);
+/** An optional string param. */
+const optionalText = (value: unknown, name: string, options?: { max?: number }): string | undefined => value === undefined ? undefined : text(value, name, options);
 
-/** A registry write's ifRevision and requestId, the requestId namespaced to the owner. @param {Record<string, any>} params */
-function registryContext(params) {
+/** A registry write's ifRevision and requestId, the requestId namespaced to the owner. */
+function registryContext(params: Record<string, any>): { ifRevision: number; requestId: string } { // any: the request's params, checked here
   if (!Number.isSafeInteger(params.ifRevision) || params.ifRevision < 0) throw invalid('ifRevision must be the registry revision you read');
   const requestId = text(params.requestId, 'requestId', { max: 150 });
   return { ifRevision: params.ifRevision, requestId: `dashboard-owner:${requestId}` };
@@ -78,15 +77,13 @@ export const LABEL_COLORS = Object.freeze(['violet', 'sky', 'emerald', 'orange',
 /**
  * `alp provider add`'s options from the method's params, checked: the values the CLI's parser
  * would hand library.js `edited`.
- * @param {Record<string, any>} params
  */
-export function providerOptions(params) {
+export function providerOptions(params: Record<string, any>) { // any: the request's params, checked here
   const id = text(params.id, 'id', { max: 64 });
   const command = text(params.command, 'command');
-  /** @type {Record<string, any>} */
-  const values = { command };
+  const values: Record<string, any> = { command }; // any: the option values `edited` takes, strings and string lists
   if (params.args !== undefined) {
-    if (!Array.isArray(params.args) || params.args.length > 64 || params.args.some(arg => typeof arg !== 'string' || arg.length > 4096 || arg.includes('\0'))) throw invalid('args must be a list of at most 64 strings');
+    if (!Array.isArray(params.args) || params.args.length > 64 || params.args.some((arg: unknown) => typeof arg !== 'string' || arg.length > 4096 || arg.includes('\0'))) throw invalid('args must be a list of at most 64 strings');
     if (params.args.length) values.arg = [...params.args];
   }
   if (params.env !== undefined) {
@@ -104,7 +101,7 @@ export function providerOptions(params) {
     if (value !== undefined) values[key] = value;
   }
   if (params.models !== undefined) {
-    if (!Array.isArray(params.models) || params.models.length > 100 || params.models.some(model => typeof model !== 'string' || !model.trim() || model.includes(',') || model.length > 256)) throw invalid('models must be a list of model ids (no commas)');
+    if (!Array.isArray(params.models) || params.models.length > 100 || params.models.some((model: unknown) => typeof model !== 'string' || !model.trim() || model.includes(',') || model.length > 256)) throw invalid('models must be a list of model ids (no commas)');
     if (params.models.length) values.models = params.models.join(',');
   }
   return { id, values };
@@ -115,9 +112,8 @@ export const PROVIDER_CHECKS = Object.freeze(['codex', 'claude', 'antigravity', 
 
 /**
  * alp doctor's checks (diagnose, read only, no --fix) that are about providers, without their fix.
- * @param {string} home @param {{ env?: NodeJS.ProcessEnv }} [options]
  */
-export async function diagnoseProviders(home, { env = process.env } = {}) {
+export async function diagnoseProviders(home: string, { env = process.env }: { env?: NodeJS.ProcessEnv } = {}) {
   const checks = await diagnose({ home, env });
   return {
     checks: checks.filter(check => PROVIDER_CHECKS.includes(check.id))
@@ -125,25 +121,22 @@ export async function diagnoseProviders(home, { env = process.env } = {}) {
   };
 }
 
-/** Runs `alp terminal <args> --json` on `home` and answers its JSON. @param {string} home @param {string[]} args */
-async function terminal(home, args) {
-  /** @type {string[]} */
-  const lines = [];
+/** Runs `alp terminal <args> --json` on `home` and answers its JSON. */
+async function terminal(home: string, args: string[]): Promise<any> { // any: the JSON `alp terminal --json` printed
+  const lines: string[] = [];
   await terminalCommand([...args, '--json'], { home, out: line => lines.push(line) });
   return JSON.parse(lines.join('\n'));
 }
 
-/** @param {string} home */
-async function terminalStatus(home) {
+async function terminalStatus(home: string) {
   return { ...await terminal(home, ['status']), warning: TERMINAL_WARNING() };
 }
 
 /**
  * A directory to register: absolute, normalized, an existing directory (after links). Answers the
  * path as given, which is what the registry and the dashboard grant keep.
- * @param {unknown} value
  */
-export async function projectDirectory(value) {
+export async function projectDirectory(value: unknown): Promise<string> {
   const directory = text(value, 'directory');
   if (!path.isAbsolute(directory)) throw invalid('directory must be an absolute path');
   if (path.resolve(directory) !== directory) throw invalid('directory must be a normalized absolute path (no .., no trailing separator)');
@@ -153,22 +146,22 @@ export async function projectDirectory(value) {
   return directory;
 }
 
-/** The owner's view of alpd's registry: live projects, their workspaces (archived too), the label catalogue. @param {any} registry */
-export function ownerRegistry(registry) {
-  const projects = (registry?.projects ?? []).filter((/** @type {any} */ project) => !project.removedAt);
-  const live = new Set(projects.map((/** @type {any} */ project) => project.id));
-  /** @type {Record<string, number>} */
-  const sessions = {};
+/** The owner's view of alpd's registry: live projects, their workspaces (archived too), the label catalogue. */
+export function ownerRegistry(registry: any) { // any: alpd's registry.owner answer, as it came; the entries below are read as given
+  const projects = (registry?.projects ?? []).filter((project: any /* any: a registry entry as alpd gave it */) => !project.removedAt);
+  const live = new Set(projects.map((project: any /* any: a registry entry as alpd gave it */) => project.id));
+  const sessions: Record<string, number> = {};
   for (const workspaceId of Object.values(registry?.sessions ?? {})) sessions[String(workspaceId)] = (sessions[String(workspaceId)] ?? 0) + 1;
   return {
     revision: registry?.revision ?? 0,
-    projects: projects.map((/** @type {any} */ project) => ({ id: project.id, root: project.root, ...(project.customName ? { customName: project.customName } : {}), addedAt: project.addedAt })),
-    workspaces: (registry?.workspaces ?? []).filter((/** @type {any} */ workspace) => live.has(workspace.projectId)).map((/** @type {any} */ workspace) => ({
+    projects: projects.map((project: any /* any: a registry entry as alpd gave it */) => ({ id: project.id, root: project.root, ...(project.customName ? { customName: project.customName } : {}), addedAt: project.addedAt })),
+    // any: registry entries as alpd gave them
+    workspaces: (registry?.workspaces ?? []).filter((workspace: any) => live.has(workspace.projectId)).map((workspace: any) => ({
       id: workspace.id, projectId: workspace.projectId, directory: workspace.directory, title: workspace.title ?? null,
       pinnedAt: workspace.pinnedAt ?? null, archivedAt: workspace.archivedAt ?? null, labels: workspace.labels ?? [], createdAt: workspace.createdAt,
       managedWorktree: !!workspace.worktree, sessions: sessions[workspace.id] ?? 0,
     })),
-    labels: (registry?.labels?.catalog ?? []).map((/** @type {any} */ label) => ({ name: label.name, color: label.color })),
+    labels: (registry?.labels?.catalog ?? []).map((label: any /* any: a catalogue entry as alpd gave it */) => ({ name: label.name, color: label.color })),
   };
 }
 
@@ -177,9 +170,8 @@ export function ownerRegistry(registry) {
  * The directory is absolute and normalized (projectDirectory), so it never reads as an option.
  * ALP_DASHBOARD_FILE_MANAGER, an absolute program path in alp dashboard's own environment, replaces
  * the platform's (another file manager; the e2e records the call instead of opening a window).
- * @param {NodeJS.Platform} platform @param {string} directory @param {NodeJS.ProcessEnv} [env] @returns {[string, string[]]}
  */
-export function revealCommand(platform, directory, env = process.env) {
+export function revealCommand(platform: NodeJS.Platform, directory: string, env: NodeJS.ProcessEnv = process.env): [string, string[]] {
   const chosen = env.ALP_DASHBOARD_FILE_MANAGER;
   if (chosen && path.isAbsolute(chosen)) return [chosen, [directory]];
   if (platform === 'darwin') return ['/usr/bin/open', [directory]];
@@ -189,8 +181,7 @@ export function revealCommand(platform, directory, env = process.env) {
 
 /** Starts the file manager and leaves it running; replaced in tests. */
 export const revealer = {
-  /** @param {string} file @param {string[]} args @returns {Promise<void>} */
-  run: (file, args) => new Promise((resolve, reject) => {
+  run: (file: string, args: string[]): Promise<void> => new Promise((resolve, reject) => {
     const child = spawn(file, args, { stdio: 'ignore', detached: true, shell: false, windowsHide: true });
     child.once('error', reject);
     child.once('spawn', () => { child.unref(); resolve(); });
@@ -209,10 +200,9 @@ export const revealer = {
  *   other  a fixed CLI name on PATH (each absolute PATH entry stat'ed, executable regular file; no
  *          `which`, no shell); started as `<absolute cli> <dir>`.
  * 'finder' is the host's file manager, always present, and does exactly what host.workspace.reveal does.
- * @typedef {{ id: string, label: string, mac?: string[], cli?: string[], exe?: string[], win?: string[], jetbrains?: { prefixes: string[], exe: string } }} EditorEntry
  */
-/** @type {ReadonlyArray<EditorEntry>} */
-export const EDITORS = Object.freeze([
+export type EditorEntry = { id: string; label: string; mac?: string[]; cli?: string[]; exe?: string[]; win?: string[]; jetbrains?: { prefixes: string[]; exe: string } };
+export const EDITORS: ReadonlyArray<EditorEntry> = Object.freeze([
   { id: 'vscode', label: 'Visual Studio Code', mac: ['Visual Studio Code.app'], cli: ['code'], exe: ['Code.exe'], win: ['%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe', '%ProgramFiles%\\Microsoft VS Code\\Code.exe'] },
   { id: 'cursor', label: 'Cursor', mac: ['Cursor.app'], cli: ['cursor'], exe: ['Cursor.exe'], win: ['%LOCALAPPDATA%\\Programs\\cursor\\Cursor.exe'] },
   { id: 'zed', label: 'Zed', mac: ['Zed.app'], cli: ['zed', 'zeditor'], exe: ['Zed.exe'], win: ['%LOCALAPPDATA%\\Programs\\Zed\\Zed.exe'] },
@@ -229,15 +219,14 @@ export const EDITORS = Object.freeze([
   { id: 'finder', label: 'File manager' },
 ].map(entry => Object.freeze(entry)));
 
-/** The file manager's label on `platform`. @param {NodeJS.Platform} platform */
-const fileManagerLabel = platform => platform === 'darwin' ? 'Finder' : platform === 'win32' ? 'File Explorer' : 'File manager';
+/** The file manager's label on `platform`. */
+const fileManagerLabel = (platform: NodeJS.Platform): string => platform === 'darwin' ? 'Finder' : platform === 'win32' ? 'File Explorer' : 'File manager';
 
 /**
  * The file-system questions detection asks; replaced in tests. Each answers false on any error.
- * @typedef {{ isDirectory: (file: string) => Promise<boolean>, isExecutable: (file: string, platform: NodeJS.Platform) => Promise<boolean>, list: (directory: string) => Promise<string[]> }} EditorProbe
  */
-/** @type {EditorProbe} */
-const fsProbe = {
+export type EditorProbe = { isDirectory: (file: string) => Promise<boolean>; isExecutable: (file: string, platform: NodeJS.Platform) => Promise<boolean>; list: (directory: string) => Promise<string[]> };
+const fsProbe: EditorProbe = {
   isDirectory: file => stat(file).then(info => info.isDirectory(), () => false),
   isExecutable: (file, platform) => stat(file).then(info => info.isFile() && (platform === 'win32' || (info.mode & 0o111) !== 0), () => false),
   list: directory => readdir(directory).catch(() => []),
@@ -245,21 +234,20 @@ const fsProbe = {
 
 /**
  * Where detection looks; alp dashboard's own environment, never the page. Replaced in tests.
- * @type {{ platform: NodeJS.Platform, env: NodeJS.ProcessEnv, home: string, probe: EditorProbe }}
  */
-export const editorHost = { platform: process.platform, env: process.env, home: os.homedir(), probe: fsProbe };
+export type EditorHost = { platform: NodeJS.Platform; env: NodeJS.ProcessEnv; home: string; probe: EditorProbe };
+export const editorHost: EditorHost = { platform: process.platform, env: process.env, home: os.homedir(), probe: fsProbe };
 
-/** A Windows environment variable, case-insensitively. @param {NodeJS.ProcessEnv} env @param {string} name */
-function winEnv(env, name) {
+/** A Windows environment variable, case-insensitively. */
+function winEnv(env: NodeJS.ProcessEnv, name: string): string | undefined {
   const key = Object.keys(env).find(candidate => candidate.toLowerCase() === name.toLowerCase());
   return key ? env[key] : undefined;
 }
 
 /**
  * The absolute PATH entries of `env` (relative ones, such as `.`, are never searched).
- * @param {NodeJS.Platform} platform @param {NodeJS.ProcessEnv} env
  */
-function pathEntries(platform, env) {
+function pathEntries(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string[] {
   const pathApi = platform === 'win32' ? path.win32 : path.posix;
   const value = platform === 'win32' ? winEnv(env, 'PATH') : env.PATH;
   return String(value ?? '').split(platform === 'win32' ? ';' : ':').filter(entry => entry && pathApi.isAbsolute(entry));
@@ -268,10 +256,8 @@ function pathEntries(platform, env) {
 /**
  * Where `entry` is installed on this host, or undefined: the absolute program (an .app bundle on mac)
  * found at the table's fixed places only.
- * @param {EditorEntry} entry @param {{ platform: NodeJS.Platform, env: NodeJS.ProcessEnv, home: string, probe: EditorProbe }} host
- * @returns {Promise<string | undefined>}
  */
-export async function locateEditor(entry, { platform, env, home, probe }) {
+export async function locateEditor(entry: EditorEntry, { platform, env, home, probe }: EditorHost): Promise<string | undefined> {
   if (platform === 'darwin') {
     for (const bundle of entry.mac ?? []) {
       for (const root of ['/Applications', ...(path.posix.isAbsolute(home) ? [path.posix.join(home, 'Applications')] : [])]) {
@@ -284,7 +270,7 @@ export async function locateEditor(entry, { platform, env, home, probe }) {
   if (platform === 'win32') {
     const local = winEnv(env, 'LOCALAPPDATA');
     const programs = winEnv(env, 'ProgramFiles');
-    const expand = (/** @type {string} */ template) => {
+    const expand = (template: string): string | undefined => {
       const value = template.replace('%LOCALAPPDATA%', local ?? '\0').replace('%ProgramFiles%', programs ?? '\0');
       return value.includes('\0') || !path.win32.isAbsolute(value) ? undefined : value;
     };
@@ -324,14 +310,11 @@ export async function locateEditor(entry, { platform, env, home, probe }) {
  * ('finder' always, without one). ALP_DASHBOARD_EDITORS, a comma-separated list of table ids in alp
  * dashboard's own environment, replaces detection (e2e): those ids count as installed, at the place
  * detection finds or else the table's first fixed place; unknown ids are ignored.
- * @param {{ platform: NodeJS.Platform, env: NodeJS.ProcessEnv, home: string, probe: EditorProbe }} [host]
- * @returns {Promise<Array<{ id: string, label: string, program?: string }>>}
  */
-export async function installedEditors(host = editorHost) {
+export async function installedEditors(host: EditorHost = editorHost): Promise<Array<{ id: string; label: string; program?: string }>> {
   const { platform, env } = host;
   const forced = typeof env.ALP_DASHBOARD_EDITORS === 'string' ? new Set(env.ALP_DASHBOARD_EDITORS.split(',').map(id => id.trim()).filter(Boolean)) : undefined;
-  /** @type {Array<{ id: string, label: string, program?: string }>} */
-  const found = [];
+  const found: Array<{ id: string; label: string; program?: string }> = [];
   for (const entry of EDITORS) {
     if (entry.id === 'finder') { found.push({ id: 'finder', label: fileManagerLabel(platform) }); continue; }
     if (entry.id === 'xcode' && platform !== 'darwin') continue;
@@ -342,8 +325,8 @@ export async function installedEditors(host = editorHost) {
   return found;
 }
 
-/** The table's first fixed place for `entry`, for an id ALP_DASHBOARD_EDITORS forces. @param {EditorEntry} entry @param {NodeJS.Platform} platform @param {NodeJS.ProcessEnv} env */
-function fallbackProgram(entry, platform, env) {
+/** The table's first fixed place for `entry`, for an id ALP_DASHBOARD_EDITORS forces. */
+function fallbackProgram(entry: EditorEntry, platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string | undefined {
   if (platform === 'darwin') return entry.mac?.[0] ? path.posix.join('/Applications', entry.mac[0]) : undefined;
   if (platform === 'win32') {
     const template = entry.win?.[0] ?? (entry.jetbrains ? `%ProgramFiles%\\JetBrains\\${entry.jetbrains.prefixes[0]}\\bin\\${entry.jetbrains.exe}` : undefined);
@@ -359,10 +342,8 @@ function fallbackProgram(entry, platform, env) {
  * never reads as an option; on mac `open` also gets `--` before it. ALP_DASHBOARD_EDITOR_RUNNER, an
  * absolute program in alp dashboard's own environment, replaces the editor (e2e records the call):
  * it gets [editorId, directory]. 'finder' is revealCommand (ALP_DASHBOARD_FILE_MANAGER applies).
- * @param {NodeJS.Platform} platform @param {{ id: string, program?: string }} editor @param {string} directory @param {NodeJS.ProcessEnv} [env]
- * @returns {[string, string[]]}
  */
-export function editorCommand(platform, editor, directory, env = process.env) {
+export function editorCommand(platform: NodeJS.Platform, editor: { id: string; program?: string }, directory: string, env: NodeJS.ProcessEnv = process.env): [string, string[]] {
   if (editor.id === 'finder') return revealCommand(platform, directory, env);
   const runner = env.ALP_DASHBOARD_EDITOR_RUNNER;
   if (runner && path.isAbsolute(runner)) return [runner, [editor.id, directory]];
@@ -371,44 +352,40 @@ export function editorCommand(platform, editor, directory, env = process.env) {
   return [editor.program, [directory]];
 }
 
-/** @param {string} message @param {string} reason */
-const notFound = (message, reason) => Object.assign(new Error(message), { code: 1001, data: { reason } });
+const notFound = (message: string, reason: string) => Object.assign(new Error(message), { code: 1001, data: { reason } });
 
 /**
  * The directory of the live (unarchived) workspace of alpd's registry that params.workspaceId names,
  * checked by projectDirectory; never a path from params.
- * @param {Record<string, any>} params @param {any} daemon
  */
-async function liveWorkspaceDirectory(params, daemon) {
+async function liveWorkspaceDirectory(params: Record<string, any>, daemon: DashboardOwnerContext['daemon']): Promise<string> { // any: the request's params, checked here
   const workspaceId = text(params.workspaceId, 'workspaceId', { max: 200 });
-  const registry = ownerRegistry((/** @type {any} */ (await daemon.request('registry.owner', {})))?.registry);
-  const workspace = registry.workspaces.find((/** @type {any} */ entry) => entry.id === workspaceId && !entry.archivedAt);
+  const registry = ownerRegistry(((await daemon.request('registry.owner', {})) as any)?.registry); // any: alpd's answer, read by ownerRegistry
+  const workspace = registry.workspaces.find((entry: any /* any: a registry entry as alpd gave it */) => entry.id === workspaceId && !entry.archivedAt);
   if (!workspace) throw notFound(`No workspace ${workspaceId}`, 'not_found');
   return projectDirectory(workspace.directory);
 }
 
-/** @param {unknown} value */
-const labelName = value => text(value, 'name', { max: 64 }).trim().replace(/\s+/g, ' ');
-/** @param {unknown} value */
-function labelColor(value) {
+const labelName = (value: unknown): string => text(value, 'name', { max: 64 }).trim().replace(/\s+/g, ' ');
+function labelColor(value: unknown): string {
   if (typeof value !== 'string' || !LABEL_COLORS.includes(value)) throw invalid(`color must be one of ${LABEL_COLORS.join(', ')}`);
   return value;
 }
 
-/** The dashboard's "Check usage" switch (t-9116). @param {string} home */
-const usageFile = home => path.join(home, 'usage.json');
+/** The dashboard's "Check usage" switch (t-9116). */
+const usageFile = (home: string): string => path.join(home, 'usage.json');
 
 /**
  * Whether the dashboard checks usage: $ALP_HOME/usage.json's `enabled`, true when the file is
- * missing or says nothing else. @param {string} home @returns {Promise<{ enabled: boolean, host: string }>}
+ * missing or says nothing else.
  */
-export async function usageSetting(home) {
+export async function usageSetting(home: string): Promise<{ enabled: boolean; host: string }> {
   const value = await readFile(usageFile(home), 'utf8').then(JSON.parse).catch(() => undefined);
   return { enabled: value?.enabled !== false, host: os.hostname() };
 }
 
-/** Writes the switch as terminal.json is written: private to the user, atomically. @param {string} home @param {boolean} enabled */
-async function writeUsageSetting(home, enabled) {
+/** Writes the switch as terminal.json is written: private to the user, atomically. */
+async function writeUsageSetting(home: string, enabled: boolean): Promise<void> {
   await mkdir(home, { recursive: true, mode: 0o700 });
   const temporary = `${usageFile(home)}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(temporary, JSON.stringify({ enabled }, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
@@ -416,18 +393,17 @@ async function writeUsageSetting(home, enabled) {
   await rename(temporary, usageFile(home)).catch(async error => { await rm(temporary, { force: true }); throw error; });
 }
 
-/** @type {Readonly<Record<string, import('./index.js').DashboardOwnerHandler>>} */
-export const methods = {
+export const methods: Readonly<Record<string, DashboardOwnerHandler>> = {
   async 'host.provider.add'({ params, home }) {
     const { id, values } = providerOptions(params);
     try {
       // As alp provider add: the CLI's own content builder, saved to the library, create only.
       const content = await edited('providers', id, undefined, values);
       const saved = await saveEntry('providers', id, content, { scope: 'library', library: home, revision: null });
-      const provider = /** @type {any} */ (content.provider);
+      const provider = content.provider as any; // any: the provider entry `edited` built, read as given
       return {
         name: id, revision: saved.revision,
-        provider: { kind: provider.kind, command: provider.command, args: provider.args ?? [], envKeys: Object.keys(provider.env ?? {}), ...(provider.label ? { label: provider.label } : {}), models: (provider.models ?? []).map((/** @type {any} */ model) => model.id) },
+        provider: { kind: provider.kind, command: provider.command, args: provider.args ?? [], envKeys: Object.keys(provider.env ?? {}), ...(provider.label ? { label: provider.label } : {}), models: (provider.models ?? []).map((model: any /* any: a model entry of that provider */) => model.id) },
       };
     } catch (error) { throw rpcError(error); }
   },
@@ -471,7 +447,7 @@ export const methods = {
   },
 
   async 'host.registry'({ daemon }) {
-    const result = /** @type {any} */ (await daemon.request('registry.owner', {}));
+    const result = (await daemon.request('registry.owner', {})) as any; // any: alpd's answer, read by ownerRegistry
     return ownerRegistry(result?.registry);
   },
 
@@ -507,8 +483,7 @@ export const methods = {
   async 'host.workspace.label'({ params, daemon }) {
     const context = registryContext(params);
     const action = params.action;
-    /** @type {{ operation: string, args: Record<string, unknown> }} */
-    let change;
+    let change: { operation: string; args: Record<string, unknown> };
     if (action === 'assign' || action === 'unassign') {
       const workspaceId = text(params.workspaceId, 'workspaceId', { max: 200 });
       const label = { name: labelName(params.name), color: action === 'assign' ? labelColor(params.color) : (params.color === undefined ? LABEL_COLORS[0] : labelColor(params.color)) };
@@ -520,7 +495,7 @@ export const methods = {
     } else if (action === 'delete') {
       change = { operation: 'label.delete', args: { name: labelName(params.name) } };
     } else throw invalid('action must be assign, unassign, update or delete');
-    const result = /** @type {any} */ (await daemon.request('registry.owner', { ...change, ...context }));
+    const result = (await daemon.request('registry.owner', { ...change, ...context })) as any; // any: alpd's answer, read as given and by ownerRegistry
     return { result: result?.result ?? {}, registry: ownerRegistry(result?.registry) };
   },
 

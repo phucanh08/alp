@@ -1,9 +1,9 @@
-// @ts-check
 import { execFile } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
 import { access, lstat, open, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { ownerRegistry } from './host.js';
+import type { DashboardOwnerHandler } from './index.js';
 
 /**
  * host.workspace.facts (t-ff83; docs/alp/remote-gateway.md §5.19): what the owner's sidebar shows
@@ -76,25 +76,21 @@ export const ICON_CANDIDATES = Object.freeze([
 
 const MIME = Object.freeze({ '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' });
 
-/**
- * @typedef {{
- *   branch?: string,
- *   additions?: number,
- *   deletions?: number,
- *   pr?: { number: number, state: 'open' | 'draft' | 'merged' | 'closed' },
- *   ci?: 'passed' | 'failed' | 'pending',
- *   icon?: string,
- *   fetchedAt: string,
- * }} WorkspaceFacts
- * @typedef {{ workspaceIds: string[], refresh?: boolean }} WorkspaceFactsParams
- * @typedef {{ workspaces: Record<string, WorkspaceFacts> }} WorkspaceFactsResult
- */
+export type WorkspaceFacts = {
+  branch?: string;
+  additions?: number;
+  deletions?: number;
+  pr?: { number: number; state: 'open' | 'draft' | 'merged' | 'closed' };
+  ci?: 'passed' | 'failed' | 'pending';
+  icon?: string;
+  fetchedAt: string;
+};
+export type WorkspaceFactsParams = { workspaceIds: string[]; refresh?: boolean };
+export type WorkspaceFactsResult = { workspaces: Record<string, WorkspaceFacts> };
 
-/** @param {string} message */
-const invalid = message => Object.assign(new Error(message), { code: -32602, data: { reason: 'invalid_params' } });
+const invalid = (message: string) => Object.assign(new Error(message), { code: -32602, data: { reason: 'invalid_params' } });
 
-/** @param {Record<string, any>} params @returns {WorkspaceFactsParams} */
-export function factsParams(params) {
+export function factsParams(params: Record<string, any>): WorkspaceFactsParams { // any: the request's params, checked here
   const ids = params.workspaceIds;
   if (!Array.isArray(ids) || ids.length < 1 || ids.length > FACTS.maxIds) throw invalid(`workspaceIds must be a list of 1 to ${FACTS.maxIds} workspace ids`);
   for (const id of ids) if (typeof id !== 'string' || !id || id.length > 200 || id.includes('\0')) throw invalid('workspaceIds must hold non-empty strings of at most 200 characters');
@@ -106,9 +102,8 @@ export function factsParams(params) {
  * ci from a statusCheckRollup: any failure, error, cancellation or timeout → failed; else anything
  * not finished (or a state this does not know) → pending; else (success, neutral, skipped) passed;
  * no checks → undefined.
- * @param {unknown} rollup @returns {WorkspaceFacts['ci']}
  */
-export function ciOf(rollup) {
+export function ciOf(rollup: unknown): WorkspaceFacts['ci'] {
   if (!Array.isArray(rollup) || !rollup.length) return undefined;
   const FAILED = ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'];
   const PASSED = ['SUCCESS', 'NEUTRAL', 'SKIPPED'];
@@ -123,8 +118,8 @@ export function ciOf(rollup) {
   return pending ? 'pending' : 'passed';
 }
 
-/** pr from gh's answer, or undefined. @param {any} view @returns {WorkspaceFacts['pr']} */
-export function prOf(view) {
+/** pr from gh's answer, or undefined. */
+export function prOf(view: any): WorkspaceFacts['pr'] { // any: gh's JSON answer, checked field by field
   if (!view || !Number.isSafeInteger(view.number) || view.number <= 0) return undefined;
   const state = String(view.state ?? '').toUpperCase();
   if (state === 'MERGED') return { number: view.number, state: 'merged' };
@@ -133,8 +128,8 @@ export function prOf(view) {
   return undefined;
 }
 
-/** Sums `git diff --numstat` output (binary files, `-`, count 0). @param {string} output */
-export function numstat(output) {
+/** Sums `git diff --numstat` output (binary files, `-`, count 0). */
+export function numstat(output: string): { additions: number; deletions: number } {
   let additions = 0, deletions = 0;
   for (const line of output.split('\n')) {
     const [added, deleted] = line.split('\t');
@@ -150,17 +145,16 @@ const GIT_OVERRIDES = [
   'diff.autoRefreshIndex=false', 'submodule.recurse=false', 'protocol.allow=never', 'maintenance.auto=false', 'gc.auto=0',
 ];
 
-/** Whether `target` is `root` or lies under it (both real paths). @param {string} root @param {string} target */
-export function isInside(root, target) {
+/** Whether `target` is `root` or lies under it (both real paths). */
+export function isInside(root: string, target: string): boolean {
   const relative = path.relative(root, target);
   return !relative || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 /**
  * An executable `name` on env.PATH: absolute entries only, none inside `root`.
- * @param {string} name @param {NodeJS.ProcessEnv} env @param {string} root
  */
-export async function onPath(name, env, root) {
+export async function onPath(name: string, env: NodeJS.ProcessEnv, root: string): Promise<string | undefined> {
   const names = process.platform === 'win32' ? [`${name}.exe`] : [name];
   for (const entry of String(env.PATH ?? env.Path ?? '').split(path.delimiter)) {
     if (!entry || !path.isAbsolute(entry)) continue;
@@ -179,10 +173,8 @@ export async function onPath(name, env, root) {
 /**
  * Runs a file with an argument list (no shell); answers stdout, or undefined when it fails, times
  * out, or prints more than FACTS.maxBuffer.
- * @param {string} file @param {string[]} args @param {{ cwd: string, env: NodeJS.ProcessEnv, deadline: number }} options
- * @returns {Promise<string | undefined>}
  */
-function run(file, args, { cwd, env, deadline }) {
+function run(file: string, args: string[], { cwd, env, deadline }: { cwd: string; env: NodeJS.ProcessEnv; deadline: number }): Promise<string | undefined> {
   const timeout = Math.min(FACTS.timeoutMs, deadline - Date.now());
   if (timeout <= 0) return Promise.resolve(undefined);
   return new Promise(resolve => {
@@ -191,15 +183,14 @@ function run(file, args, { cwd, env, deadline }) {
   });
 }
 
-/** env without Git's own variables (they would redirect Git elsewhere). @param {NodeJS.ProcessEnv} env */
-function withoutGit(env) {
+/** env without Git's own variables (they would redirect Git elsewhere). */
+function withoutGit(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(env).filter(([name]) => !name.toUpperCase().startsWith('GIT_')));
 }
 
-/** Configuration overrides as GIT_CONFIG_COUNT variables, for the Git gh starts. @param {string[]} pairs */
-function configEnv(pairs) {
-  /** @type {Record<string, string>} */
-  const env = { GIT_CONFIG_COUNT: String(pairs.length) };
+/** Configuration overrides as GIT_CONFIG_COUNT variables, for the Git gh starts. */
+function configEnv(pairs: string[]): Record<string, string> {
+  const env: Record<string, string> = { GIT_CONFIG_COUNT: String(pairs.length) };
   pairs.forEach((pair, index) => {
     const at = pair.indexOf('=');
     env[`GIT_CONFIG_KEY_${index}`] = pair.slice(0, at);
@@ -210,9 +201,9 @@ function configEnv(pairs) {
 
 /**
  * The workspace's logo as a data: URI, or undefined.
- * @param {string} directory the workspace directory
+ * @param directory the workspace directory
  */
-export async function iconOf(directory) {
+export async function iconOf(directory: string): Promise<string | undefined> {
   const root = await realpath(directory).catch(() => undefined);
   if (!root) return undefined;
   for (const relative of ICON_CANDIDATES) {
@@ -222,8 +213,7 @@ export async function iconOf(directory) {
   return undefined;
 }
 
-/** @param {string} root @param {string} relative */
-async function readIcon(root, relative) {
+async function readIcon(root: string, relative: string): Promise<string | undefined> {
   const candidate = path.join(root, relative);
   if (!await lstat(candidate).then(() => true, () => false)) return undefined;
   const real = await realpath(candidate);
@@ -231,7 +221,7 @@ async function readIcon(root, relative) {
   // The extension of both names must be the allowed one: a link named logo.png to secret.txt is not an icon.
   const extension = path.extname(relative).toLowerCase();
   if (path.extname(real).toLowerCase() !== extension) return undefined;
-  const mime = MIME[/** @type {keyof typeof MIME} */ (extension)];
+  const mime = MIME[extension as keyof typeof MIME];
   if (!mime) return undefined;
   const handle = await open(real, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
   try {
@@ -254,8 +244,8 @@ async function readIcon(root, relative) {
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const ICO = Buffer.from([0x00, 0x00, 0x01, 0x00]);
 
-/** Whether the content is the type its extension names. @param {string} extension @param {Buffer} bytes */
-export function looksLike(extension, bytes) {
+/** Whether the content is the type its extension names. */
+export function looksLike(extension: string, bytes: Buffer): boolean {
   if (extension === '.png') return bytes.length > PNG.length && bytes.subarray(0, PNG.length).equals(PNG);
   if (extension === '.ico') return bytes.length > 6 && bytes.subarray(0, ICO.length).equals(ICO);
   if (extension === '.svg') {
@@ -267,15 +257,12 @@ export function looksLike(extension, bytes) {
 
 /**
  * Reads one directory's facts. Never throws.
- * @param {string} directory @param {{ env: NodeJS.ProcessEnv }} options
- * @returns {Promise<Omit<WorkspaceFacts, 'fetchedAt'>>}
  */
-export async function readFacts(directory, { env }) {
+export async function readFacts(directory: string, { env }: { env: NodeJS.ProcessEnv }): Promise<Omit<WorkspaceFacts, 'fetchedAt'>> {
   const deadline = Date.now() + FACTS.directoryMs;
   const root = await realpath(directory).catch(() => undefined);
   if (!root || !await stat(root).then(info => info.isDirectory(), () => false)) return {};
-  /** @type {Omit<WorkspaceFacts, 'fetchedAt'>} */
-  const facts = {};
+  const facts: Omit<WorkspaceFacts, 'fetchedAt'> = {};
   const icon = await iconOf(root);
 
   const git = await onPath('git', env, root);
@@ -284,14 +271,13 @@ export async function readFacts(directory, { env }) {
     const options = { cwd: root, env: gitEnv, deadline };
     const base = GIT_OVERRIDES.flatMap(pair => ['-c', pair]);
     // Filter drivers the repository's configuration names would run on a work tree diff: emptied.
-    const filters = new Set();
+    const filters = new Set<string>();
     for (const key of (await run(git, [...base, 'config', '--name-only', '--get-regexp', '^filter\\.'], options) ?? '').split('\n')) {
       const name = key.trim();
       if (name.startsWith('filter.') && name.lastIndexOf('.') > 'filter.'.length) filters.add(name.slice('filter.'.length, name.lastIndexOf('.')));
     }
     const boxed = [...base, ...[...filters].flatMap(driver => ['-c', `filter.${driver}.clean=`, '-c', `filter.${driver}.smudge=`, '-c', `filter.${driver}.process=`, '-c', `filter.${driver}.required=false`])];
-    /** @param {string[]} args */
-    const gitRun = args => run(git, [...boxed, ...args], options);
+    const gitRun = (args: string[]): Promise<string | undefined> => run(git, [...boxed, ...args], options);
 
     const head = (await gitRun(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']))?.trim();
     if (head) {
@@ -315,8 +301,7 @@ export async function readFacts(directory, { env }) {
       if (gh && facts.branch && !/^\d+$/.test(facts.branch)) {
         const ghEnv = { ...withoutGit(env), ...configEnv([`core.fsmonitor=false`, `core.hooksPath=${NULL_DEVICE}`, 'protocol.ext.allow=never']), GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_SPINNER_DISABLED: '1', NO_COLOR: '1', CLICOLOR: '0' };
         const output = await run(gh, ['pr', 'view', facts.branch, '--json', 'number,state,isDraft,statusCheckRollup'], { cwd: root, env: ghEnv, deadline });
-        /** @type {any} */
-        let view;
+        let view: any; // any: gh's JSON answer, checked by prOf and ciOf
         try { view = output === undefined ? undefined : JSON.parse(output); } catch { view = undefined; }
         const pr = prOf(view);
         if (pr) {
@@ -333,21 +318,16 @@ export async function readFacts(directory, { env }) {
 
 /**
  * A host.workspace.facts handler with its own cache, in-flight reads and concurrency limit.
- * @param {{ env?: NodeJS.ProcessEnv, now?: () => number, read?: typeof readFacts }} [options]
  */
-export function createWorkspaceFacts({ env = process.env, now = Date.now, read = readFacts } = {}) {
-  /** @type {Map<string, { facts: WorkspaceFacts, at: number, ttl: number }>} */
-  const cache = new Map();
-  /** @type {Map<string, Promise<WorkspaceFacts>>} */
-  const inflight = new Map();
+export function createWorkspaceFacts({ env = process.env, now = Date.now, read = readFacts }: { env?: NodeJS.ProcessEnv; now?: () => number; read?: typeof readFacts } = {}) {
+  const cache = new Map<string, { facts: WorkspaceFacts; at: number; ttl: number }>();
+  const inflight = new Map<string, Promise<WorkspaceFacts>>();
   let running = 0;
-  /** @type {Array<() => void>} */
-  const waiting = [];
+  const waiting: Array<() => void> = [];
   const acquire = () => running < FACTS.concurrency ? (running++, Promise.resolve()) : new Promise(resolve => waiting.push(() => { running++; resolve(undefined); }));
   const release = () => { running--; waiting.shift()?.(); };
 
-  /** @param {string} directory @param {boolean} refresh @returns {Promise<WorkspaceFacts>} */
-  function factsOf(directory, refresh) {
+  function factsOf(directory: string, refresh: boolean): Promise<WorkspaceFacts> {
     const pending = inflight.get(directory);
     if (pending) return pending;
     const cached = cache.get(directory);
@@ -369,23 +349,22 @@ export function createWorkspaceFacts({ env = process.env, now = Date.now, read =
     return reading;
   }
 
-  /** @type {import('./index.js').DashboardOwnerHandler} */
-  const handler = async ({ params, daemon }) => {
+  const handler: DashboardOwnerHandler = async ({ params, daemon }) => {
     const { workspaceIds, refresh } = factsParams(params);
-    const answer = /** @type {any} */ (await daemon.request('registry.owner', {}));
+    // any: alpd's registry.owner answer, read through ownerRegistry
+    const answer: any = (await daemon.request('registry.owner', {}));
     const registry = ownerRegistry(answer?.registry);
-    const directories = new Map(registry.workspaces.map((/** @type {any} */ workspace) => [workspace.id, workspace.directory]));
+    // any: registry entries as alpd gave them; a directory is checked below before it is used
+    const directories = new Map<string, any>(registry.workspaces.map((workspace: any) => [workspace.id, workspace.directory]));
     // Entries whose directory is not a plain absolute path are left out, as unknown ids are.
     const wanted = workspaceIds.filter(id => typeof directories.get(id) === 'string' && path.isAbsolute(directories.get(id)));
-    /** @type {Record<string, WorkspaceFacts>} */
-    const workspaces = {};
+    const workspaces: Record<string, WorkspaceFacts> = {};
     await Promise.all(wanted.map(async id => { workspaces[id] = await factsOf(directories.get(id), refresh === true); }));
     return { workspaces: Object.fromEntries(wanted.filter(id => workspaces[id]).map(id => [id, workspaces[id]])) };
   };
   return { handler, cache, inflight, running: () => running };
 }
 
-/** @type {Readonly<Record<string, import('./index.js').DashboardOwnerHandler>>} */
-export const methods = {
+export const methods: Readonly<Record<string, DashboardOwnerHandler>> = {
   'host.workspace.facts': createWorkspaceFacts().handler,
 };

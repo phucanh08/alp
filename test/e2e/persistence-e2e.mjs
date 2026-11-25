@@ -25,7 +25,7 @@ const env = {
   ...(fake ? { ALP_CODEX_BIN: support('fake-codex.js'), ALP_CLAUDE_BIN: support('fake-claude.js'), FAKE_CODEX_STATE: path.join(home, 'fake-codex-threads.jsonl') } : {}),
 };
 // ALP_TEST_CLI runs another alp, such as a built bundle's bin/alp, which starts its native alpd (t-81b0.9).
-const alp = process.env.ALP_TEST_CLI ? [process.env.ALP_TEST_CLI] : [process.execPath, 'packages/cli/src/cli.js'];
+const alp = process.env.ALP_TEST_CLI ? [process.env.ALP_TEST_CLI] : [process.execPath, 'packages/cli/dist/cli.js'];
 const cli = (...args) => spawnSync(alp[0], [...alp.slice(1), ...args], { env, encoding: 'utf8' });
 
 /** Runs the CLI with --json; resolves its envelopes, or calls `onEnvelope` as they stream. */

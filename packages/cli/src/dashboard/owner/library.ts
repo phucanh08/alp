@@ -1,4 +1,3 @@
-// @ts-check
 import { createHash, randomBytes } from 'node:crypto';
 import { lstat, open, readFile, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -6,6 +5,7 @@ import { ERROR, RPC_ERROR, WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-p
 import { moveFile } from '@anhlp/alp-core/atomic';
 import { testEntry } from '@anhlp/alp-client/library-test';
 import { imagePreviewType, projectImagePreview } from '@anhlp/alp-gateway/policy';
+import type { DashboardOwnerContext, DashboardOwnerHandler } from './index.js';
 
 /**
  * Owner handlers for the user's library and workspace files (t-a95b group C; Settings › Templates,
@@ -39,57 +39,59 @@ export const MASK_TEXT = '‹hidden on the host›';
 export const TEST_OUTPUT_CHARS = 16 * 1024;
 const TEST_TIMEOUT_MS = 30_000;
 
+/** alpd, on the owner's own connection. */
+export type OwnerDaemon = DashboardOwnerContext['daemon'];
+/** What the file handlers read of a handler's context. */
+export type OwnerFilesContext = { daemon: OwnerDaemon; params: Record<string, any> }; // any: the request's params, checked by each handler
+
 /** A refusal the gateway passes to the app as this JSON-RPC error. */
 export class OwnerError extends Error {
-  /** @param {number} code @param {string} reason @param {string} message */
-  constructor(code, reason, message) {
+  declare code: number;
+  declare data: { reason: string };
+  constructor(code: number, reason: string, message: string) {
     super(message);
     this.code = code;
     this.data = { reason };
   }
 }
-const invalid = (/** @type {string} */ message) => new OwnerError(RPC_ERROR.invalidParams, 'invalid_params', message);
+const invalid = (message: string): OwnerError => new OwnerError(RPC_ERROR.invalidParams, 'invalid_params', message);
 
-const isObject = (/** @type {unknown} */ value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const isObject = (value: unknown): boolean => value !== null && typeof value === 'object' && !Array.isArray(value);
 
-/** @param {unknown} value */
-function kindOf(value, kinds = OWNER_LIBRARY_KINDS) {
+function kindOf(value: unknown, kinds: readonly string[] = OWNER_LIBRARY_KINDS): string {
   if (typeof value !== 'string' || !kinds.includes(value)) throw invalid(`kind must be one of ${kinds.join(', ')}`);
   return value;
 }
-/** An entry name as core accepts one ([\w.-], not . or ..). @param {unknown} value @param {string} what */
-function nameOf(value, what = 'name') {
+/** An entry name as core accepts one ([\w.-], not . or ..). */
+function nameOf(value: unknown, what: string = 'name'): string {
   if (typeof value !== 'string' || value.length > 128 || !/^[\w.-]+$/.test(value) || value === '.' || value === '..') throw invalid(`${what} must be an entry name (letters, digits, _ . -)`);
   return value;
 }
-/** @param {unknown} value */
-function scopeOf(value, required = true) {
+function scopeOf(value: unknown, required: boolean = true): 'library' | 'project' | undefined {
   if (value === undefined && !required) return undefined;
   if (value !== 'library' && value !== 'project') throw invalid('scope must be library (this host\'s) or project');
   return value;
 }
-/** An absolute directory path, as the app names a workspace. @param {unknown} value */
-function rootOf(value, required = false) {
+/** An absolute directory path, as the app names a workspace. */
+function rootOf(value: unknown, required: boolean = false): string | undefined {
   if (value === undefined && !required) return undefined;
   if (typeof value !== 'string' || !value || value.length > WORKSPACE_FILES.maxPathLength || value.includes('\0') || !path.isAbsolute(value)) throw invalid('projectRoot must be an absolute path');
   return value;
 }
-/** @param {unknown} value */
-function revisionOf(value) {
+function revisionOf(value: unknown) {
   if (value !== null && (typeof value !== 'string' || !value || value.length > 64)) throw invalid('revision must be the revision read, or null for a new entry');
   return value;
 }
 
-/** The JSON Pointer of the first string holding the mask text, or undefined. @param {unknown} value @param {string} at @returns {string | undefined} */
-export function maskIn(value, at = '') {
+/** The JSON Pointer of the first string holding the mask text, or undefined. */
+export function maskIn(value: unknown, at: string = ''): string | undefined {
   if (typeof value === 'string') return value.includes(MASK_TEXT) ? at || '/' : undefined;
   if (Array.isArray(value)) { for (const [index, item] of value.entries()) { const found = maskIn(item, `${at}/${index}`); if (found) return found; } return undefined; }
-  if (isObject(value)) { for (const [key, item] of Object.entries(/** @type {object} */ (value))) { const found = maskIn(item, `${at}/${key.replaceAll('~', '~0').replaceAll('/', '~1')}`); if (found) return found; } }
+  if (isObject(value)) { for (const [key, item] of Object.entries(value as object)) { const found = maskIn(item, `${at}/${key.replaceAll('~', '~0').replaceAll('/', '~1')}`); if (found) return found; } }
   return undefined;
 }
 
-/** @param {Record<string, any>} params */
-function entryParams(params, { scopeRequired = true, kinds = OWNER_LIBRARY_KINDS } = {}) {
+function entryParams(params: Record<string, any>, { scopeRequired = true, kinds = OWNER_LIBRARY_KINDS }: { scopeRequired?: boolean; kinds?: readonly string[] } = {}) { // any: the request's params, checked here
   const kind = kindOf(params.kind, kinds);
   const name = nameOf(params.name);
   const scope = scopeOf(params.scope, scopeRequired);
@@ -97,34 +99,29 @@ function entryParams(params, { scopeRequired = true, kinds = OWNER_LIBRARY_KINDS
   return { kind, name, ...(scope ? { scope } : {}), ...(projectRoot ? { projectRoot } : {}) };
 }
 
-/** @param {string} text */
-const clip = text => typeof text === 'string' && text.length > TEST_OUTPUT_CHARS ? `${text.slice(0, TEST_OUTPUT_CHARS)}\n… (cut at ${TEST_OUTPUT_CHARS} characters)` : text;
+const clip = (text: string): string => typeof text === 'string' && text.length > TEST_OUTPUT_CHARS ? `${text.slice(0, TEST_OUTPUT_CHARS)}\n… (cut at ${TEST_OUTPUT_CHARS} characters)` : text;
 
 /**
  * alpd's library call for the owner. Outside scope project, a projectRoot with no .alp (alpd's
  * not_alp_project: the dashboard's no-project directory, a repository never `alp init`-ed) is left
  * out and the call asked again, so it reads and writes the library there (t-a95b.1 F1). alpd refuses
  * before it writes anything; scope project and every other refusal keep alpd's answer.
- * @param {{ request: (method: string, params?: Record<string, unknown>) => Promise<unknown> }} daemon
- * @param {string} method @param {Record<string, any>} values
  */
-async function libraryCall(daemon, method, values) {
+async function libraryCall(daemon: OwnerDaemon, method: string, values: Record<string, any>): Promise<unknown> { // any: checked params on their way to alpd
   try { return await daemon.request(method, values); }
   catch (caught) {
-    const error = /** @type {any} */ (caught);
+    const error = caught as any; // any: whatever alpd's call threw; its code and reason are checked
     if (values.scope === 'project' || values.projectRoot === undefined || error?.code !== ERROR.notFound || error?.data?.reason !== 'not_alp_project') throw caught;
     const { projectRoot: _projectRoot, ...rest } = values;
     return daemon.request(method, rest);
   }
 }
 
-/** @type {import('./index.js').DashboardOwnerHandler} */
-async function libraryGet({ params, daemon }) {
+async function libraryGet({ params, daemon }: DashboardOwnerContext): Promise<unknown> {
   return libraryCall(daemon, 'library.get', entryParams(params, { scopeRequired: false }));
 }
 
-/** @type {import('./index.js').DashboardOwnerHandler} */
-async function librarySave({ params, daemon }) {
+async function librarySave({ params, daemon }: DashboardOwnerContext): Promise<unknown> {
   const entry = entryParams(params);
   if (!isObject(params.content)) throw invalid('content must be the entry\'s content object');
   const mask = maskIn(params.content);
@@ -133,8 +130,7 @@ async function librarySave({ params, daemon }) {
   return libraryCall(daemon, 'library.save', { ...entry, content: params.content, revision: revisionOf(params.revision) });
 }
 
-/** @type {import('./index.js').DashboardOwnerHandler} */
-async function libraryDelete({ params, daemon }) {
+async function libraryDelete({ params, daemon }: DashboardOwnerContext): Promise<unknown> {
   const entry = entryParams(params);
   if (typeof params.revision !== 'string' || !params.revision || params.revision.length > 64) throw invalid('revision must be the revision read');
   return libraryCall(daemon, 'library.delete', { ...entry, revision: params.revision });
@@ -143,22 +139,21 @@ async function libraryDelete({ params, daemon }) {
 /**
  * Runs an MCP server or hook once, as `alp mcp test` / `alp hook test` do: the entry that applies
  * (or the one of `scope`), the project's directory when given. Its output goes back clipped.
- * @param {import('./index.js').DashboardOwnerContext} context
- * @param {{ run?: typeof testEntry }} [seams]
  */
-export async function libraryTest({ params, home }, { run = testEntry } = {}) {
+export async function libraryTest({ params, home }: DashboardOwnerContext, { run = testEntry }: { run?: typeof testEntry } = {}) {
   const { kind, name, scope, projectRoot } = entryParams(params, { scopeRequired: false, kinds: OWNER_TEST_KINDS });
-  const result = /** @type {Record<string, any>} */ (await run(kind, name, { root: projectRoot, library: home, ...(scope ? { scope } : {}), timeoutMs: TEST_TIMEOUT_MS }));
+  // any: testEntry's answer, passed on with its output clipped
+  const result = (await run(kind, name, { root: projectRoot, library: home, ...(scope ? { scope } : {}), timeoutMs: TEST_TIMEOUT_MS })) as Record<string, any>;
   return { ...result, ...(typeof result.stdout === 'string' ? { stdout: clip(result.stdout) } : {}), ...(typeof result.stderr === 'string' ? { stderr: clip(result.stderr) } : {}) };
 }
 
 // ---- host.files.write -------------------------------------------------------------------------
 
 const SHA256 = /^[0-9a-f]{64}$/;
-const sha256 = (/** @type {Buffer} */ bytes) => createHash('sha256').update(bytes).digest('hex');
+const sha256 = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex');
 
-/** The '/'-separated segments of a path relative to a workspace, or a refusal. @param {unknown} value */
-export function relativeSegments(value) {
+/** The '/'-separated segments of a path relative to a workspace, or a refusal. */
+export function relativeSegments(value: unknown): string[] {
   if (typeof value !== 'string' || !value || value.length > WORKSPACE_FILES.maxPathLength || value.includes('\0')) throw invalid('path must be a file path relative to the workspace');
   if (value.startsWith('/') || value.includes('\\') || /^[A-Za-z]:/.test(value) || path.isAbsolute(value)) throw new OwnerError(RPC_ERROR.invalidParams, 'invalid_path', 'path must be relative to the workspace, not absolute');
   const segments = value.split('/');
@@ -170,13 +165,13 @@ export function relativeSegments(value) {
 /**
  * The real directory of the registry workspace `projectRoot` names (its directory or that
  * directory's real path), asked of alpd; a directory alpd does not know as a workspace is refused.
- * @param {{ request: (method: string, params?: Record<string, unknown>) => Promise<unknown> }} daemon @param {string} projectRoot
  */
-export async function registryWorkspace(daemon, projectRoot) {
+export async function registryWorkspace(daemon: OwnerDaemon, projectRoot: string): Promise<string> {
   const wanted = await realpath(projectRoot).catch(() => undefined);
   if (wanted) {
-    for (let cursor = /** @type {string | null} */ (null), pages = 0; pages < 50; pages++) {
-      const page = /** @type {any} */ (await daemon.request('workspace.list', { limit: 500, ...(cursor ? { cursor } : {}) }));
+    for (let cursor: string | null = null, pages = 0; pages < 50; pages++) {
+      // any: alpd's workspace.list answer, checked field by field below
+      const page: any = (await daemon.request('workspace.list', { limit: 500, ...(cursor ? { cursor } : {}) }));
       for (const workspace of Array.isArray(page?.workspaces) ? page.workspaces : []) {
         if (typeof workspace?.directory !== 'string') continue;
         if (workspace.directory === projectRoot || (await realpath(workspace.directory).catch(() => undefined)) === wanted) return wanted;
@@ -192,9 +187,8 @@ export async function registryWorkspace(daemon, projectRoot) {
  * The file at `segments` under the real directory `root`, checked as one the app may replace: every
  * directory on the way a real directory (no link: its real path is the path), the file an existing
  * regular file with one name, not a link. Answers its path, bytes and mode.
- * @param {string} root @param {string[]} segments @param {string} relative
  */
-async function confinedFile(root, segments, relative) {
+async function confinedFile(root: string, segments: string[], relative: string) {
   const file = path.join(root, ...segments);
   const parent = path.dirname(file);
   const realParent = await realpath(parent).catch(() => undefined);
@@ -218,9 +212,8 @@ async function confinedFile(root, segments, relative) {
  * the way or as the file, a missing file, content over WORKSPACE_FILES.maxReadBytes. The new bytes
  * go to a temporary file beside it (same mode) that is renamed over it once the file is checked
  * again, so a reader sees the old or the new content.
- * @param {{ daemon: { request: (method: string, params?: Record<string, unknown>) => Promise<unknown> }, params: Record<string, any> }} context
  */
-export async function writeWorkspaceFile({ daemon, params }, { afterTempWrite, beforeRename } = /** @type {{ afterTempWrite?: () => unknown, beforeRename?: () => unknown }} */ ({})) {
+export async function writeWorkspaceFile({ daemon, params }: OwnerFilesContext, { afterTempWrite, beforeRename }: { afterTempWrite?: () => unknown; beforeRename?: () => unknown } = {}) {
   const projectRoot = rootOf(params.projectRoot, true);
   const segments = relativeSegments(params.path);
   const relative = segments.join('/');
@@ -228,7 +221,7 @@ export async function writeWorkspaceFile({ daemon, params }, { afterTempWrite, b
   const bytes = Buffer.from(params.content, 'utf8');
   if (bytes.length > WORKSPACE_FILES.maxReadBytes) throw new OwnerError(ERROR.failed, 'too_large', `The file would be larger than ${WORKSPACE_FILES.maxReadBytes} bytes`);
   if (typeof params.baseSha256 !== 'string' || !SHA256.test(params.baseSha256)) throw invalid('baseSha256 must be the sha256 (hex) of the content read');
-  const root = await registryWorkspace(daemon, /** @type {string} */ (projectRoot));
+  const root = await registryWorkspace(daemon, projectRoot as string);
   const { file, info } = await confinedFile(root, segments, relative);
   const conflict = () => new OwnerError(ERROR.conflict, 'revision_conflict', `${relative} changed on the host since you opened it; reload it and apply your change again`);
   if (sha256(await readFile(file)) !== params.baseSha256) throw conflict();
@@ -268,23 +261,22 @@ export async function writeWorkspaceFile({ daemon, params }, { afterTempWrite, b
  * or reads it on the owner's own connection with its own confinement (workspace.files.list/read:
  * no link followed, one name, ignored files only with includeIgnored, no private key, 1 MiB of UTF-8
  * text). A read answers the sha256 of the bytes too, which host.files.write takes as its base.
- * @param {{ daemon: { request: (method: string, params?: Record<string, unknown>) => Promise<unknown> }, params: Record<string, any> }} context
  */
-export async function listWorkspaceFiles({ daemon, params }) {
+export async function listWorkspaceFiles({ daemon, params }: OwnerFilesContext): Promise<unknown> {
   const projectRoot = rootOf(params.projectRoot, true);
   const relative = params.path === undefined || params.path === '' ? undefined : relativeSegments(params.path).join('/');
   if (params.includeIgnored !== undefined && typeof params.includeIgnored !== 'boolean') throw invalid('includeIgnored must be true or false');
-  const root = await registryWorkspace(daemon, /** @type {string} */ (projectRoot));
+  const root = await registryWorkspace(daemon, projectRoot as string);
   return daemon.request('workspace.files.list', { projectRoot: root, ...(relative ? { path: relative } : {}), ...(params.includeIgnored ? { includeIgnored: true } : {}) });
 }
 
-/** @param {{ daemon: { request: (method: string, params?: Record<string, unknown>) => Promise<unknown> }, params: Record<string, any> }} context */
-export async function readWorkspaceFile({ daemon, params }) {
+export async function readWorkspaceFile({ daemon, params }: OwnerFilesContext) {
   const projectRoot = rootOf(params.projectRoot, true);
   const relative = relativeSegments(params.path).join('/');
   if (params.includeIgnored !== undefined && typeof params.includeIgnored !== 'boolean') throw invalid('includeIgnored must be true or false');
-  const root = await registryWorkspace(daemon, /** @type {string} */ (projectRoot));
-  const result = /** @type {any} */ (await daemon.request('workspace.files.read', { projectRoot: root, path: relative, ...(params.includeIgnored ? { includeIgnored: true } : {}) }));
+  const root = await registryWorkspace(daemon, projectRoot as string);
+  // any: alpd's workspace.files.read answer, checked below and passed on
+  const result: any = (await daemon.request('workspace.files.read', { projectRoot: root, path: relative, ...(params.includeIgnored ? { includeIgnored: true } : {}) }));
   if (typeof result?.content !== 'string' || result.path !== relative) throw new OwnerError(ERROR.failed, 'unreadable', `alpd answered the read of ${relative} in a form the dashboard does not read`);
   return { ...result, sha256: sha256(Buffer.from(result.content, 'utf8')) };
 }
@@ -296,23 +288,22 @@ export async function readWorkspaceFile({ daemon, params }) {
  * as host.files.read checks a path, refused before alpd otherwise; alpd reads it from offset 0 with
  * maxBytes WORKSPACE_FILES.maxReadBytes and its own confinement (no link, one name, no private
  * key); its answer must be that one whole image (projectImagePreview), else refused. Read only.
- * @param {{ daemon: { request: (method: string, params?: Record<string, unknown>) => Promise<unknown> }, params: Record<string, any> }} context
  */
-export async function previewWorkspaceImage({ daemon, params }) {
+export async function previewWorkspaceImage({ daemon, params }: OwnerFilesContext) {
   const projectRoot = rootOf(params.projectRoot, true);
   const relative = relativeSegments(params.path).join('/');
   if (!imagePreviewType(relative)) throw new OwnerError(ERROR.forbidden, 'not_image', 'Only PNG, JPEG, GIF and WebP images are previewed; other files are read as text');
   if (params.includeIgnored !== undefined && typeof params.includeIgnored !== 'boolean') throw invalid('includeIgnored must be true or false');
-  const root = await registryWorkspace(daemon, /** @type {string} */ (projectRoot));
-  const result = /** @type {any} */ (await daemon.request('workspace.files.preview', { projectRoot: root, path: relative, ...(params.includeIgnored ? { includeIgnored: true } : {}), maxBytes: WORKSPACE_FILES.maxReadBytes }));
+  const root = await registryWorkspace(daemon, projectRoot as string);
+  // any: alpd's workspace.files.preview answer, checked by projectImagePreview
+  const result: any = (await daemon.request('workspace.files.preview', { projectRoot: root, path: relative, ...(params.includeIgnored ? { includeIgnored: true } : {}), maxBytes: WORKSPACE_FILES.maxReadBytes }));
   if (result?.path === relative && result?.nextOffset !== undefined) throw new OwnerError(ERROR.failed, 'too_large', `${relative} is larger than ${WORKSPACE_FILES.maxReadBytes} bytes`);
   const image = projectImagePreview(result, relative);
   if (!image) throw new OwnerError(ERROR.failed, 'unreadable', `alpd answered the preview of ${relative} in a form the dashboard does not show`);
   return image;
 }
 
-/** @type {Readonly<Record<string, import('./index.js').DashboardOwnerHandler>>} */
-export const methods = {
+export const methods: Readonly<Record<string, DashboardOwnerHandler>> = {
   'host.files.list': context => listWorkspaceFiles(context),
   'host.files.read': context => readWorkspaceFile(context),
   'host.files.preview': context => previewWorkspaceImage(context),

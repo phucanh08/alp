@@ -14,13 +14,13 @@ import { UsageError } from './usage.js';
  * @param {string} file the role's script beside this CLI
  * @param {string[]} args
  */
-export async function runRole(role, file, args) {
+export async function runRole(role: 'daemon' | 'dashboard' | 'acp', file: string, args: string[]) {
   process.argv = [process.argv[0], file, ...args];
   return import(pathToFileURL(file).href);
 }
 
 /** alp bridge acp|antigravity: the stdio MCP bridge an agent CLI starts to reach alpd's tools. @param {string[]} args */
-export function bridgeCommand(args) {
+export function bridgeCommand(args: string[]) {
   if (args.length !== 1 || !['acp', 'antigravity'].includes(args[0])) throw new UsageError();
   runBridge(args[0]);
 }

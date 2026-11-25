@@ -21,6 +21,8 @@ import { selfUpdate } from './self-update.js';
 import { bundleInfo } from '@anhlp/alp-core/packaged';
 import { connect, lockAlive, readLock } from '@anhlp/alp-client/index';
 
+declare const __ALP_VERSION__: string;
+
 /** The version of this alp: the build's, or the package's. */
 function alpVersion() {
   /* global __ALP_VERSION__ */
@@ -31,25 +33,26 @@ function alpVersion() {
 async function runningDaemon() {
   const lock = await readLock(alpHome());
   if (!lockAlive(lock)) return undefined;
-  const client = await connect(lock.socket, { name: 'alp-cli', version: '1' }).catch(() => undefined);
-  if (!client) return { version: lock.version };
+  // lockAlive returned false for a missing lock, so `lock!` below is the lock just read.
+  const client = await connect(lock!.socket, { name: 'alp-cli', version: '1' }).catch(() => undefined);
+  if (!client) return { version: lock!.version };
   try {
     const status = await client.request('daemon.status');
-    return { version: status.version ?? lock.version, sessions: status.sessions };
+    return { version: status.version ?? lock!.version, sessions: status.sessions };
   } catch {
-    return { version: lock.version };
+    return { version: lock!.version };
   } finally {
     client.close();
   }
 }
 
 /** alp update: the bundle's self-update (t-1807); the template upgrade is alp update-template. */
-async function updateCommand(args) {
+async function updateCommand(args: string[]) {
   const code = await selfUpdate(args, { bundle: bundleInfo(), version: alpVersion(), daemon: runningDaemon });
   if (code) process.exitCode = code;
 }
 
-const commands = { schedule: scheduleCommand, setup: args => setup(args, alpHome()), init: args => project('init', args), 'update-template': args => project('upgrade', args), upgrade: args => project('upgrade', args), update: updateCommand, daemon, doctor, run, ps, top, attach, send, questions, answer, log, board, tasks: tasksCommand, task: taskCommand, formula: formulaCommand, permissions: permissionsCommand, config: configCommand, agents: args => libraryCommand('agents', args), skills: args => libraryCommand('skills', args), mcp: args => ['add', 'rm', 'mv', 'cp', 'test', 'show', 'edit'].includes(args[0]) ? editCommand('mcp', args) : libraryCommand('mcp', args), hooks: args => libraryCommand('hooks', args), providers: args => libraryCommand('providers', args), provider: args => editCommand('providers', args), teams: teamsCommand, packs: packsCommand, pack: packCommand, trust: trustCommand, agent: args => editCommand('agents', args), team: args => editCommand('teams', args), skill: args => editCommand('skills', args), hook: args => editCommand('hooks', args), verify, recall, pause, resume, language, models, interrupt, compact, acp: acpCommand, dashboard: dashboardCommand, desktop: desktopCommand, backup: backupCommand, restore: restoreCommand, terminal: terminalCommand, bridge: bridgeCommand };
+const commands: Record<string, (args: string[]) => unknown> = { schedule: scheduleCommand, setup: args => setup(args, alpHome()), init: args => project('init', args), 'update-template': args => project('upgrade', args), upgrade: args => project('upgrade', args), update: updateCommand, daemon, doctor, run, ps, top, attach, send, questions, answer, log, board, tasks: tasksCommand, task: taskCommand, formula: formulaCommand, permissions: permissionsCommand, config: configCommand, agents: args => libraryCommand('agents', args), skills: args => libraryCommand('skills', args), mcp: args => ['add', 'rm', 'mv', 'cp', 'test', 'show', 'edit'].includes(args[0]) ? editCommand('mcp', args) : libraryCommand('mcp', args), hooks: args => libraryCommand('hooks', args), providers: args => libraryCommand('providers', args), provider: args => editCommand('providers', args), teams: teamsCommand, packs: packsCommand, pack: packCommand, trust: trustCommand, agent: args => editCommand('agents', args), team: args => editCommand('teams', args), skill: args => editCommand('skills', args), hook: args => editCommand('hooks', args), verify, recall, pause, resume, language, models, interrupt, compact, acp: acpCommand, dashboard: dashboardCommand, desktop: desktopCommand, backup: backupCommand, restore: restoreCommand, terminal: terminalCommand, bridge: bridgeCommand };
 const [command, ...args] = process.argv.slice(2);
 try {
   if (command === '--version') {
@@ -60,10 +63,10 @@ try {
     // Effort checks read the catalog alpd last cached, the rows alpd itself checks with (t-086c), so
     // the CLI and alpd agree on a model only live rows list (t-b3cd #8). No provider is asked.
     if (command !== 'setup') useLiveModels(catalogModels(alpHome()));
-    await commands[command](args);
+    await commands[command as string](args);
   }
 } catch (error) {
-  if (error instanceof UsageError || error?.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') console.error(USAGE);
-  else console.error(`alp: ${scrubText(error?.message ?? error)}`);
+  if (error instanceof UsageError || (error as NodeJS.ErrnoException | undefined)?.code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') console.error(USAGE);
+  else console.error(`alp: ${scrubText((error as Error | undefined)?.message ?? error)}`);
   process.exitCode = 1;
 }

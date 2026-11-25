@@ -9,7 +9,7 @@ import { initProject } from '@anhlp/alp-core/init';
 import { closeTask, createTask, epicReport, landedParents, loadTasks, recordVerification, startTask, submitTask, taskDigest } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 
-const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 
 async function project(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-epic-'));

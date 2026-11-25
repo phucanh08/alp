@@ -7,6 +7,7 @@
     "src",
     "!src/dashboard",
     "dist",
+    "!dist/dashboard",
     "NOTICE"
   ],
   "exports": {
@@ -28,96 +29,96 @@
     },
     "./backup": {
       "alp-source": {
-        "types": "./src/commands/backup.js",
-        "default": "./src/commands/backup.js"
+        "types": "./src/commands/backup.ts",
+        "default": "./src/commands/backup.ts"
       },
       "types": "./dist/commands/backup.d.ts",
       "default": "./dist/commands/backup.js"
     },
     "./cli": {
       "alp-source": {
-        "types": "./src/cli.js",
-        "default": "./src/cli.js"
+        "types": "./src/cli.ts",
+        "default": "./src/cli.ts"
       },
       "types": "./dist/cli.d.ts",
       "default": "./dist/cli.js"
     },
     "./daemon": {
       "alp-source": {
-        "types": "./src/daemon.js",
-        "default": "./src/daemon.js"
+        "types": "./src/daemon.ts",
+        "default": "./src/daemon.ts"
       },
       "types": "./dist/daemon.d.ts",
       "default": "./dist/daemon.js"
     },
     "./index": {
       "alp-source": {
-        "types": "./src/index.js",
-        "default": "./src/index.js"
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
       },
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
     ".": {
       "alp-source": {
-        "types": "./src/index.js",
-        "default": "./src/index.js"
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
       },
       "types": "./dist/index.d.ts",
-      "default": "./src/index.js"
+      "default": "./dist/index.js"
     },
     "./interfaces": {
       "alp-source": {
-        "types": "./src/interfaces.js",
-        "default": "./src/interfaces.js"
+        "types": "./src/interfaces.ts",
+        "default": "./src/interfaces.ts"
       },
       "types": "./dist/interfaces.d.ts",
       "default": "./dist/interfaces.js"
     },
     "./library": {
       "alp-source": {
-        "types": "./src/commands/library.js",
-        "default": "./src/commands/library.js"
+        "types": "./src/commands/library.ts",
+        "default": "./src/commands/library.ts"
       },
       "types": "./dist/commands/library.d.ts",
       "default": "./dist/commands/library.js"
     },
     "./paths": {
       "alp-source": {
-        "types": "./src/paths.js",
-        "default": "./src/paths.js"
+        "types": "./src/paths.ts",
+        "default": "./src/paths.ts"
       },
       "types": "./dist/paths.d.ts",
       "default": "./dist/paths.js"
     },
     "./projects": {
       "alp-source": {
-        "types": "./src/commands/projects.js",
-        "default": "./src/commands/projects.js"
+        "types": "./src/commands/projects.ts",
+        "default": "./src/commands/projects.ts"
       },
       "types": "./dist/commands/projects.d.ts",
       "default": "./dist/commands/projects.js"
     },
     "./sessions": {
       "alp-source": {
-        "types": "./src/commands/sessions.js",
-        "default": "./src/commands/sessions.js"
+        "types": "./src/commands/sessions.ts",
+        "default": "./src/commands/sessions.ts"
       },
       "types": "./dist/commands/sessions.d.ts",
       "default": "./dist/commands/sessions.js"
     },
     "./tasks": {
       "alp-source": {
-        "types": "./src/commands/tasks.js",
-        "default": "./src/commands/tasks.js"
+        "types": "./src/commands/tasks.ts",
+        "default": "./src/commands/tasks.ts"
       },
       "types": "./dist/commands/tasks.d.ts",
       "default": "./dist/commands/tasks.js"
     },
     "./usage": {
       "alp-source": {
-        "types": "./src/commands/usage.js",
-        "default": "./src/commands/usage.js"
+        "types": "./src/commands/usage.ts",
+        "default": "./src/commands/usage.ts"
       },
       "types": "./dist/commands/usage.d.ts",
       "default": "./dist/commands/usage.js"

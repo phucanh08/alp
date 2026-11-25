@@ -82,7 +82,7 @@ test('the user\'s setting picks the language of main\'s instructions', async t =
 test('alp language shows, sets and resets the language', async t => {
   const dir = await home(t);
   const { execFile } = await import('node:child_process');
-  const cli = (...args) => new Promise((resolve, reject) => execFile(process.execPath, ['packages/cli/src/cli.js', 'language', ...args], { env: { ...process.env, ALP_HOME: dir } }, (error, stdout) => error ? reject(error) : resolve(stdout.trim())));
+  const cli = (...args) => new Promise((resolve, reject) => execFile(process.execPath, ['packages/cli/dist/cli.js', 'language', ...args], { env: { ...process.env, ALP_HOME: dir } }, (error, stdout) => error ? reject(error) : resolve(stdout.trim())));
   assert.equal(await cli(), 'Language: Vietnamese (the default; not set)');
   assert.equal(await cli('English'), 'Language: English');
   assert.deepEqual(JSON.parse(await cli('--json')), { language: 'English', applies: 'English', default: 'Vietnamese' });

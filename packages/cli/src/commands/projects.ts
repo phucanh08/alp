@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 import { initProject } from '@anhlp/alp-core/init';
 import { upgradeProject } from '@anhlp/alp-core/upgrade';
+import type { UpgradeResult } from '@anhlp/alp-core/upgrade';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { commandDecision, profileFor } from '@anhlp/alp-core/permissions';
 import { describeVerification, runVerify, verifyConfig } from '@anhlp/alp-core/verify';
@@ -17,10 +18,11 @@ import { DAEMON_ENTRY } from '../paths.js';
 
 const DOCTOR_MARK = { ok: '✓', info: '·', warn: '!', fail: '✗' };
 
-async function project(command, args) {
+async function project(command: 'init' | 'upgrade', args: string[]) {
   if (args.length > 1) throw new UsageError();
   try {
-    const result = await (command === 'upgrade' ? upgradeProject : initProject)(args[0] ?? process.cwd(), { library: alpHome() });
+    // init returns only created/preserved/updated; the upgrade-only fields are read under command === 'upgrade'.
+    const result = await (command === 'upgrade' ? upgradeProject : initProject)(args[0] ?? process.cwd(), { library: alpHome() }) as UpgradeResult;
     console.log(`ALP initialized: ${result.created.length} files created, ${result.preserved.length} existing files preserved.`);
     // On upgrade an edited role-skills.json is offered the built-in role skills it never was (t-de1a).
     const library = await seedLibrary(alpHome(), { offerRoleSkills: command === 'upgrade' });
@@ -37,12 +39,12 @@ async function project(command, args) {
       if (result.customSkills.length) console.log(`Customized retired skills preserved for review: ${result.customSkills.join(', ')}`);
     }
   } catch (error) {
-    console.error(`ALP initialization failed: ${error.message}`);
+    console.error(`ALP initialization failed: ${(error as Error).message}`);
     process.exitCode = 1;
   }
 }
 
-async function permissionsCommand(args) {
+async function permissionsCommand(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, json: { type: 'boolean' } } });
   const root = await taskProject(values.project);
   if (positionals[0] === 'check') {
@@ -51,9 +53,10 @@ async function permissionsCommand(args) {
     const decision = profile ? commandDecision(profile, positionals[2]) : undefined;
     const result = { agent: positionals[1], profile: profile?.name ?? null, base: profile?.base ?? null, decision: decision ?? 'mode' };
     if (values.json) { console.log(JSON.stringify(result)); return; }
-    console.log(decision === 'deny' ? `deny: a deny rule of profile ${profile.name} covers it`
-      : decision === 'ask' ? `ask: profile ${profile.name} asks the user each time`
-      : decision === 'allow' ? `allow: profile ${profile.name} lets ${result.agent} run it, even beyond its ${profile.base} mode`
+    // A decision comes only from a profile, so `profile!` holds in its three branches.
+    console.log(decision === 'deny' ? `deny: a deny rule of profile ${profile!.name} covers it`
+      : decision === 'ask' ? `ask: profile ${profile!.name} asks the user each time`
+      : decision === 'allow' ? `allow: profile ${profile!.name} lets ${result.agent} run it, even beyond its ${profile!.base} mode`
       : `no rule covers it: ${result.agent}'s mode decides${profile ? ` (at most ${profile.base})` : ''}`);
     return;
   }
@@ -71,7 +74,7 @@ async function permissionsCommand(args) {
 
 /** Lists one library kind: where each entry comes from, what it overrides, and who uses it. */
 
-async function trustCommand(args) {
+async function trustCommand(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, revoke: { type: 'boolean' }, list: { type: 'boolean' }, json: { type: 'boolean' } } });
   if (positionals.length || (values.revoke && values.list)) throw new UsageError();
   if (values.list) {
@@ -93,7 +96,7 @@ async function trustCommand(args) {
 
 /** alp teams: each team with where it comes from, its main, members and delegation. */
 
-async function language(args) {
+async function language(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { reset: { type: 'boolean' }, json: { type: 'boolean' } } });
   if (positionals.length > 1 || (values.reset && positionals.length)) throw new UsageError();
   const state = values.reset ? await setLanguage(alpHome(), null) : positionals.length ? await setLanguage(alpHome(), positionals[0]) : await languageSetting(alpHome());
@@ -103,7 +106,7 @@ async function language(args) {
 
 /** alp verify: run the project's verify commands here, in the project root. */
 
-async function verify(args) {
+async function verify(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, task: { type: 'string' }, json: { type: 'boolean' } } });
   if (positionals[0] === 'antigravity') {
     const result = await probeAntigravity({}, { cwd: process.cwd() });
@@ -129,10 +132,13 @@ async function verify(args) {
   if (!verification.passed) process.exitCode = 1;
 }
 
-async function doctor(args) {
+async function doctor(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, fix: { type: 'boolean' }, json: { type: 'boolean' } } });
   if (positionals.length) throw new UsageError();
   const project = values.project ? await taskProject(values.project) : await taskProject(undefined).catch(() => undefined);
+  // This file is never built, so the import fails and doctor gets sandbox undefined; the dead
+  // import is tracked by task t-b156 and kept as it is here.
+  // @ts-expect-error TS2307: the module does not exist (see above).
   const sandbox = await import('../../dist/runtime/index.js').then(runtime => runtime.claudeSandboxAvailable(), () => undefined);
   const options = { home: alpHome(), project, sandbox, daemonEntry: DAEMON_ENTRY };
   let checks = await diagnose(options);

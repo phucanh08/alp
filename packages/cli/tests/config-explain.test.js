@@ -9,7 +9,7 @@ import { initProject } from '@anhlp/alp-core/init';
 import { profileFor } from '@anhlp/alp-core/permissions';
 import { teardown } from '../../../test/support/teardown.js';
 
-const CLI = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
 
 async function project(t, permissions, userPermissions) {
   const defer = teardown(t);

@@ -1,7 +1,7 @@
-// @ts-check
 import { methods as host } from './host.js';
 import { methods as library } from './library.js';
 import { methods as workspaceFacts } from './workspace-facts.js';
+import type { OwnerHandler } from '@anhlp/alp-gateway/owner';
 
 /**
  * The host owner's methods of alp dashboard (t-a95b; docs/alp/remote-gateway.md §5.19): what the
@@ -23,25 +23,22 @@ import { methods as workspaceFacts } from './workspace-facts.js';
  * host.js (group B), library.js (group C) and workspace-facts.js (t-ff83, the sidebar's
  * host.workspace.facts) each own their methods; a name in both is a mistake
  * and stops the dashboard at start rather than letting one silently win.
- *
- * @typedef {{
- *   method: string,
- *   params: Record<string, any>,
- *   principal: string,
- *   daemon: { request: (method: string, params?: Record<string, unknown>) => Promise<unknown> },
- *   home: string,
- *   socket: string,
- * }} DashboardOwnerContext
- * @typedef {(context: DashboardOwnerContext) => unknown} DashboardOwnerHandler
  */
+export type DashboardOwnerContext = {
+  method: string;
+  params: Record<string, any>; // any: the request's params, unchecked; each handler checks them
+  principal: string;
+  daemon: { request: (method: string, params?: Record<string, unknown>) => Promise<unknown> };
+  home: string;
+  socket: string;
+};
+export type DashboardOwnerHandler = (context: DashboardOwnerContext) => unknown;
 
 /**
  * Merges the method tables; throws on a name defined twice.
- * @param {Array<Readonly<Record<string, DashboardOwnerHandler>>>} tables
  */
-export function mergeOwnerMethods(tables) {
-  /** @type {Record<string, DashboardOwnerHandler>} */
-  const merged = {};
+export function mergeOwnerMethods(tables: Array<Readonly<Record<string, DashboardOwnerHandler>>>): Record<string, DashboardOwnerHandler> {
+  const merged: Record<string, DashboardOwnerHandler> = {};
   for (const table of tables) {
     for (const [name, handler] of Object.entries(table)) {
       if (Object.hasOwn(merged, name)) throw new Error(`owner method ${name} is defined twice`);
@@ -54,10 +51,8 @@ export function mergeOwnerMethods(tables) {
 /**
  * The owner methods as createGateway takes them: each handler gets the gateway's context plus
  * `home` and `socket`.
- * @param {{ home: string, socket: string }} where
- * @returns {Record<string, import('@anhlp/alp-gateway/owner').OwnerHandler>}
  */
-export function ownerMethods({ home, socket }) {
+export function ownerMethods({ home, socket }: { home: string; socket: string }): Record<string, OwnerHandler> {
   return Object.fromEntries(Object.entries(mergeOwnerMethods([host, library, workspaceFacts]))
-    .map(([name, handler]) => [name, (/** @type {any} */ context) => handler({ ...context, home, socket })]));
+    .map(([name, handler]) => [name, (context: Parameters<OwnerHandler>[0]) => handler({ ...context, home, socket })]));
 }

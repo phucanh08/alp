@@ -35,10 +35,12 @@ async function compile(name) {
   const metafiles = [];
   const record = (file, result) => { metafiles.push(result.metafile); return recordBundle(entries, path.relative(ROOT, file), result); };
   // The CLI's alp-dashboard service (src/dashboard) ships only as the self-contained dist/alp-dashboard.js below: it
-  // inlines the private gateway, so it has no per-file artifacts or declarations.
+  // inlines the private gateway, so it has no declarations. Its per-file JavaScript (dist/dashboard/, which the
+  // package's `files` leaves out) is built only for the CLI's own tests, which cannot load the TypeScript sources.
   const bundledOnly = name === 'cli' ? file => file.split(path.sep)[0] === 'dashboard' : () => false;
-  const files = (await readdir(path.join(directory, 'src'), { recursive: true })).filter(file => !bundledOnly(file));
-  for (const file of files.filter(file => /\.(ts|js)$/.test(file) && !file.endsWith('.d.ts'))) {
+  const sources = await readdir(path.join(directory, 'src'), { recursive: true });
+  const files = sources.filter(file => !bundledOnly(file));
+  for (const file of sources.filter(file => /\.(ts|js)$/.test(file) && !file.endsWith('.d.ts'))) {
     const outfile = path.join(directory, 'dist', file.replace(/\.ts$/, '.js'));
     const result = await build({ absWorkingDir: ROOT, entryPoints: [path.join(directory, 'src', file)], outfile, bundle: true, format: 'esm', platform: 'node', target: 'node20', conditions: sourceConditions, external: ['./*', '../*', '@anhlp/*'], packages: 'external', plugins, metafile: true,
       define: { __ALP_VERSION__: JSON.stringify(manifest.version) } });
@@ -56,7 +58,7 @@ async function compile(name) {
     // `alp dashboard`'s service: the gateway (a private workspace) and ws inlined, the browser files beside it.
     // A core-only source copy (scripts/core-standalone-smoke.mjs) has neither app and builds without it.
     if (webSources()) {
-      record(path.join(directory, 'dist/alp-dashboard.js'), await build({ absWorkingDir: ROOT, entryPoints: ['packages/cli/src/dashboard/main.js'], outfile: path.join(directory, 'dist/alp-dashboard.js'), bundle: true, format: 'esm', platform: 'node', target: 'node20', conditions: sourceConditions, banner: requireShim, define: { __ALP_VERSION__: JSON.stringify(manifest.version) }, metafile: true }));
+      record(path.join(directory, 'dist/alp-dashboard.js'), await build({ absWorkingDir: ROOT, entryPoints: ['packages/cli/src/dashboard/main.ts'], outfile: path.join(directory, 'dist/alp-dashboard.js'), bundle: true, format: 'esm', platform: 'node', target: 'node20', conditions: sourceConditions, banner: requireShim, define: { __ALP_VERSION__: JSON.stringify(manifest.version) }, metafile: true }));
       await buildAlpDashboard();
     } else console.log('Skipped alp-dashboard: this source has no apps/gateway or apps/web (a core-only copy)');
   }
@@ -66,6 +68,8 @@ async function compile(name) {
   // published package never carries an unexported leftover from an earlier build (for example the old
   // daemon `web.js` after the web surface moved to the plugin).
   const expected = new Set(['build-manifest.json']);
+  // The tests' per-file JavaScript of the bundled-only sources (no declarations).
+  for (const file of sources.filter(file => bundledOnly(file) && /\.(ts|js)$/.test(file) && !file.endsWith('.d.ts'))) expected.add(file.replace(/\.ts$/, '.js'));
   for (const file of files) {
     // Hand-written `src/*.d.ts` companions are copied to `dist` as-is and must survive the prune.
     if (file.endsWith('.d.ts')) { expected.add(file); continue; }

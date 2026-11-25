@@ -4,7 +4,7 @@ import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { paseoTokenSocketPath, readPaseoToken } from '../src/interfaces.js';
+import { paseoTokenSocketPath, readPaseoToken } from '../dist/interfaces.js';
 import { teardown } from '../../../test/support/teardown.js';
 
 /**

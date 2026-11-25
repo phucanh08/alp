@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
 import { explainProfile, permissionScopes } from '@anhlp/alp-core/permissions';
+import type { PermissionExplanation, PermissionOrigin } from '@anhlp/alp-core/permissions';
 import { discoverAgents } from '@anhlp/alp-core/resolver';
 import { alpHome } from '@anhlp/alp-client/index';
 import { UsageError } from './commands/usage.js';
@@ -7,29 +8,34 @@ import { taskProject } from './commands/tasks.js';
 
 const SCOPE_LABEL = { project: 'project', user: 'user', default: 'default' };
 
+/** One agent's row of `alp config explain`: its explanation, or the settings error that stopped it. */
+type ConfigRow = (PermissionExplanation & { error?: undefined }) | { agent: string; error: string; warnings?: undefined };
+
 /** `project  <file>  (<key>; <reason>)`, or `default  (<reason>)`: where one value came from. */
-function origin(entry) {
+function origin(entry: PermissionOrigin<unknown> & { file?: string }) {
   const notes = [entry.key, entry.reason].filter(Boolean).join('; ');
   return `${SCOPE_LABEL[entry.scope]}${entry.file ? `  ${entry.file}` : ''}${notes ? `  (${notes})` : ''}`;
 }
 
-function printAgent(row) {
+function printAgent(row: ConfigRow) {
   if (row.error) { console.log(`${row.agent}\n  error: ${row.error}`); return; }
-  const { agent, profile, provenance, warnings } = row;
+  // The error row returned above; this is an explanation.
+  const { agent, profile, provenance, warnings } = row as PermissionExplanation;
   if (!profile) {
     console.log(`${agent}\n  no profile: no settings file maps ${agent} to one; the mode its requester or the user chooses applies (default)`);
     return;
   }
   console.log(agent);
+  // Below, `provenance!`: explainProfile returns a provenance whenever it returns a profile.
   const width = Math.max(...[profile.name, profile.base, profile.beyondMode].map(value => value.length));
-  const line = (label, value, entry) => console.log(`  ${label.padEnd(11)} ${value.padEnd(width)}  ${origin(entry)}`);
-  line('profile', profile.name, provenance.name);
-  for (const shadowed of provenance.name.overrides ?? []) console.log(`  ${' '.repeat(11)} ${' '.repeat(width)}  overrides ${shadowed.value} from ${shadowed.scope}  ${shadowed.file}`);
-  line('base', profile.base, provenance.base);
-  line('beyondMode', profile.beyondMode, provenance.beyondMode);
-  if (provenance.workdir) line('workdir', 'copy', provenance.workdir);
-  for (const kind of ['allow', 'ask', 'deny']) {
-    for (const { rule, sources } of provenance[kind]) console.log(`  ${kind.padEnd(5)} ${rule}  ${sources.map(source => `${source.scope}  ${source.file}`).join(' + ')}`);
+  const line = (label: string, value: string, entry: PermissionOrigin<unknown>) => console.log(`  ${label.padEnd(11)} ${value.padEnd(width)}  ${origin(entry)}`);
+  line('profile', profile.name, provenance!.name);
+  for (const shadowed of provenance!.name.overrides ?? []) console.log(`  ${' '.repeat(11)} ${' '.repeat(width)}  overrides ${shadowed.value} from ${shadowed.scope}  ${shadowed.file}`);
+  line('base', profile.base, provenance!.base);
+  line('beyondMode', profile.beyondMode, provenance!.beyondMode);
+  if (provenance!.workdir) line('workdir', 'copy', provenance!.workdir);
+  for (const kind of ['allow', 'ask', 'deny'] as const) {
+    for (const { rule, sources } of provenance![kind]) console.log(`  ${kind.padEnd(5)} ${rule}  ${sources.map(source => `${source.scope}  ${source.file}`).join(' + ')}`);
   }
   for (const warning of warnings) console.log(`  warning: ${warning.message}`);
 }
@@ -40,7 +46,7 @@ function printAgent(row) {
  * never blocks and never changes the exit code; a settings file ALP cannot use does (exit 1), as
  * an agent could not start with it either.
  */
-async function configCommand(args) {
+async function configCommand(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, agent: { type: 'string', multiple: true }, json: { type: 'boolean' } } });
   if (positionals.length !== 1 || positionals[0] !== 'explain') throw new UsageError();
   const root = await taskProject(values.project);
@@ -48,12 +54,12 @@ async function configCommand(args) {
   const scopes = await permissionScopes(root, home);
   // Every agent the project can run, and any other a settings file maps to a profile.
   const agents = values.agent ?? [...new Set([...await discoverAgents(root, { library: home }), ...scopes.flatMap(scope => Object.keys(scope.agents))])];
-  const rows = [];
+  const rows: ConfigRow[] = [];
   for (const agent of agents) {
     try { rows.push(await explainProfile(root, home, agent)); }
     catch (error) {
-      if (error?.code !== 'INVALID_SETTINGS') throw error;
-      rows.push({ agent, error: error.message });
+      if ((error as NodeJS.ErrnoException | undefined)?.code !== 'INVALID_SETTINGS') throw error;
+      rows.push({ agent, error: (error as Error).message });
     }
   }
   const files = scopes.map(({ scope, file, exists }) => ({ scope, file, exists }));

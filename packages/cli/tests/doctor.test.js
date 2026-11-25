@@ -131,7 +131,7 @@ test('alp doctor --json prints the checks and exits 0 when nothing fails', async
   const claude = await fakeBin(bin, 'claude', "if (process.argv[2] === '--version') console.log('1.0.0 (Claude Code)'); else console.log('{\"loggedIn\": true}');");
   const project = path.join(directory, 'project');
   await initProject(project);
-  const output = execFileSync(process.execPath, [fileURLToPath(new URL('../src/cli.js', import.meta.url)), 'doctor', '--json', '--project', project], {
+  const output = execFileSync(process.execPath, [fileURLToPath(new URL('../dist/cli.js', import.meta.url)), 'doctor', '--json', '--project', project], {
     env: { ...process.env, ALP_HOME: home, PATH: `${bin}${path.delimiter}${process.env.PATH}`, ALP_CODEX_BIN: windows ? codex : '', ALP_CLAUDE_BIN: windows ? claude : '', ALP_ANTIGRAVITY_BIN: codex },
   }).toString();
   const report = JSON.parse(output);
@@ -155,7 +155,7 @@ test('alp doctor checks efforts against the catalog alpd cached, as alpd does: a
   await writeFile(file, JSON.stringify({ ...JSON.parse(await readFile(file, 'utf8')), team: { default: { peer: { profiles: ['codex:gpt-live-only:high'] } } } }));
   let output;
   try {
-    output = execFileSync(process.execPath, [fileURLToPath(new URL('../src/cli.js', import.meta.url)), 'doctor', '--json', '--project', project], { env: { ...process.env, ALP_HOME: home, PATH: path.join(directory, 'empty') } }).toString();
+    output = execFileSync(process.execPath, [fileURLToPath(new URL('../dist/cli.js', import.meta.url)), 'doctor', '--json', '--project', project], { env: { ...process.env, ALP_HOME: home, PATH: path.join(directory, 'empty') } }).toString();
   } catch (error) { output = error.stdout.toString(); }
   const settings = JSON.parse(output).checks.find(check => check.id === 'settings');
   assert.equal(settings.status, 'fail', JSON.stringify(settings));
@@ -243,7 +243,7 @@ test('doctor only diagnoses: nothing is changed without --fix, and --fix keeps s
   await writeFile(lockFile, JSON.stringify({ pid: 2 ** 22 + 12345, bootTime: bootTime(), socket: path.join(home, 'alpd.sock') }), { mode: 0o600 });
   const unchanged = async () => { for (const [file, body] of Object.entries(keep)) assert.equal(await readFile(file, 'utf8'), body, file); };
 
-  const run = args => JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('../src/cli.js', import.meta.url)), 'doctor', '--json', '--project', project, ...args], {
+  const run = args => JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('../dist/cli.js', import.meta.url)), 'doctor', '--json', '--project', project, ...args], {
     env: { ...process.env, ALP_HOME: home, PATH: path.join(directory, 'empty') }, stdio: ['ignore', 'pipe', 'ignore'],
   }).toString());
   // Not even the dead alpd's lock goes without --fix; the exit code 1 is the missing runtimes.
@@ -267,7 +267,7 @@ test('doctor only diagnoses: nothing is changed without --fix, and --fix keeps s
 
 test('doctor --json and error output stay machine readable and scrubbed', async t => {
   const { home, directory } = await privateHome(t);
-  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
   const env = { ...process.env, ALP_HOME: home, PATH: path.join(directory, 'empty'), ANTHROPIC_API_KEY: SECRET };
   let result;
   try { result = { stdout: execFileSync(process.execPath, [cli, 'doctor', '--json'], { env, stdio: ['ignore', 'pipe', 'pipe'] }).toString(), stderr: '' }; }

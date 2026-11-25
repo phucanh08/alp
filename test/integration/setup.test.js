@@ -13,7 +13,7 @@ async function fixture(t) {
   const root = path.join(dir, 'project');
   return { home, root, file: path.join(root, '.alp/settings.json') };
 }
-const cli = ({ home, root }, ...args) => spawnSync(process.execPath, ['packages/cli/src/cli.js', 'setup', root, ...args], { env: { ...process.env, ALP_HOME: home }, encoding: 'utf8' });
+const cli = ({ home, root }, ...args) => spawnSync(process.execPath, ['packages/cli/dist/cli.js', 'setup', root, ...args], { env: { ...process.env, ALP_HOME: home }, encoding: 'utf8' });
 const read = async file => JSON.parse(await readFile(file, 'utf8'));
 /** setup's record of what it wrote, in project state beside the settings. */
 const record = f => read(path.join(f.root, '.alp/state/setup-profiles.json'));

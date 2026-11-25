@@ -266,7 +266,7 @@ test('Paseo offers every team the project can use, and alp teams lists them', as
   await conn.send({ type: 'catalog', requestId: 'c', cwd: root });
   assert.deepEqual(events[0].catalog.models.map(model => [model.id, model.label]), [['pho', 'Phở'], ['cafe', 'Cafe'], ['review', 'Review'], ['docs', 'Docs']]);
   assert.equal(events[0].catalog.defaultModel, 'pho');
-  const cli = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
+  const cli = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
   const listed = spawnSync(process.execPath, [cli, 'teams', '--project', root], { encoding: 'utf8', env: { ...process.env, ALP_HOME: home } });
   assert.equal(listed.status, 0, listed.stderr);
   assert.match(listed.stdout, /^docs {2}Docs {2}project$/m);

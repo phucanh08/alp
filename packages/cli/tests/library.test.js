@@ -123,7 +123,7 @@ test('alp agents, skills, mcp and hooks list each entry with its source', async 
   await initProject(root);
   await files(home, { 'mcp/docs.json': { url: 'https://example.test/mcp' } });
   await files(root, { '.alp/mcp/docs.json': { command: 'node' }, '.alp/agents/main/AGENT.md': 'Mine', '.alp/agents/main/agent.json': { mcp: ['docs'] } });
-  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
   const run = (...args) => spawnSync(process.execPath, [cli, ...args, '--project', root], { encoding: 'utf8', env: { ...process.env, ALP_HOME: home } });
   const agents = run('agents');
   assert.equal(agents.status, 0, agents.stderr);
@@ -141,7 +141,7 @@ test('alp skills --retired lists retired skills and alp skill restore brings one
     'retired-skills/style-2026-11-01T00-00-00-000Z/retired.json': { name: 'style', roles: ['main'], retiredAt: '2026-11-01T00:00:00.000Z', agent: 'lead', path: '/old' },
     'retired-skills/old-2026-09-01T00-00-00-000Z/SKILL.md': '# Old\n',
   });
-  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
   const run = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', cwd: home, env: { ...process.env, ALP_HOME: home } });
   const list = run('skills', '--retired');
   assert.equal(list.status, 0, list.stderr);
@@ -167,7 +167,7 @@ test('alp skills --retired lists retired skills and alp skill restore brings one
 
 test('alp skill new is strict for new skills; cp, mv and --from keep the frontmatter name in step (skill system v2)', async t => {
   const home = await fixture(t);
-  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
   const run = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', cwd: home, env: { ...process.env, ALP_HOME: home } });
   const plain = path.join(home, 'plain.md');
   await writeFile(plain, 'Just text, no frontmatter\n');
@@ -199,7 +199,7 @@ test('retired text lists warn about unreadable metadata; removed provider flag g
   const bad = path.join(home, 'retired-skills/bad-2026-11-01T00-00-00-000Z');
   await mkdir(path.join(bad, 'retired.json'), { recursive: true });
   await writeFile(path.join(bad, 'SKILL.md'), 'bad');
-  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
   const run = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', cwd: home, env: { ...process.env, ALP_HOME: home } });
   const listed = run('skills', '--retired');
   assert.equal(listed.status, 0, listed.stderr);

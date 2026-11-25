@@ -18,7 +18,7 @@ import { createBackup } from '@anhlp/alp-core/backup';
 import { connect, lockAlive, readLock } from '../../packages/client/dist/index.js';
 
 const ALPD = fileURLToPath(new URL('../../dist/alpd.js', import.meta.url));
-const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 const FAKE_CODEX = fileURLToPath(new URL('../../packages/daemon/tests/support/fake-codex.js', import.meta.url));
 const BACKUP_MODULE = fileURLToPath(new URL('../../packages/core/dist/backup.js', import.meta.url));
 const MODEL = 'codex:gpt-5.6-sol';

@@ -8,10 +8,11 @@ import { start, stop } from '../daemon.js';
 import { UsageError } from './usage.js';
 
 /* global __ALP_VERSION__ */
+declare const __ALP_VERSION__: string;
 const VERSION = typeof __ALP_VERSION__ === 'string' ? __ALP_VERSION__ : 'dev';
 const BY = `alp ${VERSION}`;
 
-const size = bytes => bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`;
+const size = (bytes: number) => bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`;
 const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
 
 /**
@@ -20,13 +21,14 @@ const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+
  * running alpd is stopped only with --stop, and started again after; what it was working on
  * is continued then, as after any stop (ALPD §31).
  */
-async function withMaintenance(kind, { stopFirst }, work) {
+async function withMaintenance<T>(kind: 'backup' | 'restore', { stopFirst }: { stopFirst?: boolean }, work: (home: string) => Promise<T>): Promise<T> {
   const home = alpHome();
   await assertPrivateDirectory(home, { create: true });
   const current = await readLock(home);
   const running = lockAlive(current);
-  if (running && current.maintenance) throw new Error(`alp ${current.maintenance} already runs (pid ${current.pid})`);
-  if (running && !stopFirst) throw new Error(`alpd is running (pid ${current.pid}); stop it first with alp daemon stop, or pass --stop: ALP then stops alpd for the ${kind} and starts it again after`);
+  // lockAlive() is false for a missing lock, so `current!` is the live lock.
+  if (running && current!.maintenance) throw new Error(`alp ${current!.maintenance} already runs (pid ${current!.pid})`);
+  if (running && !stopFirst) throw new Error(`alpd is running (pid ${current!.pid}); stop it first with alp daemon stop, or pass --stop: ALP then stops alpd for the ${kind} and starts it again after`);
   const wasHeld = await daemonHeld(home);
   await holdDaemon(home, `alp ${kind}`);
   let restart = false;
@@ -43,12 +45,12 @@ async function withMaintenance(kind, { stopFirst }, work) {
   }
 }
 
-async function isProject(directory) {
+async function isProject(directory: string) {
   return access(path.join(directory, '.alp')).then(() => true, () => false);
 }
 
 /** alp backup [create] | verify <file> | list */
-export async function backupCommand(args) {
+export async function backupCommand(args: string[]) {
   const [first, ...rest] = args;
   if (first === 'verify') return verifyCommand(rest);
   if (first === 'list') return listCommand(rest);
@@ -59,7 +61,7 @@ export async function backupCommand(args) {
   const out = path.resolve(values.output ?? path.join(backupsDir(alpHome()), `backup-${stamp()}${BACKUP_EXTENSION}`));
   if (await stat(out).then(() => true, () => false)) throw new Error(`${out} exists; choose another file with -o`);
   const summary = await withMaintenance('backup', { stopFirst: values.stop }, async home => {
-    let projects = [];
+    let projects: string[] = [];
     if (!values['no-projects']) {
       // The projects the sessions worked in, those named, and this directory when it is one.
       const named = (values.project ?? []).map(directory => path.resolve(directory));
@@ -75,7 +77,7 @@ export async function backupCommand(args) {
   console.log('  it holds your settings and library too, and may hold credentials from them: keep it private. Codex and Claude keep their own threads; see docs/alp/data-recovery.md');
 }
 
-async function verifyCommand(args) {
+async function verifyCommand(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { json: { type: 'boolean' } } });
   if (positionals.length !== 1) throw new UsageError();
   const contents = await verifyBackup(path.resolve(positionals[0]));
@@ -86,7 +88,7 @@ async function verifyCommand(args) {
   if (contents.projects.length) console.log(`  projects: ${contents.projects.join(', ')}`);
 }
 
-async function listCommand(args) {
+async function listCommand(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { json: { type: 'boolean' } } });
   if (positionals.length) throw new UsageError();
   const directory = backupsDir(alpHome());
@@ -98,7 +100,7 @@ async function listCommand(args) {
 }
 
 /** alp restore <file> [--home-only] [--stop] [--dry-run] [--replace-newer] [--json] */
-export async function restoreCommand(args) {
+export async function restoreCommand(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     'home-only': { type: 'boolean' }, stop: { type: 'boolean' }, 'dry-run': { type: 'boolean' }, 'replace-newer': { type: 'boolean' }, json: { type: 'boolean' },
   } });
@@ -106,7 +108,7 @@ export async function restoreCommand(args) {
   const file = path.resolve(positionals[0]);
   if (values['dry-run']) {
     const contents = await verifyBackup(file);
-    const missing = [];
+    const missing: string[] = [];
     for (const root of contents.projects) if (!await stat(root).then(info => info.isDirectory(), () => false)) missing.push(root);
     if (values.json) { console.log(JSON.stringify({ ...contents, missing })); return; }
     console.log(`${file} is intact; a restore would replace, in ${alpHome()}: ${contents.units.join(', ') || 'nothing'}`);

@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   allowedHop, bundleCommand, retryBusy, compareVersions, fetchBytes, npmMessage, pruneVersions, releaseBaseUrl, releasePlatform,
   selectAsset, selfUpdate, sha256, switchCurrent, systemTar, verifyChecksum, verifyProvenance,
-} from '../src/self-update.js';
+} from '../dist/self-update.js';
 
 const H = c => c.repeat(64);
 const SUMS = [
@@ -404,7 +404,7 @@ test('bundleCommand runs the bundle\'s own Node and CLI', () => {
 });
 
 test('the CLI routes update-template to the template upgrade and update to the self-update', () => {
-  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
   const usage = spawnSync(process.execPath, [cli], { encoding: 'utf8', env: { ...process.env, ALP_HOME: path.join(tmpdir(), 'alp-none') } });
   assert.match(usage.stderr, /alp <init\|update-template> \[directory\]/);
   assert.match(usage.stderr, /alp update \[--check\] \[--yes\] \[--version X\]/);

@@ -6,7 +6,7 @@ import { lstat, mkdtemp, readFile, rm, writeFile, chmod } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { HOME_UNITS } from '@anhlp/alp-core/backup';
-import { read, terminalCommand, TERMINAL_WARNING } from '../src/terminal.js';
+import { read, terminalCommand, TERMINAL_WARNING } from '../dist/terminal.js';
 
 test('allow needs --yes after the warning; the file is private; deny keeps limits; status reads it', async t => {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-terminal-cli-'));

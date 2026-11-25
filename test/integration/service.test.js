@@ -13,7 +13,7 @@ import { alpHome, daemonPaths, lockAlive, readLock } from '../../packages/client
 /** RegExp.escape, which Node 22 lacks. */
 const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 const ENTRY = fileURLToPath(new URL('../../packages/cli/dist/alpd.js', import.meta.url));
 
 test('the service keeps alpd up after a crash but not after a clean stop, with the environment alpd needs', async () => {

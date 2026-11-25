@@ -13,7 +13,7 @@ const model = process.env.ALP_TEST_MODEL ?? 'codex:gpt-5.6-sol';
 const { home, owned } = await laneHome({ prefix: 'alp-e2e-' });
 const env = { ...process.env, ALP_HOME: home };
 // ALP_TEST_CLI runs another alp, such as a built bundle's bin/alp, which starts its native alpd (t-81b0.9).
-const alp = process.env.ALP_TEST_CLI ? [process.env.ALP_TEST_CLI] : [process.execPath, 'packages/cli/src/cli.js'];
+const alp = process.env.ALP_TEST_CLI ? [process.env.ALP_TEST_CLI] : [process.execPath, 'packages/cli/dist/cli.js'];
 const cli = (...args) => spawnSync(alp[0], [...alp.slice(1), ...args], { env, encoding: 'utf8' });
 
 const root = path.resolve('.alp-test', `alpd-${Date.now()}`);

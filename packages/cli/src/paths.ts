@@ -4,7 +4,7 @@ import path from 'node:path';
 import { daemonEntry, selfEntry } from '@anhlp/alp-core/packaged';
 
 /** Locate artifacts in either the independently shipped CLI or the legacy root build. */
-export function distributionEntry(name) {
+export function distributionEntry(name: string): URL {
   const entry = process.argv[1] && path.basename(process.argv[1]) === 'cli.js' ? pathToFileURL(path.resolve(process.argv[1])) : undefined;
   const candidates = [
     ...(entry ? [new URL(`../dist/${name}`, entry)] : []),

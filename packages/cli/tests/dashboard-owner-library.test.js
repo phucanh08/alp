@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { chmod, link, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { MASK_TEXT, OWNER_LIBRARY_KINDS, TEST_OUTPUT_CHARS, libraryTest, listWorkspaceFiles, maskIn, methods, previewWorkspaceImage, readWorkspaceFile, writeWorkspaceFile } from '../src/dashboard/owner/library.js';
+import { MASK_TEXT, OWNER_LIBRARY_KINDS, TEST_OUTPUT_CHARS, libraryTest, listWorkspaceFiles, maskIn, methods, previewWorkspaceImage, readWorkspaceFile, writeWorkspaceFile } from '../dist/dashboard/owner/library.js';
 import { teardown } from '../../../test/support/teardown.js';
 
 const sha = text => createHash('sha256').update(text).digest('hex');

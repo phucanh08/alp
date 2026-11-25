@@ -9,7 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { FACTS, ICON_CANDIDATES, ciOf, createWorkspaceFacts, factsParams, iconOf, isInside, looksLike, onPath, methods, numstat, prOf, readFacts } from '../src/dashboard/owner/workspace-facts.js';
+import { FACTS, ICON_CANDIDATES, ciOf, createWorkspaceFacts, factsParams, iconOf, isInside, looksLike, onPath, methods, numstat, prOf, readFacts } from '../dist/dashboard/owner/workspace-facts.js';
 import { teardown } from '../../../test/support/teardown.js';
 
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(24, 1)]);

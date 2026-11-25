@@ -1,7 +1,7 @@
-// @ts-check
 import { createReadStream } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
 /**
  * The static side of `alp dashboard` (docs/alp/dashboard.md): the built apps/web files, served through the
@@ -20,8 +20,7 @@ import path from 'node:path';
  * content and immutable.
  */
 
-/** @type {Record<string, string>} */
-const TYPES = {
+const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.map': 'application/json; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -33,24 +32,21 @@ const TYPES = {
 // `:` names a drive or an NTFS stream on Windows; the built app has no such file anywhere.
 const FORBIDDEN_IN_SEGMENT = /[\u0000-\u001f\u007f/\\:]/;
 
-/** What a page without the built app says. @param {string} dir */
-const missingPage = dir => `<!doctype html><meta charset="utf-8"><title>ALP</title><body style="font:16px system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem">
+/** What a page without the built app says. */
+const missingPage = (dir: string): string => `<!doctype html><meta charset="utf-8"><title>ALP</title><body style="font:16px system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem">
 <h1>ALP dashboard is not built</h1><p>The web app's files are missing from <code>${dir.replace(/[&<>"]/g, char => `&#${char.charCodeAt(0)};`)}</code>. Build them from a checkout with <code>node scripts/build-workspace.mjs cli</code> (or <code>node scripts/build-alp-dashboard.mjs</code>), or install ALP from npm, which carries them. The gateway on this address keeps running.</p>`;
 
 /**
  * The path segments a raw request target names, each decoded once, or a refusal.
- * @param {string | undefined} raw
- * @returns {{ segments: string[] } | { status: 400 }}
  */
-export function parseTarget(raw) {
+export function parseTarget(raw: string | undefined): { segments: string[] } | { status: 400 } {
   if (typeof raw !== 'string' || !raw.startsWith('/') || raw.includes('\\') || /%5c/i.test(raw) || raw.includes('\0')) return { status: 400 };
   let url;
   // Never `new URL(raw, base)`: a raw `//host/x` would name another host. The fixed origin keeps it a path.
   try { url = new URL(`http://alp-dashboard.invalid${raw}`); } catch { return { status: 400 }; }
   if (url.host !== 'alp-dashboard.invalid') return { status: 400 };
   const parts = url.pathname.split('/').slice(1);
-  /** @type {string[]} */
-  const segments = [];
+  const segments: string[] = [];
   for (let index = 0; index < parts.length; index++) {
     const part = parts[index];
     // A trailing slash (`/` itself, or `/route/`) is the directory's index; any other empty segment is `//`.
@@ -63,18 +59,16 @@ export function parseTarget(raw) {
   return { segments };
 }
 
-/** @param {string} file */
-const isFile = file => stat(file).then(info => info.isFile(), () => false);
+const isFile = (file: string): Promise<boolean> => stat(file).then(info => info.isFile(), () => false);
 
 /**
- * @param {{ dir: string, csp: () => string, log?: (message: string) => void }} options
+ * @param options
  *   `dir` holds the built app (index.html and assets/); `csp` is the Content-Security-Policy for the
  *   current listener (it names the bound port).
  */
-export function createStaticServer({ dir, csp, log = () => {} }) {
+export function createStaticServer({ dir, csp, log = () => {} }: { dir: string; csp: () => string; log?: (message: string) => void }): (request: IncomingMessage, response: ServerResponse) => Promise<boolean> {
   const configured = path.resolve(dir);
-  /** @type {Promise<string | undefined> | undefined} */
-  let root;
+  let root: Promise<string | undefined> | undefined;
   /** The app directory's real path while it holds an index.html; checked again after a miss. */
   const appRoot = async () => {
     const found = await (root ??= realpath(configured).then(async real => (await isFile(path.join(real, 'index.html')) ? real : undefined), () => undefined));
@@ -82,8 +76,7 @@ export function createStaticServer({ dir, csp, log = () => {} }) {
     return found;
   };
 
-  /** @param {string} type @param {string} cache */
-  const headers = (type, cache) => ({
+  const headers = (type: string, cache: string) => ({
     'content-type': type,
     'cache-control': cache,
     'x-content-type-options': 'nosniff',
@@ -94,14 +87,13 @@ export function createStaticServer({ dir, csp, log = () => {} }) {
     'content-security-policy': csp(),
   });
 
-  /** @param {import('node:http').IncomingMessage} request @param {import('node:http').ServerResponse} response @param {number} status @param {string} text */
-  function plain(request, response, status, text) {
+  function plain(request: IncomingMessage, response: ServerResponse, status: number, text: string): void {
     response.writeHead(status, { ...headers('text/plain; charset=utf-8', 'no-store'), 'content-length': String(Buffer.byteLength(text)) });
     response.end(request.method === 'HEAD' ? undefined : text);
   }
 
-  /** @param {string} base @param {string[]} segments @returns {Promise<string | undefined>} a regular file under `base`, by realpath */
-  async function contained(base, segments) {
+  /** @returns a regular file under `base`, by realpath */
+  async function contained(base: string, segments: string[]): Promise<string | undefined> {
     const candidate = path.join(base, ...segments);
     let real;
     try { real = await realpath(candidate); } catch { return undefined; }
@@ -111,9 +103,8 @@ export function createStaticServer({ dir, csp, log = () => {} }) {
 
   /**
    * The gateway's serveStatic hook.
-   * @param {import('node:http').IncomingMessage} request @param {import('node:http').ServerResponse} response
    */
-  return async function serveStatic(request, response) {
+  return async function serveStatic(request: IncomingMessage, response: ServerResponse): Promise<boolean> {
     const base = await appRoot();
     if (!base) {
       const page = missingPage(configured);

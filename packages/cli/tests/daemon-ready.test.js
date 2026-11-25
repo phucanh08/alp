@@ -7,7 +7,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { acquireDaemonLock, daemonPaths, releaseDaemonLock } from '@anhlp/alp-client/index';
-import { ready } from '../src/daemon.js';
+import { ready } from '../dist/daemon.js';
 
 async function startingHome(t, timeout) {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-cli-ready-'));

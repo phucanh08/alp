@@ -5,14 +5,16 @@ import { parseArgs } from 'node:util';
 import { ago, duration, renderLog, renderPs } from '@anhlp/alp-client/render';
 import { AGENT_MARKER, isAgentProcess, isTaskId } from '@anhlp/alp-core/tasks';
 import { connect } from '@anhlp/alp-client/index';
+import type { AlpClient } from '@anhlp/alp-client/index';
+import type { AlpEvent, Envelope, TimelineItem, UserQuestion } from '@anhlp/alp-protocol';
 import { UsageError } from './usage.js';
 import { start, running, stop } from '../daemon.js';
 import { taskProject } from './tasks.js';
 
 /** One line for a finished tool call: its command, or what a typed call touched (ALPD §4.2). */
-export function toolLine(item) {
+export function toolLine(item: Extract<TimelineItem, { kind: 'tool_call' }>): string {
   const detail = item.detail ?? {};
-  const first = text => String(text ?? '').split('\n')[0].slice(0, 200);
+  const first = (text: unknown) => String(text ?? '').split('\n')[0].slice(0, 200);
   switch (detail.type) {
     case 'shell': return detail.command;
     case 'read': case 'edit': case 'write': return `${item.name} ${detail.filePath}`;
@@ -21,7 +23,8 @@ export function toolLine(item) {
     case 'sub_agent': return `${item.name}${detail.description ? ` ${first(detail.description)}` : ''}`;
     case 'plain_text': return `${item.name}${detail.label ? ` ${detail.label}` : ''}`;
   }
-  return item.name === 'alp_delegate' ? `delegate → ${detail.input?.agent}` : item.name;
+  // alp_delegate's detail is the untyped `unknown` kind; its input names the agent.
+  return item.name === 'alp_delegate' ? `delegate → ${(detail as { input?: { agent?: string } }).input?.agent}` : item.name;
 }
 
 /**
@@ -30,19 +33,19 @@ export function toolLine(item) {
  * and can print turns ALP started after the answer, such as a supervisor's check-in (t-beb5).
  * Children's turns are assignments and keep the plain label. `--json` output does not change.
  */
-export function answerLabel(agent, { root, origin }) {
+export function answerLabel(agent: string, { root, origin }: { root: boolean; origin?: string }): string {
   return root && origin && origin !== 'user' ? `${agent} [${origin} turn]` : agent;
 }
 
-function printer(json) {
-  const depth = new Map();
-  const agents = new Map();
+function printer(json: boolean | undefined) {
+  const depth = new Map<string, number>();
+  const agents = new Map<string, string>();
   /** The origin of each session's current turn, from its turn.started. */
-  const origins = new Map();
-  const printed = new Set();
-  const latest = new Map();
-  const line = (sessionId, text) => console.log(`${'  '.repeat(depth.get(sessionId) ?? 0)}${text}`);
-  return envelope => {
+  const origins = new Map<string, string | undefined>();
+  const printed = new Set<string>();
+  const latest = new Map<string, { sessionId: string; item: TimelineItem }>();
+  const line = (sessionId: string, text: string) => console.log(`${'  '.repeat(depth.get(sessionId) ?? 0)}${text}`);
+  return (envelope: Envelope) => {
     if (json) { console.log(JSON.stringify(envelope)); return; }
     const { sessionId, event } = envelope;
     if (event.type === 'session.opened') {
@@ -91,24 +94,24 @@ function printer(json) {
 
 /** Reads answers to questions for the user from the terminal, one question at a time. */
 
-function answerer(client) {
-  const waiting = [];
-  let rl;
+function answerer(client: AlpClient) {
+  const waiting: UserQuestion[] = [];
+  let rl: ReturnType<typeof createInterface> | undefined;
   const ask = () => {
     if (rl || !waiting.length) return;
     const question = waiting[0];
     rl = createInterface({ input: process.stdin, output: process.stderr });
     rl.question(`answer ${question.id}> `, text => {
-      rl.close();
+      rl!.close();
       rl = undefined;
       waiting.shift();
       // An empty line leaves the question for another client, such as Paseo or alp answer.
-      if (text.trim()) client.request('question.answer', { questionId: question.id, text }).catch(error => console.error(`alp: ${error.message}`));
+      if (text.trim()) client.request('question.answer', { questionId: question.id, text }).catch((error: Error) => console.error(`alp: ${error.message}`));
       ask();
     });
   };
   return {
-    accept(event) {
+    accept(event: AlpEvent) {
       if (event.type === 'question') { waiting.push(event.question); ask(); }
       if (event.type === 'question.resolved') {
         const index = waiting.findIndex(question => question.id === event.questionId);
@@ -123,9 +126,9 @@ function answerer(client) {
 
 /** Streams a tree until its root is idle; the first Ctrl-C interrupts it, the second detaches. */
 
-function follow(client, rootId, print, { untilIdle, interactive = false, targetOnly = false, promptId }) {
+function follow(client: AlpClient, rootId: string, print: (envelope: Envelope) => void, { untilIdle, interactive = false, targetOnly = false, promptId }: { untilIdle: boolean; interactive?: boolean; targetOnly?: boolean; promptId?: string }): Promise<boolean> {
   const answering = interactive ? answerer(client) : undefined;
-  const done = new Promise((resolve, reject) => {
+  const done = new Promise<boolean>((resolve, reject) => {
     let failed = false;
     let interrupted = false;
     const finish = () => { process.off('SIGINT', onSignal); answering?.close(); resolve(!failed); };
@@ -171,7 +174,7 @@ function follow(client, rootId, print, { untilIdle, interactive = false, targetO
   return done;
 }
 
-async function run(args) {
+async function run(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     agent: { type: 'string' }, team: { type: 'string' }, profile: { type: 'string' }, workflow: { type: 'string' }, model: { type: 'string' }, mode: { type: 'string' },
     thinking: { type: 'string' }, project: { type: 'string' }, json: { type: 'boolean' },
@@ -195,7 +198,7 @@ async function run(args) {
   }
 }
 
-async function ps(args) {
+async function ps(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { all: { type: 'boolean' } } });
   if (positionals.length) throw new UsageError();
   const client = await running();
@@ -205,7 +208,7 @@ async function ps(args) {
   for (const line of renderPs(sessions)) console.log(line);
 }
 
-async function attach(args) {
+async function attach(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { json: { type: 'boolean' } } });
   if (positionals.length !== 1) throw new UsageError();
   const client = await running();
@@ -223,12 +226,12 @@ async function attach(args) {
 
 /** Steers a running root, prompts an idle one, or resumes a closed one; then follows it until idle. */
 
-async function send(args) {
+async function send(args: string[]) {
   const { values, positionals: [sessionId, ...words] } = parseArgs({ args, allowPositionals: true, options: { json: { type: 'boolean' }, prompt: { type: 'boolean' } } });
   const text = words.join(' ').trim();
   if (!sessionId || !text) throw new UsageError();
   const client = await connect(await start(), { name: 'alp-cli', version: '1' });
-  let subscriptionId;
+  let subscriptionId: string | undefined;
   try {
     const { session } = await client.request('session.get', { sessionId });
     if (session.parentId && !values.prompt) {
@@ -258,7 +261,7 @@ async function send(args) {
   }
 }
 
-async function questions(args) {
+async function questions(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { json: { type: 'boolean' } } });
   if (positionals.length) throw new UsageError();
   const client = await running();
@@ -272,7 +275,7 @@ async function questions(args) {
   }
 }
 
-async function answer(args) {
+async function answer(args: string[]) {
   const { values, positionals: [questionId, ...words] } = parseArgs({ args, allowPositionals: true, options: { dismiss: { type: 'boolean' }, reason: { type: 'string' } } });
   const text = words.join(' ').trim();
   if (!questionId || (values.dismiss ? text : !text)) throw new UsageError();
@@ -285,10 +288,18 @@ async function answer(args) {
 
 /** One tree as text: sessions by depth, then questions, unmerged worktrees and leases. */
 
-function renderStatus(status, root, strategies = new Map()) {
+function renderStatus(
+  // any: session.status's tree as alpd sends it (sessions, assignments, questions, worktrees, leases, claims).
+  status: any,
+  // any: the root's row from session.list, or undefined; only its title is read.
+  root: any,
+  // any: the run log's strategy entries, as latestStrategies returns them.
+  strategies: Map<string, any> = new Map(),
+): string {
   const lines = [`${root?.title ? `"${root.title}"  ` : ''}${status.rootId}  ${status.sessions[0]?.projectRoot ?? ''}`];
-  const depth = new Map();
-  const assignments = new Map(status.assignments.map(assignment => [assignment.id, assignment]));
+  const depth = new Map<string, number>();
+  // any: the assignment rows of session.status.
+  const assignments = new Map<string, any>(status.assignments.map((assignment: any) => [assignment.id, assignment]));
   for (const session of status.sessions) {
     depth.set(session.id, session.parentId ? (depth.get(session.parentId) ?? 0) + 1 : 0);
     const assignment = assignments.get(session.id);
@@ -296,7 +307,7 @@ function renderStatus(status, root, strategies = new Map()) {
     const mail = session.unreadMail ? `  ✉${session.unreadMail}` : '';
     const strategy = strategies.get(session.id) ?? (!session.parentId || session.agent === 'lead' ? { strategy: 'smart' } : undefined);
     const chosen = strategy ? `  strategy ${strategy.strategy}${strategy.reason ? `: ${strategy.reason.split('\n')[0].slice(0, 80)}` : ''}` : '';
-    lines.push(`${'  '.repeat(depth.get(session.id) + 1)}${session.agent.padEnd(9)} ${session.state.padEnd(14)} idle ${duration(session.idleMs).padEnd(7)} ${session.runtime}:${session.model}  ${session.mode}${where}${mail}${chosen}`);
+    lines.push(`${'  '.repeat(depth.get(session.id)! + 1)}${session.agent.padEnd(9)} ${session.state.padEnd(14)} idle ${duration(session.idleMs).padEnd(7)} ${session.runtime}:${session.model}  ${session.mode}${where}${mail}${chosen}`);
   }
   for (const question of status.questions) lines.push(`  ? ${question.id} ${question.agent} asks (${ago(question.askedAt)}): ${question.body.split('\n')[0]}`);
   for (const worktree of status.worktrees) lines.push(`  ⎇ unmerged ${worktree.branch} from ${worktree.agent}: ${worktree.files.length} files${worktree.stat ? ` (${worktree.stat.trim()})` : ''}`);
@@ -306,8 +317,10 @@ function renderStatus(status, root, strategies = new Map()) {
 }
 
 /** The latest alp_strategy entry of each session in a run log (t-003a); a session without one works with smart. */
-export function latestStrategies(entries) {
-  const latest = new Map();
+// any: run-log entries as alpd reads them from JSONL; only event and sessionId are checked.
+export function latestStrategies(entries: any[]): Map<string, any> {
+  // any: each session's latest strategy entry as written to the run log.
+  const latest = new Map<string, any>();
   for (const entry of entries) if (entry?.event === 'strategy' && typeof entry.sessionId === 'string') latest.set(entry.sessionId, entry);
   return latest;
 }
@@ -317,27 +330,30 @@ export const STRATEGY_REFRESH_MS = 5000;
 
 /** A live dashboard of every tree, or of one, refreshed every second. */
 
-async function top(args) {
+async function top(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { once: { type: 'boolean' } } });
   if (positionals.length > 1) throw new UsageError();
   const client = await running();
   // Strategies live only in the run log, which alpd reads whole: read it at most every STRATEGY_REFRESH_MS per tree.
-  const strategies = new Map();
-  const strategiesOf = async rootId => {
+  const strategies = new Map<string, { at: number; latest: Map<string, any> }>(); // any: see latestStrategies
+  const strategiesOf = async (rootId: string) => {
     const cached = strategies.get(rootId);
     if (cached && Date.now() - cached.at < STRATEGY_REFRESH_MS) return cached.latest;
     const { entries } = await client.request('session.log', { sessionId: rootId }).catch(() => ({ entries: cached ? undefined : [] }));
-    const latest = entries ? latestStrategies(entries) : cached.latest;
+    // entries is undefined only when a cached value exists.
+    const latest = entries ? latestStrategies(entries) : cached!.latest;
     strategies.set(rootId, { at: Date.now(), latest });
     return latest;
   };
   const frame = async () => {
     const { sessions } = await client.request('session.list', { rootsOnly: true });
-    const roots = positionals.length ? sessions.filter(session => session.id === positionals[0]) : sessions;
+    // any: session.list rows as alpd sends them.
+    const roots = positionals.length ? sessions.filter((session: any) => session.id === positionals[0]) : sessions;
     if (positionals.length && !roots.length) throw new Error(`Session ${positionals[0]} is not a live root`);
-    const blocks = [];
+    const blocks: string[] = [];
     // Trees that ended leave the cache.
-    for (const rootId of strategies.keys()) if (!roots.some(root => root.id === rootId)) strategies.delete(rootId);
+    // any: session.list rows (see above).
+    for (const rootId of strategies.keys()) if (!roots.some((root: any) => root.id === rootId)) strategies.delete(rootId);
     for (const root of roots) {
       const { status } = await client.request('session.status', { sessionId: root.id }).catch(() => ({}));
       if (status) blocks.push(renderStatus(status, root, await strategiesOf(root.id)));
@@ -360,7 +376,7 @@ async function top(args) {
 
 /** The tree's assignment log: delegations, mail, handoffs, worktrees and questions to the user. */
 
-async function log(args) {
+async function log(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { json: { type: 'boolean' } } });
   if (positionals.length !== 1) throw new UsageError();
   const client = await running();
@@ -371,19 +387,20 @@ async function log(args) {
 }
 
 /** The models alpd offers now: the live catalog (t-e5ee); --refresh asks every provider again first. */
-async function models(args) {
+async function models(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { refresh: { type: 'boolean' }, json: { type: 'boolean' } } });
   if (positionals.length) throw new UsageError();
   const client = await running();
   const catalog = await client.request(values.refresh ? 'catalog.refresh' : 'catalog.get', {}).finally(() => client.close());
   if (values.json) { console.log(JSON.stringify(catalog)); return; }
-  for (const [runtime, state] of Object.entries(catalog.providers ?? {})) console.log(`${runtime}: ${state.status}${state.fetchedAt ? ` (${state.fetchedAt})` : ''}${state.error ? ` — ${state.error}` : ''}`);
+  // any: catalog.get's per-provider state as alpd sends it.
+  for (const [runtime, state] of Object.entries<any>(catalog.providers ?? {})) console.log(`${runtime}: ${state.status}${state.fetchedAt ? ` (${state.fetchedAt})` : ''}${state.error ? ` — ${state.error}` : ''}`);
   for (const model of catalog.models) console.log(`${model.id.padEnd(40)} ${model.label}`);
 }
 
 /** The project board every agent on the project shares: live claims, then decisions and findings. */
 
-async function board(args) {
+async function board(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, json: { type: 'boolean' } } });
   if (positionals.length) throw new UsageError();
   const projectRoot = path.resolve(values.project ?? process.cwd());
@@ -399,8 +416,10 @@ async function board(args) {
   }
 }
 
-function printPauses({ all, runtimes, parked }, always = true) {
-  const line = (name, pause) => console.log(`⏸ ${name} paused since ${pause.since.slice(0, 16).replace('T', ' ')} by ${pause.by}: ${pause.reason}${pause.resetsAt ? `; the limit resets ${pause.resetsAt}` : ''}${pause.checkedAt ? `; ${name} last asked ${ago(pause.checkedAt)} ago` : ''}`);
+// any: daemon.pauses as alpd sends it (all, runtimes, parked).
+function printPauses({ all, runtimes, parked }: any, always = true) {
+  // any: one pause record of daemon.pauses.
+  const line = (name: string, pause: any) => console.log(`⏸ ${name} paused since ${pause.since.slice(0, 16).replace('T', ' ')} by ${pause.by}: ${pause.reason}${pause.resetsAt ? `; the limit resets ${pause.resetsAt}` : ''}${pause.checkedAt ? `; ${name} last asked ${ago(pause.checkedAt)} ago` : ''}`);
   if (all) line('ALP', all);
   for (const [kind, pause] of Object.entries(runtimes)) line(kind, pause);
   for (const entry of parked) console.log(`  parked ${entry.agent} ${entry.assignmentId} (${entry.runtime}): ${entry.reason}`);
@@ -409,7 +428,7 @@ function printPauses({ all, runtimes, parked }, always = true) {
 
 /** alp pause: hold delegation and wakes on one runtime, or all; --now also parks running assignments. */
 
-async function pause(args) {
+async function pause(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { now: { type: 'boolean' }, message: { type: 'string', short: 'm' }, json: { type: 'boolean' } } });
   if (positionals.length > 1 || (positionals[0] && !['codex', 'claude', 'status'].includes(positionals[0]))) throw new UsageError();
   const client = await running();
@@ -422,7 +441,7 @@ async function pause(args) {
 
 /** alp resume: lift a pause; parked assignments continue where they stopped. */
 
-async function resume(args) {
+async function resume(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { json: { type: 'boolean' } } });
   if (positionals.length > 1 || (positionals[0] && !['codex', 'claude'].includes(positionals[0]))) throw new UsageError();
   const client = await running();
@@ -433,7 +452,7 @@ async function resume(args) {
 
 /** alp language: the language the user reads (ALPD §54); new sessions use it. */
 
-async function recall(args) {
+async function recall(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, json: { type: 'boolean' } } });
   const [target, ...words] = positionals;
   const question = words.join(' ').trim();
@@ -449,7 +468,7 @@ async function recall(args) {
   console.log(answer.answer);
 }
 
-async function interrupt(args) {
+async function interrupt(args: string[]) {
   if (args.length !== 1) throw new UsageError();
   const client = await running();
   await client.request('session.interrupt', { sessionId: args[0] }).finally(() => client.close());
@@ -457,7 +476,7 @@ async function interrupt(args) {
 }
 
 /** alp compact <session>: compacts a root's context now, or at its next turn boundary (t-0e56). */
-async function compact(args) {
+async function compact(args: string[]) {
   if (args.length !== 1) throw new UsageError();
   const client = await running();
   const { status } = await client.request('session.compact', { sessionId: args[0] }).finally(() => client.close());

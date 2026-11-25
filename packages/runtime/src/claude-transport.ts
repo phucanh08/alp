@@ -385,7 +385,7 @@ class InputQueue implements AsyncIterable<SDKUserMessage> {
  * The directory of the Paseo integration's token socket when `<home>/paseo/token.sock` is too long
  * for a socket address: `/tmp/alp-paseo-<uid>-<hash>`, as /tmp names it and as it resolves (macOS:
  * /private/tmp). Must match tokenSocketPath in integrations/paseo/server/web.ts and
- * paseoTokenSocketPath in packages/cli/src/interfaces.js. None on Windows (a named pipe).
+ * paseoTokenSocketPath in packages/cli/src/interfaces.ts. None on Windows (a named pipe).
  */
 export function tokenSocketFallback(home: string, { platform = process.platform, uid = process.getuid?.() }: { platform?: NodeJS.Platform; uid?: number } = {}) {
   if (platform === 'win32' || Buffer.byteLength(path.join(home, 'paseo', 'token.sock')) < 100) return [];

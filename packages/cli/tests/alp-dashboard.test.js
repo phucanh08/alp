@@ -13,7 +13,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { connect, daemonPaths, readLock } from '@anhlp/alp-client/index';
 import { fixtureProcesses } from '../../../test/support/fixture-processes.js';
-import { readToken, tokenSocketPath } from '../src/dashboard-service.js';
+import { readToken, tokenSocketPath } from '../dist/dashboard-service.js';
 
 /**
  * alp-dashboard (packages/cli/dist/alp-dashboard.js), the service behind `alp dashboard`, as a real process under a

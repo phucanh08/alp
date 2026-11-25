@@ -17,7 +17,7 @@ import { createDaemonServer, createStore } from '../../dist/daemon/index.js';
 import { teardown } from '../support/teardown.js';
 
 const ALPD = fileURLToPath(new URL('../../dist/alpd.js', import.meta.url));
-const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 const run = promisify(execFile);
 const skip = process.platform === 'win32' && 'POSIX modes and sockets only';
 const realpathOf = file => realpath(file);

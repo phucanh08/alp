@@ -21,7 +21,7 @@ import { promisify } from 'node:util';
 import { chromium } from 'playwright-core';
 import { appEnv, fakeAlp, freePort, host, noAlpEnv, releaseMirror, scratch, TEST_SWITCHES, waitFor } from './support.mjs';
 import { hermeticEnv } from '../../../scripts/test-lib.mjs';
-import { DESKTOP_BUNDLE_ID, readBundleId } from '../../../packages/cli/src/desktop.js';
+import { DESKTOP_BUNDLE_ID, readBundleId } from '../../../packages/cli/dist/desktop.js';
 
 const run = promisify(execFile);
 const limit = { timeout: 420_000 };
