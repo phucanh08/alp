@@ -28,7 +28,7 @@ import type { RuntimeAttachment } from '@anhlp/alp-protocol/session';
 import { clientMessageId as scheduleMessageId, createScheduler, SCHEDULE_TICK_MS, type ScheduleDelivery } from './schedules/scheduler.js';
 import { createLifecycleJournal, LIFECYCLE_RETENTION_MS } from './lifecycle.js';
 import { createConversation } from './conversation.js';
-import { createTerminalService, type TerminalServiceOptions } from './terminals.js';
+import { createTerminalService, type TerminalServiceOptions } from './terminals/terminals.js';
 
 /**
  * alpd's JSON-RPC surface over one shared runtime (plans/reference/ALPD.md §3, §6, §14).

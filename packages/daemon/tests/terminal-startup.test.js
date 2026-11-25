@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createTerminalService } from '../dist/terminals.js';
+import { createTerminalService } from '../dist/terminals/terminals.js';
 const owner = { id: 'owner', epoch: 'e1' };
 const params = requestId => ({ workspaceId: 'w', cols: 80, rows: 24, requestId });
 async function fixture(t) {

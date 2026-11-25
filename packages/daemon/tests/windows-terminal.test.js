@@ -1,4 +1,4 @@
-// The win32 terminal owner (src/windows-terminal.ts): node-pty over ConPTY, best-effort, protection 'none'.
+// The win32 terminal owner (src/terminals/backends/windows-terminal.ts): node-pty over ConPTY, best-effort, protection 'none'.
 // The unit tests drive the real owner wrapper and the real terminal service with a fake node-pty module on
 // every platform. The tests marked "ConPTY" spawn a real cmd.exe through the installed node-pty and run
 // only on Windows (the windows-daemon CI lane runs them).
@@ -7,8 +7,8 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createWindowsPtySpawn, loadNodePty, windowsPtySpawn, windowsShell, windowsTerminalCapability } from '../dist/windows-terminal.js';
-import { createTerminalService, readTerminalConfig } from '../dist/terminals.js';
+import { createWindowsPtySpawn, loadNodePty, windowsPtySpawn, windowsShell, windowsTerminalCapability } from '../dist/terminals/backends/windows-terminal.js';
+import { createTerminalService, readTerminalConfig } from '../dist/terminals/terminals.js';
 
 const windows = process.platform === 'win32';
 const conpty = !windows && 'ConPTY exists only on Windows';

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { TerminalScreen, SCREEN_LIMITS } from '../dist/terminal-screen.js';
+import { TerminalScreen, SCREEN_LIMITS } from '../dist/terminals/terminal-screen.js';
 
 test('capture parses overwrite, erase, ANSI, alternate buffer and inclusive negative ranges', async t => {
   const screen = new TerminalScreen(20, 3);

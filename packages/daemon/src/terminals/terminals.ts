@@ -2,12 +2,12 @@ import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
 import { access, lstat, readFile } from 'node:fs/promises';
-import { nativePtySpawn, nativeTerminalCapability, type CleanupResult } from './native-terminal.js';
-import { windowsPtySpawn, windowsShell, windowsTerminalCapability } from './windows-terminal.js';
+import { nativePtySpawn, nativeTerminalCapability, type CleanupResult } from '../native-terminal.js';
+import { windowsPtySpawn, windowsShell, windowsTerminalCapability } from './backends/windows-terminal.js';
 import path from 'node:path';
 import { ERROR, RPC_ERROR, TERMINAL, TERMINAL_LIMIT_KEYS, isTerminalId } from '@anhlp/alp-protocol';
 import type { TerminalEndReason, TerminalEvent, TerminalInfo, TerminalLimits } from '@anhlp/alp-protocol/rpc';
-import { RpcError } from './rpc-error.js';
+import { RpcError } from '../rpc-error.js';
 import { TerminalScreen, SCREEN_LIMITS } from './terminal-screen.js';
 
 /**
