@@ -532,6 +532,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
   }
 
+  type Denial = { tool: string; path: string | null; reason: string };
+  /** What a runtime denied in a session's turns, and whether its last turn ended on a denial (t-a648). */
+  const denials = new WeakMap<Session, { all: Denial[]; last?: { denied: Denial[]; answered: boolean; mode: string } }>();
   function notification(
     sessionId: string,
     session: Session,
@@ -619,6 +622,14 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
           : params.turn.status === 'interrupted'
             ? 'canceled'
             : 'failed';
+
+      // What the runtime denied in this turn (Antigravity, t-a648): kept for the assignment's result.
+      // A runtime that reports no denials leaves the session as it was.
+      const denied = Array.isArray(params.turn.denied) ? params.turn.denied : [];
+      if (denied.length) {
+        denials.set(session, { all: [...(denials.get(session)?.all ?? []), ...denied], last: { denied, answered: params.turn.answered === true, mode: String(params.turn.mode ?? '') } });
+        runLog(rootOf(sessionId), { event: 'turn.denied', sessionId, agent: session.mapping.agent.name, turnId: params.turn.id, mode: params.turn.mode, answered: params.turn.answered === true, denied });
+      } else if (denials.get(session)?.last) denials.get(session)!.last = undefined;
 
       // A usage limit pauses its runtime; an assignment it stopped is parked to continue later.
       if (state === 'failed' && LIMIT_ERRORS.includes(params.turn.error?.codexErrorInfo)) {
@@ -3042,6 +3053,13 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (parent.assignments.get(assignment.id) === assignment) parent.assignments.delete(assignment.id);
       return;
     }
+    // A turn that ended on a denial, with no answer and no handoff, did not complete its work (t-a648):
+    // the assignment failed, and its result says what was denied. A handoff or an answer keeps it completed.
+    const denial = child ? denials.get(child) : undefined;
+    if (state === 'completed' && denial?.last && !denial.last.answered && !child?.handoff) {
+      state = 'failed';
+      error = `${assignment.agent}'s turn ended because ${denial.last.denied.map(entry => `${entry.tool} on ${entry.path ?? 'a path the runtime did not report'} was denied (${entry.reason})`).join('; ')}${denial.last.mode ? ` in ${denial.last.mode} mode` : ''}; no handoff was filed.`;
+    }
     // Ownership must reach durable storage before recovery evidence can disappear.
     const resultChild = child;
     try {
@@ -3078,6 +3096,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       handoff: child?.handoff ?? null,
       output: child ? [...child.text.values()].at(-1) ?? '' : '',
       ...(error ? { error: errorData(error).message } : {}),
+      ...(denial?.all.length ? { denied: denial.all } : {}),
     };
 
     if (child) await closeSession(assignment.id, child);

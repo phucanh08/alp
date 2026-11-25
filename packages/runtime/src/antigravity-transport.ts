@@ -64,6 +64,17 @@ const COMMAND_TOOLS = new Set(['run_command']);
 const EDIT_TOOLS = new Set(['write_file', 'write_to_file', 'edit_file', 'replace_file_content', 'multi_replace_file_content', 'sed_file', 'notebook_edit']);
 const modeOf = (sandbox: unknown) => sandbox === 'danger-full-access' ? 'full-access' : String(sandbox);
 
+/** One tool agy denied in a turn, for the requester: what, where, and why (t-a648). */
+export type AntigravityDenial = { tool: string; path: string | null; reason: string };
+/** The reason ALP gives when agy states none. */
+export const AGY_NO_REASON = 'agy gave no reason';
+/** The error text agy gives a step its permission check refused (agy 1.5.2 and 1.5.15/16, measured M0 and T1). */
+const DENIAL_ERROR = /permission check failed|user denied permission/i;
+/** Parameters agy's file tools carry their path in: `Path` (read_file, measured M0/T1), the rest from the tools agy announces. */
+const PATH_PARAMETERS = ['Path', 'AbsolutePath', 'TargetFile', 'DirectoryPath', 'SearchPath', 'File'];
+/** A tool step that ended, as the turn's denials are matched against it. */
+type EndedStep = { callId: string; tool: string; path: string | null; state: 'DONE' | 'ERROR'; error?: string; empty: boolean; corrected?: boolean };
+
 /**
  * The agy flags for an ALP mode. Headless agy cannot ask the user, so a tool its
  * permission mode does not allow is denied: both limited modes fail closed.
@@ -127,6 +138,11 @@ export class AntigravityTransport {
   private activeTurn?: string;
   private messageText = new Map<string, string>();
   private messages = 0;
+  /** The tool steps of the active turn that ended, oldest first, and whether agent text came after the last one. */
+  private ended: EndedStep[] = [];
+  private textAfterTools = false;
+  /** A DONE step with no output outside the workspace, held until agy says whether it denied it. */
+  private held?: { step: EndedStep; item: any };
   private instructionsSent = false;
   private modeNote?: string;
   private tools: Array<{ name: string; description: string; inputSchema?: unknown }> = [];
@@ -201,6 +217,9 @@ export class AntigravityTransport {
       const turnId = randomUUID();
       this.activeTurn = turnId;
       this.messageText.clear();
+      this.ended = [];
+      this.textAfterTools = false;
+      this.held = undefined;
 
       const parts = (params.input ?? [])
         .filter((part: any) => typeof part?.text === 'string')
@@ -384,6 +403,8 @@ export class AntigravityTransport {
 
   private handleStepUpdate(step: any): void {
     if (!step || !this.activeTurn) return;
+    // A held step was not the end of the turn: agy went on, so it was not what agy denied.
+    this.release();
 
     if (step.step_type === 'agent_response') {
       const itemId = `agy-msg-${this.activeTurn}-${step.step_index ?? this.messages}`;
@@ -398,6 +419,7 @@ export class AntigravityTransport {
       }
 
       if (step.state === 'DONE' && this.messageText.has(itemId)) {
+        if (this.messageText.get(itemId)!.trim()) this.textAfterTools = true;
         this.emit('item/completed', {
           threadId: this.conversationId,
           item: { type: 'agentMessage', id: itemId, text: this.messageText.get(itemId) },
@@ -449,28 +471,110 @@ export class AntigravityTransport {
         // agy 1.4.10 sometimes marks a tool step it denied DONE, with no error and nothing run. ALP's own
         // record is authoritative: read-only denies every edit and every command outside its allowlist,
         // so never report one as done, whatever agy says.
-        if (step.state === 'DONE' && modeOf(this.config?.sandbox) === 'read-only' && this.readOnlyRefuses(toolName, step.tool_info)) {
+        const corrected = step.state === 'DONE' && modeOf(this.config?.sandbox) === 'read-only' && this.readOnlyRefuses(toolName, step.tool_info);
+        if (corrected) {
           step = { ...step, state: 'ERROR', tool_info: { ...step.tool_info, output: undefined, error: { message: `Antigravity denied ${typed.tool} in read-only mode` } } };
         }
         const output = typeof step.tool_info?.output === 'string'
           ? step.tool_info.output
           : step.tool_info?.error?.message || '';
-        this.emit('item/completed', {
-          threadId: this.conversationId,
-          item: {
-            type: 'commandExecution',
-            id: callId,
-            command: toolName,
-            cwd: this.cwd,
-            status: step.state === 'DONE' ? 'completed' : 'failed',
-            exitCode: step.state === 'DONE' ? 0 : 1,
-            aggregatedOutput: output,
-            ...typed,
-            ...(step.state === 'ERROR' ? { error: step.tool_info?.error?.message } : {}),
-          },
-        });
+        const item = {
+          type: 'commandExecution',
+          id: callId,
+          command: toolName,
+          cwd: this.cwd,
+          status: step.state === 'DONE' ? 'completed' : 'failed',
+          exitCode: step.state === 'DONE' ? 0 : 1,
+          aggregatedOutput: output,
+          ...typed,
+          ...(step.state === 'ERROR' ? { error: step.tool_info?.error?.message } : {}),
+        };
+        const ended: EndedStep = {
+          callId,
+          tool: typed.tool,
+          path: this.stepPath(step.tool_info),
+          state: step.state,
+          ...(step.state === 'ERROR' && typeof step.tool_info?.error?.message === 'string' ? { error: step.tool_info.error.message } : {}),
+          empty: !(typeof step.tool_info?.output === 'string' && step.tool_info.output),
+          ...(corrected ? { corrected } : {}),
+        };
+        this.ended.push(ended);
+        this.textAfterTools = false;
+        // agy 1.5.15 reported a read it refused DONE with no output (M0): only the turn's result says
+        // it was denied. Hold such a step outside the workspace until the next frame tells which.
+        if (ended.state === 'DONE' && ended.empty && ended.path && !this.insideWorkspace(ended.path) && modeOf(this.config?.sandbox) !== 'full-access') {
+          this.held = { step: ended, item };
+          return;
+        }
+        this.emit('item/completed', { threadId: this.conversationId, item });
       }
     }
+  }
+
+  /** The file path a tool step's input names, if any. */
+  private stepPath(info: any): string | null {
+    const parameters = info?.parameters;
+    if (!parameters || typeof parameters !== 'object') return null;
+    for (const key of PATH_PARAMETERS) if (typeof parameters[key] === 'string' && parameters[key]) return parameters[key].slice(0, 1000);
+    return null;
+  }
+
+  /** Whether a path lies in the workspace agy was given (--add-dir and trustedWorkspaces: the cwd and its real path). */
+  private insideWorkspace(target: string): boolean {
+    const cwd = this.config?.cwd || this.cwd;
+    let real = cwd;
+    try { real = realpathSync(cwd); } catch {}
+    const resolved = path.resolve(cwd, target);
+    return [cwd, real].some(root => {
+      const relative = path.relative(root, resolved);
+      return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+    });
+  }
+
+  /** Emits a held step as agy reported it, or as failed when the turn's denial named it. */
+  private release(denial?: string): void {
+    const held = this.held;
+    if (!held) return;
+    this.held = undefined;
+    const item = denial
+      ? { ...held.item, status: 'failed', exitCode: 1, aggregatedOutput: denial, error: denial }
+      : held.item;
+    this.emit('item/completed', { threadId: this.conversationId, item });
+  }
+
+  /**
+   * What agy denied in this turn, one entry per `denied_actions` entry. agy gives only
+   * {action, display_name}; the path and reason come from the step it refused: an ERROR step whose
+   * error is a permission denial (measured) or a step read-only refuses that agy marked DONE, else the
+   * held step: the turn's last, a DONE step of that tool with no output outside the workspace
+   * (inferred: agy cannot be told apart from a missing file there), else none. A DONE step inside the
+   * workspace, such as a read of a missing file (T1), or one agy went on after, is never taken.
+   */
+  private denials(actions: any[]): { denied: AntigravityDenial[]; inferred: Set<string> } {
+    const used = new Set<EndedStep>();
+    const inferred = new Set<string>();
+    const denied = actions.slice(0, 20).map((action: any): AntigravityDenial | undefined => {
+      const name = String(action?.action || '');
+      const display = String(action?.display_name || action?.action || '').slice(0, 100);
+      if (!display) return undefined;
+      const steps = this.ended.filter(step => !used.has(step) && (!name || step.tool === name)).reverse();
+      const refused = steps.find(step => step.state === 'ERROR' && (step.corrected || DENIAL_ERROR.test(step.error ?? '')));
+      if (refused) {
+        used.add(refused);
+        const reason = refused.corrected
+          ? `${AGY_NO_REASON}; agy reported this step done, and read-only mode refuses ${refused.tool}`
+          : (refused.error ?? '').split('\n')[0].trim().slice(0, 500) || AGY_NO_REASON;
+        return { tool: display, path: refused.path, reason };
+      }
+      const silent = this.held && steps.includes(this.held.step) ? this.held.step : undefined;
+      if (silent) {
+        used.add(silent);
+        inferred.add(silent.callId);
+        return { tool: display, path: silent.path, reason: `${AGY_NO_REASON}; inferred: agy reported this step done with no output, outside the workspace, and listed ${display} as denied` };
+      }
+      return { tool: display, path: null, reason: AGY_NO_REASON };
+    }).filter((entry): entry is AntigravityDenial => !!entry);
+    return { denied, inferred };
   }
 
   /** Whether read-only refuses this tool step: an edit, or a terminal command outside the allowlist. */
@@ -490,18 +594,27 @@ export class AntigravityTransport {
       const isInterrupted = result.error === 'interrupted';
       this.endTurn(turnId, isInterrupted ? 'interrupted' : 'failed', result.error);
     } else {
-      // Headless agy cannot ask, so it denies a tool the mode does not allow and ends the turn, often with no answer: say so.
-      const denied = Array.isArray(result.denied_actions) ? result.denied_actions.map((action: any) => String(action?.display_name || action?.action || '')).filter(Boolean) : [];
+      // Headless agy cannot ask, so it denies a tool the mode does not allow and ends the turn, often with no answer: say what, where and why.
+      const { denied, inferred } = this.denials(Array.isArray(result.denied_actions) ? result.denied_actions : []);
+      const mode = modeOf(this.config?.sandbox);
+      const answered = (typeof result.response === 'string' && !!result.response.trim()) || this.textAfterTools;
+      if (this.held && inferred.has(this.held.step.callId)) {
+        const entry = denied.find(item => item.path === this.held!.step.path)!;
+        this.release(`Antigravity denied ${entry.tool} on ${entry.path} in ${mode} mode (${entry.reason})`);
+      }
       if (denied.length) {
-        const text = `Antigravity denied ${[...new Set(denied)].join(', ')} in ${modeOf(this.config?.sandbox)} mode and ended the turn.`;
+        const text = `Antigravity denied ${denied.map(entry => `${entry.tool} on ${entry.path ?? 'a path agy did not report'} (${entry.reason})`).join('; ')} in ${mode} mode and ended the turn.`;
+        this.release();
         this.emit('item/completed', { threadId: this.conversationId, item: { type: 'agentMessage', id: `agy-denied-${turnId}`, text } });
       }
-      this.endTurn(turnId, 'completed');
+      this.endTurn(turnId, 'completed', undefined, denied.length ? { denied, answered, mode } : undefined);
     }
   }
 
-  private endTurn(turnId: string, status: 'completed' | 'interrupted' | 'failed', error?: string): void {
+  private endTurn(turnId: string, status: 'completed' | 'interrupted' | 'failed', error?: string, denial?: { denied: AntigravityDenial[]; answered: boolean; mode: string }): void {
     if (this.activeTurn !== turnId) return;
+    // A held step ends with its turn, as agy reported it, whatever ended the turn.
+    this.release();
     this.activeTurn = undefined;
 
     setImmediate(() => {
@@ -511,6 +624,7 @@ export class AntigravityTransport {
           id: turnId,
           status,
           ...(status === 'failed' ? { error: { message: error || 'Antigravity turn failed' } } : {}),
+          ...(denial ? denial : {}),
         },
       });
 
@@ -699,6 +813,8 @@ export class AntigravityTransport {
 
   async close(): Promise<void> {
     if (this.closed) return this.exit;
+    // A held step is never left running: it ends as agy reported it.
+    this.release();
     this.closed = true;
 
     this.listeners.clear();
