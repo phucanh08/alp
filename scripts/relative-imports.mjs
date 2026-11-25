@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Every relative specifier a module reaches for, and which of them are not on disk (t-5294.6).
 //
 // Two scripts copy test files out of this repository into an isolated project — a tarball consumer
@@ -16,14 +17,20 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import ts from 'typescript';
 
-/** Every relative module specifier in `source`, in source order, with duplicates removed. */
+/**
+ * Every relative module specifier in `source`, in source order, with duplicates removed.
+ * @param {string} source
+ * @param {string} [fileName]
+ * @returns {string[]}
+ */
 export function relativeSpecifiers(source, fileName = 'module.mjs') {
   const parsed = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  /** @type {Set<string>} */
   const found = new Set();
-  const take = node => {
+  const take = /** @param {ts.Node | undefined} node */ node => {
     if (node && ts.isStringLiteral(node) && node.text.startsWith('.')) found.add(node.text);
   };
-  const walk = node => {
+  const walk = /** @param {ts.Node} node */ node => {
     // `import x from './a.js'`, `import './a.js'`, `import * as x from './a.js'`, `export * from './a.js'`
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) take(node.moduleSpecifier);
     // `await import('./a.js')` and `import.meta.resolve('./a.js')`
@@ -43,6 +50,7 @@ export function relativeSpecifiers(source, fileName = 'module.mjs') {
  * A specifier without an extension is reported as missing only if no candidate resolves, since
  * these are ES modules where the extension is normally written out.
  */
+/** @param {string} file */
 export async function missingRelativeImports(file) {
   const source = await readFile(file, 'utf8');
   return relativeSpecifiers(source, file).filter(specifier => {
@@ -52,6 +60,7 @@ export async function missingRelativeImports(file) {
 }
 
 /** Throws naming the file, the specifier and what to do, or returns quietly. */
+/** @param {string} file @param {string} what */
 export async function requireRelativeImports(file, what) {
   const missing = await missingRelativeImports(file);
   if (missing.length) {

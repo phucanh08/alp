@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // ALP's neutral core bundles: the runtime, the daemon server, alpd and the ACP agent. They embed
 // only ALP's own templates, never the optional Paseo plugin's client or SDK, so the core six
 // workspaces stay buildable, testable and installable on their own. The optional plugin build
@@ -14,22 +15,26 @@ import { THIRD_PARTY_NOTICES, writeThirdPartyNotices } from './third-party-notic
 
 const root = ROOT;
 
+/** @param {{ log?: (message: string) => void }} [options] */
 export async function buildCore({ log = console.log } = {}) {
   process.chdir(root);
   const embedded = await resources();
   const { version } = JSON.parse(await readFile('package.json', 'utf8'));
-  const build = (options = {}) => {
+  // The cast: every call sets `metafile: true` (no caller passes its own), so each result has one.
+  const build = /** @param {import('esbuild').BuildOptions} [options] */ (options = {}) => {
     const { plugins = [], ...rest } = options;
-    return esbuild({ absWorkingDir: root, conditions: ['alp-source'], metafile: true, ...rest, plugins: [...embedded, ...plugins] });
+    return /** @type {Promise<import('esbuild').BuildResult & { metafile: import('esbuild').Metafile }>} */ (esbuild({ absWorkingDir: root, conditions: ['alp-source'], metafile: true, ...rest, plugins: [...embedded, ...plugins] }));
   };
 
   // Legacy source clients also need the protocol's JavaScript entry points on a clean checkout.
   const protocolFiles = (await readdir('packages/protocol/src')).filter(file => /\.(ts|js)$/.test(file) && !file.endsWith('.d.ts'));
   await esbuild({ absWorkingDir: root, entryPoints: protocolFiles.map(file => `packages/protocol/src/${file}`), outdir: 'packages/protocol/dist', bundle: false, format: 'esm', platform: 'node', target: 'node20' });
 
+  /** @type {Record<string, import('./build-manifest.mjs').BundleSummary>} */
   const entries = {};
+  /** @type {import('esbuild').Metafile[]} */
   const metafiles = [];
-  const record = (outfile, result) => { metafiles.push(result.metafile); return recordBundle(entries, outfile, result); };
+  const record = /** @param {string} outfile @param {{ metafile: import('esbuild').Metafile }} result */ (outfile, result) => { metafiles.push(result.metafile); return recordBundle(entries, outfile, result); };
 
   record('dist/runtime/index.js', await build({ entryPoints: ['packages/runtime/src/index.ts'], outfile: 'dist/runtime/index.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', banner: requireShim, external: ['@anthropic-ai/claude-agent-sdk', 'node-pty'] }));
   record('dist/daemon/index.js', await build({ entryPoints: ['packages/daemon/src/index.ts'], outfile: 'dist/daemon/index.js', bundle: true, format: 'esm', platform: 'node', target: 'node20', banner: requireShim, external: ['@anthropic-ai/claude-agent-sdk', 'node-pty'] }));

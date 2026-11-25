@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Standalone core smoke: the six neutral core tarballs are packed and installed into their own
 // project (no repository node_modules, no `@getpaseo/*`, no `@anhlp/alp-paseo`, no React), then the
 // installed CLI's daemon and runtime are exercised end to end with a deterministic fake ACP agent
@@ -32,6 +33,28 @@ const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'
 const TYPES_NODE = '@types/node@22.20.5';
 const CORE_NAMES = ['@anhlp/alp-protocol', '@anhlp/alp-core', '@anhlp/alp-runtime', '@anhlp/alp-client', '@anhlp/alp-daemon', '@anhlp/alp-cli'];
 
+/** @typedef {{ cwd?: string, capture?: boolean, env?: NodeJS.ProcessEnv, timeout?: number, allowFailure?: boolean }} RunOptions */
+/**
+ * With allowFailure: the outcome, for the caller to judge.
+ * @overload
+ * @param {string} command
+ * @param {string[]} args
+ * @param {RunOptions & { allowFailure: true }} options
+ * @returns {{ status: number | null, output: string, stdout: string }}
+ */
+/**
+ * Otherwise: stdout, or a throw on failure.
+ * @overload
+ * @param {string} command
+ * @param {string[]} args
+ * @param {RunOptions & { allowFailure?: false }} [options]
+ * @returns {string}
+ */
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {RunOptions} [options]
+ */
 function run(command, args, options = {}) {
   const result = spawnSync(...spawnCommand(command, args), {
     cwd: options.cwd ?? root,
@@ -47,6 +70,7 @@ function run(command, args, options = {}) {
   return result.stdout ?? '';
 }
 
+/** @param {string} directory */
 function installedPackages(directory) {
   const nodeModules = path.join(directory, 'node_modules');
   const names = [];
@@ -68,9 +92,9 @@ try {
   // prepack lifecycles here prove builds do not silently depend on an existing plugin checkout.
   const source = path.join(work, 'source');
   mkdirSync(source);
-  const sourceManifest = { ...manifest, workspaces: manifest.workspaces.filter(location => location.startsWith('packages/')) };
+  const sourceManifest = { ...manifest, workspaces: manifest.workspaces.filter(/** @param {string} location */ location => location.startsWith('packages/')) };
   writeFileSync(path.join(source, 'package.json'), JSON.stringify(sourceManifest));
-  const copied = new Set(sourceManifest.workspaces.map(location => JSON.parse(readFileSync(path.join(root, location, 'package.json'), 'utf8')).name));
+  const copied = new Set(sourceManifest.workspaces.map(/** @param {string} location */ location => JSON.parse(readFileSync(path.join(root, location, 'package.json'), 'utf8')).name));
   for (const location of sourceManifest.workspaces) {
     mkdirSync(path.join(source, location), { recursive: true });
     // The CLI bundles the private gateway (apps/gateway) as a devDependency; a core-only copy has no
@@ -92,8 +116,10 @@ try {
   const byName = new Map();
   for (const name of CORE_NAMES) {
     const output = run('npm', ['pack', '--workspace', name, '--pack-destination', packs, '--json'], { cwd: source, capture: true });
+    /** @type {[{ filename: string, files: { path: string }[] }]} */
     const [packed] = JSON.parse(output.slice(output.indexOf('[')));
-    const pkg = JSON.parse(readFileSync(path.join(root, 'packages', name.replace('@anhlp/alp-', ''), 'package.json')));
+    // JSON.parse takes the Buffer as its text (a Buffer converts to its UTF-8 string); the cast states that.
+    const pkg = JSON.parse(/** @type {string} */ (/** @type {unknown} */ (readFileSync(path.join(root, 'packages', name.replace('@anhlp/alp-', ''), 'package.json')))));
     const problems = corePackageProblems(pkg, packed.files.map(file => file.path));
     if (problems.length) throw new Error(problems.join('\n'));
     tarballs.push(path.join(packs, packed.filename));
@@ -138,7 +164,7 @@ try {
   for (const [directory, cli] of [[core, 'node_modules/@anhlp/alp-cli/dist/cli.js']]) {
     // Installs use --legacy-peer-deps, so only missing peers of an installed package are expected.
     const { stdout: tree } = run('npm', ['ls', '--all', '--json'], { cwd: directory, capture: true, allowFailure: true });
-    const unexpected = (JSON.parse(tree).problems ?? []).filter(problem => {
+    const unexpected = (JSON.parse(tree).problems ?? []).filter(/** @param {string} problem */ problem => {
       const missing = /^missing: ((?:@[^/@]+\/)?[^@]+)@[^,]+, required by ((?:@[^/@]+\/)?[^@]+)@/.exec(problem);
       if (!missing) return true;
       const requirer = JSON.parse(readFileSync(path.join(directory, 'node_modules', missing[2], 'package.json'), 'utf8'));

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // The release gate (docs/alp/beta-scope.md §6.1, §6.4, §7.5) as data: which rows block, and whether
 // the recorded evidence passes them for this release's SHA and saved artifacts. It only reads and
 // reports; people and CI record the rows, and the gate never passes on local checks alone.
@@ -14,7 +15,7 @@ import { GATE_PHASES, MANIFEST_FILE, evaluateGate, gateTemplate } from './releas
 
 const args = process.argv.slice(2);
 const usage = 'Usage: release-gate.mjs <release directory> (--init <evidence.json> | <evidence.json> [--phase publish|latest|announce])';
-const option = name => { const index = args.indexOf(name); if (index < 0) return undefined; const [, value] = args.splice(index, 2); if (!value) throw new Error(usage); return value; };
+const option = /** @param {string} name */ name => { const index = args.indexOf(name); if (index < 0) return undefined; const [, value] = args.splice(index, 2); if (!value) throw new Error(usage); return value; };
 const init = option('--init');
 const phase = option('--phase') ?? 'publish';
 if (!GATE_PHASES[phase] || args.length !== (init ? 1 : 2)) throw new Error(usage);

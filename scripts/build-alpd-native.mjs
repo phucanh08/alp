@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // The native alpd (t-81b0.9, docs/alp/binary-install.md): alpd compiled with `bun build --compile` into
 // one executable, `<bundle>/bin/alpd`, for the platforms in NATIVE_PLATFORMS. Only alpd is native; the
 // `alp` CLI keeps running on the bundle's official Node (plans/261030-node-runtime-bundle).
@@ -44,7 +45,7 @@ export async function pinnedBun() {
   return version;
 }
 
-const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+const sha256 = /** @param {Buffer} bytes */ bytes => createHash('sha256').update(bytes).digest('hex');
 
 /**
  * The pinned Bun runtime for `platform`: downloaded (or reused from `cache`), its zip checked against
@@ -79,7 +80,8 @@ export async function bunRuntime(platform, cache) {
 
 /** Whether this machine can run `platform`'s executables (its own platform, or x64 on an Apple silicon Mac with Rosetta). @param {string} platform */
 function runnable(platform) {
-  const here = `${{ darwin: 'darwin', linux: 'linux' }[process.platform]}-${process.arch}`;
+  // Another OS indexes nothing (`undefined-<arch>`), which matches no platform, as before.
+  const here = `${/** @type {Partial<Record<NodeJS.Platform, string>>} */ ({ darwin: 'darwin', linux: 'linux' })[process.platform]}-${process.arch}`;
   if (platform === here) return true;
   return platform === 'darwin-x64' && process.platform === 'darwin' && spawnSync('arch', ['-x86_64', '/usr/bin/true']).status === 0;
 }
@@ -134,7 +136,7 @@ export async function buildNativeDaemon({ platform, out, bun = 'bun', version, c
   return out;
 }
 
-const realpathOr = file => realpath(file).catch(() => file);
+const realpathOr = /** @param {string} file */ file => realpath(file).catch(() => file);
 
 async function main() {
   const { values } = parseArgs({ options: { platform: { type: 'string' }, out: { type: 'string' }, bun: { type: 'string' } } });

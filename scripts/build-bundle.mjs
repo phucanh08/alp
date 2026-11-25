@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Builds the ALP bundle for one platform (t-1807, docs/alp/binary-install.md): the official Node
 // release (scripts/node-runtime.json, checksum-pinned), `npm install` of the packed @anhlp/alp-cli
 // workspaces, and a launcher, the way Paseo ships its daemon on Electron's Node. ALP then runs
@@ -35,13 +36,14 @@ const CLI = 'lib/node_modules/@anhlp/alp-cli/dist/cli.js';
 
 /** This machine's platform; a Node translated by Rosetta 2 still names the native arm64 Mac. */
 export function hostPlatform() {
-  const osName = { darwin: 'darwin', linux: 'linux', win32: 'windows' }[process.platform];
+  // Another OS indexes nothing and names the platform `undefined-<arch>`, as before.
+  const osName = /** @type {Partial<Record<NodeJS.Platform, string>>} */ ({ darwin: 'darwin', linux: 'linux', win32: 'windows' })[process.platform];
   let arch = process.arch;
   if (process.platform === 'darwin' && arch === 'x64' && spawnSync('sysctl', ['-n', 'sysctl.proc_translated'], { encoding: 'utf8' }).stdout?.trim() === '1') arch = 'arm64';
   return `${osName}-${arch}`;
 }
 
-const npmTarget = platform => {
+const npmTarget = /** @param {string} platform */ platform => {
   const [osName, arch] = platform.split('-');
   return { os: osName === 'windows' ? 'win32' : osName, cpu: arch };
 };
@@ -65,16 +67,27 @@ rem ALP launcher (scripts/build-bundle.mjs): runs ALP with the Node release ship
 "%~dp0..\\node\\node.exe" "%~dp0..\\${CLI.replaceAll('/', '\\')}" %*\r
 `;
 
-const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+const sha256 = /** @param {Buffer} bytes */ bytes => createHash('sha256').update(bytes).digest('hex');
 
+/**
+ * @param {string} command
+ * @param {readonly string[]} args
+ * @param {import('node:child_process').SpawnSyncOptions} [options]
+ * @returns {string}
+ */
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8', shell: process.platform === 'win32' && command === 'npm', ...options });
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed (${result.status ?? result.error})`);
-  return result.stdout;
+  return /** @type {string} */ (result.stdout); // encoding 'utf8' (callers do not override it)
 }
 
-/** Downloads (or reuses from `cache`) the pinned Node archive for `platform` and checks its sha256. */
+/**
+ * Downloads (or reuses from `cache`) the pinned Node archive for `platform` and checks its sha256.
+ * @param {string} platform
+ * @param {string} cache
+ */
 export async function nodeArchive(platform, cache) {
+  /** scripts/node-runtime.json. @type {{ version: string, archives: Record<string, { file: string, sha256: string } | undefined> }} */
   const pinned = JSON.parse(await readFile(path.join(ROOT, 'scripts/node-runtime.json'), 'utf8'));
   const entry = pinned.archives[platform];
   if (!entry) throw new Error(`No pinned Node archive for ${platform}`);
@@ -93,8 +106,13 @@ export async function nodeArchive(platform, cache) {
   return { file, version: pinned.version, name: entry.file.replace(/\.(tar\.gz|zip)$/, '') };
 }
 
-/** Third-party packages the lockfile holds at exactly one version: name → version. */
+/**
+ * Third-party packages the lockfile holds at exactly one version: name → version.
+ * @param {{ packages?: Record<string, { link?: boolean, version?: string }> }} lock
+ * @returns {Map<string, string>}
+ */
 export function lockedVersions(lock) {
+  /** @type {Map<string, Set<string>>} */
   const seen = new Map();
   for (const [key, entry] of Object.entries(lock.packages ?? {})) {
     const match = /(?:^|\/)node_modules\/((?:@[^/]+\/)?[^/]+)$/.exec(key);
@@ -107,6 +125,7 @@ export function lockedVersions(lock) {
 }
 
 /** Removes the files only other platforms use: their node-pty prebuilds and native terminal helpers. */
+/** @param {string} modules @param {string} platform */
 async function prune(modules, platform) {
   const npm = npmTarget(platform);
   for (const name of await readdir(path.join(modules, '@anthropic-ai')).catch(() => [])) {
@@ -134,6 +153,7 @@ async function prune(modules, platform) {
 }
 
 /** THIRD-PARTY-NOTICES.txt: Node's licence, then the notices of the bundled JavaScript. */
+/** @param {string} nodeLicense @param {string | undefined} bunVersion */
 async function notices(nodeLicense, bunVersion) {
   const parts = [`Third-party software in the ALP bundle
 
@@ -170,6 +190,7 @@ export async function buildBundle({ platform, out, build = true, nodeCache = pat
     // 1. The workspaces as npm would publish them (already built: no prepack).
     const packs = path.join(work, 'packs');
     await mkdir(packs);
+    /** @type {Record<string, string>} */
     const tarballs = {};
     for (const location of WORKSPACES) {
       const [packed] = JSON.parse(run('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', packs], { cwd: path.join(ROOT, location) }));
@@ -209,7 +230,7 @@ export async function buildBundle({ platform, out, build = true, nodeCache = pat
     await mkdir(path.join(directory, 'bin'));
     if (windows) await writeFile(path.join(directory, 'bin/alp.cmd'), WINDOWS_LAUNCHER);
     else { await writeFile(path.join(directory, 'bin/alp'), POSIX_LAUNCHER); await chmod(path.join(directory, 'bin/alp'), 0o755); }
-    // 5. The native alpd: alp starts it instead of alpd.js when it is there (packages/core/src/packaged.js daemonEntry).
+    // 5. The native alpd: alp starts it instead of alpd.js when it is there (packages/core/src/packaged.ts daemonEntry).
     if (nativeDaemon) await buildNativeDaemon({ platform, out: path.join(directory, 'bin/alpd'), version, ...(bun ? { bun } : {}) });
     await writeFile(path.join(directory, 'alp-bundle.json'), `${JSON.stringify({ name: 'alp', version, platform, node: node.version, daemon: nativeDaemon ? 'native' : 'node' }, null, 2)}\n`);
     await copyFile(path.join(ROOT, 'LICENSE'), path.join(directory, 'LICENSE'));

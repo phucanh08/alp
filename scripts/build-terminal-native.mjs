@@ -1,3 +1,4 @@
+// @ts-check
 // Developer/release build only. Never called by terminal startup or postinstall.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -6,7 +7,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const slots = ['darwin-arm64', 'darwin-x64', 'linux-x64-glibc', 'linux-arm64-glibc', 'linux-x64-musl', 'linux-arm64-musl'];
-const libc = process.platform === 'linux' ? (process.report.getReport().header.glibcVersionRuntime ? 'glibc' : 'musl') : undefined;
+// Node types the diagnostic report as a bare object; the cast names the one field read.
+const libc = process.platform === 'linux' ? (/** @type {{ header: { glibcVersionRuntime?: string } }} */ (process.report.getReport()).header.glibcVersionRuntime ? 'glibc' : 'musl') : undefined;
 const targetArch = process.argv.find(arg => arg.startsWith('--arch='))?.slice(7) ?? process.arch;
 if (targetArch !== process.arch && !(process.platform === 'darwin' && ['arm64', 'x64'].includes(targetArch))) throw new Error('Cross architecture requires an existing Darwin toolchain');
 const slot = [process.platform, targetArch, libc].filter(Boolean).join('-');
@@ -25,7 +27,7 @@ if (process.platform === 'darwin') {
 const smoke = spawnSync(binary, ['--capability'], { encoding: 'utf8' });
 const protection = smoke.status === 0 && smoke.stdout.trim() === 'alp-terminal-owner:1' ? 'identity-bound' : process.platform === 'linux' && smoke.status === 0 && smoke.stdout.trim() === 'alp-terminal-owner:1:root-only' ? 'root-only' : undefined;
 if (!protection) throw new Error('Native capability smoke failed');
-const sha256 = value => createHash('sha256').update(value).digest('hex');
+const sha256 = /** @param {Buffer} value */ value => createHash('sha256').update(value).digest('hex');
 writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ protocol: 1, slot, source: sha256(readFileSync(source)), sha256: sha256(readFileSync(binary)), buildHost: process.version, ...(process.platform === 'darwin' ? { deploymentTarget: '11.0' } : {}), executionChecked: true, executionProtection: protection, executionHost: `${process.platform}-${process.arch}` }, null, 2) + '\n');
 console.log(`Built and executed ${slot}. Other matrix slots were NOT built or checked.`);
 if (process.argv.includes('--require-matrix')) {

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Shared local/CI baseline. Every child failure stops this lane with a nonzero exit code.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -24,23 +25,26 @@ const cleared = clearCallerSession();
 if (cleared.length) console.log(`[validate:${scope}] cleared the caller's ALP session variables, so every step runs as the user would: ${cleared.join(', ')}`);
 /** The commit this run checks, and whether the checkout differs from it, so a gate log names what it ran on. */
 function commit() {
-  const git = (...args) => spawnSync('git', args, { cwd: ROOT, encoding: 'utf8' });
+  const git = /** @param {string[]} args */ (...args) => spawnSync('git', args, { cwd: ROOT, encoding: 'utf8' });
   const head = git('rev-parse', 'HEAD');
   if (head.status !== 0 || !head.stdout.trim()) return 'commit unknown (not a git checkout)';
   const changes = git('status', '--porcelain', '--untracked-files=no');
   return `commit ${head.stdout.trim()}${changes.status !== 0 ? ' (uncommitted changes unknown)' : changes.stdout.trim() ? ' with uncommitted changes' : ''}`;
 }
 console.log(`[validate:${scope}] ${commit()}`);
+/** @param {string} script @param {string[]} args */
 function node(script, ...args) {
   console.log(`\n[validate:${scope}] ${script} ${args.join(' ')}`);
   const result = spawnSync(process.execPath, [script, ...args], { cwd: ROOT, stdio: 'inherit' });
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
+/** @param {string[]} args */
 function npm(...args) {
   console.log(`\n[validate:${scope}] npm ${args.join(' ')}`);
   const result = spawnSync(...spawnCommand('npm', args), { cwd: ROOT, stdio: 'inherit' });
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
+/** @param {string[]} files */
 function tests(files) {
   const status = runNodeTests(files);
   if (status !== 0) process.exit(status);

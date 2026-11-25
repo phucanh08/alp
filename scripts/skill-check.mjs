@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Validates skills strictly, as ALP ships them: every skill in templates/skills and
 // templates/packs/*/skills by default, or the skill directories named as arguments.
 // Exit 1 when any skill has an error; warnings are printed but do not fail.
@@ -7,7 +8,7 @@ import path from 'node:path';
 import { formatValidation, validateSkill } from '@anhlp/alp-core/skill-validate';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const dirs = async parent => (await readdir(parent, { withFileTypes: true }).catch(() => [])).filter(e => e.isDirectory()).map(e => path.join(parent, e.name));
+const dirs = /** @param {string} parent */ async parent => (await readdir(parent, { withFileTypes: true }).catch(() => [])).filter(e => e.isDirectory()).map(e => path.join(parent, e.name));
 
 /** Every shipped skill directory: core skills and the skills of each optional pack. */
 export async function shippedSkillDirs(root = ROOT) {

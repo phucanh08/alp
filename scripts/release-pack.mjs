@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Pack a release once (docs/alp/beta-scope.md §7.2 P2–P3): the eight tarballs in publish order
 // into a new directory, npm's pack JSON for each, SHA256SUMS and release-manifest.json, then A5 on them.
 // Run it in a clean clone at the release tag, after `npm ci` and `npm run build:packages`. It never publishes, tags or commits.
@@ -16,23 +17,25 @@ import { LAUNCHER_LOCATION, MANIFEST_FILE, RELEASE_PACKAGES, SUMS_FILE, createRe
 
 const root = path.resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
-const flag = name => { const index = args.indexOf(name); if (index >= 0) args.splice(index, 1); return index >= 0; };
+const flag = /** @param {string} name */ name => { const index = args.indexOf(name); if (index >= 0) args.splice(index, 1); return index >= 0; };
 const rehearsal = flag('--rehearsal');
 const ignoreScripts = flag('--ignore-scripts');
-const option = name => { const index = args.indexOf(name); if (index < 0) return undefined; const [, value] = args.splice(index, 2); if (!value) throw new Error(`${name} needs a value`); return value; };
+const option = /** @param {string} name */ name => { const index = args.indexOf(name); if (index < 0) return undefined; const [, value] = args.splice(index, 2); if (!value) throw new Error(`${name} needs a value`); return value; };
 const outArg = option('--out');
 const USAGE = 'Usage: release-pack.mjs --out <new directory> [--rehearsal] [--ignore-scripts]';
 if (!outArg || args.length) throw new Error(USAGE);
 const out = path.resolve(outArg);
 
+/** @param {string} command @param {string[]} commandArgs @returns {string} */
 function run(command, commandArgs) {
   const result = spawnSync(...spawnCommand(command, commandArgs), { cwd: root, encoding: 'utf8', maxBuffer: 128 * 1024 * 1024 });
   if (result.status !== 0) throw new Error(`${command} ${commandArgs.join(' ')} exited ${result.status}\n${result.stdout ?? ''}${result.stderr ?? ''}`);
   return result.stdout;
 }
-const git = (...gitArgs) => spawnSync('git', gitArgs, { cwd: root, encoding: 'utf8' });
+const git = /** @param {string[]} gitArgs */ (...gitArgs) => spawnSync('git', gitArgs, { cwd: root, encoding: 'utf8' });
 
-const readJson = file => JSON.parse(readFileSync(path.join(root, file), 'utf8'));
+// `any`: package.json, every workspace's package.json and package-lock.json; sourceProblems types what it reads.
+const readJson = /** @param {string} file @returns {any} */ file => JSON.parse(readFileSync(path.join(root, file), 'utf8'));
 const manifest = readJson('package.json');
 const version = manifest.version;
 const workspaces = ['.', ...manifest.workspaces, LAUNCHER_LOCATION].map(location => ({ location, pkg: location === '.' ? manifest : readJson(path.join(location, 'package.json')) }));
@@ -55,6 +58,7 @@ for (const { name, location, kind } of RELEASE_PACKAGES) {
   const output = run('npm', ['pack', ...where, '--pack-destination', out, '--json', ...(ignoreScripts ? ['--ignore-scripts'] : [])]);
   // Lifecycle output can precede npm's JSON array.
   const start = output.search(/^\[/m);
+  /** npm pack --json: one entry per packed package. @type {{ name: string, version: string, filename: string, integrity: string, shasum: string, entryCount: number }[]} */
   const packed = JSON.parse(output.slice(start >= 0 ? start : 0));
   if (packed.length !== 1 || packed[0].name !== name) throw new Error(`npm pack ${name} reported ${packed.map(entry => entry.name).join(', ')}`);
   writeFileSync(path.join(out, `pack-${name.replace('@anhlp/', '')}.json`), `${JSON.stringify(packed, null, 2)}\n`);

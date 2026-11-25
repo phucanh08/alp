@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // The browser files `alp dashboard` serves (packages/cli/dist/alp-dashboard.js, docs/alp/dashboard.md): apps/web built
 // with its own Vite config straight into packages/cli/dist/alp-dashboard/, with a THIRD-PARTY-NOTICES.txt
 // for exactly the npm packages Rollup put into the browser bundle (its module graph, not a guess).
@@ -54,6 +55,7 @@ export async function buildAlpDashboard({ outDir = ALP_DASHBOARD_DIR, log = cons
   const packages = new Set();
   const stylesheets = new Set();
   let helpers = false;
+  /** @type {import('vite').Plugin} */
   const collect = {
     name: 'alp-web-third-party',
     apply: 'build',

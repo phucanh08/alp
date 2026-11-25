@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Skill evaluation (skill system v2).
 //
 //   node scripts/skill-eval.mjs disclosure [--templates DIR] [--json]
@@ -24,9 +25,10 @@ import { InstructionsAdapter } from '@anhlp/alp-runtime';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const argv = process.argv.slice(2);
-const option = name => { const at = argv.indexOf(name); return at >= 0 ? argv[at + 1] : undefined; };
-const estimate = chars => Math.round(chars / 4);
+const option = /** @param {string} name */ name => { const at = argv.indexOf(name); return at >= 0 ? argv[at + 1] : undefined; };
+const estimate = /** @param {number} chars */ chars => Math.round(chars / 4);
 
+/** @param {string} directory */
 async function sizeOf(directory) {
   let total = 0;
   for (const entry of await readdir(directory, { withFileTypes: true, recursive: true })) {
@@ -73,6 +75,11 @@ export async function disclosure(templates = path.join(ROOT, 'templates')) {
   }
 }
 
+/**
+ * The scenarios file, one entry per case.
+ * @typedef {{ id: string, kind?: string, role: string, task: string, expect: string[], forbid: string[] }} Scenario
+ * @returns {Promise<Scenario[]>}
+ */
 async function loadScenarios() {
   return JSON.parse(await readFile(path.join(ROOT, 'test/evals/skills/triggers.json'), 'utf8')).scenarios;
 }
@@ -92,7 +99,10 @@ export async function checkScenarios() {
   return problems;
 }
 
-/** Asks a model, for each scenario, which skills of the role's index it would open. */
+/**
+ * Asks a model, for each scenario, which skills of the role's index it would open.
+ * @param {string} model
+ */
 async function liveTriggers(model) {
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const client = new Anthropic();
@@ -113,6 +123,7 @@ async function liveTriggers(model) {
         messages: [{ role: 'user', content: scenario.task }],
       });
       const text = response.content.filter(block => block.type === 'text').map(block => block.text).join('');
+      /** @type {string[]} */
       let chosen = [];
       try { chosen = JSON.parse(/\[[\s\S]*?\]/.exec(text)?.[0] ?? '[]'); } catch {}
       const missing = scenario.expect.filter(skill => !chosen.includes(skill));
@@ -128,7 +139,8 @@ async function liveTriggers(model) {
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [command] = argv;
   if (command === 'disclosure') {
-    const rows = await disclosure(option('--templates') ? path.resolve(option('--templates')) : undefined);
+    // option() returned a value on the left of `?`; the cast states that it is a string.
+    const rows = await disclosure(option('--templates') ? path.resolve(/** @type {string} */ (option('--templates'))) : undefined);
     if (argv.includes('--json')) console.log(JSON.stringify(rows, null, 2));
     else {
       console.log('role        skills  index chars  ~index tokens  bodies not loaded (B)  resources not loaded (B)  bodies leaked');

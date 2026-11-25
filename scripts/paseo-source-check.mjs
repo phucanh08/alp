@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Install the packed plugin the way Paseo installs a `paseo plugin add npm:<spec>` source, and prove
 // Paseo can compile it there (issue #111).
 //
@@ -45,20 +46,23 @@ const HOST_SDK = new Set(['@getpaseo/plugin', '@getpaseo/plugin/server', '@getpa
 const HOST_MODULE = /^(zod|react|react-native|@tanstack\/react-query)(\/|$)/;
 const builtins = new Set(builtinModules);
 
+/** @param {string} specifier */
 function packageName(specifier) {
   const parts = specifier.split('/');
   return specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
 }
 
+/** @param {string} specifier */
 function hostModule(specifier) {
   return HOST_SDK.has(specifier) || HOST_MODULE.test(specifier) || specifier.startsWith('node:') || builtins.has(specifier) || builtins.has(packageName(specifier)) || specifier === '@types/node';
 }
 
 // Paseo's compiler-imports.ts: TypeScript's bundler resolution, JavaScript allowed.
 const RESOLUTION = { module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, allowJs: true };
-const typesPackage = name => `@types/${name.replace(/^@/, '').replace('/', '__')}`;
+const typesPackage = /** @param {string} name */ name => `@types/${name.replace(/^@/, '').replace('/', '__')}`;
 
 /** The package's own TypeScript sources and declarations (`.ts`, `.tsx`, `.d.ts`, …). */
+/** @param {string} directory */
 function typeScriptFiles(directory) {
   return readdirSync(directory, { recursive: true, withFileTypes: true })
     .filter(entry => entry.isFile() && /\.[cm]?tsx?$/.test(entry.name))
@@ -67,6 +71,7 @@ function typeScriptFiles(directory) {
 }
 
 /** Every bare, non-host import of a shipped TypeScript file that does not resolve inside `project`. */
+/** @param {string} project @param {string} packageDirectory */
 export function unresolvedTypeScriptImports(project, packageDirectory) {
   const files = typeScriptFiles(packageDirectory);
   const problems = new Set();
@@ -88,7 +93,11 @@ export function unresolvedTypeScriptImports(project, packageDirectory) {
   return { files: files.length, declarations: files.filter(file => /\.d\.[cm]?ts$/.test(file)).length, problems: [...problems] };
 }
 
-/** Compile the installed plugin with Paseo's own compiler, as `paseo plugin add` does. */
+/**
+ * Compile the installed plugin with Paseo's own compiler, as `paseo plugin add` does.
+ * @param {string} packageDirectory
+ * @returns {Promise<{ skipped: string, server?: undefined, client?: undefined } | { skipped?: undefined, server: number, client: number }>}
+ */
 export async function paseoCompile(packageDirectory) {
   const compiler = path.join(PASEO_SOURCE, PASEO_COMPILER);
   if (!existsSync(compiler)) {
@@ -100,16 +109,19 @@ export async function paseoCompile(packageDirectory) {
   // Bundled into this repository's .cache so its own esbuild and typescript imports resolve here.
   const outfile = path.join(ROOT, '.cache/paseo-compiler/compiler.mjs');
   await build({ entryPoints: [compiler], outfile, bundle: true, format: 'esm', platform: 'node', target: 'node22', external: ['esbuild', 'typescript'], logLevel: 'warning' });
+  // `any`: a module bundled just above and imported by URL has no types; `bundles` below names what is read.
   const { compilePlugin } = await import(`${pathToFileURL(outfile).href}?${Date.now()}`);
   // Paseo's runtime.ts entry file names.
-  const entry = names => names.map(name => path.join(packageDirectory, name)).find(file => existsSync(file)) ?? null;
+  const entry = /** @param {string[]} names */ names => names.map(name => path.join(packageDirectory, name)).find(file => existsSync(file)) ?? null;
+  /** @type {Record<string, string | null>} */
   const entries = { server: entry(['index.server.ts', 'index.server.tsx']), client: entry(['index.client.ts', 'index.client.tsx']) };
   if (!entries.server && !entries.client) throw new Error(`no Paseo plugin entry (index.server.ts[x] or index.client.ts[x]) in ${packageDirectory}`);
+  /** @type {Record<string, string | undefined>} */
   let bundles;
   try {
     bundles = await compilePlugin(entries);
   } catch (error) {
-    throw new Error(`Paseo's compiler rejects the installed plugin (#111):\n  ${String(error?.message ?? error)}`);
+    throw new Error(`Paseo's compiler rejects the installed plugin (#111):\n  ${String(/** @type {Error | undefined} */ (error)?.message ?? error)}`);
   }
   for (const target of ['server', 'client']) {
     if (entries[target] && !bundles[`${target}Bundle`]) throw new Error(`Paseo's compiler produced no ${target} bundle for ${entries[target]}`);
@@ -117,7 +129,11 @@ export async function paseoCompile(packageDirectory) {
   return { server: bundles.serverBundle?.length ?? 0, client: bundles.clientBundle?.length ?? 0 };
 }
 
-/** The `package/package.json` inside a packed tarball, read with `tar`; a tar failure reports its own cause. */
+/**
+ * The `package/package.json` inside a packed tarball, read with `tar`; a tar failure reports its own cause.
+ * @param {string} tarball
+ * @returns {{ name: string, [field: string]: unknown }}
+ */
 export function packedManifest(tarball) {
   // spawnCommand runs the system's bsdtar on Windows: Git Bash's GNU tar misreads `D:\…` paths.
   const [tar, args] = spawnCommand('tar', ['-xOzf', tarball, 'package/package.json']);
@@ -127,11 +143,14 @@ export function packedManifest(tarball) {
   try {
     return JSON.parse(result.stdout);
   } catch (error) {
-    throw new Error(`${tar} ${args.join(' ')} printed no package.json (${error.message}): ${JSON.stringify(result.stdout.slice(0, 200))}${stderr}`);
+    throw new Error(`${tar} ${args.join(' ')} printed no package.json (${/** @type {Error} */ (error).message}): ${JSON.stringify(result.stdout.slice(0, 200))}${stderr}`);
   }
 }
 
-/** Install `plugin` as Paseo installs an npm: source, check its imports and compile it. */
+/**
+ * Install `plugin` as Paseo installs an npm: source, check its imports and compile it.
+ * @param {{ plugin: string, dependencies?: string[], work: string }} options
+ */
 export async function checkPaseoNpmSource({ plugin, dependencies = [], work }) {
   const project = path.join(work, 'paseo-npm-source');
   mkdirSync(project, { recursive: true });
@@ -153,6 +172,7 @@ export async function checkPaseoNpmSource({ plugin, dependencies = [], work }) {
   return { name, ...report, compiled: await paseoCompile(packageDirectory) };
 }
 
+/** @param {Awaited<ReturnType<typeof checkPaseoNpmSource>>} report */
 export function describe({ name, files, declarations, compiled }) {
   const compile = compiled.skipped ? `Paseo compiler skipped (${compiled.skipped})` : `Paseo's compiler built server ${compiled.server} B, client ${compiled.client} B`;
   return `${name}: installed as a Paseo npm: source (no peers); ${files} shipped TypeScript file(s), ${declarations} declaration(s), none imports an uninstalled package; ${compile}`;

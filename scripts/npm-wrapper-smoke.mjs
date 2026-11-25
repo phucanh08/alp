@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // The npm wrapper as a user gets it (t-1807): `npm install -g` of @anhlp/alp and the JavaScript
 // packages it depends on into a throwaway prefix, then npm's `alp`: --version, init, and update
 // (which only says to update with npm). With a release directory (release-pack.mjs) it installs
@@ -20,6 +21,12 @@ const prefix = path.join(work, 'prefix');
 const home = path.join(work, 'home');
 const env = { ...process.env, HOME: home, USERPROFILE: home, ALP_HOME: path.join(home, '.alp'), npm_config_prefix: prefix, npm_config_cache: path.join(work, 'npm-cache'), npm_config_userconfig: path.join(work, 'npmrc'), npm_config_update_notifier: 'false' };
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {Omit<import('node:child_process').SpawnSyncOptions, 'encoding'>} [options]
+ * @returns {string}
+ */
 function run(command, args, options = {}) {
   const result = spawnSync(...spawnCommand(command, args), { cwd: work, env, encoding: 'utf8', timeout: 300_000, maxBuffer: 64 * 1024 * 1024, ...options });
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} exited ${result.status}\n${result.stdout ?? ''}${result.stderr ?? ''}${result.error ?? ''}`);
@@ -32,13 +39,14 @@ function run(command, args, options = {}) {
 // on a fresh prefix; the npm cache is kept between attempts so later attempts mostly hit it.
 const INSTALL_TIMEOUT_MS = Number(process.env.ALP_SMOKE_INSTALL_TIMEOUT_MS) || 480_000;
 const INSTALL_ATTEMPTS = 3;
+/** @param {string[]} args */
 function installGlobal(args) {
   for (let attempt = 1; ; attempt += 1) {
     try {
       return run('npm', args, { timeout: INSTALL_TIMEOUT_MS, env: { ...env, npm_config_fetch_retries: '5', npm_config_fetch_retry_mintimeout: '10000', npm_config_fetch_retry_maxtimeout: '120000', npm_config_fetch_timeout: '120000', npm_config_prefer_offline: 'true' } });
     } catch (error) {
       if (attempt >= INSTALL_ATTEMPTS) throw error;
-      console.warn(`[npm-wrapper-smoke] npm install -g attempt ${attempt}/${INSTALL_ATTEMPTS} failed, retrying:\n${String(error.message).slice(0, 2000)}`);
+      console.warn(`[npm-wrapper-smoke] npm install -g attempt ${attempt}/${INSTALL_ATTEMPTS} failed, retrying:\n${String(/** @type {Error} */ (error).message).slice(0, 2000)}`);
       try { rmSync(prefix, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch (cleanup) { console.warn(`[npm-wrapper-smoke] could not clear ${prefix}: ${cleanup}`); }
     }
   }
@@ -67,7 +75,7 @@ try {
   // @anhlp/alp-cli declares bin alp too: the command must be the wrapper's.
   if (process.platform !== 'win32' && !realpathSync(bin).endsWith(path.join('@anhlp', 'alp', 'bin', 'alp.js'))) throw new Error(`${bin} is ${realpathSync(bin)}, not @anhlp/alp's bin/alp.js`);
   if (process.platform === 'win32' && !/@anhlp[\\/]alp[\\/]bin[\\/]alp\.js/.test(readFileSync(bin, 'utf8'))) throw new Error(`${bin} does not run @anhlp/alp's bin/alp.js`);
-  const alp = (...args) => run(bin, args, process.platform === 'win32' ? { shell: true } : {});
+  const alp = /** @param {string[]} args */ (...args) => run(bin, args, process.platform === 'win32' ? { shell: true } : {});
 
   const printed = alp('--version').trim();
   if (printed !== version) throw new Error(`alp --version printed ${JSON.stringify(printed)}, expected ${version}`);

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Proof that the published tarballs are real, independently installable packages, in two isolated
 // projects that never reach back into this repository's node_modules:
 //
@@ -42,6 +43,28 @@ const savedPacks = packsAt >= 0 ? path.resolve(process.argv[packsAt + 1] ?? '') 
 const TYPES_NODE = '@types/node@22.20.5';
 const typescript = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
 
+/** @typedef {{ cwd?: string, capture?: boolean, allowFailure?: boolean }} RunOptions */
+/**
+ * With allowFailure: the outcome, for the caller to judge.
+ * @overload
+ * @param {string} command
+ * @param {string[]} args
+ * @param {RunOptions & { allowFailure: true }} options
+ * @returns {{ status: number | null, output: string, failure: string }}
+ */
+/**
+ * Otherwise: the output, or a throw on failure.
+ * @overload
+ * @param {string} command
+ * @param {string[]} args
+ * @param {RunOptions & { allowFailure?: false }} [options]
+ * @returns {string}
+ */
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {RunOptions} [options]
+ */
 function run(command, args, options = {}) {
   const result = spawnSync(...spawnCommand(command, args), { cwd: options.cwd ?? root, encoding: 'utf8', stdio: options.capture ? 'pipe' : 'inherit', maxBuffer: 128 * 1024 * 1024 });
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
@@ -52,12 +75,14 @@ function run(command, args, options = {}) {
 }
 
 /** The concrete published version a dependency/peer is pinned to: what this repository resolved. */
+/** @param {string} name @returns {string | undefined} */
 function installedVersion(name) {
   const file = path.join(root, 'node_modules', name, 'package.json');
   return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).version : undefined;
 }
 
 /** Every package name present in a project's node_modules, scopes expanded. */
+/** @param {string} directory */
 function installedPackages(directory) {
   const nodeModules = path.join(directory, 'node_modules');
   const names = [];
@@ -69,16 +94,23 @@ function installedPackages(directory) {
   return names;
 }
 
+/** @param {string} file @param {unknown} value */
 function writeJson(file, value) {
   writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+/** @param {string} directory @param {string[]} specs */
 function installProject(directory, specs) {
   mkdirSync(directory, { recursive: true });
   writeJson(path.join(directory, 'package.json'), { name: `alp-consumer-${path.basename(directory)}`, private: true, version: '0.0.0', type: 'module' });
   run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--legacy-peer-deps', '--save-exact', ...specs], { cwd: directory });
 }
 
+/**
+ * @param {string} directory
+ * @param {{ files: string[], [key: string]: unknown }} tsconfig
+ * @param {{ expectFailure?: boolean, mustMention?: string }} [options]
+ */
 function typecheck(directory, tsconfig, { expectFailure = false, mustMention } = {}) {
   writeJson(path.join(directory, 'tsconfig.json'), tsconfig);
   const { status, output, failure } = run(process.execPath, [typescript, '-p', path.join(directory, 'tsconfig.json')], { cwd: directory, capture: true, allowFailure: true });
@@ -92,7 +124,7 @@ function typecheck(directory, tsconfig, { expectFailure = false, mustMention } =
   return output;
 }
 
-const strictConsumerTsconfig = files => ({ compilerOptions: { module: 'nodenext', moduleResolution: 'nodenext', target: 'es2022', strict: true, skipLibCheck: false, noEmit: true, types: ['node'] }, files });
+const strictConsumerTsconfig = /** @param {string[]} files */ files => ({ compilerOptions: { module: 'nodenext', moduleResolution: 'nodenext', target: 'es2022', strict: true, skipLibCheck: false, noEmit: true, types: ['node'] }, files });
 
 const work = mkdtempSync(path.join(os.tmpdir(), 'alp-tarball-consumer-'));
 const packs = path.join(work, 'packs');
@@ -100,25 +132,31 @@ mkdirSync(packs, { recursive: true });
 try {
   // Pack every public workspace once, and remember the tarball for each package name. With
   // `--packs <release directory>`, use that release's saved tarballs as they are instead.
+  /** @type {Map<string, string>} */
   const tarballs = new Map();
+  /** The public packages' package.json files, packed or read from the saved release. @type {(import('./release-lib.mjs').PackageJson & { peerDependenciesMeta?: Record<string, { optional?: boolean }> })[]} */
   const publicPackages = [];
   for (const artifact of savedPacks ? releaseArtifacts(savedPacks) : []) {
     // The npm wrapper holds no JavaScript API; package-smoke runs it.
     if (artifact.name === LAUNCHER) continue;
-    publicPackages.push(artifact.manifest);
+    // verifyRelease read every artifact's package.json before releaseArtifacts returned it.
+    publicPackages.push(/** @type {import('./release-lib.mjs').PackageJson} */ (artifact.manifest));
     tarballs.set(artifact.name, artifact.file);
   }
-  for (const location of savedPacks ? [] : manifest.workspaces) {
+  for (const location of /** @type {string[]} */ (savedPacks ? [] : manifest.workspaces)) {
+    /** @type {import('./release-lib.mjs').PackageJson & { name: string }} */
     const pkg = JSON.parse(readFileSync(path.join(root, location, 'package.json'), 'utf8'));
     if (pkg.private) continue;
     publicPackages.push(pkg);
     const output = run('npm', ['pack', '--workspace', pkg.name, '--pack-destination', packs, '--ignore-scripts', '--json'], { capture: true });
+    /** @type {[{ filename: string }]} */
     const [{ filename }] = JSON.parse(output.slice(output.indexOf('[')));
     tarballs.set(pkg.name, path.join(packs, filename));
   }
   const plugin = publicPackages.find(pkg => pkg.name === '@anhlp/alp-paseo');
   const corePackages = publicPackages.filter(pkg => pkg.name !== '@anhlp/alp-paseo');
-  const coreTarballs = corePackages.map(pkg => tarballs.get(pkg.name));
+  // Every public package was packed (or saved) above, so each name has its tarball.
+  const coreTarballs = corePackages.map(pkg => /** @type {string} */ (tarballs.get(/** @type {string} */ (pkg.name))));
 
   // 1. The neutral core installs alone: no Paseo SDK, no plugin, no React.
   const core = path.join(work, 'core');
@@ -167,10 +205,11 @@ export const sameType = (summary: DaemonSessionSummary): SessionSummary => summa
   // 2. The plugin installs with its declared published peers, pinned to the versions this repository
   //    resolved. Optional peers (react-native, client-side only) are left out.
   const pluginDir = path.join(work, 'plugin');
-  const peerSpecs = Object.entries(plugin.peerDependencies ?? {})
-    .filter(([name]) => !plugin.peerDependenciesMeta?.[name]?.optional)
+  // The plugin is one of the public packages (the release has it); the casts below state that.
+  const peerSpecs = Object.entries(/** @type {typeof publicPackages[number]} */ (plugin).peerDependencies ?? {})
+    .filter(([name]) => !/** @type {typeof publicPackages[number]} */ (plugin).peerDependenciesMeta?.[name]?.optional)
     .map(([name, range]) => `${name}@${installedVersion(name) ?? range}`);
-  installProject(pluginDir, [tarballs.get('@anhlp/alp-paseo'), ...coreTarballs, ...peerSpecs, TYPES_NODE, `esbuild@${installedVersion('esbuild')}`]);
+  installProject(pluginDir, [/** @type {string} */ (tarballs.get('@anhlp/alp-paseo')), ...coreTarballs, ...peerSpecs, TYPES_NODE, `esbuild@${installedVersion('esbuild')}`]);
   const sdkPeers = peerSpecs.filter(spec => spec.startsWith('@getpaseo/'));
   if (sdkPeers.length < 4) throw new Error(`expected the Paseo SDK peers in the plugin install, got: ${sdkPeers.join(', ')}`);
 
@@ -187,7 +226,8 @@ console.log('plugin runtime imports ok');
   run(process.execPath, [path.join(pluginDir, 'import.mjs')], { cwd: pluginDir });
 
   // A Paseo plugin, not a library: it ships no declarations (#111), and its exports stop at its files.
-  const shipped = readdirSync(path.join(pluginDir, 'node_modules/@anhlp/alp-paseo'), { recursive: true }).filter(file => /\.d\.[cm]?ts$/.test(file) && !file.split(path.sep).includes('node_modules'));
+  // Without an encoding the names are strings; the recursive overload types them loosely.
+  const shipped = /** @type {string[]} */ (readdirSync(path.join(pluginDir, 'node_modules/@anhlp/alp-paseo'), { recursive: true })).filter(file => /\.d\.[cm]?ts$/.test(file) && !file.split(path.sep).includes('node_modules'));
   if (shipped.length) throw new Error(`@anhlp/alp-paseo must not ship declarations (#111), found: ${shipped.join(', ')}`);
   const missing = run(process.execPath, ['--input-type=module', '-e', "await import('@anhlp/alp-paseo/paseo/does-not-exist')"], { cwd: pluginDir, capture: true, allowFailure: true });
   if (missing.status === 0 || !missing.output.includes('ERR_MODULE_NOT_FOUND')) throw new Error(`an unknown ./paseo/* subpath must not import (node ${missing.failure})\n${missing.output}`);
@@ -229,7 +269,7 @@ console.log('plugin runtime imports ok');
   if (regression.status !== 0) throw new Error(`installed plugin regressions failed: ${exitDescription(regression)}`);
 
   // 3. The plugin as Paseo installs an npm: source: no peers, so no shipped type import may need one.
-  console.log(describePaseoSource(await checkPaseoNpmSource({ plugin: tarballs.get('@anhlp/alp-paseo'), dependencies: coreTarballs, work })));
+  console.log(describePaseoSource(await checkPaseoNpmSource({ plugin: /** @type {string} */ (tarballs.get('@anhlp/alp-paseo')), dependencies: coreTarballs, work })));
 
   console.log('Tarball consumer check passed');
 } finally {

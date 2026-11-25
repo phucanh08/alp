@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Smoke test of the ALP bundle (t-1807), in a throwaway ALP_HOME, run by the bundle's own Node:
 // its launcher, init, daemon start/status, alp dashboard (HTTP, token gate, ticket, WebSocket), a terminal
 // (the native helper; node-pty on Windows), provider turns with the fake Codex and the fake Claude
@@ -32,7 +33,7 @@ const manifest = JSON.parse(await readFile(path.join(bundle, 'alp-bundle.json'),
 // The native alpd (t-81b0.9) where the bundle ships one, else alpd.js on the bundle's Node.
 const native = manifest.daemon === 'native';
 const alpd = native ? path.join(bundle, 'bin', windows ? 'alpd.exe' : 'alpd') : path.join(bundle, 'lib/node_modules/@anhlp/alp-cli/dist/alpd.js');
-const log = message => console.log(`[binary-smoke] ${message}`);
+const log = /** @param {string} message */ message => console.log(`[binary-smoke] ${message}`);
 const run = promisify(execFile);
 const work = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-binary-smoke-')));
 const home = path.join(work, 'home');
@@ -42,10 +43,11 @@ const home = path.join(work, 'home');
 // mechanism as scripts/core-standalone-smoke.mjs:138; the product guard is unchanged.
 const clearedSession = clearCallerSession();
 if (clearedSession.length) log(`cleared the caller's ALP session variables, so the bundled CLI runs as the user's: ${clearedSession.join(', ')}`);
+/** @type {NodeJS.ProcessEnv} */
 const env = { ...process.env, ALP_HOME: home, SHELL: '/bin/sh', ALP_CODEX_BIN: path.join(ROOT, 'packages/daemon/tests/support/fake-codex.js'), ALP_CLAUDE_BIN: path.join(ROOT, 'packages/daemon/tests/support/fake-claude.js'), ALP_DAEMON_ENTRY: '', ALP_DASHBOARD_APP: '' };
 delete env.ALP_DAEMON_ENTRY; delete env.ALP_DASHBOARD_APP; delete env.ALP_WEB_APP;
-const alp = async (args, cwd = work) => (await run(node, [...cliArgs, ...args], { env, cwd, timeout: 60_000 })).stdout.trim();
-const check = (condition, message) => { if (!condition) throw new Error(message); log(`ok: ${message}`); };
+const alp = /** @param {string[]} args @param {string} [cwd] */ async (args, cwd = work) => (await run(node, [...cliArgs, ...args], { env, cwd, timeout: 60_000 })).stdout.trim();
+const check = /** @param {unknown} condition @param {string} message */ (condition, message) => { if (!condition) throw new Error(message); log(`ok: ${message}`); };
 
 try {
   await mkdir(home, { mode: 0o700 });
@@ -92,12 +94,12 @@ try {
   check((await fetch(base)).status === 200, 'alp dashboard serves its app over HTTP');
   check((await fetch(`${base}/v1/tickets`, { method: 'POST' })).status === 401, 'a ticket without a token is refused');
   check((await fetch(`${base}/v1/tickets`, { method: 'POST', headers: { authorization: 'Bearer alpgw1.x.y' } })).status === 401, 'a ticket with a wrong token is refused');
-  const ticket = await (await fetch(`${base}/v1/tickets`, { method: 'POST', headers: { authorization: `Bearer ${token}` } })).json();
+  const ticket = /** @type {{ websocket: string, subprotocols: string[] }} */ (await (await fetch(`${base}/v1/tickets`, { method: 'POST', headers: { authorization: `Bearer ${token}` } })).json());
   const client = new AlpRpcClient(await connectWebSocket(base.replace(/^http/, 'ws') + ticket.websocket, { WebSocket, protocols: ticket.subprotocols }));
   try {
     const greeting = await hello(client, { name: 'binary-smoke', version: '0' });
-    check(greeting.capabilities.includes('terminal.watch'), 'WebSocket upgrade and hello through the gateway');
-    const events = [], output = [], payloads = [];
+    check(/** @type {string[]} */ (greeting.capabilities).includes('terminal.watch'), 'WebSocket upgrade and hello through the gateway');
+    const events = /** @type {string[]} */ ([]), output = /** @type {string[]} */ ([]), payloads = /** @type {string[]} */ ([]);
     client.onEvent(envelope => { events.push(envelope.event.type); payloads.push(JSON.stringify(envelope.event)); });
     const exits = [];
     client.onNotification((method, event) => {
@@ -107,7 +109,7 @@ try {
     {
       // POSIX: the native helper running /bin/sh. Windows: node-pty (ConPTY) running cmd.exe.
       const { workspaces } = await client.request('workspace.list', {});
-      const workspace = workspaces.find(row => row.directory === project || row.canonical === project || row.directory?.toLowerCase() === project.toLowerCase());
+      const workspace = workspaces.find(/** @param {{ id: string, directory?: string, canonical?: string }} row */ row => row.directory === project || row.canonical === project || row.directory?.toLowerCase() === project.toLowerCase());
       const { terminal } = await client.request('terminal.create', { workspaceId: workspace.id, cols: 80, rows: 24, requestId: 'smoke' });
       await client.request('terminal.attach', { terminalId: terminal.terminalId });
       // The typed line echoes back too, so the expected text is one the input does not contain.
@@ -152,8 +154,10 @@ try {
   // reported as daemon_restarted, as under Node (t-81b0.9 hazard f; ALPD §66).
   if (!windows) {
     const { connect, readLock } = await import('@anhlp/alp-client/index');
-    const first = await readLock(home);
+    // alpd was started above, so its lock exists; the cast only drops readLock's `undefined`.
+    const first = /** @type {import('@anhlp/alp-client').DaemonLock} */ (await readLock(home));
     const direct = await connect(first.socket, { name: 'binary-smoke', version: '0' });
+    /** @type {string[]} */
     const started = [];
     direct.onEvent(envelope => started.push(envelope.event.type));
     const { session } = await direct.request('session.create', { spec: { cwd: project, model: 'codex:gpt-5.6-sol' }, history: 'skip' });
@@ -165,13 +169,14 @@ try {
     direct.close();
     for (let i = 0; i < 200; i++) { try { process.kill(first.pid, 0); } catch { break; } await new Promise(resolve => setTimeout(resolve, 25)); }
     check(/running \(pid \d+\)/.test(await alp(['daemon', 'start'])), 'alp daemon start after alpd was killed takes over its lock');
-    const second = await readLock(home);
+    const second = /** @type {import('@anhlp/alp-client').DaemonLock} */ (await readLock(home));
     check(second.pid !== first.pid && second.socket === first.socket, `a new alpd (pid ${second.pid}) listens on the same socket`);
     const again = await connect(second.socket, { name: 'binary-smoke', version: '0' });
     try {
+      /** @type {{ state?: string, error?: { code?: string } }[]} */
       const ended = [];
       again.onEvent(envelope => { if (envelope.event.type === 'turn.ended') ended.push(envelope.event); });
-      for (let i = 0; i < 400 && !(await again.request('session.list', { includeClosed: true })).sessions.find(row => row.id === session.id)?.parked; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      for (let i = 0; i < 400 && !(await again.request('session.list', { includeClosed: true })).sessions.find(/** @param {{ id: string, parked?: boolean }} row */ row => row.id === session.id)?.parked; i++) await new Promise(resolve => setTimeout(resolve, 25));
       await again.request('session.attach', { sessionId: session.id });
       for (let i = 0; !ended.some(event => event.error?.code === 'daemon_restarted') && i < 400; i++) await new Promise(resolve => setTimeout(resolve, 25));
       check(ended.some(event => event.state === 'failed' && event.error?.code === 'daemon_restarted'), 'the restarted alpd reports the interrupted turn as daemon_restarted');
@@ -182,7 +187,7 @@ try {
   if (process.platform !== 'win32') {
     const socket = path.join(work, 'bridge.sock');
     const server = net.createServer(connection => connection.on('data', () => {}));
-    await new Promise(resolve => server.listen(socket, resolve));
+    await /** @type {Promise<void>} */ (new Promise(resolve => server.listen(socket, resolve)));
     const bridge = spawn(node, [...cliArgs, 'bridge', 'acp'], { env: { ...env, ALP_BRIDGE_SOCKET: socket, ALP_BRIDGE_TOKEN: 't' }, stdio: ['pipe', 'pipe', 'inherit'] });
     bridge.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })}\n`);
     const reply = await new Promise((resolve, reject) => { bridge.stdout.once('data', chunk => resolve(String(chunk))); setTimeout(() => reject(new Error('alp bridge acp did not answer')), 10_000); });

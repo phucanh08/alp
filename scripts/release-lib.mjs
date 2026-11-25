@@ -1,3 +1,4 @@
+// @ts-check
 // Release artifacts for docs/alp/beta-scope.md §6–7: which packages a release is, the manifest and
 // SHA256SUMS that pin the tarballs packed once, the checks run on those saved files (A5), and the
 // gate table that decides whether they may be published. Nothing here packs, builds or publishes.
@@ -10,6 +11,34 @@ import { THIRD_PARTY_NOTICES, packageDirectory, packageName } from './third-part
 /** The npm wrapper (t-1807): `alp` runs the CLI of its one dependency, @anhlp/alp-cli, on the user's Node. */
 export const LAUNCHER = '@anhlp/alp';
 export const LAUNCHER_LOCATION = 'npm/alp';
+
+/** @typedef {'dependencies' | 'peerDependencies' | 'optionalDependencies'} DependencyField */
+/**
+ * A package.json as the release checks read it; JSON, so every field may be missing.
+ * @typedef {{
+ *   name?: string, version?: string, private?: boolean, license?: string,
+ *   bin?: string | Record<string, string>, scripts?: Record<string, string>, files?: string[],
+ *   dependencies?: Record<string, string>, peerDependencies?: Record<string, string>,
+ *   optionalDependencies?: Record<string, string>, devDependencies?: Record<string, string>,
+ *   bundledDependencies?: string[] | boolean, bundleDependencies?: string[] | boolean,
+ *   [field: string]: unknown,
+ * }} PackageJson
+ */
+/**
+ * One tarball the release manifest pins (`createReleaseManifest`).
+ * @typedef {{ name: string, version: string, filename: string, size: number, sha256: string, integrity: string, shasum: string, entryCount: number }} ManifestPackage
+ */
+/**
+ * release-manifest.json: where and from what the tarballs were packed. Read back from JSON, so the
+ * checks treat every field as possibly missing.
+ * @typedef {{
+ *   schema?: number, version?: string, distTag?: string,
+ *   git?: { sha?: string | null, dirty?: boolean, tag?: string | null, [key: string]: unknown },
+ *   build?: unknown, pack?: { ignoreScripts?: boolean, [key: string]: unknown },
+ *   sha256sums?: string, packages?: ManifestPackage[],
+ * }} ReleaseManifest
+ */
+/** A verified tarball: its manifest entry, its path, its files and its packed package.json. @typedef {ManifestPackage & { file: string, files: Map<string, Buffer>, manifest?: PackageJson }} ReleaseArtifact */
 
 /**
  * The eight public packages, in publish order (§7.4): the seven JavaScript workspaces and last the
@@ -29,13 +58,15 @@ export const RELEASE_NAMES = RELEASE_PACKAGES.map(pkg => pkg.name);
 export const PLUGIN = '@anhlp/alp-paseo';
 export const MANIFEST_FILE = 'release-manifest.json';
 export const SUMS_FILE = 'SHA256SUMS';
+/** @type {DependencyField[]} */
 const DEPENDENCY_FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies'];
 const VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 /** `npm pack`'s file name: `@anhlp/alp-core` at 1.0.0 is `anhlp-alp-core-1.0.0.tgz`. */
-export const tarballFilename = (name, version) => `${name.replace(/^@/, '').replace('/', '-')}-${version}.tgz`;
+export const tarballFilename = /** @param {string} name @param {string | undefined} version */ (name, version) => `${name.replace(/^@/, '').replace('/', '-')}-${version}.tgz`;
 
 /** The digests the release records: SHA-256 for SHA256SUMS, and npm's own `integrity` (sha512) and `shasum` (sha1). */
+/** @param {Buffer} buffer */
 export function digests(buffer) {
   return {
     size: buffer.length,
@@ -46,8 +77,9 @@ export function digests(buffer) {
 }
 
 /** `sha256sum`/`shasum -a 256` format, so the file checks with `sha256sum -c` as well as with this script. */
-export const formatSha256Sums = entries => [...entries].sort((a, b) => a.filename.localeCompare(b.filename)).map(entry => `${entry.sha256}  ${entry.filename}\n`).join('');
+export const formatSha256Sums = /** @param {Iterable<{ filename: string, sha256: string }>} entries */ entries => [...entries].sort((a, b) => a.filename.localeCompare(b.filename)).map(entry => `${entry.sha256}  ${entry.filename}\n`).join('');
 
+/** @param {string} text @returns {Map<string, string>} */
 export function parseSha256Sums(text) {
   const sums = new Map();
   for (const line of text.split(/\r?\n/)) {
@@ -63,11 +95,14 @@ export function parseSha256Sums(text) {
 /**
  * The regular files of a gzipped tarball, relative to npm's `package/` root. Reads ustar names with
  * their prefix field, plus pax and GNU long names, which is everything `npm pack` writes.
+ * @param {Buffer} buffer
+ * @returns {Map<string, Buffer>}
  */
 export function readTarball(buffer) {
   const data = gunzipSync(buffer);
   const files = new Map();
-  const field = (block, start, length) => block.subarray(start, start + length).toString('utf8').replace(/\0[\s\S]*$/, '');
+  const field = /** @param {Buffer} block @param {number} start @param {number} length */ (block, start, length) => block.subarray(start, start + length).toString('utf8').replace(/\0[\s\S]*$/, '');
+  /** @type {string | undefined} */
   let longName;
   for (let offset = 0; offset + 512 <= data.length;) {
     const header = data.subarray(offset, offset + 512);
@@ -88,7 +123,11 @@ export function readTarball(buffer) {
   return files;
 }
 
-/** Internal dependencies must name a released package and pin the release version exactly. */
+/**
+ * Internal dependencies must name a released package and pin the release version exactly.
+ * @param {PackageJson} pkg
+ * @param {string | undefined} version
+ */
 export function internalDependencyProblems(pkg, version) {
   const problems = [];
   for (const field of DEPENDENCY_FIELDS) {
@@ -101,11 +140,15 @@ export function internalDependencyProblems(pkg, version) {
   return problems;
 }
 
-/** The wrapper's own rules: exactly @anhlp/alp-cli at the release version, pinned, and no install scripts. */
+/**
+ * The wrapper's own rules: exactly @anhlp/alp-cli at the release version, pinned, and no install scripts.
+ * @param {PackageJson} pkg
+ * @param {string | undefined} version
+ */
 export function launcherProblems(pkg, version) {
   const problems = [];
   if (JSON.stringify(pkg.dependencies ?? {}) !== JSON.stringify({ '@anhlp/alp-cli': version })) problems.push(`${LAUNCHER}: dependencies must be exactly @anhlp/alp-cli@${version}`);
-  for (const field of ['optionalDependencies', 'peerDependencies']) if (Object.keys(pkg[field] ?? {}).length) problems.push(`${LAUNCHER}: must have no ${field}`);
+  for (const field of /** @type {DependencyField[]} */ (['optionalDependencies', 'peerDependencies'])) if (Object.keys(pkg[field] ?? {}).length) problems.push(`${LAUNCHER}: must have no ${field}`);
   for (const script of ['preinstall', 'install', 'postinstall', 'prepare']) if (pkg.scripts?.[script]) problems.push(`${LAUNCHER}: no ${script} script (nothing is downloaded after install)`);
   if (JSON.stringify(pkg.bin) !== JSON.stringify({ alp: 'bin/alp.js' })) problems.push(`${LAUNCHER}: bin must be { alp: bin/alp.js }`);
   return problems;
@@ -116,12 +159,18 @@ export function launcherProblems(pkg, version) {
  * internal dependencies pinned to it, and package-lock.json agrees with the workspace manifests.
  * `workspaces` is `[{ location, pkg }]` for the root (`.`), every workspace and the launcher
  * (npm/alp, outside the workspaces).
+ * @param {{
+ *   workspaces: { location: string, pkg: PackageJson }[],
+ *   lock?: { packages?: Record<string, { version?: string } & Partial<Record<DependencyField, Record<string, string>>>> },
+ *   version?: string,
+ * }} source
  */
 export function sourceProblems({ workspaces, lock, version }) {
   const problems = [];
   if (!VERSION.test(version ?? '')) return [`release version ${JSON.stringify(version)} is not a semver version`];
   const publicNames = workspaces.filter(({ pkg }) => !pkg.private).map(({ pkg }) => pkg.name);
-  for (const name of publicNames) if (!RELEASE_NAMES.includes(name)) problems.push(`${name} is public but not a release package; mark it "private": true`);
+  // A nameless public workspace is looked up as undefined: not a release name, so it is reported.
+  for (const name of publicNames) if (!RELEASE_NAMES.includes(/** @type {string} */ (name))) problems.push(`${name} is public but not a release package; mark it "private": true`);
   for (const expected of RELEASE_PACKAGES) {
     const found = workspaces.find(({ pkg }) => pkg.name === expected.name);
     if (!found) { problems.push(`${expected.name}: no workspace has this name`); continue; }
@@ -142,7 +191,10 @@ export function sourceProblems({ workspaces, lock, version }) {
   return problems;
 }
 
-/** The release manifest (§7.2 P3): where and from what the tarballs were packed, and each tarball's identity. */
+/**
+ * The release manifest (§7.2 P3): where and from what the tarballs were packed, and each tarball's identity.
+ * @param {{ version: string, git: ReleaseManifest['git'], build: unknown, pack: ReleaseManifest['pack'], artifacts: ManifestPackage[], sha256sums: string }} release
+ */
 export function createReleaseManifest({ version, git, build, pack, artifacts, sha256sums }) {
   return {
     schema: 1,
@@ -162,6 +214,7 @@ export function createReleaseManifest({ version, git, build, pack, artifacts, sh
  * (A5 refuses a tarball outside the release); this list is checked beside A5, not as part of it.
  */
 const ALP_DASHBOARD_FILES = ['dist/alp-dashboard.js', 'dist/alp-dashboard/index.html', `dist/alp-dashboard/${THIRD_PARTY_NOTICES}`, `dist/${THIRD_PARTY_NOTICES}`];
+/** @type {Readonly<Record<string, string[]>>} */
 export const SHIPPED_WEB_FILES = Object.freeze({
   '@anhlp/alp-cli': ALP_DASHBOARD_FILES,
 });
@@ -182,19 +235,28 @@ export function shippedWebProblems(name, files) {
   return problems;
 }
 
-/** Problems a single packed package has, from its own files (no repository source involved). */
+/**
+ * Problems a single packed package has, from its own files (no repository source involved).
+ * @param {string} name
+ * @param {Map<string, Buffer>} files
+ * @param {string | undefined} version
+ * @param {Map<string, Buffer> | undefined} rootFiles
+ * @returns {{ problems: string[], pkg?: PackageJson }}
+ */
 function contentProblems(name, files, version, rootFiles) {
   const problems = [];
-  const text = file => files.get(file)?.toString('utf8');
+  const text = /** @param {string} file */ file => files.get(file)?.toString('utf8');
+  /** @type {PackageJson} */
   let pkg;
-  try { pkg = JSON.parse(text('package.json')); } catch { return { problems: [`${name}: package.json missing or unreadable`] }; }
+  // A missing package.json makes JSON.parse(undefined) throw, which the catch reports.
+  try { pkg = JSON.parse(/** @type {string} */ (text('package.json'))); } catch { return { problems: [`${name}: package.json missing or unreadable`] }; }
   if (pkg.name !== name) problems.push(`${name}: packed package.json is ${pkg.name}`);
   if (pkg.version !== version) problems.push(`${name}: packed version ${pkg.version}, expected ${version}`);
   if (pkg.private) problems.push(`${name}: packed package.json is private`);
   problems.push(...internalDependencyProblems(pkg, version));
   if (pkg.license !== 'Apache-2.0') problems.push(`${name}: license is ${pkg.license}, not Apache-2.0`);
   if (!files.has('LICENSE')) problems.push(`${name}: no LICENSE`);
-  else if (rootFiles?.has('LICENSE') && !files.get('LICENSE').equals(rootFiles.get('LICENSE'))) problems.push(`${name}: LICENSE differs from @anhlp/alp's`);
+  else if (rootFiles?.has('LICENSE') && !/** @type {Buffer} */ (files.get('LICENSE')).equals(/** @type {Buffer} */ (rootFiles.get('LICENSE')))) problems.push(`${name}: LICENSE differs from @anhlp/alp's`);
   if (!files.has('NOTICE')) problems.push(`${name}: no NOTICE`);
   for (const bin of Object.values(typeof pkg.bin === 'string' ? { [name]: pkg.bin } : pkg.bin ?? {})) {
     if (!files.has(bin.replace(/^\.\//, ''))) problems.push(`${name}: missing executable ${bin}`);
@@ -214,7 +276,7 @@ function contentProblems(name, files, version, rootFiles) {
     if (!/Paseo/.test(notice) || (rootNotice && !notice.startsWith(rootNotice))) problems.push(`${name}: NOTICE is not ALP's NOTICE followed by Paseo's attribution`);
   } else {
     problems.push(...corePackageProblems(pkg, [...files.keys()]));
-    if (rootFiles?.has('NOTICE') && files.has('NOTICE') && !files.get('NOTICE').equals(rootFiles.get('NOTICE'))) problems.push(`${name}: NOTICE differs from @anhlp/alp's`);
+    if (rootFiles?.has('NOTICE') && files.has('NOTICE') && !/** @type {Buffer} */ (files.get('NOTICE')).equals(/** @type {Buffer} */ (rootFiles.get('NOTICE')))) problems.push(`${name}: NOTICE differs from @anhlp/alp's`);
   }
   // Every package esbuild inlined (its `// node_modules/...` module comments) is listed in a notices file.
   const notices = [...files].filter(([file]) => file.endsWith(THIRD_PARTY_NOTICES)).map(([, body]) => body.toString('utf8')).join('\n');
@@ -237,18 +299,27 @@ function contentProblems(name, files, version, rootFiles) {
  * Returns `{ manifest, artifacts, problems, checksumProblems, notes }`: `checksumProblems` (also in
  * `problems`) are the files that are not the ones the manifest pinned; `artifacts` carry each packed package.json.
  * `rehearsal` accepts a dirty or script-less pack, reported in `notes`; such a pack is not gate evidence.
+ * @param {string} directory
+ * @param {{ sha?: string, version?: string, rehearsal?: boolean }} [options]
+ * @returns {{ manifest: ReleaseManifest | undefined, artifacts: ReleaseArtifact[], problems: string[], checksumProblems: string[], notes: string[] }}
  */
 export function verifyRelease(directory, { sha, version, rehearsal = false } = {}) {
+  /** @type {string[]} */
   const problems = [];
+  /** @type {string[]} */
   const checksumProblems = [];
+  /** @type {string[]} */
   const notes = [];
-  const read = file => readFileSync(path.join(directory, file));
-  const fail = (...found) => ({ manifest, problems: found, checksumProblems: found, notes, artifacts: [] });
+  const read = /** @param {string} file */ file => readFileSync(path.join(directory, file));
+  const fail = /** @param {string[]} found */ (...found) => ({ manifest, problems: found, checksumProblems: found, notes, artifacts: [] });
+  /** @type {ReleaseManifest | undefined} */
   let manifest;
-  try { manifest = JSON.parse(read(MANIFEST_FILE).toString('utf8')); } catch (error) { return fail(`${MANIFEST_FILE}: ${error.code === 'ENOENT' ? 'missing' : error.message}`); }
+  try { manifest = /** @type {ReleaseManifest} */ (JSON.parse(read(MANIFEST_FILE).toString('utf8'))); } catch (error) { return fail(`${MANIFEST_FILE}: ${/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT' ? 'missing' : /** @type {Error} */ (error).message}`); }
+  /** @type {Map<string, string>} */
   let sums;
+  /** @type {Buffer} */
   let sumsBuffer;
-  try { sumsBuffer = read(SUMS_FILE); sums = parseSha256Sums(sumsBuffer.toString('utf8')); } catch (error) { return fail(`${SUMS_FILE}: ${error.code === 'ENOENT' ? 'missing' : error.message}`); }
+  try { sumsBuffer = read(SUMS_FILE); sums = parseSha256Sums(sumsBuffer.toString('utf8')); } catch (error) { return fail(`${SUMS_FILE}: ${/** @type {NodeJS.ErrnoException} */ (error).code === 'ENOENT' ? 'missing' : /** @type {Error} */ (error).message}`); }
 
   if (manifest.schema !== 1) problems.push(`${MANIFEST_FILE}: unknown schema ${manifest.schema}`);
   const expectedVersion = version ?? manifest.version;
@@ -270,6 +341,7 @@ export function verifyRelease(directory, { sha, version, rehearsal = false } = {
   for (const file of tarballs) if (!expectedFiles.includes(file)) checksumProblems.push(`${file}: tarball not in ${MANIFEST_FILE}`);
   for (const file of sums.keys()) if (!expectedFiles.includes(file)) checksumProblems.push(`${SUMS_FILE}: lists ${file}, which is not in ${MANIFEST_FILE}`);
 
+  /** @type {ReleaseArtifact[]} */
   const artifacts = [];
   for (const entry of manifest.packages ?? []) {
     const label = `${entry.name} (${entry.filename})`;
@@ -279,9 +351,9 @@ export function verifyRelease(directory, { sha, version, rehearsal = false } = {
     try { buffer = read(entry.filename); } catch { checksumProblems.push(`${label}: tarball missing`); continue; }
     const actual = digests(buffer);
     if (sums.get(entry.filename) !== actual.sha256) checksumProblems.push(`${label}: SHA-256 ${actual.sha256} does not match ${SUMS_FILE} (${sums.get(entry.filename) ?? 'not listed'})`);
-    for (const key of ['sha256', 'integrity', 'shasum', 'size']) if (entry[key] !== actual[key]) checksumProblems.push(`${label}: ${key} ${actual[key]} does not match ${MANIFEST_FILE} (${entry[key]})`);
+    for (const key of /** @type {('sha256' | 'integrity' | 'shasum' | 'size')[]} */ (['sha256', 'integrity', 'shasum', 'size'])) if (entry[key] !== actual[key]) checksumProblems.push(`${label}: ${key} ${actual[key]} does not match ${MANIFEST_FILE} (${entry[key]})`);
     let files;
-    try { files = readTarball(buffer); } catch (error) { checksumProblems.push(`${label}: unreadable tarball: ${error.message}`); continue; }
+    try { files = readTarball(buffer); } catch (error) { checksumProblems.push(`${label}: unreadable tarball: ${/** @type {Error} */ (error).message}`); continue; }
     artifacts.push({ ...entry, file: path.join(directory, entry.filename), files });
   }
   const rootFiles = artifacts.find(artifact => artifact.name === LAUNCHER)?.files;
@@ -298,6 +370,8 @@ export function verifyRelease(directory, { sha, version, rehearsal = false } = {
 /**
  * The tarballs of a saved release, after their SHA-256 matches SHA256SUMS and the manifest, for the
  * consumer checks to install as they are (no repacking). Throws on any mismatch.
+ * @param {string} directory
+ * @param {{ sha?: string, version?: string, rehearsal?: boolean }} [options]
  */
 export function releaseArtifacts(directory, options = {}) {
   const { checksumProblems, artifacts } = verifyRelease(directory, options);
@@ -309,6 +383,8 @@ export function releaseArtifacts(directory, options = {}) {
 
 /**
  * Problems with what a consumer's package-lock.json installed, against the release manifest.
+ * @param {{ packages?: Record<string, { version?: string, integrity?: string, resolved?: string }> }} lock
+ * @param {ReleaseManifest & { packages: ManifestPackage[] }} manifest
  */
 export function installedProblems(lock, manifest) {
   const problems = [];
@@ -332,6 +408,8 @@ export function installedProblems(lock, manifest) {
  * The acceptance rows of §6.1 and §7.5. `binds` says what a pass must name: `sha` the release SHA,
  * `artifacts` also the SHA-256 of the saved SHA256SUMS (the exact eight tarballs).
  */
+/** @typedef {{ id: string, title: string, blocking: boolean, binds: 'sha' | 'artifacts', phase?: 'post' }} GateRow */
+/** @type {GateRow[]} */
 export const GATE_ROWS = [
   { id: 'H1', title: 'CI core + paseo (validate:core, validate:paseo), Ubuntu, Node 22 and 24', blocking: true, binds: 'sha' },
   { id: 'H2', title: 'validate:core + validate:paseo on macOS (CI core-paseo-macos, Node 24)', blocking: true, binds: 'sha' },
@@ -360,6 +438,7 @@ export const GATE_ROWS = [
  * What each decision needs (§7.3–7.5, D2): `publish` the whole pre-publish gate; `latest` that and
  * Q1–Q3 (moving `latest` is decided by D2 only after them); `announce` everything through Q5.
  */
+/** @type {Record<string, string[]>} */
 export const GATE_PHASES = {
   publish: GATE_ROWS.filter(row => !row.phase).map(row => row.id),
   latest: [...GATE_ROWS.filter(row => !row.phase).map(row => row.id), 'Q1', 'Q2', 'Q3'],
@@ -367,7 +446,7 @@ export const GATE_PHASES = {
 };
 
 /** An evidence file with every row pending, bound to one release manifest. */
-export const gateTemplate = manifest => ({
+export const gateTemplate = /** @param {ReleaseManifest} manifest */ manifest => ({
   schema: 1,
   version: manifest.version,
   releaseSha: manifest.git?.sha ?? null,
@@ -378,11 +457,16 @@ export const gateTemplate = manifest => ({
 /**
  * Decides one phase from the evidence. A row counts only when it passed and names the manifest's
  * release SHA (and, for artifact rows, its SHA256SUMS digest); anything missing keeps the gate closed.
+ * @typedef {{ status?: string, sha?: string | null, artifacts?: string | null, evidence?: string | null, [field: string]: unknown }} GateRecord
+ * @param {{ version?: string, rows?: Record<string, GateRecord> } | undefined} evidence
+ * @param {ReleaseManifest} manifest
+ * @param {string} [phase]
  */
 export function evaluateGate(evidence, manifest, phase = 'publish') {
   if (!GATE_PHASES[phase]) throw new Error(`unknown gate phase ${phase}; one of ${Object.keys(GATE_PHASES).join(', ')}`);
   const releaseSha = manifest.git?.sha;
   const rows = GATE_ROWS.filter(row => GATE_PHASES[phase].includes(row.id)).map(row => {
+    /** @type {GateRecord} */
     const recorded = evidence?.rows?.[row.id] ?? {};
     const reasons = [];
     if (recorded.status !== 'pass') reasons.push(recorded.status ? `status ${recorded.status}` : 'not recorded');
@@ -393,6 +477,7 @@ export function evaluateGate(evidence, manifest, phase = 'publish') {
     }
     return { ...row, status: recorded.status ?? 'missing', ok: reasons.length === 0, reasons };
   });
+  /** The failed rows, plus one entry when the evidence names another release. @type {{ id: string, reasons: string[] }[]} */
   const blocking = rows.filter(row => row.blocking && !row.ok);
   if (evidence?.version !== undefined && evidence.version !== manifest.version) blocking.push({ id: 'evidence', reasons: [`evidence is for ${evidence.version}, manifest is ${manifest.version}`] });
   return { phase, passed: blocking.length === 0, rows, blocking };

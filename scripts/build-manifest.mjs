@@ -1,3 +1,4 @@
+// @ts-check
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -9,7 +10,9 @@ import path from 'node:path';
  * reviewable summary (workspace inputs and external packages per bundle), not esbuild's full map.
  */
 
-const normalize = file => file.replaceAll('\\', '/');
+/** @typedef {import('esbuild').Metafile} Metafile */
+/** One bundle's reviewable summary. @typedef {{ inputs: string[], external: string[] }} BundleSummary */
+const normalize = /** @param {string} file */ file => file.replaceAll('\\', '/');
 const FORBIDDEN = [
   /integrations\/paseo\//,
   /(^|\/)node_modules\/@getpaseo\//,
@@ -18,6 +21,7 @@ const FORBIDDEN = [
   /^@anhlp\/alp-paseo(\/|$)/,
 ];
 
+/** @param {Metafile | undefined} metafile @param {string} label */
 export function assertCoreInputs(metafile, label) {
   const offenders = new Set();
   for (const input of Object.keys(metafile?.inputs ?? {})) {
@@ -40,6 +44,7 @@ export function assertCoreInputs(metafile, label) {
  */
 const REMOTE_FORBIDDEN_INPUTS = [/^packages\/(core|runtime|daemon|cli)\//, /^packages\/client\/src\/(?!portable\.ts$|connection\/websocket\.ts$|rpc\/)/, /^integrations\/paseo\/server\/(provider|mapping|index|main|web|tasks|library|usage)\.ts$/, /^integrations\/paseo\/server\/(panel\/(?!session-tasks\.ts$|compat\.ts$)|paseo\/)/];
 const REMOTE_FORBIDDEN_IMPORTS = /^(node:)?(fs|fs\/promises|child_process|worker_threads|cluster|module|vm)$/;
+/** @param {Metafile | undefined} metafile @param {string} label */
 export function assertRemoteInputs(metafile, label) {
   const offenders = new Set();
   for (const input of Object.keys(metafile?.inputs ?? {})) {
@@ -55,6 +60,9 @@ export function assertRemoteInputs(metafile, label) {
 /**
  * Workspace inputs (packages/*, and apps/* such as the gateway inlined into the CLI's alp-dashboard.js)
  * and external imports of one bundle, small and deterministic.
+ * @param {Metafile} metafile
+ * @param {string} outfile
+ * @returns {BundleSummary}
  */
 export function summarize(metafile, outfile) {
   const output = metafile.outputs[outfile] ?? Object.values(metafile.outputs ?? {})[0];
@@ -63,18 +71,27 @@ export function summarize(metafile, outfile) {
   return { inputs, external };
 }
 
-/** Guards a build result and folds it into `entries` keyed by its output file. */
+/**
+ * Guards a build result and folds it into `entries` keyed by its output file.
+ * @param {Record<string, BundleSummary>} entries
+ * @param {string} outfile
+ * @param {{ metafile: Metafile }} result a build run with `metafile: true`
+ */
 export function recordBundle(entries, outfile, result) {
   assertCoreInputs(result.metafile, outfile);
   entries[outfile] = summarize(result.metafile, outfile);
   return entries;
 }
 
+/** @param {string} file @param {{ version: string, entries: Record<string, BundleSummary> }} manifest */
 export async function writeBuildManifest(file, { version, entries }) {
   await writeFile(file, `${JSON.stringify({ version, entries }, null, 2)}\n`);
 }
 
-/** Throws when a core manifest entry names the optional Paseo workspace or SDK. */
+/**
+ * Throws when a core manifest entry names the optional Paseo workspace or SDK.
+ * @param {{ entries?: Record<string, Partial<BundleSummary>> } | undefined} manifest read back from JSON
+ */
 export function validateBuildManifest(manifest) {
   const failures = [];
   for (const [outfile, entry] of Object.entries(manifest?.entries ?? {})) {
@@ -89,6 +106,7 @@ export function validateBuildManifest(manifest) {
 }
 
 /** The canonical manifests a core distribution publishes, relative to a root. */
+/** @param {string} root */
 export function coreManifestPaths(root) {
   return ['dist/build-manifest.json', 'packages/daemon/dist/build-manifest.json', 'packages/cli/dist/build-manifest.json'].map(file => path.join(root, file));
 }

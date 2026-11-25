@@ -1,3 +1,4 @@
+// @ts-check
 // The hang dump's process listing (scripts/test-file-watchdog.mjs), in its own module.
 //
 // Why a module: test-file-watchdog.mjs is an executable script — it reads its work from
@@ -21,13 +22,20 @@ import { spawn } from 'node:child_process';
  */
 export const LIST_MS = { posix: 3000, win32: 8000 };
 
-/** A command's stdout, or why there is none; asynchronous, and killed after `ms`. */
+/** @typedef {{ stdout: string, error?: undefined } | { error: string, stdout?: undefined }} Captured */
+/**
+ * A command's stdout, or why there is none; asynchronous, and killed after `ms`.
+ * @param {string} command
+ * @param {string[]} args
+ * @param {number} ms
+ * @returns {Promise<Captured>}
+ */
 export function capture(command, args, ms) {
   return new Promise(resolve => {
     let stdout = '';
     let child;
     try { child = spawn(command, args, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }); }
-    catch (error) { resolve({ error: error.message }); return; }
+    catch (error) { resolve({ error: /** @type {Error} */ (error).message }); return; }
     // A listing that outlives its kill must not keep the coordinator alive: drop its pipe and handle too.
     const timer = setTimeout(() => { child.kill('SIGKILL'); child.stdout.destroy(); child.unref(); resolve({ error: `no answer within ${ms} ms` }); }, ms);
     child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
@@ -36,7 +44,14 @@ export function capture(command, args, ms) {
   });
 }
 
-/** The rows of a listing that descend from `root`, by parent, plus `root` itself; input order kept. */
+/**
+ * The rows of a listing that descend from `root`, by parent, plus `root` itself; input order kept.
+ * @template {{ pid: number, ppid: number }} Row
+ * @param {Row[]} rows
+ * @param {number} root
+ * @param {(row: Row) => boolean} [extra]
+ * @returns {Row[]}
+ */
 function tree(rows, root, extra = () => false) {
   const members = new Set([root]);
   for (let grew = true; grew;) {
@@ -50,6 +65,7 @@ function tree(rows, root, extra = () => false) {
  * The file's processes: its group and descendants (POSIX), or its process tree (Windows).
  * Listed, never signalled.
  * @param {number} root the pid of the process node:test runs the file in
+ * @param {{ platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv, capture?: typeof capture }} [options]
  */
 export async function processSummary(root, { platform = process.platform, env = process.env, capture: run = capture } = {}) {
   if (platform === 'win32') {
@@ -57,12 +73,14 @@ export async function processSummary(root, { platform = process.platform, env = 
     const script = 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CommandLine)" }';
     const result = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], LIST_MS.win32);
     if (result.error) return [`  process list unavailable: ${result.error}`];
-    const rows = result.stdout.split(/\r?\n/).filter(Boolean).map(line => { const [pid, ppid, ...command] = line.split('\t'); return { pid: Number(pid), ppid: Number(ppid), command: command.join('\t') }; });
+    // No error means the listing answered with its stdout; the cast states that.
+    const rows = /** @type {string} */ (result.stdout).split(/\r?\n/).filter(Boolean).map(/** @param {string} line */ line => { const [pid, ppid, ...command] = line.split('\t'); return { pid: Number(pid), ppid: Number(ppid), command: command.join('\t') }; });
     return tree(rows, root).map(row => `  pid ${row.pid} ppid ${row.ppid}: ${row.command}`);
   }
   const result = await run('ps', ['-A', '-o', 'pid=,ppid=,pgid=,stat=,etime=,command='], LIST_MS.posix);
   if (result.error) return [`  process list unavailable: ${result.error}`];
-  const rows = result.stdout.split('\n').filter(Boolean).map(line => { const [pid, ppid, pgid, stat, etime, ...command] = line.trim().split(/\s+/); return { pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), stat, etime, command: command.join(' ') }; });
+  // No error means the listing answered with its stdout; the cast states that.
+  const rows = /** @type {string} */ (result.stdout).split('\n').filter(Boolean).map(/** @param {string} line */ line => { const [pid, ppid, pgid, stat, etime, ...command] = line.trim().split(/\s+/); return { pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), stat, etime, command: command.join(' ') }; });
   // The file's process is its own group leader (spawned detached), so its group is its family too.
   return tree(rows, root, row => row.pgid === root).map(row => `  pid ${row.pid} ppid ${row.ppid} pgid ${row.pgid} ${row.stat} ${row.etime}: ${row.command.slice(0, 400)}`);
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 import { spawnSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,7 +9,7 @@ const root = process.env.ALP_VERSION_PACKAGE_ROOT || path.resolve(import.meta.di
 const [workspace, version] = process.argv.slice(2);
 if (!workspace || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(version ?? '')) throw new Error('Usage: npm run version:package -- <package-name> <semver>');
 const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
-const packages = await Promise.all(manifest.workspaces.map(async location => ({ location, manifest: JSON.parse(await readFile(path.join(root, location, 'package.json'), 'utf8')) })));
+const packages = await Promise.all(manifest.workspaces.map(/** @param {string} location */ async location => ({ location, manifest: JSON.parse(await readFile(path.join(root, location, 'package.json'), 'utf8')) })));
 const selected = packages.find(pkg => pkg.manifest.name === workspace);
 if (!selected || selected.manifest.private) throw new Error('Select a publishable workspace by its full npm name');
 selected.manifest.version = version;

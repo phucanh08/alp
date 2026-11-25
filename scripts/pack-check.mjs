@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 import { nativeSlots, verifyTerminalNative } from './terminal-native-assets.mjs';
 import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
@@ -11,7 +12,11 @@ const root = path.resolve(import.meta.dirname, '..');
 await verifyTerminalNative({ requireMatrix: true });
 const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 
-/** Files matched by an export target; a bare target is a single lookup, `*` is a pattern. */
+/**
+ * Files matched by an export target; a bare target is a single lookup, `*` is a pattern.
+ * @param {string} target
+ * @param {Set<string>} files
+ */
 function expand(target, files) {
   const pattern = target.replace(/^\.\//, '');
   if (!pattern.includes('*')) return files.has(pattern) ? [pattern] : [];
@@ -20,13 +25,14 @@ function expand(target, files) {
 }
 
 /** The substring a file contributes to the `*` of the pattern that matched it. */
+/** @param {string} pattern @param {string} file */
 function capture(pattern, file) {
   const star = pattern.indexOf('*');
   return file.slice(star, file.length - (pattern.length - star - 1));
 }
 
 const REPOSITORY = 'git+https://github.com/phucanh08/alp.git';
-const read = file => readFile(path.join(root, file), 'utf8');
+const read = /** @param {string} file */ file => readFile(path.join(root, file), 'utf8');
 const [rootLicense, rootNotice] = await Promise.all([read('LICENSE'), read('NOTICE')]);
 
 /**
@@ -34,9 +40,14 @@ const [rootLicense, rootNotice] = await Promise.all([read('LICENSE'), read('NOTI
  * Paseo's attribution), names the repository it is built from, and lists in a THIRD-PARTY-NOTICES.txt
  * every package esbuild inlined into its JavaScript (found from esbuild's `// <path>` module comments).
  */
+/**
+ * @param {string} location
+ * @param {import('./release-lib.mjs').PackageJson & { repository?: { url?: string, directory?: string } }} pkg
+ * @param {Set<string>} files
+ */
 async function licenceProblems(location, pkg, files) {
   const problems = [];
-  const at = file => path.posix.join(location, file);
+  const at = /** @param {string} file */ file => path.posix.join(location, file);
   if (pkg.license !== 'Apache-2.0') problems.push(`${pkg.name}: license is ${pkg.license}, not Apache-2.0`);
   if (pkg.repository?.url !== REPOSITORY || (pkg.repository?.directory ?? '.') !== location) problems.push(`${pkg.name}: repository is not ${REPOSITORY} (directory ${location})`);
   if (!files.has('LICENSE') || (await read(at('LICENSE'))) !== rootLicense) problems.push(`${pkg.name}: LICENSE missing or not the root LICENSE`);
@@ -67,8 +78,8 @@ for (const location of ['.', ...manifest.workspaces, LAUNCHER_LOCATION]) {
   // npm lifecycle progress appears before the JSON array on some npm versions.
   const start = result.stdout.indexOf('[\n');
   const packed = JSON.parse(result.stdout.slice(start >= 0 ? start : 0))[0];
-  const files = new Set(packed.files.map(file => file.path));
-  const nativeDirectory = ({ '@anhlp/alp-daemon': 'dist/terminal-native', '@anhlp/alp-cli': 'dist/terminal-native', '@anhlp/alp-paseo': 'server/dist/terminal-native' })[pkg.name];
+  const files = new Set(packed.files.map(/** @param {{ path: string }} file */ file => file.path));
+  const nativeDirectory = /** @type {Record<string, string>} */ ({ '@anhlp/alp-daemon': 'dist/terminal-native', '@anhlp/alp-cli': 'dist/terminal-native', '@anhlp/alp-paseo': 'server/dist/terminal-native' })[pkg.name];
   if (nativeDirectory) for (const slot of nativeSlots) for (const name of ['terminal-owner', 'manifest.json']) {
     if (!files.has(`${nativeDirectory}/prebuilt/${slot}/${name}`)) throw new Error(`${pkg.name}: missing shipped native ${slot}/${name}`);
   }

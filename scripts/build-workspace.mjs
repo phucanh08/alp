@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 import { copyTerminalNative } from './terminal-native-assets.mjs';
 import { build } from 'esbuild';
 import { emitDeclarations } from './declarations.mjs';
@@ -11,13 +12,16 @@ import { THIRD_PARTY_NOTICES, writeThirdPartyNotices } from './third-party-notic
 import { buildAlpDashboard } from './build-alp-dashboard.mjs';
 
 const selected = process.argv[2] === 'paseo-plugin' ? 'paseo' : process.argv[2];
+/** @type {Record<string, string>} */
 const locations = { paseo: 'integrations/paseo', tui: 'apps/tui', gateway: 'apps/gateway' };
 const visited = new Set();
 /** Whether this checkout carries the gateway and the web app alp-dashboard is built from. */
 const webSources = () => existsSync(path.join(ROOT, 'apps/gateway/package.json')) && existsSync(path.join(ROOT, 'apps/web/package.json'));
 await syncCoreTemplates();
+/** @type {import('esbuild').Plugin[] | undefined} */
 let embeddedResources;
 const embedded = async () => embeddedResources ??= await resources();
+/** @param {string} name */
 async function compile(name) {
   if (visited.has(name)) return;
   visited.add(name);
@@ -31,13 +35,15 @@ async function compile(name) {
     return;
   }
   const plugins = ['daemon', 'cli'].includes(name) ? await embedded() : [];
+  /** @type {Record<string, import('./build-manifest.mjs').BundleSummary>} */
   const entries = {};
+  /** @type {import('esbuild').Metafile[]} */
   const metafiles = [];
-  const record = (file, result) => { metafiles.push(result.metafile); return recordBundle(entries, path.relative(ROOT, file), result); };
+  const record = /** @param {string} file @param {{ metafile: import('esbuild').Metafile }} result */ (file, result) => { metafiles.push(result.metafile); return recordBundle(entries, path.relative(ROOT, file), result); };
   // The CLI's alp-dashboard service (src/dashboard) ships only as the self-contained dist/alp-dashboard.js below: it
   // inlines the private gateway, so it has no declarations. Its per-file JavaScript (dist/dashboard/, which the
   // package's `files` leaves out) is built only for the CLI's own tests, which cannot load the TypeScript sources.
-  const bundledOnly = name === 'cli' ? file => file.split(path.sep)[0] === 'dashboard' : () => false;
+  const bundledOnly = name === 'cli' ? /** @param {string} file */ file => file.split(path.sep)[0] === 'dashboard' : () => false;
   const sources = await readdir(path.join(directory, 'src'), { recursive: true });
   const files = sources.filter(file => !bundledOnly(file));
   for (const file of sources.filter(file => /\.(ts|js)$/.test(file) && !file.endsWith('.d.ts'))) {
