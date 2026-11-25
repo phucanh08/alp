@@ -4,7 +4,7 @@
 // Exit 1 when any skill has an error; warnings are printed but do not fail.
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { formatValidation, validateSkill } from '../packages/core/src/skill-validate.js';
+import { formatValidation, validateSkill } from '../packages/core/src/library/templates/skill-validate.js';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const dirs = async parent => (await readdir(parent, { withFileTypes: true }).catch(() => [])).filter(e => e.isDirectory()).map(e => path.join(parent, e.name));

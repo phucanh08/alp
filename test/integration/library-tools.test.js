@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { initProject } from '../../packages/core/src/init.js';
 import { runHook } from '../../packages/core/src/hook-run.js';
 import { probeMcp } from '../../packages/client/src/mcp-probe.js';
-import { saveEntry } from '../../packages/core/src/library-edit.js';
+import { saveEntry } from '../../packages/core/src/library/entries/library-edit.js';
 import contribute from '../../integrations/paseo/server/dist/index.js';
 import { teardown } from '../support/teardown.js';
 

@@ -1,15 +1,15 @@
 import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { moveFile } from './atomic.js';
-import { AlpError } from './errors.js';
-import { assertNoSymlinks } from './safe-path.js';
-import { seedLibrary } from './library.js';
-import { BASES, validatePermissions } from './permissions.js';
+import { moveFile } from '../../atomic.js';
+import { AlpError } from '../../errors.js';
+import { assertNoSymlinks } from '../../safe-path.js';
+import { seedLibrary } from '../entries/library.js';
+import { BASES, validatePermissions } from '../../permissions.js';
 import { validateSkill } from './skill-validate.js';
-import { shippedTemplateRoot } from './template-path.js';
-import { validateTeam } from './teams.js';
-import { validateAgentConfig } from './validation.js';
+import { shippedTemplateRoot } from '../../template-path.js';
+import { validateTeam } from '../../teams.js';
+import { validateAgentConfig } from '../../validation.js';
 
 /**
  * Optional packs (skill system v2): groups of specialist skills, custom agents and teams that ship

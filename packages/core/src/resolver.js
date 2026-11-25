@@ -3,7 +3,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { AlpError } from './errors.js';
 import { validateAgentConfig, validateHook, validateSettings, normalizeMcp, validateResolvedAgent } from './validation.js';
-import { librarySkills } from './library.js';
+import { librarySkills } from './library/entries/library.js';
 export { AlpError } from './errors.js';
 
 export async function optionalText(file) {

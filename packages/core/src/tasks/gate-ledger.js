@@ -2,7 +2,7 @@ import { realpathSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { alpHome } from '../library.js';
+import { alpHome } from '../library/entries/library.js';
 import { AlpError } from '../errors.js';
 
 /**

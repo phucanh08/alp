@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { SHIPPED_ROLE_SKILLS, seedLibrary } from '../src/library.js';
+import { SHIPPED_ROLE_SKILLS, seedLibrary } from '../src/library/entries/library.js';
 
 const sha = text => createHash('sha256').update(text.replaceAll('\r\n', '\n')).digest('hex');
 const SHIPPED = await readFile(new URL('../../../templates/role-skills.json', import.meta.url), 'utf8');
@@ -121,7 +121,7 @@ test('a shipped skill script with #! is executable where the library is seeded, 
   const { mkdtemp, rm, stat } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const pathModule = (await import('node:path')).default;
-  const { seedLibrary: seed } = await import('../src/library.js');
+  const { seedLibrary: seed } = await import('../src/library/entries/library.js');
   const home = await mkdtemp(pathModule.join(tmpdir(), 'alp-seed-exec-'));
   t.after(() => rm(home, { recursive: true, force: true }));
   await seed(home, { templates: {

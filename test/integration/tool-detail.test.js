@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initProject } from '../../packages/core/src/init.js';
-import { saveEntry } from '../../packages/core/src/library-edit.js';
+import { saveEntry } from '../../packages/core/src/library/entries/library-edit.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 
 const FAKE_ACP = fileURLToPath(new URL('../support/fake-acp.js', import.meta.url));

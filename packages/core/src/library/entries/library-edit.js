@@ -1,14 +1,14 @@
 import { cp, lstat, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { moveFile } from './atomic.js';
-import { AlpError } from './errors.js';
-import { assertNoSymlinks } from './safe-path.js';
-import { agentSources, builtinText, jsonObject, libraryEntries, optionalText } from './resolver.js';
-import { teamSources, validateTeam } from './teams.js';
-import { normalizeMcp, validateAgentConfig, validateHook } from './validation.js';
-import { validateProvider } from './providers.js';
-import { checkFrontmatter, skillReferences, specName, splitSkill } from './skill-validate.js';
+import { moveFile } from '../../atomic.js';
+import { AlpError } from '../../errors.js';
+import { assertNoSymlinks } from '../../safe-path.js';
+import { agentSources, builtinText, jsonObject, libraryEntries, optionalText } from '../../resolver.js';
+import { teamSources, validateTeam } from '../../teams.js';
+import { normalizeMcp, validateAgentConfig, validateHook } from '../../validation.js';
+import { validateProvider } from '../../providers.js';
+import { checkFrontmatter, skillReferences, specName, splitSkill } from '../templates/skill-validate.js';
 
 /**
  * A SKILL.md with its frontmatter `name` set to `name`, so a copied or renamed skill stays valid:

@@ -51,9 +51,9 @@ test('security: task file symlink is rejected without exposing outside data', as
 });
 
 test('security: first-use library and settings create private ALP_HOME', { skip: process.platform === 'win32' }, async t => {
-  const { seedLibrary } = await import('../src/library.js');
+  const { seedLibrary } = await import('../src/library/entries/library.js');
   const { setLanguage } = await import('../src/user-settings.js');
-  const { saveEntry } = await import('../src/library-edit.js');
+  const { saveEntry } = await import('../src/library/entries/library-edit.js');
   const { stat } = await import('node:fs/promises');
   const root = await fixture(t);
   const actions = [
