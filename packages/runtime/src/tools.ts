@@ -2,11 +2,11 @@ import { CLOSE_REASONS, GATE_KINDS, TASK_STATUSES, TASK_TYPES, TASKS_DIR, type T
 import { READ_ONLY_AGENTS, type ResolvedSession } from './resolve.js';
 import { READ_ONLY_ROLES } from '@anhlp/alp-core/permissions';
 
-import { PIN_KINDS, PIN_PATH_CHARS, PIN_PATHS } from './board.js';
+import { PIN_KINDS, PIN_PATH_CHARS, PIN_PATHS } from './board/board.js';
 import { POUR_VARS } from './input-limits.js';
-import { RECALL_KEEP_MS } from './recall.js';
-import { RESULT_OUTCOMES } from './assignment-results.js';
-import { HANDOFF_OUTCOMES, VERDICT_RESULTS, CRITERION_RESULTS, SEVERITIES } from './handoff.js';
+import { RECALL_KEEP_MS } from './assignments/recall.js';
+import { RESULT_OUTCOMES } from './assignments/completion/assignment-results.js';
+import { HANDOFF_OUTCOMES, VERDICT_RESULTS, CRITERION_RESULTS, SEVERITIES } from './assignments/completion/handoff.js';
 
 export const handoffList = (description: string) => ({ type: 'array', items: { type: 'string' }, description });
 

@@ -3,11 +3,11 @@ import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { moveFile } from '@anhlp/alp-core/atomic';
 import path from 'node:path';
 import { BOARD_KEEP, live, normalizePaths, overlapping, PIN_BODY_CHARS, PIN_KINDS, renderPin, type Pin, type PinKind } from './board.js';
-import { plainObject, toolResult } from './tool-results.js';
-import type { RuntimeOptions } from './contracts.js';
-import type { Session } from './sessions/lifecycle/session-state.js';
-import type { AlpEvent } from './events.js';
-import type { MailEvent } from './mailbox.js';
+import { plainObject, toolResult } from '../tool-results.js';
+import type { RuntimeOptions } from '../contracts.js';
+import type { Session } from '../sessions/lifecycle/session-state.js';
+import type { AlpEvent } from '../events.js';
+import type { MailEvent } from '../mailbox.js';
 
 type BoardContext = {
   options: RuntimeOptions;

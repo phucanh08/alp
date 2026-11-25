@@ -120,7 +120,7 @@ test('delegation preflight reserves admission until its child is registered', as
 });
 
 test('permanent result ownership survives restart and recall expiry; lost ledger fails closed', async () => {
-  const { createAssignmentResults } = await import('../dist/assignment-results.js');
+  const { createAssignmentResults } = await import('../dist/assignments/completion/assignment-results.js');
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-mutation-'));
   const target = path.join(root, 'checkout');
   await mkdir(target);
@@ -159,7 +159,7 @@ test('unfinished writers remain owned if recovery books disappear before their f
 });
 
 test('ancestor ownership refuses mutation while boundary siblings remain independent', async () => {
-  const { createAssignmentResults } = await import('../dist/assignment-results.js');
+  const { createAssignmentResults } = await import('../dist/assignments/completion/assignment-results.js');
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-overlap-owner-'));
   const target = path.join(root, 'checkout');
   const sibling = path.join(root, 'checkout-other');
@@ -245,7 +245,7 @@ test('a shared writer result holds its checkout until its requester resolves it;
 });
 
 test('the result ledger archives handled entries, survives a torn archive line, and prunes only old archive months', async () => {
-  const { createAssignmentResults, ARCHIVE_KEEP_MS } = await import('../dist/assignment-results.js');
+  const { createAssignmentResults, ARCHIVE_KEEP_MS } = await import('../dist/assignments/completion/assignment-results.js');
   const { readFile, readdir } = await import('node:fs/promises');
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-result-archive-'));
   const file = path.join(root, 'state', 'assignment-results.json');
