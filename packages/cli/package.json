@@ -28,11 +28,11 @@
     },
     "./backup": {
       "alp-source": {
-        "types": "./src/backup.js",
-        "default": "./src/backup.js"
+        "types": "./src/commands/backup.js",
+        "default": "./src/commands/backup.js"
       },
-      "types": "./dist/backup.d.ts",
-      "default": "./dist/backup.js"
+      "types": "./dist/commands/backup.d.ts",
+      "default": "./dist/commands/backup.js"
     },
     "./cli": {
       "alp-source": {
@@ -76,11 +76,11 @@
     },
     "./library": {
       "alp-source": {
-        "types": "./src/library.js",
-        "default": "./src/library.js"
+        "types": "./src/commands/library.js",
+        "default": "./src/commands/library.js"
       },
-      "types": "./dist/library.d.ts",
-      "default": "./dist/library.js"
+      "types": "./dist/commands/library.d.ts",
+      "default": "./dist/commands/library.js"
     },
     "./paths": {
       "alp-source": {
@@ -92,35 +92,35 @@
     },
     "./projects": {
       "alp-source": {
-        "types": "./src/projects.js",
-        "default": "./src/projects.js"
+        "types": "./src/commands/projects.js",
+        "default": "./src/commands/projects.js"
       },
-      "types": "./dist/projects.d.ts",
-      "default": "./dist/projects.js"
+      "types": "./dist/commands/projects.d.ts",
+      "default": "./dist/commands/projects.js"
     },
     "./sessions": {
       "alp-source": {
-        "types": "./src/sessions.js",
-        "default": "./src/sessions.js"
+        "types": "./src/commands/sessions.js",
+        "default": "./src/commands/sessions.js"
       },
-      "types": "./dist/sessions.d.ts",
-      "default": "./dist/sessions.js"
+      "types": "./dist/commands/sessions.d.ts",
+      "default": "./dist/commands/sessions.js"
     },
     "./tasks": {
       "alp-source": {
-        "types": "./src/tasks.js",
-        "default": "./src/tasks.js"
+        "types": "./src/commands/tasks.js",
+        "default": "./src/commands/tasks.js"
       },
-      "types": "./dist/tasks.d.ts",
-      "default": "./dist/tasks.js"
+      "types": "./dist/commands/tasks.d.ts",
+      "default": "./dist/commands/tasks.js"
     },
     "./usage": {
       "alp-source": {
-        "types": "./src/usage.js",
-        "default": "./src/usage.js"
+        "types": "./src/commands/usage.js",
+        "default": "./src/commands/usage.js"
       },
-      "types": "./dist/usage.d.ts",
-      "default": "./dist/usage.js"
+      "types": "./dist/commands/usage.d.ts",
+      "default": "./dist/commands/usage.js"
     }
   },
   "engines": {

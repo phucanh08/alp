@@ -2,8 +2,8 @@ import { parseArgs } from 'node:util';
 import { explainProfile, permissionScopes } from '@anhlp/alp-core/permissions';
 import { discoverAgents } from '@anhlp/alp-core/resolver';
 import { alpHome } from '@anhlp/alp-client/index';
-import { UsageError } from './usage.js';
-import { taskProject } from './tasks.js';
+import { UsageError } from './commands/usage.js';
+import { taskProject } from './commands/tasks.js';
 
 const SCOPE_LABEL = { project: 'project', user: 'user', default: 'default' };
 

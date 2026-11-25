@@ -13,7 +13,7 @@ import { alpHome } from '@anhlp/alp-client/index';
 import { languageSetting, setLanguage } from '@anhlp/alp-core/user-settings';
 import { UsageError } from './usage.js';
 import { taskProject } from './tasks.js';
-import { DAEMON_ENTRY } from './paths.js';
+import { DAEMON_ENTRY } from '../paths.js';
 
 const DOCTOR_MARK = { ok: '✓', info: '·', warn: '!', fail: '✗' };
 
@@ -133,7 +133,7 @@ async function doctor(args) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, fix: { type: 'boolean' }, json: { type: 'boolean' } } });
   if (positionals.length) throw new UsageError();
   const project = values.project ? await taskProject(values.project) : await taskProject(undefined).catch(() => undefined);
-  const sandbox = await import('../dist/runtime/index.js').then(runtime => runtime.claudeSandboxAvailable(), () => undefined);
+  const sandbox = await import('../../dist/runtime/index.js').then(runtime => runtime.claudeSandboxAvailable(), () => undefined);
   const options = { home: alpHome(), project, sandbox, daemonEntry: DAEMON_ENTRY };
   let checks = await diagnose(options);
   const fixed = values.fix ? await repair(checks) : [];
