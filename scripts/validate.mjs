@@ -57,6 +57,8 @@ if (scope === 'all' || scope === 'core') {
   node('scripts/check-teardown-order.mjs');
   node('node_modules/typescript/bin/tsc', '-p', 'tsconfig.core.json');
   node('node_modules/typescript/bin/tsc', '-p', 'tsconfig.gateway.json');
+  // The scripts themselves: strictly type-checked JavaScript (scripts/tsconfig.json, npm run check:scripts).
+  node('node_modules/typescript/bin/tsc', '-p', 'scripts/tsconfig.json');
   buildWorkspace('daemon');
   buildWorkspace('cli');
   // The gateway is only a devDependency of the CLI, so building the CLI does not build it; its tests
