@@ -1,11 +1,13 @@
-// Current behaviour (t-a648 open): what a requester receives today when agy denies a tool inside an
-// assignment and ends the turn. This pins today's result on purpose, not the one t-a648 wants: the
-// fix for t-a648 has to change these assertions.
+// t-a648: what a requester receives when agy denies a tool inside an assignment and ends the turn.
+// The assignment fails, its error names the tool, the path, the mode and agy's reason (or says agy
+// gave none), and the result carries `denied: [{tool, path, reason}]`.
 // The assignment's agy replays the frames agy 1.5.15 sent in measurement M0 (2026-11-24, macOS,
 // gemini-3.8-flash-high, workspace-write): a read_file outside the workspace is refused, agy ends
 // the whole turn with an empty answer and `denied_actions`, and no handoff is ever filed. In one
 // variant agy reports the refused step as ERROR; in the other (the library-skill read) it reports
-// it DONE with no output, so only `denied_actions` shows the refusal.
+// it DONE with no output, so only `denied_actions` shows the refusal. A third follows T1 (agy
+// 1.5.16, as the evidence doc records it): the refused read, then a read of a workspace file that
+// does not exist, reported DONE with no output, which must not be taken for the denial.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -48,6 +50,11 @@ if (at < 0 || args[at + 1] !== 'accept-edits') {
     step(index, process.env.REPLAY_VARIANT === 'done'
       ? { state: 'DONE', step_type: 'tool', tool_name: 'read_file', tool_info: read }
       : { state: 'ERROR', step_type: 'tool', tool_name: 'read_file', tool_info: { ...read, error: { type: 'TOOL_ERROR', message: process.env.REPLAY_DENIAL } } });
+    if (process.env.REPLAY_VARIANT === 't1') {
+      const missing = { name: 'read_file', parameters: { Path: process.cwd() + '/docs/missing.md' } };
+      step(++index, { state: 'ACTIVE', step_type: 'tool', tool_name: 'read_file', tool_info: missing });
+      step(index, { state: 'DONE', step_type: 'tool', tool_name: 'read_file', tool_info: missing });
+    }
     send({ event: 'result', result: { conversation_id: conversation, status: 'SUCCESS', response: '', denied_actions: [{ action: 'read_file', display_name: 'ReadFile' }] } });
   });
 }
@@ -118,29 +125,39 @@ async function delegate({ runtime, events }) {
   return { result, child };
 }
 
-for (const [variant, stepStatus] of [['error', 'failed'], ['done', 'completed']]) {
-  test(`current behaviour (t-a648 open): a denied tool ends an Antigravity assignment; the requester is told only which tool and mode, and gets no handoff (agy step ${variant.toUpperCase()})`, async t => {
+const REASON = DENIAL.split('\n')[0];
+const INFERRED = /^agy gave no reason; inferred: agy reported this step done with no output, outside the workspace, and listed ReadFile as denied$/;
+
+for (const variant of ['error', 'done', 't1']) {
+  test(`a denied tool fails an Antigravity assignment that filed no handoff; the requester gets the tool, path, mode and reason (agy step ${variant.toUpperCase()})`, async t => {
     const setupResult = await setup(t, variant);
     const { result, child } = await delegate(setupResult);
-    // What the requester receives: the turn completed (agy said SUCCESS), no handoff was filed, and
-    // the only output is ALP's line naming the denied tool and the mode.
     assert.equal(result.agent, 'peer');
     assert.equal(result.runtime, 'antigravity');
-    assert.equal(result.status, 'completed');
+    assert.equal(result.status, 'failed');
     assert.equal(result.handoff, null);
-    assert.equal(result.output, 'Antigravity denied ReadFile in workspace-write mode and ended the turn.');
-    // The assignment's own record of the refused read.
+    // Machine-readable: one entry for agy's one denied action, with the refused step's path.
+    assert.equal(result.denied.length, 1, JSON.stringify(result.denied));
+    const [denied] = result.denied;
+    assert.equal(denied.tool, 'ReadFile');
+    assert.equal(denied.path, '/etc/hosts');
+    if (variant === 'done') assert.match(denied.reason, INFERRED);
+    else assert.equal(denied.reason, REASON);
+    // The sentence the requester reads, and the line the assignment's timeline ends with.
+    assert.equal(result.error, `peer's turn ended because ReadFile on /etc/hosts was denied (${denied.reason}) in workspace-write mode; no handoff was filed.`);
+    assert.equal(result.output, `Antigravity denied ReadFile on /etc/hosts (${denied.reason}) in workspace-write mode and ended the turn.`);
+    // The assignment's own record of its reads: the refused one failed, whatever agy called it.
     const reads = child.filter(event => event.type === 'item' && event.item.kind === 'tool_call' && event.item.name === 'read_file' && event.item.status !== 'running').map(event => event.item);
-    assert.equal(reads.length, 1, JSON.stringify(child.filter(event => event.type === 'item').map(event => event.item)));
-    if (variant === 'error') {
-      assert.equal(reads[0].status, 'failed');
-      assert.match(JSON.stringify(reads[0]), /user denied permission for read_file\(\/private\/etc\/hosts\)/);
-    } else {
-      // Known gap (t-a648): agy 1.5.15 reported this refused read as DONE with no output, and ALP's
-      // DONE->ERROR correction covers only edits and commands in read-only, so the step is recorded
-      // as completed; only the turn's closing line says it was denied.
-      assert.equal(reads[0].status, stepStatus);
-    }
+    assert.equal(reads.length, variant === 't1' ? 2 : 1, JSON.stringify(child.filter(event => event.type === 'item').map(event => event.item)));
+    assert.equal(reads[0].status, 'failed');
+    if (variant === 'done') assert.match(JSON.stringify(reads[0]), /Antigravity denied ReadFile on \/etc\/hosts in workspace-write mode \(agy gave no reason; inferred: /);
+    else assert.match(JSON.stringify(reads[0]), /user denied permission for read_file\(\/private\/etc\/hosts\)/);
+    // T1: the missing workspace file agy reported DONE with no output is a completed read, not the denial.
+    if (variant === 't1') assert.equal(reads[1].status, 'completed');
     assert.match(await readFile(path.join(setupResult.dir, 'replay.jsonl'), 'utf8'), /library skill you need/);
+    // The run log names the denial, and the finished assignment carries it.
+    const runLog = (await readFile(path.join(setupResult.dir, 'runs', 'root.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    assert.deepEqual(runLog.find(entry => entry.event === 'turn.denied')?.denied, result.denied);
+    assert.equal(runLog.find(entry => entry.event === 'assignment.finished')?.status, 'failed');
   });
 }
