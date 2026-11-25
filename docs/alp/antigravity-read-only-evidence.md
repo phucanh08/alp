@@ -184,8 +184,9 @@ agy process alone ran with the user's home, everything else in a scratch directo
 1.5.16 before and after. In conversation 2, agy's default model, gemini-4-hydrogen, did one step, and
 then every answer was a quota message: the account's quota for the Gemini models was
 exhausted, so conversations 3–7 ran on agy's `claude-sonnet-4-6` (the user's decision).
-agy itself raises the permission requests, whatever the model. The model chooses which tool to
-call, so behaviour measured on Sonnet 4.6 may differ on a Gemini model.
+Every permission request seen came from agy while Sonnet 4.6 was selected; none was seen on a
+Gemini model. The model chooses which tool to call, so behaviour measured on Sonnet 4.6 may
+differ on a Gemini model.
 
 | # | What | Model | Observed |
 |---|---|---|---|
@@ -232,17 +233,17 @@ call, so behaviour measured on Sonnet 4.6 may differ on a Gemini model.
   workspace.
 - Accept-edits mode: agy still asked before the outside read and before each command (`touch`,
   `sleep 20`, `sleep 30`). No edit was tried in this mode.
-- `session/new` with `mcpServers` naming a stdio server `alp` did **not** start that server
-  (it never ran). The model then read `~/.gemini/antigravity-cli/mcp/alp/alp_board.json`
+- `session/new` with `mcpServers` naming a stdio server `alp` did **not** start that server:
+  the start log that the dummy server writes when it starts was never created. The model then read `~/.gemini/antigravity-cli/mcp/alp/alp_board.json`
   without a request; the file did not exist and the step failed. Over ACP in 1.5.16, an MCP
   server passed by the client is not available to the model, as far as this run shows.
 - A rejected request: the tool update turns `failed` with `rawOutput` `permission check
   failed for read_file "<path>": user denied permission for read_file(<path>)` followed by
-  `Do not attempt to circumvent this denial …`. The prompt returned 2 ms later with
+  `Do not attempt to circumvent this denial …`. The prompt returned 2–4 ms later with
   `stopReason: end_turn`, no text and no further tool call. Same for a rejected
   `write_file`. **A reject ends the turn**, and agy gives the path and the reason.
 - With no `--sandbox`, an allowed `touch` of a file outside the workspace (in the scratch
-  directory) succeeded. Without that flag, nothing confines commands.
+  directory) succeeded. No other confinement of commands was tested.
 - `sleep 20 && echo done`: the request carried `WaitMsBeforeAsync: 25000`. The model also
   used a `manage_task` status tool (kind `other`, no request). The prompt returned after
   the command had ended. No update came after a prompt returned in any conversation.
@@ -258,8 +259,9 @@ call, so behaviour measured on Sonnet 4.6 may differ on a Gemini model.
 
 A peer in workspace-write on `antigravity:claude-sonnet-4-6` (ALP at main 8f2707c0, which
 contains cb198f3e) was told to `read_file` a scratch file outside its workspace. The
-headless argv had `--mode accept-edits --sandbox`, the usual `--settings` and
-`--model claude-sonnet-4-6`, and no `--effort`. agy refused the read and reported the step as
+real run's argv was not captured. With the same configuration, a dry run against a fake agy
+got `--mode accept-edits --sandbox`, the usual `--settings` and `--model claude-sonnet-4-6`,
+and no `--effort`. agy refused the read and reported the step as
 an ERROR, with the error text above. The turn ended. The requester got:
 
 ```
@@ -270,8 +272,9 @@ error: peer's turn ended because ReadFile on <path> was denied (permission check
 denied: [{tool: "ReadFile", path: "<path>", reason: "permission check failed for read_file …"}]
 ```
 
-Both the path and the reason come from agy's error step; neither is inferred. agy had
-ALP's tools: it wrote `~/.gemini/antigravity-cli/mcp/alp/alp_*.json` for this session. The
+Both the path and the reason come from agy's error step; neither is inferred. agy wrote
+`~/.gemini/antigravity-cli/mcp/alp/alp_*.json` for this session. Whether the model could
+call those tools was not observed. The
 child's own `turn.ended` still says `completed`.
 
 ### Not measured
