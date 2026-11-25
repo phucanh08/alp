@@ -26,12 +26,12 @@ const prompt = mode === 'relay'
 async function cli() {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-human-e2e-'));
   const env = { ...process.env, ALP_HOME: home, ALP_RUN_LOG_DIR: path.join(home, 'runs') };
-  const alp = (...args) => spawnSync(process.execPath, ['packages/cli/src/cli.js', ...args], { env, encoding: 'utf8' });
+  const alp = (...args) => spawnSync(process.execPath, ['packages/cli/dist/cli.js', ...args], { env, encoding: 'utf8' });
   try {
     assert.equal(alp('daemon', 'start').status, 0);
     const evidence = { mode, model, project: root, word };
     const envelopes = await new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, ['packages/cli/src/cli.js', 'run', '--json', '--project', root, '--model', model, '--thinking', 'low', prompt], { env });
+      const child = spawn(process.execPath, ['packages/cli/dist/cli.js', 'run', '--json', '--project', root, '--model', model, '--thinking', 'low', prompt], { env });
       const seen = [];
       let buffer = '';
       let stderr = '';

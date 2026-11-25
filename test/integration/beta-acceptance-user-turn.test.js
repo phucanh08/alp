@@ -17,7 +17,7 @@ import { follow, userTurnAnswers } from '../../scripts/beta-acceptance-lib.mjs';
 import { teardown } from '../support/teardown.js';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
-const ALP = path.join(ROOT, 'packages/cli/src/cli.js');
+const ALP = path.join(ROOT, 'packages/cli/dist/cli.js');
 const FAKE_CODEX = path.join(ROOT, 'packages/daemon/tests/support/fake-codex.js');
 const FAKE_CLAUDE = path.join(ROOT, 'packages/daemon/tests/support/fake-claude.js');
 const MODEL = 'codex:gpt-5.6-sol';

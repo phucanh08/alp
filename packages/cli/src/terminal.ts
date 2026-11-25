@@ -18,9 +18,17 @@ export const TERMINAL_WARNING = (user = os.userInfo().username) => [
   'Paseo app devices paired with this host only after alp terminal allow --paseo.',
 ].join('\n');
 
-const file = home => path.join(home, 'terminal.json');
+/** $ALP_HOME/terminal.json as read: `value` is its parsed JSON (undefined when unreadable). */
+export type TerminalFile = {
+  exists: boolean;
+  // any: the file's JSON as the user or an older ALP wrote it; each reader checks the fields it uses.
+  value: any;
+  private: boolean;
+};
 
-export async function read(home, platform = process.platform) {
+const file = (home: string) => path.join(home, 'terminal.json');
+
+export async function read(home: string, platform: NodeJS.Platform = process.platform): Promise<TerminalFile> {
   const info = await lstat(file(home)).catch(() => undefined);
   if (!info) return { exists: false, value: undefined, private: true };
   const own = !process.getuid || info.uid === process.getuid();
@@ -29,7 +37,7 @@ export async function read(home, platform = process.platform) {
   return { exists: true, value, private: info.isFile() && own && (platform === 'win32' || !(info.mode & 0o077)) };
 }
 
-async function write(home, value) {
+async function write(home: string, value: Record<string, unknown>) {
   await mkdir(home, { recursive: true, mode: 0o700 });
   const temporary = `${file(home)}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(temporary, JSON.stringify(value, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
@@ -37,7 +45,7 @@ async function write(home, value) {
   await rename(temporary, file(home)).catch(async error => { await rm(temporary, { force: true }); throw error; });
 }
 
-export async function terminalCommand(args, { home = alpHome(), out = console.log } = {}) {
+export async function terminalCommand(args: string[], { home = alpHome(), out = console.log }: { home?: string; out?: (line: string) => void } = {}) {
   const [action, ...rest] = args;
   const json = rest.includes('--json');
   const current = await read(home);

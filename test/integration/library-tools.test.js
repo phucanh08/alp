@@ -14,7 +14,7 @@ import contribute from '../../integrations/paseo/server/dist/index.js';
 import { teardown } from '../support/teardown.js';
 
 const fakeMcp = fileURLToPath(new URL('../support/fake-mcp.js', import.meta.url));
-const cli = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
+const cli = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 
 async function fixture(t) {
   const defer = teardown(t);

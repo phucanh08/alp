@@ -4,7 +4,7 @@ import { running } from '../daemon.js';
 import { UsageError } from './usage.js';
 
 /** One-shot continuations of an existing root session; timestamps need an explicit offset. */
-export async function scheduleCommand(args) {
+export async function scheduleCommand(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     project: { type: 'string' }, session: { type: 'string' }, at: { type: 'string' },
     prompt: { type: 'string' }, status: { type: 'string' }, json: { type: 'boolean' },
@@ -16,7 +16,8 @@ export async function scheduleCommand(args) {
   if (action !== 'list' && values.status) throw new UsageError();
   if (action === 'create' && (!values.session || !values.prompt?.trim() ||
       !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/.test(values.at ?? '') ||
-      !Number.isFinite(Date.parse(values.at)))) throw new Error('create needs --session, --prompt and --at ISO timestamp with Z or a UTC offset (for example 2026-10-20T16:00:00+07:00)');
+      // The regex test above has already returned for an undefined --at.
+      !Number.isFinite(Date.parse(values.at!)))) throw new Error('create needs --session, --prompt and --at ISO timestamp with Z or a UTC offset (for example 2026-10-20T16:00:00+07:00)');
   const projectRoot = path.resolve(values.project ?? process.cwd());
   const params = action === 'create'
     ? { projectRoot, sessionId: values.session, dueAt: values.at, prompt: values.prompt }

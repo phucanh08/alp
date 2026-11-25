@@ -29,6 +29,8 @@ if (scope !== 'e2e') {
 }
 if ((scope === 'e2e' || scope === 'all') && status === 0) {
   buildWorkspace('daemon');
+  // Several e2e scripts run the CLI's built entry (packages/cli/dist/cli.js).
+  buildWorkspace('cli');
   for (const [script, ...args] of e2e) {
     const result = spawnSync(process.execPath, [script, ...args], { cwd: ROOT, stdio: 'inherit', env: hermeticEnv() });
     if (result.status !== 0) { status = result.status ?? 1; break; }

@@ -36,7 +36,7 @@ test('fresh and upgraded libraries include OpenCode and native Antigravity witho
 test('alp providers seeds defaults without requiring project initialization', async t => {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-default-provider-cli-'));
   t.after(() => rm(home, { recursive: true, force: true }));
-  const rows = JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('../src/cli.js', import.meta.url)), 'providers', '--json'], {
+  const rows = JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('../dist/cli.js', import.meta.url)), 'providers', '--json'], {
     env: { ...process.env, ALP_HOME: home }, encoding: 'utf8',
   }));
   assert.deepEqual(rows.map(row => row.name), ['antigravity', 'opencode']);

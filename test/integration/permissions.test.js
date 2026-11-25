@@ -14,7 +14,7 @@ import { claudePermissions, createAlpRuntime, createCopy, reclaimCopies, removeC
 import { teardown } from '../support/teardown.js';
 import { setProfiles } from '../support/fake-agent.js';
 
-const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 
 /**
  * What a read-only Claude session is denied besides its profile's rules (t-cde5): the Paseo

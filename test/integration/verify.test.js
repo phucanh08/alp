@@ -15,7 +15,7 @@ import { teardown } from '../support/teardown.js';
 // Verify commands are sh; Windows runs them under cmd.exe, whose echo ends its lines with CRLF and which has no sleep.
 const windows = process.platform === 'win32';
 const lf = text => text.replaceAll('\r\n', '\n');
-const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
 const exists = file => lstat(file).then(() => true, () => false);
 

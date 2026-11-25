@@ -8,6 +8,12 @@ import { UsageError } from './commands/usage.js';
 import { DAEMON_ENTRY, DAEMON_SCRIPT } from './paths.js';
 import { runRole } from './commands/roles.js';
 
+// `lock!` in this file: lockAlive() is false for a missing lock, and start()/ready() return only
+// once alpd's lock exists, so the lock read after them is defined.
+
+/** One of alpd's readiness checks in daemon.status (protocol `health.checks`). */
+type HealthCheck = { id: string; ok: boolean; code?: string; message?: string };
+
 async function built(entry = DAEMON_ENTRY) {
   try {
     await access(entry);
@@ -22,7 +28,7 @@ async function ready(timeoutMs = daemonStartTimeoutMs()) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const lock = await readLock(alpHome());
-    if (lockAlive(lock) && lock.ready) return lock.socket;
+    if (lockAlive(lock) && lock!.ready) return lock!.socket;
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   throw new Error(`alpd did not become ready within ${timeoutMs / 1000} s; see ${path.join(alpHome(), 'logs')}`);
@@ -46,21 +52,21 @@ async function start() {
 
 async function running() {
   const lock = await readLock(alpHome());
-  if (!lockAlive(lock) || !lock.ready) throw new Error('alpd is not running; start it with: alp daemon start');
-  return connect(lock.socket, { name: 'alp-cli', version: '1' });
+  if (!lockAlive(lock) || !lock!.ready) throw new Error('alpd is not running; start it with: alp daemon start');
+  return connect(lock!.socket, { name: 'alp-cli', version: '1' });
 }
 
 async function stop() {
   const home = alpHome();
   const lock = await readLock(home);
   if (!lockAlive(lock)) return false;
-  const client = await connect(lock.socket, { name: 'alp-cli', version: '1' });
+  const client = await connect(lock!.socket, { name: 'alp-cli', version: '1' });
   await client.request('daemon.shutdown').finally(() => client.close());
   for (let i = 0; i < 150 && lockAlive(await readLock(home)); i++) await new Promise(resolve => setTimeout(resolve, 100));
   return true;
 }
 
-async function daemon([action, ...rest]) {
+async function daemon([action, ...rest]: string[]): Promise<unknown> {
   // alpd itself in this process (alpd.js on this Node, even where the bundle ships the native alpd);
   // its own options (--detach, --service, --startup-timeout=MS) follow.
   if (action === 'run') { await built(DAEMON_SCRIPT); return runRole('daemon', DAEMON_SCRIPT, rest); }
@@ -68,7 +74,7 @@ async function daemon([action, ...rest]) {
   if (action === 'start') {
     const socket = await start();
     const lock = await readLock(alpHome());
-    console.log(`alpd ${lock.version} running (pid ${lock.pid}) on ${socket}`);
+    console.log(`alpd ${lock!.version} running (pid ${lock!.pid}) on ${socket}`);
   } else if (action === 'stop') {
     // Publish intent before waiting for a launch, then drain that launch before
     // reading its lock. No detached child can arrive after this stop resolves.
@@ -96,7 +102,7 @@ async function daemon([action, ...rest]) {
     await ready();
     const lock = await readLock(alpHome());
     console.log(`alpd installed as ${service.kind === 'launchd' ? 'a LaunchAgent' : 'a systemd user service'} (${service.name}, ${service.file})`);
-    console.log(`alpd ${lock.version} running (pid ${lock.pid}); it starts at login and again after a crash${replaced ? '; the alpd that ran before handed its work over' : ''}`);
+    console.log(`alpd ${lock!.version} running (pid ${lock!.pid}); it starts at login and again after a crash${replaced ? '; the alpd that ran before handed its work over' : ''}`);
   } else if (action === 'uninstall') {
     const service = serviceFor({ home: alpHome() });
     if (!service || !await uninstallService(service)) {
@@ -110,27 +116,27 @@ async function daemon([action, ...rest]) {
     // Exit codes: 0 ready, 3 not running, 4 alive but not ready (or not answering).
     const json = rest[0] === '--json';
     const lock = await readLock(alpHome());
-    if (!lockAlive(lock) || lock.maintenance) {
+    if (!lockAlive(lock) || lock!.maintenance) {
       // A backup or a restore holds alpd's lock while alpd is stopped (ALPD §68).
-      const busy = lockAlive(lock) ? { maintenance: lock.maintenance, pid: lock.pid } : {};
+      const busy = lockAlive(lock) ? { maintenance: lock!.maintenance, pid: lock!.pid } : {};
       if (json) console.log(JSON.stringify({ running: false, live: false, ready: false, ...busy }));
       else console.log(busy.maintenance ? `alpd is not running: alp ${busy.maintenance} runs (pid ${busy.pid})` : 'alpd is not running');
       process.exitCode = 3;
       return;
     }
-    const client = await connect(lock.socket, { name: 'alp-cli', version: '1' }).catch(error => {
-      if (json) console.log(JSON.stringify({ running: true, live: true, ready: false, pid: lock.pid, checks: [{ id: 'ipc', ok: false, code: 'ALP_IPC_FAILED', message: scrubText(error.message) }] }));
-      else console.log(`alpd (pid ${lock.pid}) is running but not answering on ${lock.socket}: ${scrubText(error.message)}; alp doctor says more`);
+    const client = await connect(lock!.socket, { name: 'alp-cli', version: '1' }).catch(error => {
+      if (json) console.log(JSON.stringify({ running: true, live: true, ready: false, pid: lock!.pid, checks: [{ id: 'ipc', ok: false, code: 'ALP_IPC_FAILED', message: scrubText(error.message) }] }));
+      else console.log(`alpd (pid ${lock!.pid}) is running but not answering on ${lock!.socket}: ${scrubText(error.message)}; alp doctor says more`);
       process.exitCode = 4;
     });
     if (!client) return;
     const status = await client.request('daemon.status').finally(() => client.close());
-    const health = status.health ?? { live: true, ready: lock.ready === true, checks: [] };
+    const health = status.health ?? { live: true, ready: lock!.ready === true, checks: [] };
     if (json) {
       console.log(JSON.stringify({ running: true, ...status, health }));
     } else {
-      console.log(`alpd ${status.version} running (pid ${status.pid}) since ${status.startedAt}; ${status.sessions} live sessions; socket ${lock.socket}`);
-      console.log(health.ready ? 'ready' : `not ready: ${health.checks.filter(check => !check.ok).map(check => `${check.code ?? check.id} (${scrubText(check.message ?? 'failed')})`).join(', ') || 'starting'}`);
+      console.log(`alpd ${status.version} running (pid ${status.pid}) since ${status.startedAt}; ${status.sessions} live sessions; socket ${lock!.socket}`);
+      console.log(health.ready ? 'ready' : `not ready: ${health.checks.filter((check: HealthCheck) => !check.ok).map((check: HealthCheck) => `${check.code ?? check.id} (${scrubText(check.message ?? 'failed')})`).join(', ') || 'starting'}`);
       if (status.previousExit?.kind === 'crash') console.log(`the alpd before it stopped unexpectedly${status.previousExit.at ? ` around ${status.previousExit.at}` : ''}`);
       const service = await installed();
       if (service) console.log(`managed by ${service.kind} as ${service.name}`);

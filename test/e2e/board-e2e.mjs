@@ -12,7 +12,7 @@ import { initProject } from '@anhlp/alp-core/init';
 const model = process.env.ALP_TEST_MODEL ?? 'codex:gpt-5.6-sol';
 const home = await mkdtemp(path.join(tmpdir(), 'alp-board-e2e-'));
 const env = { ...process.env, ALP_HOME: home, ALP_RUN_LOG_DIR: path.join(home, 'runs') };
-const alp = (...args) => spawnSync(process.execPath, ['packages/cli/src/cli.js', ...args], { env, encoding: 'utf8' });
+const alp = (...args) => spawnSync(process.execPath, ['packages/cli/dist/cli.js', ...args], { env, encoding: 'utf8' });
 const root = path.resolve('.alp-test', `board-${Date.now()}`);
 await initProject(root);
 await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ defaultAgent: 'main', workflow: { mode: 'pho', maxPeers: 2 } }));
@@ -34,7 +34,7 @@ const bob = [
 ].join(' ');
 
 function run(prompt) {
-  const child = spawn(process.execPath, ['packages/cli/src/cli.js', 'run', '--json', '--project', root, '--mode', 'workspace-write', '--model', model, '--thinking', 'low', prompt], { env });
+  const child = spawn(process.execPath, ['packages/cli/dist/cli.js', 'run', '--json', '--project', root, '--mode', 'workspace-write', '--model', model, '--thinking', 'low', prompt], { env });
   const envelopes = [];
   let buffer = '';
   let stderr = '';

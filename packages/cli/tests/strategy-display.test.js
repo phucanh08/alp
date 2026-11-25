@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderLog } from '@anhlp/alp-client/render';
-import { latestStrategies, renderStatus } from '../src/commands/sessions.js';
+import { latestStrategies, renderStatus } from '../dist/commands/sessions.js';
 
 // alp top and alp log show the strategy main and lead chose with alp_strategy (t-003a).
 

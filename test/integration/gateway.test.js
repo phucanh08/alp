@@ -889,7 +889,7 @@ test('terminals through the gateway on a real alpd with a real PTY: host switch,
 test('workspace.files.preview: images only, 1 MiB, in the grant, no link, on a real alpd; the owner\'s host.files.preview too (t-a35b)', { skip, timeout: 60_000 }, async t => {
   const w = await world(t);
   const { symlink } = await import('node:fs/promises');
-  const { previewWorkspaceImage } = await import('../../packages/cli/src/dashboard/owner/library.js');
+  const { previewWorkspaceImage } = await import('../../packages/cli/dist/dashboard/owner/library.js');
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
   await mkdir(path.join(w.projects.a, 'assets'), { recursive: true });
   await writeFile(path.join(w.projects.a, 'assets', 'logo.png'), png);

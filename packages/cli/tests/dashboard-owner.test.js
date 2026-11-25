@@ -3,10 +3,10 @@
 // home and alpd's socket.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeOwnerMethods, ownerMethods } from '../src/dashboard/owner/index.js';
-import { methods as host } from '../src/dashboard/owner/host.js';
-import { methods as library } from '../src/dashboard/owner/library.js';
-import { methods as workspaceFacts } from '../src/dashboard/owner/workspace-facts.js';
+import { mergeOwnerMethods, ownerMethods } from '../dist/dashboard/owner/index.js';
+import { methods as host } from '../dist/dashboard/owner/host.js';
+import { methods as library } from '../dist/dashboard/owner/library.js';
+import { methods as workspaceFacts } from '../dist/dashboard/owner/workspace-facts.js';
 
 test('owner methods: the host and library tables merge, and a name defined twice is refused', () => {
   const a = () => 'a';

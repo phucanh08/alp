@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { readLock, lockAlive } from '../../packages/client/dist/index.js';
 
 // t-1e02: the role subcommands the ALP executable starts itself with work from the npm CLI too.
-const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 test('alp bridge acp speaks MCP on stdio to the bridge socket, as `node -e <bridge>` does', { skip: process.platform === 'win32' && 'unix socket stand-in' }, async t => {

@@ -5,6 +5,8 @@ import net from 'node:net';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { alpHome, assertPrivateDirectory, connect, daemonPaths, discoverIntegration, startIntegration } from '@anhlp/alp-client/index';
+import type { AlpClient } from '@anhlp/alp-client/index';
+import type { DashboardMigration } from './dashboard-migrate.js';
 import { UsageError } from './commands/usage.js';
 import { built, start, running } from './daemon.js';
 import { DAEMON_ENTRY, distributionEntry } from './paths.js';
@@ -25,7 +27,7 @@ const PASEO = 'paseo';
  * Exported for tests.
  * @param {string} home
  */
-export async function startPaseoIntegration(home) {
+export async function startPaseoIntegration(home: string) {
   const entry = await discoverIntegration(PASEO, { home });
   if (!entry) {
     const legacy = path.join(home, 'integrations', 'web.json');
@@ -45,10 +47,10 @@ export async function startPaseoIntegration(home) {
  * @param {string} file
  * @param {string} home
  */
-async function legacyDescriptorEntry(file, home) {
+async function legacyDescriptorEntry(file: string, home: string): Promise<string | undefined> {
   // A missing or corrupt descriptor is no registration: the caller then reports the missing package.
   const raw = await readFile(file, 'utf8').then(text => JSON.parse(text)).catch(() => undefined);
-  const isFile = candidate => stat(candidate).then(info => info.isFile(), () => false);
+  const isFile = (candidate: string) => stat(candidate).then(info => info.isFile(), () => false);
   // The fields discovery accepts in a descriptor, in its priority order.
   for (const field of ['main', 'entry', 'path', 'command']) {
     const value = raw?.[field];
@@ -78,11 +80,11 @@ async function projectArgs() {
  * @param {string} directory
  * @param {{ timeoutMs?: number, connectClient?: typeof connect }} [options]
  */
-export async function registerProject(home, directory, { timeoutMs = 5_000, connectClient = connect } = {}) {
+export async function registerProject(home: string, directory: string, { timeoutMs = 5_000, connectClient = connect }: { timeoutMs?: number; connectClient?: typeof connect } = {}): Promise<void> {
   const socket = daemonPaths(home).socket;
-  let client;
+  let client: AlpClient | undefined;
   let expired = false;
-  let timer;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const work = (async () => {
     const connected = await connectClient(socket, { name: 'alp-cli', version: '1' }, { timeoutMs });
     if (expired) { connected.close(); return; }
@@ -95,7 +97,7 @@ export async function registerProject(home, directory, { timeoutMs = 5_000, conn
         await client.request('project.register', { directory, ifRevision: revision, requestId: randomUUID() }, { timeoutMs });
         break;
       } catch (error) {
-        if (error?.data?.reason === 'stale_revision' && attempt < 4) continue;
+        if ((error as { data?: { reason?: string } } | undefined)?.data?.reason === 'stale_revision' && attempt < 4) continue;
         break;
       }
     }
@@ -124,15 +126,15 @@ export async function registerProject(home, directory, { timeoutMs = 5_000, conn
  * @param {string} project
  * @param {{ timeoutMs?: number }} [options]
  */
-async function waitForGrant(home, credentialId, project, { timeoutMs = 5_000 } = {}) {
+async function waitForGrant(home: string, credentialId: string | undefined, project: string, { timeoutMs = 5_000 }: { timeoutMs?: number } = {}) {
   const credentialsFile = path.join(home, 'dashboard', 'credentials.json');
   const canonical = await realpath(project).catch(() => project);
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
       const raw = JSON.parse(await readFile(credentialsFile, 'utf8'));
-      const credential = raw?.credentials?.find(c => c.id === credentialId && !c.revokedAt);
-      if (credential?.workspaces?.some(w => w.canonical === canonical || w.path === project || w.path === canonical)) {
+      const credential = raw?.credentials?.find((c: { id: string; revokedAt?: string }) => c.id === credentialId && !c.revokedAt);
+      if (credential?.workspaces?.some((w: { canonical?: string; path?: string }) => w.canonical === canonical || w.path === project || w.path === canonical)) {
         return true;
       }
     } catch {}
@@ -142,7 +144,7 @@ async function waitForGrant(home, credentialId, project, { timeoutMs = 5_000 } =
 }
 
 /** Whether settings.json turns alp dashboard off (`dashboard.enabled`, else `web.enabled` from before the rename). @param {string} home */
-async function dashboardDisabled(home) {
+async function dashboardDisabled(home: string) {
   const settings = await readJsonFile(path.join(home, 'settings.json'));
   return dashboardSettings(settings).enabled === false;
 }
@@ -163,29 +165,29 @@ const PRINT_EXIT = { failed: 1, usage: 2, disabled: 3, agent: 4, not_built: 5, c
  * the message is printed and alp exits 1 as before.
  * @param {keyof typeof PRINT_EXIT} kind @param {string} message @param {ErrorOptions} [options]
  */
-const failure = (kind, message, options) => Object.assign(new Error(message, options), { kind });
+const failure = (kind: keyof typeof PRINT_EXIT, message: string, options?: ErrorOptions) => Object.assign(new Error(message, options), { kind });
 
 /**
  * Runs `work`; an error it throws without a class gets `kind`. The error itself is rethrown.
  * @template T @param {keyof typeof PRINT_EXIT} kind @param {() => T | Promise<T>} work @returns {Promise<T>}
  */
-async function classed(kind, work) {
+async function classed<T>(kind: keyof typeof PRINT_EXIT, work: () => T | Promise<T>): Promise<T> {
   try { return await work(); }
   catch (error) { throw classify(error, kind); }
 }
 
 /** `error`, given the class `kind` unless it has one. @param {unknown} error @param {keyof typeof PRINT_EXIT} kind */
-function classify(error, kind) {
+function classify(error: unknown, kind: keyof typeof PRINT_EXIT) {
   if (error instanceof Error && !('kind' in error)) Object.assign(error, { kind });
   return error;
 }
 
 /** A file's JSON, or undefined when it is missing or not JSON (as before: a broken file counts as none). @param {string} file */
-const readJsonFile = file => readFile(file, 'utf8').then(text => { try { return JSON.parse(text); } catch { return undefined; } }, () => undefined);
+const readJsonFile = (file: string) => readFile(file, 'utf8').then(text => { try { return JSON.parse(text); } catch { return undefined; } }, () => undefined);
 /** @param {string} home */
-const readPublished = home => readJsonFile(path.join(home, DASHBOARD.info));
+const readPublished = (home: string) => readJsonFile(path.join(home, DASHBOARD.info));
 /** @param {string} home */
-const readServiceLock = home => readJsonFile(path.join(home, 'integrations', `${DASHBOARD.lock}.lock`));
+const readServiceLock = (home: string) => readJsonFile(path.join(home, 'integrations', `${DASHBOARD.lock}.lock`));
 
 /**
  * The running service as its files and its listener show it, without ps (so also on Windows): the
@@ -194,10 +196,10 @@ const readServiceLock = home => readJsonFile(path.join(home, 'integrations', `${
  * @param {string} home
  * @returns {Promise<{ pid: number, port: number, url: string } | { held: number } | undefined>}
  */
-async function runningDashboard(home) {
+async function runningDashboard(home: string): Promise<{ pid: number; port: number; url: string } | { held: number } | undefined> {
   const lock = await readServiceLock(home);
   if (!Number.isSafeInteger(lock?.pid) || lock.pid <= 0) return undefined;
-  try { process.kill(lock.pid, 0); } catch (error) { if (/** @type {any} */ (error)?.code !== 'EPERM') return undefined; }
+  try { process.kill(lock.pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException | undefined)?.code !== 'EPERM') return undefined; }
   const info = await readPublished(home);
   if (info?.app === DASHBOARD.app && info.pid === lock.pid && typeof info.url === 'string' && await isDashboardReady(info.url)) return { pid: info.pid, port: info.port, url: info.url };
   return { held: lock.pid };
@@ -213,7 +215,7 @@ const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost'];
  * @param {string} home @param {string} entry @param {{ port?: number }} [options]
  * @returns {Promise<{ base: string, token: string, pid: number, port: number }>} `base` is dashboard.json's url (`http://127.0.0.1:<port>/`)
  */
-async function serveDashboard(home, entry, { port } = {}) {
+async function serveDashboard(home: string, entry: string, { port }: { port?: number } = {}): Promise<{ base: string; token: string; pid: number; port: number }> {
   // A lock held by a process proven not to be alp dashboard: say so now rather than wait for it. A
   // running alp-dashboard (its dashboard.json names the lock's pid and is answering) is left to startIntegration.
   const held = await serviceOwner(home);
@@ -226,12 +228,12 @@ async function serveDashboard(home, entry, { port } = {}) {
     throw failure('conflict', `alp dashboard already runs on port ${published.port} (pid ${published.pid}); you asked for port ${port}. Stop it with \`alp dashboard --stop\`, or drop --port to use the running one.`);
   }
   const project = await currentProject();
-  let lock;
+  let lock: Awaited<ReturnType<typeof startIntegration>>;
   try { lock = await startIntegration({ name: DASHBOARD.lock, entry, home, args: [...(project ? ['--project', project] : []), ...(port !== undefined ? ['--port', String(port)] : [])] }); }
   catch (error) {
     // Still held by a live process alp cannot prove: name it, as the wait may have been for it.
     const owner = await serviceOwner(home);
-    if ('reason' in owner && owner.alive) throw failure('conflict', `${error?.message ?? error}\n${refusal(home)} (${owner.reason}). If it is not alp dashboard, stop it, then run alp dashboard again.`, { cause: error });
+    if ('reason' in owner && owner.alive) throw failure('conflict', `${(error as Error | undefined)?.message ?? error}\n${refusal(home)} (${owner.reason}). If it is not alp dashboard, stop it, then run alp dashboard again.`, { cause: error });
     // startIntegration reads settings.json itself: turned off between this command's check and the start.
     throw classify(error, await dashboardDisabled(home) ? 'disabled' : 'service');
   }
@@ -243,9 +245,9 @@ async function serveDashboard(home, entry, { port } = {}) {
   if (typeof info.url !== 'string' || !(await isDashboardReady(info.url))) {
     throw failure('service', `alp dashboard published no address; see ${path.join(home, 'logs', 'integrations', 'alp-dashboard.log')}`);
   }
-  let answer;
+  let answer: Awaited<ReturnType<typeof readToken>>;
   try { answer = await readToken(home); }
-  catch (error) { throw failure('service', `alp dashboard did not hand over its token: ${error?.message ?? error}; see ${path.join(home, 'logs', 'integrations', 'alp-dashboard.log')}. A service started by an older alp keeps no token socket: run \`alp dashboard --stop\`, then \`alp dashboard\` again`, { cause: error }); }
+  catch (error) { throw failure('service', `alp dashboard did not hand over its token: ${(error as Error | undefined)?.message ?? error}; see ${path.join(home, 'logs', 'integrations', 'alp-dashboard.log')}. A service started by an older alp keeps no token socket: run \`alp dashboard --stop\`, then \`alp dashboard\` again`, { cause: error }); }
   // The socket's answer must come from the process the lock and dashboard.json name.
   if (answer.pid !== lock.pid) throw failure('conflict', `the token socket of alp dashboard is held by pid ${answer.pid}, not by the service (pid ${lock.pid}); stop it, then run alp dashboard again`);
   if (port !== undefined && info.port !== port) {
@@ -259,10 +261,10 @@ async function serveDashboard(home, entry, { port } = {}) {
 }
 
 /** The address to open: the token rides in the fragment, which a browser never sends to a server. @param {{ base: string, token: string }} served */
-const addressOf = served => `${served.base}#token=${served.token}`;
+const addressOf = (served: { base: string; token: string }) => `${served.base}#token=${served.token}`;
 
 /** Reports what the migration from `alp web` did, on stderr (stdout carries only the address). @param {Awaited<ReturnType<typeof migrateDashboard>>} report */
-function reportMigration(report) {
+function reportMigration(report: DashboardMigration) {
   if (report.stopped) console.error(`Stopped ${LEGACY_WEB.what} (pid ${report.stopped}).`);
   if (report.moved.length) console.error(`Moved alp web's files to alp dashboard's names: ${report.moved.join('; ')}`);
   for (const warning of report.warnings) console.error(warning);
@@ -275,7 +277,7 @@ function reportMigration(report) {
  * without its token.
  * @param {string} home
  */
-async function statusCommand(home) {
+async function statusCommand(home: string) {
   try {
     const running = await runningDashboard(home);
     if (running && 'url' in running) {
@@ -292,7 +294,7 @@ async function statusCommand(home) {
     for (const item of left.pending) console.log(`From before the rename to alp dashboard, moved by the next \`alp dashboard\`: ${item}`);
     for (const item of left.kept) console.log(`Left from before the rename to alp dashboard, not used: ${item}`);
   } catch (error) {
-    console.log(`alp dashboard could not tell everything: ${error?.message ?? error}`);
+    console.log(`alp dashboard could not tell everything: ${(error as Error | undefined)?.message ?? error}`);
   }
 }
 
@@ -303,13 +305,13 @@ async function statusCommand(home) {
  * is left running and the command fails.
  * @param {string} home
  */
-async function stopCommand(home) {
+async function stopCommand(home: string) {
   const report = await migrateDashboard(home);
   reportMigration(report);
   // alp web from before the rename still holds its lock: not stopped, so not a success.
   if (report.held) process.exitCode = 1;
   const owner = await serviceOwner(home);
-  if (!owner.alive && !('pid' in owner)) {
+  if (!(owner as { alive?: boolean }).alive && !('pid' in owner)) {
     if (!report.stopped) console.log('No alp dashboard running for this ALP home.');
   } else {
     const pid = await stopService(home);
@@ -325,12 +327,12 @@ async function stopCommand(home) {
  * `--rotate` revokes every credential and strips the token, under the dashboard lock.
  * @param {string} home
  */
-async function dropLeftToken(home) {
+async function dropLeftToken(home: string) {
   let published;
   try { published = JSON.parse(await readFile(path.join(home, DASHBOARD.info), 'utf8')); } catch { return; }
   if (!published || typeof published !== 'object' || !('token' in published)) return;
   const rotate = entryCommand(dashboardEntry(), 'dashboard', ['--rotate']);
-  const code = await new Promise(resolve => {
+  const code = await new Promise<number>(resolve => {
     execFile(rotate.command, rotate.args, { env: { ...process.env, ALP_HOME: home }, encoding: 'utf8', timeout: 60_000, killSignal: 'SIGTERM' },
       error => resolve(error ? (typeof error.code === 'number' ? error.code : 1) : 0));
   });
@@ -347,21 +349,22 @@ const DASHBOARD_SUBCOMMANDS = ['pair', 'rotate', 'serve'];
  * in that line only on success: it goes to the caller's stdout, as the address of --print does, and
  * nowhere else (no file, no argument, no log; --json never opens a browser).
  */
-async function dashboardCommand(args) {
+async function dashboardCommand(args: string[]) {
   if (!args.includes('--json') || DASHBOARD_SUBCOMMANDS.includes(args[0])) return runDashboard(args);
   try {
     await runDashboard(args);
   } catch (error) {
-    const usage = error instanceof UsageError || /** @type {any} */ (error)?.code?.startsWith?.('ERR_PARSE_ARGS');
-    const kind = usage ? 'usage' : Object.hasOwn(PRINT_EXIT, /** @type {any} */ (error)?.kind) ? /** @type {keyof typeof PRINT_EXIT} */ (/** @type {any} */ (error).kind) : 'failed';
-    const message = scrubText(String(error instanceof UsageError ? 'usage: alp dashboard [--port N] [--host 127.0.0.1|localhost] [--no-open|--print] [--json]' : /** @type {any} */ (error)?.message ?? error));
+    // any (three lines): whatever was thrown, read for an optional code, failure class or message.
+    const usage = error instanceof UsageError || (error as any)?.code?.startsWith?.('ERR_PARSE_ARGS');
+    const kind = usage ? 'usage' : Object.hasOwn(PRINT_EXIT, (error as any)?.kind) ? (error as any).kind as keyof typeof PRINT_EXIT : 'failed';
+    const message = scrubText(String(error instanceof UsageError ? 'usage: alp dashboard [--port N] [--host 127.0.0.1|localhost] [--no-open|--print] [--json]' : (error as any)?.message ?? error));
     console.log(JSON.stringify({ schema: PRINT_SCHEMA, version: PRINT_VERSION, ok: false, error: { code: kind, message } }));
     console.error(`alp: ${message}`);
     process.exitCode = PRINT_EXIT[kind];
   }
 }
 
-async function runDashboard(args) {
+async function runDashboard(args: string[]) {
   // alp dashboard prints, rotates and pairs with the user's own secrets (t-1c59), and stops the
   // user's service: a process an ALP agent started is refused before anything is read, stopped or printed.
   if (isAgentProcess()) throw failure('agent', 'alp dashboard is the user\'s: it prints and rotates the user\'s credential; this process was started by an ALP agent (ALP_AGENT_SESSION is set)');
@@ -381,7 +384,7 @@ async function runDashboard(args) {
   if (values.json && (values.status || values.stop)) throw new UsageError();
   if (values.status) return statusCommand(home);
   if (values.stop) return stopCommand(home);
-  let port;
+  let port: number | undefined;
   if (values.port !== undefined) {
     port = Number(values.port);
     if (!/^\d+$/.test(values.port) || port < 1024 || port > 65535) throw failure('usage', `--port must be a port from 1024 to 65535, not ${values.port}`);
@@ -416,7 +419,7 @@ async function runDashboard(args) {
  * service is stopped first; `alp-dashboard.js --rotate` then takes the lock, revokes every credential
  * and releases the lock, and the service starts again with a new one (every start mints one, t-cee3).
  */
-async function rotateCommand(args) {
+async function rotateCommand(args: string[]) {
   if (args.length) throw new UsageError();
   const entry = dashboardEntry();
   const home = alpHome();
@@ -425,7 +428,7 @@ async function rotateCommand(args) {
   const project = await projectArgs();
   for (let attempt = 1; ; attempt++) {
     await stopService(home);
-    const rotated = await new Promise(resolve => {
+    const rotated = await new Promise<{ code: number; output: string }>(resolve => {
       const rotate = entryCommand(entry, 'dashboard', ['--rotate', ...project]);
       execFile(rotate.command, rotate.args, { env: { ...process.env, ALP_HOME: home }, encoding: 'utf8', timeout: 60_000, killSignal: 'SIGTERM' },
         (error, stdout, stderr) => resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, output: `${stderr}${stdout}`.trim() }));
@@ -458,7 +461,7 @@ const PASEO_ROTATE_REQUEST = '{"op":"rotate"}';
  * integrations/paseo/server/web.ts (the CLI does not depend on that package).
  * @param {string} home @param {{ platform?: NodeJS.Platform, uid?: number }} [options]
  */
-export function paseoTokenSocketPath(home, { platform = process.platform, uid = process.getuid?.() } = {}) {
+export function paseoTokenSocketPath(home: string, { platform = process.platform, uid = process.getuid?.() }: { platform?: NodeJS.Platform; uid?: number } = {}): string {
   const hash = createHash('sha256').update(home).digest('hex');
   if (platform === 'win32') return `\\\\.\\pipe\\alp-paseo-${hash.slice(0, 24)}`;
   const preferred = path.join(home, PASEO, 'token.sock');
@@ -471,7 +474,7 @@ export function paseoTokenSocketPath(home, { platform = process.platform, uid = 
  * @param {string} home @param {{ rotate?: boolean, timeoutMs?: number, socketPath?: string }} [options]
  * @returns {Promise<{ token: string, serverId: string | undefined, pid: number | undefined }>}
  */
-export async function readPaseoToken(home, { rotate = false, timeoutMs = 10_000, socketPath = paseoTokenSocketPath(home) } = {}) {
+export async function readPaseoToken(home: string, { rotate = false, timeoutMs = 10_000, socketPath = paseoTokenSocketPath(home) }: { rotate?: boolean; timeoutMs?: number; socketPath?: string } = {}): Promise<{ token: string; serverId: string | undefined; pid: number | undefined }> {
   if (process.platform !== 'win32') {
     const directory = path.dirname(socketPath);
     await assertPrivateDirectory(directory).catch(error => {
@@ -482,7 +485,7 @@ export async function readPaseoToken(home, { rotate = false, timeoutMs = 10_000,
     if (info.uid !== process.getuid?.()) throw new Error(`the Paseo integration's token socket ${socketPath} is not yours (uid ${info.uid})`);
     if ((info.mode & 0o777) !== 0o600) throw new Error(`the Paseo integration's token socket ${socketPath} must have mode 0600, not ${(info.mode & 0o777).toString(8).padStart(4, '0')}`);
   }
-  const text = await new Promise((resolve, reject) => {
+  const text = await new Promise<string>((resolve, reject) => {
     const socket = net.connect(socketPath);
     let received = '';
     const timer = setTimeout(() => { socket.destroy(); reject(new Error(`the Paseo integration did not answer on ${socketPath} within ${timeoutMs} ms`)); }, timeoutMs);
@@ -493,7 +496,7 @@ export async function readPaseoToken(home, { rotate = false, timeoutMs = 10_000,
     socket.on('close', () => { clearTimeout(timer); resolve(received); });
   });
   let answer;
-  try { answer = JSON.parse(/** @type {string} */ (text)); } catch { answer = undefined; }
+  try { answer = JSON.parse(text); } catch { answer = undefined; }
   if (typeof answer?.token !== 'string' || !/^[a-f0-9]{64}$/.test(answer.token)) throw new Error(`the Paseo integration gave no password on ${socketPath}`);
   return { token: answer.token, serverId: typeof answer.serverId === 'string' ? answer.serverId : undefined, pid: Number.isSafeInteger(answer.pid) ? answer.pid : undefined };
 }
@@ -505,10 +508,16 @@ export async function readPaseoToken(home, { rotate = false, timeoutMs = 10_000,
  *
  * Exported so the wait can be pinned by a regression test without a live daemon restart.
  */
-export async function requestPairing(client, params, attempts = 50) {
-  let last;
+export async function requestPairing(
+  client: { request(method: string, params?: unknown): Promise<any> }, // any: the integration's web.pairing answer
+  params: { enable?: boolean },
+  attempts = 50,
+  // any: web.pairing's answer as the integration sends it (relayEnabled, url, endpoint, connected).
+): Promise<any> {
+  let last: unknown;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const outcome = await client.request('web.pairing', params).then(value => ({ value }), error => ({ error }));
+    // any: the answer (see above), or the error the request failed with.
+    const outcome: { value?: any; error?: any } = await client.request('web.pairing', params).then(value => ({ value }), error => ({ error }));
     if (!outcome.error) return outcome.value;
     last = outcome.error;
     const unknown = outcome.error?.code === -32601 || /unknown method|not available|not registered/i.test(outcome.error?.message ?? '');
@@ -519,9 +528,9 @@ export async function requestPairing(client, params, attempts = 50) {
 }
 
 /** Why the password could not be had, and what to do. @param {string} home @param {unknown} error */
-const noPassword = (home, error) => `the Paseo integration did not give its password (${/** @type {any} */ (error)?.message ?? error}). An integration started by a version of ALP from before t-cde5 has no token socket: stop it (the pid in ${path.join(home, `${PASEO}.json`)}), then run alp dashboard pair again.`;
+const noPassword = (home: string, error: unknown) => `the Paseo integration did not give its password (${(error as Error | undefined)?.message ?? error}). An integration started by a version of ALP from before t-cde5 has no token socket: stop it (the pid in ${path.join(home, `${PASEO}.json`)}), then run alp dashboard pair again.`;
 
-async function pairCommand(args) {
+async function pairCommand(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { on: { type: 'boolean' }, off: { type: 'boolean' }, rotate: { type: 'boolean' } } });
   if (positionals.length || (values.on && values.off)) throw new UsageError();
   // The password is the user's: an agent gets neither it nor a new one (alpd refuses its web.pairing too, t-d08b).
@@ -555,10 +564,10 @@ async function pairCommand(args) {
 
 /** alp acp: ALP as an ACP agent for editors; stdout carries only the protocol (ALPD §60). */
 
-async function acpCommand(args) {
+async function acpCommand(args: string[]) {
   if (args.length) throw new UsageError();
   await built();
-  const { runAcp } = /** @type {{ runAcp: (options: { daemonEntry: string }) => Promise<void> }} */ (await import(distributionEntry('acp.js').href));
+  const { runAcp } = (await import(distributionEntry('acp.js').href)) as { runAcp: (options: { daemonEntry: string }) => Promise<void> };
   await runAcp({ daemonEntry: DAEMON_ENTRY });
 }
 

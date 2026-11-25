@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createGrant } from '../src/dashboard/grant.js';
+import { createGrant } from '../dist/dashboard/grant.js';
 
 test('alp dashboard refuses to hand out its user credential to a process an ALP agent started (t-1c59)', async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-web-grant-'));
@@ -26,7 +26,7 @@ test('every alp dashboard command refuses a process an ALP agent started, printi
   t.after(() => rm(home, { recursive: true, force: true }));
   // A running service's record, as alp dashboard would print it.
   await writeFile(path.join(home, 'dashboard.json'), JSON.stringify({ url: 'http://127.0.0.1:1', token: 'alpgw1.secret-token' }), { mode: 0o600 });
-  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
   for (const args of [['dashboard', '--print'], ['dashboard', '--status'], ['dashboard', '--stop'], ['dashboard', 'rotate'], ['dashboard', 'pair'], ['dashboard', 'serve']]) {
     const run = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', env: { ...process.env, ALP_HOME: home, ALP_AGENT_SESSION: 'session-1' }, timeout: 30_000 });
     assert.notEqual(run.status, 0, args.join(' '));

@@ -101,7 +101,7 @@ test('directory at a scaffold file path fails safely', async t => {
 test('CLI supports cwd and explicit new directory, and rejects invalid usage', async t => {
   const root = await fixture(t);
   const home = await fixture(t);
-  const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
+  const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
   const run = (...args) => spawnSync(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, ALP_HOME: home } });
   assert.match(run('init').stdout, /Skill library .*: \d+ files added/);
   assert.ok(JSON.parse(await readFile(path.join(home, 'role-skills.json'), 'utf8')).main.includes('xia'));

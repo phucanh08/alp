@@ -21,7 +21,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { _electron } from 'playwright-core';
 import { fixtureProcesses } from '../../../test/support/fixture-processes.js';
-import { readToken } from '../../../packages/cli/src/dashboard-service.js';
+import { readToken } from '../../../packages/cli/dist/dashboard-service.js';
 import { teardown } from '../../../test/support/teardown.js';
 import { hermeticEnv } from '../../../scripts/test-lib.mjs';
 import { spawnCommand } from '../../../scripts/spawn-command.mjs';
@@ -29,7 +29,7 @@ import { spawnCommand } from '../../../scripts/spawn-command.mjs';
 export const APP = path.resolve(import.meta.dirname, '..');
 const ROOT = path.resolve(APP, '..', '..');
 /** The service's own source module, which the live fake alp reads the token socket with. */
-const SERVICE_SOURCE = path.join(ROOT, 'packages/cli/src/dashboard-service.js');
+const SERVICE_SOURCE = path.join(ROOT, 'packages/cli/dist/dashboard-service.js');
 export const SERVICE = process.env.ALP_DESKTOP_E2E_SERVICE || path.join(ROOT, 'packages/cli/dist/alp-dashboard.js');
 /** The Electron binary of apps/desktop's own install (require('electron') gives its path). */
 const ELECTRON = createRequire(path.join(APP, 'package.json'))('electron');

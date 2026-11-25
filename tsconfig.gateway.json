@@ -17,7 +17,7 @@
   },
   "include": [
     "apps/gateway/src/**/*.js",
-    "packages/cli/src/dashboard/**/*.js"
+    "packages/cli/src/dashboard/**/*.ts"
   ],
   "exclude": [
     "node_modules",

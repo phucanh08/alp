@@ -9,7 +9,7 @@ import { initProject } from '@anhlp/alp-core/init';
 import { addGate, GATE_REJECT_LABELS, blockersOf, checkGates, gateDecisions, gatesOf, closeTask, compactTasks, createTask, markGateNotified, rejectGate, resolveGate, startRefusal, getTask, linkTask, listTasks, loadTasks, readyTasks, releaseTask, reopenTask, startTask, submitTask, taskDigest, updateTask } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime, claudeToolShapes } from '../../dist/runtime/index.js';
 
-const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 
 async function project(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-tasks-'));

@@ -12,7 +12,7 @@ import { findFormula, listFormulas, pourFormula, validateFormula } from '@anhlp/
 import { addGate, closeTask, createTask, getTask, linkTask, loadTasks, readyTasks, resolveGate, startTask, submitTask } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 
-const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
+const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 
 /**
  * A throwaway directory for one test, deleted after it. node:test runs t.after hooks in the order

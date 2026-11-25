@@ -17,7 +17,7 @@ const entries = { npm: 'npm-cli.js', npx: 'npx-cli.js' };
 /**
  * Windows' own bsdtar, whatever PATH says.
  *
- * DUPLICATE, deliberately (t-ffe4.6): `systemTar` in packages/cli/src/self-update.js is the same
+ * DUPLICATE, deliberately (t-ffe4.6): `systemTar` in packages/cli/src/self-update.ts is the same
  * knowledge for the published CLI, which cannot import from scripts/. Change one and change the
  * other; test/integration/spawn-command.test.js asserts the two agree, and refuses any third copy.
  */

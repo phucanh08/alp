@@ -28,12 +28,17 @@ import { LEGACY_WEB, refusal, serviceOwner, stopService } from './dashboard-serv
  * or its target present is skipped.
  */
 
+/** What migrateDashboard did; `held`: a legacy holder alp would not stop still runs (only without strict). */
+export type DashboardMigration = { stopped?: number; held?: boolean; moved: string[]; kept: string[]; warnings: string[] };
+/** What a home still has under the names from before the rename (see legacyLeftovers). */
+export type LegacyLeftovers = { legacy?: { pid?: number; reason?: string }; pending: string[]; kept: string[] };
+
 /** @param {string} file */
-const exists = file => lstat(file).then(() => true, () => false);
+const exists = (file: string) => lstat(file).then(() => true, () => false);
 /** A file's JSON, or undefined when it is missing or not JSON. @param {string} file */
-const readJson = file => readFile(file, 'utf8').then(text => { try { return JSON.parse(text); } catch { return undefined; } }, () => undefined);
+const readJson = (file: string) => readFile(file, 'utf8').then(text => { try { return JSON.parse(text); } catch { return undefined; } }, () => undefined);
 /** @param {unknown} error */
-const code = error => /** @type {any} */ (error)?.code;
+const code = (error: unknown): string | undefined => (error as NodeJS.ErrnoException | undefined)?.code;
 
 /**
  * @param {string} home
@@ -42,9 +47,8 @@ const code = error => /** @type {any} */ (error)?.code;
  * @returns {Promise<{ stopped?: number, held?: boolean, moved: string[], kept: string[], warnings: string[] }>}
  *   held: a legacy holder alp would not stop is still running (only without strict).
  */
-export async function migrateDashboard(home, { strict = false } = {}) {
-  /** @type {{ stopped?: number, held?: boolean, moved: string[], kept: string[], warnings: string[] }} */
-  const report = { moved: [], kept: [], warnings: [] };
+export async function migrateDashboard(home: string, { strict = false }: { strict?: boolean } = {}): Promise<DashboardMigration> {
+  const report: DashboardMigration = { moved: [], kept: [], warnings: [] };
 
   // 1. The service from before the rename.
   const owner = await serviceOwner(home, LEGACY_WEB);
@@ -52,7 +56,7 @@ export async function migrateDashboard(home, { strict = false } = {}) {
     try { report.stopped = await stopService(home, 30_000, LEGACY_WEB); }
     catch (error) {
       if (strict) throw error;
-      report.warnings.push(/** @type {any} */ (error)?.message ?? String(error));
+      report.warnings.push((error as Error | undefined)?.message ?? String(error));
       report.held = true;
       return report;
     }
@@ -71,7 +75,7 @@ export async function migrateDashboard(home, { strict = false } = {}) {
     if (await exists(newStore)) report.kept.push(oldStore);
     else {
       try { await rename(oldStore, newStore); report.moved.push(`${oldStore} -> ${newStore}`); }
-      catch (error) { if (!['ENOENT', 'EEXIST', 'ENOTEMPTY'].includes(code(error))) throw error; }
+      catch (error) { if (!(['ENOENT', 'EEXIST', 'ENOTEMPTY'] as Array<string | undefined>).includes(code(error))) throw error; }
     }
   }
 
@@ -97,7 +101,7 @@ export async function migrateDashboard(home, { strict = false } = {}) {
     for (const key of settings.moved) report.moved.push(`settings.json web.${key} -> dashboard.${key}`);
     for (const key of settings.conflicts) report.kept.push(`settings.json web.${key} (dashboard.${key} is set and wins)`);
   } catch (error) {
-    report.warnings.push(`settings.json was not migrated (web.* is still read): ${/** @type {any} */ (error)?.message ?? error}`);
+    report.warnings.push(`settings.json was not migrated (web.* is still read): ${(error as Error | undefined)?.message ?? error}`);
   }
   return report;
 }
@@ -109,13 +113,12 @@ export async function migrateDashboard(home, { strict = false } = {}) {
  * @param {string} home
  * @returns {Promise<{ legacy?: { pid?: number, reason?: string }, pending: string[], kept: string[] }>}
  */
-export async function legacyLeftovers(home) {
-  /** @type {{ legacy?: { pid?: number, reason?: string }, pending: string[], kept: string[] }} */
-  const result = { pending: [], kept: [] };
+export async function legacyLeftovers(home: string): Promise<LegacyLeftovers> {
+  const result: LegacyLeftovers = { pending: [], kept: [] };
   const owner = await serviceOwner(home, LEGACY_WEB);
   if ('pid' in owner) result.legacy = { pid: owner.pid };
   else if (owner.alive) result.legacy = { reason: owner.reason };
-  const place = async (/** @type {string} */ old, /** @type {string} */ current) => (await exists(current) ? result.kept : result.pending).push(old);
+  const place = async (old: string, current: string) => (await exists(current) ? result.kept : result.pending).push(old);
   if (await exists(path.join(home, 'web', 'credentials.json'))) await place(path.join(home, 'web'), path.join(home, 'dashboard'));
   const published = await readJson(path.join(home, LEGACY_WEB.info));
   if (published?.app === LEGACY_WEB.app) result.pending.push(path.join(home, LEGACY_WEB.info));

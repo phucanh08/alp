@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
-import { systemTar } from '../../packages/cli/src/self-update.js';
+import { systemTar } from '../../packages/cli/dist/self-update.js';
 import { exitDescription, spawnCommand, windowsTar } from '../../scripts/spawn-command.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
@@ -58,7 +58,7 @@ const namesTar = text => /(^|[\\/\s'"])tar(\.exe)?$/.test(text.trim());
 // is held to the others by a test: 'every place that names the Windows tar path agrees' below.
 const ALLOWED = new Map([
   ['scripts/spawn-command.mjs', 'defines spawnCommand and windowsTar'],
-  ['packages/cli/src/self-update.js', 'defines systemTar: shipped code cannot import scripts/, so this copy is deliberate and pinned equal to windowsTar by a test'],
+  ['packages/cli/src/self-update.ts', 'defines systemTar: shipped code cannot import scripts/, so this copy is deliberate and pinned equal to windowsTar by a test'],
   ['test/integration/spawn-command.test.js', 'this file: it asserts on the literals'],
 ]);
 
@@ -147,7 +147,7 @@ function tarProblems(relative, text) {
   return problems;
 }
 
-// t-ffe4.6: the four copies the old scan could not see were packages/cli/src/self-update.js (its own
+// t-ffe4.6: the four copies the old scan could not see were packages/cli/src/self-update.ts (its own
 // systemTar), packages/cli/tests/self-update.test.js (bare spawnSync('tar') that GNU tar cannot
 // serve, since it writes a zip), test/integration/binary-install-ps1.test.js (its own System32 path)
 // and test/integration/binary-release.test.js (bare execFileSync('tar')).

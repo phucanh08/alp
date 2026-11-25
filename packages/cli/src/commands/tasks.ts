@@ -10,6 +10,7 @@ import { ago } from '@anhlp/alp-client/render';
 import { parse as toml } from 'smol-toml';
 import { addGate, blockersOf, checkGates, childrenOf, closeTask, compactTasks, createTask, describeGate, gateOpen, epicReport, gatesOf, linkTask, listTasks, loadTasks, readyTasks, rejectGate, reopenTask, resolveGate, summarize, TASKS_DIR, updateTask, isAgentProcess, AGENT_MARKER } from '@anhlp/alp-core/tasks';
 import { AlpError } from '@anhlp/alp-core/errors';
+import type { CloseReason, Task, TaskStatus, TaskType } from '@anhlp/alp-core/tasks';
 import { alpHome } from '@anhlp/alp-client/index';
 import { UsageError } from './usage.js';
 
@@ -18,14 +19,14 @@ const STATUS_MARK = { open: '○', in_progress: '◐', review: '◑', closed: '�
 /** The ALP project a task command works on: --project, or the current directory. */
 /** alp permissions: the profile each agent runs with, from .alp/settings.json and $ALP_HOME/settings.json. */
 
-async function taskProject(directory) {
+async function taskProject(directory?: string): Promise<string> {
   const root = path.resolve(directory ?? process.cwd());
   try { await access(path.join(root, '.alp')); }
   catch { throw new Error(`${root} is not an ALP project (no .alp directory); run alp init, or pass --project`); }
   return root;
 }
 
-function taskRow(task, tasks) {
+function taskRow(task: Task, tasks: Task[]): string {
   const row = summarize(task, tasks);
   const extra = [
     row.blockedBy ? `blocked by ${row.blockedBy.join(', ')}` : '',
@@ -36,13 +37,13 @@ function taskRow(task, tasks) {
   return `${STATUS_MARK[task.status]} ${task.id.padEnd(10)} P${task.priority} ${task.type.padEnd(7)} ${task.status.padEnd(11)} ${task.title}${extra ? `  ${extra}` : ''}`;
 }
 
-function warnUnreadable(errors) {
+function warnUnreadable(errors: Array<{ file: string; error: string }>) {
   for (const { file, error } of errors) console.error(`alp: skipped ${file}: ${error}`);
 }
 
 /** The project's tasks: open, in progress and in review by default; ready lists what nothing blocks. */
 
-async function tasksCommand(args) {
+async function tasksCommand(args: string[]) {
   if (args[0] === 'gates' || args[0] === 'compact') return taskMaintenance([args[0]], args.slice(1));
   if (args[0] === 'export' || args[0] === 'import') return beads(args[0], args.slice(1));
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
@@ -52,7 +53,7 @@ async function tasksCommand(args) {
   const root = await taskProject(values.project);
   const { tasks, errors } = await loadTasks(root);
   warnUnreadable(errors);
-  const rows = positionals[0] === 'ready' ? readyTasks(tasks) : listTasks(tasks, { status: values.status, label: values.label, all: values.all });
+  const rows = positionals[0] === 'ready' ? readyTasks(tasks) : listTasks(tasks, { status: values.status as TaskStatus | undefined, label: values.label, all: values.all });
   if (values.json) { console.log(JSON.stringify(rows)); return; }
   if (!rows.length) { console.log(positionals[0] === 'ready' ? 'No task is ready' : `No tasks in ${path.join(root, TASKS_DIR)}`); return; }
   for (const task of rows) console.log(taskRow(task, tasks));
@@ -60,23 +61,23 @@ async function tasksCommand(args) {
 
 /** The GitHub CLI, for gh:pr and gh:run gates. */
 
-const gh = (args, { cwd }) => new Promise((resolve, reject) => {
+const gh = (args: string[], { cwd }: { cwd: string }) => new Promise<string>((resolve, reject) => {
   const bin = process.env.ALP_GH_BIN ?? 'gh';
   // Windows cannot exec a script by its shebang (the tests' stand-in for gh); a JavaScript one runs under this Node.
   const script = process.platform === 'win32' && /\.[cm]?js$/i.test(bin);
-  const run = script ? scriptCommand(bin, args) : { command: bin, args };
+  const run: { command: string; args: string[]; env?: Record<string, string> } = script ? scriptCommand(bin, args) : { command: bin, args };
   const child = spawn(run.command, run.args, { cwd, ...(run.env ? { env: { ...process.env, ...run.env } } : {}), stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', chunk => { stdout += chunk; });
   child.stderr.on('data', chunk => { stderr += chunk; });
-  child.on('error', error => reject(error.code === 'ENOENT' ? new Error('gh is not installed or not on PATH') : error));
+  child.on('error', (error: NodeJS.ErrnoException) => reject(error.code === 'ENOENT' ? new Error('gh is not installed or not on PATH') : error));
   child.on('close', code => code === 0 ? resolve(stdout) : reject(new Error(stderr.trim() || `gh exited with ${code}`)));
 });
 
 /** alp tasks gates: clears GitHub gates that are done and lists the open ones. alp tasks compact: shrinks old closed tasks. */
 
-async function taskMaintenance([command], args) {
+async function taskMaintenance([command]: string[], args: string[]) {
   const { values, positionals: rest } = parseArgs({ args, allowPositionals: true, options: {
     project: { type: 'string' }, json: { type: 'boolean' }, days: { type: 'string' }, 'dry-run': { type: 'boolean' },
   } });
@@ -106,7 +107,7 @@ async function taskMaintenance([command], args) {
 
 /** alp tasks export / import: interchange with beads through its JSONL issue format. */
 
-async function beads(command, args) {
+async function beads(command: string, args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     project: { type: 'string' }, output: { type: 'string', short: 'o' }, 'dry-run': { type: 'boolean' }, json: { type: 'boolean' },
   } });
@@ -140,7 +141,7 @@ async function beads(command, args) {
 
 /** alp formula: workflow templates that pour into an epic with a task per step. */
 
-async function formulaCommand([action, ...args]) {
+async function formulaCommand([action, ...args]: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     project: { type: 'string' }, var: { type: 'string', multiple: true }, parent: { type: 'string' }, 'dry-run': { type: 'boolean' }, json: { type: 'boolean' },
   } });
@@ -151,7 +152,8 @@ async function formulaCommand([action, ...args]) {
     const found = await listFormulas(root, home, { toml });
     if (values.json) { console.log(JSON.stringify(found)); return; }
     if (!found.length) { console.log(`No formulas in ${formulaDirs(root, home).join(', ')}`); return; }
-    for (const entry of found) console.log(entry.error ? `✗ ${entry.name}  ${entry.file}: ${entry.error}` : `${entry.name}  ${entry.formula.steps.length} steps${entry.formula.description ? `  ${entry.formula.description.split('\n')[0]}` : ''}`);
+    // An entry without an error carries its formula.
+    for (const entry of found) console.log(entry.error ? `✗ ${entry.name}  ${entry.file}: ${entry.error}` : `${entry.name}  ${entry.formula!.steps.length} steps${entry.formula!.description ? `  ${entry.formula!.description.split('\n')[0]}` : ''}`);
     return;
   }
   if (positionals.length !== 1) throw new UsageError();
@@ -165,7 +167,7 @@ async function formulaCommand([action, ...args]) {
     return;
   }
   if (action !== 'pour') throw new UsageError();
-  const given = {};
+  const given: Record<string, string> = {};
   for (const entry of values.var ?? []) {
     const at = entry.indexOf('=');
     if (at < 1) throw new UsageError();
@@ -178,9 +180,9 @@ async function formulaCommand([action, ...args]) {
   for (const task of tasks) console.log(`  ${taskRow(task, all)}`);
 }
 
-const repeated = { type: 'string', multiple: true };
+const repeated = { type: 'string', multiple: true } as const;
 
-async function taskCommand([action, ...args]) {
+async function taskCommand([action, ...args]: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     description: { type: 'string', short: 'd' }, priority: { type: 'string', short: 'p' }, type: { type: 'string', short: 't' },
     label: { ...repeated, short: 'l' }, path: repeated, parent: { type: 'string' }, after: repeated, related: repeated, from: { type: 'string' },
@@ -191,11 +193,11 @@ async function taskCommand([action, ...args]) {
   const fields = {
     ...(values.description !== undefined ? { description: values.description } : {}),
     ...(values.priority !== undefined ? { priority: values.priority } : {}),
-    ...(values.type !== undefined ? { type: values.type } : {}),
+    ...(values.type !== undefined ? { type: values.type as TaskType } : {}),
     ...(values.label ? { labels: values.label } : {}),
     ...(values.path ? { paths: values.path } : {}),
   };
-  let task;
+  let task: Task | undefined;
   if (action === 'add') {
     const title = positionals.join(' ').trim();
     if (!title) throw new UsageError();
@@ -221,7 +223,7 @@ async function taskCommand([action, ...args]) {
     task = await updateTask(root, positionals[0], { ...fields, ...(values.title !== undefined ? { title: values.title } : {}), note: values.message }, 'user');
   } else if (action === 'close') {
     if (positionals.length !== 1) throw new UsageError();
-    task = await closeTask(root, positionals[0], { reason: values.reason, summary: values.message, unverified: values.unverified, agent: isAgentProcess(), channel: 'cli' }, 'user');
+    task = await closeTask(root, positionals[0], { reason: values.reason as CloseReason | undefined, summary: values.message, unverified: values.unverified, agent: isAgentProcess(), channel: 'cli' }, 'user');
   } else if (action === 'reopen') {
     if (positionals.length !== 1) throw new UsageError();
     task = await reopenTask(root, positionals[0], { note: values.message }, 'user');
@@ -232,7 +234,7 @@ async function taskCommand([action, ...args]) {
     task = await linkTask(root, id, change === 'add' ? { add: links } : { remove: links }, 'user');
   } else if (action === 'gate') {
     const [change, id, gate, ...rest] = positionals;
-    const kinds = ['human', 'timer', 'pr', 'run'].filter(kind => values[kind] !== undefined);
+    const kinds = (['human', 'timer', 'pr', 'run'] as const).filter(kind => values[kind] !== undefined);
     // Only the user decides a human gate: never from a process an ALP agent started (t-ca1f).
     if (['clear', 'reject', 'rm'].includes(change) && id && gate && isAgentProcess()) {
       const { tasks: current } = await loadTasks(root);
@@ -257,13 +259,13 @@ async function taskCommand([action, ...args]) {
   }
   if (values.json) { console.log(JSON.stringify(task)); return; }
   const { tasks } = await loadTasks(root);
-  console.log(`${{ add: 'Created', close: 'Closed', reopen: 'Reopened' }[action] ?? 'Updated'} ${TASKS_DIR}/${task.id}.json`);
+  console.log(`${({ add: 'Created', close: 'Closed', reopen: 'Reopened' } as Record<string, string | undefined>)[action] ?? 'Updated'} ${TASKS_DIR}/${task.id}.json`);
   if (action === 'gate') for (const gate of task.gates.filter(entry => gateOpen(entry))) console.log(`  ⏸ ${describeGate(gate)}`);
   console.log(taskRow(task, tasks));
   if (action === 'close' && tasks.some(entry => entry.parent === task.id)) console.log(`\n${epicReport(task.id, tasks).text}`);
 }
 
-function printTask(task, tasks) {
+function printTask(task: Task, tasks: Task[]) {
   console.log(`${STATUS_MARK[task.status]} ${task.id}  ${task.title}`);
   console.log(`  ${task.type}, P${task.priority}, ${task.status}${task.assignee ? ` with ${task.assignee.agent}` : ''}; created by ${task.createdBy} ${ago(task.createdAt)} ago, rev ${task.rev}`);
   if (task.description) console.log(`\n  ${task.description.replace(/\n/g, '\n  ')}\n`);

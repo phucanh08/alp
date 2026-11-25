@@ -9,7 +9,7 @@ import { initProject } from '@anhlp/alp-core/init';
 import { getEntry, saveEntry } from '@anhlp/alp-core/library-edit';
 import { resolveWorkflow } from '@anhlp/alp-core/workflow';
 
-const cli = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));
+const cli = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 async function fixture(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'alp-template-sync-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

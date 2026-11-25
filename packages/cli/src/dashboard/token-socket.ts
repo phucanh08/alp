@@ -1,4 +1,3 @@
-// @ts-check
 /**
  * The service's side of how `alp dashboard [--print]` gets the token of the running service (t-cee3, docs/alp/dashboard.md §4.2).
  *
@@ -44,15 +43,14 @@ const MAX_REQUEST = 256;
 /**
  * Listens on the token socket of `home` and hands `token` to whoever asks on it. Refuses to listen
  * (throws, and leaves no socket) unless the socket is 0600 inside a 0700 directory of the user's.
- * @param {{
- *   home: string,
- *   token: () => string | undefined,
- *   credentialId: () => string | undefined,
- *   afterListen?: (socketPath: string) => Promise<void>,
- * }} options `afterListen` runs between the chmod and the check (tests).
- * @returns {Promise<{ path: string, close: () => Promise<void> }>}
+ * @param options `afterListen` runs between the chmod and the check (tests).
  */
-export async function serveToken({ home, token, credentialId, afterListen }) {
+export async function serveToken({ home, token, credentialId, afterListen }: {
+  home: string;
+  token: () => string | undefined;
+  credentialId: () => string | undefined;
+  afterListen?: (socketPath: string) => Promise<void>;
+}): Promise<{ path: string; close: () => Promise<void> }> {
   const socketPath = tokenSocketPath(home);
   const posix = process.platform !== 'win32';
   if (posix) {
@@ -65,7 +63,7 @@ export async function serveToken({ home, token, credentialId, afterListen }) {
     if (stale && !stale.isSocket()) throw new Error(`${socketPath} exists and is not a socket; remove it, then start alp dashboard again`);
     if (stale) await unlink(socketPath);
   }
-  const connections = new Set();
+  const connections = new Set<net.Socket>();
   const server = net.createServer(socket => {
     connections.add(socket);
     socket.on('close', () => connections.delete(socket));
@@ -82,7 +80,7 @@ export async function serveToken({ home, token, credentialId, afterListen }) {
       socket.end(`${JSON.stringify({ token: value, credentialId: credentialId(), pid: process.pid })}\n`);
     });
   });
-  const close = async () => {
+  const close = async (): Promise<void> => {
     for (const socket of connections) socket.destroy();
     await new Promise(resolve => server.close(() => resolve(undefined)));
     if (posix) await unlink(socketPath).catch(() => {});

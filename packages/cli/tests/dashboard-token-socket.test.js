@@ -5,8 +5,8 @@ import { chmod, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { serveToken } from '../src/dashboard/token-socket.js';
-import { readToken, tokenSocketPath } from '../src/dashboard-service.js';
+import { serveToken } from '../dist/dashboard/token-socket.js';
+import { readToken, tokenSocketPath } from '../dist/dashboard-service.js';
 import { teardown } from '../../../test/support/teardown.js';
 
 /**

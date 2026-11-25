@@ -211,7 +211,7 @@ test('an acp: profile starts, and the answer says its effort was not checked', a
 const repository = fileURLToPath(new URL('../..', import.meta.url));
 /** Runs alp init or alp setup on a project, with ALP_HOME at the test's library. */
 const alp = (library, ...args) => {
-  const result = spawnSync(process.execPath, [path.join(repository, 'packages/cli/src/cli.js'), ...args], { env: { ...process.env, ALP_HOME: library }, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, [path.join(repository, 'packages/cli/dist/cli.js'), ...args], { env: { ...process.env, ALP_HOME: library }, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
 };
 /** Settings as alp init writes them, in Cafe, with or without alp setup after. */
