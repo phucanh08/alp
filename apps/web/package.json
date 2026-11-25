@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "pretest": "node ../../scripts/build-workspace.mjs client",
     "test": "node --test tests/*.test.js",
-    "pretest:e2e": "node ../../scripts/build-workspace.mjs cli && node ../../scripts/build-workspace.mjs daemon && vite build",
+    "pretest:e2e": "node ../../scripts/build-workspace.mjs cli && node ../../scripts/build-workspace.mjs gateway && node ../../scripts/build-workspace.mjs daemon && vite build",
     "test:e2e": "playwright test"
   },
   "dependencies": {

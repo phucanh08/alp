@@ -55,6 +55,9 @@ if (scope === 'all' || scope === 'core') {
   node('node_modules/typescript/bin/tsc', '-p', 'tsconfig.gateway.json');
   buildWorkspace('daemon');
   buildWorkspace('cli');
+  // The gateway is only a devDependency of the CLI, so building the CLI does not build it; its tests
+  // and the CLI's dashboard tests import its default export, which is its built dist.
+  buildWorkspace('gateway');
   node('scripts/build-core.mjs');
   node('scripts/check-boundaries.mjs', '--require-artifacts');
   tests(packages.filter(name => name !== 'paseo').flatMap(packageTests));
