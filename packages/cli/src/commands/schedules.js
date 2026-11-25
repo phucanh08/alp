@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { running } from './daemon.js';
+import { running } from '../daemon.js';
 import { UsageError } from './usage.js';
 
 /** One-shot continuations of an existing root session; timestamps need an explicit offset. */

@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util';
 import { BACKUP_EXTENSION, backupsDir, createBackup, knownProjects, restoreBackup, verifyBackup } from '@anhlp/alp-core/backup';
 import { acquireDaemonLock, alpHome, assertPrivateDirectory, daemonPaths, lockAlive, readLock, releaseDaemonLock, PROTOCOL_VERSION } from '@anhlp/alp-client/index';
 import { daemonHeld, holdDaemon, releaseHold } from '@anhlp/alp-client/supervise';
-import { start, stop } from './daemon.js';
+import { start, stop } from '../daemon.js';
 import { UsageError } from './usage.js';
 
 /* global __ALP_VERSION__ */

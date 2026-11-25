@@ -4,9 +4,9 @@ import { installedProgram, installService, serviceFor, uninstallService } from '
 import { holdDaemon, startDaemon } from '@anhlp/alp-client/supervise';
 import { alpHome, connect, daemonStartTimeoutMs, lockAlive, readLock, withDaemonLifecycle } from '@anhlp/alp-client/index';
 import { scrubText } from '@anhlp/alp-core/log';
-import { UsageError } from './usage.js';
+import { UsageError } from './commands/usage.js';
 import { DAEMON_ENTRY, DAEMON_SCRIPT } from './paths.js';
-import { runRole } from './roles.js';
+import { runRole } from './commands/roles.js';
 
 async function built(entry = DAEMON_ENTRY) {
   try {

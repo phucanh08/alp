@@ -3,7 +3,7 @@ import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/pr
 import os from 'node:os';
 import path from 'node:path';
 import { alpHome } from '@anhlp/alp-client/index';
-import { UsageError } from './usage.js';
+import { UsageError } from './commands/usage.js';
 
 /**
  * `alp terminal allow|deny|status`: the host owner's switch for remote terminals

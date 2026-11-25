@@ -6,7 +6,7 @@ import { ago, duration, renderLog, renderPs } from '@anhlp/alp-client/render';
 import { AGENT_MARKER, isAgentProcess, isTaskId } from '@anhlp/alp-core/tasks';
 import { connect } from '@anhlp/alp-client/index';
 import { UsageError } from './usage.js';
-import { start, running, stop } from './daemon.js';
+import { start, running, stop } from '../daemon.js';
 import { taskProject } from './tasks.js';
 
 /** One line for a finished tool call: its command, or what a typed call touched (ALPD §4.2). */
