@@ -4,7 +4,7 @@ import { describeVerification, runVerify, verifyConfig, type Verification, type 
 import { recordVerification, loadTasks } from '@anhlp/alp-core/tasks';
 import { checkoutFingerprint, checkoutKey, commitWorktree, linkModules, mergeWorktree, removeWorktree, type Worktree, type WorktreeChange } from './workspace.js';
 import { writes } from './catalog.js';
-import { nativeEnvironment } from './providers.js';
+import { nativeEnvironment } from './providers/providers.js';
 import { mainOf } from './tools.js';
 import { errorData, plainObject, toolResult } from './tool-results.js';
 import type { RuntimeOptions } from './contracts.js';

@@ -6,8 +6,8 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface, type Interface } from 'node:readline';
-import { openMcpTools } from './mcp-tools.js';
-import { antigravityToolDetail } from './tool-detail.js';
+import { openMcpTools } from '../../mcp-tools.js';
+import { antigravityToolDetail } from '../../tool-detail.js';
 import { bridgeCommand, isBridgeArgs } from '@anhlp/alp-core/bridges';
 
 /**

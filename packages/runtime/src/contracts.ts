@@ -1,11 +1,11 @@
-import type { ProviderFactories, ProviderRegistry } from './providers.js';
+import type { ProviderFactories, ProviderRegistry } from './providers/providers.js';
 import type { RuntimeKind, SessionSpec } from './resolve.js';
 import type { Envelope, SessionSnapshot, TreeStatus, UserQuestion } from './events.js';
 import type { Pin } from './board.js';
 import type { LiveEntry } from './live.js';
 import type { ProviderUsage } from './usage.js';
-import type { AcpProvider } from './acp-transport.js';
-import type { AntigravityProvider } from './antigravity-transport.js';
+import type { AcpProvider } from './providers/transports/acp-transport.js';
+import type { AntigravityProvider } from './providers/transports/antigravity-transport.js';
 import type { GitHubRunner } from './github.js';
 import type { AttachmentReader } from './attachments.js';
 

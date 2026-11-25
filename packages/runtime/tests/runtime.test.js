@@ -60,14 +60,18 @@ const decode = result => JSON.parse(result.contentItems[0].text);
 
 test('runtime sources never import a viewer SDK or the plugin', async () => {
   const directory = new URL('../src/', import.meta.url);
-  for (const file of await readdir(directory)) {
+  // Every source, in src/ and its feature directories (providers/, sessions/, assignments/, board/).
+  for (const file of await readdir(directory, { recursive: true })) {
     if (!file.endsWith('.ts')) continue;
-    const source = await readFile(new URL(file, directory), 'utf8');
+    const at = new URL(file.split(path.sep).join('/'), directory);
+    const source = await readFile(at, 'utf8');
     for (const match of source.matchAll(/(?:from\s+|import\s*\()['"]([^'"]+)['"]/g)) {
       const target = match[1];
       // MCP is a native runtime protocol, independent of any viewer or plugin.
       const mcpClient = ['@modelcontextprotocol/sdk/client/index.js', '@modelcontextprotocol/sdk/client/stdio.js', '@modelcontextprotocol/sdk/client/streamableHttp.js'].includes(target);
-      assert.ok(target.startsWith('node:') || /^\.\/[^/]+$/.test(target) || /^@anhlp\/alp-(?:core|protocol)(?:\/[^/]+)?$/.test(target) || target === 'zod' || target === 'smol-toml' || mcpClient, `${file} imports ${target}`);
+      // A relative import stays inside the runtime's own sources.
+      const local = /^\.\.?\//.test(target) && new URL(target, at).href.startsWith(directory.href);
+      assert.ok(target.startsWith('node:') || local || /^@anhlp\/alp-(?:core|protocol)(?:\/[^/]+)?$/.test(target) || target === 'zod' || target === 'smol-toml' || mcpClient, `${file} imports ${target}`);
     }
   }
 });
