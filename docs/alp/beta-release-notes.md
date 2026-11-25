@@ -1,3 +1,132 @@
+# ALP 0.0.1-beta.14 — release notes
+
+Prepared 2026-11-25 from the commits `v0.0.1-beta.13..ae55ea23` (49 commits, PRs #389 to #406;
+#401 was a throwaway draft, closed unmerged; task t-a254 bumped the version). npm (8 packages, `beta`
+tag) and the GitHub release (archives, installers and the two macOS DMGs) carry the same version
+from one main SHA, as in beta.13. Release acceptance runs the repository's fake Codex and fake
+Claude on the packed tarballs; macOS decides it, Linux and Windows are reported. **The gate's
+real-provider rows R1–R7 (§6.1 of [beta-scope.md](beta-scope.md)) were not run for beta.14;** none
+of them is claimed as passed here. Real-provider runs that individual PRs recorded are named below
+with the change they belong to; everything else was tested with fake providers only.
+
+**Upgrading from beta.13:**
+
+1. `alp update` (bundle) or `npm install -g @anhlp/alp@beta` (npm), then `alp daemon restart`. Most
+   changes below are in alpd and take effect only after the restart. An approval (`alp_issue`,
+   `alp_skill`, `alp_skill_retire`, `alp_lesson_curate`) still pending when you restart the beta.13
+   alpd is lost as before: beta.13 never saved it. Answer or dismiss pending approvals first.
+2. If you use the Paseo integration (`@anhlp/alp-paseo`): `npm install -g @anhlp/alp-paseo@beta`,
+   then restart Paseo (or a standalone `alp-paseo-integration`), so that the terminal list works
+   with Paseo 0.16 or later (below).
+3. ALP.app: install `ALP-0.0.1-beta.14-<arch>.dmg` to get the `--json` handshake (below). The old
+   app keeps working with the new CLI, and the new app keeps working with an older CLI. It is still
+   ad-hoc signed and not notarized ([desktop.md](desktop.md) §8).
+4. If your checkout of the ALP repository has an untracked `ALP.md` at its root (only relevant if
+   you work on ALP itself): #403 now tracks that file, so `git pull` refuses to overwrite the
+   untracked copy. Move or remove it before pulling (the tracked file has the same content).
+
+Changes that affect an existing user:
+
+- **Pending approvals survive an alpd restart and expire as `expired`** (t-43ed, #399). Pending
+  `alp_issue` (create/comment), `alp_skill`, `alp_skill_retire` and `alp_lesson_curate` approvals are
+  kept in `<ALP_HOME>/state/approvals.json` (0600). After a restart the root is reopened and the
+  same approval is asked again with a new 30-minute window; the agent resubmits nothing. When an
+  approval times out, the agent gets `expired` (before: `rejected`) and the user a notice. One that
+  cannot be asked again is dropped with `not_restored` (log `ALP_APPROVAL_DROPPED`); for a root that
+  is not open there is no user notice then. An idle root with a pending approval is no longer
+  reaped until the approval is decided or expires. `alp_schedule` approvals also report `expired`
+  but are still not restored after a restart; `alp_ask` keeps `unanswered`.
+- **Restart notices say only what happened, and replayed ones say when** (t-11c7, t-2e23, #394,
+  #402). A notice read back from history (reopened root, `session.attach`, history pages in the
+  web) now reads `[issued <time>, replayed] …`; a live notice is unchanged. Mail delivered again
+  reads `issued <time>, redelivered`, and mail delivered 10 minutes or more after it was posted
+  `issued <time>, delivered late`. alpd no longer reports a crash after a start that failed, or
+  after a requested stop that outlasted its exit timer (logged `ALP_PREVIOUS_STOP_CUT_SHORT`), and
+  no longer reopens an assignment whose run log says it finished (`ALP_STALE_LIVE_ENTRY`).
+  Recovery now starts once alpd listens. New variable `ALP_STOP_TIMEOUT_MS` (100–600000 ms) sets a
+  stop's exit timer.
+- **Cafe: main sees the verdict of an assignment lead started** (t-d8c5, #400, #405). When an
+  assignment whose requester is not the root finishes (a reviewer or peer started by lead), the
+  root gets one passive mail of the new kind `relay` (agent, status, outcome, verdict line, summary;
+  at most 1000 characters). It never wakes an idle root and never ends an `alp_wait`; it arrives with
+  the next mail, wake or prompt. `alp_delegate` with `wait: true` now also returns such mail under
+  `mail` (with a result) or `events` (with a question) instead of dropping it. The supervisor digest
+  says whether main has received the relay yet. The protocol gains the mail kind `relay`; older
+  Paseo plugins ignore it. Tested with fake providers; #405 came from a real Cafe run on Claude,
+  and the user-authorised re-check on a real chain after the merge is not part of these notes.
+- **An Antigravity turn that agy denied fails the assignment and says why** (t-a648, #404, #406).
+  When agy (headless) refuses a tool and ends the turn with no answer and no handoff, the
+  assignment now ends `failed` (before: `completed` with `handoff: null`) with an error naming tool,
+  path, mode and reason, and a `denied: [{tool, path, reason}]` list; with a handoff or an answer
+  after the denial it stays `completed` and still carries `denied`. A read-only Antigravity role
+  that tried an edit and then gave no answer and no handoff therefore now ends `failed`. Nothing a
+  role may do changes. #406 records one real headless agy run (agy 1.5.16, on agy's
+  `claude-sonnet-4-6`) where agy reported the path and reason; the shape where agy reports a
+  refused read as done with no output was not seen on a real agy, and the CLI, web and digest show
+  only the status and the error sentence, not the `denied` list.
+- **Antigravity read-only treats `edit_file` as an edit** (t-9ae1, #392). In read-only, an
+  `edit_file` step that agy reports done is reported as failed, never as a completed edit. The
+  read-only instruction text is generated from the allowlist, which stays `pwd` only, and no
+  longer says agy's reads stay inside the workspace. Reached: the read-only roles on Antigravity
+  (reviewer, oracle, supervisor, read-only peer and lead, scout, architect), each checked once with
+  a real agy in #392; other modes and runtimes are not affected.
+- **`alp config explain`** (t-7d81, #390): shows each permission value of an agent (profile, base,
+  `beyondMode`, workdir, every allow/ask/deny rule) with the scope and file it came from, and warns
+  when the project's `.alp/settings.json` gives more than your user settings. It only explains and
+  warns (exit 0); what is enforced is unchanged ([team-workflow.md](team-workflow.md), "Where a
+  value comes from").
+- **`alp dashboard --print --json`** (t-81b0.4, #389, #402): one JSON line on stdout
+  (`schema: "alp.dashboard.print"`, `version: 1`), on success (`ok, url, origin, token, port, pid`)
+  and on failure (`ok: false, error: { code, message }`), with exit codes 1–8 per failure class
+  ([dashboard.md](dashboard.md) §3.3). Without `--json` nothing changes. ALP.app reads the JSON and
+  falls back to plain `--print` for an alp of beta.13 or older.
+- **The Paseo plugin lists terminals of every workspace on Paseo SDK 0.16+** (t-1af7, #391). A
+  Paseo 0.16+ client asking for terminals without a workspace directory was refused ("Update the
+  host to list terminals across workspaces"); the plugin now answers with every workspace's
+  terminals and advertises `terminalCollection`. The plugin typechecks against the newest Paseo SDK
+  again. Checked against SDK 0.11.1, 0.12.0 and 0.17.4, not against a real Paseo 0.16+ app.
+- **A daemon lifecycle token is no longer held by a reused pid** (t-dc0e, #393). A start or stop of
+  alpd could wait forever when the process that held the lifecycle had crashed and its pid went to
+  another process. The token now carries a proof of its owner (start time on Unix, an open file on
+  Windows), and the wait ends with `ALP_LIFECYCLE_BUSY` naming the holder. Older ALP versions still
+  read the token. Not checked on a real Windows machine beyond CI.
+- **Windows: npm's `codex.cmd` starts without a shell** (t-1a70, #396, fixes #236). With Codex
+  installed by `npm install -g @openai/codex` (no `codex.exe`), ALP failed with
+  `spawn codex ENOENT`. ALP now reads npm's launcher and starts its target directly; a launcher that
+  is not exactly npm's template is refused with a message, never run through a shell. A `.cmd`
+  given in `ALP_CODEX_BIN` is followed instead of refused. POSIX is unchanged. `alp doctor` and
+  Claude Code installed by npm on Windows are not covered.
+
+Test and CI changes with no product effect: test runners give every run a private home and keep
+real `agy`, `claude`, `codex`, `gemini` and `opencode` off PATH (t-a87f, #395); the alpd and
+persistence e2e lanes follow the product, refuse your real `~/.alp` through a fail-closed home
+guard, and the acceptance kit reads the answer from the user's turn, not from a wake turn
+(t-cad9, t-beb5, #397; the Codex R1 C4 reproduction in #397 used a real Codex, R1 as a whole was
+not re-run); the windows-daemon lane lists processes in a hang dump (t-840a0, #398); one web e2e
+test for replayed notices (#402). Docs: the project's `ALP.md` is tracked (#403); measurements of
+agy 1.5.16 over ACP (t-bc8b.1, #406).
+
+Known issues:
+
+- **A deny rule may not match a command line written in non-plain shell syntax** (pre-existing;
+  open). Prefer allow rules and sandboxed modes over relying on a deny rule alone to stop a command.
+- Antigravity: agy's own read tools are not confined to the workspace (#392 measured reads outside
+  it succeed in read-only); a read-only Antigravity role can run only `pwd`, so it cannot run
+  `git diff` or tests; the supervisor on Antigravity with the shipped team does not start when the
+  model carries an effort suffix (t-ca83).
+- The Windows hang dump's process list came back empty on Node 22 (t-840a0); test-only.
+- A relay is not kept across an alpd restart, like all mail.
+- R1 (Codex) of the real-provider gate was last recorded as failing (t-beb5). #397 fixed how the
+  acceptance kit reads the answer, but a full R1 run has not confirmed it yet.
+- Carried from beta.13: the dashboard and Paseo token sockets are checked on macOS only, not on
+  Linux or Windows; the Paseo plugin and `alp dashboard` each restart a crashed alpd with their own
+  entry; Windows keeps alpd on the bundled Node; the desktop app is macOS only, not notarized, has
+  no auto-update, and does not stop `alp dashboard` when it quits; the window-owned sidebar and
+  explorer toggles are tested only in the web e2e.
+- Still as before: the Claude Agent SDK's own bundled zod is inside the advisory range (accepted
+  residual risk, [zod-advisory.md](zod-advisory.md)); remote mode (`@anhlp/alp-gateway`) is not
+  published.
+
 # ALP 0.0.1-beta.13 — release notes
 
 Prepared 2026-11-24 from the commits `v0.0.1-beta.12..e4cfd69c` (PRs #378 to #387; task t-26ab
