@@ -175,3 +175,122 @@ allowlist and no read containment (t-ffa1, t-c8ee); it is reporting only.
 `test/integration/antigravity-denied-turn.test.js` replays the M0 frames in both variants,
 and the T1 sequence, and asserts this result. Not yet checked on a real agy (chưa kiểm bằng
 agy thật).
+
+## agy over ACP, and the t-a648 check, agy 1.5.16 (2026-11-25, t-bc8b.1)
+
+Seven real agy conversations, approved by the user (six over `agy acp --disable-telemetry`,
+one headless through ALP). A scratch driver spoke ACP over stdio and logged every frame; the
+agy process alone ran with the user's home, everything else in a scratch directory. agy was
+1.5.16 before and after. In conversation 2, agy's default model, gemini-4-hydrogen, did one step, and
+then every answer was a quota message: the account's quota for the Gemini models was
+exhausted, so conversations 3–7 ran on agy's `claude-sonnet-4-6` (the user's decision).
+agy itself raises the permission requests, whatever the model. The model chooses which tool to
+call, so behaviour measured on Sonnet 4.6 may differ on a Gemini model.
+
+| # | What | Model | Observed |
+|---|---|---|---|
+| 1 | M0: flags, initialize, session/new, config | gemini-4-hydrogen | see "What agy offers over ACP" |
+| 2 | A, Default, allow every request | gemini-4-hydrogen | one in-workspace `read_file`, no request; then every answer was the quota message, `stopReason: end_turn`, no error |
+| 3 | A again | claude-sonnet-4-6 | requests for the outside read, the scratch SKILL.md read, `pwd`, `git status`, the in-workspace edit; none for the in-workspace read; MCP not reachable (below) |
+| 4 | B, reject every request | claude-sonnet-4-6 | each reject ends the turn (below) |
+| 5 | D, mode `accept-edits` | claude-sonnet-4-6 | still asks for the outside read and every command; `touch` outside the workspace succeeded; cancel works (below) |
+| 6 | T, headless through ALP (t-a648) | claude-sonnet-4-6 | assignment `failed` with `denied[]` (below) |
+| 7 | Resume of conversation 3 | claude-sonnet-4-6 | `session/load` in a new process replayed 31 updates; the next answer used the earlier context |
+
+### What agy offers over ACP (conversation 1)
+
+- `agy acp --help` lists `--sandbox` ("Run in a sandbox with terminal restrictions
+  enabled"), `--dangerously-skip-permissions`, `--add-dir`, `--process-per-session` and
+  `--login`. There is no `--mode`, `--model` or `--settings` flag on `acp`. The runs below
+  were made **without** `--sandbox`; what it confines over ACP is not measured.
+- `initialize`: `loadSession: true`; `sessionCapabilities` resume, close, load, list,
+  additionalDirectories; prompts take images and embedded context.
+- `session/new` offers four modes: `default` ("Ask before edits and commands"),
+  `accept-edits` ("Approve file edits in the workspace without asking"), `auto` ("Approve
+  edits and safe commands; ask before irreversible actions") and `plan`. They are also the
+  config option `mode`.
+- Config option `model` takes base ids (`gemini-4-hydrogen`, `gemini-3.8-flash`,
+  `claude-sonnet-4-6`, `claude-opus-4-6-thinking`, `gpt-oss-120b-medium`). Config option
+  `thought_level` takes `low`, `medium`, `high`, `xhigh` and is separate from the model. It
+  disappears from the options while `claude-sonnet-4-6` is selected.
+- `availableModels` lists suffixed ids (`gemini-4-hydrogen-high`, `…-xhigh`, …).
+  `set_config_option model = "gemini-4-hydrogen-high"` was accepted and gave
+  `model = gemini-4-hydrogen` with `thought_level = high`. `session/set_model` accepted
+  both the base id and the suffixed id.
+- Every changed value was set back before the process ended.
+
+### Permission requests (conversations 3–5)
+
+- **Every** request offered exactly two options: `allow_once` ("Allow") and `reject_once`
+  ("Deny"). There was no `allow_always`.
+- Tool names on the wire: `read_file` (kind `read`, `rawInput {Path}`), `write_file` (kind
+  `edit`, `rawInput {Append, Content, Path}`) and `run_command` (kind `execute`,
+  `rawInput {CommandLine, WaitMsBeforeAsync, toolSummary}`). Read and edit requests carry
+  `locations` with the absolute path; command requests carry none.
+- Default mode: a read inside the workspace raised no request. agy **asked** before a read
+  outside the workspace, before `pwd`, before `git status` and before an edit inside the
+  workspace.
+- Accept-edits mode: agy still asked before the outside read and before each command (`touch`,
+  `sleep 20`, `sleep 30`). No edit was tried in this mode.
+- `session/new` with `mcpServers` naming a stdio server `alp` did **not** start that server
+  (it never ran). The model then read `~/.gemini/antigravity-cli/mcp/alp/alp_board.json`
+  without a request; the file did not exist and the step failed. Over ACP in 1.5.16, an MCP
+  server passed by the client is not available to the model, as far as this run shows.
+- A rejected request: the tool update turns `failed` with `rawOutput` `permission check
+  failed for read_file "<path>": user denied permission for read_file(<path>)` followed by
+  `Do not attempt to circumvent this denial …`. The prompt returned 2 ms later with
+  `stopReason: end_turn`, no text and no further tool call. Same for a rejected
+  `write_file`. **A reject ends the turn**, and agy gives the path and the reason.
+- With no `--sandbox`, an allowed `touch` of a file outside the workspace (in the scratch
+  directory) succeeded. Without that flag, nothing confines commands.
+- `sleep 20 && echo done`: the request carried `WaitMsBeforeAsync: 25000`. The model also
+  used a `manage_task` status tool (kind `other`, no request). The prompt returned after
+  the command had ended. No update came after a prompt returned in any conversation.
+- `session/cancel` during `sleep 30`: the tool update turned `failed`, and the prompt
+  returned `stopReason: cancelled`. No `sleep 30` process was left 2 s later, and no update
+  came in the next 30 s.
+- Quota (conversation 2, gemini-4-hydrogen): the driver saw the quota message as an
+  ordinary agent message with `stopReason: end_turn` and no error. It was not run through
+  ALP. The inference, not measured, is that an ALP assignment over ACP would read such a
+  turn as an answer.
+
+### t-a648 on a real agy (conversation 6)
+
+A peer in workspace-write on `antigravity:claude-sonnet-4-6` (ALP at main 8f2707c0, which
+contains cb198f3e) was told to `read_file` a scratch file outside its workspace. The
+headless argv had `--mode accept-edits --sandbox`, the usual `--settings` and
+`--model claude-sonnet-4-6`, and no `--effort`. agy refused the read and reported the step as
+an ERROR, with the error text above. The turn ended. The requester got:
+
+```
+status: failed, handoff: null
+error: peer's turn ended because ReadFile on <path> was denied (permission check failed for
+       read_file "<path>": user denied permission for read_file(<path>)) in workspace-write
+       mode; no handoff was filed.
+denied: [{tool: "ReadFile", path: "<path>", reason: "permission check failed for read_file …"}]
+```
+
+Both the path and the reason come from agy's error step; neither is inferred. agy had
+ALP's tools: it wrote `~/.gemini/antigravity-cli/mcp/alp/alp_*.json` for this session. The
+child's own `turn.ended` still says `completed`.
+
+### Not measured
+
+- Gemini models beyond the first step of conversation 2 (quota).
+- `agy acp --sandbox` in a conversation.
+- The `auto` and `plan` modes, and an edit in `accept-edits`.
+- Permission requests for MCP tools over ACP (the server passed in `session/new` never
+  started).
+- On a real agy, the `DONE` with no output shape of a denial (t-a648 inference path): T
+  produced the `ERROR` shape only.
+- `--dangerously-skip-permissions`, `--process-per-session` and `--add-dir`.
+
+### What agy wrote in the user's home
+
+agy wrote under `~/.gemini/antigravity-cli/`, and only kinds that earlier runs had made:
+a conversation database and a `brain/` directory for each conversation, `annotations/`, an
+`acp-server-*.log` for each ACP process, one `cli-*.log` (T), `presence/<id>.lock` (T), the
+`mcp/alp/*.json` files (T), and the shared `cache/onboarding.json`, `implicit/*.pb` and
+summary files. `~/.gemini/config/mcp_config.json` kept the same sha256. The mtime of
+`~/.local/bin` changed at the T start, but its entries stayed the same. Other agy
+processes ran on the machine at the same time. Their writes are left out here.
