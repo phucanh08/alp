@@ -267,7 +267,7 @@ async function tarball() {
     // The installed portable entries bundle for a browser with nothing from Node or ALP core.
     const result = await build({ absWorkingDir: consumer, bundle: true, write: false, metafile: true, platform: 'browser', format: 'esm', stdin: { contents: "export * from '@anhlp/alp-client/portable';\nexport * from '@anhlp/alp-client/websocket';", resolveDir: consumer }, logLevel: 'silent' });
     const inputs = Object.keys(result.metafile.inputs).filter(input => input !== '<stdin>');
-    const stray = inputs.filter(input => !/^node_modules\/@anhlp\/alp-(client\/dist\/(portable|connection\/websocket|rpc\/(connection\/)?[a-z]+)|protocol\/src\/(public|wire))\.js$/.test(input));
+    const stray = inputs.filter(input => !/^node_modules\/@anhlp\/alp-(client\/dist\/(portable|connection\/websocket|rpc\/(connection\/)?[a-z]+)|protocol\/dist\/(public|wire))\.js$/.test(input));
     if (stray.length) throw new Error(`installed portable bundle pulls in ${stray.join(', ')}`);
     log(`tarball: browser bundle of the installed package has ${inputs.length} modules, all portable`);
     // Declarations: a DOM-only project (no @types/node) and a Node project both type-check.

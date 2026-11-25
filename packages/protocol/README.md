@@ -10,7 +10,7 @@ the public contract (the conformance runner alone uses `node:net`).
 - Golden values: `fixtures/v1/cases.json` (`node scripts/fixtures.mjs` writes it)
 - Conformance: `node conformance/run.mjs --socket <path> [--profiles …]` against any implementation
 
-After editing `schema/methods-v1.json`, run `npm run generate --workspace=@anhlp/alp-protocol` (a test fails while `src/contract-v1.js` is stale).
+After editing `schema/methods-v1.json`, run `npm run generate --workspace=@anhlp/alp-protocol` (a test fails while `src/contract-v1.ts` is stale).
 
 Build: `npm run build --workspace=@anhlp/alp-protocol`. Test: `npm run test --workspace=@anhlp/alp-protocol`.
 
