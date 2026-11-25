@@ -33,7 +33,7 @@ import type { DashboardOwnerContext, DashboardOwnerHandler } from './index.js';
 export const OWNER_LIBRARY_KINDS = Object.freeze(['agents', 'skills', 'teams', 'mcp', 'hooks']);
 /** The kinds that can be tried out (testEntry). */
 export const OWNER_TEST_KINDS = Object.freeze(['mcp', 'hooks']);
-/** What the app shows in place of a hidden value (apps/web/src/lib/library.js HIDDEN); never stored. */
+/** What the app shows in place of a hidden value (apps/web/src/lib/library.ts HIDDEN); never stored. */
 export const MASK_TEXT = '‹hidden on the host›';
 /** At most this much of a test's stdout and stderr each goes back to the app. */
 export const TEST_OUTPUT_CHARS = 16 * 1024;

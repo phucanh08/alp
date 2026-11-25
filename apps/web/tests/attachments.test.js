@@ -2,8 +2,8 @@
 // sent inline in session.prompt, never as a path. Against the in-memory host; no runtime is reached.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Controller } from '../src/lib/controller.js';
-import { IMAGE_LIMITS, imageLimits, addImages, filesOf, fitImages, imageType, promptContent, readImages, toBase64 } from '../src/lib/attachments.js';
+import { Controller } from '../dist-lib/controller.js';
+import { IMAGE_LIMITS, imageLimits, addImages, filesOf, fitImages, imageType, promptContent, readImages, toBase64 } from '../dist-lib/attachments.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 /** A File-like value of `size` bytes. */

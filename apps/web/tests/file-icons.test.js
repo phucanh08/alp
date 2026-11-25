@@ -1,7 +1,7 @@
 // t-81b0.12: the Files panel's file icons, as Paseo's (material-file-icons.ts, file-icon-svg.ts).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { desaturateHexColor, fileIconUrl, rawFileIconSvg } from '../src/lib/file-icons.js';
+import { desaturateHexColor, fileIconUrl, rawFileIconSvg } from '../dist-lib/file-icons.js';
 
 test('file icons: by extension, case-insensitive, the default for anything else', () => {
   assert.match(rawFileIconSvg('main.ts'), /#0288d1/);

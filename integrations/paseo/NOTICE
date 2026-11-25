@@ -6,7 +6,7 @@ Licensed under the Apache License, Version 2.0 (see LICENSE).
 Where a package's bundled files include third-party code, its
 THIRD-PARTY-NOTICES.txt names each package and reproduces its licence.
 
-apps/web/src/lib/file-icons.js (built into the ALP web app that alp dashboard
+apps/web/src/lib/file-icons.ts (built into the ALP web app that alp dashboard
 serves) copies file icon SVGs from material-icon-theme
 (https://github.com/material-extensions/vscode-material-icon-theme), by way of
 Paseo (Apache License 2.0), under this licence:

@@ -30,7 +30,7 @@ import { useTabs } from './tabs';
  * git/diff-pane.tsx ChangesSurface): a branch row; a comparison row with Paseo's mode menu
  * (Uncommitted, Committed "branch -> base", then the host's Staged and Unstaged), the comparison's
  * +/-, Refresh (RotateCw, a spinner while it runs) and the options menu ("…": Open Diff tab, Inline
- * diff); the changed files as Paseo's tree (git/changed-files-tree.tsx, lib/git.js changesTree):
+ * diff); the changed files as Paseo's tree (git/changed-files-tree.tsx, lib/git.ts changesTree):
  * folders first, single-child chains as one row, each folder with its subtree's +/-, a file with
  * its material icon, +/- and Paseo's change icon. A click on a file opens it in Diff. Inline diff
  * (off by default, remembered in this browser) lists the files with their hunks in place, the
@@ -70,7 +70,7 @@ const view = (() => {
 })();
 const useView = () => React.useSyncExternalStore(view.subscribe, view.get, view.get);
 
-/** Hide whitespace, remembered in this browser as Paseo's changes preference (lib/git.js). */
+/** Hide whitespace, remembered in this browser as Paseo's changes preference (lib/git.ts). */
 function setIgnoreWhitespace(hide: boolean) { saveHideWhitespace(browserStorage(), hide); view.set({ ignoreWhitespace: hide }); }
 
 /** The file the Diff panel shows (Changes' "Open in Diff"), for the workspace `scope` names only; null for every file. */

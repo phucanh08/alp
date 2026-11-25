@@ -1,10 +1,10 @@
-// The center column's split panes (lib/panes.js), as Paseo's workspace layout splits, closes,
-// navigates and keeps them; and the pane keys of lib/shortcuts.js.
+// The center column's split panes (lib/panes.ts), as Paseo's workspace layout splits, closes,
+// navigates and keeps them; and the pane keys of lib/shortcuts.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_TREE_DEPTH, adjacentPane, clampSizes, dropPosition, moveToPane, nearestPane, paneIds, paneOf, parsePanes, removePane, resizeGroup, singlePane, splitPane, splitRootRight, tabsByPane, treeDepth } from '../src/lib/panes.js';
-import { LAYOUT_KEY, loadLayout, updateLayout } from '../src/lib/layout.js';
-import { helpSections, matchShortcut, shortcutLabel } from '../src/lib/shortcuts.js';
+import { MAX_TREE_DEPTH, adjacentPane, clampSizes, dropPosition, moveToPane, nearestPane, paneIds, paneOf, parsePanes, removePane, resizeGroup, singlePane, splitPane, splitRootRight, tabsByPane, treeDepth } from '../dist-lib/panes.js';
+import { LAYOUT_KEY, loadLayout, updateLayout } from '../dist-lib/layout.js';
+import { helpSections, matchShortcut, shortcutLabel } from '../dist-lib/shortcuts.js';
 
 const id = key => key;
 
@@ -127,7 +127,7 @@ test('pane keys: Paseo binds them on a Mac only', () => {
 });
 
 test("command center: ALP's commands in a section of their own, after the app's actions", async () => {
-  const { commandResults } = await import('../src/lib/command-center.js');
+  const { commandResults } = await import('../dist-lib/command-center.js');
   const actions = [
     { id: 'alp-open-tasks', label: 'Open ALP tasks', group: 'alp', always: true },
     { id: 'history', label: 'History', group: 'actions', always: true },

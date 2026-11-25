@@ -3,7 +3,7 @@
 // announced afresh, a closed root that stays known.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyAttach, prependHistory, historyEnvelope, deliveredPrompts, emptyProjection, entriesOf, members, project, promptTurnOver } from '../src/lib/timeline.js';
+import { applyAttach, prependHistory, historyEnvelope, deliveredPrompts, emptyProjection, entriesOf, members, project, promptTurnOver } from '../dist-lib/timeline.js';
 
 const env = (cursor, event, sessionId = 'r') => ({ sessionId, epoch: 'e', seq: cursor ?? 0, ts: '2026-10-16T00:00:00.000Z', event, ...(cursor === undefined ? {} : { cursor }) });
 const item = (cursor, id, text, sessionId = 'r') => env(cursor, { type: 'item', item: { kind: 'assistant_message', id, text } }, sessionId);

@@ -2,7 +2,7 @@ import * as React from 'react';
 import { USAGE_PREFS_KEY, loadUsagePrefs, updateUsagePrefs, type UsagePrefs } from '../../../lib/usage-prefs.js';
 
 /*
- * The browser's usage preferences (lib/usage-prefs.js) as one live value: Settings › Usage and the
+ * The browser's usage preferences (lib/usage-prefs.ts) as one live value: Settings › Usage and the
  * sidebar summary read the same one, so a change on the page shows in the footer at once, and a
  * change in another tab arrives through the storage event.
  */

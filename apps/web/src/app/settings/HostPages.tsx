@@ -219,7 +219,7 @@ export function TerminalsPage({ onNavigate }: { onNavigate: (page: Page) => void
 
 // ---- The host owner's parts (t-a95b.1 group B; docs/alp/dashboard.md §4.7) ----------------------
 // Shown only when useOwner() (the dashboard's own credential on a direct loopback socket); every
-// request goes through controller.ownerRequest (lib/owner-host.js). Any other connection keeps the
+// request goes through controller.ownerRequest (lib/owner-host.ts). Any other connection keeps the
 // Unavailable panels above, unchanged.
 
 /** A request's pending flag and error, for an owner action. */

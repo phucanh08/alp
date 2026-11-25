@@ -492,7 +492,7 @@ servers, Editor) trong `settings/LibraryPages.tsx`. Việc host owner làm đư�
 Năm trang host làm việc thật khi kết nối là **host owner** (§4.6: link của `alp dashboard` trên máy
 này, `useOwner()`); mọi kết nối khác (credential của `alp-gateway`, thiết bị Paseo, proxy) thấy các
 trang như trước, kèm bảng "not available in this beta" không đổi. Mỗi việc đi qua
-`controller.ownerRequest` (`apps/web/src/lib/owner-host.js`) tới một method owner của gateway; method
+`controller.ownerRequest` (`apps/web/src/lib/owner-host.ts`) tới một method owner của gateway; method
 `host.*` do `packages/cli/src/dashboard/owner/host.js` trả lời, dùng lại đúng code của CLI hoặc RPC của
 alpd, không chép lại:
 
@@ -577,7 +577,7 @@ Chỉ host owner (§4.6, `state.owner`) mới thay đổi được; mọi creden
 các trang y như trước, kể cả thông báo Unavailable. Các method owner nằm trong khối
 `// --- owner: library (group C) ---` của `apps/gateway/src/policy.js` (`handler: true`, chỉ các
 `params` liệt kê tới handler) và handler ở `packages/cli/src/dashboard/owner/library.js`; phía app là
-`apps/web/src/lib/owner-library.js`.
+`apps/web/src/lib/owner-library.ts`.
 
 - **Hooks, MCP servers** (`host.library.get/save/delete/test`): owner tạo, sửa, xoá và thử entry ở
   library của host (`scope: library`, như `alp hook add/edit`, `alp mcp add/edit`) hoặc của project

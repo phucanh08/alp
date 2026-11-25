@@ -23,12 +23,12 @@ import { useTabs } from './tabs';
  * label ("Name ⌄") cycles name, modified, size; Eye/EyeOff shows or hides hidden files; Refresh
  * (a spinner while it runs) lists the open directories again, the tree kept meanwhile. A folder row
  * is its chevron (a spinner while it loads) and name, a file row its material file icon
- * (lib/file-icons.js) and name. Paseo's New file / New folder are left out: nothing here writes.
+ * (lib/file-icons.ts) and name. Paseo's New file / New folder are left out: nothing here writes.
  * ALP's hidden toggle, off by default, shows dot-names and also lists what .gitignore hides
  * (includeIgnored, docs/alp/remote-gateway.md); Paseo's is on by default and has no .gitignore to
  * respect. Blocked paths (secrets, .git, .alp) and links never show.
  * The sort, the hidden toggle and each workspace's open folders are kept across reloads, as Paseo's
- * panel-store keeps them (lib/files-panel-state.js); a workspace opened again shows its own folders.
+ * panel-store keeps them (lib/files-panel-state.ts); a workspace opened again shows its own folders.
  * The host owner's own dashboard (state.owner) lists through host.files.list instead, without
  * files.read on its credential (t-a95b, docs/alp/dashboard.md §4.8); every other token as above.
  *

@@ -94,7 +94,7 @@ function SearchRow({ query, onQuery, open, onOpen, onClose, focusRequest, shortc
   );
 }
 
-/** A row's status (lib/attention.js sessionBucket): its question, its status, a turn that ended unseen. */
+/** A row's status (lib/attention.ts sessionBucket): its question, its status, a turn that ended unseen. */
 export function bucketOf(session: SessionSummary, waiting: boolean, reason?: 'finished' | 'error'): Bucket {
   return sessionBucket({ status: session.status, waiting, reason });
 }

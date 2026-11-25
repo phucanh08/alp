@@ -1,7 +1,7 @@
 // The composer's "/" suggestions (t-f628).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { insertCommand, matchCommands, slashQuery } from '../src/lib/slash-commands.js';
+import { insertCommand, matchCommands, slashQuery } from '../dist-lib/slash-commands.js';
 
 const commands = [
   { name: 'compact', description: 'Clear history', argumentHint: '<what>', kind: 'command' },

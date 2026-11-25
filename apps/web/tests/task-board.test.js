@@ -2,7 +2,7 @@
 // alp-provider plugin's (integrations/paseo/client/tasks-panel.tsx, shared/tasks.ts).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { age, boardColumns, epicGroups, filterCounts, filterTasks, listSections, stateOf } from '../src/lib/task-board.js';
+import { age, boardColumns, epicGroups, filterCounts, filterTasks, listSections, stateOf } from '../dist-lib/task-board.js';
 
 const at = '2026-10-01T00:00:00.000Z';
 const task = (id, extra = {}) => ({ id, title: `Task ${id}`, type: 'task', priority: 2, status: 'open', ready: false, updatedAt: at, ...extra });

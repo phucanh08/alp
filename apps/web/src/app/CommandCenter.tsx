@@ -34,7 +34,7 @@ export function useWorkspaceFileSource({ readable = false }: { readable?: boolea
   }), [connection.capabilities, workspace, controller, granted]);
 }
 
-/** Paseo's useWorkspaceFileSearch over lib/file-search.js: debounced, stale answers dropped. */
+/** Paseo's useWorkspaceFileSearch over lib/file-search.ts: debounced, stale answers dropped. */
 export function useFileSearch({ enabled, source, query, search }: { enabled: boolean; source: string | null; query: string; search: FileSearchRequest }): FileSearchState {
   const [state, setState] = React.useState<FileSearchState>(EMPTY_FILE_SEARCH);
   const latest = React.useRef(search);

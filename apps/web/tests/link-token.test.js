@@ -5,9 +5,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { Controller } from '../src/lib/controller.js';
-import { AuthenticationError, ConfigurationError, TransientError } from '../src/lib/errors.js';
-import { LINK_NOT_LOOPBACK, LINK_TOKEN_INVALID, LINK_TOKEN_KEY, LINK_TOKEN_MALFORMED, STANDALONE_GATEWAY, defaultGatewayAddress, isLinkToken, isLoopbackPage, parseLinkHash, servedByAlpWeb, storedLinkToken, takeLinkToken } from '../src/lib/link-token.js';
+import { Controller } from '../dist-lib/controller.js';
+import { AuthenticationError, ConfigurationError, TransientError } from '../dist-lib/errors.js';
+import { LINK_NOT_LOOPBACK, LINK_TOKEN_INVALID, LINK_TOKEN_KEY, LINK_TOKEN_MALFORMED, STANDALONE_GATEWAY, defaultGatewayAddress, isLinkToken, isLoopbackPage, parseLinkHash, servedByAlpWeb, storedLinkToken, takeLinkToken } from '../dist-lib/link-token.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 const TOKEN = `alpgw1.0123456789abcdef.${'A'.repeat(42)}w`;
@@ -116,8 +116,8 @@ test('main.tsx keeps the link token in sessionStorage, never in localStorage', a
   assert.match(main, /linkStorage = tabStorage\(\)/);
   assert.match(main, /takeLinkToken\(\{ location: window\.location, history: window\.history, storage: linkStorage \}\)/);
   assert.match(main, /new Controller\(\{ storage: browserStorage\(\), linkStorage \}\)/);
-  const source = await readFile(new URL('../src/lib/link-token.js', import.meta.url), 'utf8');
-  assert.equal(/localStorage/.test(source.replace(/^\s*(\/\/|\*|\/\*).*$/gm, '')), false, 'link-token.js code never names localStorage');
+  const source = await readFile(new URL('../src/lib/link-token.ts', import.meta.url), 'utf8');
+  assert.equal(/localStorage/.test(source.replace(/^\s*(\/\/|\*|\/\*).*$/gm, '')), false, 'link-token.ts code never names localStorage');
 });
 
 // ---- the controller with a link token ---------------------------------------------------------

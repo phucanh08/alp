@@ -36,7 +36,7 @@ export const PANELS: Record<PanelKind, { label: string; icon: typeof Bot; unavai
 /**
  * Paseo's Browser entry (a globe, after Diff in the + menu). Not a panel: any number of Browser
  * tabs can be open, each with its own address (tabs.tsx, BrowserPanel). Offered only in ALP.app
- * (lib/browser-url.js isDesktopApp).
+ * (lib/browser-url.ts isDesktopApp).
  */
 export const BROWSER = { label: 'Browser', icon: Globe };
 

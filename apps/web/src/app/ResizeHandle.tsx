@@ -18,7 +18,7 @@ const bounds = (which: Which, reserved = 0) => {
 
 /**
  * A docked panel's width, as Paseo's sidebar and explorer widths: dragged with the panel's
- * handle, clamped to the panel's bounds, kept across reloads (lib/layout.js).
+ * handle, clamped to the panel's bounds, kept across reloads (lib/layout.ts).
  */
 export function usePanelWidth(which: Which, reserved = 0) {
   const key = which === 'sidebar' ? 'sidebarWidth' : 'dockWidth';

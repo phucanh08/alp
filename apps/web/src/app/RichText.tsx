@@ -28,7 +28,7 @@ function FileLinkButton({ target, links, children, title }: { target: FileTarget
 
 export { parseBlocks };
 
-// INLINE's spans are bounded (lib/inline-markdown.js), so a long line costs a linear scan.
+// INLINE's spans are bounded (lib/inline-markdown.ts), so a long line costs a linear scan.
 const safeHref = (url: string) => (/^(https?:\/\/|mailto:)/i.test(url) ? url : undefined);
 
 function Link({ href, children }: { href: string; children: React.ReactNode }) {

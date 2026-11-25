@@ -25,16 +25,16 @@ import { adjacentPane, moveToPane, nearestPane, paneIds, paneOf, removePane, res
  *
  * As Paseo's workspace layout: the tabs can be dragged into another order, and each workspace's
  * tabs (the open session and its agent tabs, task and panel tabs, their order, the active tab)
- * are kept across reloads (lib/layout.js). The draft is not kept.
+ * are kept across reloads (lib/layout.ts). The draft is not kept.
  *
- * As Paseo's split panes (lib/panes.js): the center can split into panes, each with its own tab
+ * As Paseo's split panes (lib/panes.ts): the center can split into panes, each with its own tab
  * row. A tab sits in one pane; one pane has focus, and `active` is the tab in front there (the
  * other panes show their own). New tabs open in the focused pane; a pane whose last tab closes
  * goes away (the last pane stays). Splitting a pane opens a New tab in the new pane, as Paseo's:
  * a launcher (Agent, the panels) that turns into what is picked.
  *
  * Browser tabs (ALP.app only, t-9116): any number per workspace, each with the address it shows
- * (lib/browser-url.js), kept with the workspace's other tabs. A page in one that opens a new
+ * (lib/browser-url.ts), kept with the workspace's other tabs. A page in one that opens a new
  * window gets a new Browser tab instead (BrowserPanel).
  */
 

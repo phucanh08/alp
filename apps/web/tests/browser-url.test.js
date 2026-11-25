@@ -2,8 +2,8 @@
 // tab may show, the desktop marker, and the Browser tabs kept in the workspace layout.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DESKTOP_MARKER, MAX_BROWSERS, browserLabel, isBrowsableUrl, isDesktopApp, nextBrowserId, parseBrowsers, readAddress } from '../src/lib/browser-url.js';
-import { parseLayout, serializeLayout } from '../src/lib/layout.js';
+import { DESKTOP_MARKER, MAX_BROWSERS, browserLabel, isBrowsableUrl, isDesktopApp, nextBrowserId, parseBrowsers, readAddress } from '../dist-lib/browser-url.js';
+import { parseLayout, serializeLayout } from '../dist-lib/layout.js';
 
 test('browser: addresses read as Paseo reads them', () => {
   const cases = [

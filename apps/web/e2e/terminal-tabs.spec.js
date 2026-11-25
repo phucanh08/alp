@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
 import { connect as hostConnect } from '@anhlp/alp-client';
 import { AlpRpcClient, hello } from '@anhlp/alp-client/portable';
-import { openGateway } from '../src/lib/gateway.js';
+import { openGateway } from '../dist-lib/gateway.js';
 import { startWorld, REPOSITORY } from './support/world.js';
 import { connect, newSession } from './support/app.js';
 

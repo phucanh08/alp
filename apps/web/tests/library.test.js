@@ -3,8 +3,8 @@
 // patches 0015, 0017). Against the in-memory host; no runtime is reached.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Controller, hostName } from '../src/lib/controller.js';
-import { HIDDEN, isSecretMarker, libraryContentParts } from '../src/lib/library.js';
+import { Controller, hostName } from '../dist-lib/controller.js';
+import { HIDDEN, isSecretMarker, libraryContentParts } from '../dist-lib/library.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 const MARK = { $secret: 'keep' };

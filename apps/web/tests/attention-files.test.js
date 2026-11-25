@@ -3,10 +3,10 @@
 // (workspace.files.search: requests, debounce, stale answers, scope, errors).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Controller, FILES_FORBIDDEN, FILE_SEARCH_LIMIT, attentionReason, visibleAttention } from '../src/lib/controller.js';
-import { faviconStatus, newlyEnded, sessionBucket, turnNotification } from '../src/lib/attention.js';
-import { commandResults, describeFilePath, rankWorkspaces, workspaceRows } from '../src/lib/command-center.js';
-import { FILE_SEARCH_DEBOUNCE_MS, FileSearch } from '../src/lib/file-search.js';
+import { Controller, FILES_FORBIDDEN, FILE_SEARCH_LIMIT, attentionReason, visibleAttention } from '../dist-lib/controller.js';
+import { faviconStatus, newlyEnded, sessionBucket, turnNotification } from '../dist-lib/attention.js';
+import { commandResults, describeFilePath, rankWorkspaces, workspaceRows } from '../dist-lib/command-center.js';
+import { FILE_SEARCH_DEBOUNCE_MS, FileSearch } from '../dist-lib/file-search.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 function setup(t, hostOptions, controllerOptions = {}) {
@@ -27,7 +27,7 @@ async function connected({ controller, state }, workspace = '/w/a') {
 const settle = () => new Promise(resolve => setTimeout(resolve, 20));
 const watchCalls = host => host.calls.filter(call => call.method === 'question.watch');
 
-// ---- lib/attention.js ----------------------------------------------------------------------
+// ---- lib/attention.ts ----------------------------------------------------------------------
 
 test('attention: Paseo buckets for a turn that ended unseen; favicon running > attention > none', () => {
   assert.equal(sessionBucket({ status: 'idle', reason: 'finished' }), 'attention');
@@ -388,7 +388,7 @@ test('file search: a token without project.read is told without asking; a host w
   await assert.rejects(v.controller.searchWorkspaceFiles({ query: 'x' }), /does not offer file search/);
 });
 
-// ---- lib/file-search.js --------------------------------------------------------------------
+// ---- lib/file-search.ts --------------------------------------------------------------------
 
 function engine(search, debounceMs = 30) {
   const seen = [];
@@ -444,7 +444,7 @@ test('file search engine: a stale answer is dropped; another workspace starts em
   failing.dispose();
 });
 
-// ---- lib/command-center.js: workspaces and files -------------------------------------------
+// ---- lib/command-center.ts: workspaces and files -------------------------------------------
 
 test('command center: Workspaces are the granted folders, by name, five with an empty query, ranked by Paseo\'s matching', () => {
   const rows = workspaceRows(['/w/zeta', '/w/alpha', '/srv/app2', '/srv/app10', '/home/x/notes', '/w/beta/'], '/w/alpha');
@@ -477,7 +477,7 @@ test('command center: sections in Paseo\'s order, Files with a query or alone in
 });
 
 test('shortcuts: Cmd+P on a Mac, Ctrl+P elsewhere is Paseo\'s Search files, listed under General', async () => {
-  const { helpSections, matchShortcut } = await import('../src/lib/shortcuts.js');
+  const { helpSections, matchShortcut } = await import('../dist-lib/shortcuts.js');
   const press = mods => ({ code: 'KeyP', key: 'p', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
   assert.equal(matchShortcut(press({ metaKey: true }), { mac: true })?.binding.action, 'command-center.files');
   assert.equal(matchShortcut(press({ ctrlKey: true }), { mac: false })?.binding.action, 'command-center.files');

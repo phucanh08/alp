@@ -1,7 +1,7 @@
 // @ts-check
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readUsage, setUsageSetting, USAGE_EVENT } from '../src/lib/owner-host.js';
+import { readUsage, setUsageSetting, USAGE_EVENT } from '../dist-lib/owner-host.js';
 
 // A browser's window is an EventTarget; node's globalThis is not, so give it one for these tests.
 const g = /** @type {any} */ (globalThis);
