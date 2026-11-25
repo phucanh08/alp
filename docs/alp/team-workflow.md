@@ -1539,6 +1539,20 @@ to files instead.
 the child's final message. Interim messages stay in the child timeline and are no
 longer concatenated into the result.
 
+**A turn a runtime denied (Antigravity).** Headless agy cannot ask, so it denies a
+tool its mode does not allow and ends the whole turn. When that turn ends with no
+answer and the child filed no handoff, the assignment's status is `failed`, and
+`error` names the tool, the path, the mode and agy's reason: `peer's turn ended
+because ReadFile on /etc/hosts was denied (permission check failed for read_file …)
+in workspace-write mode; no handoff was filed.` agy states no reason when it reports
+the refused step done, and the reason then says `agy gave no reason`. The result also
+carries `denied: [{tool, path, reason}]` so a caller can tell a denial from a crash or
+a timeout; `path` is `null` when agy's steps do not show it. A handoff or an answer
+after the denial keeps the status `completed`, and `denied` still comes with it. Other
+runtimes report no denials and their results are unchanged. ALP does not retry the
+turn. The run log records each such turn as `turn.denied`. The task of a failed
+assignment returns to open, as for any failed assignment.
+
 **Review verdicts.** A review ends in a fixed verdict, filed as the handoff's
 `verdict`:
 - `criteria`: each acceptance criterion with `pass`, `fail` or `not_checked`,
