@@ -1352,9 +1352,15 @@ when it finished, the handoff outcome and verdict line, and the handoff summary,
 most 1,000 characters in all. A relay is information: it never wakes an idle main and
 never ends main's `alp_wait`; it rides with the next mail main gets, such as lead's
 result, or with main's next turn, so main reads the verdict its supervisor reads
-without asking lead. It is posted once, when the assignment finishes; delivered again,
-it says when it was issued. In the digest, such a result says
-`(also relayed to main)`, or `(result went to lead, not to main)` when main got no
+without asking lead. When main waits in `alp_delegate` with `wait: true`, a relay that
+comes with the result is in that call's result under `mail`, and one that comes with a
+question is among its `events`. It is posted once, when the assignment finishes; delivered again,
+it says when it was issued, and when it first reaches main's input as mail 10 minutes or
+more after it was posted, it reads `issued <time>, delivered late` (in a tool result, the
+time it finished in its body says the same). In the digest, such a result says
+`(relay to main posted; not yet in main's input)`, and a later line says
+`main received the relay of …` once a completed turn of main took it; a relay main never
+took gets no such line. It says `(result went to lead, not to main)` when main got no
 relay, for example because lead cancelled the assignment, so the supervisor does
 not judge main on a result main never had. `alp log` shows a relay as
 `✉ relay ALP → main`.

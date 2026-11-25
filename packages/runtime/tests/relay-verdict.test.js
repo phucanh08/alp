@@ -149,12 +149,131 @@ test('the supervisor digest says which grandchild results main got and which onl
   await until(() => supervisor.started.length === 1, 'the review of main\'s turn');
   const digest = supervisor.started[0].params.input.at(-1).text;
   const line = id => digest.split('\n').find(text => text.includes(`assignment ${id} `) && !text.includes(' → '));
-  assert.match(line(reviewed.id), /reviewer assignment \S+ completed, handoff complete, verdict FAIL .*: One blocker \(also relayed to main\)$/);
+  assert.match(line(reviewed.id), /reviewer assignment \S+ completed, handoff complete, verdict FAIL .*: One blocker \(relay to main posted; not yet in main's input\)$/);
+  // main's completed turn took the relay with the lead's result: the digest says it received it.
+  assert.match(digest, new RegExp(`main received the relay of reviewer assignment ${reviewed.id} \\(its result went to lead\\)`));
+  assert.doesNotMatch(digest, new RegExp(`received the relay of reviewer assignment ${dropped.id}`));
   assert.match(line(dropped.id), /reviewer assignment \S+ canceled, no handoff \(Canceled by lead: Not needed\) \(result went to lead, not to main\)$/);
   // Main's own lead: main was its requester, no mark.
   assert.match(line(leadId), /lead assignment \S+ completed, handoff complete: Reviewed; fixing$/);
   // The relay itself is not a second digest line.
   assert.doesNotMatch(digest, /mail relay/);
+});
+
+// The real Cafe run of 25/11: main delegated to its lead with wait: true, and the relay of the
+// reviewer's verdict was taken out of main's mailbox with the lead's result but never shown.
+test('a relay that comes while the root waits in alp_delegate wait: true is in that call\'s result, and the digest says main got it', async t => {
+  const defer = teardown(t);
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-relay-'));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  const root = path.join(directory, 'project');
+  await initProject(root);
+  await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ workflow: { mode: 'cafe', supervisor: true } }));
+  const agents = [];
+  const runtime = createAlpRuntime({ language: 'English', libraryDir: path.join(directory, 'home'), runLogDir: path.join(directory, 'runs'), transport: fakeTransport(agents) });
+  defer(() => runtime.shutdown());
+  await runtime.open('root', { cwd: root });
+  await until(() => agents.length === 2, 'the supervisor');
+  const [main, supervisor] = agents;
+  await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Fix retries' }] });
+  await until(() => main.turnId, 'main turn');
+
+  // main waits in the delegate call itself, as the real main did.
+  const delegated = main.call('alp_delegate', { agent: 'lead', task: 'Fix retries and get it reviewed', mode: 'read-only', wait: true });
+  await until(() => agents.length === 3 && agents[2].turnId, 'lead turn');
+  const lead = agents[2];
+  const { assignmentId: reviewerId } = await lead.call('alp_delegate', { agent: 'reviewer', task: 'Review the retry change', wait: false });
+  await until(() => agents.length === 4 && agents[3].turnId, 'reviewer turn');
+  const reviewer = agents[3];
+  await reviewer.call('alp_handoff', { outcome: 'complete', summary: 'One blocker', verdict: failing });
+  reviewer.finish('Reviewed');
+  await lead.call('alp_wait', { assignments: [reviewerId] });
+  await lead.call('alp_handoff', { outcome: 'complete', summary: 'Reviewer failed it; fixing' });
+  lead.finish('Done');
+
+  const result = await delegated;
+  assert.equal(result.status, 'completed', JSON.stringify(result));
+  assert.equal(result.handoff.summary, 'Reviewer failed it; fixing');
+  // The relay taken with the lead's result is shown in the same tool result, not dropped.
+  const relays = (result.mail ?? []).filter(event => event.kind === 'relay');
+  assert.deepEqual(relays.map(event => [event.from, event.assignment]), [['ALP', reviewerId]], JSON.stringify(result));
+  assert.match(relays[0].body, new RegExp(`^reviewer assignment ${reviewerId} for lead completed at [^,]+, handoff complete, verdict FAIL .*: One blocker$`));
+  assert.deepEqual(Object.keys(relays[0]).sort(), ['assignment', 'body', 'from', 'id', 'kind']);
+
+  main.finish('Lead reported; reviewer failed it');
+  await until(() => supervisor.started.length === 1, 'the review of main\'s turn');
+  const digest = supervisor.started[0].params.input.at(-1).text;
+  const finished = digest.split('\n').find(line => line.includes(`assignment ${reviewerId} `) && !line.includes(' → ')) ?? digest;
+  // Posted is not received: the finish line says only that the relay was posted ...
+  assert.match(finished, /reviewer assignment \S+ completed, handoff complete, verdict FAIL .*: One blocker \(relay to main posted; not yet in main's input\)$/);
+  // ... and the digest says main received it once its completed turn took it.
+  assert.match(digest, new RegExp(`main received the relay of reviewer assignment ${reviewerId} \\(its result went to lead\\)`));
+});
+
+test('a relay that comes with the child\'s question to a root in alp_delegate wait: true is shown with the question', async t => {
+  const defer = teardown(t);
+  const directory = await mkdtemp(path.join(tmpdir(), 'alp-relay-'));
+  defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  const root = path.join(directory, 'project');
+  await initProject(root);
+  await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ workflow: { mode: 'cafe', supervisor: false } }));
+  const agents = [];
+  const runtime = createAlpRuntime({ language: 'English', libraryDir: path.join(directory, 'home'), runLogDir: path.join(directory, 'runs'), transport: fakeTransport(agents) });
+  defer(() => runtime.shutdown());
+  await runtime.open('root', { cwd: root });
+  const [main] = agents;
+  await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Fix retries' }] });
+  await until(() => main.turnId, 'main turn');
+  const delegated = main.call('alp_delegate', { agent: 'lead', task: 'Fix retries and get it reviewed', mode: 'read-only', wait: true });
+  await until(() => agents.length === 2 && agents[1].turnId, 'lead turn');
+  const lead = agents[1];
+  const { assignmentId: reviewerId } = await lead.call('alp_delegate', { agent: 'reviewer', task: 'Review the retry change', wait: false });
+  await until(() => agents.length === 3 && agents[2].turnId, 'reviewer turn');
+  await agents[2].call('alp_handoff', { outcome: 'complete', summary: 'One blocker', verdict: failing });
+  agents[2].finish('Reviewed');
+  await lead.call('alp_wait', { assignments: [reviewerId] });
+  // The lead asks main; main's delegate wait ends on the question, and the relay comes with it.
+  const asked = lead.call('alp_ask', { question: 'Fix the blocker or ship?' });
+  const answer = await delegated;
+  assert.deepEqual(answer.events.map(event => [event.kind, event.assignment]), [['relay', reviewerId], ['question', answer.assignmentId]], JSON.stringify(answer));
+  assert.match(answer.events[0].body, /verdict FAIL .*: One blocker$/);
+  await main.call('alp_send', { to: answer.assignmentId, kind: 'answer', replyTo: answer.events[1].id, body: 'Fix it' });
+  assert.match(JSON.stringify(await asked), /Fix it/);
+  await lead.call('alp_handoff', { outcome: 'complete', summary: 'Fixed' });
+  lead.finish('Done');
+  // The relay is not shown twice: the result that ends main's next wait comes alone.
+  const done = await main.call('alp_wait', { assignments: [answer.assignmentId] });
+  assert.deepEqual(done.events.map(event => event.kind), ['result']);
+  main.finish('ok');
+});
+
+test('a relay main has not read yet is not called relayed in the digest; the next turn that takes it is', async t => {
+  const { agents, main, lead, leadId, delegate, barrier } = await setup(t, { supervisor: true });
+  const supervisor = agents[1];
+  const reviewer = await delegate('Review the retry change');
+  // main is busy outside any wait: the passive relay neither steers nor ends anything.
+  await reviewer.agent.call('alp_handoff', { outcome: 'complete', summary: 'One blocker', verdict: failing });
+  reviewer.agent.finish('Reviewed');
+  await lead.call('alp_wait', { assignments: [reviewer.id] });
+  await barrier();
+  assert.deepEqual(main.steered, []);
+  main.finish('Still working');
+  await until(() => supervisor.started.length === 1, 'the review of main\'s first turn');
+  const first = supervisor.started[0].params.input.at(-1).text;
+  assert.match(first, new RegExp(`reviewer assignment ${reviewer.id} completed, .*\\(relay to main posted; not yet in main's input\\)`));
+  assert.doesNotMatch(first, /also relayed|received the relay/);
+
+  // The lead's result wakes main; the relay rides with it and that turn's digest says main got it.
+  await lead.call('alp_handoff', { outcome: 'complete', summary: 'Done' });
+  lead.finish('Done');
+  await until(() => main.started.length === 2, 'main woken by the lead\'s result');
+  assert.match(main.started[1].params.input.at(-1).text, new RegExp(`relay from ALP, result of assignment ${reviewer.id},`));
+  supervisor.finish('Reviewed');
+  main.finish('Lead reported');
+  await until(() => supervisor.started.length === 2, 'the review of main\'s second turn');
+  const second = supervisor.started[1].params.input.at(-1).text;
+  assert.match(second, new RegExp(`main received the relay of reviewer assignment ${reviewer.id} \\(its result went to lead\\)`));
+  assert.match(second, new RegExp(`lead assignment ${leadId} completed`));
 });
 
 test('a grandchild alpd abandons after a restart is relayed to the root once, and the digest says so', async t => {
@@ -206,5 +325,6 @@ test('a grandchild alpd abandons after a restart is relayed to the root once, an
   let supervisor;
   await until(() => (supervisor = next.find(agent => agent !== mainAgain && agent !== leadAgain && agent.started.length)), 'the review of main\'s turn');
   const digest = supervisor.started[0].params.input.at(-1).text;
-  assert.match(digest.split('\n').find(line => line.includes(`assignment ${reviewer.id} `) && !line.includes(' → ')) ?? digest, /reviewer assignment \S+ failed, no handoff \(.*\) \(also relayed to main\)$/);
+  assert.match(digest.split('\n').find(line => line.includes(`assignment ${reviewer.id} `) && !line.includes(' → ')) ?? digest, /reviewer assignment \S+ failed, no handoff \(.*\) \(relay to main posted; not yet in main's input\)$/);
+  assert.equal(digest.split(`main received the relay of reviewer assignment ${reviewer.id} (its result went to lead)`).length - 1, 1, digest);
 });
