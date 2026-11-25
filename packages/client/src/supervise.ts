@@ -10,29 +10,32 @@ import { installedProgram, serviceFor, startService } from './service.js';
  * alpd again only when someone asks for it.
  */
 
-const holdFile = home => path.join(home, 'state', 'alpd.held');
+/** The options of startDaemon. */
+export type StartDaemonOptions = { home: string, entry?: string, env?: NodeJS.ProcessEnv, timeoutMs?: number, automatic?: boolean, signal?: AbortSignal };
+
+const holdFile = (home: string) => path.join(home, 'state', 'alpd.held');
 
 /** Records that the user stopped alpd on purpose. */
-export async function holdDaemon(home, by = 'alp daemon stop') {
+export async function holdDaemon(home: string, by: string = 'alp daemon stop'): Promise<void> {
   await mkdir(path.dirname(holdFile(home)), { recursive: true, mode: 0o700 });
   await writeFile(holdFile(home), JSON.stringify({ by, at: new Date().toISOString() }) + '\n', { mode: 0o600 });
 }
 
-export async function releaseHold(home) {
+export async function releaseHold(home: string): Promise<void> {
   await unlink(holdFile(home)).catch(() => {});
 }
 
-export async function daemonHeld(home) {
+export async function daemonHeld(home: string): Promise<boolean> {
   return stat(holdFile(home)).then(() => true, () => false);
 }
 
 /** Polls until an alpd for `home` is ready; returns its socket. */
-async function whenReady(home, timeoutMs, signal) {
+async function whenReady(home: string, timeoutMs: number, signal?: AbortSignal): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     signal?.throwIfAborted();
     const lock = await readLock(home);
-    if (lockAlive(lock) && lock.ready) return lock.socket;
+    if (lockAlive(lock) && lock!.ready) return lock!.socket;
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   throw new Error(`alpd did not become ready within ${timeoutMs / 1000} s; see ${path.join(home, 'logs')}`);
@@ -41,9 +44,11 @@ async function whenReady(home, timeoutMs, signal) {
 /**
  * Starts alpd for `home` unless it runs, and lifts a hold: someone asked for it.
  * Returns its socket. Waits up to `timeoutMs`, by default daemonStartTimeoutMs(env)
- * (ALP_DAEMON_START_TIMEOUT_MS, else 60 s).
+ * (ALP_DAEMON_START_TIMEOUT_MS, else 60 s). An `automatic` start leaves a held alpd down and resolves to undefined.
  */
-export async function startDaemon({ home, entry, env = process.env, timeoutMs = daemonStartTimeoutMs(env), automatic = false, signal }) {
+export function startDaemon(options: StartDaemonOptions & { automatic?: false }): Promise<string>;
+export function startDaemon(options: StartDaemonOptions): Promise<string | undefined>;
+export async function startDaemon({ home, entry, env = process.env, timeoutMs = daemonStartTimeoutMs(env), automatic = false, signal }: StartDaemonOptions): Promise<string | undefined> {
   return withDaemonLifecycle(home, 'start', async () => {
     signal?.throwIfAborted();
     if (automatic) {
@@ -51,7 +56,7 @@ export async function startDaemon({ home, entry, env = process.env, timeoutMs = 
     } else await releaseHold(home);
     const lock = await readLock(home);
     signal?.throwIfAborted();
-    if (lockAlive(lock)) return lock.ready ? lock.socket : whenReady(home, timeoutMs, signal);
+    if (lockAlive(lock)) return lock!.ready ? lock!.socket : whenReady(home, timeoutMs, signal);
     const service = serviceFor({ home, env });
     if (service && await installedProgram(service)) {
       signal?.throwIfAborted();
@@ -69,14 +74,23 @@ export async function startDaemon({ home, entry, env = process.env, timeoutMs = 
  * watching, and resolves once a start it began has settled; alpd keeps running. `by` names the
  * caller in the log line of the first start ("alpd started with <by>").
  */
-export function superviseDaemon({ home, entry, env = process.env, intervalMs = 5_000, misses = 2, log = () => {}, by }) {
+export function superviseDaemon({ home, entry, env = process.env, intervalMs = 5_000, misses = 2, log = () => {}, by }: {
+  home: string,
+  entry?: string | (() => string | undefined),
+  env?: NodeJS.ProcessEnv,
+  intervalMs?: number,
+  misses?: number,
+  log?: (message: string) => void,
+  /** Who keeps alpd up, for the log: "alpd started with <by>". */
+  by?: string,
+}): (() => Promise<void>) & { started: Promise<void> } {
   let stopped = false;
   let missed = 0;
-  let starting;
+  let starting: Promise<void> | undefined;
   // The first start is the caller's own request (it lifts a hold); later ones are automatic.
-  const start = (reason, automatic = true) => {
+  const start = (reason: string, automatic = true): Promise<void> => {
     starting ??= startDaemon({ home, entry: typeof entry === 'function' ? entry() : entry, env, automatic })
-      .then(socket => { if (socket) log(`alpd ${reason}`); }, error => log(`could not start alpd: ${error?.message ?? error}`))
+      .then(socket => { if (socket) log(`alpd ${reason}`); }, (error: any) => log(`could not start alpd: ${error?.message ?? error}`)) // any: whatever startDaemon rejected with
       .finally(() => { starting = undefined; missed = 0; });
     return starting;
   };

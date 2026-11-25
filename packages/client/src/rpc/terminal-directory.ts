@@ -1,3 +1,9 @@
+import type { TerminalInfo } from '@anhlp/alp-protocol';
+
+// any: request results and notification params are daemon JSON, checked field by field below.
+export type TerminalConnection = { request<T = any>(method: string, params?: any): Promise<T>, onNotification?(listener: (method: string, params: any) => void): () => void, onClose(listener: (error: Error) => void): () => void };
+export type WatchTerminalsOptions = { capabilities: readonly string[], workspaceId?: string, pollMs?: number, onSnapshot: (terminals: TerminalInfo[]) => void, onError?: (error: unknown) => void, onMode?: (mode: 'events' | 'polling') => void };
+
 /**
  * A terminal directory for one connection. Subscribe before requesting the atomic snapshot.
  * Invalidations are coalesced; a reconnect installs a new watcher and replaces state with its
@@ -5,22 +11,22 @@
  * @param {{request<T = any>(method:string, params?:any):Promise<T>, onNotification?(listener:(method:string,params:any)=>void):()=>void, onClose(listener:(error:Error)=>void):()=>void}} connection
  * @param {{capabilities:readonly string[], workspaceId?:string, pollMs?:number, onSnapshot:(terminals:import('@anhlp/alp-protocol').TerminalInfo[])=>void, onError?:(error:unknown)=>void, onMode?:(mode:'events'|'polling')=>void}} options
  */
-export function watchTerminals(connection, options) {
+export function watchTerminals(connection: TerminalConnection, options: WatchTerminalsOptions) {
   const events = options.capabilities.includes('terminal.watch') && !!connection.onNotification;
   let closed = false;
   let watchId = '';
   let cursor = '';
   let again = false;
-  /** @type {Promise<void> | undefined} */ let refreshing;
+  /** @type {Promise<void> | undefined} */ let refreshing: Promise<void> | undefined;
   // One newest token per watchId; bounded even when the host sends malformed/stale traffic.
-  /** @type {Map<string,string>} */ const pending = new Map();
+  /** @type {Map<string,string>} */ const pending = new Map<string, string>();
   const off = connection.onNotification?.((method, params) => {
     if (closed || !events || method !== 'terminal.changed' || !/^[0-9a-f]{32}$/.test(params?.watchId) || !/^[0-9a-f]{32}$/.test(params?.cursor)) return;
     if (pending.size >= 4 && !pending.has(params.watchId)) pending.delete(pending.keys().next().value ?? '');
     pending.set(params.watchId, params.cursor);
     if (params.watchId === watchId && params.cursor !== cursor) { again = true; void refresh(); }
   });
-  function refresh() {
+  function refresh(): Promise<void> {
     if (closed) return Promise.resolve();
     if (refreshing) return refreshing;
     refreshing = (async () => {
@@ -46,7 +52,7 @@ export function watchTerminals(connection, options) {
   const timer = events ? undefined : setInterval(() => { void refresh(); }, options.pollMs ?? 5000);
   let offClose = () => {};
   /** @param {boolean} [unwatch] */
-  function close(unwatch = true) {
+  function close(unwatch: boolean = true) {
     if (closed) return;
     closed = true;
     if (timer !== undefined) clearInterval(timer);

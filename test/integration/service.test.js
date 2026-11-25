@@ -7,8 +7,8 @@ import path from 'node:path';
 import net from 'node:net';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { installedProgram, serviceDefinition, serviceFor } from '../../packages/client/src/service.js';
-import { alpHome, daemonPaths, lockAlive, readLock } from '../../packages/client/src/index.js';
+import { installedProgram, serviceDefinition, serviceFor } from '../../packages/client/dist/service.js';
+import { alpHome, daemonPaths, lockAlive, readLock } from '../../packages/client/dist/index.js';
 
 /** RegExp.escape, which Node 22 lacks. */
 const escape = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -67,7 +67,7 @@ test('a service naming the alp command runs `alp daemon run --service`, and alpd
   const fsp = await import('node:fs/promises');
   const directory = await fsp.realpath(await mkdtemp(path.join(tmpdir(), 'alp-find-bundle-')));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const { findDaemonEntry } = await import('../../packages/client/src/index.js');
+  const { findDaemonEntry } = await import('../../packages/client/dist/index.js');
   const bin = path.join(directory, 'bin');
   const launcher = process.platform === 'win32' ? 'alp.cmd' : 'alp';
   await fsp.mkdir(bin);

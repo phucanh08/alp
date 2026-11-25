@@ -5,19 +5,9 @@
  * `@anhlp/alp-client/websocket` here, the Unix socket and named pipe in the Node entry.
  */
 
-/**
- * @typedef {import('./rpc/client.js').AlpTransport} AlpTransport
- * @typedef {import('./rpc/client.js').TransportClose} TransportClose
- * @typedef {import('./rpc/client.js').TransportState} TransportState
- * @typedef {import('./rpc/client.js').AbortSignalLike} AbortSignalLike
- * @typedef {import('./rpc/client.js').RequestOptions} RequestOptions
- * @typedef {import('./rpc/client.js').AlpRpcClientOptions} AlpRpcClientOptions
- * @typedef {import('./rpc/connection/handshake.js').ClientInfo} ClientInfo
- * @typedef {import('./rpc/connection/reconnect.js').ReconnectOptions} ReconnectOptions
- * @typedef {import('./rpc/connection/reconnect.js').ReconnectingClient} ReconnectingClient
- * @typedef {import('./rpc/connection/reconnect.js').ReconnectState} ReconnectState
- * @typedef {import('./rpc/connection/reconnect.js').Backoff} Backoff
- */
+export type { AlpTransport, TransportClose, TransportState, AbortSignalLike, RequestOptions, AlpRpcClientOptions } from './rpc/client.js';
+export type { ClientInfo } from './rpc/connection/handshake.js';
+export type { ReconnectOptions, ReconnectingClient, ReconnectState, Backoff } from './rpc/connection/reconnect.js';
 export { PROTOCOL_VERSION, MAX_FRAME, AlpRpcError, ERROR } from '@anhlp/alp-protocol';
 export { AlpRpcClient, DEFAULT_MAX_PENDING } from './rpc/client.js';
 export { AlpClientError, CLIENT_ERROR, isAlpClientError } from './rpc/errors.js';

@@ -54,7 +54,7 @@ try {
   const env = { ...process.env, ALP_HOME: home, ALP_GATEWAY_HOME: path.join(work, 'gateway'), ALP_CODEX_BIN: path.join(root, 'packages/daemon/tests/support/fake-codex.js') };
   const alpd = spawn(process.execPath, [path.join(root, 'packages/daemon/dist/alpd.js')], { env, stdio: 'ignore', detached: true });
   children.push(alpd);
-  const { readLock } = await import(pathToFileURL(path.join(consumer, 'node_modules/@anhlp/alp-client/src/index.js')).href);
+  const { readLock } = await import(pathToFileURL(path.join(consumer, 'node_modules/@anhlp/alp-client/dist/index.js')).href);
   for (let i = 0; ; i++) {
     const lock = await readLock(home);
     if (lock?.ready && lock.pid === alpd.pid) break;

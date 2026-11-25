@@ -5,7 +5,7 @@
  */
 
 /** UTF-8 length of `text` without Buffer or TextEncoder; an unpaired surrogate counts as U+FFFD (3 bytes). @param {string} text */
-export function utf8Length(text) {
+export function utf8Length(text: string): number {
   let bytes = 0;
   for (let index = 0; index < text.length; index++) {
     const code = text.charCodeAt(index);
@@ -25,17 +25,17 @@ export function utf8Length(text) {
  * @param {{ maxFrame: number }} options
  * @returns {{ push(chunk: string): string[], readonly buffered: number }}
  */
-export function createLineDecoder({ maxFrame }) {
+export function createLineDecoder({ maxFrame }: { maxFrame: number }): { push(chunk: string): string[], readonly buffered: number } {
   /** @type {string[]} */
-  let parts = [];
+  let parts: string[] = [];
   let bytes = 0;
   let failed = false;
   const overflow = () => { failed = true; parts = []; bytes = 0; return new RangeError(`Frame exceeds ${maxFrame} bytes`); };
   return {
-    push(chunk) {
+    push(chunk: string) {
       if (failed) throw new RangeError('Line decoder already failed');
       /** @type {string[]} */
-      const frames = [];
+      const frames: string[] = [];
       let start = 0;
       for (let index = chunk.indexOf('\n'); index >= 0; index = chunk.indexOf('\n', start)) {
         const piece = chunk.slice(start, index);

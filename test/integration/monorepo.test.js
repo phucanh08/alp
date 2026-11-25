@@ -141,9 +141,9 @@ test('root distribution boundary rejects direct/optional/peer/dev/bundled SDK an
 
 test('the Paseo remote bundle gate rejects local-only inputs and host imports', async () => {
   const { assertRemoteInputs } = await import('../../scripts/build-manifest.mjs');
-  const portable = { inputs: { 'packages/client/src/portable.js': {}, 'packages/client/src/rpc/index.js': {}, 'integrations/paseo/server/provider-core.ts': {}, 'integrations/paseo/server/remote/link.ts': {} }, outputs: { 'out.js': { imports: [{ path: 'ws', external: true }, { path: 'node:crypto', external: true }] } } };
+  const portable = { inputs: { 'packages/client/src/portable.ts': {}, 'packages/client/src/rpc/index.ts': {}, 'integrations/paseo/server/provider-core.ts': {}, 'integrations/paseo/server/remote/link.ts': {} }, outputs: { 'out.js': { imports: [{ path: 'ws', external: true }, { path: 'node:crypto', external: true }] } } };
   assert.doesNotThrow(() => assertRemoteInputs(portable, 'remote'));
-  for (const input of ['packages/core/src/index.ts', 'packages/runtime/src/index.ts', 'packages/daemon/src/server.ts', 'packages/client/src/index.js', 'packages/client/src/supervise.js', 'integrations/paseo/server/provider.ts', 'integrations/paseo/server/mapping.ts', 'integrations/paseo/server/panel/library.ts', 'integrations/paseo/server/paseo/agents.ts']) {
+  for (const input of ['packages/core/src/index.ts', 'packages/runtime/src/index.ts', 'packages/daemon/src/server.ts', 'packages/client/src/index.ts', 'packages/client/src/supervise.ts', 'integrations/paseo/server/provider.ts', 'integrations/paseo/server/mapping.ts', 'integrations/paseo/server/panel/library.ts', 'integrations/paseo/server/paseo/agents.ts']) {
     assert.throws(() => assertRemoteInputs({ inputs: { ...portable.inputs, [input]: {} }, outputs: {} }, 'remote'), new RegExp(input.replace(/[.]/g, '\\.')));
   }
   for (const external of ['fs', 'node:fs/promises', 'child_process', 'node:child_process', 'worker_threads', 'node:vm']) {

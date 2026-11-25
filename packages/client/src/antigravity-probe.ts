@@ -29,7 +29,7 @@ const ANTIGRAVITY_MODES = [
   },
 ];
 
-function runCommand(command, args, { env = process.env, cwd, timeoutMs = 20_000 } = {}) {
+function runCommand(command: string, args: string[], { env = process.env, cwd, timeoutMs = 20_000 }: { env?: NodeJS.ProcessEnv, cwd?: string, timeoutMs?: number } = {}): Promise<{ stdout: string, stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
@@ -67,7 +67,7 @@ function runCommand(command, args, { env = process.env, cwd, timeoutMs = 20_000 
  * @param {{ command?: string, args?: string[], env?: Record<string, string>, label?: string, id?: string}} [provider]
  * @param {{ cwd?: string, timeoutMs?: number }} [options]
  */
-export async function probeAntigravity(provider = {}, { cwd, timeoutMs = 20_000 } = {}) {
+export async function probeAntigravity(provider: { command?: string, args?: string[], env?: Record<string, string>, label?: string, id?: string } = {}, { cwd, timeoutMs = 20_000 }: { cwd?: string, timeoutMs?: number } = {}) {
   const command = provider.command || 'agy';
   const args = provider.args ?? [];
   const env = { ...process.env, ...(provider.env ?? {}) };
@@ -78,11 +78,11 @@ export async function probeAntigravity(provider = {}, { cwd, timeoutMs = 20_000 
     const res = await runCommand(command, [...args, '--version'], { env, cwd, timeoutMs: Math.min(timeoutMs, 5000) });
     version = res.stdout.trim().split('\n')[0] ?? '';
   } catch (error) {
-    throw new Error(`Antigravity command '${command}' is not available: ${error.message}`);
+    throw new Error(`Antigravity command '${command}' is not available: ${(error as Error).message}`);
   }
 
   // Probe models
-  let models = [];
+  let models: Array<{ id: string, label: string }> = [];
   try {
     const res = await runCommand(command, [...args, 'models'], { env, cwd, timeoutMs });
     for (const line of res.stdout.trim().split(/\r?\n/)) {

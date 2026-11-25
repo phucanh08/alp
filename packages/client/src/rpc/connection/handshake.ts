@@ -1,9 +1,11 @@
 import { PROTOCOL_VERSION } from '@anhlp/alp-protocol';
+import type { RequestOptions } from '../client.js';
 
 /** The daemon.hello capability a process an ALP agent started announces. */
 export const AGENT_CAPABILITY = 'principal.agent';
 
 /** @typedef {{ name: string, version: string }} ClientInfo */
+export type ClientInfo = { name: string, version: string };
 
 /**
  * The version handshake every ALP connection starts with (plans/reference/ALPD.md §3): alpd
@@ -15,7 +17,7 @@ export const AGENT_CAPABILITY = 'principal.agent';
  * @param {{ agent?: boolean }} [principal] `agent`: an ALP agent started this process (the Node entry reads ALP_AGENT_SESSION).
  * @returns {Promise<{ protocolVersion: number } & Record<string, unknown>>}
  */
-export function hello(client, info = { name: 'alp', version: '0' }, options, { agent = false } = {}) {
+export function hello(client: { request(method: string, params?: unknown, options?: RequestOptions): Promise<any> /* any: the caller's request result type */ }, info: ClientInfo = { name: 'alp', version: '0' }, options?: RequestOptions, { agent = false }: { agent?: boolean } = {}): Promise<{ protocolVersion: number } & Record<string, unknown>> {
   // A process an ALP agent started says so (t-ca1f): alpd then refuses it what only the user may do.
   return client.request('daemon.hello', { protocolVersion: PROTOCOL_VERSION, client: info, ...(agent ? { capabilities: [AGENT_CAPABILITY] } : {}) }, options);
 }

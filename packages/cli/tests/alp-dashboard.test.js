@@ -534,7 +534,7 @@ test('a delayed web bootstrap refusal reports failed startup before the readines
   const preload = path.join(context.directory, 'delay.mjs');
   await writeFile(preload, `if (process.argv[1] === ${JSON.stringify(SERVICE)}) await new Promise(resolve => setTimeout(resolve, 400));`);
   const runner = path.join(context.directory, 'runner.mjs');
-  await writeFile(runner, `import { startIntegration } from ${JSON.stringify(pathToFileURL(path.join(root, 'packages/client/src/index.js')).href)};
+  await writeFile(runner, `import { startIntegration } from ${JSON.stringify(pathToFileURL(path.join(root, 'packages/client/dist/index.js')).href)};
 try { await startIntegration({ name: 'dashboard', home: process.env.ALP_HOME, entry: ${JSON.stringify(SERVICE)} }); process.exitCode = 2; }
 catch (error) { console.error(error.message); process.exitCode = 1; }`);
   const child = spawn(process.execPath, [runner], { env: { ...process.env, ...context.env, ALP_SUPERVISE: '0', NODE_OPTIONS: `${context.env.NODE_OPTIONS ?? ''} --import=${pathToFileURL(preload).href}` }, stdio: ['ignore', 'ignore', 'pipe'] });

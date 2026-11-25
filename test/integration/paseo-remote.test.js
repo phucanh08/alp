@@ -18,8 +18,8 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
-import { connectSocket, readLock } from '../../packages/client/src/index.js';
-import { AlpRpcClient, hello } from '../../packages/client/src/portable.js';
+import { connectSocket, readLock } from '../../packages/client/dist/index.js';
+import { AlpRpcClient, hello } from '../../packages/client/dist/portable.js';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const ALPD = path.join(ROOT, 'packages/daemon/dist/alpd.js');

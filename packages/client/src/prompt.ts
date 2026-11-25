@@ -1,7 +1,7 @@
 import { emitKeypressEvents } from 'node:readline';
 
-const dim = text => `\x1b[2m${text}\x1b[22m`;
-const cyan = text => `\x1b[36m${text}\x1b[39m`;
+const dim = (text: string) => `\x1b[2m${text}\x1b[22m`;
+const cyan = (text: string) => `\x1b[36m${text}\x1b[39m`;
 
 export class Cancelled extends Error {
   constructor() { super('Setup cancelled.'); }
@@ -15,7 +15,7 @@ export class Cancelled extends Error {
  * @param {{ input?: NodeJS.ReadStream, output?: NodeJS.WriteStream }} [io]
  * @returns {Promise<T>}
  */
-export function select({ message, choices, initial }, { input = process.stdin, output = process.stdout } = {}) {
+export function select<T>({ message, choices, initial }: { message: string, choices: Array<{ label: string, value: T, hint?: string }>, initial?: T }, { input = process.stdin, output = process.stdout }: { input?: NodeJS.ReadStream, output?: NodeJS.WriteStream } = {}): Promise<T> {
   let index = Math.max(0, choices.findIndex(choice => choice.value === initial));
   let drawn = 0;
   const draw = () => {
@@ -25,21 +25,21 @@ export function select({ message, choices, initial }, { input = process.stdin, o
     output.write(lines.join('\n') + '\n');
     drawn = lines.length;
   };
-  return new Promise((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     emitKeypressEvents(input);
     const raw = input.isRaw;
     input.setRawMode?.(true);
     input.resume();
     output.write('\x1b[?25l');
-    const done = (settle, value) => {
+    const done = (settle: ((value: T) => void) | ((reason: unknown) => void), value: T | Cancelled) => {
       input.off('keypress', onKey);
       input.setRawMode?.(raw ?? false);
       input.pause();
       output.write(`\x1b[${drawn}A\x1b[0J\x1b[?25h`);
       if (settle === resolve) output.write(`${cyan('✔')} ${message} ${cyan(choices[index].label)}\n`);
-      settle(value);
+      (settle as (value: T | Cancelled) => void)(value);
     };
-    const onKey = (text, key = {}) => {
+    const onKey = (text: string, key: { ctrl?: boolean, name?: string } = {}) => {
       if ((key.ctrl && key.name === 'c') || key.name === 'escape') return done(reject, new Cancelled());
       if (key.name === 'return' || key.name === 'enter') return done(resolve, choices[index].value);
       if (key.name === 'up' || key.name === 'k') index = (index + choices.length - 1) % choices.length;
@@ -57,7 +57,7 @@ export function select({ message, choices, initial }, { input = process.stdin, o
  * @param {string} message
  * @param {{ input?: NodeJS.ReadStream, output?: NodeJS.WriteStream }} [io]
  */
-export async function text(message, { input = process.stdin, output = process.stdout } = {}) {
+export async function text(message: string, { input = process.stdin, output = process.stdout }: { input?: NodeJS.ReadStream, output?: NodeJS.WriteStream } = {}) {
   const { createInterface } = await import('node:readline/promises');
   const rl = createInterface({ input, output });
   try { return (await rl.question(`${cyan('?')} ${message} `)).trim(); } finally { rl.close(); }

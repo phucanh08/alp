@@ -10,7 +10,7 @@ import path from 'node:path';
 
 test('a failed fstat after the exclusive create leaves no lock behind', async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-lock-fstat-'));
-  const { acquireDaemonLock, daemonPaths, releaseDaemonLock } = await import('../src/index.js');
+  const { acquireDaemonLock, daemonPaths, releaseDaemonLock } = await import('../dist/index.js');
   // The lock this test takes (and on Windows its open hold) goes before its home: Windows cannot
   // remove a directory holding an open file. One hook, so a failed release cannot skip the rm.
   t.after(async () => { try { await releaseDaemonLock(home); } finally { await rm(home, { recursive: true, force: true }); } });
@@ -35,7 +35,7 @@ test('a failed fstat after the exclusive create leaves no lock behind', async t 
 test('fstat failure must not unlink a successor lock (t-50af)', async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-lock-successor-'));
   t.after(() => rm(home, { recursive: true, force: true }));
-  const { acquireDaemonLock, daemonPaths } = await import('../src/index.js');
+  const { acquireDaemonLock, daemonPaths } = await import('../dist/index.js');
   const file = daemonPaths(home).lock;
   await fs.promises.mkdir(path.dirname(file), { recursive: true });
   const open = fs.promises.open;
@@ -58,7 +58,7 @@ test('a daemon lock held by a separate live process refuses another owner (t-50a
   const { fork } = await import('node:child_process');
   const { once } = await import('node:events');
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-lock-child-'));
-  const module = new URL('../src/index.js', import.meta.url).href;
+  const module = new URL('../dist/index.js', import.meta.url).href;
   const fixture = path.join(home, 'owner.mjs');
   await writeFile(fixture, `import { acquireDaemonLock } from ${JSON.stringify(module)};
     await acquireDaemonLock(${JSON.stringify(home)}, { version: 't', protocolVersion: 1, socket: 's' });
@@ -71,7 +71,7 @@ test('a daemon lock held by a separate live process refuses another owner (t-50a
   });
   const [message] = await once(child, 'message', { signal: AbortSignal.timeout(5000) });
   assert.equal(message.ready, true);
-  const { acquireDaemonLock, readLock } = await import('../src/index.js');
+  const { acquireDaemonLock, readLock } = await import('../dist/index.js');
   await assert.rejects(acquireDaemonLock(home, { version: 't', protocolVersion: 1, socket: 's' }), /daemon already running/);
   assert.equal((await readLock(home)).pid, child.pid, 'the competing owner remains intact');
 });
@@ -79,7 +79,7 @@ test('a daemon lock held by a separate live process refuses another owner (t-50a
 test('when neither descriptor stat works, failure preserves the unidentified lock (t-50af)', async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-lock-unidentified-'));
   t.after(() => rm(home, { recursive: true, force: true }));
-  const { acquireDaemonLock, daemonPaths } = await import('../src/index.js');
+  const { acquireDaemonLock, daemonPaths } = await import('../dist/index.js');
   const file = daemonPaths(home).lock;
   const open = fs.promises.open, fstat = fs.fstatSync;
   fs.promises.open = async function (name, ...args) {

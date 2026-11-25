@@ -18,12 +18,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import * as client from '../src/index.js';
+import * as client from '../dist/index.js';
 import { teardown } from '../../../test/support/teardown.js';
 
 const { bootTime, holdOps, readDaemonLifecycle, withDaemonLifecycle } = client;
 const windows = process.platform === 'win32';
-const moduleUrl = new URL('../src/index.js', import.meta.url).href;
+const moduleUrl = new URL('../dist/index.js', import.meta.url).href;
 /** What an ALP from before t-dc0e accepts as a token name: it must keep reading ours. */
 const LEGACY_NAME = /^owner-(\d+)-(\d+)-(start|stop)-[a-f0-9-]+$/;
 const PROOF = /-([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})-(c\d+|b\d{14}|e)$/;

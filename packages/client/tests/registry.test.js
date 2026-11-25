@@ -1,4 +1,4 @@
-// The portable registry helpers (packages/client/src/rpc/registry.js): each sends its method with
+// The portable registry helpers (packages/client/src/rpc/registry.ts): each sends its method with
 // exactly the params given, so a caller's requestId and cursor reach the daemon unchanged.
 import test from 'node:test';
 import assert from 'node:assert/strict';

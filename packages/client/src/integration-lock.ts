@@ -4,6 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { moveFile } from '@anhlp/alp-core/atomic';
 import { assertIntegrationName, bootId, bootTime, isSameBoot } from './index.js';
+import type { Stats } from 'node:fs';
+
+/** The record in an integration's lock file. */
+export type IntegrationLockRecord = { pid: number, bootTime: number, bootId?: string, startedUptime?: number, startedAt: string, ready: boolean, lockVersion?: number, owner?: string };
+/** The single-owner lock of one integration service (createIntegrationLock). */
+export type IntegrationLock = {
+  acquire(): Promise<{ acquired: boolean, lock: IntegrationLockRecord }>,
+  setReady(ready: boolean): Promise<boolean>,
+  release(): Promise<boolean>,
+};
 
 /**
  * @typedef {{ pid: number, bootTime: number, bootId?: string, startedUptime?: number, startedAt: string, ready: boolean, lockVersion?: number, owner?: string }} IntegrationLockRecord
@@ -24,33 +34,34 @@ import { assertIntegrationName, bootId, bootTime, isSameBoot } from './index.js'
  * @param {string} name the integration name, for example `web`
  * @returns {IntegrationLock}
  */
-export function createIntegrationLock(home, name) {
+export function createIntegrationLock(home: string, name: string): IntegrationLock {
   const file = path.join(home, 'integrations', `${assertIntegrationName(name)}.lock`);
   const guard = `${file}.reclaim`;
   /** @type {'new' | 'acquiring' | 'owned' | 'retired'} */
-  let phase = 'new';
+  let phase: 'new' | 'acquiring' | 'owned' | 'retired' = 'new';
   /** This instance's lock while it owns it: the lifetime nonce and the file's identity. @type {{ owner: string, dev: number, ino: number } | undefined} */
-  let owned;
+  let owned: { owner: string, dev: number, ino: number } | undefined;
   /** Serializes concurrent in-process setReady calls to preserve FIFO order. @type {Promise<any>} */
-  let readyQueue = Promise.resolve();
+  let readyQueue: Promise<unknown> = Promise.resolve();
   // The lock file as read: its record and the stats of the handle it was read through. Kept inside
   // the factory so the published declarations name only IntegrationLock and its record.
-  /** @typedef {{ value: any, info: import('node:fs').Stats }} Snapshot */
+  // any: the lock file's JSON as parsed, before complete() checks it
+  type Snapshot = { value: any, info: Stats };
   /** @param {string} reason */
-  const recovery = reason => new Error(`${reason}. Stop ALL integration processes using this ALP_HOME before manual lock-only recovery of ${file} and ${guard}; see docs/modular-monorepo.md`);
+  const recovery = (reason: string) => new Error(`${reason}. Stop ALL integration processes using this ALP_HOME before manual lock-only recovery of ${file} and ${guard}; see docs/modular-monorepo.md`);
 
   /**
    * @template T
    * @param {() => Promise<T>} run
    * @returns {Promise<T>}
    */
-  async function guarded(run) {
+  async function guarded<T>(run: () => Promise<T>): Promise<T> {
     await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
     const deadline = Date.now() + 20_000;
     for (;;) {
       try { await mkdir(guard, { mode: 0o700 }); break; }
       catch (error) {
-        if (/** @type {any} */ (error)?.code !== 'EEXIST') throw error;
+        if ((error as NodeJS.ErrnoException)?.code !== 'EEXIST') throw error;
         if (Date.now() >= deadline) throw recovery('Integration mutation guard remains busy or abandoned');
         await new Promise(resolve => setTimeout(resolve, 25));
       }
@@ -66,17 +77,17 @@ export function createIntegrationLock(home, name) {
       // Only this successful mkdir owner finalizes, once. Missing token may mean a replacement
       // generation: never rmdir in that case. No contender removes any other owner's token.
       try { await unlink(token); }
-      catch (error) { throw recovery(/** @type {any} */ (error)?.code === 'ENOENT' ? 'Integration guard ownership was lost' : `Integration guard token cleanup failed: ${String(error)}`); }
+      catch (error) { throw recovery((error as NodeJS.ErrnoException)?.code === 'ENOENT' ? 'Integration guard ownership was lost' : `Integration guard token cleanup failed: ${String(error)}`); }
       try { await rmdir(guard); }
       catch (error) { throw recovery(`Integration guard cleanup failed: ${String(error)}`); }
     }
   }
 
   /** @returns {Promise<Snapshot | undefined>} */
-  async function snapshot() {
+  async function snapshot(): Promise<Snapshot | undefined> {
     let handle;
     try { handle = await open(file, 'r'); }
-    catch (error) { if (/** @type {any} */ (error)?.code === 'ENOENT') return undefined; throw error; }
+    catch (error) { if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return undefined; throw error; }
     try {
       const info = await handle.stat();
       const raw = await handle.readFile('utf8');
@@ -90,7 +101,7 @@ export function createIntegrationLock(home, name) {
    * @param {any} value
    * @returns {value is IntegrationLockRecord}
    */
-  function complete(value) {
+  function complete(value: any): value is IntegrationLockRecord { // any: a parsed lock record, checked here field by field
     return value && Number.isSafeInteger(value.pid) && value.pid > 0
       && typeof value.bootTime === 'number' && Number.isFinite(value.bootTime) && value.bootTime > 0
       && (value.bootId === undefined || typeof value.bootId === 'string' && value.bootId.length > 0)
@@ -105,10 +116,10 @@ export function createIntegrationLock(home, name) {
    * @param {IntegrationLockRecord} value
    * @returns {boolean}
    */
-  function dead(value) {
+  function dead(value: IntegrationLockRecord): boolean {
     try { process.kill(value.pid, 0); return false; }
     catch (error) {
-      if (/** @type {any} */ (error)?.code !== 'ESRCH') return false; // EPERM and unknown errors never grant takeover.
+      if ((error as NodeJS.ErrnoException)?.code !== 'ESRCH') return false; // EPERM and unknown errors never grant takeover.
       // Approximate wall-clock boot metadata is context, never affirmative death evidence.
       if (!isSameBoot(value)) throw recovery('Integration owner boot context is uncertain');
       return true;
@@ -119,7 +130,7 @@ export function createIntegrationLock(home, name) {
    * @param {Snapshot | undefined} current
    * @returns {boolean}
    */
-  function matches(current) {
+  function matches(current: Snapshot | undefined): boolean {
     return !!owned && current?.value?.owner === owned.owner
       && current.info.dev === owned.dev && current.info.ino === owned.ino;
   }
@@ -159,7 +170,7 @@ export function createIntegrationLock(home, name) {
       } catch (error) { phase = 'retired'; owned = undefined; throw error; }
     },
 
-    async setReady(ready) {
+    async setReady(ready: boolean) {
       if (phase !== 'owned') return false;
       const execute = async () => {
         if (phase !== 'owned') return false;

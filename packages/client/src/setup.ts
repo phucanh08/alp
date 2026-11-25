@@ -6,19 +6,30 @@ import { catalogModels, useLiveModels } from '@anhlp/alp-core/models';
 import { fitEffort, modelEfforts, profileDefaults, profileFingerprint, projectProfiles } from '@anhlp/alp-core/profiles';
 import { BUILTIN_TEAMS, resolveTeam, teamSources } from '@anhlp/alp-core/teams';
 import { validateSettings } from '@anhlp/alp-core/validation';
+import type { ResolvedTeam } from '@anhlp/alp-core/teams';
+import type { AgentProfilesConfig, RawSettings } from '@anhlp/alp-core/types';
 import { Cancelled, select, text } from './prompt.js';
 
 const PROVIDERS = ['claude', 'codex'];
-const PROVIDER_LABEL = { claude: 'Claude', codex: 'Codex' };
+const PROVIDER_LABEL: Record<string, string> = { claude: 'Claude', codex: 'Codex' };
 /** Each seat's model and effort per provider. Main runs on the preferred provider's only; peers may run on any model of an enabled provider. */
-const DEFAULTS = {
+const DEFAULTS: Record<string, Record<string, [model: string, effort: string]>> = {
   main: { claude: ['claude-opus-5-5', 'high'], codex: ['gpt-6.1-sol', 'high'] },
   worker: { claude: ['claude-opus-5-5', 'high'], codex: ['gpt-6.1-sol', 'high'] },
   supervisor: { claude: ['claude-sonnet-5', 'medium'], codex: ['gpt-6-luna', 'medium'] },
   oracle: { claude: ['claude-fable-5-1', 'high'], codex: ['gpt-6-astra', 'high'] },
 };
 const FLAGS = { main: 'model', worker: 'model', supervisor: 'supervisor', oracle: 'oracle' };
-const SEAT_LABEL = { main: 'main', worker: 'lead, reviewer', supervisor: 'supervisor', oracle: 'oracle' };
+const SEAT_LABEL: Record<string, string> = { main: 'main', worker: 'lead, reviewer', supervisor: 'supervisor', oracle: 'oracle' };
+/** One seat's model on one provider. */
+export type SeatChoice = { provider: string; model: string; effort?: string };
+/** Each seat's choices, by seat. */
+export type Seats = Record<string, SeatChoice[]>;
+/** Profile entries by team and agent. */
+type TeamsProfiles = Record<string, Record<string, AgentProfilesConfig>>;
+/** Fingerprints of setup's own entries, by team and agent. */
+type SetupRecord = Record<string, Record<string, string>>;
+
 const ANY_EFFORT = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 /**
@@ -28,11 +39,11 @@ const ANY_EFFORT = ['low', 'medium', 'high', 'xhigh', 'max'];
  * list the user wrote, or one a team override of Phở or Cafe pins in its team.json, is kept and named. Other teams are
  * left alone and named with the settings keys to edit: their team.json carries their author's model choices.
  */
-export async function setup(args, home) {
+export async function setup(args: string[], home: string): Promise<void> {
   // Effort fitting reads alpd's cached live catalog when there is one (t-086c); no provider is asked.
   useLiveModels(catalogModels(home));
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: Object.fromEntries(
-    ['runtime', 'prefer', ...PROVIDERS.flatMap(provider => Object.values(FLAGS).map(flag => `${provider}-${flag}`))].map(name => [name, { type: 'string' }]),
+    ['runtime', 'prefer', ...PROVIDERS.flatMap(provider => Object.values(FLAGS).map(flag => `${provider}-${flag}`))].map(name => [name, { type: 'string' as const }]),
   ) });
   if (positionals.length > 1) throw new Error('setup takes at most one directory');
   const root = path.resolve(positionals[0] ?? process.cwd());
@@ -62,7 +73,7 @@ export async function setup(args, home) {
 
     const file = path.join(root, '.alp/settings.json');
     const settings = await readFile(file, 'utf8').then(content => {
-      try { return JSON.parse(content); } catch (error) { throw new Error(`${file} is not valid JSON: ${error.message}`); }
+      try { return JSON.parse(content) as RawSettings; } catch (error) { throw new Error(`${file} is not valid JSON: ${(error as Error).message}`); }
     }, error => {
       if (error.code === 'ENOENT') return undefined;
       throw new Error(`${file}: ${error.message}`);
@@ -110,14 +121,14 @@ export async function setup(args, home) {
   }
 }
 
-const describe = choice => `${choice.provider}:${choice.model}${choice.effort ? `:${choice.effort}` : ''}`;
+const describe = (choice: { provider?: string; model?: string; effort?: string }): string => `${choice.provider}:${choice.model}${choice.effort ? `:${choice.effort}` : ''}`;
 
 /** Pick one seat and provider, then its model and effort. */
-async function change(seats, home) {
+async function change(seats: Seats, home: string): Promise<void> {
   // alpd's live catalog (t-e5ee) when it has one, else the static rows.
   const catalog = catalogModels(home);
   const [seat, at] = await select({ message: 'Which model?', choices: Object.entries(seats).flatMap(([seat, choices]) =>
-    choices.map((choice, at) => ({ label: `${SEAT_LABEL[seat]} · ${PROVIDER_LABEL[choice.provider]}`, value: [seat, at], hint: describe(choice) }))) });
+    choices.map((choice, at) => ({ label: `${SEAT_LABEL[seat]} · ${PROVIDER_LABEL[choice.provider]}`, value: [seat, at] as [string, number], hint: describe(choice) }))) });
   const current = seats[seat][at];
   const offered = catalog.filter(model => model.runtime === current.provider);
   const picked = await select({ message: `${SEAT_LABEL[seat]} on ${PROVIDER_LABEL[current.provider]}`, initial: current.model, choices: [
@@ -126,15 +137,15 @@ async function change(seats, home) {
   ] });
   const model = picked ?? nativeModel(await text(`${PROVIDER_LABEL[current.provider]} model ID:`), current.provider, 'The model ID');
   const efforts = catalog.find(entry => entry.runtime === current.provider && entry.id === model)?.efforts ?? modelEfforts(`${current.provider}:${model}`) ?? ANY_EFFORT;
-  const effort = efforts.length > 1 ? await select({ message: 'Effort', initial: efforts.includes(current.effort) ? current.effort : DEFAULTS[seat][current.provider][1],
+  const effort = efforts.length > 1 ? await select({ message: 'Effort', initial: efforts.includes(current.effort as string) ? current.effort : DEFAULTS[seat][current.provider][1],
     choices: efforts.map(effort => ({ label: effort, value: effort })) }) : efforts[0];
   seats[seat][at] = { provider: current.provider, model, ...(effort ? { effort } : {}) };
 }
 
 /** Each seat's choices for the enabled providers: main on the preferred one, the others on each. */
-function seatsFor(enabled, prefer, values = {}) {
+function seatsFor(enabled: string[], prefer: string, values: Record<string, string | undefined> = {}): Seats {
   /** @type {Record<string, Array<{ provider: string, model: string, effort?: string }>>} */
-  const seats = {};
+  const seats: Seats = {};
   for (const [seat, flag] of Object.entries(FLAGS)) {
     seats[seat] = (seat === 'main' ? [prefer] : enabled).map(provider => {
       const option = `${provider}-${flag}`;
@@ -146,16 +157,16 @@ function seatsFor(enabled, prefer, values = {}) {
   return seats;
 }
 /** Whether two { key: value } maps hold the same pairs, in any order. */
-const sameEntries = (a, b) => JSON.stringify(Object.entries(a ?? {}).sort()) === JSON.stringify(Object.entries(b ?? {}).sort());
+const sameEntries = (a: Record<string, string> | undefined, b: Record<string, string> | undefined): boolean => JSON.stringify(Object.entries(a ?? {}).sort()) === JSON.stringify(Object.entries(b ?? {}).sort());
 /** A peer takes any model of an enabled provider: whoever assigns it picks the model and effort. */
-const peersFor = enabled => enabled.map(provider => `${provider}:*`);
-const currentTeams = settings => settings && ({ ...(settings.profile ?? {}), ...(settings.team ?? {}) });
+const peersFor = (enabled: string[]): string[] => enabled.map(provider => `${provider}:*`);
+const currentTeams = (settings: RawSettings | undefined): TeamsProfiles | undefined => settings && ({ ...(settings.profile ?? {}), ...(settings.team ?? {}) });
 
 /** Each agent's profile list for one team, by its role: main, supervisor and oracle by seat, a peer on any model, the others as workers. */
-function teamProfiles(team, seats, peers) {
-  const strings = choices => choices.map(choice => typeof choice === 'string' ? choice : describe(choice));
+function teamProfiles(team: ResolvedTeam, seats: Seats, peers: string[]): Record<string, string[]> {
+  const strings = (choices: Array<string | SeatChoice>) => choices.map(choice => typeof choice === 'string' ? choice : describe(choice));
   /** @type {Record<string, string[]>} */
-  const agents = {};
+  const agents: Record<string, string[]> = {};
   for (const [name, member] of Object.entries(team.members)) {
     if (name !== 'oracle') agents[name] = strings(name === team.main ? seats.main : member.role === 'peer' ? peers : seats.worker);
   }
@@ -165,11 +176,11 @@ function teamProfiles(team, seats, peers) {
 }
 
 /** Every Phở and Cafe agent's profiles, keeping each agent's own compaction setting and "/" commands (t-efa3). */
-async function profiles(root, home, seats, peers, settings) {
-  const profile = {};
+async function profiles(root: string, home: string, seats: Seats, peers: string[], settings: RawSettings | undefined): Promise<TeamsProfiles> {
+  const profile: TeamsProfiles = {};
   for (const id of BUILTIN_TEAMS) {
     const team = await resolveTeam(root, id, { library: home });
-    const agents = {};
+    const agents: Record<string, AgentProfilesConfig> = {};
     for (const [name, list] of Object.entries(teamProfiles(team, seats, peers))) {
       const old = currentTeams(settings)?.[id]?.[name];
       agents[name] = { profiles: list, autocompact: old?.autocompact ?? 'auto', ...(old?.commands ? { commands: old.commands } : {}) };
@@ -193,18 +204,18 @@ async function profiles(root, home, seats, peers, settings) {
  * defaults, and never refuses to run over it.
  */
 const RECORD_VERSION = 1;
-const recordFile = root => path.join(root, '.alp', 'state', 'setup-profiles.json');
-async function readRecord(root) {
+const recordFile = (root: string): string => path.join(root, '.alp', 'state', 'setup-profiles.json');
+async function readRecord(root: string): Promise<{ teams: SetupRecord; newer: boolean }> {
   let value;
   try { value = JSON.parse(await readFile(recordFile(root), 'utf8')); } catch { return { teams: {}, newer: false }; }
   // A newer ALP's record is left for it, unread and unwritten.
   if (Number.isSafeInteger(value?.version) && value.version > RECORD_VERSION) return { teams: {}, newer: true };
-  const teams = value?.version === RECORD_VERSION && value.teams && typeof value.teams === 'object' && !Array.isArray(value.teams) ? value.teams : {};
+  const teams: Record<string, Record<string, unknown>> = value?.version === RECORD_VERSION && value.teams && typeof value.teams === 'object' && !Array.isArray(value.teams) ? value.teams : {};
   return { newer: false, teams: Object.fromEntries(Object.entries(teams).filter(([, agents]) => agents && typeof agents === 'object' && !Array.isArray(agents))
-    .map(([id, agents]) => [id, Object.fromEntries(Object.entries(agents).filter(([, hash]) => typeof hash === 'string' && /^[a-f0-9]{64}$/.test(hash)))])) };
+    .map(([id, agents]) => [id, Object.fromEntries(Object.entries(agents).filter(([, hash]) => typeof hash === 'string' && /^[a-f0-9]{64}$/.test(hash)))])) as SetupRecord };
 }
 /** Saves the record; settings are already saved, so a failure here is reported, not thrown. */
-async function writeRecord(root, teams, newer) {
+async function writeRecord(root: string, teams: SetupRecord, newer: boolean): Promise<void> {
   if (newer) return;
   const directory = path.dirname(recordFile(root));
   try {
@@ -212,21 +223,21 @@ async function writeRecord(root, teams, newer) {
     await writeFile(path.join(directory, '.gitignore'), '*\n', { flag: 'wx' }).catch(error => { if (error.code !== 'EEXIST') throw error; });
     await writeFile(recordFile(root), JSON.stringify({ version: RECORD_VERSION, teams }, null, 2) + '\n');
   } catch (error) {
-    console.log(`Could not save ${recordFile(root)} (${error.message}); the next alp setup recognizes these profiles by setup's defaults instead.`);
+    console.log(`Could not save ${recordFile(root)} (${(error as Error).message}); the next alp setup recognizes these profiles by setup's defaults instead.`);
   }
 }
 
-async function ownership(root, home, existing) {
+async function ownership(root: string, home: string, existing: RawSettings | undefined) {
   const { teams: record, newer } = await readRecord(root);
   // A project without settings is judged as alp init is about to write it, so a team override's pinned model counts there too.
   const initial = existing ? undefined : await projectProfiles({ root, library: home });
-  const settings = existing ?? { team: initial, templateDefaults: profileDefaults(initial) };
+  const settings = existing ?? { team: initial, templateDefaults: profileDefaults(initial!) };
   const teams = currentTeams(settings) ?? {};
   const file = path.join(root, '.alp/settings.json');
   /** @type {Record<string, Record<string, string[]>>} */
-  const legacy = {};
+  const legacy: Record<string, Record<string, string[]>> = {};
   /** @type {Record<string, Record<string, string>>} */
-  const pinned = {};
+  const pinned: Record<string, Record<string, string>> = {};
   for (const id of BUILTIN_TEAMS) {
     const team = await resolveTeam(root, id, { library: home });
     const builtin = await resolveTeam(undefined, id, { library: '' });
@@ -243,7 +254,7 @@ async function ownership(root, home, existing) {
     pinned[id] = {};
     if (team.source !== 'builtin') {
       /** What an override sets for one agent beyond the built-in's, as "model" and/or "effort X"; undefined when nothing. */
-      const choice = (own, base) => {
+      const choice = (own: { model?: string; thinking?: string } | undefined, base: { model?: string; thinking?: string } | undefined): string | undefined => {
         const parts = [own?.model && own.model !== base?.model ? own.model : undefined, own?.thinking && own.thinking !== base?.thinking ? `effort ${own.thinking}` : undefined].filter(Boolean);
         return parts.length ? parts.join(', ') : undefined;
       };
@@ -260,14 +271,14 @@ async function ownership(root, home, existing) {
       }
     }
   }
-  const rewrites = (id, name) => {
+  const rewrites = (id: string, name: string): boolean => {
     const config = teams[id]?.[name];
     if (!config) return true;
     const fingerprint = profileFingerprint(config, name);
     if (record[id]?.[name] === fingerprint || legacy[id]?.[name]?.includes(fingerprint)) return true;
     return settings?.templateDefaults?.[id]?.[name] === fingerprint && !pinned[id]?.[name];
   };
-  const kept = [];
+  const kept: string[] = [];
   for (const id of BUILTIN_TEAMS) {
     for (const [name, config] of Object.entries(teams[id] ?? {})) {
       if (rewrites(id, name)) continue;
@@ -280,7 +291,7 @@ async function ownership(root, home, existing) {
           : `Kept team.${id}.${name}.profiles (${list}): ALP cannot tell whether an earlier alp setup or you wrote it (it is none of setup's defaults, and no setup record names it), so it is kept as yours. Delete the entry from the file and run alp setup again to replace it.`);
     }
   }
-  const others = [];
+  const others: string[] = [];
   for (const [id, found] of await teamSources(root, { library: home })) {
     if (BUILTIN_TEAMS.includes(id)) continue;
     const team = await resolveTeam(root, id, { library: home }).catch(() => undefined);
@@ -291,25 +302,28 @@ async function ownership(root, home, existing) {
 }
 
 /** The settings with setup's profiles where setup may write them and every other entry kept, and the record of what setup wrote. */
-function merge(written, profile, owners) {
+/** Who owns each existing entry, as ownership finds it. */
+type Owners = Awaited<ReturnType<typeof ownership>>;
+
+function merge(written: RawSettings, profile: TeamsProfiles, owners: Owners): { next: RawSettings; record: SetupRecord } {
   const next = { ...written, team: currentTeams(written) };
   delete next.profile;
   const record = structuredClone(owners.record);
   for (const [id, agents] of Object.entries(profile)) {
-    const team = { ...(next.team[id] ?? {}) };
+    const team = { ...(next.team![id] ?? {}) };
     for (const [name, config] of Object.entries(agents)) {
       if (!owners.rewrites(id, name)) { if (record[id]) delete record[id][name]; continue; }
       team[name] = config;
       (record[id] ??= {})[name] = profileFingerprint(config, name);
     }
-    next.team[id] = team;
+    next.team![id] = team;
     if (record[id] && !Object.keys(record[id]).length) delete record[id];
   }
   return { next, record };
 }
 
 /** A model for one provider: a native ID, or one prefixed with that provider. */
-function nativeModel(id, provider, where) {
+function nativeModel(id: string, provider: string, where: string): string {
   const model = id.startsWith(`${provider}:`) ? id.slice(provider.length + 1) : id;
   if (!model || /\s/.test(model) || /^(codex|claude):/.test(model) || (model.includes(':') && !id.startsWith(`${provider}:`))) throw new Error(`${where} expects a ${provider} model, got '${id}'`);
   return model;

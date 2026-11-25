@@ -5,18 +5,28 @@ import { launchCommand } from '@anhlp/alp-core/providers';
 const PROTOCOL = '2025-06-18';
 const client = { name: 'alp', version: '1' };
 
+/** A normalized MCP server definition: { command, args, env, cwd } for stdio, or { url, headers } for HTTP. */
+export type McpServer = { command?: string, args?: string[], env?: Record<string, string>, cwd?: string, url?: string, headers?: Record<string, string> };
+/** A JSON-RPC session with an MCP server or ACP agent. */
+export type RpcSession = {
+  // any: a JSON-RPC result, whose shape depends on the method and on the server that answers it
+  request(method: string, params?: unknown): Promise<any>,
+  notify(method: string): Promise<void>,
+  close(): Promise<void>,
+};
+
 /**
  * Starts an MCP server once and lists its tools (ALPD §43), for the Test button and
  * `alp mcp test`. `server` is a normalized definition: { command, args, env, cwd } for
  * stdio, or { url, headers } for HTTP. The server is stopped afterwards.
  * @returns {Promise<{ server?: { name?: string, version?: string }, tools: Array<{ name: string, description?: string }> }>}
  */
-export async function probeMcp(server, { cwd, timeoutMs = 15_000 } = {}) {
+export async function probeMcp(server: McpServer, { cwd, timeoutMs = 15_000 }: { cwd?: string, timeoutMs?: number } = {}): Promise<{ server?: { name?: string, version?: string }, tools: Array<{ name: string, description?: string }> }> {
   const session = server.url ? await httpSession(server, timeoutMs) : stdioSession(server, cwd, timeoutMs);
   try {
     const init = await session.request('initialize', { protocolVersion: PROTOCOL, capabilities: {}, clientInfo: client });
     await session.notify('notifications/initialized');
-    const tools = [];
+    const tools: Array<{ name: string, description?: string }> = [];
     let cursor;
     for (let page = 0; page < 20; page++) {
       const result = await session.request('tools/list', cursor ? { cursor } : {});
@@ -31,18 +41,19 @@ export async function probeMcp(server, { cwd, timeoutMs = 15_000 } = {}) {
 }
 
 /** A JSON-RPC session with a process over stdio; ACP providers are probed with it too. */
-export function stdioSession(server, cwd, timeoutMs) {
+export function stdioSession(server: McpServer, cwd: string | undefined, timeoutMs: number): RpcSession {
   // Its own process group, so a launcher such as npx is stopped with what it started.
   const env = { ...process.env, ...(server.env ?? {}) };
-  const launch = launchCommand(server.command, server.args ?? [], env);
+  const launch = launchCommand(server.command!, server.args ?? [], env);
   const child = spawn(launch.command, launch.args, { cwd: server.cwd ?? cwd, env: launch.env ? { ...env, ...launch.env } : env, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
-  const signal = name => { try { process.kill(-child.pid, name); } catch { child.kill(name); } };
+  const signal = (name: NodeJS.Signals) => { try { process.kill(-child.pid!, name); } catch { child.kill(name); } };
   let stderr = '';
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', chunk => { if (stderr.length < 4000) stderr += chunk; });
-  const pending = new Map();
-  let exited;
-  const failAll = error => { for (const { reject } of pending.values()) reject(error); pending.clear(); };
+  // any: the result of a request, as the server sent it
+  const pending = new Map<number, { resolve: (value: any) => void, reject: (error: Error) => void }>();
+  let exited: Error | undefined;
+  const failAll = (error: Error) => { for (const { reject } of pending.values()) reject(error); pending.clear(); };
   child.on('error', error => { exited = error; failAll(error); });
   child.on('exit', code => {
     exited = new Error(`${server.command} exited (${code ?? 'signal'})${stderr.trim() ? `: ${stderr.trim().split('\n').slice(-3).join(' ')}` : ''}`);
@@ -60,7 +71,7 @@ export function stdioSession(server, cwd, timeoutMs) {
   child.stdin.on('error', () => {});
   let id = 0;
   return {
-    request(method, params) {
+    request(method: string, params?: unknown) {
       if (exited) return Promise.reject(exited);
       const current = ++id;
       return new Promise((resolve, reject) => {
@@ -69,7 +80,7 @@ export function stdioSession(server, cwd, timeoutMs) {
         child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: current, method, params }) + '\n');
       });
     },
-    async notify(method) { if (!exited) child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method }) + '\n'); },
+    async notify(method: string) { if (!exited) child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method }) + '\n'); },
     async close() {
       if (child.exitCode !== null || child.signalCode !== null) return;
       const done = new Promise(resolve => child.once('exit', resolve));
@@ -82,11 +93,11 @@ export function stdioSession(server, cwd, timeoutMs) {
   };
 }
 
-async function httpSession(server, timeoutMs) {
-  let sessionId;
+async function httpSession(server: McpServer, timeoutMs: number): Promise<RpcSession> {
+  let sessionId: string | undefined;
   let id = 0;
-  const post = async body => {
-    const response = await fetch(server.url, {
+  const post = async (body: unknown) => {
+    const response = await fetch(server.url!, {
       method: 'POST',
       headers: { ...(server.headers ?? {}), 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...(sessionId ? { 'mcp-session-id': sessionId } : {}), 'mcp-protocol-version': PROTOCOL },
       body: JSON.stringify(body),
@@ -97,7 +108,7 @@ async function httpSession(server, timeoutMs) {
     return response;
   };
   return {
-    async request(method, params) {
+    async request(method: string, params?: unknown) {
       const current = ++id;
       const response = await post({ jsonrpc: '2.0', id: current, method, params });
       const text = await response.text();
@@ -110,9 +121,9 @@ async function httpSession(server, timeoutMs) {
       if (message.error) throw new Error(`${message.error.message ?? 'MCP error'} (${message.error.code})`);
       return message.result ?? {};
     },
-    async notify(method) { await post({ jsonrpc: '2.0', method }); },
+    async notify(method: string) { await post({ jsonrpc: '2.0', method }); },
     async close() {
-      if (sessionId) await fetch(server.url, { method: 'DELETE', headers: { ...(server.headers ?? {}), 'mcp-session-id': sessionId }, signal: AbortSignal.timeout(timeoutMs) }).catch(() => {});
+      if (sessionId) await fetch(server.url!, { method: 'DELETE', headers: { ...(server.headers ?? {}), 'mcp-session-id': sessionId }, signal: AbortSignal.timeout(timeoutMs) }).catch(() => {});
     },
   };
 }

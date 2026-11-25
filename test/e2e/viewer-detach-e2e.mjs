@@ -9,7 +9,7 @@ import path from 'node:path';
 import { createPaseoApi } from '@getpaseo/client';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
 import { initProject } from '@anhlp/alp-core/init';
-import { alpHome, connect, readLock } from '../../packages/client/src/index.js';
+import { alpHome, connect, readLock } from '../../packages/client/dist/index.js';
 
 const paseoHome = process.env.ALP_TEST_PASEO_HOME;
 const runLogDir = process.env.ALP_RUN_LOG_DIR;

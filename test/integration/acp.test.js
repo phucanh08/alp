@@ -6,8 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
 import { getEntry, listEntries, saveEntry } from '@anhlp/alp-core/library-edit';
-import { testEntry } from '../../packages/client/src/library-test.js';
-import { diagnose } from '../../packages/client/src/doctor.js';
+import { testEntry } from '../../packages/client/dist/library-test.js';
+import { diagnose } from '../../packages/client/dist/doctor.js';
 import { ModelCatalog, acpDecision, acpPermission, createAlpRuntime, setActiveCatalog } from '../../dist/runtime/index.js';
 import { listProviders } from '@anhlp/alp-core/providers';
 import { literal, templateBodySentence, templateIndexDescription } from '../support/template-text.js';
@@ -241,7 +241,7 @@ test('models, resuming, and what an ACP session cannot do', async t => {
 
  test('ACP configOptions discovers and selects OpenCode-style models', async t => {
   const { root, runtime, received } = await setup(t, { env: { FAKE_ACP_CONFIG: '1' } });
-  const { probeAcp } = await import('../../packages/client/src/acp-probe.js');
+  const { probeAcp } = await import('../../packages/client/dist/acp-probe.js');
   const discovered = await probeAcp({ command: process.execPath, args: [FAKE], env: { FAKE_ACP_CONFIG: '1' } }, { cwd: root, discover: true });
   assert.deepEqual(discovered.models, [{ id: 'small', label: 'Small' }, { id: 'large', label: 'Large' }]);
   assert.equal(discovered.currentModel, 'small');

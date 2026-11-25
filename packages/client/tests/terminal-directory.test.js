@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { watchTerminals } from '../src/portable.js';
+import { watchTerminals } from '../dist/portable.js';
 const id = n => String(n).padStart(32, '0');
 function connection(request) {
   const listeners = new Set();
