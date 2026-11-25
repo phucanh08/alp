@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initProject } from '../../packages/core/src/init.js';
-import { getEntry, listEntries, saveEntry } from '../../packages/core/src/library-edit.js';
+import { getEntry, listEntries, saveEntry } from '../../packages/core/src/library/entries/library-edit.js';
 import { testEntry } from '../../packages/client/src/library-test.js';
 import { diagnose } from '../../packages/client/src/doctor.js';
 import { ModelCatalog, acpDecision, acpPermission, createAlpRuntime, setActiveCatalog } from '../../dist/runtime/index.js';

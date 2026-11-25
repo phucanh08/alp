@@ -8,7 +8,7 @@ import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initProject } from '../../packages/core/src/init.js';
-import { installPack } from '../../packages/core/src/packs.js';
+import { installPack } from '../../packages/core/src/library/templates/packs.js';
 import { addAllowRule, commandDecision, parseRule, plainCommands, profileFor, simpleCommands, unwrapShell, validatePermissions } from '../../packages/core/src/permissions.js';
 import { claudePermissions, createAlpRuntime, createCopy, reclaimCopies, removeCopy, resolveSession } from '../../dist/runtime/index.js';
 import { teardown } from '../support/teardown.js';

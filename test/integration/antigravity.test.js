@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 import { initProject } from '../../packages/core/src/init.js';
-import { getEntry, listEntries, saveEntry } from '../../packages/core/src/library-edit.js';
+import { getEntry, listEntries, saveEntry } from '../../packages/core/src/library/entries/library-edit.js';
 import { testEntry } from '../../packages/client/src/library-test.js';
 import { diagnose } from '../../packages/client/src/doctor.js';
 import { probeAntigravity } from '../../packages/client/src/antigravity-probe.js';

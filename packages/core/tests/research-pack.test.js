@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { installPack, listPacks, validatePack } from '../src/packs.js';
+import { installPack, listPacks, validatePack } from '../src/library/templates/packs.js';
 import { ADVISORS, READ_ONLY_ROLES, commandDecision, profileFor } from '../src/permissions.js';
 import { BUILTIN_AGENTS, resolveAgent } from '../src/resolver.js';
 import { TEAM_ROLES, resolveTeam } from '../src/teams.js';

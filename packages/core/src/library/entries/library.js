@@ -1,10 +1,10 @@
-import { shippedTemplateRoot } from './template-path.js';
+import { shippedTemplateRoot } from '../../template-path.js';
 import { chmod, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
-import { moveFile } from './atomic.js';
+import { moveFile } from '../../atomic.js';
 import { createHash, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import { AlpError } from './errors.js';
+import { AlpError } from '../../errors.js';
 
 /**
  * The user's library: skills, role assignments and default providers, kept in

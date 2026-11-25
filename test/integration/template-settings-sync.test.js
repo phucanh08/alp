@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { initProject } from '../../packages/core/src/init.js';
-import { getEntry, saveEntry } from '../../packages/core/src/library-edit.js';
+import { getEntry, saveEntry } from '../../packages/core/src/library/entries/library-edit.js';
 import { resolveWorkflow } from '../../packages/core/src/workflow.js';
 
 const cli = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));

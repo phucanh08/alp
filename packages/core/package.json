@@ -108,19 +108,19 @@
     },
     "./library-edit": {
       "alp-source": {
-        "types": "./src/library-edit.js",
-        "default": "./src/library-edit.js"
+        "types": "./src/library/entries/library-edit.js",
+        "default": "./src/library/entries/library-edit.js"
       },
-      "types": "./dist/library-edit.d.ts",
-      "default": "./src/library-edit.js"
+      "types": "./dist/library/entries/library-edit.d.ts",
+      "default": "./src/library/entries/library-edit.js"
     },
     "./library": {
       "alp-source": {
-        "types": "./src/library.js",
-        "default": "./src/library.js"
+        "types": "./src/library/entries/library.js",
+        "default": "./src/library/entries/library.js"
       },
-      "types": "./dist/library.d.ts",
-      "default": "./src/library.js"
+      "types": "./dist/library/entries/library.d.ts",
+      "default": "./src/library/entries/library.js"
     },
     "./log": {
       "alp-source": {
@@ -297,19 +297,19 @@
     },
     "./skill-validate": {
       "alp-source": {
-        "types": "./src/skill-validate.js",
-        "default": "./src/skill-validate.js"
+        "types": "./src/library/templates/skill-validate.js",
+        "default": "./src/library/templates/skill-validate.js"
       },
-      "types": "./dist/skill-validate.d.ts",
-      "default": "./src/skill-validate.js"
+      "types": "./dist/library/templates/skill-validate.d.ts",
+      "default": "./src/library/templates/skill-validate.js"
     },
     "./packs": {
       "alp-source": {
-        "types": "./src/packs.js",
-        "default": "./src/packs.js"
+        "types": "./src/library/templates/packs.js",
+        "default": "./src/library/templates/packs.js"
       },
-      "types": "./dist/packs.d.ts",
-      "default": "./src/packs.js"
+      "types": "./dist/library/templates/packs.d.ts",
+      "default": "./src/library/templates/packs.js"
     }
   },
   "engines": {
