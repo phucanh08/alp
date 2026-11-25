@@ -2,7 +2,7 @@ import type { ProviderFactories, ProviderRegistry } from './providers/providers.
 import type { RuntimeKind, SessionSpec } from './resolve.js';
 import type { Envelope, SessionSnapshot, TreeStatus, UserQuestion } from './events.js';
 import type { Pin } from './board.js';
-import type { LiveEntry } from './live.js';
+import type { LiveEntry } from './sessions/lifecycle/live.js';
 import type { ProviderUsage } from './usage.js';
 import type { AcpProvider } from './providers/transports/acp-transport.js';
 import type { AntigravityProvider } from './providers/transports/antigravity-transport.js';
@@ -305,8 +305,8 @@ export type AlpRuntime = {
   reconfigure?(sessionId: string, changes: ConfigureChanges, options?: { fresh?: boolean; onApplied?: (result: ConfigureResult) => Promise<void> }): Promise<ConfigureResult>;
 };
 
-import type { ConfigureChanges, EffectiveConfig } from './configure.js';
-export type { ConfigureChanges, EffectiveConfig } from './configure.js';
+import type { ConfigureChanges, EffectiveConfig } from './sessions/configuration/configure.js';
+export type { ConfigureChanges, EffectiveConfig } from './sessions/configuration/configure.js';
 import type { ConfigurePreview } from '@anhlp/alp-protocol/session';
 export type { ConfigurePreview } from '@anhlp/alp-protocol/session';
 /** What reconfigure did: the session as it runs now, its effective configuration, and whether its process restarted. */

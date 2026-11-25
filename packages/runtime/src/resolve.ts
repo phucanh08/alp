@@ -12,7 +12,7 @@ import type { AntigravityProvider } from './providers/transports/antigravity-tra
 import { ensureLibrary } from '@anhlp/alp-core/library';
 import { compileAgent } from '@anhlp/alp-core/adapter';
 import { capMode, profileFor, READ_ONLY_ROLES } from '@anhlp/alp-core/permissions';
-import { compactSettings } from './compact.js';
+import { compactSettings } from './sessions/conversation/compact.js';
 import { userLanguage } from '@anhlp/alp-core/user-settings';
 import { claudeSandboxAvailable } from './providers/transports/claude-transport.js';
 import type { ResolvedAgent } from '@anhlp/alp-core/types';
