@@ -30,8 +30,6 @@ export type DesktopFound =
 /**
  * The CFBundleIdentifier of the app bundle at `app`, or undefined when it cannot be read. An XML
  * Info.plist (what electron-builder writes) is read directly; any other form through plutil.
- * @param {string} app
- * @returns {Promise<string | undefined>}
  */
 export async function readBundleId(app: string): Promise<string | undefined> {
   const plist = path.join(app, 'Contents', 'Info.plist');
@@ -46,15 +44,12 @@ export async function readBundleId(app: string): Promise<string | undefined> {
   });
 }
 
-/** @param {string} file */
 const isDirectory = (file: string) => stat(file).then(info => info.isDirectory(), () => false);
-/** @param {string} file */
 const isFile = (file: string) => stat(file).then(info => info.isFile(), () => false);
 
 /**
  * The desktop app's directory in a checkout: `dir` itself or `dir/apps/desktop`, whichever holds the
  * package named alp-desktop.
- * @param {string} dir
  */
 async function desktopPackage(dir: string) {
   for (const candidate of [path.join(dir, 'apps', 'desktop'), dir]) {
@@ -67,10 +62,6 @@ async function desktopPackage(dir: string) {
 /**
  * Where the app is and how to start it. Exported for tests.
  * `onSkip` hears about each ALP.app passed over because its bundle id is not DESKTOP_BUNDLE_ID.
- * @param {{ platform?: NodeJS.Platform, home?: string, env?: NodeJS.ProcessEnv, applications?: string[], onSkip?: (message: string) => void }} [options]
- * @returns {Promise<{ kind: 'app', app: string, command: string, args: string[] }
- *   | { kind: 'checkout', dir: string, command: string, args: string[] }
- *   | { kind: 'missing', reason?: string }>}
  */
 export async function resolveDesktop({ platform = process.platform, home = os.homedir(), env = process.env, applications, onSkip = () => {} }: DesktopOptions = {}): Promise<DesktopFound> {
   if (platform === 'darwin') {
@@ -100,10 +91,6 @@ const INSTRUCTIONS = `ALP's desktop app is not installed.
       ALP_DESKTOP_CHECKOUT=<checkout> alp desktop
 Meanwhile, \`alp dashboard\` opens ALP in your browser.`;
 
-/**
- * @param {string[]} args
- * @param {{ resolve?: typeof resolveDesktop, launch?: (command: string, args: string[], env: NodeJS.ProcessEnv) => Promise<void> }} [deps]
- */
 export async function desktopCommand(args: string[], { resolve = resolveDesktop, launch = start }: { resolve?: typeof resolveDesktop; launch?: (command: string, args: string[], env: NodeJS.ProcessEnv) => Promise<void> } = {}) {
   if (args.length) throw new UsageError();
   const found = await resolve({ onSkip: message => console.error(message) });
@@ -120,7 +107,7 @@ export async function desktopCommand(args: string[], { resolve = resolveDesktop,
   console.log(found.kind === 'app' ? `Opened ${found.app}.` : `Started the desktop app from ${found.dir}.`);
 }
 
-/** Starts `command` detached, resolving once it spawned. @param {string} command @param {string[]} args @param {NodeJS.ProcessEnv} env */
+/** Starts `command` detached, resolving once it spawned. */
 function start(command: string, args: string[], env: NodeJS.ProcessEnv) {
   return new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, { stdio: 'ignore', detached: true, env });

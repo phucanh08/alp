@@ -10,16 +10,15 @@ import { UsageError } from './usage.js';
  *
  * The role's module reads its options from process.argv as when run directly, so argv is rewritten
  * to `[runtime, entry, ...args]` before the module loads.
- * @param {'daemon' | 'dashboard' | 'acp'} role
- * @param {string} file the role's script beside this CLI
- * @param {string[]} args
+ *
+ * @param file the role's script beside this CLI
  */
 export async function runRole(role: 'daemon' | 'dashboard' | 'acp', file: string, args: string[]) {
   process.argv = [process.argv[0], file, ...args];
   return import(pathToFileURL(file).href);
 }
 
-/** alp bridge acp|antigravity: the stdio MCP bridge an agent CLI starts to reach alpd's tools. @param {string[]} args */
+/** alp bridge acp|antigravity: the stdio MCP bridge an agent CLI starts to reach alpd's tools. */
 export function bridgeCommand(args: string[]) {
   if (args.length !== 1 || !['acp', 'antigravity'].includes(args[0])) throw new UsageError();
   runBridge(args[0]);

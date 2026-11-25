@@ -33,19 +33,15 @@ export type DashboardMigration = { stopped?: number; held?: boolean; moved: stri
 /** What a home still has under the names from before the rename (see legacyLeftovers). */
 export type LegacyLeftovers = { legacy?: { pid?: number; reason?: string }; pending: string[]; kept: string[] };
 
-/** @param {string} file */
 const exists = (file: string) => lstat(file).then(() => true, () => false);
-/** A file's JSON, or undefined when it is missing or not JSON. @param {string} file */
+/** A file's JSON, or undefined when it is missing or not JSON. */
 const readJson = (file: string) => readFile(file, 'utf8').then(text => { try { return JSON.parse(text); } catch { return undefined; } }, () => undefined);
-/** @param {unknown} error */
 const code = (error: unknown): string | undefined => (error as NodeJS.ErrnoException | undefined)?.code;
 
 /**
- * @param {string} home
- * @param {{ strict?: boolean }} [options] strict: a legacy holder alp cannot stop is an error (a start
+ * @param options strict: a legacy holder alp cannot stop is an error (a start
  *   would otherwise lose its port to it); without it, it is reported and the files are left alone.
- * @returns {Promise<{ stopped?: number, held?: boolean, moved: string[], kept: string[], warnings: string[] }>}
- *   held: a legacy holder alp would not stop is still running (only without strict).
+ * @returns held: a legacy holder alp would not stop is still running (only without strict).
  */
 export async function migrateDashboard(home: string, { strict = false }: { strict?: boolean } = {}): Promise<DashboardMigration> {
   const report: DashboardMigration = { moved: [], kept: [], warnings: [] };
@@ -110,8 +106,6 @@ export async function migrateDashboard(home: string, { strict = false }: { stric
  * What a home still has under the names from before the rename, without changing anything (for
  * `alp dashboard --status`): `pending` the next `alp dashboard` moves, `kept` it leaves because the
  * new name exists, and the legacy service if one runs.
- * @param {string} home
- * @returns {Promise<{ legacy?: { pid?: number, reason?: string }, pending: string[], kept: string[] }>}
  */
 export async function legacyLeftovers(home: string): Promise<LegacyLeftovers> {
   const result: LegacyLeftovers = { pending: [], kept: [] };

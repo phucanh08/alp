@@ -41,21 +41,19 @@ export function dashboardScript() {
 export const dashboardEntry = () => selfEntry(dashboardScript());
 
 /**
- * @typedef {{ lock: string, info: string, app: string, what: string }} Service
  * The integration lock's name, the file the service publishes, the `app` it writes there, and what
  * messages call it.
  */
 export type Service = { lock: string; info: string; app: string; what: string };
 /** Who owns a service's lock: a process proven safe to stop, or why it is not (see serviceOwner). */
 export type ServiceOwner = { pid: number; app: unknown } | { reason: string; alive: boolean; kind?: 'transient' | 'foreign' | 'unknown' };
-/** @type {Service} */
 export const DASHBOARD: Service = Object.freeze({ lock: 'dashboard', info: 'dashboard.json', app: 'alp-dashboard', what: 'alp dashboard' });
-/** alp web as 0.0.1-beta.8 and earlier ran it (and, before that, the Paseo integration). @type {Service} */
+/** alp web as 0.0.1-beta.8 and earlier ran it (and, before that, the Paseo integration). */
 export const LEGACY_WEB: Service = Object.freeze({ lock: 'web', info: 'web.json', app: 'alp-web', what: 'alp web from before its rename to alp dashboard' });
 
 const readJson = async (file: string) => JSON.parse(await readFile(file, 'utf8'));
 
-/** When `pid` started and elapsed seconds from ps, or undefined when ps cannot say. @param {number} pid */
+/** When `pid` started and elapsed seconds from ps, or undefined when ps cannot say. */
 async function processTimes(pid: number) {
   try {
     const { stdout } = await execFileAsync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8', timeout: 5_000 });
@@ -77,8 +75,6 @@ async function processTimes(pid: number) {
  * The reuse proof compares the lock's creation time with the process's start from ps: when
  * `startedUptime` is recorded, monotonic uptime comparison prevents clock step vulnerabilities.
  * For legacy locks, wall-clock `startedAt` is compared.
- * @param {string} home @param {Service} [service]
- * @returns {Promise<{ pid: number, app: unknown } | { reason: string, alive: boolean, kind?: 'transient' | 'foreign' | 'unknown' }>}
  */
 export async function serviceOwner(home: string, service: Service = DASHBOARD): Promise<ServiceOwner> {
   const lockFile = path.join(home, 'integrations', `${service.lock}.lock`);
@@ -118,7 +114,6 @@ export async function serviceOwner(home: string, service: Service = DASHBOARD): 
 
 /**
  * Sends SIGTERM to a proven owner and waits for it to exit.
- * @param {number} pid @param {string} what @param {number} [timeoutMs]
  */
 async function terminate(pid: number, what: string, timeoutMs = 20_000) {
   try { process.kill(pid, 'SIGTERM'); } catch (error) { if ((error as NodeJS.ErrnoException | undefined)?.code === 'ESRCH') return; throw error; }
@@ -132,7 +127,7 @@ async function terminate(pid: number, what: string, timeoutMs = 20_000) {
 
 const PASEO_BEFORE_RENAME = 'The Paseo integration from before its rename';
 
-/** What a proven owner of `service`'s lock is, by the `app` its file names. @param {Service} service @param {unknown} app */
+/** What a proven owner of `service`'s lock is, by the `app` its file names. */
 const ownerName = (service: Service, app: unknown) => app === service.app || service === DASHBOARD ? service.what : PASEO_BEFORE_RENAME;
 
 /**
@@ -140,7 +135,6 @@ const ownerName = (service: Service, app: unknown) => app === service.app || ser
  * the Paseo integration from before its own), waiting up to `timeoutMs` for a starting owner to
  * publish what proves it. Resolves with the pid it stopped, or undefined once no live process owns
  * the lock; refuses at once an owner that is foreign or cannot be proven.
- * @param {string} home @param {number} [timeoutMs] @param {Service} [service]
  */
 export async function stopService(home: string, timeoutMs = 30_000, service: Service = DASHBOARD): Promise<number | undefined> {
   const deadline = Date.now() + timeoutMs;
@@ -154,7 +148,7 @@ export async function stopService(home: string, timeoutMs = 30_000, service: Ser
   }
 }
 
-/** The opening of the message for a lock held by a process alp would not stop. @param {string} home @param {Service} [service] */
+/** The opening of the message for a lock held by a process alp would not stop. */
 export function refusal(home: string, service: Service = DASHBOARD): string {
   const lock = path.join(home, 'integrations', `${service.lock}.lock`);
   return service === DASHBOARD
@@ -165,8 +159,6 @@ export function refusal(home: string, service: Service = DASHBOARD): string {
 /**
  * Probes whether the published dashboard URL is live and answering requests.
  * Accepts only loopback HTTP/HTTPS addresses.
- * @param {string | undefined} url
- * @param {number} [timeoutMs]
  */
 export async function isDashboardReady(url: string | undefined, timeoutMs = 1_000): Promise<boolean> {
   if (typeof url !== 'string' || !url) return false;
@@ -185,10 +177,6 @@ export async function isDashboardReady(url: string | undefined, timeoutMs = 1_00
  * Whether the published file is genuinely claimed by a live alp-dashboard process.
  * If the process is proven foreign (e.g. a reused PID or from another boot) or
  * the URL does not answer HTTP requests, it is never claimed.
- * @param {any} published
- * @param {number | undefined} lockPid
- * @param {any} held
- * @param {number} [timeoutMs]
  */
 export async function isServiceClaimed(
   // any: the service's published <name>.json as read from disk; only app, pid and url are checked.
@@ -212,7 +200,6 @@ const TOKEN = /^alpgw1\.[a-f0-9]{16}\.[A-Za-z0-9_-]{43}$/;
 
 /**
  * Where the service answers for `home`.
- * @param {string} home @param {{ platform?: NodeJS.Platform }} [options]
  */
 export function tokenSocketPath(home: string, { platform = process.platform }: { platform?: NodeJS.Platform } = {}): string {
   const hash = createHash('sha256').update(home).digest('hex');
@@ -226,7 +213,6 @@ export function tokenSocketPath(home: string, { platform = process.platform }: {
 /**
  * Throws unless `socketPath` is a socket of the user's with mode 0600 in a directory of the user's
  * with mode 0700 (POSIX; nothing to check for a Windows pipe).
- * @param {string} socketPath
  */
 export async function assertTokenSocket(socketPath: string): Promise<void> {
   if (process.platform === 'win32') return;
@@ -243,8 +229,6 @@ export async function assertTokenSocket(socketPath: string): Promise<void> {
 /**
  * Asks the running service of `home` for its token. Throws when there is no service, the socket is
  * not private, or the answer is not a token.
- * @param {string} home @param {{ timeoutMs?: number }} [options]
- * @returns {Promise<{ token: string, credentialId: string | undefined, pid: number | undefined }>}
  */
 export async function readToken(home: string, { timeoutMs = 5_000 }: { timeoutMs?: number } = {}): Promise<{ token: string; credentialId: string | undefined; pid: number | undefined }> {
   const socketPath = tokenSocketPath(home);

@@ -25,7 +25,6 @@ const PASEO = 'paseo';
  * Starts the Paseo integration. For one release, a home that still has only the descriptor
  * registered before the rename (`integrations/web.json`) keeps working, with a hint to re-register.
  * Exported for tests.
- * @param {string} home
  */
 export async function startPaseoIntegration(home: string) {
   const entry = await discoverIntegration(PASEO, { home });
@@ -44,8 +43,6 @@ export async function startPaseoIntegration(home: string) {
  * The entry named by the pre-rename descriptor `<home>/integrations/web.json`, and nothing else: no
  * environment, distribution or PATH lookup, since the name `web` belonged to alp web after that. A relative
  * `main` resolves against the descriptor's directory, then the home, as discovery does.
- * @param {string} file
- * @param {string} home
  */
 async function legacyDescriptorEntry(file: string, home: string): Promise<string | undefined> {
   // A missing or corrupt descriptor is no registration: the caller then reports the missing package.
@@ -76,9 +73,6 @@ async function projectArgs() {
 /**
  * Registers `directory` as a project in alpd via IPC (`project.register`).
  * If alpd cannot be reached or the call fails, this is best-effort.
- * @param {string} home
- * @param {string} directory
- * @param {{ timeoutMs?: number, connectClient?: typeof connect }} [options]
  */
 export async function registerProject(home: string, directory: string, { timeoutMs = 5_000, connectClient = connect }: { timeoutMs?: number; connectClient?: typeof connect } = {}): Promise<void> {
   const socket = daemonPaths(home).socket;
@@ -121,10 +115,6 @@ export async function registerProject(home: string, directory: string, { timeout
 /**
  * Waits until the credential in `<home>/dashboard/credentials.json` contains `project`.
  * Polls for up to `timeoutMs` (default 5,000 ms).
- * @param {string} home
- * @param {string} credentialId
- * @param {string} project
- * @param {{ timeoutMs?: number }} [options]
  */
 async function waitForGrant(home: string, credentialId: string | undefined, project: string, { timeoutMs = 5_000 }: { timeoutMs?: number } = {}) {
   const credentialsFile = path.join(home, 'dashboard', 'credentials.json');
@@ -143,7 +133,7 @@ async function waitForGrant(home: string, credentialId: string | undefined, proj
   return false;
 }
 
-/** Whether settings.json turns alp dashboard off (`dashboard.enabled`, else `web.enabled` from before the rename). @param {string} home */
+/** Whether settings.json turns alp dashboard off (`dashboard.enabled`, else `web.enabled` from before the rename). */
 async function dashboardDisabled(home: string) {
   const settings = await readJsonFile(path.join(home, 'settings.json'));
   return dashboardSettings(settings).enabled === false;
@@ -163,38 +153,32 @@ const PRINT_EXIT = { failed: 1, usage: 2, disabled: 3, agent: 4, not_built: 5, c
 /**
  * An Error of failure class `kind` (a key of PRINT_EXIT). Without --json the class changes nothing:
  * the message is printed and alp exits 1 as before.
- * @param {keyof typeof PRINT_EXIT} kind @param {string} message @param {ErrorOptions} [options]
  */
 const failure = (kind: keyof typeof PRINT_EXIT, message: string, options?: ErrorOptions) => Object.assign(new Error(message, options), { kind });
 
 /**
  * Runs `work`; an error it throws without a class gets `kind`. The error itself is rethrown.
- * @template T @param {keyof typeof PRINT_EXIT} kind @param {() => T | Promise<T>} work @returns {Promise<T>}
  */
 async function classed<T>(kind: keyof typeof PRINT_EXIT, work: () => T | Promise<T>): Promise<T> {
   try { return await work(); }
   catch (error) { throw classify(error, kind); }
 }
 
-/** `error`, given the class `kind` unless it has one. @param {unknown} error @param {keyof typeof PRINT_EXIT} kind */
+/** `error`, given the class `kind` unless it has one. */
 function classify(error: unknown, kind: keyof typeof PRINT_EXIT) {
   if (error instanceof Error && !('kind' in error)) Object.assign(error, { kind });
   return error;
 }
 
-/** A file's JSON, or undefined when it is missing or not JSON (as before: a broken file counts as none). @param {string} file */
+/** A file's JSON, or undefined when it is missing or not JSON (as before: a broken file counts as none). */
 const readJsonFile = (file: string) => readFile(file, 'utf8').then(text => { try { return JSON.parse(text); } catch { return undefined; } }, () => undefined);
-/** @param {string} home */
 const readPublished = (home: string) => readJsonFile(path.join(home, DASHBOARD.info));
-/** @param {string} home */
 const readServiceLock = (home: string) => readJsonFile(path.join(home, 'integrations', `${DASHBOARD.lock}.lock`));
 
 /**
  * The running service as its files and its listener show it, without ps (so also on Windows): the
  * lock names a live pid, dashboard.json names the same pid and is alp-dashboard's, and its address
  * answers. `held` is a live lock owner that is not (yet) that.
- * @param {string} home
- * @returns {Promise<{ pid: number, port: number, url: string } | { held: number } | undefined>}
  */
 async function runningDashboard(home: string): Promise<{ pid: number; port: number; url: string } | { held: number } | undefined> {
   const lock = await readServiceLock(home);
@@ -212,8 +196,8 @@ const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost'];
  * Starts alp-dashboard unless it runs and returns the address to open, the token in its fragment
  * (which the browser never sends to a server). The token comes from the running service over its
  * private token socket (t-cee3); no file holds it.
- * @param {string} home @param {string} entry @param {{ port?: number }} [options]
- * @returns {Promise<{ base: string, token: string, pid: number, port: number }>} `base` is dashboard.json's url (`http://127.0.0.1:<port>/`)
+ *
+ * @returns `base` is dashboard.json's url (`http://127.0.0.1:<port>/`)
  */
 async function serveDashboard(home: string, entry: string, { port }: { port?: number } = {}): Promise<{ base: string; token: string; pid: number; port: number }> {
   // A lock held by a process proven not to be alp dashboard: say so now rather than wait for it. A
@@ -260,10 +244,10 @@ async function serveDashboard(home: string, entry: string, { port }: { port?: nu
   return { base: info.url, token: answer.token, pid: lock.pid, port: info.port };
 }
 
-/** The address to open: the token rides in the fragment, which a browser never sends to a server. @param {{ base: string, token: string }} served */
+/** The address to open: the token rides in the fragment, which a browser never sends to a server. */
 const addressOf = (served: { base: string; token: string }) => `${served.base}#token=${served.token}`;
 
-/** Reports what the migration from `alp web` did, on stderr (stdout carries only the address). @param {Awaited<ReturnType<typeof migrateDashboard>>} report */
+/** Reports what the migration from `alp web` did, on stderr (stdout carries only the address). */
 function reportMigration(report: DashboardMigration) {
   if (report.stopped) console.error(`Stopped ${LEGACY_WEB.what} (pid ${report.stopped}).`);
   if (report.moved.length) console.error(`Moved alp web's files to alp dashboard's names: ${report.moved.join('; ')}`);
@@ -275,7 +259,6 @@ function reportMigration(report: DashboardMigration) {
  * _report_dashboard_status): what runs, or that nothing does; always exit 0, and nothing is changed
  * (the move from `alp web` waits for a command that starts or stops). The address is printed
  * without its token.
- * @param {string} home
  */
 async function statusCommand(home: string) {
   try {
@@ -303,7 +286,6 @@ async function statusCommand(home: string) {
  * _dashboard_lifecycle_flags): only this ALP home's service (and alp web from before the rename,
  * which the move stops); nothing running is not an error; a process alp cannot prove is the service
  * is left running and the command fails.
- * @param {string} home
  */
 async function stopCommand(home: string) {
   const report = await migrateDashboard(home);
@@ -325,7 +307,6 @@ async function stopCommand(home: string) {
  * A token an older alp dashboard (before t-cee3) wrote into dashboard.json stays readable there, and
  * its credential live, until the service starts again. --stop clears it too: the service's own
  * `--rotate` revokes every credential and strips the token, under the dashboard lock.
- * @param {string} home
  */
 async function dropLeftToken(home: string) {
   let published;
@@ -459,7 +440,6 @@ const PASEO_ROTATE_REQUEST = '{"op":"rotate"}';
 /**
  * Where the Paseo integration of `home` answers for its token. Must match tokenSocketPath in
  * integrations/paseo/server/web.ts (the CLI does not depend on that package).
- * @param {string} home @param {{ platform?: NodeJS.Platform, uid?: number }} [options]
  */
 export function paseoTokenSocketPath(home: string, { platform = process.platform, uid = process.getuid?.() }: { platform?: NodeJS.Platform; uid?: number } = {}): string {
   const hash = createHash('sha256').update(home).digest('hex');
@@ -471,8 +451,6 @@ export function paseoTokenSocketPath(home: string, { platform = process.platform
 /**
  * Asks the Paseo integration of `home` for its password over its token socket, or (`rotate`) for a
  * new one. Refuses a socket that is not the user's 0600 socket in a 0700 directory of the user's.
- * @param {string} home @param {{ rotate?: boolean, timeoutMs?: number, socketPath?: string }} [options]
- * @returns {Promise<{ token: string, serverId: string | undefined, pid: number | undefined }>}
  */
 export async function readPaseoToken(home: string, { rotate = false, timeoutMs = 10_000, socketPath = paseoTokenSocketPath(home) }: { rotate?: boolean; timeoutMs?: number; socketPath?: string } = {}): Promise<{ token: string; serverId: string | undefined; pid: number | undefined }> {
   if (process.platform !== 'win32') {
@@ -527,7 +505,7 @@ export async function requestPairing(
   throw last ?? new Error('alpd did not register web.pairing; run `alp dashboard pair` again to let the integration start');
 }
 
-/** Why the password could not be had, and what to do. @param {string} home @param {unknown} error */
+/** Why the password could not be had, and what to do. */
 const noPassword = (home: string, error: unknown) => `the Paseo integration did not give its password (${(error as Error | undefined)?.message ?? error}). An integration started by a version of ALP from before t-cde5 has no token socket: stop it (the pid in ${path.join(home, `${PASEO}.json`)}), then run alp dashboard pair again.`;
 
 async function pairCommand(args: string[]) {
