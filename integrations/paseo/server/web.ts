@@ -27,7 +27,7 @@ import { assertPrivateDirectory } from '@anhlp/alp-client/index';
  * `<home>/relay-keypair.json` moves into the directory on the next start and leaves the old place.
  *
  * `alp dashboard pair` gets the token over a local socket only the user can connect to (the same
- * shape as alp dashboard's, packages/cli/src/dashboard/token-socket.js):
+ * shape as alp dashboard's, packages/cli/src/dashboard/token-socket.ts):
  * - POSIX: `<home>/paseo/token.sock`, or for a home whose path is too long for a socket address
  *   `/tmp/alp-paseo-<uid>-<hash>/token.sock`; mode 0600 inside a directory of the user's with mode
  *   0700 whose ancestors no other user may write. The integration checks both after it listens and

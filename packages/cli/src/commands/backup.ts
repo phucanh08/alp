@@ -7,7 +7,6 @@ import { daemonHeld, holdDaemon, releaseHold } from '@anhlp/alp-client/supervise
 import { start, stop } from '../daemon.js';
 import { UsageError } from './usage.js';
 
-/* global __ALP_VERSION__ */
 declare const __ALP_VERSION__: string;
 const VERSION = typeof __ALP_VERSION__ === 'string' ? __ALP_VERSION__ : 'dev';
 const BY = `alp ${VERSION}`;

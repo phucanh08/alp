@@ -32,7 +32,7 @@ it against SHA256SUMS and, when gh is installed, its build provenance. --check o
 ALP_UPDATE_BASE_URL (as --base-url, an https:// or file:// mirror) and ALP_INSTALL_REPO (owner/name) override the source.
 The project template upgrade is \`alp update-template [directory]\`.`;
 
-/** The release platform of this process: darwin-arm64, linux-x64, windows-x64. @param {string} platform @param {string} arch */
+/** The release platform of this process: darwin-arm64, linux-x64, windows-x64. */
 export function releasePlatform(platform: string = process.platform, arch: string = process.arch): string {
   const osName = ({ darwin: 'darwin', linux: 'linux', win32: 'windows' } as Record<string, string | undefined>)[platform];
   const archName = ({ x64: 'x64', arm64: 'arm64' } as Record<string, string | undefined>)[arch];
@@ -40,10 +40,10 @@ export function releasePlatform(platform: string = process.platform, arch: strin
   return `${osName}-${archName}`;
 }
 
-/** The archive extension of a release platform. @param {string} platform */
+/** The archive extension of a release platform. */
 export const archiveExtension = (platform: string): '.zip' | '.tar.gz' => platform.startsWith('windows-') ? '.zip' : '.tar.gz';
 
-/** Parses SHA256SUMS into [{ sha256, name }]. @param {string} text */
+/** Parses SHA256SUMS into [{ sha256, name }]. */
 export function parseSums(text: string): Array<{ sha256: string; name: string }> {
   const entries: Array<{ sha256: string; name: string }> = [];
   for (const raw of text.split(/\r?\n/)) {
@@ -58,8 +58,6 @@ export function parseSums(text: string): Array<{ sha256: string; name: string }>
 
 /**
  * The archive for `platform` in SHA256SUMS: alp-<version>-<platform>.<ext>, for `version` when given.
- * @param {string} sumsText @param {string} platform @param {string} [version]
- * @returns {{ name: string, sha256: string, version: string }}
  */
 export function selectAsset(sumsText: string, platform: string, version?: string): { name: string; sha256: string; version: string } {
   const suffix = `-${platform}${archiveExtension(platform)}`;
@@ -73,14 +71,14 @@ export function selectAsset(sumsText: string, platform: string, version?: string
 
 export const sha256 = (bytes: Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
 
-/** Refuses an archive whose digest differs from SHA256SUMS. @param {Uint8Array} bytes @param {{ name: string, sha256: string }} asset */
+/** Refuses an archive whose digest differs from SHA256SUMS. */
 export function verifyChecksum(bytes: Uint8Array, asset: { name: string; sha256: string }): string {
   const actual = sha256(bytes);
   if (actual !== asset.sha256) throw new Error(`Checksum mismatch for ${asset.name} (expected ${asset.sha256}, got ${actual}); nothing was replaced`);
   return actual;
 }
 
-/** Compares dotted versions numerically, prerelease below release. @param {string} a @param {string} b */
+/** Compares dotted versions numerically, prerelease below release. */
 export function compareVersions(a: string, b: string): number {
   const split = (v: string) => {
     // Build metadata (+b) does not order versions.
@@ -99,7 +97,7 @@ export function compareVersions(a: string, b: string): number {
   return x.pre.localeCompare(y.pre, 'en', { numeric: true });
 }
 
-/** The base URL that holds SHA256SUMS and the archives. @param {{ repo: string, version?: string, baseUrl?: string }} options */
+/** The base URL that holds SHA256SUMS and the archives. */
 export function releaseBaseUrl({ repo, version, baseUrl }: { repo: string; version?: string; baseUrl?: string }): string {
   let base = baseUrl;
   if (!base) base = version ? `https://github.com/${repo}/releases/download/v${version}` : `https://github.com/${repo}/releases/latest/download`;
@@ -121,7 +119,6 @@ const isLoopbackHttp = (url: URL) => url.protocol === 'http:' && LOOPBACK.includ
  * Whether a download may go to `next`: every hop of an https download stays https, since one plain
  * http hop lets a man in the middle replace the archive and SHA256SUMS together. Only a loopback
  * http mirror given explicitly (tests) may use loopback http, besides https.
- * @param {string} start @param {string} next
  */
 export function allowedHop(start: string, next: string): boolean {
   const to = new URL(next);
@@ -132,7 +129,6 @@ export function allowedHop(start: string, next: string): boolean {
 /**
  * Downloads `url` (https, loopback http or file) within a time and size limit, following at most 10
  * redirects itself and refusing any hop that `allowedHop` refuses.
- * @param {string} url @param {{ timeoutMs?: number, max?: number, fetch?: typeof globalThis.fetch }} [options]
  */
 export async function fetchBytes(url: string, { timeoutMs = 10 * 60_000, max = MAX_DOWNLOAD, fetch: fetchImpl = globalThis.fetch }: { timeoutMs?: number; max?: number; fetch?: typeof globalThis.fetch } = {}): Promise<Uint8Array<ArrayBuffer>> {
   if (url.startsWith('file:')) {
@@ -167,7 +163,7 @@ export async function fetchBytes(url: string, { timeoutMs = 10 * 60_000, max = M
   return new Uint8Array(Buffer.concat(chunks));
 }
 
-/** Whether a program is on PATH. @param {string} name */
+/** Whether a program is on PATH. */
 function which(name: string): string | undefined {
   const result = spawnSync(process.platform === 'win32' ? 'where' : 'which', [name], { encoding: 'utf8', windowsHide: true });
   return result.status === 0 ? result.stdout.split(/\r?\n/)[0].trim() || undefined : undefined;
@@ -176,7 +172,6 @@ function which(name: string): string | undefined {
 /**
  * Verifies the archive's build provenance with gh. Returns 'verified', or 'unavailable' when gh is
  * absent (ALP_UPDATE_NO_GH=1 treats it as absent); throws when gh reports a failure.
- * @param {string} file @param {{ repo: string, env?: NodeJS.ProcessEnv, run?: typeof spawnSync, find?: typeof which }} options
  */
 export function verifyProvenance(file: string, { repo, env = process.env, run = spawnSync, find = which }: { repo: string; env?: NodeJS.ProcessEnv; run?: typeof spawnSync; find?: (name: string) => string | undefined }): 'verified' | 'unavailable' {
   if (env.ALP_UPDATE_NO_GH === '1') return 'unavailable';
@@ -196,7 +191,6 @@ const pause = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(
 /**
  * Runs `action`, again after a pause while Windows reports the file busy: a virus scanner holds an
  * executable it just saw run (the staged bundle's --version) for a moment. About 8 s in all.
- * @template T @param {() => T} action @param {(ms: number) => void} [sleep]
  */
 export function retryBusy<T>(action: () => T, sleep: (ms: number) => void = pause, attempts = 25): T {
   for (let attempt = 1; ; attempt++) {
@@ -207,7 +201,7 @@ export function retryBusy<T>(action: () => T, sleep: (ms: number) => void = paus
   }
 }
 
-/** What to say outside the ALP bundle (an npm install). @param {string[]} positionals */
+/** What to say outside the ALP bundle (an npm install). */
 export function npmMessage(positionals: string[] = []): string {
   const lines: string[] = [];
   if (positionals.length) lines.push(`alp: ${TEMPLATE_HINT}`);
@@ -215,7 +209,7 @@ export function npmMessage(positionals: string[] = []): string {
   return lines.join('\n');
 }
 
-/** Why this bundle cannot update itself: it was not installed by install.sh / install.ps1. @param {string} root */
+/** Why this bundle cannot update itself: it was not installed by install.sh / install.ps1. */
 export const notInstalledMessage = (root: string): string => `alp: ${root} is not an installed ALP (no app/current points at it); install the release with install.sh (Windows: install.ps1), which alp update can then keep up to date:\n  curl -fsSL https://github.com/${DEFAULT_REPO}/releases/latest/download/install.sh | sh`;
 
 /**
@@ -228,12 +222,11 @@ export const notInstalledMessage = (root: string): string => `alp: ${root} is no
  * knowledge for the repository's own scripts. This package is published, so it cannot import from
  * scripts/, and scripts/ must keep working before anything is built. Change one and change the
  * other; test/integration/spawn-command.test.js asserts the two agree, and refuses any third copy.
- * @param {string} platform @param {Record<string, string | undefined>} env
  */
 export const systemTar = (platform: string = process.platform, env: Record<string, string | undefined> = process.env): string =>
   platform === 'win32' ? path.win32.join(env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
 
-/** Extracts the archive into `directory` and returns the bundle inside it. @param {string} archive @param {string} directory @param {{ name: string }} asset @param {string} platform */
+/** Extracts the archive into `directory` and returns the bundle inside it. */
 function extract(archive: string, directory: string, asset: { name: string }, platform: string, run = spawnSync): string {
   const windows = platform.startsWith('windows-');
   // tar reads both: GNU/bsd tar for .tar.gz, Windows' bsdtar (tar.exe) for .zip.
@@ -245,7 +238,7 @@ function extract(archive: string, directory: string, asset: { name: string }, pl
   return root;
 }
 
-/** The bundle's own Node and CLI: run without its launcher, so Windows needs no shell for alp.cmd. @param {string} root @param {string} platform */
+/** The bundle's own Node and CLI: run without its launcher, so Windows needs no shell for alp.cmd. */
 export function bundleCommand(root: string, platform: string = process.platform): { command: string; args: string[] } {
   const node = platform === 'win32' ? path.join(root, 'node', 'node.exe') : path.join(root, 'node', 'bin', 'node');
   return { command: node, args: [path.join(root, 'lib', 'node_modules', '@anhlp', 'alp-cli', 'dist', 'cli.js')] };
@@ -254,7 +247,6 @@ export function bundleCommand(root: string, platform: string = process.platform)
 /**
  * Points `<app>/current` at `<app>/<version>`. Unix: a relative symlink renamed over the old one, in
  * one step. Windows: the junction is replaced (removed, then made again; put back on failure).
- * @param {string} app @param {string} version @param {{ platform?: string, fs?: typeof nodeFs, unique?: () => string }} [options]
  */
 export function switchCurrent(app: string, version: string, { platform = process.platform, fs = nodeFs, unique = () => randomBytes(6).toString('hex') }: { platform?: string; fs?: typeof nodeFs; unique?: () => string } = {}): void {
   const p = platform === 'win32' ? path.win32 : path;
@@ -278,7 +270,6 @@ export function switchCurrent(app: string, version: string, { platform = process
  * Removes what earlier updates left in `<app>`: versions other than `keep`, and staging directories.
  * A failure (a file still in use on Windows) leaves that entry for the next update. keepAside keeps
  * the copies earlier reinstalls moved aside, which a running alpd may still run from.
- * @param {string} app @param {string[]} keep
  */
 export function pruneVersions(app: string, keep: string[], fs: typeof nodeFs = nodeFs, { keepAside = false }: { keepAside?: boolean } = {}): string[] {
   let names: string[];
@@ -292,7 +283,7 @@ export function pruneVersions(app: string, keep: string[], fs: typeof nodeFs = n
   return removed;
 }
 
-/** Asks a yes/no question on the terminal. @param {string} question */
+/** Asks a yes/no question on the terminal. */
 async function confirm(question: string): Promise<boolean> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   try { return /^y(es)?$/i.test((await rl.question(`${question} [y/N] `)).trim()); } finally { rl.close(); }
@@ -308,7 +299,7 @@ export type UpdateDeps = {
   runVersion: (root: string) => string; runDaemonVersion: (root: string) => string;
 };
 
-/** @param {string[]} args @param {Partial<UpdateDeps>} [overrides] @returns {Promise<number>} the exit code */
+/** @returns the exit code */
 export async function selfUpdate(args: string[], overrides: Partial<UpdateDeps> = {}): Promise<number> {
   const deps: UpdateDeps = {
     bundle: bundleInfo(), version: '0.0.0', env: process.env, platform: process.platform, arch: process.arch,
