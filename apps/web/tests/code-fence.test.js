@@ -1,9 +1,9 @@
 // A Markdown code fence's info string as the file name the highlighter picks a parser by
-// (lib/code-fence.js): Paseo's aliases, the first word only, and fence names that are
+// (lib/code-fence.ts): Paseo's aliases, the first word only, and fence names that are
 // Object.prototype members never read from the prototype.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fenceFilename } from '../src/lib/code-fence.js';
+import { fenceFilename } from '../dist-lib/code-fence.js';
 
 test('a fence names its file by extension, through Paseo\'s aliases', () => {
   assert.equal(fenceFilename('ts'), 'code.ts');

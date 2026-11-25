@@ -1,7 +1,7 @@
-// The Tasks pill above the composer (lib/tracks.js), as ALP's Paseo plugin shows it.
+// The Tasks pill above the composer (lib/tracks.ts), as ALP's Paseo plugin shows it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { stateOf, tasksTrack } from '../src/lib/tracks.js';
+import { stateOf, tasksTrack } from '../dist-lib/tracks.js';
 
 const rows = [
   { id: 't-1', title: 'Ship', status: 'open', ready: true, priority: 2 },

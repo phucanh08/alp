@@ -1,8 +1,8 @@
-// Paseo's workspace shortcuts as lib/shortcuts.js maps them, and the History grouping.
+// Paseo's workspace shortcuts as lib/shortcuts.ts maps them, and the History grouping.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BINDINGS, formatShortcut, helpSections, isEditable, matchShortcut, shortcutKeys, shortcutLabel } from '../src/lib/shortcuts.js';
-import { dateSection, groupHistory } from '../src/lib/history.js';
+import { BINDINGS, formatShortcut, helpSections, isEditable, matchShortcut, shortcutKeys, shortcutLabel } from '../dist-lib/shortcuts.js';
+import { dateSection, groupHistory } from '../dist-lib/history.js';
 
 const press = (code, key, mods = {}) => ({ code, key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
 
@@ -117,7 +117,7 @@ test('History groups by the calendar day of the last activity, newest first, and
 
 // ---- Settings › Shortcuts: the user's keys (Paseo's ShortcutOverrides) ---------------------------
 
-import { NOT_SET, bindingId, checkCapture, combosCollide, comboFromEvent, effectiveBindings, isRebindable, normalizeCombo, parseShortcutOverrides, setShortcutOverrides, shortcutSections } from '../src/lib/shortcuts.js';
+import { NOT_SET, bindingId, checkCapture, combosCollide, comboFromEvent, effectiveBindings, isRebindable, normalizeCombo, parseShortcutOverrides, setShortcutOverrides, shortcutSections } from '../dist-lib/shortcuts.js';
 
 test('every rebindable row has one id per platform; aliases and the composer keys are not rebindable', () => {
   for (const mac of [true, false]) for (const desktop of [true, false]) {
@@ -212,7 +212,7 @@ test('capture refuses keys that would type, keys taken by another shortcut, and 
   assert.equal(combosCollide('Mod+K', 'Ctrl+K', false), true);
 });
 
-import { checkReset } from '../src/lib/shortcuts.js';
+import { checkReset } from '../dist-lib/shortcuts.js';
 
 test('Reset to default is refused while another shortcut holds the default keys (row or alias)', () => {
   const mac = { mac: true };

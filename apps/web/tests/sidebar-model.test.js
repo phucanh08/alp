@@ -1,8 +1,8 @@
-// The Workspaces section as Paseo 0.14 arranges it (lib/sidebar-model.js): sort newest first,
+// The Workspaces section as Paseo 0.14 arranges it (lib/sidebar-model.ts): sort newest first,
 // status sections in Paseo's order, seven rows plus the unfinished ones, and the project filter.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GROUP_LIMIT, STATUS_GROUPS, filterProjects, groupByStatus, limitRows, resolveProjectFilters, sortSessions } from '../src/lib/sidebar-model.js';
+import { GROUP_LIMIT, STATUS_GROUPS, filterProjects, groupByStatus, limitRows, resolveProjectFilters, sortSessions } from '../dist-lib/sidebar-model.js';
 
 const session = (id, createdAt, updatedAt, status = 'idle') => ({ id, createdAt, updatedAt, status });
 

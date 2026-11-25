@@ -6,10 +6,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AlpRpcError } from '@anhlp/alp-client/portable';
-import { Controller, needsInput } from '../src/lib/controller.js';
-import { AuthenticationError } from '../src/lib/errors.js';
-import { entriesOf } from '../src/lib/timeline.js';
-import { parsePreferences } from '../src/lib/preferences.js';
+import { Controller, needsInput } from '../dist-lib/controller.js';
+import { AuthenticationError } from '../dist-lib/errors.js';
+import { entriesOf } from '../dist-lib/timeline.js';
+import { parsePreferences } from '../dist-lib/preferences.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 function setup(t, hostOptions, controllerOptions = {}) {
@@ -126,7 +126,7 @@ test('a refused credential stops reconnecting and forgets everything', async t =
 
 test('the first connection failing is reported at once, not retried', async t => {
   const w = setup(t);
-  const { TransientError } = await import('../src/lib/errors.js');
+  const { TransientError } = await import('../dist-lib/errors.js');
   w.host.refuse = new TransientError('Cannot reach the gateway.');
   w.controller.connect({ url: 'http://127.0.0.1:7434', token: 't' });
   await until(() => w.state().connection.phase === 'failed', 'failed');
@@ -192,7 +192,7 @@ test('disconnect during backoff stops for good and clears the token and data', a
   await connected(w);
   w.controller.selectSession('ses_a');
   await until(() => attached(w.state), 'attached');
-  w.host.refuse = new (await import('../src/lib/errors.js')).TransientError('down');
+  w.host.refuse = new (await import('../dist-lib/errors.js')).TransientError('down');
   w.host.drop();
   await until(() => w.state().connection.phase === 'reconnecting', 'reconnecting');
   w.controller.disconnect();
@@ -1890,7 +1890,7 @@ for (const refused of [false, true]) {
 }
 
 test('notices stack (t-de48): at most three, newest last; one dismissed by id leaves the others; the same words replace their copy', async t => {
-  const { NOTICE_STACK } = await import('../src/lib/controller.js');
+  const { NOTICE_STACK } = await import('../dist-lib/controller.js');
   const w = setup(t);
   w.controller.notify('info', 'one');
   w.controller.notify('error', 'two');

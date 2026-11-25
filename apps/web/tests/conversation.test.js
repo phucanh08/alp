@@ -6,9 +6,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AlpClientError, AlpRpcError } from '@anhlp/alp-client/portable';
-import { Controller } from '../src/lib/controller.js';
-import { COMPACT_MESSAGES, RELOAD_MESSAGES, agentControlsGate, describeCompactError, allTurnsEnded, branchTurns, conversationGate, conversationMarker, describeConversationError, describeReloadError, turnsByMessage } from '../src/lib/conversation.js';
-import { emptyProjection, entriesOf, project, prependHistory } from '../src/lib/timeline.js';
+import { Controller } from '../dist-lib/controller.js';
+import { COMPACT_MESSAGES, RELOAD_MESSAGES, agentControlsGate, describeCompactError, allTurnsEnded, branchTurns, conversationGate, conversationMarker, describeConversationError, describeReloadError, turnsByMessage } from '../dist-lib/conversation.js';
+import { emptyProjection, entriesOf, project, prependHistory } from '../dist-lib/timeline.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 const CAPS = ['session.history', 'session.fork', 'session.rewind'];

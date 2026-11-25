@@ -9,7 +9,7 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { initProject } from '@anhlp/alp-core/init';
 import { createReconnectingClient } from '@anhlp/alp-client/portable';
-import { Controller } from '../../apps/web/src/lib/controller.js';
+import { Controller } from '../../apps/web/dist-lib/controller.js';
 import { fakeTransport } from '../support/fake-agent.js';
 
 async function until(check, message) {

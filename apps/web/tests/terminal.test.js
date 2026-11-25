@@ -1,4 +1,4 @@
-// Issue #121 H: the Terminal tab's logic (lib/terminal.js) — gating on the host's switch and the
+// Issue #121 H: the Terminal tab's logic (lib/terminal.ts) — gating on the host's switch and the
 // token's terminal.exec, create/attach, replay bookkeeping by seq, gaps, input batching within
 // maxInputBytes, debounced resize, reconnect, replaced and exit — and the controller's routing of
 // terminal.event notifications through a fake host. No real shell is reached here; the e2e
@@ -7,8 +7,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AlpRpcError } from '@anhlp/alp-client/portable';
 import { TERMINAL } from '@anhlp/alp-protocol';
-import { Controller } from '../src/lib/controller.js';
-import { TERMINAL_MESSAGES, TerminalSession, clampSize, exitText, gapMarker, splitUtf8, terminalGate, terminalLimits, protectionNotice, TERMINAL_PROTECTION_NOTICES } from '../src/lib/terminal.js';
+import { Controller } from '../dist-lib/controller.js';
+import { TERMINAL_MESSAGES, TerminalSession, clampSize, exitText, gapMarker, splitUtf8, terminalGate, terminalLimits, protectionNotice, TERMINAL_PROTECTION_NOTICES } from '../dist-lib/terminal.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 const ID = `term_${'a'.repeat(32)}`;

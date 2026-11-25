@@ -1,9 +1,9 @@
-// The New session screen's logic (lib/new-session.js): models with efforts, thinking options and
+// The New session screen's logic (lib/new-session.ts): models with efforts, thinking options and
 // labels, the effective model from a preview, the spec sent, the preview's rows and a title from
 // the first message.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSpec, effectiveModel, startNewSession, effortLabel, effortOptions, initialChoices, normalizeModels, parsePreview, previewRows, resolveThinking } from '../src/lib/new-session.js';
+import { buildSpec, effectiveModel, startNewSession, effortLabel, effortOptions, initialChoices, normalizeModels, parsePreview, previewRows, resolveThinking } from '../dist-lib/new-session.js';
 
 const models = normalizeModels([
   { id: 'codex:gpt-6.1-sol', label: 'codex · GPT-6.1-Sol', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'low'], effort: 'low' },
@@ -74,7 +74,7 @@ test('a preview: checked, then read as rows', () => {
 });
 
 test('the team a start sends: chosen, else the current preview\'s, else the first listed once the preview cannot answer; none only when the host has no team', async () => {
-  const { startTeam, previewBase, failedStartNotice } = await import('../src/lib/new-session.js');
+  const { startTeam, previewBase, failedStartNotice } = await import('../dist-lib/new-session.js');
   const teams = [{ id: 'pho' }, { id: 'cafe' }];
   assert.deepEqual(startTeam({ chosen: 'cafe', previewTeam: 'pho', previewSettled: false, teams }), { team: 'cafe' });
   assert.deepEqual(startTeam({ previewTeam: 'pho', previewSettled: false, teams: [] }), { team: 'pho' });
@@ -94,7 +94,7 @@ test('the team a start sends: chosen, else the current preview\'s, else the firs
 });
 
 test('a start that cannot tell its team says why and what unblocks it, and never starts without one', async () => {
-  const { startTeam } = await import('../src/lib/new-session.js');
+  const { startTeam } = await import('../dist-lib/new-session.js');
   const stuck = input => {
     const result = startTeam({ previewSettled: true, teams: [], teamsKnown: false, ...input });
     assert.equal(result.team, undefined, 'fail closed: no create without a team');
@@ -148,7 +148,7 @@ test('a New session start takes its workspace and connection before waiting on t
 });
 
 test('a team the preview names that the list lacks (custom) is offered first, and choosing it sends it back', async () => {
-  const { unlistedTeam, teamMenu, startTeam, buildSpec } = await import('../src/lib/new-session.js');
+  const { unlistedTeam, teamMenu, startTeam, buildSpec } = await import('../dist-lib/new-session.js');
   const teams = [{ id: 'pho', label: 'Phở' }, { id: 'cafe', label: 'Cafe' }];
   // Settings without workflow.mode: the preview names `custom`, which team.list does not.
   const custom = parsePreview({ preview: { teams, team: 'custom', agent: 'main' } });

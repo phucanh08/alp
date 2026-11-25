@@ -14,7 +14,7 @@ import { useAppState, useController } from './store';
 /*
  * The Terminal tab (#121 H, docs/protocol/alp-json-rpc-v1.md §12.10): a real shell on the daemon
  * host through the gateway, drawn by xterm.js. The logic (create, attach, replay, input batching,
- * resize, reconnect) is lib/terminal.js; this view only draws it.
+ * resize, reconnect) is lib/terminal.ts; this view only draws it.
  *
  * Honesty first (the user's product decision): the panel says where the shell runs and that the
  * workspace is not a sandbox, in full the first time a terminal opens in this page session and in a

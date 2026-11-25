@@ -1,9 +1,9 @@
-// The app's preferences in browser storage (lib/preferences.js): Paseo 0.14's app settings that
+// The app's preferences in browser storage (lib/preferences.ts): Paseo 0.14's app settings that
 // apply in a browser, versioned, read tolerantly field by field (clamped to Paseo's limits),
 // written with known fields only (never the token), and a storage that throws.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_PREFERENCES, LIMITS, PREFERENCES_KEY, PREFERENCES_VERSION, loadPreferences, parsePreferences, rememberChoices, savePreferences, serializePreferences } from '../src/lib/preferences.js';
+import { DEFAULT_PREFERENCES, LIMITS, PREFERENCES_KEY, PREFERENCES_VERSION, loadPreferences, parsePreferences, rememberChoices, savePreferences, serializePreferences } from '../dist-lib/preferences.js';
 
 const memory = (initial = {}) => {
   const entries = new Map(Object.entries(initial));

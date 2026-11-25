@@ -2,8 +2,8 @@
 // and that the token goes only in the Authorization header and never into an error.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { can, gatewayUrl, grantedWorkspace, openGateway } from '../src/lib/gateway.js';
-import { AuthenticationError, ConfigurationError, TransientError, describe } from '../src/lib/errors.js';
+import { can, gatewayUrl, grantedWorkspace, openGateway } from '../dist-lib/gateway.js';
+import { AuthenticationError, ConfigurationError, TransientError, describe } from '../dist-lib/errors.js';
 
 const TOKEN = 'alpgw1.0123456789abcdef.c2VjcmV0LXNlY3JldC1zZWNyZXQ';
 const principal = { id: 'p', label: 'web', permissions: ['session.read', 'session.write'], workspaces: ['/w'], workspaceRoots: [{ path: '/w', canonical: '/real/w' }] };

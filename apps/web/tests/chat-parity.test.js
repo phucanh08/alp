@@ -2,9 +2,9 @@
 // center's agent rows.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FIND_LIMIT, findMatches, findStatus, isFindShortcut, stepMatch } from '../src/lib/pane-find.js';
-import { insertMention, mentionAt, mentionText } from '../src/lib/mentions.js';
-import { commandResults } from '../src/lib/command-center.js';
+import { FIND_LIMIT, findMatches, findStatus, isFindShortcut, stepMatch } from '../dist-lib/pane-find.js';
+import { insertMention, mentionAt, mentionText } from '../dist-lib/mentions.js';
+import { commandResults } from '../dist-lib/command-center.js';
 
 const key = (init) => ({ key: 'f', metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...init });
 

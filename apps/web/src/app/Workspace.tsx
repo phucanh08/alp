@@ -630,7 +630,7 @@ function PaneView({ id, props, whole = false }: { id: string; props: RowProps; w
         <ContextMenu label="Pane actions" at={menu} onClose={() => setMenu(null)} testId={menu ? `workspace-pane-context-${id}` : undefined}
           items={menu ? PANE_SPLITS.map(({ position, label, icon }) => ({
             id: `split-${position}`, label, icon, testId: `workspace-pane-split-${position}`,
-            // A split past the deepest nesting is refused (lib/panes.js): its row is off.
+            // A split past the deepest nesting is refused (lib/panes.ts): its row is off.
             disabled: !splitPane(panes, { target: id, position }),
             onSelect: () => splitEmpty(position, id),
           })) : []} />

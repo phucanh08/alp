@@ -1,12 +1,12 @@
-// The owner's library forms (src/lib/owner-library.js; t-a95b group C): a hidden value read as
+// The owner's library forms (src/lib/owner-library.ts; t-a95b group C): a hidden value read as
 // alpd's keep marker goes back as the marker, never as the mask text the page shows; the review
 // names what will run without any secret value.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { HIDDEN } from '../src/lib/library.js';
-import { KEEP, hookContent, hookForm, mcpContent, mcpForm, reviewRows } from '../src/lib/owner-library.js';
+import { HIDDEN } from '../dist-lib/library.js';
+import { KEEP, hookContent, hookForm, mcpContent, mcpForm, reviewRows } from '../dist-lib/owner-library.js';
 
-test('the mask text is the one alp dashboard\'s host.library.save refuses (packages/cli/src/dashboard/owner/library.js MASK_TEXT)', () => {
+test('the mask text is the one alp dashboard\'s host.library.save refuses (packages/cli/src/dashboard/owner/library.ts MASK_TEXT)', () => {
   assert.equal(HIDDEN, '‹hidden on the host›');
 });
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { windowControlsVisible, windowToggles } from '../src/lib/window-controls.js';
+import { windowControlsVisible, windowToggles } from '../dist-lib/window-controls.js';
 
 test('only a visible Window Controls Overlay counts as traffic lights in the page', () => {
   assert.equal(windowControlsVisible(undefined), false);

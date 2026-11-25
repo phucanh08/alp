@@ -5,9 +5,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { Controller } from '../src/lib/controller.js';
-import { NO_FILES, abortUpload, fileLimits, fileName, fileRefusal, fileSize, fileType, fitFiles, messageContent, messageFiles, readFiles, uploadRequestId } from '../src/lib/attachments.js';
-import { describe as describeError } from '../src/lib/errors.js';
+import { Controller } from '../dist-lib/controller.js';
+import { NO_FILES, abortUpload, fileLimits, fileName, fileRefusal, fileSize, fileType, fitFiles, messageContent, messageFiles, readFiles, uploadRequestId } from '../dist-lib/attachments.js';
+import { describe as describeError } from '../dist-lib/errors.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 const LIMITS = { maxObjectBytes: 64, maxPerPrompt: 3, maxPromptBytes: 100, maxChunkBytes: 16 };

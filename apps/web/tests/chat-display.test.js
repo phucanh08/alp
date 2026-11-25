@@ -1,9 +1,9 @@
-// Paseo 0.14's Chat display (lib/chat-display.js): Full keeps every row, Collapse tool calls folds
+// Paseo 0.14's Chat display (lib/chat-display.ts): Full keeps every row, Collapse tool calls folds
 // runs of two or more tool calls into one summary row, Collapse turns also folds each finished
 // turn's work before its last reply into one line under the user's message.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { displayRows, isGroupable, summarizeWork, summaryLabel } from '../src/lib/chat-display.js';
+import { displayRows, isGroupable, summarizeWork, summaryLabel } from '../dist-lib/chat-display.js';
 
 let seq = 0;
 const entry = item => ({ key: `e${++seq}`, ts: '2026-10-30T00:00:00Z', item });

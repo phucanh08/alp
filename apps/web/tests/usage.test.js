@@ -1,8 +1,8 @@
 // The context meter's numbers (t-7679.12), as Paseo's composer shows them.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { contextOf, formatSessionCost, formatTokenCount, meterLabel, meterLevel, responseTokens, ringShare } from '../src/lib/usage.js';
-import { emptyProjection, project } from '../src/lib/timeline.js';
+import { contextOf, formatSessionCost, formatTokenCount, meterLabel, meterLevel, responseTokens, ringShare } from '../dist-lib/usage.js';
+import { emptyProjection, project } from '../dist-lib/timeline.js';
 
 const env = (cursor, event, sessionId = 'r') => ({ sessionId, epoch: 'e', seq: cursor, cursor, ts: '2026-10-17T00:00:00.000Z', event });
 

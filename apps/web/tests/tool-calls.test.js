@@ -1,9 +1,9 @@
-// Tool calls in the stream (src/lib/tool-calls.js): the collapsed row per detail type as Paseo's
+// Tool calls in the stream (src/lib/tool-calls.ts): the collapsed row per detail type as Paseo's
 // tool-call-display.ts, paths relative to the workspace, unified diffs with line numbers, a
 // bounded line diff, clipping and links.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clipLines, detailKind, diffStats, editDiff, humanizeToolName, lineDiff, parseUnifiedDiff, presentToolCall, relativePath, safeLink, splitLines } from '../src/lib/tool-calls.js';
+import { clipLines, detailKind, diffStats, editDiff, humanizeToolName, lineDiff, parseUnifiedDiff, presentToolCall, relativePath, safeLink, splitLines } from '../dist-lib/tool-calls.js';
 
 const roots = ['/home/me/project', '/private/home/me/project'];
 const row = (name, detail) => {

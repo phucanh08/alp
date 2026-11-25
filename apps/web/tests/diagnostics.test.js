@@ -1,8 +1,8 @@
-// Settings › Diagnostics (lib/diagnostics.js): the report is built from named fields only, so
+// Settings › Diagnostics (lib/diagnostics.ts): the report is built from named fields only, so
 // nothing else on the state (the access token, prompts) can reach the text that gets copied.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { diagnosticsSections, diagnosticsText } from '../src/lib/diagnostics.js';
+import { diagnosticsSections, diagnosticsText } from '../dist-lib/diagnostics.js';
 
 const input = {
   version: '0.0.1-beta.7',

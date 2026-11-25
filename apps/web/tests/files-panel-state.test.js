@@ -6,8 +6,8 @@ import assert from 'node:assert/strict';
 import {
   FILES_PANEL_KEY, MAX_EXPANDED, MAX_PATH_CHARS, MAX_WORKSPACES, expandedFor, loadFilesPanelState, parseFilesPanelState,
   serializeFilesPanelState, updateFilesPanelState, withExpanded,
-} from '../src/lib/files-panel-state.js';
-import { workspaceScope } from '../src/lib/layout.js';
+} from '../dist-lib/files-panel-state.js';
+import { workspaceScope } from '../dist-lib/layout.js';
 
 const DEFAULTS = { sort: 'name', showHidden: false, workspaces: {} };
 const A = workspaceScope('https://host-a.example', '/Users/me/project');

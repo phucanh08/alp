@@ -1,0 +1,2 @@
+# The JavaScript of src/lib the unit tests load (scripts/build-lib.mjs); built by `npm test`'s pretest.
+/dist-lib/

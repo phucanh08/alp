@@ -3,7 +3,7 @@
 // line (a 1 MiB Markdown file in a file tab's preview) is read in linear time.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { INLINE, splitLink } from '../src/lib/inline-markdown.js';
+import { INLINE, splitLink } from '../dist-lib/inline-markdown.js';
 
 const KINDS = ['code', 'strong', 'strike', 'link', 'url', 'em'];
 /** The tokens RichText's Inline makes of `text`, as it walks it: [kind, token] or ['text', text]. */

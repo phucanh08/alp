@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { openTerminalLink } from '../src/lib/terminal-links.js';
+import { openTerminalLink } from '../dist-lib/terminal-links.js';
 test('terminal links open web URLs with opener isolation and reject executable/credential URLs', () => {
   const calls = [];
   const open = (...args) => calls.push(args);

@@ -12,13 +12,13 @@ import { Section } from './parts';
  * Paseo's Settings › Shortcuts (screens/settings/keyboard-shortcuts-section.tsx): every row of the
  * shortcuts dialog with its keys, and per row a menu to Bind/Rebind (press the new keys), Clear
  * (the row stays, "Not set", nothing fires) and Reset to default; Reset all over the first section.
- * The keys are the app preferences' shortcutOverrides; lib/shortcuts.js applies them to the window
+ * The keys are the app preferences' shortcutOverrides; lib/shortcuts.ts applies them to the window
  * listener, the dialog and the hints at once.
  *
  * Capture as Paseo's: the next key press with its modifiers, a held modifier shown while it waits.
  * ALP's differences: Escape cancels (Paseo records it as a key), the keys are saved on the press
  * (ALP has no multi-key chords, so no Done), and keys another shortcut uses, or a key that would
- * type, are refused with the reason (lib/shortcuts.js checkCapture). Reset to default is refused,
+ * type, are refused with the reason (lib/shortcuts.ts checkCapture). Reset to default is refused,
  * with the reason, when another shortcut has taken the default keys since (checkReset).
  */
 

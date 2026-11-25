@@ -1,9 +1,9 @@
-// The sidebar's workspace facts and usage line (lib/sidebar-facts.js, t-ff83): batches of at most
+// The sidebar's workspace facts and usage line (lib/sidebar-facts.ts, t-ff83): batches of at most
 // 50 ids, well-formed fields only (an icon only as a data:image URL), Paseo's diff counts and PR
 // labels, the one row that carries the facts, the 5h/wk usage parts, and the schedules order.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FACTS_BATCH, batches, cleanFacts, excerpt, formatDiffCount, mostRecentSession, prLabel, readFacts, scheduleRows, usageLine } from '../src/lib/sidebar-facts.js';
+import { FACTS_BATCH, batches, cleanFacts, excerpt, formatDiffCount, mostRecentSession, prLabel, readFacts, scheduleRows, usageLine } from '../dist-lib/sidebar-facts.js';
 
 test('facts are read 50 workspace ids per call, duplicates once, a failed batch left out', async () => {
   const ids = Array.from({ length: 120 }, (_, index) => `ws_${index}`);

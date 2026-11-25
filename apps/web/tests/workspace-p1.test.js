@@ -1,10 +1,10 @@
-// The workspace P1 slice's pure parts (t-7679.5): the kept layout (lib/layout.js), the command
-// center's matching and sections (lib/command-center.js) and the page's attention (lib/attention.js).
+// The workspace P1 slice's pure parts (t-7679.5): the kept layout (lib/layout.ts), the command
+// center's matching and sections (lib/command-center.ts) and the page's attention (lib/attention.ts).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DOCK_WIDTH, LAYOUT_KEY, SIDEBAR_WIDTH, clampWidth, loadLayout, moveKey, orderTabs, parseLayout, serializeLayout, updateLayout, workspaceScope } from '../src/lib/layout.js';
-import { commandResults, matchScore, matchTier, sortSessions } from '../src/lib/command-center.js';
-import { faviconStatus, newlyWaiting, notificationBody, userSees } from '../src/lib/attention.js';
+import { DOCK_WIDTH, LAYOUT_KEY, SIDEBAR_WIDTH, clampWidth, loadLayout, moveKey, orderTabs, parseLayout, serializeLayout, updateLayout, workspaceScope } from '../dist-lib/layout.js';
+import { commandResults, matchScore, matchTier, sortSessions } from '../dist-lib/command-center.js';
+import { faviconStatus, newlyWaiting, notificationBody, userSees } from '../dist-lib/attention.js';
 
 const memory = (initial = {}) => {
   const entries = new Map(Object.entries(initial));
@@ -110,7 +110,7 @@ test('attention: favicon status, new waits, the notification body, quiet when th
   assert.equal(userSees({ visible: true, focused: true, shown: 'b' }, 'a'), false);
 });
 
-import { closeRange, planClose } from '../src/lib/tab-close.js';
+import { closeRange, planClose } from '../dist-lib/tab-close.js';
 
 const T = (kind, id) => ({ kind, id });
 const keys = list => list.map(tab => `${tab.kind}:${tab.id}`);

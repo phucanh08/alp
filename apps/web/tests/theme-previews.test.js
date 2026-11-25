@@ -1,10 +1,10 @@
 // t-81b0.12 round 4: the theme tiles of Settings › Appearance draw each theme in the colours
-// styles.css gives it, so the table in lib/theme-previews.js must match the stylesheet.
+// styles.css gives it, so the table in lib/theme-previews.ts must match the stylesheet.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { THEMES } from '../src/lib/preferences.js';
-import { THEME_PREVIEWS } from '../src/lib/theme-previews.js';
+import { THEMES } from '../dist-lib/preferences.js';
+import { THEME_PREVIEWS } from '../dist-lib/theme-previews.js';
 
 const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 

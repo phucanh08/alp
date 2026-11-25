@@ -20,12 +20,12 @@ function tabStorage(): TokenStorage | undefined {
 
 // The address `alp dashboard` opened carries its token in the fragment (#token=alpgw1.…): taken out of the
 // address bar first, before anything renders, and kept in this tab's sessionStorage only, so a
-// reload of this tab connects again (lib/link-token.js, docs/alp/dashboard.md §4.2).
+// reload of this tab connects again (lib/link-token.ts, docs/alp/dashboard.md §4.2).
 const linkStorage = tabStorage();
 const link = takeLinkToken({ location: window.location, history: window.history, storage: linkStorage });
 
 // One controller for the page's life. A token typed in the form is held in memory only; closing or
-// reloading the tab forgets it. Only the app's preferences go to localStorage (lib/preferences.js).
+// reloading the tab forgets it. Only the app's preferences go to localStorage (lib/preferences.ts).
 const controller = new Controller({ storage: browserStorage(), linkStorage });
 if (link && 'token' in link) controller.connect({ url: link.url, token: link.token, link: true });
 else if (link) controller.showError(link.error);

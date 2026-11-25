@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_USAGE_PREFS, USAGE_PREFS_KEY, balanceText, displayPercent, effectivePins, formatDisplayPct, formatResetLabel, formatResetTime, isCardOn,
   loadUsagePrefs, parseUsagePrefs, pinnedSummary, resolveWindow, serializeUsagePrefs, setCardOn, togglePin, updateUsagePrefs, windowTone,
-} from '../src/lib/usage-prefs.js';
+} from '../dist-lib/usage-prefs.js';
 
 const CLAUDE = {
   runtime: 'claude', available: true, checkedAt: '2026-11-22T00:00:00Z', plan: 'max', planLabel: 'Max 5x', limited: false, pause: null, parked: 0,

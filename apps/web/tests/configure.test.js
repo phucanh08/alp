@@ -6,9 +6,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AlpClientError, AlpRpcError } from '@anhlp/alp-client/portable';
-import { Controller } from '../src/lib/controller.js';
-import { CONFIGURE_MESSAGES, configuredNotice, configuredSummary, describeConfigureError, liveConfigureGate, liveModels } from '../src/lib/configure.js';
-import { effortLabel } from '../src/lib/new-session.js';
+import { Controller } from '../dist-lib/controller.js';
+import { CONFIGURE_MESSAGES, configuredNotice, configuredSummary, describeConfigureError, liveConfigureGate, liveModels } from '../dist-lib/configure.js';
+import { effortLabel } from '../dist-lib/new-session.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 const CAPS = ['session.history', 'session.configure.live'];

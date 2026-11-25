@@ -7,13 +7,13 @@ import { useAppState } from './store';
 
 /*
  * Paseo's keyboard shortcuts for the workspace: one window listener that maps a key press to an
- * action of the shell (lib/shortcuts.js holds the bindings), and the "Shortcuts" dialog that
+ * action of the shell (lib/shortcuts.ts holds the bindings), and the "Shortcuts" dialog that
  * Shift+? opens (packages/app/src/components/keyboard-shortcuts-dialog.tsx).
  */
 
 /**
  * Applies the user's keys (Settings › Shortcuts, preferences.shortcutOverrides) to every shortcut:
- * the window listener, the dialog and the hints read them from lib/shortcuts.js. Called by the app
+ * the window listener, the dialog and the hints read them from lib/shortcuts.ts. Called by the app
  * root while it renders, so the components under it render with the current keys.
  */
 export function useShortcutOverrides() {

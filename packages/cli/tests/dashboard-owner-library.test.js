@@ -194,7 +194,7 @@ test('host.files.preview: a raster image of a registry workspace only, whole, at
 });
 
 test('host.library.save: the keep marker goes to alpd as is; the app\'s mask text is refused and never written', async t => {
-  // The app's HIDDEN (apps/web/src/lib/library.js; apps/web/tests/owner-library.test.js checks the same text).
+  // The app's HIDDEN (apps/web/src/lib/library.ts; apps/web/tests/owner-library.test.js checks the same text).
   const HIDDEN = '‹hidden on the host›';
   assert.equal(MASK_TEXT, HIDDEN, 'the handler refuses exactly what the app shows');
   const daemon = fakeDaemon({ 'library.save': { revision: 'r2' } });

@@ -103,7 +103,7 @@ function ReconnectBanner() {
 }
 
 /**
- * Paseo's workspace shortcuts (lib/shortcuts.js), run against the shell's state. Inside the tabs'
+ * Paseo's workspace shortcuts (lib/shortcuts.ts), run against the shell's state. Inside the tabs'
  * provider, so the tab actions reach the open tabs.
  */
 function ShellShortcuts({ settings, history, splits, onAction }: { settings: boolean; history: boolean; splits: boolean; onAction: (action: string, binding: Binding, index?: number) => boolean | void }) {
@@ -204,7 +204,7 @@ function CommandCenterHost({ open, scope, onClose, history, splits, onAction, on
   const tabs = splits ? row : all;
   const closeOthers = (tab: Tab, which: 'left' | 'right' | 'others') => closeRow(tab, which, splits ? undefined : all);
   const many = paneIds(panes.root).length > 1;
-  // Nothing to close, as the tab menu says (lib/tab-close.js).
+  // Nothing to close, as the tab menu says (lib/tab-close.ts).
   const none = (which: 'left' | 'right' | 'others') => !active || closeRange(tabs, active, which, selected).length === 0;
   const mac = React.useMemo(() => isMacPlatform(), []);
   const canWrite = can(principal ?? undefined, 'session.write');

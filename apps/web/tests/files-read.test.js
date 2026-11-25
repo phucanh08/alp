@@ -5,11 +5,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WORKSPACE_FILES } from '@anhlp/alp-protocol';
-import { Controller, FILES_READ_FORBIDDEN, FILES_READ_UNAVAILABLE } from '../src/lib/controller.js';
-import { FILE_MESSAGES, FileAccessError, describeFileError } from '../src/lib/errors.js';
-import { cleanListing, flattenTree, formatSize, lineCount, nextSort, relativeFilePath, sortEntries, toggleExpanded } from '../src/lib/file-tree.js';
-import { parseFileLink } from '../src/lib/file-links.js';
-import { parseLayout, workspaceScope } from '../src/lib/layout.js';
+import { Controller, FILES_READ_FORBIDDEN, FILES_READ_UNAVAILABLE } from '../dist-lib/controller.js';
+import { FILE_MESSAGES, FileAccessError, describeFileError } from '../dist-lib/errors.js';
+import { cleanListing, flattenTree, formatSize, lineCount, nextSort, relativeFilePath, sortEntries, toggleExpanded } from '../dist-lib/file-tree.js';
+import { parseFileLink } from '../dist-lib/file-links.js';
+import { parseLayout, workspaceScope } from '../dist-lib/layout.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 const READER = { id: 'p1', label: 'tests', permissions: ['session.read', 'session.write', 'project.read', 'files.read'], workspaces: ['/w/a'], workspaceRoots: [{ path: '/w/a', canonical: '/w/a' }] };

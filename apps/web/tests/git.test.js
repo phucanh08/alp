@@ -1,10 +1,10 @@
 // Issue #121 G1: Paseo's Changes and Diff panels, read only — the controller's workspace.git.status
 // and workspace.git.diff (capability workspace.git; project.read, and files.read for hunks), what
-// the panels show in each state (lib/git.js gitAccess), and the diff pages they keep.
+// the panels show in each state (lib/git.ts gitAccess), and the diff pages they keep.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Controller } from '../src/lib/controller.js';
-import { GIT_ERROR_MESSAGES, GIT_MESSAGES, GitAccessError, appendDiffPage, baseLabel, branchLine, changeKind, changesEmptyAction, changesTree, committedDescription, describeGitError, diffRows, diffTotals, formatDiffCount, gitAccess, gitCompare, gitRequestPath, registryWorkspaceOf, restartsDiff } from '../src/lib/git.js';
+import { Controller } from '../dist-lib/controller.js';
+import { GIT_ERROR_MESSAGES, GIT_MESSAGES, GitAccessError, appendDiffPage, baseLabel, branchLine, changeKind, changesEmptyAction, changesTree, committedDescription, describeGitError, diffRows, diffTotals, formatDiffCount, gitAccess, gitCompare, gitRequestPath, registryWorkspaceOf, restartsDiff } from '../dist-lib/git.js';
 import { FakeHost, until } from './support/fake-host.js';
 
 const READER = { id: 'p1', label: 'tests', permissions: ['session.read', 'session.write', 'project.read', 'files.read'], workspaces: ['/w/a'], workspaceRoots: [{ path: '/w/a', canonical: '/real/a' }] };
@@ -165,7 +165,7 @@ test('labels: branch line, base, counts, comparisons and request paths', () => {
 });
 
 test('splitRows pairs a run of removals with the additions after it, context on both sides, hunks across (t-a35b)', async () => {
-  const { splitRows } = await import('../src/lib/git.js');
+  const { splitRows } = await import('../dist-lib/git.js');
   const rows = diffRows({ path: 'a.ts', change: 'modified', kind: 'text', additions: 3, deletions: 2, hunks: [{ oldStart: 1, oldCount: 4, newStart: 1, newCount: 5, lines: [
     { type: 'context', content: 'keep' }, { type: 'remove', content: 'old1' }, { type: 'remove', content: 'old2' }, { type: 'add', content: 'new1' }, { type: 'add', content: 'new2' }, { type: 'add', content: 'new3' }, { type: 'context', content: 'tail' },
   ] }] });
@@ -182,7 +182,7 @@ test('splitRows pairs a run of removals with the additions after it, context on 
 });
 
 test('formatReviewComments groups by file in line order and quotes each line (t-a35b)', async () => {
-  const { formatReviewComments, REVIEW_LIMITS } = await import('../src/lib/git.js');
+  const { formatReviewComments, REVIEW_LIMITS } = await import('../dist-lib/git.js');
   const text = formatReviewComments([
     { path: 'src/b.ts', side: 'new', line: 9, excerpt: 'const b = 1;', text: 'rename b' },
     { path: 'src/a.ts', side: 'new', line: 3, excerpt: 'x', text: '  second  ' },
@@ -244,7 +244,7 @@ test("changes labels: change kinds as Paseo's icons, the Committed description, 
 // t-81b0.14: Hide whitespace is remembered in this browser, as Paseo's changes preferences
 // (hooks/use-changes-preferences/storage.ts hideWhitespace); the mode is not (Paseo keeps it in memory).
 test('Hide whitespace: remembered under its own key, anything else is off, storage that throws is ignored', async () => {
-  const { HIDE_WHITESPACE_KEY, loadHideWhitespace, saveHideWhitespace } = await import('../src/lib/git.js');
+  const { HIDE_WHITESPACE_KEY, loadHideWhitespace, saveHideWhitespace } = await import('../dist-lib/git.js');
   const memory = () => { const items = new Map(); return { items, getItem: key => items.get(key) ?? null, setItem: (key, value) => { items.set(key, String(value)); } }; };
   const storage = memory();
   assert.equal(HIDE_WHITESPACE_KEY, 'alp.changes.hideWhitespace');
