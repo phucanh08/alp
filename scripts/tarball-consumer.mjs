@@ -238,8 +238,7 @@ console.log('plugin runtime imports ok');
   const suite = path.join(pluginDir, 'integrations/paseo/tests');
   mkdirSync(suite, { recursive: true });
   mkdirSync(path.join(pluginDir, 'test/support'), { recursive: true });
-  const support = readFileSync(path.join(root, 'test/support/fake-agent.js'), 'utf8')
-    .replace('../../dist/runtime/index.js', '@anhlp/alp-runtime');
+  const support = readFileSync(path.join(root, 'test/support/fake-agent.js'), 'utf8');
   writeFileSync(path.join(pluginDir, 'test/support/fake-agent.js'), support);
   // Everything else under test/support that a copied suite imports. teardown.js arrived with
   // t-5294.6, which converted paseo/team/human.test.js to the shared `defer` helper: those three now
