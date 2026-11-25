@@ -21,7 +21,7 @@ test.beforeAll(async () => {
       await owner.request('project.register', { directory, ifRevision: revision, requestId: `tabs-${path.basename(directory)}` });
     }
   } finally { owner.close(); }
-  const { stdout } = await run(process.execPath, [path.join(REPOSITORY, 'apps/gateway/src/cli.js'), 'credential', 'create', '--label', 'terminal-tabs', '--workspace', world.projects.main, '--workspace', world.projects.custom,
+  const { stdout } = await run(process.execPath, [path.join(REPOSITORY, 'apps/gateway/dist/cli.js'), 'credential', 'create', '--label', 'terminal-tabs', '--workspace', world.projects.main, '--workspace', world.projects.custom,
     ...['session.read', 'session.write', 'project.read', 'project.write', 'session.team.write', 'terminal.exec'].flatMap(p => ['--permission', p]), '--json'],
   { env: { ...process.env, ALP_HOME: world.home, ALP_GATEWAY_HOME: path.join(world.directory, 'gateway') } });
   token = JSON.parse(stdout).token;

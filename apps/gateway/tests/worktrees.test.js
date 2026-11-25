@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway, until } from './support/harness.js';
-import { DEFAULT_PERMISSIONS } from '../src/policy.js';
+import { DEFAULT_PERMISSIONS } from '../dist/policy.js';
 import { teardown } from '../../../test/support/teardown.js';
 test('worktree grants are opt-in, creator+scope-epoch bound and refreshed before cached events/resources; mappings never grant siblings', async (t) => {
   const defer = teardown(t);

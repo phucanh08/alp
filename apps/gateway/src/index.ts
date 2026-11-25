@@ -1,4 +1,3 @@
-// @ts-check
 /**
  * @anhlp/alp-gateway (docs/alp/remote-gateway.md): an authenticated WebSocket front for one OS
  * user's alpd. Remote clients speak ALP protocol v1 through it; it reaches alpd only through the

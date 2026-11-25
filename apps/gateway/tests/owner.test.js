@@ -1,4 +1,4 @@
-// The host owner (t-a95b; owner.js, docs/alp/remote-gateway.md §5.19): the methods the exposure
+// The host owner (t-a95b; owner.ts, docs/alp/remote-gateway.md §5.19): the methods the exposure
 // matrix marks `owner` answer only the credential an owner gateway names, on a direct loopback
 // socket, checked again on every request. Every other connection, and every connection of a gateway
 // without the owner option (standalone alp-gateway), gets exactly a denied method's refusal, and
@@ -9,7 +9,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { CAPABILITY } from '@anhlp/alp-protocol';
-import { EXPOSURE, FORWARDING_HEADERS, OWNER_LOOPBACK, createGateway, createGatewayLogger, CredentialStore, credentialsFile, directLoopback, isForwardingHeader, ownerOptionError, resolveConfig, revokeCredential } from '../src/index.js';
+import { EXPOSURE, FORWARDING_HEADERS, OWNER_LOOPBACK, createGateway, createGatewayLogger, CredentialStore, credentialsFile, directLoopback, isForwardingHeader, ownerOptionError, resolveConfig, revokeCredential } from '../dist/index.js';
 import { fakeDaemon } from './support/fake-daemon.js';
 import WebSocket from 'ws';
 import { AGENT_CAPABILITY, AlpRpcClient } from '@anhlp/alp-client/portable';
@@ -136,7 +136,7 @@ test('owner (e): the owner credential through a forwarding hop (a proxy or tunne
 
 test('owner (e): only a direct loopback peer counts; a non-loopback, proxied or forwarded one never does', () => {
   // directLoopback reads the socket's own peer address, which a client cannot set: these requests
-  // stand in for sockets from the network (remoteAddress) and for server.js peerOf's verdict.
+  // stand in for sockets from the network (remoteAddress) and for server.ts peerOf's verdict.
   const request = (remoteAddress, headers = {}) => ({ socket: { remoteAddress }, headers });
   for (const address of OWNER_LOOPBACK) assert.equal(directLoopback(request(address), { proxied: false }), true, address);
   for (const address of ['192.168.1.5', '10.0.0.2', '203.0.113.9', '::ffff:192.168.1.5', 'fe80::1', '127.0.0.2', '127.1.2.3', '', undefined]) {

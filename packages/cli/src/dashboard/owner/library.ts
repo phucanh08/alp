@@ -11,7 +11,7 @@ import type { DashboardOwnerContext, DashboardOwnerHandler } from './index.js';
  * Owner handlers for the user's library and workspace files (t-a95b group C; Settings › Templates,
  * Agents, Skills, Hooks, MCP servers and Editor; docs/alp/dashboard.md §4.8). Each one also has its
  * `owner` entry (`handler: true`, its `params`) in the `// --- owner: library (group C) ---` block of
- * apps/gateway/src/policy.js, or it is never reachable. Only the keys an entry lists reach a handler,
+ * apps/gateway/src/policy.ts, or it is never reachable. Only the keys an entry lists reach a handler,
  * and a handler checks every value itself: no protocol schema covers a host.* method.
  *
  *   host.library.get     alpd's library.get: env and header values come back as { $secret: 'keep' }
@@ -283,7 +283,7 @@ export async function readWorkspaceFile({ daemon, params }: OwnerFilesContext) {
 
 /**
  * host.files.preview: one image of a registry workspace for the owner's file view, as the gateway
- * narrows workspace.files.preview for files.read (apps/gateway/src/policy.js PREVIEW_IMAGE_TYPES):
+ * narrows workspace.files.preview for files.read (apps/gateway/src/policy.ts PREVIEW_IMAGE_TYPES):
  * a raster image by extension in any case (never SVG, a document that can carry script), checked
  * as host.files.read checks a path, refused before alpd otherwise; alpd reads it from offset 0 with
  * maxBytes WORKSPACE_FILES.maxReadBytes and its own confinement (no link, one name, no private

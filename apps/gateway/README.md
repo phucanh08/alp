@@ -11,7 +11,7 @@ alp-gateway serve                                                           # 12
 
 - `POST /v1/tickets` with `Authorization: Bearer <token>` returns a one-time ticket; open
   `/v1/ws` with the subprotocols `alp.v1` and `alp.ticket.<ticket>`. No secret goes in a URL.
-- Default deny: only the methods in `src/policy.js` marked `exposed` are forwarded, each after a
+- Default deny: only the methods in `src/policy.ts` marked `exposed` are forwarded, each after a
   permission check and a workspace/session scope check; results and events are filtered too.
   Daemon shutdown, extension registration and host administration are never remote. Library
   entry content (MCP servers, hooks, providers) never leaves: list rows carry names only.

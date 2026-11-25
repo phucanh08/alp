@@ -6,7 +6,7 @@ import path from 'node:path';
 import WebSocket from 'ws';
 import { AlpRpcClient, hello } from '@anhlp/alp-client/portable';
 import { connectWebSocket } from '@anhlp/alp-client/websocket';
-import { CredentialStore, createCredential, createGateway, createGatewayLogger, resolveConfig } from '../../src/index.js';
+import { CredentialStore, createCredential, createGateway, createGatewayLogger, resolveConfig } from '../../dist/index.js';
 import { teardown } from '../../../../test/support/teardown.js';
 
 export const ORIGIN = 'https://app.example';

@@ -8,7 +8,7 @@ import type { DashboardOwnerHandler } from './index.js';
 /**
  * host.workspace.facts (t-ff83; docs/alp/remote-gateway.md §5.19): what the owner's sidebar shows
  * under each workspace, read on this host for the host owner only. One `handler: true` entry in the
- * `// --- owner: host ---` block of apps/gateway/src/policy.js; never forwarded to alpd.
+ * `// --- owner: host ---` block of apps/gateway/src/policy.ts; never forwarded to alpd.
  *
  * params  { workspaceIds: string[] (1..FACTS.maxIds), refresh?: boolean }
  * result  { workspaces: { [workspaceId]: WorkspaceFacts } }

@@ -1,4 +1,3 @@
-// @ts-check
 import { MAX_FRAME } from '@anhlp/alp-protocol';
 
 /**
@@ -9,7 +8,6 @@ import { MAX_FRAME } from '@anhlp/alp-protocol';
 
 export const DEFAULT_PORT = 7434;
 
-/** @typedef {typeof DEFAULT_LIMITS} Limits */
 export const DEFAULT_LIMITS = Object.freeze({
   /** Largest WebSocket message a client may send, in bytes; at most the protocol's MAX_FRAME. */
   maxFrame: 4 * 1024 * 1024,
@@ -35,38 +33,33 @@ export const DEFAULT_LIMITS = Object.freeze({
   authFailures: 20,
   authWindowMs: 5 * 60_000,
 });
+export type Limits = typeof DEFAULT_LIMITS;
 
 const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost']);
-export const isLoopbackHost = (/** @type {string} */ host) => LOOPBACK.has(host);
-export const isLoopbackAddress = (/** @type {string | undefined} */ address) => !!address && (address === '::1' || address.startsWith('127.') || address.startsWith('::ffff:127.'));
+export const isLoopbackHost = (host: string) => LOOPBACK.has(host);
+export const isLoopbackAddress = (address: string | undefined) => !!address && (address === '::1' || address.startsWith('127.') || address.startsWith('::ffff:127.'));
 
-/**
- * @typedef {{
- *   host?: string, port?: number, tls?: { cert: string, key: string },
- *   origins?: string[], hosts?: string[], trustProxy?: string[], allowInsecure?: boolean,
- *   socketPath?: string, limits?: Partial<Limits>,
- * }} GatewayConfigInput
- * @typedef {{
- *   host: string, port: number, tls?: { cert: string, key: string },
- *   origins: Set<string>, hosts: Set<string>, trustProxy: Set<string>, allowInsecure: boolean,
- *   socketPath?: string, limits: Limits,
- * }} GatewayConfig
- */
+export type GatewayConfigInput = {
+  host?: string, port?: number, tls?: { cert: string, key: string },
+  origins?: string[], hosts?: string[], trustProxy?: string[], allowInsecure?: boolean,
+  socketPath?: string, limits?: Partial<Limits>,
+};
+export type GatewayConfig = {
+  host: string, port: number, tls?: { cert: string, key: string },
+  origins: Set<string>, hosts: Set<string>, trustProxy: Set<string>, allowInsecure: boolean,
+  socketPath?: string, limits: Limits,
+};
 
-/** A browser Origin as browsers send it: scheme, host and port only, lower case. @param {string} origin */
-export function normalizeOrigin(origin) {
+/** A browser Origin as browsers send it: scheme, host and port only, lower case. */
+export function normalizeOrigin(origin: string) {
   const url = new URL(origin);
   if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error(`Origin ${origin} must be http or https`);
   if (url.pathname !== '/' || url.search || url.hash || url.username || url.password) throw new Error(`Origin ${origin} must have no path, query or credentials`);
   return url.origin.toLowerCase();
 }
 
-/**
- * Checked settings with defaults.
- * @param {GatewayConfigInput} [input]
- * @returns {GatewayConfig}
- */
-export function resolveConfig(input = {}) {
+/** Checked settings with defaults. */
+export function resolveConfig(input: GatewayConfigInput = {}): GatewayConfig {
   const host = input.host ?? '127.0.0.1';
   const port = input.port ?? DEFAULT_PORT;
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('port must be 0 to 65535');

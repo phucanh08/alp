@@ -3,7 +3,7 @@
  * Images attached to a message (t-7679.11), as Paseo's composer takes them (paste, drop, the
  * attach button; a preview each, with Remove), but sent inline: the browser reads the file and
  * the prompt carries its base64, never a path on either machine. The limits are the gateway's
- * (apps/gateway/src/policy.js GATEWAY_PROMPT_IMAGES), so a refusal shows here before sending.
+ * (apps/gateway/src/policy.ts GATEWAY_PROMPT_IMAGES), so a refusal shows here before sending.
  */
 
 /** The types the host takes (protocol PROMPT_IMAGES.mimeTypes). */

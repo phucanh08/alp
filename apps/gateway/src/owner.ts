@@ -1,14 +1,14 @@
-// @ts-check
 import { isLoopbackHost } from './config.js';
+import type { GatewayConfig } from './config.js';
 
 /**
  * The host owner (t-a95b, docs/alp/remote-gateway.md §5.19): the one connection that may call the
- * methods the exposure matrix marks `owner` (policy.js). Only alp dashboard creates a gateway with
+ * methods the exposure matrix marks `owner` (policy.ts). Only alp dashboard creates a gateway with
  * an `owner` option; standalone `alp-gateway serve` never does, so behind it no connection is the
  * owner and an owner method answers exactly as a denied one (-32601 not_exposed).
  *
  * A connection is the owner while ALL of these hold, the credential part checked again on every
- * request (connection.js #isOwner):
+ * request (connection.ts #isOwner):
  *   1. the gateway was created with `owner` (and so listens on plain loopback: ownerOptionError);
  *   2. its credential is the one `owner.credentialId()` names NOW: after `alp dashboard rotate` or a
  *      revoke the old token is no longer the owner, even on a connection that is still open;
@@ -45,19 +45,17 @@ export const FORWARDING_HEADERS = Object.freeze(['forwarded', 'x-forwarded-for',
  * `*-client-ip`, `*-connecting-ip`), so a proxy's own variant (x-forwarded-server,
  * x-original-forwarded-for, x-cluster-client-ip, fastly-client-ip) is caught too. A plain TCP
  * forwarder adds no header at all and cannot be told from a direct client (docs §5.19).
- * @param {string} name
  */
-export function isForwardingHeader(name) {
+export function isForwardingHeader(name: string) {
   return FORWARDING_HEADERS.includes(name) || name.includes('forwarded') || name.startsWith('x-real-') || name.startsWith('x-original-') || name.endsWith('-client-ip') || name.endsWith('connecting-ip');
 }
 
 /**
  * Whether an upgrade request came straight from this machine: the socket's own peer address is
  * loopback, the peer was not resolved through a trusted proxy, and no forwarding header is present.
- * @param {{ socket: { remoteAddress?: string }, headers: Record<string, unknown> }} request
- * @param {{ proxied: boolean }} peer what server.js peerOf made of the request
+ * `peer` is what server.ts peerOf made of the request.
  */
-export function directLoopback(request, peer) {
+export function directLoopback(request: { socket: { remoteAddress?: string }, headers: Record<string, unknown> }, peer: { proxied: boolean }) {
   if (peer.proxied) return false;
   if (!OWNER_LOOPBACK.includes(request.socket.remoteAddress ?? '')) return false;
   return !Object.keys(request.headers).some(name => isForwardingHeader(name.toLowerCase()));
@@ -70,23 +68,21 @@ export function directLoopback(request, peer) {
  * sends a request to alpd on this connection's own alpd connection. A thrown error with a numeric
  * `code` (and optional `data`) reaches the client as that error; any other throw is logged and
  * answered as "<method> failed in the gateway".
- * @typedef {(context: { method: string, params: Record<string, any>, principal: string, daemon: { request: (method: string, params?: Record<string, unknown>) => Promise<unknown> } }) => unknown} OwnerHandler
  */
+// any: a handler reads its own params, which the matrix passed through unchecked (it checks them itself).
+export type OwnerHandler = (context: { method: string, params: Record<string, any>, principal: string, daemon: { request: (method: string, params?: Record<string, unknown>) => Promise<unknown> } }) => unknown;
 
-/**
- * @typedef {{
- *   credentialId: () => string | undefined,
- *   methods?: Readonly<Record<string, OwnerHandler>>,
- * }} OwnerOption
- *   `credentialId` is read on every request, so it must answer the credential the owner holds now.
- */
+/** `credentialId` is read on every request, so it must answer the credential the owner holds now. */
+export type OwnerOption = {
+  credentialId: () => string | undefined,
+  methods?: Readonly<Record<string, OwnerHandler>>,
+};
 
 /**
  * Why an owner option cannot be used with this config, or undefined. The owner is a plain loopback
  * listener: no TLS (its clients are on this machine), no trusted proxy, a loopback bind address.
- * @param {OwnerOption | undefined} owner @param {import('./config.js').GatewayConfig} config
  */
-export function ownerOptionError(owner, config) {
+export function ownerOptionError(owner: OwnerOption | undefined, config: GatewayConfig) {
   if (!owner) return undefined;
   if (typeof owner.credentialId !== 'function') return 'owner.credentialId must be a function';
   if (owner.methods !== undefined && (owner.methods === null || typeof owner.methods !== 'object')) return 'owner.methods must be an object of handlers';

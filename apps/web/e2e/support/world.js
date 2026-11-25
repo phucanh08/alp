@@ -20,7 +20,7 @@ export const WEB = path.resolve(here, '../..');
 export const REPOSITORY = path.resolve(WEB, '../..');
 const ALPD = path.join(REPOSITORY, 'packages/daemon/dist/alpd.js');
 const CLI = path.join(REPOSITORY, 'packages/cli/dist/cli.js');
-const GATEWAY = path.join(REPOSITORY, 'apps/gateway/src/cli.js');
+const GATEWAY = path.join(REPOSITORY, 'apps/gateway/dist/cli.js');
 const FAKE_CODEX = path.join(here, 'fake-codex.js');
 const run = promisify(execFile);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));

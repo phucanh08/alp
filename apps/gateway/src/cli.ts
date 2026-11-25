@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// @ts-check
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
@@ -10,6 +9,7 @@ import { CredentialStore, createCredential, gatewayHome, listCredentials, reissu
 import { createGatewayLogger } from './log.js';
 import { DEFAULT_PERMISSIONS, PERMISSIONS, TERMINAL_EXEC_WARNING } from './policy.js';
 import { createGateway } from './server.js';
+import type { GatewayConfigInput } from './config.js';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -49,10 +49,10 @@ Credentials never expire unless you pass --expires-in-days. Only you make, chang
 it refuses to when run by an ALP agent (ALP_AGENT_SESSION is set).
 Files live in $ALP_GATEWAY_HOME, else $ALP_HOME/gateway. The gateway never starts alpd.`;
 
-const fail = (/** @type {string} */ message) => { console.error(message); process.exit(2); };
+const fail = (message: string) => { console.error(message); process.exit(2); };
 
 
-async function serve(/** @type {string[]} */ args) {
+async function serve(args: string[]) {
   const { values } = parseArgs({
     args,
     options: {
@@ -62,8 +62,7 @@ async function serve(/** @type {string[]} */ args) {
       'allow-insecure': { type: 'boolean' }, socket: { type: 'string' },
     },
   });
-  /** @type {import('./config.js').GatewayConfigInput} */
-  const file = values.config ? JSON.parse(await readFile(values.config, 'utf8')) : {};
+  const file: GatewayConfigInput = values.config ? JSON.parse(await readFile(values.config, 'utf8')) : {};
   const input = {
     ...file,
     ...(values.host ? { host: values.host } : {}),
@@ -95,7 +94,7 @@ async function serve(/** @type {string[]} */ args) {
   process.on('SIGHUP', () => void store.reload());
 }
 
-async function credential(/** @type {string[]} */ args) {
+async function credential(args: string[]) {
   const [action, ...rest] = args;
   // Only the user manages credentials (t-1c59): a process an ALP agent started is refused every change.
   if (['create', 'rotate', 'reissue', 'edit', 'revoke'].includes(action) && isAgentProcess()) {
@@ -113,7 +112,7 @@ async function credential(/** @type {string[]} */ args) {
     if (days !== undefined && !(days > 0)) fail('--expires-in-days must be a positive number');
     const permissions = (values.permission ?? [...DEFAULT_PERMISSIONS]).flatMap(entry => entry.split(',')).map(entry => entry.trim()).filter(Boolean);
     const { credential: created, token } = await createCredential(home, {
-      label: /** @type {string} */ (values.label), workspaces: /** @type {string[]} */ (values.workspace), permissions, worktreeMappings: values['worktree-mapping'] ?? [],
+      label: values.label as string, workspaces: values.workspace as string[], permissions, worktreeMappings: values['worktree-mapping'] ?? [],
       ...(values.mode ? { modes: values.mode } : {}),
       ...(values.agent !== undefined ? { agent: values.agent } : {}),
       ...(days ? { expiresAt: new Date(Date.now() + days * 86_400_000).toISOString() } : {}),

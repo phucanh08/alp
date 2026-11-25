@@ -13,7 +13,7 @@ import type { DashboardOwnerContext, DashboardOwnerHandler } from './index.js';
 /**
  * Owner handlers for the host pages of Settings (t-a95b.1 group B; docs/alp/dashboard.md §4.7):
  * Providers, Terminals, Usage, Workspaces and Projects. Each method here has a `handler: true` entry in the
- * `// --- owner: host (group B) ---` block of apps/gateway/src/policy.js, which lists the params
+ * `// --- owner: host (group B) ---` block of apps/gateway/src/policy.ts, which lists the params
  * that reach it; the values are checked here, before anything runs or reaches alpd.
  *
  * Each one reuses what the CLI does, never a copy of it:

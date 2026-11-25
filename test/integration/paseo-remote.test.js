@@ -23,7 +23,7 @@ import { AlpRpcClient, hello } from '../../packages/client/dist/portable.js';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const ALPD = path.join(ROOT, 'packages/daemon/dist/alpd.js');
-const GATEWAY = path.join(ROOT, 'apps/gateway/src/cli.js');
+const GATEWAY = path.join(ROOT, 'apps/gateway/dist/cli.js');
 const CLIENT = path.join(ROOT, 'test/integration/support/paseo-remote-client.mjs');
 const REMOTE_ENTRY = path.join(ROOT, 'integrations/paseo/server/dist/remote/index.js');
 const FAKE_CODEX = path.join(ROOT, 'packages/daemon/tests/support/fake-codex.js');

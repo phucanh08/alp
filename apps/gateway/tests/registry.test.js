@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, realpath, rm, symlink, unlink } from 'node:fs/promises';
 import { fakeDaemon } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
-import { DEFAULT_PERMISSIONS } from '../src/policy.js';
+import { DEFAULT_PERMISSIONS } from '../dist/policy.js';
 import { teardown } from '../../../test/support/teardown.js';
 
 test('registry: exact existing grants, filtered pagination/count, explicit projection, opt-in writes and authorize before replay', async t => {

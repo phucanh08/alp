@@ -1,5 +1,13 @@
-// @ts-check
 import { ATTACHMENTS, CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS, TERMINAL, TERMINAL_LIMIT_KEYS, WORKSPACE_FILES, WORKSPACE_GIT, attachmentChunkBytes, base64Bytes, blockedFilePath, isTerminalId } from '@anhlp/alp-protocol';
+import type { AttachmentInfo, AttachmentLimits, ConversationBranch, ForkProvenance, GitDiffFile, GitDiffHunk, GitDiffLine, GitDiffPage, GitStatus, GitStatusFile, TerminalInfo, TerminalLimits } from '@anhlp/alp-protocol';
+import type { Grant } from './credentials.js';
+
+/**
+ * An answer from alpd (or a value a client sent) before the gateway checked it: each projection
+ * below tests every field it reads before passing it on.
+ */
+// any: untrusted JSON of any shape; the projections narrow each field they read.
+type Unchecked = Record<string, any>;
 
 /**
  * What the gateway lets a remote client call (docs/alp/remote-gateway.md §5): the method
@@ -88,9 +96,8 @@ export const GATEWAY_PROMPT_IMAGES = Object.freeze({ mimeTypes: PROMPT_IMAGES.mi
  * The image limits of a gateway whose clients send frames of at most `maxFrame` bytes: those above,
  * lowered so the images as base64, with 64 KiB for the rest of the request, still fit one frame (a
  * smaller `limits.maxFrame` refuses them as image_limit rather than closing the socket).
- * @param {number} [maxFrame]
  */
-export function promptImageLimits(maxFrame = 4 * 1024 * 1024) {
+export function promptImageLimits(maxFrame: number = 4 * 1024 * 1024) {
   const fits = Math.max(0, Math.floor((maxFrame - 64 * 1024) * 3 / 4));
   const maxTotalBytes = Math.min(GATEWAY_PROMPT_IMAGES.maxTotalBytes, fits);
   return { maxCount: GATEWAY_PROMPT_IMAGES.maxCount, maxBytes: Math.min(GATEWAY_PROMPT_IMAGES.maxBytes, maxTotalBytes), maxTotalBytes };
@@ -101,69 +108,63 @@ export function promptImageLimits(maxFrame = 4 * 1024 * 1024) {
  * ones, each a non-negative integer no higher than ATTACHMENTS (an unusable value is replaced by
  * ATTACHMENTS'), the chunk also lowered to fit this gateway's frame. The gateway refuses a chunk
  * over it before alpd; alpd enforces the rest.
- * @param {unknown} advertised @param {number} [maxFrame]
  */
-export function gatewayAttachmentLimits(advertised, maxFrame = 4 * 1024 * 1024) {
-  const source = /** @type {Record<string, unknown>} */ (advertised && typeof advertised === 'object' ? advertised : {});
-  /** @type {Record<string, number>} */
-  const limits = {};
-  for (const key of /** @type {const} */ (['maxObjectBytes', 'maxPerPrompt', 'maxPromptBytes', 'maxChunkBytes', 'maxActiveUploads', 'maxPrincipalBytes', 'maxDaemonBytes', 'uploadTimeoutMs', 'unreferencedRetentionMs', 'releasedGraceMs'])) {
+export function gatewayAttachmentLimits(advertised: unknown, maxFrame: number = 4 * 1024 * 1024) {
+  const source = (advertised && typeof advertised === 'object' ? advertised : {}) as Record<string, unknown>;
+  const limits: Record<string, number> = {};
+  for (const key of (['maxObjectBytes', 'maxPerPrompt', 'maxPromptBytes', 'maxChunkBytes', 'maxActiveUploads', 'maxPrincipalBytes', 'maxDaemonBytes', 'uploadTimeoutMs', 'unreferencedRetentionMs', 'releasedGraceMs'] as const)) {
     const value = source[key];
     limits[key] = typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? Math.min(value, ATTACHMENTS[key]) : ATTACHMENTS[key];
   }
   limits.maxChunkBytes = Math.min(limits.maxChunkBytes, attachmentChunkBytes(maxFrame));
-  return /** @type {import('@anhlp/alp-protocol').AttachmentLimits} */ (limits);
+  return limits as unknown as AttachmentLimits;
 }
 
 /**
  * The terminal limits of this gateway (§5.18): alpd's advertised ones, never above TERMINAL; an
  * output event must fit a client's frame with room for its envelope.
- * @param {unknown} advertised @param {number} [maxFrame]
- * @returns {import('@anhlp/alp-protocol').TerminalLimits}
  */
-export function gatewayTerminalLimits(advertised, maxFrame = 4 * 1024 * 1024) {
-  const source = /** @type {Record<string, unknown>} */ (advertised && typeof advertised === 'object' ? advertised : {});
-  /** @type {Record<string, number>} */
-  const limits = {};
+export function gatewayTerminalLimits(advertised: unknown, maxFrame: number = 4 * 1024 * 1024): TerminalLimits {
+  const source = (advertised && typeof advertised === 'object' ? advertised : {}) as Record<string, unknown>;
+  const limits: Record<string, number> = {};
   for (const key of TERMINAL_LIMIT_KEYS) {
     const value = source[key];
-    const max = /** @type {number} */ (TERMINAL[/** @type {keyof typeof TERMINAL} */ (key)]);
+    const max = TERMINAL[key as keyof typeof TERMINAL] as number;
     limits[key] = typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? Math.min(value, max) : max;
   }
   // A JSON-escaped output frame may take up to 6 bytes per byte of data.
   limits.maxOutputFrameBytes = Math.max(1, Math.min(limits.maxOutputFrameBytes, Math.floor((maxFrame - 1024) / 6)));
-  return /** @type {any} */ (limits);
+  return limits as unknown as TerminalLimits;
 }
 
 const TERMINAL_END = new Set(['exited', 'closed', 'idle', 'lifetime', 'detached', 'revoked', 'disabled', 'shutdown']);
-const TERMINAL_STAMP = (/** @type {unknown} */ value) => typeof value === 'string' && value.length <= 64 && !Number.isNaN(Date.parse(value));
-const integerOrNull = (/** @type {unknown} */ value) => value === null || Number.isSafeInteger(value);
+const TERMINAL_STAMP = (value: unknown) => typeof value === 'string' && value.length <= 64 && !Number.isNaN(Date.parse(value));
+const integerOrNull = (value: unknown) => value === null || Number.isSafeInteger(value);
 
 /**
  * A terminal as a remote client may see it: the schema's fields only, each checked. Never a process
  * id, shell path or host path; undefined when alpd answered anything else (the answer is refused).
- * @param {any} raw
  */
-export function projectTerminal(raw) {
+// any: alpd's untrusted answer; every field is checked before it is copied.
+export function projectTerminal(raw: any) {
   if (!raw || typeof raw !== 'object' || !isTerminalId(raw.terminalId) || typeof raw.workspaceId !== 'string' || !raw.workspaceId || raw.workspaceId.length > 200) return undefined;
   if (typeof raw.title !== 'string' || raw.title.length > 64 || /[\p{Cc}\p{Cf}/\\]/u.test(raw.title)) return undefined;
   if (![raw.cols, raw.rows].every(value => Number.isSafeInteger(value)) || raw.cols < TERMINAL.minCols || raw.cols > TERMINAL.maxCols || raw.rows < TERMINAL.minRows || raw.rows > TERMINAL.maxRows) return undefined;
   if (raw.state !== 'running' && raw.state !== 'exited') return undefined;
   if (typeof raw.attached !== 'boolean' || ![raw.createdAt, raw.lastActivityAt, raw.expiresAt].every(TERMINAL_STAMP)) return undefined;
-  /** @type {Record<string, unknown>} */
-  const terminal = { terminalId: raw.terminalId, workspaceId: raw.workspaceId, title: raw.title, cols: raw.cols, rows: raw.rows, state: raw.state, attached: raw.attached, createdAt: raw.createdAt, lastActivityAt: raw.lastActivityAt, expiresAt: raw.expiresAt };
+  const terminal: Record<string, unknown> = { terminalId: raw.terminalId, workspaceId: raw.workspaceId, title: raw.title, cols: raw.cols, rows: raw.rows, state: raw.state, attached: raw.attached, createdAt: raw.createdAt, lastActivityAt: raw.lastActivityAt, expiresAt: raw.expiresAt };
   if (raw.exitCode !== undefined) { if (!integerOrNull(raw.exitCode)) return undefined; terminal.exitCode = raw.exitCode; }
   if (raw.signal !== undefined) { if (!integerOrNull(raw.signal)) return undefined; terminal.signal = raw.signal; }
   if (raw.endReason !== undefined) { if (!TERMINAL_END.has(raw.endReason)) return undefined; terminal.endReason = raw.endReason; }
   if (raw.protection !== undefined) { if (raw.protection !== 'root-only' && raw.protection !== 'none') return undefined; terminal.protection = raw.protection; }
-  return /** @type {import('@anhlp/alp-protocol').TerminalInfo} */ (/** @type {unknown} */ (terminal));
+  return terminal as unknown as TerminalInfo;
 }
 
 /**
  * A terminal.event a remote client may get: output, exit or detached, the schema's fields only.
- * @param {any} raw @param {number} maxOutputFrameBytes
  */
-export function projectTerminalEvent(raw, maxOutputFrameBytes) {
+// any: alpd's untrusted event; every field is checked before it is copied.
+export function projectTerminalEvent(raw: any, maxOutputFrameBytes: number) {
   if (!raw || typeof raw !== 'object' || !isTerminalId(raw.terminalId)) return undefined;
   if (raw.type === 'output') {
     if (!Number.isSafeInteger(raw.seq) || raw.seq < 1 || typeof raw.data !== 'string' || !raw.data || Buffer.byteLength(raw.data) > maxOutputFrameBytes) return undefined;
@@ -203,20 +204,18 @@ export const TERMINAL_REFUSALS = Object.freeze({
 const UPLOAD_ID = /^upl_[0-9a-f]{32}$/;
 const ATTACHMENT_ID = /^att_[0-9a-f]{32}$/;
 const MIME = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/;
-const STAMP = (/** @type {unknown} */ value) => typeof value === 'string' && value.length <= 64 && !/[\p{Cc}\p{Cf}]/u.test(value);
-const bytes = (/** @type {unknown} */ value) => Number.isSafeInteger(value) && /** @type {number} */ (value) >= 0;
+const STAMP = (value: unknown) => typeof value === 'string' && value.length <= 64 && !/[\p{Cc}\p{Cf}]/u.test(value);
+const bytes = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0;
 
 /**
  * An attachment as a remote client may see it: the schema's fields only, each checked (ids,
  * a display name of at most 255 UTF-8 bytes without control, format or path-separator characters,
  * MIME types, sizes, digest, times). Never a host path. Undefined when any field is not one alpd
  * would answer: the answer is then refused.
- * @param {unknown} raw
- * @returns {import('@anhlp/alp-protocol').AttachmentInfo | undefined}
  */
-export function projectAttachment(raw) {
+export function projectAttachment(raw: unknown): AttachmentInfo | undefined {
   if (!plain(raw)) return undefined;
-  const source = /** @type {Record<string, any>} */ (raw);
+  const source = raw as Unchecked;
   const name = source.name;
   if (!ATTACHMENT_ID.test(source.attachmentId ?? '') || typeof source.sessionId !== 'string' || !/^[A-Za-z0-9_.:-]{1,128}$/.test(source.sessionId)) return undefined;
   if (typeof name !== 'string' || !name || Buffer.byteLength(name, 'utf8') > 255 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\/\\]/u.test(name)) return undefined;
@@ -228,11 +227,10 @@ export function projectAttachment(raw) {
 /**
  * An attachment.begin answer as a remote client may see it, its chunk size within `maxChunkBytes`;
  * undefined when it is not one.
- * @param {unknown} raw @param {number} maxChunkBytes
  */
-export function projectUploadBegun(raw, maxChunkBytes) {
+export function projectUploadBegun(raw: unknown, maxChunkBytes: number) {
   if (!plain(raw)) return undefined;
-  const source = /** @type {Record<string, any>} */ (raw);
+  const source = raw as Unchecked;
   if (!UPLOAD_ID.test(source.uploadId ?? '') || !['uploading', 'committed'].includes(source.state) || !bytes(source.received) || !bytes(source.size) || !Number.isSafeInteger(source.maxChunkBytes) || source.maxChunkBytes < 1) return undefined;
   if (source.state === 'uploading' && !STAMP(source.expiresAt)) return undefined;
   if (source.state === 'committed' && !ATTACHMENT_ID.test(source.attachmentId ?? '')) return undefined;
@@ -244,18 +242,16 @@ export function projectUploadBegun(raw, maxChunkBytes) {
 
 const GENERATION = /^[0-9a-f]{32}$/;
 const BRANCH_ID = /^br_[0-9a-f]{16}$/;
-const TURN_ID = (/** @type {unknown} */ value) => typeof value === 'string' && value.length > 0 && value.length <= 200 && !/[\p{Cc}\p{Cf}]/u.test(value);
-const SESSION_ID = (/** @type {unknown} */ value) => typeof value === 'string' && /^[\w.:-]{1,128}$/.test(value);
+const TURN_ID = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 200 && !/[\p{Cc}\p{Cf}]/u.test(value);
+const SESSION_ID = (value: unknown) => typeof value === 'string' && /^[\w.:-]{1,128}$/.test(value);
 
 /**
  * A conversation branch (session.rewind's `branch`, a summary's `branches`) as a remote client may
  * see it: the schema's four fields, each checked; undefined when any is not one alpd would answer.
- * @param {unknown} raw
- * @returns {import('@anhlp/alp-protocol').ConversationBranch | undefined}
  */
-export function projectBranch(raw) {
+export function projectBranch(raw: unknown): ConversationBranch | undefined {
   if (!plain(raw)) return undefined;
-  const source = /** @type {Record<string, any>} */ (raw);
+  const source = raw as Unchecked;
   if (!BRANCH_ID.test(source.branchId ?? '') || !TURN_ID(source.beforeTurnId) || !count(source.turns) || !STAMP(source.at) || !source.at) return undefined;
   return { branchId: source.branchId, beforeTurnId: source.beforeTurnId, turns: source.turns, at: source.at };
 }
@@ -264,12 +260,10 @@ export function projectBranch(raw) {
  * Where a fork came from as a remote client may see it: the schema's fields, each checked, and
  * only when `visible(sessionId)` says the source is in the credential's grant. Otherwise undefined:
  * the whole field is dropped (never a source id outside the grant, docs/alp/remote-gateway.md §5.15).
- * @param {unknown} raw @param {(sessionId: string) => boolean} visible
- * @returns {import('@anhlp/alp-protocol').ForkProvenance | undefined}
  */
-export function projectForkedFrom(raw, visible) {
+export function projectForkedFrom(raw: unknown, visible: (sessionId: string) => boolean): ForkProvenance | undefined {
   if (!plain(raw)) return undefined;
-  const source = /** @type {Record<string, any>} */ (raw);
+  const source = raw as Unchecked;
   if (!SESSION_ID(source.sessionId) || !['through', 'before', 'whole'].includes(source.boundary) || !STAMP(source.at) || !source.at) return undefined;
   if ((source.turnId !== undefined && !TURN_ID(source.turnId)) || (source.branchId !== undefined && !BRANCH_ID.test(source.branchId))) return undefined;
   if (!visible(source.sessionId)) return undefined;
@@ -279,26 +273,24 @@ export function projectForkedFrom(raw, visible) {
 /**
  * A summary's conversation support as a remote client may see it: its booleans (fork, rewind,
  * reload §12.8, and configure §12.9) and a known reason.
- * @param {unknown} raw
  */
-export function projectConversation(raw) {
+export function projectConversation(raw: unknown) {
   if (!plain(raw)) return undefined;
-  const source = /** @type {Record<string, any>} */ (raw);
+  const source = raw as Unchecked;
   if (typeof source.fork !== 'boolean' || typeof source.rewind !== 'boolean') return undefined;
   return { fork: source.fork, rewind: source.rewind, ...(typeof source.reload === 'boolean' ? { reload: source.reload } : {}), ...(typeof source.configure === 'boolean' ? { configure: source.configure } : {}), ...(['runtime_unsupported', 'not_persistent', 'not_root'].includes(source.reason) ? { reason: source.reason } : {}) };
 }
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9_.:@\[\]\/-]{0,199}$/;
-const name = (/** @type {unknown} */ value) => typeof value === 'string' && NAME.test(value) ? value : undefined;
-const names = (/** @type {unknown} */ value) => Array.isArray(value) ? value.slice(0, 64).map(name).filter(item => item !== undefined) : [];
+const name = (value: unknown) => typeof value === 'string' && NAME.test(value) ? value : undefined;
+const names = (value: unknown) => Array.isArray(value) ? value.slice(0, 64).map(name).filter(item => item !== undefined) : [];
 /**
  * An effective configuration (§12.9) as a remote client may see it: its names, booleans and counts,
  * MCP servers by name and kind only; never a path, command or the instructions themselves.
- * @param {unknown} raw
  */
-export function projectEffective(raw) {
+export function projectEffective(raw: unknown) {
   if (!plain(raw)) return undefined;
-  const source = /** @type {Record<string, any>} */ (raw);
+  const source = raw as Unchecked;
   const required = { team: name(source.team), agent: name(source.agent), model: name(source.model), thinking: name(source.thinking), mode: name(source.mode) };
   if (Object.values(required).some(value => value === undefined) || !['codex', 'claude', 'acp', 'antigravity'].includes(source.runtime)) return undefined;
   return {
@@ -339,11 +331,10 @@ export const CONFIGURE_REASONS = Object.freeze({
 /**
  * session.configure.preview's answer (§12.9) as a remote client may see it: both configurations
  * projected, the change list, booleans, a known reason with its fixed message, and the teams.
- * @param {unknown} raw
  */
-export function projectConfigurePreview(raw) {
+export function projectConfigurePreview(raw: unknown) {
   if (!plain(raw)) return undefined;
-  const source = /** @type {Record<string, any>} */ (raw);
+  const source = raw as Unchecked;
   const current = projectEffective(source.current);
   const proposed = projectEffective(source.proposed);
   if (!current || !proposed || typeof source.restart !== 'boolean' || typeof source.allowed !== 'boolean') return undefined;
@@ -352,23 +343,23 @@ export function projectConfigurePreview(raw) {
     current, proposed,
     changes: Array.isArray(source.changes) ? source.changes.filter(change => ['model', 'thinking', 'team', 'mode'].includes(change)) : [],
     restart: source.restart, allowed: source.allowed === true && !reason,
-    ...(reason ? { reason, message: CONFIGURE_REASONS[/** @type {keyof typeof CONFIGURE_REASONS} */ (reason)] } : source.allowed ? {} : { reason: 'runtime_unsupported', message: CONFIGURE_REASONS.runtime_unsupported }),
+    ...(reason ? { reason, message: CONFIGURE_REASONS[reason as keyof typeof CONFIGURE_REASONS] } : source.allowed ? {} : { reason: 'runtime_unsupported', message: CONFIGURE_REASONS.runtime_unsupported }),
     teams: Array.isArray(source.teams) ? source.teams.slice(0, 64).filter(team => plain(team) && name(team.id) && typeof team.label === 'string' && team.label.length <= 200).map(team => ({ id: team.id, label: team.label, ...(typeof team.description === 'string' && team.description.length <= 1000 ? { description: team.description } : {}) })) : [],
   };
 }
 
-/** session.configure's `configured` (§12.9) as a remote client may see it. @param {unknown} raw */
-export function projectConfigured(raw) {
+/** session.configure's `configured` (§12.9) as a remote client may see it. */
+export function projectConfigured(raw: unknown) {
   if (!plain(raw)) return undefined;
-  const source = /** @type {Record<string, any>} */ (raw);
+  const source = raw as Unchecked;
   const effective = projectEffective(source.effective);
   if (!effective || !['applied', 'unchanged'].includes(source.status) || typeof source.restarted !== 'boolean') return undefined;
   const requested = plain(source.requested) ? Object.fromEntries(['model', 'thinking', 'team', 'mode'].map(key => [key, name(source.requested[key])]).filter(([, value]) => value !== undefined)) : {};
   return { status: source.status, requested, effective, restarted: source.restarted };
 }
 
-/** A history generation alpd answers: 32 lowercase hex digits. @param {unknown} value */
-export const isGeneration = value => typeof value === 'string' && GENERATION.test(value);
+/** A history generation alpd answers: 32 lowercase hex digits. */
+export const isGeneration = (value: unknown) => typeof value === 'string' && GENERATION.test(value);
 
 /**
  * Fields of list rows passed on; anything else alpd adds later is dropped until reviewed. Rows name
@@ -385,13 +376,13 @@ export const LIBRARY_ENTRY_FIELDS = Object.freeze(['kind', 'name', 'source', 'ov
 /** What stands for a hidden value in library.get content, as alpd's own marker (docs/protocol/alp-json-rpc-v1.md §15.3). */
 export const SECRET_MARKER = Object.freeze({ $secret: 'keep' });
 
-const plain = (/** @type {unknown} */ value) => value !== null && typeof value === 'object' && !Array.isArray(value);
-const pointerOf = (/** @type {string[]} */ parts) => parts.map(part => `/${part.replaceAll('~', '~0').replaceAll('/', '~1')}`).join('');
-const isString = (/** @type {unknown} */ value) => typeof value === 'string';
-const isBoolean = (/** @type {unknown} */ value) => typeof value === 'boolean';
-const isNumber = (/** @type {unknown} */ value) => typeof value === 'number' && Number.isFinite(value);
-const isStrings = (/** @type {unknown} */ value) => Array.isArray(value) && value.every(isString);
-const isStringOrNumber = (/** @type {unknown} */ value) => isString(value) || isNumber(value);
+const plain = (value: unknown) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const pointerOf = (parts: string[]) => parts.map(part => `/${part.replaceAll('~', '~0').replaceAll('/', '~1')}`).join('');
+const isString = (value: unknown) => typeof value === 'string';
+const isBoolean = (value: unknown) => typeof value === 'boolean';
+const isNumber = (value: unknown) => typeof value === 'number' && Number.isFinite(value);
+const isStrings = (value: unknown) => Array.isArray(value) && value.every(isString);
+const isStringOrNumber = (value: unknown) => isString(value) || isNumber(value);
 
 /**
  * How each field of an entry's content leaves the gateway. A function keeps a value of that type
@@ -402,12 +393,11 @@ const isStringOrNumber = (/** @type {unknown} */ value) => isString(value) || is
  * false or projects an object; any other object projects the fields it names. A field the map
  * does not name is dropped, so a field alpd or core adds later stays on the host until it is
  * reviewed here. ($-names never collide with content fields: $schema is dropped.)
- * @typedef {((value: unknown) => boolean) | 'secret' | 'secretValues' | 'secretItems' | 'program' | { $each: Projection } | { $list: Projection } | { $orFalse: Projection } | { [key: string]: Projection }} Projection
  */
+export type Projection = ((value: unknown) => boolean) | 'secret' | 'secretValues' | 'secretItems' | 'program' | { $each: Projection } | { $list: Projection } | { $orFalse: Projection } | { [key: string]: Projection };
 const MODEL_ENTRY = { id: isString, label: isString, description: isString };
 const MEMBER = { role: isString, model: isString, thinking: isString };
-/** @type {Readonly<Record<string, { [key: string]: Projection }>>} */
-const LIBRARY_CONTENT = Object.freeze({
+const LIBRARY_CONTENT: Readonly<Record<string, { [key: string]: Projection }>> = Object.freeze({
   agents: {
     instructions: isString,
     config: { description: isString, provider: isString, model: isString, thinking: isString, mode: isString, context: isStringOrNumber, autocompact: isStringOrNumber, skills: isStrings, mcp: isStrings, hooks: isStrings },
@@ -439,16 +429,13 @@ const LIBRARY_CONTENT = Object.freeze({
  * An entry's content as a remote client may see it, and the JSON Pointers of the values it hides.
  * alpd hides env and header values itself (§15.3); the gateway hides every other field that can
  * hold a secret and drops what it does not know. A kind it does not know answers no content.
- * @param {string} kind @param {unknown} content
- * @returns {{ content: Record<string, unknown>, secrets: string[] }}
  */
-export function projectLibraryContent(kind, content) {
-  /** @type {string[]} */
-  const secrets = [];
+export function projectLibraryContent(kind: string, content: unknown): { content: Record<string, unknown>, secrets: string[] } {
+  const secrets: string[] = [];
   const map = Object.hasOwn(LIBRARY_CONTENT, kind) ? LIBRARY_CONTENT[kind] : undefined;
   if (!map || !plain(content)) return { content: {}, secrets };
-  /** @param {any} rule @param {unknown} value @param {string[]} parts @returns {unknown} */
-  const project = (rule, value, parts) => {
+  // any: a rule is any member of the Projection union, told apart at run time below.
+  const project = (rule: any, value: unknown, parts: string[]): unknown => {
     if (typeof rule === 'function') return rule(value) ? (Array.isArray(value) ? [...value] : value) : undefined;
     if (rule === 'secret') { secrets.push(pointerOf(parts)); return { ...SECRET_MARKER }; }
     if (rule === 'program') {
@@ -459,7 +446,7 @@ export function projectLibraryContent(kind, content) {
     }
     if (rule === 'secretValues') {
       if (!plain(value)) return undefined;
-      return Object.fromEntries(Object.keys(/** @type {object} */ (value)).map(key => { secrets.push(pointerOf([...parts, key])); return [key, { ...SECRET_MARKER }]; }));
+      return Object.fromEntries(Object.keys(value as object).map(key => { secrets.push(pointerOf([...parts, key])); return [key, { ...SECRET_MARKER }]; }));
     }
     if (rule === 'secretItems') {
       if (!Array.isArray(value)) return undefined;
@@ -471,9 +458,8 @@ export function projectLibraryContent(kind, content) {
     }
     if (Object.hasOwn(rule, '$orFalse')) return value === false ? false : project(rule.$orFalse, value, parts);
     if (!plain(value)) return undefined;
-    const source = /** @type {Record<string, unknown>} */ (value);
-    /** @type {Record<string, unknown>} */
-    const out = {};
+    const source = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
     if (Object.hasOwn(rule, '$each')) {
       for (const key of Object.keys(source)) {
         const kept = project(rule.$each, source[key], [...parts, key]);
@@ -488,7 +474,7 @@ export function projectLibraryContent(kind, content) {
     }
     return out;
   };
-  return { content: /** @type {Record<string, unknown>} */ (project(map, content, [])), secrets };
+  return { content: project(map, content, []) as Record<string, unknown>, secrets };
 }
 
 /**
@@ -496,9 +482,8 @@ export function projectLibraryContent(kind, content) {
  * patch 0017): alpd's os.hostname(), trimmed, at most 253 characters, no control or format
  * characters (bidi overrides, zero-width), which could make one host look like another.
  * Anything else answers no hostname.
- * @param {unknown} value
  */
-export function hostLabel(value) {
+export function hostLabel(value: unknown) {
   if (typeof value !== 'string') return undefined;
   const name = value.trim();
   return name && name.length <= 253 && !/[\p{Cc}\p{Cf}]/u.test(name) ? name : undefined;
@@ -513,7 +498,7 @@ export const WORKSPACE = '<workspace>';
 /** What stands for V8's quote of a file in error text. */
 export const FILE_QUOTE = '<file content>';
 
-const escapeRegExp = (/** @type {string} */ text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** Characters that end a path token in prose: whitespace, quotes, brackets, `,` `;` `:`. */
 const PATH_CHAR = '[^\\s\'"`()\\[\\]{}<>,;:|]';
 /**
@@ -535,10 +520,9 @@ const TOKENS = new RegExp([
  * paths inside a granted workspace made relative to it (its root WORKSPACE), every other absolute host path (POSIX,
  * Windows, UNC, ~/, file: URLs, the gateway's home directory) replaced by HOST_PATH, at most
  * MAX_ERROR_TEXT characters. Text with none of these (a rate limit, an HTTP status, a URL) passes as it is.
- * @param {unknown} value @param {readonly { path: string, canonical: string }[]} workspaces @param {{ lines?: boolean, home?: string }} [options]
- *   lines: keep every line (alpd's own notices); home: the host's home directory, replaced wherever it appears
+ * Options: `lines` keeps every line (alpd's own notices); `home`, the host's home directory, is replaced wherever it appears.
  */
-export function safeErrorText(value, workspaces, { lines = false, home } = {}) {
+export function safeErrorText(value: unknown, workspaces: readonly { path: string, canonical: string }[], { lines = false, home }: { lines?: boolean, home?: string } = {}) {
   // Never String() an object: one without a primitive conversion would throw.
   let text = typeof value === 'string' ? value : typeof value === 'number' || typeof value === 'boolean' ? String(value) : '';
   if (!lines) text = text.split(/\r\n|\r|\n|\u0085|\u2028|\u2029/, 1)[0];
@@ -575,10 +559,9 @@ export function safeErrorText(value, workspaces, { lines = false, home } = {}) {
  * An error object of an event, a prompt receipt or a session's lastError (`{ message, code? }`) as
  * a remote client may see it: the code when it is a plain identifier, the message through
  * safeErrorText; every other field dropped. Anything that is not an object answers a generic one.
- * @param {unknown} error @param {readonly { path: string, canonical: string }[]} workspaces @param {{ home?: string }} [options]
  */
-export function safeAlpError(error, workspaces, options = {}) {
-  const source = /** @type {any} */ (plain(error) ? error : {});
+export function safeAlpError(error: unknown, workspaces: readonly { path: string, canonical: string }[], options: { home?: string } = {}) {
+  const source = (plain(error) ? error : {}) as Unchecked;
   const code = typeof source.code === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(source.code) ? source.code : undefined;
   const message = typeof source.message === 'string' && source.message ? safeErrorText(source.message, workspaces, options) : 'Failed';
   return { message, ...(code ? { code } : {}) };
@@ -592,44 +575,45 @@ const MODEL_ID = new RegExp(`^(?:(?:codex|claude|antigravity):${VISIBLE}+|acp:(?
  * A model id as alpd reads spec.model (packages/runtime/src/resolve.ts) and library.models lists
  * them: `<runtime>:<model>` for codex, claude and antigravity (catalogue ids such as
  * `claude:claude-opus-4-8[1m]`), `acp:<provider>` or `acp:<provider>/<model>`, where a provider id
- * is a library file name ([\w.-], packages/core/src/providers.js) and its model any id without
+ * is a library file name ([\w.-], packages/core/src/providers.ts) and its model any id without
  * whitespace the provider lists, or a bare catalogue id. At most 256 characters. A model id is
  * never a path to the gateway or alpd: it chooses a provider by name and is passed to it.
- * @param {unknown} value
  */
-export function isModelId(value) {
+export function isModelId(value: unknown) {
   return typeof value === 'string' && value.length <= 256 && MODEL_ID.test(value);
 }
 
 /**
- * @typedef {'gateway' | 'exposed' | 'owner' | 'denied' | 'prohibited'} ExposureStatus
- *   gateway: answered by the gateway itself; exposed: forwarded after the checks; owner: only for
- *   the host owner's connection (isOwner in connection.js: a gateway created with `owner`, the
- *   credential it names, a direct loopback socket), answered by the gateway's owner handler of that
- *   name or else forwarded to alpd with `params`; every other connection gets the `denied` answer
- *   (-32601 not_exposed), so for a remote credential an owner method is a denied one; denied: not
- *   exposed until a contract or policy makes its scope checkable; prohibited: never remote in v1.
- *   handler (owner only): the method is the gateway's own (a `host.*` name alpd does not serve),
- *   answered only by the owner handler of that name, never forwarded; it lists `params` (the only
- *   keys the handler receives) and the handler validates their values itself, as it has no
- *   methods-v1 schema. An owner method without `handler` is alpd's and has a methods-v1 schema.
- *   alsoRequires: permissions the grant must hold besides `permission` (each checked, refused
- *   with 1003 grant naming the first one missing, before anything reaches alpd).
- * @typedef {{
- *   status: ExposureStatus,
- *   permission?: 'session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage' | 'attachments.write' | 'session.team.write' | 'terminal.exec',
- *   alsoRequires?: readonly ('session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage' | 'attachments.write' | 'session.team.write' | 'terminal.exec')[],
- *   scope: string,
- *   capability?: string,
- *   params?: readonly string[],
- *   handler?: true,
- *   tests?: readonly string[],
- *   reason?: string,
- * }} Exposure
+ * gateway: answered by the gateway itself; exposed: forwarded after the checks; owner: only for
+ * the host owner's connection (isOwner in connection.ts: a gateway created with `owner`, the
+ * credential it names, a direct loopback socket), answered by the gateway's owner handler of that
+ * name or else forwarded to alpd with `params`; every other connection gets the `denied` answer
+ * (-32601 not_exposed), so for a remote credential an owner method is a denied one; denied: not
+ * exposed until a contract or policy makes its scope checkable; prohibited: never remote in v1.
  */
+export type ExposureStatus = 'gateway' | 'exposed' | 'owner' | 'denied' | 'prohibited';
 
-/** @type {Readonly<Record<string, Exposure>>} */
-export const EXPOSURE = Object.freeze({
+/**
+ * handler (owner only): the method is the gateway's own (a `host.*` name alpd does not serve),
+ * answered only by the owner handler of that name, never forwarded; it lists `params` (the only
+ * keys the handler receives) and the handler validates their values itself, as it has no
+ * methods-v1 schema. An owner method without `handler` is alpd's and has a methods-v1 schema.
+ * alsoRequires: permissions the grant must hold besides `permission` (each checked, refused
+ * with 1003 grant naming the first one missing, before anything reaches alpd).
+ */
+export type Exposure = {
+  status: ExposureStatus,
+  permission?: 'session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage' | 'attachments.write' | 'session.team.write' | 'terminal.exec',
+  alsoRequires?: readonly ('session.read' | 'session.write' | 'project.read' | 'project.write' | 'files.read' | 'library.write' | 'workspace.write' | 'workspace.manage' | 'attachments.write' | 'session.team.write' | 'terminal.exec')[],
+  scope: string,
+  capability?: string,
+  params?: readonly string[],
+  handler?: true,
+  tests?: readonly string[],
+  reason?: string,
+};
+
+export const EXPOSURE: Readonly<Record<string, Exposure>> = Object.freeze({
   'daemon.hello': { status: 'gateway', scope: 'connection', reason: 'Answered by the gateway after its own hello to alpd: capabilities are alpd\'s intersected with FORWARDED_CAPABILITIES; alpd\'s hostname when hostLabel accepts it; no pid.', tests: ['handshake'] },
 
   'catalog.get': { status: 'exposed', permission: 'session.read', scope: 'none: the model and mode catalogue (live provider lists merged over static rows, t-e5ee; enabled acp:* rows, t-d0b0); CATALOG_MODEL_FIELDS only, provider errors dropped', params: [], tests: ['permission'] },
@@ -741,7 +725,7 @@ export const EXPOSURE = Object.freeze({
   // handler the dashboard registers.
   // --- owner: host (group B) ---
   // Settings' host pages (docs/alp/dashboard.md §4.7). Answered by alp dashboard's owner handlers
-  // (packages/cli/src/dashboard/owner/host.js), never forwarded under these names; each handler
+  // (packages/cli/src/dashboard/owner/host.ts), never forwarded under these names; each handler
   // checks the values of the params listed here. Remote credentials keep workspace.update and
   // project.register as exposed above (no labels, no placement, granted directories only).
   'host.provider.add': { status: 'owner', handler: true, scope: 'host: the user\'s library ($ALP_HOME/providers)', reason: 'Configures a command the host runs for agents (alp provider add): create only, never over an existing provider. The app shows the exact command, args and env names (values masked) in a confirm step first.', params: ['id', 'command', 'args', 'env', 'label', 'description', 'models'], tests: ['owner', 'handler'] },
@@ -761,7 +745,7 @@ export const EXPOSURE = Object.freeze({
   'host.project.remove': { status: 'owner', handler: true, scope: 'host: any project of alpd\'s registry', reason: 'Remove a project (alpd project.remove: its workspaces are archived, no files change); the dashboard grant follows the registry.', params: ['projectId', 'ifRevision', 'requestId'], tests: ['owner', 'handler'] },
   'host.workspace.facts': { status: 'owner', handler: true, scope: 'host: the directories of the workspaces of alpd\'s registry named by id (never a path from params); git and gh run there read only, boxed, bounded (at most 50 ids, cached, one read per directory in flight, 4 at once)', reason: 'Branch, diff size against the base branch, pull request and CI state, and a logo file of each workspace, for the owner\'s sidebar (t-ff83); host data a remote credential never sees.', params: ['workspaceIds', 'refresh'], tests: ['owner', 'handler'] },
   // --- owner: library (group C) ---
-  // Answered by packages/cli/src/dashboard/owner/library.js (alp dashboard's process, as the user);
+  // Answered by packages/cli/src/dashboard/owner/library.ts (alp dashboard's process, as the user);
   // each handler checks every value itself. Settings > Templates, Agents, Skills, Hooks, MCP servers
   // and the Files panel / Editor (docs/alp/dashboard.md §4.8).
   'host.library.get': { status: 'owner', handler: true, scope: 'host: the library (this host\'s user entries) or a project\'s; read through alpd\'s library.get, which hides env and header values ({ $secret: \'keep\' })', reason: 'Content of host library entries (commands, args, URLs, cwd) a remote credential never sees unprojected; only the host owner\'s own dashboard.', params: ['kind', 'name', 'scope', 'projectRoot'], tests: ['owner', 'owner-library'] },
@@ -774,8 +758,8 @@ export const EXPOSURE = Object.freeze({
   'host.files.write': { status: 'owner', handler: true, scope: 'workspace: as host.files.read; an existing regular file with one name, every directory on the way real (no link), never blocked (.git, .alp, .env, keys), content at most WORKSPACE_FILES.maxReadBytes; written only while its sha256 is baseSha256 (else 1004 revision_conflict), atomically through a temporary file beside it', reason: 'Changes workspace files on the host; never a remote credential.', params: ['projectRoot', 'path', 'content', 'baseSha256'], tests: ['owner', 'owner-files'] },
 });
 
-/** The exposure of a method, or undefined when the gateway does not know it at all. @param {string} method */
-export function exposureOf(method) {
+/** The exposure of a method, or undefined when the gateway does not know it at all. */
+export function exposureOf(method: string) {
   return Object.hasOwn(EXPOSURE, method) ? EXPOSURE[method] : undefined;
 }
 
@@ -787,9 +771,8 @@ export function unclassified(methods = RPC_METHODS) {
 /**
  * The workspace of a grant `value` names exactly (its path as given or its canonical path), or
  * undefined. Client strings are compared, never resolved on this host.
- * @param {import('./credentials.js').Grant} grant @param {unknown} value
  */
-export function workspaceOf(grant, value) {
+export function workspaceOf(grant: Grant, value: unknown) {
   if (typeof value !== 'string') return undefined;
   return grant.workspaces.find(workspace => workspace.path === value || workspace.canonical === value);
 }
@@ -800,17 +783,16 @@ const GIT_CHANGES = new Set(['modified', 'added', 'deleted', 'renamed', 'copied'
 const GIT_KINDS = new Set(['text', 'binary', 'too_large', 'withheld', 'symlink', 'submodule']);
 const GIT_MODES = new Set(['uncommitted', 'staged', 'unstaged', 'base']);
 const GIT_LINE_TYPES = new Set(['add', 'remove', 'context']);
-const count = (/** @type {unknown} */ value) => Number.isSafeInteger(value) && /** @type {number} */ (value) >= 0;
+const count = (value: unknown) => Number.isSafeInteger(value) && (value as number) >= 0;
 /** A ref or branch name as text a client may see: 1–1024 characters, no control or format characters. */
-const refName = (/** @type {unknown} */ value) => typeof value === 'string' && value.length > 0 && value.length <= 1024 && !/[\p{Cc}\p{Cf}]/u.test(value);
+const refName = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 1024 && !/[\p{Cc}\p{Cf}]/u.test(value);
 
 /**
  * A path a Git answer may name: plainly relative to the workspace ('/' between names, no root,
  * drive, backslash, `.`, `..` or empty segment, no NUL, at most 4096 code points) and not one
  * blockedFilePath names. Anything else never leaves the gateway.
- * @param {unknown} value
  */
-export function gitPath(value) {
+export function gitPath(value: unknown) {
   if (typeof value !== 'string' || !value || value.length > 8192 || [...value].length > 4096 || /[\0\\]/.test(value)) return false;
   if (value.startsWith('/') || /^[A-Za-z]:/.test(value)) return false;
   if (!value.split('/').every(segment => segment !== '' && segment !== '.' && segment !== '..')) return false;
@@ -822,9 +804,8 @@ export function gitPath(value) {
  * password, query or fragment, or scp-like `host:path` (a host of two characters or more, so never
  * a Windows drive), at most 2048 characters without whitespace. A local path, a `file:` URL or
  * anything else answers null, as alpd answers a local remote.
- * @param {unknown} value
  */
-export function gitRemoteUrl(value) {
+export function gitRemoteUrl(value: unknown) {
   if (typeof value !== 'string' || !value || value.length > 2048 || /[\s\p{Cc}\p{Cf}]/u.test(value)) return null;
   if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)) {
     let url;
@@ -839,9 +820,8 @@ export function gitRemoteUrl(value) {
 /**
  * The bytes of patch content a diff file carries (its lines' text, UTF-8), which is never more
  * than the patch alpd measured against WORKSPACE_GIT.
- * @param {{ hunks: Array<{ lines: Array<{ content: string }> }> }} file
  */
-export function gitPatchBytes(file) {
+export function gitPatchBytes(file: { hunks: Array<{ lines: Array<{ content: string }> }> }) {
   let bytes = 0;
   for (const hunk of file.hunks) for (const line of hunk.lines) bytes += Buffer.byteLength(line.content, 'utf8');
   return bytes;
@@ -852,17 +832,14 @@ export function gitPatchBytes(file) {
  * checked; a row whose path or old path gitPath refuses is left out and counted in hiddenCount
  * (`dropped` says how many, for the gateway's log); at most WORKSPACE_GIT.maxStatusFiles rows.
  * Returns undefined for an answer that is not a status at all.
- * @param {unknown} raw
- * @returns {{ status: import('@anhlp/alp-protocol').GitStatus, dropped: number } | undefined}
  */
-export function projectGitStatus(raw) {
+export function projectGitStatus(raw: unknown): { status: GitStatus, dropped: number } | undefined {
   if (!plain(raw)) return undefined;
-  const source = /** @type {Record<string, any>} */ (raw);
+  const source = raw as Unchecked;
   if (!['repository', 'not_repository', 'unsupported'].includes(source.state) || typeof source.snapshot !== 'string' || source.snapshot.length > 1024) return undefined;
   let dropped = 0;
   let truncated = source.truncated === true;
-  /** @type {import('@anhlp/alp-protocol').GitStatusFile[]} */
-  const files = [];
+  const files: GitStatusFile[] = [];
   for (const row of Array.isArray(source.files) ? source.files : []) {
     const kept = plain(row) && gitPath(row.path) && (row.oldPath === undefined || gitPath(row.oldPath)) && GIT_CHANGES.has(row.change);
     if (!kept) { dropped++; continue; }
@@ -898,22 +875,18 @@ export function projectGitStatus(raw) {
  * One file of a workspace.git.diff answer, checked field by field; undefined when its shape is
  * not the schema's (the whole answer is then refused), `false` when a path is refused by gitPath
  * (it is left out and counted hidden).
- * @param {unknown} raw
- * @returns {import('@anhlp/alp-protocol').GitDiffFile | false | undefined}
  */
-function gitDiffFile(raw) {
+function gitDiffFile(raw: unknown): GitDiffFile | false | undefined {
   if (!plain(raw)) return undefined;
-  const source = /** @type {Record<string, any>} */ (raw);
+  const source = raw as Unchecked;
   if (!gitPath(source.path) || (source.oldPath !== undefined && !gitPath(source.oldPath))) return false;
   if (!GIT_CHANGES.has(source.change) || !GIT_KINDS.has(source.kind) || !count(source.additions) || !count(source.deletions) || !Array.isArray(source.hunks)) return undefined;
-  /** @type {import('@anhlp/alp-protocol').GitDiffHunk[]} */
-  const hunks = [];
+  const hunks: GitDiffHunk[] = [];
   if (source.kind === 'text') {
     for (const hunk of source.hunks) {
       if (!plain(hunk) || !count(hunk.oldStart) || !count(hunk.oldCount) || !count(hunk.newStart) || !count(hunk.newCount) || !Array.isArray(hunk.lines)) return undefined;
       if (hunk.context !== undefined && (typeof hunk.context !== 'string' || hunk.context.length > 4096)) return undefined;
-      /** @type {import('@anhlp/alp-protocol').GitDiffLine[]} */
-      const lines = [];
+      const lines: GitDiffLine[] = [];
       for (const line of hunk.lines) {
         if (!plain(line) || !GIT_LINE_TYPES.has(line.type) || typeof line.content !== 'string') return undefined;
         lines.push({ type: line.type, content: line.content, ...(line.noNewline === true ? { noNewline: true } : {}) });
@@ -931,12 +904,10 @@ function gitDiffFile(raw) {
  * file whose content is over WORKSPACE_GIT.maxFileBytes, or past the page's maxTotalBytes, stays
  * listed as too_large without hunks (`oversize`). Any field of the wrong shape refuses the whole
  * answer: `{ refused }` says why, for the gateway's log.
- * @param {unknown} raw @param {{ path?: string }} [request]
- * @returns {{ page: import('@anhlp/alp-protocol').GitDiffPage, hidden: number, foreign: number, oversize: number } | { refused: 'shape' }}
  */
-export function projectGitDiff(raw, { path } = {}) {
+export function projectGitDiff(raw: unknown, { path }: { path?: string } = {}): { page: GitDiffPage, hidden: number, foreign: number, oversize: number } | { refused: 'shape' } {
   if (!plain(raw)) return { refused: 'shape' };
-  const source = /** @type {Record<string, any>} */ (raw);
+  const source = raw as Unchecked;
   const compare = source.compare;
   if (!plain(compare) || !GIT_MODES.has(compare.mode) || typeof compare.ignoreWhitespace !== 'boolean' || (compare.baseRef !== undefined && !refName(compare.baseRef))) return { refused: 'shape' };
   if (typeof source.snapshot !== 'string' || source.snapshot.length > 1024 || !Array.isArray(source.files)) return { refused: 'shape' };
@@ -945,8 +916,7 @@ export function projectGitDiff(raw, { path } = {}) {
   let foreign = 0;
   let oversize = 0;
   let total = 0;
-  /** @type {import('@anhlp/alp-protocol').GitDiffFile[]} */
-  const files = [];
+  const files: GitDiffFile[] = [];
   for (const entry of source.files) {
     const file = gitDiffFile(entry);
     if (file === undefined) return { refused: 'shape' };
@@ -982,14 +952,14 @@ export function projectGitDiff(raw, { path } = {}) {
  */
 export const PREVIEW_IMAGE_TYPES = Object.freeze({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' });
 
-/** The MIME type of a path PREVIEW_IMAGE_TYPES allows, by its last extension in any case; else undefined. @param {unknown} file */
-export function imagePreviewType(file) {
+/** The MIME type of a path PREVIEW_IMAGE_TYPES allows, by its last extension in any case; else undefined. */
+export function imagePreviewType(file: unknown) {
   if (typeof file !== 'string') return undefined;
   const name = file.slice(file.lastIndexOf('/') + 1);
   const dot = name.lastIndexOf('.');
   if (dot <= 0) return undefined;
   const extension = name.slice(dot + 1).toLowerCase();
-  return Object.hasOwn(PREVIEW_IMAGE_TYPES, extension) ? PREVIEW_IMAGE_TYPES[/** @type {keyof typeof PREVIEW_IMAGE_TYPES} */ (extension)] : undefined;
+  return Object.hasOwn(PREVIEW_IMAGE_TYPES, extension) ? PREVIEW_IMAGE_TYPES[extension as keyof typeof PREVIEW_IMAGE_TYPES] : undefined;
 }
 
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
@@ -999,11 +969,10 @@ const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$
  * (kind image, base64, offset 0 and no nextOffset) of `file` itself (no target: never through a
  * link), its MIME type the one its extension names, at most WORKSPACE_FILES.maxReadBytes decoded and
  * as large as its size says. Only path, mimeType, size, modifiedAt, encoding and content pass.
- * @param {unknown} raw @param {string} file
- * @returns {{ path: string, kind: 'image', mimeType: string, size: number, modifiedAt?: string, encoding: 'base64', content: string } | undefined}
  */
-export function projectImagePreview(raw, file) {
-  const source = /** @type {any} */ (raw);
+export function projectImagePreview(raw: unknown, file: string): { path: string, kind: 'image', mimeType: string, size: number, modifiedAt?: string, encoding: 'base64', content: string } | undefined {
+  // any: alpd's untrusted answer; every field is checked before it passes.
+  const source = raw as any;
   const mimeType = imagePreviewType(file);
   if (!mimeType || !source || typeof source !== 'object' || Array.isArray(source)) return undefined;
   if (source.path !== file || source.target !== undefined || source.kind !== 'image' || source.encoding !== 'base64' || source.mimeType !== mimeType) return undefined;

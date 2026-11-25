@@ -12,40 +12,40 @@
     "NOTICE"
   ],
   "bin": {
-    "alp-gateway": "src/cli.js"
+    "alp-gateway": "dist/cli.js"
   },
   "exports": {
     ".": {
       "alp-source": {
-        "types": "./src/index.js",
-        "default": "./src/index.js"
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
       },
       "types": "./dist/index.d.ts",
-      "default": "./src/index.js"
+      "default": "./dist/index.js"
     },
     "./policy": {
       "alp-source": {
-        "types": "./src/policy.js",
-        "default": "./src/policy.js"
+        "types": "./src/policy.ts",
+        "default": "./src/policy.ts"
       },
       "types": "./dist/policy.d.ts",
-      "default": "./src/policy.js"
+      "default": "./dist/policy.js"
     },
     "./owner": {
       "alp-source": {
-        "types": "./src/owner.js",
-        "default": "./src/owner.js"
+        "types": "./src/owner.ts",
+        "default": "./src/owner.ts"
       },
       "types": "./dist/owner.d.ts",
-      "default": "./src/owner.js"
+      "default": "./dist/owner.js"
     },
     "./credentials": {
       "alp-source": {
-        "types": "./src/credentials.js",
-        "default": "./src/credentials.js"
+        "types": "./src/credentials.ts",
+        "default": "./src/credentials.ts"
       },
       "types": "./dist/credentials.d.ts",
-      "default": "./src/credentials.js"
+      "default": "./dist/credentials.js"
     }
   },
   "engines": {

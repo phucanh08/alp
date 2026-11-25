@@ -11,7 +11,7 @@
 /** The sessionStorage key of the link's token. */
 export const LINK_TOKEN_KEY = 'alp-web:link-token';
 
-/** A gateway credential's token (apps/gateway/src/credentials.js): `alpgw1.<16 hex>.<43 base64url>`. */
+/** A gateway credential's token (apps/gateway/src/credentials.ts): `alpgw1.<16 hex>.<43 base64url>`. */
 const TOKEN = /^alpgw1\.[a-f0-9]{16}\.[A-Za-z0-9_-]{43}$/;
 
 /** What the connect form says when the link's token stopped working (rotated, revoked). */

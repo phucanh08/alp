@@ -1,4 +1,3 @@
-// @ts-check
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import http from 'node:http';
@@ -9,6 +8,13 @@ import { isLoopbackAddress } from './config.js';
 import { directLoopback, ownerOptionError } from './owner.js';
 import { TicketBook } from './tickets.js';
 import { daemonMonitor, upstreamConnector } from './upstream.js';
+import type { AddressInfo } from 'node:net';
+import type { Duplex } from 'node:stream';
+import type { Logger } from '@anhlp/alp-core/log';
+import type { GatewayConfig } from './config.js';
+import type { CredentialStore } from './credentials.js';
+import type { OwnerOption } from './owner.js';
+import type { OpenTransport } from './upstream.js';
 
 /**
  * The gateway's HTTP side (docs/alp/remote-gateway.md §3, §4, §7):
@@ -28,74 +34,65 @@ export const TICKET_PROTOCOL_PREFIX = 'alp.ticket.';
 export const WEBSOCKET_PATH = '/v1/ws';
 export const TICKET_PATH = '/v1/tickets';
 
-/** @param {string | undefined} address */
-const plain = address => (address ?? '').replace(/^::ffff:/, '');
+const plain = (address: string | undefined) => (address ?? '').replace(/^::ffff:/, '');
 
 /**
  * The path of a raw request target, or undefined when it cannot be parsed (`//[`, `//x:99999/`):
  * such a target is a 400, never an exception in the request handler.
- * @param {http.IncomingMessage} request
  */
-const pathOf = request => { try { return new URL(request.url ?? '/', 'http://gateway').pathname; } catch { return undefined; } };
+const pathOf = (request: http.IncomingMessage) => { try { return new URL(request.url ?? '/', 'http://gateway').pathname; } catch { return undefined; } };
 
-/** Paths the gateway answers itself, whatever the method; a static hook never sees them. @param {string} pathname */
-const ownPath = pathname => pathname === '/healthz' || pathname === '/readyz' || pathname === '/v1' || pathname.startsWith('/v1/');
+/** Paths the gateway answers itself, whatever the method; a static hook never sees them. */
+const ownPath = (pathname: string) => pathname === '/healthz' || pathname === '/readyz' || pathname === '/v1' || pathname.startsWith('/v1/');
 
 /**
- * @param {{
- *   config: import('./config.js').GatewayConfig,
- *   store: import('./credentials.js').CredentialStore,
- *   openTransport: import('./upstream.js').OpenTransport,
- *   logger: import('@anhlp/alp-core/log').Logger,
- *   version: string,
- *   monitorIntervalMs?: number,
- *   serveStatic?: (request: http.IncomingMessage, response: http.ServerResponse) => unknown,
- *   owner?: import('./owner.js').OwnerOption,
- * }} options
- *   `serveStatic` answers GET and HEAD requests outside the gateway's own paths, once the Host and
+ * `serveStatic` answers GET and HEAD requests outside the gateway's own paths, once the Host and
  *   TLS checks passed. It writes the response itself; returning (or resolving to) `false` without
- *   writing leaves the gateway's 404, and a throw or rejection becomes a 500.
- *   `owner` (alp dashboard only; owner.js) names the host owner's credential and the owner handlers:
- *   that credential on a direct loopback socket may call the methods the matrix marks `owner`. It
- *   needs a plain loopback config (no TLS, no trusted proxy), else createGateway throws.
+ * writing leaves the gateway's 404, and a throw or rejection becomes a 500.
+ * `owner` (alp dashboard only; owner.ts) names the host owner's credential and the owner handlers:
+ * that credential on a direct loopback socket may call the methods the matrix marks `owner`. It
+ * needs a plain loopback config (no TLS, no trusted proxy), else createGateway throws.
  */
-export function createGateway({ config, store, openTransport, logger, version, monitorIntervalMs, serveStatic, owner }) {
+export function createGateway({ config, store, openTransport, logger, version, monitorIntervalMs, serveStatic, owner }: {
+  config: GatewayConfig,
+  store: CredentialStore,
+  openTransport: OpenTransport,
+  logger: Logger,
+  version: string,
+  monitorIntervalMs?: number,
+  serveStatic?: (request: http.IncomingMessage, response: http.ServerResponse) => unknown,
+  owner?: OwnerOption,
+}) {
   const ownerProblem = ownerOptionError(owner, config);
   if (ownerProblem) throw new Error(ownerProblem);
   const { limits } = config;
   const tickets = new TicketBook({ ttlMs: limits.ticketTtlMs });
-  /** @type {Set<ClientConnection>} */
-  const connections = new Set();
+  const connections = new Set<ClientConnection>();
   /** Open and opening connections per credential. */
   const perPrincipal = new Map();
-  /** @param {string} id */
-  const decrementPrincipal = id => {
+  const decrementPrincipal = (id: string) => {
     const next = (perPrincipal.get(id) ?? 1) - 1;
     if (next <= 0) perPrincipal.delete(id);
     else perPrincipal.set(id, next);
   };
   let opening = 0;
-  /** @type {Map<string, { count: number, resetAt: number }>} */
-  const failures = new Map();
+  const failures = new Map<string, { count: number, resetAt: number }>();
   const connectUpstream = upstreamConnector({ openTransport, version, maxPending: limits.maxPending });
-  /** @type {ReturnType<typeof daemonMonitor> | undefined} */
-  let monitor;
-  /** @type {Array<ReturnType<typeof setInterval>>} */
-  const timers = [];
-  /** @type {Set<string>} */
-  let hosts = new Set();
+  let monitor: ReturnType<typeof daemonMonitor> | undefined;
+  const timers: Array<ReturnType<typeof setInterval>> = [];
+  let hosts = new Set<string>();
   let closing = false;
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: limits.maxFrame, perMessageDeflate: false, clientTracking: false, handleProtocols: () => SUBPROTOCOL });
 
-  /** The client's address and how it reached the gateway; forwarded headers count only from a trusted proxy. @param {http.IncomingMessage} request */
-  function peerOf(request) {
+  /** The client's address and how it reached the gateway; forwarded headers count only from a trusted proxy. */
+  function peerOf(request: http.IncomingMessage): { ip: string, proxied: boolean, secure: boolean, host?: string | undefined } {
     const remote = plain(request.socket.remoteAddress);
     const forwarded = request.headers['x-forwarded-for'];
     if (!config.trustProxy.has(remote) || typeof forwarded !== 'string') return { ip: remote, proxied: false, secure: !!config.tls };
     const chain = forwarded.split(',').map(entry => plain(entry.trim())).filter(Boolean);
     let ip = remote;
-    while (chain.length) { ip = /** @type {string} */ (chain.pop()); if (!config.trustProxy.has(ip)) break; }
+    while (chain.length) { ip = chain.pop() as string; if (!config.trustProxy.has(ip)) break; }
     const proto = String(request.headers['x-forwarded-proto'] ?? '').split(',')[0].trim().toLowerCase();
     const forwardedHost = request.headers['x-forwarded-host'];
     return { ip, proxied: true, secure: proto === 'https', host: typeof forwardedHost === 'string' ? forwardedHost.split(',')[0].trim() : undefined };
@@ -103,9 +100,8 @@ export function createGateway({ config, store, openTransport, logger, version, m
 
   /**
    * Why a request may not go on, or undefined: an unknown Host, or plaintext from beyond loopback.
-   * @param {http.IncomingMessage} request @param {ReturnType<typeof peerOf>} peer
    */
-  function refusal(request, peer) {
+  function refusal(request: http.IncomingMessage, peer: ReturnType<typeof peerOf>) {
     const host = String(peer.host ?? request.headers.host ?? '').toLowerCase();
     if (!hosts.has(host)) return { status: 421, error: 'unknown_host' };
     if (peer.secure || config.allowInsecure) return undefined;
@@ -113,23 +109,21 @@ export function createGateway({ config, store, openTransport, logger, version, m
     return { status: 403, error: 'tls_required' };
   }
 
-  /** The request's Origin when allowed (null without one), or false. @param {http.IncomingMessage} request */
-  function originOf(request) {
+  /** The request's Origin when allowed (null without one), or false. */
+  function originOf(request: http.IncomingMessage) {
     const origin = request.headers.origin;
     if (origin === undefined) return null;
     const normalized = String(origin).toLowerCase();
     return config.origins.has(normalized) ? normalized : false;
   }
 
-  /** @param {string} ip */
-  function blocked(ip) {
+  function blocked(ip: string) {
     const entry = failures.get(ip);
     if (!entry || entry.resetAt <= Date.now()) { failures.delete(ip); return undefined; }
     return entry.count >= limits.authFailures ? Math.ceil((entry.resetAt - Date.now()) / 1000) : undefined;
   }
 
-  /** @param {string} ip @param {string} reason */
-  function failed(ip, reason) {
+  function failed(ip: string, reason: string) {
     const now = Date.now();
     const entry = failures.get(ip);
     if (!entry || entry.resetAt <= now) failures.set(ip, { count: 1, resetAt: now + limits.authWindowMs });
@@ -138,18 +132,17 @@ export function createGateway({ config, store, openTransport, logger, version, m
     logger.warn('refused an authentication', { code: 'ALP_GATEWAY_AUTH_FAILED', ip, reason });
   }
 
-  /** @param {http.ServerResponse} response @param {number} status @param {unknown} body @param {Record<string, string>} [headers] */
-  function json(response, status, body, headers = {}) {
+  function json(response: http.ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
     const text = JSON.stringify(body);
     response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-length': String(Buffer.byteLength(text)), ...headers });
     response.end(text);
   }
 
-  /** CORS for an allowed browser origin; nothing for clients without one. @param {string | null} origin @returns {Record<string, string>} */
-  const cors = origin => origin ? { 'access-control-allow-origin': origin, vary: 'Origin' } : {};
+  /** CORS for an allowed browser origin; nothing for clients without one. */
+  const cors = (origin: string | null): Record<string, string> => origin ? { 'access-control-allow-origin': origin, vary: 'Origin' } : {};
 
-  /** Hands a request to the static hook; its `false` or failure ends in a 404 or 500. @param {NonNullable<typeof serveStatic>} hook @param {http.IncomingMessage} request @param {http.ServerResponse} response */
-  async function staticRoute(hook, request, response) {
+  /** Hands a request to the static hook; its `false` or failure ends in a 404 or 500. */
+  async function staticRoute(hook: NonNullable<typeof serveStatic>, request: http.IncomingMessage, response: http.ServerResponse) {
     try {
       const handled = await hook(request, response);
       if (handled === false && !response.headersSent && !response.writableEnded) json(response, 404, { error: 'not_found' });
@@ -160,8 +153,7 @@ export function createGateway({ config, store, openTransport, logger, version, m
     }
   }
 
-  /** @param {http.IncomingMessage} request @param {http.ServerResponse} response */
-  function onRequest(request, response) {
+  function onRequest(request: http.IncomingMessage, response: http.ServerResponse) {
     const peer = peerOf(request);
     const refused = refusal(request, peer);
     if (refused) return json(response, refused.status, { error: refused.error });
@@ -213,11 +205,9 @@ export function createGateway({ config, store, openTransport, logger, version, m
     }, cors(origin));
   }
 
-  /** @param {http.IncomingMessage} request @param {import('node:stream').Duplex} socket @param {Buffer} head */
-  function onUpgrade(request, socket, head) {
+  function onUpgrade(request: http.IncomingMessage, socket: Duplex, head: Buffer) {
     socket.on('error', () => {});
-    /** @param {number} status @param {string} text @param {string} [reason] */
-    const refuse = (status, text, reason) => {
+    const refuse = (status: number, text: string, reason?: string) => {
       if (reason) logger.info('refused a WebSocket', { code: 'ALP_GATEWAY_UPGRADE_REFUSED', status, reason });
       socket.end(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nCache-Control: no-store\r\nContent-Length: 0\r\n\r\n`);
     };
@@ -256,7 +246,7 @@ export function createGateway({ config, store, openTransport, logger, version, m
         decrementPrincipal(grant.id);
       };
       // Whether this socket could be the owner's is fixed at the upgrade; the credential half is
-      // checked again on every request (connection.js #isOwner), so a rotated or revoked owner
+      // checked again on every request (connection.ts #isOwner), so a rotated or revoked owner
       // credential stops being the owner at once.
       const direct = !!owner && directLoopback(request, peer);
       try {
@@ -284,9 +274,8 @@ export function createGateway({ config, store, openTransport, logger, version, m
   /**
    * The handlers as the server calls them: a throw from one is logged and answered (500, or the
    * socket closed), never left to reach the process, so one bad request cannot stop the gateway.
-   * @param {http.IncomingMessage} request @param {http.ServerResponse} response
    */
-  function guardedRequest(request, response) {
+  function guardedRequest(request: http.IncomingMessage, response: http.ServerResponse) {
     try { onRequest(request, response); }
     catch (error) {
       logger.error('a request handler failed', { code: 'ALP_GATEWAY_REQUEST_FAILED', error });
@@ -295,8 +284,7 @@ export function createGateway({ config, store, openTransport, logger, version, m
     }
   }
 
-  /** @param {http.IncomingMessage} request @param {import('node:stream').Duplex} socket @param {Buffer} head */
-  function guardedUpgrade(request, socket, head) {
+  function guardedUpgrade(request: http.IncomingMessage, socket: Duplex, head: Buffer) {
     try { onUpgrade(request, socket, head); }
     catch (error) {
       logger.error('an upgrade handler failed', { code: 'ALP_GATEWAY_UPGRADE_FAILED', error });
@@ -323,8 +311,7 @@ export function createGateway({ config, store, openTransport, logger, version, m
     }
   });
 
-  /** @type {http.Server | https.Server | undefined} */
-  let server;
+  let server: http.Server | https.Server | undefined;
 
   return {
     connections,
@@ -341,12 +328,12 @@ export function createGateway({ config, store, openTransport, logger, version, m
       server.requestTimeout = 15_000;
       server.on('upgrade', guardedUpgrade);
       server.on('clientError', (_error, socket) => { try { socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n'); } catch {} });
-      const listening = /** @type {http.Server} */ (server);
+      const listening = server as http.Server;
       await new Promise((resolve, reject) => {
         listening.once('error', reject);
         listening.listen(config.port, config.host, () => { listening.off('error', reject); resolve(undefined); });
       });
-      const { port } = /** @type {import('node:net').AddressInfo} */ (listening.address());
+      const { port } = listening.address() as AddressInfo;
       hosts = new Set([...config.hosts, `127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`]);
       if (config.tls && port === 443) for (const name of config.hosts) hosts.add(name.replace(/:443$/, ''));
       monitor = daemonMonitor({ openTransport, version, logger, ...(monitorIntervalMs ? { intervalMs: monitorIntervalMs } : {}) });
@@ -364,7 +351,7 @@ export function createGateway({ config, store, openTransport, logger, version, m
       monitor?.stop();
       for (const connection of [...connections]) connection.close(CLOSE_CODE.goingAway, 'gateway shutting down');
       if (server) {
-        const stopping = /** @type {http.Server} */ (server);
+        const stopping = server as http.Server;
         await new Promise(resolve => { stopping.close(() => resolve(undefined)); stopping.closeAllConnections?.(); });
       }
     },

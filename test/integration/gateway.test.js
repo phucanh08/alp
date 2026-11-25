@@ -18,7 +18,7 @@ import { addGate, getTask } from '@anhlp/alp-core/tasks';
 import { connectSocket, readLock } from '../../packages/client/dist/index.js';
 import { AlpRpcClient, createReconnectingClient, hello, isAlpClientError } from '../../packages/client/dist/portable.js';
 import { connectWebSocket } from '../../packages/client/dist/connection/websocket.js';
-import { CredentialStore, createCredential, createGateway, createGatewayLogger, resolveConfig, revokeCredential } from '../../apps/gateway/src/index.js';
+import { CredentialStore, createCredential, createGateway, createGatewayLogger, resolveConfig, revokeCredential } from '../../apps/gateway/dist/index.js';
 
 const ALPD = fileURLToPath(new URL('../../packages/daemon/dist/alpd.js', import.meta.url));
 const FAKE_CODEX = fileURLToPath(new URL('../../packages/daemon/tests/support/fake-codex.js', import.meta.url));
