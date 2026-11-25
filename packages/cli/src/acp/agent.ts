@@ -465,6 +465,7 @@ export function createAcpAgent(options: AcpAgentOptions) {
     .onRequest('session/list', async ({ params }) => {
       const { sessions: rows } = await request('session.list', { ...(params.cwd ? { projectRoot: path.resolve(params.cwd) } : {}), rootsOnly: true, includeClosed: true });
       return {
+        // any: session.list rows come back untyped from request(); only fields alpd's SessionSummary has are read.
         sessions: rows.filter((row: any) => row.persistent).slice(0, 100).map((row: any) => ({
           sessionId: row.id,
           cwd: row.projectRoot,

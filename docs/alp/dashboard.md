@@ -310,12 +310,12 @@ Test: `test/integration/dashboard-process.test.js` (hai test `t-81b0.4`: định
   - Không bao giờ lưu vào localStorage hay cookie.
 - Token gõ vào form chỉ nằm trong bộ nhớ: reload hay đóng tab là mất.
 - Token của alp-dashboard không nằm trong file nào (t-cee3, phương án A do người dùng chọn ở gate g2):
-  - Mỗi lần khởi động, service (`packages/cli/src/dashboard/main.js`, `grant.ensure`) tạo credential mới,
+  - Mỗi lần khởi động, service (`packages/cli/src/dashboard/main.ts`, `grant.ensure`) tạo credential mới,
     thu hồi mọi credential khác trong `<home>/dashboard/credentials.json`, và giữ token trong bộ nhớ.
     `dashboard.json` (`version: 3`) không có khoá `token`; một `token` do bản cũ để lại bị xoá khỏi file
     khi service khởi động hoặc khi chạy `alp dashboard --stop` (credential của nó bị thu hồi cùng lúc).
-  - `alp dashboard [--print] [--json]` lấy token qua socket của service (`packages/cli/src/dashboard/token-socket.js`,
-    phía client ở `packages/cli/src/dashboard-service.js`): client ghi một dòng `{"op":"token"}`, service
+  - `alp dashboard [--print] [--json]` lấy token qua socket của service (`packages/cli/src/dashboard/token-socket.ts`,
+    phía client ở `packages/cli/src/dashboard-service.ts`): client ghi một dòng `{"op":"token"}`, service
     trả một dòng JSON `{token, credentialId, pid}` rồi đóng; client kiểm `pid` khớp với lock của service
     (một kiểm tra nhất quán để bỏ qua socket cũ của service đã chết, không phải ranh giới bảo mật: ranh
     giới là thư mục 0700).
@@ -340,7 +340,7 @@ Test: `test/integration/dashboard-process.test.js` (hai test `t-81b0.4`: định
   - **Ngoài phạm vi:** agent `full-access` (hay bất kỳ chương trình nào) chạy bằng chính tài khoản của
     user mà không có sandbox của OS kết nối được tới socket như user, nên lấy được token. Chặn việc đó cần
     tách uid; người dùng đã chấp nhận giới hạn này ở gate g2 của t-cee3.
-- Link của `alp dashboard` (`http://127.0.0.1:<port>/#token=alpgw1.…`, `src/lib/link-token.js`):
+- Link của `alp dashboard` (`http://127.0.0.1:<port>/#token=alpgw1.…`, `src/lib/link-token.ts`):
   - Khi trang load, `main.tsx` đọc `#token=` và kiểm tra dạng `alpgw1.<16 hex>.<43 base64url>`.
   - Fragment bị xóa ngay bằng `history.replaceState`, trước khi render, kể cả khi token hỏng.
   - Token hợp lệ được giữ trong sessionStorage của tab (key `alp-web:link-token`). Reload tab đó
@@ -358,9 +358,9 @@ Test: `test/integration/dashboard-process.test.js` (hai test `t-81b0.4`: định
 - E2E kiểm tra token không có trong localStorage, URL, Referer, console và log.
 - localStorage chỉ giữ ba key, không key nào chứa token hay secret:
   - `alp-web:gateway`: địa chỉ gateway;
-  - `alp-web:preferences` (`src/lib/preferences.js`): Default send, theme (System/Light/Dark),
+  - `alp-web:preferences` (`src/lib/preferences.ts`): Default send, theme (System/Light/Dark),
     lựa chọn của màn New session (team, mode, model, thinking theo model);
-  - `alp-web:layout` (`src/lib/layout.js`): theo gateway + workspace, session đang mở, các tab
+  - `alp-web:layout` (`src/lib/layout.ts`): theo gateway + workspace, session đang mở, các tab
     (agent, task, panel), thứ tự, tab đang mở; độ rộng sidebar và dock. Chỉ id, không có tiêu đề
     hay dữ liệu khác của host.
   - Hai key sau có version, đọc dung thứ (field hỏng về mặc định, version khác hoặc rác thì về
@@ -493,7 +493,7 @@ Năm trang host làm việc thật khi kết nối là **host owner** (§4.6: li
 này, `useOwner()`); mọi kết nối khác (credential của `alp-gateway`, thiết bị Paseo, proxy) thấy các
 trang như trước, kèm bảng "not available in this beta" không đổi. Mỗi việc đi qua
 `controller.ownerRequest` (`apps/web/src/lib/owner-host.ts`) tới một method owner của gateway; method
-`host.*` do `packages/cli/src/dashboard/owner/host.js` trả lời, dùng lại đúng code của CLI hoặc RPC của
+`host.*` do `packages/cli/src/dashboard/owner/host.ts` trả lời, dùng lại đúng code của CLI hoặc RPC của
 alpd, không chép lại:
 
 | Trang | Owner làm được | Method | Dùng lại |
@@ -575,8 +575,8 @@ trang và host thấy kết quả; credential của `alp-gateway` riêng vẫn t
 
 Chỉ host owner (§4.6, `state.owner`) mới thay đổi được; mọi credential khác (gateway riêng, relay) thấy
 các trang y như trước, kể cả thông báo Unavailable. Các method owner nằm trong khối
-`// --- owner: library (group C) ---` của `apps/gateway/src/policy.js` (`handler: true`, chỉ các
-`params` liệt kê tới handler) và handler ở `packages/cli/src/dashboard/owner/library.js`; phía app là
+`// --- owner: library (group C) ---` của `apps/gateway/src/policy.ts` (`handler: true`, chỉ các
+`params` liệt kê tới handler) và handler ở `packages/cli/src/dashboard/owner/library.ts`; phía app là
 `apps/web/src/lib/owner-library.ts`.
 
 - **Hooks, MCP servers** (`host.library.get/save/delete/test`): owner tạo, sửa, xoá và thử entry ở
@@ -653,7 +653,7 @@ Mọi client (owner hay không):
 - **Icon project**: ô chữ cái màu (như trước) khi không có icon. Nhánh vẫn ở dòng meta theo Show ›
   Branch, từ registry, cho mọi hàng.
 - **Show mặc định như Paseo**: Branch bật, Host tắt, không có giờ ở cuối hàng (Last activity tắt);
-  Labels bật, Project tắt như trước (`DEFAULT_SIDEBAR_DISPLAY` trong `lib/preferences.js`).
+  Labels bật, Project tắt như trước (`DEFAULT_SIDEBAR_DISPLAY` trong `lib/preferences.ts`).
   Show đã lưu mà vẫn đúng y mặc định cũ (chưa có `revision: 2`) được chuyển một lần sang mặc định
   mới; Show đã đổi bất kỳ chỗ nào giữ nguyên (`parseSidebarDisplay`).
 
@@ -668,7 +668,7 @@ gửi request nào trong số này, không thấy lỗi, hàng giống như trê
   bên phải; dòng thứ hai: nhánh · số PR (mở: `2`; `344 Merged`, `7 Draft`, `9 Closed`) · CI
   (`passed`, `failed`, `pending`). Nhánh của facts chỉ dùng khi registry không có và Show › Branch bật.
 - **Icon project**: khi facts có `icon` (URL `data:image/...;base64`) thì hiện bằng `<img>`, không
-  bao giờ chèn SVG hay HTML vào trang; `lib/sidebar-facts.js` `cleanFacts` bỏ mọi giá trị khác.
+  bao giờ chèn SVG hay HTML vào trang; `lib/sidebar-facts.ts` `cleanFacts` bỏ mọi giá trị khác.
 - **Usage ở chân**: `daemon.usage`, mỗi provider một mục "<icon> 98% 5h  61% wk" (cửa sổ
   `five_hour`/5 giờ và `seven_day`/7 ngày); thiếu cửa sổ nào thì bỏ phần đó, không có usage thì không
   có dòng. Bấm mở Settings › Usage.
