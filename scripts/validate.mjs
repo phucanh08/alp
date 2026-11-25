@@ -95,6 +95,8 @@ if (scope === 'all' || scope === 'packages') {
 if (scope === 'all' || scope === 'web') {
   // The browser app (docs/alp/dashboard.md): types, unit tests and its bundle boundary, then the UI end
   // to end against a real alpd and gateway with a fake provider, in Chromium.
+  // The app and its unit tests import @anhlp/alp-client, whose default export is its built dist.
+  buildWorkspace('client');
   node('node_modules/typescript/bin/tsc', '-p', 'apps/web/tsconfig.json');
   tests(webTests());
   // pretest:e2e in apps/web builds the CLI, daemon and app bundle first.
