@@ -158,4 +158,20 @@ then the turn ended. Nothing was edited and no handoff was filed. The requester'
 `alp_delegate` returned status `completed`, `handoff: null` and the output
 `Antigravity denied ReadFile in workspace-write mode and ended the turn.`: the requester learns
 the tool name and the mode, not the path or the reason.
-`test/integration/antigravity-denied-turn.test.js` asserts the same result.
+
+What ALP reports since t-a648, from these frames: agy's `denied_actions` gives only
+`{action, display_name}`, so ALP takes the path from the input (`Path`) of the step that
+agy refused, and the reason from that step's error text. agy gives an error only when it
+reports the step `ERROR` (the M0 and T1 refusals: `permission check failed for read_file
+"…": user denied permission …`). For a refused read that agy reports `DONE` with no output
+(the M0 skill-file read), ALP takes the last such read **outside the workspace**. From what
+agy reports, that read cannot be told apart from a missing file outside the workspace, so
+the reason reads `agy gave no reason; inferred: …`, and ALP records the step as failed. A
+`DONE` read with no output inside the workspace (the T1 missing file) is never taken for
+the denial. The assignment fails because agy listed a denied action and the turn ended
+with no answer and no handoff. It never fails on ALP's inference alone: with no
+`denied_actions`, a `DONE` read with no output stays completed. This changes no flag, no
+allowlist and no read containment (t-ffa1, t-c8ee); it is reporting only.
+`test/integration/antigravity-denied-turn.test.js` replays the M0 frames in both variants,
+and the T1 sequence, and asserts this result. Not yet checked on a real agy (chưa kiểm bằng
+agy thật).
