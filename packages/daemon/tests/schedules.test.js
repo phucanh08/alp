@@ -57,17 +57,19 @@ async function setup(t) {
   const state = path.join(directory, 'state');
   let count = 0;
   async function start(options = {}) {
-    const { openDelayMs, openFailure, resumeGate, ...rest } = options;
+    const { openDelayMs, openFailure, resumeGate, onBindSchedules, ...rest } = options;
     const runtime = createAlpRuntime({ transport: fakeTransport(runtimes, resumeGate), runLogDir: path.join(directory, 'runs') });
     // A daemon whose sessions take a moment to open again, as a real provider does,
     // or one whose sessions cannot be opened at all.
-    const daemon = openDelayMs || openFailure
+    const opened = openDelayMs || openFailure
       ? { ...runtime, open: async (...args) => {
         if (openFailure) throw new Error(openFailure);
         if (openDelayMs) await new Promise(resolve => setTimeout(resolve, openDelayMs));
         return runtime.open(...args);
       } }
       : runtime;
+    // The handler alpd binds for the agent path (runtime.bindSchedules), seen by the test as well.
+    const daemon = onBindSchedules ? { ...opened, bindSchedules: handler => { onBindSchedules(handler); runtime.bindSchedules(handler); } } : opened;
     const store = createStore(state);
     const socketPath = daemonPaths(path.join(directory, `d${count++}`)).socket;
     const server = createDaemonServer({ runtime: daemon, socketPath, version: 'test', store, home: directory, scheduleTickMs: 20, ...rest });
@@ -739,6 +741,27 @@ test('a delivery timeout retains the runtime queue until the native start settle
   assert.equal(runtimes[0].started.length, 1);
   assert.equal(runtimes[1].started.length, 1);
   assert.equal((await jobOf(daemon, job.id)).attempts, 1);
+});
+
+test('the agent path (runtime.bindSchedules) and IPC reach the same schedule handlers', async t => {
+  const { start, create, project } = await setup(t);
+  let bound;
+  const daemon = await start({ onBindSchedules: handler => { bound = handler; } });
+  assert.equal(typeof bound, 'function', 'alpd binds a schedule handler for the agent path');
+  const { session } = await create(daemon);
+
+  const { job } = await bound('create', { projectRoot: project, sessionId: session.id, dueAt: inMs(60_000), prompt: 'Agent path.' });
+  assert.deepEqual(await jobOf(daemon, job.id), job, 'a job the agent created is the one IPC reads');
+  assert.deepEqual(await bound('list', { projectRoot: project }), await daemon.request('schedule.list', { projectRoot: project }));
+  assert.deepEqual(await bound('get', { id: job.id, projectRoot: project }), { job });
+  // The same refusals: no project, an unknown job.
+  await assert.rejects(bound('list', {}), { code: -32602 });
+  await assert.rejects(bound('get', { id: 'sch_0000000000000000', projectRoot: project }), { code: 1001 });
+
+  const { job: cancelled } = await bound('cancel', { id: job.id, projectRoot: project });
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal((await jobOf(daemon, job.id)).status, 'cancelled');
+  await assert.rejects(daemon.request('schedule.cancel', { id: job.id, projectRoot: project }), { code: 1004 });
 });
 
 test('a job that is cancelled before its time never runs', async t => {
