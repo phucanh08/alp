@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Plugin and `alp dashboard` acceptance on the saved tarballs: docs/alp/beta-scope.md §6.3 W1–W6 (rows R5, R6).
 // --live adds the plugin to the Paseo on this machine and needs a person for W3–W5; --fake checks
 // only what needs no Paseo and no model: W6's token gate on a throwaway ALP_HOME.
@@ -21,7 +22,8 @@ const USAGE = `Usage: node scripts/beta-acceptance-web.mjs --packs <dir> (--fake
 
 const opts = options(USAGE, { provider: { type: 'string' }, 'use-default-home': { type: 'boolean' } });
 if (opts.unattended) { console.error('--unattended is not available for W1–W6 yet: W3–W5 and the browser half of W6 need a person.'); process.exit(2); }
-const provider = opts.provider ?? (opts.fake ? 'codex' : undefined);
+// Typed as checked: the next line exits on anything but codex or claude.
+const provider = /** @type {'codex' | 'claude'} */ (opts.provider ?? (opts.fake ? 'codex' : undefined));
 if (!['codex', 'claude'].includes(provider)) { console.error(`--provider must be codex or claude (required with --live)\n\n${USAGE}`); process.exit(2); }
 if (opts.live && !['darwin', 'linux'].includes(process.platform)) { console.error('Live acceptance runs on macOS or Linux (beta-scope §6.1).'); process.exit(2); }
 
@@ -38,12 +40,12 @@ if (opts.live && home === defaultHome && !opts['use-default-home']) {
   process.exit(2);
 }
 let consumer;
-try { ({ consumer } = install(run, opts)); } catch (error) { run.record('install', 'fail', error.message); process.exit(run.summary()); }
+try { ({ consumer } = install(run, opts)); } catch (error) { run.record('install', 'fail', /** @type {Error} */ (error).message); process.exit(run.summary()); }
 const plugin = path.join(consumer, 'node_modules', '@anhlp', 'alp-paseo');
 const alp = alpCommand(consumer);
 const env = environment({ bin: path.join(consumer, 'node_modules', '.bin'), home, fake: opts.fake });
-const cli = (label, args) => run.exec(label, process.execPath, [alp, ...args], { env, cwd: project });
-const paseo = (label, args) => run.exec(label, 'paseo', args, { env, cwd: project });
+const cli = /** @param {string} label @param {string[]} args */ (label, args) => run.exec(label, process.execPath, [alp, ...args], { env, cwd: project });
+const paseo = /** @param {string} label @param {string[]} args */ (label, args) => run.exec(label, 'paseo', args, { env, cwd: project });
 const settingsFile = path.join(project, '.alp', 'settings.json');
 
 try {
@@ -59,7 +61,7 @@ try {
     await run.step('W1', 'alp daemon start; paseo plugin add <absolute path>', async () => {
       if (cli('W1', ['daemon', 'start']).status !== 0) throw new Error('alp daemon start failed');
       const added = paseo('W1', ['plugin', 'add', plugin]);
-      if (added.error?.code === 'ENOENT') throw new Error('paseo is not on PATH');
+      if (/** @type {NodeJS.ErrnoException | undefined} */ (added.error)?.code === 'ENOENT') throw new Error('paseo is not on PATH');
       if (added.status !== 0) throw new Error(`paseo plugin add failed: ${(added.stderr || added.stdout).trim().slice(0, 300)}; try the install of scripts/tarball-consumer.mjs and note it`);
       run.record('W1', 'pass', `plugin added from ${plugin}`);
     });
@@ -124,17 +126,18 @@ try {
     }
   });
 } catch (error) {
-  run.record('acceptance', 'fail', error.message);
+  run.record('acceptance', 'fail', /** @type {Error} */ (error).message);
 } finally {
   if (opts.fake) {
     try { await cleanupFakeWeb(home, () => cli('cleanup', ['daemon', 'stop'])); }
-    catch (error) { run.record('cleanup', 'fail', error.message); }
+    catch (error) { run.record('cleanup', 'fail', /** @type {Error} */ (error).message); }
   }
   else console.log('\nalpd and the plugin stay as Paseo uses them. To undo W1: paseo plugin remove alp-provider');
 }
 process.exit(run.summary());
 
 /** POST /v1/tickets on alp-dashboard's gateway with `token` (none: no Authorization header): the status. */
+/** @param {string} origin @param {string} [token] */
 async function ticket(origin, token) {
   const response = await fetch(`${origin}/v1/tickets`, { method: 'POST', headers: token ? { authorization: `Bearer ${token}` } : {} });
   await response.body?.cancel();
@@ -142,6 +145,7 @@ async function ticket(origin, token) {
 }
 
 /** The task files of a project, hashed, to tell whether the panel changed them. */
+/** @param {string} directory */
 function snapshot(directory) {
   if (!existsSync(directory)) return '';
   const hash = createHash('sha256');

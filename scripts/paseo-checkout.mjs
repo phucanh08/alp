@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Checks out the sources of Paseo's plugin compiler at a pinned commit, for scripts/paseo-source-check.mjs
 // (issue #111): it compiles the packed plugin with Paseo's own compiler, as `paseo plugin add npm:…` does.
 // A new checkout has only packages/server/src/server/plugins (sparse, blobs on demand): no install, no build.
@@ -18,12 +19,13 @@ export const PASEO_COMPILER_DIRECTORY = 'packages/server/src/server/plugins';
 const ROOT = path.resolve(import.meta.dirname, '..');
 export const paseoSource = () => path.resolve(process.env.ALP_PASEO_SRC ?? path.join(ROOT, '.cache/paseo-src'));
 
+/** @param {string[]} args @param {string} [cwd] */
 function git(args, cwd) {
   console.log(`$ git ${args.join(' ')}`);
   const result = spawnSync(...spawnCommand('git', args), { cwd, stdio: 'inherit' });
   if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed (${result.status ?? result.signal})`);
 }
-const quiet = (args, cwd) => spawnSync(...spawnCommand('git', args), { cwd, encoding: 'utf8' }).stdout?.trim() ?? '';
+const quiet = /** @param {string[]} args @param {string} [cwd] */ (args, cwd) => spawnSync(...spawnCommand('git', args), { cwd, encoding: 'utf8' }).stdout?.trim() ?? '';
 
 /** The checkout at the pinned commit, with only the compiler's directory; returns its path. */
 export function checkoutPaseo(source = paseoSource()) {

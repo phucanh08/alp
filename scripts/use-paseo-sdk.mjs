@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // CI only: rewrites this checkout so integrations/paseo builds and tests against another Paseo SDK
 // release (t-e5dc). Never commit its result.
 //
@@ -19,6 +20,7 @@ import { spawnCommand } from './spawn-command.mjs';
 const ROOT = path.resolve(import.meta.dirname, '..');
 const SDK = ['@getpaseo/plugin', '@getpaseo/client', '@getpaseo/protocol', '@getpaseo/relay'];
 
+/** @param {string} command @param {string[]} args @returns {string} */
 function run(command, args) {
   const result = spawnSync(...spawnCommand(command, args), { cwd: ROOT, encoding: 'utf8' });
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} exited ${result.status}\n${result.stdout}${result.stderr}`);

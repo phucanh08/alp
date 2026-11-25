@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Runs only from an isolated install of the six neutral core tarballs (copied there by
 // scripts/core-standalone-smoke.mjs next to a copy of the deterministic fake ACP agent).
 //
@@ -24,7 +25,7 @@ assert.deepEqual(validateParams('daemon.status', {}), []);
 assert.equal(typeof runConformance, 'function');
 assert.ok(PROFILES.includes('wire') && CASES.length > 0);
 const protocolFixtures = JSON.parse(await readFile(new URL(import.meta.resolve('@anhlp/alp-protocol/fixtures/v1/cases.json')), 'utf8'));
-assert.ok(protocolFixtures.cases.some(entry => entry.valid));
+assert.ok(protocolFixtures.cases.some(/** @param {{ valid?: boolean }} entry */ entry => entry.valid));
 
 const FAKE = path.join(import.meta.dirname, 'fake-acp.js');
 const ALPD_ENTRY = path.join(import.meta.dirname, 'node_modules/@anhlp/alp-daemon/dist/alpd.js');
@@ -36,16 +37,18 @@ const logA = path.join(work, 'acp-a.jsonl');
 const logB = path.join(work, 'acp-b.jsonl');
 const settings = { defaultAgent: 'main', workflow: { mode: 'pho', supervisor: false } };
 
-const until = async (check, what, tries = 3000) => {
+/** @typedef {import('@anhlp/alp-protocol').Envelope} Envelope */
+const until = /** @param {() => unknown} check @param {string} what @param {number} [tries] */ async (check, what, tries = 3000) => {
   for (let i = 0; i < tries; i++) {
     if (await check()) return;
     await new Promise(resolve => setTimeout(resolve, 5));
   }
   throw new Error(`timeout waiting for ${what}`);
 };
-const log = async file => (await readFile(file, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
-const provider = logFile => ({ kind: 'acp', label: 'Fake', command: process.execPath, args: [FAKE], env: { FAKE_ACP_LOG: logFile } });
-const assistantText = (events, sessionId, from) => events.slice(from).filter(entry => entry.sessionId === sessionId && entry.event.type === 'item' && entry.event.item?.kind === 'assistant_message').map(entry => entry.event.item.text);
+// `any[]`: the fake agent's log lines are JSON-RPC messages of every shape; the checks read method/params.
+const log = /** @param {string} file @returns {Promise<any[]>} */ async file => (await readFile(file, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+const provider = /** @param {string} logFile */ logFile => ({ kind: 'acp', label: 'Fake', command: process.execPath, args: [FAKE], env: { FAKE_ACP_LOG: logFile } });
+const assistantText = /** @param {Envelope[]} events @param {string} sessionId @param {number} from */ (events, sessionId, from) => events.slice(from).filter(entry => entry.sessionId === sessionId && entry.event.type === 'item' && entry.event.item?.kind === 'assistant_message').map(entry => /** @type {{ item: { text?: string } }} */ (/** @type {unknown} */ (entry.event)).item.text); // the filter kept item events only
 const cleanup = () => rm(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 
 try {
@@ -55,6 +58,7 @@ try {
   // Part A — in-process runtime from the installed tarball.
   await saveEntry('providers', 'fake', { provider: provider(logA) }, { scope: 'library', library: homeA });
   const runtime = createAlpRuntime({ language: 'English', supervisor: false, libraryDir: homeA, runLogDir: path.join(work, 'runs') });
+  /** @type {Envelope[]} */
   const runtimeEvents = [];
   runtime.onEvent(entry => runtimeEvents.push(entry));
   const opened = await runtime.open('root', { cwd: project, model: 'acp:fake' });
@@ -74,12 +78,14 @@ try {
   await access(ALPD_ENTRY).catch(() => { throw new Error(`installed alpd missing: ${ALPD_ENTRY}`); });
   await saveEntry('providers', 'fake', { provider: provider(logB) }, { scope: 'library', library: homeB });
   const socket = await ensureDaemon({ home: homeB, entry: ALPD_ENTRY });
-  const lock = await readLock(homeB);
+  // ensureDaemon above returned, so the lock exists; the cast only drops readLock's `undefined`.
+  const lock = /** @type {import('@anhlp/alp-client').DaemonLock} */ (await readLock(homeB));
   assert.equal(lock.ready, true, 'the installed alpd comes up ready');
   assert.equal(socket, lock.socket, 'the lock publishes the socket');
   await assert.rejects(access(path.join(homeB, 'integrations/paseo.json')), 'no integration descriptor exists at start');
 
   const client = await connect(socket);
+  /** @type {Envelope[]} */
   const events = [];
   client.onEvent(entry => events.push(entry));
   const status = await client.request('daemon.status');
@@ -95,16 +101,18 @@ try {
   // Disconnect: the daemon keeps serving and its busy session stays.
   client.close();
   await new Promise(resolve => setTimeout(resolve, 150));
-  assert.equal((await readLock(homeB)).ready, true, 'the daemon survives a client disconnect');
+  // A missing lock makes this throw, which fails the smoke as before.
+  assert.equal(/** @type {import('@anhlp/alp-client').DaemonLock} */ (await readLock(homeB)).ready, true, 'the daemon survives a client disconnect');
 
   // Reconnect and replay the still-busy session.
   const again = await connect(socket);
+  /** @type {Envelope[]} */
   const replayEvents = [];
   again.onEvent(entry => replayEvents.push(entry));
   const reopened = await again.request('session.create', { sessionId: 'root', spec: { cwd: project, model: 'acp:fake', persist: false }, history: 'replay' });
   assert.equal(reopened.attached, true, 'a reconnect replays the retained session');
   await until(() => replayEvents.some(entry => entry.sessionId === 'root' && entry.event.type === 'turn.started'), 'the replayed turn events');
-  assert.equal((await again.request('session.list')).sessions.some(session => session.id === 'root'), true, 'session.list still lists it');
+  assert.equal((await again.request('session.list')).sessions.some(/** @param {{ id: string }} session */ session => session.id === 'root'), true, 'session.list still lists it');
 
   await again.request('daemon.shutdown');
   again.close();

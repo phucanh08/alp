@@ -1,3 +1,4 @@
+// @ts-check
 // Third-party code esbuild inlines into a bundle keeps its licence. Each bundle's metafile names the
 // node_modules files it read; this writes, beside the bundles, the name, version and licence text of
 // every package they came from (THIRD-PARTY-NOTICES.txt, named in each package's NOTICE).
@@ -5,19 +6,25 @@ import { readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
-const normalize = file => file.replaceAll('\\', '/');
+const normalize = /** @param {string} file */ file => file.replaceAll('\\', '/');
 export const THIRD_PARTY_NOTICES = 'THIRD-PARTY-NOTICES.txt';
 
-/** The installed package directory a bundle input (or esbuild's `// path` comment) belongs to; the last node_modules wins. */
+/**
+ * The installed package directory a bundle input (or esbuild's `// path` comment) belongs to; the last node_modules wins.
+ * @param {string} file
+ */
 export function packageDirectory(file) {
   return /^(.*node_modules\/(?:@[^/]+\/[^/]+|[^@/][^/]*))\//.exec(normalize(file))?.[1];
 }
 
-/** The package name of a directory from packageDirectory. */
-export const packageName = directory => /node_modules\/((?:@[^/]+\/)?[^/]+)$/.exec(directory)[1];
+/**
+ * The package name of a directory from packageDirectory (which always matches, hence the cast).
+ * @param {string} directory
+ */
+export const packageName = directory => /** @type {RegExpExecArray} */ (/node_modules\/((?:@[^/]+\/)?[^/]+)$/.exec(directory))[1];
 
 /** The heading a package's entry starts with; pack-check looks packages up by it. */
-export const heading = (name, version, license) => `${name}@${version} (${license})`;
+export const heading = /** @param {string} name @param {string} version @param {string} license */ (name, version, license) => `${name}@${version} (${license})`;
 
 // Paseo's own packages ship without a licence file or field; they are Paseo's Apache-2.0 code.
 const PASEO = { license: 'Apache-2.0', file: path.join(root, 'integrations/paseo/LICENSE.paseo.txt') };
@@ -42,12 +49,25 @@ EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 USE OR OTHER DEALINGS IN THE SOFTWARE.`;
 
-const declared = pkg => typeof pkg.license === 'string' ? pkg.license : pkg.license?.type ?? pkg.licenses?.map(item => item.type ?? item).join(' OR ');
-const person = value => typeof value === 'string' ? value : [value?.name, value?.email && `<${value.email}>`].filter(Boolean).join(' ');
+/**
+ * The fields of a bundled package's package.json that its notice reads.
+ * @typedef {{
+ *   name: string, version: string,
+ *   license?: string | { type?: string }, licenses?: { type?: string }[],
+ *   repository?: string | { url?: string }, author?: Person,
+ * }} NoticePackage
+ * (An old-style `licenses` entry may also be a plain string; its `.type` reads undefined and the
+ * string itself is used.)
+ * @typedef {string | { name?: string, email?: string } | undefined} Person
+ */
+const declared = /** @param {NoticePackage} pkg @returns {string | undefined} */ pkg => typeof pkg.license === 'string' ? pkg.license : pkg.license?.type ?? pkg.licenses?.map(item => item.type ?? item).join(' OR ');
+const person = /** @param {Person} value */ value => typeof value === 'string' ? value : [value?.name, value?.email && `<${value.email}>`].filter(Boolean).join(' ');
 
 /** One package's notice: its licence file(s), else what its manifest declares; `directory` is absolute or relative to the repo. */
+/** @param {string} directory */
 async function entry(directory) {
   const dir = path.resolve(root, directory);
+  /** @type {NoticePackage} */
   const pkg = JSON.parse(await readFile(path.join(dir, 'package.json'), 'utf8'));
   const files = await readdir(dir);
   const paseo = pkg.name.startsWith('@getpaseo/') ? PASEO : undefined;
@@ -75,6 +95,9 @@ async function entry(directory) {
 /**
  * Writes `file` with every package in `directories` (installed package directories); returns the
  * headings and the packages that ship no licence text.
+ * @param {string} file
+ * @param {Iterable<string>} directories
+ * @param {string} label
  */
 export async function writeNoticesFor(file, directories, label) {
   const loaded = await Promise.all([...new Set(directories)].map(entry));
@@ -86,8 +109,14 @@ export async function writeNoticesFor(file, directories, label) {
   return { headings: entries.map(item => heading(item.name, item.version, item.license)), missingText: entries.filter(item => item.missingText).map(item => `${item.name}@${item.version}`) };
 }
 
-/** Writes `file` with every third-party package any of the esbuild `metafiles` bundled. */
+/**
+ * Writes `file` with every third-party package any of the esbuild `metafiles` bundled.
+ * @param {string} file
+ * @param {({ inputs?: Record<string, unknown> } | undefined)[]} metafiles
+ * @param {string} label
+ */
 export async function writeThirdPartyNotices(file, metafiles, label) {
+  /** @type {string[]} */
   const directories = [];
   for (const metafile of metafiles) for (const input of Object.keys(metafile?.inputs ?? {})) {
     const directory = packageDirectory(input);

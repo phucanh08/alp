@@ -1,9 +1,14 @@
+// @ts-check
 import ts from 'typescript';
 import { mkdir, writeFile, cp } from 'node:fs/promises';
 import path from 'node:path';
 import { ROOT } from './workspace-build-lib.mjs';
 
-/** Emit only this package's declarations, while resolving dependency types from workspace sources. */
+/**
+ * Emit only this package's declarations, while resolving dependency types from workspace sources.
+ * @param {string} directory
+ * @param {string[]} files
+ */
 export async function emitDeclarations(directory, files) {
   const roots = files.filter(file => /\.(ts|js)$/.test(file)).map(file => path.join(directory, 'src', file));
   const output = path.join(ROOT, '.cache/workspace-declarations');
@@ -13,6 +18,7 @@ export async function emitDeclarations(directory, files) {
     noEmitOnError: true, rootDir: ROOT, outDir: output, customConditions: ['alp-source'], types: ['node'],
   };
   const program = ts.createProgram(roots, options);
+  /** @type {Promise<void>[]} */
   const writes = [];
   const prefix = path.join(output, path.relative(ROOT, directory), 'src') + path.sep;
   const result = program.emit(undefined, (emitted, content) => {

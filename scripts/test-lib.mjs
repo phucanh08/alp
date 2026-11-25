@@ -1,3 +1,4 @@
+// @ts-check
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -6,31 +7,39 @@ import path from 'node:path';
 export const ROOT = path.resolve(import.meta.dirname, '..');
 export const packages = ['protocol', 'core', 'runtime', 'client', 'daemon', 'cli', 'gateway', 'paseo'];
 /** Where each workspace lives: libraries under packages/, external integrations under integrations/, apps under apps/. */
+/** @type {Record<string, string>} */
 export const locations = { paseo: 'integrations/paseo', tui: 'apps/tui', gateway: 'apps/gateway' };
-export const workspaceDirectory = name => locations[name] ?? `packages/${name}`;
+export const workspaceDirectory = /** @param {string} name */ name => locations[name] ?? `packages/${name}`;
 
-/** Every `*.test.js` under `directory`, relative to the repository root; none if it does not exist. */
+/**
+ * Every `*.test.js` under `directory`, relative to the repository root; none if it does not exist.
+ * @param {string} directory
+ * @returns {string[]}
+ */
 export function testFiles(directory) {
   const absolute = path.join(ROOT, directory);
   try {
-    return readdirSync(absolute, { recursive: true })
+    // Without an encoding readdirSync lists names as strings; its recursive overload types them loosely.
+    return /** @type {string[]} */ (readdirSync(absolute, { recursive: true }))
       .filter(file => file.endsWith('.test.js'))
       .map(file => path.join(directory, file).split(path.sep).join('/'))
       .sort();
   } catch { return []; }
 }
 
-export const packageTests = name => testFiles(`${workspaceDirectory(name)}/tests`);
+export const packageTests = /** @param {string} name */ name => testFiles(`${workspaceDirectory(name)}/tests`);
 export const integrationTests = () => testFiles('test/integration');
 /** The browser app's unit tests (apps/web): not a library workspace, run as a group of their own. */
 export const webTests = () => testFiles('apps/web/tests');
 
+/** @param {string} script @param {string[]} args */
 function step(script, ...args) {
   const result = spawnSync(process.execPath, [path.join(ROOT, script), ...args], { cwd: ROOT, stdio: 'inherit' });
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 
 /** Builds `name` and, recursively, the workspaces it depends on (the plugin also builds the root bundles). */
+/** @param {string} name */
 export function buildWorkspace(name) { step('scripts/build-workspace.mjs', name); }
 
 /** Builds every workspace, as the suites that cross packages need all of their artifacts. */
@@ -74,7 +83,7 @@ export function clearCallerSession(env = process.env) {
 }
 
 /** ALP_CODEX_BIN, ALP_CLAUDE_BIN, ALP_GH_BIN, ...: the caller's provider and tool executables. */
-export const isCallerBinary = name => /^ALP_[A-Z0-9_]+_BIN$/i.test(name);
+export const isCallerBinary = /** @param {string} name */ name => /^ALP_[A-Z0-9_]+_BIN$/i.test(name);
 
 /**
  * The POSIX base directories a program looks in INSTEAD of `$HOME/.config` and friends when they are
@@ -91,6 +100,9 @@ export const XDG_BASE_DIRECTORIES = { XDG_CONFIG_HOME: '.config', XDG_DATA_HOME:
  * Redirect home/profile-based discovery to the private home (t-bfbd), removing
  * caller ALP_*_BIN overrides. PATH stays available for normal tool execution.
  * This is test environment isolation, not a filesystem sandbox.
+ * @param {NodeJS.ProcessEnv} env
+ * @param {string} home
+ * @returns {NodeJS.ProcessEnv}
  */
 export function homelessEnv(env, home) {
   const result = { ...env };
@@ -135,7 +147,7 @@ export const PROVIDER_COMMANDS = ['agy', 'claude', 'codex', 'gemini', 'opencode'
 export const PINNED_PROVIDER_VARIABLES = ['ALP_CODEX_BIN', 'ALP_CLAUDE_BIN'];
 
 /** Whether a directory entry is a provider command: any case (case-insensitive file systems), and on Windows with an executable extension. */
-const isProviderEntry = (entry, platform) => {
+const isProviderEntry = /** @param {string} entry @param {NodeJS.Platform} platform */ (entry, platform) => {
   const name = entry.toLowerCase();
   return PROVIDER_COMMANDS.some(command => name === command || (platform === 'win32' && /^\.(exe|cmd|bat|ps1|com)$/.test(name.slice(command.length)) && name.startsWith(command)));
 };
@@ -148,6 +160,9 @@ const isProviderEntry = (entry, platform) => {
  * on CI. A test that wants a provider puts its own fake first on its child's PATH, which still works.
  * An entry that cannot be linked is left out of the shadow rather than reaching the original, and a
  * directory that cannot be listed is left out of PATH.
+ * @param {string | undefined} searchPath
+ * @param {string} shadowRoot
+ * @param {{ platform?: NodeJS.Platform }} [options]
  */
 export function providerFreePath(searchPath, shadowRoot, { platform = process.platform } = {}) {
   const delimiter = platform === 'win32' ? ';' : ':';
@@ -176,6 +191,7 @@ export function providerFreePath(searchPath, shadowRoot, { platform = process.pl
  * private HOME/USERPROFILE/XDG profile `user` with no caller ALP_*_BIN (homelessEnv), the provider
  * executables pinned under `scratch` to a path that does not exist, and a PATH without any provider
  * command (providerFreePath). Only the test environment changes; the code under test is untouched.
+ * @param {{ env?: NodeJS.ProcessEnv, user: string, scratch: string, platform?: NodeJS.Platform }} options
  */
 export function testRunEnv({ env = process.env, user, scratch, platform = process.platform }) {
   const base = homelessEnv(hermeticEnv(env), user);
@@ -197,6 +213,8 @@ export function testRunEnv({ env = process.env, user, scratch, platform = proces
  * minutes), including leaked handles after tests finish. Normal files run without
  * process instrumentation. Timeout termination is best effort for the held root/group;
  * detached descendants may survive. Timeout or coordinator failure retains all scratch.
+ * @param {string[]} files
+ * @param {{ extra?: string[], fileTimeoutMs?: number, privateHome?: boolean }} [options] privateHome is accepted and ignored (see above)
  */
 export function runNodeTests(files, { extra = [], fileTimeoutMs = 300_000 } = {}) {
   if (!files.length) throw new Error('no test files selected');
@@ -214,7 +232,7 @@ export function runNodeTests(files, { extra = [], fileTimeoutMs = 300_000 } = {}
     // alpd under test never asks the real providers for models (t-e5ee); a test that wants it unsets this.
     // A per-file hard watchdog also cuts off leaked handles after five minutes.
     const base = testRunEnv({ user, scratch });
-    for (const directory of [base.APPDATA, base.LOCALAPPDATA, ...Object.keys(XDG_BASE_DIRECTORIES).map(name => base[name])]) mkdirSync(directory, { recursive: true });
+    for (const directory of [base.APPDATA, base.LOCALAPPDATA, ...Object.keys(XDG_BASE_DIRECTORIES).map(name => base[name])]) mkdirSync(/** @type {string} */ (directory), { recursive: true }); // homelessEnv sets every one of them
     const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts/test-file-watchdog.mjs'), JSON.stringify({ files, extra, fileTimeoutMs })], { cwd: ROOT, stdio: 'inherit', env: { ALP_MODEL_CATALOG: 'static', ...base, ALP_TEST_RETAIN: retain, ALP_HOME: home, TMPDIR: scratch, TMP: scratch, TEMP: scratch } });
     if (result.error || result.signal || result.status === null) writeFileSync(retain, 'coordinator failed\n');
     return result.status ?? 1;
@@ -225,7 +243,7 @@ export function runNodeTests(files, { extra = [], fileTimeoutMs = 300_000 } = {}
     // A directory a lingering child still holds must not turn a passing run into a failure.
     for (const dir of (existsSync(retain) ? [] : [home, scratch, user].filter(Boolean))) {
       try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
-      catch (error) { console.warn(`warning: could not remove ${dir}: ${error.message}`); }
+      catch (error) { console.warn(`warning: could not remove ${dir}: ${/** @type {Error} */ (error).message}`); }
     }
   }
 }

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Smoke test of install + `alp update` (t-1807) with a built bundle against local release mirrors: a
 // file:// mirror and a loopback HTTP mirror holding this platform's archive and SHA256SUMS (packed by
 // scripts/package-binary.mjs). The bundle is installed into a throwaway root by install.sh (POSIX) or
@@ -22,20 +23,21 @@ const windows = process.platform === 'win32';
 const version = JSON.parse(await readFile(path.join(ROOT, 'packages/cli/package.json'), 'utf8')).version;
 const bundle = path.resolve(process.argv[2] ?? path.join(ROOT, 'dist/bundle', `alp-${version}-${hostPlatform()}`));
 if (!existsSync(path.join(bundle, 'alp-bundle.json'))) throw new Error(`${bundle} is not a built bundle; build it with node scripts/build-bundle.mjs`);
-const log = message => console.log(`[binary-update-smoke] ${message}`);
-const check = (condition, message) => { if (!condition) throw new Error(message); log(`ok: ${message}`); };
+const log = /** @param {string} message */ message => console.log(`[binary-update-smoke] ${message}`);
+const check = /** @param {unknown} condition @param {string} message */ (condition, message) => { if (!condition) throw new Error(message); log(`ok: ${message}`); };
 const exec = promisify(execFile);
 const work = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-update-smoke-')));
 const user = path.join(work, 'user');
+/** @type {NodeJS.ProcessEnv & { ALP_HOME: string }} */
 const env = { ...process.env, HOME: user, USERPROFILE: user, ALP_HOME: path.join(work, 'alp-home'), ALP_UPDATE_NO_GH: '1', SHELL: '/bin/sh' };
 delete env.ALP_UPDATE_BASE_URL;
 /** Runs a command; never throws: returns { code, stdout, stderr }. */
-const runCmd = (file, args, options = {}) => exec(file, args, { env, timeout: 300_000, ...options }).then(r => ({ code: 0, ...r }), e => ({ code: e.code ?? 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' }));
+const runCmd = /** @param {string} file @param {string[]} args @param {import('node:child_process').ExecFileOptions} [options] */ (file, args, options = {}) => exec(file, args, { env, timeout: 300_000, ...options }).then(r => ({ code: 0, ...r }), e => ({ code: e.code ?? 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' }));
 const root = path.join(work, 'root');
 const app = path.join(root, 'app');
 const bin = path.join(work, 'bin');
 const installed = path.join(bin, windows ? 'alp.cmd' : 'alp');
-const alp = args => runCmd(installed, args, { shell: windows });
+const alp = /** @param {string[]} args */ args => runCmd(installed, args, { shell: windows });
 const current = () => windows ? readlinkSync(path.join(app, 'current')) : readlinkSync(path.join(app, 'current'));
 const versions = () => readdirSync(app).sort();
 // The native alpd (t-81b0.9) where the bundle ships one: alp starts it through app/current, it survives
@@ -43,6 +45,7 @@ const versions = () => readdirSync(app).sort();
 const native = JSON.parse(await readFile(path.join(bundle, 'alp-bundle.json'), 'utf8')).daemon === 'native';
 const daemonEntry = () => JSON.parse(readFileSync(path.join(env.ALP_HOME, 'alpd.json'), 'utf8')).entry;
 
+/** @type {import('node:http').Server | undefined} */
 let server;
 try {
   await mkdir(user);
@@ -105,11 +108,13 @@ try {
 
   // Loopback HTTP mirror; the previous aside copy is pruned now.
   server = http.createServer(async (request, response) => {
-    const name = decodeURIComponent(new URL(request.url, 'http://x').pathname.split('/').pop());
+    // A request always has a url, and split() returns at least one element; the casts state both.
+    const name = decodeURIComponent(/** @type {string} */ (new URL(/** @type {string} */ (request.url), 'http://x').pathname.split('/').pop()));
     try { response.end(await readFile(path.join(mirror, path.basename(name)))); } catch { response.statusCode = 404; response.end(); }
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  r = await alp(['update', '--yes', '--version', version, '--base-url', `http://127.0.0.1:${server.address().port}/v${version}`]);
+  // `server` was created just above; the casts only narrow its type and its listening address.
+  await /** @type {Promise<void>} */ (new Promise(resolve => /** @type {import('node:http').Server} */ (server).listen(0, '127.0.0.1', resolve)));
+  r = await alp(['update', '--yes', '--version', version, '--base-url', `http://127.0.0.1:${/** @type {import('node:net').AddressInfo} */ (/** @type {import('node:http').Server} */ (server).address()).port}/v${version}`]);
   check(r.code === 0 && /Updated ALP/.test(r.stdout), `alp update --yes from a loopback HTTP mirror (${r.stderr.trim() || 'ok'})`);
   // With alpd running (the native alpd started above) every aside copy stays: alpd may still run from one (pruneVersions keepAside).
   const aside = versions().filter(name => name.startsWith('.alp-old-')).length;

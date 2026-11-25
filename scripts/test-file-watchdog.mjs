@@ -1,3 +1,4 @@
+// @ts-check
 // Hard per-file wall-clock limit, including leaked handles after tests finish.
 // Normal files run without process instrumentation. This is not containment:
 // detached descendants may survive a timeout, so shared scratch is retained.
@@ -19,6 +20,7 @@ import { mkdirSync, readFileSync, readdirSync, rmSync, unlinkSync } from 'node:f
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+/** The coordinator's request (scripts/test-lib.mjs runNodeTests). @type {{ files: string[], extra: string[], fileTimeoutMs: number }} */
 const { files, extra, fileTimeoutMs } = JSON.parse(process.argv[2]);
 const windows = process.platform === 'win32';
 // The reporter node:test would pick by itself for a piped stdout: tap before Node 23, spec since.
@@ -27,7 +29,9 @@ const progressReporter = pathToFileURL(path.join(import.meta.dirname, 'test-prog
 let next = 0;
 let failed = false;
 let retainScratch = false;
+/** @type {Set<import('node:child_process').ChildProcess>} */
 const active = new Set();
+/** @param {import('node:child_process').ChildProcess} child */
 function stop(child) {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
   if (windows) {
@@ -37,7 +41,7 @@ function stop(child) {
     // The still-held root is its own process-group leader. Never enumerate or
     // signal stored descendant PIDs after their spawning handles have gone.
     try { process.kill(-child.pid, 'SIGKILL'); }
-    catch (error) { if (error.code !== 'ESRCH') console.error(`[test-file] process-group kill failed: ${error.message}`); }
+    catch (error) { if (/** @type {NodeJS.ErrnoException} */ (error).code !== 'ESRCH') console.error(`[test-file] process-group kill failed: ${/** @type {Error} */ (error).message}`); }
   }
   child.kill('SIGKILL');
 }
@@ -47,17 +51,29 @@ for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => {
   process.exit(signal === 'SIGINT' ? 130 : 143);
 });
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const indent = (value, by = '    ') => String(value).split('\n').map(line => by + line).join('\n');
+const sleep = /** @param {number} ms */ ms => new Promise(resolve => setTimeout(resolve, ms));
+const indent = /** @param {unknown} value @param {string} [by] */ (value, by = '    ') => String(value).split('\n').map(line => by + line).join('\n');
 
-/** Which subtests ran, failed (and why) and are still in flight, from the progress reporter's lines. */
+/**
+ * One line of the progress reporter (test-progress-reporter.mjs).
+ * @typedef {{
+ *   type: string, name: string, nesting?: number, line?: number, file?: string, ms?: number, at: number,
+ *   error?: { failureType?: string, message?: string, stack?: string },
+ * }} ProgressEntry
+ */
+/**
+ * Which subtests ran, failed (and why) and are still in flight, from the progress reporter's lines.
+ * @param {string} file
+ */
 function progressSummary(file) {
+  /** @type {ProgressEntry[]} */
   let entries;
   try { entries = readFileSync(file, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line)); }
-  catch (error) { return [`  no subtest progress (${error.code ?? error.message})`]; }
+  catch (error) { return [`  no subtest progress (${/** @type {NodeJS.ErrnoException} */ (error).code ?? /** @type {Error} */ (error).message})`]; }
   const out = [];
+  /** @type {Map<string, ProgressEntry>} */
   const running = new Map();
-  const key = entry => `${entry.nesting}\0${entry.name}\0${entry.line}`;
+  const key = /** @param {ProgressEntry} entry */ entry => `${entry.nesting}\0${entry.name}\0${entry.line}`;
   let passed = 0;
   for (const entry of entries) {
     if (entry.type === 'test:dequeue') { running.set(key(entry), entry); continue; }
@@ -75,13 +91,26 @@ function progressSummary(file) {
   return out;
 }
 
-/** One line per libuv handle a diagnostic report lists, without the report's environment. */
+/**
+ * A Node diagnostic report, as far as it is read here.
+ * @typedef {{
+ *   header?: { commandLine?: string[], processId?: number },
+ *   javascriptStack?: { message?: string, stack?: string[] },
+ *   libuv?: ({ type: string, is_referenced?: boolean, is_active?: boolean, [field: string]: unknown })[],
+ *   workers?: unknown[],
+ * }} DiagnosticReport
+ */
+/**
+ * One line per libuv handle a diagnostic report lists, without the report's environment.
+ * @param {DiagnosticReport} report
+ */
 function handleLines(report) {
   // The executable and its operands; node:test passes the file's process a long list of flags.
   const command = report.header?.commandLine ?? [];
   const out = [`  pid ${report.header?.processId}: ${[command[0], ...command.slice(1).filter(arg => !arg.startsWith('-'))].join(' ').slice(0, 400)}`];
   const stack = report.javascriptStack?.stack;
-  if (Array.isArray(stack) && stack.length) out.push(`    js stack: ${report.javascriptStack.message ?? ''}`, ...stack.slice(0, 8).map(frame => `      ${frame}`));
+  // A stack array means javascriptStack is there; the cast states that.
+  if (Array.isArray(stack) && stack.length) out.push(`    js stack: ${/** @type {{ message?: string }} */ (report.javascriptStack).message ?? ''}`, ...stack.slice(0, 8).map(frame => `      ${frame}`));
   // Only referenced, active handles keep a process alive; the rest are counted.
   let others = 0;
   for (const handle of report.libuv ?? []) {
@@ -96,13 +125,18 @@ function handleLines(report) {
   return out;
 }
 
-/** Asks the file's process group for Node diagnostic reports (only processes started with --report-on-signal answer). */
+/**
+ * Asks the file's process group for Node diagnostic reports (only processes started with --report-on-signal answer).
+ * @param {number} root
+ * @param {string} directory
+ */
 async function handleSummary(root, directory) {
   if (windows) return ['  open handles: not available on Windows (Node diagnostic reports cannot be requested by signal)'];
   mkdirSync(directory, { recursive: true });
   // SIGUSR2 is the report signal; group members without the flag end on it, and are stopped next anyway.
-  try { process.kill(-root, 'SIGUSR2'); } catch (error) { return [`  open handles: could not signal the file's group: ${error.message}`]; }
+  try { process.kill(-root, 'SIGUSR2'); } catch (error) { return [`  open handles: could not signal the file's group: ${/** @type {Error} */ (error).message}`]; }
   const deadline = Date.now() + 2000;
+  /** @type {string[]} */
   let names = [];
   while (Date.now() < deadline) {
     await sleep(100);
@@ -114,11 +148,17 @@ async function handleSummary(root, directory) {
   const out = [];
   for (const name of names.sort()) {
     try { out.push(...handleLines(JSON.parse(readFileSync(path.join(directory, name), 'utf8')))); }
-    catch (error) { out.push(`  ${name}: unreadable (${error.message})`); }
+    catch (error) { out.push(`  ${name}: unreadable (${/** @type {Error} */ (error).message})`); }
   }
   return out;
 }
 
+/**
+ * @param {string} file
+ * @param {import('node:child_process').ChildProcess & { pid: number }} child
+ * @param {string} progress
+ * @param {string} reports
+ */
 async function dump(file, child, progress, reports) {
   const out = [`[test-file] HANG DUMP ${file} (pid ${child.pid})`, ' subtests:', ...progressSummary(progress), ' processes:', ...await processSummary(child.pid)];
   out.push(' referenced active handles (what keeps each process alive):', ...await handleSummary(child.pid, reports));
@@ -148,13 +188,14 @@ async function worker() {
     // this coordinator so the deadline can close its local read handles too.
     const status = await new Promise(resolve => {
       let settled = false;
-      const finish = code => { if (!settled) { settled = true; resolve(code); } };
+      const finish = /** @param {number} code */ code => { if (!settled) { settled = true; resolve(code); } };
       const timer = setTimeout(async () => {
         timedOut = true;
         retainScratch = true;
         console.error(`[test-file] TIMEOUT ${file} after ${fileTimeoutMs} ms; retaining scratch; detached descendants may survive`);
         // The dump is bounded (about 5.2 s on POSIX, 8 s on Windows with the opt-in) and must not defeat the deadline if it fails.
-        try { await dump(file, child, progress, reports); } catch (error) { console.error(`[test-file] hang dump failed: ${error.message}`); }
+        // A timed-out child was started, so it has a pid; the cast states that.
+        try { await dump(file, /** @type {typeof child & { pid: number }} */ (child), progress, reports); } catch (error) { console.error(`[test-file] hang dump failed: ${/** @type {Error} */ (error).message}`); }
         stop(child);
         // A failed kill must not defeat the deadline.
         child.stdout.destroy();

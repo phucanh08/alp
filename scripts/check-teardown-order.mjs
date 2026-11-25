@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // The teardown-order lint (t-5294.6). node:test runs a test's `t.after` hooks in registration order
 // and STOPS at the first one that throws, so a hook that removes a directory, registered BEFORE the
 // hook that closes the server or kills the child living in it, turns one routine ENOTEMPTY into a
@@ -31,7 +32,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
-const argument = name => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined; };
+const argument = /** @param {string} name */ name => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined; };
 const root = path.resolve(argument('--root') ?? path.join(import.meta.dirname, '..'));
 
 /** Where this repository keeps `*.test.js`: every workspace's tests, plus the cross-package suites. */
@@ -58,23 +59,41 @@ const RELEASES = /\.(?:close|closeAllConnections|shutdown|stop|kill|destroy|disc
  * has moved) must be deleted from it rather than left to rot. Every entry below is a real defect
  * owned by another agent's branch in the same wave of work; each one goes when that branch lands.
  */
+/** @type {Record<string, string>} */
 export const ALLOWED = {
   // Empty, and meant to stay that way. Group D's five sites (binary-install-ps1, library-tools,
   // packs and teams x2) were the last entries; they are converted now, so the entries are gone.
   // Anything added here must name the branch that owns it and be deleted when that branch lands.
 };
 
+/** @typedef {ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction} FunctionLike */
+/** @typedef {{ removes: boolean, releases: boolean, releasesFirst: boolean }} Classified */
+/** `const defer = teardown(t)`: the one hook that runs the whole defer list. @typedef {{ kind: 'teardown', context: string, position: number, file: string, line: number }} TeardownEvent */
+/** A bare `t.after(...)` (hook) or a `defer(...)` step. @typedef {{ kind: 'hook' | 'step', context: string | undefined, position: number, file: string, line: number } & Classified} HookEvent */
+/** A call that may hand the context to a fixture helper. @typedef {{ kind: 'call', name: string, position: number, arguments: (string | undefined)[] }} CallEvent */
+/** @typedef {TeardownEvent | HookEvent | CallEvent} SequenceEvent */
+/** A registration in one test's context, with the helper invocation (frame) it came from (none for file-level hooks). @typedef {(TeardownEvent | HookEvent) & { frame?: string }} Registration */
+/** The whole defer list, placed where `teardown(t)` registered it. @typedef {{ kind: 'list', position: number, file: string, line: number, removes: boolean, releases: boolean, releasesFirst?: boolean }} ListEntry */
+/** One problem the scan reports. @typedef {{ site: string, skips: string, detail: string }} Problem */
+/** @typedef {ReturnType<typeof unitOf>} Unit */
+/** @typedef {(from: string, specifier: string) => Unit | undefined} UnitLoader */
+
+/** @type {(node: ts.Node) => node is FunctionLike} */
 const functionLike = node => ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node);
-const parameterNames = node => node.parameters.map(p => (ts.isIdentifier(p.name) ? p.name.text : undefined));
+const parameterNames = /** @param {FunctionLike} node */ node => node.parameters.map(p => (ts.isIdentifier(p.name) ? p.name.text : undefined));
 /** `test`, `it`, `test.only`, `t.test`, ... : a call whose last argument is the body of one test. */
-const testCallName = node => {
+const testCallName = /** @param {ts.Node} node @returns {'test' | 'it' | undefined} */ node => {
   if (!ts.isCallExpression(node)) return undefined;
   const callee = node.expression;
   const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : undefined;
   return name === 'test' || name === 'it' ? name : undefined;
 };
 
-/** What a hook or step body does, from its source text. */
+/**
+ * What a hook or step body does, from its source text.
+ * @param {string} body
+ * @returns {Classified}
+ */
 function classify(body) {
   return {
     removes: REMOVES.test(body), releases: RELEASES.test(body),
@@ -91,9 +110,15 @@ function classify(body) {
  *   `hook`, a bare `t.after(...)`, which node:test runs in registration order, and
  *   `step`, a `defer(...)` from test/support/teardown.js, which runs in REVERSE registration order.
  * `deferNames` maps a name bound to `teardown(X)` onto the context X it tears down.
+ * @param {ts.Node} fn
+ * @param {ts.SourceFile} parsed
+ * @param {Map<string, string>} [deferNames]
+ * @returns {SequenceEvent[]}
  */
 function sequenceOf(fn, parsed, deferNames = new Map()) {
+  /** @type {SequenceEvent[]} */
   const events = [];
+  /** @param {ts.Node} node */
   const walk = node => {
     if (node !== fn && functionLike(node) && node.parent && testCallName(node.parent)) return;
     // `const defer = teardown(t)`: remember which context this name registers steps for.
@@ -131,6 +156,8 @@ function sequenceOf(fn, parsed, deferNames = new Map()) {
  * hooks it registers land in the calling test's context exactly as a same-file helper's do. Reading
  * only the test file therefore misses them entirely, which is how apps/gateway/tests/support/
  * harness.js kept the hang shape through the whole of t-5294.6 (review finding M).
+ * @param {ts.SourceFile} parsed
+ * @returns {Map<string, { specifier: string, imported: string }>}
  */
 function relativeImports(parsed) {
   const found = new Map();
@@ -147,9 +174,14 @@ function relativeImports(parsed) {
   return found;
 }
 
-/** Every module-level named function (declaration or `const name = ... =>`), by name. */
+/**
+ * Every module-level named function (declaration or `const name = ... =>`), by name.
+ * @param {ts.SourceFile} parsed
+ * @returns {Map<string, FunctionLike>}
+ */
 function namedFunctions(parsed) {
   const found = new Map();
+  /** @param {ts.Node} node */
   const walk = node => {
     if (ts.isFunctionDeclaration(node) && node.name) found.set(node.name.text, node);
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && functionLike(node.initializer)) {
@@ -164,8 +196,17 @@ function namedFunctions(parsed) {
 /**
  * The hooks one test registers on its own context, in order: its body's own `t.after` calls with the
  * hooks of every fixture helper it passes `t` to spliced in where the call happens.
+ * @param {FunctionLike} fn
+ * @param {string} context
+ * @param {Unit} unit
+ * @param {UnitLoader} load
+ * @param {Set<string>} [seen]
+ * @param {Map<string, string>} [deferNames]
+ * @param {string} [frame]
+ * @returns {Registration[]}
  */
 function hooksOf(fn, context, unit, load, seen = new Set(), deferNames = new Map(), frame = 'test') {
+  /** @type {Registration[]} */
   const hooks = [];
   for (const event of sequenceOf(fn, unit.parsed, deferNames)) {
     if (event.kind !== 'call') { if (event.context === context) hooks.push({ ...event, frame }); continue; }
@@ -176,8 +217,9 @@ function hooksOf(fn, context, unit, load, seen = new Set(), deferNames = new Map
     if (!helper) {
       const imported = unit.imports.get(event.name);
       const other = imported && load(unit.relative, imported.specifier);
-      helper = other?.helpers.get(imported.imported);
-      if (helper) where = other;
+      // `other` is only defined when `imported` is; the cast states that.
+      helper = other?.helpers.get(/** @type {{ imported: string }} */ (imported).imported);
+      if (helper) where = /** @type {Unit} */ (other); // a helper was found in it, so it is loaded
     }
     const key = `${where.relative}#${event.name}`;
     if (!helper || seen.has(key)) continue;
@@ -191,7 +233,11 @@ function hooksOf(fn, context, unit, load, seen = new Set(), deferNames = new Map
   return hooks;
 }
 
-/** One parsed file: what hooksOf needs to read it and to follow a helper out of it. */
+/**
+ * One parsed file: what hooksOf needs to read it and to follow a helper out of it.
+ * @param {string} relative
+ * @param {string} source
+ */
 export function unitOf(relative, source) {
   const parsed = ts.createSourceFile(relative, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   return { relative, parsed, helpers: namedFunctions(parsed), imports: relativeImports(parsed) };
@@ -200,38 +246,49 @@ export function unitOf(relative, source) {
 /**
  * The order problems in one file's source. `allowed` defaults to ALLOWED; pass `{}` to see the
  * excused sites too, which is how the test checks that no entry has gone stale.
+ * @param {string} relative
+ * @param {string} source
+ * @param {Record<string, string>} [allowed]
+ * @param {UnitLoader} [load]
+ * @returns {Problem[]}
  */
 export function teardownProblems(relative, source, allowed = ALLOWED, load = () => undefined) {
   const unit = unitOf(relative, source);
   const parsed = unit.parsed;
-  /** One ordered hook list per test, plus one for the file-level `test.after` hooks. */
+  /** One ordered hook list per test, plus one for the file-level `test.after` hooks. @type {Registration[][]} */
   const contexts = [];
+  /** @type {Registration[]} */
   const fileLevel = [];
+  /** @param {ts.Node} node */
   const walk = node => {
     if (testCallName(node)) {
-      const body = node.arguments.find(functionLike);
+      // testCallName names only a call expression; the cast states that.
+      const body = /** @type {FunctionLike | undefined} */ (/** @type {ts.CallExpression} */ (node).arguments.find(functionLike));
       const context = body && parameterNames(body)[0];
       if (body && context) contexts.push(hooksOf(body, context, unit, load));
     }
     // A file-level hook (`test.after`) runs after every per-test hook: its own order is all that matters.
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'after'
         && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === 'test') {
-      fileLevel.push(...sequenceOf(node, parsed).filter(event => event.kind === 'hook'));
+      // The filter keeps only hooks; the cast states that for the checker.
+      fileLevel.push(.../** @type {HookEvent[]} */ (sequenceOf(node, parsed).filter(event => event.kind === 'hook')));
     }
     ts.forEachChild(node, walk);
   };
   walk(parsed);
   /** `file:line`, naming the support module when the hook was registered there, not the test file. */
-  const at = entry => `${entry.file ?? relative}:${entry.line}`;
+  const at = /** @param {{ file?: string, line: number }} entry */ entry => `${entry.file ?? relative}:${entry.line}`;
 
+  /** @type {Problem[]} */
   const problems = [];
-  const add = problem => {
+  const add = /** @param {Problem} problem */ problem => {
     if (Object.hasOwn(allowed, problem.site)) return;
     if (problems.some(seen => seen.site === problem.site && seen.skips === problem.skips)) return;
     problems.push(problem);
   };
   for (const registrations of [...contexts, fileLevel]) {
-    const steps = registrations.filter(entry => entry.kind === 'step');
+    // The filter keeps only defer steps; the cast states that for the checker.
+    const steps = /** @type {(HookEvent & { frame?: string })[]} */ (registrations.filter(entry => entry.kind === 'step'));
     const teardownAt = registrations.find(entry => entry.kind === 'teardown');
     /**
      * node:test runs the hooks of one test in registration order, and `teardown(t)` is ONE of them.
@@ -243,6 +300,7 @@ export function teardownProblems(relative, source, allowed = ALLOWED, load = () 
      * releases, and a bare release after a defer list that removes (review finding M: all three are
      * present in apps/gateway/tests).
      */
+    /** @type {ListEntry | undefined} */
     const list = teardownAt && steps.length ? {
       kind: 'list', position: teardownAt.position, file: teardownAt.file, line: teardownAt.line,
       removes: steps.some(step => step.removes), releases: steps.some(step => step.releases),
@@ -255,12 +313,13 @@ export function teardownProblems(relative, source, allowed = ALLOWED, load = () 
     // Only the FIRST teardown(t) becomes a list: calling it again returns the same defer, so it
     // registers no second hook, however many fixtures in the chain ask for one.
     let listPlaced = false;
-    const order = registrations.flatMap(entry => {
+    /** @type {((HookEvent & { frame?: string }) | ListEntry)[]} */
+    const order = registrations.flatMap(/** @returns {((HookEvent & { frame?: string }) | ListEntry)[]} */ entry => {
       if (entry.kind === 'hook') return [entry];
       if (entry.kind === 'teardown' && list && !listPlaced) { listPlaced = true; return [list]; }
       return [];
     });
-    const describe = entry => (entry.kind === 'list' ? `the teardown(t) list started at ${at(entry)}` : `the after hook at ${at(entry)}`);
+    const describe = /** @param {{ kind: string, file?: string, line: number }} entry */ entry => (entry.kind === 'list' ? `the teardown(t) list started at ${at(entry)}` : `the after hook at ${at(entry)}`);
 
     for (const [index, entry] of order.entries()) {
       // A removal that cannot be reached past: every hook after it is skipped when it throws.
@@ -297,6 +356,7 @@ export function teardownProblems(relative, source, allowed = ALLOWED, load = () 
   return problems;
 }
 
+/** @param {string} directory @returns {Promise<string[]>} */
 async function testFiles(directory) {
   try {
     return (await readdir(path.join(root, directory), { recursive: true }))
@@ -308,8 +368,10 @@ async function testFiles(directory) {
 /**
  * Loads a relative import as a unit, so a fixture helper in a support module is expanded at its call
  * site like a local one. Cached: one support module serves a dozen test files.
+ * @returns {UnitLoader}
  */
 function moduleLoader() {
+  /** @type {Map<string, Unit | undefined>} */
   const cache = new Map();
   return (from, specifier) => {
     const relative = path.join(path.dirname(from), specifier).split(path.sep).join('/');
@@ -322,7 +384,10 @@ function moduleLoader() {
   };
 }
 
-/** Every problem in the tree at `root`. Pass `{ allowed: {} }` to include the excused sites. */
+/**
+ * Every problem in the tree at `root`. Pass `{ allowed: {} }` to include the excused sites.
+ * @param {{ allowed?: Record<string, string> }} [options]
+ */
 export async function scan({ allowed = ALLOWED } = {}) {
   const problems = [];
   const load = moduleLoader();

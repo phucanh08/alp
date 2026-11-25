@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Paseo compatibility guard for @anhlp/alp-paseo (t-e5dc).
 //
 // beta.2 stopped loading for users who upgraded to Paseo 0.12.0: the Paseo host refuses a plugin
@@ -30,21 +31,31 @@ const args = process.argv.slice(2);
 if (args.length > 1 || args.some(arg => !['--latest', '--floor'].includes(arg))) throw new Error('Usage: check-paseo-compat.mjs [--latest | --floor]');
 const latest = args.includes('--latest');
 
-const readJson = file => JSON.parse(readFileSync(file, 'utf8'));
+// `any`: each JSON file read here has its own shape (package.json, paseo-plugin.json, dist-tags).
+const readJson = /** @param {string} file @returns {any} */ file => JSON.parse(readFileSync(file, 'utf8'));
 const pkg = readJson(path.join(PLUGIN_DIR, 'package.json'));
 const manifest = readJson(path.join(PLUGIN_DIR, 'paseo-plugin.json'));
 const problems = [];
 
 /** Runs `command` as spawnCommand starts it: npm/npx through Node and tar as the system's bsdtar on Windows. */
+/**
+ * @param {string} command
+ * @param {string[]} commandArgs
+ * @param {import('node:child_process').SpawnSyncOptions} [options]
+ * @returns {string}
+ */
 function run(command, commandArgs, options = {}) {
   const result = spawnSync(...spawnCommand(command, commandArgs), { encoding: 'utf8', ...options });
   if (result.error || result.status !== 0) {
     throw new Error(`${command} ${commandArgs.join(' ')} ${exitDescription(result)}\n${result.stdout ?? ''}${result.stderr ?? ''}`);
   }
-  return result.stdout;
+  return /** @type {string} */ (result.stdout); // encoding 'utf8' (callers do not override it)
 }
 
 /** semver and the host check, loaded from an installed @getpaseo/protocol (semver is its own dependency). */
+// `any` (semver, assertPluginCompatibility): both are loaded at run time from the installed Paseo SDK,
+// which this repository does not type-check against.
+/** @param {string} protocolDir */
 async function hostCheck(protocolDir) {
   const require = createRequire(path.join(protocolDir, 'package.json'));
   const { assertPluginCompatibility } = await import(pathToFileURL(path.join(protocolDir, 'dist/plugin-requirements.js')).href);
@@ -59,6 +70,7 @@ for (const name of SDK) {
 }
 
 /** Where the plugin resolves an SDK package: its own node_modules first (npm nests there on a conflict), then the root. */
+/** @param {string} name */
 function sdkDir(name) {
   const nested = path.join(PLUGIN_DIR, 'node_modules', name);
   return existsSync(path.join(nested, 'package.json')) ? nested : path.join(ROOT, 'node_modules', name);
@@ -80,7 +92,7 @@ for (const name of SDK) {
 try {
   installed.assertPluginCompatibility({ id: manifest.id, requirements: manifest.requirements, version: installed.version, runtime: 'daemon' });
 } catch (error) {
-  problems.push(`installed host check (@getpaseo/protocol@${installed.version}): ${error.message}`);
+  problems.push(`installed host check (@getpaseo/protocol@${installed.version}): ${/** @type {Error} */ (error).message}`);
 }
 
 if (latest && problems.length === 0) await checkLatest();
@@ -96,6 +108,7 @@ async function checkLatest() {
   const work = mkdtempSync(path.join(os.tmpdir(), 'alp-paseo-compat-'));
   try {
     // a. The latest release of every SDK package (Paseo releases them in lockstep with the app).
+    /** @type {Record<string, string>} */
     const versions = {};
     for (const name of SDK) {
       const tags = JSON.parse(run('npm', ['view', name, 'dist-tags', '--json']));
@@ -143,7 +156,7 @@ async function checkLatest() {
       latestHost.assertPluginCompatibility({ id: packedManifest.id, requirements: packedManifest.requirements, version: latestHost.version, runtime: 'daemon' });
       console.log(`Paseo ${latestHost.version}'s own plugin check accepts the packed manifest (requirements.paseo ${packedManifest.requirements?.paseo})`);
     } catch (error) {
-      problems.push(`Paseo ${latestHost.version}'s plugin check rejects the packed manifest: ${error.message}`);
+      problems.push(`Paseo ${latestHost.version}'s plugin check rejects the packed manifest: ${/** @type {Error} */ (error).message}`);
     }
   } finally {
     rmSync(work, { recursive: true, force: true });

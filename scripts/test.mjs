@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Root test entry: `unit` (every packages/*/tests), `integration` (test/integration), `e2e`
 // (test/e2e, live providers, opt-in) or `all`. Without an argument it runs the hermetic suites,
 // unit and integration together in one `node --test` run, so no file executes twice.

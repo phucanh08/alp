@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Consumer verification on a saved release (docs/alp/beta-scope.md §6.3, §7.2): installs exactly the
 // eight tarballs in the release directory, never packs or builds them again, and proves that what
 // got installed is those files:
@@ -19,16 +20,21 @@ import { installedProblems, shippedWebProblems, verifyRelease } from './release-
 
 const root = path.resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
-const flag = name => { const index = args.indexOf(name); if (index >= 0) args.splice(index, 1); return index >= 0; };
+const flag = /** @param {string} name */ name => { const index = args.indexOf(name); if (index >= 0) args.splice(index, 1); return index >= 0; };
 const rehearsal = flag('--rehearsal');
 const installOnly = flag('--install-only');
 if (args.length !== 1) throw new Error('Usage: release-consumer.mjs <directory> [--rehearsal] [--install-only]');
 const directory = path.resolve(args[0]);
 
+/**
+ * @param {string} stage
+ * @returns {ReturnType<typeof verifyRelease> & { manifest: import('./release-lib.mjs').ReleaseManifest & { packages: import('./release-lib.mjs').ManifestPackage[] } }}
+ */
 function verified(stage) {
   const result = verifyRelease(directory, { rehearsal });
   if (result.problems.length) throw new Error(`${stage}: A5 failed for ${directory}:\n- ${result.problems.join('\n- ')}`);
-  return result;
+  // A release with no problems has a manifest that lists its packages (A5 checked them); the cast states that.
+  return /** @type {ReturnType<typeof verified>} */ (result);
 }
 
 const before = verified('before install');

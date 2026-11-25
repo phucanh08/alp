@@ -1,3 +1,4 @@
+// @ts-check
 import { build } from 'esbuild';
 import { readFile, readdir, cp } from 'node:fs/promises';
 import path from 'node:path';
@@ -9,8 +10,10 @@ export async function syncCoreTemplates() {
   await cp(path.join(ROOT, 'templates'), path.join(ROOT, 'packages/core/templates'), { recursive: true });
 }
 
+/** @returns {Promise<import('esbuild').Plugin[]>} */
 export async function resources() {
   await syncCoreTemplates();
+  /** @type {Record<string, string>} */
   const templates = {};
   for (const entry of await readdir(path.join(ROOT, 'packages/core/templates'), { recursive: true, withFileTypes: true })) {
     if (!entry.isFile()) continue;

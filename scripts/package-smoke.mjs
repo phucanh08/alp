@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Verify packed modules without repository source, workspace links, or a provider login.
 // `--packs <release directory>` (scripts/release-pack.mjs) installs that release's saved tarballs,
 // after checking them against its SHA256SUMS, instead of packing the workspaces.
@@ -14,6 +15,12 @@ const root = path.resolve(import.meta.dirname, '..');
 const packsAt = process.argv.indexOf('--packs');
 const saved = packsAt >= 0 ? releaseArtifacts(path.resolve(process.argv[packsAt + 1] ?? '')) : undefined;
 const directory = await mkdtemp(path.join(os.tmpdir(), 'alp-package-smoke-'));
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {import('node:child_process').SpawnSyncOptionsWithStringEncoding | Omit<import('node:child_process').SpawnSyncOptions, 'encoding'>} [options]
+ * @returns {string}
+ */
 function run(command, args, options = {}) {
   const result = spawnSync(...spawnCommand(command, args), { cwd: directory, encoding: 'utf8', timeout: 180_000, maxBuffer: 32 * 1024 * 1024, ...options });
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed:\n${result.stdout}${result.stderr}${result.error ?? ''}`);
@@ -26,12 +33,15 @@ function run(command, args, options = {}) {
 const clearedSession = clearCallerSession();
 if (clearedSession.length) console.log(`package smoke: cleared the caller's ALP session variables, so the installed CLI runs as the user's: ${clearedSession.join(', ')}`);
 const env = { ...process.env, ALP_HOME: path.join(directory, 'home') };
+/** @type {string | undefined} */
 let cli;
 try {
   await mkdir(env.ALP_HOME, { recursive: true, mode: 0o700 });
   await writeFile(path.join(env.ALP_HOME, 'settings.json'), JSON.stringify({ dashboard: { port: await freeWebPort() }, web: { relay: { enabled: false } } }));
   const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+  /** @type {Record<string, string>} */
   const dependencies = {};
+  /** @type {string[]} */
   const workspaceNames = [];
   for (const artifact of saved ?? []) {
     dependencies[artifact.name] = `file:${artifact.file}`;
@@ -48,7 +58,7 @@ try {
   const savedLauncher = saved?.find(artifact => artifact.name === LAUNCHER);
   const launcherPack = savedLauncher ? undefined : JSON.parse(run('npm', ['pack', `./${LAUNCHER_LOCATION}`, '--ignore-scripts', '--json', '--pack-destination', directory], { cwd: root }))[0];
   if (launcherPack) dependencies[LAUNCHER] = `file:${path.join(directory, launcherPack.filename)}`;
-  const shipped = new Set(savedLauncher ? savedLauncher.files.keys() : launcherPack.files.map(file => file.path));
+  const shipped = new Set(savedLauncher ? savedLauncher.files.keys() : launcherPack.files.map(/** @param {{ path: string }} file */ file => file.path));
   for (const file of shipped) {
     if (!['package.json', 'README.md', 'LICENSE', 'NOTICE', 'bin/alp.js'].includes(file)) throw new Error(`the wrapper ${LAUNCHER} must ship only bin/alp.js, found ${file}`);
   }
@@ -81,7 +91,8 @@ void frame; void observe;
 `);
   run(process.execPath, [path.join(root, 'node_modules/typescript/lib/tsc.js'), '--noEmit', '--strict', '--skipLibCheck', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', '--target', 'ES2022', '--typeRoots', path.join(root, 'node_modules/@types'), 'consumer.ts']);
   cli = path.join(directory, 'node_modules/@anhlp/alp-cli/dist/cli.js');
-  const alp = (...args) => run(process.execPath, [cli, ...args], { env });
+  // `cli` was set on the line above; the cast only narrows its type inside the closure.
+  const alp = /** @param {string[]} args */ (...args) => run(process.execPath, [/** @type {string} */ (cli), ...args], { env });
   const project = path.join(directory, 'project');
   alp('init', project);
   alp('update-template', project);
@@ -104,9 +115,10 @@ void frame; void observe;
   await mkdir(elsewhere, { recursive: true });
   const alpLink = path.join(bin, 'alp');
   await symlink(path.relative(bin, cli), alpLink);
-  const fromElsewhere = (...args) => run(process.execPath, [alpLink, ...args], { cwd: elsewhere, env });
+  const fromElsewhere = /** @param {string[]} args */ (...args) => run(process.execPath, [alpLink, ...args], { cwd: elsewhere, env });
   const line = fromElsewhere('dashboard', '--print').trim().split('\n').pop();
-  const match = /^(http:\/\/127\.0\.0\.1:\d+)\/#token=(alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43})$/.exec(line);
+  // split() returns at least one element, so `line` is a string.
+  const match = /^(http:\/\/127\.0\.0\.1:\d+)\/#token=(alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43})$/.exec(/** @type {string} */ (line));
   if (!match) throw new Error(`alp dashboard --print printed no loopback address with an alpgw1 token: ${line}`);
   const [, origin, token] = match;
   const alpd = JSON.parse(await readFile(path.join(env.ALP_HOME, 'alpd.lock'), 'utf8'));

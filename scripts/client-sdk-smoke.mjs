@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Smoke checks of the portable client SDK (docs/alp/client-sdk.md) outside node --test:
 //   browser  headless Chromium runs the portable client over the browser's own WebSocket against a
 //            real alpd (scripted agents) through a test-only bridge: handshake, a request, streamed
@@ -23,9 +24,10 @@ const root = path.resolve(import.meta.dirname, '..');
 // A throwaway ALP_HOME, set before any ALP module loads: the smoke never reads or writes ~/.alp.
 const smokeHome = await mkdtemp(path.join(tmpdir(), 'alp-sdk-home-'));
 process.env.ALP_HOME = smokeHome;
-const load = file => import(pathToFileURL(path.join(root, file)).href);
+// `any`: the built modules are loaded by path at run time, so their types are not known here.
+const load = /** @param {string} file @returns {Promise<any>} */ file => import(pathToFileURL(path.join(root, file)).href);
 const modes = process.argv.slice(2).length ? process.argv.slice(2) : ['browser', 'metro', 'tarball'];
-const log = message => console.log(`[client-sdk] ${message}`);
+const log = /** @param {string} message */ message => console.log(`[client-sdk] ${message}`);
 
 /** A real alpd with scripted agents and a test-only WebSocket bridge to its socket. */
 async function alpdWithBridge() {
@@ -39,6 +41,7 @@ async function alpdWithBridge() {
   const home = process.env.ALP_HOME;
   const project = path.join(directory, 'project');
   await initProject(project);
+  /** The fake agents fakeTransport creates, in order; the smoke finishes their turns. @type {{ finish(text: string): void }[]} */
   const agents = [];
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(agents), supervisor: false, libraryDir: home });
   const socketPath = daemonPaths(directory).socket;
@@ -47,28 +50,32 @@ async function alpdWithBridge() {
   daemon.extend('test.never', () => new Promise(() => {}));
   const routes = new Map();
   const server = http.createServer((request, response) => {
-    const body = routes.get(new URL(request.url, 'http://x').pathname);
+    // A server request always has a url; the cast only narrows its optional type.
+    const body = routes.get(new URL(/** @type {string} */ (request.url), 'http://x').pathname);
     if (!body) { response.writeHead(404).end(); return; }
     response.writeHead(200, { 'content-type': body.type, 'cache-control': 'no-store' }).end(body.text);
   });
   const sockets = new WebSocketServer({ server, path: '/rpc' });
   sockets.on('connection', ws => {
+    /** @type {string[]} */
     const early = [];
+    /** @type {import('@anhlp/alp-client/portable').AlpTransport | undefined} */
     let transport;
     ws.on('message', data => { const frame = data.toString('utf8'); if (transport) transport.send(frame); else early.push(frame); });
-    connectSocket(socketPath).then(opened => {
+    connectSocket(socketPath).then(/** @param {import('@anhlp/alp-client/portable').AlpTransport} opened */ opened => {
       transport = opened;
       if (ws.readyState !== WebSocket.OPEN) return transport.close();
       for (const frame of early.splice(0)) transport.send(frame);
-      transport.onMessage(frame => ws.send(frame));
+      transport.onMessage(/** @param {string} frame */ frame => ws.send(frame));
       transport.onClose(() => ws.close(1011, 'alpd connection ended'));
-      ws.on('close', () => transport.close());
+      ws.on('close', () => /** @type {import('@anhlp/alp-client/portable').AlpTransport} */ (transport).close());
     }, () => ws.close(1011, 'alpd unreachable'));
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const origin = `http://127.0.0.1:${server.address().port}`;
+  await /** @type {Promise<void>} */ (new Promise(resolve => server.listen(0, '127.0.0.1', resolve)));
+  const origin = `http://127.0.0.1:${/** @type {import('node:net').AddressInfo} */ (server.address()).port}`;
   return {
     project, agents, routes, origin, url: `${origin.replace('http', 'ws')}/rpc`,
+    /** @param {number} code @param {string} reason */
     kick(code, reason) { for (const ws of sockets.clients) ws.close(code, reason); },
     async close() {
       for (const ws of sockets.clients) ws.terminate();
@@ -116,6 +123,7 @@ async function browser() {
   alpd.routes.set('/', { type: 'text/html; charset=utf-8', text: '<!doctype html><meta charset="utf-8"><title>ALP SDK smoke</title><script type="module" src="/app.js"></script>' });
   alpd.routes.set('/app.js', { type: 'text/javascript; charset=utf-8', text: bundle.outputFiles[0].text });
   let instance;
+  /** @type {string[]} */
   const errors = [];
   try {
     instance = await chromium.launch({ headless: true, channel: process.env.ALP_SMOKE_BROWSER ?? 'chrome' });
@@ -150,19 +158,28 @@ async function browser() {
   }
 }
 
-/** A WebSocket double for the Metro bundle: answers hello and daemon.status, then closes. */
+/**
+ * A WebSocket double for the Metro bundle: answers hello and daemon.status, then closes.
+ * @param {string[]} record
+ */
 function webSocketDouble(record) {
   return class {
+    /** @param {string} url */
     constructor(url) {
       record.push(`open ${url}`);
       this.readyState = 0;
       this.bufferedAmount = 0;
+      /** @type {Record<string, Set<(event: unknown) => void>>} */
       this.listeners = {};
       setTimeout(() => { this.readyState = 1; this.emit('open', {}); }, 0);
     }
+    /** @param {string} type @param {(event: unknown) => void} listener */
     addEventListener(type, listener) { (this.listeners[type] ??= new Set()).add(listener); }
+    /** @param {string} type @param {(event: unknown) => void} listener */
     removeEventListener(type, listener) { this.listeners[type]?.delete(listener); }
+    /** @param {string} type @param {unknown} event */
     emit(type, event) { for (const listener of [...(this.listeners[type] ?? [])]) listener(event); }
+    /** @param {string} data */
     send(data) {
       const message = JSON.parse(data);
       record.push(`send ${message.method}`);
@@ -222,6 +239,7 @@ globalThis.smoke = (async () => {
       if (forbidden.test(code)) throw new Error(`${path.basename(out)} contains ${forbidden}`);
     }
     // A bare context: no process, Buffer, require or module; only timers and the WebSocket double.
+    /** @type {string[]} */
     const record = [];
     const context = vm.createContext({ setTimeout, clearTimeout, queueMicrotask, console, WebSocket: webSocketDouble(record) });
     vm.runInContext(code, context, { filename: out });
@@ -233,6 +251,11 @@ globalThis.smoke = (async () => {
   log('metro smoke passed (bundle resolution and a bare JS runtime; no Hermes or device run)');
 }
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {import('node:child_process').SpawnSyncOptionsWithStringEncoding | {}} [options]
+ */
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: 'utf8', shell: process.platform === 'win32', ...options });
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed:\n${result.stdout}\n${result.stderr}`);
@@ -307,6 +330,7 @@ export async function main(socketPath: string) {
   } finally { await rm(work, { recursive: true, force: true }); }
 }
 
+/** @type {Record<string, () => Promise<void>>} */
 const runs = { browser, metro, tarball };
 try {
   for (const mode of modes) {

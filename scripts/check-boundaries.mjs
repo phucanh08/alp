@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import ts from 'typescript';
@@ -12,7 +13,9 @@ import { coreManifestPaths, validateBuildManifest } from './build-manifest.mjs';
 const argument = process.argv.indexOf('--root');
 const root = path.resolve(argument >= 0 && process.argv[argument + 1] ? process.argv[argument + 1] : path.join(import.meta.dirname, '..'));
 const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+/** @type {Map<string, string[]>} */
 const graph = new Map();
+/** @type {Record<string, string[]>} */
 const allowed = {
   '@anhlp/alp-protocol': [],
   '@anhlp/alp-core': ['@anhlp/alp-protocol'],
@@ -32,7 +35,9 @@ const allowed = {
  * that bundle (src/dashboard/) may import it: every other CLI file is built with `@anhlp/*` external and
  * would ship an import of a package that is never published.
  */
+/** @type {Record<string, string[]>} */
 const bundledApps = { '@anhlp/alp-cli': ['@anhlp/alp-gateway'] };
+/** @type {Record<string, string>} */
 const bundledSources = { '@anhlp/alp-cli': `src${path.sep}dashboard${path.sep}` };
 const failures = corePackageProblems(manifest);
 /** The only sources that may name process.execPath directly: the runtime-neutral launch helpers. */
@@ -41,8 +46,10 @@ const supportDirectory = path.join(root, 'test', 'support');
 
 
 /** Names bound to createRequire(...) so an aliased require('...') is caught like a bare one. */
+/** @param {ts.SourceFile} source */
 function requireAliases(source) {
   const names = new Set(['require']);
+  /** @param {ts.Node} node */
   function inspect(node) {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && ts.isCallExpression(node.initializer)) {
       const callee = node.initializer.expression;
@@ -91,7 +98,9 @@ for (const location of manifest.workspaces ?? []) {
     const text = await readFile(path.join(directory, relative), 'utf8');
     const source = ts.createSourceFile(relative, text, ts.ScriptTarget.Latest, true);
     const aliases = requireAliases(source);
+    /** @type {string[]} */
     const specifiers = [];
+    /** @param {ts.Node} node */
     function inspect(node) {
       if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) specifiers.push(node.moduleSpecifier.text);
       if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments[0] && ts.isStringLiteral(node.arguments[0])) specifiers.push(node.arguments[0].text);
@@ -105,7 +114,7 @@ for (const location of manifest.workspaces ?? []) {
     // entryCommand, scriptCommand, bridgeCommand). Tests and default parameters may still name it.
     if (!/(^|[\\/])(tests?|e2e)[\\/]|\.(test|spec)\.[cm]?[jt]sx?$/.test(relative) && !EXECPATH_HOMES.has(`${location}/${relative}`.replaceAll(path.sep, '/'))) {
       const lines = text.split('\n');
-      (function execPath(node) {
+      (function execPath(/** @type {ts.Node} */ node) {
         if (namesExecPath(node)) {
           const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
           const defaulted = ts.isParameter(node.parent) || (ts.isBindingElement(node.parent) && node.parent.initializer === node);
@@ -141,6 +150,7 @@ for (const location of manifest.workspaces ?? []) {
   }
 }
 const done = new Set();
+/** @param {string} name @param {string[]} [stack] */
 function visit(name, stack = []) {
   if (stack.includes(name)) { failures.push(`Dependency cycle: ${[...stack, name].join(' -> ')}`); return; }
   if (done.has(name)) return;
@@ -159,21 +169,21 @@ for (const name of artifactPackages) {
       const text = await readFile(path.join(directory, relative), 'utf8');
       if (text.includes('@getpaseo')) failures.push(`packages/${name}/dist/${relative}: packed artifact contains @getpaseo`);
     }
-  } catch (error) { if (process.argv.includes('--require-artifacts')) failures.push(`Missing or unreadable build artifact: ${error.message}`); }
+  } catch (error) { if (process.argv.includes('--require-artifacts')) failures.push(`Missing or unreadable build artifact: ${/** @type {Error} */ (error).message}`); }
 }
 // Root bundles carrying alpd/acp must not embed Paseo.
 for (const file of ['dist/alpd.js', 'dist/acp.js', 'dist/acp/agent.js', 'dist/runtime/index.js', 'dist/daemon/index.js', 'packages/cli/dist/alpd.js', 'packages/cli/dist/acp.js']) {
   try {
     const text = await readFile(path.join(root, file), 'utf8');
     if (text.includes('@getpaseo')) failures.push(`${file}: packed artifact contains @getpaseo`);
-  } catch (error) { if (process.argv.includes('--require-artifacts')) failures.push(`Missing or unreadable build artifact: ${error.message}`); }
+  } catch (error) { if (process.argv.includes('--require-artifacts')) failures.push(`Missing or unreadable build artifact: ${/** @type {Error} */ (error).message}`); }
 }
 // Every core build writes a manifest of each canonical bundle's inputs and externals (root
 // runtime/daemon/alpd/acp, plus the workspace daemon and CLI alpd/acp outputs); validate them all.
 for (const manifestFile of coreManifestPaths(root)) {
   try {
     failures.push(...validateBuildManifest(JSON.parse(await readFile(manifestFile, 'utf8'))));
-  } catch (error) { if (process.argv.includes('--require-artifacts')) failures.push(`Missing or unreadable build artifact: ${error.message}`); }
+  } catch (error) { if (process.argv.includes('--require-artifacts')) failures.push(`Missing or unreadable build artifact: ${/** @type {Error} */ (error).message}`); }
 }
 
 if (failures.length) { console.error(failures.join('\n')); process.exitCode = 1; }

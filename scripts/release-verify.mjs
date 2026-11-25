@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // A5 (docs/alp/beta-scope.md §6.1) on a saved release directory: reads only the files in it.
 //
 //   release-verify.mjs <directory> [--sha <RELEASE_SHA>] [--version <semver>] [--rehearsal] [--record <evidence.json>]
@@ -10,7 +11,7 @@ import path from 'node:path';
 import { gateTemplate, verifyRelease } from './release-lib.mjs';
 
 const args = process.argv.slice(2);
-const option = name => { const index = args.indexOf(name); if (index < 0) return undefined; const [, value] = args.splice(index, 2); if (!value) throw new Error(`${name} needs a value`); return value; };
+const option = /** @param {string} name */ name => { const index = args.indexOf(name); if (index < 0) return undefined; const [, value] = args.splice(index, 2); if (!value) throw new Error(`${name} needs a value`); return value; };
 const rehearsalAt = args.indexOf('--rehearsal');
 const rehearsal = rehearsalAt >= 0;
 if (rehearsal) args.splice(rehearsalAt, 1);
@@ -20,7 +21,8 @@ const record = option('--record');
 if (args.length !== 1) throw new Error('Usage: release-verify.mjs <directory> [--sha <RELEASE_SHA>] [--version <semver>] [--rehearsal] [--record <evidence.json>]');
 const directory = path.resolve(args[0]);
 
-const { manifest, artifacts, problems, notes } = verifyRelease(directory, { sha, version, rehearsal });
+// The manifest is read whenever problems is empty; the run exits below otherwise, before any use of it.
+const { manifest, artifacts, problems, notes } = /** @type {ReturnType<typeof verifyRelease> & { manifest: import('./release-lib.mjs').ReleaseManifest }} */ (verifyRelease(directory, { sha, version, rehearsal }));
 for (const artifact of artifacts) console.log(`${artifact.sha256}  ${artifact.filename}  ${artifact.name}@${artifact.version}  ${artifact.files.size} files`);
 for (const note of notes) console.log(`rehearsal only: ${note}`);
 if (problems.length) {

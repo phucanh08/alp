@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Standalone smoke of the remote gateway package (docs/alp/remote-gateway.md §9): packs protocol,
 // core, client and gateway, installs only those tarballs into an empty project (no Paseo, no
 // React, no repository links), then runs the installed `alp-gateway` against a real alpd from this
@@ -17,9 +18,15 @@ import { pathToFileURL } from 'node:url';
 
 const root = path.resolve(import.meta.dirname, '..');
 const work = await mkdtemp(path.join(tmpdir(), 'alp-gateway-smoke-'));
-const log = message => console.log(`[gateway-smoke] ${message}`);
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const log = /** @param {string} message */ message => console.log(`[gateway-smoke] ${message}`);
+const sleep = /** @param {number} ms */ ms => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ * @param {Omit<import('node:child_process').SpawnSyncOptions, 'encoding'>} [options]
+ * @returns {string}
+ */
 function run(command, args, options = {}) {
   const result = spawnSync(...spawnCommand(command, args), { encoding: 'utf8', timeout: 180_000, maxBuffer: 32 * 1024 * 1024, ...options });
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed:\n${result.stdout}${result.stderr}${result.error ?? ''}`);
@@ -68,6 +75,7 @@ try {
   const { token } = JSON.parse(run(process.execPath, [cli, 'credential', 'create', '--label', 'smoke', '--workspace', project, '--json'], { env, cwd: consumer }));
   const server = spawn(process.execPath, [cli, 'serve', '--port', '0'], { env, cwd: consumer, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(server);
+  /** @type {string[]} */
   const stderr = [];
   server.stderr.on('data', chunk => stderr.push(String(chunk)));
   const [line] = await Promise.race([once(createInterface({ input: server.stdout }), 'line'), sleep(10_000).then(() => { throw new Error(`alp-gateway serve printed nothing:\n${stderr.join('')}`); })]);

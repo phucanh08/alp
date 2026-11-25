@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Packs a built ALP bundle (scripts/build-bundle.mjs, t-1807, docs/alp/binary-install.md) as a release
 // archive: alp-<version>-<os>-<arch>.tar.gz holding the alp-<version>-<os>-<arch>/ directory, or
 // alp-<version>-windows-x64.zip on Windows. `sums` writes SHA256SUMS for every archive (and install.sh,
@@ -43,7 +44,7 @@ export async function pack({ bundle, out }) {
 
 /** Writes `SHA256SUMS` (sha256sum format) for the archives and installers in `directory`. @param {string} directory */
 export async function sums(directory) {
-  const archive = name => /^alp-.+\.(tar\.gz|zip)$/.test(name);
+  const archive = /** @param {string} name */ name => /^alp-.+\.(tar\.gz|zip)$/.test(name);
   const names = (await readdir(directory)).filter(name => archive(name) || name === 'install.sh' || name === 'install.ps1').sort();
   if (!names.some(archive)) throw new Error(`No alp-*.tar.gz or alp-*.zip archive in ${directory}`);
   const lines = [];

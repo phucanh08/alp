@@ -1,0 +1,24 @@
+{
+  // The scripts stay JavaScript (they are run by name from package.json, CI, tests and packaged code,
+  // and Node 22.12-22.17 cannot run .ts without a flag); this only type-checks them strictly.
+  // Run: npx tsc -p scripts/tsconfig.json
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    // Workspace imports (@anhlp/*) resolve to their TypeScript sources: no build needed to check.
+    "customConditions": ["alp-source"],
+    // binary-smoke.mjs imports ../packages/cli/dist/self-update.js (built at run time); this lets the
+    // checker read packages/cli/src/self-update.ts in its place, without a build.
+    "rootDirs": ["../packages/cli/src", "../packages/cli/dist"]
+  },
+  // browser-page-globals.d.ts: types only, for the page callbacks of client-sdk-smoke.mjs.
+  "include": ["*.mjs", "*.js", "*.d.ts"]
+}

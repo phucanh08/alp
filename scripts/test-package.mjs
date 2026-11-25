@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // `npm test` inside one workspace: build the package and the workspaces it depends on, then run
 // only the tests in packages/<name>/tests. They import the package and its declared dependencies,
 // never a sibling that depends on them (scripts/check-boundaries.mjs enforces that).
@@ -10,6 +11,7 @@ import { buildWorkspace, packageTests, packages, runNodeTests } from './test-lib
  * (test/support/fake-agent.js), so a fresh checkout builds it first. The CLI's dashboard tests
  * import the gateway, only a devDependency of the CLI, whose default export is its built dist.
  */
+/** @type {Record<string, string[]>} */
 const testSupport = { client: ['runtime'], cli: ['gateway'] };
 
 // --private-home is still accepted and changes nothing: runNodeTests always gives a throwaway

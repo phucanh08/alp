@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // CLI and alpd acceptance on the saved tarballs: docs/alp/beta-scope.md §6.3 C1–C9 (rows R1–R4).
 // See beta-acceptance-lib.mjs for the modes. --live calls the real provider and costs money.
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -24,7 +25,8 @@ const USAGE = `Usage: node scripts/beta-acceptance-cli.mjs --packs <dir> (--fake
 Every run gets a fresh ALP_HOME under --work; ~/.alp is never read or written.`;
 
 const opts = options(USAGE, { provider: { type: 'string' }, model: { type: 'string' } });
-const provider = opts.provider ?? (opts.fake ? 'codex' : undefined);
+// Typed as checked: the next line exits on anything but codex or claude.
+const provider = /** @type {'codex' | 'claude'} */ (opts.provider ?? (opts.fake ? 'codex' : undefined));
 if (!['codex', 'claude'].includes(provider)) { console.error(`--provider must be codex or claude (required with --live)\n\n${USAGE}`); process.exit(2); }
 if (opts.live && !['darwin', 'linux'].includes(process.platform)) { console.error('Live acceptance runs on macOS or Linux (beta-scope §6.1); use --fake elsewhere.'); process.exit(2); }
 
@@ -36,20 +38,26 @@ const home = path.join(base, 'home');
 const restoredHome = path.join(base, 'home-restored');
 const project = path.join(base, 'project');
 let consumer;
-try { ({ consumer } = install(run, opts)); } catch (error) { run.record('install', 'fail', error.message); process.exit(run.summary()); }
+try { ({ consumer } = install(run, opts)); } catch (error) { run.record('install', 'fail', /** @type {Error} */ (error).message); process.exit(run.summary()); }
 const alp = alpCommand(consumer);
 const env = environment({ bin: path.join(consumer, 'node_modules', '.bin'), home, fake: opts.fake });
 const restoredEnv = { ...env, ALP_HOME: restoredHome };
-const cli = (label, args, extra = {}) => run.exec(label, process.execPath, [alp, ...args], { env, cwd: project, ...extra });
-const git = (...args) => run.exec('git', 'git', ['-c', 'user.name=ALP beta', '-c', 'user.email=alp-beta@localhost', ...args], { cwd: project });
-const json = (result, what) => { try { return JSON.parse(result.stdout); } catch { throw new Error(`${what} did not print JSON (exit ${result.status}): ${(result.stderr || result.stdout).trim().slice(0, 300)}`); } };
+/** @typedef {ReturnType<Run['exec']>} ExecResult */
+const cli = /** @param {string} label @param {string[]} args @param {{ env?: NodeJS.ProcessEnv, cwd?: string, input?: string, timeout?: number }} [extra] */ (label, args, extra = {}) => run.exec(label, process.execPath, [alp, ...args], { env, cwd: project, ...extra });
+const git = /** @param {string[]} args */ (...args) => run.exec('git', 'git', ['-c', 'user.name=ALP beta', '-c', 'user.email=alp-beta@localhost', ...args], { cwd: project });
+// `any`: each caller reads a different CLI's --json output; the callbacks that read it name their fields.
+const json = /** @param {ExecResult} result @param {string} what @returns {any} */ (result, what) => { try { return JSON.parse(result.stdout); } catch { throw new Error(`${what} did not print JSON (exit ${result.status}): ${(result.stderr || result.stdout).trim().slice(0, 300)}`); } };
 const settingsFile = path.join(project, '.alp', 'settings.json');
 const live = !opts.fake;
 /** `alp run --json` in the project, followed until it exits. */
-const start = (label, prompt, extra = []) => follow(run, label, ['run', '--json', '--team', 'pho', ...extra, prompt], { env, cwd: project, alp });
+const start = /** @param {string} label @param {string} prompt @param {string[]} [extra] */ (label, prompt, extra = []) => follow(run, label, ['run', '--json', '--team', 'pho', ...extra, prompt], { env, cwd: project, alp });
+/** @type {string | undefined} */
 let c4Root;
+/** @type {string[]} */
 let c4Named = [];
+/** @type {string | undefined} */
 let marker;
+/** @typedef {{ id: string, status: string, summary?: string }} DoctorCheck */
 
 mkdirSync(project, { recursive: true });
 git('init', '-q', '-b', 'main');
@@ -59,12 +67,12 @@ try {
   await run.step('C1', 'alp doctor', async () => {
     const result = cli('C1', ['doctor', '--json']);
     const { checks } = json(result, 'alp doctor --json');
-    const runtime = checks.find(check => check.id === provider);
+    const runtime = checks.find(/** @param {DoctorCheck} check */ check => check.id === provider);
     // The fakes stand in for the provider: their own check says nothing about the install.
-    const failed = checks.filter(check => check.status === 'fail' && (live || !['codex', 'claude'].includes(check.id)));
+    const failed = checks.filter(/** @param {DoctorCheck} check */ check => check.status === 'fail' && (live || !['codex', 'claude'].includes(check.id)));
     if (live && runtime?.status !== 'ok') throw new Error(`${provider}: ${runtime?.status ?? 'not checked'} — ${runtime?.summary ?? ''}`);
-    if (failed.length) throw new Error(`blocking: ${failed.map(check => `${check.id} (${check.summary})`).join('; ')}`);
-    run.record('C1', 'pass', live ? `${provider} ok: ${runtime.summary}; no failing check` : `no failing check outside the provider checks (fake ${provider})`, { checks: checks.map(({ id, status, summary }) => ({ id, status, summary })) });
+    if (failed.length) throw new Error(`blocking: ${failed.map(/** @param {DoctorCheck} check */ check => `${check.id} (${check.summary})`).join('; ')}`);
+    run.record('C1', 'pass', live ? `${provider} ok: ${runtime.summary}; no failing check` : `no failing check outside the provider checks (fake ${provider})`, { checks: checks.map(/** @param {DoctorCheck} check */ ({ id, status, summary }) => ({ id, status, summary })) });
   });
 
   await run.step('C2', 'alp daemon start && alp daemon status --json', async () => {
@@ -79,12 +87,12 @@ try {
     if (cli('C3', ['init']).status !== 0) throw new Error('alp init failed');
     const model = opts.model ? [`--${provider}-model`, opts.model] : [];
     if (cli('C3', ['setup', '--runtime', provider, ...model]).status !== 0) throw new Error('alp setup failed');
-    const teams = json(cli('C3', ['teams', '--json']), 'alp teams --json').map(team => String(team.id ?? team.name).toLowerCase());
+    const teams = json(cli('C3', ['teams', '--json']), 'alp teams --json').map(/** @param {{ id?: string, name?: string }} team */ team => String(team.id ?? team.name).toLowerCase());
     if (!teams.includes('pho') || !teams.includes('cafe')) throw new Error(`teams are ${teams.join(', ')}; expected pho and cafe`);
     // A task to find again after the restore of C9; the worktrees of C7 need a committed checkout.
     const added = cli('C3', ['task', 'add', 'C9 restore marker']);
     if (added.status !== 0) throw new Error('alp task add failed');
-    marker = json(cli('C3', ['tasks', '--all', '--json']), 'alp tasks --all --json').find(task => task.title === 'C9 restore marker')?.id;
+    marker = json(cli('C3', ['tasks', '--all', '--json']), 'alp tasks --all --json').find(/** @param {{ id: string, title?: string }} task */ task => task.title === 'C9 restore marker')?.id;
     // The fakes hold any turn whose prompt says [hold], and main's prompt reaches the supervisor's
     // review: with a supervisor C5 would never go idle. A live run keeps Phở's supervisor.
     if (opts.fake) writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(readFileSync(settingsFile, 'utf8')), workflow: { ...JSON.parse(readFileSync(settingsFile, 'utf8')).workflow, supervisor: false } }, null, 2));
@@ -101,7 +109,8 @@ try {
     const answer = stream.answers().at(-1);
     if (!answer) throw new Error('no answer streamed');
     const ps = cli('C4', ['ps', '--all']).stdout;
-    if (!ps.includes(c4Root.slice(0, 12))) throw new Error(`alp ps --all does not list ${c4Root}`);
+    // A missing root throws here, which fails the step, as before.
+    if (!ps.includes(/** @type {string} */ (c4Root).slice(0, 12))) throw new Error(`alp ps --all does not list ${c4Root}`);
     // What C8 should remember: the project's entries this answer names.
     c4Named = readdirSync(project).filter(entry => entry !== '.git' && answer.toLowerCase().includes(entry.toLowerCase()));
     // The answer is read from the user's turn only (t-beb5); the root's turns, by origin, and what it
@@ -116,7 +125,8 @@ try {
     const prompt = `Đếm chậm từ 1 tới 200, mỗi số một dòng.${opts.fake ? ' [hold]' : ''}`;
     const first = start('C5-interrupt', prompt);
     const stopped = await interruptTurn(first, () => {
-      if (cli('C5', ['interrupt', first.rootId]).status !== 0) throw new Error('alp interrupt failed');
+      // The root is known once its user turn started (interruptTurn waits for that); the cast only narrows.
+      if (cli('C5', ['interrupt', /** @type {string} */ (first.rootId)]).status !== 0) throw new Error('alp interrupt failed');
     }, { waitForOutput: live });
     if (stopped.status === 'pending') {
       run.record('C5', 'pending', 'root turn completed before alp interrupt could be sent; cancellation untested, rerun C5', { session: first.rootId, ...stopped });
@@ -135,7 +145,8 @@ try {
       states.push(`Ctrl-C: ${ctrlC.state}`);
     } else states.push('Ctrl-C not tried on Windows (no SIGINT to a child)');
     const ps = cli('C5', ['ps']).stdout;
-    const again = follow(run, 'C5-send', ['send', '--json', first.rootId, 'Bạn đã dừng ở số mấy?'], { env, cwd: project, alp });
+    // first.rootId is set: alp interrupt above already used it. The cast only narrows its type.
+    const again = follow(run, 'C5-send', ['send', '--json', /** @type {string} */ (first.rootId), 'Bạn đã dừng ở số mấy?'], { env, cwd: project, alp });
     const sent = await again.exit;
     if (sent !== 0) throw new Error(`alp send after the interrupt exited ${sent}`);
     run.record('C5', live ? 'check' : 'pass', `${states.join('; ')}; alp send ran${live ? ' — read its answer' : ''}`, { session: first.rootId, ps, answer: again.answers().at(-1)?.slice(0, 2000) });
@@ -159,12 +170,13 @@ try {
     const profile = { profiles: { review: { base: 'workspace-write', ask: ['Bash(touch *)'], beyondMode: 'ask' } }, agents: { main: 'review' } };
     writeFileSync(settingsFile, JSON.stringify({ ...JSON.parse(original), permissions: profile }, null, 2));
     try {
-      const say = command => `Tự chạy đúng một lệnh shell này, không giao cho ai và không dùng cách khác: \`${command}\`. Nếu bị từ chối thì báo lại là bị từ chối, đừng thử cách khác.`;
+      const say = /** @param {string} command */ command => `Tự chạy đúng một lệnh shell này, không giao cho ai và không dùng cách khác: \`${command}\`. Nếu bị từ chối thì báo lại là bị từ chối, đừng thử cách khác.`;
       const once = await permission('C6-once', say('touch c6-once.txt'), 'once', 2);
       if (!existsSync(path.join(project, 'c6-once.txt'))) throw new Error('Allow once was answered but c6-once.txt does not exist');
       const deny = await permission('C6-deny', say('touch c6-deny.txt'), 'deny', 2);
       if (existsSync(path.join(project, 'c6-deny.txt'))) throw new Error('Deny was answered but c6-deny.txt exists');
       const always = await permission('C6-always', say('mkdir -p c6-always'), 'always', 3);
+      /** @type {string[]} */
       const rules = JSON.parse(readFileSync(settingsFile, 'utf8')).permissions?.profiles?.review?.allow ?? [];
       if (!rules.some(rule => rule.startsWith('Bash(mkdir'))) throw new Error(`Always allow added no mkdir rule to profile review (allow: ${JSON.stringify(rules)})`);
       const after = await permission('C6-again', say('mkdir -p c6-always'), null);
@@ -184,8 +196,9 @@ try {
     const stream = start('C7', 'Giao hai peer ghi song song, mỗi peer trong worktree riêng: peer 1 tạo a.txt chứa A, peer 2 tạo b.txt chứa B; rồi merge cả hai bằng alp_merge.');
     const code = await stream.exit;
     if (code !== 0) throw new Error(`alp run exited ${code}`);
-    const entries = cli('C7', ['log', stream.rootId, '--json']).stdout.split('\n').filter(Boolean).map(line => { try { return JSON.parse(line); } catch { return {}; } });
-    const count = event => entries.filter(entry => entry.event === event).length;
+    // As before, an absent root is passed through to alp log; the cast only narrows its type.
+    const entries = cli('C7', ['log', /** @type {string} */ (stream.rootId), '--json']).stdout.split('\n').filter(Boolean).map(line => { try { return JSON.parse(line); } catch { return {}; } });
+    const count = /** @param {string} event */ event => entries.filter(entry => entry.event === event).length;
     const files = ['a.txt', 'b.txt'].map(file => [file, existsSync(path.join(project, file)) ? readFileSync(path.join(project, file), 'utf8').trim() : null]);
     const worktrees = git('worktree', 'list', '--porcelain').stdout.split('\n').filter(line => line.startsWith('worktree ')).length;
     const problems = [];
@@ -200,7 +213,8 @@ try {
   await run.step('C8', 'alp daemon restart, then alp send to the C4 session', async () => {
     if (!c4Root) throw new Error('C4 has no session');
     if (cli('C8', ['daemon', 'restart']).status !== 0) throw new Error('alp daemon restart failed');
-    const stream = follow(run, 'C8', ['send', '--json', c4Root, 'Nhắc lại câu trả lời trước trong một dòng.'], { env, cwd: project, alp });
+    // c4Root was checked at the top of this step; the cast only narrows its type.
+    const stream = follow(run, 'C8', ['send', '--json', /** @type {string} */ (c4Root), 'Nhắc lại câu trả lời trước trong một dòng.'], { env, cwd: project, alp });
     const code = await stream.exit;
     if (code !== 0) throw new Error(`alp send exited ${code}`);
     const answer = stream.answers().at(-1);
@@ -230,9 +244,10 @@ try {
     const tasks = json(run.exec('C9', process.execPath, [alp, 'tasks', '--all', '--json'], { env: restoredEnv, cwd: project }), 'alp tasks --all --json');
     const problems = [];
     if (c4Root && !ps.includes(c4Root.slice(0, 12))) problems.push(`the restored alpd does not list ${c4Root}`);
-    if (marker && !tasks.some(task => task.id === marker)) problems.push(`task ${marker} is missing after the restore`);
+    if (marker && !tasks.some(/** @param {{ id: string }} task */ task => task.id === marker)) problems.push(`task ${marker} is missing after the restore`);
     if (problems.length) throw new Error(problems.join('; '));
-    const stream = follow(run, 'C9-send', ['send', '--json', c4Root, 'Bạn còn đó không? Trả lời một dòng.'], { env: restoredEnv, cwd: project, alp });
+    // As before, an absent C4 root is passed through; the cast only narrows its type.
+    const stream = follow(run, 'C9-send', ['send', '--json', /** @type {string} */ (c4Root), 'Bạn còn đó không? Trả lời một dòng.'], { env: restoredEnv, cwd: project, alp });
     const code = await stream.exit;
     if (code !== 0) throw new Error(`alp send into the restored session exited ${code}`);
     run.record('C9', 'pass', `backup ${verified.sessions} sessions / ${verified.tasks} tasks verified; dry run changed nothing; restored home lists ${c4Root} and task ${marker}; alp send ran`, { backup: file });
@@ -249,6 +264,10 @@ process.exit(run.summary());
  * One permission round: runs `prompt`, waits for the question, checks it in `alp questions --json`,
  * answers with the choice of `key` through `alp answer`, and waits for the run to end. With `key`
  * null it expects no question at all.
+ * @param {string} label
+ * @param {string} prompt
+ * @param {keyof typeof CHOICES | null} key
+ * @param {number} [choices]
  */
 async function permission(label, prompt, key, choices) {
   // C6 runs main read-only (its profile allows up to workspace-write), so writes are beyond its mode.
@@ -261,22 +280,26 @@ async function permission(label, prompt, key, choices) {
     question.catch(() => {});
     return { root: stream.rootId, answer: stream.answers().at(-1) };
   }
+  // The awaited envelope matched type 'question', so it carries a question (casts below).
   const { event } = await question;
-  const options = event.question.options ?? [];
+  const options = /** @type {{ id: string, options?: string[] }} */ (event.question).options ?? [];
   if (options.length !== choices) throw new Error(`${label}: ${options.length} choices (${options.join(' | ')}), expected ${choices}`);
   const pending = JSON.parse(cli(label, ['questions', '--json']).stdout || '[]');
-  if (!pending.some(entry => entry.id === event.question.id)) throw new Error(`${label}: alp questions does not list ${event.question.id}`);
+  if (!pending.some(/** @param {{ id: string }} entry */ entry => entry.id === /** @type {{ id: string, options?: string[] }} */ (event.question).id)) throw new Error(`${label}: alp questions does not list ${/** @type {{ id: string, options?: string[] }} */ (event.question).id}`);
   const choice = options.find(option => CHOICES[key].includes(option));
   if (!choice) throw new Error(`${label}: no ${key} choice among ${options.join(' | ')}`);
-  if (cli(label, ['answer', event.question.id, choice]).status !== 0) throw new Error(`${label}: alp answer failed`);
+  if (cli(label, ['answer', /** @type {{ id: string, options?: string[] }} */ (event.question).id, choice]).status !== 0) throw new Error(`${label}: alp answer failed`);
   const code = await stream.exit;
   if (code !== 0) throw new Error(`${label}: alp run exited ${code}`);
-  return { root: stream.rootId, answer: stream.answers().at(-1), question: event.question };
+  return { root: stream.rootId, answer: stream.answers().at(-1), question: /** @type {{ id: string, options?: string[] }} */ (event.question) };
 }
 
 /**
  * Turns a "check" step into pass or fail when a person confirms it on a terminal. Unattended, the
  * rule `judged` decides a pass; a step it cannot confirm stays "check" for a person to read.
+ * @param {string} id
+ * @param {string} what
+ * @param {{ ok: boolean, rule: string }} judged
  */
 async function confirmStep(id, what, judged) {
   if (opts.unattended) {

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // R7 of docs/alp/beta-scope.md §6.1/§6.3: real worktrees and alp_merge, from the source at the release
 // SHA (not the tarballs), once per provider. Real model calls: live only, at the user's cost.
 import { existsSync } from 'node:fs';
@@ -17,7 +18,7 @@ Exit 3: the row is not complete yet (e.g. one provider only); R7 needs both, on 
 
 let values;
 try { ({ values } = parseArgs({ args: process.argv.slice(2), options: { live: { type: 'boolean' }, model: { type: 'string', multiple: true }, sha: { type: 'string' }, work: { type: 'string' }, runner: { type: 'string' }, evidence: { type: 'string' }, help: { type: 'boolean', short: 'h' } } })); }
-catch (error) { console.error(`${error.message}\n\n${USAGE}`); process.exit(2); }
+catch (error) { console.error(`${/** @type {Error} */ (error).message}\n\n${USAGE}`); process.exit(2); }
 if (values.help) { console.log(USAGE); process.exit(0); }
 const models = values.model ?? [];
 if (!values.live || !models.length || models.some(model => !/^(codex|claude):\S+$/.test(model))) { console.error(USAGE); process.exit(2); }
@@ -27,7 +28,8 @@ const head = capture('git', ['rev-parse', 'HEAD'], { cwd: ROOT }).trim();
 const dirty = capture('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: ROOT }).trim();
 const work = path.resolve(values.work ?? path.join(os.tmpdir(), 'alp-beta'));
 const run = new Run({ work, name: `r7-${process.platform}-${new Date().toISOString().replace(/[:.]/g, '-')}`, row: 'R7', mode: 'live', runner: values.runner, evidence: values.evidence });
-run.sha = head;
+// R7 binds the release SHA itself (no manifest); Run.save() reads this optional field.
+/** @type {Run & { sha?: string }} */ (run).sha = head;
 
 await run.step('R7-source', 'checkout at the release SHA, built', async () => {
   const problems = [];

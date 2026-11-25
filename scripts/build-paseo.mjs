@@ -1,8 +1,11 @@
+// @ts-check
 import { copyTerminalNative } from './terminal-native-assets.mjs';
 import { buildCore } from './build-core.mjs';
 import { build as esbuild } from 'esbuild';
 // Every plugin bundle's metafile is kept: the third-party packages they inline ship their licences.
+/** @type {(import('esbuild').Metafile | undefined)[]} */
 const metafiles = [];
+/** @param {import('esbuild').BuildOptions} options */
 const build = async options => {
   const result = await esbuild({ absWorkingDir: path.resolve(import.meta.dirname, '..'), conditions: ['alp-source'], metafile: true, ...options });
   metafiles.push(result.metafile);
@@ -26,7 +29,8 @@ const PLUGIN_SDK = ['@getpaseo/plugin', '@getpaseo/plugin/*', 'react', 'react/js
 const pluginClientBuild = await build({ entryPoints: ['integrations/paseo/index.client.tsx'], bundle: true, write: false, format: 'cjs', jsx: 'automatic', platform: 'neutral', target: 'es2020', mainFields: ['module', 'main'], supported: { 'async-await': false }, external: PLUGIN_SDK, legalComments: 'none' });
 const pluginManifest = JSON.parse(await readFile('integrations/paseo/paseo-plugin.json', 'utf8'));
 // Paseo makes re-exports eager for Hermes and wraps the module in a function of `require`.
-const pluginCode = pluginClientBuild.outputFiles[0].text.replaceAll('get: () => from[key]', 'value: from[key]');
+// write: false above, so esbuild returns the output files; the cast states that.
+const pluginCode = /** @type {import('esbuild').OutputFile[]} */ (pluginClientBuild.outputFiles)[0].text.replaceAll('get: () => from[key]', 'value: from[key]');
 const pluginClient = { id: pluginManifest.id, requirements: pluginManifest.requirements, factory: `(function(require){const module={exports:{}};const exports=module.exports;${pluginCode}\nreturn module.exports;})` };
 
 // Plugin resources: the plugin's own templates and the client bundle above. Only the plugin build
@@ -34,6 +38,7 @@ const pluginClient = { id: pluginManifest.id, requirements: pluginManifest.requi
 const embeddedTemplates = await (await import('./workspace-build-lib.mjs')).resources();
 const embeddedPluginClient = {
   name: 'embedded-alp-plugin-client',
+  /** @param {import('esbuild').PluginBuild} builder */
   setup(builder) {
     builder.onResolve({ filter: /^alp:plugin-client$/ }, () => ({ path: 'plugin-client', namespace: 'alp-plugin-client' }));
     builder.onLoad({ filter: /.*/, namespace: 'alp-plugin-client' }, () => ({ contents: `export default ${JSON.stringify(pluginClient)}`, loader: 'js' }));

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 // Runs the named test files through runNodeTests: a throwaway ALP_HOME and TMPDIR, without the
 // caller's ALP session variables. A CI lane that lists its own files uses this instead of a bare
 // `node --test` (t-bfbd). Builds nothing: the lane builds first.

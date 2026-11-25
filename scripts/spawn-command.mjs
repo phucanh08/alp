@@ -1,3 +1,4 @@
+// @ts-check
 // How the scripts start a command, in one place, so a platform workaround is written once:
 //
 // - npm and npx are .cmd shims on Windows, which spawn refuses to start without a shell since
@@ -12,6 +13,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 
+/** @type {Record<string, string>} */
 const entries = { npm: 'npm-cli.js', npx: 'npx-cli.js' };
 
 /**
@@ -23,7 +25,12 @@ const entries = { npm: 'npm-cli.js', npx: 'npx-cli.js' };
  */
 export const windowsTar = (env = process.env) => path.win32.join(env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe');
 
-/** Returns `[file, args]` for spawn/spawnSync. */
+/**
+ * Returns `[file, args]` for spawn/spawnSync.
+ * @param {string} name
+ * @param {readonly string[]} args
+ * @returns {[string, readonly string[]]}
+ */
 export function spawnCommand(name, args) {
   if (process.platform !== 'win32') return [name, args];
   if (name === 'tar') return [windowsTar(), args];
@@ -37,7 +44,10 @@ export function spawnCommand(name, args) {
   return [process.execPath, [entry, ...shell, ...args]];
 }
 
-/** How a finished spawnSync failed: its error (not started, timed out, output too large), signal or exit status. */
+/**
+ * How a finished spawnSync failed: its error (not started, timed out, output too large), signal or exit status.
+ * @param {{ error?: Error, signal?: NodeJS.Signals | null, status?: number | null }} result
+ */
 export function exitDescription(result) {
   if (result.error) return `could not run to completion: ${result.error.message}`;
   return result.signal ? `was killed by ${result.signal}` : `exited ${result.status}`;
