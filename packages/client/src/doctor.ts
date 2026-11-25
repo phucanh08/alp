@@ -3,6 +3,7 @@ import { access, chmod, constants, lstat, readdir, readFile, statfs, unlink, wri
 import os from 'node:os';
 import path from 'node:path';
 import { runCommand } from './command.js';
+import type { CommandResult, CommandRunner } from './command.js';
 import { assertPrivateSocket, connect, daemonPaths, lockAlive, readLock } from './index.js';
 import { installedProgram, serviceFor } from './service.js';
 import { jsonObject, agentSources, resolveAgent } from '@anhlp/alp-core/resolver';
@@ -13,6 +14,38 @@ import { listProviders } from '@anhlp/alp-core/providers';
 import { settingsWarnings, validateSettings, validateUserSettings } from '@anhlp/alp-core/validation';
 import { readLogTail, scrubText } from '@anhlp/alp-core/log';
 import { STATE_SCHEMA, migrationFile, readStateSchema } from '@anhlp/alp-core/state-schema';
+import type { LoadedHook } from '@anhlp/alp-core/hooks';
+import type { LogRecord } from '@anhlp/alp-core/log';
+import type { Provider } from '@anhlp/alp-core/providers';
+import type { StateSchemaInfo } from '@anhlp/alp-core/state-schema';
+
+export type { CommandResult, CommandRunner } from './command.js';
+
+/** One finding of alp doctor; `fix` is what --fix may do about it. */
+export type DoctorCheck = {
+  id: string;
+  status: 'ok' | 'info' | 'warn' | 'fail';
+  summary: string;
+  details?: string[];
+  hint?: string;
+  fix?: { describe: string; apply(): Promise<string> };
+};
+export type LeftoverState = 'clean-pushed' | 'dirty' | 'local-only' | 'unpushed' | 'in-use' | 'unknown';
+export type Leftover = { path: string; state: LeftoverState; reason?: string; command?: string };
+export type DiagnoseOptions = { home?: string; project?: string; env?: NodeJS.ProcessEnv; run?: CommandRunner; sandbox?: boolean; daemonEntry?: string; timeoutMs?: number };
+export type DiskCheckOptions = { run?: CommandRunner; env?: NodeJS.ProcessEnv; free?: number; tempDirs?: string[]; cwd?: string; classifyMs?: number; recentMs?: number; platform?: NodeJS.Platform };
+/** The fields of alpd's lock that doctor reads. */
+type DaemonLock = { pid: number; socket: string; version?: string; ready?: boolean; maintenance?: string; startedAt: string };
+/** The part of alpd's daemon.status answer that doctor reads. */
+type DaemonStatus = { protocolVersion?: number | string; version?: string; health?: { ready: boolean; checks: Array<{ ok: boolean; id: string; code?: string; message?: string }> } };
+/** A failed connection or request: an Error, perhaps with a code. */
+type IpcError = Error & { code?: string };
+/** A hook with the agents that use it. */
+type UsedHook = LoadedHook & { agents: string[] };
+/** What classifying a leftover needs besides its path. */
+/** An array with ES2023's findLast and findLastIndex, which Node has and the ES2022 library types lack. */
+type FindLastArray<T> = T[] & { findLast(predicate: (value: T) => unknown): T | undefined; findLastIndex(predicate: (value: T) => unknown): number };
+type ClassifyOptions = { run: CommandRunner; env: NodeJS.ProcessEnv; owned: Set<string>; here: string; recentMs: number; platform: NodeJS.Platform };
 
 /**
  * `alp doctor` (ALPD §36): checks what ALP needs from this machine and project, and
@@ -29,10 +62,10 @@ import { STATE_SCHEMA, migrationFile, readStateSchema } from '@anhlp/alp-core/st
  * reports is scrubbed of credentials, whatever it quotes.
  */
 
-const firstLine = text => text.trim().split('\n')[0] ?? '';
+const firstLine = (text: string): string => text.trim().split('\n')[0] ?? '';
 
 /** The executable `command` names, as a spawn without a shell would find it (on Windows that adds .exe and .com). */
-async function executable(command, env) {
+async function executable(command: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
   const names = process.platform === 'win32' ? [command, `${command}.exe`, `${command}.com`] : [command];
   const candidates = path.isAbsolute(command) ? names : (env.PATH ?? '').split(path.delimiter).filter(Boolean).flatMap(directory => names.map(name => path.join(directory, name)));
   for (const candidate of candidates) {
@@ -42,7 +75,7 @@ async function executable(command, env) {
 }
 
 /** How to tell whether each native runtime is logged in. */
-const RUNTIMES = [
+const RUNTIMES: Array<{ kind: string; command?: string; variable: string; login: string[]; hint: string; loggedIn: (result: CommandResult) => boolean }> = [
   { kind: 'codex', variable: 'ALP_CODEX_BIN', login: ['login', 'status'], loggedIn: result => result.code === 0, hint: 'codex login' },
   {
     kind: 'claude', variable: 'ALP_CLAUDE_BIN', login: ['auth', 'status'], hint: 'claude auth login',
@@ -54,8 +87,8 @@ const RUNTIMES = [
   },
 ];
 
-async function runtimeChecks({ env, run }) {
-  const checks = [];
+async function runtimeChecks({ env, run }: { env: NodeJS.ProcessEnv; run: CommandRunner }): Promise<DoctorCheck[]> {
+  const checks: DoctorCheck[] = [];
   for (const runtime of RUNTIMES) {
     const command = env[runtime.variable] || runtime.command || runtime.kind;
     const found = await executable(command, env);
@@ -79,19 +112,19 @@ async function runtimeChecks({ env, run }) {
 }
 
 /** An installed alpd service whose node, alpd.js or native alpd moved can no longer start alpd. */
-async function serviceCheck(home, env) {
+async function serviceCheck(home: string, env: NodeJS.ProcessEnv): Promise<DoctorCheck | undefined> {
   const service = serviceFor({ home, env });
   const program = service && await installedProgram(service);
   if (!program) return undefined;
-  const missing = [];
+  const missing: string[] = [];
   // [node, alpd.js], or [alpd, --service] for the native alpd (t-81b0.9): only the files.
   for (const file of program.filter(arg => path.isAbsolute(arg))) if (!await lstat(file).then(() => true, () => false)) missing.push(file);
   return missing.length
-    ? { id: 'service', status: 'fail', summary: `the ${service.kind} service ${service.name} runs files that are gone; run alp daemon install again`, details: missing }
-    : { id: 'service', status: 'ok', summary: `${service.kind} runs alpd as ${service.name}` };
+    ? { id: 'service', status: 'fail', summary: `the ${service!.kind} service ${service!.name} runs files that are gone; run alp daemon install again`, details: missing }
+    : { id: 'service', status: 'ok', summary: `${service!.kind} runs alpd as ${service!.name}` };
 }
 
-const seconds = ms => `${Math.round(ms / 1000)} s`;
+const seconds = (ms: number): string => `${Math.round(ms / 1000)} s`;
 
 /** Codes of the failures a start can stop at, and of the ones that mean another alpd is running. */
 const STARTUP_CODES = new Set(['ALP_HOME_UNUSABLE', 'ALP_LOCK_FAILED', 'ALP_STARTUP_FAILED', 'ALP_IPC_LISTEN_FAILED']);
@@ -100,10 +133,10 @@ const GROUPS = [
   { id: 'ipc log', match: /^ALP_(IPC|RPC)_/, hint: 'clients had trouble talking to alpd; alp daemon restart reopens the endpoint' },
   { id: 'provider log', match: /^ALP_PROVIDER_/, hint: 'a runtime process failed or would not start; the runtime checks above say whether it is installed and logged in' },
 ];
-const STATE_FAILURES = { ENOENT: 'is missing', EACCES: 'is not accessible to you', EPERM: 'is not accessible to you', EROFS: 'is on a read-only filesystem', ENOSPC: 'has no space left' };
+const STATE_FAILURES: Record<string, string> = { ENOENT: 'is missing', EACCES: 'is not accessible to you', EPERM: 'is not accessible to you', EROFS: 'is on a read-only filesystem', ENOSPC: 'has no space left' };
 
 /** What a failed connection to alpd's socket means, as a code the log uses too. */
-function ipcFailure(error) {
+function ipcFailure(error: IpcError | undefined): string {
   if (error?.code === 'ALP_IPC_TIMEOUT') return 'ALP_IPC_TIMEOUT';
   if (error?.code === 'ENOENT') return 'ALP_IPC_SOCKET_MISSING';
   if (error?.code === 'ECONNREFUSED') return 'ALP_IPC_REFUSED';
@@ -113,14 +146,14 @@ function ipcFailure(error) {
 }
 
 /** Asks a running alpd for its status; `error` says why it could not be asked. */
-async function askDaemon(lock, timeoutMs) {
-  let timer;
+async function askDaemon(lock: DaemonLock, timeoutMs: number): Promise<{ status: DaemonStatus; error?: undefined } | { status?: undefined; error: IpcError }> {
+  let timer: NodeJS.Timeout | undefined;
   const attempt = connect(lock.socket, { name: 'alp-doctor', version: '1' }).then(async client => {
     try { return await client.request('daemon.status'); } finally { client.close(); }
   });
   const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error(`no answer within ${seconds(timeoutMs)}`), { code: 'ALP_IPC_TIMEOUT' })), timeoutMs); });
-  try { return { status: await Promise.race([attempt, timeout]) }; }
-  catch (error) { attempt.catch(() => {}); return { error }; }
+  try { return { status: await Promise.race([attempt, timeout]) as DaemonStatus }; }
+  catch (error) { attempt.catch(() => {}); return { error: error as IpcError }; }
   finally { clearTimeout(timer); }
 }
 
@@ -128,20 +161,20 @@ async function askDaemon(lock, timeoutMs) {
  * alpd as a client sees it (ALPD §67): whether its IPC endpoint answers, and whether it is ready,
  * which is more than alive: it accepts connections and its state is readable and writable now.
  */
-async function daemonHealthChecks(lock, timeoutMs) {
-  if (!lockAlive(lock) || lock.maintenance) return [];
-  const { status, error } = await askDaemon(lock, timeoutMs);
+async function daemonHealthChecks(lock: DaemonLock | undefined, timeoutMs: number): Promise<DoctorCheck[]> {
+  if (!lockAlive(lock) || lock!.maintenance) return [];
+  const { status, error } = await askDaemon(lock!, timeoutMs);
   if (error) {
     const code = ipcFailure(error);
     // A socket that is missing right after start is still being opened.
-    const starting = !lock.ready && Date.now() - Date.parse(lock.startedAt) < 60_000;
+    const starting = !lock!.ready && Date.now() - Date.parse(lock!.startedAt) < 60_000;
     return [{
       id: 'ipc', status: starting ? 'info' : 'fail',
-      summary: `alpd (pid ${lock.pid}) is running but ${starting ? 'does not answer yet, it is still starting' : 'cannot be reached'} on ${lock.socket}: ${code}, ${error.message}`,
+      summary: `alpd (pid ${lock!.pid}) is running but ${starting ? 'does not answer yet, it is still starting' : 'cannot be reached'} on ${lock!.socket}: ${code}, ${error.message}`,
       details: [`code ${code}`, ...(starting ? [] : ['alp daemon restart starts it again; its work is kept and continued'])],
     }];
   }
-  const checks = [{ id: 'ipc', status: 'ok', summary: `alpd answers on ${lock.socket} (protocol ${status.protocolVersion})` }];
+  const checks: DoctorCheck[] = [{ id: 'ipc', status: 'ok', summary: `alpd answers on ${lock!.socket} (protocol ${status.protocolVersion})` }];
   const health = status.health;
   if (!health) { checks.push({ id: 'readiness', status: 'info', summary: `alpd ${status.version} does not report readiness; alp daemon restart updates it` }); return checks; }
   const failing = health.checks.filter(check => !check.ok);
@@ -153,12 +186,12 @@ async function daemonHealthChecks(lock, timeoutMs) {
       details: failing.map(check => `${check.code ?? check.id}: ${check.message ?? 'failed'}`),
       hint: 'new prompts may fail until this clears; alp doctor shows the state directory below',
     });
-  if (!lock.ready) checks.push({ id: 'startup', status: 'warn', summary: 'alpd answers but has not finished starting' });
+  if (!lock!.ready) checks.push({ id: 'startup', status: 'warn', summary: 'alpd answers but has not finished starting' });
   return checks;
 }
 
 /** The state directory alpd keeps sessions in, without writing to it (alpd probes its own writes). */
-async function stateCheck(home) {
+async function stateCheck(home: string): Promise<DoctorCheck> {
   const directory = path.join(home, 'state');
   const info = await lstat(directory).catch(() => undefined);
   const target = info ? directory : home;
@@ -166,13 +199,13 @@ async function stateCheck(home) {
   try { await access(target, constants.R_OK | constants.W_OK | constants.X_OK); }
   catch (error) {
     return {
-      id: 'state', status: 'fail', summary: `${target} ${STATE_FAILURES[error.code] ?? `cannot be used (${error.code ?? error.message})`}: alpd cannot ${error.code === 'ENOENT' ? 'find' : 'write'} its sessions; ALP_STATE_NOT_WRITABLE`,
-      details: [error.message],
+      id: 'state', status: 'fail', summary: `${target} ${STATE_FAILURES[(error as NodeJS.ErrnoException).code!] ?? `cannot be used (${(error as NodeJS.ErrnoException).code ?? (error as NodeJS.ErrnoException).message})`}: alpd cannot ${(error as NodeJS.ErrnoException).code === 'ENOENT' ? 'find' : 'write'} its sessions; ALP_STATE_NOT_WRITABLE`,
+      details: [(error as NodeJS.ErrnoException).message],
     };
   }
   if (!info) return { id: 'state', status: 'ok', summary: `${directory} is created when alpd first starts` };
-  const unreadable = [];
-  const leftovers = [];
+  const unreadable: string[] = [];
+  const leftovers: string[] = [];
   let records = 0;
   for (const name of await readdir(path.join(directory, 'sessions')).catch(() => []).then(names => names.slice(0, 2000))) {
     if (name.endsWith('.tmp')) { leftovers.push(name); continue; }
@@ -188,19 +221,19 @@ async function stateCheck(home) {
   return { id: 'state', status: 'ok', summary: `${directory} is readable and writable; ${records} session record${records === 1 ? '' : 's'}${leftovers.length ? `, ${leftovers.length} temporary file${leftovers.length > 1 ? 's' : ''} left by an interrupted write (alpd removes them)` : ''}` };
 }
 
-const brief = record => `${record.time} ${record.component} ${record.code ?? ''} ${record.msg}${record.sessionId ? ` [session ${record.sessionId}]` : ''}`.replace(/\s+/g, ' ').trim();
+const brief = (record: LogRecord): string => `${record.time} ${record.component} ${record.code ?? ''} ${record.msg}${record.sessionId ? ` [session ${record.sessionId}]` : ''}`.replace(/\s+/g, ' ').trim();
 
 /** What alpd's own log says: where the last start stopped, and the failures logged since it was ready. */
-async function logChecks(home, running) {
+async function logChecks(home: string, running: boolean): Promise<DoctorCheck[]> {
   const file = daemonPaths(home).log;
-  let records;
-  try { records = (await readLogTail(file)).filter(record => !record.legacy); }
-  catch (error) { return [{ id: 'log', status: 'warn', summary: `${file} cannot be read: ${error.message}` }]; }
+  let records: FindLastArray<LogRecord>;
+  try { records = (await readLogTail(file)).filter(record => !record.legacy) as FindLastArray<LogRecord>; }
+  catch (error) { return [{ id: 'log', status: 'warn', summary: `${file} cannot be read: ${(error as Error).message}` }]; }
   if (!records.length) return [];
   const lastReady = records.findLastIndex(record => record.event === 'ready');
-  const since = records.slice(lastReady + 1);
-  const checks = [];
-  const failure = since.findLast(record => record.level === 'error' && STARTUP_CODES.has(record.code));
+  const since = records.slice(lastReady + 1) as FindLastArray<LogRecord>;
+  const checks: DoctorCheck[] = [];
+  const failure = since.findLast(record => record.level === 'error' && STARTUP_CODES.has(record.code as string));
   if (failure) checks.push({
     id: 'startup', status: running ? 'info' : 'fail',
     summary: `${running ? 'an attempt to start another alpd' : 'the last alpd'} failed at ${failure.time}: ${failure.code}, ${failure.msg}`,
@@ -222,7 +255,7 @@ async function logChecks(home, running) {
 }
 
 /** Sessions that ended in failure, from their records: what a provider failure left, with the codes the log uses. */
-async function failedSessionsCheck(home) {
+async function failedSessionsCheck(home: string): Promise<DoctorCheck | undefined> {
   const directory = path.join(home, 'state', 'sessions');
   const failed = [];
   for (const name of await readdir(directory).catch(() => []).then(names => names.slice(0, 2000))) {
@@ -242,13 +275,13 @@ async function failedSessionsCheck(home) {
   };
 }
 
-async function daemonCheck(home) {
+async function daemonCheck(home: string): Promise<DoctorCheck> {
   const paths = daemonPaths(home);
   const lock = await readLock(home);
-  const exists = file => lstat(file).then(() => true, () => false);
-  if (lockAlive(lock) && lock.maintenance) return { id: 'alpd', status: 'info', summary: `not running while alp ${lock.maintenance} runs (pid ${lock.pid})` };
-  if (lockAlive(lock)) return { id: 'alpd', status: 'ok', summary: `running (pid ${lock.pid}, ${lock.version})${lock.ready ? '' : ', starting'}` };
-  const stale = [];
+  const exists = (file: string) => lstat(file).then(() => true, () => false);
+  if (lockAlive(lock) && lock!.maintenance) return { id: 'alpd', status: 'info', summary: `not running while alp ${lock!.maintenance} runs (pid ${lock!.pid})` };
+  if (lockAlive(lock)) return { id: 'alpd', status: 'ok', summary: `running (pid ${lock!.pid}, ${lock!.version})${lock!.ready ? '' : ', starting'}` };
+  const stale: string[] = [];
   if (await exists(paths.lock)) stale.push(paths.lock);
   if (await exists(paths.socket)) stale.push(paths.socket);
   const marker = path.join(home, 'state', 'alpd.running');
@@ -274,7 +307,7 @@ async function daemonCheck(home) {
 }
 
 /** Files and directories under ALP_HOME that hold logs, state or settings. */
-async function privateEntries(home) {
+async function privateEntries(home: string): Promise<string[]> {
   const entries = [home];
   for (const name of ['settings.json', 'alpd.lock', 'alpd.json', 'role-skills.json']) entries.push(path.join(home, name));
   for (const directory of ['state', 'runs', 'logs', 'boards', 'worktrees', 'copies']) {
@@ -286,10 +319,10 @@ async function privateEntries(home) {
   return entries;
 }
 
-async function permissionsCheck(home) {
+async function permissionsCheck(home: string): Promise<DoctorCheck> {
   // Windows files have no group/other mode bits to read or tighten; the profile's ACL keeps the home private.
   if (process.platform === 'win32') return { id: 'permissions', status: 'ok', summary: `${home} follows your Windows profile access rules` };
-  const open = [];
+  const open: Array<{ entry: string; mode: number; directory: boolean }> = [];
   for (const entry of await privateEntries(home)) {
     const info = await lstat(entry).catch(() => undefined);
     if (!info || info.isSymbolicLink() || !(info.mode & 0o077)) continue;
@@ -310,7 +343,7 @@ async function permissionsCheck(home) {
   };
 }
 
-async function userSettingsCheck(home) {
+async function userSettingsCheck(home: string): Promise<DoctorCheck> {
   const file = path.join(home, 'settings.json');
   try {
     const text = await readFile(file, 'utf8').catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
@@ -322,12 +355,12 @@ async function userSettingsCheck(home) {
       ? { id: 'user settings', status: 'warn', summary: `${file}: ${warnings.length} key${warnings.length > 1 ? 's' : ''} ALP ignores`, details: warnings }
       : { id: 'user settings', status: 'ok', summary: file };
   } catch (error) {
-    return { id: 'user settings', status: 'fail', summary: `alpd ignores ${file}: ${error.message.replace(`${file}: `, '')}` };
+    return { id: 'user settings', status: 'fail', summary: `alpd ignores ${file}: ${(error as Error).message.replace(`${file}: `, '')}` };
   }
 }
 
-async function projectChecks(project, home) {
-  const checks = [];
+async function projectChecks(project: string, home: string): Promise<DoctorCheck[]> {
+  const checks: DoctorCheck[] = [];
   const file = path.join(project, '.alp', 'settings.json');
   let settings;
   try {
@@ -338,14 +371,14 @@ async function projectChecks(project, home) {
       ? { id: 'settings', status: 'warn', summary: `${file}: ${warnings.length} key${warnings.length > 1 ? 's' : ''} ALP ignores`, details: warnings }
       : { id: 'settings', status: 'ok', summary: file });
   } catch (error) {
-    checks.push({ id: 'settings', status: 'fail', summary: error.message });
+    checks.push({ id: 'settings', status: 'fail', summary: (error as Error).message });
     return checks;
   }
   const sources = await agentSources(project, { library: home });
   const agents = [...sources.keys()].sort((a, b) => a.localeCompare(b));
-  const broken = [];
-  const shadows = [];
-  const hooks = new Map();
+  const broken: string[] = [];
+  const shadows: string[] = [];
+  const hooks = new Map<string, UsedHook>();
   // An override replaces the whole agent, so it misses later updates to the one it replaces.
   for (const [agent, { source, overrides }] of sources) if (overrides) shadows.push(`${agent}: the ${source}'s copy replaces the ${overrides === 'builtin' ? 'built-in' : 'library'} agent`);
   for (const agent of agents) {
@@ -356,7 +389,7 @@ async function projectChecks(project, home) {
         const library = path.join(home, 'skills', skill.name, 'SKILL.md');
         if (await lstat(library).then(() => true, () => false)) shadows.push(`${agent}: ${skill.name} from the project replaces the library's`);
       }
-    } catch (error) { broken.push(`${agent}: ${error.message}`); }
+    } catch (error) { broken.push(`${agent}: ${(error as Error).message}`); }
   }
   if (!agents.length) checks.push({ id: 'agents', status: 'fail', summary: 'no agents: neither ALP\'s built-ins nor the library nor the project define one' });
   else if (broken.length) checks.push({ id: 'agents', status: 'fail', summary: `${broken.length} of ${agents.length} agents cannot start`, details: broken });
@@ -367,12 +400,12 @@ async function projectChecks(project, home) {
 }
 
 /** The command a hook starts, when it is a plain program name or path: the first word of its shell command. */
-const program = command => /^\s*([\w./-]+)/.exec(command)?.[1];
+const program = (command: string): string | undefined => /^\s*([\w./-]+)/.exec(command)?.[1];
 const SHELL_WORDS = new Set(['cd', 'test', '[', 'echo', 'exit', 'true', 'false', 'set', 'export', 'if', 'for', 'while', 'exec', 'env', 'command', 'printf', 'read', 'source', '.']);
 
 /** Hooks the agents use: whether the project's may run, and whether their programs exist (ALPD §45). */
-async function hooksCheck(project, home, hooks) {
-  const missing = [];
+async function hooksCheck(project: string, home: string, hooks: UsedHook[]): Promise<DoctorCheck> {
+  const missing: string[] = [];
   for (const hook of hooks) {
     const name = program(hook.command);
     if (!name || SHELL_WORDS.has(name)) continue;
@@ -395,11 +428,11 @@ async function hooksCheck(project, home, hooks) {
  * ACP providers of the library (ALPD §46): whether their commands exist, and what ALP
  * cannot do for an agent it reaches through ACP.
  */
-async function providersCheck(home, env) {
-  let providers;
-  try { providers = await listProviders(home); } catch (error) { return { id: 'providers', status: 'fail', summary: error.message }; }
+async function providersCheck(home: string, env: NodeJS.ProcessEnv): Promise<DoctorCheck | undefined> {
+  let providers: Provider[];
+  try { providers = await listProviders(home); } catch (error) { return { id: 'providers', status: 'fail', summary: (error as Error).message }; }
   if (!providers.length) return undefined;
-  const missing = [];
+  const missing: string[] = [];
   for (const provider of providers) if (!await executable(provider.command, { ...env, ...provider.env })) missing.push(`${provider.id}: ${provider.command} is not found`);
   return {
     id: 'providers', status: 'warn',
@@ -414,11 +447,11 @@ async function providersCheck(home, env) {
  * The library's skills against the skill format, in legacy mode: a format problem is a warning
  * (the skill still loads), an unsafe reference or link an error. Nothing is rewritten.
  */
-async function skillFormatCheck(home) {
+async function skillFormatCheck(home: string): Promise<DoctorCheck | undefined> {
   const directory = path.join(home, 'skills');
   const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
-  const failed = [];
-  const warned = [];
+  const failed: string[] = [];
+  const warned: string[] = [];
   let checked = 0;
   for (const entry of entries) {
     // The skills the resolver loads: a plain directory name holding SKILL.md (not .git or notes).
@@ -429,7 +462,7 @@ async function skillFormatCheck(home) {
       const report = await validateSkill(path.join(directory, entry.name));
       if (!report.ok) failed.push(`${entry.name}: ${report.errors.map(finding => finding.message).join('; ')}`);
       else if (report.warnings.length) warned.push(`${entry.name}: ${report.warnings.map(finding => finding.code).join(', ')}`);
-    } catch (error) { failed.push(`${entry.name}: could not be checked: ${error.message}`); }
+    } catch (error) { failed.push(`${entry.name}: could not be checked: ${(error as Error).message}`); }
   }
   if (!checked) return undefined;
   if (failed.length) return { id: 'skill-format', status: 'fail', summary: `${failed.length} library skill${failed.length > 1 ? 's have' : ' has'} an unsafe link or an unreadable file (alp skill check <name> explains)`, details: [...failed, ...warned] };
@@ -437,16 +470,16 @@ async function skillFormatCheck(home) {
   return { id: 'skill-format', status: 'ok', summary: `the library's skills meet the skill format (${directory})` };
 }
 
-async function librarySkillsCheck(home) {
+async function librarySkillsCheck(home: string): Promise<DoctorCheck | undefined> {
   const file = path.join(home, 'role-skills.json');
   let roles;
   try {
     const text = await readFile(file, 'utf8').catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
     if (text === undefined) return undefined;
     roles = JSON.parse(text);
-  } catch (error) { return { id: 'skills', status: 'fail', summary: `${file}: ${error.message}` }; }
+  } catch (error) { return { id: 'skills', status: 'fail', summary: `${file}: ${(error as Error).message}` }; }
   if (!roles || typeof roles !== 'object' || Array.isArray(roles)) return { id: 'skills', status: 'fail', summary: `${file}: expected an object of role names to skill lists` };
-  const missing = [];
+  const missing: string[] = [];
   for (const [role, names] of Object.entries(roles)) {
     if (!Array.isArray(names)) { missing.push(`${role}: not a list`); continue; }
     for (const name of names) {
@@ -459,12 +492,12 @@ async function librarySkillsCheck(home) {
 }
 
 /** The live book alpd continues at start: entries whose project is gone can never continue. */
-async function liveCheck(home, running) {
+async function liveCheck(home: string, running: boolean): Promise<DoctorCheck | undefined> {
   const file = path.join(home, 'state', 'live.json');
   let entries;
   try { entries = JSON.parse(await readFile(file, 'utf8')); } catch { return undefined; }
   if (!Array.isArray(entries)) return { id: 'live work', status: 'warn', summary: `${file} is not a list; alpd ignores it` };
-  const gone = [];
+  const gone: Array<{ project?: unknown; agent?: string; assignmentId?: string } | null | undefined> = [];
   for (const entry of entries) {
     if (typeof entry?.project !== 'string' || !await lstat(entry.project).then(() => true, () => false)) gone.push(entry);
   }
@@ -476,7 +509,7 @@ async function liveCheck(home, running) {
     fix: running ? undefined : {
       describe: `drop them from ${file}, keeping a copy beside it`,
       async apply() {
-        const current = JSON.parse(await readFile(file, 'utf8'));
+        const current: Array<{ assignmentId?: string } | null | undefined> = JSON.parse(await readFile(file, 'utf8'));
         const ids = new Set(gone.map(entry => entry?.assignmentId));
         const kept = current.filter(entry => !ids.has(entry?.assignmentId));
         // What is dropped stays on disk, so a repair never loses a record.
@@ -490,13 +523,13 @@ async function liveCheck(home, running) {
 }
 
 /** Worktrees git lost track of, and alp/* branches: merged ones are dead weight, unmerged ones hold kept work. */
-async function branchCheck(project, home, run) {
-  const git = args => run('git', args, { cwd: project });
+async function branchCheck(project: string, home: string, run: CommandRunner): Promise<DoctorCheck[]> {
+  const git = (args: string[]) => run('git', args, { cwd: project });
   const top = await git(['rev-parse', '--show-toplevel']);
   if (top.code !== 0) return [];
-  const checks = [];
+  const checks: DoctorCheck[] = [];
   const worktrees = (await git(['worktree', 'list', '--porcelain'])).stdout.split('\n\n').filter(Boolean);
-  const prunable = worktrees.filter(block => /^prunable/m.test(block)).map(block => block.match(/^worktree (.*)$/m)?.[1]).filter(Boolean);
+  const prunable = worktrees.filter(block => /^prunable/m.test(block)).map(block => block.match(/^worktree (.*)$/m)?.[1]).filter(Boolean) as string[];
   if (prunable.length) checks.push({
     id: 'worktrees', status: 'warn', summary: `git still lists ${prunable.length} worktree${prunable.length > 1 ? 's' : ''} that no longer exist`, details: prunable,
     fix: { describe: 'git worktree prune', async apply() { await git(['worktree', 'prune']); return 'pruned'; } },
@@ -527,8 +560,8 @@ async function branchCheck(project, home, run) {
 }
 
 /** A check with every line scrubbed: a message may quote what a runtime, a file or a user wrote. */
-function scrubCheck(check) {
-  const clean = text => scrubText(text, { max: 1000 });
+function scrubCheck(check: DoctorCheck): DoctorCheck {
+  const clean = (text: string) => scrubText(text, { max: 1000 });
   return {
     ...check, summary: clean(check.summary),
     ...(check.details ? { details: check.details.map(clean) } : {}),
@@ -543,11 +576,11 @@ function scrubCheck(check) {
 export { runCommand };
 
 /** The state's schema (ALPD §68), and a migration or a restore cut short. Reads only. */
-async function schemaChecks(home) {
-  let info;
+async function schemaChecks(home: string): Promise<DoctorCheck[]> {
+  let info: StateSchemaInfo;
   try { info = await readStateSchema(home); }
-  catch (error) { return [{ id: 'schema', status: 'fail', summary: `${error.message} (ALP_${error.code ?? 'STATE_UNUSABLE'})` }]; }
-  const checks = [info.schema > STATE_SCHEMA
+  catch (error) { return [{ id: 'schema', status: 'fail', summary: `${(error as NodeJS.ErrnoException).message} (ALP_${(error as NodeJS.ErrnoException).code ?? 'STATE_UNUSABLE'})` }]; }
+  const checks: DoctorCheck[] = [info.schema > STATE_SCHEMA
     ? { id: 'schema', status: 'fail', summary: `state schema ${info.schema}${info.by ? ` from ${info.by}` : ''} is newer than this ALP knows (${STATE_SCHEMA}): alpd refuses to start and changes nothing in it (ALP_STATE_SCHEMA_TOO_NEW)`, hint: 'run the ALP that wrote it, or a newer one; docs/alp/data-recovery.md says more' }
     : { id: 'schema', status: info.schema < STATE_SCHEMA ? 'info' : 'ok', summary: info.fresh ? `no state yet; alpd starts it at schema ${STATE_SCHEMA}` : info.schema < STATE_SCHEMA ? `state schema ${info.schema}: alpd migrates it to ${STATE_SCHEMA} at its next start, after saving a backup in ${path.join(home, 'backups')}` : `state schema ${info.schema}` }];
   if (await lstat(migrationFile(home)).then(() => true, () => false)) checks.push({ id: 'migration', status: 'warn', summary: 'a state migration was cut short; alpd continues it at its next start, or puts the state back if it fails' });
@@ -556,8 +589,8 @@ async function schemaChecks(home) {
 }
 
 /** Checks whether directory `target` is inside directory `container`. */
-function isInside(target, container) {
-  const resolve = directory => {
+function isInside(target: string, container: string): boolean {
+  const resolve = (directory: string): string => {
     let current = path.resolve(directory);
     let suffix = '';
     for (;;) {
@@ -581,7 +614,7 @@ function isInside(target, container) {
  * can write the temp directory and their workspace, so staged copies inside either could
  * be modified by a sandboxed tool before alpd reads them (ALP_ATTACHMENT_STAGE_EXPOSED).
  */
-async function homeLocationCheck(home, project) {
+async function homeLocationCheck(home: string | undefined, project: string | undefined): Promise<DoctorCheck> {
   if (process.platform === 'win32' || !home) return { id: 'home', status: 'ok', summary: home ?? '' };
   if (project && isInside(home, project)) {
     return {
@@ -600,10 +633,10 @@ async function homeLocationCheck(home, project) {
 }
 
 const GIB = 1024 ** 3;
-const formatSize = bytes => bytes >= GIB ? `${(bytes / GIB).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
+const formatSize = (bytes: number): string => bytes >= GIB ? `${(bytes / GIB).toFixed(1)} GB` : `${Math.round(bytes / 1024 ** 2)} MB`;
 
 /** Entries of `directory` whose names start with `prefix`, as full paths; none when it cannot be read. */
-async function entries(directory, prefix = '') {
+async function entries(directory: string, prefix = ''): Promise<string[]> {
   const names = await readdir(directory).catch(() => []);
   return names.filter(name => name.startsWith(prefix)).map(name => path.join(directory, name));
 }
@@ -621,7 +654,7 @@ const QUOTABLE = /^[A-Za-z0-9._\-/\\: ]+$/;
  * unless it is absolute (so it cannot read as an option) and every character is QUOTABLE, in which
  * case nothing in it needs escaping. A path that is not gets no command at all.
  */
-export function shellQuote(text, platform = process.platform) {
+export function shellQuote(text: string, platform: NodeJS.Platform = process.platform): string | undefined {
   const value = String(text);
   const absolute = platform === 'win32' ? path.win32.isAbsolute(value) : path.posix.isAbsolute(value);
   return absolute && QUOTABLE.test(value) ? `'${value}'` : undefined;
@@ -632,13 +665,13 @@ export function shellQuote(text, platform = process.platform) {
  * so it stays one line and reads as it is. A backslash is doubled, so the escaping is injective:
  * a path that holds the text \u{a} prints as \\u{a}, never as a path with a newline would.
  */
-export const printable = text => String(text).replace(/\\|[\p{C}\p{Zl}\p{Zp}]|(?! )\p{Zs}/gu, char => char === '\\' ? '\\\\' : `\\u{${char.codePointAt(0).toString(16)}}`);
+export const printable = (text: unknown): string => String(text).replace(/\\|[\p{C}\p{Zl}\p{Zp}]|(?! )\p{Zs}/gu, char => char === '\\' ? '\\\\' : `\\u{${char.codePointAt(0)!.toString(16)}}`);
 
 /** Why a clean and pushed leftover has no command. */
 const UNQUOTABLE = 'no command: its path holds characters other than ASCII letters, digits, space and . _ - / \\ :, which a pasted command might not carry safely; check it and remove it by hand';
 
 /** What each leftover state means, in the order alp doctor lists them. */
-export const LEFTOVER_STATES = {
+export const LEFTOVER_STATES: Record<LeftoverState, string> = {
   'clean-pushed': 'clean and pushed (no changes, no untracked or ignored files, and every commit and, for a clone, every ref on a remote it last fetched; remove by hand with the command shown, given only for a plain ASCII path)',
   dirty: 'dirty (uncommitted changes or untracked files, or a merge or rebase in progress; keep)',
   'local-only': 'local-only data (ignored files such as .env, local config, node_modules or build output, which exist only here; keep)',
@@ -648,9 +681,9 @@ export const LEFTOVER_STATES = {
 };
 
 /** Paths ALP still owns: running assignments' worktrees and the retained results' checkouts. */
-async function ownedPaths(home) {
-  const owned = new Set();
-  const read = async file => JSON.parse(await readFile(file, 'utf8'));
+async function ownedPaths(home: string): Promise<Set<string>> {
+  const owned = new Set<string>();
+  const read = async (file: string) => JSON.parse(await readFile(file, 'utf8'));
   const live = await read(path.join(home, 'state', 'live.json')).catch(() => []);
   for (const entry of Array.isArray(live) ? live : []) if (typeof entry?.worktree?.path === 'string') owned.add(realpathOr(entry.worktree.path));
   const ledger = await read(path.join(home, 'state', 'assignment-results.json')).catch(() => undefined);
@@ -675,11 +708,11 @@ class OutOfTime extends Error {}
  * what this clone last fetched. Anything git cannot answer is unknown. Each git command ends by
  * `deadline`; past it the leftover is unknown, not checked.
  */
-async function classifyLeftover(directory, { run, env, owned, here, recentMs, deadline, platform }) {
+async function classifyLeftover(directory: string, { run, env, owned, here, recentMs, deadline, platform }: ClassifyOptions & { deadline: number }): Promise<Leftover> {
   const real = realpathOr(directory);
-  const inside = (outer, inner) => inner === outer || inner.startsWith(outer.endsWith(path.sep) ? outer : outer + path.sep);
+  const inside = (outer: string, inner: string): boolean => inner === outer || inner.startsWith(outer.endsWith(path.sep) ? outer : outer + path.sep);
   if ([...owned].some(owner => inside(real, owner) || inside(owner, real)) || inside(real, here)) return { path: directory, state: 'in-use' };
-  const git = async args => {
+  const git = async (args: string[]) => {
     const left = deadline - Date.now();
     if (left <= 0) throw new OutOfTime();
     const result = await run('git', ['-C', directory, ...args], { env, timeoutMs: Math.min(10_000, left) });
@@ -687,7 +720,7 @@ async function classifyLeftover(directory, { run, env, owned, here, recentMs, de
     if (Date.now() >= deadline) throw new OutOfTime();
     return result;
   };
-  const unknown = reason => ({ path: directory, state: 'unknown', reason });
+  const unknown = (reason: string): Leftover => ({ path: directory, state: 'unknown', reason });
   // The top of every git checkout holds .git (a directory, or a file in a linked worktree): without it, no git is needed.
   if (!await lstat(path.join(directory, '.git')).then(() => true, () => false)) return unknown('not a git checkout');
   const where = await git(['rev-parse', '--show-toplevel', '--absolute-git-dir', '--git-common-dir']);
@@ -730,14 +763,14 @@ async function classifyLeftover(directory, { run, env, owned, here, recentMs, de
     // other ref by name and object (refs/tags/v1 by refs/remotes/<remote>/tags/v1).
     const refs = await git(['for-each-ref', '--format=%(objectname) %(refname)']);
     if (refs.code !== 0) return unknown('git could not list its refs');
-    const all = refs.stdout.split('\n').filter(Boolean).map(line => { const at = line.indexOf(' '); return [line.slice(at + 1), line.slice(0, at)]; });
+    const all = refs.stdout.split('\n').filter(Boolean).map((line): [string, string] => { const at = line.indexOf(' '); return [line.slice(at + 1), line.slice(0, at)]; });
     // Matched by full ref name, refs/remotes/<remote>/<name> for a configured remote, so a branch
     // x is not taken for origin/feature/x (nor for a remote named feature's x unless feature is one).
     const remotes = await git(['remote']);
     if (remotes.code !== 0) return unknown('git could not list its remotes');
     const remoteNames = remotes.stdout.split('\n').map(line => line.trim()).filter(Boolean);
     const mirrors = new Map(all.filter(([name]) => name.startsWith('refs/remotes/')));
-    const mirrored = ([name, object]) => {
+    const mirrored = ([name, object]: [string, string]): boolean => {
       const branch = name.startsWith('refs/heads/');
       const rest = branch ? name.slice('refs/heads/'.length) : name.slice('refs/'.length);
       return remoteNames.some(remote => {
@@ -770,8 +803,8 @@ async function classifyLeftover(directory, { run, env, owned, here, recentMs, de
  * each git command is cut off when it comes, and doctor stops waiting then. Those not finished
  * by then are unknown.
  */
-async function classifyLeftovers(paths, { budgetMs, ...options }) {
-  const results = paths.map(directory => ({ path: directory, state: 'unknown', reason: NOT_CHECKED }));
+async function classifyLeftovers(paths: string[], { budgetMs, ...options }: ClassifyOptions & { budgetMs: number }): Promise<Leftover[]> {
+  const results: Leftover[] = paths.map(directory => ({ path: directory, state: 'unknown', reason: NOT_CHECKED }));
   const deadline = Date.now() + budgetMs;
   let next = 0, done = false;
   const worker = async () => {
@@ -780,11 +813,11 @@ async function classifyLeftovers(paths, { budgetMs, ...options }) {
       try {
         const result = await classifyLeftover(paths[index], { ...options, deadline });
         if (!done && Date.now() < deadline) results[index] = result;
-      } catch (error) { if (!(error instanceof OutOfTime)) results[index] = { path: paths[index], state: 'unknown', reason: `could not check: ${error?.message ?? error}` }; }
+      } catch (error) { if (!(error instanceof OutOfTime)) results[index] = { path: paths[index], state: 'unknown', reason: `could not check: ${(error as Error | undefined)?.message ?? error}` }; }
     }
   };
   // A file system call that hangs (a stale network mount) is not cut off by a command timeout: stop waiting at the deadline.
-  let timer;
+  let timer: NodeJS.Timeout | undefined;
   const expired = new Promise(resolve => { timer = setTimeout(resolve, Math.max(0, budgetMs)); });
   await Promise.race([Promise.all(Array.from({ length: Math.min(8, paths.length) }, worker)), expired]);
   clearTimeout(timer);
@@ -805,13 +838,13 @@ const SHOWN_COMMANDS = 20;
  * Classifying stops after `classifyMs` (10 s); what it did not reach is unknown. A clean one
  * changed within `recentMs` (a day) is in use: someone may have just started in it.
  */
-export async function diskCheck(home, { run = runCommand, env = process.env, free, tempDirs = [...new Set([os.tmpdir(), ...(process.platform === 'win32' ? [] : ['/tmp'])])], cwd = process.cwd(), classifyMs = 10_000, recentMs = 24 * 60 * 60 * 1000, platform = process.platform } = {}) {
+export async function diskCheck(home: string, { run = runCommand, env = process.env, free, tempDirs = [...new Set([os.tmpdir(), ...(process.platform === 'win32' ? [] : ['/tmp'])])], cwd = process.cwd(), classifyMs = 10_000, recentMs = 24 * 60 * 60 * 1000, platform = process.platform }: DiskCheckOptions = {}): Promise<DoctorCheck & { leftovers?: Leftover[] }> {
   let bytes = free;
   if (bytes === undefined) {
     try { const info = await statfs(home); bytes = Number(info.bavail) * Number(info.bsize); } catch {}
   }
   const worktrees = await entries(path.join(home, 'worktrees'));
-  const temp = [];
+  const temp: string[] = [];
   for (const directory of tempDirs) {
     for (const entry of await entries(directory, 'alp-')) {
       const info = await lstat(entry).catch(() => undefined);
@@ -819,7 +852,7 @@ export async function diskCheck(home, { run = runCommand, env = process.env, fre
     }
   }
   /** Kilobytes du counts under the paths; undefined when du is missing, slow or fails. */
-  async function size(paths) {
+  async function size(paths: string[]): Promise<number | undefined> {
     if (!paths.length) return 0;
     if (process.platform === 'win32') return undefined;
     const result = await run('du', ['-sk', ...paths], { env, timeoutMs: 20_000 });
@@ -830,7 +863,7 @@ export async function diskCheck(home, { run = runCommand, env = process.env, fre
   // git must answer about each leftover itself, not about a repository the caller's environment names,
   // and only read: GIT_OPTIONAL_LOCKS=0 keeps git status from refreshing the index of a worktree in use.
   const gitEnv = { ...Object.fromEntries(Object.entries(env).filter(([name]) => !/^GIT_(DIR|WORK_TREE|INDEX_FILE|COMMON_DIR|OBJECT_DIRECTORY|NAMESPACE|CEILING_DIRECTORIES)$/.test(name))), GIT_OPTIONAL_LOCKS: '0' };
-  const groups = [[`${path.join(home, 'worktrees')}`, worktrees], [`${tempDirs.map(directory => path.join(directory, 'alp-*')).join(', ')}`, temp]].filter(([, paths]) => paths.length);
+  const groups = ([[`${path.join(home, 'worktrees')}`, worktrees], [`${tempDirs.map(directory => path.join(directory, 'alp-*')).join(', ')}`, temp]] as Array<[label: string, paths: string[]]>).filter(([, paths]) => paths.length);
   // Sizing and classifying run side by side: du alone can take many seconds over thousands of leftovers.
   const [sizes, leftovers] = await Promise.all([
     Promise.all(groups.map(([, paths]) => size(paths))),
@@ -858,60 +891,60 @@ export async function diskCheck(home, { run = runCommand, env = process.env, fre
   return { id: 'disk', status, summary, ...(details.length ? { details } : {}), ...(hint ? { hint } : {}), ...(leftovers.length ? { leftovers } : {}) };
 }
 
-function realpathOr(file) {
+function realpathOr(file: string): string {
   try { return realpathSync(file); } catch { return file; }
 }
 
-export async function diagnose({ home, project, env = process.env, run = runCommand, sandbox, daemonEntry, timeoutMs = 3000 } = {}) {
-  const checks = [];
+export async function diagnose({ home, project, env = process.env, run = runCommand, sandbox, daemonEntry, timeoutMs = 3000 }: DiagnoseOptions = {}): Promise<DoctorCheck[]> {
+  const checks: DoctorCheck[] = [];
   if (daemonEntry) {
     checks.push(await lstat(daemonEntry).then(() => ({ id: 'build', status: 'ok', summary: daemonEntry }), () => ({ id: 'build', status: 'fail', summary: `alpd is not built (${daemonEntry}); run npm run build` })));
   }
   checks.push(...await runtimeChecks({ env, run }));
   checks.push(await homeLocationCheck(home, project));
   if (home) checks.push(await diskCheck(home, { run, env }));
-  const daemon = await daemonCheck(home);
+  const daemon = await daemonCheck(home!);
   checks.push(daemon);
-  const service = await serviceCheck(home, env);
+  const service = await serviceCheck(home!, env);
   if (service) checks.push(service);
   const running = daemon.status === 'ok' && daemon.summary.startsWith('running');
-  checks.push(...await daemonHealthChecks(await readLock(home), timeoutMs));
-  checks.push(await stateCheck(home));
-  const schema = await schemaChecks(home);
+  checks.push(...await daemonHealthChecks(await readLock(home!), timeoutMs));
+  checks.push(await stateCheck(home!));
+  const schema = await schemaChecks(home!);
   checks.push(...schema);
   // State an ALP cannot read is left alone, by --fix too.
   const unreadable = schema.some(check => check.id === 'schema' && check.status === 'fail');
-  checks.push(...await logChecks(home, running));
-  const failedSessions = await failedSessionsCheck(home);
+  checks.push(...await logChecks(home!, running));
+  const failedSessions = await failedSessionsCheck(home!);
   if (failedSessions) checks.push(failedSessions);
   if (sandbox !== undefined) checks.push(sandbox
     ? { id: 'sandbox', status: 'ok', summary: 'Claude sessions run Bash in an OS sandbox that holds their mode' }
     : { id: 'sandbox', status: 'warn', summary: `no Bash sandbox for Claude (${process.platform === 'linux' ? 'install bubblewrap and socat' : 'Seatbelt is missing'}): read-only Claude agents rely on their permission rules alone, and review copies on Claude cannot start` });
-  checks.push(await permissionsCheck(home));
-  checks.push(await userSettingsCheck(home));
-  const skills = await librarySkillsCheck(home);
+  checks.push(await permissionsCheck(home!));
+  checks.push(await userSettingsCheck(home!));
+  const skills = await librarySkillsCheck(home!);
   if (skills) checks.push(skills);
-  const skillFormat = await skillFormatCheck(home);
+  const skillFormat = await skillFormatCheck(home!);
   if (skillFormat) checks.push(skillFormat);
-  const providers = await providersCheck(home, env);
+  const providers = await providersCheck(home!, env);
   if (providers) checks.push(providers);
-  const live = await liveCheck(home, running);
+  const live = await liveCheck(home!, running);
   if (live && unreadable) delete live.fix;
   if (live) checks.push(live);
   if (project) {
-    checks.push(...await projectChecks(project, home));
-    checks.push(...await branchCheck(project, home, run));
+    checks.push(...await projectChecks(project, home!));
+    checks.push(...await branchCheck(project, home!, run));
   }
   return checks.map(scrubCheck);
 }
 
 /** Applies the fixes of the given checks in order; returns what each did. */
-export async function repair(checks) {
-  const done = [];
+export async function repair(checks: DoctorCheck[]): Promise<Array<{ id: string; result: string }>> {
+  const done: Array<{ id: string; result: string }> = [];
   for (const check of checks) {
     if (!check.fix) continue;
     try { done.push({ id: check.id, result: await check.fix.apply() }); }
-    catch (error) { done.push({ id: check.id, result: `failed: ${error.message}` }); }
+    catch (error) { done.push({ id: check.id, result: `failed: ${(error as Error).message}` }); }
   }
   return done;
 }

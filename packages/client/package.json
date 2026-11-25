@@ -11,139 +11,139 @@
   "exports": {
     "./acp-probe": {
       "alp-source": {
-        "types": "./src/acp-probe.js",
-        "default": "./src/acp-probe.js"
+        "types": "./src/acp-probe.ts",
+        "default": "./src/acp-probe.ts"
       },
       "types": "./dist/acp-probe.d.ts",
-      "default": "./src/acp-probe.js"
+      "default": "./dist/acp-probe.js"
     },
     "./antigravity-probe": {
       "alp-source": {
-        "types": "./src/antigravity-probe.js",
-        "default": "./src/antigravity-probe.js"
+        "types": "./src/antigravity-probe.ts",
+        "default": "./src/antigravity-probe.ts"
       },
       "types": "./dist/antigravity-probe.d.ts",
-      "default": "./src/antigravity-probe.js"
+      "default": "./dist/antigravity-probe.js"
     },
     "./command": {
       "alp-source": {
-        "types": "./src/command.js",
-        "default": "./src/command.js"
+        "types": "./src/command.ts",
+        "default": "./src/command.ts"
       },
       "types": "./dist/command.d.ts",
-      "default": "./src/command.js"
+      "default": "./dist/command.js"
     },
     "./doctor": {
       "alp-source": {
-        "types": "./src/doctor.js",
-        "default": "./src/doctor.js"
+        "types": "./src/doctor.ts",
+        "default": "./src/doctor.ts"
       },
       "types": "./dist/doctor.d.ts",
-      "default": "./src/doctor.js"
+      "default": "./dist/doctor.js"
     },
     "./index": {
       "alp-source": {
-        "types": "./src/index.js",
-        "default": "./src/index.js"
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
       },
       "types": "./dist/index.d.ts",
-      "default": "./src/index.js"
+      "default": "./dist/index.js"
     },
     ".": {
       "alp-source": {
-        "types": "./src/index.js",
-        "default": "./src/index.js"
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
       },
       "types": "./dist/index.d.ts",
-      "default": "./src/index.js"
+      "default": "./dist/index.js"
     },
     "./integration-lock": {
       "alp-source": {
-        "types": "./src/integration-lock.js",
-        "default": "./src/integration-lock.js"
+        "types": "./src/integration-lock.ts",
+        "default": "./src/integration-lock.ts"
       },
       "types": "./dist/integration-lock.d.ts",
-      "default": "./src/integration-lock.js"
+      "default": "./dist/integration-lock.js"
     },
     "./ipc": {
       "alp-source": {
-        "types": "./src/connection/ipc.js",
-        "default": "./src/connection/ipc.js"
+        "types": "./src/connection/ipc.ts",
+        "default": "./src/connection/ipc.ts"
       },
       "types": "./dist/connection/ipc.d.ts",
-      "default": "./src/connection/ipc.js"
+      "default": "./dist/connection/ipc.js"
     },
     "./library-test": {
       "alp-source": {
-        "types": "./src/library-test.js",
-        "default": "./src/library-test.js"
+        "types": "./src/library-test.ts",
+        "default": "./src/library-test.ts"
       },
       "types": "./dist/library-test.d.ts",
-      "default": "./src/library-test.js"
+      "default": "./dist/library-test.js"
     },
     "./mcp-probe": {
       "alp-source": {
-        "types": "./src/mcp-probe.js",
-        "default": "./src/mcp-probe.js"
+        "types": "./src/mcp-probe.ts",
+        "default": "./src/mcp-probe.ts"
       },
       "types": "./dist/mcp-probe.d.ts",
-      "default": "./src/mcp-probe.js"
+      "default": "./dist/mcp-probe.js"
     },
     "./portable": {
       "alp-source": {
-        "types": "./src/portable.js",
-        "default": "./src/portable.js"
+        "types": "./src/portable.ts",
+        "default": "./src/portable.ts"
       },
       "types": "./dist/portable.d.ts",
-      "default": "./src/portable.js"
+      "default": "./dist/portable.js"
     },
     "./prompt": {
       "alp-source": {
-        "types": "./src/prompt.js",
-        "default": "./src/prompt.js"
+        "types": "./src/prompt.ts",
+        "default": "./src/prompt.ts"
       },
       "types": "./dist/prompt.d.ts",
-      "default": "./src/prompt.js"
+      "default": "./dist/prompt.js"
     },
     "./render": {
       "alp-source": {
-        "types": "./src/render.js",
-        "default": "./src/render.js"
+        "types": "./src/render.ts",
+        "default": "./src/render.ts"
       },
       "types": "./dist/render.d.ts",
-      "default": "./src/render.js"
+      "default": "./dist/render.js"
     },
     "./service": {
       "alp-source": {
-        "types": "./src/service.js",
-        "default": "./src/service.js"
+        "types": "./src/service.ts",
+        "default": "./src/service.ts"
       },
       "types": "./dist/service.d.ts",
-      "default": "./src/service.js"
+      "default": "./dist/service.js"
     },
     "./setup": {
       "alp-source": {
-        "types": "./src/setup.js",
-        "default": "./src/setup.js"
+        "types": "./src/setup.ts",
+        "default": "./src/setup.ts"
       },
       "types": "./dist/setup.d.ts",
-      "default": "./src/setup.js"
+      "default": "./dist/setup.js"
     },
     "./supervise": {
       "alp-source": {
-        "types": "./src/supervise.js",
-        "default": "./src/supervise.js"
+        "types": "./src/supervise.ts",
+        "default": "./src/supervise.ts"
       },
       "types": "./dist/supervise.d.ts",
-      "default": "./src/supervise.js"
+      "default": "./dist/supervise.js"
     },
     "./websocket": {
       "alp-source": {
-        "types": "./src/connection/websocket.js",
-        "default": "./src/connection/websocket.js"
+        "types": "./src/connection/websocket.ts",
+        "default": "./src/connection/websocket.ts"
       },
       "types": "./dist/connection/websocket.d.ts",
-      "default": "./src/connection/websocket.js"
+      "default": "./dist/connection/websocket.js"
     }
   },
   "engines": {

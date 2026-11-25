@@ -126,7 +126,7 @@ async function openBackend(options: Options): Promise<ProviderBackend> {
     if (closed || signal?.aborted) throw new Error('Provider connection is closed');
     const lock = await readLock(where);
     if (closed || signal?.aborted) throw new Error('Provider connection is closed');
-    if (!demand && !(lockAlive(lock) && lock.ready) && await daemonHeld(where)) throw new Error('alpd was stopped with alp daemon stop');
+    if (!demand && !(lockAlive(lock) && lock!.ready) && await daemonHeld(where)) throw new Error('alpd was stopped with alp daemon stop');
     if (closed || signal?.aborted) throw new Error('Provider connection is closed');
     const socket = await startDaemon({ home: where, entry: daemonEntry(entry, _paseoHome), signal });
     let connection: DaemonConnection | undefined;

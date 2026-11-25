@@ -9,7 +9,7 @@ export const MAX_TIMER_MS = 2_147_483_647;
  * @param {string} [name]
  * @returns {number | undefined}
  */
-export function timerDelay(value, name = 'timeoutMs') {
+export function timerDelay(value: unknown, name = 'timeoutMs'): number | undefined {
   if (value === undefined || value === Infinity) return undefined;
   if (typeof value !== 'number' || Number.isNaN(value) || value < 0) throw new TypeError(`${name} must be a non-negative number of milliseconds`);
   return value > MAX_TIMER_MS ? undefined : value;

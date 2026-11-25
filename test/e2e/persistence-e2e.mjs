@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { connect, readLock } from '../../packages/client/src/index.js';
+import { connect, readLock } from '../../packages/client/dist/index.js';
 import { laneHome } from './home-guard.mjs';
 
 const fake = process.env.ALP_TEST_FAKE === '1';

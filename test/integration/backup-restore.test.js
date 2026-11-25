@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
 import { closeTask, createTask, loadTasks } from '@anhlp/alp-core/tasks';
 import { createBackup } from '@anhlp/alp-core/backup';
-import { connect, lockAlive, readLock } from '../../packages/client/src/index.js';
+import { connect, lockAlive, readLock } from '../../packages/client/dist/index.js';
 
 const ALPD = fileURLToPath(new URL('../../dist/alpd.js', import.meta.url));
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));

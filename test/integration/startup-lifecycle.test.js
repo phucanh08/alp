@@ -236,7 +236,7 @@ test('startup admission serializes processes racing to reap a dead owner', async
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await writeFile(path.join(directory, `owner-2147483647-${bootTime()}-start-00000000-0000-0000-0000-000000000000`), '');
   const script = `
-    import { withDaemonLifecycle } from ${JSON.stringify(new URL('../../packages/client/src/index.js', import.meta.url).href)};
+    import { withDaemonLifecycle } from ${JSON.stringify(new URL('../../packages/client/dist/index.js', import.meta.url).href)};
     import { mkdir, rmdir } from 'node:fs/promises';
     await withDaemonLifecycle(${JSON.stringify(home)}, 'start', async () => {
       await mkdir(${JSON.stringify(path.join(home, 'critical'))});

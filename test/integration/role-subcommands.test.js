@@ -6,7 +6,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readLock, lockAlive } from '../../packages/client/src/index.js';
+import { readLock, lockAlive } from '../../packages/client/dist/index.js';
 
 // t-1e02: the role subcommands the ALP executable starts itself with work from the npm CLI too.
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));

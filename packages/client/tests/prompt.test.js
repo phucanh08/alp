@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
-import { Cancelled, select } from '../src/prompt.js';
+import { Cancelled, select } from '../dist/prompt.js';
 
 const terminal = () => {
   const input = Object.assign(new PassThrough(), { isTTY: true, isRaw: false, setRawMode(mode) { this.isRaw = mode; } });

@@ -3,27 +3,37 @@
  * golden tests can render fixtures without an alpd (ALPD §39).
  */
 
-const TASK_PAST = { create: 'created', update: 'updated', link: 'linked', start: 'started', close: 'closed', reopen: 'reopened', delegate: 'delegated', submit: 'submitted', release: 'released', gate: 'gated', clear: 'cleared a gate of', orphaned: 'reopened (its assignment ended with alpd)' };
+/** A session as `alp ps` shows it: the fields of a session snapshot this file reads. */
+export type PsSession = {
+  id: string, parentId?: string | null, agent: string, runtime: string, model: string, mode: string,
+  status: string, parked?: string, activeTurnId?: string | null, busy?: boolean, lastError?: { code?: string } | null,
+  projectRoot?: string, title?: string,
+};
+/** One run-log line: `ts` and `event`, then the fields of that event. */
+// any: run-log entries are a union of some thirty event shapes that alp-core does not type yet
+export type LogEntry = { ts: string, event: string, [field: string]: any };
+
+const TASK_PAST:Record<string, string> = { create: 'created', update: 'updated', link: 'linked', start: 'started', close: 'closed', reopen: 'reopened', delegate: 'delegated', submit: 'submitted', release: 'released', gate: 'gated', clear: 'cleared a gate of', orphaned: 'reopened (its assignment ended with alpd)' };
 
 /** How long ago `since` was, as 42s, 3m05s or 2h10m. */
-export const ago = (since, now = Date.now()) => {
+export const ago = (since: string, now: number = Date.now()): string => {
   const seconds = Math.max(0, Math.round((now - Date.parse(since)) / 1000));
   return seconds < 60 ? `${seconds}s` : seconds < 3600 ? `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, '0')}s` : `${Math.floor(seconds / 3600)}h${String(Math.floor(seconds % 3600 / 60)).padStart(2, '0')}m`;
 };
 /** A duration in the same form. */
-export const duration = ms => ago(new Date(0).toISOString(), ms);
+export const duration = (ms: number): string => ago(new Date(0).toISOString(), ms);
 /** A token count as people say it: 164k, 1M. */
-const tokens = count => typeof count !== 'number' ? '?' : count >= 1_000_000 && count % 1_000_000 < 50_000 ? `${Math.round(count / 1_000_000)}M` : `${Math.round(count / 1000)}k`;
+const tokens = (count: unknown): string => typeof count !== 'number' ? '?' : count >= 1_000_000 && count % 1_000_000 < 50_000 ? `${Math.round(count / 1_000_000)}M` : `${Math.round(count / 1000)}k`;
 
 /** `alp ps`: sessions as a tree, one line each. */
-export function renderPs(sessions) {
-  const lines = [];
-  const children = new Map();
+export function renderPs(sessions: PsSession[]): string[] {
+  const lines: string[] = [];
+  const children = new Map<string, PsSession[]>();
   for (const session of sessions) {
     const key = session.parentId ?? '';
     children.set(key, [...(children.get(key) ?? []), session]);
   }
-  const print = (session, depth) => {
+  const print = (session: PsSession, depth: number) => {
     const status = session.parked ? `parked (${session.parked})` : session.status === 'running' || session.status === 'idle' ? (session.activeTurnId ? 'running' : session.busy ? 'waiting' : 'idle') : session.lastError?.code ?? session.status;
     lines.push(`${'  '.repeat(depth)}${session.id}  ${session.agent}  ${session.runtime}:${session.model}  ${session.mode}  ${status}${depth ? '' : `  ${session.projectRoot}${session.title ? `  "${session.title}"` : ''}`}`);
     for (const child of children.get(session.id) ?? []) print(child, depth + 1);
@@ -33,12 +43,12 @@ export function renderPs(sessions) {
 }
 
 /** `alp log`: one line per run-log entry, with its time. */
-export function renderLog(rootId, entries) {
-  const lines = [];
-  const agents = new Map();
+export function renderLog(rootId: string, entries: LogEntry[]): string[] {
+  const lines: string[] = [];
+  const agents = new Map<string, string>();
   for (const entry of entries) {
     const time = entry.ts.slice(11, 19);
-    let text;
+    let text: string;
     switch (entry.event) {
       case 'assignment.started':
         agents.set(entry.assignmentId, entry.agent);

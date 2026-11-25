@@ -25,12 +25,16 @@ export const CLIENT_ERROR = Object.freeze({
   overloaded: 'overloaded',
 });
 
+export type ClientErrorReason = 'closed' | 'disconnected' | 'protocol' | 'send_failed' | 'timeout' | 'aborted' | 'overloaded';
+
 export class AlpClientError extends Error {
+  declare reason: ClientErrorReason;
+  declare data: unknown;
   /**
    * @param {string} message
    * @param {{ reason: 'closed' | 'disconnected' | 'protocol' | 'send_failed' | 'timeout' | 'aborted' | 'overloaded', cause?: unknown, data?: unknown }} details
    */
-  constructor(message, { reason, cause, data }) {
+  constructor(message: string, { reason, cause, data }: { reason: ClientErrorReason, cause?: unknown, data?: unknown }) {
     super(message, cause === undefined ? undefined : { cause });
     this.name = 'AlpClientError';
     /** @type {'closed' | 'disconnected' | 'protocol' | 'send_failed' | 'timeout' | 'aborted' | 'overloaded'} */
@@ -48,7 +52,8 @@ export class AlpClientError extends Error {
  * @param {string} [reason]
  * @returns {error is AlpClientError}
  */
-export function isAlpClientError(error, reason) {
-  return typeof error === 'object' && error !== null && /** @type {any} */ (error)[BRAND] === true
-    && (reason === undefined || /** @type {any} */ (error).reason === reason);
+export function isAlpClientError(error: unknown, reason?: string): error is AlpClientError {
+  // any: the brand is a symbol property a foreign copy of this class sets; no declared type has it.
+  return typeof error === 'object' && error !== null && (error as any)[BRAND] === true
+    && (reason === undefined || (error as { reason?: unknown }).reason === reason);
 }

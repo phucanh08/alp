@@ -3,6 +3,7 @@ import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { runCommand } from './command.js';
+import type { CommandRunner } from './command.js';
 import { entryCommand, stablePath } from '@anhlp/alp-core/packaged';
 
 /**
@@ -16,14 +17,24 @@ import { entryCommand, stablePath } from '@anhlp/alp-core/packaged';
 /** Variables alpd reads, carried into the service when the installing shell sets them. */
 const CARRIED = ['ALP_RUN_LOG_DIR', 'ALP_CODEX_BIN', 'ALP_CLAUDE_BIN', 'ALP_ANTIGRAVITY_BIN', 'ALP_GH_BIN'];
 
-const escapeXml = value => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const quoteUnit = value => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+/** One service manager command: [command, args, { ignore: a failure is not an error }]. */
+export type ServiceStep = [command: string, args: string[], options?: { ignore?: boolean }];
+/** How alpd for one ALP_HOME is defined as a service. */
+export type Service = {
+  kind: 'launchd' | 'systemd'; name: string; file: string;
+  install: ServiceStep[]; start: ServiceStep[]; uninstall: ServiceStep[]; afterUninstall?: ServiceStep[];
+};
+/** What a service definition runs: alpd for `home`, started from `entry`. */
+export type ServiceOptions = { home: string; entry: string; execPath?: string; env?: NodeJS.ProcessEnv };
+
+const escapeXml = (value: string): string => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const quoteUnit = (value: string): string => `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
 /**
  * Where and how alpd for `home` is defined as a service on `platform`, or undefined
  * where ALP has no service support. Each ALP_HOME gets its own service.
  */
-export function serviceFor({ home, env = process.env, platform = process.platform, uid = process.getuid?.() ?? 0 }) {
+export function serviceFor({ home, env = process.env, platform = process.platform, uid = process.getuid?.() ?? 0 }: { home: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; uid?: number }): Service | undefined {
   const custom = path.resolve(home) !== path.join(os.homedir(), '.alp');
   const suffix = custom ? createHash('sha256').update(path.resolve(home)).digest('hex').slice(0, 8) : '';
   if (platform === 'darwin') {
@@ -55,8 +66,8 @@ export function serviceFor({ home, env = process.env, platform = process.platfor
 }
 
 /** The service definition that runs `entry` (alpd.js with `execPath`, the native alpd, or an `alp` command) for `home`. */
-export function serviceDefinition(service, { home, entry, execPath = process.execPath, env = process.env }) {
-  const variables = { ALP_HOME: path.resolve(home), PATH: env.PATH ?? '' };
+export function serviceDefinition(service: Service, { home, entry, execPath = process.execPath, env = process.env }: ServiceOptions): string {
+  const variables: Record<string, string> = { ALP_HOME: path.resolve(home), PATH: env.PATH ?? '' };
   for (const name of CARRIED) if (env[name]) variables[name] = env[name];
   // A script entry runs under execPath; an `alp` command runs `alp daemon run --service`. Inside the
   // ALP bundle both name it through app/current, so `alp update` never leaves the service on a removed version.
@@ -116,19 +127,19 @@ WantedBy=default.target
 }
 
 /** The program an installed definition runs: [node, alpd.js] or [alpd, --service] (native, t-81b0.9), or undefined when it is not installed. */
-export async function installedProgram(service) {
+export async function installedProgram(service: Service): Promise<string[] | undefined> {
   const text = await readFile(service.file, 'utf8').catch(() => undefined);
   if (text === undefined) return undefined;
   if (service.kind === 'launchd') {
     const array = text.match(/<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/)?.[1] ?? '';
-    const unescape = value => value.replace(/&quot;/g, '"').replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&');
+    const unescape = (value: string) => value.replace(/&quot;/g, '"').replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&');
     return [...array.matchAll(/<string>([\s\S]*?)<\/string>/g)].map(match => unescape(match[1])).slice(0, 2);
   }
   const line = text.match(/^ExecStart=(.*)$/m)?.[1] ?? '';
   return [...line.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map(match => match[1].replace(/\\(.)/g, '$1')).slice(0, 2);
 }
 
-async function runAll(steps, run) {
+async function runAll(steps: ServiceStep[], run: CommandRunner): Promise<void> {
   for (const [command, args, { ignore = false } = {}] of steps) {
     const result = await run(command, args);
     if (result.code !== 0 && !ignore) throw new Error(`${command} ${args.join(' ')} failed: ${(result.stderr || result.stdout).trim() || `exit ${result.code}`}`);
@@ -136,7 +147,7 @@ async function runAll(steps, run) {
 }
 
 /** Writes the definition and loads it, which starts alpd. */
-export async function installService(service, options, run = runCommand) {
+export async function installService(service: Service, options: ServiceOptions, run: CommandRunner = runCommand): Promise<void> {
   await mkdir(path.dirname(service.file), { recursive: true });
   await mkdir(path.join(path.resolve(options.home), 'logs'), { recursive: true, mode: 0o700 });
   await writeFile(service.file, serviceDefinition(service, options), { mode: 0o644 });
@@ -144,12 +155,12 @@ export async function installService(service, options, run = runCommand) {
 }
 
 /** Starts an installed service's alpd. */
-export async function startService(service, run = runCommand) {
+export async function startService(service: Service, run: CommandRunner = runCommand): Promise<void> {
   await runAll(service.start, run);
 }
 
 /** Unloads the service, which stops its alpd, and removes the definition; false when none was installed. */
-export async function uninstallService(service, run = runCommand) {
+export async function uninstallService(service: Service, run: CommandRunner = runCommand): Promise<boolean> {
   if (await installedProgram(service) === undefined) return false;
   await runAll(service.uninstall, run);
   await unlink(service.file).catch(error => { if (error.code !== 'ENOENT') throw error; });

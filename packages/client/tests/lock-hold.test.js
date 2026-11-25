@@ -10,11 +10,11 @@ import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { acquireDaemonLock, bootTime, daemonPaths, holdOps, lockAlive, readLock, releaseDaemonLock } from '../src/index.js';
+import { acquireDaemonLock, bootTime, daemonPaths, holdOps, lockAlive, readLock, releaseDaemonLock } from '../dist/index.js';
 
 const windows = process.platform === 'win32';
 const contents = { version: 't', protocolVersion: 1, socket: 's' };
-const moduleUrl = new URL('../src/index.js', import.meta.url).href;
+const moduleUrl = new URL('../dist/index.js', import.meta.url).href;
 
 /**
  * Teardown in reverse order of setup: node:test runs t.after hooks FIFO and stops at the first that

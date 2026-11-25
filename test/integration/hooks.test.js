@@ -9,7 +9,7 @@ import { addGate, createTask, getTask } from '@anhlp/alp-core/tasks';
 import { saveEntry } from '@anhlp/alp-core/library-edit';
 import { isTrusted, trustProject } from '@anhlp/alp-core/trust';
 import { fileURLToPath } from 'node:url';
-import { renderLog } from '../../packages/client/src/render.js';
+import { renderLog } from '../../packages/client/dist/render.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 
 // Hook commands are sh; Windows runs them under cmd.exe, where these node scripts do the same.

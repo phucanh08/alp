@@ -13,7 +13,7 @@ import { archiveName, pack, sums } from '../../scripts/package-binary.mjs';
 import { namesExecPath } from '../../scripts/execpath-lint.mjs';
 import { spawnCommand } from '../../scripts/spawn-command.mjs';
 import { fakeBundle } from '../support/fake-bundle.mjs';
-import { assertPrivateDirectory } from '../../packages/client/src/index.js';
+import { assertPrivateDirectory } from '../../packages/client/dist/index.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const INSTALL = path.join(ROOT, 'install.sh');

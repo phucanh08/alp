@@ -11,8 +11,8 @@ import {
   integrationAlive,
   acquireDaemonLock,
   _setBootIdForTest,
-} from '../src/index.js';
-import { createIntegrationLock } from '../src/integration-lock.js';
+} from '../dist/index.js';
+import { createIntegrationLock } from '../dist/integration-lock.js';
 
 test.afterEach(() => {
   _setBootIdForTest(null);

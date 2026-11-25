@@ -1,6 +1,7 @@
 import { AlpRpcError, ERROR } from '@anhlp/alp-protocol';
 import { AlpRpcClient } from '../client.js';
 import { AlpClientError } from '../errors.js';
+import type { AlpTransport, AlpRpcClientOptions, RequestOptions, AbortSignalLike } from '../client.js';
 
 /**
  * Keeps an ALP connection up: connects, runs the caller's `onConnect` (handshake, reattach and
@@ -12,39 +13,34 @@ import { AlpClientError } from '../errors.js';
  * retry belongs to the caller, who knows which methods are safe to repeat.
  */
 
-/**
- * @typedef {import('../client.js').AlpTransport} AlpTransport
- * @typedef {import('../client.js').AlpRpcClientOptions} AlpRpcClientOptions
- * @typedef {import('../client.js').RequestOptions} RequestOptions
- * @typedef {import('../client.js').AbortSignalLike} AbortSignalLike
- * @typedef {'connecting' | 'open' | 'waiting' | 'stopped'} ReconnectState
- * @typedef {{ initialMs?: number, maxMs?: number, factor?: number, jitter?: number }} Backoff
- * @typedef {{
- *   connect(context: { attempt: number, signal: AbortSignalLike }): Promise<AlpTransport>,
- *   onConnect?(client: AlpRpcClient, context: { attempt: number, reconnect: boolean, signal: AbortSignalLike }): unknown,
- *   onDisconnect?(error: Error, context: { reconnect: boolean }): void,
- *   backoff?: Backoff,
- *   maxAttempts?: number,
- *   stableMs?: number,
- *   shouldRetry?(error: Error): boolean,
- *   client?: AlpRpcClientOptions,
- *   random?: () => number,
- * }} ReconnectOptions
- * @typedef {{
- *   readonly state: ReconnectState,
- *   readonly client: AlpRpcClient | undefined,
- *   readonly attempt: number,
- *   ready(options?: { signal?: AbortSignalLike }): Promise<AlpRpcClient>,
- *   request<T = any>(method: string, params?: unknown, options?: RequestOptions): Promise<T>,
- *   onEvent(listener: (envelope: any) => void): () => boolean,
- *   onNotification(listener: (method: string, params: any) => void): () => boolean,
- *   onState(listener: (state: ReconnectState, error?: Error) => void): () => boolean,
- *   stop(): void,
- * }} ReconnectingClient
- */
+export type ReconnectState = 'connecting' | 'open' | 'waiting' | 'stopped';
+export type Backoff = { initialMs?: number, maxMs?: number, factor?: number, jitter?: number };
+export type ReconnectOptions = {
+  connect(context: { attempt: number, signal: AbortSignalLike }): Promise<AlpTransport>,
+  onConnect?(client: AlpRpcClient, context: { attempt: number, reconnect: boolean, signal: AbortSignalLike }): unknown,
+  onDisconnect?(error: Error, context: { reconnect: boolean }): void,
+  backoff?: Backoff,
+  maxAttempts?: number,
+  stableMs?: number,
+  shouldRetry?(error: Error): boolean,
+  client?: AlpRpcClientOptions,
+  random?: () => number,
+};
+// any: request results, event envelopes and notification params are daemon JSON whose shape the caller knows.
+export type ReconnectingClient = {
+  readonly state: ReconnectState,
+  readonly client: AlpRpcClient | undefined,
+  readonly attempt: number,
+  ready(options?: { signal?: AbortSignalLike }): Promise<AlpRpcClient>,
+  request<T = any>(method: string, params?: unknown, options?: RequestOptions): Promise<T>,
+  onEvent(listener: (envelope: any) => void): () => boolean,
+  onNotification(listener: (method: string, params: any) => void): () => boolean,
+  onState(listener: (state: ReconnectState, error?: Error) => void): () => boolean,
+  stop(): void,
+};
 
 /** The delay before attempt `attempt` (1-based), with ±jitter. @param {number} attempt @param {Backoff} backoff @param {() => number} random */
-export function backoffDelay(attempt, { initialMs = 250, maxMs = 10_000, factor = 2, jitter = 0.2 } = {}, random = Math.random) {
+export function backoffDelay(attempt: number, { initialMs = 250, maxMs = 10_000, factor = 2, jitter = 0.2 }: Backoff = {}, random: () => number = Math.random): number {
   const base = Math.min(maxMs, initialMs * factor ** Math.max(0, attempt - 1));
   return Math.max(0, Math.round(base * (1 + jitter * (2 * random() - 1))));
 }
@@ -54,30 +50,30 @@ export function backoffDelay(attempt, { initialMs = 250, maxMs = 10_000, factor 
  * handshake (ERROR.protocol, an unsupported protocol version), which retrying cannot fix.
  * @param {Error} error
  */
-export function retryable(error) {
+export function retryable(error: Error): boolean {
   return !(error instanceof AlpRpcError && error.code === ERROR.protocol);
 }
 
 /** The platform's AbortController, whose signal fetch and AbortSignal.any accept; a minimal one where there is none. */
-function controller() {
+function controller(): { signal: AbortSignalLike, abort(reason: unknown): void } {
   if (typeof globalThis.AbortController === 'function') {
     const native = new globalThis.AbortController();
-    return { signal: /** @type {AbortSignalLike} */ (native.signal), /** @param {unknown} reason */ abort: reason => native.abort(reason) };
+    return { signal: /** @type {AbortSignalLike} */ (native.signal), /** @param {unknown} reason */ abort: (reason: unknown) => native.abort(reason) };
   }
   /** @type {Set<() => void>} */
-  const listeners = new Set();
-  const signal = {
+  const listeners = new Set<() => void>();
+  const signal: { aborted: boolean, reason: unknown, addEventListener(_type: 'abort', listener: () => void): void, removeEventListener(_type: 'abort', listener: () => void): void } = {
     aborted: false,
     /** @type {unknown} */ reason: undefined,
     /** @param {'abort'} _type @param {() => void} listener */
-    addEventListener(_type, listener) { listeners.add(listener); },
+    addEventListener(_type: 'abort', listener: () => void) { listeners.add(listener); },
     /** @param {'abort'} _type @param {() => void} listener */
-    removeEventListener(_type, listener) { listeners.delete(listener); },
+    removeEventListener(_type: 'abort', listener: () => void) { listeners.delete(listener); },
   };
   return {
     signal,
     /** @param {unknown} reason */
-    abort(reason) {
+    abort(reason: unknown) {
       if (signal.aborted) return;
       signal.aborted = true;
       signal.reason = reason;
@@ -91,33 +87,33 @@ function controller() {
  * @param {ReconnectOptions} options
  * @returns {ReconnectingClient}
  */
-export function createReconnectingClient({ connect, onConnect, onDisconnect, backoff = {}, maxAttempts = Infinity, stableMs = 5_000, shouldRetry = retryable, client: clientOptions, random = Math.random }) {
+export function createReconnectingClient({ connect, onConnect, onDisconnect, backoff = {}, maxAttempts = Infinity, stableMs = 5_000, shouldRetry = retryable, client: clientOptions, random = Math.random }: ReconnectOptions): ReconnectingClient {
   if (typeof connect !== 'function') throw new TypeError('createReconnectingClient needs connect()');
   /** @type {ReconnectState} */
-  let state = 'connecting';
+  let state: ReconnectState = 'connecting';
   /** @type {AlpRpcClient | undefined} */
-  let current;
+  let current: AlpRpcClient | undefined;
   let attempt = 0;
   let connectedBefore = false;
   /** @type {ReturnType<typeof setTimeout> | undefined} */
-  let timer;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   // One run for the client's whole life: stop() is final and aborts it.
   const run = controller();
   /** @type {Set<(envelope: any) => void>} */
-  const events = new Set();
+  const events = new Set<(envelope: any /* any: daemon event JSON */) => void>();
   /** @type {Set<(method: string, params: any) => void>} */
-  const notifications = new Set();
+  const notifications = new Set<(method: string, params: any /* any: depends on the method */) => void>();
   /** @type {Set<(state: ReconnectState, error?: Error) => void>} */
-  const states = new Set();
+  const states = new Set<(state: ReconnectState, error?: Error) => void>();
   /** @type {Set<{ resolve(client: AlpRpcClient): void, reject(error: Error): void }>} */
-  const waiters = new Set();
+  const waiters = new Set<{ resolve(client: AlpRpcClient): void, reject(error: Error): void }>();
 
-  const onListenerError = clientOptions?.onListenerError ?? (error => { setTimeout(() => { throw error; }, 0); });
+  const onListenerError = clientOptions?.onListenerError ?? ((error: unknown) => { setTimeout(() => { throw error; }, 0); });
   /** @param {Function} listener @param {unknown[]} args */
-  const dispatch = (listener, ...args) => { try { listener(...args); } catch (error) { onListenerError(error); } };
+  const dispatch = (listener: Function, ...args: unknown[]) => { try { listener(...args); } catch (error) { onListenerError(error); } };
 
   /** @param {ReconnectState} next @param {Error} [error] */
-  const enter = (next, error) => {
+  const enter = (next: ReconnectState, error?: Error) => {
     state = next;
     for (const listener of [...states]) {
       dispatch(listener, next, error);
@@ -129,7 +125,7 @@ export function createReconnectingClient({ connect, onConnect, onDisconnect, bac
   };
 
   /** @param {Error} error */
-  const retry = error => {
+  const retry = (error: Error) => {
     if (state === 'stopped') return;
     if (attempt >= maxAttempts || !shouldRetry(error)) return enter('stopped', error);
     enter('waiting', error);
@@ -137,14 +133,14 @@ export function createReconnectingClient({ connect, onConnect, onDisconnect, bac
     timer = setTimeout(() => { timer = undefined; void open(); }, backoffDelay(attempt, backoff, random));
   };
 
-  const open = async () => {
+  const open = async (): Promise<void> => {
     if (state === 'stopped') return;
     attempt++;
     enter('connecting');
     const { signal } = run;
     if (state !== 'connecting' || signal.aborted) return;
     /** @type {AlpRpcClient | undefined} */
-    let candidate;
+    let candidate: AlpRpcClient | undefined;
     // stop() during the handshake closes the connection being set up: its pending requests reject
     // and nothing more is sent on it.
     const closeCandidate = () => candidate?.close();
@@ -167,7 +163,7 @@ export function createReconnectingClient({ connect, onConnect, onDisconnect, bac
     } finally {
       signal.removeEventListener('abort', closeCandidate);
     }
-    const connected = /** @type {AlpRpcClient} */ (candidate);
+    const connected = /** @type {AlpRpcClient} */ (candidate as AlpRpcClient);
     current = connected;
     const reconnect = connectedBefore;
     connectedBefore = true;
@@ -189,13 +185,13 @@ export function createReconnectingClient({ connect, onConnect, onDisconnect, bac
     get state() { return state; },
     get client() { return current; },
     get attempt() { return attempt; },
-    ready({ signal } = {}) {
+    ready({ signal }: { signal?: AbortSignalLike } = {}) {
       if (state === 'open' && current) return Promise.resolve(current);
       if (state === 'stopped') return Promise.reject(new AlpClientError('ALP connection stopped', { reason: 'closed' }));
-      return new Promise((resolve, reject) => {
+      return new Promise<AlpRpcClient>((resolve, reject) => {
         const waiter = {
-          /** @param {AlpRpcClient} client */ resolve: client => { signal?.removeEventListener('abort', onAbort); resolve(client); },
-          /** @param {Error} error */ reject: error => { signal?.removeEventListener('abort', onAbort); reject(error); },
+          /** @param {AlpRpcClient} client */ resolve: (client: AlpRpcClient) => { signal?.removeEventListener('abort', onAbort); resolve(client); },
+          /** @param {Error} error */ reject: (error: Error) => { signal?.removeEventListener('abort', onAbort); reject(error); },
         };
         const onAbort = () => { waiters.delete(waiter); reject(new AlpClientError('Waiting for the ALP connection was aborted', { reason: 'aborted', cause: signal?.reason })); };
         if (signal?.aborted) return onAbort();

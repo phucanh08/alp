@@ -26,7 +26,8 @@ async function graph(entry) {
     seen.set(file, text);
     for (const match of text.matchAll(IMPORT)) {
       const specifier = match[1] ?? match[2];
-      if (specifier.startsWith('.')) await visit(path.resolve(path.dirname(file), specifier), file);
+      // The client sources are TypeScript; their relative specifiers name the emitted .js (NodeNext).
+      if (specifier.startsWith('.')) await visit(path.resolve(path.dirname(file), file.endsWith('.ts') ? specifier.replace(/\.js$/, '.ts') : specifier), file);
       else if (specifier === '@anhlp/alp-protocol') await visit(protocolEntry, file);
       else assert.fail(`${path.relative(source, file)} imports ${specifier} (reached from ${from ? path.relative(source, from) : 'the entry'})`);
     }
@@ -35,7 +36,7 @@ async function graph(entry) {
   return seen;
 }
 
-for (const entry of ['portable.js', 'connection/websocket.js']) {
+for (const entry of ['portable.ts', 'connection/websocket.ts']) {
   test(`${entry} reaches only portable modules`, async () => {
     const modules = await graph(path.join(source, entry));
     assert.ok(modules.size >= 3, 'the walk followed the imports');

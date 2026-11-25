@@ -13,18 +13,38 @@ import { dashboardSettings } from '@anhlp/alp-core/user-settings';
 import { createSocketTransport } from './connection/ipc.js';
 import { AlpRpcClient } from './rpc/client.js';
 import { hello } from './rpc/connection/handshake.js';
+import type { Stats } from 'node:fs';
+import type { Socket } from 'node:net';
+import type { AttachmentLimits, TerminalLimits } from '@anhlp/alp-protocol';
 export { PROTOCOL_VERSION, MAX_FRAME, AlpRpcError, encodeFrame } from '@anhlp/alp-protocol';
 // The Node entry carries the whole portable API and the WebSocket transport too, so Node callers need one import.
 export * from './portable.js';
 export { connectWebSocket, createWebSocketTransport, redactUrl, CLOSE_CODE } from './connection/websocket.js';
 export { createSocketTransport } from './connection/ipc.js';
 
-export function alpHome(env = process.env) {
+/** What alpd writes into its lock beyond the fields every lock has. */
+export type DaemonLockContents = { version: string, protocolVersion: number, socket: string, maintenance?: string };
+/** alpd's single-instance lock, `<home>/alpd.lock`, as acquireDaemonLock writes it. */
+export type DaemonLock = DaemonLockContents & {
+  pid: number, startedAt: string, startedUptime: number, bootTime: number, bootId?: string, uid: number, ready: boolean, hold?: string,
+};
+/** The fields of a lock record that tell whether its owner still runs. */
+export type LiveLock = { pid: number, bootId?: string, bootTime?: number, hold?: string };
+/** How the Windows hold on a lock is opened, probed and closed (holdOps; tests replace it). */
+export type HoldOps = { take(file: string): number, taken(file: string): boolean, close(fd: number): void };
+/** One start or stop of alpd in its lifecycle directory, read from its owner token. */
+export type LifecycleOwner = { token: string, pid: number, bootTime: number, action: string, id?: string, proof?: string };
+/** The options of the socket transport (maxFrame, maxBufferedBytes). */
+export type SocketTransportOptions = NonNullable<Parameters<typeof createSocketTransport>[1]>;
+/** The options of AlpClient and connect: the RPC client's and the socket transport's. */
+export type AlpClientOptions = NonNullable<ConstructorParameters<typeof AlpRpcClient>[1]> & SocketTransportOptions;
+
+export function alpHome(env: NodeJS.ProcessEnv = process.env): string {
   return path.resolve(env.ALP_HOME || path.join(os.homedir(), '.alp'));
 }
 
 /** Windows uses named pipes; long Unix homes get a short socket in the temp directory. */
-export function daemonPaths(home) {
+export function daemonPaths(home: string) {
   const preferred = path.join(home, 'alpd.sock');
   const socket = process.platform === 'win32'
     ? `\\\\.\\pipe\\alpd-${createHash('sha256').update(home).digest('hex').slice(0, 24)}`
@@ -36,7 +56,7 @@ export function daemonPaths(home) {
 
 /** IPC trusts the OS user, not every local process. Existing unsafe directories fail closed.
  * Windows mode bits do not describe named-pipe ACLs; those remain an OS deployment assumption. */
-async function assertSafeAncestors(directory) {
+async function assertSafeAncestors(directory: string) {
   if (process.platform === 'win32') return;
   const absolute = path.isAbsolute(directory) ? directory : `${process.cwd()}/${directory}`;
   let current = path.parse(absolute).root;
@@ -68,14 +88,14 @@ async function assertSafeAncestors(directory) {
   }
 }
 
-export async function assertPrivateDirectory(directory, { create = false } = {}) {
+export async function assertPrivateDirectory(directory: string, { create = false }: { create?: boolean } = {}): Promise<void> {
   await assertSafeAncestors(directory);
   if (create) await mkdir(directory, { recursive: true, mode: 0o700 });
   let info = await lstat(directory);
   if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('IPC requires a private directory, not a symlink');
   if (process.platform === 'win32') return;
   const shown = JSON.stringify(directory);
-  const mine = (/** @type {import('node:fs').Stats} */ entry) => entry.isDirectory() && !entry.isSymbolicLink() && entry.uid === process.getuid?.();
+  const mine = (entry: Stats) => entry.isDirectory() && !entry.isSymbolicLink() && entry.uid === process.getuid?.();
   if (info.uid !== process.getuid?.()) throw new Error(`IPC directory ${shown} must be owned by the current user (it belongs to uid ${info.uid}); use a directory of your own`);
   if ((info.mode & 0o077) === 0) return;
   // t-37f1: a directory the user made for ALP (mkdir, mktemp) and left at 0755 is still empty:
@@ -91,7 +111,7 @@ export async function assertPrivateDirectory(directory, { create = false } = {})
   throw new Error(`IPC directory ${shown} must have private permissions (0700), not ${(info.mode & 0o777).toString(8).padStart(4, '0')}; fix it with: chmod 700 ${quoted}`);
 }
 
-export async function assertPrivateSocket(socketPath) {
+export async function assertPrivateSocket(socketPath: string): Promise<Stats | undefined> {
   if (process.platform === 'win32') return;
   await assertPrivateDirectory(path.dirname(socketPath));
   const info = await lstat(socketPath);
@@ -101,7 +121,7 @@ export async function assertPrivateSocket(socketPath) {
   return info;
 }
 
-const isFile = file => stat(file).then(info => info.isFile(), () => false);
+const isFile = (file: string) => stat(file).then(info => info.isFile(), () => false);
 
 /** Global bin directories that a GUI app's PATH may lack. */
 const BIN_DIRECTORIES = [path.join(os.homedir(), '.alp', 'bin'), path.join(os.homedir(), '.npm-global', 'bin'), path.join(os.homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin'];
@@ -116,12 +136,12 @@ const CLI_PACKAGES = ['@anhlp/alp', '@anhlp/alp-cli'];
  * alp.cmd shim of npm or install.ps1 is followed to the script it runs (t-1f14).
  * @param {string} cli @param {number} [depth] @param {NodeJS.ProcessEnv} [env]
  */
-async function cliDaemonEntry(cli, depth = 0, env = process.env) {
+async function cliDaemonEntry(cli: string, depth = 0, env: NodeJS.ProcessEnv = process.env): Promise<string | undefined> {
   const base = path.basename(cli).toLowerCase();
   const root = path.resolve(path.dirname(cli), '..');
-  const alpd = directory => path.join(directory, 'dist', 'alpd.js');
-  const named = async directory => readFile(path.join(directory, 'package.json'), 'utf8').then(text => JSON.parse(text)?.name).catch(() => undefined);
-  let candidates = [];
+  const alpd = (directory: string) => path.join(directory, 'dist', 'alpd.js');
+  const named = async (directory: string) => readFile(path.join(directory, 'package.json'), 'utf8').then(text => JSON.parse(text)?.name).catch(() => undefined);
+  let candidates: string[] = [];
   if (base === 'alp.cmd' && depth < 1 && !await isFile(path.join(root, 'alp-bundle.json'))) {
     // A Windows shim that is not the bundle's own: npm's ("%dp0%\node_modules\@anhlp\alp\bin\alp.js")
     // or install.ps1's ("<root>\app\current\lib\node_modules\@anhlp\alp-cli\dist\cli.js"): follow the script it runs.
@@ -156,7 +176,7 @@ async function cliDaemonEntry(cli, depth = 0, env = process.env) {
  * recorded itself ($ALP_HOME/alpd.json), then the ALP CLI (`alp`) on PATH and in the usual install
  * directories (`binDirectories`; a test passes [] so the caller's own install is not found).
  */
-export async function findDaemonEntry({ home = alpHome(), env = process.env, candidates = /** @type {Array<string | undefined>} */ ([]), binDirectories = BIN_DIRECTORIES } = {}) {
+export async function findDaemonEntry({ home = alpHome(), env = process.env, candidates = /** @type {Array<string | undefined>} */ ([]), binDirectories = BIN_DIRECTORIES }: { home?: string, env?: NodeJS.ProcessEnv, candidates?: Array<string | undefined>, binDirectories?: string[] } = {}): Promise<string | undefined> {
   for (const candidate of candidates) if (candidate && await isFile(candidate)) return candidate;
   try {
     const { entry } = JSON.parse(await readFile(daemonPaths(home).install, 'utf8'));
@@ -178,12 +198,12 @@ export async function findDaemonEntry({ home = alpHome(), env = process.env, can
  * @param {unknown} name
  * @returns {string}
  */
-export function assertIntegrationName(name) {
+export function assertIntegrationName(name: unknown): string {
   if (typeof name !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new TypeError(`Invalid integration name: ${JSON.stringify(name)}`);
   return name;
 }
 
-let cachedBootId = null;
+let cachedBootId: string | undefined | null = null;
 
 /**
  * Returns a stable identifier for the current OS boot session,
@@ -194,7 +214,7 @@ let cachedBootId = null;
  *
  * @returns {string | undefined}
  */
-export function bootId() {
+export function bootId(): string | undefined {
   if (cachedBootId !== null) return cachedBootId;
   try {
     if (process.platform === 'linux') {
@@ -225,12 +245,12 @@ export function bootId() {
  * Internal/testing seam: resets or sets the cached boot identifier.
  * @param {string | undefined | null} [id]
  */
-export function _setBootIdForTest(id = null) {
+export function _setBootIdForTest(id: string | undefined | null = null): void {
   cachedBootId = id;
 }
 
 /** Wall-clock boot time; a lock from an earlier boot is stale even if its pid is reused. */
-export function bootTime() {
+export function bootTime(): number {
   return Math.round((Date.now() - os.uptime() * 1000) / 1000);
 }
 
@@ -248,7 +268,7 @@ export function bootTime() {
  * @param {{ bootId?: string, bootTime?: number }} [current]
  * @returns {boolean}
  */
-export function isSameBoot(lock, { bootId: curBootId = bootId(), bootTime: curBootTime = bootTime() } = {}) {
+export function isSameBoot(lock?: { bootId?: string, bootTime?: number } | null, { bootId: curBootId = bootId(), bootTime: curBootTime = bootTime() }: { bootId?: string, bootTime?: number } = {}): boolean {
   if (!lock) return false;
   if (typeof lock.bootId === 'string' && lock.bootId.length > 0 && typeof curBootId === 'string' && curBootId.length > 0) {
     return lock.bootId === curBootId;
@@ -259,11 +279,11 @@ export function isSameBoot(lock, { bootId: curBootId = bootId(), bootTime: curBo
   return false;
 }
 
-export async function readLock(home) {
+export async function readLock(home: string): Promise<DaemonLock | undefined> {
   try {
     return JSON.parse(await readFile(daemonPaths(home).lock, 'utf8'));
   } catch (error) {
-    if (error?.code === 'ENOENT' || error instanceof SyntaxError) return undefined;
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT' || error instanceof SyntaxError) return undefined;
     throw error;
   }
 }
@@ -277,37 +297,37 @@ export async function readLock(home) {
 const UV_FS_O_EXLOCK = 0x10000000;
 export const holdOps = {
   /** Opens the hold; throws EBUSY while another handle has it open. */
-  take(file) {
+  take(file: string): number {
     for (let attempt = 0; ; attempt++) {
       try { return openSync(file, fsConstants.O_RDWR | fsConstants.O_CREAT | UV_FS_O_EXLOCK, 0o600); }
       catch (error) {
         // A reader probing it (`taken`) holds it for a moment; a real owner keeps it.
-        if (attempt >= 10 || !['EBUSY', 'EPERM', 'EACCES'].includes(error?.code)) throw error;
+        if (attempt >= 10 || !['EBUSY', 'EPERM', 'EACCES'].includes((error as NodeJS.ErrnoException)?.code!)) throw error;
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
       }
     }
   },
   /** True while some handle has the hold open; a missing file is free. */
-  taken(file) {
+  taken(file: string): boolean {
     try { closeSync(openSync(file, 'r')); return false; }
-    catch (error) { return error?.code !== 'ENOENT'; }
+    catch (error) { return (error as NodeJS.ErrnoException)?.code !== 'ENOENT'; }
   },
-  close(fd) { closeSync(fd); },
+  close(fd: number): void { closeSync(fd); },
 };
 /** home → the hold this process has: its descriptor and how to close it. */
-const holds = new Map();
+const holds = new Map<string, { fd: number, close: (fd: number) => void }>();
 
 /**
  * True while the lock's owner runs: same boot, its pid exists, and on Windows, when the lock
  * names a hold, that hold is still open. A lock without `hold` (an older alpd) is judged by its
  * pid alone.
  */
-export function lockAlive(lock, { platform = process.platform, taken = holdOps.taken } = {}) {
+export function lockAlive(lock: LiveLock | null | undefined, { platform = process.platform, taken = holdOps.taken }: { platform?: NodeJS.Platform, taken?: (file: string) => boolean } = {}): boolean {
   if (!lock || !Number.isSafeInteger(lock.pid) || !isSameBoot(lock)) return false;
   try {
     process.kill(lock.pid, 0);
   } catch (error) {
-    if (error?.code !== 'EPERM') return false;
+    if ((error as NodeJS.ErrnoException)?.code !== 'EPERM') return false;
   }
   if (platform === 'win32' && typeof lock.hold === 'string') return taken(lock.hold);
   return true;
@@ -320,21 +340,21 @@ export function lockAlive(lock, { platform = process.platform, taken = holdOps.t
  * @param {string} home
  * @param {{ version: string, protocolVersion: number, socket: string, maintenance?: string }} contents
  */
-export async function acquireDaemonLock(home, contents, { platform = process.platform, ops = holdOps } = {}) {
+export async function acquireDaemonLock(home: string, contents: DaemonLockContents, { platform = process.platform, ops = holdOps }: { platform?: NodeJS.Platform, ops?: HoldOps } = {}): Promise<DaemonLock> {
   const { lock: file, hold } = daemonPaths(home);
-  const busy = current => new Error(current.maintenance ? `ALP is busy: alp ${current.maintenance} runs (pid ${current.pid}); try again when it finishes` : `ALP daemon already running (pid ${current.pid})`);
+  const busy = (current: DaemonLock) => new Error(current.maintenance ? `ALP is busy: alp ${current.maintenance} runs (pid ${current.pid}); try again when it finishes` : `ALP daemon already running (pid ${current.pid})`);
   // On Windows the hold comes first: whoever has it is the only one that may write the lock.
-  let fd;
+  let fd: number | undefined;
   if (platform === 'win32' && !holds.has(home)) {
     try { fd = ops.take(hold); }
     catch (error) {
-      if (!['EBUSY', 'EPERM', 'EACCES'].includes(error?.code)) throw error;
+      if (!['EBUSY', 'EPERM', 'EACCES'].includes((error as NodeJS.ErrnoException)?.code!)) throw error;
       const current = await readLock(home);
-      if (lockAlive(current, { platform, taken: ops.taken })) throw busy(current);
+      if (lockAlive(current, { platform, taken: ops.taken })) throw busy(current!);
       throw new Error(`ALP daemon lock ${file} is held: another start is in progress. Try again when it finishes`);
     }
     // The hold counts only if a second open really fails; else go on by pid alone, unmarked.
-    if (!ops.taken(hold)) { ops.close(fd); fd = undefined; }
+    if (!ops.taken(hold)) { ops.close(fd!); fd = undefined; }
   }
   try {
     const lock = await takeLockFile(home, file, contents, fd === undefined ? undefined : hold, platform, ops, busy);
@@ -347,15 +367,15 @@ export async function acquireDaemonLock(home, contents, { platform = process.pla
 }
 
 /** Our own hold, named by `current`: its owner is gone, since we could take it. */
-function ownHold(current, hold, platform) {
+function ownHold(current: { hold?: unknown } | undefined, hold: string | undefined, platform: NodeJS.Platform): boolean {
   if (!hold || typeof current?.hold !== 'string') return false;
-  const a = path.resolve(current.hold), b = path.resolve(hold);
+  const a = path.resolve(current!.hold as string), b = path.resolve(hold);
   return platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
-async function takeLockFile(home, file, contents, hold, platform, ops, busy) {
+async function takeLockFile(home: string, file: string, contents: DaemonLockContents, hold: string | undefined, platform: NodeJS.Platform, ops: HoldOps, busy: (current: DaemonLock) => Error): Promise<DaemonLock> {
   const currentBootId = bootId();
-  const lock = {
+  const lock: DaemonLock = {
     pid: process.pid,
     startedAt: new Date().toISOString(),
     startedUptime: Math.floor(os.uptime()),
@@ -370,7 +390,7 @@ async function takeLockFile(home, file, contents, hold, platform, ops, busy) {
     try {
       const handle = await open(file, 'wx', 0o600);
       // The identity of the file this call created, taken before anything can fail on it.
-      let ours;
+      let ours: Stats | undefined;
       try {
         ours = await handle.stat();
         await handle.writeFile(JSON.stringify(lock));
@@ -387,10 +407,10 @@ async function takeLockFile(home, file, contents, hold, platform, ops, busy) {
       await handle.close();
       return lock;
     } catch (error) {
-      if (error?.code !== 'EEXIST') throw error;
+      if ((error as NodeJS.ErrnoException)?.code !== 'EEXIST') throw error;
       const current = await readLock(home);
-      const alive = candidate => !ownHold(candidate, hold, platform) && lockAlive(candidate, { platform, taken: ops.taken });
-      if (alive(current)) throw busy(current);
+      const alive = (candidate: DaemonLock | undefined) => !ownHold(candidate, hold, platform) && lockAlive(candidate, { platform, taken: ops.taken });
+      if (alive(current)) throw busy(current!);
       // Remove the stale lock only if nobody replaced it meanwhile. A lock that cannot be read may
       // be one another start is writing now: it stays, and this start says so.
       const again = await readFile(file, 'utf8').catch(() => undefined);
@@ -404,7 +424,7 @@ async function takeLockFile(home, file, contents, hold, platform, ops, busy) {
 }
 
 /** Lets go of alpd's lock if this process holds it. */
-export async function releaseDaemonLock(home) {
+export async function releaseDaemonLock(home: string): Promise<void> {
   const current = await readLock(home).catch(() => undefined);
   // The lock goes first, then the hold, in one tick: no start sees our lock with the hold free
   // and no one else's lock is removed.
@@ -420,24 +440,24 @@ export async function releaseDaemonLock(home) {
  */
 export class AlpClient extends AlpRpcClient {
   /** Host features captured by connect's handshake. @type {readonly string[]} */
-  capabilities = [];
+  capabilities: readonly string[] = [];
   /** Limits captured by connect's handshake. @type {import('@anhlp/alp-protocol').AttachmentLimits | undefined} */
-  attachmentLimits;
+  attachmentLimits: AttachmentLimits | undefined;
   /** @type {{ readonly maxCount: number; readonly maxBytes: number; readonly maxTotalBytes: number } | undefined} */
-  promptImageLimits;
+  promptImageLimits: { readonly maxCount: number; readonly maxBytes: number; readonly maxTotalBytes: number } | undefined;
   /** @type {import('@anhlp/alp-protocol').TerminalLimits | undefined} */
-  terminalLimits;
+  terminalLimits: TerminalLimits | undefined;
   /**
    * @param {import('node:net').Socket} socket a connected or connecting socket; the client owns it
    * @param {import('./rpc/client.js').AlpRpcClientOptions & import('./connection/ipc.js').SocketTransportOptions} [options]
    */
-  constructor(socket, { maxFrame, maxBufferedBytes, ...options } = {}) {
+  constructor(socket: Socket, { maxFrame, maxBufferedBytes, ...options }: AlpClientOptions = {}) {
     super(createSocketTransport(socket, { maxFrame, maxBufferedBytes }), { maxFrame, ...options });
   }
 }
 
 /** A socket to alpd, once it is checked to be private to this user (the IPC checks above). @param {string} socketPath */
-async function openSocket(socketPath) {
+async function openSocket(socketPath: string): Promise<Socket> {
   await assertPrivateSocket(socketPath);
   return /** @type {Promise<import('node:net').Socket>} */ (new Promise((resolve, reject) => {
     const candidate = net.createConnection(socketPath);
@@ -452,7 +472,7 @@ async function openSocket(socketPath) {
  * @param {string} socketPath
  * @param {import('./connection/ipc.js').SocketTransportOptions} [options]
  */
-export async function connectSocket(socketPath, options) {
+export async function connectSocket(socketPath: string, options?: SocketTransportOptions) {
   return createSocketTransport(await openSocket(socketPath), options);
 }
 
@@ -463,19 +483,19 @@ export async function connectSocket(socketPath, options) {
  * @param {import('./rpc/client.js').AlpRpcClientOptions & import('./connection/ipc.js').SocketTransportOptions} [options]
  * @returns {Promise<AlpClient>}
  */
-export async function connect(socketPath, client = { name: 'alp', version: '0' }, options = {}) {
+export async function connect(socketPath: string, client: { name: string, version: string } = { name: 'alp', version: '0' }, options: AlpClientOptions = {}): Promise<AlpClient> {
   const connection = new AlpClient(await openSocket(socketPath), options);
   try {
     const greeting = await hello(connection, client, undefined, { agent: typeof process.env.ALP_AGENT_SESSION === 'string' && process.env.ALP_AGENT_SESSION !== '' });
-    connection.capabilities = Object.freeze(Array.isArray(greeting.capabilities) ? greeting.capabilities.filter(value => typeof value === 'string') : []);
+    connection.capabilities = Object.freeze(Array.isArray(greeting.capabilities) ? greeting.capabilities.filter((value: unknown): value is string => typeof value === 'string') : []);
     if (greeting.attachmentLimits && typeof greeting.attachmentLimits === 'object') {
-      connection.attachmentLimits = Object.freeze({ ...greeting.attachmentLimits });
+      connection.attachmentLimits = Object.freeze({ ...greeting.attachmentLimits }) as AttachmentLimits;
     }
     if (greeting.promptImageLimits && typeof greeting.promptImageLimits === 'object') {
-      connection.promptImageLimits = Object.freeze({ ...greeting.promptImageLimits });
+      connection.promptImageLimits = Object.freeze({ ...greeting.promptImageLimits }) as { readonly maxCount: number; readonly maxBytes: number; readonly maxTotalBytes: number };
     }
     if (greeting.terminalLimits && typeof greeting.terminalLimits === 'object') {
-      connection.terminalLimits = Object.freeze({ ...greeting.terminalLimits });
+      connection.terminalLimits = Object.freeze({ ...greeting.terminalLimits }) as TerminalLimits;
     }
   } catch (error) {
     connection.close();
@@ -485,7 +505,7 @@ export async function connect(socketPath, client = { name: 'alp', version: '0' }
 }
 
 /** Why a launcher failed, from the last structured log line it wrote to stderr: code and message, scrubbed. */
-function launcherReason(text) {
+function launcherReason(text: string): string {
   const line = text.trim().split('\n').filter(Boolean).at(-1);
   if (!line) return '';
   let reason = line;
@@ -496,7 +516,7 @@ function launcherReason(text) {
   return `: ${scrubText(reason, { max: 600 })}`;
 }
 
-async function tail(file, lines = 30) {
+async function tail(file: string, lines = 30): Promise<string> {
   // The tail goes into an error message, so it is scrubbed like every other log output.
   try { return scrubText((await readFile(file, 'utf8')).split('\n').slice(-lines).join('\n'), { max: 8000 }); } catch { return ''; }
 }
@@ -508,7 +528,7 @@ async function tail(file, lines = 30) {
  * the C locale so that two callers agree whatever their own environment says. ps counts whole
  * seconds: a pid cannot come back within the second its last owner started in.
  */
-export function processBirth(pid, { platform = process.platform } = {}) {
+export function processBirth(pid: number, { platform = process.platform }: { platform?: NodeJS.Platform } = {}): string | undefined {
   if (!Number.isSafeInteger(pid) || pid <= 0 || platform === 'win32') return undefined;
   try {
     if (platform === 'linux') {
@@ -534,16 +554,16 @@ export function processBirth(pid, { platform = process.platform } = {}) {
 }
 
 /** This process's own birth: it never changes, so it is asked for once. */
-let ownBirth = null;
+let ownBirth: string | undefined | null = null;
 
 /** How long one check of a lifecycle owner's proof stands before it is made again. */
 const LIFECYCLE_PROOF_TTL_MS = 1_000;
 /** How long admission waits when no alp command holds it and yet it cannot be taken. */
 const LIFECYCLE_STUCK_MS = 30_000;
 
-const lifecycleDirectory = home => path.join(home, 'state', 'alpd.starting');
+const lifecycleDirectory = (home: string) => path.join(home, 'state', 'alpd.starting');
 /** The Windows hold of a lifecycle owner: outside the directory it publishes, which Windows would not move with an open handle inside. */
-const lifecycleHold = (home, id) => path.join(home, 'state', `alpd.lifecycle-${id}.held`);
+const lifecycleHold = (home: string, id: string) => path.join(home, 'state', `alpd.lifecycle-${id}.held`);
 
 /**
  * Immutable admission identities live in filenames, including for service hard links.
@@ -554,7 +574,7 @@ const lifecycleHold = (home, id) => path.join(home, 'state', `alpd.lifecycle-${i
  * handle of t-a5d8). A name without one comes from an older ALP and is judged by its pid; an
  * older ALP reads a name with one as it always did, since the proof is hex digits after the uuid.
  */
-async function lifecycleOwners(home) {
+async function lifecycleOwners(home: string): Promise<LifecycleOwner[]> {
   const names = await readdir(lifecycleDirectory(home)).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
   return names.map(token => {
     const match = /^owner-(\d+)-(\d+)-(start|stop)-[a-f0-9-]+$/.exec(token);
@@ -569,9 +589,9 @@ async function lifecycleOwners(home) {
  * A proof that cannot be checked here leaves the owner alive: only a different birth, or a hold
  * nobody has open, shows that the pid belongs to someone else now.
  */
-function lifecycleOwnerState(home, owner, { platform = process.platform, ops = holdOps } = {}) {
+function lifecycleOwnerState(home: string, owner: LifecycleOwner, { platform = process.platform, ops = holdOps }: { platform?: NodeJS.Platform, ops?: HoldOps } = {}): { alive: boolean, proven: boolean } {
   if (!lockAlive(owner)) return { alive: false, proven: true };
-  if (owner.proof === 'e') return platform === 'win32' ? { alive: ops.taken(lifecycleHold(home, owner.id)), proven: true } : { alive: true, proven: false };
+  if (owner.proof === 'e') return platform === 'win32' ? { alive: ops.taken(lifecycleHold(home, owner.id!)), proven: true } : { alive: true, proven: false };
   if (!owner.proof) return { alive: true, proven: false };
   const birth = processBirth(owner.pid, { platform });
   if (birth === undefined || birth[0] !== owner.proof[0]) return { alive: true, proven: false };
@@ -579,13 +599,13 @@ function lifecycleOwnerState(home, owner, { platform = process.platform, ops = h
 }
 
 /** Removes what a dead owner left: its token, then its hold. */
-async function reapLifecycleOwner(home, owner) {
+async function reapLifecycleOwner(home: string, owner: LifecycleOwner): Promise<void> {
   await unlink(path.join(lifecycleDirectory(home), owner.token)).catch(error => { if (error.code !== 'ENOENT') throw error; });
-  if (owner.proof === 'e') await unlink(lifecycleHold(home, owner.id)).catch(() => {});
+  if (owner.proof === 'e') await unlink(lifecycleHold(home, owner.id!)).catch(() => {});
 }
 
 /** The start or stop that holds the lifecycle of `home` now, if one does. */
-export async function readDaemonLifecycle(home, { platform = process.platform, ops = holdOps } = {}) {
+export async function readDaemonLifecycle(home: string, { platform = process.platform, ops = holdOps }: { platform?: NodeJS.Platform, ops?: HoldOps } = {}): Promise<LifecycleOwner | undefined> {
   return (await lifecycleOwners(home)).find(owner => lifecycleOwnerState(home, owner, { platform, ops }).alive);
 }
 
@@ -595,7 +615,7 @@ export async function readDaemonLifecycle(home, { platform = process.platform, o
  * half a minute, so 150 s by default. A holder that finishes sooner is never cut short.
  * @param {NodeJS.ProcessEnv} [env]
  */
-export function daemonLifecycleWaitMs(env = process.env) {
+export function daemonLifecycleWaitMs(env: NodeJS.ProcessEnv = process.env): number {
   return 2 * daemonStartTimeoutMs(env) + 30_000;
 }
 
@@ -610,14 +630,14 @@ export function daemonLifecycleWaitMs(env = process.env) {
  * holder at all, this rejects with ALP_LIFECYCLE_BUSY and says what to remove. It never takes the
  * lifecycle from a holder it cannot show to be gone.
  */
-export async function withDaemonLifecycle(home, action, run, { joinStart = false, signal = /** @type {AbortSignal | undefined} */ (undefined), waitMs = daemonLifecycleWaitMs(), platform = process.platform, ops = holdOps } = {}) {
+export async function withDaemonLifecycle<T>(home: string, action: 'start' | 'stop', run: () => T | Promise<T>, { joinStart = false, signal = /** @type {AbortSignal | undefined} */ (undefined), waitMs = daemonLifecycleWaitMs(), platform = process.platform, ops = holdOps }: { joinStart?: boolean, signal?: AbortSignal, waitMs?: number, platform?: NodeJS.Platform, ops?: HoldOps } = {}): Promise<T> {
   signal?.throwIfAborted();
   try {
     await assertPrivateDirectory(home, { create: true });
   } catch (cause) {
     // Admission now prepares the home before the launcher can report this failure.
     // Preserve the operator-facing startup code at this earlier boundary.
-    throw Object.assign(new Error(`ALP_HOME_UNUSABLE, alpd failed to start while preparing its home: ${cause.message}`, { cause }), { code: 'ALP_HOME_UNUSABLE' });
+    throw Object.assign(new Error(`ALP_HOME_UNUSABLE, alpd failed to start while preparing its home: ${(cause as Error).message}`, { cause }), { code: 'ALP_HOME_UNUSABLE' });
   }
   const state = path.join(home, 'state');
   await assertPrivateDirectory(state, { create: true });
@@ -625,7 +645,7 @@ export async function withDaemonLifecycle(home, action, run, { joinStart = false
   const currentBootId = bootId();
   const id = randomUUID();
   // The proof comes before the token: whoever can read the token can already check it.
-  let proof, hold, fd;
+  let proof: string | undefined, hold: string | undefined, fd: number | undefined;
   if (platform === 'win32') {
     hold = lifecycleHold(home, id);
     try {
@@ -657,19 +677,19 @@ export async function withDaemonLifecycle(home, action, run, { joinStart = false
           // pins its directory until this service has finished starting.
           await link(path.join(directory, owner.token), path.join(directory, token));
           joined = true;
-        } catch (error) { if (error.code !== 'ENOENT') throw error; }
+        } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       }
     }
     // What blocks admission now and since when; the clock restarts whenever that changes.
-    let blocker, since = 0;
+    let blocker: string | undefined, since = 0;
     /** token → its owner's state and when it was read: ps is too slow to ask on every turn. */
-    const checked = new Map();
+    const checked = new Map<string, { at: number, alive: boolean, proven: boolean }>();
     while (!joined) {
       signal?.throwIfAborted();
       try { await rename(candidate, directory); break; }
       catch (error) {
-        if (!['EEXIST', 'ENOTEMPTY', 'EPERM', 'EACCES'].includes(error.code)) throw error;
-        const holders = [];
+        if (!['EEXIST', 'ENOTEMPTY', 'EPERM', 'EACCES'].includes((error as NodeJS.ErrnoException).code!)) throw error;
+        const holders: Array<LifecycleOwner & { proven: boolean }> = [];
         for (const owner of await lifecycleOwners(home)) {
           let seen = checked.get(owner.token);
           // A pid that is gone is seen at once; the proof is read again when it is a second old.
@@ -681,10 +701,10 @@ export async function withDaemonLifecycle(home, action, run, { joinStart = false
           else await reapLifecycleOwner(home, owner);
         }
         await rmdir(directory).catch(error => { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error; });
-        const now = holders.map(owner => owner.token).sort().join(' ') || `!${error.code}`;
+        const now = holders.map(owner => owner.token).sort().join(' ') || `!${(error as NodeJS.ErrnoException).code}`;
         if (now !== blocker) { blocker = now; since = Date.now(); }
         const waited = Date.now() - since;
-        if (waited >= (holders.length ? waitMs : Math.min(waitMs, LIFECYCLE_STUCK_MS))) throw lifecycleBusy(home, action, holders, waited, error);
+        if (waited >= (holders.length ? waitMs : Math.min(waitMs, LIFECYCLE_STUCK_MS))) throw lifecycleBusy(home, action, holders, waited, error as NodeJS.ErrnoException);
         await delay(25, undefined, { signal });
       }
     }
@@ -708,7 +728,7 @@ export async function withDaemonLifecycle(home, action, run, { joinStart = false
 }
 
 /** Why admission gave up: who holds the lifecycle, for how long it was watched, and what to do. */
-function lifecycleBusy(home, action, holders, waited, cause) {
+function lifecycleBusy(home: string, action: string, holders: Array<LifecycleOwner & { proven: boolean }>, waited: number, cause: NodeJS.ErrnoException) {
   const directory = lifecycleDirectory(home);
   const seconds = Math.max(1, Math.round(waited / 1000));
   const [holder] = holders;
@@ -730,7 +750,7 @@ const DAEMON_START_TIMEOUT_MAX_MS = 3_600_000;
  * is a positive whole number of at most one hour, else DAEMON_START_TIMEOUT_MS.
  * @param {NodeJS.ProcessEnv} [env]
  */
-export function daemonStartTimeoutMs(env = process.env) {
+export function daemonStartTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.ALP_DAEMON_START_TIMEOUT_MS?.trim();
   if (!raw || !/^[0-9]+$/.test(raw)) return DAEMON_START_TIMEOUT_MS;
   const value = Number(raw);
@@ -742,25 +762,25 @@ export function daemonStartTimeoutMs(env = process.env) {
  * `entry` is the daemon script; it is started through its own detaching launcher so the
  * daemon outlives the client that started it.
  */
-export async function ensureDaemon({ home = alpHome(), entry = /** @type {string | undefined} */ (undefined), env = process.env, execPath = process.execPath, timeoutMs = daemonStartTimeoutMs(env), lifecycleLocked = false, signal = /** @type {AbortSignal | undefined} */ (undefined) } = {}) {
+export async function ensureDaemon({ home = alpHome(), entry = /** @type {string | undefined} */ (undefined), env = process.env, execPath = process.execPath, timeoutMs = daemonStartTimeoutMs(env), lifecycleLocked = false, signal = /** @type {AbortSignal | undefined} */ (undefined) }: { home?: string, entry?: string, env?: NodeJS.ProcessEnv, execPath?: string, timeoutMs?: number, lifecycleLocked?: boolean, signal?: AbortSignal } = {}): Promise<string> {
   signal?.throwIfAborted();
   if (!lifecycleLocked) return withDaemonLifecycle(home, 'start', () => ensureDaemon({ home, entry, env, execPath, timeoutMs, lifecycleLocked: true, signal }), { signal });
   const ready = async () => {
     const lock = await readLock(home);
-    return lockAlive(lock) && lock.ready ? lock.socket : undefined;
+    return lockAlive(lock) && lock!.ready ? lock!.socket : undefined;
   };
   const live = await ready();
   if (live) return live;
   const held = await readLock(home);
-  if (lockAlive(held) && held.maintenance) throw new Error(`ALP is busy: alp ${held.maintenance} runs (pid ${held.pid}); alpd starts again when it finishes`);
+  if (lockAlive(held) && held!.maintenance) throw new Error(`ALP is busy: alp ${held!.maintenance} runs (pid ${held!.pid}); alpd starts again when it finishes`);
   if (!lockAlive(held)) {
     entry ??= await findDaemonEntry({ home, env });
     if (!entry) throw new Error('ALP daemon is not running and alpd.js was not found. Install the ALP CLI and run `alp daemon start`, or set ALP_DAEMON_ENTRY to alpd.js');
     signal?.throwIfAborted();
-    await new Promise((resolve, reject) => {
-      const launch = entryCommand(entry, 'daemon', ['--detach', `--startup-timeout=${timeoutMs}`], execPath);
+    await new Promise<void>((resolve, reject) => {
+      const launch = entryCommand(entry!, 'daemon', ['--detach', `--startup-timeout=${timeoutMs}`], execPath);
       // BUN_BE_BUN=1 would turn the native alpd (t-81b0.9) into the Bun CLI instead of starting alpd.
-      const launchEnv = { ...env, ALP_HOME: home, ELECTRON_RUN_AS_NODE: '1' };
+      const launchEnv: NodeJS.ProcessEnv = { ...env, ALP_HOME: home, ELECTRON_RUN_AS_NODE: '1' };
       if (isNativeDaemonName(launch.command)) delete launchEnv.BUN_BE_BUN;
       const launcher = spawn(launch.command, launch.args, {
         env: launchEnv,
@@ -788,7 +808,7 @@ export async function ensureDaemon({ home = alpHome(), entry = /** @type {string
 /** Registration descriptor field names, in priority order. */
 const INTEGRATION_DESCRIPTOR_FIELDS = ['main', 'entry', 'path', 'command'];
 
-async function readIntegrationDescriptor(file, baseDirs = []) {
+async function readIntegrationDescriptor(file: string, baseDirs: string[] = []): Promise<string | undefined> {
   try {
     const raw = JSON.parse(await readFile(file, 'utf8'));
     for (const field of INTEGRATION_DESCRIPTOR_FIELDS) {
@@ -808,7 +828,7 @@ async function readIntegrationDescriptor(file, baseDirs = []) {
   return undefined;
 }
 
-async function integrationCandidateFromHome(home, name) {
+async function integrationCandidateFromHome(home: string, name: string): Promise<string | undefined> {
   const descriptors = [
     path.join(home, 'integrations', `${name}.json`),
     path.join(home, 'integrations', name, 'integration.json'),
@@ -822,13 +842,13 @@ async function integrationCandidateFromHome(home, name) {
   return (await isFile(legacy)) ? legacy : undefined;
 }
 
-function integrationBinaryName(name) {
+function integrationBinaryName(name: string): string {
   return `alp-${name}-integration`;
 }
 
 /** Distribution roots that may carry a bundled integration descriptor. */
 async function distributionRoots() {
-  const roots = [];
+  const roots: string[] = [];
   const argv = process.argv[1] ? await realpath(process.argv[1]).catch(() => process.argv[1]) : undefined;
   if (argv) {
     // The CLI runs from <distribution>/packages/cli/dist, so the distribution root is a few levels
@@ -859,7 +879,7 @@ async function distributionRoots() {
  * @param {string} [name]
  * @param {{ home?: string, env?: NodeJS.ProcessEnv, binDirectories?: string[], roots?: string[] }} [options]
  */
-export async function discoverIntegration(name = 'dashboard', options = {}) {
+export async function discoverIntegration(name: string = 'dashboard', options: { home?: string, env?: NodeJS.ProcessEnv, binDirectories?: string[], roots?: string[] } = {}): Promise<string | undefined> {
   // The name becomes a descriptor path under <home>/integrations, so it must stay one safe segment.
   assertIntegrationName(name);
   if (name === 'dashboard' || name === 'web') return undefined;
@@ -869,7 +889,7 @@ export async function discoverIntegration(name = 'dashboard', options = {}) {
     env[`ALP_${name.toUpperCase()}_INTEGRATION`],
     name === 'paseo' ? env.ALP_WEB_INTEGRATION : undefined,
     env.ALP_INTEGRATION_ENTRY,
-  ].filter(Boolean);
+  ].filter(Boolean) as string[];
   for (const candidate of envCandidates) if (await isFile(candidate)) return candidate;
 
   const home = options?.home ? path.resolve(options.home) : alpHome();
@@ -893,13 +913,13 @@ export async function discoverIntegration(name = 'dashboard', options = {}) {
   return undefined;
 }
 
-export function integrationAlive(lock) {
+export function integrationAlive(lock: LiveLock | null | undefined): boolean {
   if (!lock || !Number.isSafeInteger(lock.pid) || !isSameBoot(lock)) return false;
   try {
     process.kill(lock.pid, 0);
     return true;
   } catch (error) {
-    return error?.code === 'EPERM';
+    return (error as NodeJS.ErrnoException)?.code === 'EPERM';
   }
 }
 
@@ -909,7 +929,7 @@ export function integrationAlive(lock) {
  * @param {string} name
  * @param {string} home
  */
-function integrationText(name, home) {
+function integrationText(name: string, home: string) {
   const logs = path.join(home, 'logs', 'integrations');
   if (name === 'dashboard') return {
     what: 'alp dashboard',
@@ -936,8 +956,8 @@ function integrationText(name, home) {
  * in the home's settings.json (or `web.enabled`, its key before the rename) refuses `dashboard` only.
  * @param {string | { name?: string, entry?: string, home?: string, args?: string[] }} [nameOrOptions]
  */
-export async function startIntegration(nameOrOptions = 'dashboard') {
-  const options = typeof nameOrOptions === 'string' ? { name: nameOrOptions } : (nameOrOptions ?? {});
+export async function startIntegration(nameOrOptions: string | { name?: string, entry?: string, home?: string, args?: string[] } = 'dashboard') {
+  const options: { name?: string, entry?: string, home?: string, args?: string[] } = typeof nameOrOptions === 'string' ? { name: nameOrOptions } : (nameOrOptions ?? {});
   const name = assertIntegrationName(options.name ?? 'dashboard');
   if (options.entry !== undefined && (typeof options.entry !== 'string' || !options.entry)) throw new TypeError('startIntegration entry must be a non-empty path');
   const args = options.args ?? [];
@@ -961,7 +981,7 @@ export async function startIntegration(nameOrOptions = 'dashboard') {
     if (dashboardSettings(settings).enabled === false) throw new Error('alp dashboard is disabled by settings ("dashboard.enabled": false).');
   }
 
-  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
   const readLock = async () => {
     try { return JSON.parse(await fs.readFile(lockPath, 'utf8')); } catch { return undefined; }
   };
@@ -1009,7 +1029,7 @@ export async function startIntegration(nameOrOptions = 'dashboard') {
   // alp dashboard may be an `alp` command (`alp dashboard serve`); other integrations are scripts.
   const launch = name === 'dashboard' ? entryCommand(entry, 'dashboard', ['--service', ...args]) : entryCommand(entry, 'dashboard', ['--service', ...args], undefined, { scriptOnly: true });
   const child = spawn(launch.command, launch.args, { stdio: 'ignore', detached: true, env: { ...process.env, ALP_HOME: home } });
-  let spawnError = null;
+  let spawnError: Error | null = null;
   child.on('error', error => { spawnError = error; });
   let exited = false;
   child.on('exit', code => { if (code !== 0 && code !== null) exited = true; });

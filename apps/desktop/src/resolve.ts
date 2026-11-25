@@ -2,7 +2,7 @@
  * Finding the user's `alp` and a PATH to run it with. An app started from Finder gets
  * PATH=/usr/bin:/bin:/usr/sbin:/sbin, and an npm-installed alp is `#!/usr/bin/env node`, so both alp
  * and node must be found. Order: the explicit setting (or ALP_DESKTOP_ALP), the global bin
- * directories alp-client also searches (packages/client/src/index.js BIN_DIRECTORIES), then the
+ * directories alp-client also searches (packages/client/src/index.ts BIN_DIRECTORIES), then the
  * user's login shell (with a timeout, since rc files can hang).
  */
 import path from 'node:path';
