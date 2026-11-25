@@ -37,7 +37,7 @@ const root = path.resolve(argument('--root') ?? path.join(import.meta.dirname, '
 
 /** Where this repository keeps `*.test.js`: every workspace's tests, plus the cross-package suites. */
 const TEST_DIRECTORIES = ['test/integration', 'apps/web/tests', 'apps/gateway/tests', 'apps/tui/tests',
-  ...['protocol', 'core', 'runtime', 'client', 'daemon', 'cli', 'gateway'].map(name => `packages/${name}/tests`),
+  ...['protocol', 'core', 'runtime', 'client', 'daemon', 'cli'].map(name => `packages/${name}/tests`),
   'integrations/paseo/tests'];
 
 /** A hook body that deletes something: the step that must run LAST. */
