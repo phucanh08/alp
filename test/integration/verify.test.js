@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initProject } from '../../packages/core/src/init.js';
-import { closeTask, createTask, getTask, loadTasks, recordVerification, startTask, submitTask, summarize, taskDigest } from '../../packages/core/src/tasks.js';
+import { closeTask, createTask, getTask, loadTasks, recordVerification, startTask, submitTask, summarize, taskDigest } from '../../packages/core/src/tasks/records/tasks.js';
 import { describeVerification, runVerify, validateVerify, verifyConfig } from '../../packages/core/src/verify.js';
 import { validateSettings } from '../../packages/core/src/validation.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';

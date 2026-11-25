@@ -16,7 +16,7 @@ const repository = path.resolve(web, '../..');
 test('module ids: the portable SDK passes; host code, Node built-ins and Paseo fail', () => {
   const ok = ['packages/client/src/portable.js', 'packages/client/src/websocket.js', 'packages/client/src/rpc/reconnect.js', 'packages/protocol/src/wire.js', 'apps/web/src/lib/controller.js', 'node_modules/react/index.js'];
   for (const file of ok) assert.equal(boundaryProblem(path.join(repository, file), repository), undefined, file);
-  const bad = ['packages/client/src/index.js', 'packages/client/src/ipc.js', 'packages/core/src/tasks.js', 'packages/runtime/src/runtime.ts', 'packages/daemon/dist/alpd.js', 'packages/protocol/src/contract.js', 'apps/gateway/src/policy.js', 'integrations/paseo/server/index.ts', 'node_modules/ws/index.js', 'node_modules/@getpaseo/client/index.js'];
+  const bad = ['packages/client/src/index.js', 'packages/client/src/ipc.js', 'packages/core/src/tasks/records/tasks.js', 'packages/runtime/src/runtime.ts', 'packages/daemon/dist/alpd.js', 'packages/protocol/src/contract.js', 'apps/gateway/src/policy.js', 'integrations/paseo/server/index.ts', 'node_modules/ws/index.js', 'node_modules/@getpaseo/client/index.js'];
   for (const file of bad) assert.ok(boundaryProblem(path.join(repository, file), repository), file);
   assert.ok(boundaryProblem('\0__vite-browser-external:node:fs', repository));
 });

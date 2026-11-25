@@ -1,4 +1,4 @@
-import type { Task } from './tasks.js';
+import type { Task } from './records/tasks.js';
 
 export type FormulaStep = { id: string; title: string; description?: string; type: string; needs: string[]; priority?: number; labels?: string[]; paths?: string[] };
 export type Formula = {

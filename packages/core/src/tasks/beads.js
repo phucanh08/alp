@@ -1,4 +1,4 @@
-import { DESCRIPTION_CHARS, MAX_LABELS, TASK_TYPES, batch, isTaskId } from './tasks.js';
+import { DESCRIPTION_CHARS, MAX_LABELS, TASK_TYPES, batch, isTaskId } from './records/tasks.js';
 
 /**
  * Interchange with beads (github.com/gastownhall/beads) through its JSONL issue

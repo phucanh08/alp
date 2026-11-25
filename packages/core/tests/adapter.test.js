@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { resolveAgent } from '../src/resolver.js';
 import { compileAgent } from '../src/adapter.js';
 import { FakeAdapter } from '../../../test/support/fake-adapter.js';
@@ -28,11 +29,14 @@ test('fake compiles main and filesystem custom agent without provider dependenci
 });
 test('core import graph contains only node builtins and core-relative modules', async () => {
   const directory = new URL('../src/', import.meta.url);
-  for (const file of await readdir(directory)) {
+  const root = path.resolve(fileURLToPath(directory));
+  for (const file of await readdir(directory, { recursive: true })) {
     if (!/\.(js|ts)$/.test(file)) continue;
-    const source = await readFile(new URL(file, directory), 'utf8');
+    const source = await readFile(new URL(file.replaceAll('\\', '/'), directory), 'utf8');
     for (const match of source.matchAll(/(?:from\s+|import\s*\()['"]([^'"]+)['"]/g)) {
-      assert.ok(match[1].startsWith('node:') || /^\.\/[^/]+$/.test(match[1]), `${file} imports ${match[1]}`);
+      // A relative specifier must stay inside src/ (subdirectories such as tasks/ and library/ included).
+      const inside = /^\.\.?\//.test(match[1]) && path.resolve(root, path.dirname(file), match[1]).startsWith(root + path.sep);
+      assert.ok(match[1].startsWith('node:') || inside, `${file} imports ${match[1]}`);
     }
   }
 });

@@ -12,7 +12,7 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import { createBackup, knownProjects, recoverInterruptedRestore, restoreBackup, verifyBackup, readRestoredMarker, clearRestoredMarker } from '../src/backup.js';
 import { MIGRATIONS, migrateState } from '../src/migrations.js';
 import { STATE_SCHEMA, readStateSchema } from '../src/state-schema.js';
-import { createTask, loadTasks } from '../src/tasks.js';
+import { createTask, loadTasks } from '../src/tasks/records/tasks.js';
 
 const run = promisify(execFile);
 const BACKUP_MODULE = new URL('../src/backup.js', import.meta.url).href;

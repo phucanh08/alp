@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AlpError } from './errors.js';
-import { DESCRIPTION_CHARS, TASK_TYPES, batch } from './tasks.js';
+import { AlpError } from '../errors.js';
+import { DESCRIPTION_CHARS, TASK_TYPES, batch } from './records/tasks.js';
 
 /**
  * Formulas, after beads: a workflow template whose steps become tasks. A

@@ -36,11 +36,11 @@
     },
     "./beads": {
       "alp-source": {
-        "types": "./src/beads.js",
-        "default": "./src/beads.js"
+        "types": "./src/tasks/beads.js",
+        "default": "./src/tasks/beads.js"
       },
-      "types": "./dist/beads.d.ts",
-      "default": "./src/beads.js"
+      "types": "./dist/tasks/beads.d.ts",
+      "default": "./src/tasks/beads.js"
     },
     "./delegation": {
       "alp-source": {
@@ -60,11 +60,11 @@
     },
     "./formulas": {
       "alp-source": {
-        "types": "./src/formulas.js",
-        "default": "./src/formulas.js"
+        "types": "./src/tasks/formulas.js",
+        "default": "./src/tasks/formulas.js"
       },
-      "types": "./dist/formulas.d.ts",
-      "default": "./src/formulas.js"
+      "types": "./dist/tasks/formulas.d.ts",
+      "default": "./src/tasks/formulas.js"
     },
     "./hook-run": {
       "alp-source": {
@@ -196,19 +196,19 @@
     },
     "./task-rows": {
       "alp-source": {
-        "types": "./src/task-rows.js",
-        "default": "./src/task-rows.js"
+        "types": "./src/tasks/records/task-rows.js",
+        "default": "./src/tasks/records/task-rows.js"
       },
-      "types": "./dist/task-rows.d.ts",
-      "default": "./src/task-rows.js"
+      "types": "./dist/tasks/records/task-rows.d.ts",
+      "default": "./src/tasks/records/task-rows.js"
     },
     "./tasks": {
       "alp-source": {
-        "types": "./src/tasks.js",
-        "default": "./src/tasks.js"
+        "types": "./src/tasks/records/tasks.js",
+        "default": "./src/tasks/records/tasks.js"
       },
-      "types": "./dist/tasks.d.ts",
-      "default": "./src/tasks.js"
+      "types": "./dist/tasks/records/tasks.d.ts",
+      "default": "./src/tasks/records/tasks.js"
     },
     "./teams": {
       "alp-source": {

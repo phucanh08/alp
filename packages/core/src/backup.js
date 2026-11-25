@@ -9,7 +9,7 @@ import { createGunzip, createGzip } from 'node:zlib';
 import { AlpError } from './errors.js';
 import { moveFile, writeAtomic } from './atomic.js';
 import { STATE_SCHEMA, assertStateSupported, readStateSchema } from './state-schema.js';
-import { withTaskLock } from './tasks.js';
+import { withTaskLock } from './tasks/records/tasks.js';
 
 /**
  * Backups of ALP's data and their restore (plans/reference/ALPD.md §68).

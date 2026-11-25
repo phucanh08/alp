@@ -1,11 +1,11 @@
 import { mkdir, readFile, readdir, rmdir, stat, writeFile } from 'node:fs/promises';
-import { moveFile } from './atomic.js';
+import { moveFile } from '../../atomic.js';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { AlpError } from './errors.js';
-import { assertNoSymlinks } from './safe-path.js';
-import { describeVerification } from './verify.js';
-import { applyLedger, ledgerAdopt, ledgerPrune, ledgerResolve, readLedger } from './gate-ledger.js';
+import { AlpError } from '../../errors.js';
+import { assertNoSymlinks } from '../../safe-path.js';
+import { describeVerification } from '../../verify.js';
+import { applyLedger, ledgerAdopt, ledgerPrune, ledgerResolve, readLedger } from '../gate-ledger.js';
 
 /**
  * ALP sets this in the environment of every agent process it starts (t-ca1f). The CLI and

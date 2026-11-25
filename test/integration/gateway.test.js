@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { initProject } from '../../packages/core/src/init.js';
-import { addGate, getTask } from '../../packages/core/src/tasks.js';
+import { addGate, getTask } from '../../packages/core/src/tasks/records/tasks.js';
 import { connectSocket, readLock } from '../../packages/client/src/index.js';
 import { AlpRpcClient, createReconnectingClient, hello, isAlpClientError } from '../../packages/client/src/portable.js';
 import { connectWebSocket } from '../../packages/client/src/websocket.js';
