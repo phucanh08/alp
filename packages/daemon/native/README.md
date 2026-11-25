@@ -1,6 +1,6 @@
 # Terminal native owner — candidate, platform matrix incomplete
 
-Task t-d71b. Production `src/terminals.ts` now uses this identity-bound owner,
+Task t-d71b. Production `src/terminals/terminals.ts` now uses this identity-bound owner,
 with no node-pty fallback on macOS or Linux. Linux may use the best-effort root-only mode described below;
 Windows has no protection helper and uses node-pty (ConPTY), best-effort (see "Windows" below). This candidate is NOT accepted for release:
 actual Linux (beyond CI capability checks) and Windows evidence remain missing. Missing or
@@ -185,7 +185,7 @@ Rosetta execution is claimed as Linux or physical-x64/minimum-macOS proof.
 ## Windows (best-effort, no protection helper)
 
 There is no Windows native owner and pack-check requires no Windows slot. On win32,
-`src/terminals.ts` spawns the shell (`%ComSpec%`, else `cmd.exe`) through node-pty
+`src/terminals/terminals.ts` spawns the shell (`%ComSpec%`, else `cmd.exe`) through node-pty
 (ConPTY), the same platform PTY Paseo uses; node-pty is an optional dependency, and
 when it cannot load, terminals refuse with `terminal_unsupported`. Terminals report
 `protection: "none"`, and clients show a "not guaranteed on Windows" notice. Closing,

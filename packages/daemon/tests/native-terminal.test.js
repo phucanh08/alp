@@ -76,7 +76,7 @@ test('default service owns a real terminal without node-pty injection', { skip }
   const path = await import('node:path');
   const home = await mkdtemp(path.join(tmpdir(), 'alpd-native-default-'));
   await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
-  const { createTerminalService } = await import('../dist/terminals.js');
+  const { createTerminalService } = await import('../dist/terminals/terminals.js');
   const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} }, killGraceMs: 100 });
   t.after(async () => { await service.shutdown(); await rm(home, { recursive: true, force: true }); });
   const owner = { id: 'owner', epoch: 'e' }, sink = { send() {} };

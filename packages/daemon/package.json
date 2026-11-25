@@ -38,11 +38,11 @@
     },
     "./terminals": {
       "alp-source": {
-        "types": "./src/terminals.ts",
-        "default": "./src/terminals.ts"
+        "types": "./src/terminals/terminals.ts",
+        "default": "./src/terminals/terminals.ts"
       },
-      "types": "./dist/terminals.d.ts",
-      "default": "./dist/terminals.js"
+      "types": "./dist/terminals/terminals.d.ts",
+      "default": "./dist/terminals/terminals.js"
     },
     "./conversation": {
       "alp-source": {
