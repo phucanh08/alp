@@ -1,7 +1,7 @@
 {
   "name": "alp-desktop",
   "productName": "ALP",
-  "version": "0.0.1-beta.13",
+  "version": "0.0.1-beta.14",
   "private": true,
   "description": "ALP desktop shell for macOS: opens the user's installed alp dashboard in its own window (D32).",
   "main": "dist/main.cjs",
