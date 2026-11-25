@@ -326,6 +326,10 @@ test('the CLI package must pack alp dashboard: alp-dashboard.js, its app and the
   const found = shippedWebProblems('@anhlp/alp-cli', [...cli, 'src/dashboard/main.js']);
   assert.equal(found.length, 1);
   assert.match(found[0], /bundled-only .* is packed/);
+  // The dashboard's per-file JavaScript (dist/dashboard/, built for the CLI's tests) is bundled-only too.
+  const built = shippedWebProblems('@anhlp/alp-cli', [...cli, 'dist/dashboard/main.js']);
+  assert.equal(built.length, 1);
+  assert.match(built[0], /bundled-only dist\/dashboard\/ is packed/);
   for (const file of cli) {
     const missing = shippedWebProblems('@anhlp/alp-cli', cli.filter(entry => entry !== file));
     assert.equal(missing.length, 1);

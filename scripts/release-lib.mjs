@@ -173,8 +173,12 @@ export const SHIPPED_WEB_FILES = Object.freeze({
 export function shippedWebProblems(name, files) {
   const packed = new Set(files);
   const problems = (SHIPPED_WEB_FILES[name] ?? []).filter(file => !packed.has(file)).map(file => `${name}: ${file} is not packed; alp dashboard cannot run (build the CLI with apps/gateway and apps/web present)`);
-  const sourcePrefix = name === '@anhlp/alp-cli' ? 'src/dashboard/' : undefined;
-  if (sourcePrefix && [...packed].some(file => file.startsWith(sourcePrefix))) problems.push(`${name}: bundled-only ${sourcePrefix} is packed; it imports the unpublished gateway (ship dist/alp-dashboard.js instead)`);
+  // The dashboard's sources, and the per-file JavaScript built from them for the CLI's own tests: both import the
+  // unpublished gateway, and only the self-contained dist/alp-dashboard.js ships.
+  const bundledOnly = name === '@anhlp/alp-cli' ? ['src/dashboard/', 'dist/dashboard/'] : [];
+  for (const prefix of bundledOnly) {
+    if ([...packed].some(file => file.startsWith(prefix))) problems.push(`${name}: bundled-only ${prefix} is packed; it imports the unpublished gateway (ship dist/alp-dashboard.js instead)`);
+  }
   return problems;
 }
 
