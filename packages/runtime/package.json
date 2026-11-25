@@ -115,11 +115,11 @@
     },
     "./live": {
       "alp-source": {
-        "types": "./src/live.ts",
-        "default": "./src/live.ts"
+        "types": "./src/sessions/lifecycle/live.ts",
+        "default": "./src/sessions/lifecycle/live.ts"
       },
-      "types": "./dist/live.d.ts",
-      "default": "./dist/live.js"
+      "types": "./dist/sessions/lifecycle/live.d.ts",
+      "default": "./dist/sessions/lifecycle/live.js"
     },
     "./mailbox": {
       "alp-source": {
@@ -195,11 +195,11 @@
     },
     "./session-config": {
       "alp-source": {
-        "types": "./src/session-config.ts",
-        "default": "./src/session-config.ts"
+        "types": "./src/sessions/configuration/session-config.ts",
+        "default": "./src/sessions/configuration/session-config.ts"
       },
-      "types": "./dist/session-config.d.ts",
-      "default": "./dist/session-config.js"
+      "types": "./dist/sessions/configuration/session-config.d.ts",
+      "default": "./dist/sessions/configuration/session-config.js"
     },
     "./tools": {
       "alp-source": {

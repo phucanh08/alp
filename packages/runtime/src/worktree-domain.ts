@@ -8,7 +8,7 @@ import { nativeEnvironment } from './providers/providers.js';
 import { mainOf } from './tools.js';
 import { errorData, plainObject, toolResult } from './tool-results.js';
 import type { RuntimeOptions } from './contracts.js';
-import type { Session, Assignment } from './session-state.js';
+import type { Session, Assignment } from './sessions/lifecycle/session-state.js';
 
 type WorktreeContext = {
   options: RuntimeOptions;

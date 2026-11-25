@@ -1,14 +1,14 @@
 import { TASKS_DIR } from '@anhlp/alp-core/tasks';
 import { ADVISORS, type PermissionProfile } from '@anhlp/alp-core/permissions';
 import { anyModel, profileModel } from '@anhlp/alp-core/profiles';
-import type { ResolvedSession, RuntimeKind } from './resolve.js';
-import { models, thinkingOptionsFor } from './catalog.js';
-import { claudeSandboxAvailable, SKILL_PLUGIN } from './providers/transports/claude-transport.js';
-import { languageInstruction } from './language.js';
-import { antigravityModeText } from './providers/transports/antigravity-transport.js';
-import { HANDOFF_TOOL, WAIT_TOOL, SEND_TOOL, MERGE_TOOL, VERIFY_TOOL, DISCARD_TOOL, RESOLVE_TOOL, CANCEL_TOOL, RECALL_TOOL, PIN_TOOL, BOARD_TOOL, UNPIN_TOOL, ASK_TOOL, LESSON_TOOL, LESSON_CURATE_TOOL, SKILL_TOOL, SKILL_RETIRE_TOOL, ISSUE_TOOL, SCHEDULE_TOOL, STRATEGY_TOOL, choosesStrategy, mainOf, roleOf, taskActions, taskTool } from './tools.js';
+import type { ResolvedSession, RuntimeKind } from '../../resolve.js';
+import { models, thinkingOptionsFor } from '../../catalog.js';
+import { claudeSandboxAvailable, SKILL_PLUGIN } from '../../providers/transports/claude-transport.js';
+import { languageInstruction } from '../../language.js';
+import { antigravityModeText } from '../../providers/transports/antigravity-transport.js';
+import { HANDOFF_TOOL, WAIT_TOOL, SEND_TOOL, MERGE_TOOL, VERIFY_TOOL, DISCARD_TOOL, RESOLVE_TOOL, CANCEL_TOOL, RECALL_TOOL, PIN_TOOL, BOARD_TOOL, UNPIN_TOOL, ASK_TOOL, LESSON_TOOL, LESSON_CURATE_TOOL, SKILL_TOOL, SKILL_RETIRE_TOOL, ISSUE_TOOL, SCHEDULE_TOOL, STRATEGY_TOOL, choosesStrategy, mainOf, roleOf, taskActions, taskTool } from '../../tools.js';
 
-import { COMPACT_SHARE } from './runtime-context.js';
+import { COMPACT_SHARE } from '../../runtime-context.js';
 
 /** The mode the native harness runs with: a session in a copy writes the copy, though ALP treats it as read-only. */
 export const nativeMode = (mapping: Pick<ResolvedSession, 'mode' | 'copy'> & Partial<Pick<ResolvedSession, 'runtimeKind' | 'antigravity'>>) =>

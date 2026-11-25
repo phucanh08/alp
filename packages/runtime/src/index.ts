@@ -38,4 +38,4 @@ export { ProviderRegistry, createProviderRegistry } from './providers/providers.
 export type { ProviderContext, ProviderFactory, ProviderFactories } from './providers/providers.js';
 export { acpToolDetail, antigravityToolDetail, boundDetail, claudeToolDetail, clipText, codexToolCall, stripReadGutter, toolError, DETAIL_FILE_PATHS, DETAIL_TEXT_CHARS, DETAIL_WEB_RESULTS, ERROR_CHARS, TOOL_FAILED } from './tool-detail.js';
 export type { AcpCall, ClaudeResult, CodexToolCall, ToolCallDetail } from './tool-detail.js';
-export { checkpointPrompt, compactDue, compactSettings, contextFill, seedPrompt, COMPACT_DEFAULTS } from './compact.js';
+export { checkpointPrompt, compactDue, compactSettings, contextFill, seedPrompt, COMPACT_DEFAULTS } from './sessions/conversation/compact.js';

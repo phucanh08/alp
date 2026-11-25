@@ -58,7 +58,7 @@ try {
   const lead = opened.find(session => session.agent === 'lead');
   const peer = opened.find(session => session.agent === 'peer');
   // Every message of main, in any of its turns. alp_delegate runs in the background by default and its
-  // result comes to main as mail (packages/runtime/src/session-config.ts), which can wake main in a
+  // result comes to main as mail (packages/runtime/src/sessions/configuration/session-config.ts), which can wake main in a
   // later turn of origin 'wake'; and `alp run` follows main until it is idle, so after that answer the
   // stream can hold Cafe's supervisor check-in (t-beb5). The last message, or the user's turn alone,
   // is therefore not where the proof must be. The token exists only in the peer's AGENT.md, so main
