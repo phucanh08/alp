@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createLogger, readLogTail, redact, scrubText } from '../src/log.js';
+import { createLogger, readLogTail, redact, scrubText } from '@anhlp/alp-core/log';
 
 const SECRETS = [
   'sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789',

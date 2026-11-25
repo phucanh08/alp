@@ -5,8 +5,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initProject } from '../../packages/core/src/init.js';
-import { addGate, GATE_REJECT_LABELS, blockersOf, checkGates, gateDecisions, gatesOf, closeTask, compactTasks, createTask, markGateNotified, rejectGate, resolveGate, startRefusal, getTask, linkTask, listTasks, loadTasks, readyTasks, releaseTask, reopenTask, startTask, submitTask, taskDigest, updateTask } from '../../packages/core/src/tasks/records/tasks.js';
+import { initProject } from '@anhlp/alp-core/init';
+import { addGate, GATE_REJECT_LABELS, blockersOf, checkGates, gateDecisions, gatesOf, closeTask, compactTasks, createTask, markGateNotified, rejectGate, resolveGate, startRefusal, getTask, linkTask, listTasks, loadTasks, readyTasks, releaseTask, reopenTask, startTask, submitTask, taskDigest, updateTask } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime, claudeToolShapes } from '../../dist/runtime/index.js';
 
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { listProviders } from '../src/providers.js';
+import { listProviders } from '@anhlp/alp-core/providers';
 
 test('listProviders: with onError an invalid file is reported and skipped; without it the list fails', async t => {
   const library = await mkdtemp(path.join(tmpdir(), 'alp-providers-'));
@@ -22,7 +22,7 @@ test('legacy readOnlyMode loads with migration guidance but cannot be newly conf
   const { mkdtemp, mkdir, writeFile, readFile, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const path = await import('node:path');
-  const { loadProvider, validateProvider, PROVIDER_SETTINGS } = await import('../src/providers.js');
+  const { loadProvider, validateProvider, PROVIDER_SETTINGS } = await import('@anhlp/alp-core/providers');
   const home = await mkdtemp(path.join(tmpdir(), 'alp-provider-migration-'));
   t.after(() => rm(home, { recursive: true, force: true }));
   await mkdir(path.join(home, 'providers'));

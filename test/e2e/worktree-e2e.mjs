@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../../packages/core/src/init.js';
+import { initProject } from '@anhlp/alp-core/init';
 
 const model = process.env.ALP_TEST_MODEL ?? 'codex:gpt-5.6-sol';
 const home = await mkdtemp(path.join(tmpdir(), 'alp-worktree-e2e-'));

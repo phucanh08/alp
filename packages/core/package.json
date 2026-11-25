@@ -12,304 +12,304 @@
   "exports": {
     "./adapter": {
       "alp-source": {
-        "types": "./src/adapter.js",
-        "default": "./src/adapter.js"
+        "types": "./src/adapter.ts",
+        "default": "./src/adapter.ts"
       },
       "types": "./dist/adapter.d.ts",
-      "default": "./src/adapter.js"
+      "default": "./dist/adapter.js"
     },
     "./atomic": {
       "alp-source": {
-        "types": "./src/atomic.js",
-        "default": "./src/atomic.js"
+        "types": "./src/atomic.ts",
+        "default": "./src/atomic.ts"
       },
       "types": "./dist/atomic.d.ts",
-      "default": "./src/atomic.js"
+      "default": "./dist/atomic.js"
     },
     "./backup": {
       "alp-source": {
-        "types": "./src/backup.js",
-        "default": "./src/backup.js"
+        "types": "./src/backup.ts",
+        "default": "./src/backup.ts"
       },
       "types": "./dist/backup.d.ts",
-      "default": "./src/backup.js"
+      "default": "./dist/backup.js"
     },
     "./beads": {
       "alp-source": {
-        "types": "./src/tasks/beads.js",
-        "default": "./src/tasks/beads.js"
+        "types": "./src/tasks/beads.ts",
+        "default": "./src/tasks/beads.ts"
       },
       "types": "./dist/tasks/beads.d.ts",
-      "default": "./src/tasks/beads.js"
+      "default": "./dist/tasks/beads.js"
     },
     "./delegation": {
       "alp-source": {
-        "types": "./src/delegation.js",
-        "default": "./src/delegation.js"
+        "types": "./src/delegation.ts",
+        "default": "./src/delegation.ts"
       },
       "types": "./dist/delegation.d.ts",
-      "default": "./src/delegation.js"
+      "default": "./dist/delegation.js"
     },
     "./errors": {
       "alp-source": {
-        "types": "./src/errors.js",
-        "default": "./src/errors.js"
+        "types": "./src/errors.ts",
+        "default": "./src/errors.ts"
       },
       "types": "./dist/errors.d.ts",
-      "default": "./src/errors.js"
+      "default": "./dist/errors.js"
     },
     "./formulas": {
       "alp-source": {
-        "types": "./src/tasks/formulas.js",
-        "default": "./src/tasks/formulas.js"
+        "types": "./src/tasks/formulas.ts",
+        "default": "./src/tasks/formulas.ts"
       },
       "types": "./dist/tasks/formulas.d.ts",
-      "default": "./src/tasks/formulas.js"
+      "default": "./dist/tasks/formulas.js"
     },
     "./hook-run": {
       "alp-source": {
-        "types": "./src/hook-run.js",
-        "default": "./src/hook-run.js"
+        "types": "./src/hook-run.ts",
+        "default": "./src/hook-run.ts"
       },
       "types": "./dist/hook-run.d.ts",
-      "default": "./src/hook-run.js"
+      "default": "./dist/hook-run.js"
     },
     "./hooks": {
       "alp-source": {
-        "types": "./src/hooks.js",
-        "default": "./src/hooks.js"
+        "types": "./src/hooks.ts",
+        "default": "./src/hooks.ts"
       },
       "types": "./dist/hooks.d.ts",
-      "default": "./src/hooks.js"
+      "default": "./dist/hooks.js"
     },
     "./index": {
       "alp-source": {
-        "types": "./src/index.js",
-        "default": "./src/index.js"
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
       },
       "types": "./dist/index.d.ts",
-      "default": "./src/index.js"
+      "default": "./dist/index.js"
     },
     ".": {
       "alp-source": {
-        "types": "./src/index.js",
-        "default": "./src/index.js"
+        "types": "./src/index.ts",
+        "default": "./src/index.ts"
       },
       "types": "./dist/index.d.ts",
-      "default": "./src/index.js"
+      "default": "./dist/index.js"
     },
     "./init": {
       "alp-source": {
-        "types": "./src/init.js",
-        "default": "./src/init.js"
+        "types": "./src/init.ts",
+        "default": "./src/init.ts"
       },
       "types": "./dist/init.d.ts",
-      "default": "./src/init.js"
+      "default": "./dist/init.js"
     },
     "./library-edit": {
       "alp-source": {
-        "types": "./src/library/entries/library-edit.js",
-        "default": "./src/library/entries/library-edit.js"
+        "types": "./src/library/entries/library-edit.ts",
+        "default": "./src/library/entries/library-edit.ts"
       },
       "types": "./dist/library/entries/library-edit.d.ts",
-      "default": "./src/library/entries/library-edit.js"
+      "default": "./dist/library/entries/library-edit.js"
     },
     "./library": {
       "alp-source": {
-        "types": "./src/library/entries/library.js",
-        "default": "./src/library/entries/library.js"
+        "types": "./src/library/entries/library.ts",
+        "default": "./src/library/entries/library.ts"
       },
       "types": "./dist/library/entries/library.d.ts",
-      "default": "./src/library/entries/library.js"
+      "default": "./dist/library/entries/library.js"
     },
     "./log": {
       "alp-source": {
-        "types": "./src/log.js",
-        "default": "./src/log.js"
+        "types": "./src/log.ts",
+        "default": "./src/log.ts"
       },
       "types": "./dist/log.d.ts",
-      "default": "./src/log.js"
+      "default": "./dist/log.js"
     },
     "./migrations": {
       "alp-source": {
-        "types": "./src/migrations.js",
-        "default": "./src/migrations.js"
+        "types": "./src/migrations.ts",
+        "default": "./src/migrations.ts"
       },
       "types": "./dist/migrations.d.ts",
-      "default": "./src/migrations.js"
+      "default": "./dist/migrations.js"
     },
     "./models": {
       "alp-source": {
-        "types": "./src/models.js",
-        "default": "./src/models.js"
+        "types": "./src/models.ts",
+        "default": "./src/models.ts"
       },
       "types": "./dist/models.d.ts",
-      "default": "./src/models.js"
+      "default": "./dist/models.js"
     },
     "./permissions": {
       "alp-source": {
-        "types": "./src/permissions.js",
-        "default": "./src/permissions.js"
+        "types": "./src/permissions.ts",
+        "default": "./src/permissions.ts"
       },
       "types": "./dist/permissions.d.ts",
-      "default": "./src/permissions.js"
+      "default": "./dist/permissions.js"
     },
     "./profiles": {
       "alp-source": {
-        "types": "./src/profiles.js",
-        "default": "./src/profiles.js"
+        "types": "./src/profiles.ts",
+        "default": "./src/profiles.ts"
       },
       "types": "./dist/profiles.d.ts",
-      "default": "./src/profiles.js"
+      "default": "./dist/profiles.js"
     },
     "./promptsafe": {
       "alp-source": {
-        "types": "./src/promptsafe.js",
-        "default": "./src/promptsafe.js"
+        "types": "./src/promptsafe.ts",
+        "default": "./src/promptsafe.ts"
       },
       "types": "./dist/promptsafe.d.ts",
-      "default": "./src/promptsafe.js"
+      "default": "./dist/promptsafe.js"
     },
     "./providers": {
       "alp-source": {
-        "types": "./src/providers.js",
-        "default": "./src/providers.js"
+        "types": "./src/providers.ts",
+        "default": "./src/providers.ts"
       },
       "types": "./dist/providers.d.ts",
-      "default": "./src/providers.js"
+      "default": "./dist/providers.js"
     },
     "./resolver": {
       "alp-source": {
-        "types": "./src/resolver.js",
-        "default": "./src/resolver.js"
+        "types": "./src/resolver.ts",
+        "default": "./src/resolver.ts"
       },
       "types": "./dist/resolver.d.ts",
-      "default": "./src/resolver.js"
+      "default": "./dist/resolver.js"
     },
     "./state-schema": {
       "alp-source": {
-        "types": "./src/state-schema.js",
-        "default": "./src/state-schema.js"
+        "types": "./src/state-schema.ts",
+        "default": "./src/state-schema.ts"
       },
       "types": "./dist/state-schema.d.ts",
-      "default": "./src/state-schema.js"
+      "default": "./dist/state-schema.js"
     },
     "./task-rows": {
       "alp-source": {
-        "types": "./src/tasks/records/task-rows.js",
-        "default": "./src/tasks/records/task-rows.js"
+        "types": "./src/tasks/records/task-rows.ts",
+        "default": "./src/tasks/records/task-rows.ts"
       },
       "types": "./dist/tasks/records/task-rows.d.ts",
-      "default": "./src/tasks/records/task-rows.js"
+      "default": "./dist/tasks/records/task-rows.js"
     },
     "./tasks": {
       "alp-source": {
-        "types": "./src/tasks/records/tasks.js",
-        "default": "./src/tasks/records/tasks.js"
+        "types": "./src/tasks/records/tasks.ts",
+        "default": "./src/tasks/records/tasks.ts"
       },
       "types": "./dist/tasks/records/tasks.d.ts",
-      "default": "./src/tasks/records/tasks.js"
+      "default": "./dist/tasks/records/tasks.js"
     },
     "./teams": {
       "alp-source": {
-        "types": "./src/teams.js",
-        "default": "./src/teams.js"
+        "types": "./src/teams.ts",
+        "default": "./src/teams.ts"
       },
       "types": "./dist/teams.d.ts",
-      "default": "./src/teams.js"
+      "default": "./dist/teams.js"
     },
     "./trust": {
       "alp-source": {
-        "types": "./src/trust.js",
-        "default": "./src/trust.js"
+        "types": "./src/trust.ts",
+        "default": "./src/trust.ts"
       },
       "types": "./dist/trust.d.ts",
-      "default": "./src/trust.js"
+      "default": "./dist/trust.js"
     },
     "./upgrade": {
       "alp-source": {
-        "types": "./src/upgrade.js",
-        "default": "./src/upgrade.js"
+        "types": "./src/upgrade.ts",
+        "default": "./src/upgrade.ts"
       },
       "types": "./dist/upgrade.d.ts",
-      "default": "./src/upgrade.js"
+      "default": "./dist/upgrade.js"
     },
     "./user-settings": {
       "alp-source": {
-        "types": "./src/user-settings.js",
-        "default": "./src/user-settings.js"
+        "types": "./src/user-settings.ts",
+        "default": "./src/user-settings.ts"
       },
       "types": "./dist/user-settings.d.ts",
-      "default": "./src/user-settings.js"
+      "default": "./dist/user-settings.js"
     },
     "./validation": {
       "alp-source": {
-        "types": "./src/validation.js",
-        "default": "./src/validation.js"
+        "types": "./src/validation.ts",
+        "default": "./src/validation.ts"
       },
       "types": "./dist/validation.d.ts",
-      "default": "./src/validation.js"
+      "default": "./dist/validation.js"
     },
     "./verify": {
       "alp-source": {
-        "types": "./src/verify.js",
-        "default": "./src/verify.js"
+        "types": "./src/verify.ts",
+        "default": "./src/verify.ts"
       },
       "types": "./dist/verify.d.ts",
-      "default": "./src/verify.js"
+      "default": "./dist/verify.js"
     },
     "./workflow": {
       "alp-source": {
-        "types": "./src/workflow.js",
-        "default": "./src/workflow.js"
+        "types": "./src/workflow.ts",
+        "default": "./src/workflow.ts"
       },
       "types": "./dist/workflow.d.ts",
-      "default": "./src/workflow.js"
+      "default": "./dist/workflow.js"
     },
     "./types": {
       "alp-source": {
-        "types": "./src/types.d.ts"
+        "types": "./src/types.ts"
       },
       "types": "./dist/types.d.ts"
     },
     "./template-path": {
       "alp-source": {
-        "types": "./src/template-path.js"
+        "types": "./src/template-path.ts"
       },
       "types": "./dist/template-path.d.ts",
-      "default": "./src/template-path.js"
+      "default": "./dist/template-path.js"
     },
     "./bridges": {
       "alp-source": {
-        "types": "./src/bridges.js",
-        "default": "./src/bridges.js"
+        "types": "./src/bridges.ts",
+        "default": "./src/bridges.ts"
       },
       "types": "./dist/bridges.d.ts",
-      "default": "./src/bridges.js"
+      "default": "./dist/bridges.js"
     },
     "./packaged": {
       "alp-source": {
-        "types": "./src/packaged.js",
-        "default": "./src/packaged.js"
+        "types": "./src/packaged.ts",
+        "default": "./src/packaged.ts"
       },
       "types": "./dist/packaged.d.ts",
-      "default": "./src/packaged.js"
+      "default": "./dist/packaged.js"
     },
     "./skill-validate": {
       "alp-source": {
-        "types": "./src/library/templates/skill-validate.js",
-        "default": "./src/library/templates/skill-validate.js"
+        "types": "./src/library/templates/skill-validate.ts",
+        "default": "./src/library/templates/skill-validate.ts"
       },
       "types": "./dist/library/templates/skill-validate.d.ts",
-      "default": "./src/library/templates/skill-validate.js"
+      "default": "./dist/library/templates/skill-validate.js"
     },
     "./packs": {
       "alp-source": {
-        "types": "./src/library/templates/packs.js",
-        "default": "./src/library/templates/packs.js"
+        "types": "./src/library/templates/packs.ts",
+        "default": "./src/library/templates/packs.ts"
       },
       "types": "./dist/library/templates/packs.d.ts",
-      "default": "./src/library/templates/packs.js"
+      "default": "./dist/library/templates/packs.js"
     }
   },
   "engines": {

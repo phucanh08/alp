@@ -5,12 +5,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
-import { initProject } from '../../packages/core/src/init.js';
-import { getEntry, listEntries, saveEntry } from '../../packages/core/src/library/entries/library-edit.js';
+import { initProject } from '@anhlp/alp-core/init';
+import { getEntry, listEntries, saveEntry } from '@anhlp/alp-core/library-edit';
 import { testEntry } from '../../packages/client/src/library-test.js';
 import { diagnose } from '../../packages/client/src/doctor.js';
 import { probeAntigravity } from '../../packages/client/src/antigravity-probe.js';
-import { validateProvider } from '../../packages/core/src/providers.js';
+import { validateProvider } from '@anhlp/alp-core/providers';
 import { createAlpRuntime, resolveSession, AntigravityTransport } from '../../dist/runtime/index.js';
 import { teardown } from '../support/teardown.js';
 

@@ -61,7 +61,7 @@ test('the boundary checker rejects process.execPath outside the runtime-neutral 
   await write('package.json', JSON.stringify({ private: true, workspaces: ['packages/core', 'packages/daemon'] }));
   await write('packages/core/package.json', JSON.stringify({ name: '@anhlp/alp-core', version: '0.0.0' }));
   await write('packages/daemon/package.json', JSON.stringify({ name: '@anhlp/alp-daemon', version: '0.0.0' }));
-  await write('packages/core/src/packaged.js', "export const self = () => process.execPath;\n");
+  await write('packages/core/src/packaged.ts', "export const self = () => process.execPath;\n");
   await write('packages/daemon/src/ok.ts', "export function start({ execPath = process.execPath } = {}) { return execPath; }\nexport const shown = { nodePath: process.execPath /* alp-allow-execpath: reported only */ };\n");
   await write('packages/daemon/tests/spawn.test.js', "import { spawn } from 'node:child_process';\nspawn(process.execPath, ['x.js']);\n");
   const check = () => { const result = spawnSync(process.execPath, ['scripts/check-boundaries.mjs', '--root', fixture], { cwd: root, encoding: 'utf8' }); return { status: result.status, output: (result.stdout + result.stderr).replaceAll('\\', '/') }; };
@@ -72,7 +72,7 @@ test('the boundary checker rejects process.execPath outside the runtime-neutral 
   assert.equal(stray.status, 1, stray.output);
   assert.match(stray.output, /packages\/daemon\/src\/main\.ts:2: process\.execPath outside @anhlp\/alp-core\/packaged/);
   assert.match(stray.output, /packages\/daemon\/src\/main\.ts:3: process\.execPath outside/);
-  assert.doesNotMatch(stray.output, /ok\.ts|spawn\.test\.js|packaged\.js/);
+  assert.doesNotMatch(stray.output, /ok\.ts|spawn\.test\.js|packaged\.ts/);
 });
 
 test('the CLI may bundle the private gateway only as a devDependency; other packages may not depend on it', async t => {

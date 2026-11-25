@@ -405,10 +405,10 @@ test('bundleCommand runs the bundle\'s own Node and CLI', () => {
 
 test('the CLI routes update-template to the template upgrade and update to the self-update', () => {
   const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
-  const usage = spawnSync(process.execPath, ['--conditions=alp-source', cli], { encoding: 'utf8', env: { ...process.env, ALP_HOME: path.join(tmpdir(), 'alp-none') } });
+  const usage = spawnSync(process.execPath, [cli], { encoding: 'utf8', env: { ...process.env, ALP_HOME: path.join(tmpdir(), 'alp-none') } });
   assert.match(usage.stderr, /alp <init\|update-template> \[directory\]/);
   assert.match(usage.stderr, /alp update \[--check\] \[--yes\] \[--version X\]/);
-  const npm = spawnSync(process.execPath, ['--conditions=alp-source', cli, 'update', '.'], { encoding: 'utf8', env: { ...process.env, ALP_HOME: path.join(tmpdir(), 'alp-none') } });
+  const npm = spawnSync(process.execPath, [cli, 'update', '.'], { encoding: 'utf8', env: { ...process.env, ALP_HOME: path.join(tmpdir(), 'alp-none') } });
   assert.equal(npm.status, 0, npm.stderr);
   assert.match(npm.stdout, /did you mean `alp update-template`/);
   assert.match(npm.stdout, /npm install -g @anhlp\/alp@beta/);

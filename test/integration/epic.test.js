@@ -5,8 +5,8 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initProject } from '../../packages/core/src/init.js';
-import { closeTask, createTask, epicReport, landedParents, loadTasks, recordVerification, startTask, submitTask, taskDigest } from '../../packages/core/src/tasks/records/tasks.js';
+import { initProject } from '@anhlp/alp-core/init';
+import { closeTask, createTask, epicReport, landedParents, loadTasks, recordVerification, startTask, submitTask, taskDigest } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 
 const CLI = fileURLToPath(new URL('../../packages/cli/src/cli.js', import.meta.url));

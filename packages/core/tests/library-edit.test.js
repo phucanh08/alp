@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, rm, writeFile, mkdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { initProject } from '../src/init.js';
-import { resolveAgent } from '../src/resolver.js';
-import { resolveTeam } from '../src/teams.js';
-import { deleteEntry, duplicateEntry, getEntry, listEntries, listRetiredSkills, renameEntry, restoreSkill, saveEntry, setGivenSkills } from '../src/library/entries/library-edit.js';
+import { initProject } from '@anhlp/alp-core/init';
+import { resolveAgent } from '@anhlp/alp-core/resolver';
+import { resolveTeam } from '@anhlp/alp-core/teams';
+import { deleteEntry, duplicateEntry, getEntry, listEntries, listRetiredSkills, renameEntry, restoreSkill, saveEntry, setGivenSkills } from '@anhlp/alp-core/library-edit';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-edit-'));
@@ -286,12 +286,12 @@ test('copying a skill copies its whole directory, bytes and executable bits kept
 });
 
 test('copying or renaming a skill sets its frontmatter name to the new directory (P0)', async t => {
-  const { withSkillName } = await import('../src/library/entries/library-edit.js');
+  const { withSkillName } = await import('@anhlp/alp-core/library-edit');
   assert.equal(withSkillName('---\nname: "old"\ndescription: "D. Use when x."\n---\nBody\n', 'new'), '---\nname: new\ndescription: "D. Use when x."\n---\nBody\n');
   assert.equal(withSkillName('---\r\ndescription: x\r\n---\r\nBody\r\n', 'new'), '---\r\nname: new\r\ndescription: x\r\n---\r\nBody\r\n', 'a missing name is added, line endings kept');
   assert.equal(withSkillName('# No frontmatter\n', 'new'), '# No frontmatter\n', 'a legacy skill is left as it is');
   const { root, library, options } = await setup(t);
-  const { validateSkill } = await import('../src/library/templates/skill-validate.js');
+  const { validateSkill } = await import('@anhlp/alp-core/skill-validate');
   const source = path.join(library, 'skills', 'review-api');
   await mkdir(path.join(source, 'references'), { recursive: true });
   await writeFile(path.join(source, 'SKILL.md'), '---\nname: review-api\ndescription: "Review an API change. Use when an endpoint changes."\n---\n\nSee [references/a.md](references/a.md).\n');

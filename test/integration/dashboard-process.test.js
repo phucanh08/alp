@@ -15,8 +15,8 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createDaemonServer } from '../../dist/daemon/index.js';
 import { createPaseoBridge } from '../../integrations/paseo/server/dist/index.js';
-import { initProject } from '../../packages/core/src/init.js';
-import { seedLibrary } from '../../packages/core/src/library/entries/library.js';
+import { initProject } from '@anhlp/alp-core/init';
+import { seedLibrary } from '@anhlp/alp-core/library';
 import { fakeTransport } from '../support/fake-agent.js';
 import { fixtureProcesses } from '../support/fixture-processes.js';
 

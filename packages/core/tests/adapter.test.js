@@ -4,8 +4,8 @@ import { mkdtemp, mkdir, writeFile, rm, readdir, readFile } from 'node:fs/promis
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { resolveAgent } from '../src/resolver.js';
-import { compileAgent } from '../src/adapter.js';
+import { resolveAgent } from '@anhlp/alp-core/resolver';
+import { compileAgent } from '@anhlp/alp-core/adapter';
 import { FakeAdapter } from '../../../test/support/fake-adapter.js';
 
 test('fake compiles main and filesystem custom agent without provider dependencies', async t => {

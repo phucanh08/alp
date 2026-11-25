@@ -1,0 +1,190 @@
+import { readdir } from 'node:fs/promises';
+import path from 'node:path';
+import { AlpError } from './errors.js';
+import { builtinText, optionalText } from './resolver.js';
+import { settingsKeys, unknownMessage } from './validation.js';
+
+type LibraryOptions = { library?: string; templates?: Record<string, string> };
+/** Where one team comes from. */
+export type TeamSource = { source: 'builtin' | 'library' | 'project'; directory?: string; overrides?: 'builtin' | 'library' };
+/** A team as resolveTeam returns it, with its house rules. */
+export type ResolvedTeam = {
+  id: string; source: 'builtin' | 'library' | 'project'; label: string; description?: string; main: string;
+  members: Record<string, { role?: string; model?: string; thinking?: string }>; delegation: Record<string, string[]>;
+  oracleThinking?: Record<string, string>; oracleModels?: string[]; maxPeers?: number; maxLeads?: number; supervisor: false | { agent: string; model?: string; thinking?: string };
+  modelSetup?: { mode: string; preset?: string }; houseRules: string;
+};
+/** One row of listTeams. */
+export type TeamRow = { id: string; source: 'builtin' | 'library' | 'project'; label?: string; description?: string; overrides?: 'builtin' | 'library'; path?: string; error?: string };
+
+/**
+ * Teams (ALPD §42): a main agent, its members, who may delegate to whom, and the
+ * house rules every member follows. Phở and Cafe ship as built-in teams; the user's
+ * library (ALP_HOME/teams) and the project (.alp/teams) add teams or override one by
+ * its id, the later layer replacing the team whole.
+ */
+
+export const BUILTIN_TEAMS: string[] = ['pho', 'cafe'];
+export const TEAM_SETTINGS: string[] = ['$schema', 'label', 'description', 'main', 'members', 'delegation', 'maxPeers', 'maxLeads', 'supervisor', 'oracleModels', 'oracleThinking', 'modelSetup'];
+export const TEAM_ROLES: string[] = ['lead', 'peer', 'advisor', 'reviewer'];
+const MEMBER_SETTINGS = ['role', 'model', 'thinking'];
+const SUPERVISOR_SETTINGS = ['agent', 'model', 'thinking'];
+
+/** Names of teams before they were renamed; settings and resumed sessions may still carry them. */
+const aliases: Record<string, string> = { smart: 'pho', supervised: 'cafe' };
+/** The team an id selects, accepting the old names. */
+export const teamOf = (id: string): string => aliases[id] ?? id;
+
+const object = (value: unknown) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const nonempty = (value: unknown) => typeof value === 'string' && value.trim().length > 0;
+const validName = (name: unknown) => typeof name === 'string' && /^[\w.-]+$/.test(name) && name !== '.' && name !== '..';
+
+function keys(value: unknown, known: string[], check: (ok: boolean, message: string) => void, where: string): void {
+  const { unknown } = settingsKeys(value, known);
+  check(!unknown.length, unknown.length ? `${where}${unknownMessage(unknown[0], known)}` : '');
+}
+
+/** Checks a team.json; the delegation graph must name members and stay acyclic. */
+export function validateTeam(config: any, source: string): any { // any: a parsed team.json, checked field by field and returned as given
+  const check = (ok: boolean, message: string) => { if (!ok) throw new AlpError('INVALID_TEAM', `${source}: ${message}`); };
+  check(object(config), 'expected an object');
+  keys(config, TEAM_SETTINGS, check, '');
+  if (config.modelSetup !== undefined) {
+    const setup = config.modelSetup;
+    check(object(setup) && ['default', 'custom'].includes(setup.mode), 'modelSetup.mode must be default or custom');
+    keys(setup, ['mode', 'preset'], check, 'modelSetup: ');
+    if (setup.mode === 'default') check(['claude', 'codex', 'opencode', 'antigravity', 'mix'].includes(setup.preset), 'modelSetup.preset must name a preset');
+    else check(setup.preset === undefined, 'custom modelSetup has no preset');
+  }
+  check(nonempty(config.label), 'label must be a nonempty string');
+  if (config.description !== undefined) check(typeof config.description === 'string', 'description must be a string');
+  check(validName(config.main), 'main must name an agent');
+  check(object(config.members), 'members must map agent names to { role, model, thinking }');
+  check(Object.hasOwn(config.members, config.main), `members must include main (${config.main})`);
+  for (const [name, member] of Object.entries<any>(config.members)) { // any: a member as written in team.json, checked below
+    const where = `members.${name}`;
+    check(validName(name) && object(member), `${where} must be an object under an agent name`);
+    keys(member, MEMBER_SETTINGS, check, `${where}: `);
+    if (name === config.main) check(member.role === undefined || member.role === 'main', `${where}.role: main's role is main`);
+    else check(TEAM_ROLES.includes(member.role), `${where}.role must be one of ${TEAM_ROLES.join(', ')}`);
+    for (const key of ['model', 'thinking']) if (member[key] !== undefined) check(nonempty(member[key]), `${where}.${key} must be a nonempty string`);
+  }
+  check(object(config.delegation), 'delegation must map members to the members they may delegate to');
+  for (const [owner, targets] of Object.entries(config.delegation)) {
+    check(Object.hasOwn(config.members, owner), `delegation.${owner}: not a member`);
+    check(Array.isArray(targets) && new Set(targets).size === targets.length, `delegation.${owner} must list members once each`);
+    for (const target of targets as string[]) check(Object.hasOwn(config.members, target) && target !== config.main, `delegation.${owner}: ${target} is not a member main can be assigned to`);
+  }
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (owner: string) => {
+    check(!visiting.has(owner), `delegation cycle at '${owner}'`);
+    if (visited.has(owner)) return;
+    visiting.add(owner);
+    for (const target of config.delegation[owner] ?? []) visit(target);
+    visiting.delete(owner);
+    visited.add(owner);
+  };
+  for (const owner of Object.keys(config.delegation)) visit(owner);
+  if (config.oracleModels !== undefined) {
+    check(Array.isArray(config.oracleModels) && config.oracleModels.length > 0, 'oracleModels must list runtime-prefixed models');
+    check(config.oracleModels.every((model: unknown) => typeof model === 'string' && /^(codex|claude|antigravity|acp):[^\s]+$/.test(model)) && new Set(config.oracleModels).size === config.oracleModels.length, 'oracleModels must list each model once');
+  }
+  if (config.oracleThinking !== undefined) {
+    check(object(config.oracleThinking), 'oracleThinking must map providers to effort');
+    for (const [provider, effort] of Object.entries(config.oracleThinking)) check((['codex', 'claude', 'antigravity', 'acp'].includes(provider) || /^(codex|claude|antigravity|acp):[^\s]+$/.test(provider)) && ['none', 'off', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'ultracode'].includes(effort as string), 'oracleThinking requires a provider or model ID and a supported effort');
+  }
+  if (config.maxPeers !== undefined) check(Number.isSafeInteger(config.maxPeers) && config.maxPeers >= 1, 'maxPeers must be a positive integer');
+  if (config.maxLeads !== undefined) check(Number.isSafeInteger(config.maxLeads) && config.maxLeads >= 1, 'maxLeads must be a positive integer');
+  if (config.supervisor !== undefined && config.supervisor !== false) {
+    check(object(config.supervisor), 'supervisor must be false or { agent, model, thinking }');
+    keys(config.supervisor, SUPERVISOR_SETTINGS, check, 'supervisor: ');
+    check(validName(config.supervisor.agent), 'supervisor.agent must name an agent');
+    check(!Object.hasOwn(config.members, config.supervisor.agent), 'supervisor.agent watches the team and cannot be a member');
+    for (const key of ['model', 'thinking']) if (config.supervisor[key] !== undefined) check(nonempty(config.supervisor[key]), `supervisor.${key} must be a nonempty string`);
+  }
+  return config;
+}
+
+async function directories(directory: string): Promise<string[]> {
+  try { return (await readdir(directory, { withFileTypes: true })).filter(entry => entry.isDirectory() && validName(entry.name)).map(entry => entry.name).sort(); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error; }
+}
+
+/**
+ * Where each team comes from: built in, then the library, then the project. A team
+ * directory counts only with a team.json. `root` may be undefined outside a project.
+ * @param {string | undefined} root
+ * @param {{ library?: string, templates?: Record<string, string> }} [options]
+ * @returns {Promise<Map<string, { source: 'builtin' | 'library' | 'project', directory?: string, overrides?: 'builtin' | 'library' }>>}
+ */
+export async function teamSources(root: string | undefined, { library, templates }: LibraryOptions = {}): Promise<Map<string, TeamSource>> {
+  const found = new Map<string, TeamSource>();
+  for (const id of BUILTIN_TEAMS) if (await builtinText(`teams/${id}/team.json`, templates) !== undefined) found.set(id, { source: 'builtin' });
+  const layer = async (directory: string, source: 'library' | 'project') => {
+    for (const id of await directories(directory)) {
+      if ((await optionalText(path.join(directory, id, 'team.json'))) === undefined) continue;
+      const previous = found.get(id);
+      found.set(id, { source, directory: path.join(directory, id), ...(previous ? { overrides: previous.source as 'builtin' | 'library' } : {}) });
+    }
+  };
+  if (library) await layer(path.join(library, 'teams'), 'library');
+  // Without a project, only the built-ins and the library apply.
+  if (root !== undefined) await layer(path.join(path.resolve(root), '.alp', 'teams'), 'project');
+  return found;
+}
+
+/**
+ * A team by id, with its house rules.
+ * @param {string | undefined} root
+ * @param {string} id
+ * @param {{ library?: string, templates?: Record<string, string> }} [options]
+ * @returns {Promise<{ id: string, source: 'builtin' | 'library' | 'project', label: string, description?: string, main: string,
+ *   members: Record<string, { role?: string, model?: string, thinking?: string }>, delegation: Record<string, string[]>,
+ *   oracleThinking?: Record<string, string>, oracleModels?: string[], maxPeers?: number, maxLeads?: number, supervisor: false | { agent: string, model?: string, thinking?: string }, houseRules: string }>}
+ */
+export async function resolveTeam(root: string | undefined, id: string, { library, templates }: LibraryOptions = {}): Promise<ResolvedTeam> {
+  const team = teamOf(id);
+  const sources = await teamSources(root, { library, templates });
+  const found = sources.get(team);
+  if (!found) throw new AlpError('TEAM_NOT_FOUND', `Team '${id}' not found; teams: ${[...sources.keys()].join(', ')}`);
+  const where = found.directory ? path.join(found.directory, 'team.json') : `built-in teams/${team}/team.json`;
+  const text = found.directory ? await optionalText(where) : await builtinText(`teams/${team}/team.json`, templates);
+  let config;
+  try { config = JSON.parse(text ?? ''); }
+  catch (cause) { throw new AlpError('INVALID_TEAM', `${where}: ${(cause as Error).message}`, { cause }); }
+  validateTeam(config, where);
+  const houseRules = (found.directory ? await optionalText(path.join(found.directory, 'HOUSE_RULES.md')) : await builtinText(`teams/${team}/HOUSE_RULES.md`, templates)) ?? '';
+  return {
+    id: team, source: found.source, label: config.label,
+    ...(config.description !== undefined ? { description: config.description } : {}),
+    main: config.main, members: config.members, delegation: config.delegation,
+    ...(config.maxPeers !== undefined ? { maxPeers: config.maxPeers } : {}),
+    ...(config.maxLeads !== undefined ? { maxLeads: config.maxLeads } : {}),
+    supervisor: config.supervisor ?? false,
+    oracleModels: config.oracleModels,
+    oracleThinking: config.oracleThinking,
+    ...(config.modelSetup ? { modelSetup: config.modelSetup } : {}),
+    houseRules: houseRules.trim(),
+  };
+}
+
+/**
+ * Every team a project can use, in order: built-in, library, project; with what each overrides.
+ * A team that does not load is listed with its error.
+ * @param {string | undefined} root
+ * @param {{ library?: string, templates?: Record<string, string> }} [options]
+ * @returns {Promise<Array<{ id: string, source: 'builtin' | 'library' | 'project', label?: string, description?: string, overrides?: 'builtin' | 'library', path?: string, error?: string }>>}
+ */
+export async function listTeams(root: string | undefined, options: LibraryOptions = {}): Promise<TeamRow[]> {
+  /** @type {Array<{ id: string, source: 'builtin' | 'library' | 'project', label?: string, description?: string, overrides?: 'builtin' | 'library', path?: string, error?: string }>} */
+  const rows: TeamRow[] = [];
+  for (const [id, source] of await teamSources(root, options)) {
+    let team;
+    try { team = await resolveTeam(root, id, options); }
+    catch (error) { rows.push({ id, source: source.source, ...(source.overrides ? { overrides: source.overrides } : {}), error: (error as Error).message }); continue; }
+    rows.push({ id, source: source.source, label: team.label, ...(team.description !== undefined ? { description: team.description } : {}), ...(source.overrides ? { overrides: source.overrides } : {}), ...(source.directory ? { path: source.directory } : {}) });
+  }
+  const rank = { builtin: 0, library: 1, project: 2 };
+  return rows.sort((a, b) => rank[a.source] - rank[b.source] || (BUILTIN_TEAMS.indexOf(a.id) + 1 || 99) - (BUILTIN_TEAMS.indexOf(b.id) + 1 || 99) || a.id.localeCompare(b.id));
+}

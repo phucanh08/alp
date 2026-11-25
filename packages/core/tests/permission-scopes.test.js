@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { explainProfile, permissionScopes, profileFor } from '../src/permissions.js';
+import { explainProfile, permissionScopes, profileFor } from '@anhlp/alp-core/permissions';
 import { teardown } from '../../../test/support/teardown.js';
 
 async function fixture(t) {

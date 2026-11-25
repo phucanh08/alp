@@ -8,7 +8,7 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createPaseoApi } from '@getpaseo/client';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
-import { initProject } from '../../packages/core/src/init.js';
+import { initProject } from '@anhlp/alp-core/init';
 import { readRunLog, requireScratchDaemon } from './scratch-daemon.mjs';
 
 const { url, runLogDir } = requireScratchDaemon();

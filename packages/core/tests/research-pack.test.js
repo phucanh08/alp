@@ -4,10 +4,10 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { installPack, listPacks, validatePack } from '../src/library/templates/packs.js';
-import { ADVISORS, READ_ONLY_ROLES, commandDecision, profileFor } from '../src/permissions.js';
-import { BUILTIN_AGENTS, resolveAgent } from '../src/resolver.js';
-import { TEAM_ROLES, resolveTeam } from '../src/teams.js';
+import { installPack, listPacks, validatePack } from '@anhlp/alp-core/packs';
+import { ADVISORS, READ_ONLY_ROLES, commandDecision, profileFor } from '@anhlp/alp-core/permissions';
+import { BUILTIN_AGENTS, resolveAgent } from '@anhlp/alp-core/resolver';
+import { TEAM_ROLES, resolveTeam } from '@anhlp/alp-core/teams';
 
 // The research pack: two read-only advisors (librarian, scout) and two variant teams. Phở and Cafe stay as they are.
 

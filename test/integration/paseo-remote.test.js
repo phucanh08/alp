@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { initProject } from '../../packages/core/src/init.js';
+import { initProject } from '@anhlp/alp-core/init';
 import { connectSocket, readLock } from '../../packages/client/src/index.js';
 import { AlpRpcClient, hello } from '../../packages/client/src/portable.js';
 
