@@ -109,7 +109,7 @@ async function until(check, what) {
   assert.fail(`${what} did not arrive`);
 }
 
-/** Delegates one workspace-write assignment and returns what the requester's alp_delegate got back. */
+/** Delegates one workspace-write assignment that agy's denial fails, and returns what the requester's alp_delegate got back. */
 async function delegate({ runtime, events }) {
   const task = 'Open the library skill you need, then make the change and file your handoff.';
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: `call_tool alp_delegate ${JSON.stringify({ agent: 'peer', model: MODEL, mode: 'workspace-write', wait: true, task })}` }] });
@@ -119,7 +119,8 @@ async function delegate({ runtime, events }) {
   const match = /^tool alp_delegate: (.*)$/s.exec(said ?? '');
   assert.ok(match, `the requester got the delegate result: ${said}`);
   const reply = JSON.parse(match[1]);
-  assert.notEqual(reply.isError, true, said);
+  // A failed assignment comes back to alp_delegate as an error result (t-a648); its payload is checked by each test.
+  assert.equal(reply.isError, true, said);
   const result = JSON.parse(reply.content[0].text);
   const child = events.filter(entry => entry.sessionId === result.sessionId).map(entry => entry.event);
   return { result, child };
