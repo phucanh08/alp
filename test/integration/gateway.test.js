@@ -17,7 +17,7 @@ import { initProject } from '@anhlp/alp-core/init';
 import { addGate, getTask } from '@anhlp/alp-core/tasks';
 import { connectSocket, readLock } from '../../packages/client/src/index.js';
 import { AlpRpcClient, createReconnectingClient, hello, isAlpClientError } from '../../packages/client/src/portable.js';
-import { connectWebSocket } from '../../packages/client/src/websocket.js';
+import { connectWebSocket } from '../../packages/client/src/connection/websocket.js';
 import { CredentialStore, createCredential, createGateway, createGatewayLogger, resolveConfig, revokeCredential } from '../../apps/gateway/src/index.js';
 
 const ALPD = fileURLToPath(new URL('../../packages/daemon/dist/alpd.js', import.meta.url));

@@ -35,7 +35,7 @@ async function graph(entry) {
   return seen;
 }
 
-for (const entry of ['portable.js', 'websocket.js']) {
+for (const entry of ['portable.js', 'connection/websocket.js']) {
   test(`${entry} reaches only portable modules`, async () => {
     const modules = await graph(path.join(source, entry));
     assert.ok(modules.size >= 3, 'the walk followed the imports');

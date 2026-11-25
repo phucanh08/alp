@@ -67,11 +67,11 @@
     },
     "./ipc": {
       "alp-source": {
-        "types": "./src/ipc.js",
-        "default": "./src/ipc.js"
+        "types": "./src/connection/ipc.js",
+        "default": "./src/connection/ipc.js"
       },
-      "types": "./dist/ipc.d.ts",
-      "default": "./src/ipc.js"
+      "types": "./dist/connection/ipc.d.ts",
+      "default": "./src/connection/ipc.js"
     },
     "./library-test": {
       "alp-source": {
@@ -139,11 +139,11 @@
     },
     "./websocket": {
       "alp-source": {
-        "types": "./src/websocket.js",
-        "default": "./src/websocket.js"
+        "types": "./src/connection/websocket.js",
+        "default": "./src/connection/websocket.js"
       },
-      "types": "./dist/websocket.d.ts",
-      "default": "./src/websocket.js"
+      "types": "./dist/connection/websocket.d.ts",
+      "default": "./src/connection/websocket.js"
     }
   },
   "engines": {

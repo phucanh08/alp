@@ -10,8 +10,8 @@ import path from 'node:path';
 
 /** Files of the repository's own packages the bundle may hold, relative to the repository. */
 const ALLOWED_ALP = [
-  /^packages\/client\/src\/(portable|websocket)\.js$/,
-  /^packages\/client\/src\/rpc\/[\w-]+\.js$/,
+  /^packages\/client\/src\/(portable|connection\/websocket)\.js$/,
+  /^packages\/client\/src\/rpc\/(connection\/)?[\w-]+\.js$/,
   /^packages\/protocol\/src\/(public|wire)\.js$/,
 ];
 
