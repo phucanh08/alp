@@ -1,22 +1,19 @@
-// @ts-check
 import { AlpRpcClient, createReconnectingClient, hello } from '@anhlp/alp-client/portable';
+import type { AlpTransport } from '@anhlp/alp-client/portable';
+import type { Logger } from '@anhlp/alp-core/log';
+import type { Upstream } from './connection.js';
 
 /**
  * The gateway's side of alpd: client SDK connections over the daemon's private IPC socket. The
  * gateway never starts alpd and never reads its files; it only connects, as any local client.
- *
- * @typedef {import('@anhlp/alp-client/portable').AlpTransport} AlpTransport
- * @typedef {() => Promise<AlpTransport>} OpenTransport
  */
+export type { AlpTransport };
+export type OpenTransport = () => Promise<AlpTransport>;
 
 const HELLO_TIMEOUT_MS = 10_000;
 
-/**
- * Opens one handshaken connection per remote client.
- * @param {{ openTransport: OpenTransport, version: string, maxPending: number }} options
- * @returns {() => Promise<import('./connection.js').Upstream>}
- */
-export function upstreamConnector({ openTransport, version, maxPending }) {
+/** Opens one handshaken connection per remote client. */
+export function upstreamConnector({ openTransport, version, maxPending }: { openTransport: OpenTransport, version: string, maxPending: number }): () => Promise<Upstream> {
   return async () => {
     // A little room above the client's own limit for the gateway's scope lookups.
     const client = new AlpRpcClient(await openTransport(), { maxPending: maxPending * 2 + 16 });
@@ -33,13 +30,11 @@ export function upstreamConnector({ openTransport, version, maxPending }) {
 /**
  * Readiness: a connection of its own that keeps reconnecting and asks daemon.status every
  * `intervalMs`. Ready means alpd answers and reports itself ready (its state can be written).
- * @param {{ openTransport: OpenTransport, version: string, intervalMs?: number, logger?: import('@anhlp/alp-core/log').Logger }} options
  */
-export function daemonMonitor({ openTransport, version, intervalMs = 5_000, logger }) {
-  /** @type {{ connected: boolean, ready: boolean, code?: string, checkedAt?: string }} */
-  let state = { connected: false, ready: false, code: 'ALP_GATEWAY_DAEMON_UNREACHABLE' };
+export function daemonMonitor({ openTransport, version, intervalMs = 5_000, logger }: { openTransport: OpenTransport, version: string, intervalMs?: number, logger?: Logger }) {
+  let state: { connected: boolean, ready: boolean, code?: string, checkedAt?: string } = { connected: false, ready: false, code: 'ALP_GATEWAY_DAEMON_UNREACHABLE' };
   let previous = '';
-  const set = (/** @type {typeof state} */ next) => {
+  const set = (next: typeof state) => {
     state = { ...next, checkedAt: new Date().toISOString() };
     const summary = `${state.connected}:${state.ready}:${state.code ?? ''}`;
     if (summary !== previous) {
@@ -74,9 +69,8 @@ export function daemonMonitor({ openTransport, version, intervalMs = 5_000, logg
      * Ends every terminal of a credential at once (terminal.revoke, docs/protocol/alp-json-rpc-v1.md
      * §12.10): a revoked, rotated, expired or regranted credential keeps no shell. When alpd cannot be
      * asked now, its own detach timeout ends them once their connections have closed.
-     * @param {string} principalId
      */
-    async revokeTerminals(principalId) {
+    async revokeTerminals(principalId: string) {
       if (connection.state !== 'open') return { revoked: false };
       try {
         const result = await connection.request('terminal.revoke', { principalId }, { timeoutMs: 5_000 });

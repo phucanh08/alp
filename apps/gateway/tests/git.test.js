@@ -10,7 +10,7 @@ import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { WORKSPACE_GIT } from '@anhlp/alp-protocol';
-import { DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, gitPath, gitRemoteUrl, projectGitDiff, projectGitStatus } from '../src/policy.js';
+import { DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, gitPath, gitRemoteUrl, projectGitDiff, projectGitStatus } from '../dist/policy.js';
 import { fakeDaemon } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
 import { teardown } from '../../../test/support/teardown.js';

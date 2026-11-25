@@ -25,7 +25,7 @@ const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 /** 3000 bytes of every value, NULs included: a file no text path could carry. */
 const BINARY = Buffer.from(Array.from({ length: 3000 }, (_, index) => (index * 7) % 256));
 const TEXT = Buffer.from('hello\nworld\n');
-/** The gateway's text for alpd's 1005 attachment_unsupported (apps/gateway/src/connection.js ATTACHMENT_REFUSALS). */
+/** The gateway's text for alpd's 1005 attachment_unsupported (apps/gateway/src/connection.ts ATTACHMENT_REFUSALS). */
 const ATTACHMENT_UNSUPPORTED = 'This session\'s runtime cannot read attachments yet; they stay stored and the prompt was not sent';
 const RUNTIME_REFUSAL = /cannot read attachments yet; they stay stored and the prompt was not sent/;
 

@@ -8,10 +8,10 @@ import nodeFs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import * as credentials from '../src/credentials.js';
+import * as credentials from '../dist/credentials.js';
 import { fakeDaemon } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
-import { CredentialStore, TicketBook, createCredential, createGatewayLogger, credentialsFile, listCredentials, parseToken, revokeCredential, rotateCredential, scrubGatewaySecrets } from '../src/index.js';
+import { CredentialStore, TicketBook, createCredential, createGatewayLogger, credentialsFile, listCredentials, parseToken, revokeCredential, rotateCredential, scrubGatewaySecrets } from '../dist/index.js';
 import { teardown } from '../../../test/support/teardown.js';
 
 async function home(t) {
@@ -64,7 +64,7 @@ test('CLI edit/reissue replaces named grants, retains omitted fields, and reject
   const { home: gatewayHome, workspace, directory } = await home(t);
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
-  const run = (...args) => promisify(execFile)(process.execPath, [path.join(import.meta.dirname, '../src/cli.js'), 'credential', ...args], { env: { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory, ALP_AGENT_SESSION: '' } });
+  const run = (...args) => promisify(execFile)(process.execPath, [path.join(import.meta.dirname, '../dist/cli.js'), 'credential', ...args], { env: { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory, ALP_AGENT_SESSION: '' } });
   const original = JSON.parse((await run('create', '--label', 'phone', '--workspace', workspace, '--permission', 'session.write', '--mode', 'cafe', '--json')).stdout);
   const edited = JSON.parse((await run('edit', original.credential.id, '--permission', 'files.read', '--expires-in-days', '2', '--json')).stdout);
   assert.equal(edited.credential.id, original.credential.id);
@@ -161,7 +161,7 @@ test('CLI --agent makes an agent credential, list shows it, and reissue keeps it
   const { home: gatewayHome, workspace, directory } = await home(t);
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
-  const run = (...args) => promisify(execFile)(process.execPath, [path.join(import.meta.dirname, '../src/cli.js'), 'credential', ...args], { env: { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory, ALP_AGENT_SESSION: '' } });
+  const run = (...args) => promisify(execFile)(process.execPath, [path.join(import.meta.dirname, '../dist/cli.js'), 'credential', ...args], { env: { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory, ALP_AGENT_SESSION: '' } });
   const user = JSON.parse((await run('create', '--label', 'phone', '--workspace', workspace, '--json')).stdout);
   assert.equal(user.credential.agent, undefined);
   // A bare --agent is refused with a clear message, and makes nothing (t-1c59).
@@ -190,7 +190,7 @@ test('a process an ALP agent started may not create, rotate, reissue or revoke c
   const { home: gatewayHome, workspace, directory } = await home(t);
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
-  const run = (env, ...args) => promisify(execFile)(process.execPath, [path.join(import.meta.dirname, '../src/cli.js'), 'credential', ...args], { env: { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory, ALP_AGENT_SESSION: '', ...env } });
+  const run = (env, ...args) => promisify(execFile)(process.execPath, [path.join(import.meta.dirname, '../dist/cli.js'), 'credential', ...args], { env: { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory, ALP_AGENT_SESSION: '', ...env } });
   const user = JSON.parse((await run({}, 'create', '--label', 'phone', '--workspace', workspace, '--json')).stdout);
   const before = await readFile(credentialsFile(gatewayHome), 'utf8');
   const agent = { ALP_AGENT_SESSION: 'ses-1' };
@@ -299,7 +299,7 @@ test('files.read is held only when named: never by default, implied by nothing, 
   const { directory, home: gatewayHome, workspace } = await home(t);
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
-  const cli = path.join(import.meta.dirname, '..', 'src', 'cli.js');
+  const cli = path.join(import.meta.dirname, '..', 'dist', 'cli.js');
   const env = { ...process.env, ALP_GATEWAY_HOME: gatewayHome, ALP_HOME: directory, ALP_AGENT_SESSION: '' };
   const create = async (...extra) => JSON.parse((await promisify(execFile)(process.execPath, [cli, 'credential', 'create', '--label', 'x', '--workspace', workspace, '--json', ...extra], { env })).stdout).credential.permissions;
   assert.deepEqual(await create(), ['session.read', 'session.write', 'project.read', 'project.write'], 'the default leaves files.read out');

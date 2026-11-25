@@ -9,7 +9,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { CAPABILITY } from '@anhlp/alp-protocol';
-import { EXPOSURE } from '../src/index.js';
+import { EXPOSURE } from '../dist/index.js';
 import { fakeDaemon } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
 import { teardown } from '../../../test/support/teardown.js';

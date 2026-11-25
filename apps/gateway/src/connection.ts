@@ -1,5 +1,4 @@
 import { realpath as registryRealpath, stat as registryStat } from 'node:fs/promises';
-// @ts-check
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { CAPABILITY, ERROR, PROTOCOL_VERSION, RPC_ERROR, TERMINAL, WORKSPACE_FILES, base64Bytes, blockedFilePath, resumeCommandOf } from '@anhlp/alp-protocol';
@@ -10,6 +9,20 @@ import { projectGitDiff, projectGitStatus, gatewayAttachmentLimits, projectAttac
 import { CONFIGURE_REASONS, isGeneration, projectBranch, projectConfigured, projectConfigurePreview, projectConversation, projectForkedFrom } from './policy.js';
 import { TERMINAL_REFUSALS, gatewayTerminalLimits, projectTerminal, projectTerminalEvent } from './policy.js';
 import { assertProjectDataContent } from '@anhlp/alp-core/library-edit';
+import type { WebSocket, RawData } from 'ws';
+import type { AlpRpcClient } from '@anhlp/alp-client/portable';
+import type { Logger } from '@anhlp/alp-core/log';
+import type { AttachmentLimits, Envelope, GitDiffFile, GitDiffPage, TerminalLimits } from '@anhlp/alp-protocol';
+import type { Grant, Workspace } from './credentials.js';
+import type { OwnerHandler } from './owner.js';
+import type { Exposure } from './policy.js';
+
+/**
+ * JSON from alpd or from a client before the gateway checked it. Every field the gateway reads is
+ * tested where it is read (and the client's params against the v1 schema first).
+ */
+// any: untrusted wire JSON of any shape; each use checks the fields it reads.
+type Wire = any;
 
 /**
  * One remote client of the gateway (docs/alp/remote-gateway.md §3, §6): its WebSocket, its own
@@ -20,7 +33,7 @@ import { assertProjectDataContent } from '@anhlp/alp-core/library-edit';
  * busy session keeps working; nothing is cancelled).
  *
  * Every request goes through the checks of docs/protocol/alp-json-rpc-v1.md §5.2, then the
- * exposure matrix (policy.js), the v1 schema, the grant's permission and the resource scope,
+ * exposure matrix (policy.ts), the v1 schema, the grant's permission and the resource scope,
  * before one request goes to alpd. Requests are never resent. Responses and events leave in one
  * ordered queue, so replayed events still arrive before the session.attach response that ends
  * them (§8.3).
@@ -57,8 +70,8 @@ const MAX_CACHED = 10_000;
 /** Events question.watch sends of trees a client did not attach, as copies without a cursor. */
 const WATCHED = new Set(['question', 'question.resolved', 'turn.ended', 'attention']);
 
-/** A path relative to a workspace, under it: no root, drive, `.`/`..` or empty segment, no NUL. @param {unknown} file */
-function relativeFile(file) {
+/** A path relative to a workspace, under it: no root, drive, `.`/`..` or empty segment, no NUL. */
+function relativeFile(file: unknown) {
   // At most 4096 code points, as alpd and the schema count them.
   if (typeof file !== 'string' || !file || file.length > 8192 || [...file].length > 4096 || file.includes('\0')) return false;
   if (/^[\\/]/.test(file) || /^[A-Za-z]:/.test(file)) return false;
@@ -80,8 +93,7 @@ const HOME = (() => { try { return homedir(); } catch { return undefined; } })()
 const CURSOR_KEY = randomBytes(32);
 const CURSOR_PREFIX = 'g1.';
 
-/** @param {string} cursor @param {string} principal */
-function sealCursor(cursor, principal) {
+function sealCursor(cursor: string, principal: string) {
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', CURSOR_KEY, iv);
   cipher.setAAD(Buffer.from(principal, 'utf8'));
@@ -89,8 +101,8 @@ function sealCursor(cursor, principal) {
   return CURSOR_PREFIX + Buffer.concat([iv, cipher.getAuthTag(), body]).toString('base64url');
 }
 
-/** alpd's cursor inside a sealed one, or undefined for anything else. @param {string} token @param {string} principal */
-function openCursor(token, principal) {
+/** alpd's cursor inside a sealed one, or undefined for anything else. */
+function openCursor(token: string, principal: string) {
   if (!token.startsWith(CURSOR_PREFIX)) return undefined;
   try {
     const raw = Buffer.from(token.slice(CURSOR_PREFIX.length), 'base64url');
@@ -104,19 +116,19 @@ function openCursor(token, principal) {
   }
 }
 
-/**
- * @typedef {{
- *   maxPending: number, rate: number, burst: number, maxStrikes: number, handshakeMs: number,
- *   requestTimeoutMs: number, maxBufferedBytes: number, maxQueue: number, closeGraceMs: number,
- *   maxFrame?: number,
- * }} ConnectionLimits
- * @typedef {{ client: import('@anhlp/alp-client/portable').AlpRpcClient, hello: Record<string, any> }} Upstream
- * @typedef {{ root: string, projectRoot: string, mode?: string }} Scoped
- */
+export type ConnectionLimits = {
+  maxPending: number, rate: number, burst: number, maxStrikes: number, handshakeMs: number,
+  requestTimeoutMs: number, maxBufferedBytes: number, maxQueue: number, closeGraceMs: number,
+  maxFrame?: number,
+};
+// any: alpd's hello answer, read field by field.
+export type Upstream = { client: AlpRpcClient, hello: Record<string, any> };
+export type Scoped = { root: string, projectRoot: string, mode?: string };
 
 class GatewayError extends Error {
-  /** @param {number} code @param {string} message @param {Record<string, unknown>} [data] */
-  constructor(code, message, data) {
+  declare code: number;
+  declare data: Record<string, unknown> | undefined;
+  constructor(code: number, message: string, data?: Record<string, unknown>) {
     super(message);
     this.code = code;
     this.data = data;
@@ -125,14 +137,14 @@ class GatewayError extends Error {
 
 /** A session the client may not see; `outside` tells existing-elsewhere from missing, for the gateway only. */
 class NotInScope extends GatewayError {
-  /** @param {string} id @param {'missing' | 'outside'} why */
-  constructor(id, why) {
+  declare why: 'missing' | 'outside';
+  constructor(id: string, why: 'missing' | 'outside') {
     super(ERROR.notFound, `No session ${id}`);
     this.why = why;
   }
 }
 
-const forbidden = (/** @type {string} */ message, /** @type {string} */ reason, extra = {}) => new GatewayError(GATEWAY_ERROR.forbidden, message, { reason, ...extra });
+const forbidden = (message: string, reason: string, extra = {}) => new GatewayError(GATEWAY_ERROR.forbidden, message, { reason, ...extra });
 
 /**
  * Reasons of alpd refusals whose message names a host path or quotes a file: an entry, team,
@@ -146,10 +158,9 @@ const HOST_FILE_REASONS = new Set(['invalid_entry', 'unreadable', 'unsafe_path',
  * rest of data does not (t-70c4). With `keepReasoned`, a refusal with a reason the contract names
  * passes unchanged unless that reason is one of HOST_FILE_REASONS; raw failures (no reason) are
  * replaced, as alpd logs them in full on its host. Errors that are not alpd's are returned as they are.
- * @param {unknown} caught @param {string} message @param {{ keepReasoned?: boolean }} [options]
  */
-function opaqueDaemonError(caught, message, { keepReasoned = false } = {}) {
-  const error = /** @type {any} */ (caught);
+function opaqueDaemonError(caught: unknown, message: string, { keepReasoned = false }: { keepReasoned?: boolean } = {}) {
+  const error = caught as Wire;
   if (error instanceof GatewayError || isAlpClientError(error) || typeof error?.code !== 'number') return error;
   const reason = typeof error.data?.reason === 'string' && /^[a-z_]{1,64}$/.test(error.data.reason) ? error.data.reason : undefined;
   if (keepReasoned && reason !== undefined && !HOST_FILE_REASONS.has(reason)) return error;
@@ -162,9 +173,8 @@ const TASK_UNREADABLE = 'This task file cannot be read on the daemon host';
  * The message the client gets for each alpd refusal of workspace.files.list and read (t-70c4):
  * alpd names only the client's own path, but every message is fixed here all the same, so no alpd
  * text (a host path, a quote of a file) can pass. Code and reason pass on.
- * @type {Readonly<Record<string, string>>}
  */
-const FILE_REFUSALS = Object.freeze({
+const FILE_REFUSALS: Readonly<Record<string, string>> = Object.freeze({
   blocked_path: 'This path is never readable remotely: .git, .env files, ALP configuration and key or credential files are always refused',
   ignored: 'This path is ignored by .gitignore; ask with includeIgnored to see it',
   linked: 'This path is reached through a link, has more than one name, or changed while it was read; links are not followed',
@@ -180,9 +190,8 @@ const FILE_REFUSALS = Object.freeze({
  * The message the client gets for each alpd refusal of workspace.git.status and diff
  * (docs/protocol/alp-json-rpc-v1.md §12.5): fixed here, so no alpd text (a host path, a Git
  * message quoting the repository) can pass. Code and reason pass on.
- * @type {Readonly<Record<string, string>>}
  */
-const GIT_REFUSALS = Object.freeze({
+const GIT_REFUSALS: Readonly<Record<string, string>> = Object.freeze({
   not_found: 'No such workspace on the daemon host',
   not_repository: 'This workspace is not a Git repository',
   unknown_ref: 'The base branch is not known in this repository',
@@ -198,9 +207,8 @@ const GIT_REFUSALS = Object.freeze({
  * The message the client gets for each alpd refusal of an attachment call (docs/protocol/
  * alp-json-rpc-v1.md §12.6): fixed here, so no alpd text (its store's path, a file system error)
  * can pass. Code, reason and ATTACHMENT_ERROR_DATA pass on.
- * @type {Readonly<Record<string, string>>}
  */
-const ATTACHMENT_REFUSALS = Object.freeze({
+const ATTACHMENT_REFUSALS: Readonly<Record<string, string>> = Object.freeze({
   not_found: 'No such upload or attachment for this credential',
   upload_expired: 'This upload expired before it was committed; begin it again',
   invalid_name: 'The file name needs a visible character and at most 255 UTF-8 bytes once control characters and path separators are removed',
@@ -222,9 +230,8 @@ const ATTACHMENT_REFUSALS = Object.freeze({
 /**
  * The message the client gets for each alpd refusal of session.reload (§12.8): fixed as for fork and
  * rewind (no runtime stderr or path passes), with reload's own words where they differ.
- * @type {Readonly<Record<string, string>>}
  */
-const RELOAD_REFUSALS = Object.freeze({
+const RELOAD_REFUSALS: Readonly<Record<string, string>> = Object.freeze({
   session_busy: 'The session or one of its agents is working; wait until everything is idle, then try again',
   session_closed: 'The session is not open; open it and its agent starts on its conversation',
   no_history: 'The agent has no conversation to keep yet; send it a message first, or start a new session',
@@ -232,8 +239,8 @@ const RELOAD_REFUSALS = Object.freeze({
   not_root: 'Only a root session can be reloaded',
   native_refused: 'The agent could not be restarted on its conversation; the session is closed with its conversation kept and opens again with the next message',
 });
-/** The message the client gets for each alpd refusal of session.compact (t-de1a): fixed, as reload's. @type {Readonly<Record<string, string>>} */
-const COMPACT_REFUSALS = Object.freeze({
+/** The message the client gets for each alpd refusal of session.compact (t-de1a): fixed, as reload's. */
+const COMPACT_REFUSALS: Readonly<Record<string, string>> = Object.freeze({
   session_busy: 'The session is not open; open it first, then compact it',
   runtime_unsupported: 'Only a root session can be compacted',
   not_root: 'Only a root session can be compacted',
@@ -243,9 +250,8 @@ const COMPACT_REFUSALS = Object.freeze({
  * (docs/protocol/alp-json-rpc-v1.md §12.7, docs/alp/remote-gateway.md §5.15): fixed here, so no
  * alpd or runtime text (a native thread's path, a CLI's stderr) can pass. Code and reason pass on,
  * with a current generation and plain numbers (#conversationError).
- * @type {Readonly<Record<string, string>>}
  */
-const CONVERSATION_REFUSALS = Object.freeze({
+const CONVERSATION_REFUSALS: Readonly<Record<string, string>> = Object.freeze({
   not_found: 'No such session or turn for this credential',
   session_busy: 'The session is running a turn; wait for it to end, then try again',
   stale_generation: 'The conversation changed since it was read; read its history again and retry with the current generation',
@@ -274,15 +280,14 @@ const ATTACHMENT_ERROR_DATA = Object.freeze(['received', 'size', 'max', 'limit',
 const GIT_PAGE_PREFIX = 'alp-gateway-page:';
 const MAX_GIT_PAGES = 64;
 
-/** A file path a client may ask for: plainly relative (relativeFile), '/' separated. @param {unknown} file */
-const requestedFile = file => relativeFile(file) && !String(file).includes('\\');
+/** A file path a client may ask for: plainly relative (relativeFile), '/' separated. */
+const requestedFile = (file: unknown) => relativeFile(file) && !String(file).includes('\\');
 
 /**
  * Failures of session.preview, create and configure the gateway can name without alpd's text:
  * alpd's message only chooses the template; the names in it are the client's own (validated) params.
- * @type {Array<[RegExp, (names: { team: string | undefined, agent: string | undefined, provider: string | undefined, runtime: string | undefined }) => string]>}
  */
-const SESSION_FAULTS = [
+const SESSION_FAULTS: Array<[RegExp, (names: { team: string | undefined, agent: string | undefined, provider: string | undefined, runtime: string | undefined }) => string]> = [
   [/^Team '[^']*' not found/, ({ team }) => `${team ? `Team '${team}'` : 'The team'} is not available on the daemon host`],
   [/(^|[\\/])team\.json: /, ({ team }) => `${team ? `Team '${team}'` : 'The team'} has a configuration the daemon host cannot read`],
   [/^Agent '[^']*' not found/, ({ agent }) => `${agent ? `Agent '${agent}'` : 'The agent'} is not available on the daemon host`],
@@ -293,12 +298,12 @@ const SESSION_FAULTS = [
 
 /**
  * A session method's failure as the client sees it: protocol refusals with a reason pass; a
- * failure SESSION_FAULTS knows gets its fixed message; the rest a generic one.
- * @param {unknown} error @param {string} method @param {{ workflow?: unknown, agent?: unknown, model?: unknown }} [ask] the spec or params the client sent
+ * failure SESSION_FAULTS knows gets its fixed message; the rest a generic one. `ask` is the spec
+ * or params the client sent.
  */
-function sessionFault(error, method, ask = {}) {
-  const text = String(/** @type {any} */ (error)?.message ?? '');
-  const plain = (/** @type {unknown} */ value) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}$/.test(value) ? value : undefined;
+function sessionFault(error: unknown, method: string, ask: { workflow?: unknown, agent?: unknown, model?: unknown } = {}) {
+  const text = String((error as Wire)?.message ?? '');
+  const plain = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}$/.test(value) ? value : undefined;
   const model = typeof ask.model === 'string' ? ask.model : '';
   const provider = model.startsWith('acp:') ? plain(model.slice(4).split('/')[0]) : undefined;
   const runtime = provider ?? (/^(codex|claude|antigravity):/.test(model) ? model.split(':')[0] : undefined);
@@ -307,80 +312,80 @@ function sessionFault(error, method, ask = {}) {
   return opaqueDaemonError(error, known ? known[1](names) : `${method} failed on the daemon host; the daemon log there may have details`, { keepReasoned: true });
 }
 
-/** A request id v1 accepts (docs/protocol/alp-json-rpc-v1.md §3). @param {unknown} id */
-function validId(id) {
+/** A request id v1 accepts (docs/protocol/alp-json-rpc-v1.md §3). */
+function validId(id: unknown) {
   if (typeof id !== 'string') return Number.isSafeInteger(id);
   let length = 0;
   for (const _point of id) if (++length > 128) return false;
   return true;
 }
 
-/** The listed params that are present. @param {Record<string, unknown>} params @param {readonly string[]} keys */
-function pick(params, keys) {
-  /** @type {Record<string, unknown>} */
-  const picked = {};
+/** The listed params that are present. */
+function pick(params: Record<string, unknown>, keys: readonly string[]) {
+  const picked: Record<string, unknown> = {};
   for (const key of keys) if (Object.hasOwn(params, key) && params[key] !== undefined) picked[key] = params[key];
   return picked;
 }
 
 export class ClientConnection {
-  /** @type {import('ws').WebSocket} */ #ws;
-  /** @type {import('./credentials.js').Grant} */ #grant;
-  /** @type {import('./credentials.js').Workspace[]} */ #baseWorkspaces = [];
-  /** @type {any[]} */ #managedWorkspaces = [];
-  /** @type {Promise<void> | undefined} */ #refreshingWorktrees;
-  /** @type {Promise<unknown>} */ #eventTail = Promise.resolve();
-  /** @type {ConnectionLimits} */ #limits;
-  /** @type {import('@anhlp/alp-core/log').Logger} */ #log;
-  /** @type {Upstream['client'] | undefined} */ #up;
-  /** @type {Promise<void>} */ #ready;
-  /** @type {Record<string, any>} */ #daemonHello = {};
-  /** @type {string[]} */ #capabilities = [];
-  /** @type {Map<string, Scoped>} */ #sessions = new Map();
-  /** Sessions whose watched questions were found outside the grant. @type {Set<string>} */ #outside = new Set();
-  /** Fork sources (forkedFrom.sessionId) found outside the grant or gone: never named to the client. @type {Set<string>} */ #foreignSources = new Set();
+  declare id: string;
+  declare principal: string;
+  #ws: WebSocket;
+  #grant: Grant;
+  #baseWorkspaces: Workspace[] = [];
+  #managedWorkspaces: Wire[] = [];
+  #refreshingWorktrees: Promise<void> | undefined;
+  #eventTail: Promise<unknown> = Promise.resolve();
+  #limits: ConnectionLimits;
+  #log: Logger;
+  #up: Upstream['client'] | undefined;
+  #ready: Promise<void>;
+  #daemonHello: Record<string, Wire> = {};
+  #capabilities: string[] = [];
+  #sessions = new Map<string, Scoped>();
+  /** Sessions whose watched questions were found outside the grant. */ #outside = new Set<string>();
+  /** Fork sources (forkedFrom.sessionId) found outside the grant or gone: never named to the client. */ #foreignSources = new Set<string>();
   /** Roots this client attached (session.create, session.attach) and has not released. */
-  /** @type {Set<string>} */ #attached = new Set();
+  #attached = new Set<string>();
   /** After question.watch: the workspace it named, or null for every one of the grant. */
-  /** @type {import('./credentials.js').Workspace | null | undefined} */ #watch;
-  /** @type {Array<{ frame: string | null | undefined }>} */ #queue = [];
+  #watch: Workspace | null | undefined;
+  #queue: Array<{ frame: string | null | undefined }> = [];
   #queuedBytes = 0;
   #helloed = false;
   /** The credential is an agent's (t-53aa), or the client said in daemon.hello that an ALP agent started it: the re-hello that says so on its alpd connection (t-e706). */
-  /** @type {Promise<unknown> | undefined} */ #agent;
+  #agent: Promise<unknown> | undefined;
   /** A hello waiting for alpd: requests pipelined behind it wait too, as alpd answers hello at once. */
-  /** @type {Promise<unknown> | undefined} */ #helloing;
+  #helloing: Promise<unknown> | undefined;
   #closed = false;
   #upstreamGone = false;
   #pending = 0;
-  #tokens;
+  #tokens: number;
   #lastRefill = Date.now();
   #strikes = 0;
   #alive = true;
-  /** @type {Array<ReturnType<typeof setTimeout>>} */ #timers = [];
+  #timers: Array<ReturnType<typeof setTimeout>> = [];
   /** Diff pages the gateway split (workspace.git.diff): its cursor → what continues it. */
-  /** @type {Map<string, { key: string, cursor: string | undefined, skip: number, snapshot: string }>} */ #gitPages = new Map();
-  /** @type {(connection: ClientConnection, code: number) => void} */ #onClosed;
+  #gitPages = new Map<string, { key: string, cursor: string | undefined, skip: number, snapshot: string }>();
+  #onClosed: (connection: ClientConnection, code: number) => void;
   /** Effective attachment limits of this connection (gatewayAttachmentLimits), once alpd said hello. */
-  /** @type {import('@anhlp/alp-protocol').AttachmentLimits} */ #attachmentLimits = gatewayAttachmentLimits(undefined);
-  /** @type {import('@anhlp/alp-protocol').TerminalLimits} */ #terminalLimits = gatewayTerminalLimits(undefined);
+  #attachmentLimits: AttachmentLimits = gatewayAttachmentLimits(undefined);
+  #terminalLimits: TerminalLimits = gatewayTerminalLimits(undefined);
   /** alpd's terminal output events do not fit this gateway's frames: terminal.* is refused. */ #terminalFramesTooSmall = false;
   #terminalWatching = false;
-  /** The host owner hooks of an owner gateway (owner.js), else undefined: no owner method then. */
-  /** @type {{ isOwner: () => boolean, methods: Readonly<Record<string, import('./owner.js').OwnerHandler>> } | undefined} */ #owner;
-  /** Terminals this connection attached: only their terminal.event notifications leave (§5.18). @type {Set<string>} */ #terminals = new Set();
+  /** The host owner hooks of an owner gateway (owner.ts), else undefined: no owner method then. */
+  #owner: { isOwner: () => boolean, methods: Readonly<Record<string, OwnerHandler>> } | undefined;
+  /** Terminals this connection attached: only their terminal.event notifications leave (§5.18). */ #terminals = new Set<string>();
 
   /**
-   * @param {{
-   *   ws: import('ws').WebSocket, grant: import('./credentials.js').Grant, id: string,
-   *   connectUpstream: () => Promise<Upstream>, limits: ConnectionLimits,
-   *   logger: import('@anhlp/alp-core/log').Logger, onClosed: (connection: ClientConnection, code: number) => void,
-   *   owner?: { isOwner: () => boolean, methods: Readonly<Record<string, import('./owner.js').OwnerHandler>> },
-   * }} options
-   *   `owner` (server.js, only on a gateway created with `owner`): `isOwner` answers, at each call,
-   *   whether this socket and its credential are the host owner's.
+   * `owner` (server.ts, only on a gateway created with `owner`): `isOwner` answers, at each call,
+   * whether this socket and its credential are the host owner's.
    */
-  constructor({ ws, grant, id, connectUpstream, limits, logger, onClosed, owner }) {
+  constructor({ ws, grant, id, connectUpstream, limits, logger, onClosed, owner }: {
+    ws: WebSocket, grant: Grant, id: string,
+    connectUpstream: () => Promise<Upstream>, limits: ConnectionLimits,
+    logger: Logger, onClosed: (connection: ClientConnection, code: number) => void,
+    owner?: { isOwner: () => boolean, methods: Readonly<Record<string, OwnerHandler>> },
+  }) {
     this.id = id;
     this.#owner = owner;
     this.principal = grant.id;
@@ -407,8 +412,7 @@ export class ClientConnection {
 
   get closed() { return this.#closed; }
 
-  /** @param {Upstream} upstream */
-  #attachUpstream({ client, hello }) {
+  #attachUpstream({ client, hello }: Upstream) {
     if (this.#closed) { client.close(); return; }
     this.#up = client;
     this.#daemonHello = hello;
@@ -417,7 +421,7 @@ export class ClientConnection {
     this.#attachmentLimits = gatewayAttachmentLimits(hello.attachmentLimits, this.#limits.maxFrame);
     this.#terminalLimits = gatewayTerminalLimits(hello.terminalLimits, this.#limits.maxFrame);
     // A frame too small for alpd's output events would drop output: no terminals through this gateway then.
-    const advertisedFrames = /** @type {any} */ (hello.terminalLimits)?.maxOutputFrameBytes;
+    const advertisedFrames = (hello.terminalLimits as Wire)?.maxOutputFrameBytes;
     // An off host omits limits. The protocol maximum still bounds a later opt-in: retain the
     // daemon's own disabled refusal when that maximum fits, and refuse a smaller gateway.
     const daemonFrames = !listed.includes('terminal') && advertisedFrames === undefined ? TERMINAL.maxOutputFrameBytes : advertisedFrames;
@@ -444,9 +448,8 @@ export class ClientConnection {
   /**
    * Ends the connection with `code`; queued frames go first. A client that does not read is
    * terminated after the grace period.
-   * @param {number} code @param {string} reason
    */
-  close(code, reason) {
+  close(code: number, reason: string) {
     if (this.#closed) return;
     this.#closed = true;
     this.#pump();
@@ -456,16 +459,14 @@ export class ClientConnection {
     this.#teardown(code);
   }
 
-  /** @param {number} code */
-  #finish(code) {
+  #finish(code: number) {
     if (!this.#closed) {
       this.#closed = true;
       this.#teardown(code);
     }
   }
 
-  /** @param {number} code */
-  #teardown(code) {
+  #teardown(code: number) {
     for (const timer of this.#timers) clearTimeout(timer);
     this.#timers = [];
     this.#queue = [];
@@ -476,8 +477,7 @@ export class ClientConnection {
     this.#onClosed(this, code);
   }
 
-  /** @param {Error} error */
-  #upstreamClosed(error) {
+  #upstreamClosed(error: Error) {
     if (this.#closed) return;
     this.#upstreamGone = true;
     this.#log.warn('the connection to alpd ended', { code: 'ALP_GATEWAY_DAEMON_DISCONNECTED', error });
@@ -488,8 +488,7 @@ export class ClientConnection {
 
   // ---- outbound: one ordered, bounded queue for responses and events ----
 
-  /** @param {string} frame */
-  #push(frame) {
+  #push(frame: string) {
     if (this.#closed) return;
     this.#queue.push({ frame });
     this.#queuedBytes += frame.length;
@@ -498,10 +497,9 @@ export class ClientConnection {
 
   /** A place in the queue whose frame is decided later (an event whose scope is being checked). */
   #slot() {
-    /** @type {{ frame: string | null | undefined }} */
-    const entry = { frame: undefined };
+    const entry: { frame: string | null | undefined } = { frame: undefined };
     this.#queue.push(entry);
-    return (/** @type {string | null} */ frame) => {
+    return (frame: string | null) => {
       entry.frame = frame;
       if (frame) this.#queuedBytes += frame.length;
       this.#pump();
@@ -510,7 +508,7 @@ export class ClientConnection {
 
   #pump() {
     while (this.#queue.length && this.#queue[0].frame !== undefined) {
-      const { frame } = /** @type {{ frame: string | null }} */ (this.#queue.shift());
+      const { frame } = this.#queue.shift() as { frame: string | null };
       if (frame === null) continue;
       this.#queuedBytes -= frame.length;
       if (this.#ws.readyState !== 1) continue;
@@ -528,18 +526,16 @@ export class ClientConnection {
     this.close(CLOSE_CODE.slowConsumer, 'client too slow; reconnect and replay from your cursor');
   }
 
-  /** @param {unknown} id @param {Record<string, unknown>} body */
-  #respond(id, body) {
+  #respond(id: unknown, body: Record<string, unknown>) {
     this.#push(JSON.stringify({ jsonrpc: '2.0', id: validId(id) ? id : null, ...body }));
   }
 
   // ---- inbound ----
 
-  /** @param {import('ws').RawData} data @param {boolean} binary */
-  #receive(data, binary) {
+  #receive(data: RawData, binary: boolean) {
     if (this.#closed) return;
     if (binary) return this.close(CLOSE_CODE.unsupportedData, 'binary messages are not ALP frames');
-    const text = Array.isArray(data) ? Buffer.concat(data).toString('utf8') : Buffer.from(/** @type {any} */ (data)).toString('utf8');
+    const text = Array.isArray(data) ? Buffer.concat(data).toString('utf8') : Buffer.from(data as ArrayBuffer).toString('utf8');
     let message;
     try { message = JSON.parse(text); } catch {
       this.#respond(null, { error: { code: RPC_ERROR.parseError, message: 'Parse error' } });
@@ -587,8 +583,8 @@ export class ClientConnection {
     return true;
   }
 
-  /** The wire error for a failure: alpd's errors pass unchanged; the client SDK's become an unknown outcome. @param {any} error @param {string} method */
-  #errorOf(error, method) {
+  /** The wire error for a failure: alpd's errors pass unchanged; the client SDK's become an unknown outcome. */
+  #errorOf(error: Wire, method: string) {
     if (error instanceof GatewayError) return { code: error.code, message: error.message, ...(error.data ? { data: error.data } : {}) };
     if (isAlpClientError(error)) {
       // Refused before it left the gateway: alpd never saw it, so sending it again is safe.
@@ -610,24 +606,23 @@ export class ClientConnection {
 
   // ---- error text (t-d27c, docs/alp/remote-gateway.md §5.12) ----
 
-  /** Error text through safeErrorText, against this grant's workspaces. @param {unknown} text @param {{ lines?: boolean }} [options] */
-  #safeText(text, options = {}) {
+  /** Error text through safeErrorText, against this grant's workspaces. */
+  #safeText(text: unknown, options: { lines?: boolean } = {}) {
     return safeErrorText(text, this.#grant.workspaces, { ...options, home: HOME });
   }
 
   /**
    * A session summary or snapshot as the client sees it: lastError through safeAlpError, parked
    * (why a limit or a pause holds it) through safeErrorText; everything else as alpd gave it.
-   * @param {any} session
    */
-  #safeSession(session) {
+  #safeSession(session: Wire) {
     if (!session || typeof session !== 'object' || Array.isArray(session)) return session;
     const conversational = Object.hasOwn(session, 'conversation') || Object.hasOwn(session, 'forkedFrom') || Object.hasOwn(session, 'branches');
     // pinnedAt and labels (capability session.meta) only in their shapes: a time, catalogue names.
     const meta = Object.hasOwn(session, 'pinnedAt') || Object.hasOwn(session, 'labels');
     if (session.lastError === undefined && typeof session.parked !== 'string' && session.attention?.message === undefined && !conversational && !meta) return session;
     const { pinnedAt, labels, ...unpinned } = session;
-    const names = Array.isArray(labels) ? labels.filter((/** @type {unknown} */ name) => typeof name === 'string').slice(0, 20) : [];
+    const names = Array.isArray(labels) ? labels.filter((name: unknown) => typeof name === 'string').slice(0, 20) : [];
     const safe = {
       ...unpinned,
       ...(typeof pinnedAt === 'string' ? { pinnedAt } : {}),
@@ -645,9 +640,8 @@ export class ClientConnection {
    * only), and `forkedFrom` only when its source is a session this connection found in the grant
    * (#seeForkSources looks it up first); otherwise the field is dropped, never a source id outside
    * the grant. A field that is not one alpd would answer is dropped too.
-   * @param {Record<string, any>} session
    */
-  #safeConversation(session) {
+  #safeConversation(session: Record<string, Wire>) {
     const { conversation, forkedFrom, branches, ...rest } = session;
     const kept = projectConversation(conversation);
     const source = projectForkedFrom(forkedFrom, id => this.#sessions.has(id));
@@ -659,11 +653,10 @@ export class ClientConnection {
    * Looks up the fork sources these summaries name that this connection has not checked yet, so
    * #safeConversation can tell. A source outside the grant, or gone, is remembered as such; one
    * that could not be checked now is simply not shown. Never rejects.
-   * @param {unknown[]} sessions
    */
-  async #seeForkSources(sessions) {
+  async #seeForkSources(sessions: unknown[]) {
     for (const session of sessions) {
-      const id = /** @type {any} */ (session)?.forkedFrom?.sessionId;
+      const id = (session as Wire)?.forkedFrom?.sessionId;
       if (typeof id !== 'string' || this.#sessions.has(id) || this.#foreignSources.has(id)) continue;
       try { await this.#resolve(id); }
       catch (error) {
@@ -674,32 +667,32 @@ export class ClientConnection {
     }
   }
 
-  /** A fork source an event's summary names that is not checked yet, or undefined. @param {any} event */
-  #uncheckedSource(event) {
+  /** A fork source an event's summary names that is not checked yet, or undefined. */
+  #uncheckedSource(event: Wire) {
     if (event?.type !== 'session.opened' && event?.type !== 'session.updated') return undefined;
     const id = event.session?.forkedFrom?.sessionId;
     return typeof id === 'string' && !this.#sessions.has(id) && !this.#foreignSources.has(id) ? id : undefined;
   }
 
-  /** #safeResult once the fork sources its summaries name are checked. @param {any} result */
-  async #shownResult(result) {
+  /** #safeResult once the fork sources its summaries name are checked. */
+  async #shownResult(result: Wire) {
     if (result && typeof result === 'object') await this.#seeForkSources([result.session, ...(Array.isArray(result.sessions) ? result.sessions : [])]);
     return this.#safeResult(result);
   }
 
-  /** A root's attention, its failed turn's message through safeErrorText as turn.ended's error. @param {any} attention */
-  #safeAttention(attention) {
+  /** A root's attention, its failed turn's message through safeErrorText as turn.ended's error. */
+  #safeAttention(attention: Wire) {
     if (!attention || typeof attention !== 'object' || attention.message === undefined) return attention;
     return { ...attention, message: this.#safeText(attention.message) };
   }
 
-  /** A result whose `session` (and `sessions`) go through #safeSession. @param {any} result */
-  #safeResult(result) {
+  /** A result whose `session` (and `sessions`) go through #safeSession. */
+  #safeResult(result: Wire) {
     if (!result || typeof result !== 'object') return result;
     return {
       ...result,
       ...(Object.hasOwn(result, 'session') ? { session: this.#safeSession(result.session) } : {}),
-      ...(Array.isArray(result.sessions) ? { sessions: result.sessions.map((/** @type {any} */ session) => this.#safeSession(session)) } : {}),
+      ...(Array.isArray(result.sessions) ? { sessions: result.sessions.map((session: Wire) => this.#safeSession(session)) } : {}),
     };
   }
 
@@ -707,10 +700,9 @@ export class ClientConnection {
    * An event as the client sees it: the error of session.failed, prompt.failed and turn.ended
    * through safeAlpError; the session of session.opened and session.updated through #safeSession;
    * a notice's text through safeErrorText, every line kept. Other events pass as alpd gave them.
-   * @param {import('@anhlp/alp-protocol').Envelope} envelope
    */
-  #safeEnvelope(envelope) {
-    const event = /** @type {any} */ (envelope.event);
+  #safeEnvelope(envelope: Envelope) {
+    const event = envelope.event as Wire;
     if (!event || typeof event !== 'object') return envelope;
     let safe = event;
     if ((event.type === 'session.failed' || event.type === 'prompt.failed' || event.type === 'turn.ended') && event.error !== undefined) safe = { ...event, error: safeAlpError(event.error, this.#grant.workspaces, { home: HOME }) };
@@ -720,8 +712,7 @@ export class ClientConnection {
     return safe === event ? envelope : { ...envelope, event: safe };
   }
 
-  /** @param {string} method @param {Record<string, any>} params */
-  async #handle(method, params) {
+  async #handle(method: string, params: Record<string, Wire>) {
     if (method === 'daemon.hello') {
       const greeting = this.#hello(params);
       // Chained: what follows waits for every hello before it, so none can hide a pending mark (t-e706).
@@ -751,7 +742,7 @@ export class ClientConnection {
   }
 
   /**
-   * Whether this connection is the host owner's now (owner.js): an owner gateway, its socket direct
+   * Whether this connection is the host owner's now (owner.ts): an owner gateway, its socket direct
    * from loopback and its credential the owner's (both in `isOwner`, the credential read afresh),
    * and not marked as an ALP agent's.
    */
@@ -763,9 +754,8 @@ export class ClientConnection {
   /**
    * A method the matrix marks `owner`: for any other connection, exactly the refusal of a denied
    * method; for the owner, its owner handler, else alpd with the entry's params.
-   * @param {string} method @param {Record<string, any>} params @param {import('./policy.js').Exposure} exposure
    */
-  async #ownerRequest(method, params, exposure) {
+  async #ownerRequest(method: string, params: Record<string, Wire>, exposure: Exposure) {
     const refused = () => new GatewayError(RPC_ERROR.methodNotFound, `${method} is not available through the gateway`, { reason: GATEWAY_REASON.notExposed });
     if (!this.#isOwner()) throw refused();
     const issues = validateParams(method, params);
@@ -786,8 +776,8 @@ export class ClientConnection {
     return this.#call(method, pick(params, exposure.params));
   }
 
-  /** The gateway's own handshake, answered once its handshake with alpd is done. @param {Record<string, any>} params */
-  async #hello(params) {
+  /** The gateway's own handshake, answered once its handshake with alpd is done. */
+  async #hello(params: Record<string, Wire>) {
     if (params.protocolVersion !== PROTOCOL_VERSION) throw new GatewayError(ERROR.protocol, `The gateway speaks ALP protocol ${PROTOCOL_VERSION}`, { reason: 'protocol_version', supported: [PROTOCOL_VERSION] });
     const issues = validateParams('daemon.hello', params);
     if (issues?.length) throw new GatewayError(RPC_ERROR.invalidParams, `Invalid params: ${issues.map(issue => `${issue.path || 'params'} ${issue.message}`).join('; ')}`, { reason: 'invalid_params', issues });
@@ -819,16 +809,15 @@ export class ClientConnection {
     };
   }
 
-  /** One request to alpd on this client's connection. @param {string} method @param {Record<string, unknown>} params */
-  #call(method, params) {
+  /** One request to alpd on this client's connection. */
+  #call(method: string, params: Record<string, unknown>) {
     if (!this.#up || this.#upstreamGone) return Promise.reject(new GatewayError(ERROR.failed, 'The connection to alpd ended', { reason: GATEWAY_REASON.daemonDisconnected }));
     return this.#up.request(method, params, { timeoutMs: this.#limits.requestTimeoutMs });
   }
 
   // ---- scope ----
 
-  /** @param {string} id @param {Scoped} scoped */
-  #remember(id, scoped) {
+  #remember(id: string, scoped: Scoped) {
     if (this.#sessions.size >= MAX_CACHED) this.#sessions.clear();
     this.#sessions.set(id, scoped);
   }
@@ -836,10 +825,8 @@ export class ClientConnection {
   /**
    * The tree of a session the grant covers: the session and every ancestor up to its root lie in
    * a granted workspace. Anything else is "no such session", as for an id that never existed.
-   * @param {string} sessionId @param {{ fresh?: boolean }} [options]
-   * @returns {Promise<Scoped>}
    */
-  async #resolve(sessionId, { fresh = false } = {}) {
+  async #resolve(sessionId: string, { fresh = false }: { fresh?: boolean } = {}): Promise<Scoped> {
     const cached = this.#sessions.get(sessionId);
     if (cached && !fresh) return cached;
     return (await this.#walk(sessionId, { trustAncestors: true })).scoped;
@@ -849,22 +836,19 @@ export class ClientConnection {
    * Looks `sessionId` up in alpd and walks to its root, checking each session's workspace. With
    * `trustAncestors`, an ancestor already in scope ends the walk; without it every session up to
    * the root is asked for afresh, as mode checks need.
-   * @param {string} sessionId @param {{ trustAncestors: boolean }} options
-   * @returns {Promise<{ scoped: Scoped, chain: Array<{ id: string, projectRoot: string, mode?: string }> }>}
    */
-  async #walk(sessionId, { trustAncestors }) {
-    /** @type {Array<{ id: string, projectRoot: string, mode?: string }>} */
-    const chain = [];
+  async #walk(sessionId: string, { trustAncestors }: { trustAncestors: boolean }): Promise<{ scoped: Scoped, chain: Array<{ id: string, projectRoot: string, mode?: string }> }> {
+    const chain: Array<{ id: string, projectRoot: string, mode?: string }> = [];
     let id = sessionId;
-    let root;
+    let root: string | undefined;
     for (let depth = 0; depth < MAX_DEPTH; depth++) {
       const known = depth > 0 && trustAncestors ? this.#sessions.get(id) : undefined;
       if (known) { root = known.root; break; }
-      let summary;
+      let summary: Wire;
       try {
-        ({ session: summary } = await this.#call('session.get', { sessionId: id }));
+        ({ session: summary } = await this.#call('session.get', { sessionId: id }) as Wire);
       } catch (error) {
-        if (/** @type {any} */ (error)?.code === ERROR.notFound) throw new NotInScope(sessionId, depth === 0 ? 'missing' : 'outside');
+        if ((error as Wire)?.code === ERROR.notFound) throw new NotInScope(sessionId, depth === 0 ? 'missing' : 'outside');
         throw error;
       }
       if (!summary || typeof summary.projectRoot !== 'string' || !workspaceOf(this.#grant, summary.projectRoot)) throw new NotInScope(sessionId, 'outside');
@@ -874,7 +858,7 @@ export class ClientConnection {
     }
     if (root === undefined) throw new NotInScope(sessionId, 'outside');
     for (const entry of chain) this.#remember(entry.id, { root, projectRoot: entry.projectRoot, mode: entry.mode });
-    return { scoped: /** @type {Scoped} */ (this.#sessions.get(sessionId) ?? { root, projectRoot: chain[0].projectRoot, mode: chain[0].mode }), chain };
+    return { scoped: (this.#sessions.get(sessionId) ?? { root, projectRoot: chain[0].projectRoot, mode: chain[0].mode }) as Scoped, chain };
   }
 
   /**
@@ -885,44 +869,42 @@ export class ClientConnection {
    * keeps an assignment's mode within its requester's, so the root's is the widest of the tree.
    * With `stop`, the session itself may run in any mode: stopping it starts nothing there, but its
    * requesters are told, so they must be within the grant. A root may always be stopped.
-   * @param {string} sessionId @param {{ stop?: boolean }} [options]
-   * @returns {Promise<Scoped>}
    */
-  async #drive(sessionId, { stop = false } = {}) {
+  async #drive(sessionId: string, { stop = false }: { stop?: boolean } = {}): Promise<Scoped> {
     if (!this.#grant.modes) return this.#resolve(sessionId);
     const { scoped, chain } = await this.#walk(sessionId, { trustAncestors: false });
     for (const entry of stop ? chain.slice(1) : chain) this.#checkMode(entry.mode, entry.id);
     return scoped;
   }
 
-  /** A whole-tree answer that is not the tree the scope check covered. @param {string} sessionId @param {string} method */
-  #outOfTree(sessionId, method) {
+  /** A whole-tree answer that is not the tree the scope check covered. */
+  #outOfTree(sessionId: string, method: string) {
     this.#log.error(`${method} answered a tree beyond the session checked; refused it`, { code: 'ALP_GATEWAY_TREE_OUT_OF_SCOPE' });
     return new NotInScope(sessionId, 'outside');
   }
 
-  /** A projectRoot param must name a granted workspace exactly. @param {unknown} projectRoot */
-  #workspace(projectRoot) {
+  /** A projectRoot param must name a granted workspace exactly. */
+  #workspace(projectRoot: unknown) {
     const workspace = workspaceOf(this.#grant, projectRoot);
     if (!workspace) throw forbidden('projectRoot is not a workspace this credential may use', GATEWAY_REASON.outsideWorkspace);
     return workspace;
   }
 
-  /** A workspace.files path: plainly relative, never blocked; refused before alpd sees it. @param {unknown} file */
-  #checkFile(file) {
+  /** A workspace.files path: plainly relative, never blocked; refused before alpd sees it. */
+  #checkFile(file: unknown) {
     if (!requestedFile(file)) throw new GatewayError(RPC_ERROR.invalidParams, FILE_REFUSALS.invalid_path, { reason: 'invalid_path' });
-    if (blockedFilePath(/** @type {string} */ (file))) throw forbidden(FILE_REFUSALS.blocked_path, GATEWAY_REASON.blockedPath);
+    if (blockedFilePath(file as string)) throw forbidden(FILE_REFUSALS.blocked_path, GATEWAY_REASON.blockedPath);
   }
 
-  /** alpd's refusal of a workspace.files call with the gateway's fixed text for its reason. @param {unknown} error */
-  #fileError(error) {
-    const reason = /** @type {any} */ (error)?.data?.reason;
+  /** alpd's refusal of a workspace.files call with the gateway's fixed text for its reason. */
+  #fileError(error: unknown) {
+    const reason = (error as Wire)?.data?.reason;
     return opaqueDaemonError(error, typeof reason === 'string' && Object.hasOwn(FILE_REFUSALS, reason) ? FILE_REFUSALS[reason] : 'The file cannot be read on the daemon host');
   }
 
-  /** alpd's refusal of a workspace.git call with the gateway's fixed text for its reason. @param {unknown} error */
-  #gitError(error) {
-    const reason = /** @type {any} */ (error)?.data?.reason;
+  /** alpd's refusal of a workspace.git call with the gateway's fixed text for its reason. */
+  #gitError(error: unknown) {
+    const reason = (error as Wire)?.data?.reason;
     return opaqueDaemonError(error, typeof reason === 'string' && Object.hasOwn(GIT_REFUSALS, reason) ? GIT_REFUSALS[reason] : 'The workspace\'s Git state cannot be read on the daemon host');
   }
 
@@ -936,17 +918,15 @@ export class ClientConnection {
    * that cannot fit alone answers kind too_large without hunks (this gateway lowers the per-file
    * limit). The rest continues from a cursor of this connection, which asks alpd for the same page
    * again (`cursor`, its snapshot checked there) and skips what was sent; hidden files are counted
-   * on the first part only.
-   * @param {import('@anhlp/alp-protocol').GitDiffPage} page @param {{ key: string, cursor: string | undefined, skip: number }} from
+   * on the first part only. `from` says where this part starts.
    */
-  #gitPage(page, { key, cursor, skip }) {
+  #gitPage(page: GitDiffPage, { key, cursor, skip }: { key: string, cursor: string | undefined, skip: number }) {
     const budget = this.#answerBudget();
     const head = { compare: page.compare, snapshot: page.snapshot };
     const hiddenCount = skip ? 0 : page.hiddenCount;
     const fixed = Buffer.byteLength(JSON.stringify({ ...head, files: [], hiddenCount, truncated: true, nextCursor: 'x'.repeat(1024) })) + 256;
     let used = fixed;
-    /** @type {import('@anhlp/alp-protocol').GitDiffFile[]} */
-    const files = [];
+    const files: GitDiffFile[] = [];
     let index = skip;
     for (; index < page.files.length; index++) {
       let file = page.files[index];
@@ -958,7 +938,7 @@ export class ClientConnection {
     }
     if (index < page.files.length) {
       const token = `${GIT_PAGE_PREFIX}${randomBytes(12).toString('base64url')}`;
-      if (this.#gitPages.size >= MAX_GIT_PAGES) this.#gitPages.delete(/** @type {string} */ (this.#gitPages.keys().next().value));
+      if (this.#gitPages.size >= MAX_GIT_PAGES) this.#gitPages.delete(this.#gitPages.keys().next().value as string);
       this.#gitPages.set(token, { key, cursor, skip: index, snapshot: page.snapshot });
       return { ...head, files, hiddenCount, truncated: true, nextCursor: token };
     }
@@ -973,26 +953,24 @@ export class ClientConnection {
    * owner's Settings list the library and built-in layers there (t-a95b.1 F1). Any other refusal,
    * and every other connection, keeps alpd's answer: a remote credential gains no library read on a
    * workspace that is not an ALP project.
-   * @param {string} method @param {Record<string, any>} params
    */
-  async #libraryRead(method, params) {
+  async #libraryRead(method: string, params: Record<string, Wire>) {
     try { return await this.#call(method, params); }
     catch (caught) {
-      const error = /** @type {any} */ (caught);
+      const error = caught as Wire;
       if (error?.code !== ERROR.notFound || error?.data?.reason !== 'not_alp_project' || params.scope === 'project' || !this.#isOwner()) throw caught;
       const { projectRoot: _projectRoot, ...rest } = params;
       return this.#call(method, rest);
     }
   }
 
-  /** A projectRoot the gateway requires where alpd would fall back to host-level data. @param {unknown} projectRoot @param {string} method */
-  #project(projectRoot, method) {
+  /** A projectRoot the gateway requires where alpd would fall back to host-level data. */
+  #project(projectRoot: unknown, method: string) {
     if (projectRoot === undefined) throw forbidden(`${method} through the gateway needs a projectRoot this credential may use`, GATEWAY_REASON.hostScope);
     return this.#workspace(projectRoot);
   }
 
-  /** @param {string} method @param {Record<string, any>} params */
-  async #writeLibrary(method, params) {
+  async #writeLibrary(method: string, params: Record<string, Wire>) {
     const workspace = this.#project(params.projectRoot, method);
     if (params.scope !== 'project') throw forbidden('Library writes require project scope', GATEWAY_REASON.hostScope);
     if (!['agents', 'skills'].includes(params.kind) || params.sync !== undefined && params.sync !== 'none') throw forbidden('Only project instruction entries may be changed remotely', 'library_policy');
@@ -1006,8 +984,8 @@ export class ClientConnection {
     });
   }
 
-  /** @param {unknown} mode @param {string} [sessionId] the session that runs in it, when the refusal is about one */
-  #checkMode(mode, sessionId) {
+  /** `sessionId`: the session that runs in it, when the refusal is about one. */
+  #checkMode(mode: unknown, sessionId?: string) {
     const modes = this.#grant.modes;
     if (!modes || (typeof mode === 'string' && modes.has(mode))) return;
     const runs = sessionId === undefined ? '' : `Session ${sessionId} runs ${typeof mode === 'string' ? mode : 'in an unknown mode'}; `;
@@ -1018,10 +996,8 @@ export class ClientConnection {
    * A remote spec: allow-listed fields only, and cwd one of the grant's workspaces, sent to alpd
    * as its canonical path. Fields that run code or choose paths (env, mcpServers, workdir,
    * writeRoot, copy, restore, ...) are refused, not dropped, so the client knows.
-   * @param {Record<string, unknown>} spec
-   * @returns {{ workspace: import('./credentials.js').Workspace, spec: Record<string, any> }}
    */
-  #spec(spec) {
+  #spec(spec: Record<string, unknown>): { workspace: Workspace, spec: Record<string, Wire> } {
     for (const field of Object.keys(spec)) {
       if (spec[field] !== undefined && !SPEC_FIELDS.includes(field)) throw forbidden(`spec.${field} cannot be set through the gateway`, GATEWAY_REASON.specField, { field });
     }
@@ -1040,11 +1016,8 @@ export class ClientConnection {
     return { workspace, spec: { ...pick(spec, SPEC_FIELDS), cwd: workspace.canonical } };
   }
 
-  /**
-   * Whether a listed session's tree lies in the grant, using the list itself for its ancestors.
-   * @param {any} summary @param {Map<string, any>} listed
-   */
-  async #listedInScope(summary, listed) {
+  /** Whether a listed session's tree lies in the grant, using the list itself for its ancestors. */
+  async #listedInScope(summary: Wire, listed: Map<string, Wire>) {
     let current = summary;
     for (let depth = 0; depth < MAX_DEPTH; depth++) {
       if (!current || typeof current.projectRoot !== 'string' || !workspaceOf(this.#grant, current.projectRoot)) return false;
@@ -1059,25 +1032,23 @@ export class ClientConnection {
   /**
    * An event of alpd for this client. A summary naming a fork source not checked yet holds its
    * place in the queue until the source is looked up (#seeForkSources), so order is kept.
-   * @param {import('@anhlp/alp-protocol').Envelope} envelope
    */
-  #event(envelope) {
+  #event(envelope: Envelope) {
     if (this.#closed) return;
     if (typeof envelope?.sessionId !== 'string') return;
     if (this.#uncheckedSource(envelope.event) === undefined) return this.#deliver(envelope);
     const fill = this.#slot();
-    this.#seeForkSources([/** @type {any} */ (envelope.event).session]).then(() => this.#deliver(envelope, fill));
+    this.#seeForkSources([(envelope.event as Wire).session]).then(() => this.#deliver(envelope, fill));
   }
 
   /**
    * An event out to the client when its session is in scope; into `fill`, a place already held in
    * the queue, when given.
-   * @param {import('@anhlp/alp-protocol').Envelope} envelope @param {(frame: string | null) => void} [fill]
    */
-  #deliver(envelope, fill) {
+  #deliver(envelope: Envelope, fill?: (frame: string | null) => void) {
     if (this.#closed) { fill?.(null); return; }
     const id = envelope.sessionId;
-    const put = fill ?? ((/** @type {string} */ frame) => this.#push(frame));
+    const put = fill ?? ((frame: string) => this.#push(frame));
     let safe = this.#safeEnvelope(envelope);
     let frame = JSON.stringify({ jsonrpc: '2.0', method: 'event', params: safe });
     const sourceBytes = Math.max(Buffer.byteLength(JSON.stringify(envelope)), Buffer.byteLength(frame));
@@ -1085,7 +1056,7 @@ export class ClientConnection {
       safe = { ...envelope, event: { type: 'item', item: { kind: 'notice', id: `oversized:${envelope.cursor}`, level: 'warning', text: `History event ${envelope.cursor} is too large to display (${sourceBytes} bytes).` } } };
       frame = JSON.stringify({ jsonrpc: '2.0', method: 'event', params: safe });
     }
-    const event = /** @type {any} */ (envelope.event);
+    const event = envelope.event as Wire;
     const known = this.#sessions.get(id);
     if (known) { if (this.#wanted(envelope, known)) put(frame); else fill?.(null); return; }
     // A child opening in a tree already in scope.
@@ -1118,10 +1089,9 @@ export class ClientConnection {
    * tree this client did not attach) goes out only for the workspace the watch named: alpd is asked
    * for every tree, as it compares projectRoot strings and a workspace has two
    * (docs/alp/remote-gateway.md §5.1).
-   * @param {import('@anhlp/alp-protocol').Envelope} envelope @param {Scoped} scoped
    */
-  #wanted(envelope, scoped) {
-    const type = /** @type {any} */ (envelope.event)?.type;
+  #wanted(envelope: Envelope, scoped: Scoped) {
+    const type = (envelope.event as Wire)?.type;
     if (!WATCHED.has(type) || envelope.cursor !== undefined || this.#attached.has(scoped.root)) return true;
     if (this.#watch === undefined) return false;
     // The tree's workspace, as alpd's watch compares it: its root's.
@@ -1132,17 +1102,16 @@ export class ClientConnection {
   /**
    * session.list pages: alpd's are read with what is left of the limit until the page is full or
    * alpd has no more, so a page the grant thins out still continues from alpd's own cursor.
-   * @param {Record<string, any>} params @param {(session: any, listed: Map<string, any>) => Promise<boolean>} keep
    */
-  async #listPages(params, keep) {
+  async #listPages(params: Record<string, Wire>, keep: (session: Wire, listed: Map<string, Wire>) => Promise<boolean>) {
     const limit = params.limit;
-    /** @type {any[]} */ const kept = [];
+    const kept: Wire[] = [];
     let result;
     let cursor = params.cursor;
     for (let reads = 0; reads < MAX_LIST_READS; reads++) {
       result = await this.#call('session.list', { ...params, ...(limit === undefined ? {} : { limit: limit - kept.length }), ...(cursor === undefined ? {} : { cursor }) });
       const sessions = Array.isArray(result?.sessions) ? result.sessions : [];
-      const listed = new Map(sessions.map((/** @type {any} */ session) => [session.id, session]));
+      const listed = new Map<string, Wire>(sessions.map((session: Wire) => [session.id, session]));
       for (const session of sessions) if (await keep(session, listed)) kept.push(session);
       cursor = typeof result?.nextCursor === 'string' ? result.nextCursor : undefined;
       if (limit === undefined || cursor === undefined || kept.length >= limit) break;
@@ -1158,13 +1127,12 @@ export class ClientConnection {
    */
   #attachmentContext() { return { principalId: this.#grant.id, principalEpoch: this.#grant.scopeId ?? this.#grant.fingerprint, authorizedRoots: [...new Set(this.#grant.workspaces.map(workspace => workspace.canonical))] }; }
 
-  /** alpd's refusal of an attachment call: the gateway's fixed text, its code, reason and ATTACHMENT_ERROR_DATA only. @param {unknown} caught */
-  #attachmentError(caught) {
-    const error = /** @type {any} */ (caught);
+  /** alpd's refusal of an attachment call: the gateway's fixed text, its code, reason and ATTACHMENT_ERROR_DATA only. */
+  #attachmentError(caught: unknown) {
+    const error = caught as Wire;
     if (error instanceof GatewayError || isAlpClientError(error) || typeof error?.code !== 'number') return error;
     const reason = typeof error.data?.reason === 'string' && Object.hasOwn(ATTACHMENT_REFUSALS, error.data.reason) ? error.data.reason : undefined;
-    /** @type {Record<string, unknown>} */
-    const data = reason ? { reason } : {};
+    const data: Record<string, unknown> = reason ? { reason } : {};
     for (const key of ATTACHMENT_ERROR_DATA) {
       const value = error.data?.[key];
       if ((Number.isSafeInteger(value) && value >= 0)
@@ -1180,11 +1148,10 @@ export class ClientConnection {
    * A terminal's output, exit or detach from alpd (§5.18): only for a terminal this connection
    * attached, while the credential holds terminal.exec, in the schema's shape. Into the one ordered
    * queue at once, so an attach's replay still leaves before its answer.
-   * @param {unknown} raw
    */
-  #terminalEvent(raw) {
+  #terminalEvent(raw: unknown) {
     if (this.#closed) return;
-    const candidate = /** @type {any} */ (raw);
+    const candidate = raw as Wire;
     if (candidate?.type === 'output' && typeof candidate.data === 'string' && this.#terminals.has(candidate.terminalId) && this.#grant.permissions.has('terminal.exec') && Buffer.byteLength(candidate.data) > this.#terminalLimits.maxOutputFrameBytes) {
       // A host changed its output contract: explicitly end this connection rather than lose bytes.
       this.close(CLOSE_CODE.internal, 'Terminal output exceeds the negotiated frame limit; reconnect');
@@ -1199,55 +1166,54 @@ export class ClientConnection {
     this.#push(JSON.stringify({ jsonrpc: '2.0', method: 'terminal.event', params: event }));
   }
 
-  /** The live catalog changed (t-e5ee): read-only news for clients that may read it (catalog.get), with
+  /**
+   * The live catalog changed (t-e5ee): read-only news for clients that may read it (catalog.get), with
    * fetchedAt only; the client re-reads catalog.get, which the gateway projects.
-   * @param {any} raw */
-  #catalogUpdated(raw) {
+   */
+  #catalogUpdated(raw: Wire) {
     if (this.#closed || !this.#helloed || !this.#grant.permissions.has('session.read')) return;
     const fetchedAt = typeof raw?.fetchedAt === 'string' && raw.fetchedAt.length <= 64 ? raw.fetchedAt : undefined;
     this.#push(JSON.stringify({ jsonrpc: '2.0', method: 'catalog.updated', params: fetchedAt ? { fetchedAt } : {} }));
   }
 
-  /** Only this connection's authorized watch gets opaque invalidations; never host terminal data.
-   * @param {any} raw */
-  #terminalChanged(raw) {
+  /** Only this connection's authorized watch gets opaque invalidations; never host terminal data. */
+  #terminalChanged(raw: Wire) {
     if (this.#closed || !this.#terminalWatching || !this.#grant.permissions.has('terminal.exec')) return;
     if (!/^[0-9a-f]{32}$/.test(raw?.watchId) || !/^[0-9a-f]{32}$/.test(raw?.cursor)) return;
     this.#push(JSON.stringify({ jsonrpc: '2.0', method: 'terminal.changed', params: { watchId: raw.watchId, cursor: raw.cursor } }));
   }
 
-  /** alpd's refusal of a terminal call: a fixed text per known reason, its code and reason, `limit` only. @param {unknown} caught */
-  #terminalError(caught) {
-    const error = /** @type {any} */ (caught);
+  /** alpd's refusal of a terminal call: a fixed text per known reason, its code and reason, `limit` only. */
+  #terminalError(caught: unknown) {
+    const error = caught as Wire;
     if (error instanceof GatewayError || isAlpClientError(error) || typeof error?.code !== 'number') return error;
     const reason = typeof error.data?.reason === 'string' && Object.hasOwn(TERMINAL_REFUSALS, error.data.reason) ? error.data.reason : undefined;
-    /** @type {Record<string, unknown>} */
-    const data = reason ? { reason } : {};
+    const data: Record<string, unknown> = reason ? { reason } : {};
     if (reason === 'terminal_limit' && (error.data.limit === 'principal' || error.data.limit === 'daemon')) data.limit = error.data.limit;
-    return new GatewayError(error.code, reason ? TERMINAL_REFUSALS[/** @type {keyof typeof TERMINAL_REFUSALS} */ (reason)] : 'The terminal request failed on the daemon host', Object.keys(data).length ? data : undefined);
+    return new GatewayError(error.code, reason ? TERMINAL_REFUSALS[reason as keyof typeof TERMINAL_REFUSALS] : 'The terminal request failed on the daemon host', Object.keys(data).length ? data : undefined);
   }
 
-  /** One terminal call to alpd with this credential's context (as attachments bind it); alpd's refusal rewritten. @param {string} method @param {Record<string, unknown>} params */
-  #terminalCall(method, params) {
+  /** One terminal call to alpd with this credential's context (as attachments bind it); alpd's refusal rewritten. */
+  #terminalCall(method: string, params: Record<string, unknown>) {
     return this.#call(method, { ...params, ...this.#attachmentContext() }).catch(error => { throw this.#terminalError(error); });
   }
 
-  /** A terminal answer the gateway passes on, or a refusal. @param {unknown} raw @param {string} method */
-  #terminalAnswer(raw, method) {
+  /** A terminal answer the gateway passes on, or a refusal. */
+  #terminalAnswer(raw: unknown, method: string) {
     const terminal = projectTerminal(raw);
     if (terminal) return terminal;
     this.#log.error(`${method} answered a terminal the gateway does not pass on; refused it`, { code: 'ALP_GATEWAY_TERMINAL_REFUSED' });
     throw new GatewayError(ERROR.failed, 'The daemon host answered a terminal the gateway does not pass on');
   }
 
-  /** One attachment call to alpd with this credential's context; alpd's refusal rewritten. @param {string} method @param {Record<string, unknown>} params */
-  #attachmentCall(method, params) {
+  /** One attachment call to alpd with this credential's context; alpd's refusal rewritten. */
+  #attachmentCall(method: string, params: Record<string, unknown>) {
     return this.#call(method, { ...params, ...this.#attachmentContext() }).catch(error => { throw this.#attachmentError(error); });
   }
 
-  /** An attachment answer the gateway passes on, or a refusal. @param {unknown} raw @param {string} method */
-  #attachmentAnswer(raw, method) {
-    const attachment = projectAttachment(/** @type {any} */ (raw)?.attachment);
+  /** An attachment answer the gateway passes on, or a refusal. */
+  #attachmentAnswer(raw: unknown, method: string) {
+    const attachment = projectAttachment((raw as Wire)?.attachment);
     if (attachment) return { attachment };
     this.#log.error(`${method} answered an attachment the gateway does not pass on; refused it`, { code: 'ALP_GATEWAY_ATTACHMENT_REFUSED' });
     throw new GatewayError(ERROR.failed, 'The daemon host answered an attachment the gateway does not pass on');
@@ -1257,15 +1223,13 @@ export class ClientConnection {
    * alpd's refusal of session.fork or session.rewind: the gateway's fixed text for its reason (a
    * generic one for a reason it does not know), its code and plain reason, a current generation and
    * non-negative integers; nothing else, so no alpd or runtime text reaches the client.
-   * @param {unknown} caught
    */
-  #conversationError(caught, refusals = CONVERSATION_REFUSALS) {
-    const error = /** @type {any} */ (caught);
+  #conversationError(caught: unknown, refusals = CONVERSATION_REFUSALS) {
+    const error = caught as Wire;
     if (error instanceof GatewayError || isAlpClientError(error) || typeof error?.code !== 'number') return error;
     const reason = typeof error.data?.reason === 'string' && /^[a-z_]{1,64}$/.test(error.data.reason) ? error.data.reason : undefined;
-    /** @type {Record<string, unknown>} */
-    const data = reason ? { reason } : {};
-    const source = error.data && typeof error.data === 'object' && !Array.isArray(error.data) ? error.data : {};
+    const data: Record<string, unknown> = reason ? { reason } : {};
+    const source: Record<string, Wire> = error.data && typeof error.data === 'object' && !Array.isArray(error.data) ? error.data : {};
     for (const [key, value] of Object.entries(source).slice(0, 16)) {
       if (!/^[A-Za-z]{1,32}$/.test(key) || key === 'reason') continue;
       if ((Number.isSafeInteger(value) && value >= 0) || (key === 'generation' && isGeneration(value)) || (key === 'action' && value === 'session.create')) data[key] = value;
@@ -1280,9 +1244,9 @@ export class ClientConnection {
    * The root a fork or rewind names: in a granted workspace, looked up afresh, and a root (a child's
    * conversation belongs to its requester's tree). Both drive the session's future conversation (a fork
    * inherits its configuration), so a grant with `modes` must allow the mode of the root and its tree,
-   * looked up afresh, exactly as session.prompt checks it (#drive). @param {string} sessionId @param {{ not_root: string }} [refusals] its not_root text
+   * looked up afresh, exactly as session.prompt checks it (#drive). `refusals` gives its not_root text.
    */
-  async #conversationRoot(sessionId, refusals = CONVERSATION_REFUSALS) {
+  async #conversationRoot(sessionId: string, refusals: Readonly<Record<string, string>> = CONVERSATION_REFUSALS) {
     const scoped = await this.#resolve(sessionId, { fresh: true });
     if (scoped.root !== sessionId) throw forbidden(refusals.not_root, GATEWAY_REASON.notRoot);
     await this.#drive(sessionId);
@@ -1295,9 +1259,8 @@ export class ClientConnection {
    * session.team.write too; the mode alpd would run it with, asked first (session.configure.preview),
    * must be one of the grant's, so a change never takes the session beyond the credential. requestIds
    * are this credential's own; alpd's refusals leave as fixed text with their code and reason.
-   * @param {any} params
    */
-  async #configureLive(params) {
+  async #configureLive(params: Wire) {
     if (params.team !== undefined && !this.#grant.permissions.has('session.team.write')) throw forbidden('This credential lacks session.team.write', GATEWAY_REASON.grant, { permission: 'session.team.write' });
     if (!this.#capabilities.includes(CAPABILITY.sessionConfigureLive)) throw new GatewayError(GATEWAY_ERROR.unavailable, 'The daemon host changes only the mode of a session', { reason: 'capability', capability: CAPABILITY.sessionConfigureLive });
     await this.#conversationRoot(params.sessionId, CONFIGURE_REASONS);
@@ -1320,8 +1283,8 @@ export class ClientConnection {
     return { session: this.#safeSession(session), configured, ...(result.duplicate === true ? { duplicate: true } : {}) };
   }
 
-  /** An answer of session.fork or session.rewind the gateway does not pass on. @param {string} method @param {string} why */
-  #conversationRefused(method, why) {
+  /** An answer of session.fork or session.rewind the gateway does not pass on. */
+  #conversationRefused(method: string, why: string) {
     this.#log.error(`${method} answered something the gateway does not pass on; refused it`, { code: 'ALP_GATEWAY_CONVERSATION_REFUSED', why });
     return new GatewayError(ERROR.failed, `The daemon host answered ${method} with something the gateway does not pass on; read the session before trying again`, { reason: 'outcome_unknown' });
   }
@@ -1347,15 +1310,14 @@ export class ClientConnection {
     return this.#refreshingWorktrees;
   }
 
-  /** Fixed error text keeps host registry/migration paths out of remote failures. @param {string} method @param {any} params */
-  #registryCall(method, params) { return this.#call(method, params).catch(error => {
-    const reason=/** @type {any} */ (error)?.data?.reason;
+  /** Fixed error text keeps host registry/migration paths out of remote failures. */
+  #registryCall(method: string, params: Wire) { return this.#call(method, params).catch(error => {
+    const reason=(error as Wire)?.data?.reason;
     const messages={workspace_dirty:'Preserve dirty, ignored, hidden-index or submodule data before removing this checkout.',workspace_busy:'Close active sessions and wait for opening work before removal.',workspace_claimed:'Release workspace claims before removal.',workspace_leased:'An assignment holds this checkout; finish it before removal.',workspace_assignment_result:'Merge or preserve retained assignment results before removal; ask the host owner if ownership evidence needs repair.',workspace_history:'Saved sessions still reference this checkout. Retain its files; this operation does not delete history.',reconciliation_required:'Retry the original worktree request with its original requestId and revision before another mutation.',outside_workspace:'The host has not granted this source and destination mapping to this credential.',mapping_invalid:'Ask the host owner to repair the private worktree destination configuration.'};
-    throw opaqueDaemonError(error, /** @type {Record<string,string>} */ (messages)[reason] ?? 'Workspace metadata could not be read or saved. Refresh and retry; ask the host owner if it persists.');
+    throw opaqueDaemonError(error, (messages as Record<string,string>)[reason] ?? 'Workspace metadata could not be read or saved. Refresh and retry; ask the host owner if it persists.');
   }); }
-  /** Live identity check: a retargeted granted symlink never follows its new target.
-   * @param {unknown} directory */
-  async #registryDirectory(directory) {
+  /** Live identity check: a retargeted granted symlink never follows its new target. */
+  async #registryDirectory(directory: unknown) {
     const grant = this.#workspace(directory);
     const canonical = await registryRealpath(grant.path).catch(() => undefined);
     if (!canonical || canonical !== grant.canonical || !(await registryStat(canonical)).isDirectory()) throw forbidden('Granted directory changed; ask the owner to update the credential', GATEWAY_REASON.outsideWorkspace);
@@ -1366,33 +1328,29 @@ export class ClientConnection {
     for (const grant of this.#grant.workspaces) { try { roots.push((await this.#registryDirectory(grant.path)).canonical); } catch {} }
     return roots;
   }
-  /** Explicit remote projection: owner canonical/placement/receipts never cross this boundary.
-   * @param {any} entry @param {'project'|'workspace'} kind */
-  #registryProjection(entry, kind) {
+  /** Explicit remote projection: owner canonical/placement/receipts never cross this boundary. */
+  #registryProjection(entry: Wire, kind: 'project'|'workspace') {
     const fields = kind === 'project' ? ['id', 'root', 'customName', 'addedAt', 'removedAt', 'revision'] : ['id', 'projectId', 'directory', 'title', 'pinnedAt', 'archivedAt', 'labels', 'createdAt', 'revision', 'branch', 'managedWorktree'];
     return Object.fromEntries(fields.filter(key => Object.hasOwn(entry, key)).map(key => [key, entry[key]]));
   }
-  /** @param {string} workspaceId */
-  async #registryWorkspace(workspaceId) {
+  async #registryWorkspace(workspaceId: string) {
     const result = await this.#registryCall('workspace.get', { workspaceId }).catch(() => { throw forbidden('Workspace is unavailable to this credential', GATEWAY_REASON.outsideWorkspace); });
     const grant = await this.#registryDirectory(result?.workspace?.directory);
     const canonical = await registryRealpath(result.workspace.directory).catch(() => undefined);
     if (canonical !== grant.canonical || (result.workspace.canonical && result.workspace.canonical !== canonical)) throw forbidden('Workspace directory changed', GATEWAY_REASON.outsideWorkspace);
     return result;
   }
-  /** Principal-scoped durable IDs without trusting an actor field from the client. @param {string} id */
-  #registryRequestId(id) { return 'gw:' + createHash('sha256').update(JSON.stringify([this.#grant.id, id])).digest('hex'); }
-  /** @param {string} kind @param {any} params */
-  async #registryList(kind, params) {
+  /** Principal-scoped durable IDs without trusting an actor field from the client. */
+  #registryRequestId(id: string) { return 'gw:' + createHash('sha256').update(JSON.stringify([this.#grant.id, id])).digest('hex'); }
+  async #registryList(kind: string, params: Wire) {
     const result = await this.#registryCall(kind + '.list', { ...params, projectRoots: await this.#registryRoots() });
     const key = kind + 's';
-    return { [key]: (result[key] ?? []).map((/** @type {any} */ entry) => this.#registryProjection(entry, /** @type {'project'|'workspace'} */ (kind))), total: result.total, nextCursor: result.nextCursor, revision: result.revision };
+    return { [key]: (result[key] ?? []).map((entry: Wire) => this.#registryProjection(entry, kind as 'project'|'workspace')), total: result.total, nextCursor: result.nextCursor, revision: result.revision };
   }
 
   // ---- handlers of exposed methods: params are already schema-checked and allow-listed ----
 
-  /** @type {Record<string, (params: Record<string, any>) => Promise<unknown>>} */
-  #handlers = {
+  #handlers: Record<string, (params: Record<string, Wire>) => Promise<unknown>> = {
     'workspace.worktree.options': async params => {
       await this.#registryWorkspace(params.workspaceId);
       return this.#registryCall('workspace.worktree.options', {...params,...this.#worktreeContext()});
@@ -1429,7 +1387,7 @@ export class ClientConnection {
       let projectCursor; let found = false;
       do {
         const page = await this.#registryList('project', { limit: 500, includeRemoved: true, ...(projectCursor ? { cursor: projectCursor } : {}) });
-        found = page.projects.some((/** @type {any} */ p) => p.id === params.projectId);
+        found = page.projects.some((p: Wire) => p.id === params.projectId);
         projectCursor = page.nextCursor;
       } while (!found && projectCursor);
       if (!found) throw forbidden('Project is unavailable to this credential', GATEWAY_REASON.outsideWorkspace);
@@ -1446,9 +1404,9 @@ export class ClientConnection {
     'catalog.get': async () => {
       const { providers, models, ...rest } = await this.#call('catalog.get', {});
       // A disabled ACP provider's rows stay on the host; every row is projected to known fields.
-      const catalog = { ...rest, models: (Array.isArray(models) ? models : []).filter((/** @type {any} */ model) => !(model?.runtime === 'acp' && model?.enabled === false)).map((/** @type {any} */ model) => pick(model, CATALOG_MODEL_FIELDS)) };
+      const catalog = { ...rest, models: (Array.isArray(models) ? models : []).filter((model: Wire) => !(model?.runtime === 'acp' && model?.enabled === false)).map((model: Wire) => pick(model, CATALOG_MODEL_FIELDS)) };
       return providers && typeof providers === 'object'
-        ? { ...catalog, providers: Object.fromEntries(Object.entries(providers).map(([runtime, state]) => [runtime, { status: state?.status, ...(typeof state?.fetchedAt === 'string' ? { fetchedAt: state.fetchedAt } : {}) }])) }
+        ? { ...catalog, providers: Object.fromEntries(Object.entries(providers).map(([runtime, state]: [string, Wire]) => [runtime, { status: state?.status, ...(typeof state?.fetchedAt === 'string' ? { fetchedAt: state.fetchedAt } : {}) }])) }
         : catalog;
     },
 
@@ -1460,7 +1418,7 @@ export class ClientConnection {
         cursor = openCursor(sealed, this.#grant.id);
         if (cursor === undefined) throw new GatewayError(RPC_ERROR.invalidParams, 'cursor is not one this gateway answered; read the list again from the start', { reason: 'invalid_params' });
       }
-      const keep = async (/** @type {any} */ session, /** @type {Map<string, any>} */ listed) => {
+      const keep = async (session: Wire, listed: Map<string, Wire>) => {
         if (only && session.projectRoot !== only.path && session.projectRoot !== only.canonical) return false;
         return this.#listedInScope(session, listed);
       };
@@ -1486,9 +1444,9 @@ export class ClientConnection {
       const result = await this.#call('session.status', params);
       const status = result?.status;
       const sessions = Array.isArray(status?.sessions) ? status.sessions : [];
-      if (status?.rootId !== scoped.root || sessions.some((/** @type {any} */ session) => !workspaceOf(this.#grant, session?.projectRoot))) throw this.#outOfTree(params.sessionId, 'session.status');
+      if (status?.rootId !== scoped.root || sessions.some((session: Wire) => !workspaceOf(this.#grant, session?.projectRoot))) throw this.#outOfTree(params.sessionId, 'session.status');
       await this.#seeForkSources(sessions);
-      return { ...result, status: { ...status, sessions: sessions.map((/** @type {any} */ session) => this.#safeSession(session)) } };
+      return { ...result, status: { ...status, sessions: sessions.map((session: Wire) => this.#safeSession(session)) } };
     },
     // The run log of the session's root: entries name no workspace, so the root is the check.
     'session.log': async params => {
@@ -1508,7 +1466,7 @@ export class ClientConnection {
       const scoped = await this.#resolve(params.sessionId);
       const result = await this.#call('session.history', { sessionId: params.sessionId, ...(params.before !== undefined ? { before: params.before } : {}), ...(params.limit !== undefined ? { limit: params.limit } : {}), maxBytes: Math.min(512 * 1024, Math.floor((this.#limits.maxFrame ?? 512 * 1024) / 2)) });
       const items = [];
-      await this.#seeForkSources((result.items ?? []).map((/** @type {any} */ item) => item?.event?.type === 'session.opened' || item?.event?.type === 'session.updated' ? item.event.session : undefined));
+      await this.#seeForkSources((result.items ?? []).map((item: Wire) => item?.event?.type === 'session.opened' || item?.event?.type === 'session.updated' ? item.event.session : undefined));
       for (const item of result.items ?? []) {
         if (item.oversized) { items.push(item); continue; }
         const member = await this.#resolve(item.sessionId);
@@ -1584,7 +1542,7 @@ export class ClientConnection {
 
     'session.prompt': async params => {
       // Attachment parts are the credential's own uploads: attachments.write as well, before anything else.
-      const attaches = params.content.some((/** @type {any} */ part) => part?.type === 'attachment');
+      const attaches = params.content.some((part: Wire) => part?.type === 'attachment');
       if (attaches && !this.#grant.permissions.has('attachments.write')) throw forbidden('This credential lacks attachments.write', GATEWAY_REASON.grant, { permission: 'attachments.write' });
       await this.#drive(params.sessionId);
       let count = 0;
@@ -1643,7 +1601,7 @@ export class ClientConnection {
     // The registry's label catalogue: names and colours only, nothing else alpd might add.
     'label.list': async () => {
       const result = await this.#call('label.list', {});
-      return { labels: (Array.isArray(result?.labels) ? result.labels : []).filter((/** @type {any} */ label) => typeof label?.name === 'string' && typeof label?.color === 'string').slice(0, 1000).map((/** @type {any} */ label) => ({ name: label.name, color: label.color })) };
+      return { labels: (Array.isArray(result?.labels) ? result.labels : []).filter((label: Wire) => typeof label?.name === 'string' && typeof label?.color === 'string').slice(0, 1000).map((label: Wire) => ({ name: label.name, color: label.color })) };
     },
     'session.archive': async params => { await this.#resolve(params.sessionId); return this.#shownResult(await this.#call('session.archive', params)); },
     // Conversation fork and rewind (docs/protocol/alp-json-rpc-v1.md §12.7, docs/alp/remote-gateway.md
@@ -1687,11 +1645,11 @@ export class ClientConnection {
     'session.commands': async params => {
       await this.#resolve(params.sessionId);
       const result = await this.#call('session.commands', params);
-      const text = (value, max) => typeof value === 'string' ? value.slice(0, max) : '';
+      const text = (value: unknown, max: number) => typeof value === 'string' ? value.slice(0, max) : '';
       const commands = (Array.isArray(result?.commands) ? result.commands : [])
-        .filter(entry => entry && typeof entry.name === 'string' && /^[^\s\u0000-\u001f\u007f]{1,256}$/.test(entry.name))
+        .filter((entry: Wire) => entry && typeof entry.name === 'string' && /^[^\s\u0000-\u001f\u007f]{1,256}$/.test(entry.name))
         .slice(0, 1000)
-        .map(entry => ({ name: entry.name, description: text(entry.description, 4096), ...(typeof entry.argumentHint === 'string' && entry.argumentHint ? { argumentHint: text(entry.argumentHint, 256) } : {}), kind: entry.kind === 'skill' ? 'skill' : 'command' }));
+        .map((entry: Wire) => ({ name: entry.name, description: text(entry.description, 4096), ...(typeof entry.argumentHint === 'string' && entry.argumentHint ? { argumentHint: text(entry.argumentHint, 256) } : {}), kind: entry.kind === 'skill' ? 'skill' : 'command' }));
       return { commands };
     },
     // The ALP CLI command for the clipboard: rebuilt here from the id, passed on only when alpd's is the same.
@@ -1702,7 +1660,7 @@ export class ClientConnection {
       const expected = resumeCommandOf(params.sessionId, platform);
       const same = result && typeof result === 'object' && Object.keys(result).length === Object.keys(expected).length
         && Array.isArray(result.argv) && JSON.stringify(result.argv) === JSON.stringify(expected.argv)
-        && ['posix', 'windows', 'display', 'platform'].every(key => result[key] === expected[key]);
+        && (['posix', 'windows', 'display', 'platform'] as const).every(key => result[key] === expected[key]);
       if (!same) {
         this.#log.error('session.resumeCommand answered a command the gateway does not pass on; refused it', { code: 'ALP_GATEWAY_RESUME_COMMAND_REFUSED' });
         throw new GatewayError(ERROR.failed, 'The daemon host answered a resume command the gateway does not pass on');
@@ -1716,8 +1674,7 @@ export class ClientConnection {
     'session.fork': async params => {
       if (this.#grant.agent === true) throw forbidden('session.fork is the user\'s; this credential is an agent\'s', 'user_only');
       const scoped = await this.#conversationRoot(params.sessionId);
-      /** @type {import('./credentials.js').Workspace} */
-      let destination;
+      let destination: Workspace;
       if (params.workspaceId !== undefined) destination = this.#workspace((await this.#registryWorkspace(params.workspaceId)).workspace.directory);
       else destination = this.#workspace(scoped.projectRoot);
       if (params.newSessionId !== undefined) {
@@ -1770,8 +1727,7 @@ export class ClientConnection {
       let result;
       try { result = await this.#call('question.watch', { ...(params.turns === true ? { turns: true } : {}), ...(params.attention === true ? { attention: true } : {}) }); }
       catch (error) { this.#watch = previous; throw error; }
-      /** @param {string} sessionId */
-      const inScope = async sessionId => {
+      const inScope = async (sessionId: string) => {
         const scoped = await this.#resolve(sessionId).catch(() => undefined);
         return !!scoped && (!only || scoped.projectRoot === only.path || scoped.projectRoot === only.canonical);
       };
@@ -1796,7 +1752,7 @@ export class ClientConnection {
     'question.answer': async params => {
       // An exact id only: alpd accepts a unique prefix, which could match a question elsewhere.
       const { questions = [] } = await this.#call('question.list', {});
-      const question = questions.find((/** @type {any} */ candidate) => candidate.id === params.questionId);
+      const question = questions.find((candidate: Wire) => candidate.id === params.questionId);
       const missing = new GatewayError(ERROR.notFound, `No question ${params.questionId} waits for an answer`);
       if (!question) throw missing;
       await this.#resolve(question.sessionId).catch(() => { throw missing; });
@@ -1912,7 +1868,7 @@ export class ClientConnection {
       const key = JSON.stringify([params.workspaceId, compare.mode, compare.baseRef ?? null, compare.ignoreWhitespace === true, params.path ?? null]);
       let cursor = params.cursor;
       let skip = 0;
-      /** @type {string | undefined} */ let snapshot;
+      let snapshot: string | undefined;
       if (typeof cursor === 'string' && cursor.startsWith(GIT_PAGE_PREFIX)) {
         const split = this.#gitPages.get(cursor);
         if (!split || split.key !== key) throw new GatewayError(RPC_ERROR.invalidParams, GIT_REFUSALS.invalid_cursor, { reason: 'invalid_cursor' });
@@ -1942,22 +1898,22 @@ export class ClientConnection {
     // grant epoch and the grant's workspaces, so another credential's terminal is not found.
     'terminal.create': async params => {
       await this.#registryWorkspace(params.workspaceId);
-      const result = /** @type {any} */ (await this.#terminalCall('terminal.create', params));
+      const result = await this.#terminalCall('terminal.create', params) as Wire;
       return { terminal: this.#terminalAnswer(result?.terminal, 'terminal.create') };
     },
     'terminal.list': async params => {
       if (params.workspaceId !== undefined) await this.#registryWorkspace(params.workspaceId);
-      const result = /** @type {any} */ (await this.#terminalCall('terminal.list', params));
+      const result = await this.#terminalCall('terminal.list', params) as Wire;
       if (!Array.isArray(result?.terminals)) throw new GatewayError(ERROR.failed, 'The daemon host answered a list the gateway does not pass on');
-      return { terminals: result.terminals.map((/** @type {unknown} */ entry) => this.#terminalAnswer(entry, 'terminal.list')) };
+      return { terminals: result.terminals.map((entry: unknown) => this.#terminalAnswer(entry, 'terminal.list')) };
     },
     'terminal.watch': async params => {
       if (params.workspaceId !== undefined) await this.#registryWorkspace(params.workspaceId);
       this.#terminalWatching = true;
       try {
-        const result = /** @type {any} */ (await this.#terminalCall('terminal.watch', params));
+        const result = await this.#terminalCall('terminal.watch', params) as Wire;
         if (!Array.isArray(result?.terminals) || !/^[0-9a-f]{32}$/.test(result.watchId) || !/^[0-9a-f]{32}$/.test(result.cursor) || typeof result.reset !== 'boolean') throw new GatewayError(ERROR.failed, 'Invalid terminal snapshot from daemon host');
-        const safe = { terminals: result.terminals.map((/** @type {unknown} */ entry) => this.#terminalAnswer(entry, 'terminal.watch')), watchId: result.watchId, cursor: result.cursor, reset: result.reset };
+        const safe = { terminals: result.terminals.map((entry: unknown) => this.#terminalAnswer(entry, 'terminal.watch')), watchId: result.watchId, cursor: result.cursor, reset: result.reset };
         if (Buffer.byteLength(JSON.stringify(safe)) > (this.#limits.maxFrame ?? 512 * 1024) - 1024) throw new GatewayError(GATEWAY_ERROR.unavailable, 'Terminal snapshot exceeds this gateway frame limit; select a workspace', { reason: 'terminal_snapshot_too_large' });
         return safe;
       } catch (error) { this.#terminalWatching = false; throw error; }
@@ -1968,8 +1924,8 @@ export class ClientConnection {
       return { closed: true };
     },
     'terminal.capture': async params => {
-      const result = /** @type {any} */ (await this.#terminalCall('terminal.capture', params));
-      if (!Array.isArray(result?.lines) || !result.lines.every((/** @type {unknown} */ line) => typeof line === 'string') || !Number.isSafeInteger(result.totalLines) || result.totalLines < 0 || result.lines.length > result.totalLines) throw new GatewayError(ERROR.failed, 'The daemon host answered a capture the gateway does not pass on');
+      const result = await this.#terminalCall('terminal.capture', params) as Wire;
+      if (!Array.isArray(result?.lines) || !result.lines.every((line: unknown) => typeof line === 'string') || !Number.isSafeInteger(result.totalLines) || result.totalLines < 0 || result.lines.length > result.totalLines) throw new GatewayError(ERROR.failed, 'The daemon host answered a capture the gateway does not pass on');
       const safe = { lines: result.lines, totalLines: result.totalLines };
       if (Buffer.byteLength(JSON.stringify(safe)) > (this.#limits.maxFrame ?? 512 * 1024) - 1024) throw new GatewayError(GATEWAY_ERROR.unavailable, 'Terminal capture exceeds this gateway frame limit; select a smaller line range', { reason: 'terminal_capture_too_large' });
       return safe;
@@ -1979,7 +1935,7 @@ export class ClientConnection {
       const known = this.#terminals.has(params.terminalId);
       this.#terminals.add(params.terminalId);
       try {
-        const result = /** @type {any} */ (await this.#terminalCall('terminal.attach', params));
+        const result = await this.#terminalCall('terminal.attach', params) as Wire;
         const gap = result?.gap;
         if (!Number.isSafeInteger(result?.nextSeq) || result.nextSeq < 1 || (gap !== undefined && !(Number.isSafeInteger(gap?.fromSeq) && Number.isSafeInteger(gap?.toSeq) && gap.fromSeq >= 1 && gap.toSeq >= gap.fromSeq))) throw new GatewayError(ERROR.failed, 'The daemon host answered an attach the gateway does not pass on');
         return { terminal: this.#terminalAnswer(result.terminal, 'terminal.attach'), nextSeq: result.nextSeq, ...(gap ? { gap: { fromSeq: gap.fromSeq, toSeq: gap.toSeq } } : {}) };
@@ -1990,12 +1946,12 @@ export class ClientConnection {
     },
     'terminal.input': async params => {
       if (Buffer.byteLength(params.data) > this.#terminalLimits.maxInputBytes) throw new GatewayError(RPC_ERROR.invalidParams, TERMINAL_REFUSALS.input_too_large, { reason: 'input_too_large', max: this.#terminalLimits.maxInputBytes });
-      const result = /** @type {any} */ (await this.#terminalCall('terminal.input', params));
+      const result = await this.#terminalCall('terminal.input', params) as Wire;
       if (!Number.isSafeInteger(result?.bytes)) throw new GatewayError(ERROR.failed, 'The daemon host answered input the gateway does not pass on');
       return { bytes: result.bytes };
     },
     'terminal.resize': async params => {
-      const result = /** @type {any} */ (await this.#terminalCall('terminal.resize', params));
+      const result = await this.#terminalCall('terminal.resize', params) as Wire;
       if (!Number.isSafeInteger(result?.cols) || !Number.isSafeInteger(result?.rows)) throw new GatewayError(ERROR.failed, 'The daemon host answered a resize the gateway does not pass on');
       return { cols: result.cols, rows: result.rows };
     },
@@ -2031,7 +1987,7 @@ export class ClientConnection {
       this.#workspace(params.projectRoot);
       const result = await this.#call('task.list', params);
       if (!Array.isArray(result?.unreadable)) return result;
-      const unreadable = result.unreadable.map((/** @type {any} */ entry) => ({ ...(relativeFile(entry?.file) ? { file: entry.file } : {}), error: TASK_UNREADABLE }));
+      const unreadable = result.unreadable.map((entry: Wire) => ({ ...(relativeFile(entry?.file) ? { file: entry.file } : {}), error: TASK_UNREADABLE }));
       return { ...result, unreadable };
     },
     'task.create': async params => { this.#workspace(params.projectRoot); return this.#call('task.create', params); },
@@ -2044,7 +2000,7 @@ export class ClientConnection {
     'team.list': async params => {
       this.#project(params.projectRoot, 'team.list');
       const result = await this.#libraryRead('team.list', params).catch(error => { throw opaqueDaemonError(error, 'The teams cannot be read on the daemon host'); });
-      const teams = (Array.isArray(result?.teams) ? result.teams : []).map((/** @type {any} */ team) => {
+      const teams = (Array.isArray(result?.teams) ? result.teams : []).map((team: Wire) => {
         const row = pick(team, TEAM_ROW_FIELDS);
         if (row.error !== undefined) row.error = 'This team cannot be read on the daemon host';
         return row;
@@ -2054,7 +2010,7 @@ export class ClientConnection {
     'library.list': async params => {
       this.#project(params.projectRoot, 'library.list');
       const result = await this.#libraryRead('library.list', params).catch(error => { throw opaqueDaemonError(error, `The ${params.kind} entries cannot be read on the daemon host`); });
-      return { ...result, entries: (Array.isArray(result?.entries) ? result.entries : []).map((/** @type {any} */ entry) => pick(entry, LIBRARY_ROW_FIELDS)) };
+      return { ...result, entries: (Array.isArray(result?.entries) ? result.entries : []).map((entry: Wire) => pick(entry, LIBRARY_ROW_FIELDS)) };
     },
     // One entry, read only, as the projectRoot's sessions would use it (project, else library, else
     // built-in). Its content leaves through projectLibraryContent: listed fields only, every field
@@ -2072,7 +2028,7 @@ export class ClientConnection {
     },
     'library.models': async () => {
       const result = await this.#call('library.models', {}).catch(error => { throw opaqueDaemonError(error, 'The models cannot be read on the daemon host'); });
-      return { ...result, models: (Array.isArray(result?.models) ? result.models : []).map((/** @type {any} */ model) => pick(model, MODEL_ROW_FIELDS)) };
+      return { ...result, models: (Array.isArray(result?.models) ? result.models : []).map((model: Wire) => pick(model, MODEL_ROW_FIELDS)) };
     },
     'library.save': params => this.#writeLibrary('library.save', params),
     'library.delete': params => this.#writeLibrary('library.delete', params),

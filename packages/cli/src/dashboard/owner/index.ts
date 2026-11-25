@@ -9,7 +9,7 @@ import type { OwnerHandler } from '@anhlp/alp-gateway/owner';
  * credential can. main.js hands `ownerMethods({ home, socket })` to createGateway's `owner.methods`.
  *
  * A handler runs in the dashboard process, as the user, only after the gateway has checked that
- * the method is an `owner` entry of its exposure matrix (apps/gateway/src/policy.js) and that the
+ * the method is an `owner` entry of its exposure matrix (apps/gateway/src/policy.ts) and that the
  * connection is the owner's; a handler with no matrix entry is never called. It gets one object:
  *   method   the method name;
  *   params   the request's params (only those the matrix entry lists, when it lists any); check them;

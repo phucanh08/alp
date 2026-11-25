@@ -1,4 +1,3 @@
-// @ts-check
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { lstat, readFile, realpath, rename, stat, writeFile, chmod, unlink } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -6,6 +5,7 @@ import path from 'node:path';
 import { alpHome, assertPrivateDirectory } from '@anhlp/alp-client';
 import { AGENT_NAME } from '@anhlp/alp-protocol';
 import { PERMISSIONS } from './policy.js';
+import type { Logger } from '@anhlp/alp-core/log';
 
 /**
  * Errors Windows intermittently raises when replacing a file that is concurrently open for reading.
@@ -18,22 +18,19 @@ export const RENAME_MAX_BACKOFF_MS = 80;
 /**
  * Replaces a file atomically, retrying with bounded backoff on Windows (or when encountering
  * EPERM/EACCES/EBUSY) when the destination is temporarily held open by another process or reader.
- * @param {string} temporary
- * @param {string} destination
- * @param {{ retries?: number, initialBackoffMs?: number, maxBackoffMs?: number, sleep?: (ms: number) => Promise<void> }} [options]
  */
-export async function renameWithRetry(temporary, destination, {
+export async function renameWithRetry(temporary: string, destination: string, {
   retries = RENAME_MAX_RETRIES,
   initialBackoffMs = RENAME_INITIAL_BACKOFF_MS,
   maxBackoffMs = RENAME_MAX_BACKOFF_MS,
   sleep: delayFn = sleep,
-} = {}) {
+}: { retries?: number, initialBackoffMs?: number, maxBackoffMs?: number, sleep?: (ms: number) => Promise<void> } = {}) {
   for (let attempt = 0; ; attempt++) {
     try {
       await rename(temporary, destination);
       return;
     } catch (error) {
-      if (!RETRIABLE_RENAME_ERRORS.has(/** @type {any} */ (error)?.code) || attempt >= retries) {
+      if (!RETRIABLE_RENAME_ERRORS.has((error as NodeJS.ErrnoException)?.code as string) || attempt >= retries) {
         throw error;
       }
       const delay = Math.min(initialBackoffMs * (2 ** attempt), maxBackoffMs);
@@ -75,31 +72,30 @@ const MODE = /^[a-z][a-z0-9-]{0,63}$/;
 export { AGENT_NAME };
 
 /**
- * @typedef {{ path: string, canonical: string }} Workspace
- *   `path` as the owner gave it, `canonical` its real path when the credential was made; a client
- *   names a workspace by either string, exactly.
- * @typedef {{
- *   id: string, label: string, hash: string, workspaces: Workspace[], permissions: string[],
- *   worktreeMappings?: string[], scopeId?: string, modes?: string[], agent?: true, agentName?: string, createdAt: string, rotatedAt?: string, updatedAt?: string, expiresAt?: string, revokedAt?: string,
- * }} StoredCredential
- * @typedef {{
- *   id: string, label: string, workspaces: Workspace[], permissions: Set<string>,
- *   worktreeMappings?: string[], scopeId?: string, modes?: Set<string>, agent?: true, agentName?: string, expiresAt?: number, secretHash: string, fingerprint: string,
- * }} Grant
+ * `path` as the owner gave it, `canonical` its real path when the credential was made; a client
+ * names a workspace by either string, exactly.
  */
+export type Workspace = { path: string, canonical: string };
+export type StoredCredential = {
+  id: string, label: string, hash: string, workspaces: Workspace[], permissions: string[],
+  worktreeMappings?: string[], scopeId?: string, modes?: string[], agent?: true, agentName?: string, createdAt: string, rotatedAt?: string, updatedAt?: string, expiresAt?: string, revokedAt?: string,
+};
+export type Grant = {
+  id: string, label: string, workspaces: Workspace[], permissions: Set<string>,
+  worktreeMappings?: string[], scopeId?: string, modes?: Set<string>, agent?: true, agentName?: string, expiresAt?: number, secretHash: string, fingerprint: string,
+};
 
-/** Where the gateway keeps its own files: $ALP_GATEWAY_HOME, else <ALP_HOME>/gateway. @param {NodeJS.ProcessEnv} [env] */
-export function gatewayHome(env = process.env) {
+/** Where the gateway keeps its own files: $ALP_GATEWAY_HOME, else <ALP_HOME>/gateway. */
+export function gatewayHome(env: NodeJS.ProcessEnv = process.env) {
   return path.resolve(env.ALP_GATEWAY_HOME || path.join(alpHome(env), 'gateway'));
 }
 
-/** @param {string} home */
-export const credentialsFile = home => path.join(home, 'credentials.json');
+export const credentialsFile = (home: string) => path.join(home, 'credentials.json');
 
-const digest = (/** @type {string} */ secret) => createHash('sha256').update(secret, 'utf8').digest('hex');
+const digest = (secret: string) => createHash('sha256').update(secret, 'utf8').digest('hex');
 
-/** The id and secret of a well-formed token, or undefined. @param {unknown} token */
-export function parseToken(token) {
+/** The id and secret of a well-formed token, or undefined. */
+export function parseToken(token: unknown) {
   const match = typeof token === 'string' ? TOKEN.exec(token) : null;
   return match ? { id: match[1], secret: match[2] } : undefined;
 }
@@ -112,10 +108,8 @@ function newToken(id = randomBytes(8).toString('hex')) {
 /**
  * Reads the credentials file. A missing file holds none; a file others can read, or that is not
  * ours, is refused, as ssh refuses a private key others can read.
- * @param {string} home
- * @returns {Promise<{ version: number, credentials: StoredCredential[] }>}
  */
-export async function readCredentials(home) {
+export async function readCredentials(home: string): Promise<{ version: number, credentials: StoredCredential[] }> {
   const file = credentialsFile(home);
   const info = await lstat(file).catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
   if (!info) return { version: FILE_VERSION, credentials: [] };
@@ -129,8 +123,8 @@ export async function readCredentials(home) {
   return data;
 }
 
-/** Writes the file whole, private, and replaces the old one in one rename. @param {string} home @param {{ version: number, credentials: StoredCredential[] }} data */
-async function writeCredentials(home, data) {
+/** Writes the file whole, private, and replaces the old one in one rename. */
+async function writeCredentials(home: string, data: { version: number, credentials: StoredCredential[] }) {
   await assertPrivateDirectory(home, { create: true });
   const file = credentialsFile(home);
   const temporary = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
@@ -144,21 +138,18 @@ async function writeCredentials(home, data) {
   }
 }
 
-/** What a credential may be shown as: everything but its hash. @param {StoredCredential} credential */
-export function describeCredential({ hash: _hash, ...rest }) {
+/** What a credential may be shown as: everything but its hash. */
+export function describeCredential({ hash: _hash, ...rest }: StoredCredential) {
   return rest;
 }
 
 /**
  * Resolves the workspaces of a new credential on this host: absolute, normalized, existing
  * directories. Done by the owner's command, never with a path a client sent.
- * @param {string[]} workspaces
- * @returns {Promise<Workspace[]>}
  */
-async function resolveWorkspaces(workspaces) {
+async function resolveWorkspaces(workspaces: string[]): Promise<Workspace[]> {
   if (!Array.isArray(workspaces) || !workspaces.length) throw new Error('A credential needs at least one workspace');
-  /** @type {Workspace[]} */
-  const resolved = [];
+  const resolved: Workspace[] = [];
   for (const entry of workspaces) {
     if (typeof entry !== 'string' || !path.isAbsolute(entry) || path.resolve(entry) !== entry || entry.includes('\0')) {
       throw new Error(`Workspace ${JSON.stringify(entry)} must be an absolute, normalized path`);
@@ -170,8 +161,7 @@ async function resolveWorkspaces(workspaces) {
   return resolved;
 }
 
-/** @param {unknown} permissions */
-function checkPermissions(permissions) {
+function checkPermissions(permissions: unknown) {
   if (!Array.isArray(permissions) || !permissions.length) throw new Error(`A credential needs permissions: ${PERMISSIONS.join(', ')}`);
   for (const permission of permissions) {
     if (!PERMISSIONS.includes(permission)) throw new Error(`Unknown or ungrantable permission ${JSON.stringify(permission)}; a remote credential may hold ${PERMISSIONS.join(', ')}`);
@@ -184,14 +174,13 @@ function checkPermissions(permissions) {
   return PERMISSIONS.filter(permission => granted.has(permission));
 }
 
-/** Host-only named mappings; never paths. @param {unknown} value @returns {string[]} */
-function checkMappings(value) {
+/** Host-only named mappings; never paths. */
+function checkMappings(value: unknown): string[] {
  if (!Array.isArray(value) || value.some(id => typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(id))) throw new Error('worktreeMappings must list host mapping IDs');
  return [...new Set(value)];
 }
 
-/** @param {unknown} modes */
-function checkModes(modes) {
+function checkModes(modes: unknown) {
   if (modes === undefined) return undefined;
   if (!Array.isArray(modes) || !modes.length || modes.some(mode => typeof mode !== 'string' || !MODE.test(mode))) throw new Error('modes must be a non-empty list of session mode ids');
   return [...new Set(modes)];
@@ -199,9 +188,9 @@ function checkModes(modes) {
 
 /**
  * `agent`: undefined or false (a user's), true (an unnamed agent credential, as before t-1c59) or
- * an agent name. @param {unknown} agent @returns {{ agent: boolean, name?: string }}
+ * an agent name.
  */
-function checkAgent(agent) {
+function checkAgent(agent: unknown): { agent: boolean, name?: string } {
   if (agent === undefined || typeof agent === 'boolean') return { agent: agent === true };
   if (typeof agent !== 'string' || !AGENT_NAME.test(agent) || agent === 'true' || agent === 'false') throw new Error(`agent must be true, false or an agent name (lower-case letters, digits and single hyphens, starting with a letter, at most 64 characters, not true or false); got ${JSON.stringify(agent)}`);
   return { agent: true, name: agent };
@@ -210,17 +199,14 @@ function checkAgent(agent) {
 /**
  * Creates a credential and returns its token, which is not stored and cannot be shown again.
  * `agent: true` makes an agent credential (see above); the default is a user's.
- * @param {string} home
- * @param {{ label: string, workspaces: string[], permissions: string[], worktreeMappings?: string[], modes?: string[], agent?: boolean | string, expiresAt?: string, now?: Date }} options
  */
-export async function createCredential(home, { label, workspaces, permissions, worktreeMappings = [], modes, agent, expiresAt, now = new Date() }) {
+export async function createCredential(home: string, { label, workspaces, permissions, worktreeMappings = [], modes, agent, expiresAt, now = new Date() }: { label: string, workspaces: string[], permissions: string[], worktreeMappings?: string[], modes?: string[], agent?: boolean | string, expiresAt?: string, now?: Date }) {
   if (typeof label !== 'string' || !label.trim() || label.length > 100) throw new Error('A credential needs a label of 1 to 100 characters');
   const forAgent = checkAgent(agent);
   if (expiresAt !== undefined && !(Date.parse(expiresAt) > now.getTime())) throw new Error('expiresAt must be a future ISO 8601 time');
   const data = await readCredentials(home);
   const token = newToken();
-  /** @type {StoredCredential} */
-  const credential = {
+  const credential: StoredCredential = {
     id: token.id,
     label: label.trim(),
     hash: digest(token.secret),
@@ -238,8 +224,7 @@ export async function createCredential(home, { label, workspaces, permissions, w
   return { credential: describeCredential(credential), token: token.token };
 }
 
-/** @param {{ credentials: StoredCredential[] }} data @param {string} id */
-function find(data, id) {
+function find(data: { credentials: StoredCredential[] }, id: string) {
   const credential = data.credentials.find(entry => entry.id === id);
   if (!credential) throw new Error(`No credential ${id}`);
   return credential;
@@ -248,9 +233,8 @@ function find(data, id) {
 /**
  * Replaces a credential's secret: the old token stops working at once, also for connections the
  * gateway holds (it closes them), and the grant stays. Returns the new token.
- * @param {string} home @param {string} id @param {{ now?: Date }} [options]
  */
-export async function rotateCredential(home, id, { now = new Date() } = {}) {
+export async function rotateCredential(home: string, id: string, { now = new Date() }: { now?: Date } = {}) {
   const data = await readCredentials(home);
   const credential = find(data, id);
   if (credential.revokedAt) throw new Error(`Credential ${id} is revoked; create a new one`);
@@ -264,10 +248,8 @@ export async function rotateCredential(home, id, { now = new Date() } = {}) {
  * Locally replaces named grant fields and reissues the secret, keeping the device id.
  * Omitted fields retain their grants; supplied lists replace rather than append. `agent: true`
  * makes it an agent credential; an agent credential stays one (`agent: false` is refused).
- * @param {string} home @param {string} id
- * @param {{ label?: string, workspaces?: string[], permissions?: string[], worktreeMappings?: string[], modes?: string[], agent?: boolean | string, expiresAt?: string, now?: Date }} [options]
  */
-export async function reissueCredential(home, id, { label, workspaces, permissions, worktreeMappings, modes, agent, expiresAt, now = new Date() } = {}) {
+export async function reissueCredential(home: string, id: string, { label, workspaces, permissions, worktreeMappings, modes, agent, expiresAt, now = new Date() }: { label?: string, workspaces?: string[], permissions?: string[], worktreeMappings?: string[], modes?: string[], agent?: boolean | string, expiresAt?: string, now?: Date } = {}) {
   const data = await readCredentials(home);
   const credential = find(data, id);
   if (credential.revokedAt) throw new Error(`Credential ${id} is revoked; create a new one`);
@@ -283,7 +265,7 @@ export async function reissueCredential(home, id, { label, workspaces, permissio
     ...(workspaces !== undefined ? { workspaces: await resolveWorkspaces(workspaces) } : {}),
     ...(permissions !== undefined ? { permissions: checkPermissions(permissions) } : {}),
     ...(modes !== undefined ? { modes: checkModes(modes) } : {}),
-    ...(forAgent.agent ? { agent: /** @type {true} */ (true) } : {}),
+    ...(forAgent.agent ? { agent: true as const } : {}),
     ...(forAgent.name ? { agentName: forAgent.name } : {}),
     ...(expiresAt !== undefined ? { expiresAt: new Date(expiresAt).toISOString() } : {}),
   };
@@ -301,10 +283,8 @@ export async function reissueCredential(home, id, { label, workspaces, permissio
  * its epoch from the grant (grantOf), so for it the epoch changes too. Omitted fields retain their
  * grants; supplied lists replace rather than append. Inputs are checked as createCredential checks
  * them, before anything is written.
- * @param {string} home @param {string} id
- * @param {{ workspaces?: string[], permissions?: string[], now?: Date }} [options]
  */
-export async function updateCredential(home, id, { workspaces, permissions, now = new Date() } = {}) {
+export async function updateCredential(home: string, id: string, { workspaces, permissions, now = new Date() }: { workspaces?: string[], permissions?: string[], now?: Date } = {}) {
   if (workspaces === undefined && permissions === undefined) throw new Error('An update needs workspaces or permissions');
   const data = await readCredentials(home);
   const credential = find(data, id);
@@ -318,8 +298,8 @@ export async function updateCredential(home, id, { workspaces, permissions, now 
   return { credential: describeCredential(credential) };
 }
 
-/** Revokes a credential for good; the gateway closes its connections. @param {string} home @param {string} id @param {{ now?: Date }} [options] */
-export async function revokeCredential(home, id, { now = new Date() } = {}) {
+/** Revokes a credential for good; the gateway closes its connections. */
+export async function revokeCredential(home: string, id: string, { now = new Date() }: { now?: Date } = {}) {
   const data = await readCredentials(home);
   const credential = find(data, id);
   credential.revokedAt ??= now.toISOString();
@@ -327,25 +307,24 @@ export async function revokeCredential(home, id, { now = new Date() } = {}) {
   return describeCredential(credential);
 }
 
-/** @param {string} home */
-export async function listCredentials(home) {
+export async function listCredentials(home: string) {
   return (await readCredentials(home)).credentials.map(describeCredential);
 }
 
 /**
  * Why a stored credential's agent mark is not one the CLI could have written, or undefined.
  * Anything but `true` in `agent` is refused, not read as a user's; a name only on an agent
- * credential, and only one the CLI could have written. @param {StoredCredential} stored
+ * credential, and only one the CLI could have written.
  */
-function malformedAgent(stored) {
+function malformedAgent(stored: StoredCredential) {
   if (stored.agent !== undefined && stored.agent !== true) return 'agent is not true';
   if (stored.agentName !== undefined && stored.agent !== true) return 'agentName on a credential that is not an agent\'s';
   if (stored.agentName !== undefined && (typeof stored.agentName !== 'string' || !AGENT_NAME.test(stored.agentName))) return 'agentName is not a valid agent name';
   return undefined;
 }
 
-/** A grant from a stored credential, or undefined when it can no longer be used. @param {StoredCredential} stored @param {number} now */
-function grantOf(stored, now) {
+/** A grant from a stored credential, or undefined when it can no longer be used. */
+function grantOf(stored: StoredCredential, now: number) {
   if (stored.revokedAt) return undefined;
   const expiresAt = stored.expiresAt === undefined ? undefined : Date.parse(stored.expiresAt);
   if (expiresAt !== undefined && !(expiresAt > now)) return undefined;
@@ -357,7 +336,7 @@ function grantOf(stored, now) {
   if (malformedAgent(stored)) return undefined;
   const agent = stored.agent === true;
   const agentName = stored.agentName;
-  return /** @type {Grant} */ ({
+  return ({
     id: stored.id,
     label: String(stored.label ?? ''),
     workspaces: workspaces.map(({ path: given, canonical }) => ({ path: given, canonical })),
@@ -371,7 +350,7 @@ function grantOf(stored, now) {
     // The mark is appended only when set: a user credential's fingerprint (its epoch, when it has
     // no scopeId) stays what it was; gaining the mark changes it, so its connections close.
     fingerprint: JSON.stringify([workspaces, permissions, stored.modes ?? null, stored.expiresAt ?? null, stored.worktreeMappings ?? [], stored.scopeId ?? null, ...(agent ? ['agent'] : []), ...(agentName ? [agentName] : [])]),
-  });
+  }) as Grant;
 }
 
 /**
@@ -381,20 +360,17 @@ function grantOf(stored, now) {
  * that cannot be read safely counts as holding no credentials: the gateway fails closed.
  */
 export class CredentialStore {
-  /** @type {Map<string, StoredCredential>} */ #stored = new Map();
-  /** @type {Map<string, Grant>} */ #grants = new Map();
-  /** @type {Set<(changes: Map<string, 'revoked' | 'changed'>) => void>} */ #listeners = new Set();
-  /** @type {ReturnType<typeof setInterval> | undefined} */ #timer;
+  #stored = new Map<string, StoredCredential>();
+  #grants = new Map<string, Grant>();
+  #listeners = new Set<(changes: Map<string, 'revoked' | 'changed'>) => void>();
+  #timer: ReturnType<typeof setInterval> | undefined;
   #signature = '';
-  /** @type {Map<string, string>} */ #malformed = new Map();
-  #home;
-  #log;
-  #now;
+  #malformed = new Map<string, string>();
+  #home: string;
+  #log: Logger | undefined;
+  #now: () => number;
 
-  /**
-   * @param {{ home: string, logger?: import('@anhlp/alp-core/log').Logger, pollMs?: number, now?: () => number }} options
-   */
-  constructor({ home, logger, pollMs = 1000, now = Date.now }) {
+  constructor({ home, logger, pollMs = 1000, now = Date.now }: { home: string, logger?: Logger, pollMs?: number, now?: () => number }) {
     this.#home = home;
     this.#log = logger;
     this.#now = now;
@@ -406,8 +382,7 @@ export class CredentialStore {
 
   /** Reads the file now; also the first load. Never throws: an unreadable file holds nothing. */
   async reload() {
-    /** @type {StoredCredential[]} */
-    let list = [];
+    let list: StoredCredential[] = [];
     try {
       list = (await readCredentials(this.#home)).credentials;
     } catch (error) {
@@ -416,7 +391,7 @@ export class CredentialStore {
     this.#stored = new Map(list.filter(entry => typeof entry?.id === 'string').map(entry => [entry.id, entry]));
     // Remember only currently malformed marks: unchanged reloads stay quiet, but a
     // changed mark or a mark that was fixed and then broken again warns anew.
-    const malformed = new Map();
+    const malformed = new Map<string, string>();
     for (const [id, stored] of this.#stored) {
       const reason = malformedAgent(stored);
       if (!reason) continue;
@@ -434,15 +409,13 @@ export class CredentialStore {
   #refresh() {
     const now = this.#now();
     const previous = this.#grants;
-    /** @type {Map<string, Grant>} */
-    const grants = new Map();
+    const grants = new Map<string, Grant>();
     for (const [id, stored] of this.#stored) {
       const grant = grantOf(stored, now);
       if (grant) grants.set(id, grant);
     }
     this.#grants = grants;
-    /** @type {Map<string, 'revoked' | 'changed'>} */
-    const changes = new Map();
+    const changes = new Map<string, 'revoked' | 'changed'>();
     for (const [id, before] of previous) {
       const after = grants.get(id);
       // Gone, revoked, expired or rotated: the token those connections authenticated with is dead.
@@ -464,9 +437,8 @@ export class CredentialStore {
   /**
    * The grant a token carries, or undefined; compares in constant time and does the same work
    * for an unknown id.
-   * @param {unknown} token
    */
-  verify(token) {
+  verify(token: unknown) {
     const parsed = parseToken(token);
     const presented = Buffer.from(digest(parsed?.secret ?? 'x'), 'hex');
     const stored = parsed ? this.#stored.get(parsed.id) : undefined;
@@ -476,15 +448,14 @@ export class CredentialStore {
     return this.grant(parsed.id);
   }
 
-  /** The current grant of a credential, if it is still usable. @param {string} id */
-  grant(id) {
+  /** The current grant of a credential, if it is still usable. */
+  grant(id: string) {
     const grant = this.#grants.get(id);
     if (grant?.expiresAt !== undefined && !(grant.expiresAt > this.#now())) return undefined;
     return grant;
   }
 
-  /** @param {(changes: Map<string, 'revoked' | 'changed'>) => void} listener */
-  onChange(listener) { this.#listeners.add(listener); return () => this.#listeners.delete(listener); }
+  onChange(listener: (changes: Map<string, 'revoked' | 'changed'>) => void) { this.#listeners.add(listener); return () => this.#listeners.delete(listener); }
 
   close() {
     if (this.#timer) clearInterval(this.#timer);

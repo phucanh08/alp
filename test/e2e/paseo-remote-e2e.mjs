@@ -90,7 +90,7 @@ try {
 
   // 2. The host: alpd with real Codex and the gateway, both from the host install.
   alpCli = path.join(dirs.host, 'node_modules/@anhlp/alp-cli/dist/cli.js');
-  const gatewayCli = path.join(dirs.host, 'node_modules/@anhlp/alp-gateway/src/cli.js');
+  const gatewayCli = path.join(dirs.host, 'node_modules/@anhlp/alp-gateway/dist/cli.js');
   const alp = (...args) => run(process.execPath, [alpCli, ...args], { env: hostEnv });
   await writeFile(path.join(dirs['host-alp-home'], 'settings.json'), JSON.stringify({ language: 'English' }));
   alp('init', dirs.project);

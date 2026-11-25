@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { EXPOSURE, FORWARDED_CAPABILITIES } from '../src/policy.js';
+import { EXPOSURE, FORWARDED_CAPABILITIES } from '../dist/policy.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
 import { teardown } from '../../../test/support/teardown.js';

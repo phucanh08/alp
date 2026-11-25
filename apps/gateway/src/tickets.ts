@@ -1,4 +1,3 @@
-// @ts-check
 import { createHash, randomBytes } from 'node:crypto';
 
 /**
@@ -10,17 +9,16 @@ import { createHash, randomBytes } from 'node:crypto';
  */
 
 const TICKET = /^alpgwt\.[A-Za-z0-9_-]{43}$/;
-const key = (/** @type {string} */ ticket) => createHash('sha256').update(ticket, 'utf8').digest('hex');
+const key = (ticket: string) => createHash('sha256').update(ticket, 'utf8').digest('hex');
 
 export class TicketBook {
-  /** @type {Map<string, { principal: string, origin: string | null, expiresAt: number }>} */ #tickets = new Map();
-  #ttlMs;
-  #perPrincipal;
-  #total;
-  #now;
+  #tickets = new Map<string, { principal: string, origin: string | null, expiresAt: number }>();
+  #ttlMs: number;
+  #perPrincipal: number;
+  #total: number;
+  #now: () => number;
 
-  /** @param {{ ttlMs?: number, perPrincipal?: number, total?: number, now?: () => number }} [options] */
-  constructor({ ttlMs = 30_000, perPrincipal = 16, total = 1024, now = Date.now } = {}) {
+  constructor({ ttlMs = 30_000, perPrincipal = 16, total = 1024, now = Date.now }: { ttlMs?: number, perPrincipal?: number, total?: number, now?: () => number } = {}) {
     this.#ttlMs = ttlMs;
     this.#perPrincipal = perPrincipal;
     this.#total = total;
@@ -32,11 +30,8 @@ export class TicketBook {
     for (const [hash, entry] of this.#tickets) if (entry.expiresAt <= now) this.#tickets.delete(hash);
   }
 
-  /**
-   * A new ticket for `principal`, or undefined when too many are outstanding.
-   * @param {string} principal @param {string | null} origin
-   */
-  issue(principal, origin) {
+  /** A new ticket for `principal`, or undefined when too many are outstanding. */
+  issue(principal: string, origin: string | null) {
     this.#prune();
     let mine = 0;
     for (const entry of this.#tickets.values()) if (entry.principal === principal) mine++;
@@ -50,9 +45,8 @@ export class TicketBook {
   /**
    * The principal of a live ticket presented from the Origin it was issued to; the ticket is spent
    * either way, so a guess or a replay gets one try.
-   * @param {unknown} ticket @param {string | null} origin
    */
-  consume(ticket, origin) {
+  consume(ticket: unknown, origin: string | null) {
     if (typeof ticket !== 'string' || !TICKET.test(ticket)) return undefined;
     const hash = key(ticket);
     const entry = this.#tickets.get(hash);
@@ -61,8 +55,8 @@ export class TicketBook {
     return entry.principal;
   }
 
-  /** Drops every ticket of a credential that was revoked or changed. @param {string} principal */
-  revoke(principal) {
+  /** Drops every ticket of a credential that was revoked or changed. */
+  revoke(principal: string) {
     for (const [hash, entry] of this.#tickets) if (entry.principal === principal) this.#tickets.delete(hash);
   }
 

@@ -1,16 +1,16 @@
-// The host owner's library, file and language methods (t-a95b group C; policy.js "owner: library"
+// The host owner's library, file and language methods (t-a95b group C; policy.ts "owner: library"
 // block, docs/alp/remote-gateway.md §5.4 and §5.19). Each answers only the credential an owner
 // gateway names, on a direct loopback socket. A gateway without the owner option (standalone
 // alp-gateway) and any other credential of an owner gateway get exactly a denied method's refusal
 // (-32601 not_exposed): no handler runs and nothing reaches alpd. The handlers themselves are alp
-// dashboard's (packages/cli/src/dashboard/owner/library.js, tested in packages/cli/tests); here they
+// dashboard's (packages/cli/src/dashboard/owner/library.ts, tested in packages/cli/tests); here they
 // are stand-ins that record their calls.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { EXPOSURE } from '../src/index.js';
+import { EXPOSURE } from '../dist/index.js';
 import { fakeDaemon } from './support/fake-daemon.js';
 import WebSocket from 'ws';
 import { AGENT_CAPABILITY, AlpRpcClient } from '@anhlp/alp-client/portable';

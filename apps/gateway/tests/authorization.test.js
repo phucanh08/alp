@@ -10,8 +10,8 @@ import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { RPC_METHODS } from '@anhlp/alp-protocol';
 import { METHODS_V1 } from '@anhlp/alp-protocol/contract';
-import { EXPOSURE, unclassified } from '../src/index.js';
-import { hostLabel, projectLibraryContent, promptImageLimits } from '../src/policy.js';
+import { EXPOSURE, unclassified } from '../dist/index.js';
+import { hostLabel, projectLibraryContent, promptImageLimits } from '../dist/policy.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway, until } from './support/harness.js';
 import { teardown } from '../../../test/support/teardown.js';
@@ -158,7 +158,7 @@ const LOOKUPS = new Set(['session.get', 'question.list', 'session.list']);
 const exposed = Object.entries(EXPOSURE).filter(([, entry]) => entry.status === 'exposed').map(([method]) => method);
 
 test('every v1 method is classified, and every exposed one has a permission, params and scope tests', () => {
-  assert.deepEqual(unclassified(), [], 'classify new methods in src/policy.js before they can be exposed');
+  assert.deepEqual(unclassified(), [], 'classify new methods in src/policy.ts before they can be exposed');
   for (const method of exposed) {
     const entry = EXPOSURE[method];
     assert.ok(entry.permission && Array.isArray(entry.params) && entry.tests?.length, method);
@@ -201,7 +201,7 @@ test('the exposure matrix agrees with the daemon\'s x-alp annotations', t => {
   for (const [method, entry] of annotated) {
     const { effect, scope, risks = [] } = entry['x-alp'];
     const exposure = EXPOSURE[method];
-    assert.ok(exposure, `${method} is annotated but not classified in src/policy.js`);
+    assert.ok(exposure, `${method} is annotated but not classified in src/policy.ts`);
     if (exposure.status !== 'exposed') continue;
     assert.ok(scope?.kind !== 'host' || (effect === 'query' && hostReads.has(method)), `${method}: host-level ${effect} exposed`);
     assert.ok(scope?.kind !== 'library-or-project' || exposure.permission === 'library.write', `${method}: can write the host library`);
@@ -1097,7 +1097,7 @@ test('session.failed, prompt.failed, turn.ended, session.updated and notices rea
 });
 
 test('safeErrorText keeps useful text and replaces host paths (t-d27c)', async () => {
-  const { safeErrorText, safeAlpError } = await import('../src/policy.js');
+  const { safeErrorText, safeAlpError } = await import('../dist/policy.js');
   assert.equal(typeof safeErrorText, 'function', 'policy.js exports safeErrorText');
   const workspaces = [{ path: '/tmp/my ws', canonical: '/private/tmp/my ws' }];
   const cases = [

@@ -64,7 +64,7 @@ try {
 
   // The installed CLI: a credential, then the server.
   // The installed bin script under this Node: on Windows .bin holds shell shims spawn cannot run.
-  const cli = path.join(consumer, 'node_modules/@anhlp/alp-gateway/src/cli.js');
+  const cli = path.join(consumer, 'node_modules/@anhlp/alp-gateway/dist/cli.js');
   const { token } = JSON.parse(run(process.execPath, [cli, 'credential', 'create', '--label', 'smoke', '--workspace', project, '--json'], { env, cwd: consumer }));
   const server = spawn(process.execPath, [cli, 'serve', '--port', '0'], { env, cwd: consumer, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(server);
