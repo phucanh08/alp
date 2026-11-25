@@ -13,7 +13,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { initProject } from '../../packages/core/src/init.js';
-import { closeTask, createTask, loadTasks } from '../../packages/core/src/tasks.js';
+import { closeTask, createTask, loadTasks } from '../../packages/core/src/tasks/records/tasks.js';
 import { createBackup } from '../../packages/core/src/backup.js';
 import { connect, lockAlive, readLock } from '../../packages/client/src/index.js';
 

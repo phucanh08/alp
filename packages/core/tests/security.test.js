@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink } from 'node:
 import os from 'node:os';
 import path from 'node:path';
 import { profileFor } from '../src/permissions.js';
-import { createTask, loadTasks } from '../src/tasks.js';
+import { createTask, loadTasks } from '../src/tasks/records/tasks.js';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-security-'));

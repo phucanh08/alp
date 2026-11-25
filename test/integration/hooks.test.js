@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '../../packages/core/src/init.js';
-import { addGate, createTask, getTask } from '../../packages/core/src/tasks.js';
+import { addGate, createTask, getTask } from '../../packages/core/src/tasks/records/tasks.js';
 import { saveEntry } from '../../packages/core/src/library-edit.js';
 import { isTrusted, trustProject } from '../../packages/core/src/trust.js';
 import { fileURLToPath } from 'node:url';
