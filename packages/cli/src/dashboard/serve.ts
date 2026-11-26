@@ -34,7 +34,7 @@ const FORBIDDEN_IN_SEGMENT = /[\u0000-\u001f\u007f/\\:]/;
 
 /** What a page without the built app says. */
 const missingPage = (dir: string): string => `<!doctype html><meta charset="utf-8"><title>ALP</title><body style="font:16px system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem">
-<h1>ALP dashboard is not built</h1><p>The web app's files are missing from <code>${dir.replace(/[&<>"]/g, char => `&#${char.charCodeAt(0)};`)}</code>. Build them from a checkout with <code>node scripts/build-workspace.mjs cli</code> (or <code>node scripts/build-alp-dashboard.mjs</code>), or install ALP from npm, which carries them. The gateway on this address keeps running.</p>`;
+<h1>ALP dashboard is not built</h1><p>The web app's files are missing from <code>${dir.replace(/[&<>"]/g, char => `&#${char.charCodeAt(0)};`)}</code>. Build them from a checkout with <code>node scripts/build-workspace.ts cli</code> (or <code>node scripts/build-alp-dashboard.ts</code>), or install ALP from npm, which carries them. The gateway on this address keeps running.</p>`;
 
 /**
  * The path segments a raw request target names, each decoded once, or a refusal.

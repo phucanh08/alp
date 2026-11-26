@@ -218,7 +218,7 @@ export const notInstalledMessage = (root: string): string => `alp: ${root} is no
  * GNU tar, which reads a drive-letter path such as `D:\a\…\alp.zip` as a remote `host:file`
  * archive and cannot read or write a zip at all. `--force-local` is not an answer: bsdtar rejects it.
  *
- * DUPLICATE, deliberately (t-ffe4.6): `windowsTar` in scripts/spawn-command.mjs is the same
+ * DUPLICATE, deliberately (t-ffe4.6): `windowsTar` in scripts/spawn-command.ts is the same
  * knowledge for the repository's own scripts. This package is published, so it cannot import from
  * scripts/, and scripts/ must keep working before anything is built. Change one and change the
  * other; test/integration/spawn-command.test.js asserts the two agree, and refuses any third copy.
