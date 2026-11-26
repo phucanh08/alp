@@ -227,7 +227,17 @@ async function tree(t: TestContext) {
   await runtime.open('root', { cwd: root });
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Go' }] });
   await until(() => agents[0]?.turnId, 'main turn');
-  const runLog = async () => (await readFile(path.join(runs, 'root.jsonl'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  const readLog = async () => (await readFile(path.join(runs, 'root.jsonl'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  /**
+   * The run log once `assignmentId`'s assignment.finished line is in it (t-a509). The runtime
+   * appends run-log lines on a background chain it does not await before posting the result, so
+   * the line can land after alp_wait returns; the chain is ordered, so every earlier line is in too.
+   */
+  const runLog = async (assignmentId: string) => {
+    let log: Json[] = [];
+    await until(async () => (log = await readLog()).some(entry => entry.event === 'assignment.finished' && entry.assignmentId === assignmentId), `assignment.finished for ${assignmentId} in the run log`);
+    return log;
+  };
   const main = agents[0];
   /** Delegates one peer assignment, lets `act` drive the peer, and returns the result main receives. */
   const assign = async (act: (agent: FakeAgent) => unknown, extra = {}) => {
@@ -257,7 +267,7 @@ test('other runtimes are unchanged: a Codex/Claude-shaped turn with no denied, n
   assert.equal(result.error, undefined);
   assert.equal('denied' in result, false);
   assert.deepEqual(Object.keys(result).sort(), ['agent', 'handoff', 'output', 'runtime', 'sessionId', 'status', 'threadId']);
-  assert.equal((await runLog()).some(entry => entry.event === 'turn.denied'), false);
+  assert.equal((await runLog(result.sessionId)).some(entry => entry.event === 'turn.denied'), false);
   // And one with a handoff, the ordinary success.
   const handed = await assign(async agent => { await agent.call('alp_handoff', { outcome: 'complete', summary: 'Changed it' }); agent.finish('Done'); });
   assert.equal(handed.status, 'completed');
@@ -275,7 +285,7 @@ test('a turn that ended on a denial with no answer and no handoff fails the assi
   // A failed assignment's task goes back to open, as for any failed assignment.
   assert.equal(result.task.status, 'open');
   assert.equal((await getTask(root, task.id)).status, 'open');
-  const log = await runLog();
+  const log = await runLog(result.sessionId);
   const line = log.find(entry => entry.event === 'turn.denied');
   assert.deepEqual([line.agent, line.mode, line.answered, line.denied], ['peer', 'workspace-write', false, DENIED]);
   const finished = log.find(entry => entry.event === 'assignment.finished');
