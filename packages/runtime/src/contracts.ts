@@ -1,13 +1,13 @@
-import type { ProviderFactories, ProviderRegistry } from './providers/providers.js';
-import type { RuntimeKind, SessionSpec } from './resolve.js';
-import type { Envelope, SessionSnapshot, TreeStatus, UserQuestion } from './events.js';
-import type { Pin } from './board/board.js';
-import type { LiveEntry } from './sessions/lifecycle/live.js';
-import type { ProviderUsage } from './usage.js';
-import type { AcpProvider } from './providers/transports/acp-transport.js';
-import type { AntigravityProvider } from './providers/transports/antigravity-transport.js';
-import type { GitHubRunner } from './github.js';
-import type { AttachmentReader } from './attachments.js';
+import type { ProviderFactories, ProviderRegistry } from './providers/providers.ts';
+import type { RuntimeKind, SessionSpec } from './resolve.ts';
+import type { Envelope, SessionSnapshot, TreeStatus, UserQuestion } from './events.ts';
+import type { Pin } from './board/board.ts';
+import type { LiveEntry } from './sessions/lifecycle/live.ts';
+import type { ProviderUsage } from './usage.ts';
+import type { AcpProvider } from './providers/transports/acp-transport.ts';
+import type { AntigravityProvider } from './providers/transports/antigravity-transport.ts';
+import type { GitHubRunner } from './github.ts';
+import type { AttachmentReader } from './attachments.ts';
 
 /** A slash command or skill an agent's composer offers after "/" (t-f628). */
 export type RuntimeCommand = { name: string; description: string; argumentHint?: string; kind: 'command' | 'skill' };
@@ -305,8 +305,8 @@ export type AlpRuntime = {
   reconfigure?(sessionId: string, changes: ConfigureChanges, options?: { fresh?: boolean; onApplied?: (result: ConfigureResult) => Promise<void> }): Promise<ConfigureResult>;
 };
 
-import type { ConfigureChanges, EffectiveConfig } from './sessions/configuration/configure.js';
-export type { ConfigureChanges, EffectiveConfig } from './sessions/configuration/configure.js';
+import type { ConfigureChanges, EffectiveConfig } from './sessions/configuration/configure.ts';
+export type { ConfigureChanges, EffectiveConfig } from './sessions/configuration/configure.ts';
 import type { ConfigurePreview } from '@anhlp/alp-protocol/session';
 export type { ConfigurePreview } from '@anhlp/alp-protocol/session';
 /** What reconfigure did: the session as it runs now, its effective configuration, and whether its process restarted. */

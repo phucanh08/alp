@@ -1,9 +1,9 @@
 /** Live model probes for the catalog (t-e5ee): each asks a provider's own CLI, read-only, and closes it. */
 import { spawn } from 'node:child_process';
 import os from 'node:os';
-import { CodexTransport } from '../transports/transport.js';
-import { ClaudeTransport } from '../transports/claude-transport.js';
-import type { CatalogRuntime, LiveModel, Probe } from './model-catalog.js';
+import { CodexTransport } from '../transports/transport.ts';
+import { ClaudeTransport } from '../transports/claude-transport.ts';
+import type { CatalogRuntime, LiveModel, Probe } from './model-catalog.ts';
 
 export function codexProbe(command = process.env.ALP_CODEX_BIN ?? 'codex', env: NodeJS.ProcessEnv = process.env): Probe {
   return async signal => {

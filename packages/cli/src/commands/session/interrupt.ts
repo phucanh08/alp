@@ -1,5 +1,5 @@
-import { UsageError } from '../_shared/usage.js';
-import { running } from '../daemon/index.js';
+import { UsageError } from '../_shared/usage.ts';
+import { running } from '../daemon/index.ts';
 
 export async function interrupt(args: string[]) {
   if (args.length !== 1) throw new UsageError();

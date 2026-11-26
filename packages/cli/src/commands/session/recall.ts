@@ -1,9 +1,9 @@
 import { parseArgs } from 'node:util';
 import { ago } from '@anhlp/alp-client/render';
 import { isTaskId } from '@anhlp/alp-core/tasks';
-import { taskProject } from '../_shared/project.js';
-import { UsageError } from '../_shared/usage.js';
-import { running } from '../daemon/index.js';
+import { taskProject } from '../_shared/project.ts';
+import { UsageError } from '../_shared/usage.ts';
+import { running } from '../daemon/index.ts';
 
 /** alp recall: ask a finished assignment, or the last one on a task, what it did and why. */
 export async function recall(args: string[]) {

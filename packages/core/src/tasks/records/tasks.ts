@@ -1,11 +1,11 @@
 import { mkdir, readFile, readdir, rmdir, stat, writeFile } from 'node:fs/promises';
-import { moveFile } from '../../atomic.js';
+import { moveFile } from '../../atomic.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { AlpError } from '../../errors.js';
-import { assertNoSymlinks } from '../../safe-path.js';
-import { describeVerification } from '../../verify.js';
-import { applyLedger, ledgerAdopt, ledgerPrune, ledgerResolve, readLedger } from '../gate-ledger.js';
+import { AlpError } from '../../errors.ts';
+import { assertNoSymlinks } from '../../safe-path.ts';
+import { describeVerification } from '../../verify.ts';
+import { applyLedger, ledgerAdopt, ledgerPrune, ledgerResolve, readLedger } from '../gate-ledger.ts';
 
 export type TaskType = 'task' | 'bug' | 'feature' | 'chore' | 'epic';
 export type TaskStatus = 'open' | 'in_progress' | 'review' | 'closed';
@@ -188,11 +188,11 @@ export async function loadTasks(projectRoot: string): Promise<{ tasks: Task[]; e
 
 /** Fills fields an older or hand-written file lacks, so readers can rely on them. */
 function normalize(task: Partial<Task>): Task {
-  return <Task>{
+  return {
     description: '', type: 'task', priority: 2, labels: [], paths: [], parent: null, blockedBy: [],
     discoveredFrom: null, related: [], gates: [], assignee: null, handoff: null, verified: null, closed: null, log: [], rev: 0,
     ...task,
-  };
+  } as Task;
 }
 
 export async function getTask(projectRoot: string, id: string): Promise<Task> {
@@ -816,7 +816,7 @@ export function addGate(projectRoot: string, id: string, { kind, note, until, re
     if (!GATE_KINDS.includes(kind)) fail('INVALID_TASK', `kind must be one of ${GATE_KINDS.join(', ')}`);
     if (task.status === 'closed') fail('INVALID_TASK', `${id} is closed`);
     if ((task.gates ?? []).filter(gate => gateOpen(gate)).length >= MAX_GATES) fail('INVALID_TASK', `A task has at most ${MAX_GATES} open gates`);
-    const gate = <TaskGate>{ id: `g${Math.max(0, ...(task.gates ?? []).map(entry => Number(entry.id.slice(1)) || 0)) + 1}`, kind };
+    const gate = { id: `g${Math.max(0, ...(task.gates ?? []).map(entry => Number(entry.id.slice(1)) || 0)) + 1}`, kind } as TaskGate;
     if (kind === 'human') gate.note = checkText(note, 'note', NOTE_CHARS, { required: true });
     else if (note !== undefined) gate.note = checkText(note, 'note', NOTE_CHARS);
     if (options !== undefined) {
@@ -1022,7 +1022,7 @@ export async function compactTasks(projectRoot: string, { days = 30, dryRun = fa
         description: clipText(task.description, COMPACT_TEXT),
         handoff: task.handoff ? { outcome: task.handoff.outcome, summary: clipText(String(task.handoff.summary ?? ''), COMPACT_TEXT), agent: task.handoff.agent, at: task.handoff.at } : null,
         // `at` stays: it names the gate in the gate ledger (t-ca1f); an open human gate keeps its note too.
-        gates: task.gates.map(({ id, kind, at, note, resolved }) => <TaskGate>({ id, kind, ...(at ? { at } : {}), ...(kind === 'human' && !resolved && note ? { note } : {}), ...(resolved ? { resolved: { at: resolved.at, by: resolved.by } } : {}) })),
+        gates: task.gates.map(({ id, kind, at, note, resolved }) => ({ id, kind, ...(at ? { at } : {}), ...(kind === 'human' && !resolved && note ? { note } : {}), ...(resolved ? { resolved: { at: resolved.at, by: resolved.by } } : {}) }) as TaskGate),
         log: [created, closed].filter(Boolean) as TaskLogEntry[],
         rev: task.rev + 1,
         updatedAt: now(),

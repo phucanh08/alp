@@ -1,5 +1,5 @@
-import type { RuntimeKind } from './dto.js';
-import type { SessionSnapshot, TurnAttention } from './events.js';
+import type { RuntimeKind } from './dto.ts';
+import type { SessionSnapshot, TurnAttention } from './events.ts';
 /** MCP servers a client adds to the agent's own; the agent's names win no collisions. */
 export type HostMcpServer =
   | { type: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }

@@ -5,7 +5,7 @@ import { ERROR, RPC_ERROR, WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-p
 import { moveFile } from '@anhlp/alp-core/atomic';
 import { testEntry } from '@anhlp/alp-client/library-test';
 import { imagePreviewType, projectImagePreview } from '@anhlp/alp-gateway/policy';
-import type { DashboardOwnerContext, DashboardOwnerHandler } from './index.js';
+import type { DashboardOwnerContext, DashboardOwnerHandler } from './index.ts';
 
 /**
  * Owner handlers for the user's library and workspace files (t-a95b group C; Settings › Templates,

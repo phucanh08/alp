@@ -1,5 +1,5 @@
 import { runBridge } from '@anhlp/alp-core/bridges';
-import { UsageError } from '../_shared/usage.js';
+import { UsageError } from '../_shared/usage.ts';
 
 /** alp bridge acp|antigravity: the stdio MCP bridge an agent CLI starts to reach alpd's tools. */
 export function bridgeCommand(args: string[]) {

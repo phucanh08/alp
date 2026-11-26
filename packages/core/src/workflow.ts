@@ -1,12 +1,12 @@
 import path from 'node:path';
-import { jsonObject, optionalText } from './resolver.js';
-import { applyProfile } from './profiles.js';
-import { validateSettings } from './validation.js';
-import { resolveTeam, teamOf } from './teams.js';
+import { jsonObject, optionalText } from './resolver.ts';
+import { applyProfile } from './profiles.ts';
+import { validateSettings } from './validation.ts';
+import { resolveTeam, teamOf } from './teams.ts';
 
 type Team = Awaited<ReturnType<typeof resolveTeam>>;
 
-export { teamOf as profileOf } from './teams.js';
+export { teamOf as profileOf } from './teams.ts';
 
 /** The team `alp init` names in a new project's settings (`init.js`). */
 export const INIT_TEAM = 'pho';

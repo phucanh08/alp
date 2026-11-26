@@ -3,16 +3,16 @@ import { parseArgs } from 'node:util';
 import { alpHome } from '@anhlp/alp-client/index';
 import { isAgentProcess } from '@anhlp/alp-core/tasks';
 import { scrubText } from '@anhlp/alp-core/log';
-import { runRole } from '../_shared/run-role.js';
-import { UsageError } from '../_shared/usage.js';
-import { start } from '../daemon/index.js';
-import { DISABLED, PRINT_EXIT, PRINT_SCHEMA, PRINT_VERSION, addressOf, classed, dashboardDisabled, failure, reportMigration } from './common.js';
-import { migrateDashboard } from './migrate.js';
-import { pairCommand } from './pair.js';
-import { rotateCommand } from './rotate.js';
-import { serveDashboard } from './start.js';
-import { statusCommand, stopCommand } from './status.js';
-import { dashboardEntry, dashboardScript } from '../../dashboard-service.js';
+import { runRole } from '../_shared/run-role.ts';
+import { UsageError } from '../_shared/usage.ts';
+import { start } from '../daemon/index.ts';
+import { DISABLED, PRINT_EXIT, PRINT_SCHEMA, PRINT_VERSION, addressOf, classed, dashboardDisabled, failure, reportMigration } from './common.ts';
+import { migrateDashboard } from './migrate.ts';
+import { pairCommand } from './pair.ts';
+import { rotateCommand } from './rotate.ts';
+import { serveDashboard } from './start.ts';
+import { statusCommand, stopCommand } from './status.ts';
+import { dashboardEntry, dashboardScript } from '../../dashboard-service.ts';
 
 /** Loopback names `--host` accepts; the service listens on 127.0.0.1 only, which serves both. */
 const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost'];

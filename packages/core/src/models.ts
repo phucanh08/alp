@@ -16,7 +16,7 @@ type LiveModel = { id: string; label?: string; description?: string; efforts?: s
 /**
  * @type {Array<{ runtime: 'codex' | 'claude' | 'antigravity', id: string, label: string, description: string, efforts: string[], effort?: string }>}
  */
-export const MODELS: ModelRow[] = (<Array<[ModelRow['runtime'], string, string, string, string[], string | undefined]>>[
+export const MODELS: ModelRow[] = ([
   ['codex', 'gpt-6.1-sol', 'GPT-6.1-Sol', 'Latest workhorse model for coding and everyday work.', codexFull, 'low'],
   // ALP runs GPT-6 Astra at low effort only.
   ['codex', 'gpt-6-astra', 'GPT-6-Astra', 'Frontier intelligence for the most demanding work.', ['low'], 'low'],
@@ -50,7 +50,7 @@ export const MODELS: ModelRow[] = (<Array<[ModelRow['runtime'], string, string, 
   ['antigravity', 'claude-sonnet-4-6', 'Claude Sonnet 4.6', 'Sonnet 4.6 via Antigravity.', [], undefined],
   ['antigravity', 'claude-opus-4-6-thinking', 'Claude Opus 4.6 Thinking', 'Opus 4.6 with thinking via Antigravity.', [], undefined],
   ['antigravity', 'gpt-oss-120b-medium', 'GPT-OSS 120B (Medium)', 'Open weights model via Antigravity.', [], undefined],
-]).map(([runtime, id, label, description, efforts, effort]) => ({ runtime, id, label, description, efforts, ...(effort ? { effort } : {}) }));
+] as Array<[ModelRow['runtime'], string, string, string, string[], string | undefined]>).map(([runtime, id, label, description, efforts, effort]) => ({ runtime, id, label, description, efforts, ...(effort ? { effort } : {}) }));
 
 /** ALP policy applied over whatever a provider reports. */
 export const MODEL_POLICY: Record<string, { efforts: string[]; effort: string }> = {

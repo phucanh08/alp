@@ -1,4 +1,4 @@
-import { stdioSession } from './mcp-probe.js';
+import { stdioSession } from './mcp-probe.ts';
 
 /** An ACP provider as `alp provider test` and the settings screen start it. */
 export type AcpProvider = { command: string, args?: string[], env?: Record<string, string>, label?: string, id?: string };

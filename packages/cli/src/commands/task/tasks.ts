@@ -2,11 +2,11 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { listTasks, loadTasks, readyTasks, TASKS_DIR } from '@anhlp/alp-core/tasks';
 import type { TaskStatus } from '@anhlp/alp-core/tasks';
-import { taskProject } from '../_shared/project.js';
-import { UsageError } from '../_shared/usage.js';
-import { beads } from './beads.js';
-import { taskRow, warnUnreadable } from './format.js';
-import { taskMaintenance } from './maintenance.js';
+import { taskProject } from '../_shared/project.ts';
+import { UsageError } from '../_shared/usage.ts';
+import { beads } from './beads.ts';
+import { taskRow, warnUnreadable } from './format.ts';
+import { taskMaintenance } from './maintenance.ts';
 
 /** The project's tasks: open, in progress and in review by default; ready lists what nothing blocks. */
 

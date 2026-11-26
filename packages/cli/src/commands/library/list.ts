@@ -4,7 +4,7 @@ import { seedLibrary } from '@anhlp/alp-core/library';
 import { libraryEntries } from '@anhlp/alp-core/resolver';
 import { listRetiredSkills } from '@anhlp/alp-core/library-edit';
 import { alpHome } from '@anhlp/alp-client/index';
-import { UsageError } from '../_shared/usage.js';
+import { UsageError } from '../_shared/usage.ts';
 
 /** Lists one library kind: where each entry comes from, what it overrides, and who uses it. */
 export async function libraryCommand(kind: string, args: string[]) {

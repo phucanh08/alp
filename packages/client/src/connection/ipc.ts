@@ -1,8 +1,8 @@
 import { MAX_FRAME } from '@anhlp/alp-protocol';
-import { AlpClientError } from '../rpc/errors.js';
-import { createLineDecoder } from '../rpc/framing.js';
+import { AlpClientError } from '../rpc/errors.ts';
+import { createLineDecoder } from '../rpc/framing.ts';
 import type { Socket } from 'node:net';
-import type { AlpTransport, TransportClose } from '../rpc/client.js';
+import type { AlpTransport, TransportClose } from '../rpc/client.ts';
 
 export type { AlpTransport, TransportClose };
 

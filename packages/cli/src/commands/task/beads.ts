@@ -3,9 +3,9 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { exportBeads, importBeads, parseJsonl } from '@anhlp/alp-core/beads';
 import { loadTasks } from '@anhlp/alp-core/tasks';
-import { taskProject } from '../_shared/project.js';
-import { UsageError } from '../_shared/usage.js';
-import { warnUnreadable } from './format.js';
+import { taskProject } from '../_shared/project.ts';
+import { UsageError } from '../_shared/usage.ts';
+import { warnUnreadable } from './format.ts';
 
 /** alp tasks export / import: interchange with beads through its JSONL issue format. */
 

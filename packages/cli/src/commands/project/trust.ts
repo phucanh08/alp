@@ -1,8 +1,8 @@
 import { parseArgs } from 'node:util';
 import { isTrusted, revokeProject, trustProject, trustedProjects } from '@anhlp/alp-core/trust';
 import { alpHome } from '@anhlp/alp-client/index';
-import { taskProject } from '../_shared/project.js';
-import { UsageError } from '../_shared/usage.js';
+import { taskProject } from '../_shared/project.ts';
+import { UsageError } from '../_shared/usage.ts';
 
 /** alp trust: the workspaces whose hooks run without asking (ALPD §45). */
 export async function trustCommand(args: string[]) {

@@ -2,8 +2,8 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { installPack, listPacks, packStatus } from '@anhlp/alp-core/packs';
 import { alpHome } from '@anhlp/alp-client/index';
-import { projectFlag, taskProject } from '../_shared/project.js';
-import { UsageError } from '../_shared/usage.js';
+import { projectFlag, taskProject } from '../_shared/project.ts';
+import { UsageError } from '../_shared/usage.ts';
 
 /**
  * alp packs [--project DIR] [--json]: the optional packs ALP ships, and whether the library or the

@@ -5,12 +5,12 @@ import { ERROR, RPC_ERROR, resumeCommandOf } from '@anhlp/alp-protocol';
 import type { AlpRuntime, ConfigureChanges, EffectiveConfig, Envelope, NativeBinding, SessionSnapshot } from '@anhlp/alp-runtime/index';
 import type { ConfigureOutcome, ConfigurePreview, ConversationBranch, ForkProvenance, SessionSummary } from '@anhlp/alp-protocol/session';
 import type { RpcMethodMap } from '@anhlp/alp-protocol/rpc';
-import type { SessionRecord, Store, StoredBranch } from './store.js';
-import type { RegistryService } from './registry.js';
-import { RegistryError } from './registry.js';
-import type { Principal } from './attachments.js';
-import { createLifecycle, type LifecycleEntry, type LifecycleJournal } from './lifecycle.js';
-import { RpcError } from './rpc-error.js';
+import type { SessionRecord, Store, StoredBranch } from './store.ts';
+import type { RegistryService } from './registry.ts';
+import { RegistryError } from './registry.ts';
+import type { Principal } from './attachments.ts';
+import { createLifecycle, type LifecycleEntry, type LifecycleJournal } from './lifecycle.ts';
+import { RpcError } from './rpc-error.ts';
 
 /**
  * session.fork and session.rewind (docs/protocol/alp-json-rpc-v1.md §12.7): a root's conversation cut

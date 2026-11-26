@@ -35,7 +35,7 @@ import { chmod, lstat, unlink } from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
 import { assertPrivateDirectory } from '@anhlp/alp-client/index';
-import { TOKEN_REQUEST, assertTokenSocket, tokenSocketPath } from '../dashboard-service.js';
+import { TOKEN_REQUEST, assertTokenSocket, tokenSocketPath } from '../dashboard-service.ts';
 
 /** The longest request line the server reads. */
 const MAX_REQUEST = 256;

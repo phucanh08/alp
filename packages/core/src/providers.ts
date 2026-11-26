@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AlpError } from './errors.js';
-import { settingsKeys, unknownMessage } from './validation.js';
-import { scriptCommand } from './packaged.js';
+import { AlpError } from './errors.ts';
+import { settingsKeys, unknownMessage } from './validation.ts';
+import { scriptCommand } from './packaged.ts';
 
 /** A provider of the library as loadProvider returns it. */
 export type Provider = { id: string; kind: 'acp' | 'antigravity'; label: string; description?: string; command: string; args: string[]; env: Record<string, string>; models?: Array<{ id: string; label?: string; description?: string }>; additionalModels?: Array<{ id: string; label?: string; description?: string }>; enabled?: boolean; params?: Record<string, unknown> };

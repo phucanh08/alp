@@ -1,7 +1,7 @@
 import { alpHome, connect, lockAlive, readLock } from '@anhlp/alp-client/index';
 import { bundleInfo } from '@anhlp/alp-core/packaged';
-import { alpVersion } from '../../version.js';
-import { selfUpdate } from './self-update.js';
+import { alpVersion } from '../../version.ts';
+import { selfUpdate } from './self-update.ts';
 
 /** The running alpd's version and live sessions, if one runs for this ALP_HOME. */
 async function runningDaemon() {

@@ -1,5 +1,5 @@
 // Entry of the native alpd (t-81b0.9): `bun build --compile` of this file is `<bundle>/bin/alpd`
 // (scripts/build-alpd-native.ts). The registration must load before alpd: ES modules evaluate in
 // import order.
-import './native-register.js';
-import './main.js';
+import './native-register.ts';
+import './main.ts';

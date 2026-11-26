@@ -1,12 +1,12 @@
-import { shippedTemplateRoot } from './template-path.js';
+import { shippedTemplateRoot } from './template-path.ts';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { AlpError } from './errors.js';
-import { validateAgentConfig, validateHook, validateSettings, normalizeMcp, validateResolvedAgent } from './validation.js';
-import { librarySkills } from './library/entries/library.js';
+import { AlpError } from './errors.ts';
+import { validateAgentConfig, validateHook, validateSettings, normalizeMcp, validateResolvedAgent } from './validation.ts';
+import { librarySkills } from './library/entries/library.ts';
 import type { Dirent } from 'node:fs';
-import type { ResolvedAgent } from './types.js';
-export { AlpError } from './errors.js';
+import type { ResolvedAgent } from './types.ts';
+export { AlpError } from './errors.ts';
 
 
 type LibraryOptions = { library?: string; templates?: Record<string, string> };
@@ -234,7 +234,7 @@ export async function resolveAgent(projectRoot: string, { agent, library, templa
     ...(config.thinking !== undefined ? { reasoning: config.thinking } : {}),
     ...projectRuntime,
   };
-  return <ResolvedAgent>validateResolvedAgent({
+  return validateResolvedAgent({
     name, projectRoot: root, source: source.source,
     instructions: { project: (await optionalText(path.join(root, 'ALP.md'))) ?? '', agent: instructions },
     skills, hooks, runtime, projectRuntime: { ...projectRuntime },
@@ -243,5 +243,5 @@ export async function resolveAgent(projectRoot: string, { agent, library, templa
     ...(typeof config.context === 'number' ? { context: config.context } : {}),
     ...(config.autocompact !== undefined ? { autocompact: config.autocompact } : {}),
     mcp: { mcpServers: servers },
-  });
+  }) as ResolvedAgent;
 }

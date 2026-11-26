@@ -1,12 +1,12 @@
 import { execFile } from 'node:child_process';
 import { alpHome } from '@anhlp/alp-client/index';
 import { entryCommand } from '@anhlp/alp-core/packaged';
-import { UsageError } from '../_shared/usage.js';
-import { start } from '../daemon/index.js';
-import { DISABLED, addressOf, dashboardDisabled, reportMigration } from './common.js';
-import { migrateDashboard } from './migrate.js';
-import { projectArgs, serveDashboard } from './start.js';
-import { dashboardEntry, stopService } from '../../dashboard-service.js';
+import { UsageError } from '../_shared/usage.ts';
+import { start } from '../daemon/index.ts';
+import { DISABLED, addressOf, dashboardDisabled, reportMigration } from './common.ts';
+import { migrateDashboard } from './migrate.ts';
+import { projectArgs, serveDashboard } from './start.ts';
+import { dashboardEntry, stopService } from '../../dashboard-service.ts';
 
 /**
  * alp dashboard rotate: alp dashboard's token is replaced and the old one revoked, so every open

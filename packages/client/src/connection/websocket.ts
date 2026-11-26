@@ -1,8 +1,8 @@
 import { MAX_FRAME } from '@anhlp/alp-protocol';
-import { AlpClientError } from '../rpc/errors.js';
-import { utf8Length } from '../rpc/framing.js';
-import { timerDelay } from '../rpc/timers.js';
-import type { AlpTransport, TransportClose, AbortSignalLike } from '../rpc/client.js';
+import { AlpClientError } from '../rpc/errors.ts';
+import { utf8Length } from '../rpc/framing.ts';
+import { timerDelay } from '../rpc/timers.ts';
+import type { AlpTransport, TransportClose, AbortSignalLike } from '../rpc/client.ts';
 
 export type { AlpTransport, TransportClose, AbortSignalLike };
 

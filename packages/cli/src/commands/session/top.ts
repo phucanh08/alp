@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { ago, duration } from '@anhlp/alp-client/render';
-import { UsageError } from '../_shared/usage.js';
-import { running } from '../daemon/index.js';
+import { UsageError } from '../_shared/usage.ts';
+import { running } from '../daemon/index.ts';
 
 /** One tree as text: sessions by depth, then questions, unmerged worktrees and leases. */
 

@@ -2,9 +2,9 @@ import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { entryCommand } from '@anhlp/alp-core/packaged';
-import { DISABLED, dashboardDisabled, readPublished, readServiceLock, reportMigration } from './common.js';
-import { legacyLeftovers, migrateDashboard } from './migrate.js';
-import { DASHBOARD, LEGACY_WEB, dashboardEntry, isDashboardReady, refusal, serviceOwner, stopService } from '../../dashboard-service.js';
+import { DISABLED, dashboardDisabled, readPublished, readServiceLock, reportMigration } from './common.ts';
+import { legacyLeftovers, migrateDashboard } from './migrate.ts';
+import { DASHBOARD, LEGACY_WEB, dashboardEntry, isDashboardReady, refusal, serviceOwner, stopService } from '../../dashboard-service.ts';
 
 /**
  * The running service as its files and its listener show it, without ps (so also on Windows): the

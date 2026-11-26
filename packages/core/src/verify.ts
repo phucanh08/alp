@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AlpError } from './errors.js';
-import { signalShell, spawnShell } from './shell.js';
+import { AlpError } from './errors.ts';
+import { signalShell, spawnShell } from './shell.ts';
 
 /**
  * The project's verification gate (plans/reference/ALPD.md §28): commands from

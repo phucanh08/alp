@@ -1,8 +1,8 @@
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { AlpError } from './errors.js';
-import { builtinText, optionalText } from './resolver.js';
-import { settingsKeys, unknownMessage } from './validation.js';
+import { AlpError } from './errors.ts';
+import { builtinText, optionalText } from './resolver.ts';
+import { settingsKeys, unknownMessage } from './validation.ts';
 
 type LibraryOptions = { library?: string; templates?: Record<string, string> };
 /** Where one team comes from. */

@@ -2,8 +2,8 @@ import { parseArgs } from 'node:util';
 import { describeVerification, runVerify, verifyConfig } from '@anhlp/alp-core/verify';
 import { probeAntigravity } from '@anhlp/alp-client/antigravity-probe';
 import { getTask, recordVerification } from '@anhlp/alp-core/tasks';
-import { taskProject } from '../_shared/project.js';
-import { UsageError } from '../_shared/usage.js';
+import { taskProject } from '../_shared/project.ts';
+import { UsageError } from '../_shared/usage.ts';
 
 /** alp verify: run the project's verify commands here, in the project root. */
 

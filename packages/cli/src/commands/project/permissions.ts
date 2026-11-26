@@ -2,8 +2,8 @@ import { parseArgs } from 'node:util';
 import { commandDecision, profileFor } from '@anhlp/alp-core/permissions';
 import { discoverAgents } from '@anhlp/alp-core/resolver';
 import { alpHome } from '@anhlp/alp-client/index';
-import { taskProject } from '../_shared/project.js';
-import { UsageError } from '../_shared/usage.js';
+import { taskProject } from '../_shared/project.ts';
+import { UsageError } from '../_shared/usage.ts';
 
 /** alp permissions: the profile each agent runs with, from .alp/settings.json and $ALP_HOME/settings.json. */
 export async function permissionsCommand(args: string[]) {

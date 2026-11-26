@@ -1,9 +1,9 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { moveFile } from './atomic.js';
+import { moveFile } from './atomic.ts';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { AlpError } from './errors.js';
-import { DASHBOARD_SETTINGS, validateUserSettings } from './validation.js';
+import { AlpError } from './errors.ts';
+import { DASHBOARD_SETTINGS, validateUserSettings } from './validation.ts';
 
 /**
  * The user's own settings in $ALP_HOME/settings.json that ALP and its screens edit

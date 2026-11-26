@@ -1,6 +1,6 @@
-import { UsageError } from '../_shared/usage.js';
-import { built } from '../daemon/index.js';
-import { DAEMON_ENTRY, distributionEntry } from '../../paths.js';
+import { UsageError } from '../_shared/usage.ts';
+import { built } from '../daemon/index.ts';
+import { DAEMON_ENTRY, distributionEntry } from '../../paths.ts';
 
 /** alp acp: ALP as an ACP agent for editors; stdout carries only the protocol (ALPD §60). */
 

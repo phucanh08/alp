@@ -6,9 +6,9 @@ import path from 'node:path';
 import { diagnose } from '@anhlp/alp-client/doctor';
 import { testEntry } from '@anhlp/alp-client/library-test';
 import { saveEntry } from '@anhlp/alp-core/library-edit';
-import { edited } from '../../commands/library/edit.js';
-import { TERMINAL_WARNING, terminalCommand } from '../../commands/terminal/index.js';
-import type { DashboardOwnerContext, DashboardOwnerHandler } from './index.js';
+import { edited } from '../../commands/library/edit.ts';
+import { TERMINAL_WARNING, terminalCommand } from '../../commands/terminal/index.ts';
+import type { DashboardOwnerContext, DashboardOwnerHandler } from './index.ts';
 
 /**
  * Owner handlers for the host pages of Settings (t-a95b.1 group B; docs/alp/dashboard.md §4.7):

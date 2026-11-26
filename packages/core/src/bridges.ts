@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { isExecutableName, nodeExecutable, stablePath } from './packaged.js';
+import { isExecutableName, nodeExecutable, stablePath } from './packaged.ts';
 
 /**
  * The stdio MCP bridges an agent CLI starts to reach alpd's tools (ACP agents and Antigravity).

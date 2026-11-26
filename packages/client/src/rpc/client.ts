@@ -1,7 +1,7 @@
 import { AlpRpcError, MAX_FRAME } from '@anhlp/alp-protocol';
-import { AlpClientError } from './errors.js';
-import { utf8Length } from './framing.js';
-import { timerDelay } from './timers.js';
+import { AlpClientError } from './errors.ts';
+import { utf8Length } from './framing.ts';
+import { timerDelay } from './timers.ts';
 
 /**
  * The transport-independent JSON-RPC 2.0 engine of an ALP client (plans/reference/ALPD.md §3):

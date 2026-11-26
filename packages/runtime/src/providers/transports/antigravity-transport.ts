@@ -6,8 +6,8 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface, type Interface } from 'node:readline';
-import { openMcpTools } from '../../mcp-tools.js';
-import { antigravityToolDetail } from '../../tool-detail.js';
+import { openMcpTools } from '../../mcp-tools.ts';
+import { antigravityToolDetail } from '../../tool-detail.ts';
 import { bridgeCommand, isBridgeArgs } from '@anhlp/alp-core/bridges';
 
 /**
@@ -124,6 +124,16 @@ export function encodePrompt(text: string): string {
  * Emits line-delimited JSON events and parses stdout line by line.
  */
 export class AntigravityTransport {
+  declare private readonly command: string;
+  declare private readonly cwd: string;
+  declare private readonly env: NodeJS.ProcessEnv;
+  declare private readonly provider?: AntigravityProvider;
+  constructor(command: string = 'agy', cwd: string = process.cwd(), env: NodeJS.ProcessEnv = process.env, provider?: AntigravityProvider) {
+    this.command = command;
+    this.cwd = cwd;
+    this.env = env;
+    this.provider = provider;
+  }
   /** Antigravity's prompt is one line of text: no images. */
   takesImages() { return false; }
   private child?: ChildProcessWithoutNullStreams;
@@ -154,12 +164,6 @@ export class AntigravityTransport {
   private externalStarting?: ReturnType<typeof openMcpTools>;
   private readonly startupAbort = new AbortController();
 
-  constructor(
-    private readonly command: string = 'agy',
-    private readonly cwd: string = process.cwd(),
-    private readonly env: NodeJS.ProcessEnv = process.env,
-    private readonly provider?: AntigravityProvider,
-  ) {}
 
   async initialize(): Promise<void> {
     if (/\.(cmd|bat|ps1)$/i.test(this.command)) {

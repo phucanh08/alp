@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
-import { UsageError } from '../_shared/usage.js';
-import { running } from '../daemon/index.js';
+import { UsageError } from '../_shared/usage.ts';
+import { running } from '../daemon/index.ts';
 
 /** The models alpd offers now: the live catalog (t-e5ee); --refresh asks every provider again first. */
 export async function models(args: string[]) {

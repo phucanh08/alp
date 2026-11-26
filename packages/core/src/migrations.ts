@@ -1,9 +1,9 @@
 import { readdir, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { AlpError } from './errors.js';
-import { writeAtomic } from './atomic.js';
-import { STATE_SCHEMA, assertStateSupported, migrationFile, readStateSchema, stateDir, writeStateSchema } from './state-schema.js';
-import { STATE_UNITS, automaticBackup, restoreBackup } from './backup.js';
+import { AlpError } from './errors.ts';
+import { writeAtomic } from './atomic.ts';
+import { STATE_SCHEMA, assertStateSupported, migrationFile, readStateSchema, stateDir, writeStateSchema } from './state-schema.ts';
+import { STATE_UNITS, automaticBackup, restoreBackup } from './backup.ts';
 
 /**
  * Versioned migrations of alpd's state (plans/reference/ALPD.md §68). Each step moves the

@@ -1,15 +1,15 @@
 import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { moveFile } from '../../atomic.js';
-import { AlpError } from '../../errors.js';
-import { assertNoSymlinks } from '../../safe-path.js';
-import { seedLibrary } from '../entries/library.js';
-import { BASES, validatePermissions } from '../../permissions.js';
-import { validateSkill } from './skill-validate.js';
-import { shippedTemplateRoot } from '../../template-path.js';
-import { validateTeam } from '../../teams.js';
-import { validateAgentConfig } from '../../validation.js';
+import { moveFile } from '../../atomic.ts';
+import { AlpError } from '../../errors.ts';
+import { assertNoSymlinks } from '../../safe-path.ts';
+import { seedLibrary } from '../entries/library.ts';
+import { BASES, validatePermissions } from '../../permissions.ts';
+import { validateSkill } from './skill-validate.ts';
+import { shippedTemplateRoot } from '../../template-path.ts';
+import { validateTeam } from '../../teams.ts';
+import { validateAgentConfig } from '../../validation.ts';
 
 type PackKind = 'skills' | 'agents' | 'teams';
 type PermissionProfile = { base: string; allow?: string[]; ask?: string[]; deny?: string[] };
@@ -131,7 +131,7 @@ async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
  * @param {string} id
  * @param {{ scope: 'library' | 'project', root?: string, library?: string, assign?: boolean, templates?: Record<string, string> }} options
  */
-export async function installPack(id: string, { scope, root, library, assign = false, templates }: InstallOptions = <InstallOptions>{}) {
+export async function installPack(id: string, { scope, root, library, assign = false, templates }: InstallOptions = {} as InstallOptions) {
   if (typeof id !== 'string' || !NAME.test(id)) fail('INVALID_NAME', `'${id}' is not a pack name`);
   const packs = await listPacks({ templates });
   const pack = packs.find(candidate => candidate.id === id) ?? fail('NOT_FOUND', `No pack '${id}'; packs are ${packs.map(candidate => candidate.id).join(', ')}`);
@@ -226,7 +226,7 @@ export async function installPack(id: string, { scope, root, library, assign = f
     let changed = false;
     for (const [agent, entry] of Object.entries(pack.permissions)) {
       // A base mode names itself; a pack profile is installed under the agent's name.
-      const profile: PermissionProfile | undefined = object(entry) ? { base: entry.base, ...Object.fromEntries((<Array<'allow' | 'ask' | 'deny'>>['allow', 'ask', 'deny']).filter(key => entry[key]?.length).map(key => [key, entry[key]])) } : undefined;
+      const profile: PermissionProfile | undefined = object(entry) ? { base: entry.base, ...Object.fromEntries((['allow', 'ask', 'deny'] as Array<'allow' | 'ask' | 'deny'>).filter(key => entry[key]?.length).map(key => [key, entry[key]])) } : undefined;
       const required = profile ? agent : entry;
       const shown = profile ? `profile ${agent}` : `'${required}'`;
       // An agent of that name that was already there is the user's: its permissions are theirs to set.
@@ -238,7 +238,7 @@ export async function installPack(id: string, { scope, root, library, assign = f
       if (newProfile) profiles[agent] = profile;
       if (!Object.hasOwn(agents, agent)) agents[agent] = required;
       else if (!newProfile) { permissions.kept.push(`${agent}: ${shown}`); continue; }
-      permissions.set.push(`${agent}: ${profile ? `profile ${agent} (${profile.base}${(<Array<'allow' | 'ask' | 'deny'>>['allow', 'ask', 'deny']).map(key => profile[key] ? `, ${profile[key].length} ${key}` : '').join('')})` : required}`);
+      permissions.set.push(`${agent}: ${profile ? `profile ${agent} (${profile.base}${(['allow', 'ask', 'deny'] as Array<'allow' | 'ask' | 'deny'>).map(key => profile[key] ? `, ${profile[key].length} ${key}` : '').join('')})` : required}`);
       changed = true;
     }
     if (changed) {

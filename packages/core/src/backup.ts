@@ -6,10 +6,10 @@ import { Readable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
 import { pipeline } from 'node:stream/promises';
 import { createGunzip, createGzip } from 'node:zlib';
-import { AlpError } from './errors.js';
-import { moveFile, writeAtomic } from './atomic.js';
-import { STATE_SCHEMA, assertStateSupported, readStateSchema } from './state-schema.js';
-import { withTaskLock } from './tasks/records/tasks.js';
+import { AlpError } from './errors.ts';
+import { moveFile, writeAtomic } from './atomic.ts';
+import { STATE_SCHEMA, assertStateSupported, readStateSchema } from './state-schema.ts';
+import { withTaskLock } from './tasks/records/tasks.ts';
 import type { Stats } from 'node:fs';
 import type { Hash } from 'node:crypto';
 

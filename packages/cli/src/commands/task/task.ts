@@ -3,9 +3,9 @@ import { parseArgs } from 'node:util';
 import { addGate, closeTask, createTask, describeGate, gateOpen, epicReport, linkTask, loadTasks, rejectGate, reopenTask, resolveGate, TASKS_DIR, updateTask, isAgentProcess, AGENT_MARKER } from '@anhlp/alp-core/tasks';
 import { AlpError } from '@anhlp/alp-core/errors';
 import type { CloseReason, Task, TaskType } from '@anhlp/alp-core/tasks';
-import { taskProject } from '../_shared/project.js';
-import { UsageError } from '../_shared/usage.js';
-import { printTask, taskRow, warnUnreadable } from './format.js';
+import { taskProject } from '../_shared/project.ts';
+import { UsageError } from '../_shared/usage.ts';
+import { printTask, taskRow, warnUnreadable } from './format.ts';
 
 export const repeated = { type: 'string', multiple: true } as const;
 

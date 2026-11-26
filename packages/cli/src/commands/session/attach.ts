@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
-import { UsageError } from '../_shared/usage.js';
-import { running } from '../daemon/index.js';
-import { follow, printer } from './output.js';
+import { UsageError } from '../_shared/usage.ts';
+import { running } from '../daemon/index.ts';
+import { follow, printer } from './output.ts';
 
 export async function attach(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { json: { type: 'boolean' } } });

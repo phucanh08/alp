@@ -1,5 +1,5 @@
 import { PROTOCOL_VERSION } from '@anhlp/alp-protocol';
-import type { RequestOptions } from '../client.js';
+import type { RequestOptions } from '../client.ts';
 
 /** The daemon.hello capability a process an ALP agent started announces. */
 export const AGENT_CAPABILITY = 'principal.agent';

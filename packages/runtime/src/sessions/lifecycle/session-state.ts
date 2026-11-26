@@ -1,10 +1,10 @@
-import type { NativeBase, RuntimeTransport } from '../../contracts.js';
-import type { RuntimeKind, SessionSpec, ResolvedSession } from '../../resolve.js';
-import type { MailEvent } from '../../mailbox.js';
-import type { Worktree, WorktreeChange, Copy } from '../../workspace.js';
+import type { NativeBase, RuntimeTransport } from '../../contracts.ts';
+import type { RuntimeKind, SessionSpec, ResolvedSession } from '../../resolve.ts';
+import type { MailEvent } from '../../mailbox.ts';
+import type { Worktree, WorktreeChange, Copy } from '../../workspace.ts';
 import type { Verification } from '@anhlp/alp-core/verify';
-import type { Handoff } from '../../assignments/completion/handoff.js';
-import type { SessionUsage } from '../../events.js';
+import type { Handoff } from '../../assignments/completion/handoff.ts';
+import type { SessionUsage } from '../../events.ts';
 
 /** The pause that stopped a turn; a matching resume may arrive before its interruption settles. */
 export type ParkPause = { scope: RuntimeKind | 'all'; resumed?: boolean; /** The pause was alpd's, for a full disk (t-2831). */ disk?: boolean };
@@ -85,7 +85,7 @@ export type Session = {
   /** When its last compaction failed: automatic ones wait COMPACT_RETRY_MS after it. */
   compactFailedAt?: number;
   /** The user's prompts held while it compacts, sent after (t-0e56). */
-  compactBuffer?: import('../../contracts.js').PromptInput[];
+  compactBuffer?: import('../../contracts.ts').PromptInput[];
   /** The user's last message to it, seeded into a fresh conversation after a compaction (t-0e56). */
   lastUserText?: string;
   /** An assignment's brief as its requester gave it, repeated after a compaction. */

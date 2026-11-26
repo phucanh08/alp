@@ -1,7 +1,7 @@
 import { realpath as fsRealpath } from 'node:fs/promises';
-import { createRegistry, RegistryError } from './registry.js';
-import { createWorkspaceWorktrees } from './worktrees.js';
-import { HistoryError } from './history.js';
+import { createRegistry, RegistryError } from './registry.ts';
+import { createWorkspaceWorktrees } from './worktrees.ts';
+import { HistoryError } from './history.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import { appendFile, chmod, mkdir, readFile, unlink, lstat, rename } from 'node:fs/promises';
 import net from 'node:net';
@@ -14,21 +14,21 @@ import { validateParams } from '@anhlp/alp-protocol/contract';
 export { ERROR } from '@anhlp/alp-protocol';
 import { DEFAULT_MODEL, models, modes, type ModelCatalog, thinkingOptions, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '@anhlp/alp-runtime/index';
 import { replayedNotice } from '@anhlp/alp-runtime/mailbox';
-import type { Receipt, SessionRecord, SessionStatus, Store, UnreadableReceipt } from './store.js';
+import type { Receipt, SessionRecord, SessionStatus, Store, UnreadableReceipt } from './store.ts';
 import type { PromptContent, SessionSummary } from '@anhlp/alp-protocol/session';
 import type { ScheduleJob, TurnAttention } from '@anhlp/alp-protocol/index';
-import { RpcError } from './rpc-error.js';
-import { createOperations, fromCore, type OperationsOptions } from './operations.js';
-import { createFindPages, FileAccessError, FilesError, listWorkspaceDirectory, previewWorkspaceFile, readWorkspaceFile, searchHostDirectories, searchWorkspaceFiles } from './files.js';
-import { createGitReader } from './git.js';
-import { createScheduleStore, projectKey } from './schedules/schedules.js';
-import { createScheduleHandlers } from './schedules/rpc/handlers.js';
-import { createAttachmentStore, type AttachmentRuntime, type AttachmentStoreOptions, type Principal } from './attachments.js';
+import { RpcError } from './rpc-error.ts';
+import { createOperations, fromCore, type OperationsOptions } from './operations.ts';
+import { createFindPages, FileAccessError, FilesError, listWorkspaceDirectory, previewWorkspaceFile, readWorkspaceFile, searchHostDirectories, searchWorkspaceFiles } from './files.ts';
+import { createGitReader } from './git.ts';
+import { createScheduleStore, projectKey } from './schedules/schedules.ts';
+import { createScheduleHandlers } from './schedules/rpc/handlers.ts';
+import { createAttachmentStore, type AttachmentRuntime, type AttachmentStoreOptions, type Principal } from './attachments.ts';
 import type { RuntimeAttachment } from '@anhlp/alp-protocol/session';
-import { clientMessageId as scheduleMessageId, createScheduler, SCHEDULE_TICK_MS, type ScheduleDelivery } from './schedules/scheduler.js';
-import { createLifecycleJournal, LIFECYCLE_RETENTION_MS } from './lifecycle.js';
-import { createConversation } from './conversation.js';
-import { createTerminalService, type TerminalServiceOptions } from './terminals/terminals.js';
+import { clientMessageId as scheduleMessageId, createScheduler, SCHEDULE_TICK_MS, type ScheduleDelivery } from './schedules/scheduler.ts';
+import { createLifecycleJournal, LIFECYCLE_RETENTION_MS } from './lifecycle.ts';
+import { createConversation } from './conversation.ts';
+import { createTerminalService, type TerminalServiceOptions } from './terminals/terminals.ts';
 
 /**
  * alpd's JSON-RPC surface over one shared runtime (plans/reference/ALPD.md §3, §6, §14).

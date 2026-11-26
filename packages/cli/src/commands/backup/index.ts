@@ -4,8 +4,8 @@ import { parseArgs } from 'node:util';
 import { BACKUP_EXTENSION, backupsDir, createBackup, knownProjects, restoreBackup, verifyBackup } from '@anhlp/alp-core/backup';
 import { acquireDaemonLock, alpHome, assertPrivateDirectory, daemonPaths, lockAlive, readLock, releaseDaemonLock, PROTOCOL_VERSION } from '@anhlp/alp-client/index';
 import { daemonHeld, holdDaemon, releaseHold } from '@anhlp/alp-client/supervise';
-import { start, stop } from '../daemon/index.js';
-import { UsageError } from '../_shared/usage.js';
+import { start, stop } from '../daemon/index.ts';
+import { UsageError } from '../_shared/usage.ts';
 
 declare const __ALP_VERSION__: string;
 const VERSION = typeof __ALP_VERSION__ === 'string' ? __ALP_VERSION__ : 'dev';

@@ -2,9 +2,9 @@ import { parseArgs } from 'node:util';
 import { findFormula, formulaDirs, listFormulas, pourFormula } from '@anhlp/alp-core/formulas';
 import { parse as toml } from 'smol-toml';
 import { alpHome } from '@anhlp/alp-client/index';
-import { taskProject } from '../_shared/project.js';
-import { UsageError } from '../_shared/usage.js';
-import { taskRow } from './format.js';
+import { taskProject } from '../_shared/project.ts';
+import { UsageError } from '../_shared/usage.ts';
+import { taskRow } from './format.ts';
 
 /** alp formula: workflow templates that pour into an epic with a task per step. */
 

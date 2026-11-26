@@ -37,10 +37,10 @@ import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { dashboardSettings } from '@anhlp/alp-core/user-settings';
 import { CredentialStore, createGateway, createGatewayLogger, renameWithRetry, resolveConfig } from '@anhlp/alp-gateway';
 import { TERMINAL_EXEC_WARNING } from '@anhlp/alp-gateway/policy';
-import { createGrant, grantPermissions, dashboardGatewayHome } from './grant.js';
-import { serveToken } from './token-socket.js';
-import { createStaticServer } from './serve.js';
-import { ownerMethods } from './owner/index.js';
+import { createGrant, grantPermissions, dashboardGatewayHome } from './grant.ts';
+import { serveToken } from './token-socket.ts';
+import { createStaticServer } from './serve.ts';
+import { ownerMethods } from './owner/index.ts';
 import { daemonEntry as bundledDaemonEntry } from '@anhlp/alp-core/packaged';
 import type { Logger } from '@anhlp/alp-core/log';
 

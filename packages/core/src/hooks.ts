@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AlpError } from './errors.js';
-import { validateHook } from './validation.js';
-import type { ResolvedAgent } from './types.js';
+import { AlpError } from './errors.ts';
+import { validateHook } from './validation.ts';
+import type { ResolvedAgent } from './types.ts';
 
 export type LoadedHook = { name: string, path: string, project: boolean, event: string, command: string, blocking?: boolean, timeoutSec?: number, match?: { agent?: string, label?: string }, description?: string };
 

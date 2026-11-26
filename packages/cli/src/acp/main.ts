@@ -3,7 +3,7 @@ import { Readable, Writable } from 'node:stream';
 import { alpHome, connect } from '@anhlp/alp-client/index';
 import { startDaemon } from '@anhlp/alp-client/supervise';
 import { createLogger } from '@anhlp/alp-core/log';
-import { createAcpAgent } from './agent.js';
+import { createAcpAgent } from './agent.ts';
 
 declare const __ALP_VERSION__: string;
 
