@@ -29,7 +29,8 @@ export const workspaceDirectory = (name: string) => locations[name] ?? `packages
 
 /**
  * Every `*.test.js` and `*.test.ts` under `directory`, relative to the repository root; none if it
- * does not exist. Node runs the TypeScript ones directly (dev/CI Node >= 22.18, assertTypeStripping).
+ * does not exist; files under a `fixtures` directory are data. Node runs the TypeScript ones directly
+ * (dev/CI Node >= 22.18, assertTypeStripping).
  */
 export function testFiles(directory: string): string[] {
   const absolute = path.join(ROOT, directory);
@@ -37,6 +38,9 @@ export function testFiles(directory: string): string[] {
     // Without an encoding readdirSync lists names as strings; its recursive overload types them loosely.
     return (readdirSync(absolute, { recursive: true }) as string[])
       .filter(file => file.endsWith('.test.js') || file.endsWith('.test.ts'))
+      // A `fixtures` directory holds data a test reads (test/fixtures/architecture-app has its own
+      // orders.test.ts), never a test of this repository.
+      .filter(file => !file.split(path.sep).slice(0, -1).includes('fixtures'))
       .map(file => path.join(directory, file).split(path.sep).join('/'))
       .sort();
   } catch { return []; }

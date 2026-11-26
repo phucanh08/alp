@@ -95,7 +95,7 @@ test('the app adds an ACP agent from its catalog; alpd keeps it in the library a
   assert.deepEqual(JSON.parse(await readFile(path.join(home, 'providers', 'fake.json'), 'utf8')).additionalModels, [{ id: 'extra', label: 'Extra' }]);
 
   const diagnostic = await ask({ type: 'provider_diagnostic_request', provider: 'fake' });
-  assert.match(diagnostic.payload.diagnostic, /Command: .*fake-acp\.js/);
+  assert.match(diagnostic.payload.diagnostic, /Command: .*fake-acp\.ts/);
   assert.match(diagnostic.payload.diagnostic, /Models: fast, deep/);
   assert.equal((await ask({ type: 'refresh_providers_snapshot_request', providers: ['fake'] })).payload.acknowledged, true);
 
