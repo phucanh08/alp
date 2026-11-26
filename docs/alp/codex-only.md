@@ -21,7 +21,7 @@ installs whatever npm's `latest` tag points at, which moves to a new beta only a
 post-publish checks ([beta-install.md](beta-install.md)).
 
 ```sh
-npm install -g @anhlp/alp@beta
+npm install -g @anhlp/alp@beta   # or: pnpm add -g @anhlp/alp@beta
 alp doctor
 ```
 
