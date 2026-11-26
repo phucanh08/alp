@@ -66,7 +66,7 @@ unable to run `git diff` or any test for days (issue #308, task t-c8ee).
 
 ### Antigravity read-only permissions
 
-`packages/runtime/src/antigravity-transport.ts` is one mechanism with two open
+`packages/runtime/src/providers/transports/antigravity-transport.ts` is one mechanism with two open
 workstreams: t-ffa1 (keep agy's view_file/list_dir/search inside the workspace) and
 t-c8ee (give a read-only reviewer enough capability to verify). One owner changes that
 file at a time, and a change to either must state its effect on the other.
