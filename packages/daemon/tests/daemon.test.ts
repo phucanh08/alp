@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { realpath as realpathOf } from 'node:fs/promises';
 import { initProject } from '@anhlp/alp-core/init';
 import { createTask } from '@anhlp/alp-core/tasks';
-import { connect, daemonPaths, ensureDaemon, findDaemonEntry, readLock, PROTOCOL_VERSION } from '@anhlp/alp-client';
+import { connect, daemonPaths, ensureDaemon, findDaemonEntry, holdOps, readLock, PROTOCOL_VERSION } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import type { RuntimeTransport } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
@@ -273,6 +273,11 @@ test('alpd tells a clean stop from a crash by the marker it keeps while running'
   process.kill(pid, 'SIGKILL');
   await until(() => { try { process.kill(pid, 0); return false; } catch { return true; } });
   if (process.platform === 'win32') {
+    // A killed pid stops answering before Windows has closed its handles: libuv's kill(pid, 0) reads the
+    // exit code, which TerminateProcess sets at once, while the hold and the pipe close a moment later
+    // (t-7a0b). Until the hold is free the lock below still looks alive, and the next status() is sent to
+    // the dying alpd's pipe ('connect ENOENT' or 'connection closed').
+    await until(() => !holdOps.taken(daemonPaths(home).hold));
     // Windows soon gives a killed pid to another process (t-a5d8); this test's own pid stands in for
     // it. The killed alpd's hold went with it, so its lock is stale and a new alpd starts.
     await writeFile(daemonPaths(home).lock, JSON.stringify({ ...(await readLock(home)), pid: process.pid }));
