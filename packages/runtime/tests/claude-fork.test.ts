@@ -2,6 +2,7 @@
 // stand-in: turn ids are the prompt uuids, a resume with a base forks only while the session has no
 // transcript, and refusals fail the resume itself. Transcripts live in a temporary CLAUDE_CONFIG_DIR.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -20,10 +21,10 @@ test.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, re
 const CLI = fileURLToPath(new URL('./support/recording-claude.js', import.meta.url));
 
 /** Writes a transcript of `entries` ([type, uuid, content]) under another project's directory, as a session resumed from elsewhere. */
-async function transcript(sessionId, entries, project = '-elsewhere') {
-  const folder = path.join(process.env.CLAUDE_CONFIG_DIR, 'projects', project);
+async function transcript(sessionId: string, entries: [string, string, unknown][], project = '-elsewhere') {
+  const folder = path.join(process.env.CLAUDE_CONFIG_DIR!, 'projects', project);
   await mkdir(folder, { recursive: true });
-  let parentUuid = null;
+  let parentUuid: string | null = null;
   const lines = entries.map(([type, uuid, content]) => {
     const line = { type, uuid, parentUuid, isSidechain: false, sessionId, cwd, timestamp: new Date().toISOString(),
       message: type === 'user' ? { role: 'user', content } : { role: 'assistant', type: 'message', id: `m-${uuid}`, model: 'fixture', content } };
@@ -43,23 +44,24 @@ await transcript(S, [
 
 const config = { cwd, model: 'sonnet', thinking: 'high', sandbox: 'workspace-write', approvalPolicy: 'never', developerInstructions: 'You are a fixture.', mcpServers: {}, dynamicTools: [] };
 
-async function claude(t, extra = {}) {
+async function claude(t: TestContext, extra = {}) {
   const record = path.join(directory, `record-${randomUUID()}.jsonl`);
   const transport = new ClaudeTransport(CLI, cwd, { ...process.env, ALP_FAKE_CLAUDE_RECORD: record, ...extra });
   t.after(() => transport.close());
-  const seen = [];
+  // `any`: the transport's notifications are JSON of every shape; the tests read their fields.
+  const seen: any[] = [];
   transport.onNotification((method, params) => seen.push({ method, ...params }));
   const recorded = async () => (await readFile(record, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
   return { transport, seen, recorded };
 }
 
-async function until(check) {
+async function until(check: () => unknown) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
   assert.fail('Expected condition did not arrive');
 }
 
 /** A flag's value as the SDK passes it (`--name=value` or `--name value`), true for a bare flag. */
-const flag = (argv, name) => {
+const flag = (argv: string[], name: string) => {
   const index = argv.findIndex(arg => arg === name || arg.startsWith(`${name}=`));
   if (index < 0) return undefined;
   if (argv[index] !== name) return argv[index].slice(name.length + 1);
@@ -145,7 +147,7 @@ test('Claude refusing the resume at boot fails the resume itself', async t => {
   const { transport } = await claude(t, { ALP_FAKE_CLAUDE_REFUSE: refusal });
   const failures = [];
   transport.onFailure(error => failures.push(error));
-  await assert.rejects(transport.request('thread/resume', { ...config, threadId: randomUUID(), base: { threadId: S, at: ids.a1 } }), error => error.message.includes(refusal));
+  await assert.rejects(transport.request('thread/resume', { ...config, threadId: randomUUID(), base: { threadId: S, at: ids.a1 } }), (error: Error) => error.message.includes(refusal));
   const { transport: plain } = await claude(t, { ALP_FAKE_CLAUDE_REFUSE: refusal });
-  await assert.rejects(plain.request('thread/resume', { ...config, threadId: S, requireHistory: true }), error => error.message.includes(refusal));
+  await assert.rejects(plain.request('thread/resume', { ...config, threadId: S, requireHistory: true }), (error: Error) => error.message.includes(refusal));
 });

@@ -7,14 +7,22 @@ import { fileURLToPath } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
 import { ClaudeTransport, createAlpRuntime, customClearAliases, nativeCommandRefusal } from '@anhlp/alp-runtime';
 
-const text = text => ({ type: 'text', text });
-const start = id => ({ type: 'message_start', message: { id, content: [] } });
-const block = (index, content_block = text('')) => ({ type: 'content_block_start', index, content_block });
-const delta = (index, text) => ({ type: 'content_block_delta', index, delta: { type: 'text_delta', text } });
-const final = (id, content) => ({ type: 'assistant', parent_tool_use_id: null, message: { id, content } });
+// `any`: SDK messages, the transport's notifications and events are JSON of every shape; the tests read their fields.
+type Json = any;
+/** ClaudeTransport's public members, and the private ones these tests drive or read: the SDK message handler, the turn, the SDK query, the config and the streamed text. */
+type ClaudeInternals = Omit<ClaudeTransport, never> & {
+  handle(message: Json): void, fail(value: unknown): void, activeTurn?: string, query: Json, config: Json,
+  assistantText: Map<string, unknown>, assistantState(id: string): { blocks: Map<number, { text: string, final: boolean }> },
+};
+
+const text = (text: string) => ({ type: 'text', text });
+const start = (id: string) => ({ type: 'message_start', message: { id, content: [] } });
+const block = (index: number, content_block: object = text('')) => ({ type: 'content_block_start', index, content_block });
+const delta = (index: number, text: string) => ({ type: 'content_block_delta', index, delta: { type: 'text_delta', text } });
+const final = (id: string, content: object[]) => ({ type: 'assistant', parent_tool_use_id: null, message: { id, content } });
 const result = { type: 'result', subtype: 'success', is_error: false };
-const completed = seen => seen.filter(event => event.method === 'item/completed' && event.item.type === 'agentMessage').map(event => event.item.text);
-async function until(check) {
+const completed = (seen: Json[]) => seen.filter(event => event.method === 'item/completed' && event.item.type === 'agentMessage').map(event => event.item.text);
+async function until(check: () => unknown) {
   for (let i = 0; i < 400; i++) {
     if (check()) return;
     await new Promise(resolve => setTimeout(resolve, 10));
@@ -22,11 +30,11 @@ async function until(check) {
   assert.fail('Expected streaming event did not arrive');
 }
 function fixture() {
-  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env);
+  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env) as unknown as ClaudeInternals;
   transport.activeTurn = 'turn-1';
-  const seen = [];
+  const seen: Json[] = [];
   transport.onNotification((method, params) => seen.push({ method, ...params }));
-  return { transport, seen, stream: (event, parent_tool_use_id = null) => transport.handle({ type: 'stream_event', parent_tool_use_id, event }) };
+  return { transport, seen, stream: (event: object, parent_tool_use_id: string | null = null) => transport.handle({ type: 'stream_event', parent_tool_use_id, event }) };
 }
 
 test('Claude exposes growing text before the completed assistant message, then reconciles its final text', () => {
@@ -154,8 +162,8 @@ test('the real Agent SDK opts into partials and public runtime items grow before
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-claude-stream-'));
   const root = path.join(directory, 'project');
   await initProject(root);
-  const transports = [];
-  let resumed;
+  const transports: ClaudeTransport[] = [];
+  let resumed: ClaudeTransport | undefined;
   const runtime = createAlpRuntime({ supervisor: false, libraryDir: path.join(directory, 'home'), transport: () => {
     const transport = new ClaudeTransport(fileURLToPath(new URL('./support/streaming-claude.js', import.meta.url)), root, process.env);
     transports.push(transport);
@@ -166,7 +174,7 @@ test('the real Agent SDK opts into partials and public runtime items grow before
     await runtime.shutdown();
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
-  const events = [];
+  const events: Json[] = [];
   runtime.onEvent(envelope => events.push(envelope.event));
   await runtime.open('root', { cwd: root, model: 'claude:sonnet' });
   await runtime.prompt('root', { clientMessageId: 'one', delivery: 'auto', content: [text('go')] });
@@ -175,11 +183,11 @@ test('the real Agent SDK opts into partials and public runtime items grow before
   assert.deepEqual(answers(), [['sdk-message', 'draft'], ['sdk-message', 'final']]);
   assert.ok(events.findIndex(event => event.item?.text === 'draft') < events.findIndex(event => event.type === 'turn.ended'));
   // Exercise resume through the actual SDK entrypoint without paid provider access.
-  const transport = transports[0];
+  const transport = transports[0] as unknown as ClaudeInternals;
   transport.assistantState('stale').blocks.set(0, { text: 'stale', final: false });
   await transport.close();
   resumed = new ClaudeTransport(fileURLToPath(new URL('./support/streaming-claude.js', import.meta.url)), root, process.env);
-  const seen = [];
+  const seen: Json[] = [];
   resumed.onNotification((method, params) => seen.push({ method, ...params }));
   await resumed.request('thread/resume', { ...transport.config, threadId: 'resumed-session' });
   await resumed.request('turn/start', { input: [text('again')] });
@@ -200,7 +208,7 @@ test('a reply written before a blocking ALP tool reaches viewers before the tool
     await runtime.shutdown();
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
-  const events = [];
+  const events: Json[] = [];
   runtime.onEvent(envelope => events.push(envelope.event));
   await runtime.open('root', { cwd: root, model: 'claude:sonnet' });
   await runtime.prompt('root', { clientMessageId: 'one', delivery: 'auto', content: [text('go')] });
@@ -216,7 +224,7 @@ test('a reply written before a blocking ALP tool reaches viewers before the tool
 
 // t-efa3: the composer is not offered Claude's /clear, /compact and /rewind, whose work ALP does its own way.
 test('Claude\'s commands for the composer leave out /clear, /compact and /rewind', async () => {
-  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env);
+  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env) as unknown as ClaudeInternals;
   assert.deepEqual(await transport.commands(), [], 'none before the session starts');
   transport.query = { supportedCommands: async () => ['clear', 'compact', 'rewind', 'model', 'alp:xia'].map(name => ({ name, description: name, argumentHint: '' })) };
   assert.deepEqual(await transport.commands(), [{ name: 'model', description: 'model', kind: 'command' }, { name: 'alp:xia', description: 'alp:xia', kind: 'skill' }]);
@@ -224,7 +232,7 @@ test('Claude\'s commands for the composer leave out /clear, /compact and /rewind
 
 // t-5ac5: a command of the user's named new or reset is not Claude's /clear: it is offered and passes.
 test('a custom command named new or reset is offered and not refused; Claude\'s own aliases still are', async () => {
-  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env);
+  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env) as unknown as ClaudeInternals;
   const rows = [
     { name: 'clear', description: 'Clear', argumentHint: '', aliases: ['reset', 'new'], builtin: true },
     { name: 'compact', description: 'Compact', argumentHint: '', builtin: true },
@@ -240,7 +248,7 @@ test('a custom command named new or reset is offered and not refused; Claude\'s 
   ]);
   const custom = transport.customCommands();
   assert.deepEqual([...custom], ['new']);
-  const text = value => [{ type: 'text', text: value }];
+  const text = (value: string) => [{ type: 'text', text: value }];
   assert.equal(nativeCommandRefusal('claude', text('/new idea'), custom), undefined, 'the user\'s /new passes');
   assert.ok(nativeCommandRefusal('claude', text('/reset'), custom), '/reset is still Claude\'s /clear');
   assert.ok(nativeCommandRefusal('claude', text('/clear'), custom), '/clear is always Claude\'s');

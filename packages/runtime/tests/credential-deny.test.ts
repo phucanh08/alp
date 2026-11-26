@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:
 import os from 'node:os';
 import path from 'node:path';
 import { acpDecision, claudePermissions } from '@anhlp/alp-runtime';
+import type { PermissionProfile } from '@anhlp/alp-core/permissions';
 import { caseInsensitive, credentialDenials, credentialPaths, namesCredential, tokenSocketFallback } from '@anhlp/alp-runtime/claude-transport';
 
 /**
@@ -16,17 +17,21 @@ import { caseInsensitive, credentialDenials, credentialPaths, namesCredential, t
 
 const home = path.join(os.tmpdir(), 'alp-cde5-home');
 const root = path.join(os.tmpdir(), 'alp-cde5-repo');
-const rule = file => `/${file}`;
+const rule = (file: string) => `/${file}`;
 const DENY = [`Read(${rule(path.join(home, 'paseo'))}/**)`, `Read(${rule(path.join(home, 'relay-keypair.json'))})`];
 const BUILT_IN = ['Agent', 'Task', 'TeamCreate', 'EnterPlanMode', 'ExitPlanMode'];
 
+/** What the tests read of a sandbox and a permission decision; each is a union the tests narrow by reading. */
+type Sandbox = { filesystem?: unknown };
+type Decision = { behavior: string, updatedInput?: Record<string, unknown>, updatedPermissions?: unknown };
+
 test('t-cde5: a read-only Claude session denies Read of the credentials, in its rules and its sandbox; nothing else changes', () => {
   // The built-in read-only profile of reviewer, oracle and supervisor (permissions.js profileFor), with the read-only floor.
-  const advisor = claudePermissions('read-only', undefined, { base: 'read-only', allow: [], ask: [], deny: [], beyondMode: 'refuse', floor: 'read-only', floorRoot: root }, undefined, home);
+  const advisor = claudePermissions('read-only', undefined, { base: 'read-only', allow: [], ask: [], deny: [], beyondMode: 'refuse' as const, floor: 'read-only' as const, floorRoot: root }, undefined, home);
   assert.deepEqual(advisor.disallowedTools, [...BUILT_IN, ...DENY]);
-  assert.deepEqual(advisor.sandbox.filesystem, { denyWrite: [root], denyRead: [path.join(home, 'paseo'), path.join(home, 'relay-keypair.json')] });
+  assert.deepEqual((advisor.sandbox as Sandbox).filesystem, { denyWrite: [root], denyRead: [path.join(home, 'paseo'), path.join(home, 'relay-keypair.json')] });
   assert.deepEqual(advisor.tools, ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Skill', 'Bash'], 'the same tools as before');
-  assert.equal(advisor.sandbox.allowUnsandboxedCommands, false, 't-cde5 g2: a read-only profile\'s Bash never leaves the sandbox');
+  assert.equal(advisor.sandbox!.allowUnsandboxedCommands, false, 't-cde5 g2: a read-only profile\'s Bash never leaves the sandbox');
   assert.equal(advisor.permissionMode, 'default');
   assert.equal(advisor.allowedTools, undefined);
   // Without an OS sandbox (no floor): the deny rules still hold.
@@ -36,7 +41,7 @@ test('t-cde5: a read-only Claude session denies Read of the credentials, in its 
 });
 
 test('t-cde5: a user-written read-only profile with a broad Read allow: the deny wins (Claude applies deny before allow), its other rules are unchanged', () => {
-  const profile = { name: 'reader', base: 'read-only', allow: ['Read', 'Grep', 'Bash(git diff:*)', `Read(${rule(home)}/**)`], ask: ['Bash(npm test:*)'], deny: ['WebFetch'], beyondMode: 'ask' };
+  const profile = { name: 'reader', base: 'read-only', allow: ['Read', 'Grep', 'Bash(git diff:*)', `Read(${rule(home)}/**)`], ask: ['Bash(npm test:*)'], deny: ['WebFetch'], beyondMode: 'ask' as const };
   const gate = claudePermissions('read-only', () => 'read-only', { ...profile, floor: 'read-only', floorRoot: root }, undefined, home);
   assert.deepEqual(gate.allowedTools, profile.allow.filter(rule => !rule.startsWith('Bash(')), 'every non-Bash allow rule is passed as before (Bash allow rules are decided in canUseTool, t-6dc5)');
   assert.deepEqual(gate.disallowedTools, [...BUILT_IN, 'WebFetch', ...DENY], 'the user\'s deny rules, then the credentials\'');
@@ -44,21 +49,21 @@ test('t-cde5: a user-written read-only profile with a broad Read allow: the deny
 });
 
 test('t-cde5: workspace-write and full-access Claude sessions are not narrowed; a read-only profile in a writable copy is', () => {
-  for (const mode of ['workspace-write', 'full-access']) {
+  for (const mode of ['workspace-write', 'full-access'] as const) {
     const gate = claudePermissions(mode, () => mode, { allow: [], deny: [], floor: mode === 'workspace-write' ? 'workspace-write' : undefined, floorRoot: root }, undefined, home);
     assert.deepEqual(gate.disallowedTools, BUILT_IN, mode);
-    assert.equal(gate.sandbox?.filesystem, undefined, mode);
+    assert.equal((gate.sandbox as Sandbox | undefined)?.filesystem, undefined, mode);
   }
   // An advisor working in a copy runs with a workspace-write floor in its copy; its profile is read-only.
   const copy = claudePermissions('workspace-write', () => 'workspace-write', { base: 'read-only', allow: [], deny: [], floor: 'workspace-write', floorRoot: root }, undefined, home);
   assert.deepEqual(copy.disallowedTools, [...BUILT_IN, ...DENY]);
-  assert.deepEqual(copy.sandbox.filesystem, { denyRead: [path.join(home, 'paseo'), path.join(home, 'relay-keypair.json')] });
+  assert.deepEqual((copy.sandbox as Sandbox).filesystem, { denyRead: [path.join(home, 'paseo'), path.join(home, 'relay-keypair.json')] });
 });
 
 test('t-cde5 g2: a read-only profile\'s Bash never leaves the sandbox, even under an allow rule; its commands run inside it as before', async () => {
   // Claude itself lets an allow rule's command out of the sandbox without asking canUseTool, so the SDK must refuse the way out.
   const gate = claudePermissions('read-only', () => 'read-only', { base: 'read-only', allow: ['Bash(cat:*)'], deny: [], floor: 'read-only', floorRoot: root }, undefined, home);
-  assert.equal(gate.sandbox.allowUnsandboxedCommands, false);
+  assert.equal(gate.sandbox!.allowUnsandboxedCommands, false);
   assert.equal(gate.allowedTools, undefined, 'Bash allow rules are decided by ALP in canUseTool (t-6dc5), not handed to Claude');
   // canUseTool decides such a call as the sandboxed command it is, without the parameter Claude ignores.
   for (const command of [`cat ${path.join(home, 'paseo', 'token.json')}`, 'cat README.md', 'git diff']) {
@@ -70,14 +75,14 @@ test('t-cde5 g2: a read-only profile\'s Bash never leaves the sandbox, even unde
   assert.deepEqual(await ruled.canUseTool('Bash', { command: 'touch once.txt' }, { decisionReasonType: 'rule' }), { behavior: 'allow', updatedInput: { command: 'touch once.txt' } });
   // An advisor in a copy (workspace-write floor, read-only profile) is confined as well.
   const copy = claudePermissions('workspace-write', () => 'workspace-write', { base: 'read-only', allow: ['Bash(npm test *)'], deny: [], floor: 'workspace-write', floorRoot: root }, undefined, home);
-  assert.equal(copy.sandbox.allowUnsandboxedCommands, false);
+  assert.equal(copy.sandbox!.allowUnsandboxedCommands, false);
 });
 
 test('t-cde5: a session merely started read-only keeps the way out of the sandbox; a command naming the credentials is refused there by its text', async () => {
   // It may be switched to full access later, when Bash must leave the read-only floor to write.
   const gate = claudePermissions('read-only', () => 'read-only', { base: 'full-access', allow: ['Bash(cat:*)'], deny: [], floor: 'read-only', floorRoot: root }, undefined, home);
-  assert.equal(gate.sandbox.allowUnsandboxedCommands, true);
-  const run = command => gate.canUseTool('Bash', { command, dangerouslyDisableSandbox: true }, {});
+  assert.equal(gate.sandbox!.allowUnsandboxedCommands, true);
+  const run = (command: string) => gate.canUseTool('Bash', { command, dangerouslyDisableSandbox: true }, {});
   for (const command of [`cat ${path.join(home, 'paseo', 'token.json')}`, 'cat ~/.alp/paseo/token.json', 'cat "$ALP_HOME/paseo/token.json"', 'cat relay-keypair.json']) {
     assert.equal((await run(command)).behavior, 'deny', command);
   }
@@ -87,7 +92,7 @@ test('t-cde5: a session merely started read-only keeps the way out of the sandbo
   assert.equal(namesCredential('git log --stat', credentialDenials(home).denyRead), false);
   // No profile, no allow rule: the way out stays, and Claude asks canUseTool, which refuses it in read-only.
   const plain = claudePermissions('read-only', () => 'read-only', { allow: [], deny: [], floor: 'read-only', floorRoot: root }, undefined, home);
-  assert.equal(plain.sandbox.allowUnsandboxedCommands, true);
+  assert.equal(plain.sandbox!.allowUnsandboxedCommands, true);
   assert.equal((await plain.canUseTool('Bash', { command: 'cat README.md', dangerouslyDisableSandbox: true }, {})).behavior, 'deny');
 });
 
@@ -147,8 +152,8 @@ test('t-cde5 M3: the /tmp directory of a long home\'s token socket is denied, as
 });
 
 test('t-cde5: ACP read-only sessions refuse reads and searches of the credentials and commands naming them, whatever a rule allows', () => {
-  const profile = { name: 'reader', base: 'read-only', allow: ['Bash(cat:*)'], ask: [], deny: [], beyondMode: 'refuse' };
-  const request = (kind, paths, command) => ({ kind, title: kind, paths, alpTool: false, ...(command ? { command } : {}) });
+  const profile: PermissionProfile = { name: 'reader', base: 'read-only', allow: ['Bash(cat:*)'], ask: [], deny: [], beyondMode: 'refuse' };
+  const request = (kind: string, paths: string[], command?: string) => ({ kind, title: kind, paths, alpTool: false, ...(command ? { command } : {}) });
   const token = path.join(home, 'paseo', 'token.json');
   assert.equal(acpDecision(request('read', [token]), 'read-only', null, root, home), 'deny');
   assert.equal(acpDecision(request('read', [path.join(home, 'relay-keypair.json')]), 'read-only', null, root, home), 'deny');
@@ -169,9 +174,9 @@ test('t-cde5 g4: a read-only profile leaves the sandbox only for a command its c
   // The librarian's shape: read-only base, a checked clone rule, and a plain allow rule beside it. Its root is a scratch 0700 dir.
   const libRoot = mkdtempSync(path.join(os.tmpdir(), 'alp-g4-lib-'));
   t.after(() => rmSync(libRoot, { recursive: true, force: true }));
-  const profile = { base: 'read-only', allow: [`Bash(@git-clone-public ${libRoot})`, 'Bash(cat:*)'], ask: [], deny: [], beyondMode: 'refuse', floor: 'read-only', floorRoot: root };
+  const profile = { base: 'read-only', allow: [`Bash(@git-clone-public ${libRoot})`, 'Bash(cat:*)'], ask: [], deny: [], beyondMode: 'refuse' as const, floor: 'read-only' as const, floorRoot: root };
   const gate = claudePermissions('read-only', () => 'read-only', profile, async () => ({ allow: true, always: true }), home);
-  assert.equal(gate.sandbox.allowUnsandboxedCommands, true, 'the SDK must let the checked clone out');
+  assert.equal(gate.sandbox!.allowUnsandboxedCommands, true, 'the SDK must let the checked clone out');
   assert.equal(gate.allowedTools, undefined, 'no Bash rule goes to Claude, so Claude never lets a command out by itself');
   // A public clone below the root, covered by the checked rule: it leaves the sandbox (it needs the network).
   const clone = `git clone --depth 1 https://github.com/sindresorhus/is-plain-obj ${libRoot}/is-plain-obj`;
@@ -183,32 +188,32 @@ test('t-cde5 g4: a read-only profile leaves the sandbox only for a command its c
     `sh -c '${clone}' ; ${token} 'b'`, `bash -c "${clone}" ; touch x "b"`, `sh -c '${clone}'`,
     // A comment whose quote hides a second line from ALP but not from the shell (t-cde5 re-review).
     `${clone} # '\n${token}\n#'`]) {
-    const decided = await gate.canUseTool('Bash', { command, dangerouslyDisableSandbox: true }, {});
+    const decided: Decision = await gate.canUseTool('Bash', { command, dangerouslyDisableSandbox: true }, {});
     assert.equal(decided.updatedInput?.dangerouslyDisableSandbox, undefined, command);
   }
   // A plain allow rule alone never opens the way out.
   const plain = claudePermissions('read-only', () => 'read-only', { ...profile, allow: ['Bash(cat:*)', 'Bash(git clone:*)'] }, undefined, home);
-  assert.equal(plain.sandbox.allowUnsandboxedCommands, false);
+  assert.equal(plain.sandbox!.allowUnsandboxedCommands, false);
   assert.deepEqual(await plain.canUseTool('Bash', { command: clone, dangerouslyDisableSandbox: true }, {}), { behavior: 'allow', updatedInput: { command: clone } });
   // "Always allow" in a confined session adds no native Bash rule Claude could use to let a command out unchecked.
   const asked = claudePermissions('read-only', () => 'read-only', { ...profile, ask: ['Bash(touch *)'], beyondMode: 'ask' }, async () => ({ allow: true, always: true }), home);
-  const answer = await asked.canUseTool('Bash', { command: 'touch x' }, { decisionReasonType: 'rule', suggestions: [] });
+  const answer: Decision = await asked.canUseTool('Bash', { command: 'touch x' }, { decisionReasonType: 'rule', suggestions: [] });
   assert.equal(answer.behavior, 'allow');
   assert.equal(answer.updatedPermissions, undefined);
 });
 
 test('t-cde5 review: a plain allow rule never covers an unquoted ( (zsh =(…), *(e…), subshells) on Claude and ACP', async () => {
-  const profile = { base: 'workspace-write', allow: ['Bash(echo:*)'], ask: [], deny: [], beyondMode: 'refuse' };
+  const profile: Omit<PermissionProfile, 'name'> = { base: 'workspace-write', allow: ['Bash(echo:*)'], ask: [], deny: [], beyondMode: 'refuse' };
   // Claude, a session that may leave its floor: only a covered command keeps dangerouslyDisableSandbox.
   const gate = claudePermissions('workspace-write', () => 'workspace-write', { ...profile, floor: 'workspace-write', floorRoot: root }, undefined, home);
   assert.deepEqual(await gate.canUseTool('Bash', { command: 'echo hi', dangerouslyDisableSandbox: true }, {}), { behavior: 'allow', updatedInput: { command: 'echo hi', dangerouslyDisableSandbox: true } });
   for (const command of ['echo =(touch X)', "echo *(e:'touch X':)", '(echo hi; touch X)']) {
-    const decided = await gate.canUseTool('Bash', { command, dangerouslyDisableSandbox: true }, {});
+    const decided: Decision = await gate.canUseTool('Bash', { command, dangerouslyDisableSandbox: true }, {});
     assert.notEqual(decided.behavior === 'allow' && decided.updatedInput?.dangerouslyDisableSandbox, true, command);
   }
-  // ACP: the rule does not allow it, so the read-only mode decides.
-  const execute = command => ({ kind: 'execute', title: command, command, paths: [], alpTool: false });
-  assert.equal(acpDecision(execute('echo hi'), 'read-only', profile, root, home), 'allow');
-  assert.equal(acpDecision(execute('echo =(touch X)'), 'read-only', profile, root, home), 'mode');
-  assert.equal(acpDecision(execute("echo *(e:'touch X':)"), 'read-only', profile, root, home), 'mode');
+  // ACP: the rule does not allow it, so the read-only mode decides. (`as`: acpDecision reads no name from it.)
+  const execute = (command: string) => ({ kind: 'execute', title: command, command, paths: [], alpTool: false });
+  assert.equal(acpDecision(execute('echo hi'), 'read-only', profile as PermissionProfile, root, home), 'allow');
+  assert.equal(acpDecision(execute('echo =(touch X)'), 'read-only', profile as PermissionProfile, root, home), 'mode');
+  assert.equal(acpDecision(execute("echo *(e:'touch X':)"), 'read-only', profile as PermissionProfile, root, home), 'mode');
 });

@@ -7,7 +7,9 @@ import { initProject } from '@anhlp/alp-core/init';
 import { upgradeProject } from '@anhlp/alp-core/upgrade';
 import { validateSettings } from '@anhlp/alp-core/validation';
 import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
+import type { FakeAgent } from '../../../test/support/fake-agent.ts';
 import { createAlpRuntime, resolveSession } from '@anhlp/alp-runtime';
+import type { PromptInput } from '@anhlp/alp-runtime';
 
 test('project profile resolves model/effort, supervisor and dual lenses; caller can override', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-profile-'));
@@ -26,7 +28,7 @@ test('project profile resolves model/effort, supervisor and dual lenses; caller 
   assert.deepEqual(main.oracleModels, ['claude:sonnet', 'codex:custom-oracle', 'codex:another-oracle']);
   for (const model of main.oracleModels) {
     const lens = await resolveSession({ cwd: root, agent: 'oracle', model }, { library: root });
-    assert.equal(lens.thinking, settings.team.cafe.oracle.profiles.find(config => config.startsWith(`${model}:`)).split(':')[2]);
+    assert.equal(lens.thinking, settings.team.cafe.oracle.profiles.find((config: string) => config.startsWith(`${model}:`)).split(':')[2]);
   }
   const explicit = await resolveSession({ cwd: root, model: 'claude:sonnet', thinking: 'high' }, { library: root });
   assert.equal(explicit.runtimeKind, 'claude');
@@ -72,7 +74,7 @@ test('oracle profiles list rejects empty, repeated, mismatched and malformed cho
 
 test('every agent has model profiles; the requester picks a peer model and effort, and its autocompact applies', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-agent-profiles-'));
-  const agents = [];
+  const agents: FakeAgent[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(agents), libraryDir: root, supervisor: false });
   t.after(async () => { await runtime.shutdown(); await rm(root, { recursive: true, force: true }); });
   await initProject(root, { library: root });
@@ -96,7 +98,8 @@ test('every agent has model profiles; the requester picks a peer model and effor
   assert.equal(main.config.config.model_auto_compact_token_limit, 300000);
   assert.match(main.config.developerInstructions, /peer, choose a model and effort: claude:sonnet[^;]*usually medium; codex:peer-custom, usually low/);
   assert.match(main.config.developerInstructions, /reviewer: codex:review-custom \(effort high\)/);
-  await runtime.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Go' }] });
+  // No delivery, as before: the type requires one, the runtime does not.
+  await runtime.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Go' }] } as PromptInput);
   const unchosen = await main.call('alp_delegate', { agent: 'peer', task: 'Inspect A', mode: 'read-only' });
   assert.match(unchosen.error, /several model profiles: choose one for this task as model, its effort as thinking/);
   const effortless = await main.call('alp_delegate', { agent: 'peer', task: 'Inspect A', model: 'claude:sonnet', mode: 'read-only' });
@@ -127,12 +130,12 @@ test('every agent has model profiles; the requester picks a peer model and effor
   const watcher = await resolveSession({ cwd: root, agent: 'supervisor', model: 'claude:sonnet' }, { library: root });
   assert.equal(watcher.thinking, 'medium');
   assert.equal(watcher.autocompact, 180000);
-  const watched = [];
+  const watched: FakeAgent[] = [];
   const supervised = createAlpRuntime({ transport: fakeTransport(watched), libraryDir: root });
   try {
     await supervised.open('watched-root', { cwd: root });
     await until(() => watched.some(agent => agent.config?.model === 'watch-custom'));
-    const supervisor = watched.find(agent => agent.config?.model === 'watch-custom');
+    const supervisor = watched.find(agent => agent.config?.model === 'watch-custom')!;
     assert.equal(supervisor.config.thinking, 'low');
     assert.equal(supervisor.config.config.model_auto_compact_token_limit, 180000);
   } finally { await supervised.shutdown(); }
@@ -151,7 +154,7 @@ test('upgrade wraps old agent choices and preserves compaction and model order',
   assert.ok(result.backup);
   const upgraded = JSON.parse(await readFile(file, 'utf8'));
   assert.deepEqual(upgraded.team.pho.main, { profiles: ['codex:custom-main:low'], autocompact: 200000 });
-  for (const config of Object.values(upgraded.team.pho)) assert.ok(Array.isArray(config.profiles));
+  for (const config of Object.values(upgraded.team.pho) as { profiles: unknown }[]) assert.ok(Array.isArray(config.profiles));
   const again = await upgradeProject(root);
   assert.deepEqual(again.updated, []);
 });
@@ -171,7 +174,7 @@ test('all agents validate profile lists and autocompact before launching', () =>
 
 test('a peer on codex:* runs on any Codex model the requester picks, at the effort it picks', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-any-model-'));
-  const agents = [];
+  const agents: FakeAgent[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(agents), libraryDir: root, supervisor: false });
   t.after(async () => { await runtime.shutdown(); await rm(root, { recursive: true, force: true }); });
   await initProject(root, { library: root });
@@ -183,7 +186,8 @@ test('a peer on codex:* runs on any Codex model the requester picks, at the effo
   await runtime.open('root', { cwd: root });
   const main = agents[0];
   assert.match(main.config.developerInstructions, /peer, choose a model and effort: any codex model .*codex:gpt-6-luna: Fast and affordable model for easier tasks\. Efforts low\|medium\|high\|xhigh\|max/);
-  await runtime.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Go' }] });
+  // No delivery, as before: the type requires one, the runtime does not.
+  await runtime.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Go' }] } as PromptInput);
   const brief = { agent: 'peer', task: 'Inspect A', mode: 'read-only' };
   assert.match((await main.call('alp_delegate', brief)).error, /choose one for this task as model, its effort as thinking/);
   assert.match((await main.call('alp_delegate', { ...brief, model: 'claude:claude-sonnet-5', thinking: 'low' })).error, /not one of peer's model profiles/);

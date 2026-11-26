@@ -16,7 +16,13 @@ import { createTask, getTask } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { AntigravityTransport } from '@anhlp/alp-runtime/antigravity-transport';
 import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
+import type { FakeAgent } from '../../../test/support/fake-agent.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
+
+// `any`: the transport's notifications and alp_wait's answers are JSON of every shape; the tests read their fields.
+type Json = any;
+type Note = { method: string, params: Json };
 
 // The refusal text agy 1.5.15 gave in M0, verbatim.
 const DENIAL = 'permission check failed for read_file "/private/etc/hosts": user denied permission for read_file(/private/etc/hosts)\nDo not attempt to circumvent this denial by rephrasing the command, using alternative tools/scripts (e.g. python, sh, curl), or accessing the same target resource. Proceed without performing this action.';
@@ -38,15 +44,15 @@ createInterface({ input: process.stdin }).once('line', () => {
 });
 `;
 
-const step = (index, extra) => ({ event: 'step_update', step_update: { step_index: index, ...extra } });
-const read = (file, state, extra = {}) => ({ state, step_type: 'tool', tool_name: 'read_file', tool_info: { name: 'read_file', parameters: { Path: file }, ...extra } });
-const refusedRead = (index, file) => [step(index, read(file, 'ACTIVE')), step(index, read(file, 'ERROR', { error: { type: 'TOOL_ERROR', message: DENIAL } }))];
-const silentRead = (index, file) => [step(index, read(file, 'ACTIVE')), step(index, read(file, 'DONE'))];
+const step = (index: number, extra: object) => ({ event: 'step_update', step_update: { step_index: index, ...extra } });
+const read = (file: string, state: string, extra = {}) => ({ state, step_type: 'tool', tool_name: 'read_file', tool_info: { name: 'read_file', parameters: { Path: file }, ...extra } });
+const refusedRead = (index: number, file: string) => [step(index, read(file, 'ACTIVE')), step(index, read(file, 'ERROR', { error: { type: 'TOOL_ERROR', message: DENIAL } }))];
+const silentRead = (index: number, file: string) => [step(index, read(file, 'ACTIVE')), step(index, read(file, 'DONE'))];
 const result = (extra = {}) => ({ event: 'result', result: { status: 'SUCCESS', response: '', ...extra } });
 const deniedRead = { denied_actions: [{ action: 'read_file', display_name: 'ReadFile' }] };
 
 /** Runs one agy turn over `frames` in `mode`; returns the notifications in order, ending with turn/completed. */
-async function agyTurn(t, frames, { mode = 'workspace-write', after } = {}) {
+async function agyTurn(t: TestContext, frames: object[], { mode = 'workspace-write', after }: { mode?: string, after?: (transport: AntigravityTransport, seen: Note[]) => Promise<void> } = {}) {
   const defer = teardown(t);
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-denied-unit-'));
   defer(() => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -57,18 +63,18 @@ async function agyTurn(t, frames, { mode = 'workspace-write', after } = {}) {
   const env = { PATH: process.env.PATH, FRAMES: JSON.stringify(frames) };
   const transport = new AntigravityTransport(process.execPath, workspace, env, { id: 'antigravity', label: 'Antigravity', command: process.execPath, args: [script] });
   defer(() => transport.close());
-  const notes = [];
+  const notes: Note[] = [];
   transport.onNotification((method, params) => notes.push({ method, params }));
   transport.onFailure(() => {});
   await transport.request('thread/start', { cwd: workspace, sandbox: mode, model: 'gemini-3.8-flash-high' });
   await transport.request('turn/start', { input: [{ type: 'text', text: 'go' }] });
   if (after) await after(transport, notes);
   await until(() => notes.some(note => note.method === 'turn/completed'), 'turn/completed');
-  return { notes, workspace, turn: notes.find(note => note.method === 'turn/completed').params.turn };
+  return { notes, workspace, turn: notes.find(note => note.method === 'turn/completed')!.params.turn };
 }
 
-const toolEnds = notes => notes.filter(note => note.method === 'item/completed' && note.params.item.type === 'commandExecution').map(note => note.params.item);
-const said = notes => notes.filter(note => note.method === 'item/completed' && note.params.item.type === 'agentMessage').map(note => note.params.item.text);
+const toolEnds = (notes: Note[]) => notes.filter(note => note.method === 'item/completed' && note.params.item.type === 'commandExecution').map(note => note.params.item);
+const said = (notes: Note[]) => notes.filter(note => note.method === 'item/completed' && note.params.item.type === 'agentMessage').map(note => note.params.item.text);
 
 test('agy refused a read and said why (ERROR, M0): the turn names the tool, the path, the mode and agy\'s reason', async t => {
   const { notes, turn } = await agyTurn(t, [...refusedRead(3, '/etc/hosts'), result(deniedRead)]);
@@ -108,7 +114,7 @@ test('a missing-file read inside the workspace is never taken for the denial, ev
 });
 
 /** A turn whose one DONE/no-output read names an absolute path inside the workspace. */
-async function agyTurnAbsolute(t) {
+async function agyTurnAbsolute(t: TestContext) {
   const defer = teardown(t);
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-denied-abs-'));
   defer(() => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -119,13 +125,13 @@ async function agyTurnAbsolute(t) {
   const frames = [...silentRead(3, path.join(workspace, 'missing.md')), result(deniedRead)];
   const transport = new AntigravityTransport(process.execPath, workspace, { PATH: process.env.PATH, FRAMES: JSON.stringify(frames) }, { id: 'antigravity', label: 'Antigravity', command: process.execPath, args: [script] });
   defer(() => transport.close());
-  const notes = [];
+  const notes: Note[] = [];
   transport.onNotification((method, params) => notes.push({ method, params }));
   transport.onFailure(() => {});
   await transport.request('thread/start', { cwd: workspace, sandbox: 'workspace-write', model: 'gemini-3.8-flash-high' });
   await transport.request('turn/start', { input: [{ type: 'text', text: 'go' }] });
   await until(() => notes.some(note => note.method === 'turn/completed'), 'turn/completed');
-  return { notes, turn: notes.find(note => note.method === 'turn/completed').params.turn };
+  return { notes, turn: notes.find(note => note.method === 'turn/completed')!.params.turn };
 }
 
 test('a DONE read with no output outside the workspace is not a denial unless agy lists one: it completes, and the turn carries no denied', async t => {
@@ -167,8 +173,8 @@ test('a held step is never left running: agy exiting mid-turn ends it as agy rep
   const frames = [...silentRead(3, '/tmp/a.txt'), { exit: 3 }];
   const transport = new AntigravityTransport(process.execPath, dir, { PATH: process.env.PATH, FRAMES: JSON.stringify(frames) }, { id: 'antigravity', label: 'Antigravity', command: process.execPath, args: [script] });
   defer(() => transport.close());
-  const notes = [];
-  let failure;
+  const notes: Note[] = [];
+  let failure: unknown;
   transport.onNotification((method, params) => notes.push({ method, params }));
   transport.onFailure(error => { failure = error; });
   await transport.request('thread/start', { cwd: dir, sandbox: 'workspace-write', model: 'gemini-3.8-flash-high' });
@@ -178,7 +184,7 @@ test('a held step is never left running: agy exiting mid-turn ends it as agy rep
 });
 
 test('an edit read-only refuses that agy marked DONE is named with its path, and the reason says agy gave none', async t => {
-  const edit = state => ({ state, step_type: 'tool', tool_name: 'write_to_file', tool_info: { name: 'write_to_file', parameters: { TargetFile: 'src/a.js', CodeContent: 'x' } } });
+  const edit = (state: string) => ({ state, step_type: 'tool', tool_name: 'write_to_file', tool_info: { name: 'write_to_file', parameters: { TargetFile: 'src/a.js', CodeContent: 'x' } } });
   const { notes, turn } = await agyTurn(t, [step(3, edit('ACTIVE')), step(3, edit('DONE')), result({ denied_actions: [{ action: 'write_to_file', display_name: 'WriteFile' }] })], { mode: 'read-only' });
   assert.deepEqual(turn.denied, [{ tool: 'WriteFile', path: 'src/a.js', reason: 'agy gave no reason; agy reported this step done, and read-only mode refuses write_to_file' }]);
   assert.deepEqual(toolEnds(notes).map(item => item.status), ['failed']);
@@ -208,14 +214,14 @@ test('an answer after the denial is an answer: agy\'s response, or agent text af
 
 // --- The runtime: what the requester of the assignment gets. Codex-shaped scripted agents. ---
 
-async function tree(t) {
+async function tree(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-denied-runtime-'));
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(directory, 'project');
   await initProject(root);
   const runs = path.join(directory, 'runs');
-  const agents = [];
+  const agents: FakeAgent[] = [];
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(agents), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: runs });
   defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root });
@@ -224,23 +230,23 @@ async function tree(t) {
   const runLog = async () => (await readFile(path.join(runs, 'root.jsonl'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
   const main = agents[0];
   /** Delegates one peer assignment, lets `act` drive the peer, and returns the result main receives. */
-  const assign = async (act, extra = {}) => {
+  const assign = async (act: (agent: FakeAgent) => unknown, extra = {}) => {
     const count = agents.length;
     const { assignmentId } = await main.call('alp_delegate', { agent: 'peer', task: 'Change the file', mode: 'read-only', wait: false, ...extra });
     assert.ok(assignmentId);
-    await until(() => agents.length > count && agents.at(-1).turnId, 'peer turn');
-    await act(agents.at(-1));
+    await until(() => agents.length > count && agents.at(-1)!.turnId, 'peer turn');
+    await act(agents.at(-1)!);
     const answer = await main.call('alp_wait', { assignments: [assignmentId] });
-    return answer.events.find(event => event.kind === 'result' && event.assignment === assignmentId).result;
+    return answer.events.find((event: Json) => event.kind === 'result' && event.assignment === assignmentId).result;
   };
   return { root, runtime, runLog, assign };
 }
 
 const DENIED = [{ tool: 'ReadFile', path: '/etc/hosts', reason: REASON }];
 /** Ends a scripted agent's turn the way the Antigravity transport ends one that agy denied. */
-const deniedTurn = (agent, { answered = false } = {}) => {
-  agent.notification('item/completed', { threadId: agent.threadId, item: { type: 'agentMessage', id: `denied-${agent.turnId}`, text: `Antigravity denied ReadFile on /etc/hosts (${REASON}) in workspace-write mode and ended the turn.` } });
-  agent.notification('turn/completed', { threadId: agent.threadId, turn: { id: agent.turnId, status: 'completed', denied: DENIED, answered, mode: 'workspace-write' } });
+const deniedTurn = (agent: FakeAgent, { answered = false } = {}) => {
+  agent.notification!('item/completed', { threadId: agent.threadId, item: { type: 'agentMessage', id: `denied-${agent.turnId}`, text: `Antigravity denied ReadFile on /etc/hosts (${REASON}) in workspace-write mode and ended the turn.` } });
+  agent.notification!('turn/completed', { threadId: agent.threadId, turn: { id: agent.turnId, status: 'completed', denied: DENIED, answered, mode: 'workspace-write' } });
 };
 
 test('other runtimes are unchanged: a Codex/Claude-shaped turn with no denied, no answer and no handoff completes exactly as before', async t => {

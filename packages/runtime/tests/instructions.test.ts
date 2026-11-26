@@ -6,12 +6,16 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 
-function fakeTransport(runtimes) {
+// `any`: the app-server requests the fake records are JSON of every shape; the test reads their fields.
+type Json = any;
+type FakeRuntime = { calls: { method: string, params: Json }[], threadId: string };
+
+function fakeTransport(runtimes: FakeRuntime[]) {
   return () => {
     const runtime = {
-      calls: [], threadId: `thread-${runtimes.length}`,
+      calls: [] as FakeRuntime['calls'], threadId: `thread-${runtimes.length}`,
       async initialize() {}, onNotification() {}, onFailure() {}, onRequest() {}, async close() {},
-      async request(method, params) { this.calls.push({ method, params }); return method.startsWith('thread/') ? { thread: { id: this.threadId } } : {}; },
+      async request(method: string, params: Json) { this.calls.push({ method, params }); return method.startsWith('thread/') ? { thread: { id: this.threadId } } : {}; },
     };
     runtimes.push(runtime);
     return runtime;
@@ -23,13 +27,13 @@ test('each session records a digest of its instructions, and of ALP.md and AGENT
   const root = path.join(directory, 'project');
   await initProject(root);
   const runs = path.join(directory, 'runs');
-  const runtimes = [];
+  const runtimes: FakeRuntime[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: runs });
   t.after(() => runtime.shutdown());
   // After hooks run in the order they are added: remove the files only once that has stopped.
   t.after(() => rm(directory, { recursive: true, force: true }));
   // The run log is written in the background: wait for the entry.
-  const log = async id => {
+  const log = async (id: string) => {
     for (let i = 0; i < 400; i++) {
       const entries = (await readFile(path.join(runs, `${id}.jsonl`), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.event === 'instructions');
       if (entries.length) return entries;

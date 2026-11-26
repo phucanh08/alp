@@ -7,9 +7,16 @@ import { initProject } from '@anhlp/alp-core/init';
 import { validateAgentConfig } from '@anhlp/alp-core/validation';
 import { ClaudeTransport, createAlpRuntime } from '@anhlp/alp-runtime';
 import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
+import type { FakeAgent } from '../../../test/support/fake-agent.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
 
-async function project(t) {
+// `any`: event envelopes and the transport's notifications are JSON of every shape; the tests read their fields.
+type Json = any;
+/** ClaudeTransport's public members, and the private ones these tests drive: the SDK message handler, the turn, the SDK query and the context measure. */
+type ClaudeInternals = Omit<ClaudeTransport, never> & { handle(message: Json): void, activeTurn?: string, query: Json, measureContext(): Promise<void> };
+
+async function project(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-context-'));
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -18,13 +25,13 @@ async function project(t) {
   return { directory, root, runs: path.join(directory, 'runs') };
 }
 
-const logOf = runs => async event => (await readFile(path.join(runs, 'root.jsonl'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.event === event);
+const logOf = (runs: string) => async (event: string) => (await readFile(path.join(runs, 'root.jsonl'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.event === event);
 
 test('an assignment hears once that its context nears compaction, with no push to hand off, and gets its brief again after it', async t => {
   const defer = teardown(t);
   const { directory, root, runs } = await project(t);
-  const runtimes = [];
-  const events = [];
+  const runtimes: FakeAgent[] = [];
+  const events: Json[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: runs });
   defer(() => runtime.shutdown());
   runtime.onEvent(envelope => events.push([envelope.sessionId, envelope.event]));
@@ -75,7 +82,7 @@ test('an assignment hears once that its context nears compaction, with no push t
 test('main is told between turns without a turn, and after a compaction gets its open assignments and tasks again', async t => {
   const defer = teardown(t);
   const { directory, root, runs } = await project(t);
-  const runtimes = [];
+  const runtimes: FakeAgent[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: runs });
   defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root });
@@ -92,7 +99,7 @@ test('main is told between turns without a turn, and after a compaction gets its
   assert.doesNotMatch(main.steered[0], /Your assignment from/);
 
   main.finish('waiting');
-  await until(() => !runtime.snapshot('root').activeTurnId);
+  await until(() => !runtime.snapshot('root')!.activeTurnId);
   main.usage(82_000);
   await new Promise(resolve => setTimeout(resolve, 30));
   assert.equal(main.started.length, 1);
@@ -106,8 +113,8 @@ test('an agent\'s context setting reaches the runtime that compacts: a window fo
   await mkdir(path.join(agents, 'main'), { recursive: true });
   await writeFile(path.join(agents, 'main', 'AGENT.md'), 'You are main.\n');
   await writeFile(path.join(agents, 'main', 'agent.json'), JSON.stringify({ context: 400_000 }));
-  for (const [model, expected] of [['claude:claude-opus-5-5', { context: 400_000 }], ['codex:gpt-5.6-sol', { config: { model_auto_compact_token_limit: 360_000 } }]]) {
-    const runtimes = [];
+  for (const [model, expected] of [['claude:claude-opus-5-5', { context: 400_000 }], ['codex:gpt-5.6-sol', { config: { model_auto_compact_token_limit: 360_000 } }]] as [string, object][]) {
+    const runtimes: FakeAgent[] = [];
     const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home') });
     await runtime.open(model, { cwd: root, model });
     const config = runtimes[0].config;
@@ -128,7 +135,7 @@ test('agent.json autocompact overrides legacy context and reaches each native ru
   await writeFile(path.join(main, 'AGENT.md'), 'You are main.\n');
   await writeFile(path.join(main, 'agent.json'), JSON.stringify({ context: 400000, autocompact: 200000 }));
   for (const model of ['claude:claude-opus-5-5', 'codex:gpt-6.1-sol']) {
-    const agents = [];
+    const agents: FakeAgent[] = [];
     const runtime = createAlpRuntime({ transport: fakeTransport(agents), supervisor: false, libraryDir: path.join(directory, 'home') });
     try {
       await runtime.open('root', { cwd: root, model });
@@ -140,11 +147,11 @@ test('agent.json autocompact overrides legacy context and reaches each native ru
 });
 
 test('Claude reports the window and compaction point it resolved, and no guessed window before', async () => {
-  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env);
-  const seen = [];
+  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env) as unknown as ClaudeInternals;
+  const seen: Json[] = [];
   transport.onNotification((method, params) => method === 'thread/tokenUsage/updated' && seen.push(params.tokenUsage));
   transport.activeTurn = 'turn-1';
-  const assistant = usage => ({ type: 'assistant', parent_tool_use_id: null, message: { id: `m${seen.length}`, content: [], usage } });
+  const assistant = (usage: object) => ({ type: 'assistant', parent_tool_use_id: null, message: { id: `m${seen.length}`, content: [], usage } });
   transport.handle(assistant({ input_tokens: 1000, cache_read_input_tokens: 90_000, cache_creation_input_tokens: 4000, output_tokens: 5000 }));
   transport.handle({ type: 'result', subtype: 'success', is_error: false, modelUsage: { 'claude-opus-5-5': { contextWindow: 1_000_000 } } });
   transport.handle(assistant({ input_tokens: 10, output_tokens: 10 }));
@@ -165,13 +172,13 @@ test('Claude reports the window and compaction point it resolved, and no guessed
 test('a token report becomes the session\'s usage: sent when it changes and kept in the snapshot', async t => {
   const defer = teardown(t);
   const { directory, root } = await project(t);
-  const runtimes = [];
-  const usages = [];
+  const runtimes: FakeAgent[] = [];
+  const usages: [string, Json][] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home') });
   defer(() => runtime.shutdown());
   runtime.onEvent(envelope => envelope.event.type === 'usage' && usages.push([envelope.sessionId, envelope.event.usage]));
   await runtime.open('root', { cwd: root });
-  assert.equal(runtime.snapshot('root').usage, undefined);
+  assert.equal(runtime.snapshot('root')!.usage, undefined);
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Go' }] });
   const main = runtimes[0];
   // As Codex reports it: the latest call's breakdown and the model's window.
@@ -180,17 +187,17 @@ test('a token report becomes the session\'s usage: sent when it changes and kept
   await until(() => usages.length === 1, 'the usage');
   const first = { contextWindowUsedTokens: 42_000, contextWindowMaxTokens: 258_400, inputTokens: 41_000, cachedInputTokens: 30_000, outputTokens: 1000 };
   assert.deepEqual(usages[0], ['root', first]);
-  assert.deepEqual(runtime.snapshot('root').usage, first);
+  assert.deepEqual(runtime.snapshot('root')!.usage, first);
   // A report without the window (Claude before it said one) keeps the one known; bad numbers are dropped.
-  main.notification('thread/tokenUsage/updated', { threadId: main.threadId, turnId: main.turnId, tokenUsage: { last: { totalTokens: 50_000, inputTokens: -1, outputTokens: 1.5 }, modelContextWindow: null } });
+  main.notification!('thread/tokenUsage/updated', { threadId: main.threadId, turnId: main.turnId, tokenUsage: { last: { totalTokens: 50_000, inputTokens: -1, outputTokens: 1.5 }, modelContextWindow: null } });
   await until(() => usages.length === 2, 'the second usage');
   assert.deepEqual(usages[1][1], { ...first, contextWindowUsedTokens: 50_000 });
   // A cost alone, as Claude's result says it.
-  main.notification('thread/tokenUsage/updated', { threadId: main.threadId, turnId: main.turnId, tokenUsage: { totalCostUsd: 0.42 } });
+  main.notification!('thread/tokenUsage/updated', { threadId: main.threadId, turnId: main.turnId, tokenUsage: { totalCostUsd: 0.42 } });
   await until(() => usages.length === 3, 'the cost');
   assert.deepEqual(usages[2][1], { ...first, contextWindowUsedTokens: 50_000, totalCostUsd: 0.42 });
   // A later response's counts replace the earlier ones together: no cached count of an earlier response stays.
-  main.notification('thread/tokenUsage/updated', { threadId: main.threadId, turnId: main.turnId, tokenUsage: { last: { totalTokens: 51_000, inputTokens: 900, outputTokens: 100 } } });
+  main.notification!('thread/tokenUsage/updated', { threadId: main.threadId, turnId: main.turnId, tokenUsage: { last: { totalTokens: 51_000, inputTokens: 900, outputTokens: 100 } } });
   await until(() => usages.length === 4, 'the later response');
   assert.deepEqual(usages[3][1], { contextWindowUsedTokens: 51_000, contextWindowMaxTokens: 258_400, inputTokens: 900, outputTokens: 100, totalCostUsd: 0.42 });
   await new Promise(resolve => setTimeout(resolve, 20));
@@ -198,8 +205,8 @@ test('a token report becomes the session\'s usage: sent when it changes and kept
 });
 
 test('Claude reports the session\'s cost from its result, before the turn ends', () => {
-  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env);
-  const seen = [];
+  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env) as unknown as ClaudeInternals;
+  const seen: Json[] = [];
   transport.onNotification((method, params) => (method === 'thread/tokenUsage/updated' || method === 'turn/completed') && seen.push([method, params.tokenUsage ?? params.turn.status]));
   transport.activeTurn = 'turn-1';
   transport.handle({ type: 'assistant', parent_tool_use_id: null, message: { id: 'm1', content: [], usage: { input_tokens: 10, cache_read_input_tokens: 2000, cache_creation_input_tokens: 0, output_tokens: 30 } } });
@@ -212,8 +219,8 @@ test('Claude reports the session\'s cost from its result, before the turn ends',
 });
 
 test('Claude reports a compaction as Codex does, from its start to its boundary', () => {
-  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env);
-  const seen = [];
+  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env) as unknown as ClaudeInternals;
+  const seen: Json[] = [];
   transport.onNotification((method, params) => params.item?.type === 'contextCompaction' && seen.push([method, params.item]));
   transport.activeTurn = 'turn-1';
   transport.handle({ type: 'system', subtype: 'status', status: 'compacting' });

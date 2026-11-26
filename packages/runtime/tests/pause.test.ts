@@ -6,13 +6,42 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { createTask, getTask } from '@anhlp/alp-core/tasks';
 import { ClaudeTransport, createAlpRuntime } from '@anhlp/alp-runtime';
+import type { AlpRuntime, RuntimeKind, RuntimeOptions } from '@anhlp/alp-runtime';
+import type { TestContext } from 'node:test';
+
+// `any`: the app-server messages the fake answers and sends, and event envelopes, are JSON of every shape; tests read their fields.
+type Message = any;
+type Handler = (method: string, params: Message) => Message;
+type Call = { method: string, params: Message };
+/** One fake native harness, as fakeTransport hands it to the runtime and to the test. */
+type FakeRuntime = {
+  calls: Call[], threadId: string, turnId: string | undefined,
+  notification?: Handler, failure?: (error: unknown) => void, serverRequest?: Handler,
+  initialize(): Promise<void>,
+  onNotification(fn: Handler): void, onFailure(fn: (error: unknown) => void): void, onRequest(fn: Handler): void,
+  close(): Promise<void>,
+  request(method: string, params: Message): Promise<Message>,
+  kind: string | undefined, cwd: string, closed?: boolean,
+  readonly started: Call[],
+  readonly config: Message,
+  call(tool: string, args: Message): Promise<Message>,
+  finish(text?: string, turn?: object): void,
+  limit(): void,
+  orchestrationContext?: () => Promise<unknown>,
+};
+/** ClaudeTransport's public members, and the private ones these tests drive: the SDK message handler and the running turn. */
+type ClaudeInternals = Omit<ClaudeTransport, never> & { handle(message: Message): void, activeTurn?: string };
+/** The runtime options a test adds, for its scratch directory. */
+type Options = (directory: string) => RuntimeOptions;
 
 let calls = 0;
-function fakeTransport(runtimes) {
-  return (cwd, env, kind) => {
+function fakeTransport(runtimes: FakeRuntime[]) {
+  // The runtime's transport signature (RuntimeOptions.transport): it passes the kind, typed optional there.
+  return (cwd: string, env: NodeJS.ProcessEnv, kind?: string) => {
     const index = runtimes.length;
     let turns = 0;
-    const runtime = {
+    // The runtime sets the handlers before it starts a turn; the `!`s below rely on that, as before.
+    const runtime: FakeRuntime = {
       kind, cwd, calls: [], threadId: `thread-${index}`, turnId: undefined,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -26,14 +55,14 @@ function fakeTransport(runtimes) {
       get started() { return this.calls.filter(call => call.method === 'turn/start'); },
       get config() { return this.calls.find(call => call.method === 'thread/start')?.params; },
       async call(tool, args) {
-        return JSON.parse((await this.serverRequest('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text);
+        return JSON.parse((await this.serverRequest!('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text);
       },
       finish(text = 'done', turn = {}) {
-        this.notification('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}-${turns}`, text } });
-        this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed', ...turn } });
+        this.notification!('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}-${turns}`, text } });
+        this.notification!('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed', ...turn } });
       },
       limit() {
-        this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'failed', error: { message: 'You have hit your usage limit', codexErrorInfo: 'usageLimitExceeded', additionalDetails: null } } });
+        this.notification!('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'failed', error: { message: 'You have hit your usage limit', codexErrorInfo: 'usageLimitExceeded', additionalDetails: null } } });
       },
     };
     runtimes.push(runtime);
@@ -41,20 +70,21 @@ function fakeTransport(runtimes) {
   };
 }
 
-async function until(check) {
+async function until(check: () => unknown) {
   for (let i = 0; i < 600; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail('Expected condition did not arrive');
 }
 
-async function setup(t, options = {}, workflow = 'pho') {
+// Every test passes `options`; the default is kept as it was.
+async function setup(t: TestContext, options: Options = {} as Options, workflow = 'pho') {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-pause-'));
   const root = path.join(directory, 'project');
   await initProject(root);
   await writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify({ defaultAgent: 'main', workflow: { mode: workflow, maxPeers: 2, supervisor: false } }));
-  const runtimes = [];
+  const runtimes: FakeRuntime[] = [];
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: path.join(directory, 'runs'), boardDir: path.join(directory, 'boards'), ...options(directory) });
   t.after(async () => { await runtime.shutdown(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
-  const events = [];
+  const events: Message[] = [];
   runtime.onEvent(envelope => events.push(envelope));
   // Main runs on Codex here, so a Codex pause holds its wakes.
   await runtime.open('root', { cwd: root, model: 'codex:gpt-5.6-sol' });
@@ -62,7 +92,7 @@ async function setup(t, options = {}, workflow = 'pho') {
   return { directory, root, runtime, runtimes, events, main: runtimes[0] };
 }
 const none = () => ({});
-const notices = (events, sessionId = 'root') => events.filter(envelope => envelope.sessionId === sessionId && envelope.event.type === 'item' && envelope.event.item.kind === 'notice').map(envelope => envelope.event.item);
+const notices = (events: Message[], sessionId = 'root') => events.filter(envelope => envelope.sessionId === sessionId && envelope.event.type === 'item' && envelope.event.item.kind === 'notice').map(envelope => envelope.event.item);
 
 test('a usage limit pauses its runtime and parks the assignment it stopped, until the user resumes', async t => {
   const { root, runtime, runtimes, events, main } = await setup(t, directory => ({ silentForMs: 40, pauseFile: path.join(directory, 'home', 'state', 'pause.json') }));
@@ -72,12 +102,12 @@ test('a usage limit pauses its runtime and parks the assignment it stopped, unti
   const peer = runtimes[1];
   // Codex reports the used-up window before the turn fails.
   const resetsAt = Math.floor(Date.now() / 1000) + 3600;
-  peer.notification('account/rateLimits/updated', { rateLimits: { primary: { usedPercent: 100, windowDurationMins: 300, resetsAt }, secondary: null } });
+  peer.notification!('account/rateLimits/updated', { rateLimits: { primary: { usedPercent: 100, windowDurationMins: 300, resetsAt }, secondary: null } });
   peer.limit();
 
   await until(() => runtime.pauses().runtimes.codex);
   const state = runtime.pauses();
-  assert.deepEqual([state.runtimes.codex.by, state.runtimes.codex.reason, state.runtimes.codex.resetsAt], ['alpd', 'Codex usage limit reached', new Date(resetsAt * 1000).toISOString()]);
+  assert.deepEqual([state.runtimes.codex!.by, state.runtimes.codex!.reason, state.runtimes.codex!.resetsAt], ['alpd', 'Codex usage limit reached', new Date(resetsAt * 1000).toISOString()]);
   assert.deepEqual(state.parked.map(entry => [entry.assignmentId, entry.agent, entry.runtime]), [[assignmentId, 'peer', 'codex']]);
   assert.match(notices(events)[0].text, /^Codex usage limit reached; it resets .*ALP paused delegation to Codex agents and parked their assignments; Claude agents keep working\. ALP asks Codex every minute and resumes it as soon as the limit lifts\.$/);
   assert.equal(notices(events)[0].level, 'error');
@@ -93,7 +123,7 @@ test('a usage limit pauses its runtime and parks the assignment it stopped, unti
   assert.match(steered(), /stalled from peer[\s\S]*Parked: the Codex usage limit was reached\. ALP continues this assignment where it stopped when Codex is resumed/);
   await new Promise(resolve => setTimeout(resolve, 150));
   assert.equal((await getTask(root, task.id)).status, 'in_progress');
-  assert.equal(runtime.status('root').assignments.length, 1);
+  assert.equal(runtime.status('root')!.assignments.length, 1);
 
   // No new Codex assignments; Claude still takes them.
   const refused = await main.call('alp_delegate', { agent: 'peer', task: 'More', mode: 'read-only', wait: false });
@@ -106,7 +136,7 @@ test('a usage limit pauses its runtime and parks the assignment it stopped, unti
   runtimes[2].finish('Read');
   await main.call('alp_wait', { assignments: [onClaude.assignmentId] });
 
-  assert.throws(() => runtime.resume({ runtime: 'gemini' }), /runtime must be codex or claude/);
+  assert.throws(() => runtime.resume({ runtime: 'gemini' as unknown as RuntimeKind }), /runtime must be codex or claude/);
   runtime.resume({ runtime: 'codex' });
   await until(() => peer.started.length === 2);
   assert.deepEqual(runtime.pauses(), { runtimes: {}, parked: [] });
@@ -126,14 +156,14 @@ test('alp pause holds delegation and wakes; --now parks running assignments wher
   const peer = runtimes[1];
 
   const state = runtime.pause({ now: true, reason: 'Lunch' });
-  assert.deepEqual([state.all.by, state.all.reason], ['the user', 'Lunch']);
+  assert.deepEqual([state.all!.by, state.all!.reason], ['the user', 'Lunch']);
   assert.match(notices(events).at(-1).text, /^ALP paused by the user: Lunch\. Delegation waits, and running assignments park where they are\. alp resume continues\.$/);
   // The running assignment is interrupted; its turn ends as interrupted and it parks.
   assert.ok(peer.calls.some(call => call.method === 'turn/interrupt'));
-  peer.notification('turn/completed', { threadId: peer.threadId, turn: { id: peer.turnId, status: 'interrupted' } });
+  peer.notification!('turn/completed', { threadId: peer.threadId, turn: { id: peer.turnId, status: 'interrupted' } });
   await until(() => runtime.pauses().parked.length === 1);
   assert.equal(runtime.pauses().parked[0].reason, 'paused by the user');
-  assert.equal(runtime.snapshot(assignmentId).parked, 'paused by the user');
+  assert.equal(runtime.snapshot(assignmentId)!.parked, 'paused by the user');
   assert.match((await main.call('alp_delegate', { agent: 'peer', task: 'More', mode: 'read-only', model: 'claude:claude-sonnet-4-6', wait: false })).error, /^ALP is paused \(Lunch, by the user\)/);
   assert.throws(() => runtime.resume({ runtime: 'codex' }), /All of ALP is paused/);
 
@@ -145,8 +175,8 @@ test('alp pause holds delegation and wakes; --now parks running assignments wher
 
   runtime.resume();
   await until(() => peer.started.length === 2);
-  assert.equal(runtime.snapshot(assignmentId).parked, undefined);
-  assert.match(peer.started[1].params.input.map(entry => entry.text).join('\n'), /ALP resumed this assignment; it had stopped because paused by the user/);
+  assert.equal(runtime.snapshot(assignmentId)!.parked, undefined);
+  assert.match(peer.started[1].params.input.map((entry: { text: string }) => entry.text).join('\n'), /ALP resumed this assignment; it had stopped because paused by the user/);
   await peer.call('alp_handoff', { outcome: 'complete', summary: 'Checked' });
   peer.finish('Checked');
   // Main is woken by the result once nothing is paused.
@@ -165,15 +195,15 @@ test('a pause without --now lets running turns finish, and holds wakes until res
   // The result waits: main is on Codex.
   await new Promise(resolve => setTimeout(resolve, 50));
   assert.equal(main.started.length, 1);
-  assert.equal(runtime.status('root').assignments.length, 0);
+  assert.equal(runtime.status('root')!.assignments.length, 0);
   runtime.resume({ runtime: 'codex' });
   await until(() => main.started.length === 2);
   assert.match(main.started[1].params.input.at(-1).text, new RegExp(assignmentId));
 });
 
 test('Claude reports a usage limit as a failed turn with the reset time', async () => {
-  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env);
-  const seen = [];
+  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env) as unknown as ClaudeInternals;
+  const seen: Message[] = [];
   transport.onNotification((method, params) => seen.push({ method, params }));
   transport.activeTurn = 'turn-1';
   transport.handle({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', utilization: 0.91, resetsAt: 1_900_000_000 } });
@@ -196,7 +226,7 @@ test('Claude reports a usage limit as a failed turn with the reset time', async 
 test('usage warnings reach the user once per window', async t => {
   const { runtimes, events, main } = await setup(t, none);
   const resetsAt = Math.floor(Date.now() / 1000) + 7200;
-  for (let i = 0; i < 2; i++) main.notification('account/rateLimits/updated', { rateLimits: { primary: { usedPercent: 93, windowDurationMins: 300, resetsAt }, secondary: null } });
+  for (let i = 0; i < 2; i++) main.notification!('account/rateLimits/updated', { rateLimits: { primary: { usedPercent: 93, windowDurationMins: 300, resetsAt }, secondary: null } });
   assert.equal(notices(events).length, 1);
   assert.match(notices(events)[0].text, /^Codex has used 93% of a usage window that resets /);
   assert.equal(notices(events)[0].level, 'warning');
@@ -210,7 +240,7 @@ test('a limit pause survives a restart, and autoResume lifts it after the reset'
   const past = new Date(Date.now() - 120_000).toISOString();
   await writeFile(file, JSON.stringify({ runtimes: { codex: { since: past, by: 'alpd', reason: 'Codex usage limit reached', resetsAt: past } } }));
   const kept = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false, pauseFile: file });
-  assert.equal(kept.pauses().runtimes.codex.reason, 'Codex usage limit reached');
+  assert.equal(kept.pauses().runtimes.codex!.reason, 'Codex usage limit reached');
   await kept.shutdown();
   const lifted = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false, pauseFile: file, autoResume: true });
   t.after(() => lifted.shutdown());
@@ -263,7 +293,7 @@ test('Cafe main and lead can inspect beside a parked peer, and lead can return a
     for (const agent of ['reviewer', 'oracle']) {
       const advice = await requester.call('alp_delegate', { agent, task: 'Inspect finished work', mode: 'read-only', model: 'claude:claude-fable-5-1' });
       assert.equal(advice.status, 'running', JSON.stringify(advice));
-      const advisor = runtimes.at(-1);
+      const advisor = runtimes.at(-1)!;
       await until(() => advisor.started.length === 1);
       await requester.call('alp_cancel', { assignmentId: advice.assignmentId });
     }
@@ -275,16 +305,16 @@ test('Cafe main and lead can inspect beside a parked peer, and lead can return a
   assert.equal(result.events[0]?.result?.handoff?.outcome, 'partial', JSON.stringify(result));
   assert.equal(runtimes[2].closed, true);
   assert.equal(runtime.pauses().parked.length, 0);
-  assert.equal(runtime.status('root').assignments.length, 0);
+  assert.equal(runtime.status('root')!.assignments.length, 0);
 });
 
 // An idle root is a queue barrier: recover does not send a turn without continuation intent.
-async function barrier(runtime) { await runtime.recover('barrier'); }
-async function openIdle(runtime, root, id, model = 'codex:gpt-5.6-sol') {
+async function barrier(runtime: AlpRuntime) { await runtime.recover('barrier'); }
+async function openIdle(runtime: AlpRuntime, root: string, id: string, model = 'codex:gpt-5.6-sol') {
   await runtime.open(id, { cwd: root, model });
 }
 
-for (const scope of ['claude', 'codex', 'all']) {
+for (const scope of ['claude', 'codex', 'all'] as const) {
   test(`resume ${scope} leaves manual recovery roots parked, including one recovered during a pause`, async t => {
     const { root, runtime, runtimes, main, events } = await setup(t, () => ({ recoveryResume: false }));
     main.finish();
@@ -298,11 +328,11 @@ for (const scope of ['claude', 'codex', 'all']) {
     assert.equal(main.started.length, 1, 'manual Codex recovery must wait for an explicit session prompt');
     assert.doesNotMatch(notices(events).at(-1).text, /Parked assignments continue/);
     assert.equal(runtimes[2].started.length, 0, 'manual Claude recovery must wait even when recovered during a provider pause');
-    assert.ok(runtime.snapshot('root').parked);
-    assert.ok(runtime.snapshot('other').parked);
+    assert.ok(runtime.snapshot('root')!.parked);
+    assert.ok(runtime.snapshot('other')!.parked);
     await runtime.prompt('root', { clientMessageId: 'explicit-recovery', delivery: 'auto', content: [{ type: 'text', text: 'Continue my recovered session' }] });
     assert.equal(main.started.length, 2, 'explicit session resume still starts the recovered root');
-    assert.equal(runtime.snapshot('root').parked, undefined);
+    assert.equal(runtime.snapshot('root')!.parked, undefined);
   });
 }
 
@@ -320,10 +350,10 @@ test('provider resume selects the pause that parked work and survives resume bef
   runtime.resume({ runtime: 'codex' });
   await barrier(runtime);
   assert.equal(peer.started.length, 1, 'the interrupted turn has not settled yet');
-  peer.notification('turn/completed', { threadId: peer.threadId, turn: { id: peer.turnId, status: 'interrupted' } });
+  peer.notification!('turn/completed', { threadId: peer.threadId, turn: { id: peer.turnId, status: 'interrupted' } });
   await barrier(runtime);
   assert.equal(peer.started.length, 2, 'the matching earlier resume continues the turn once it parks');
-  assert.equal(runtime.snapshot(assignmentId).parked, undefined);
+  assert.equal(runtime.snapshot(assignmentId)!.parked, undefined);
   runtime.resume();
   await barrier(runtime);
   assert.equal(peer.started.length, 2, 'repeated resume cannot duplicate a continuation');
@@ -334,14 +364,14 @@ test('wrong-provider resume cannot reach a parked root through a lifecycle hold'
   main.finish();
   await openIdle(runtime, root, 'barrier');
   await runtime.recover('root', { continueRoot: true });
-  const release = runtime.hold('root');
+  const release = runtime.hold!('root')!;
   runtime.resume({ runtime: 'claude' });
   await barrier(runtime);
   release();
   release();
   await barrier(runtime);
   assert.equal(main.started.length, 1);
-  assert.ok(runtime.snapshot('root').parked);
+  assert.ok(runtime.snapshot('root')!.parked);
 });
 
 for (const terminal of ['interrupted', 'completed']) {
@@ -369,8 +399,8 @@ for (const timing of ['queued', 'held']) {
     const { root, runtime, main } = await setup(t, () => ({ autoResume: false }));
     await openIdle(runtime, root, 'barrier');
     main.limit();
-    await until(() => runtime.snapshot('root').parked);
-    const release = timing === 'held' ? runtime.hold('root') : undefined;
+    await until(() => runtime.snapshot('root')!.parked);
+    const release = timing === 'held' ? runtime.hold!('root') : undefined;
     let replacement;
     if (timing === 'queued') replacement = runtime.recover('root', { parkedRoot: 'manual recovery replacement' });
     runtime.resume({ runtime: 'codex' });
@@ -382,7 +412,7 @@ for (const timing of ['queued', 'held']) {
     release?.();
     await barrier(runtime);
     assert.equal(main.started.length, 1, 'old resume authority belongs only to its original parked object');
-    assert.equal(runtime.snapshot('root').parked, 'manual recovery replacement');
+    assert.equal(runtime.snapshot('root')!.parked, 'manual recovery replacement');
   });
 }
 
@@ -399,16 +429,16 @@ test('automatic quota resume continues its limited root and leaves unrelated man
   await until(() => main.started.length === 2);
   await barrier(runtime);
   assert.equal(runtimes[2].started.length, 0);
-  assert.ok(runtime.snapshot('manual').parked);
+  assert.ok(runtime.snapshot('manual')!.parked);
 });
 
 test('matching pause resume survives nested holds and a second pause without duplicate turns', async t => {
   const { root, runtime, main } = await setup(t, none);
   await openIdle(runtime, root, 'barrier');
   main.limit();
-  await until(() => runtime.snapshot('root').parked && runtime.pauses().runtimes.codex);
-  const first = runtime.hold('root');
-  const last = runtime.hold('root');
+  await until(() => runtime.snapshot('root')!.parked && runtime.pauses().runtimes.codex);
+  const first = runtime.hold!('root')!;
+  const last = runtime.hold!('root')!;
   runtime.resume({ runtime: 'codex' });
   runtime.resume({ runtime: 'codex' });
   await barrier(runtime);
@@ -445,14 +475,14 @@ test('a newer provider pause replaces released global pause intent before the in
   assert.equal(peer.started.length, 2);
 });
 
-for (const scope of ['codex', 'all']) {
+for (const scope of ['codex', 'all'] as const) {
   test(`automatic working recovery blocked by ${scope} pause waits for the matching resume`, async t => {
     const { root, runtime, main } = await setup(t, none);
     main.finish();
     await openIdle(runtime, root, 'barrier');
     runtime.pause(scope === 'all' ? {} : { runtime: scope });
     await runtime.recover('root', { continueRoot: true });
-    assert.ok(runtime.snapshot('root').parked);
+    assert.ok(runtime.snapshot('root')!.parked);
     if (scope === 'all') assert.throws(() => runtime.resume({ runtime: 'codex' }), /All of ALP is paused/);
     else runtime.resume({ runtime: 'claude' });
     await barrier(runtime);
@@ -461,7 +491,7 @@ for (const scope of ['codex', 'all']) {
     runtime.resume();
     await barrier(runtime);
     assert.equal(main.started.length, 2);
-    assert.equal(runtime.snapshot('root').parked, undefined);
+    assert.equal(runtime.snapshot('root')!.parked, undefined);
   });
 }
 
@@ -482,10 +512,10 @@ for (const paused of [false, true]) {
     runtime.resume();
     await barrier(runtime);
     assert.equal(main.started.length, 1, 'provider/all resume cannot infer a legacy park scope');
-    assert.equal(runtime.snapshot('root').parked, reason);
+    assert.equal(runtime.snapshot('root')!.parked, reason);
     await runtime.prompt('root', { clientMessageId: 'explicit-legacy', delivery: 'auto', content: [{ type: 'text', text: 'Continue' }] });
     assert.equal(main.started.length, 2);
-    assert.equal(runtime.snapshot('root').parked, undefined);
+    assert.equal(runtime.snapshot('root')!.parked, undefined);
   });
 }
 
@@ -496,14 +526,14 @@ test('a full disk pauses all ALP and parks running work; releasing it continues 
   const peer = runtimes[1];
 
   const state = runtime.holdForDisk('the disk is full');
-  assert.deepEqual([state.all.by, state.all.reason, state.all.cause], ['alpd', 'the disk is full', 'disk']);
+  assert.deepEqual([state.all!.by, state.all!.reason, state.all!.cause], ['alpd', 'the disk is full', 'disk']);
   assert.equal(runtime.diskHeld(), true);
   assert.match(notices(events).at(-1).text, /^Disk full: the disk is full\. ALP paused its work and parked running assignments/);
   assert.equal(notices(events).at(-1).level, 'error');
   assert.ok(peer.calls.some(call => call.method === 'turn/interrupt'));
-  peer.notification('turn/completed', { threadId: peer.threadId, turn: { id: peer.turnId, status: 'interrupted' } });
+  peer.notification!('turn/completed', { threadId: peer.threadId, turn: { id: peer.turnId, status: 'interrupted' } });
   await until(() => runtime.pauses().parked.length === 1);
-  assert.equal(runtime.snapshot(assignmentId).parked, 'the disk is full');
+  assert.equal(runtime.snapshot(assignmentId)!.parked, 'the disk is full');
   // Main learns why and what happens next.
   const steered = () => main.calls.filter(call => call.method === 'turn/steer').map(call => call.params.input.at(-1).text).join('\n');
   await until(() => /Parked:/.test(steered()));
@@ -518,7 +548,7 @@ test('a full disk pauses all ALP and parks running work; releasing it continues 
   await until(() => peer.started.length === 2);
   assert.match(peer.started[1].params.input.at(-1).text, /it had stopped because the disk is full\. Continue where you left off/);
   assert.equal(runtime.pauses().all, undefined);
-  assert.equal(runtime.pauses().runtimes.claude.by, 'the user');
+  assert.equal(runtime.pauses().runtimes.claude!.by, 'the user');
   assert.match(notices(events).at(-1).text, /^ALP resumed by alpd, after disk space returned\. Parked assignments continue\.$/);
   await peer.call('alp_handoff', { outcome: 'complete', summary: 'Wrote it' });
   peer.finish('Done');
@@ -531,9 +561,9 @@ test('a full disk leaves a pause the user made theirs to lift (t-2831)', async t
   runtime.pause({ reason: 'Lunch' });
   runtime.holdForDisk('the disk is full');
   assert.equal(runtime.diskHeld(), false);
-  assert.equal(runtime.pauses().all.by, 'the user');
+  assert.equal(runtime.pauses().all!.by, 'the user');
   runtime.releaseDisk('alpd');
-  assert.equal(runtime.pauses().all.reason, 'Lunch');
+  assert.equal(runtime.pauses().all!.reason, 'Lunch');
   runtime.resume();
   main.finish('Done');
 });

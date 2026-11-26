@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,17 +11,38 @@ import { teardown } from '../../../test/support/teardown.ts';
 // alp_strategy (t-003a): main and lead record a strategy (rush, smart, deep, large). It is guidance
 // only: one change per root user turn, logged, and nothing else about the session changes.
 
-async function until(check) {
+async function until(check: () => unknown) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail('Expected condition did not arrive');
 }
 
+// `any`: the app-server messages the fake answers and sends are JSON of every shape; tests read their fields.
+type Message = any;
+type Handler = (method: string, params: Message) => Message;
+type Call = { method: string, params: Message };
+/** One fake native harness, as fakeTransport hands it to the runtime and to the test. */
+type FakeRuntime = {
+  calls: Call[], threadId: string, turnId: string | undefined,
+  notification?: Handler, failure?: (error: unknown) => void, serverRequest?: Handler,
+  initialize(): Promise<void>,
+  onNotification(fn: Handler): void, onFailure(fn: (error: unknown) => void): void, onRequest(fn: Handler): void,
+  close(): Promise<void>,
+  request(method: string, params: Message): Promise<Message>,
+  kind: string | undefined, closed?: boolean,
+  readonly config: Message,
+  readonly tools: string[],
+  call(tool: string, args: Message, callId?: string): Promise<Message>,
+  finish(text?: string): void,
+};
+
 let calls = 0;
-function fakeTransport(runtimes) {
-  return (cwd, env, kind) => {
+function fakeTransport(runtimes: FakeRuntime[]) {
+  // The runtime's transport signature (RuntimeOptions.transport): it passes the kind, typed optional there.
+  return (cwd: string, env: NodeJS.ProcessEnv, kind?: string) => {
     const index = runtimes.length;
     let turns = 0;
-    const runtime = {
+    // The runtime sets the handlers before it starts a turn; the `!`s below rely on that, as before.
+    const runtime: FakeRuntime = {
       kind, calls: [], threadId: `thread-${index}`, turnId: undefined,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -32,13 +54,13 @@ function fakeTransport(runtimes) {
         return {};
       },
       get config() { return this.calls.find(call => call.method === 'thread/start')?.params; },
-      get tools() { return this.config.dynamicTools.map(tool => tool.name); },
+      get tools() { return this.config.dynamicTools.map((tool: Message) => tool.name); },
       async call(tool, args, callId = `${tool}-${index}-${++calls}`) {
-        return JSON.parse((await this.serverRequest('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId, namespace: null, tool, arguments: args })).contentItems[0].text);
+        return JSON.parse((await this.serverRequest!('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId, namespace: null, tool, arguments: args })).contentItems[0].text);
       },
       finish(text = 'done') {
-        this.notification('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}-${turns}`, text } });
-        this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
+        this.notification!('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}-${turns}`, text } });
+        this.notification!('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
       },
     };
     runtimes.push(runtime);
@@ -46,7 +68,7 @@ function fakeTransport(runtimes) {
   };
 }
 
-async function setup(t, settings) {
+async function setup(t: TestContext, settings: object) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-strategy-'));
   // Removed last: teardown runs in reverse, so the runtime (still writing its run log) stops first.
@@ -54,22 +76,22 @@ async function setup(t, settings) {
   const root = path.join(directory, 'project');
   await initProject(root);
   await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify(settings));
-  const runtimes = [];
+  const runtimes: FakeRuntime[] = [];
   const runLogDir = path.join(directory, 'runs');
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: path.join(directory, 'home'), runLogDir });
   defer(() => runtime.shutdown());
-  const prompt = (id, text) => runtime.prompt('root', { clientMessageId: id, delivery: 'auto', content: [{ type: 'text', text }] });
+  const prompt = (id: string, text: string) => runtime.prompt('root', { clientMessageId: id, delivery: 'auto', content: [{ type: 'text', text }] });
   const runLog = async () => (await readFile(path.join(runLogDir, 'root.jsonl'), 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
   return { root, runtime, runtimes, prompt, runLog };
 }
 
 /** Starts one assignment from `from` and returns its fake native runtime once its turn runs. */
-async function delegate(runtimes, from, agent, extra = {}) {
+async function delegate(runtimes: FakeRuntime[], from: FakeRuntime, agent: string, extra = {}) {
   const before = runtimes.length;
   const started = await from.call('alp_delegate', { agent, task: `Work as ${agent}`, wait: false, ...extra });
   assert.ok(started.assignmentId, JSON.stringify(started));
-  await until(() => runtimes.length > before && runtimes.at(-1).turnId);
-  return runtimes.at(-1);
+  await until(() => runtimes.length > before && runtimes.at(-1)!.turnId);
+  return runtimes.at(-1)!;
 }
 
 test('alp_strategy is offered to main and lead only, never to peer, oracle, reviewer or supervisor', async t => {
@@ -89,7 +111,7 @@ test('alp_strategy is offered to main and lead only, never to peer, oracle, revi
     assert.equal(harness.tools.includes('alp_strategy'), false, `${name} must not get alp_strategy`);
   }
   // The Claude schema matches what the runtime offers.
-  const offered = main.config.dynamicTools.find(tool => tool.name === 'alp_strategy');
+  const offered = main.config.dynamicTools.find((tool: Message) => tool.name === 'alp_strategy');
   assert.deepEqual(Object.keys(claudeToolShapes.alp_strategy).sort(), Object.keys(offered.inputSchema.properties).sort());
   assert.deepEqual(offered.inputSchema.properties.strategy.enum, ['rush', 'smart', 'deep', 'large']);
   assert.doesNotMatch(offered.description, /\bmode\b/);
@@ -134,7 +156,7 @@ test('one strategy change per user turn: a second is refused, a new user turn al
   await until(() => runtimes[0]?.turnId);
   const [main] = runtimes;
   const lead = await delegate(runtimes, main, 'lead');
-  const before = runtime.status('root');
+  const before = runtime.status('root')!;
   const sessionsBefore = before.sessions.map(({ id, agent, runtime: kind, model, mode, thinking, workflow, teamLabel }) => ({ id, agent, kind, model, mode, thinking, workflow, teamLabel }));
   const harnesses = runtimes.length;
 
@@ -148,7 +170,7 @@ test('one strategy change per user turn: a second is refused, a new user turn al
   assert.match((await lead.call('alp_strategy', { strategy: 'deep', reason: 'Harder than it looked' })).error, /already changed in this user turn/);
 
   // Nothing but the strategy changed: no model, effort, mode, team, session or assignment.
-  const after = runtime.status('root');
+  const after = runtime.status('root')!;
   assert.deepEqual(after.sessions.map(({ id, agent, runtime: kind, model, mode, thinking, workflow, teamLabel }) => ({ id, agent, kind, model, mode, thinking, workflow, teamLabel })), sessionsBefore);
   assert.equal(after.assignments.length, before.assignments.length);
   assert.equal(runtimes.length, harnesses);
@@ -161,12 +183,12 @@ test('one strategy change per user turn: a second is refused, a new user turn al
     { agent: 'main', strategy: 'deep', previous: 'smart', reason: 'Concurrency bug' },
     { agent: 'lead', strategy: 'rush', previous: 'smart', reason: 'One small fix' },
   ]);
-  assert.deepEqual(logged.map(entry => entry.sessionId), ['root', after.sessions.find(session => session.agent === 'lead').id]);
+  assert.deepEqual(logged.map(entry => entry.sessionId), ['root', after.sessions.find(session => session.agent === 'lead')!.id]);
   assert.ok(logged.every(entry => typeof entry.ts === 'string'));
 
   // A new user turn of the root allows one more change, for main and for lead.
   main.finish('Planned');
-  await until(() => !runtime.status('root').sessions[0].activeTurnId);
+  await until(() => !runtime.status('root')!.sessions[0].activeTurnId);
   await prompt('m2', 'It touches the CLI and the daemon too');
   await until(() => main.turnId?.endsWith('-2'));
   assert.deepEqual(await main.call('alp_strategy', { strategy: 'large', reason: 'Spans CLI and daemon' }), { strategy: 'large', previous: 'deep', reason: 'Spans CLI and daemon' });
@@ -182,7 +204,7 @@ test('a main reopened after a restart keeps the strategy its run log recorded, a
   await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ workflow: { mode: 'pho', supervisor: false } }));
   const runLogDir = path.join(directory, 'runs');
   const start = () => {
-    const runtimes = [];
+    const runtimes: FakeRuntime[] = [];
     const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: path.join(directory, 'home'), runLogDir });
     return { runtime, runtimes };
   };

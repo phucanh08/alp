@@ -1,12 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { tree, until } from '../../../test/support/fake-agent.ts';
+import type { FakeAgent } from '../../../test/support/fake-agent.ts';
+import type { AlpRuntime, ClaudeTransport } from '@anhlp/alp-runtime';
+
+// `any`: alp_wait's and alp_delegate's answers, and event envelopes, are JSON of every shape; the tests read their fields.
+type Json = any;
+/** ClaudeTransport's public members, and the private one this test drives: the SDK message handler. */
+type ClaudeInternals = Omit<ClaudeTransport, never> & { handle(message: Json): void };
 
 /**
  * Main stays reachable while its assignments run (ALPD §48): the user's words end its
  * waits, check-ins keep it and the user posted, and an ETA it gave is held to.
  */
-const steer = (runtime, text) => runtime.prompt('root', { clientMessageId: `steer-${text}`, delivery: 'steer', content: [{ type: 'text', text }] });
+const steer = (runtime: AlpRuntime, text: string) => runtime.prompt('root', { clientMessageId: `steer-${text}`, delivery: 'steer', content: [{ type: 'text', text }] });
 const peerHandoff = { outcome: 'complete', summary: 'Done' };
 
 test('the final background result wakes idle main after more than eight assignment completions', async t => {
@@ -26,7 +33,7 @@ test('the final background result wakes idle main after more than eight assignme
     agents[round].finish(`completed job ${round}`);
     await until(() => results.length === round, `job ${round} result to be posted`);
     await until(() => main.started.length === round + 1, `job ${round} result to wake main`);
-    const text = main.started.at(-1).params.input.at(-1).text;
+    const text = main.started.at(-1)!.params.input.at(-1).text;
     assert.ok(text.includes(delegated.assignmentId));
     assert.ok(text.includes(`completed job ${round}`));
     assert.match(text, /result from peer/);
@@ -34,12 +41,12 @@ test('the final background result wakes idle main after more than eight assignme
   main.finish('All results received.');
   await new Promise(resolve => setTimeout(resolve, 30));
   assert.equal(main.started.length, 11, 'acknowledged results do not start duplicate turns');
-  assert.equal(runtime.snapshot('root').busy, false, 'no result or assignment remains outstanding');
+  assert.equal(runtime.snapshot('root')!.busy, false, 'no result or assignment remains outstanding');
 });
 
 // Exercise the real retry guard without changing private counters: one message
 // whose turn/start repeatedly fails consumes eight wakes, then stays queued.
-async function exhaustWakes(runtime, main) {
+async function exhaustWakes(runtime: AlpRuntime, main: FakeAgent) {
   main.finish('Work continues in the background.');
   const request = main.request;
   let attempts = 0;
@@ -61,7 +68,7 @@ test('a new assignment question renews delivery after exhausted retries, and its
   await exhaustWakes(runtime, main);
   const answer = agents[1].call('alp_ask', { question: 'Which output?' });
   await until(() => main.started.length === 2, 'the new question wake');
-  const text = main.started.at(-1).params.input.at(-1).text;
+  const text = main.started.at(-1)!.params.input.at(-1).text;
   assert.match(text, /question from peer[\s\S]*Which output\?/);
   assert.match(text, /Please report when done/);
   const replyTo = text.match(/\[(#\d+)\] question from peer/)[1];
@@ -71,7 +78,7 @@ test('a new assignment question renews delivery after exhausted retries, and its
   await agents[1].call('alp_handoff', peerHandoff);
   agents[1].finish('JSON produced');
   await until(() => main.started.length === 3, 'the final result wake');
-  assert.match(main.started.at(-1).params.input.at(-1).text, /JSON produced/);
+  assert.match(main.started.at(-1)!.params.input.at(-1).text, /JSON produced/);
 });
 
 test('check-ins reach idle main after exhausted retries without renewing its retry allowance', async t => {
@@ -83,7 +90,7 @@ test('check-ins reach idle main after exhausted retries without renewing its ret
   t.after(() => { Date.now = real; });
   Date.now = () => real() + 61_000;
   await until(() => main.started.length === 2, 'a check-in after the budget is exhausted');
-  assert.match(main.started.at(-1).params.input.at(-1).text, /check-in from ALP/);
+  assert.match(main.started.at(-1)!.params.input.at(-1).text, /check-in from ALP/);
   main.finish('Still working.');
   // New ordinary mail still cannot wake main: the check-in did not renew it.
   runtime.message('root', 'Another status note');
@@ -111,7 +118,7 @@ test('a check-in after exhausted retries has bounded failed starts and a fresh c
   main.request = request;
   Date.now = () => real() + 122_000;
   await until(() => main.started.length === 2, 'fresh check-in to renew the failed-start allowance');
-  assert.match(main.started.at(-1).params.input.at(-1).text, /check-in from ALP/);
+  assert.match(main.started.at(-1)!.params.input.at(-1).text, /check-in from ALP/);
 });
 
 test('a check-in beyond the first mail batch wakes exhausted main and delivers the backlog', async t => {
@@ -141,7 +148,7 @@ test('concurrent final results reach a pending user turn without duplicate wakes
   await exhaustWakes(runtime, main);
   const request = main.request;
   let pending = false;
-  let release;
+  let release!: (value?: unknown) => void;
   const gate = new Promise(resolve => { release = resolve; });
   main.request = async function(method, params) {
     if (method === 'turn/start') { pending = true; await gate; }
@@ -162,7 +169,7 @@ test('concurrent final results reach a pending user turn without duplicate wakes
   main.finish('Both results received.');
   await new Promise(resolve => setTimeout(resolve, 30));
   assert.equal(main.started.length, 2, 'only the user prompt starts a turn');
-  assert.equal(runtime.snapshot('root').busy, false, 'both results are acknowledged');
+  assert.equal(runtime.snapshot('root')!.busy, false, 'both results are acknowledged');
 });
 
 test('the user\'s message ends main\'s wait for an assignment, which keeps running', async t => {
@@ -182,7 +189,7 @@ test('the user\'s message ends main\'s wait for an assignment, which keeps runni
   await steer(runtime, 'Also add a README');
   const released = await wait;
   assert.equal(released.userMessage, true);
-  assert.deepEqual(released.running.map(entry => [entry.agent, entry.status]), [['peer', 'running']]);
+  assert.deepEqual(released.running.map((entry: Json) => [entry.agent, entry.status]), [['peer', 'running']]);
   const result = main.call('alp_wait', { timeoutMs: 60_000 });
   await agents[1].call('alp_handoff', peerHandoff);
   agents[1].finish('finished');
@@ -200,7 +207,7 @@ test('main gets a check-in while assignments run, and check-ins do not use up it
   // More check-ins than the wake limit (8) each wake main, which finishes its turn.
   for (let wake = 1; wake <= 10; wake++) {
     await until(() => main.started.length === 1 + wake, `check-in wake ${wake}`);
-    const text = main.started.at(-1).params.input.at(-1).text;
+    const text = main.started.at(-1)!.params.input.at(-1).text;
     assert.match(text, /check-in from ALP/);
     assert.match(text, new RegExp(`peer \\(${assignmentId}\\): running \\d+ s; last activity \\d+ s ago; ETA in 30 min; last note: Halfway through the parser`));
     assert.match(text, /Tell the user in one or two lines how the work is going/);
@@ -209,7 +216,7 @@ test('main gets a check-in while assignments run, and check-ins do not use up it
   // The result still wakes main.
   await agents[1].call('alp_handoff', peerHandoff);
   agents[1].finish('parser done');
-  await until(() => main.started.at(-1).params.input.at(-1).text.includes('parser done'), 'the result wake');
+  await until(() => main.started.at(-1)!.params.input.at(-1).text.includes('parser done'), 'the result wake');
   assert.ok((await runLog()).some(entry => entry.event === 'mail' && entry.kind === 'checkin'));
 });
 
@@ -237,7 +244,7 @@ test('an assignment past the ETA its requester gave ends the requester\'s wait w
   await new Promise(resolve => setTimeout(resolve, 100));
   await agents[1].call('alp_handoff', peerHandoff);
   agents[1].finish('fixed');
-  assert.deepEqual((await result).events.map(event => event.kind), ['result']);
+  assert.deepEqual((await result).events.map((event: Json) => event.kind), ['result']);
 });
 
 test('main is told to ask once about unclear requests and to stay reachable while others work', async t => {
@@ -248,7 +255,7 @@ test('main is told to ask once about unclear requests and to stay reachable whil
   assert.match(instructions, /Stay reachable while others work, as a chat where work runs in the background\. .*Then end your turn rather than wait/);
   assert.match(instructions, /Background first: run long shell commands/);
   assert.match(instructions, /by default alp_delegate starts the assignment and returns its assignmentId at once/);
-  const delegate = main.config.dynamicTools.find(tool => tool.name === 'alp_delegate');
+  const delegate = main.config.dynamicTools.find((tool: Json) => tool.name === 'alp_delegate');
   assert.equal(delegate.inputSchema.properties.etaMinutes.maximum, 1440);
 });
 
@@ -265,12 +272,12 @@ test('a steer from its requester ends a lead\'s wait for its peer, which keeps r
   await main.call('alp_send', { to: leadId, kind: 'steer', body: 'The user wants a Notion-like style' });
   const early = await waiting;
   assert.equal(early.status, 'running');
-  assert.deepEqual(early.events.map(event => [event.kind, event.from, event.body]), [['steer', 'main', 'The user wants a Notion-like style']]);
+  assert.deepEqual(early.events.map((event: Json) => [event.kind, event.from, event.body]), [['steer', 'main', 'The user wants a Notion-like style']]);
   assert.match(early.next, /pass that on with alp_send/);
   assert.equal(agents[2].closed, false, 'the peer keeps running');
   const named = lead.call('alp_wait', { assignments: [early.assignmentId], timeoutMs: 60_000 });
   await main.call('alp_send', { to: leadId, kind: 'note', body: 'Also a dark mode' });
-  assert.deepEqual((await named).events.map(event => event.body), ['Also a dark mode']);
+  assert.deepEqual((await named).events.map((event: Json) => event.body), ['Also a dark mode']);
 });
 
 test('notes from running assignments ride with main\'s next turn instead of waking it', async t => {
@@ -298,17 +305,17 @@ test('while the user waits a minute for main\'s first words, every ALP tool resu
   const reminded = await main.call('alp_board', {});
   assert.match(reminded.userWaiting, /^The user wrote to you at \d\d:\d\d:\d\d and has had no reply for \d+ s\. Before more tool calls, answer them in a short message they can read/);
   // Words the user can read end the reminders.
-  main.notification('item/completed', { threadId: main.threadId, item: { type: 'agentMessage', id: 'reply', text: 'Lead đang review, khoảng 10 phút nữa xong ạ.' } });
+  main.notification!('item/completed', { threadId: main.threadId, item: { type: 'agentMessage', id: 'reply', text: 'Lead đang review, khoảng 10 phút nữa xong ạ.' } });
   assert.equal((await main.call('alp_board', {})).userWaiting, undefined);
 });
 
 test('Claude adopts a turn it starts by itself, as after a background task ended (ALPD §56)', async () => {
   const { ClaudeTransport } = await import('@anhlp/alp-runtime');
   const { tmpdir } = await import('node:os');
-  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env);
-  const seen = [];
+  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env) as unknown as ClaudeInternals;
+  const seen: [string, string][] = [];
   transport.onNotification((method, params) => (method === 'turn/started' || method === 'turn/completed') && seen.push([method, params.turn.id]));
-  const assistant = (parent = null) => ({ type: 'assistant', parent_tool_use_id: parent, message: { id: `m${seen.length}`, content: [{ type: 'text', text: 'CI is green' }] } });
+  const assistant = (parent: string | null = null) => ({ type: 'assistant', parent_tool_use_id: parent, message: { id: `m${seen.length}`, content: [{ type: 'text', text: 'CI is green' }] } });
   // A sub-agent's message starts nothing; the session's own does, once.
   transport.handle(assistant('tool-1'));
   transport.handle(assistant());
@@ -321,13 +328,13 @@ test('Claude adopts a turn it starts by itself, as after a background task ended
 
 test('ALP follows a turn the runtime started by itself: its tools work and its end is a turn end', async t => {
   const { runtime, main, runLog } = await tree(t, { options: () => ({ checkInMs: 0 }) });
-  const events = [];
+  const events: Json[] = [];
   runtime.onEvent(envelope => envelope.sessionId === 'root' && events.push(envelope.event));
   main.finish('Watching CI in the background.');
   await until(() => events.some(event => event.type === 'turn.ended'), 'the first turn to end');
   // The background command ends; Claude answers in a turn ALP did not start.
   main.turnId = 'native-turn';
-  main.notification('turn/started', { threadId: main.threadId, turn: { id: 'native-turn' } });
+  main.notification!('turn/started', { threadId: main.threadId, turn: { id: 'native-turn' } });
   assert.deepEqual(events.at(-1), { type: 'turn.started', turnId: 'native-turn', origin: 'runtime' });
   const board = await main.call('alp_board', {});
   assert.equal(board.error, undefined, JSON.stringify(board));
@@ -336,7 +343,7 @@ test('ALP follows a turn the runtime started by itself: its tools work and its e
   assert.equal(events.at(-1).turnId, 'native-turn');
   // A turn ALP knows of is not taken over by one the runtime reports.
   await runtime.prompt('root', { clientMessageId: 'm2', delivery: 'auto', content: [{ type: 'text', text: 'Next' }] });
-  main.notification('turn/started', { threadId: main.threadId, turn: { id: 'late' } });
+  main.notification!('turn/started', { threadId: main.threadId, turn: { id: 'late' } });
   assert.notEqual(events.at(-1).turnId, 'late');
   assert.ok((await runLog()).length);
 });
@@ -354,7 +361,7 @@ test('main\'s turn ending while it waits never cancels its running assignment (#
       const blocking = scenario.startsWith('wait true');
       const delegated = main.call('alp_delegate', { agent: 'peer', task: 'Long job', mode: 'read-only', ...(blocking ? { wait: true } : {}) });
       await until(() => agents[1]?.started.length, 'the peer to start');
-      const assignmentId = runtime.status('root').assignments[0].id;
+      const assignmentId = runtime.status('root')!.assignments[0].id;
       const waiting = blocking ? delegated : (await delegated, main.call('alp_wait', { timeoutMs: 3_000_000 }));
       // The tool call is waiting before anything else happens.
       await new Promise(resolve => setTimeout(resolve, 30));
@@ -370,8 +377,8 @@ test('main\'s turn ending while it waits never cancels its running assignment (#
         assert.match(JSON.stringify(await waiting), /Turn ended/);
       } else {
         // The native turn ends while the tool still waits (a provider that ends its turn on its own).
-        main.notification('item/completed', { threadId: main.threadId, item: { type: 'agentMessage', id: 'reply', text: 'Still working.' } });
-        main.notification('turn/completed', { threadId: main.threadId, turn: { id: main.turnId, status: scenario.endsWith('fails') ? 'failed' : 'completed', ...(scenario.endsWith('fails') ? { error: { message: 'stream closed' } } : {}) } });
+        main.notification!('item/completed', { threadId: main.threadId, item: { type: 'agentMessage', id: 'reply', text: 'Still working.' } });
+        main.notification!('turn/completed', { threadId: main.threadId, turn: { id: main.turnId, status: scenario.endsWith('fails') ? 'failed' : 'completed', ...(scenario.endsWith('fails') ? { error: { message: 'stream closed' } } : {}) } });
         const result = await waiting;
         await new Promise(resolve => setTimeout(resolve, 30));
         assert.equal(agents[1].closed, false, 'the assignment keeps running');
@@ -383,11 +390,11 @@ test('main\'s turn ending while it waits never cancels its running assignment (#
       await until(() => ended.length === 1, 'main\'s turn to end');
       await new Promise(resolve => setTimeout(resolve, 30));
       assert.equal(agents[1].closed, false, 'the assignment keeps running');
-      assert.deepEqual(runtime.status('root').assignments.map(entry => [entry.id, entry.status]), [[assignmentId, 'running']]);
+      assert.deepEqual(runtime.status('root')!.assignments.map(entry => [entry.id, entry.status]), [[assignmentId, 'running']]);
       await agents[1].call('alp_handoff', peerHandoff);
       agents[1].finish('long job finished');
       await until(() => main.started.length === 2, 'the result to wake main');
-      const wake = main.started.at(-1).params.input.at(-1).text;
+      const wake = main.started.at(-1)!.params.input.at(-1).text;
       assert.ok(wake.includes(assignmentId));
       assert.match(wake, /result from peer[\s\S]*long job finished/);
     });
@@ -396,7 +403,7 @@ test('main\'s turn ending while it waits never cancels its running assignment (#
 
 // The other side of #116: the user's stop and a closing session do end the work, and say so.
 test('the user\'s stop or closing the session cancels the assignment a wait was for, and the wait says so', async t => {
-  for (const operation of ['interrupt', 'close']) for (const waiting of ['wait true', 'alp_wait']) {
+  for (const operation of ['interrupt', 'close'] as const) for (const waiting of ['wait true', 'alp_wait']) {
     await t.test(`${operation}, ${waiting}`, async t => {
       const { runtime, agents, main } = await tree(t, { options: () => ({ checkInMs: 0, silentForMs: 3_600_000 }) });
       const delegated = main.call('alp_delegate', { agent: 'peer', task: 'Long job', mode: 'read-only', ...(waiting === 'wait true' ? { wait: true } : {}) });

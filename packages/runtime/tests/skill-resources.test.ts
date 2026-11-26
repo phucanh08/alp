@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { pathActions, resourceUses } from '@anhlp/alp-runtime';
 
 const skills = [{ name: 'bug-loop', path: '/home/u/.alp/skills/bug-loop/SKILL.md' }, { name: 'xia', path: '/p/.alp/skills/xia/SKILL.md' }];
-const uses = command => resourceUses(command, skills).map(use => `${use.action} ${use.skill}/${use.resource}`);
+const uses = (command: string) => resourceUses(command, skills).map(use => `${use.action} ${use.skill}/${use.resource}`);
 
 test('reading a reference counts, by shell, by Claude Read, by an ACP read, by path or by plugin link', () => {
   assert.deepEqual(uses('cat /home/u/.alp/skills/bug-loop/references/test-proof.md'), ['read bug-loop/references/test-proof.md']);

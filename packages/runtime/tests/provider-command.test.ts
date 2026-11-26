@@ -13,37 +13,41 @@ import { CODEX_COMMAND, providerLaunch, readNpmShim } from '@anhlp/alp-runtime/p
 import { CodexTransport } from '@anhlp/alp-runtime/transport';
 import { createTransport } from '@anhlp/alp-runtime/providers';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { CommandHost } from '@anhlp/alp-runtime/provider-command';
+import type { TestContext } from 'node:test';
+
+type Env = Record<string, string | undefined>;
 
 const windows = process.platform === 'win32';
 
 // npm's launcher, written out from cmd-shim's writeShim_ (lib/index.js; the same text in 4.1.0 to 8.0.0).
 // The Windows half below checks that the npm of the runner still writes exactly this.
 const HEAD = '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n';
-const progShim = (prog, target, args = '', variables = '') => `${HEAD}${variables}\r\nIF EXIST "%dp0%\\${prog}.exe" (\r\n  SET "_prog=%dp0%\\${prog}.exe"\r\n) ELSE (\r\n  SET "_prog=${prog}"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%" ${args} "%dp0%\\${target}" %*\r\n`;
-const nodeShim = (target, args = '') => progShim('node', target, args);
-const nativeShim = target => `${HEAD}"%dp0%\\${target}"   %*\r\n`;
+const progShim = (prog: string, target: string, args = '', variables = '') => `${HEAD}${variables}\r\nIF EXIST "%dp0%\\${prog}.exe" (\r\n  SET "_prog=%dp0%\\${prog}.exe"\r\n) ELSE (\r\n  SET "_prog=${prog}"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%" ${args} "%dp0%\\${target}" %*\r\n`;
+const nodeShim = (target: string, args = '') => progShim('node', target, args);
+const nativeShim = (target: string) => `${HEAD}"%dp0%\\${target}"   %*\r\n`;
 
 const SCRIPT = 'node_modules\\@openai\\codex\\bin\\codex.js';
 const NODE = 'C:\\alp\\node\\node.exe';
 
 /** A Windows host over `files` (path → text); names compare without case, as on NTFS. */
-function host(files, parentEnv = {}) {
+function host(files: Record<string, string>, parentEnv: Env = {}): CommandHost & { asked: string[] } {
   const entries = new Map(Object.entries(files).map(([file, text]) => [file.toLowerCase(), text]));
-  const asked = [];
+  const asked: string[] = [];
   return {
     platform: 'win32', parentEnv, asked,
     isFile: file => { asked.push(file); return entries.has(file.toLowerCase()); },
-    read: file => { if (!entries.has(file.toLowerCase())) throw Object.assign(new Error('missing'), { code: 'ENOENT' }); return entries.get(file.toLowerCase()); },
+    read: file => { if (!entries.has(file.toLowerCase())) throw Object.assign(new Error('missing'), { code: 'ENOENT' }); return entries.get(file.toLowerCase())!; },
     script: file => ({ command: NODE, args: [file] }),
   };
 }
 const NPM = 'C:\\Users\\me\\AppData\\Roaming\\npm';
 const installed = { [`${NPM}\\codex.cmd`]: nodeShim(SCRIPT), [`${NPM}\\codex`]: '#!/bin/sh\n', [`${NPM}\\codex.ps1`]: '#!/usr/bin/env pwsh\n', [`${NPM}\\${SCRIPT}`]: '' };
-const launch = (command, env, files, parentEnv) => providerLaunch(command, env, CODEX_COMMAND, host(files, parentEnv));
+const launch = (command: string, env: Env, files: Record<string, string>, parentEnv?: Env) => providerLaunch(command, env, CODEX_COMMAND, host(files, parentEnv));
 const viaNode = { command: NODE, args: [`${NPM}\\${SCRIPT}`] };
 
 test('outside Windows a command is started as it is, and a launcher name is refused as before', () => {
-  const posix = { platform: 'linux', parentEnv: {}, isFile: () => { throw new Error('no lookup outside Windows'); }, read: () => { throw new Error('no read outside Windows'); }, script: () => { throw new Error('no Node wrapper outside Windows'); } };
+  const posix: CommandHost = { platform: 'linux', parentEnv: {}, isFile: () => { throw new Error('no lookup outside Windows'); }, read: () => { throw new Error('no read outside Windows'); }, script: () => { throw new Error('no Node wrapper outside Windows'); } };
   for (const command of ['codex', '/opt/bin/codex', './fake-codex.js', 'codex.exe']) assert.deepEqual(providerLaunch(command, { PATH: '/usr/bin' }, CODEX_COMMAND, posix), { command, args: [] });
   for (const command of ['codex.cmd', '/x/codex.BAT', 'codex.ps1']) assert.throws(() => providerLaunch(command, {}, CODEX_COMMAND, posix), { message: 'Codex executable must be a native binary, not a shell launcher' });
 });
@@ -87,11 +91,11 @@ test('anything that is not exactly that launcher is refused, never partly read',
     'only the head': HEAD,
   };
   for (const [name, text] of Object.entries(refused)) {
-    const read = readNpmShim(text);
+    const read = readNpmShim(text) as { refused?: string };
     assert.equal(typeof read.refused, 'string', `${name}: ${JSON.stringify(read)}`);
     assert.deepEqual(Object.keys(read), ['refused'], name);
     // The same through the lookup: an error that names the file, the reason and both ways out; nothing to start.
-    assert.throws(() => launch('codex', { Path: NPM }, { ...installed, [`${NPM}\\codex.cmd`]: text }), error => {
+    assert.throws(() => launch('codex', { Path: NPM }, { ...installed, [`${NPM}\\codex.cmd`]: text }), (error: Error) => {
       assert.ok(error.message.startsWith(`Codex: ${NPM}\\codex.cmd ${read.refused}. `), `${name}: ${error.message}`);
       assert.match(error.message, /without a shell/);
       assert.match(error.message, /npm install -g @openai\/codex/);
@@ -141,7 +145,7 @@ test('the working directory and relative PATH entries never supply the provider'
   assert.throws(() => launch('codex.exe', { Path: '.' }, planted), /Codex was not found: no codex\.exe in any directory of PATH/);
   // A launcher named by a relative path is refused; it is not looked up anywhere else either.
   for (const command of ['.\\codex.cmd', 'bin\\codex.cmd', 'bin/codex.cmd', 'C:codex.cmd']) {
-    assert.throws(() => launch(command, { Path: NPM }, { ...planted, ...installed }), error => error.message.startsWith(`Codex: ${command} is a launcher named by a relative path`), command);
+    assert.throws(() => launch(command, { Path: NPM }, { ...planted, ...installed }), (error: Error) => error.message.startsWith(`Codex: ${command} is a launcher named by a relative path`), command);
   }
 });
 
@@ -151,7 +155,7 @@ test('the first PATH directory that has the name decides: a refused launcher is 
   assert.deepEqual(launch('codex', { Path: `${NPM};C:\\first` }, files), viaNode);
   // A launcher whose script is gone (a half-removed install) names the missing file.
   const broken = { [`${NPM}\\codex.cmd`]: nodeShim(SCRIPT), 'C:\\tools\\codex.exe': 'MZ' };
-  assert.throws(() => launch('codex', { Path: `${NPM};C:\\tools` }, broken), error => error.message.startsWith(`Codex: ${NPM}\\codex.cmd runs ${NPM}\\${SCRIPT}, which does not exist`));
+  assert.throws(() => launch('codex', { Path: `${NPM};C:\\tools` }, broken), (error: Error) => error.message.startsWith(`Codex: ${NPM}\\codex.cmd runs ${NPM}\\${SCRIPT}, which does not exist`));
 });
 
 test('a configured launcher is followed or refused by name: never a shell, never another file', () => {
@@ -179,7 +183,7 @@ test('a configured launcher is followed or refused by name: never a shell, never
   ];
   const hand = { ...files, 'C:\\hand\\codex.cmd': '@node "%~dp0\\codex.js" %*\r\n', 'C:\\hand\\codex.bat': '@node "%~dp0\\codex.js" %*\r\n', 'C:\\hand\\codex.js': '' };
   for (const [command, start] of fails) {
-    assert.throws(() => launch(command, env, hand), error => {
+    assert.throws(() => launch(command, env, hand), (error: Error) => {
       assert.ok(error.message.startsWith(start), `${command}: ${error.message}`);
       assert.match(error.message, /Install Codex with `npm install -g @openai\/codex`, or set ALP_CODEX_BIN to the full path of the native codex\.exe or of the JavaScript file the launcher runs\.$/);
       return true;
@@ -202,7 +206,7 @@ createInterface({ input: process.stdin }).on('line', line => {
 `;
 
 /** A throwaway npm prefix with `@openai/codex` (the stand-in) installed globally by the runner's own npm. */
-async function npmCodex(t) {
+async function npmCodex(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(os.tmpdir(), 'alp-codex-npm-'));
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }));
@@ -225,8 +229,8 @@ async function npmCodex(t) {
   env.Path = `${prefix};${path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32')}`;
   return { directory, prefix, project, env, script: path.join(prefix, 'node_modules', '@openai', 'codex', 'bin', 'codex.js'), defer };
 }
-const npmEnv = directory => ({ ...process.env, npm_config_cache: path.join(directory, 'npm-cache'), npm_config_userconfig: path.join(directory, 'npmrc'), npm_config_update_notifier: 'false' });
-const same = (a, b) => a.toLowerCase() === b.toLowerCase();
+const npmEnv = (directory: string) => ({ ...process.env, npm_config_cache: path.join(directory, 'npm-cache'), npm_config_userconfig: path.join(directory, 'npmrc'), npm_config_update_notifier: 'false' });
+const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 test("Windows: npm's own codex.cmd is the launcher ALP reads, and a spawn without a shell does not find it", { skip }, async t => {
   const { prefix, project, env } = await npmCodex(t);
@@ -235,7 +239,7 @@ test("Windows: npm's own codex.cmd is the launcher ALP reads, and a spawn withou
   assert.ok(!existsSync(path.join(prefix, 'codex.exe')));
   assert.equal(readFileSync(path.join(prefix, 'codex.cmd'), 'utf8'), nodeShim(SCRIPT), "the runner's npm writes the template this file tests against");
   // The defect of issue #236: the bare name, as ALP spawned it.
-  const failure = await new Promise(resolve => {
+  const failure = await new Promise<NodeJS.ErrnoException>(resolve => {
     const child = spawn('codex', ['--version'], { cwd: project, env, windowsHide: true, stdio: 'ignore' });
     child.once('error', resolve);
     child.once('close', code => resolve(new Error(`codex started and exited ${code}`)));
@@ -247,7 +251,7 @@ test("Windows: npm's own codex.cmd is the launcher ALP reads, and a spawn withou
 test('Windows: a Codex installed with npm starts, without a shell, and its arguments arrive unchanged', { skip }, async t => {
   const { prefix, project, env, script, defer } = await npmCodex(t);
   assert.deepEqual(providerLaunch('codex', env, CODEX_COMMAND), { command: process.execPath, args: [script] });
-  const started = async (transport, expected) => {
+  const started = async (transport: CodexTransport, expected: string[]) => {
     defer(() => transport.close());
     const answer = await transport.request('initialize', {}, 30_000);
     assert.deepEqual(answer.argv, expected);
@@ -255,7 +259,8 @@ test('Windows: a Codex installed with npm starts, without a shell, and its argum
     assert.deepEqual(answer.execArgv, []);
   };
   // As alpd starts it: the provider registry, the bare name, the session's working directory.
-  await started(createTransport({ codexCommand: 'codex' }, 'codex', project, env), ['app-server', '--listen', 'stdio://']);
+  // `as`: for codex the registry makes a CodexTransport, whose request takes a timeout.
+  await started(createTransport({ codexCommand: 'codex' }, 'codex', project, env) as CodexTransport, ['app-server', '--listen', 'stdio://']);
   // Every character cmd.exe would act on, had a shell been involved; and what Windows quoting gets wrong when done by hand.
   const hostile = ['two words', 'a&b', '&calc.exe', 'a|b', 'a^b', '^', '%PATH%', '%*', '%%', '!PATH!', 'say "hi"', '"', '\\"', 'ends with backslash\\', 'C:\\Program Files\\x\\', 'line one\nline two', 'cr\r\nlf', 'tab\there', '(a)', '<in >out', 'a;b,c=d', '*?', '', ' ', "'single'", '`tick`', '$env:PATH', '@file', 'ünïcödé ✓'];
   await started(new CodexTransport('codex', project, env, hostile), hostile);

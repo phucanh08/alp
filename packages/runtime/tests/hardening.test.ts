@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -19,7 +20,7 @@ test('promptSafe strips system-reminder tags, nested ones too, and leaves other 
   assert.equal(promptSafe(undefined), undefined);
 });
 
-async function project(t) {
+async function project(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-hardening-'));
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -28,12 +29,32 @@ async function project(t) {
   return { directory, root };
 }
 
+// `any`: the app-server messages the fake answers and sends are JSON of every shape; tests read their fields.
+type Message = any;
+type Handler = (method: string, params: Message) => Message;
+type Call = { method: string, params: Message };
+/** One fake native harness, as fakeTransport hands it to the runtime and to the test. */
+type FakeRuntime = {
+  calls: Call[], threadId: string, turnId: string | undefined,
+  notification?: Handler, failure?: (error: unknown) => void, serverRequest?: Handler,
+  initialize(): Promise<void>,
+  onNotification(fn: Handler): void, onFailure(fn: (error: unknown) => void): void, onRequest(fn: Handler): void,
+  close(): Promise<void>,
+  request(method: string, params: Message): Promise<Message>,
+  kind: string | undefined, env: NodeJS.ProcessEnv,
+  readonly started: Call[],
+  raw(tool: string, args: Message): Promise<string>,
+  finish(text?: string): void,
+};
+
 let calls = 0;
-function fakeTransport(runtimes) {
-  return (cwd, env, kind) => {
+function fakeTransport(runtimes: FakeRuntime[]) {
+  // The runtime's transport signature (RuntimeOptions.transport): it passes the kind, typed optional there.
+  return (cwd: string, env: NodeJS.ProcessEnv, kind?: string) => {
     const index = runtimes.length;
     let turns = 0;
-    const runtime = {
+    // The runtime sets the handlers before it starts a turn; the `!`s below rely on that, as before.
+    const runtime: FakeRuntime = {
       kind, env, calls: [], threadId: `thread-${index}`, turnId: undefined,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -46,11 +67,11 @@ function fakeTransport(runtimes) {
       },
       get started() { return this.calls.filter(call => call.method === 'turn/start'); },
       async raw(tool, args) {
-        return (await this.serverRequest('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text;
+        return (await this.serverRequest!('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text;
       },
       finish(text = 'done') {
-        this.notification('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `out-${index}-${++calls}`, text } });
-        this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
+        this.notification!('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `out-${index}-${++calls}`, text } });
+        this.notification!('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
       },
     };
     runtimes.push(runtime);
@@ -58,7 +79,7 @@ function fakeTransport(runtimes) {
   };
 }
 
-async function until(check, what = 'condition') {
+async function until(check: () => unknown, what = 'condition') {
   for (let i = 0; i < 600; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`Expected ${what} did not arrive`);
 }
@@ -66,7 +87,7 @@ async function until(check, what = 'condition') {
 test('what an agent writes reaches another agent without system-reminder tags; the user\'s own words are untouched', async t => {
   const defer = teardown(t);
   const { directory, root } = await project(t);
-  const runtimes = [];
+  const runtimes: FakeRuntime[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home'), environment: { PATH: process.env.PATH, CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'cli', KEEP: 'yes' } });
   defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root });
@@ -123,16 +144,16 @@ test('verify stops a command with SIGTERM first, stops a silent one, and counts 
 
 test('a live pid counts as an earlier process only when its start time matches', async t => {
   const defer = teardown(t);
-  assert.ok(Math.abs(processStartedAt(process.pid) - OWN_START) < 2000);
+  assert.ok(Math.abs(processStartedAt(process.pid)! - OWN_START) < 2000);
   const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)']);
   defer(() => child.kill('SIGKILL'));
-  await until(() => processStartedAt(child.pid) !== undefined, 'ps to see the child');
-  const started = processStartedAt(child.pid);
-  assert.equal(sameProcessAlive(child.pid, started), true);
-  assert.equal(sameProcessAlive(child.pid, started - 60_000), false, 'a reused pid is another process');
-  assert.equal(sameProcessAlive(child.pid), true);
+  await until(() => processStartedAt(child.pid!) !== undefined, 'ps to see the child');
+  const started = processStartedAt(child.pid!);
+  assert.equal(sameProcessAlive(child.pid!, started), true);
+  assert.equal(sameProcessAlive(child.pid!, started! - 60_000), false, 'a reused pid is another process');
+  assert.equal(sameProcessAlive(child.pid!), true);
   child.kill('SIGKILL');
-  await until(() => !sameProcessAlive(child.pid), 'the child to exit');
+  await until(() => !sameProcessAlive(child.pid!), 'the child to exit');
 });
 
 test('git runs without the git context of a hook that called ALP', () => {

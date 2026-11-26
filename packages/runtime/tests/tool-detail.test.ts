@@ -11,8 +11,14 @@ import {
   acpToolDetail, antigravityToolDetail, boundDetail, claudeToolDetail, clipText, codexToolCall, stripReadGutter, toolError,
   ClaudeTransport, createAlpRuntime, DETAIL_FILE_PATHS, DETAIL_TEXT_CHARS, DETAIL_WEB_RESULTS, ERROR_CHARS, SKILL_PLUGIN,
 } from '@anhlp/alp-runtime';
+import type { AlpRuntime } from '@anhlp/alp-runtime';
 
-async function until(check, what = 'condition') {
+// `any`: a tool call's detail is a union over its types; the tests read the fields of the one they built.
+type Json = any;
+/** ClaudeTransport's public members, and the private ones these tests drive: the SDK message handler and the running turn. */
+type ClaudeInternals = Omit<ClaudeTransport, never> & { handle(message: Json): void, activeTurn?: string };
+
+async function until(check: () => unknown, what = 'condition') {
   for (let i = 0; i < 600; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`Expected ${what} did not arrive`);
 }
@@ -62,7 +68,7 @@ test('Claude tools become typed details; Bash stays a shell command', () => {
     claudeToolDetail('Task', { subagent_type: 'Explore', description: 'Find the parser', prompt: 'Look for…' }, { text: 'raw', structured: { agentId: 'a', content: [{ type: 'text', text: 'It is in src/p.ts' }] } }),
     { type: 'sub_agent', subAgentType: 'Explore', description: 'Find the parser', log: 'It is in src/p.ts' },
   );
-  assert.equal(claudeToolDetail('Agent', { description: 'x' }).type, 'sub_agent');
+  assert.equal(claudeToolDetail('Agent', { description: 'x' })!.type, 'sub_agent');
   assert.deepEqual(claudeToolDetail('ExitPlanMode', { plan: '1. Read\n2. Fix' }), { type: 'plan', text: '1. Read\n2. Fix' });
   assert.deepEqual(claudeToolDetail('Skill', { skill: 'alp:xia' }, { text: 'Launching skill: alp:xia' }), { type: 'plain_text', label: 'alp:xia', text: 'Launching skill: alp:xia' });
   assert.deepEqual(
@@ -86,8 +92,8 @@ test('the gutter is stripped only from text numbered from its first line', () =>
   assert.equal(stripReadGutter('1\ta\nplain\n3\tc'), undefined);
   assert.deepEqual(stripReadGutter('     9→x\n    10→\n    11→y\n'), { content: 'x\n\ny\n', startLine: 9 });
   // The first line's number is the offset, over the input's.
-  assert.equal(claudeToolDetail('Read', { file_path: '/p/a.ts', offset: 5 }, { text: '     7\tx' }).offset, 7);
-  assert.equal(claudeToolDetail('Read', { file_path: '/p/a.ts', offset: 5 }).offset, 5);
+  assert.equal((claudeToolDetail('Read', { file_path: '/p/a.ts', offset: 5 }, { text: '     7\tx' }) as Json).offset, 7);
+  assert.equal((claudeToolDetail('Read', { file_path: '/p/a.ts', offset: 5 }) as Json).offset, 5);
 });
 
 test('typed details are bounded: 65,536 characters a string, 200 paths, 50 web results; errors 2,000; shell and unknown pass', () => {
@@ -95,28 +101,28 @@ test('typed details are bounded: 65,536 characters a string, 200 paths, 50 web r
   assert.equal(clipText(long), `${'x'.repeat(DETAIL_TEXT_CHARS)}\n… (10 more characters)`);
   // Bounding twice keeps the first count.
   assert.equal(clipText(clipText(long)), clipText(long));
-  const big = boundDetail({ type: 'read', filePath: '/p/a', content: 'y'.repeat(DETAIL_TEXT_CHARS + 4464) });
+  const big: Json = boundDetail({ type: 'read', filePath: '/p/a', content: 'y'.repeat(DETAIL_TEXT_CHARS + 4464) });
   assert.deepEqual(boundDetail(big), big);
   assert.ok(big.content.endsWith('… (4464 more characters)'));
   // A surrogate pair is never split.
   const emoji = `${'a'.repeat(DETAIL_TEXT_CHARS - 1)}😀tail`;
   assert.ok(clipText(emoji).startsWith(`${'a'.repeat(DETAIL_TEXT_CHARS - 1)}\n…`));
-  const read = claudeToolDetail('Read', { file_path: '/p/big.txt' }, { text: long });
+  const read: Json = claudeToolDetail('Read', { file_path: '/p/big.txt' }, { text: long });
   assert.equal(read.content.length, DETAIL_TEXT_CHARS + '\n… (10 more characters)'.length);
   const paths = Array.from({ length: 250 }, (_, i) => `f${i}.ts`);
-  const glob = claudeToolDetail('Glob', { pattern: '*' }, { structured: { durationMs: 1, numFiles: 250, filenames: paths, truncated: false } });
+  const glob: Json = claudeToolDetail('Glob', { pattern: '*' }, { structured: { durationMs: 1, numFiles: 250, filenames: paths, truncated: false } });
   assert.equal(glob.filePaths.length, DETAIL_FILE_PATHS);
   assert.equal(glob.truncated, true);
   const hits = Array.from({ length: 60 }, (_, i) => ({ title: `t${i}`, url: `https://x.dev/${i}` }));
-  const search = claudeToolDetail('WebSearch', { query: 'q' }, { structured: { query: 'q', results: [{ tool_use_id: 's', content: hits }], durationSeconds: 1 } });
+  const search: Json = claudeToolDetail('WebSearch', { query: 'q' }, { structured: { query: 'q', results: [{ tool_use_id: 's', content: hits }], durationSeconds: 1 } });
   assert.equal(search.webResults.length, DETAIL_WEB_RESULTS);
   assert.equal(toolError('e'.repeat(ERROR_CHARS + 5)), `${'e'.repeat(ERROR_CHARS)}\n… (5 more characters)`);
   assert.equal(toolError(''), 'Tool call failed');
   assert.equal(toolError('<tool_use_error>File does not exist.</tool_use_error>'), 'File does not exist.');
   assert.equal(toolError(undefined), 'Tool call failed');
-  const shell = { type: 'shell', command: long, output: long };
+  const shell: Json = { type: 'shell', command: long, output: long };
   assert.equal(boundDetail(shell), shell);
-  const unknown = { type: 'unknown', input: long, output: long };
+  const unknown: Json = { type: 'unknown', input: long, output: long };
   assert.equal(boundDetail(unknown), unknown);
 });
 
@@ -154,32 +160,32 @@ test('Codex native file changes, web searches, MCP calls and sub-agents become t
   assert.deepEqual(one, { name: 'apply_patch', status: 'completed', detail: { type: 'edit', filePath: '/p/a.ts', unifiedDiff: '@@ -1 +1 @@\n-a\n+b\n' } });
   assert.deepEqual(codexToolCall({ type: 'fileChange', id: 'f2', status: 'inProgress', changes: [{ path: '/p/n.md', kind: { type: 'add' }, diff: '# New\n' }] }, false), { name: 'apply_patch', status: 'running', detail: { type: 'write', filePath: '/p/n.md', content: '# New\n' } });
   // Codex reports a deleted or added file's content, not a diff: it becomes one hunk.
-  assert.deepEqual(codexToolCall({ type: 'fileChange', id: 'f3', status: 'completed', changes: [{ path: '/p/old.ts', kind: { type: 'delete' }, diff: 'gone\n-x\n' }] }, true).detail, { type: 'edit', filePath: '/p/old.ts', unifiedDiff: '@@ -1,2 +0,0 @@\n-gone\n--x\n' });
+  assert.deepEqual(codexToolCall({ type: 'fileChange', id: 'f3', status: 'completed', changes: [{ path: '/p/old.ts', kind: { type: 'delete' }, diff: 'gone\n-x\n' }] }, true)!.detail, { type: 'edit', filePath: '/p/old.ts', unifiedDiff: '@@ -1,2 +0,0 @@\n-gone\n--x\n' });
   assert.deepEqual(
-    codexToolCall({ type: 'fileChange', id: 'f5', status: 'completed', changes: [{ path: 'n.md', kind: { type: 'add' }, diff: '# N\nx' }, { path: 'old.ts', kind: { type: 'delete' }, diff: 'gone\n' }] }, true).detail,
+    codexToolCall({ type: 'fileChange', id: 'f5', status: 'completed', changes: [{ path: 'n.md', kind: { type: 'add' }, diff: '# N\nx' }, { path: 'old.ts', kind: { type: 'delete' }, diff: 'gone\n' }] }, true)!.detail,
     { type: 'edit', filePath: 'n.md', unifiedDiff: '--- a/n.md\n+++ b/n.md\n@@ -0,0 +1,2 @@\n+# N\n+x\n--- a/old.ts\n+++ b/old.ts\n@@ -1,1 +0,0 @@\n-gone\n' },
   );
   // Content with a diff-like line inside (a deleted .patch file) is still content.
-  assert.equal(codexToolCall({ type: 'fileChange', id: 'f6', status: 'completed', changes: [{ path: 'a.patch', kind: { type: 'delete' }, diff: 'notes\n--- x\n' }] }, true).detail.unifiedDiff, '@@ -1,2 +0,0 @@\n-notes\n---- x\n');
+  assert.equal((codexToolCall({ type: 'fileChange', id: 'f6', status: 'completed', changes: [{ path: 'a.patch', kind: { type: 'delete' }, diff: 'notes\n--- x\n' }] }, true)!.detail as Json).unifiedDiff, '@@ -1,2 +0,0 @@\n-notes\n---- x\n');
   // A removed `-- x` line inside a file's hunk is not that file's header.
   assert.equal(
-    codexToolCall({ type: 'fileChange', id: 'f8', status: 'completed', changes: [{ path: 'a.ts', kind: { type: 'update' }, diff: '@@ -1 +1 @@\n-a\n+b\n' }, { path: 'q.sql', kind: { type: 'delete' }, diff: '-- comment\nselect 1\n' }] }, true).detail.unifiedDiff,
+    (codexToolCall({ type: 'fileChange', id: 'f8', status: 'completed', changes: [{ path: 'a.ts', kind: { type: 'update' }, diff: '@@ -1 +1 @@\n-a\n+b\n' }, { path: 'q.sql', kind: { type: 'delete' }, diff: '-- comment\nselect 1\n' }] }, true)!.detail as Json).unifiedDiff,
     '--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-a\n+b\n--- a/q.sql\n+++ b/q.sql\n@@ -1,2 +0,0 @@\n--- comment\n-select 1\n',
   );
   // #117: an update's diff that starts with its `+++ ` header gets only the `--- ` line it lacks,
   // so the target header is not repeated; a moved file keeps its own target.
   assert.equal(
-    codexToolCall({ type: 'fileChange', id: 'f9', status: 'completed', changes: [{ path: 'x', kind: { type: 'update' }, diff: '+++ b/x\n@@ -1 +1 @@\n-a\n+b\n' }, { path: 'old.ts', kind: { type: 'update', move_path: 'new.ts' }, diff: '+++ b/new.ts\n@@ -1 +1 @@\n-c\n+d' }] }, true).detail.unifiedDiff,
+    (codexToolCall({ type: 'fileChange', id: 'f9', status: 'completed', changes: [{ path: 'x', kind: { type: 'update' }, diff: '+++ b/x\n@@ -1 +1 @@\n-a\n+b\n' }, { path: 'old.ts', kind: { type: 'update', move_path: 'new.ts' }, diff: '+++ b/new.ts\n@@ -1 +1 @@\n-c\n+d' }] }, true)!.detail as Json).unifiedDiff,
     '--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n--- a/old.ts\n+++ b/new.ts\n@@ -1 +1 @@\n-c\n+d\n',
   );
   // An update's diff passes as it is.
-  assert.equal(codexToolCall({ type: 'fileChange', id: 'f7', status: 'completed', changes: [{ path: 'a.ts', kind: { type: 'update' }, diff: 'x\n' }] }, true).detail.unifiedDiff, 'x\n');
+  assert.equal((codexToolCall({ type: 'fileChange', id: 'f7', status: 'completed', changes: [{ path: 'a.ts', kind: { type: 'update' }, diff: 'x\n' }] }, true)!.detail as Json).unifiedDiff, 'x\n');
   assert.deepEqual(
     codexToolCall({ type: 'fileChange', id: 'f4', status: 'declined', changes: [{ path: 'a.ts', kind: { type: 'update' }, diff: '@@ -1 +1 @@\n-a\n+b' }, { path: 'b.ts', kind: { type: 'update' }, diff: '--- a/b.ts\n+++ b/b.ts\n@@ -1 +1 @@\n-c\n+d\n' }] }, true),
     { name: 'apply_patch', status: 'failed', error: 'Tool call failed', detail: { type: 'edit', filePath: 'a.ts', unifiedDiff: '--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-a\n+b\n--- a/b.ts\n+++ b/b.ts\n@@ -1 +1 @@\n-c\n+d\n' } },
   );
   assert.deepEqual(codexToolCall({ type: 'webSearch', id: 'w1', query: 'acp spec' }, false), { name: 'web_search', status: 'running', detail: { type: 'search', query: 'acp spec', toolName: 'web_search' } });
-  assert.equal(codexToolCall({ type: 'webSearch', id: 'w1', query: 'acp spec' }, true).status, 'completed');
+  assert.equal(codexToolCall({ type: 'webSearch', id: 'w1', query: 'acp spec' }, true)!.status, 'completed');
   assert.deepEqual(
     codexToolCall({ type: 'mcpToolCall', id: 'm1', server: 'docs', tool: 'lookup', status: 'failed', arguments: { q: 'x' }, result: null, error: { message: 'server down' } }, true),
     { name: 'mcp__docs__lookup', status: 'failed', error: 'server down', detail: { type: 'unknown', input: { q: 'x' }, output: null } },
@@ -189,8 +195,8 @@ test('Codex native file changes, web searches, MCP calls and sub-agents become t
 });
 
 test('ClaudeTransport keeps its command strings and attaches the typed detail, running and done', () => {
-  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env);
-  const seen = [];
+  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env) as unknown as ClaudeInternals;
+  const seen: [string, Json][] = [];
   transport.onNotification((method, params) => method.startsWith('item/') && seen.push([method, params.item]));
   transport.activeTurn = 'turn-1';
   transport.handle({ type: 'assistant', parent_tool_use_id: null, message: { id: 'm1', content: [
@@ -210,15 +216,36 @@ test('ClaudeTransport keeps its command strings and attaches the typed detail, r
   // A failed typed call carries the tool's error text.
   transport.handle({ type: 'assistant', parent_tool_use_id: null, message: { id: 'm2', content: [{ type: 'tool_use', id: 't3', name: 'Edit', input: { file_path: '/p/a.ts', old_string: 'x', new_string: 'y' } }] } });
   transport.handle({ type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't3', content: 'String to replace not found in file.', is_error: true }] } });
-  assert.equal(seen.at(-1)[1].error, 'String to replace not found in file.');
+  assert.equal(seen.at(-1)![1].error, 'String to replace not found in file.');
 });
 
+// `any`: the app-server messages the fake answers and sends are JSON of every shape; tests read their fields.
+type Message = any;
+type Handler = (method: string, params: Message) => Message;
+type Call = { method: string, params: Message };
+/** One fake native harness, as fakeTransport hands it to the runtime and to the test. */
+type FakeRuntime = {
+  calls: Call[], threadId: string, turnId: string | undefined,
+  notification?: Handler, failure?: (error: unknown) => void, serverRequest?: Handler,
+  initialize(): Promise<void>,
+  onNotification(fn: Handler): void, onFailure(fn: (error: unknown) => void): void, onRequest(fn: Handler): void,
+  close(): Promise<void>,
+  request(method: string, params: Message): Promise<Message>,
+  kind: string | undefined, closed?: boolean,
+  readonly started: Call[],
+  readonly config: Message,
+  item(method: string, item: Message): void,
+  finish(text?: string): void,
+};
+
 let calls = 0;
-function fakeTransport(runtimes) {
-  return (cwd, env, kind) => {
+function fakeTransport(runtimes: FakeRuntime[]) {
+  // The runtime's transport signature (RuntimeOptions.transport): it passes the kind, typed optional there.
+  return (cwd: string, env: NodeJS.ProcessEnv, kind?: string) => {
     const index = runtimes.length;
     let turns = 0;
-    const runtime = {
+    // The runtime sets the handlers before it starts a turn; the `!`s below rely on that, as before.
+    const runtime: FakeRuntime = {
       kind, calls: [], threadId: `thread-${index}`, turnId: undefined,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -231,10 +258,10 @@ function fakeTransport(runtimes) {
       },
       get started() { return this.calls.filter(call => call.method === 'turn/start'); },
       get config() { return this.calls.find(call => call.method === 'thread/start')?.params; },
-      item(method, item) { this.notification(method, { threadId: this.threadId, item }); },
+      item(method, item) { this.notification!(method, { threadId: this.threadId, item }); },
       finish(text = 'done') {
-        this.notification('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}-${turns}-${++calls}`, text } });
-        this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
+        this.notification!('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}-${turns}-${++calls}`, text } });
+        this.notification!('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
       },
     };
     runtimes.push(runtime);
@@ -244,14 +271,14 @@ function fakeTransport(runtimes) {
 
 test('the runtime emits typed tool calls, while skill use and the supervisor\'s journal still read the command', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-tool-detail-'));
-  let runtime;
+  let runtime: AlpRuntime | undefined;
   t.after(async () => { await runtime?.shutdown(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   const root = path.join(directory, 'project');
   const runs = path.join(directory, 'runs');
   await initProject(root);
-  const runtimes = [];
+  const runtimes: FakeRuntime[] = [];
   runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(runtimes), libraryDir: path.join(directory, 'home'), runLogDir: runs });
-  const events = [];
+  const events: Json[] = [];
   runtime.onEvent(envelope => envelope.event.type === 'item' && envelope.event.item.kind === 'tool_call' && events.push(envelope.event.item));
   await runtime.open('root', { cwd: root, model: 'claude:claude-opus-5-5' });
   await until(() => runtimes.length === 2 && runtimes[1].config, 'the supervisor');
@@ -278,7 +305,7 @@ test('the runtime emits typed tool calls, while skill use and the supervisor\'s 
   main.finish('Read it');
 
   await until(() => supervisor.started.length === 1, 'the review');
-  const last = id => events.filter(item => item.id === id).at(-1);
+  const last = (id: string) => events.filter(item => item.id === id).at(-1);
   assert.deepEqual(last('r1'), { kind: 'tool_call', id: 'r1', callId: 'r1', name: 'Read', status: 'completed', detail: { type: 'read', filePath: '/p/a.ts', content: 'x', offset: 1 } });
   assert.deepEqual(events.find(item => item.id === 'r1'), { kind: 'tool_call', id: 'r1', callId: 'r1', name: 'Read', status: 'running', detail: { type: 'read', filePath: '/p/a.ts' } });
   assert.deepEqual([last('s1').name, last('s1').detail], ['Skill', { type: 'plain_text', label: `${SKILL_PLUGIN}:xia` }]);

@@ -4,19 +4,27 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createAlpRuntime } from '../dist/runtime.js';
+import type { AssignmentResultHandling } from '../dist/assignments/completion/assignment-results.js';
+import type { RuntimeTransport } from '@anhlp/alp-runtime';
+import type { FakeAgent } from '../../../test/support/fake-agent.ts';
+
+/** What the tests read of a refusal: its reason and message. */
+type Refusal = { data: { reason: string }, message: string };
+/** A transport that keeps the runtime's request handler, to call ALP tools by hand. */
+type Transport = RuntimeTransport & { handle?: (method: string, params: unknown) => Promise<unknown> };
 
 test('workspace mutation reserves admission and releases after callback failure', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-mutation-'));
   const runtime = createAlpRuntime();
   await runtime.registerWorkspace(root);
-  let release;
+  let release!: (value?: unknown) => void;
   const gate = new Promise(resolve => { release = resolve; });
-  let entered;
+  let entered!: (value?: unknown) => void;
   const ready = new Promise(resolve => { entered = resolve; });
   try {
     const mutation = runtime.withWorkspaceMutation(root, async () => { entered(); await gate; throw new Error('callback failure'); });
     await ready;
-    await assert.rejects(runtime.withWorkspaceMutation(root, async () => assert.fail('nested callback')), error => error.data.reason === 'workspace_busy');
+    await assert.rejects(runtime.withWorkspaceMutation(root, async () => assert.fail('nested callback')), (error: Refusal) => error.data.reason === 'workspace_busy');
     // Public open queues behind the mutation; it must never enter the callback's interval.
     release();
     await assert.rejects(mutation, /callback failure/);
@@ -37,14 +45,14 @@ test('persisted assignment results block only contained paths and malformed book
   try {
     assert.equal(await runtime.withWorkspaceMutation(sibling, async () => 'fresh'), 'fresh');
     await writeFile(recallFile, JSON.stringify([{ assignmentId: 'retained', cwd: path.join(target, 'deleted-subdir') }]));
-    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('unsafe callback')), error => error.data.reason === 'workspace_assignment_result');
+    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('unsafe callback')), (error: Refusal) => error.data.reason === 'workspace_assignment_result');
     assert.equal(await runtime.withWorkspaceMutation(sibling, async () => true), true);
     await writeFile(liveFile, JSON.stringify([{ assignmentId: 'unknown', project: sibling, spec: {}, worktree: {} }]));
-    await assert.rejects(runtime.withWorkspaceMutation(sibling, async () => assert.fail('incomplete worktree')), error => error.data.reason === 'workspace_assignment_result');
+    await assert.rejects(runtime.withWorkspaceMutation(sibling, async () => assert.fail('incomplete worktree')), (error: Refusal) => error.data.reason === 'workspace_assignment_result');
     await writeFile(liveFile, '{broken');
-    await assert.rejects(runtime.withWorkspaceMutation(sibling, async () => assert.fail('unknown callback')), error => error.data.reason === 'workspace_assignment_result');
+    await assert.rejects(runtime.withWorkspaceMutation(sibling, async () => assert.fail('unknown callback')), (error: Refusal) => error.data.reason === 'workspace_assignment_result');
     await writeFile(liveFile, JSON.stringify([{ assignmentId: 'recoverable', project: sibling, spec: { workdir: target } }]));
-    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('recoverable callback')), error => error.data.reason === 'workspace_assignment_result');
+    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('recoverable callback')), (error: Refusal) => error.data.reason === 'workspace_assignment_result');
   } finally { await runtime.shutdown(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -54,9 +62,9 @@ test('an opening transport prevents mutation and live sessions protect their own
   const target = path.join(root, 'checkout');
   const sibling = path.join(root, 'checkout-other');
   await initProject(target); await mkdir(sibling);
-  let release;
+  let release!: (value?: unknown) => void;
   const gate = new Promise(resolve => { release = resolve; });
-  let entered;
+  let entered!: (value?: unknown) => void;
   const ready = new Promise(resolve => { entered = resolve; });
   const runtime = createAlpRuntime({
     supervisor: false, libraryDir: path.join(root, 'library'),
@@ -70,9 +78,9 @@ test('an opening transport prevents mutation and live sessions protect their own
     await runtime.registerWorkspace(target); await runtime.registerWorkspace(sibling);
     const opening = runtime.open('opening', { cwd: target, model: 'codex:gpt-5.6-sol' });
     await ready;
-    await assert.rejects(runtime.withWorkspaceMutation(sibling, async () => assert.fail('opening race')), error => error.data.reason === 'workspace_busy');
+    await assert.rejects(runtime.withWorkspaceMutation(sibling, async () => assert.fail('opening race')), (error: Refusal) => error.data.reason === 'workspace_busy');
     release(); await opening;
-    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('live session')), error => error.data.reason === 'workspace_busy');
+    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('live session')), (error: Refusal) => error.data.reason === 'workspace_busy');
     assert.equal(await runtime.withWorkspaceMutation(sibling, async () => 'safe'), 'safe');
     await runtime.close('opening');
     assert.equal(await runtime.withWorkspaceMutation(target, async () => 'closed'), 'closed');
@@ -85,14 +93,14 @@ test('delegation preflight reserves admission until its child is registered', as
   const project = path.join(root, 'project');
   const target = path.join(root, 'target');
   await initProject(project); await mkdir(target);
-  let release;
+  let release!: (value?: unknown) => void;
   const gate = new Promise(resolve => { release = resolve; });
-  let entered;
+  let entered!: (value?: unknown) => void;
   const ready = new Promise(resolve => { entered = resolve; });
-  const transports = [];
+  const transports: Transport[] = [];
   const runtime = createAlpRuntime({ supervisor: false, libraryDir: path.join(root, 'library'), transport: () => {
     const index = transports.length;
-    const transport = {
+    const transport: Transport = {
       async initialize() { if (index === 1) { entered(); await gate; } },
       onNotification() {}, onFailure() {}, onRequest(fn) { this.handle = fn; }, async close() {},
       async request(method) {
@@ -107,12 +115,12 @@ test('delegation preflight reserves admission until its child is registered', as
     await runtime.registerWorkspace(target);
     await runtime.open('root', { cwd: project, model: 'codex:gpt-5.6-sol' });
     await runtime.prompt('root', { clientMessageId: 'start', delivery: 'auto', content: [{ type: 'text', text: 'Work' }] });
-    const delegation = transports[0].handle('item/tool/call', { threadId: 'thread-0', turnId: 'turn-0', callId: 'delegate', tool: 'alp_delegate', arguments: { agent: 'peer', task: 'Inspect', mode: 'read-only', wait: false } });
+    const delegation = transports[0].handle!('item/tool/call', { threadId: 'thread-0', turnId: 'turn-0', callId: 'delegate', tool: 'alp_delegate', arguments: { agent: 'peer', task: 'Inspect', mode: 'read-only', wait: false } });
     await ready;
-    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('delegation race')), error => error.data.reason === 'workspace_busy');
+    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('delegation race')), (error: Refusal) => error.data.reason === 'workspace_busy');
     release(); await delegation;
     assert.equal(await runtime.withWorkspaceMutation(target, async () => {
-      await assert.rejects(transports[0].handle('item/tool/call', { threadId: 'thread-0', turnId: 'turn-0', callId: 'blocked-delegate', tool: 'alp_delegate', arguments: { agent: 'peer', task: 'Inspect again', mode: 'read-only', wait: false } }), error => error.data.reason === 'workspace_busy');
+      await assert.rejects(transports[0].handle!('item/tool/call', { threadId: 'thread-0', turnId: 'turn-0', callId: 'blocked-delegate', tool: 'alp_delegate', arguments: { agent: 'peer', task: 'Inspect again', mode: 'read-only', wait: false } }), (error: Refusal) => error.data.reason === 'workspace_busy');
       assert.equal(transports.length, 2);
       return 'independent';
     }), 'independent');
@@ -134,27 +142,27 @@ test('permanent result ownership survives restart and recall expiry; lost ledger
     await runtime.shutdown();
     // Neither recall nor live history exists: permanent ownership remains authoritative.
     runtime = createAlpRuntime(options);
-    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('retained result')), error => error.data.reason === 'workspace_assignment_result');
+    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('retained result')), (error: Refusal) => error.data.reason === 'workspace_assignment_result');
     await ledger.remove('unmerged');
     assert.equal(await runtime.withWorkspaceMutation(target, async () => 'released'), 'released');
     await rm(assignmentResultFile);
-    await assert.rejects(runtime.registerWorkspace(target), error => error.data.reason === 'workspace_assignment_result');
-    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('lost ledger')), error => error.data.reason === 'workspace_assignment_result');
+    await assert.rejects(runtime.registerWorkspace(target), (error: Refusal) => error.data.reason === 'workspace_assignment_result');
+    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('lost ledger')), (error: Refusal) => error.data.reason === 'workspace_assignment_result');
     await writeFile(assignmentResultFile, '{broken');
-    await assert.rejects(runtime.registerWorkspace(target), error => error.data.reason === 'workspace_assignment_result');
+    await assert.rejects(runtime.registerWorkspace(target), (error: Refusal) => error.data.reason === 'workspace_assignment_result');
   } finally { await runtime.shutdown(); await rm(root, { recursive: true, force: true }); }
 });
 
 test('unfinished writers remain owned if recovery books disappear before their first result',async()=>{
  const {initProject}=await import('@anhlp/alp-core/init');const {fakeTransport}=await import('../../../test/support/fake-agent.ts');const {readFile,realpath}=await import('node:fs/promises');
  const root=await realpath(await mkdtemp(path.join(os.tmpdir(),'alp-unfinished-owner-')));const project=path.join(root,'project'),target=path.join(root,'managed');await initProject(project);await mkdir(target);const assignmentResultFile=path.join(root,'results.json'),liveFile=path.join(root,'live.json'),recallFile=path.join(root,'recall.json');
- const options={assignmentResultFile,liveFile,recallFile,supervisor:false,libraryDir:path.join(root,'library')};const agents=[];let runtime=createAlpRuntime({...options,transport:fakeTransport(agents)});
+ const options={assignmentResultFile,liveFile,recallFile,supervisor:false,libraryDir:path.join(root,'library')};const agents: FakeAgent[]=[];let runtime=createAlpRuntime({...options,transport:fakeTransport(agents)});
  try{
   await runtime.registerWorkspace(target);await runtime.open('root',{cwd:project,workflow:'pho',mode:'workspace-write',model:'codex:gpt-5.6-sol'});await runtime.prompt('root',{clientMessageId:'start',delivery:'auto',content:[{type:'text',text:'Work'}]});
   const result=await agents[0].call('alp_delegate',{agent:'peer',task:'Keep working',mode:'workspace-write',writeRoot:target,wait:false});assert.ok(result.assignmentId,JSON.stringify(result));
-  const ledger=JSON.parse(await readFile(assignmentResultFile,'utf8'));assert.ok(ledger.results.some(owner=>owner.assignmentId===result.assignmentId && owner.checkout===target),'ownership must precede native assignment work');
+  const ledger=JSON.parse(await readFile(assignmentResultFile,'utf8'));assert.ok(ledger.results.some((owner: { assignmentId: string, checkout: string })=>owner.assignmentId===result.assignmentId && owner.checkout===target),'ownership must precede native assignment work');
   await runtime.shutdown();await rm(liveFile,{force:true});await rm(recallFile,{force:true});runtime=createAlpRuntime(options);
-  await assert.rejects(runtime.withWorkspaceMutation(target,async()=>assert.fail('unfinished owner lost with recovery books')),error=>error.data.reason==='workspace_assignment_result');
+  await assert.rejects(runtime.withWorkspaceMutation(target,async()=>assert.fail('unfinished owner lost with recovery books')),(error: Refusal)=>error.data.reason==='workspace_assignment_result');
  }finally{await runtime.shutdown();await rm(root,{recursive:true,force:true});}
 });
 
@@ -172,17 +180,17 @@ test('ancestor ownership refuses mutation while boundary siblings remain indepen
     const ledger = createAssignmentResults(assignmentResultFile);
     for (const checkout of [root, target, path.join(target, 'missing-child')]) {
       await ledger.put({ assignmentId: 'owner', checkout });
-      await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('overlapping retained owner')), error => error.data.reason === 'workspace_assignment_result');
+      await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('overlapping retained owner')), (error: Refusal) => error.data.reason === 'workspace_assignment_result');
       await ledger.remove('owner');
     }
     await ledger.put({ assignmentId: 'sibling', checkout: sibling });
     assert.equal(await runtime.withWorkspaceMutation(target, async () => 'independent'), 'independent');
     await ledger.remove('sibling');
     await writeFile(liveFile, JSON.stringify([{ assignmentId: 'ancestor-live', project: sibling, spec: { writeRoot: root } }]));
-    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('ancestor live scope')), error => error.data.reason === 'workspace_assignment_result');
+    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('ancestor live scope')), (error: Refusal) => error.data.reason === 'workspace_assignment_result');
     await writeFile(liveFile, '[]');
     await writeFile(recallFile, JSON.stringify([{ assignmentId: 'ancestor-recall', cwd: sibling, shared: { writeRoot: root } }]));
-    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('ancestor recall scope')), error => error.data.reason === 'workspace_assignment_result');
+    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('ancestor recall scope')), (error: Refusal) => error.data.reason === 'workspace_assignment_result');
   } finally { await runtime.shutdown(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -195,14 +203,14 @@ test('a shared writer result holds its checkout until its requester resolves it;
   await initProject(project); await mkdir(target);
   const assignmentResultFile = path.join(root, 'results.json'), liveFile = path.join(root, 'live.json'), recallFile = path.join(root, 'recall.json');
   const options = { assignmentResultFile, liveFile, recallFile, supervisor: false, libraryDir: path.join(root, 'library') };
-  const agents = [];
+  const agents: FakeAgent[] = [];
   let runtime = createAlpRuntime({ ...options, transport: fakeTransport(agents) });
   try {
     await runtime.registerWorkspace(target);
     await runtime.open('root', { cwd: project, workflow: 'pho', mode: 'workspace-write', model: 'codex:gpt-5.6-sol' });
     await runtime.prompt('root', { clientMessageId: 'start', delivery: 'auto', content: [{ type: 'text', text: 'Work' }] });
     const main = agents[0];
-    assert.ok(main.config.dynamicTools.some(tool => tool.name === 'alp_resolve'));
+    assert.ok(main.config.dynamicTools.some((tool: { name: string }) => tool.name === 'alp_resolve'));
     const started = await main.call('alp_delegate', { agent: 'peer', task: 'Write in managed', mode: 'workspace-write', writeRoot: target, wait: false });
     assert.ok(started.assignmentId, JSON.stringify(started));
     while (agents.length < 2 || !agents[1].turnId) await new Promise(resolve => setTimeout(resolve, 10));
@@ -218,10 +226,10 @@ test('a shared writer result holds its checkout until its requester resolves it;
     await runtime.shutdown();
     await rm(recallFile, { force: true });
     runtime = createAlpRuntime({ ...options, transport: fakeTransport(agents) });
-    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('produced result')), error => error.data.reason === 'workspace_assignment_result' && error.message.includes(`Resolve permanent assignment result ${started.assignmentId}`));
+    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('produced result')), (error: Refusal) => error.data.reason === 'workspace_assignment_result' && error.message.includes(`Resolve permanent assignment result ${started.assignmentId}`));
     await runtime.open('root', { cwd: project, workflow: 'pho', mode: 'workspace-write', model: 'codex:gpt-5.6-sol' });
     await runtime.prompt('root', { clientMessageId: 'again', delivery: 'auto', content: [{ type: 'text', text: 'Handle it' }] });
-    const reopened = agents.at(-1);
+    const reopened = agents.at(-1)!;
     assert.match((await reopened.call('alp_resolve', { assignmentId: started.assignmentId, outcome: 'merged' })).error, /outcome/);
     assert.match((await reopened.call('alp_resolve', { assignmentId: 'unknown', outcome: 'applied' })).error, /No unresolved assignment result/);
     // The requester's session is gone; a root of the project may still resolve it.
@@ -240,7 +248,7 @@ test('a shared writer result holds its checkout until its requester resolves it;
     await runtime.close('root');
     assert.equal(await runtime.withWorkspaceMutation(target, async () => 'released'), 'released');
     await writeFile(recallFile, JSON.stringify([{ assignmentId: 'other', cwd: project, shared: { writeRoot: target } }]));
-    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('unresolved recall')), error => error.data.reason === 'workspace_assignment_result');
+    await assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('unresolved recall')), (error: Refusal) => error.data.reason === 'workspace_assignment_result');
   } finally { await runtime.shutdown(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -251,12 +259,12 @@ test('the result ledger archives handled entries, survives a torn archive line, 
   const file = path.join(root, 'state', 'assignment-results.json');
   const archive = path.join(root, 'state', 'assignment-archive');
   const ledger = createAssignmentResults(file);
-  const handled = { outcome: 'discarded', by: 'main in root', at: new Date().toISOString() };
+  const handled: AssignmentResultHandling = { outcome: 'discarded', by: 'main in root', at: new Date().toISOString() };
   try {
     await ledger.put({ assignmentId: 'a', checkout: root });
     await ledger.put({ assignmentId: 'b', checkout: root });
     await assert.rejects(ledger.resolve('missing', handled), /No retained assignment result/);
-    await assert.rejects(ledger.resolve('a', { ...handled, outcome: 'expired' }), /Invalid result handling/);
+    await assert.rejects(ledger.resolve('a', { ...handled, outcome: 'expired' } as unknown as AssignmentResultHandling), /Invalid result handling/);
     // A handled entry left by a crash before archiving is archived with the next resolution.
     const value = JSON.parse(await readFile(file, 'utf8'));
     value.results[1].handled = handled;
@@ -271,8 +279,8 @@ test('the result ledger archives handled entries, survives a torn archive line, 
     assert.equal(record.assignmentId, 'a');
     assert.deepEqual((await ledger.inspect()).results, []);
     assert.deepEqual(await readdir(archive), [`${month}.jsonl`]);
-    assert.equal((await ledger.archived('a')).handled.outcome, 'discarded');
-    assert.equal((await ledger.archived('b')).assignmentId, 'b');
+    assert.equal((await ledger.archived('a'))!.handled.outcome, 'discarded');
+    assert.equal((await ledger.archived('b'))!.assignmentId, 'b');
     assert.equal(await ledger.archived('old'), undefined);
     assert.equal(await ledger.archived('torn'), undefined);
     // An invalid handling record makes the ledger fail closed rather than release paths.
