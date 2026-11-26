@@ -1,4 +1,4 @@
-// Opt-in: uses real models and a declared scratch Paseo daemon (scratch-daemon.mjs). It refuses the
+// Opt-in: uses real models and a declared scratch Paseo daemon (scratch-daemon.ts). It refuses the
 // user's own daemon and ~/.alp before connecting or creating fixtures.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createPaseoApi } from '@getpaseo/client';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
 import { initProject } from '@anhlp/alp-core/init';
-import { readRunLog, requireScratchDaemon } from './scratch-daemon.mjs';
+import { readRunLog, requireScratchDaemon, type RunLogLine } from './scratch-daemon.ts';
 
 const { url, runLogDir } = requireScratchDaemon();
 
@@ -20,8 +20,9 @@ const root = path.resolve('.alp-test', `workflow-${workflow}-${Date.now()}`);
 await initProject(root);
 const token = `PROOF_${randomUUID()}`;
 await writeFile(path.join(root, 'proof.txt'), token);
-async function snapshot(directory) {
-  const output = {};
+type Snapshot = { [name: string]: Snapshot | string };
+async function snapshot(directory: string): Promise<Snapshot> {
+  const output: Snapshot = {};
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const file = path.join(directory, entry.name);
     output[entry.name] = entry.isDirectory() ? await snapshot(file) : await readFile(file, 'base64');
@@ -46,9 +47,9 @@ try {
   // The proof is the peer's handoff, not main's last message: in Cafe main delegates lead in the
   // background and may end its turn before lead returns (t-0336). Wait for the tree to finish and the
   // peer and reviewer handoffs to reach the scratch home's run log.
-  const finishedBy = (lines, role) => lines.filter(line => line.event === 'assignment.finished' && line.agent === role);
+  const finishedBy = (lines: RunLogLine[], role: string) => lines.filter(line => line.event === 'assignment.finished' && line.agent === role);
   let children;
-  let log = [];
+  let log: RunLogLine[] = [];
   for (const deadline = Date.now() + 360_000; ;) {
     children = await driver.listProviderSubagents(agent.id);
     log = await readRunLog(runLogDir, root);
@@ -62,13 +63,13 @@ try {
   const evidencePath = `.alp-test/workflow-${workflow}-${runtime}-e2e.json`;
   await writeFile(evidencePath, JSON.stringify(evidence, null, 2));
   console.log(JSON.stringify({ workflow, status: result.status, error: result.error, children: children.subagents?.map(child => ({ title: child.title, status: child.status, parent: child.parentSubagentId })), evidencePath }));
-  const handoffs = role => finishedBy(log, role).map(line => ({ status: line.status, handoff: line.handoff }));
+  const handoffs = (role: string) => finishedBy(log, role).map(line => ({ status: line.status, handoff: line.handoff }));
   console.log(JSON.stringify({ workflow, peer: handoffs('peer'), reviewer: handoffs('reviewer') }));
   assert.ok(log.length, `No run log for ${root} in ${runLogDir}: is ALP_TEST_ALP_HOME the scratch daemon's ALP home?`);
   assert.ok(finishedBy(log, 'peer').some(line => line.status === 'completed' && line.handoff?.summary?.includes(token)), 'Missing real peer proof: no completed peer handoff carries the token');
   assert.ok(finishedBy(log, 'reviewer').some(line => line.status === 'completed' && line.handoff), 'No completed reviewer handoff');
   assert.equal(children.error, null);
-  const find = name => children.subagents.find(child => child.title?.startsWith(`ALP ${name}`));
+  const find = (name: string) => children.subagents.find(child => child.title?.startsWith(`ALP ${name}`));
   assert.ok(find('peer'), 'No real peer');
   assert.ok(find('reviewer'), 'No real reviewer');
   // Main's supervisor stays open beside it; assignments complete.
@@ -77,15 +78,15 @@ try {
   if (workflow === 'pho') {
     assert.equal(find('lead'), undefined);
     assert.equal(children.subagents.filter(child => child.title?.startsWith('ALP oracle')).length, 2, 'Expected two oracles');
-    assert.equal(find('peer').parentSubagentId, null);
+    assert.equal(find('peer')!.parentSubagentId, null);
   } else {
     assert.ok(find('lead'));
-    assert.equal(find('peer').parentSubagentId, find('lead').id);
-    assert.equal(find('reviewer').parentSubagentId, find('lead').id);
+    assert.equal(find('peer')!.parentSubagentId, find('lead')!.id);
+    assert.equal(find('reviewer')!.parentSubagentId, find('lead')!.id);
   }
   // Lessons main records are the only project change.
   const after = await snapshot(root);
-  delete after['.alp']['lessons.md'];
+  delete (after['.alp'] as Snapshot)['lessons.md'];
   assert.deepEqual(after, before);
   console.log(JSON.stringify({ workflow, passed: true, evidencePath }));
 } finally {

@@ -152,7 +152,7 @@ Paseo UI ─▶ Paseo daemon ─▶ plugin (remote) ─▶ @anhlp/alp-client/por
 
 ## 7. E2E thật trên macOS (real provider)
 
-`node test/e2e/paseo-remote-e2e.mjs` (opt-in, gọi model thật; cần `codex` đã đăng nhập và `paseo`
+`node test/e2e/paseo-remote-e2e.ts` (opt-in, gọi model thật; cần `codex` đã đăng nhập và `paseo`
 0.11.x). Tách bạch với test fake ở §6:
 
 1. `npm pack` mọi workspace → hai project cài sạch từ tarball: **host** (alp-cli, daemon,

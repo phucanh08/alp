@@ -1695,7 +1695,7 @@ port 6767):
 
 ```sh
 pnpm run test:e2e:workflow
-node test/e2e/workflow-e2e.mjs pho
+node test/e2e/workflow-e2e.ts pho
 ```
 
 They create isolated fixture directories under ignored `.alp-test/`, inspect actual

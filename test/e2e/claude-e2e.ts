@@ -1,10 +1,10 @@
-// Opt-in integration: requires a declared scratch Paseo daemon with the ALP plugin (scratch-daemon.mjs)
+// Opt-in integration: requires a declared scratch Paseo daemon with the ALP plugin (scratch-daemon.ts)
 // and Claude Code authentication. It refuses the user's own daemon and ~/.alp before connecting.
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createPaseoClient } from '@getpaseo/client';
-import { requireScratchDaemon } from './scratch-daemon.mjs';
+import { requireScratchDaemon } from './scratch-daemon.ts';
 
 const { url } = requireScratchDaemon();
 
@@ -18,8 +18,8 @@ let agent;
 try {
   await client.connect();
   const models = await client.providers.listModels('alp', { cwd: root });
-  assert.ok(!models.error, models.error);
-  assert.ok(models.models.some(entry => entry.id === `claude:${model}`));
+  assert.ok(!models.error, models.error ?? undefined);
+  assert.ok(models.models!.some(entry => entry.id === `claude:${model}`));
 
   agent = await client.agents.create({
     cwd: root,

@@ -19,8 +19,8 @@ for (const [file, content] of Object.entries({
   await mkdir(path.dirname(path.join(root, file)), { recursive: true });
   await writeFile(path.join(root, file), content);
 }
-async function snapshot(directory, prefix = '') {
-  const result = {};
+async function snapshot(directory: string, prefix = ''): Promise<Record<string, string>> {
+  const result: Record<string, string> = {};
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const relative = path.join(prefix, entry.name);
     if (entry.isDirectory()) Object.assign(result, await snapshot(path.join(directory, entry.name), relative));
@@ -31,11 +31,11 @@ async function snapshot(directory, prefix = '') {
 const before = await snapshot(root);
 const client = createPaseoClient({ url, clientId: `alp-e2e-${Date.now()}` });
 const agents = [];
-const evidence = { project: root, model: 'gpt-5.6-sol', results: [] };
+const evidence: { project: string, model: string, results: object[], projectFilesUnchanged?: boolean } = { project: root, model: 'gpt-5.6-sol', results: [] };
 try {
   await client.connect();
   const models = await client.providers.listModels('alp', { cwd: root });
-  assert.ok(!models.error, models.error);
+  assert.ok(!models.error, models.error ?? undefined);
   for (const name of ['main', 'custom']) {
     const agent = await client.agents.create({
       config: { provider: 'alp/gpt-5.6-sol', modeId: 'read-only', thinkingOptionId: 'low', ...(name === 'custom' ? { options: { agent: name } } : {}) },

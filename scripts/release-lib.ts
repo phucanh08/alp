@@ -392,7 +392,7 @@ export const GATE_ROWS: GateRow[] = [
   { id: 'R4', title: 'Linux, Claude Code, CLI/alpd C1–C9 on the tarballs', blocking: false, binds: 'artifacts' },
   { id: 'R5', title: 'macOS, Codex and Claude, plugin in Paseo 0.11.x + alp dashboard W1–W6 on the tarballs', blocking: true, binds: 'artifacts' },
   { id: 'R6', title: 'Linux, Codex or Claude, plugin in Paseo 0.11.x + alp dashboard W1–W6 on the tarballs', blocking: false, binds: 'artifacts' },
-  { id: 'R7', title: 'macOS (Linux when possible), Codex and Claude, test/e2e/worktree-e2e.mjs at the release SHA', blocking: true, binds: 'sha' },
+  { id: 'R7', title: 'macOS (Linux when possible), Codex and Claude, test/e2e/worktree-e2e.ts at the release SHA', blocking: true, binds: 'sha' },
   { id: 'Q1', title: 'Registry: beta dist-tag and integrity of all 8 match the manifest', blocking: true, binds: 'artifacts', phase: 'post' },
   { id: 'Q2', title: 'Clean install from the registry on macOS (Linux when possible); lockfile integrity matches', blocking: true, binds: 'artifacts', phase: 'post' },
   { id: 'Q3', title: 'Smoke on the registry install: C1, C2, C4, W2, W6', blocking: true, binds: 'artifacts', phase: 'post' },

@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { scratchDaemon } from '../e2e/scratch-daemon.mjs';
+import { scratchDaemon } from '../e2e/scratch-daemon.ts';
 
 const home = os.userInfo().homedir;
 const realAlp = path.join(home, '.alp');

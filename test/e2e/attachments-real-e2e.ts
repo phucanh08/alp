@@ -3,7 +3,7 @@
 // branch J) on the installed Codex and Claude. It spends a few small real turns per runtime, so it never
 // runs in CI:
 //
-//   node scripts/build-workspace.ts daemon && ALP_HOME=<scratch> node test/e2e/attachments-real-e2e.mjs codex claude
+//   node scripts/build-workspace.ts daemon && ALP_HOME=<scratch> node test/e2e/attachments-real-e2e.ts codex claude
 //
 // A real alpd runs on its own temporary ALP_HOME. Per runtime, in a read-only session (the strictest
 // sandbox; nothing is widened): three files are uploaded into alpd's store (random binary with NUL bytes,
@@ -33,11 +33,19 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const ALPD = path.join(here, '../../packages/daemon/dist/alpd.js');
 const MODELS = { codex: process.env.ALP_REAL_CODEX_MODEL ?? 'codex:gpt-6-luna', claude: process.env.ALP_REAL_CLAUDE_MODEL ?? 'claude:claude-haiku-4-5' };
 const runtimes = process.argv.slice(2).filter(name => name === 'codex' || name === 'claude');
-if (!runtimes.length) { console.error('usage: attachments-real-e2e.mjs codex|claude ...'); process.exit(2); }
+if (!runtimes.length) { console.error('usage: attachments-real-e2e.ts codex|claude ...'); process.exit(2); }
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const sha = data => createHash('sha256').update(data).digest('hex');
-const sha512 = data => createHash('sha512').update(data).digest('hex');
+type Client = Awaited<ReturnType<typeof connect>>;
+// `any`: alpd answers, history items and run log lines are JSON whose shape depends on the method or event.
+type Json = any;
+// The fields of Codex's account/rateLimits/read answer this script reads.
+type UsageWindow = { usedPercent?: number, windowDurationMins?: number };
+type RateLimit = { primary?: UsageWindow, secondary?: UsageWindow } | undefined;
+type RateLimits = { rateLimitsByLimitId?: Record<string, RateLimit>, rateLimits?: RateLimit } | undefined;
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const sha = (data: Buffer) => createHash('sha256').update(data).digest('hex');
+const sha512 = (data: Buffer) => createHash('sha512').update(data).digest('hex');
 const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-attach-real-')));
 const logDir = process.env.ALP_REAL_LOG_DIR ?? path.join(directory, 'logs');
 await mkdir(logDir, { recursive: true });
@@ -47,20 +55,20 @@ await writeFile(path.join(home, 'settings.json'), '{}');
 const stageRoot = path.join(home, 'state', 'staged');
 console.log(`ALP_HOME=${home}\nlogs=${logDir}`);
 let logFile = path.join(logDir, 'run.jsonl');
-const log = async entry => { const line = { at: new Date().toISOString(), ...entry }; console.log(JSON.stringify(line)); await appendFile(logFile, `${JSON.stringify(line)}\n`); };
+const log = async (entry: Record<string, unknown>) => { const line = { at: new Date().toISOString(), ...entry }; console.log(JSON.stringify(line)); await appendFile(logFile, `${JSON.stringify(line)}\n`); };
 // The child gets this run's home and run log only, never the caller's.
 const childEnv = { ...process.env, ALP_HOME: home, ALP_RUN_LOG_DIR: path.join(home, 'runs') };
 
-let child;
+let child: ReturnType<typeof spawn> | undefined;
 async function startAlpd() {
   const out = openSync(path.join(logDir, 'alpd.log'), 'a');
   child = spawn(process.execPath, [ALPD], { stdio: ['ignore', out, out], env: childEnv });
   closeSync(out);
-  for (let i = 0; i < 200; i++) { const lock = await readLock(home); if (lock?.ready && lock.pid === child.pid) break; await sleep(50); }
-  return connect((await readLock(home)).socket, { name: 'attachments-real', version: '0' });
+  for (let i = 0; i < 200; i++) { const lock = await readLock(home); if (lock?.ready && lock.pid === child!.pid) break; await sleep(50); }
+  return connect((await readLock(home))!.socket, { name: 'attachments-real', version: '0' });
 }
-async function stopAlpd(client) {
-  const exited = once(child, 'exit');
+async function stopAlpd(client: Client) {
+  const exited = once(child!, 'exit');
   await client.request('daemon.shutdown').catch(() => {});
   client.close();
   await exited;
@@ -70,22 +78,22 @@ async function codexHeadroom() {
   const transport = new CodexTransport(process.env.ALP_CODEX_BIN ?? 'codex', directory, childEnv);
   try {
     await transport.initialize();
-    const result = await transport.request('account/rateLimits/read', {});
+    const result = await transport.request('account/rateLimits/read', {}) as RateLimits;
     const limits = Object.values(result?.rateLimitsByLimitId ?? (result?.rateLimits ? { default: result.rateLimits } : {}));
-    const windows = limits.flatMap(limit => [limit?.primary, limit?.secondary].filter(Boolean));
+    const windows = limits.flatMap(limit => [limit?.primary, limit?.secondary].filter((window): window is UsageWindow => Boolean(window)));
     // Unknown usage is not headroom: without a reading, Codex does not run.
     return { windows: windows.map(window => ({ usedPercent: window.usedPercent, windowDurationMins: window.windowDurationMins })), ok: windows.length > 0 && windows.every(window => typeof window.usedPercent === 'number' && 100 - window.usedPercent > 10) };
   } finally { await transport.close(); }
 }
 
-async function upload(client, sessionId, name, mimeType, bytes, requestId) {
+async function upload(client: Client, sessionId: string, name: string, mimeType: string, bytes: Buffer, requestId: string) {
   const begun = await client.request('attachment.begin', { sessionId, name, size: bytes.length, mimeType, requestId });
   for (let offset = 0; offset < bytes.length; offset += begun.maxChunkBytes) await client.request('attachment.chunk', { uploadId: begun.uploadId, offset, data: bytes.subarray(offset, offset + begun.maxChunkBytes).toString('base64') });
   return (await client.request('attachment.commit', { uploadId: begun.uploadId, sha256: sha(bytes) })).attachment;
 }
 
 /** Sends `content` and waits for the turn to end; answers the prompt's result, the last assistant message and the turn's tool calls. */
-async function ask(client, sessionId, id, content) {
+async function ask(client: Client, sessionId: string, id: string, content: unknown[]) {
   const before = (await client.request('session.history', { sessionId, limit: 500 })).items.length;
   const result = await client.request('session.prompt', { sessionId, clientMessageId: id, content });
   const deadline = Date.now() + 300_000;
@@ -95,16 +103,16 @@ async function ask(client, sessionId, id, content) {
     if (Date.now() > deadline) throw new Error(`turn ${id} did not end`);
     await sleep(500);
   }
-  const items = (await client.request('session.history', { sessionId, limit: 500 })).items.slice(before).map(item => item.event).filter(event => event?.type === 'item').map(event => event.item);
-  return { result, answer: items.filter(item => item.kind === 'assistant_message').at(-1)?.text ?? '', tools: items.filter(item => item.kind === 'tool_call').map(item => ({ name: item.name, status: item.status, ...(item.detail?.command ? { command: item.detail.command } : {}), ...(item.detail?.path ? { path: item.detail.path } : {}) })), items };
+  const items = (await client.request('session.history', { sessionId, limit: 500 })).items.slice(before).map((item: Json) => item.event).filter((event: Json) => event?.type === 'item').map((event: Json) => event.item);
+  return { result, answer: items.filter((item: Json) => item.kind === 'assistant_message').at(-1)?.text ?? '', tools: items.filter((item: Json) => item.kind === 'tool_call').map((item: Json) => ({ name: item.name, status: item.status, ...(item.detail?.command ? { command: item.detail.command } : {}), ...(item.detail?.path ? { path: item.detail.path } : {}) })), items };
 }
-const userMessages = async (client, sessionId) => (await client.request('session.history', { sessionId, limit: 500 })).items.map(item => item.event).filter(event => event?.type === 'item' && event.item.kind === 'user_message').map(event => event.item);
+const userMessages = async (client: Client, sessionId: string) => (await client.request('session.history', { sessionId, limit: 500 })).items.map((item: Json) => item.event).filter((event: Json) => event?.type === 'item' && event.item.kind === 'user_message').map((event: Json) => event.item);
 const stagedCopies = async () => (await readdir(stageRoot).catch(() => [])).filter(name => !name.startsWith('.'));
 const storedObjects = async () => (await readdir(path.join(home, 'state', 'attachments')).catch(() => [])).filter(name => /^[0-9a-f]{32}$/.test(name));
 const holders = async () => JSON.parse(await readFile(path.join(home, 'state', 'attachments', 'refs.json'), 'utf8')).holders;
 
-const made = { codex: new Set(), claude: new Set() };
-const results = {};
+const made = { codex: new Set<string>(), claude: new Set<string>() };
+const results: Record<string, string> = {};
 let client = await startAlpd();
 try {
   const hello = await client.request('daemon.hello', { protocolVersion: 1 });
@@ -123,7 +131,7 @@ try {
     const spec = { cwd: project, persist: true, model: MODELS[runtime], mode: 'read-only', thinking: 'low' };
     const { session } = await client.request('session.create', { spec });
     const id = session.id;
-    const remember = async sessionId => { const threadId = (await client.request('session.get', { sessionId })).session.threadId; if (threadId) made[runtime].add(threadId); };
+    const remember = async (sessionId: string) => { const threadId = (await client.request('session.get', { sessionId })).session.threadId; if (threadId) made[runtime].add(threadId); };
     await remember(id);
     await log({ step: 'create', runtime, sessionId: id, model: MODELS[runtime], mode: session.mode, promptAttachments: session.promptAttachments });
     assert.deepEqual(session.promptAttachments, ['file.path']);
@@ -165,7 +173,7 @@ try {
     assert.ok(!toolText.includes(stageRoot), 'tool calls show the staging directory masked');
     const [message] = await userMessages(client, id);
     await log({ step: 'user_message', item: message });
-    assert.deepEqual(message.attachments.map(entry => entry.attachmentId), stored.map(entry => entry.attachmentId));
+    assert.deepEqual(message.attachments.map((entry: Json) => entry.attachmentId), stored.map(entry => entry.attachmentId));
     assert.ok(!JSON.stringify(message).includes(stageRoot), 'the user message names no staging path');
     const copies = await stagedCopies();
     const modes = await Promise.all(copies.map(async name => ({ name, mode: ((await lstat(path.join(stageRoot, name))).mode & 0o777).toString(8) })));
@@ -189,7 +197,7 @@ try {
 
     // A fork of the conversation pins the attachments; its runtime reads the file again.
     const { generation } = await client.request('session.history', { sessionId: id, limit: 1 });
-    const turnId = (await client.request('session.history', { sessionId: id, limit: 500 })).items.map(item => item.event).find(event => event?.type === 'turn.started')?.turnId;
+    const turnId = (await client.request('session.history', { sessionId: id, limit: 500 })).items.map((item: Json) => item.event).find((event: Json) => event?.type === 'turn.started')?.turnId;
     const fork = await client.request('session.fork', { sessionId: id, requestId: `${runtime}-fork`, ifGeneration: generation, boundary: { throughTurnId: turnId } });
     const forkId = fork.session.id;
     if (fork.session.threadId) made[runtime].add(fork.session.threadId);
@@ -208,7 +216,7 @@ try {
     results[runtime] = 'pass';
   }
 } catch (error) {
-  await log({ step: 'failed', error: error?.message ?? String(error) });
+  await log({ step: 'failed', error: (error as Error | undefined)?.message ?? String(error) });
   process.exitCode = 1;
 } finally {
   await stopAlpd(client).catch(() => {});

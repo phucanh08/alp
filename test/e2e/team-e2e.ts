@@ -16,8 +16,9 @@ await mkdir(path.join(root, '.alp/agents/peer'), { recursive: true });
 await writeFile(path.join(root, '.alp/agents/peer/AGENT.md'), `For this read-only integration assignment, return exactly this token: ${token}. Do not use tools or delegate.`);
 await writeFile(path.join(root, '.alp/agents/lead/AGENT.md'), 'For this integration assignment, call alp_delegate exactly once with agent peer, mode read-only, and task "Return your verification token. Do not use tools or change files." Return the complete tool result verbatim to main. Do not read files or run shell commands.');
 }
-async function snapshot(directory) {
-  const output = {};
+type Snapshot = { [name: string]: Snapshot | string };
+async function snapshot(directory: string): Promise<Snapshot> {
+  const output: Snapshot = {};
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const file = path.join(directory, entry.name);
     output[entry.name] = entry.isDirectory() ? await snapshot(file) : (await readFile(file)).toString('base64');
@@ -49,10 +50,10 @@ try {
   assert.equal(children.error, null);
   const lead = children.subagents.find(child => child.title?.startsWith('ALP lead'));
   const peer = children.subagents.find(child => child.title?.startsWith('ALP peer'));
-  assert.equal(lead.parentSubagentId, null);
-  assert.equal(peer.parentSubagentId, lead.id);
-  assert.equal(lead.status, 'completed');
-  assert.equal(peer.status, 'completed');
+  assert.equal(lead!.parentSubagentId, null);
+  assert.equal(peer!.parentSubagentId, lead!.id);
+  assert.equal(lead!.status, 'completed');
+  assert.equal(peer!.status, 'completed');
   const after = await snapshot(root);
   if (writeMode) {
     assert.equal(await readFile(path.join(root, 'team-proof.txt'), 'utf8'), token);

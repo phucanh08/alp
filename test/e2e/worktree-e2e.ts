@@ -11,8 +11,8 @@ import { initProject } from '@anhlp/alp-core/init';
 const model = process.env.ALP_TEST_MODEL ?? 'codex:gpt-5.6-sol';
 const home = await mkdtemp(path.join(tmpdir(), 'alp-worktree-e2e-'));
 const env = { ...process.env, ALP_HOME: home, ALP_RUN_LOG_DIR: path.join(home, 'runs') };
-const cli = (...args) => spawnSync(process.execPath, ['packages/cli/dist/cli.js', ...args], { env, encoding: 'utf8' });
-const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+const cli = (...args: string[]) => spawnSync(process.execPath, ['packages/cli/dist/cli.js', ...args], { env, encoding: 'utf8' });
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 
 const root = path.resolve('.alp-test', `worktree-${Date.now()}`);
 await initProject(root);
@@ -23,8 +23,11 @@ git(root, 'init', '--quiet', '-b', 'main');
 git(root, 'add', '-A');
 git(root, '-c', 'user.name=ALP test', '-c', 'user.email=alp@localhost', 'commit', '--quiet', '-m', 'init');
 
-const tokens = { 'alpha.txt': `ALPHA_${randomUUID()}`, 'beta.txt': `BETA_${randomUUID()}` };
-const task = file => `Create the file ${file} containing exactly ${tokens[file]} followed by a newline.`;
+const tokens: Record<string, string> = { 'alpha.txt': `ALPHA_${randomUUID()}`, 'beta.txt': `BETA_${randomUUID()}` };
+const task = (file: string) => `Create the file ${file} containing exactly ${tokens[file]} followed by a newline.`;
+// `alp run --json` envelopes and run log lines: JSON of many shapes; the fields this lane reads.
+type Envelope = { sessionId: string, event: { type: string, session?: { parentId?: string }, item?: { kind?: string, text?: string } } };
+type RunLogLine = { event?: string, assignmentId?: string, isolation?: string, task?: string, status?: string, files?: unknown, [key: string]: unknown };
 const prompt = [
   'Integration check of parallel writers. Do not create or edit any file yourself, and do not use shell commands.',
   'Call alp_delegate twice, both with agent peer, mode workspace-write, isolation worktree and wait false,',
@@ -35,7 +38,7 @@ const prompt = [
 
 try {
   assert.equal(cli('daemon', 'start').status, 0);
-  const output = await new Promise((resolve, reject) => {
+  const output = await new Promise<string>((resolve, reject) => {
     const child = spawn(process.execPath, ['packages/cli/dist/cli.js', 'run', '--json', '--project', root, '--mode', 'workspace-write', '--model', model, '--thinking', 'low', prompt], { env });
     let stdout = '';
     let stderr = '';
@@ -44,14 +47,14 @@ try {
     child.stderr.on('data', chunk => { stderr += chunk; });
     child.on('close', code => { clearTimeout(timer); code === 0 ? resolve(stdout) : reject(new Error(`alp run exited ${code}: ${stderr}`)); });
   });
-  const envelopes = output.trim().split('\n').map(line => JSON.parse(line));
-  const main = envelopes.find(e => e.event.type === 'session.opened' && !e.event.session.parentId).sessionId;
-  const log = (await readFile(path.join(home, 'runs', `${main}.jsonl`), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  const envelopes: Envelope[] = output.trim().split('\n').map(line => JSON.parse(line));
+  const main = envelopes.find(e => e.event.type === 'session.opened' && !e.event.session!.parentId)!.sessionId;
+  const log: RunLogLine[] = (await readFile(path.join(home, 'runs', `${main}.jsonl`), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
   const started = log.filter(entry => entry.event === 'assignment.started');
   const firstFinished = log.findIndex(entry => entry.event === 'assignment.finished');
   const merged = log.filter(entry => entry.event === 'worktree.merged');
   const files = Object.fromEntries(await Promise.all(Object.keys(tokens).map(async file => [file, await readFile(path.join(root, file), 'utf8').catch(() => null)])));
-  const final = envelopes.filter(e => e.sessionId === main && e.event.type === 'item' && e.event.item.kind === 'assistant_message').at(-1)?.event.item.text ?? '';
+  const final = envelopes.filter(e => e.sessionId === main && e.event.type === 'item' && e.event.item!.kind === 'assistant_message').at(-1)?.event.item!.text ?? '';
   const evidence = {
     project: root, model, tokens, files,
     assignments: started.map(entry => ({ id: entry.assignmentId, isolation: entry.isolation, task: entry.task })),

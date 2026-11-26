@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createProvider } from '../../integrations/paseo/server/dist/index.js';
-import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
+import { PROVIDER_CAPABILITIES, type ProviderEvent, type ProviderTimelineItem } from '@getpaseo/plugin/server/provider';
 
 // Default to an ignored fixture: the provider installs ALP starter files into the project.
 const root = path.resolve(process.env.ALP_TEST_ROOT ?? path.join('.alp-test', `claude-runtime-${Date.now()}`));
@@ -15,7 +15,7 @@ const connection = await provider.connect({
   versions: [1],
   capabilities: PROVIDER_CAPABILITIES,
 });
-const events = [];
+const events: ProviderEvent[] = [];
 connection.onEvent((event) => events.push(event));
 
 try {
@@ -58,9 +58,9 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 
-  const terminal = events.findLast((event) => event.type === 'session.turn' && event.sessionId === 'claude-smoke');
+  const terminal = events.findLast((event): event is Extract<ProviderEvent, { type: 'session.turn' }> => event.type === 'session.turn' && event.sessionId === 'claude-smoke');
   const response = events
-    .filter((event) => event.type === 'timeline.item' && event.sessionId === 'claude-smoke' && event.item.type === 'assistant_message')
+    .filter((event): event is Extract<ProviderEvent, { type: 'timeline.item' }> & { item: Extract<ProviderTimelineItem, { type: 'assistant_message' }> } => event.type === 'timeline.item' && event.sessionId === 'claude-smoke' && event.item.type === 'assistant_message')
     .at(-1)?.item.text;
   console.log(JSON.stringify({ terminal, response }));
   assert.equal(terminal?.state, 'completed');

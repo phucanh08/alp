@@ -1,7 +1,7 @@
 // A file uploaded to Paseo reaches the runtime through a real alpd (issue #121 J): the provider reads
 // it from Paseo's uploads (server/uploads.ts), uploads it into alpd's attachment store, alpd pins it
 // and the ALP runtime stages a read-only copy whose path the native turn names. The native runtime is
-// scripted; real Codex and Claude runs are test/e2e/attachments-real-e2e.mjs.
+// scripted; real Codex and Claude runs are test/e2e/attachments-real-e2e.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';

@@ -6,19 +6,21 @@
 // ALP_TEST_FAKE=1 runs the same steps on the repo's fake Codex, with no model call: its [hold]
 // marker stands for a long turn, and [codewords] for a model that recalls what its thread holds.
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { connect, readLock } from '../../packages/client/dist/index.js';
-import { laneHome } from './home-guard.mjs';
+import { laneHome } from './home-guard.ts';
 
 const fake = process.env.ALP_TEST_FAKE === '1';
 const model = fake ? 'codex:gpt-5.6-sol' : process.env.ALP_TEST_MODEL ?? 'codex:gpt-5.6-sol';
 // Always a new temporary home (removed at the end), checked by the fail-closed guard (t-cad9).
 const { home } = await laneHome({ prefix: 'alp-persist-', acceptGiven: false });
-const support = name => fileURLToPath(new URL(`../../packages/daemon/tests/support/${name}`, import.meta.url));
+// `any`: alpd envelopes and events are JSON whose payload depends on the event type (the client types them so too).
+type Json = any;
+const support = (name: string) => fileURLToPath(new URL(`../../packages/daemon/tests/support/${name}`, import.meta.url));
 const env = {
   ...process.env, ALP_HOME: home, ALP_RUN_LOG_DIR: path.join(home, 'runs'),
   // The fake keeps its threads in a file, as Codex's own store does, so the next alpd's provider sees them.
@@ -26,12 +28,12 @@ const env = {
 };
 // ALP_TEST_CLI runs another alp, such as a built bundle's bin/alp, which starts its native alpd (t-81b0.9).
 const alp = process.env.ALP_TEST_CLI ? [process.env.ALP_TEST_CLI] : [process.execPath, 'packages/cli/dist/cli.js'];
-const cli = (...args) => spawnSync(alp[0], [...alp.slice(1), ...args], { env, encoding: 'utf8' });
+const cli = (...args: string[]) => spawnSync(alp[0], [...alp.slice(1), ...args], { env, encoding: 'utf8' });
 
 /** Runs the CLI with --json; resolves its envelopes, or calls `onEnvelope` as they stream. */
-function stream(args, onEnvelope = () => {}) {
+function stream(args: string[], onEnvelope: (envelope: Json, child: ChildProcess) => void = () => {}) {
   const child = spawn(alp[0], [...alp.slice(1), ...args, '--json'], { env });
-  const envelopes = [];
+  const envelopes: Json[] = [];
   let buffer = '';
   child.stdout.on('data', chunk => {
     buffer += chunk;
@@ -42,7 +44,7 @@ function stream(args, onEnvelope = () => {}) {
       onEnvelope(envelope, child);
     }
   });
-  const done = new Promise(resolve => child.on('close', code => resolve({ code, envelopes })));
+  const done = new Promise<{ code: number | null, envelopes: Json[] }>(resolve => child.on('close', code => resolve({ code, envelopes })));
   return { child, done };
 }
 /**
@@ -50,7 +52,7 @@ function stream(args, onEnvelope = () => {}) {
  * A stream follows the root until it is idle, so it can also hold turns ALP started (a recovery
  * prompt, a supervisor's check-in); what the agent says in those is not the answer (t-beb5).
  */
-function userAnswer(envelopes, sessionId) {
+function userAnswer(envelopes: Json[], sessionId: string) {
   let inUserTurn = false;
   let answer = '';
   for (const { sessionId: id, event } of envelopes) {
@@ -61,7 +63,7 @@ function userAnswer(envelopes, sessionId) {
   return answer;
 }
 /** Waits for a fact, not for time: resolves what `read` returns once it is truthy. */
-async function until(read, what, timeoutMs) {
+async function until<T>(read: () => T | Promise<T>, what: string, timeoutMs: number): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await read();
@@ -84,7 +86,7 @@ const prompts = {
   recall: fake ? 'Which codewords do you hold? [codewords]' : 'What was the codeword I asked you to remember? Reply with the word only.',
 };
 
-let client;
+let client: Awaited<ReturnType<typeof connect>> | undefined;
 try {
   assert.equal(cli('daemon', 'start').status, 0);
   const first = await stream(['run', '--project', root, '--model', model, '--thinking', 'low', prompts.remember]).done;
@@ -92,7 +94,7 @@ try {
   const sessionId = first.envelopes.find(e => e.event.type === 'session.opened').sessionId;
 
   // Kill alpd while a turn runs.
-  const { pid } = await readLock(home);
+  const { pid } = (await readLock(home))!;
   // Which alpd ran (alp's native alpd, t-81b0.9, or alpd.js), for the evidence.
   const daemonEntry = JSON.parse(await readFile(path.join(home, 'alpd.json'), 'utf8')).entry;
   let killed = false;
@@ -108,8 +110,8 @@ try {
   assert.equal(cli('daemon', 'start').status, 0);
   // The root's timeline, replayed and then live. `session.get` right after the start is a race:
   // the root reads error/daemon_restarted only until recovery reopens it, some milliseconds later.
-  client = await connect((await readLock(home)).socket);
-  const events = [];
+  client = await connect((await readLock(home))!.socket);
+  const events: Json[] = [];
   client.onEvent(envelope => { if (envelope.sessionId === sessionId) events.push(envelope.event); });
   await client.request('session.attach', { sessionId });
   const wait = fake ? 20_000 : 240_000;
@@ -120,7 +122,7 @@ try {
   assert.equal(events[recovery].origin, 'wake');
   const recovered = await until(() => events.find((event, index) => index > recovery && event.type === 'turn.ended'), 'the recovery turn to end', wait);
   assert.equal(recovered.state, 'completed');
-  await until(async () => !(await client.request('session.get', { sessionId })).session.busy, 'the root to be idle', wait);
+  await until(async () => !(await client!.request('session.get', { sessionId })).session.busy, 'the root to be idle', wait);
   const { session } = await client.request('session.get', { sessionId });
   assert.equal(session.status, 'idle');
   assert.equal(session.lastError, undefined, 'the reopened root carries no error');
@@ -128,8 +130,8 @@ try {
   const ps = cli('ps', '--all').stdout;
   const listed = ps.split('\n').find(line => line.startsWith(sessionId));
   assert.ok(listed, 'alp ps --all lists the root');
-  assert.match(listed, /  idle  /);
-  assert.doesNotMatch(listed, /daemon_restarted/);
+  assert.match(listed!, /  idle  /);
+  assert.doesNotMatch(listed!, /daemon_restarted/);
   client.close();
   client = undefined;
 
