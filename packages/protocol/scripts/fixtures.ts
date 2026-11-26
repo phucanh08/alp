@@ -8,9 +8,12 @@ const summary = { ...snapshot, status: 'idle', title: 'Sửa lỗi 😀', create
 const question = { id: 'q_1', sessionId: 'ses_fixture', rootId: 'ses_fixture', agent: 'main', body: 'Tiếp tục?', options: ['có', 'không'], askedAt: ts };
 const pin = { id: 'pin_1', project: '/work/project', kind: 'claim', body: 'Đang sửa server', paths: ['src/server.ts'], agent: 'peer', sessionId: 'ses_child', rootId: 'ses_fixture', at: ts };
 const pauses = { runtimes: { claude: { since: ts, by: 'the user', reason: 'limit', resetsAt: ts } }, parked: [{ assignmentId: 'a_1', agent: 'peer', runtime: 'claude', rootId: 'ses_fixture', reason: 'limit', since: ts }] };
-const env = (event, extra = {}) => ({ sessionId: 'ses_fixture', epoch: 'epoch-1', seq: 3, cursor: 12, ts, event, ...extra });
-const cases = [];
-const add = (check, name, value, valid = true, method) => cases.push({ name, check, ...(method ? { method } : {}), valid, value });
+// `any`: the fixtures are JSON values of every shape the schema allows, valid or deliberately not.
+type Json = any;
+
+const env = (event: Json, extra: Json = {}) => ({ sessionId: 'ses_fixture', epoch: 'epoch-1', seq: 3, cursor: 12, ts, event, ...extra });
+const cases: Json[] = [];
+const add = (check: string, name: string, value: Json, valid = true, method?: string) => cases.push({ name, check, ...(method ? { method } : {}), valid, value });
 
 // messages
 add('message', 'request', { jsonrpc: '2.0', id: 1, method: 'daemon.hello', params: { protocolVersion: 1, client: { name: 'fixture', version: '0.9.5' } } });
@@ -93,8 +96,8 @@ add('envelope', 'usage with fractional tokens', env({ type: 'usage', usage: { ou
 add('envelope', 'missing epoch', (({ epoch, ...rest }) => rest)(env({ type: 'session.ready' })), false);
 
 // params and results of every method
-const P = (method, value, valid = true, name = 'params') => add('params', `${method} ${name}`, value, valid, method);
-const R = (method, value, valid = true, name = 'result') => add('result', `${method} ${name}`, value, valid, method);
+const P = (method: string, value: Json, valid = true, name = 'params') => add('params', `${method} ${name}`, value, valid, method);
+const R = (method: string, value: Json, valid = true, name = 'result') => add('result', `${method} ${name}`, value, valid, method);
 P('daemon.hello', { protocolVersion: 1, client: { name: 'paseo', version: '0.10.0' } });
 P('daemon.hello', { protocolVersion: 1 }, true, 'without client');
 P('daemon.hello', { protocolVersion: 1, client: 'paseo' }, false, 'with a string client');

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-const generator = new URL('../scripts/fixtures.mjs', import.meta.url);
+const generator = new URL('../scripts/fixtures.ts', import.meta.url);
 const golden = new URL('../fixtures/v1/cases.json', import.meta.url);
 
 test('the fixture generator reproduces every golden case byte for byte', async () => {
