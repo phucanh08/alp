@@ -493,7 +493,7 @@ A project can name the commands that prove a change works, in
 `.alp/settings.json`:
 
 ```json
-{ "verify": { "setup": "npm ci", "typecheck": "npx tsc --noEmit", "test": "npm test", "timeoutSec": 600, "idleSec": 300 } }
+{ "verify": { "setup": "pnpm install --frozen-lockfile", "typecheck": "pnpm exec tsc --noEmit", "test": "pnpm test", "timeoutSec": 600, "idleSec": 300 } }
 ```
 
 Any of `setup`, `typecheck` and `test` may be set. They run in that order through
