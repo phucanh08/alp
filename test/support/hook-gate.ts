@@ -1,5 +1,5 @@
 // What the hook tests' POSIX gate does in sh, for Windows' cmd.exe: fails with "<name>: tests failed" until
-// $ALP_PROJECT/out/ok-<name> exists. Usage: node hook-gate.js <name>
+// $ALP_PROJECT/out/ok-<name> exists. Usage: node hook-gate.ts <name>
 import { existsSync } from 'node:fs';
 
 const [name] = process.argv.slice(2);

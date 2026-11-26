@@ -4,6 +4,8 @@ import ts from 'typescript';
 const PASEO_IMPORT = /^@getpaseo(\/|$)|integrations\/paseo\/server\/dist(\/|$)/;
 // A string that names the plugin's built output, however it is used (a spawn path, for example).
 const PASEO_PATH = /integrations\/paseo\/server\/dist(\/|$)/;
+// A TypeScript module is parsed as TypeScript, so its annotations are not misread.
+const scriptKind = (fileName: string) => /\.[cm]?tsx?$/.test(fileName) ? ts.ScriptKind.TS : ts.ScriptKind.JS;
 
 /**
  * The Paseo plugin or SDK references a module actually makes. This walks the TypeScript AST so that
@@ -11,11 +13,11 @@ const PASEO_PATH = /integrations\/paseo\/server\/dist(\/|$)/;
  * only counts as an import or require, while a string only counts when it points into the plugin's
  * own `server/dist`, which is how a test would silently spawn the plugin it must not depend on.
  */
-export function paseoImportSpecifiers(source, fileName = 'module.js') {
-  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS);
-  const imported = [];
-  const add = node => { if (node && ts.isStringLiteral(node)) imported.push(node.text); };
-  const visit = node => {
+export function paseoImportSpecifiers(source: string, fileName = 'module.js') {
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.ESNext, true, scriptKind(fileName));
+  const imported: string[] = [];
+  const add = (node: ts.Node | undefined) => { if (node && ts.isStringLiteral(node)) imported.push(node.text); };
+  const visit = (node: ts.Node) => {
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) add(node.moduleSpecifier);
     else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) add(node.moduleReference.expression);
     else if (ts.isCallExpression(node)) {
@@ -25,20 +27,20 @@ export function paseoImportSpecifiers(source, fileName = 'module.js') {
     ts.forEachChild(node, visit);
   };
   visit(file);
-  const strings = [];
-  const collect = node => { if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) strings.push(node.text); ts.forEachChild(node, collect); };
+  const strings: string[] = [];
+  const collect = (node: ts.Node) => { if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) strings.push(node.text); ts.forEachChild(node, collect); };
   collect(file);
   return [...new Set([...imported.filter(text => PASEO_IMPORT.test(text)), ...strings.filter(text => PASEO_PATH.test(text))])];
 }
 
 /** Repository location of each workspace, as named in file paths. */
-const WORKSPACE_PATHS = [['packages/', ['protocol', 'core', 'runtime', 'client', 'daemon', 'cli']], ['integrations/', ['paseo']], ['apps/', ['tui']]];
+const WORKSPACE_PATHS: [string, string[]][] = [['packages/', ['protocol', 'core', 'runtime', 'client', 'daemon', 'cli']], ['integrations/', ['paseo']], ['apps/', ['tui']]];
 
 /** The workspaces whose files a string literal points into (`packages/x/...`, `integrations/paseo/...`, `apps/tui/...` or `../../x/...` from a package's tests). */
-export function referencedPackages(source, fileName = 'module.js') {
-  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.ESNext, true, ts.ScriptKind.JS);
-  const found = new Set();
-  const collect = node => {
+export function referencedPackages(source: string, fileName = 'module.js') {
+  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.ESNext, true, scriptKind(fileName));
+  const found = new Set<string>();
+  const collect = (node: ts.Node): void => {
     if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
       for (const [prefix, names] of WORKSPACE_PATHS) {
         for (const match of node.text.matchAll(new RegExp(`${prefix}(${names.join('|')})/`, 'g'))) found.add(match[1]);

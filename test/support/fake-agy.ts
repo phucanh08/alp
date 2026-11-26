@@ -5,8 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 
+// `any`: agy's stream events and MCP messages are JSON of every shape; this fake reads only the fields each scenario sends.
+type Message = any;
+/** An MCP server entry of agy's configuration: how to start it. */
+type McpServer = { command: string, args?: string[], env?: Record<string, string> };
+
 const args = process.argv.slice(2);
-const log = message => {
+const log = (message: Message) => {
   if (process.env.FAKE_AGY_LOG) {
     appendFileSync(process.env.FAKE_AGY_LOG, (typeof message === 'string' ? message : JSON.stringify(message)) + '\n');
   }
@@ -33,7 +38,7 @@ if (args[0] === 'models') {
 }
 
 // 3. Stream-json session
-const send = obj => process.stdout.write(JSON.stringify(obj) + '\n');
+const send = (obj: Message) => process.stdout.write(JSON.stringify(obj) + '\n');
 
 log({ op: 'start', args });
 const conversationId = args.includes('--conversation') ? args[args.indexOf('--conversation') + 1] : crypto.randomUUID();
@@ -47,10 +52,10 @@ send({
   },
 });
 
-async function callMcp(server, method, params) {
+async function callMcp(server: McpServer, method: string, params: Message): Promise<Message> {
   const env = { ...process.env, ...(server.env || {}) };
   const child = spawn(server.command, server.args || [], { env, stdio: ['pipe', 'pipe', 'inherit'] });
-  const replies = new Map();
+  const replies = new Map<number, (message: Message) => void>();
   createInterface({ input: child.stdout }).on('line', line => {
     try {
       const message = JSON.parse(line);
@@ -58,7 +63,7 @@ async function callMcp(server, method, params) {
     } catch {}
   });
   let seq = 0;
-  const request = (methodName, methodParams) => new Promise(resolve => {
+  const request = (methodName: string, methodParams: Message) => new Promise<Message>(resolve => {
     const id = ++seq;
     replies.set(id, resolve);
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method: methodName, params: methodParams }) + '\n');
@@ -74,11 +79,11 @@ async function callMcp(server, method, params) {
   }
 }
 
-function findAlpServer() {
+function findAlpServer(): McpServer | null {
   try {
     const configPath = process.env.ALP_AGY_MCP_CONFIG || path.join(os.homedir(), '.gemini', 'config', 'mcp_config.json');
     const content = JSON.parse(readFileSync(configPath, 'utf8'));
-    for (const [key, server] of Object.entries(content.mcpServers || {})) {
+    for (const [key, server] of Object.entries<McpServer>(content.mcpServers || {})) {
       if (key === 'alp' || key.startsWith('alp_')) return server;
     }
   } catch {}
@@ -98,8 +103,8 @@ rl.on('line', async line => {
   }
 
   const content = parsed.message?.content || parsed.prompt || '';
-  const lines = content.split('\n').map(l => l.trim()).filter(Boolean);
-  const commandLine = lines.findLast(l => /^(say|tools|call_tool|tool_step|fail|hang|deny)\b/.test(l)) || lines.at(-1) || '';
+  const lines = content.split('\n').map((l: string) => l.trim()).filter(Boolean);
+  const commandLine = lines.findLast((l: string) => /^(say|tools|call_tool|tool_step|fail|hang|deny)\b/.test(l)) || lines.at(-1) || '';
 
   // tool_step JSON: a native tool step, ACTIVE then DONE (or ERROR when JSON has error), with JSON as its
   // tool_info ({name, parameters, output, error: {type, message}}).
@@ -135,7 +140,7 @@ rl.on('line', async line => {
     let toolNames = 'none';
     if (alpServer) {
       const res = await callMcp(alpServer, 'tools/list', {});
-      toolNames = (res?.result?.tools || []).map(t => t.name).join(',');
+      toolNames = (res?.result?.tools || []).map((t: { name: string }) => t.name).join(',');
     }
     const idx = ++stepIndex;
     send({

@@ -10,12 +10,40 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 
 let calls = 0;
 
+// `any`: the app-server messages the fake answers and sends are JSON of every shape; tests read their fields.
+type Message = any;
+type Handler = (method: string, params: Message) => Message;
+type Call = { method: string, params: Message };
+/** One scripted agent, as fakeTransport hands it to the runtime and to the test. */
+export type FakeAgent = {
+  calls: Call[], threadId: string, turnId: string | undefined, closed: boolean,
+  /** A usage report (ALPD §58) orchestrationContext answers with. */
+  limits?: unknown,
+  notification?: Handler, failure?: (error: Error) => void, serverRequest?: Handler,
+  initialize(): Promise<void>,
+  orchestrationContext(): Promise<Message>,
+  onNotification(fn: Handler): void, onFailure(fn: (error: Error) => void): void, onRequest(fn: Handler): void,
+  close(): Promise<void>,
+  request(method: string, params: Message): Promise<Message>,
+  readonly started: Call[],
+  readonly steered: string[],
+  readonly config: Message,
+  call(tool: string, args: Message): Promise<Message>,
+  finish(text?: string): void,
+  slowHandoff(ms: number, handoff: Message, text?: string): Promise<void>,
+  usage(totalTokens: number, modelContextWindow?: number, autoCompactTokens?: number, breakdown?: Record<string, number>): void,
+  compact(preTokens: number, postTokens: number, options?: { failed?: boolean }): void,
+  limit(resetsAt?: number): void,
+  crash(message?: string): void,
+};
+
 /** A transport factory for createAlpRuntime; every agent it starts is pushed to `agents`. */
-export function fakeTransport(agents) {
+export function fakeTransport(agents: FakeAgent[]) {
   return () => {
     const index = agents.length;
     let turns = 0;
-    const agent = {
+    // The runtime sets the handlers before it starts a turn; the `!`s below rely on that, as before.
+    const agent: FakeAgent = {
       calls: [], threadId: `thread-${index}`, turnId: undefined, closed: false,
       async initialize() {},
       /** What it says of its catalog and usage; set `limits` to a usage report (ALPD §58). */
@@ -36,12 +64,12 @@ export function fakeTransport(agents) {
       get config() { return this.calls.find(call => call.method === 'thread/start')?.params; },
       /** Calls an ALP tool and returns its parsed answer. */
       async call(tool, args) {
-        return JSON.parse((await this.serverRequest('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text);
+        return JSON.parse((await this.serverRequest!('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text);
       },
       /** Ends the running turn with a final message. */
       finish(text = 'done') {
-        this.notification('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `out-${index}-${++calls}`, text } });
-        this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
+        this.notification!('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `out-${index}-${++calls}`, text } });
+        this.notification!('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
       },
       /** Files a handoff after `ms`, then finishes: an agent slow to report. */
       async slowHandoff(ms, handoff, text = 'done') {
@@ -51,22 +79,22 @@ export function fakeTransport(agents) {
       },
       /** Reports how full its context is, where its runtime compacts it when it says, and the latest call's other token counts (`breakdown`). */
       usage(totalTokens, modelContextWindow = 100_000, autoCompactTokens, breakdown = {}) {
-        this.notification('thread/tokenUsage/updated', { threadId: this.threadId, turnId: this.turnId, tokenUsage: { last: { totalTokens, ...breakdown }, total: { totalTokens, ...breakdown }, modelContextWindow, ...(autoCompactTokens ? { autoCompactTokens } : {}) } });
+        this.notification!('thread/tokenUsage/updated', { threadId: this.threadId, turnId: this.turnId, tokenUsage: { last: { totalTokens, ...breakdown }, total: { totalTokens, ...breakdown }, modelContextWindow, ...(autoCompactTokens ? { autoCompactTokens } : {}) } });
       },
       /** Compacts its context, as Codex reports it: a contextCompaction item from start to end. */
       compact(preTokens, postTokens, { failed = false } = {}) {
         const item = { type: 'contextCompaction', id: `compact-${index}-${++calls}` };
-        this.notification('item/started', { threadId: this.threadId, turnId: this.turnId, item });
-        this.notification('item/completed', { threadId: this.threadId, turnId: this.turnId, item: { ...item, ...(failed ? { status: 'failed', error: 'summary failed' } : { status: 'completed', trigger: 'auto', preTokens, postTokens }) } });
+        this.notification!('item/started', { threadId: this.threadId, turnId: this.turnId, item });
+        this.notification!('item/completed', { threadId: this.threadId, turnId: this.turnId, item: { ...item, ...(failed ? { status: 'failed', error: 'summary failed' } : { status: 'completed', trigger: 'auto', preTokens, postTokens }) } });
       },
       /** Fails the running turn on a used-up Codex window. */
       limit(resetsAt = Math.floor(Date.now() / 1000) + 3600) {
-        this.notification('account/rateLimits/updated', { rateLimits: { primary: { usedPercent: 100, windowDurationMins: 300, resetsAt }, secondary: null } });
-        this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'failed', error: { message: 'You have hit your usage limit', codexErrorInfo: 'usageLimitExceeded', additionalDetails: null } } });
+        this.notification!('account/rateLimits/updated', { rateLimits: { primary: { usedPercent: 100, windowDurationMins: 300, resetsAt }, secondary: null } });
+        this.notification!('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'failed', error: { message: 'You have hit your usage limit', codexErrorInfo: 'usageLimitExceeded', additionalDetails: null } } });
       },
       /** The native process dies mid-turn. */
       crash(message = 'app-server exited with code 1') {
-        this.failure(new Error(message));
+        this.failure!(new Error(message));
       },
     };
     agents.push(agent);
@@ -75,7 +103,7 @@ export function fakeTransport(agents) {
 }
 
 /** Waits up to 3 s for `check` to hold. */
-export async function until(check, what = 'condition') {
+export async function until(check: () => unknown, what = 'condition') {
   for (let i = 0; i < 600; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`Expected ${what} did not arrive`);
 }
@@ -84,9 +112,8 @@ export async function until(check, what = 'condition') {
  * Sets the model profiles of agents of a team in a project's settings. A target's profiles are
  * the models a coordinator may pass for it (P2), and `alp init` gives each agent one Claude
  * profile, so a test that delegates on another model must say so here.
- * @param {string} root @param {Record<string, string[]>} profiles @param {string} [team]
  */
-export async function setProfiles(root, profiles, team = 'pho') {
+export async function setProfiles(root: string, profiles: Record<string, string[]>, team = 'pho') {
   const file = path.join(root, '.alp', 'settings.json');
   const settings = JSON.parse(await readFile(file, 'utf8'));
   for (const [agent, list] of Object.entries(profiles)) settings.team[team][agent] = { ...settings.team[team][agent], profiles: list };
@@ -98,13 +125,18 @@ export async function setProfiles(root, profiles, team = 'pho') {
  * Phở's agents (setProfiles). Returns the runtime,
  * its agents (main first), and the run log reader.
  */
-export async function tree(t, { prefix = 'alp-fake-', open = {}, options = () => ({}), profiles } = {}) {
+export async function tree(t: { after: (fn: () => unknown) => unknown }, { prefix = 'alp-fake-', open = {}, options = () => ({}), profiles }: {
+  prefix?: string, open?: Record<string, unknown>,
+  // The options a test passes through to createAlpRuntime, as the runtime reads them.
+  options?: (directory: string) => Partial<Parameters<typeof createAlpRuntime>[0]>,
+  profiles?: Record<string, string[]>,
+} = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), prefix));
   const root = path.join(directory, 'project');
   await initProject(root);
   if (profiles) await setProfiles(root, profiles);
   const runs = path.join(directory, 'runs');
-  const agents = [];
+  const agents: FakeAgent[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(agents), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: runs, ...options(directory) });
   t.after(async () => { await runtime.shutdown(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   await runtime.open('root', { cwd: root, ...open });

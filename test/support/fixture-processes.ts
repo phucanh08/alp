@@ -4,11 +4,13 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-const preload = new URL('./fixture-process-preload.mjs', import.meta.url).href;
-const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { if (error.code === 'ESRCH') return false; throw error; } };
+const preload = new URL('./fixture-process-preload.ts', import.meta.url).href;
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false; throw error; } };
+/** One admitted process, as fixture-process-preload.ts registers it. */
+export type FixtureProcess = { pid: number, home: string, token: string };
 
 /** Only fixture-admitted processes can stop themselves; metadata never authorizes a signal. */
-export async function fixtureProcesses(home) {
+export async function fixtureProcesses(home: string) {
   const directory = path.join(home, 'fixture-processes');
   const token = randomUUID();
   await mkdir(directory, { mode: 0o700 });
@@ -20,14 +22,14 @@ export async function fixtureProcesses(home) {
     ALP_FIXTURE_TOKEN: token,
     NODE_OPTIONS: `--import=${preload}`,
   };
-  const processes = async () => {
+  const processes = async (): Promise<FixtureProcess[]> => {
     const files = (await readdir(directory)).filter(file => file !== 'owner.json' && file.endsWith('.json'));
     const entries = await Promise.all(files.map(async file => JSON.parse(await readFile(path.join(directory, file), 'utf8'))));
     for (const entry of entries) assert.ok(entry.home === home && entry.token === token && Number.isSafeInteger(entry.pid) && entry.pid > 1 && entry.pid !== process.pid, 'invalid fixture registration');
     return entries;
   };
   const running = async () => (await processes()).filter(entry => alive(entry.pid));
-  let stopping;
+  let stopping: Promise<void> | undefined;
   const stop = () => stopping ??= (async () => {
     await writeFile(path.join(directory, 'closed'), token, { mode: 0o600 });
     // Workers register before entry. Late admissions see CLOSED (or a missing owner)

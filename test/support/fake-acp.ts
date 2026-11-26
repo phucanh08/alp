@@ -21,28 +21,33 @@ import { spawn } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
-const log = message => { if (process.env.FAKE_ACP_LOG) appendFileSync(process.env.FAKE_ACP_LOG, JSON.stringify(message) + '\n'); };
-const send = value => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...value }) + '\n');
-const sessions = new Map();
-const waiting = new Map();
-let sequence = 1000;
-let cancel;
+// `any`: ACP and MCP messages are JSON of every shape; this fake reads only the fields each scenario sends.
+type Message = any;
+/** An MCP server entry of session/new: how to start it. */
+type McpServer = { name: string, command: string, args?: string[], env?: { name: string, value: string }[] };
 
-const ask = (method, params) => new Promise(resolve => { const id = ++sequence; waiting.set(id, resolve); send({ id, method, params }); });
-const update = (sessionId, value) => send({ method: 'session/update', params: { sessionId, update: value } });
-const say = (sessionId, text) => {
+const log = (message: Message) => { if (process.env.FAKE_ACP_LOG) appendFileSync(process.env.FAKE_ACP_LOG, JSON.stringify(message) + '\n'); };
+const send = (value: Message) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...value }) + '\n');
+const sessions = new Map<string, { prompts: number, alp: McpServer }>();
+const waiting = new Map<number, (message: Message) => void>();
+let sequence = 1000;
+let cancel: (() => void) | undefined;
+
+const ask = (method: string, params: Message) => new Promise<Message>(resolve => { const id = ++sequence; waiting.set(id, resolve); send({ id, method, params }); });
+const update = (sessionId: string, value: Message) => send({ method: 'session/update', params: { sessionId, update: value } });
+const say = (sessionId: string, text: string) => {
   // In two chunks, as agents stream.
   const half = Math.ceil(text.length / 2);
   for (const part of [text.slice(0, half), text.slice(half)]) if (part) update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: part } });
 };
 
 /** A tiny MCP client for one call to the alp server. */
-async function mcp(server, method, params) {
+async function mcp(server: McpServer, method: string, params: Message): Promise<Message> {
   const env = { ...process.env, ...Object.fromEntries((server.env ?? []).map(entry => [entry.name, entry.value])) };
   const child = spawn(server.command, server.args ?? [], { env, stdio: ['pipe', 'pipe', 'inherit'] });
-  const replies = new Map();
+  const replies = new Map<number, (message: Message) => void>();
   createInterface({ input: child.stdout }).on('line', line => { const message = JSON.parse(line); replies.get(message.id)?.(message); });
-  const request = (id, name, args) => new Promise(resolve => { replies.set(id, resolve); child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method: name, params: args }) + '\n'); });
+  const request = (id: number, name: string, args: Message) => new Promise<Message>(resolve => { replies.set(id, resolve); child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method: name, params: args }) + '\n'); });
   try {
     await request(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'fake-acp', version: '1' } });
     child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
@@ -50,25 +55,26 @@ async function mcp(server, method, params) {
   } finally { child.stdin.end(); child.kill(); }
 }
 
-async function prompt(id, { sessionId, prompt: blocks }) {
-  const session = sessions.get(sessionId);
+async function prompt(id: number, { sessionId, prompt: blocks }: { sessionId: string, prompt: { type: string, text?: string }[] }) {
+  // A prompt names a session this fake created (as before, an unknown one throws).
+  const session = sessions.get(sessionId)!;
   session.prompts += 1;
   const text = blocks.filter(block => block.type === 'text').at(-1)?.text ?? '';
   const lines = text.split('\n').filter(line => line.startsWith('fake:'));
   if (!lines.length) lines.push('fake:say ok');
-  let usage;
+  let usage: Record<string, number> | undefined;
   for (const line of lines) {
     const [verb, ...rest] = line.slice(5).split(' ');
     const argument = rest.join(' ');
     if (verb === 'say') say(sessionId, argument);
     else if (verb === 'tools') {
       const reply = await mcp(session.alp, 'tools/list', {});
-      say(sessionId, `tools: ${reply.result.tools.map(tool => tool.name).join(',')}`);
+      say(sessionId, `tools: ${reply.result.tools.map((tool: { name: string }) => tool.name).join(',')}`);
     } else if (verb === 'tool') {
       const [name, ...json] = rest;
       update(sessionId, { sessionUpdate: 'tool_call', toolCallId: `call-${++sequence}`, title: `alp: ${name}`, kind: 'other', status: 'pending' });
       const reply = await mcp(session.alp, 'tools/call', { name, arguments: JSON.parse(json.join(' ') || '{}') });
-      say(sessionId, `tool ${name}: ${reply.result.isError ? 'error ' : ''}${reply.result.content.map(part => part.text).join('')}`);
+      say(sessionId, `tool ${name}: ${reply.result.isError ? 'error ' : ''}${reply.result.content.map((part: { text: string }) => part.text).join('')}`);
     } else if (verb === 'permit') {
       const [kind, ...what] = rest;
       const toolCallId = `call-${++sequence}`;
@@ -91,7 +97,7 @@ async function prompt(id, { sessionId, prompt: blocks }) {
       if (late) update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId, status: 'in_progress', kind: 'other' });
     } else if (verb === 'usage') update(sessionId, { sessionUpdate: 'usage_update', used: Number(rest[0]), size: Number(rest[1]), ...(rest[2] ? { cost: { amount: Number(rest[2]), currency: 'USD' } } : {}) });
     else if (verb === 'tokens') usage = { inputTokens: Number(rest[0]), outputTokens: Number(rest[1]), cachedReadTokens: Number(rest[2]), totalTokens: Number(rest[0]) + Number(rest[1]) };
-    else if (verb === 'hang') { await new Promise(resolve => { cancel = resolve; }); return send({ id, result: { stopReason: 'cancelled' } }); }
+    else if (verb === 'hang') { await new Promise<void>(resolve => { cancel = resolve; }); return send({ id, result: { stopReason: 'cancelled' } }); }
     else if (verb === 'fail') return send({ id, error: { code: -32603, message: 'fake failure' } });
     else if (verb === 'exit') process.exit(3);
   }
@@ -107,7 +113,7 @@ createInterface({ input: process.stdin }).on('line', line => {
     send({ id, result: { protocolVersion: 1, agentInfo: { name: 'fake-acp', title: 'Fake ACP', version: '1.0.0' }, agentCapabilities: { loadSession: process.env.FAKE_ACP_LOAD === '1', mcpCapabilities: { http: false }, ...(process.env.FAKE_ACP_IMAGES === '1' ? { promptCapabilities: { image: true } } : {}) }, authMethods: [] } });
   } else if (method === 'session/new' || method === 'session/load') {
     const sessionId = method === 'session/load' ? params.sessionId : `fake-session-${++sequence}`;
-    sessions.set(sessionId, { prompts: 0, alp: params.mcpServers.find(server => server.name === 'alp') });
+    sessions.set(sessionId, { prompts: 0, alp: params.mcpServers.find((server: McpServer) => server.name === 'alp') });
     // A loaded session replays its history first.
     if (method === 'session/load') say(sessionId, 'replayed history');
     const models = process.env.FAKE_ACP_MODELS ? { models: { currentModelId: process.env.FAKE_ACP_MODELS.split(',')[0], availableModels: process.env.FAKE_ACP_MODELS.split(',').map(modelId => ({ modelId, name: modelId })) } } : {};

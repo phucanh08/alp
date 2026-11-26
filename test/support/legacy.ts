@@ -5,7 +5,7 @@ import { initProject } from '@anhlp/alp-core/init';
 export const BUILTIN = ['main', 'lead', 'peer', 'oracle', 'reviewer', 'supervisor'];
 
 /** A project as `alp init` made it before ALPD §41: ALP.md, settings and a copy of each built-in agent. */
-export async function legacyProject(root, agents = BUILTIN) {
+export async function legacyProject(root: string, agents: string[] = BUILTIN) {
   await initProject(root);
   for (const name of agents) {
     const directory = path.join(root, '.alp/agents', name);

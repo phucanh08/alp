@@ -31,9 +31,9 @@ if (isMainThread) {
     parentPort.postMessage('admitted');
     setInterval(() => { if (closed()) stop(); }, 10);
   `, { eval: true, execArgv: [], workerData: { directory, home: manifest.home, token } });
-  await new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     let admitted = false;
-    const failed = error => {
+    const failed = (error: Error) => {
       if (admitted) process.kill(process.pid, 'SIGKILL');
       else reject(error);
     };

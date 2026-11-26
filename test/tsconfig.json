@@ -1,0 +1,24 @@
+{
+  // The root tests and their support files are TypeScript that Node (>= 22.18, the dev/CI floor) runs
+  // directly by stripping types: relative imports name the .ts file, type-only imports say so
+  // (verbatimModuleSyntax), and only erasable syntax is allowed. This only type-checks them strictly.
+  // Run: pnpm exec tsc -p test/tsconfig.json
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    // Workspace imports (@anhlp/*) resolve to their TypeScript sources: no build needed to check.
+    "customConditions": ["alp-source"]
+  },
+  "include": ["**/*.ts"],
+  // The fixture apps are data the tests copy or read, not code checked here.
+  "exclude": ["fixtures/**"]
+}

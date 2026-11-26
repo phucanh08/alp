@@ -23,28 +23,25 @@
 //
 // Calling `teardown(t)` again for the same `t` returns the same `defer`, so a fixture helper and the
 // test body that calls it share one ordered list. Prefer this over a bare `t.after` that removes a
-// directory: scripts/check-teardown-order.mjs fails the build on a new one.
+// directory: scripts/check-teardown-order.ts fails the build on a new one.
 
-/** @type {WeakMap<object, (step: () => unknown) => void>} */
-const handles = new WeakMap();
+const handles = new WeakMap<object, (step: () => unknown) => void>();
 
 /**
  * One reverse-order teardown hook for `t` (a node:test TestContext, or `test` itself for a
  * file-level hook). Returns `defer(step)`; see the note above.
- * @param {{ after: (fn: () => unknown) => unknown }} t
- * @returns {(step: () => unknown) => void}
  */
-export function teardown(t) {
+export function teardown(t: { after: (fn: () => unknown) => unknown }): (step: () => unknown) => void {
   const existing = handles.get(t);
   if (existing) return existing;
-  /** @type {Array<() => unknown>} */
-  const steps = [];
+  const steps: Array<() => unknown> = [];
   t.after(async () => {
-    const errors = [];
+    const errors: unknown[] = [];
     // Pop rather than iterate a reversed copy: a step that defers another step (a cleanup that
     // opens something) is still run, and no step can run twice.
     while (steps.length) {
-      try { await steps.pop()(); } catch (error) { errors.push(error); }
+      // The loop condition guarantees a step to pop.
+      try { await steps.pop()!(); } catch (error) { errors.push(error); }
     }
     if (errors.length === 1) throw errors[0];
     // Name every failure in the message itself: Node 22's reporter prints an AggregateError's
@@ -54,7 +51,7 @@ export function teardown(t) {
       throw new AggregateError(errors, `teardown failed: ${messages.join('; ')}`);
     }
   });
-  const defer = step => { steps.push(step); };
+  const defer = (step: () => unknown) => { steps.push(step); };
   handles.set(t, defer);
   return defer;
 }

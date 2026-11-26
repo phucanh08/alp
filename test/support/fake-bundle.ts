@@ -1,13 +1,13 @@
-// A stand-in ALP bundle (scripts/build-bundle.mjs layout) for installer tests: alp-bundle.json, the
+// A stand-in ALP bundle (scripts/build-bundle.ts layout) for installer tests: alp-bundle.json, the
 // real launcher, this Node as node/bin/node (a symlink) or node/node.exe (a copy), and a cli.js that
 // prints `version` for --version and its arguments otherwise.
 import { chmod, copyFile, mkdir, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { POSIX_LAUNCHER, WINDOWS_LAUNCHER } from '../../scripts/build-bundle.mjs';
+import { POSIX_LAUNCHER, WINDOWS_LAUNCHER } from '../../scripts/build-bundle.ts';
 
 /** Writes <directory>/alp-<version>-<platform>/ and returns its path. */
 /** nativeDaemon: also a bin/alpd that prints `nativeDaemon` for --version (an empty string: it cannot run). */
-export async function fakeBundle(directory, version, platform, { nativeDaemon } = {}) {
+export async function fakeBundle(directory: string, version: string, platform: string, { nativeDaemon }: { nativeDaemon?: string } = {}) {
   const root = path.join(directory, `alp-${version}-${platform}`);
   const windows = platform.startsWith('windows-');
   const cli = path.join(root, 'lib/node_modules/@anhlp/alp-cli/dist/cli.js');
