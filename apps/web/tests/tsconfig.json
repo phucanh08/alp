@@ -13,8 +13,8 @@
     "jsx": "react-jsx",
     "rootDirs": ["../src/lib", "../dist-lib"],
     "baseUrl": "..",
-    // @alp-web-lib/*: only for dist-modules.d.ts, which declares the built dist-lib with these sources.
-    "paths": { "@/*": ["src/*"], "@alp-web-lib/*": ["src/lib/*"] }
+    // @anhlp/alp-web/src/lib/*: only for dist-modules.d.ts, which declares the built dist-lib with these sources.
+    "paths": { "@/*": ["src/*"], "@anhlp/alp-web/src/lib/*": ["src/lib/*"] }
   },
   "include": ["**/*.ts", "../build/*.ts", "../vite.config.ts"],
   // Entry files the boundary test hands to Vite, not code checked here.
