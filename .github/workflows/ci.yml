@@ -32,13 +32,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      # pnpm first, at the version package.json's packageManager pins, so setup-node can cache its store.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - uses: ./.github/actions/terminal-native
-      - run: npm run validate:core
+      - run: pnpm run validate:core
 
   paseo:
     needs: terminal-native
@@ -50,14 +52,16 @@ jobs:
         node: [22, 24]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # pnpm first, at the version package.json's packageManager pins, so setup-node can cache its store.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - uses: ./.github/actions/terminal-native
       # Plugin-owned and all cross-package tests use fake providers.
-      - run: npm run validate:paseo
+      - run: pnpm run validate:paseo
 
   # The paseo lane above builds and tests with the SDK in the lockfile, the newest supported Paseo.
   # This one runs it against the lowest release requirements.paseo admits, so both bounds of the
@@ -68,16 +72,18 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # pnpm first, at the version package.json's packageManager pins, so setup-node can cache its store.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - uses: ./.github/actions/terminal-native
       - run: node scripts/use-paseo-sdk.mjs floor
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
       - run: node scripts/use-paseo-sdk.mjs --verify
-      - run: npm run validate:paseo
+      - run: pnpm run validate:paseo
 
   # H2 (docs/alp/beta-scope.md §6.1, D7): macOS is the primary test platform, so the core and paseo
   # lanes run there too, on a runner with no global ALP install. A new job name: the required checks
@@ -87,13 +93,15 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # pnpm first, at the version package.json's packageManager pins, so setup-node can cache its store.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run validate:core
-      - run: npm run validate:paseo
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run validate:core
+      - run: pnpm run validate:paseo
 
   windows-daemon:
     runs-on: windows-latest
@@ -109,11 +117,13 @@ jobs:
         node: [22, 24]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # pnpm first, at the version package.json's packageManager pins, so setup-node can cache its store.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: node scripts/build-workspace.mjs cli
       - run: node scripts/build-workspace.mjs paseo
       # t-fa1b: run the catalog/compact/probe/migration regressions on both Windows Node versions.
@@ -146,18 +156,20 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # pnpm first, at the version package.json's packageManager pins, so setup-node can cache its store.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - if: runner.os == 'Linux'
         uses: ./.github/actions/terminal-native
       - if: runner.os == 'Linux'
-        run: npx playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium
       - if: runner.os == 'macOS'
-        run: npx playwright install chromium
-      - run: npm run validate:web
+        run: pnpm exec playwright install chromium
+      - run: pnpm run validate:web
         env:
           ALP_WEB_PLAYWRIGHT_OUTPUT: ${{ runner.temp }}/alp-web-playwright
       - if: failure()
@@ -178,16 +190,18 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # pnpm first, at the version package.json's packageManager pins, so setup-node can cache its store.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - uses: ./.github/actions/terminal-native
       # Checks out the pinned Paseo compiler and builds all packages before inspecting/installing tarballs.
-      - run: npm run validate:packages
+      - run: pnpm run validate:packages
 
-  # The macOS desktop shell (apps/desktop, D32): a standalone bun project outside the npm workspaces,
+  # The macOS desktop shell (apps/desktop, D32): a standalone bun project outside the pnpm workspaces,
   # so the root runner never sees its tests. Unit tests, typecheck, the bundle, then the Electron e2e
   # against a disposable alp dashboard host built from this checkout (packages/cli/dist/alp-dashboard.js), with
   # Playwright's _electron from the root install. Then the two ad-hoc signed DMGs (arm64, x64; t-81b0.3,
@@ -208,11 +222,13 @@ jobs:
       - run: bun test test
       - run: bun run typecheck
       - run: bun run build
+      # pnpm first, at the version package.json's packageManager pins, so setup-node can cache its store.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
         working-directory: .
       - run: node scripts/build-workspace.mjs cli
         working-directory: .

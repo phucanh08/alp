@@ -59,20 +59,22 @@ jobs:
             git -c user.name="ALP release" -c user.email=release@localhost tag -a "$tag" -m "ALP ${tag#v}" "$RELEASE_SHA"
           fi
           echo "TAG=$tag" >> "$GITHUB_ENV"
+      # pnpm first, at the version package.json's packageManager pins, so setup-node can cache its store.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       # The CLI's build includes alp-dashboard (`alp dashboard`): packages/cli/dist/alp-dashboard.js with the private
       # gateway inlined, and the apps/web files in packages/cli/dist/alp-dashboard/ with their notices.
-      - run: npm run build:packages
+      - run: pnpm run build:packages
       # release:pack refuses a dirty checkout or an untagged commit, runs prepack, writes SHA256SUMS
       # and release-manifest.json, and runs A5 itself, then checks that @anhlp/alp and @anhlp/alp-cli
       # carry alp-dashboard.js, alp-dashboard/index.html and the notices; verify again against the SHA asked for.
       - name: release:pack
-        run: npm run release:pack -- --out "$OUT"
-      - run: npm run release:verify -- "$OUT" --sha "$RELEASE_SHA"
+        run: pnpm run release:pack --out "$OUT"
+      - run: pnpm run release:verify "$OUT" --sha "$RELEASE_SHA"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: alp-release
@@ -101,10 +103,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
+      # pnpm first, at the version package.json's packageManager pins, so setup-node can cache its store.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: alp-release
@@ -114,12 +118,12 @@ jobs:
       # The harness and release-consumer check SHA256SUMS and the manifest before using the tarballs.
       - name: Locate the release
         run: echo "PACKS=$RUNNER_TEMP/release/v$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
       # Paseo's plugin compiler at the pinned commit, which release-consumer's #111 check runs on the
       # plugin installed from these tarballs.
       - name: Paseo plugin compiler checkout (#111)
         run: node scripts/paseo-checkout.mjs
-      - run: npm run release:consumer -- "$PACKS"
+      - run: pnpm run release:consumer "$PACKS"
       - name: CLI C1–C9, fake Codex
         if: ${{ !cancelled() }}
         run: node scripts/beta-acceptance-cli.mjs --packs "$PACKS" --fake --provider codex --work "$RUNNER_TEMP/alp-beta" --runner "github-actions ${{ github.actor }}"
