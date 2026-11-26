@@ -19,7 +19,7 @@ test('the fixture generator reproduces every golden case byte for byte', async (
     });
     assert.equal(generated.status, 0, generated.stderr || generated.error?.message);
     assert.ok((await readFile(output)).equals(await readFile(golden)),
-      'Fixture drift: edit scripts/fixtures.mjs and regenerate fixtures/v1/cases.json together');
+      'Fixture drift: edit scripts/fixtures.ts and regenerate fixtures/v1/cases.json together');
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }

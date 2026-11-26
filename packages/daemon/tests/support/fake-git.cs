@@ -1,4 +1,4 @@
-// A stand-in git.exe for the daemon's tests on Windows (files.test.js, fakeGit).
+// A stand-in git.exe for the daemon's tests on Windows (files.test.ts, fakeGit).
 //
 // alpd runs git with an argument list and no shell, which on Windows can start only a real
 // executable: a script with a #! line, or a .cmd, is never run. This program is that executable.

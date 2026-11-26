@@ -465,8 +465,7 @@ test('writeCredentials retries transient EPERM/EACCES/EBUSY on atomic rename and
     calls++;
     if (calls <= 2) {
       const err = new Error('EPERM: operation not permitted, rename');
-      // @ts-ignore
-      err.code = calls === 1 ? 'EPERM' : 'EBUSY';
+      (err as NodeJS.ErrnoException).code = calls === 1 ? 'EPERM' : 'EBUSY';
       throw err;
     }
     return originalRename.call(this, from, to);
@@ -494,8 +493,7 @@ test('writeCredentials retries transient EPERM/EACCES/EBUSY on atomic rename and
     rotateCalls++;
     if (rotateCalls <= 2) {
       const err = new Error('EACCES: permission denied, rename');
-      // @ts-ignore
-      err.code = 'EACCES';
+      (err as NodeJS.ErrnoException).code = 'EACCES';
       throw err;
     }
     return originalRename.call(this, from, to);
@@ -536,8 +534,7 @@ test('writeCredentials rethrows and cleans up temp files when rename retries are
   nodeFs.promises.rename = async function(from, to) {
     calls++;
     const err = new Error('EPERM: operation not permitted, rename');
-    // @ts-ignore
-    err.code = 'EPERM';
+    (err as NodeJS.ErrnoException).code = 'EPERM';
     throw err;
   };
   syncBuiltinESMExports();
@@ -566,8 +563,7 @@ test('writeCredentials fails immediately on non-retriable rename errors without 
   nodeFs.promises.rename = async function(from, to) {
     calls++;
     const err = new Error('EISDIR: illegal operation on a directory, rename');
-    // @ts-ignore
-    err.code = 'EISDIR';
+    (err as NodeJS.ErrnoException).code = 'EISDIR';
     throw err;
   };
   syncBuiltinESMExports();
@@ -611,8 +607,7 @@ test('renameWithRetry unit contract: backoff schedule, bounds and error filterin
     attempts++;
     if (attempts <= 3) {
       const err = new Error('EBUSY: resource busy');
-      // @ts-ignore
-      err.code = 'EBUSY';
+      (err as NodeJS.ErrnoException).code = 'EBUSY';
       throw err;
     }
     return originalRename.call(this, from, to);

@@ -1,6 +1,6 @@
 // alp dashboard's host owner methods for the library and workspace files (t-a95b group C,
 // src/dashboard/owner/library.js; docs/alp/dashboard.md §4.8). The gateway lets only the owner's
-// connection reach them (apps/gateway/tests/owner-library.test.js); here each handler's own checks:
+// connection reach them (apps/gateway/tests/owner-library.test.ts); here each handler's own checks:
 // every refusal writes nothing, a stale base is a conflict, a hidden value is never written as its mask.
 import test from 'node:test';
 import type { TestContext } from 'node:test';

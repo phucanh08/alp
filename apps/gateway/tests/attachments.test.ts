@@ -4,7 +4,7 @@
 // grant before begin; the gateway's own principal context (credential, grant epoch, authorized
 // roots) on every call, whatever the client sends; chunks over the advertised size refused before
 // alpd; answers projected and alpd's errors rewritten. alpd's binding itself is proven against the
-// real store in packages/daemon/tests/attachments.test.js and test/integration/gateway.test.ts.
+// real store in packages/daemon/tests/attachments.test.ts and test/integration/gateway.test.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
