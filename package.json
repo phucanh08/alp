@@ -65,7 +65,7 @@
     "check:teardown-order": "node scripts/check-teardown-order.ts"
   },
   "engines": {
-    "node": ">=22.12"
+    "node": ">=22.18"
   },
   "devDependencies": {
     "@agentclientprotocol/sdk": "1.7.0",
