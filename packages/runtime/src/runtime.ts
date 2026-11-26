@@ -1486,17 +1486,19 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       : { usage: ((await runtime.orchestrationContext?.()) as any)?.usage, account: null };
     const open = [...sessions.values()].find(session => !session.closed && !session.pending && session.runtimeKind === kind);
     if (open) return optionalRead(() => read(open.runtime), 20_000);
-    const transport = createTransport(options, kind, os.tmpdir(), nativeEnvironment(options));
-    transport.onFailure(() => {});
+    let transport: RuntimeTransport | undefined;
     try {
+      // A provider that cannot be made (not on PATH, which throws at once on Windows) reads as no usage.
+      const made = transport = createTransport(options, kind, os.tmpdir(), nativeEnvironment(options));
+      made.onFailure(() => {});
       return await optionalRead(async () => {
-        await transport.initialize();
-        return read(transport);
+        await made.initialize();
+        return read(made);
       }, 20_000);
     } catch {
       return undefined;
     } finally {
-      await transport.close().catch(() => {});
+      await transport?.close().catch(() => {});
     }
   }
 
@@ -4246,14 +4248,21 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
 
     const environment = nativeEnvironment(options, mapping.env);
 
-    const runtime = createTransport(
-      options,
-      runtimeKind,
-      mapping.workdir,
-      environment,
-      mapping.acp,
-      mapping.antigravity,
-    );
+    let runtime: RuntimeTransport;
+    try {
+      runtime = createTransport(
+        options,
+        runtimeKind,
+        mapping.workdir,
+        environment,
+        mapping.acp,
+        mapping.antigravity,
+      );
+    } catch (error) {
+      // No session exists yet (Codex not on PATH throws here on Windows): logged as the start failure it is (t-aad3).
+      log.error(`${mapping.agent.name} could not start its ${runtimeKind} session`, { code: 'ALP_PROVIDER_START_FAILED', sessionId, rootId: context ? rootOf(context.parent) : sessionId, agent: mapping.agent.name, provider: runtimeKind, error });
+      throw error;
+    }
 
     const session: Session = {
       runtimeKind,
@@ -4610,13 +4619,16 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const old = session.runtime;
     const finishPending = beginPending(session);
     await old.close().catch(() => {});
-    const transport = createTransport(options, session.runtimeKind, session.mapping.workdir, nativeEnvironment(options, session.mapping.env), session.mapping.acp, session.mapping.antigravity);
-    // Not wired before it resumes: a failure now fails this restart, not the session.
-    let failure: unknown;
-    transport.onFailure(error => { failure ??= error; });
-    session.runtime = transport;
+    let transport: RuntimeTransport | undefined;
     let result: any;
     try {
+      // Inside the try: a provider that cannot be made (Codex gone from PATH, which throws at once on
+      // Windows) fails this restart like any other step, and the session is not left pending (t-aad3).
+      transport = createTransport(options, session.runtimeKind, session.mapping.workdir, nativeEnvironment(options, session.mapping.env), session.mapping.acp, session.mapping.antigravity);
+      // Not wired before it resumes: a failure now fails this restart, not the session.
+      let failure: unknown;
+      transport.onFailure(error => { failure ??= error; });
+      session.runtime = transport;
       await transport.initialize();
       const config = await configOf(shape ? { ...session, ...shape } : session);
       noteInstructions(sessionId, session, config.developerInstructions);
@@ -4632,7 +4644,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       if (binding && result?.thread?.id !== undefined && result.thread.id !== binding.threadId) throw new Error(`${label(session.runtimeKind)} resumed ${result.thread.id} instead of ${binding.threadId}`);
       if (!binding && typeof result?.thread?.id !== 'string') throw new Error(`${label(session.runtimeKind)} started no conversation`);
     } catch (error) {
-      await transport.close().catch(() => {});
+      await transport?.close().catch(() => {});
       // Not pending any more: mail that waited runs again in the operation queue, after this restart's
       // caller (which reopens or fails the session) is through.
       finishPending();
