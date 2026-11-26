@@ -51,7 +51,7 @@ async function shippedFiles({ templateRoot, templates }: SeedOptions): Promise<R
  * Every role-skills.json ALP shipped, by sha (CRLF-normalized), with what it gave each role. A
  * library's manifest names the one ALP last wrote, so the built-in skills its user has already been
  * offered are known for a library from before `roleSkillsOffered` was recorded (t-de1a). Add each
- * new shipped version here (packages/core/tests/role-skills-offer.test.js checks the current one is).
+ * new shipped version here (packages/core/tests/role-skills-offer.test.ts checks the current one is).
  * @type {Readonly<Record<string, Record<string, string[]>>>}
  */
 export const SHIPPED_ROLE_SKILLS: Readonly<Record<string, Record<string, string[]>>> = Object.freeze({

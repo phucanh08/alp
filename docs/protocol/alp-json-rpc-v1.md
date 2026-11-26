@@ -17,7 +17,7 @@ changes listed in §13. Where earlier alpd behaved differently, §13 says so.
 | `packages/protocol/src/*.ts`, `wire.js` | TypeScript projection and constants. Tests type-check the golden fixtures against it to detect covered differences from the schema. |
 | `packages/protocol/fixtures/v1/cases.json` | Golden values: valid and invalid messages, envelopes, params and results of every method. |
 | `packages/protocol/conformance/` | Executable suite run against a live endpoint (§11). |
-| `src/contract-v1.js` | Generated from `methods-v1.json` (`node packages/protocol/scripts/generate.mjs`); a test fails when stale. |
+| `src/contract-v1.js` | Generated from `methods-v1.json` (`node packages/protocol/scripts/generate.ts`); a test fails when stale. |
 
 A shape is changed in the schema first. The schema is not changed to make TypeScript convenient.
 
@@ -643,7 +643,7 @@ node packages/protocol/conformance/run.mjs --socket S --profiles handshake,wire,
 - **Session profile requirements**: a disposable daemon home and an initialised ALP project in
   `--project` with its supervisor disabled; a provider whose turns end by themselves, except that a prompt containing the hold marker
   keeps its turn running until interrupted. alpd's tests use `packages/daemon/tests/support/fake-codex.js`
-  via `ALP_CODEX_BIN`; `packages/daemon/tests/conformance.test.js` runs every profile against a real
+  via `ALP_CODEX_BIN`; `packages/daemon/tests/conformance.test.ts` runs every profile against a real
   alpd process this way.
 - **Golden fixtures** `fixtures/v1/cases.json` (183 values): an implementation's own unit tests should
   load them and check that its decoder accepts every valid value and its validation rejects every

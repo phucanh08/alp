@@ -20,7 +20,7 @@ hạn. Từ 4.6.6, danh sách vượt giới hạn bị từ chối ngay ở gi�
 - (Ghi chú sau: đây là bản ghi thời repo còn dùng npm; từ t-fa0a.7 lockfile là `pnpm-lock.yaml`.)
 - Các bundle ALP tự build (alpd, CLI, plugin Paseo) lấy zod từ `node_modules`, nên khi build lại sẽ
   nhúng bản 4.6.7.
-- Regression: `packages/runtime/tests/zod-security.test.js` kiểm bản zod cài đặt, hành vi của
+- Regression: `packages/runtime/tests/zod-security.test.ts` kiểm bản zod cài đặt, hành vi của
   array/set/map có `.max()`, mọi danh sách có giới hạn trong tool schema Claude của ALP
   (`claude-transport.ts`, `toolShapes`) và hai danh sách lồng trong `verdict` của `alp_handoff`. Với
   zod 4.4.3 cả 4 test fail; với 4.6.7 cả 4 pass.
@@ -42,8 +42,8 @@ Vì vậy, khi viết một field mới nhận đầu vào từ bên ngoài:
   `z.preprocess` rồi mới cho schema chạy). `vars` của `alp_pour` là đúng mẫu này.
 - Field nào dựa vào `.max()` của array thì nên có test ghim **cả hình dạng** chứ không chỉ con số,
   để lần sau ai đổi sang record thì test kêu. Hai ví dụ:
-  `packages/runtime/tests/zod-security.test.js` (tool schema Claude) và
-  `integrations/paseo/tests/compact-schema.test.js` (`alp.agent.compact.sessions`, max 4).
+  `packages/runtime/tests/zod-security.test.ts` (tool schema Claude) và
+  `integrations/paseo/tests/compact-schema.test.ts` (`alp.agent.compact.sessions`, max 4).
 
 Rà toàn repo ngày 2026-11-06 (t-5294.4, mục 3) — **không có** `z.record` nào có giới hạn mà chưa qua
 `bounded()`. Bốn chỗ dùng `z.record`, và đây là trạng thái của từng chỗ:

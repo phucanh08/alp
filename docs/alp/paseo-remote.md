@@ -105,7 +105,7 @@ Paseo UI ─▶ Paseo daemon ─▶ plugin (remote) ─▶ @anhlp/alp-client/por
   phán quyết mới làm root thất bại: `1001` (session không còn), `1003` (credential không còn được
   thấy nó), `-32601`/`-32602`. Gateway từ chối credential (`401` khi xin ticket) → mọi session báo
   lỗi một lần, ngừng kết nối lại. Đóng provider dừng backoff, không mở link mới. Lúc attach lại chỉ
-  gửi lệnh đọc. Test: `integrations/paseo/tests/remote-reattach.test.js`.
+  gửi lệnh đọc. Test: `integrations/paseo/tests/remote-reattach.test.ts`.
 - alpd đóng root rảnh khi không còn ai xem (vd. gateway restart lúc session rảnh). `session.closed`
   đó tới bằng replay khi kết nối lại; provider **không** chuyển cho Paseo mà đánh dấu root dormant,
   prompt kế tiếp mở lại bằng `session.create { resume: true }`. `session.closed` tới lúc đang xem
@@ -146,7 +146,7 @@ Paseo UI ─▶ Paseo daemon ─▶ plugin (remote) ─▶ @anhlp/alp-client/por
 | Bộ test | Chạy bằng | Nội dung |
 |---|---|---|
 | `test/integration/paseo-remote.test.ts` | `node scripts/test.ts integration`; lane paseo | 3 process không chung file: alpd (`ALP_HOME` A, **fake Codex**), `alp-gateway serve`, phía Paseo (`dist/remote/index.js` + plugin host giả) chạy với `node --permission --allow-fs-read=<repo> --allow-net`. Probe: đọc A/project và spawn → `ERR_ACCESS_DENIED`. Catalog, create (notice env), prompt + stream, câu hỏi allow/deny, tasks add/list/close, library list/models/language, các RPC unavailable, interrupt → `canceled`, gateway restart giữa turn → `turn.ended` tới đúng một lần bằng replay, alpd restart → prompt tiếp được, không item trùng, mỗi prompt tới provider một lần, không token trong output/log. Credential `read-only`: catalog chỉ có `read-only`, full-access và thư mục ngoài grant bị từ chối |
-| `apps/gateway/tests/*.test.js` | lane core | `workspaceRoots` trong principal; `workflow` theo quy tắc tên |
+| `apps/gateway/tests/*.test.ts` | lane core | `workspaceRoots` trong principal; `workflow` theo quy tắc tên |
 | Local/embedded regression | `integrations/paseo/tests/*` (lane paseo) | toàn bộ test cũ của provider/panels chạy trên `provider.ts` mới |
 | Gate build | `pnpm run build` / lane packages | `assertRemoteInputs`, `check-boundaries` |
 
@@ -215,7 +215,7 @@ macOS (Darwin 27, Apple silicon), Node 26.3, Paseo 0.11.1, Codex CLI 0.162.1 đ�
 | Cancel | pass (`canceled`) | pass (~0.7 s) |
 | Gateway restart giữa turn, replay không trùng | pass | pass (message cuối đúng 1 lần) |
 | Gateway restart lúc rảnh (alpd đóng root không ai xem) | pass (root được mở lại) | pass (`gateway.restart.twice`: restart hai lần liên tiếp, prompt sau đó chạy) |
-| Link đứt / lỗi tạm thời trong lúc reattach, nhiều root, đóng khi đang retry, credential bị từ chối | pass (`remote-reattach.test.js`, link giả) | — |
+| Link đứt / lỗi tạm thời trong lúc reattach, nhiều root, đóng khi đang retry, credential bị từ chối | pass (`remote-reattach.test.ts`, link giả) | — |
 | alpd restart, resume | pass | pass |
 | Credential mode `read-only` | pass | không chạy |
 | Client không đọc host / không spawn | pass (permission model) | `ALP_HOME` client rỗng |

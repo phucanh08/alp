@@ -145,6 +145,6 @@ export function daemonEntry(explicit?: string, paseoHome?: string) {
 
 ## 6. Verification Summary
 
-1. **Unit Tests:** `integrations/paseo/tests/supervise.test.js` verified explicit candidate resolution, Paseo config plugin directory resolution, and CLI fallback.
+1. **Unit Tests:** `integrations/paseo/tests/supervise.test.ts` verified explicit candidate resolution, Paseo config plugin directory resolution, and CLI fallback.
 2. **Package Tests:** `npm test --workspace @anhlp/alp-paseo` passed all 287 tests (0 failures).
 3. **Live Host Parity:** Validated on macOS darwin-arm64 against `/Applications/Paseo.app` 0.12 and `@getpaseo/cli@0.12`.

@@ -21,7 +21,7 @@ export function loadNodePty(): NodePty | undefined {
   return loaded ?? undefined;
 }
 
-/** `load` is a test hook (tests/windows-terminal.test.js); production loads the installed node-pty. */
+/** `load` is a test hook (tests/windows-terminal.test.ts); production loads the installed node-pty. */
 export function windowsTerminalCapability(load: () => NodePty | undefined = loadNodePty): { available: boolean; protection?: 'none'; reason?: string } {
   return load() ? { available: true, protection: 'none' } : { available: false, reason: 'node_pty_unavailable' };
 }

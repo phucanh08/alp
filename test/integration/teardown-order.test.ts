@@ -129,7 +129,7 @@ test('a step deferred by another step still runs, and no step runs twice', async
 });
 
 test('the lint reads registration order, not file order: it expands a fixture helper at its call site', () => {
-  // The exact shape of packages/runtime/tests/runtime.test.js:223 before this task.
+  // The exact shape of packages/runtime/tests/runtime.test.ts:223 before this task.
   const viaHelper = `import test from 'node:test';
 async function setup(t) {
   const root = await mkdtemp('x');
@@ -160,7 +160,7 @@ test('the lint does not flag hooks that cannot skip each other', () => {
 test('one', async t => { t.after(() => rm(a)); });
 test('two', async t => { t.after(() => server.close()); });`), []);
 
-  // A file-level test.after always runs after every per-test hook (packages/runtime/tests/claude-fork.test.js:18).
+  // A file-level test.after always runs after every per-test hook (packages/runtime/tests/claude-fork.test.ts:18).
   assert.deepEqual(teardownProblems('f.test.js', `import test from 'node:test';
 test.after(() => rm(directory, { recursive: true, force: true }));
 test('one', async t => { t.after(() => transport.close()); });`), []);
@@ -216,7 +216,7 @@ test('no allowlist entry is stale: each one still names a site the scan reports'
 });
 
 // Review finding M, t-5294.6. The hang shape can live in a SUPPORT MODULE, and then nothing in the
-// test file shows it. apps/gateway/tests/support/harness.js was exactly that: `startGateway(t)`
+// test file shows it. apps/gateway/tests/support/harness.ts was exactly that: `startGateway(t)`
 // registered a bare hook that closed the gateway and store and THEN removed its directory, and two
 // later ones terminating a raw socket and closing an SDK client. Reading only the test file, the
 // lint saw a test that registers one `t.after(rm(...))` and nothing else, and passed it — for all 15
@@ -262,7 +262,7 @@ test('one', async t => {
   // is the blind spot itself, asserted so it cannot come back unnoticed.
   assert.deepEqual(teardownProblems('tests/plain.test.js', plain, {}), []);
 
-  // SHAPE 2, the half-converted file (apps/gateway/tests/{credentials,gateway}.test.js on this
+  // SHAPE 2, the half-converted file (apps/gateway/tests/{credentials,gateway}.test.ts on this
   // branch before the fix): the test uses teardown(t), the helper still uses bare t.after. node:test
   // runs the teardown hook first because it was registered first, so the whole defer list — rm
   // included — runs BEFORE the helper's close. Converting one side only makes it worse, not better.

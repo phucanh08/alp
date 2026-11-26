@@ -156,7 +156,7 @@ try {
 
   await run.step('C6', 'permission questions through alp questions / alp answer', async () => {
     if (opts.fake) {
-      run.record('C6', 'skip', `the fake ${provider} asks no permission; covered hermetically by integrations/paseo/tests/permissions.test.js and test/integration/permissions.test.ts`);
+      run.record('C6', 'skip', `the fake ${provider} asks no permission; covered hermetically by integrations/paseo/tests/permissions.test.ts and test/integration/permissions.test.ts`);
       return;
     }
     const original = readFileSync(settingsFile, 'utf8');
@@ -187,7 +187,7 @@ try {
   });
 
   await run.step('C7', 'two peers in worktrees, merged with alp_merge', async () => {
-    if (opts.fake) { run.record('C7', 'skip', 'needs a real model; hermetic coverage: packages/runtime/tests/worktree.test.js'); return; }
+    if (opts.fake) { run.record('C7', 'skip', 'needs a real model; hermetic coverage: packages/runtime/tests/worktree.test.ts'); return; }
     const stream = start('C7', 'Giao hai peer ghi song song, mỗi peer trong worktree riêng: peer 1 tạo a.txt chứa A, peer 2 tạo b.txt chứa B; rồi merge cả hai bằng alp_merge.');
     const code = await stream.exit;
     if (code !== 0) throw new Error(`alp run exited ${code}`);

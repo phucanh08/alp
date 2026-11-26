@@ -244,7 +244,7 @@ alp-gateway credential revoke <id>     # vĩnh viễn; connection đóng 4401, t
   (§5.7): field liệt kê mới đi, mọi field có thể chứa secret thành marker `{ "$secret": "keep" }`.
   Các dòng của `library.list`, `team.list`, `library.models` chỉ giữ các field liệt kê trong
   `policy.js`. Test E2E đặt sentinel vào các chỗ đó và kiểm tra không cái nào tới client (§9).
-- Test xác nhận log không chứa secret: `apps/gateway/tests/{credentials,gateway}.test.js` và
+- Test xác nhận log không chứa secret: `apps/gateway/tests/{credentials,gateway}.test.ts` và
   `test/integration/gateway.test.ts`.
 - Proxy không được log header `Authorization` hay `Sec-WebSocket-Protocol` (xem `deploy/`).
 
@@ -387,7 +387,7 @@ chuyển nguyên vẹn, trừ các method đọc file của host (§5.7, §5.10)
 Nguồn sự thật là `MATRIX` trong `apps/gateway/src/policy.js`. Test:
 
 - mọi method v1 phải được phân loại;
-- mọi method exposed phải có ca vượt scope trong `authorization.test.js`;
+- mọi method exposed phải có ca vượt scope trong `authorization.test.ts`;
 - matrix không được mâu thuẫn với `x-alp` của schema khi có (§11).
 
 Cột Test dùng các mã sau:
@@ -398,7 +398,7 @@ Cột Test dùng các mã sau:
 - `E`: lọc event, giữ thứ tự replay;
 - `M`: giới hạn mode (§5.5);
 - `F`: dòng chỉ giữ field liệt kê;
-- `owner`: `apps/gateway/tests/owner.test.js` (§5.19);
+- `owner`: `apps/gateway/tests/owner.test.ts` (§5.19);
 - `T`: answer phải là đúng tree đã kiểm tra (§5.6);
 - `I`: E2E với alpd thật.
 
@@ -516,7 +516,7 @@ Quy tắc:
   báo cho requester và nó có thể chạy tiếp.
 - Không phải drive, không kiểm tra mode: `get`, `list`, `status`, `log`, `attach`, `release`,
   `rename`, `archive`, `preview`, `question.list`, và `session.create` attach vào root đang chạy.
-- Từ chối luôn xảy ra **trước** request tới alpd. Test: `apps/gateway/tests/modes.test.js`
+- Từ chối luôn xảy ra **trước** request tới alpd. Test: `apps/gateway/tests/modes.test.ts`
   (fake daemon, đếm request) và E2E với alpd thật: message lúc rảnh, lúc steer, prompt, answer và
   dismiss đều bị từ chối, không marker nào tới provider; tree read-only của chính credential thì
   message đánh thức được và answer cho turn chạy tiếp.
@@ -779,7 +779,7 @@ Không áp: item `tool_call` (`error`, `detail`) là kết quả tool của agen
 workspace có khoảng trắng chỉ bị thay tới khoảng trắng đầu (phần sau, một mảnh tên, còn lại) trừ khi
 nó nằm dưới home của host; đường dẫn dính liền sau ký tự khác (ví dụ `x#/a`, `a*/b`) không được nhận ra,
 để glob và JSON pointer (`src/**/*.ts`, `#/properties/x`) giữ nguyên; trích file dạng khác V8 trên cùng dòng đầu (YAML, TOML) không được nhận ra.
-Test sentinel: `apps/gateway/tests/authorization.test.js` (các test `t-d27c`).
+Test sentinel: `apps/gateway/tests/authorization.test.ts` (các test `t-d27c`).
 
 ### 5.13 Git status và diff của workspace (issue #121, G1)
 
@@ -818,7 +818,7 @@ commit, push, pull, merge, checkout, switch, stash hay thao tác Git nào khác 
 - **Rủi ro còn lại**: diff cho thấy nội dung file đã xoá và lịch sử so với base, mà `workspace.files.read`
   không cho xem; block list vẫn là mức sàn như §5.10. Tên nhánh, upstream và `baseRef` là metadata của
   repo, đi qua như text (không ký tự điều khiển, ≤ 1024 ký tự).
-Test: `apps/gateway/tests/git.test.js`.
+Test: `apps/gateway/tests/git.test.ts`.
 
 ### 5.14 Attachment không phải ảnh (issue #121, I)
 
@@ -862,7 +862,7 @@ xuống, giải nén, chạy file hay render HTML qua remote.
   `1005 attachment_unsupported` trước khi gửi gì, file vẫn được giữ. `user_message.attachments` chỉ
   mang id, tên hiển thị, kiểu và kích thước; mọi event runtime phát ra hiện thư mục stage là
   `<alp-attachments>`, nên client remote không thấy đường dẫn host của bản sao.
-Test: `apps/gateway/tests/attachments.test.js`, `test/integration/gateway.test.ts` (alpd thật).
+Test: `apps/gateway/tests/attachments.test.ts`, `test/integration/gateway.test.ts` (alpd thật).
 
 ### 5.15 Fork và rewind hội thoại (issue #121, C)
 
@@ -915,7 +915,7 @@ bao giờ bị xoá, phục hồi được thành session mới bằng `session.
   `attachment_forbidden`, `key_conflict`, `outcome_unknown`, `workspace_mismatch`…; reason lạ giữ
   reason với câu chung). Chỉ mã, `reason`, `generation` (32 hex) và số nguyên không âm đi qua; không
   text của alpd hay runtime (đường dẫn thread native, stderr của CLI).
-Test: `apps/gateway/tests/conversation.test.js`.
+Test: `apps/gateway/tests/conversation.test.ts`.
 
 ### 5.16 Reload agent và lệnh resume (issue #121, G2)
 
@@ -1073,7 +1073,7 @@ Quyết định (main, theo quyền người dùng, 2026-11-21): ALP.app và `al
   phải có schema trong `methods-v1.json` (params được kiểm trước khi tới alpd). Method riêng của gateway
   (`handler: true`) là tên `host.*` không có trong `methods-v1.json` (protocol chỉ liệt kê method alpd
   phục vụ), phải liệt kê `params` (chỉ các key đó tới handler) và handler tự kiểm giá trị; không có
-  handler thì bị từ chối, không bao giờ chuyển tới alpd (`authorization.test.js`).
+  handler thì bị từ chối, không bao giờ chuyển tới alpd (`authorization.test.ts`).
   Method chưa có trong matrix thì handler không bao giờ được gọi.
 - **Sidebar (t-ff83)**: `host.workspace.facts { workspaceIds, refresh? }` trả `{ workspaces: { [id]: {
   branch?, additions?, deletions?, pr?: { number, state: open|draft|merged|closed }, ci?: passed|failed|pending,
@@ -1276,11 +1276,11 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
 
 | Bộ test | Chạy bằng | Nội dung |
 |---|---|---|
-| `apps/gateway/tests/credentials.test.js` | `pnpm --filter @anhlp/alp-gateway test`; lane core | hash, token in một lần, xoay/thu hồi/hết hạn, file không private → fail closed, ticket một lần/TTL/Origin, log không có secret |
-| `apps/gateway/tests/gateway.test.js` | như trên (fake daemon) | healthz/readyz theo alpd, ticket flow, CORS, Host/DNS rebinding, proxy tin cậy, chặn bind không TLS, các kiểm tra §5.2, binary 4003, quá lớn 1009, hello timeout 4408, rate/pending, slow consumer 4431 không ảnh hưởng client khác, hai client đồng thời, revoke/rotate 4401, mất alpd 4503 + request chờ `daemon_disconnected` không gửi lại, alpd không chạy, tắt gateway 1001 không hủy gì |
-| `apps/gateway/tests/authorization.test.js` | như trên | matrix đủ, mọi method không expose → -32601 không tới alpd (kể cả ghi library), credential thiếu permission → 1003 `grant` cho **mọi** method ngoài quyền của nó, **mọi method expose có ca vượt scope** (không tới alpd), tasks/teams/library trong project, host scope bị chặn, param danh tính bị bỏ, đường dẫn chỉ khớp tuyệt đối, param lạ bị bỏ, lọc list, `question.answer` không nhận prefix, allowlist spec và tên agent, ngữ pháp model id (ACP `acp:<provider>/<model>`, id có `[1m]`; id sai bị từ chối), gateway đặt id root, race create ngoài scope → release, chỉ prompt text, giới hạn mode khi create/configure, lọc event có giữ thứ tự, replay đứng trước response attach, đối chiếu `x-alp`; `library.get` qua `projectLibraryContent` cho cả sáu kind (sentinel ở mọi field có thể chứa secret, field lạ, kiểu sai, pointer cần escape, kind lạ), kết quả chỉ giữ `LIBRARY_ENTRY_FIELDS`, param lạ bị bỏ, các method ghi library → -32601 không tới alpd; `hostname` của hello qua `hostLabel` (ký tự điều khiển, quá dài → bỏ); dòng library/team/model chỉ giữ field liệt kê, lỗi team không nêu đường dẫn; `session.status`/`log` trả tree khác → 1001 |
-| `apps/gateway/tests/conversation.test.js` | như trên (fake daemon) | `session.fork`/`session.rewind`: matrix và capability; thiếu `session.write`/`session.read` → 1003 trước alpd; nguồn ngoài grant, session con, đích và `newSessionId` ngoài grant, param lạ → từ chối trước alpd; context principal và `requestId` của gateway thắng của client; root mới ngoài grant/đích, nguồn khác → không trả; `forkedFrom` có nguồn ngoài grant bị bỏ trong get/list/event/history (giữ thứ tự event); `branches`/`conversation` chiếu; `history.reset` tới connection attach nguyên vẹn; lỗi alpd thành câu cố định; grant `modes` chỉ fork/rewind được root có tree chạy trong đó, tra mới (`1003 mode` trước alpd) |
-| `apps/gateway/tests/modes.test.js` | như trên | grant `read-only`: prompt, message, answer, dismiss một session full-access → `1003 mode` trước alpd; assignment read-only trong tree full-access cũng bị từ chối; mode đổi bởi client local có hiệu lực ngay (tra lại tới root); trong grant thì drive được; credential không có `modes` không bị giới hạn; dừng root luôn được, dừng assignment của requester full-access bị từ chối; get/status/log/attach/rename/archive/release không bị giới hạn; hạ mode bằng configure được, nâng thì không |
+| `apps/gateway/tests/credentials.test.ts` | `pnpm --filter @anhlp/alp-gateway test`; lane core | hash, token in một lần, xoay/thu hồi/hết hạn, file không private → fail closed, ticket một lần/TTL/Origin, log không có secret |
+| `apps/gateway/tests/gateway.test.ts` | như trên (fake daemon) | healthz/readyz theo alpd, ticket flow, CORS, Host/DNS rebinding, proxy tin cậy, chặn bind không TLS, các kiểm tra §5.2, binary 4003, quá lớn 1009, hello timeout 4408, rate/pending, slow consumer 4431 không ảnh hưởng client khác, hai client đồng thời, revoke/rotate 4401, mất alpd 4503 + request chờ `daemon_disconnected` không gửi lại, alpd không chạy, tắt gateway 1001 không hủy gì |
+| `apps/gateway/tests/authorization.test.ts` | như trên | matrix đủ, mọi method không expose → -32601 không tới alpd (kể cả ghi library), credential thiếu permission → 1003 `grant` cho **mọi** method ngoài quyền của nó, **mọi method expose có ca vượt scope** (không tới alpd), tasks/teams/library trong project, host scope bị chặn, param danh tính bị bỏ, đường dẫn chỉ khớp tuyệt đối, param lạ bị bỏ, lọc list, `question.answer` không nhận prefix, allowlist spec và tên agent, ngữ pháp model id (ACP `acp:<provider>/<model>`, id có `[1m]`; id sai bị từ chối), gateway đặt id root, race create ngoài scope → release, chỉ prompt text, giới hạn mode khi create/configure, lọc event có giữ thứ tự, replay đứng trước response attach, đối chiếu `x-alp`; `library.get` qua `projectLibraryContent` cho cả sáu kind (sentinel ở mọi field có thể chứa secret, field lạ, kiểu sai, pointer cần escape, kind lạ), kết quả chỉ giữ `LIBRARY_ENTRY_FIELDS`, param lạ bị bỏ, các method ghi library → -32601 không tới alpd; `hostname` của hello qua `hostLabel` (ký tự điều khiển, quá dài → bỏ); dòng library/team/model chỉ giữ field liệt kê, lỗi team không nêu đường dẫn; `session.status`/`log` trả tree khác → 1001 |
+| `apps/gateway/tests/conversation.test.ts` | như trên (fake daemon) | `session.fork`/`session.rewind`: matrix và capability; thiếu `session.write`/`session.read` → 1003 trước alpd; nguồn ngoài grant, session con, đích và `newSessionId` ngoài grant, param lạ → từ chối trước alpd; context principal và `requestId` của gateway thắng của client; root mới ngoài grant/đích, nguồn khác → không trả; `forkedFrom` có nguồn ngoài grant bị bỏ trong get/list/event/history (giữ thứ tự event); `branches`/`conversation` chiếu; `history.reset` tới connection attach nguyên vẹn; lỗi alpd thành câu cố định; grant `modes` chỉ fork/rewind được root có tree chạy trong đó, tra mới (`1003 mode` trước alpd) |
+| `apps/gateway/tests/modes.test.ts` | như trên | grant `read-only`: prompt, message, answer, dismiss một session full-access → `1003 mode` trước alpd; assignment read-only trong tree full-access cũng bị từ chối; mode đổi bởi client local có hiệu lực ngay (tra lại tới root); trong grant thì drive được; credential không có `modes` không bị giới hạn; dừng root luôn được, dừng assignment của requester full-access bị từ chối; get/status/log/attach/rename/archive/release không bị giới hạn; hạ mode bằng configure được, nâng thì không |
 | `test/integration/gateway.test.ts` | `node scripts/test.ts integration`; lane paseo | **alpd thật + fake Codex** qua SDK WebSocket: handshake, create, prompt, stream; client rớt mà turn vẫn chạy; gateway restart trong lúc turn kết thúc → nhận `turn.ended` bằng replay; alpd restart → 4503, readyz 503→200, resume và prompt tiếp; cursor 1..n không trùng, không thiếu, không reset; mỗi prompt tới provider đúng một lần; credential khác không thấy, attach, prompt hay nhận event; event `usage` và `session.get().session.usage` tới đúng credential của session, credential khác không nhận, `daemon.usage` vẫn -32601; `task.create/list/update`, `team.list`, `settings.language.get` qua gateway; hello có `hostname` = `os.hostname()`; credential khác không đọc/ghi được tasks của project; `library.get` của built-in `main` đọc được, projectRoot ngoài grant → 1003; `library.save` without `library.write` → 1003 grant; revoke → 4401. **Mode**: credential `read-only`, session full-access do client local tạo: message lúc rảnh (wake), lúc turn chạy (steer), prompt, answer và dismiss một câu hỏi `alp_ask` thật đều → `1003 mode`, câu hỏi vẫn chờ, không marker nào tới provider; dừng root vẫn được; tree read-only của chính nó thì message đánh thức (marker tới provider) và answer cho turn chạy tiếp. **Secret**: MCP (userinfo, query, header, args, env), hook và provider có sentinel; alpd trả chúng cho client local, còn credential `project.read` qua gateway: `library.get` trả các field đó là marker (nội dung đúng từng field), `library.list` (5 kind), `team.list`, `library.models` không chứa sentinel hay đường dẫn library; model `acp:custom/vendor-model` từ `library.models` qua được `session.preview` |
 | `scripts/gateway-smoke.ts` | `pnpm run test:gateway:smoke`; lane packages | cài từ tarball protocol/core/client/gateway vào project rỗng, **không có Paseo hay React**; chạy `alp-gateway` đã cài với alpd thật: credential, serve, readyz, ticket, create và prompt, `task.create`/`task.list` qua SDK đã cài, `daemon.shutdown` bị chặn, log không có token |
 | `tsconfig.gateway.json` | lane core | type-check JSDoc (`// @ts-check`) của `apps/gateway/src` |
@@ -1366,7 +1366,7 @@ alp.onEvent(envelope => { /* áp dụng; nếu envelope.cursor có thì cập nh
 3. Muốn expose thêm method, sửa `policy.js`:
    - `status: 'exposed'`, permission, params, scope;
    - handler trong `connection.js` (`#workspace`/`#project` cho `projectRoot`);
-   - thêm ca vào `OUT_OF_SCOPE` và `IN_SCOPE` của `authorization.test.js`.
+   - thêm ca vào `OUT_OF_SCOPE` và `IN_SCOPE` của `authorization.test.ts`.
    #118 expose project-only agents/skills với authoritative policy `project-data`;
    teams/mcp/hooks/providers và executable reference vẫn là quản trị.
 4. Phía Paseo:
