@@ -565,9 +565,9 @@ có workspace và từ chối chuyển nó sang workspace khác (`packages/daemo
 `workspace.write`, như trước. `requestId` của owner được gắn tiền tố `dashboard-owner:` để không trùng
 receipt của credential khác trong registry.
 
-Kiểm thử: `apps/gateway/tests/owner-host.test.js` (gateway không owner, credential khác, kết nối có
+Kiểm thử: `apps/gateway/tests/owner-host.test.ts` (gateway không owner, credential khác, kết nối có
 header chuyển tiếp: `-32601 not_exposed`, handler và alpd không nhận gì; owner tới đúng handler với đúng
-params), `packages/cli/tests/dashboard-owner-host.test.js` (từng handler, giá trị sai bị từ chối trước khi
+params), `packages/cli/tests/dashboard-owner-host.test.ts` (từng handler, giá trị sai bị từ chối trước khi
 chạy gì), `apps/web/e2e/settings-host.spec.js` (owner qua link `alp dashboard` làm việc chính của từng
 trang và host thấy kết quả; credential của `alp-gateway` riêng vẫn thấy bảng "not available").
 
@@ -631,9 +631,9 @@ các trang y như trước, kể cả thông báo Unavailable. Các method owner
 - **Files** (trang App): ALP không có plugin file panel; trang nói token này đọc được file không và sửa
   được không.
 
-Kiểm chứng: `apps/gateway/tests/owner-library.test.js` (không owner và credential khác → `-32601
+Kiểm chứng: `apps/gateway/tests/owner-library.test.ts` (không owner và credential khác → `-32601
 not_exposed`, không handler nào chạy, alpd không nhận gì; owner nhận kết quả với đúng params),
-`packages/cli/tests/dashboard-owner-library.test.js` (từng lần từ chối, conflict, mask, marker),
+`packages/cli/tests/dashboard-owner-library.test.ts` (từng lần từ chối, conflict, mask, marker),
 `apps/web/e2e/settings-library.spec.js` (qua `alp dashboard` thật: `e2e/support/dashboard.js`).
 
 ### 4.9 Sidebar như Paseo (t-ff83)

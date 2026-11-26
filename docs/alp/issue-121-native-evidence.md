@@ -515,16 +515,16 @@ What the log shows, per runtime:
 
 ### Covered without paid turns
 
-`packages/daemon/tests/conversation-crash.test.js` kills a real alpd (with a fake Codex app-server that keeps
+`packages/daemon/tests/conversation-crash.test.ts` kills a real alpd (with a fake Codex app-server that keeps
 threads, turns and forks in a shared file, so forks persist across provider processes) at
 `rewind.after-prepared` (native step never sent again: `outcome_unknown` now and after the restart, binding
 unchanged), `rewind.after-applied`, `rewind.before-timeline`, `rewind.after-timeline`,
 `rewind.before-committed` and `fork.before-record` (each finished from the journal at the next start: one
 native fork, one result, one marker, the next reply sees only the kept turns). It also proves a scheduled
 prompt a rewind set aside is not delivered again, before or after a restart, and that a set-aside turn's
-prompt id still answers `duplicate`. `packages/daemon/tests/conversation.test.js` adds the in-process cases:
+prompt id still answers `duplicate`. `packages/daemon/tests/conversation.test.ts` adds the in-process cases:
 the fence after a failed commit, mail held during a rewind and delivered after the rebind, a whole fork
-holding the live source's prompts, and `store.rewind` keeping lines after the marker in cursor order. `packages/runtime/tests/{conversation,claude-fork}.test.js` cover the
+holding the live source's prompts, and `store.rewind` keeping lines after the marker in cursor order. `packages/runtime/tests/{conversation,claude-fork}.test.ts` cover the
 Codex fork parameters, verification and error mapping, the Claude cut over tool-result entries, pending
 bases and boot refusals, and rebind's idle barrier. `apps/web/e2e/conversation.spec.js` drives fork, rewind,
 reload and branch restore in a browser through the gateway.

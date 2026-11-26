@@ -14,4 +14,4 @@ Settings currently accept `defaultAgent` and `runtime: { provider?, model?, reas
 
 MCP supports a `mcpServers` map with command/args/cwd/env or HTTP(S) url/headers. Relative cwd and explicit command paths resolve against the agent directory; bare executable names retain PATH semantics. Unsupported MCP fields are rejected. Runtime adapters must state any additional limits.
 
-Today: `pnpm --filter @anhlp/alp-core test` (`packages/core/tests/adapter.test.js`), on Node 22 (22.12 or later) or 24. At the time of writing: `node --test` ran the JavaScript directly on Node 20 with no install/build step, because the local npm 12 warned that Node 20.13.1 was outside its supported range. Node 20 is no longer supported.
+Today: `pnpm --filter @anhlp/alp-core test` (`packages/core/tests/adapter.test.ts`), on Node 22 (22.12 or later) or 24. At the time of writing: `node --test` ran the JavaScript directly on Node 20 with no install/build step, because the local npm 12 warned that Node 20.13.1 was outside its supported range. Node 20 is no longer supported.

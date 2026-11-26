@@ -6,7 +6,7 @@ import { buildWorkspace, packageTests, packages, runNodeTests } from './test-lib
 
 /**
  * Workspaces a package's tests drive through the shared test/support helpers without depending on
- * them: the client's golden output (tests/golden.test.js) runs a tree on the runtime
+ * them: the client's golden output (tests/golden.test.ts) runs a tree on the runtime
  * (test/support/fake-agent.ts), so a fresh checkout builds it first. The CLI's dashboard tests
  * import the gateway, only a devDependency of the CLI, whose default export is its built dist.
  */

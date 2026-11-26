@@ -23,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         node: [22, 24]
-    # t-cc9e: packages/core/tests/teamv1-history.test.js holds teamV1 to every list it has had on
+    # t-cc9e: packages/core/tests/teamv1-history.test.ts holds teamV1 to every list it has had on
     # main, read from git history; this lane checks out that history and makes its absence a failure.
     # Other lanes keep the shallow checkout and rely on the committed snapshot.
     env:
@@ -127,20 +127,20 @@ jobs:
       - run: node scripts/build-workspace.ts cli
       - run: node scripts/build-workspace.ts paseo
       # t-fa1b: run the catalog/compact/probe/migration regressions on both Windows Node versions.
-      - run: node scripts/run-tests.ts --private-home packages/daemon/tests/model-catalog.test.js packages/runtime/tests/model-catalog.test.js packages/runtime/tests/compact.test.js packages/runtime/tests/antigravity-mode.test.js packages/runtime/tests/provider-command.test.js packages/client/tests/acp-probe.test.js packages/core/tests/providers.test.js test/integration/paseo-source-check-tar.test.ts
+      - run: node scripts/run-tests.ts --private-home packages/daemon/tests/model-catalog.test.ts packages/runtime/tests/model-catalog.test.ts packages/runtime/tests/compact.test.ts packages/runtime/tests/antigravity-mode.test.ts packages/runtime/tests/provider-command.test.ts packages/client/tests/acp-probe.test.ts packages/core/tests/providers.test.ts test/integration/paseo-source-check-tar.test.ts
       # Select recovery/CLI regressions without the older Unix-symlink library fixtures.
       - run: >-
-          node -e "import('./scripts/test-lib.ts').then(({runNodeTests})=>{process.exitCode=runNodeTests(['packages/core/tests/library-edit.test.js','packages/cli/tests/library.test.js'],{privateHome:true,extra:['--test-name-pattern=retired metadata IO|own role key|AFTER moving|retired text lists']})})"
+          node -e "import('./scripts/test-lib.ts').then(({runNodeTests})=>{process.exitCode=runNodeTests(['packages/core/tests/library-edit.test.ts','packages/cli/tests/library.test.ts'],{privateHome:true,extra:['--test-name-pattern=retired metadata IO|own role key|AFTER moving|retired text lists']})})"
       # Every test step runs through runNodeTests with --private-home (t-bfbd): a throwaway ALP_HOME,
       # TMPDIR and HOME/USERPROFILE, without ALP_*_BIN or the caller's ALP session variables.
       # The CLI discovery fixture creates a Unix symlink; all daemon lifecycle/session tests run.
-      - run: node scripts/run-tests.ts --private-home packages/client/tests/daemon-paths.test.js packages/daemon/tests/daemon.test.js packages/daemon/tests/ipc-security.test.js integrations/paseo/tests/daemon-git.test.js test/integration/test-env.test.ts packages/client/tests/lock-fstat.test.js packages/client/tests/lock-hold.test.js packages/client/tests/start-integration.test.js packages/client/tests/lifecycle-identity.test.js
+      - run: node scripts/run-tests.ts --private-home packages/client/tests/daemon-paths.test.ts packages/daemon/tests/daemon.test.ts packages/daemon/tests/ipc-security.test.ts integrations/paseo/tests/daemon-git.test.ts test/integration/test-env.test.ts packages/client/tests/lock-fstat.test.ts packages/client/tests/lock-hold.test.ts packages/client/tests/start-integration.test.ts packages/client/tests/lifecycle-identity.test.ts
       # workspace.git over real repositories, including a real untracked junction (t-8f37); the POSIX shell-trap tests skip on win32.
-      - run: node scripts/run-tests.ts --private-home packages/daemon/tests/git.test.js
+      - run: node scripts/run-tests.ts --private-home packages/daemon/tests/git.test.ts
       # The win32 terminal owner: unit tests, then a real cmd.exe through node-pty/ConPTY (the "ConPTY:" tests run only here).
-      - run: node scripts/run-tests.ts --private-home packages/daemon/tests/windows-terminal.test.js
+      - run: node scripts/run-tests.ts --private-home packages/daemon/tests/windows-terminal.test.ts
       - run: node scripts/test-package.ts gateway --private-home
-      - run: node scripts/run-tests.ts --private-home packages/cli/tests/alp-dashboard.test.js
+      - run: node scripts/run-tests.ts --private-home packages/cli/tests/alp-dashboard.test.ts
       # npm install -g of the packed wrapper into a throwaway prefix: npm's alp.cmd runs, and alpd is found through it (t-1f14).
       - run: node scripts/npm-wrapper-smoke.ts
 

@@ -18,7 +18,7 @@ type Unchecked = Record<string, any>;
  * Each exposed method names the permission it needs, the resource its scope check reads, the
  * params forwarded to alpd (others are dropped: alpd ignores unknown params in v1, and a later
  * meaning must not reach it unreviewed) and the gateway tests that cover its authorization
- * (apps/gateway/tests/authorization.test.js asserts each exposed method has them).
+ * (apps/gateway/tests/authorization.test.ts asserts each exposed method has them).
  */
 
 /**
@@ -719,7 +719,7 @@ export const EXPOSURE: Readonly<Record<string, Exposure>> = Object.freeze({
   'schedule.get': { status: 'owner', scope: 'host: as schedule.list', reason: 'As schedule.list: one job of the host, the host owner\'s own dashboard only.', params: ['id', 'projectRoot'], tests: ['owner', 'owner-schedule'] },
   'schedule.cancel': { status: 'prohibited', scope: 'workspace', reason: 'As schedule.create: cancelling a job of the host is never remote in v1.' },
   // Owner methods (status 'owner'; t-a95b): appended below by later changes, one block each, so
-  // they do not edit the same lines. Each entry names its `tests` (authorization.test.js asserts it)
+  // they do not edit the same lines. Each entry names its `tests` (authorization.test.ts asserts it)
   // and either the `params` forwarded to alpd or an owner handler of the same name
   // (packages/cli/src/dashboard/owner/). A method that is not here is never reachable, whatever
   // handler the dashboard registers.

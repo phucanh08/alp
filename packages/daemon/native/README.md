@@ -133,7 +133,7 @@ approved g3 discovery limit. Actual Linux/Windows browser keyboard and Linux
 namespace/proc permissions/races remain NOT_CHECKED.
 
 Explicit developer regressions (require a local C compiler, not end-user startup):
-`node --test packages/daemon/native/tests/lifecycle.mjs` exercises delayed native
+`node --test packages/daemon/native/tests/lifecycle.ts` exercises delayed native
 startup and a real stalled control reader. `ALP_NATIVE_BASELINE=8ed11fd` runs the
 same checks against the committed pre-correction C/TS in isolated scratch space.
 This mode does not change the checkout. Both cases fail on that baseline and pass

@@ -1,6 +1,6 @@
 // t-ca1f: only the user clears a human gate. A process an ALP agent started carries
 // ALP_AGENT_SESSION; the CLI refuses it, and a clear made by editing the task file is detected
-// and undone. (The daemon's refusal is in packages/daemon/tests/gate-authority.test.js.)
+// and undone. (The daemon's refusal is in packages/daemon/tests/gate-authority.test.ts.)
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';

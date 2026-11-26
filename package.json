@@ -16,7 +16,7 @@
     "test:all": "node scripts/test.ts all",
     "check": "tsc -p tsconfig.paseo.json && tsc -p tsconfig.client.json && pnpm run check:scripts && pnpm run check:test",
     "check:scripts": "tsc -p scripts/tsconfig.json",
-    "check:test": "tsc -p test/tsconfig.json",
+    "check:test": "tsc -p test/tsconfig.json && tsc -p packages/protocol/tests && tsc -p packages/core/tests && tsc -p packages/runtime/tests && tsc -p packages/client/tests && tsc -p packages/daemon/tests && tsc -p packages/cli/tests && tsc -p apps/gateway/tests && tsc -p integrations/paseo/tests",
     "build": "node scripts/build-workspace.ts cli && node scripts/build-core.ts",
     "test:e2e:workflow": "node test/e2e/workflow-e2e.ts pho && node test/e2e/workflow-e2e.ts cafe",
     "test:e2e:mailbox": "node test/e2e/mailbox-e2e.ts ask && node test/e2e/mailbox-e2e.ts wake && node test/e2e/mailbox-e2e.ts steer",

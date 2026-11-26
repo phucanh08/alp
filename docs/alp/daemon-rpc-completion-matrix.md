@@ -65,8 +65,8 @@ nguyên chuỗi), `H` = host (thư viện/settings của user daemon).
 | `settings.language.get` | settings.language | query | `{}` → `{language\|null, applies, default}` | H | không | có | 1000 unreadable | ops, remote |
 | `settings.language.set` | settings.language | mutation | `{language\|null}` → như get | H | ghi `settings.json`, giữ key khác | có | -32602, 1000 unreadable | ops, remote |
 
-`ops` = `packages/daemon/tests/operations.test.js` (socket thật, server thật, runtime giả).
-`remote` = `packages/daemon/tests/remote-client.test.js` (alpd thật + client process riêng, §5).
+`ops` = `packages/daemon/tests/operations.test.ts` (socket thật, server thật, runtime giả).
+`remote` = `packages/daemon/tests/remote-client.test.ts` (alpd thật + client process riêng, §5).
 
 ## 3. Ghi chú bảo mật cho Gateway
 
@@ -85,7 +85,7 @@ nguyên chuỗi), `H` = host (thư viện/settings của user daemon).
 - **Identity.** Mọi ghi ghi `by: "user"`; daemon không đọc identity từ params. Khi Gateway có principal, cần
   đề xuất cách truyền xuống (vd `accept(send, { principal })`), không làm trong task này.
 - **Annotation.** Mọi method (cũ và mới) có `x-alp: { effect, scope: { kind, param?, required?, selector?, reads? },
-  capability?, idempotent, risks?, writes?, redacts? }`; test `contract.test.js` kiểm tra param tồn tại và
+  capability?, idempotent, risks?, writes?, redacts? }`; test `contract.test.ts` kiểm tra param tồn tại và
   capability đã khai báo. Gateway không nên expose chỉ dựa vào annotation.
 
 ## 4. Gap còn lại và thứ tự tích hợp
@@ -111,7 +111,7 @@ Thứ tự đề xuất:
 
 ## 5. Kiểm thử "không chung filesystem"
 
-`remote-client.test.js` chạy alpd thật (`dist/alpd.js`, `ALP_HOME` = home của daemon, provider giả) và một client
+`remote-client.test.ts` chạy alpd thật (`dist/alpd.js`, `ALP_HOME` = home của daemon, provider giả) và một client
 process riêng:
 - `HOME`, `ALP_HOME`, `cwd` riêng; chỉ import `@anhlp/alp-client/portable` + `@anhlp/alp-client/ipc`;
 - chạy dưới Node permission model, chỉ được đọc mã của chính nó, `packages/client`, `packages/protocol`. Test kiểm
@@ -125,11 +125,11 @@ process riêng:
 | File | Lý do |
 |---|---|
 | `packages/protocol/schema/methods-v1.json`, `schema/ipc-v1.json` | method, `$defs`, lỗi, capability, `x-alp`; hai file phải có `$defs` giống hệt |
-| `packages/protocol/src/contract-v1.js` | sinh từ schema: chạy lại `node packages/protocol/scripts/generate.mjs`, đừng merge tay |
-| `packages/protocol/fixtures/v1/cases.json` | sinh từ `scripts/fixtures.mjs`: merge script rồi chạy lại |
+| `packages/protocol/src/contract-v1.js` | sinh từ schema: chạy lại `node packages/protocol/scripts/generate.ts`, đừng merge tay |
+| `packages/protocol/fixtures/v1/cases.json` | sinh từ `scripts/fixtures.ts`: merge script rồi chạy lại |
 | `packages/protocol/src/wire.js` | `ERROR` (+1003, 1005), `CAPABILITY` (+4), `RPC_METHODS` |
 | `packages/protocol/src/rpc.ts`, `src/dto.ts` | kiểu method và DTO mới |
 | `docs/protocol/alp-json-rpc-v1.md` | §5, §6.2, §10, §12–§15 |
 | `packages/daemon/src/server.ts`, `src/main.ts` | `RpcError` chuyển sang `rpc-error.ts`; option `home`/`templates`; tên v1 dành riêng cho extension |
 | `packages/core/src/tasks.js`, `tasks.d.ts`, `task-rows.js` | `resolveGate` nhận `ifRev`; `taskRow.rev` |
-| `packages/daemon/tests/wire.test.js`, `methods.test.js`, `packages/protocol/tests/contract.test.js` | kỳ vọng inventory/capability/lỗi mới |
+| `packages/daemon/tests/wire.test.ts`, `methods.test.ts`, `packages/protocol/tests/contract.test.ts` | kỳ vọng inventory/capability/lỗi mới |
