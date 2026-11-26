@@ -4,17 +4,28 @@
 // Settings › Notifications sends a test notification once they are allowed. What ALP.app itself does
 // (the permission, ⌘W on its own pages, the window's bounds) is apps/desktop's e2e.
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect, newSession } from './support/app.js';
+import type { Locator, Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect, newSession } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
+
+// The page globals the init scripts below set and the page callbacks read.
+declare global {
+  interface Window { __closed: number }
+}
+/** The fake Notification's instances, as window.__notes holds them (__notes is not global: other specs record other shapes). */
+type Note = { title: string, options: NotificationOptions, onclick: (() => void) | null, closed: boolean };
+type NotesWindow = typeof window & { __notes: Note[] };
+/** The Window Controls Overlay as the stub below makes it (lib.dom has no navigator.windowControlsOverlay). */
+type Overlay = EventTarget & { visible: boolean, getTitlebarAreaRect(): DOMRect };
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
 const DESKTOP_UA = 'Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/140 Safari/537.36 ALPDesktop/1';
-const heading = (page, name) => page.getByRole('heading', { level: 1, name });
-const selected = (page, name) => expect(page.getByRole('tab', { name, exact: true })).toHaveAttribute('aria-selected', 'true');
+const heading = (page: Page, name: string) => page.getByRole('heading', { level: 1, name });
+const selected = (page: Page, name: string) => expect(page.getByRole('tab', { name, exact: true })).toHaveAttribute('aria-selected', 'true');
 
 test('ALP.app takes Paseo\'s desktop keys; a browser keeps the web ones', async ({ browser }) => {
   const context = await browser.newContext({ userAgent: DESKTOP_UA, viewport: { width: 1440, height: 900 } });
@@ -142,12 +153,16 @@ test('ALP.app: Mod+W that closes no tab closes the window; never while a dialog 
 test('Settings › Notifications: Enable, then Send shows a test notification that brings the window forward', async ({ page }) => {
   // The browser's Notification, recorded: what was shown, and the permission prompt's answer.
   await page.addInitScript(() => {
-    const shown = [];
+    const shown: Note[] = [];
     let permission = 'default';
     class FakeNotification {
+      declare title: string;
+      declare options: NotificationOptions;
+      declare onclick: (() => void) | null;
+      declare closed: boolean;
       static get permission() { return permission; }
       static async requestPermission() { permission = 'granted'; return permission; }
-      constructor(title, options = {}) { this.title = title; this.options = options; this.onclick = null; this.closed = false; shown.push(this); }
+      constructor(title: string, options: NotificationOptions = {}) { this.title = title; this.options = options; this.onclick = null; this.closed = false; shown.push(this); }
       close() { this.closed = true; }
     }
     Object.defineProperty(window, 'Notification', { value: FakeNotification, configurable: true, writable: true });
@@ -167,16 +182,16 @@ test('Settings › Notifications: Enable, then Send shows a test notification th
   await expect(section.getByTestId('notification-test')).toBeEnabled();
   await section.getByTestId('notification-test').click();
   await expect(section.getByTestId('notification-test-result')).toHaveText('Test notification sent.');
-  const note = await page.evaluate(() => ({ title: window.__notes[0]?.title, tag: window.__notes[0]?.options.tag, count: window.__notes.length }));
+  const note = await page.evaluate(() => ({ title: (window as NotesWindow).__notes[0]?.title, tag: (window as NotesWindow).__notes[0]?.options.tag, count: (window as NotesWindow).__notes.length }));
   expect(note).toEqual({ title: 'Test notification', tag: 'alp-test', count: 1 });
   // Its click focuses the window and closes it.
   const clicked = await page.evaluate(() => {
     let focused = false;
     const focus = window.focus;
     window.focus = () => { focused = true; };
-    window.__notes[0].onclick();
+    (window as NotesWindow).__notes[0]!.onclick!();
     window.focus = focus;
-    return { focused, closed: window.__notes[0].closed };
+    return { focused, closed: (window as NotesWindow).__notes[0]!.closed };
   });
   expect(clicked).toEqual({ focused: true, closed: true });
 });
@@ -189,7 +204,7 @@ test('a browser, even with the ALP.app marker, has no window chrome room: no dra
   const page = await context.newPage();
   await connect(page, world);
   const sizes = await page.evaluate(() => {
-    const box = selector => { const element = document.querySelector(selector); const rect = element?.getBoundingClientRect(); return rect ? [rect.width, rect.height] : null; };
+    const box = (selector: string) => { const element = document.querySelector(selector); const rect = element?.getBoundingClientRect(); return rect ? [rect.width, rect.height] : null; };
     return { drag: box('.window-drag'), row: box('nav[aria-label="Workspaces and sessions"] .window-controls-row') };
   });
   expect(sizes.drag).toEqual([1440, 0]);
@@ -210,7 +225,7 @@ test('a browser, even with the ALP.app marker, has no window chrome room: no dra
 test('ALP.app on macOS: the sidebar and explorer toggles stay in the top row as the panels open and close', async ({ browser }) => {
   const context = await browser.newContext({ userAgent: DESKTOP_UA, viewport: { width: 1440, height: 900 } });
   await context.addInitScript(() => {
-    const overlay = new EventTarget();
+    const overlay = new EventTarget() as Overlay;
     overlay.visible = true;
     overlay.getTitlebarAreaRect = () => new DOMRect(overlay.visible ? 85 : 0, 0, overlay.visible ? 1300 : 0, overlay.visible ? 38 : 0);
     Object.defineProperty(navigator, 'windowControlsOverlay', { value: overlay, configurable: true });
@@ -219,18 +234,18 @@ test('ALP.app on macOS: the sidebar and explorer toggles stay in the top row as 
   await connect(page, world);
   const sidebar = page.getByTestId('window-sidebar-toggle');
   const explorer = page.getByTestId('workspace-explorer-toggle');
-  const at = async locator => { const box = await locator.boundingBox(); return box && [Math.round(box.x), Math.round(box.y)]; };
+  const at = async (locator: Locator) => { const box = await locator.boundingBox(); return box && [Math.round(box.x), Math.round(box.y)]; };
   await expect(sidebar).toHaveAttribute('aria-label', 'Close sessions');
   await expect(explorer).toHaveCount(1);
   const start = { sidebar: await at(sidebar), explorer: await at(explorer) };
   // The explorer toggle at the window's right edge, in the explorer's tab row, which keeps it a slot.
-  expect(start.explorer[0]).toBe(1440 - 6 - 32);
+  expect(start.explorer![0]).toBe(1440 - 6 - 32);
   // The sidebar toggle where a leftmost header's would be: the lights' room (titlebar-area-x, 0.75rem
   // here: the stub has no env() values) and the header's gap, less its -0.375rem; over the sidebar's top row.
   expect(start.sidebar).toEqual([12 + 8 - 6, 2]);
   // The tab row's + ends before the explorer toggle's slot: nothing in the row is under the toggle.
-  const plus = await page.getByTestId('workspace-new-tab-button').boundingBox();
-  expect(plus.x + plus.width).toBeLessThanOrEqual(start.explorer[0]);
+  const plus = (await page.getByTestId('workspace-new-tab-button').boundingBox())!;
+  expect(plus.x + plus.width).toBeLessThanOrEqual(start.explorer![0]);
   await expect(page.getByRole('complementary', { name: 'Explorer' }).getByTestId('window-explorer-toggle-slot')).toHaveCount(1);
   await expect(page.locator('main header').getByRole('button', { name: /sessions$/ })).toHaveCount(0);
 
@@ -252,7 +267,7 @@ test('ALP.app on macOS: the sidebar and explorer toggles stay in the top row as 
   await expect(page.getByTestId('sidebar-column')).toHaveCount(1);
 
   // Full screen: no lights, so the headers own the toggles again, as in a browser.
-  await page.evaluate(() => { navigator.windowControlsOverlay.visible = false; navigator.windowControlsOverlay.dispatchEvent(new Event('geometrychange')); });
+  await page.evaluate(() => { (navigator as Navigator & { windowControlsOverlay: Overlay }).windowControlsOverlay.visible = false; (navigator as Navigator & { windowControlsOverlay: Overlay }).windowControlsOverlay.dispatchEvent(new Event('geometrychange')); });
   await expect(sidebar).toHaveCount(0);
   await expect(page.locator('main header').getByRole('button', { name: 'Close sessions' })).toHaveCount(1);
   await expect(page.locator('main header').getByTestId('workspace-explorer-toggle')).toHaveCount(1);

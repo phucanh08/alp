@@ -2,16 +2,17 @@
 // team/model/thinking/permissions controls and ALP's session.preview, a first message that starts
 // the session, the chosen effort reaching Codex, and the choices remembered for the next one.
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { assistant, connect, idle, users } from './support/app.js';
+import type { Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { assistant, connect, idle, users } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
-const screen = page => page.getByTestId('new-session-screen');
-const preview = page => screen(page).getByTestId('session-preview');
+const screen = (page: Page) => page.getByTestId('new-session-screen');
+const preview = (page: Page) => screen(page).getByTestId('session-preview');
 
 test('pick team, model and thinking with a live preview; the first message starts the session with that effort', async ({ page }) => {
   await connect(page, world);
@@ -29,11 +30,11 @@ test('pick team, model and thinking with a live preview; the first message start
   await screen(page).getByRole('button', { name: 'Team' }).click();
   const teamItems = page.getByRole('menu', { name: 'Team' }).getByRole('menuitemradio');
   // The team the preview named is the one checked (and the one sent).
-  await expect(page.getByRole('menu', { name: 'Team' }).getByRole('menuitemradio', { name: defaultTeam, exact: true })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('menu', { name: 'Team' }).getByRole('menuitemradio', { name: defaultTeam!, exact: true })).toHaveAttribute('aria-checked', 'true');
   const other = (await teamItems.allTextContents()).find(label => label !== defaultTeam);
   expect(other).toBeTruthy();
   await page.getByRole('menu', { name: 'Team' }).getByRole('menuitemradio', { name: other, exact: true }).click();
-  await expect(preview(page).getByTestId('preview-team')).toHaveText(other);
+  await expect(preview(page).getByTestId('preview-team')).toHaveText(other!);
 
   // The model's efforts (library.models) in the Thinking control; High goes into the preview.
   await screen(page).getByRole('button', { name: 'Model' }).click();
@@ -68,7 +69,7 @@ test('pick team, model and thinking with a live preview; the first message start
   await page.reload();
   await connect(page, world);
   await page.getByRole('navigation').getByRole('button', { name: 'New session' }).click();
-  await expect(screen(page).getByRole('button', { name: 'Team' })).toContainText(other);
+  await expect(screen(page).getByRole('button', { name: 'Team' })).toContainText(other!);
   await expect(screen(page).getByRole('button', { name: 'Model' })).toContainText('GPT-5.6-Sol');
   await expect(screen(page).getByTestId('thinking-label')).toHaveText('High');
   await expect(preview(page).getByTestId('preview-thinking')).toHaveText('High');
@@ -91,7 +92,7 @@ test('a workspace whose settings name no team offers Custom, which can be chosen
   await page.getByRole('navigation').getByRole('button', { name: 'New session' }).click();
   await expect(screen(page)).toBeVisible();
   const menu = page.getByRole('menu', { name: 'Team' });
-  const item = name => menu.getByRole('menuitemradio', { name, exact: true });
+  const item = (name: string) => menu.getByRole('menuitemradio', { name, exact: true });
   await expect(screen(page).getByRole('button', { name: 'Team' })).toContainText('Custom');
   await screen(page).getByRole('button', { name: 'Team' }).click();
   await expect(item('Custom')).toHaveAttribute('aria-checked', 'true');

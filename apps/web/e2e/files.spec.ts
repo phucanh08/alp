@@ -6,12 +6,13 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { startWorld } from './support/world.js';
-import { assistant, connect, idle, newSession, send, users } from './support/app.js';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { assistant, connect, idle, newSession, send, users } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 /** A files.read token for both 'shop' (main) and 'plain' (custom). */
 let twoWorkspaces = '';
 test.beforeAll(async () => {
@@ -51,17 +52,17 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await world?.close(); });
 
-const center = page => page.getByRole('dialog', { name: 'Command center' });
-const body = page => page.locator('body').click({ position: { x: 700, y: 300 } });
-const dock = page => page.getByRole('complementary', { name: 'Explorer' });
-const fileView = page => page.getByRole('main').getByTestId('file-view');
-const fileTab = (page, file) => page.getByRole('main').locator(`[data-tab="file:${file}"]`);
+const center = (page: Page) => page.getByRole('dialog', { name: 'Command center' });
+const body = (page: Page) => page.locator('body').click({ position: { x: 700, y: 300 } });
+const dock = (page: Page) => page.getByRole('complementary', { name: 'Explorer' });
+const fileView = (page: Page) => page.getByRole('main').getByTestId('file-view');
+const fileTab = (page: Page, file: string) => page.getByRole('main').locator(`[data-tab="file:${file}"]`);
 
-async function openFilesPanel(page) {
+async function openFilesPanel(page: Page) {
   await dock(page).getByRole('tab', { name: 'Files' }).click();
   await expect(dock(page).getByTestId('files-panel')).toBeVisible();
 }
-const entry = (page, file) => dock(page).locator(`[data-testid="files-entry"][data-path="${file}"]`);
+const entry = (page: Page, file: string) => dock(page).locator(`[data-testid="files-entry"][data-path="${file}"]`);
 
 test('Cmd/Ctrl+P picks a file: it opens in a file tab with its lines numbered', async ({ page }) => {
   await connect(page, world, world.tokens.filesReader);
@@ -199,7 +200,7 @@ test('a token without files.read: the Files panel says how to get it, links stay
 });
 
 test('the Files panel keeps its sort, hidden toggle and each workspace\'s open folders across a reload, as Paseo', async ({ page }) => {
-  const workspaceRow = name => page.getByTestId('project-row').filter({ hasText: name });
+  const workspaceRow = (name: string) => page.getByTestId('project-row').filter({ hasText: name });
   const sort = () => dock(page).getByTestId('files-sort');
   const hidden = () => dock(page).getByTestId('files-show-hidden');
   await connect(page, world, twoWorkspaces);
@@ -258,5 +259,5 @@ test('the Files panel keeps its sort, hidden toggle and each workspace\'s open f
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('alp-web:files-panel') ?? 'null'));
   expect(Object.keys(stored).sort()).toEqual(['showHidden', 'sort', 'v', 'workspaces']);
   expect(stored).toMatchObject({ v: 1, sort: 'modified', showHidden: true });
-  expect(Object.values(stored.workspaces).map(workspace => workspace.expanded).sort()).toEqual([['docs', 'gone'], ['src', 'src/checkout']]);
+  expect(Object.values(stored.workspaces).map(workspace => (workspace as { expanded: string[] }).expanded).sort()).toEqual([['docs', 'gone'], ['src', 'src/checkout']]);
 });

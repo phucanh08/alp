@@ -7,15 +7,18 @@ import { deflateSync, crc32 } from 'node:zlib';
 import { realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { startWorld } from './support/world.js';
-import { connect } from './support/app.js';
-import { dashboardSettings, startDashboard } from './support/dashboard.js';
-import { closeWorldAfter } from './support/cleanup.js';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect } from './support/app.ts';
+import { dashboardSettings, startDashboard } from './support/dashboard.ts';
+import type { Dashboard } from './support/dashboard.ts';
+import { closeWorldAfter } from './support/cleanup.ts';
 
 /** A PNG of `width` × `height` opaque pixels of one colour. */
-function png(width, height, [r, g, b] = [200, 40, 40]) {
-  const chunk = (type, data) => {
+function png(width: number, height: number, [r, g, b] = [200, 40, 40]) {
+  const chunk = (type: string, data: Buffer) => {
     const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
     const length = Buffer.alloc(4); length.writeUInt32BE(data.length);
     const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(body) >>> 0);
@@ -32,13 +35,15 @@ function png(width, height, [r, g, b] = [200, 40, 40]) {
 const PICTURE = png(3, 2);
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><script>window.__svgRan = true</script></svg>\n';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
-/** @type {Awaited<ReturnType<typeof startDashboard>>} */
-let dashboard;
-let project;
+let world: World;
+let dashboard: Dashboard;
+let project: string;
+// The page global the SVG's script would set if the page ever ran it.
+declare global {
+  interface Window { __svgRan?: boolean }
+}
 
-async function host(method, params) {
+async function host(method: string, params: unknown) {
   const client = await hostConnect(world.socket);
   try { return await client.request(method, params); } finally { client.close(); }
 }
@@ -60,11 +65,11 @@ test.afterAll(async () => {
   await closeWorldAfter(world, async () => { await dashboard?.stop(); });
 });
 
-const dock = page => page.getByRole('complementary', { name: 'Explorer' });
-const fileView = page => page.getByRole('main').getByTestId('file-view');
-const entry = (page, file) => dock(page).locator(`[data-testid="files-entry"][data-path="${file}"]`);
+const dock = (page: Page) => page.getByRole('complementary', { name: 'Explorer' });
+const fileView = (page: Page) => page.getByRole('main').getByTestId('file-view');
+const entry = (page: Page, file: string) => dock(page).locator(`[data-testid="files-entry"][data-path="${file}"]`);
 
-async function open(page, file) {
+async function open(page: Page, file: string) {
   await dock(page).getByRole('tab', { name: 'Files' }).click();
   await expect(dock(page).getByTestId('files-panel')).toBeVisible();
   await entry(page, file).click();
@@ -72,13 +77,13 @@ async function open(page, file) {
 }
 
 /** The image the view shows: drawn from a data: URL of the raster type, at its natural size. */
-async function expectPicture(page) {
+async function expectPicture(page: Page) {
   const view = fileView(page);
   const image = view.getByTestId('file-view-image-img');
   await expect(image).toBeVisible();
   expect(await image.getAttribute('src')).toBe(`data:image/png;base64,${PICTURE.toString('base64')}`);
-  await expect.poll(() => image.evaluate(node => /** @type {HTMLImageElement} */ (node).naturalWidth)).toBe(3);
-  expect(await image.evaluate(node => /** @type {HTMLImageElement} */ (node).naturalHeight)).toBe(2);
+  await expect.poll(() => image.evaluate(node => (node as HTMLImageElement).naturalWidth)).toBe(3);
+  expect(await image.evaluate(node => (node as HTMLImageElement).naturalHeight)).toBe(2);
   await expect(view.getByTestId('file-view-meta')).toHaveText(`${PICTURE.length} B · 3 × 2`);
   // Never edited, never a text view.
   await expect(view.getByTestId('file-view-edit')).toHaveCount(0);
@@ -87,7 +92,8 @@ async function expectPicture(page) {
 
 test('a token with files.read sees a PNG as an image; Copy path and Refresh work; SVG stays text; over 1 MiB is too large', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  const previews = [];
+  // any: workspace.files.preview requests the page sent, parsed from the socket.
+  const previews: any[] = [];
   page.on('websocket', socket => socket.on('framesent', frame => { if (String(frame.payload).includes('"workspace.files.preview"')) previews.push(JSON.parse(String(frame.payload))); }));
   await connect(page, world, world.tokens.filesReader);
   await open(page, 'picture.PNG');
@@ -106,7 +112,7 @@ test('a token with files.read sees a PNG as an image; Copy path and Refresh work
   await expect(fileView(page).getByTestId('file-view-content')).toContainText('<script>window.__svgRan = true</script>');
   await expect(fileView(page).getByTestId('file-view-image-img')).toHaveCount(0);
   await expect(page.locator('main svg script')).toHaveCount(0);
-  expect(await page.evaluate(() => /** @type {any} */ (window).__svgRan)).toBeUndefined();
+  expect(await page.evaluate(() => window.__svgRan)).toBeUndefined();
 
   await open(page, 'huge.png');
   await expect(fileView(page).getByTestId('file-view-error')).toHaveAttribute('data-reason', 'too_large');
@@ -116,7 +122,7 @@ test('a token with files.read sees a PNG as an image; Copy path and Refresh work
 
 test('a token without files.read is refused as for any file: no image tab, the pick copies the path, no preview is asked', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  const previews = [];
+  const previews: (string | Buffer)[] = [];
   page.on('websocket', socket => socket.on('framesent', frame => { if (String(frame.payload).includes('"workspace.files.preview"')) previews.push(frame.payload); }));
   await connect(page, world, world.tokens.owner);
   await dock(page).getByRole('tab', { name: 'Files' }).click();

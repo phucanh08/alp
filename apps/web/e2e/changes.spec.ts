@@ -8,16 +8,17 @@ import { mkdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect } from './support/app.js';
+import type { Locator, Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect } from './support/app.ts';
 
 const run = promisify(execFile);
-/** Git as world.js runs it for worktrees: no system or global configuration, no hooks. */
+/** Git as world.ts runs it for worktrees: no system or global configuration, no hooks. */
 const gitEnv = { PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
-const git = (cwd, ...args) => run('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Test', '-c', 'user.email=test@localhost', ...args], { cwd, env: gitEnv });
+const git = (cwd: string, ...args: string[]) => run('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Test', '-c', 'user.email=test@localhost', ...args], { cwd, env: gitEnv });
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => {
   world = await startWorld();
   const root = world.projects.main;
@@ -47,16 +48,16 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await world?.close(); });
 
-const dock = page => page.getByRole('complementary', { name: 'Explorer' });
-const file = (scope, name) => scope.locator(`[data-testid="git-file"][data-path="${name}"]`);
+const dock = (page: Page) => page.getByRole('complementary', { name: 'Explorer' });
+const file = (scope: Locator, name: string) => scope.locator(`[data-testid="git-file"][data-path="${name}"]`);
 
-async function openChanges(page) {
+async function openChanges(page: Page) {
   await dock(page).getByRole('tab', { name: 'Changes' }).click();
   await expect(dock(page).getByTestId('changes-panel')).toBeVisible();
 }
 
 /** Opens the Changes options menu (Paseo's "…") and picks one of its rows; the menu is closed after. */
-async function option(page, panel, id) {
+async function option(page: Page, panel: Locator, id: string) {
   await panel.getByTestId('changes-options-menu').click();
   await page.getByTestId(id).click();
   if (await page.getByRole('menu', { name: 'Diff options' }).count()) await page.keyboard.press('Escape');

@@ -5,11 +5,16 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { assistant, connect, idle, newSession, send, users } from './support/app.js';
+import type { Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { assistant, connect, idle, newSession, send, users } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
+// The page's own toLocaleTimeString, kept by the init script below while it breaks the chat's clock times.
+declare global {
+  var __realClock: Date['toLocaleTimeString'];
+}
 test.beforeAll(async () => {
   world = await startWorld();
   const root = world.projects.main;
@@ -19,11 +24,11 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await world?.close(); });
 
-const center = page => page.getByRole('dialog', { name: 'Command center' });
-const composer = page => page.getByLabel('Message', { exact: true });
-const highlights = (page, name) => page.evaluate(key => globalThis.CSS?.highlights?.get(key)?.size ?? 0, name);
+const center = (page: Page) => page.getByRole('dialog', { name: 'Command center' });
+const composer = (page: Page) => page.getByLabel('Message', { exact: true });
+const highlights = (page: Page, name: string) => page.evaluate((key: string) => globalThis.CSS?.highlights?.get(key)?.size ?? 0, name);
 
-async function command(page, query) {
+async function command(page: Page, query: string) {
   await page.keyboard.press('ControlOrMeta+K');
   await expect(center(page)).toBeVisible();
   await center(page).getByTestId('command-center-input').fill(query);
@@ -143,7 +148,7 @@ test('the command center changes the open session\'s model, thinking and mode; t
   await command(page, 'thinking');
   const efforts = center(page).getByRole('group', { name: 'Agent' }).getByRole('option');
   const other = efforts.filter({ hasNot: page.getByTestId('command-center-action-current') }).first();
-  const label = (await other.textContent()).replace(/^Thinking: /, '').trim();
+  const label = (await other.textContent())!.replace(/^Thinking: /, '').trim();
   await other.click();
   await expect(page.getByTestId('session-thinking-label')).toHaveText(label);
   // Two notices now, the newest last.
@@ -164,7 +169,7 @@ test('the command center changes the open session\'s model, thinking and mode; t
   const newest = await notices.last().textContent();
   await notices.first().getByRole('button', { name: 'Dismiss' }).click();
   await expect(notices).toHaveCount(1);
-  await expect(notices.first()).toHaveText(newest);
+  await expect(notices.first()).toHaveText(newest!);
 });
 
 test('the tab switcher lists the pane\'s tabs, filters as typed, and shows the one chosen', async ({ page }) => {

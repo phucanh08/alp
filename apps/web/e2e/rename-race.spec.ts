@@ -1,8 +1,15 @@
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect, newSession } from './support/app.js';
+import type { Page } from '@playwright/test';
 
-let world;
+// The page global gateRenameRender's init script sets and the test arms.
+declare global {
+  interface Window { renameRenderGate: { armed: boolean, blocked: boolean, held: (() => void)[], offset: number } }
+}
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect, newSession } from './support/app.ts';
+
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
@@ -12,9 +19,9 @@ test.afterAll(async () => { await world?.close(); });
  * changing React, input values, focus, selection, or DOM events. Advancing the
  * scheduler's clock forces a yield; no wall-clock sleep or probabilistic load.
  */
-async function gateRenameRender(page) {
+async function gateRenameRender(page: Page) {
   await page.addInitScript(() => {
-    const gate = window.renameRenderGate = { armed: false, blocked: false, held: [], offset: 0 };
+    const gate: Window['renameRenderGate'] = window.renameRenderGate = { armed: false, blocked: false, held: [], offset: 0 };
     const now = performance.now.bind(performance);
     performance.now = () => now() + gate.offset;
     const Channel = window.MessageChannel;
@@ -43,7 +50,7 @@ async function gateRenameRender(page) {
   });
 }
 
-async function releaseRender(page) {
+async function releaseRender(page: Page) {
   await page.evaluate(() => {
     const gate = window.renameRenderGate;
     gate.blocked = false;

@@ -6,24 +6,25 @@
 // alp-gateway has no owner: its tokens still see the read-only pages and Unavailable notes. The
 // dashboard credential holds no files.read: the owner reads files through host.files.*.
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { readFile, realpath, writeFile, access, mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { startWorld } from './support/world.js';
-import { connect } from './support/app.js';
-import { dashboardSettings, startDashboard } from './support/dashboard.js';
-import { closeWorldAfter } from './support/cleanup.js';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect } from './support/app.ts';
+import { dashboardSettings, startDashboard } from './support/dashboard.ts';
+import type { Dashboard } from './support/dashboard.ts';
+import { closeWorldAfter } from './support/cleanup.ts';
 
 const HIDDEN = '‹hidden on the host›';
 const SECRET = 'SENTINEL-OWNER-ENV-VALUE';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
-/** @type {Awaited<ReturnType<typeof startDashboard>>} */
-let dashboard;
-let project;
+let world: World;
+let dashboard: Dashboard;
+let project: string;
 
-async function host(method, params) {
+async function host(method: string, params: unknown) {
   const client = await hostConnect(world.socket);
   try { return await client.request(method, params); } finally { client.close(); }
 }
@@ -45,23 +46,23 @@ test.afterAll(async () => {
   await closeWorldAfter(world, async () => { await dashboard?.stop(); });
 });
 
-const openSettings = async page => {
+const openSettings = async (page: Page) => {
   await page.getByRole('button', { name: 'Settings' }).click();
   return page.getByRole('region', { name: 'Settings' });
 };
 
 /** Opens the dashboard's link: the app connects by itself as the host owner, on the project. */
-async function asOwner(page) {
+async function asOwner(page: Page) {
   await page.goto(dashboard.url);
   const row = page.locator(`[data-testid="project-row"][data-workspace="${project}"]`);
   await expect(row).toBeVisible();
   await expect(page.locator('main header')).toBeVisible();
 }
 
-const stored = async file => JSON.parse(await readFile(file, 'utf8'));
+const stored = async (file: string) => JSON.parse(await readFile(file, 'utf8'));
 
 test('owner: an MCP server is edited with a review of what will run; the hidden env value is kept as stored, never written as the mask', async ({ page }) => {
-  const frames = [];
+  const frames: string[] = [];
   page.on('websocket', socket => socket.on('framereceived', frame => frames.push(String(frame.payload))));
   await asOwner(page);
   const settings = await openSettings(page);
@@ -314,7 +315,7 @@ test('audit: every other control on the owner\'s app and host tabs does what it 
   await asOwner(page);
   const settings = await openSettings(page);
   // Library pages: Refresh lists again; an opened entry shows its content and Close closes it.
-  for (const [id, row] of [['settings-alp-templates', null], ['settings-alp-agents', 'main'], ['settings-alp-skills', null]]) {
+  for (const [id, row] of [['settings-alp-templates', null], ['settings-alp-agents', 'main'], ['settings-alp-skills', null]] as [string, string | null][]) {
     await settings.getByTestId(id).click();
     await settings.getByRole('button', { name: 'Refresh' }).click();
     await expect(settings.locator('[data-testid^="library-row-"]').first()).toBeVisible();

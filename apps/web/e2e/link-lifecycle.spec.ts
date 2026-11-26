@@ -1,16 +1,23 @@
 // Browser checks execute main.tsx's real listeners and the rendered controls, not source patterns.
 import { chromium, expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { closeWorldAfter } from './support/cleanup.js';
-import { freePort, startWorld } from './support/world.js';
+import { closeWorldAfter } from './support/cleanup.ts';
+import { freePort, startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
 
-let world, url, origin;
+let world: World, url: string, origin: string;
 const tokenKey = 'alp-web:link-token';
-const form = page => page.getByLabel('Access token');
-const connected = page => page.getByRole('navigation', { name: 'Workspaces and sessions' });
-const kept = page => page.evaluate(key => sessionStorage.getItem(key) !== null, tokenKey);
+// The page globals the bfcache test's init script sets.
+declare global {
+  interface Window { __documentId: string, __shows: boolean[] }
+}
+const form = (page: Page) => page.getByLabel('Access token');
+const connected = (page: Page) => page.getByRole('navigation', { name: 'Workspaces and sessions' });
+const kept = (page: Page) => page.evaluate((key: string) => sessionStorage.getItem(key) !== null, tokenKey);
 
 test.beforeAll(async () => {
   world = await startWorld({ gateway: false, serveWeb: false, settings: { dashboard: { port: await freePort() }, web: { relay: { enabled: false } } } });
@@ -47,7 +54,7 @@ test('nonloopback link clears an old credential in that origin tab storage', asy
   await page.route('http://alp.invalid/**', async route => {
     const target = new URL(route.request().url());
     const response = await fetch(`${origin}${target.pathname}${target.search}`);
-    await route.fulfill({ status: response.status, headers: { 'content-type': response.headers.get('content-type') }, body: Buffer.from(await response.arrayBuffer()) });
+    await route.fulfill({ status: response.status, headers: { 'content-type': response.headers.get('content-type')! }, body: Buffer.from(await response.arrayBuffer()) });
   });
   await page.goto('http://alp.invalid/');
   await page.evaluate(({ key, token }) => sessionStorage.setItem(key, token), { key: tokenKey, token: old });
@@ -110,7 +117,7 @@ test('genuine browser back-forward cache restores the document and reconnects', 
   const away = http.createServer((_, response) => { response.end('<!doctype html><title>Away</title>away'); });
   let context;
   try {
-    await new Promise((resolve, reject) => { away.once('error', reject); away.listen(0, '127.0.0.1', resolve); });
+    await new Promise<void>((resolve, reject) => { away.once('error', reject); away.listen(0, '127.0.0.1', resolve); });
     context = await browser.newContext();
     const page = await context.newPage();
     let tickets = 0;
@@ -124,7 +131,7 @@ test('genuine browser back-forward cache restores the document and reconnects', 
     await expect(connected(page)).toBeVisible();
     const id = await page.evaluate(() => window.__documentId);
     const before = tickets;
-    await page.goto(`http://127.0.0.1:${away.address().port}/`);
+    await page.goto(`http://127.0.0.1:${(away.address() as AddressInfo).port}/`);
     // bfcache restoration emits pageshow rather than a fresh document load.
     await page.goBack({ waitUntil: 'commit', timeout: 10_000 });
     await expect(connected(page)).toBeVisible();

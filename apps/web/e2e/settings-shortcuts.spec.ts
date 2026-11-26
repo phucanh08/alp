@@ -3,28 +3,29 @@
 // type are refused; the keys survive a reload and are the ones the window, the Shortcuts dialog and
 // the command center's hints use. Through the real UI, gateway and alpd.
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect, newSession } from './support/app.js';
+import type { Locator, Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect, newSession } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
-const nav = page => page.getByRole('navigation', { name: 'Workspaces and sessions' });
-const openShortcuts = async page => {
+const nav = (page: Page) => page.getByRole('navigation', { name: 'Workspaces and sessions' });
+const openShortcuts = async (page: Page) => {
   await page.getByRole('button', { name: 'Settings' }).click();
   const settings = page.getByRole('region', { name: 'Settings' });
   await settings.getByTestId('settings-shortcuts').click();
   await expect(settings.getByTestId('shortcuts-page')).toBeVisible();
   return settings;
 };
-const closeSettings = async page => {
+const closeSettings = async (page: Page) => {
   await page.getByRole('region', { name: 'Settings' }).getByRole('button', { name: 'Back' }).click();
   await expect(page.getByRole('region', { name: 'Settings' })).toHaveCount(0);
 };
-const row = (settings, id) => settings.getByTestId(`shortcut-setting-${id}`);
-const act = async (page, settings, id, action) => {
+const row = (settings: Locator, id: string) => settings.getByTestId(`shortcut-setting-${id}`);
+const act = async (page: Page, settings: Locator, id: string, action: string) => {
   const item = page.getByTestId(`shortcut-${action}-${id}`);
   // Scrolling the row into view closes a menu that opened before the scroll event arrived (the
   // Menu closes when its trigger scrolls), so open it again until it stays.
@@ -35,13 +36,13 @@ const act = async (page, settings, id, action) => {
   }).toPass();
   await item.click();
 };
-const stored = page => page.evaluate(() => JSON.parse(localStorage.getItem('alp-web:preferences') ?? '{}').shortcutOverrides);
+const stored = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('alp-web:preferences') ?? '{}').shortcutOverrides);
 
 test('rebind, conflicts, typing keys, clear, reset one and all; persisted and used everywhere', async ({ page }) => {
   await connect(page, world);
   await newSession(page, 'Keys');
   const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
-  const keys = (/** @type {string} */ key) => mac ? `⌘${key}` : `Ctrl+${key}`;
+  const keys = (key: string) => mac ? `⌘${key}` : `Ctrl+${key}`;
   const explorer = page.getByRole('complementary', { name: 'Explorer' });
 
   let settings = await openShortcuts(page);

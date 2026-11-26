@@ -3,7 +3,7 @@
 // Claude. Their own tools must report each file's exact SHA-256 and byte count. It spends real turns,
 // so it runs only when asked:
 //
-//   ALP_WEB_E2E_REAL_RUNTIMES=codex,claude pnpm exec playwright test e2e/attachment-files-real.spec.js --project=desktop
+//   ALP_WEB_E2E_REAL_RUNTIMES=codex,claude pnpm exec playwright test e2e/attachment-files-real.spec.ts --project=desktop
 //
 // Each session is created read-only (the strictest sandbox) by the host's owner on a small model, then
 // opened in the browser. The turn's descriptor of a file already names its SHA-256 and size, so the
@@ -17,25 +17,28 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { connect as connectSocket } from '@anhlp/alp-client';
-import { startWorld } from './support/world.js';
-import { assistant, connect, idle } from './support/app.js';
+import type { AlpClient } from '@anhlp/alp-client';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { assistant, connect, idle } from './support/app.ts';
 
 const wanted = (process.env.ALP_WEB_E2E_REAL_RUNTIMES ?? '').split(',').map(name => name.trim()).filter(name => name === 'codex' || name === 'claude');
 const MODELS = { codex: process.env.ALP_REAL_CODEX_MODEL ?? 'codex:gpt-6-luna', claude: process.env.ALP_REAL_CLAUDE_MODEL ?? 'claude:claude-haiku-4-5' };
-const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
-const sha512 = bytes => createHash('sha512').update(bytes).digest('hex');
+const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+const sha512 = (bytes: Buffer) => createHash('sha512').update(bytes).digest('hex');
 /** The installed runtimes, through a command of the root package (apps/web imports no runtime package). */
 const NATIVE = fileURLToPath(new URL('../../../test/e2e/native-threads.ts', import.meta.url));
-const native = async (...args) => JSON.parse((await promisify(execFile)(process.execPath, [NATIVE, ...args], { env: { ...process.env, ALP_HOME: world.home } })).stdout);
+const native = async (...args: string[]) => JSON.parse((await promisify(execFile)(process.execPath, [NATIVE, ...args], { env: { ...process.env, ALP_HOME: world.home } })).stdout);
 
 test.describe.configure({ mode: 'serial', timeout: 600_000 });
 test.skip(!wanted.length, 'Real runtimes only when ALP_WEB_E2E_REAL_RUNTIMES names codex and/or claude');
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
-/** @type {any} */
-let owner;
+let world: World;
+let owner: AlpClient;
+// any: session.history's items as alpd answers them; the test reads a few fields of each.
+type HistoryJson = any;
 let logFile = '';
 test.beforeAll(async () => {
   world = await startWorld({ provider: 'real' });
@@ -45,10 +48,10 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { owner?.close(); await world?.close(); });
 
-const log = async entry => { const line = JSON.stringify({ at: new Date().toISOString(), ...entry }); console.log(line); await appendFile(logFile, `${line}\n`); };
+const log = async (entry: object) => { const line = JSON.stringify({ at: new Date().toISOString(), ...entry }); console.log(line); await appendFile(logFile, `${line}\n`); };
 
 /** Drops files on the composer as a person drags them from the desktop. */
-async function dropFiles(page, files) {
+async function dropFiles(page: Page, files: { name: string, type: string, buffer: Buffer }[]) {
   await page.getByTestId('composer-box').evaluate((box, entries) => {
     const transfer = new DataTransfer();
     for (const entry of entries) transfer.items.add(new File([Uint8Array.from(atob(entry.base64), char => char.charCodeAt(0))], entry.name, { type: entry.type }));
@@ -57,7 +60,7 @@ async function dropFiles(page, files) {
   }, files.map(file => ({ name: file.name, type: file.type, base64: file.buffer.toString('base64') })));
 }
 
-for (const runtime of ['codex', 'claude']) {
+for (const runtime of ['codex', 'claude'] as const) {
   test(`${runtime}: a dropped and a picked file are read byte for byte by the runtime's own tools`, async ({ page }) => {
     test.skip(!wanted.includes(runtime), `${runtime} not asked for`);
     if (runtime === 'codex') {
@@ -103,11 +106,11 @@ for (const runtime of ['codex', 'claude']) {
     expect(answer).toContain(word);
 
     const history = await owner.request('session.history', { sessionId: session.id, limit: 500 });
-    const items = history.items.map(item => item.event).filter(event => event?.type === 'item').map(event => event.item);
-    const message = items.find(item => item.kind === 'user_message');
-    const tools = items.filter(item => item.kind === 'tool_call').map(item => ({ name: item.name, status: item.status, command: item.detail?.command }));
+    const items = history.items.map((item: HistoryJson) => item.event).filter((event: HistoryJson) => event?.type === 'item').map((event: HistoryJson) => event.item);
+    const message = items.find((item: HistoryJson) => item.kind === 'user_message');
+    const tools = items.filter((item: HistoryJson) => item.kind === 'tool_call').map((item: HistoryJson) => ({ name: item.name, status: item.status, command: item.detail?.command }));
     await log({ step: 'timeline', runtime, userMessage: message, tools });
-    expect(message.attachments.map(entry => entry.name)).toEqual(files.map(file => file.name));
+    expect(message.attachments.map((entry: HistoryJson) => entry.name)).toEqual(files.map(file => file.name));
     expect(tools.length).toBeGreaterThan(0);
     // Neither the page nor the timeline names where the host stages the copies.
     const home = await realpath(world.home);

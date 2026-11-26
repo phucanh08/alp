@@ -1,11 +1,12 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import type { World } from './world.ts';
 
-const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
 /** Always release this fixture's service and host, even if its graceful-stop assertion fails. */
-export async function closeWorldAfter(world, beforeClose) {
+export async function closeWorldAfter(world: World, beforeClose: () => unknown) {
   try {
     await beforeClose();
   } finally {

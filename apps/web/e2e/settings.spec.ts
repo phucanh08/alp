@@ -2,19 +2,20 @@
 // reload through localStorage, the access token never does, garbage in storage gives the defaults,
 // and Reset goes back to them. Through the real UI, gateway and alpd.
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect } from './support/app.js';
+import type { Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
-const openSettings = async page => {
+const openSettings = async (page: Page) => {
   await page.getByRole('button', { name: 'Settings' }).click();
   return page.getByRole('region', { name: 'Settings' });
 };
-const theme = page => page.evaluate(() => document.documentElement.dataset.theme);
+const theme = (page: Page) => page.evaluate(() => document.documentElement.dataset.theme);
 
 test('Default send and the theme survive a reload; the token does not; garbage and Reset give the defaults', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' });
@@ -32,7 +33,7 @@ test('Default send and the theme survive a reload; the token does not; garbage a
 
   // What storage holds: the versioned preferences; the token nowhere (the connect form keeps only
   // the gateway address, as before).
-  const preferences = JSON.parse(await page.evaluate(() => localStorage.getItem('alp-web:preferences')));
+  const preferences = JSON.parse((await page.evaluate(() => localStorage.getItem('alp-web:preferences')))!);
   expect(preferences).toMatchObject({ v: 1, sendBehavior: 'queue', theme: 'light', chatDisplay: 'collapseTurns', newSession: {} });
   const stored = await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }));
   expect(stored).not.toContain(world.tokens.owner);
@@ -59,7 +60,7 @@ test('Default send and the theme survive a reload; the token does not; garbage a
   await settings.getByTestId('settings-general').click();
   await settings.getByRole('button', { name: 'Reset' }).click();
   await expect(settings.getByLabel('Default send')).toHaveValue('steer');
-  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('alp-web:preferences')))).toMatchObject({ v: 1, sendBehavior: 'steer', theme: 'system' });
+  expect(JSON.parse((await page.evaluate(() => localStorage.getItem('alp-web:preferences')))!)).toMatchObject({ v: 1, sendBehavior: 'steer', theme: 'system' });
 
   // Garbage in storage: the defaults, and the app still connects.
   await page.evaluate(() => localStorage.setItem('alp-web:preferences', '{"v":1,"sendBehavior":"sideways","theme":42'));
@@ -71,9 +72,9 @@ test('Default send and the theme survive a reload; the token does not; garbage a
   await expect(settings.getByLabel('Default send')).toHaveValue('steer');
 });
 
-const stored = page => page.evaluate(() => JSON.parse(localStorage.getItem('alp-web:preferences') ?? '{}'));
+const stored = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('alp-web:preferences') ?? '{}'));
 
-const css = (page, name) => page.evaluate(variable => getComputedStyle(document.documentElement).getPropertyValue(variable).trim(), name);
+const css = (page: Page, name: string) => page.evaluate(variable => getComputedStyle(document.documentElement).getPropertyValue(variable).trim(), name);
 
 test('Appearance as Paseo: theme tiles, fonts and sizes, content width Default / Wide / Full, highlight theme with a live preview', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' });
@@ -135,7 +136,7 @@ test('Appearance as Paseo: theme tiles, fonts and sizes, content width Default /
   settings = await openSettings(page);
   await settings.getByTestId('settings-appearance').click();
   // A custom width kept from before selects no preset and says so.
-  await page.evaluate(() => { const value = JSON.parse(localStorage.getItem('alp-web:preferences')); localStorage.setItem('alp-web:preferences', JSON.stringify({ ...value, contentMaxWidth: 1100 })); });
+  await page.evaluate(() => { const value = JSON.parse(localStorage.getItem('alp-web:preferences')!); localStorage.setItem('alp-web:preferences', JSON.stringify({ ...value, contentMaxWidth: 1100 })); });
   await page.reload();
   expect(await css(page, '--content-width')).toBe('1100px');
   await connect(page, world);
@@ -289,8 +290,7 @@ test('Settings has no Voice, Pair device, Plugins or Metadata page, and Usage st
 });
 
 test.describe('Host › Terminals on a host that allows terminals', () => {
-  /** @type {Awaited<ReturnType<typeof startWorld>>} */
-  let terminals;
+  let terminals: World;
   test.beforeAll(async () => { terminals = await startWorld({ terminal: true }); });
   test.afterAll(async () => { await terminals?.close(); });
 

@@ -1,10 +1,10 @@
 // The same app on a phone-sized screen: the session list is a drawer, agents and tasks a sheet.
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { assistant, connect, newSession, openTasks, send } from './support/app.js';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { assistant, connect, newSession, openTasks, send } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
@@ -15,7 +15,7 @@ test('drawer, new session, prompt and tasks sheet on a phone', async ({ page }) 
   await send(page, 'hello from a phone [tool]');
   await expect(assistant(page).last()).toContainText('three files');
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
-  expect(width).toBeLessThanOrEqual(page.viewportSize().width);
+  expect(width).toBeLessThanOrEqual(page.viewportSize()!.width);
 
   await page.getByRole('button', { name: 'Open sessions' }).click();
   await expect(page.getByTestId('session-row')).toContainText('From my phone');

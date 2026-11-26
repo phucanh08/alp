@@ -3,21 +3,22 @@
 // pane's edge, the pane commands, resize, maximize, the panes kept across a reload, the narrow
 // window; Open ALP tasks and its full-screen board.
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect, newSession } from './support/app.js';
+import type { Locator, Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect, newSession } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
-const pane = (page, id) => page.getByTestId(`workspace-pane-${id}`);
-const paneTabs = (page, id) => pane(page, id).getByTestId('workspace-tab');
-const panes = page => page.getByTestId('workspace-panes');
+const pane = (page: Page, id: string) => page.getByTestId(`workspace-pane-${id}`);
+const paneTabs = (page: Page, id: string) => pane(page, id).getByTestId('workspace-tab');
+const panes = (page: Page) => page.getByTestId('workspace-panes');
 
 /** Presses `tab` and moves it to (x, y), as a person drags it. */
-async function dragTo(page, tab, x, y) {
-  const from = await tab.boundingBox();
+async function dragTo(page: Page, tab: Locator, x: number, y: number) {
+  const from = (await tab.boundingBox())!;
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
   await page.mouse.down();
   await page.mouse.move(x, y, { steps: 10 });
@@ -25,7 +26,7 @@ async function dragTo(page, tab, x, y) {
 }
 
 /** Runs a command center action by its words. */
-async function command(page, words, id) {
+async function command(page: Page, words: string, id: string) {
   await page.keyboard.press('ControlOrMeta+K');
   const center = page.getByRole('dialog', { name: 'Command center' });
   await center.getByRole('combobox').fill(words);
@@ -60,8 +61,8 @@ test('split panes: split, focus, drag between panes and to an edge, resize, maxi
   await expect(pane(page, 'pane-1').getByTestId('new-session-screen')).toBeVisible();
   // Both panes show their tab in front: Diff on the left still.
   await expect(pane(page, 'main').getByTestId('changes-not-git')).toHaveAttribute('data-reason', 'not_repository');
-  const left = await pane(page, 'main').boundingBox();
-  const right = await pane(page, 'pane-1').boundingBox();
+  const left = (await pane(page, 'main').boundingBox())!;
+  const right = (await pane(page, 'pane-1').boundingBox())!;
   expect(Math.abs(left.width - right.width)).toBeLessThan(4);
   expect(right.x).toBeGreaterThan(left.x + left.width - 2);
 
@@ -73,7 +74,7 @@ test('split panes: split, focus, drag between panes and to an edge, resize, maxi
   await expect(pane(page, 'pane-1').getByRole('tab', { name: 'New session' })).toHaveAttribute('aria-selected', 'true');
 
   // Drag Diff onto the other pane's tab row: it moves there and comes forward, with the focus.
-  const row = await pane(page, 'pane-1').locator('[data-pane-row]').boundingBox();
+  const row = (await pane(page, 'pane-1').locator('[data-pane-row]').boundingBox())!;
   await dragTo(page, pane(page, 'main').getByRole('tab', { name: 'Diff' }), row.x + row.width - 140, row.y + row.height / 2);
   await expect(paneTabs(page, 'main')).toHaveText(['Split work', 'Terminal']);
   await expect(paneTabs(page, 'pane-1')).toHaveText(['New session', 'Diff']);
@@ -95,12 +96,12 @@ test('split panes: split, focus, drag between panes and to an edge, resize, maxi
 
   // The handle between them resizes; the keyboard moves it too.
   const handle = page.getByTestId('workspace-split-resize-handle');
-  const at = await handle.boundingBox();
+  const at = (await handle.boundingBox())!;
   await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
   await page.mouse.down();
   await page.mouse.move(at.x - 150, at.y + at.height / 2, { steps: 6 });
   await page.mouse.up();
-  const narrower = await pane(page, 'main').boundingBox();
+  const narrower = (await pane(page, 'main').boundingBox())!;
   expect(narrower.width).toBeLessThan(left.width - 120);
   await handle.focus();
   const before = Number(await handle.getAttribute('aria-valuenow'));
@@ -124,9 +125,9 @@ test('split panes: split, focus, drag between panes and to an edge, resize, maxi
   await expect(pane(page, 'main').getByPlaceholder(/^Message main/)).toBeVisible();
 
   // A tab dropped on a pane's lower edge splits that pane down with it.
-  const body = await pane(page, 'pane-1').locator('[data-pane-body]').boundingBox();
+  const body = (await pane(page, 'pane-1').locator('[data-pane-body]').boundingBox())!;
   const tab = pane(page, 'pane-1').getByRole('tab', { name: 'Terminal' });
-  const from = await tab.boundingBox();
+  const from = (await tab.boundingBox())!;
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
   await page.mouse.down();
   await page.mouse.move(body.x + body.width / 2, body.y + body.height - 20, { steps: 10 });
@@ -134,8 +135,8 @@ test('split panes: split, focus, drag between panes and to an edge, resize, maxi
   await page.mouse.up();
   await expect(panes(page)).toHaveAttribute('data-panes', '3');
   await expect(paneTabs(page, 'pane-2')).toHaveText(['Terminal']);
-  const upper = await pane(page, 'pane-1').boundingBox();
-  const lower = await pane(page, 'pane-2').boundingBox();
+  const upper = (await pane(page, 'pane-1').boundingBox())!;
+  const lower = (await pane(page, 'pane-2').boundingBox())!;
   expect(lower.y).toBeGreaterThan(upper.y + upper.height - 2);
 
   // Close pane closes its tabs; a pane whose last tab closes goes too.
@@ -214,8 +215,8 @@ test('a right click in a pane: split it left, up, right or down; a field and a n
   await expect(panes(page)).toHaveAttribute('data-panes', '2');
   await expect(paneTabs(page, 'pane-1')).toHaveText(['New tab']);
   await expect(pane(page, 'pane-1')).toHaveAttribute('data-focused', 'true');
-  const left = await pane(page, 'pane-1').boundingBox();
-  const right = await pane(page, 'main').boundingBox();
+  const left = (await pane(page, 'pane-1').boundingBox())!;
+  const right = (await pane(page, 'main').boundingBox())!;
   expect(left.x + left.width).toBeLessThanOrEqual(right.x + 2);
 
   // Up, from the clicked pane (not the focused one): a vertical group with the new pane on top.
@@ -223,8 +224,8 @@ test('a right click in a pane: split it left, up, right or down; a field and a n
   await menu.getByRole('menuitem', { name: 'Split pane up' }).click();
   await expect(panes(page)).toHaveAttribute('data-panes', '3');
   await expect(paneTabs(page, 'pane-2')).toHaveText(['New tab']);
-  const top = await pane(page, 'pane-2').boundingBox();
-  const bottom = await pane(page, 'main').boundingBox();
+  const top = (await pane(page, 'pane-2').boundingBox())!;
+  const bottom = (await pane(page, 'main').boundingBox())!;
   expect(top.y + top.height).toBeLessThanOrEqual(bottom.y + 2);
   expect(Math.abs(top.x - bottom.x)).toBeLessThan(2);
 

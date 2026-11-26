@@ -2,11 +2,11 @@
 // session, stream a reply with a tool call, answer and decline questions, stop a running turn,
 // tasks with a human gate, rename; the token never lands in storage, the URL or the gateway log.
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { assistant, connect, fullChat, idle, newSession, openDockPanel, openTasks, send, users } from './support/app.js';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { assistant, connect, fullChat, idle, newSession, openDockPanel, openTasks, send, users } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
@@ -171,7 +171,7 @@ test('tasks: add, approve a human gate, close and reopen', async ({ page }) => {
   await expect(detail.getByRole('button', { name: 'Close task' })).toBeVisible();
   const listed = JSON.parse(await world.alp('task', 'show', id, '--json'));
   expect(listed.status).toBe('open');
-  expect(listed.gates.every(gate => gate.resolved)).toBe(true);
+  expect(listed.gates.every((gate: { resolved?: boolean }) => gate.resolved)).toBe(true);
 });
 
 test('settings: the old app\'s layout, what the token allows, names from the library, what this beta cannot do', async ({ page }) => {

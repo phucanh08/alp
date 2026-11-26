@@ -5,29 +5,31 @@
 // workspace's directory on the host (a recording program stands in for the file manager here).
 // Real alpd, fake Codex, no fixed waits.
 import { expect, test } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { chmod, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { startWorld } from './support/world.js';
-import { closeWorldAfter } from './support/cleanup.js';
-import { dashboardSettings, startDashboard } from './support/dashboard.js';
-import { connect, newSession } from './support/app.js';
+import type { SessionSummary } from '@anhlp/alp-protocol';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { closeWorldAfter } from './support/cleanup.ts';
+import { dashboardSettings, startDashboard } from './support/dashboard.ts';
+import type { Dashboard } from './support/dashboard.ts';
+import { connect, newSession } from './support/app.ts';
 
 const git = promisify(execFile);
 const DESKTOP_MARKER = 'ALPDesktop/1';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
-/** @type {Awaited<ReturnType<typeof startDashboard>>} */
-let dashboard;
+let world: World;
+let dashboard: Dashboard;
 /** Where the stand-in file manager writes the directory it was asked to open. */
-let opened;
+let opened: string;
 /** Where the stand-in editor writes `<editor id>|<directory>`. */
-let edited;
+let edited: string;
 
-async function host(method, params = {}) {
+async function host(method: string, params = {}) {
   const client = await hostConnect(world.socket);
   try { return await client.request(method, params); } finally { client.close(); }
 }
@@ -56,23 +58,23 @@ test.afterAll(async () => {
   if (world) await closeWorldAfter(world, async () => { await dashboard?.stop(); });
 });
 
-const nav = page => page.getByRole('navigation', { name: 'Workspaces and sessions' });
-const row = (page, title) => nav(page).getByTestId('session-row').filter({ hasText: title });
+const nav = (page: Page) => page.getByRole('navigation', { name: 'Workspaces and sessions' });
+const row = (page: Page, title: string) => nav(page).getByTestId('session-row').filter({ hasText: title });
 
 /** Opens a row's ⋮ menu and answers it with the labels of its items, in order. */
-async function openMenu(page, title) {
+async function openMenu(page: Page, title: string) {
   await row(page, title).hover();
   await nav(page).getByRole('button', { name: `Actions for ${title}` }).click();
   const menu = page.getByRole('menu', { name: `Actions for ${title}` });
   await expect(menu).toBeVisible();
   return menu;
 }
-const labels = menu => menu.getByRole('menuitem').evaluateAll(items => items.map(item => item.querySelector('span')?.textContent?.trim() ?? item.textContent?.trim()));
+const labels = (menu: Locator) => menu.getByRole('menuitem').evaluateAll(items => items.map(item => item.querySelector('span')?.textContent?.trim() ?? item.textContent?.trim()));
 /** The host's row of the session titled `title`, by either spelling of the project's path (a temporary directory may sit under a symbolic link). */
-async function sessionOf(title, extra = {}) {
+async function sessionOf(title: string, extra = {}) {
   for (const projectRoot of new Set([world.projects.main, await realpath(world.projects.main)])) {
     // A root nobody has open is closed, and still in the sidebar.
-    const found = (await host('session.list', { projectRoot, includeClosed: true, ...extra })).sessions.find(session => session.title === title);
+    const found = (await host('session.list', { projectRoot, includeClosed: true, ...extra })).sessions.find((session: SessionSummary) => session.title === title);
     if (found) return found;
   }
   return undefined;
@@ -126,7 +128,7 @@ test('a writer\'s menu: Paseo\'s items in order; copy, rename, mark unread then 
   await expect(row(page, 'Menu renamed')).toHaveCount(1);
   await expect.poll(async () => !!(await sessionOf('Menu renamed'))).toBe(true);
 
-  // Archive: an idle session leaves the list at once (Undo in the toast, menus.spec.js) and the host archives it.
+  // Archive: an idle session leaves the list at once (Undo in the toast, menus.spec.ts) and the host archives it.
   menu = await openMenu(page, 'Menu renamed');
   await menu.getByRole('menuitem', { name: 'Archive' }).click();
   await expect(row(page, 'Menu renamed')).toHaveCount(0);

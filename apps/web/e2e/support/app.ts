@@ -1,8 +1,13 @@
 // What a person does in the app, as Playwright actions on the real UI.
 import { expect } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import type { World } from './world.ts';
+
+/** A located element's box (Locator.boundingBox() of an element that is shown). */
+export type Box = NonNullable<Awaited<ReturnType<Locator['boundingBox']>>>;
 
 /** Opens the app and connects with `token`; waits for the workspace screen. */
-export async function connect(page, world, token = world.tokens.owner) {
+export async function connect(page: Page, world: World, token = world.tokens.owner) {
   await page.goto(world.webUrl);
   await page.getByLabel('Gateway address').fill(world.gatewayUrl);
   await page.getByLabel('Access token').fill(token);
@@ -16,7 +21,7 @@ export async function connect(page, world, token = world.tokens.owner) {
  * specs about the rows themselves; the app's default, as Paseo's, folds finished turns. Runs
  * before the app's scripts on every load of the page, so it holds across reloads.
  */
-export async function fullChat(page) {
+export async function fullChat(page: Page) {
   await page.addInitScript(() => {
     try {
       const stored = JSON.parse(localStorage.getItem('alp-web:preferences') ?? 'null');
@@ -29,7 +34,7 @@ export async function fullChat(page) {
  * Starts a session from the New session screen (Paseo's new agent tab) with a title and, when
  * given, a first message; waits until it is ready for a message.
  */
-export async function newSession(page, title, { from = page.getByRole('navigation').getByRole('button', { name: 'New session' }), prompt } = {}) {
+export async function newSession(page: Page, title: string, { from = page.getByRole('navigation').getByRole('button', { name: 'New session' }), prompt }: { from?: Locator, prompt?: string } = {}) {
   await from.click();
   const screen = page.getByTestId('new-session-screen');
   await expect(screen).toBeVisible();
@@ -43,7 +48,7 @@ export async function newSession(page, title, { from = page.getByRole('navigatio
 }
 
 /** Types a message in the composer and sends it with Enter. */
-export async function send(page, text) {
+export async function send(page: Page, text: string) {
   const composer = page.getByLabel('Message', { exact: true });
   await expect(composer).toBeEnabled();
   await composer.fill(text);
@@ -51,19 +56,19 @@ export async function send(page, text) {
 }
 
 /** Opens a panel in the explorer dock: + then the panel in its New tab menu, as Paseo's. */
-export async function openDockPanel(page, kind, label) {
+export async function openDockPanel(page: Page, kind: string, label: string) {
   await page.getByRole('button', { name: 'New explorer tab' }).click();
   await page.getByTestId(`workspace-new-tab-menu-${kind}`).click();
   await expect(page.getByRole('complementary', { name: 'Explorer' }).getByRole('tab', { name: new RegExp(`^${label}`) })).toHaveAttribute('aria-selected', 'true');
 }
 
-export const openTasks = page => openDockPanel(page, 'tasks', 'Tasks');
+export const openTasks = (page: Page) => openDockPanel(page, 'tasks', 'Tasks');
 
-export const assistant = page => page.getByTestId('assistant-message');
-export const users = page => page.getByTestId('user-message');
+export const assistant = (page: Page) => page.getByTestId('assistant-message');
+export const users = (page: Page) => page.getByTestId('user-message');
 
 /** Waits until no turn runs, as a person waits for the reply to finish before the next message. */
-export async function idle(page) {
+export async function idle(page: Page) {
   await expect(page.getByTestId('working')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Interrupt agent' })).toBeHidden();
 }

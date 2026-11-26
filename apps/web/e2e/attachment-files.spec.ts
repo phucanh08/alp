@@ -13,15 +13,16 @@ import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { assistant, connect, idle, newSession } from './support/app.js';
+import type { Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { assistant, connect, idle, newSession } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
-const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+const sha256 = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 /** 3000 bytes of every value, NULs included: a file no text path could carry. */
 const BINARY = Buffer.from(Array.from({ length: 3000 }, (_, index) => (index * 7) % 256));
 const TEXT = Buffer.from('hello\nworld\n');
@@ -36,12 +37,12 @@ const RUNTIME_REFUSAL = /cannot read attachments yet; they stay stored and the p
  * session.prompt carrying an attachment part with the gateway's 1005 attachment_unsupported error
  * frame instead of passing it on (`refused` counts them). `dropOnChunk` closes the page's socket
  * right after the first attachment.chunk went out, before its answer.
- * @param {import('@playwright/test').Page} page
- * @param {{ snapshot?: 'keep' | 'strip', refuseAttachments?: boolean, dropOnChunk?: boolean }} [options]
  */
-async function watchGateway(page, { snapshot = 'keep', refuseAttachments = false, dropOnChunk = false } = {}) {
-  const seen = { native: false, sockets: 0, begins: /** @type {any[]} */ ([]), dropped: false, refused: 0 };
-  const rewrite = value => {
+async function watchGateway(page: Page, { snapshot = 'keep', refuseAttachments = false, dropOnChunk = false }: { snapshot?: 'keep' | 'strip', refuseAttachments?: boolean, dropOnChunk?: boolean } = {}) {
+  // any: attachment.begin params as the page sent them (parsed JSON).
+  const seen = { native: false, sockets: 0, begins: [] as any[], dropped: false, refused: 0 };
+  // any: any value of a parsed gateway frame, walked and rewritten in place.
+  const rewrite = (value: any) => {
     if (Array.isArray(value)) { value.forEach(rewrite); return; }
     if (!value || typeof value !== 'object') return;
     if (typeof value.id === 'string' && typeof value.runtime === 'string') {
@@ -59,7 +60,7 @@ async function watchGateway(page, { snapshot = 'keep', refuseAttachments = false
       let request;
       try { request = JSON.parse(String(message)); } catch {}
       if (request?.method === 'attachment.begin') seen.begins.push(request.params);
-      if (refuseAttachments && request?.method === 'session.prompt' && request.params?.content?.some(part => part?.type === 'attachment')) {
+      if (refuseAttachments && request?.method === 'session.prompt' && request.params?.content?.some((part: { type?: string } | null) => part?.type === 'attachment')) {
         seen.refused += 1;
         ws.send(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: 1005, message: ATTACHMENT_UNSUPPORTED, data: { reason: 'attachment_unsupported' } } }));
         return;
@@ -84,7 +85,7 @@ async function watchGateway(page, { snapshot = 'keep', refuseAttachments = false
 }
 
 /** Drops files onto the composer, as a person drags them from the desktop. */
-async function dropFiles(page, files) {
+async function dropFiles(page: Page, files: { name: string, type: string, buffer: Buffer }[]) {
   await page.getByTestId('composer-box').evaluate((box, entries) => {
     const transfer = new DataTransfer();
     for (const entry of entries) transfer.items.add(new File([Uint8Array.from(atob(entry.base64), char => char.charCodeAt(0))], entry.name, { type: entry.type }));
@@ -93,7 +94,7 @@ async function dropFiles(page, files) {
   }, files.map(file => ({ name: file.name, type: file.type, base64: file.buffer.toString('base64') })));
 }
 
-const composer = page => page.getByLabel('Message', { exact: true });
+const composer = (page: Page) => page.getByLabel('Message', { exact: true });
 
 test('files a token or a runtime cannot take are refused before anything is uploaded', async ({ page }) => {
   const before = (await world.storedAttachments()).length;
@@ -182,7 +183,7 @@ test('a dropped and a picked file reach the runtime byte for byte; the timeline 
   expect((await world.storedAttachments()).filter(entry => entry.sessionId === sessionId).map(entry => [entry.name, entry.state, entry.sha256]).sort()).toEqual([['blob.bin', 'committed', sha256(BINARY)], ['notes.txt', 'committed', sha256(TEXT)]]);
   expect(await world.promptReceipts(sessionId)).toHaveLength(1);
   const withFiles = (await world.turnStarts()).filter(entry => entry.files);
-  expect(withFiles.at(-1).files.map(({ name, sha256: digest, bytes }) => ({ name, digest, bytes }))).toEqual([{ name: 'blob.bin', digest: sha256(BINARY), bytes: BINARY.length }, { name: 'notes.txt', digest: sha256(TEXT), bytes: TEXT.length }]);
+  expect(withFiles.at(-1).files.map(({ name, sha256: digest, bytes }: { name: string, sha256: string, bytes: number }) => ({ name, digest, bytes }))).toEqual([{ name: 'blob.bin', digest: sha256(BINARY), bytes: BINARY.length }, { name: 'notes.txt', digest: sha256(TEXT), bytes: TEXT.length }]);
   // The browser never sees where the host keeps or stages them.
   // (The granted workspace's own path may show: it is the project the credential names.)
   const html = await page.content();

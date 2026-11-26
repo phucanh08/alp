@@ -2,10 +2,11 @@
 // holds main's ALP skills (session.commands), filters as the name is typed, and Enter, Tab or a click
 // puts the chosen one in the box; Escape closes the list without interrupting the agent.
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect, newSession } from './support/app.js';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect, newSession } from './support/app.ts';
 
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 

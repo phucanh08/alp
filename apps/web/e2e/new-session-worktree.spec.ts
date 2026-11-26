@@ -3,12 +3,14 @@
 // first with workspace.worktree.create, then session.create with its workspaceId), and the app
 // opens that worktree. A token without workspace.manage is not offered the choice.
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { startWorld } from './support/world.js';
-import { assistant, connect, idle, users } from './support/app.js';
+import type { SessionSummary } from '@anhlp/alp-protocol';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { assistant, connect, idle, users } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => {
   world = await startWorld({ worktrees: true });
   const local = await hostConnect(world.socket);
@@ -19,7 +21,7 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await world?.close(); });
 
-const screen = page => page.getByTestId('new-session-screen');
+const screen = (page: Page) => page.getByTestId('new-session-screen');
 
 test('New worktree: the worktree is made first, the session starts there, and the app opens it', async ({ page }) => {
   await connect(page, world, world.tokens.worktreeWriter);
@@ -38,7 +40,7 @@ test('New worktree: the worktree is made first, the session starts there, and th
   await screen(page).getByTestId('new-session-where').click();
   await page.getByTestId('new-session-where-worktree').click();
 
-  // As a person waits for "This session will run" before starting (new-session.spec.js).
+  // As a person waits for "This session will run" before starting (new-session.spec.ts).
   await expect(screen(page).getByTestId('session-preview')).toHaveAttribute('aria-busy', 'false');
   const composer = screen(page).getByLabel('Message', { exact: true });
   await composer.fill('Work in isolation');
@@ -57,7 +59,7 @@ test('New worktree: the worktree is made first, the session starts there, and th
     const row = (await owner.request('workspace.get', { workspaceId: id })).workspace;
     expect(row.managedWorktree).toBeTruthy();
     const { sessions } = await owner.request('session.list', {});
-    const started = sessions.filter(session => session.title === 'Work in isolation');
+    const started = sessions.filter((session: SessionSummary) => session.title === 'Work in isolation');
     expect(started).toHaveLength(1);
     expect(started[0].projectRoot).toBe(row.directory);
     expect(started[0].projectRoot).not.toBe(world.projects.main);

@@ -1,9 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect } from './support/app.js';
+import type { Locator } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect } from './support/app.ts';
 import { connect as hostConnect } from '@anhlp/alp-client';
+import type { RegistryWorkspace } from '@anhlp/alp-protocol';
 import { execFileSync } from 'node:child_process';
-let world;
+let world: World;
 test.beforeAll(async () => {
   world = await startWorld({ worktrees: true });
 });
@@ -33,7 +36,7 @@ test('gateway browser creates approved worktree, shows branch after restart, del
   }).trim();
   await expect(source).toHaveAttribute('data-branch', sourceBranch);
   // Paseo's project actions hold the worktree commands.
-  const actions = project => project.getByTestId('project-actions');
+  const actions = (project: Locator) => project.getByTestId('project-actions');
   await source.getByTestId('project-row').hover();
   await actions(source).click();
   await page.getByTestId('project-create-worktree').click();
@@ -106,7 +109,7 @@ test('real gateway refuses missing mapping, dirty, active and saved-session remo
   await hello(client);
   try {
     const rows = await client.request('workspace.list', {});
-    const source = rows.workspaces.find((w) => !w.managedWorktree);
+    const source = rows.workspaces.find((w: RegistryWorkspace) => !w.managedWorktree);
     expect(source).toBeTruthy();
     const file = world.home + '/state/web-workspaces.json';
     const before = await readFile(file, 'utf8');

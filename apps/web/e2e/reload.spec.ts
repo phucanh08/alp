@@ -4,18 +4,21 @@
 // the same thread, keeping the session id and history, and the next reply still sees the earlier turns
 // (the fake answers "[codewords]" from its thread's kept history, across processes).
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { startWorld } from './support/world.js';
-import { assistant, connect, idle, newSession, send } from './support/app.js';
+import type { SessionSummary } from '@anhlp/alp-protocol';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { assistant, connect, idle, newSession, send } from './support/app.ts';
 
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
-const tabMenu = page => page.getByRole('menu');
+const tabMenu = (page: Page) => page.getByRole('menu');
 
-async function ask(page, text) {
+async function ask(page: Page, text: string) {
   const before = await assistant(page).count();
   await send(page, text);
   await expect(assistant(page)).toHaveCount(before + 1);
@@ -23,7 +26,7 @@ async function ask(page, text) {
   return (await assistant(page).last().textContent())?.trim();
 }
 
-async function host(method, params) {
+async function host(method: string, params: unknown) {
   const owner = await hostConnect(world.socket);
   try { return await owner.request(method, params); } finally { owner.close(); }
 }
@@ -37,7 +40,7 @@ test('Copy resume command copies the host\'s ALP command; Reload agent restarts 
   await newSession(page, 'Reload me');
   expect(await ask(page, 'codeword DELTA')).toBe('Echo: codeword DELTA');
   const { sessions } = await host('session.list', { rootsOnly: true });
-  const session = sessions.find(row => row.title === 'Reload me');
+  const session = sessions.find((row: SessionSummary) => row.title === 'Reload me');
   expect(session.conversation).toEqual({ fork: true, rewind: true, reload: true, configure: true });
   const historyBefore = await host('session.history', { sessionId: session.id, limit: 200 });
 

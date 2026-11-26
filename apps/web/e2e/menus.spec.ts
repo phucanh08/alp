@@ -3,19 +3,29 @@
 // Undo toast, the project menu's Remove project, per-session Pin to top and Labels with the sidebar's
 // Pinned section, and Settings › Notifications' Play sound and Refresh. Readers get no write item.
 import { expect, test } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { startWorld } from './support/world.js';
-import { connect, newSession } from './support/app.js';
+import type { RegistryWorkspace, SessionSummary } from '@anhlp/alp-protocol';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect, newSession } from './support/app.ts';
 
 const git = promisify(execFile);
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 
-async function host(method, params = {}) {
+// The page global the notification init script below sets.
+declare global {
+  interface Window { __setPermission(value: string): void }
+}
+/** The fake Notification's instances, as window.__notes holds them (__notes is not global: other specs record other shapes). */
+type Note = { title: string, options: NotificationOptions };
+type NotesWindow = typeof window & { __notes: Note[] };
+
+async function host(method: string, params = {}) {
   const client = await hostConnect(world.socket);
   try { return await client.request(method, params); } finally { client.close(); }
 }
@@ -31,26 +41,26 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await world?.close(); });
 
-const nav = page => page.getByRole('navigation', { name: 'Workspaces and sessions' });
-const row = (page, title) => nav(page).getByTestId('session-row').filter({ hasText: title });
-const labels = menu => menu.getByRole('menuitem').evaluateAll(items => items.map(item => item.querySelector('span')?.textContent?.trim() ?? item.textContent?.trim()));
+const nav = (page: Page) => page.getByRole('navigation', { name: 'Workspaces and sessions' });
+const row = (page: Page, title: string) => nav(page).getByTestId('session-row').filter({ hasText: title });
+const labels = (menu: Locator) => menu.getByRole('menuitem').evaluateAll(items => items.map(item => item.querySelector('span')?.textContent?.trim() ?? item.textContent?.trim()));
 
-async function sessionOf(title, extra = {}) {
+async function sessionOf(title: string, extra = {}) {
   for (const projectRoot of new Set([world.projects.main, await realpath(world.projects.main)])) {
-    const found = (await host('session.list', { projectRoot, includeClosed: true, ...extra })).sessions.find(session => session.title === title);
+    const found = (await host('session.list', { projectRoot, includeClosed: true, ...extra })).sessions.find((session: SessionSummary) => session.title === title);
     if (found) return found;
   }
   return undefined;
 }
 
-async function headerMenu(page) {
+async function headerMenu(page: Page) {
   await page.locator('main header').getByRole('button', { name: 'Session actions' }).click();
   const menu = page.getByRole('menu', { name: 'Session actions' });
   await expect(menu).toBeVisible();
   return menu;
 }
 
-async function rowMenu(page, title) {
+async function rowMenu(page: Page, title: string) {
   await row(page, title).first().hover();
   await nav(page).getByRole('button', { name: `Actions for ${title}` }).first().click();
   const menu = page.getByRole('menu', { name: `Actions for ${title}` });
@@ -156,9 +166,9 @@ test('Pin to top and Labels on a session: kept by the host, the row moves to Pin
   // The host's label catalog (the owner's Settings › Workspaces makes labels): two labels, then
   // taken off the workspace again so the row's labels are the session's own.
   const { workspaces } = await host('workspace.list', {});
-  const workspaceId = workspaces.find(entry => !entry.archivedAt).id;
+  const workspaceId = workspaces.find((entry: RegistryWorkspace) => !entry.archivedAt).id;
   // Each write takes the registry's revision as it is now (the app's own reads and writes move it).
-  const owner = async (operation, args, requestId) => host('registry.owner', { operation, args, ifRevision: (await host('registry.owner', {})).registry.revision, requestId });
+  const owner = async (operation: string, args: object, requestId: string) => host('registry.owner', { operation, args, ifRevision: (await host('registry.owner', {})).registry.revision, requestId });
   for (const [name, color, assigned] of [['urgent', 'red', true], ['review', 'sky', true], ['urgent', 'red', false], ['review', 'sky', false]]) {
     await owner('label.assign', { workspaceId, label: { name, color }, assigned }, `menus-${name}-${assigned}`);
   }
@@ -214,18 +224,20 @@ test('Pin to top and Labels on a session: kept by the host, the row moves to Pin
 
 test('Settings › Notifications: Play sound decides a notification\'s silent; Refresh reads the permission again', async ({ page }) => {
   await page.addInitScript(() => {
-    const shown = [];
+    const shown: Note[] = [];
     let permission = 'default';
     class FakeNotification {
+      declare title: string;
+      declare options: NotificationOptions;
       static get permission() { return permission; }
       static async requestPermission() { return permission; }
-      constructor(title, options = {}) { this.title = title; this.options = options; shown.push(this); }
+      constructor(title: string, options: NotificationOptions = {}) { this.title = title; this.options = options; shown.push(this); }
       close() {}
     }
     Object.defineProperty(window, 'Notification', { value: FakeNotification, configurable: true, writable: true });
     Object.defineProperty(window, '__notes', { value: shown });
     // What the system settings would change behind the page's back.
-    Object.defineProperty(window, '__setPermission', { value: value => { permission = value; } });
+    Object.defineProperty(window, '__setPermission', { value: (value: string) => { permission = value; } });
   });
   await connect(page, world);
   await page.getByRole('button', { name: 'Settings' }).click();
@@ -246,12 +258,12 @@ test('Settings › Notifications: Play sound decides a notification\'s silent; R
   const sound = section.getByTestId('notification-sound');
   await expect(sound).toHaveAttribute('aria-checked', 'true');
   await section.getByTestId('notification-test').click();
-  await expect.poll(() => page.evaluate(() => window.__notes.at(-1)?.options.silent)).toBe(false);
+  await expect.poll(() => page.evaluate(() => (window as NotesWindow).__notes.at(-1)?.options.silent)).toBe(false);
   // Off: silent, and it stays off after a reload (this browser's preferences).
   await sound.click();
   await expect(sound).toHaveAttribute('aria-checked', 'false');
   await section.getByTestId('notification-test').click();
-  await expect.poll(() => page.evaluate(() => window.__notes.at(-1)?.options.silent)).toBe(true);
+  await expect.poll(() => page.evaluate(() => (window as NotesWindow).__notes.at(-1)?.options.silent)).toBe(true);
   await page.screenshot({ path: test.info().outputPath('settings-notifications.png') });
   await page.reload();
   await connect(page, world);
