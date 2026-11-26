@@ -1,5 +1,5 @@
 {
-  "comment": "The official Node release the ALP bundle ships (scripts/build-bundle.mjs, t-1807). sha256 values are from https://nodejs.org/dist/<version>/SHASUMS256.txt; change version and every sha256 together.",
+  "comment": "The official Node release the ALP bundle ships (scripts/build-bundle.ts, t-1807). sha256 values are from https://nodejs.org/dist/<version>/SHASUMS256.txt; change version and every sha256 together.",
   "version": "24.22.2",
   "archives": {
     "darwin-arm64": { "file": "node-v24.22.2-darwin-arm64.tar.gz", "sha256": "aa9549349e47dffaa42dcf95d6e06ade8c4bdafc980979883b88767670df385a" },

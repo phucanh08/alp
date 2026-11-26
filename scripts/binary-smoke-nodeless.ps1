@@ -1,6 +1,6 @@
 # The ALP bundle on Windows without a system Node (t-1807): CI runs this on windows-2022 with PATH cut
 # down to the Windows system directories, so no node can be found; the bundle's own node.exe runs ALP.
-# scripts/binary-smoke.mjs (which needs Node for its fake provider and WebSocket client) covers the rest.
+# scripts/binary-smoke.ts (which needs Node for its fake provider and WebSocket client) covers the rest.
 #
 #   powershell -NoProfile -File scripts/binary-smoke-nodeless.ps1 path\to\alp-<version>-windows-x64\bin\alp.cmd
 param([Parameter(Mandatory = $true)][string]$Binary)

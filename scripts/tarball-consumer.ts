@@ -1,0 +1,246 @@
+#!/usr/bin/env node
+// Proof that the published tarballs are real, independently installable packages, in two isolated
+// projects that never reach back into this repository's node_modules:
+//
+//   1. Core: install only the six neutral workspace tarballs. They must come up with no Paseo SDK,
+//      no plugin and no React packages at all, then import at runtime and typecheck strictly.
+//   2. Plugin: install the plugin tarball plus its declared Paseo/React peer dependencies at pinned
+//      published versions. It must import at runtime and pass its behavioural regressions.
+//   3. Paseo npm: source: install the plugin as `paseo plugin add npm:` does (own directory,
+//      --legacy-peer-deps, no peers; scripts/paseo-source-check.ts). No TypeScript it ships may
+//      import a non-host package that is not installed there, and Paseo's compiler must build it (#111).
+//
+// The only addition is `@types/node` (a consumer always needs Node's types); no `paths`, no
+// `typeRoots`, and no hand-written SDK stubs point anywhere near this repository.
+//
+// `--packs <release directory>` (scripts/release-pack.ts) installs that release's saved tarballs,
+// after checking them against its SHA256SUMS, instead of packing the workspaces.
+import { spawnSync } from 'node:child_process';
+import { exitDescription, spawnCommand } from './spawn-command.ts';
+import { LAUNCHER, releaseArtifacts } from './release-lib.ts';
+import { checkPaseoNpmSource, describe as describePaseoSource } from './paseo-source-check.ts';
+import { clearCallerSession } from './test-lib.ts';
+import { requireRelativeImports } from './relative-imports.ts';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { workspaceLocations } from './workspaces.ts';
+
+// t-5294.3: the installed-plugin regressions below are the published packages as a USER installs
+// them. Run from an ALP agent's shell, the inherited ALP_AGENT_SESSION made the installed client
+// announce itself as an agent, and the user-only guard answered "Only the user answers a question;
+// this connection was opened by an ALP agent" — so `pnpm run validate:packages` could not pass for
+// any agent either. The guard is product behaviour and is untouched; what is cleared is the caller's
+// own session, here as well as in the validate wrapper, because this script is also run directly
+// (`pnpm run release:tarball-check`, scripts/release-consumer.ts).
+const clearedSession = clearCallerSession();
+if (clearedSession.length) console.log(`tarball consumer: cleared the caller's ALP session variables, so the installed packages run as the user's: ${clearedSession.join(', ')}`);
+
+const root = path.resolve(import.meta.dirname, '..');
+const packsAt = process.argv.indexOf('--packs');
+const savedPacks = packsAt >= 0 ? path.resolve(process.argv[packsAt + 1] ?? '') : undefined;
+const TYPES_NODE = '@types/node@22.20.5';
+const typescript = path.join(root, 'node_modules', 'typescript', 'bin', 'tsc');
+
+export type RunOptions = { cwd?: string, capture?: boolean, allowFailure?: boolean };
+/** With allowFailure: the outcome, for the caller to judge. */
+function run(command: string, args: string[], options: RunOptions & { allowFailure: true }): { status: number | null, output: string, failure: string };
+/** Otherwise: the output, or a throw on failure. */
+function run(command: string, args: string[], options?: RunOptions & { allowFailure?: false }): string;
+function run(command: string, args: string[], options: RunOptions = {}) {
+  const result = spawnSync(...spawnCommand(command, args), { cwd: options.cwd ?? root, encoding: 'utf8', stdio: options.capture ? 'pipe' : 'inherit', maxBuffer: 128 * 1024 * 1024 });
+  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
+  // A start error or signal leaves status null: callers must not read that as a command's own failure.
+  if (options.allowFailure) return { status: result.status, output, failure: exitDescription(result) };
+  if (result.error || result.status !== 0) throw new Error(`${command} ${args.join(' ')} ${exitDescription(result)}${output ? `\n${output}` : ''}`);
+  return output;
+}
+
+/** The concrete published version a dependency/peer is pinned to: what this repository resolved. */
+function installedVersion(name: string): string|undefined {
+  const file = path.join(root, 'node_modules', name, 'package.json');
+  return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).version : undefined;
+}
+
+/** Every package name present in a project's node_modules, scopes expanded. */
+function installedPackages(directory: string) {
+  const nodeModules = path.join(directory, 'node_modules');
+  const names = [];
+  for (const entry of readdirSync(nodeModules, { withFileTypes: true })) {
+    if (entry.name === '.bin' || entry.name === '.package-lock.json') continue;
+    if (entry.name.startsWith('@')) for (const scoped of readdirSync(path.join(nodeModules, entry.name))) names.push(`${entry.name}/${scoped}`);
+    else names.push(entry.name);
+  }
+  return names;
+}
+
+function writeJson(file: string, value: unknown) {
+  writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function installProject(directory: string, specs: string[]) {
+  mkdirSync(directory, { recursive: true });
+  writeJson(path.join(directory, 'package.json'), { name: `alp-consumer-${path.basename(directory)}`, private: true, version: '0.0.0', type: 'module' });
+  run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--legacy-peer-deps', '--save-exact', ...specs], { cwd: directory });
+}
+
+function typecheck(directory: string, tsconfig: { files: string[];[key: string]: unknown; }, { expectFailure = false, mustMention }: { expectFailure?: boolean; mustMention?: string; } = {}) {
+  writeJson(path.join(directory, 'tsconfig.json'), tsconfig);
+  const { status, output, failure } = run(process.execPath, [typescript, '-p', path.join(directory, 'tsconfig.json')], { cwd: directory, capture: true, allowFailure: true });
+  if (status === null) throw new Error(`tsc for ${tsconfig.files.join(', ')} ${failure}${output ? `\n${output}` : ''}`);
+  if (expectFailure) {
+    if (status === 0) throw new Error(`expected a type error for ${tsconfig.files.join(', ')} but tsc passed`);
+    if (mustMention && !output.includes(mustMention)) throw new Error(`expected tsc to report ${mustMention}\n${output}`);
+    return output;
+  }
+  if (status !== 0) throw new Error(`typecheck failed for ${tsconfig.files.join(', ')} (tsc ${failure})\n${output}`);
+  return output;
+}
+
+const strictConsumerTsconfig = (files: string[]) => ({ compilerOptions: { module: 'nodenext', moduleResolution: 'nodenext', target: 'es2022', strict: true, skipLibCheck: false, noEmit: true, types: ['node'] }, files });
+
+const work = mkdtempSync(path.join(os.tmpdir(), 'alp-tarball-consumer-'));
+const packs = path.join(work, 'packs');
+mkdirSync(packs, { recursive: true });
+try {
+  // Pack every public workspace once, and remember the tarball for each package name. With
+  // `--packs <release directory>`, use that release's saved tarballs as they are instead.
+  const tarballs: Map<string,string> = new Map();
+  /** The public packages' package.json files, packed or read from the saved release. */
+  const publicPackages: (import('./release-lib.ts').PackageJson&{ peerDependenciesMeta?: Record<string,{ optional?: boolean; }>; })[] = [];
+  for (const artifact of savedPacks ? releaseArtifacts(savedPacks) : []) {
+    // The npm wrapper holds no JavaScript API; package-smoke runs it.
+    if (artifact.name === LAUNCHER) continue;
+    // verifyRelease read every artifact's package.json before releaseArtifacts returned it.
+    publicPackages.push((artifact.manifest as import('./release-lib.ts').PackageJson));
+    tarballs.set(artifact.name, artifact.file);
+  }
+  for (const location of savedPacks ? [] : workspaceLocations(root)) {
+    const pkg: import('./release-lib.ts').PackageJson&{ name: string; } = JSON.parse(readFileSync(path.join(root, location, 'package.json'), 'utf8'));
+    if (pkg.private) continue;
+    publicPackages.push(pkg);
+    const output = run('npm', ['pack', `./${location}`, '--pack-destination', packs, '--ignore-scripts', '--json'], { capture: true });
+    const [{ filename }]: [{ filename: string }] = JSON.parse(output.slice(output.indexOf('[')));
+    tarballs.set(pkg.name, path.join(packs, filename));
+  }
+  const plugin = publicPackages.find(pkg => pkg.name === '@anhlp/alp-paseo');
+  const corePackages = publicPackages.filter(pkg => pkg.name !== '@anhlp/alp-paseo');
+  // Every public package was packed (or saved) above, so each name has its tarball.
+  const coreTarballs = corePackages.map(pkg => (tarballs.get((pkg.name as string)) as string));
+
+  // 1. The neutral core installs alone: no Paseo SDK, no plugin, no React.
+  const core = path.join(work, 'core');
+  installProject(core, [...coreTarballs, TYPES_NODE]);
+  const leaked = installedPackages(core).filter(name =>
+    name.startsWith('@getpaseo/') || name === '@anhlp/alp-paseo' || ['react', 'react-dom', 'react-native', 'react-is'].includes(name) || name.startsWith('@types/react'));
+  if (leaked.length) throw new Error(`the core install must not carry Paseo SDK or React packages, found: ${leaked.join(', ')}`);
+
+  writeFileSync(path.join(core, 'import.mjs'), `
+import assert from 'node:assert/strict';
+const protocol = await import('@anhlp/alp-protocol');
+const coreInit = await import('@anhlp/alp-core/init');
+const runtime = await import('@anhlp/alp-runtime');
+const client = await import('@anhlp/alp-client');
+const daemon = await import('@anhlp/alp-daemon');
+const cli = await import('@anhlp/alp-cli');
+assert.equal(protocol.PROTOCOL_VERSION, 1);
+assert.equal(typeof protocol.encodeFrame, 'function');
+assert.equal(typeof coreInit.initProject, 'function');
+assert.equal(typeof runtime.createAlpRuntime, 'function');
+assert.equal(typeof client.alpHome, 'function');
+assert.equal(typeof daemon.createDaemonServer, 'function');
+assert.equal(typeof cli.CLI_PACKAGE, 'string');
+console.log('core runtime imports ok');
+`);
+  run(process.execPath, [path.join(core, 'import.mjs')], { cwd: core });
+
+  writeFileSync(path.join(core, 'consumer.ts'), `
+import { PROTOCOL_VERSION, ERROR, encodeFrame, type SessionSpec, type SessionSummary, type SessionStatus, type SessionError } from '@anhlp/alp-protocol';
+import { initProject } from '@anhlp/alp-core/init';
+import { createAlpRuntime } from '@anhlp/alp-runtime';
+import { alpHome, lockAlive } from '@anhlp/alp-client';
+import { createDaemonServer, createStore, type SessionSummary as DaemonSessionSummary } from '@anhlp/alp-daemon';
+import { CLI_PACKAGE } from '@anhlp/alp-cli';
+export const version: number = PROTOCOL_VERSION;
+export const notFound: number = ERROR.notFound;
+export const use = (spec: SessionSpec, summary: SessionSummary, status: SessionStatus, error: SessionError) => [encodeFrame, initProject, createAlpRuntime, alpHome, lockAlive, createDaemonServer, createStore, CLI_PACKAGE, spec, summary, status, error] as const;
+/** The daemon's alias and the protocol's type are the same neutral shape, both directions. */
+export const sameType = (summary: DaemonSessionSummary): SessionSummary => summary;
+`);
+  typecheck(core, strictConsumerTsconfig(['consumer.ts']));
+  writeFileSync(path.join(core, 'removed.ts'), `import { createWebServer } from '@anhlp/alp-daemon/web';\nexport { createWebServer };\n`);
+  typecheck(core, strictConsumerTsconfig(['removed.ts']), { expectFailure: true, mustMention: '@anhlp/alp-daemon/web' });
+  console.log('core consumer ok (isolated, no SDK or React)');
+
+  // 2. The plugin installs with its declared published peers, pinned to the versions this repository
+  //    resolved. Optional peers (react-native, client-side only) are left out.
+  const pluginDir = path.join(work, 'plugin');
+  // The plugin is one of the public packages (the release has it); the casts below state that.
+  const peerSpecs = Object.entries((plugin as typeof publicPackages[number]).peerDependencies ?? {})
+    .filter(([name]) => !(plugin as typeof publicPackages[number]).peerDependenciesMeta?.[name]?.optional)
+    .map(([name, range]) => `${name}@${installedVersion(name) ?? range}`);
+  installProject(pluginDir, [(tarballs.get('@anhlp/alp-paseo') as string), ...coreTarballs, ...peerSpecs, TYPES_NODE, `esbuild@${installedVersion('esbuild')}`]);
+  const sdkPeers = peerSpecs.filter(spec => spec.startsWith('@getpaseo/'));
+  if (sdkPeers.length < 4) throw new Error(`expected the Paseo SDK peers in the plugin install, got: ${sdkPeers.join(', ')}`);
+
+  writeFileSync(path.join(pluginDir, 'import.mjs'), `
+import assert from 'node:assert/strict';
+const plugin = await import('@anhlp/alp-paseo');
+const quiet = await import('@anhlp/alp-paseo/paseo/quiet');
+assert.equal(typeof plugin.default, 'function');
+assert.equal(typeof plugin.createProvider, 'function');
+assert.equal(typeof plugin.createWebServer, 'function');
+assert.equal(typeof quiet.quietHandlers, 'object');
+console.log('plugin runtime imports ok');
+`);
+  run(process.execPath, [path.join(pluginDir, 'import.mjs')], { cwd: pluginDir });
+
+  // A Paseo plugin, not a library: it ships no declarations (#111), and its exports stop at its files.
+  // Without an encoding the names are strings; the recursive overload types them loosely.
+  const shipped = (readdirSync(path.join(pluginDir, 'node_modules/@anhlp/alp-paseo'), { recursive: true }) as string[]).filter(file => /\.d\.[cm]?ts$/.test(file) && !file.split(path.sep).includes('node_modules'));
+  if (shipped.length) throw new Error(`@anhlp/alp-paseo must not ship declarations (#111), found: ${shipped.join(', ')}`);
+  const missing = run(process.execPath, ['--input-type=module', '-e', "await import('@anhlp/alp-paseo/paseo/does-not-exist')"], { cwd: pluginDir, capture: true, allowFailure: true });
+  if (missing.status === 0 || !missing.output.includes('ERR_MODULE_NOT_FOUND')) throw new Error(`an unknown ./paseo/* subpath must not import (node ${missing.failure})\n${missing.output}`);
+  console.log('plugin consumer ok (isolated, real SDK, no declarations)');
+
+  // Run the existing behavioral regressions against installed public APIs, not workspace links.
+  const tests = ['paseo', 'team', 'human', 'web', 'relay', 'bridge-socket', 'workflow', 'transport'];
+  const suite = path.join(pluginDir, 'integrations/paseo/tests');
+  mkdirSync(suite, { recursive: true });
+  mkdirSync(path.join(pluginDir, 'test/support'), { recursive: true });
+  const support = readFileSync(path.join(root, 'test/support/fake-agent.ts'), 'utf8');
+  writeFileSync(path.join(pluginDir, 'test/support/fake-agent.ts'), support);
+  // Everything else under test/support that a copied suite imports. teardown.ts arrived with
+  // t-5294.6, which converted paseo/team/human.test.js to the shared `defer` helper: those three now
+  // import ../../../test/support/teardown.ts, and without it here the isolated run dies on
+  // ERR_MODULE_NOT_FOUND before a single regression executes. It imports nothing itself, so it is
+  // copied verbatim.
+  copyFileSync(path.join(root, 'test/support/teardown.ts'), path.join(pluginDir, 'test/support/teardown.ts'));
+  // t-814a, same reason: paseo.test.js and team.test.js now read the shipped role definitions from
+  // the template root instead of keeping a copy of a sentence. It imports only published package
+  // specifiers (@anhlp/alp-core/template-path, @anhlp/alp-runtime), both of which this project
+  // installs, so it too is copied verbatim.
+  copyFileSync(path.join(root, 'test/support/template-text.ts'), path.join(pluginDir, 'test/support/template-text.ts'));
+  for (const name of tests) {
+    const source = readFileSync(path.join(root, 'integrations/paseo/tests', `${name}.test.js`), 'utf8')
+      .replace("new URL('../server/dist/index.js', import.meta.url)", "import.meta.resolve('@anhlp/alp-paseo')");
+    writeFileSync(path.join(suite, `${name}.test.js`), source);
+  }
+  // Say which support file is missing, here, instead of leaving a module-resolution error 180 s into
+  // `node --test`: the copied suite is a moving target, and the next test to gain a support import
+  // would otherwise fail with nothing pointing at this block. Parsed, so every import form counts
+  // (scripts/relative-imports.ts).
+  for (const name of tests) await requireRelativeImports(path.join(suite, `${name}.test.js`), 'scripts/tarball-consumer.ts');
+  const regression = spawnSync(process.execPath, ['--test', ...tests.map(name => path.join(suite, `${name}.test.js`))], {
+    cwd: pluginDir, stdio: 'inherit', timeout: 180_000,
+    env: { ...process.env, ALP_HOME: path.join(pluginDir, 'home'), NODE_PATH: '' },
+  });
+  if (regression.status !== 0) throw new Error(`installed plugin regressions failed: ${exitDescription(regression)}`);
+
+  // 3. The plugin as Paseo installs an npm: source: no peers, so no shipped type import may need one.
+  console.log(describePaseoSource(await checkPaseoNpmSource({ plugin: (tarballs.get('@anhlp/alp-paseo') as string), dependencies: coreTarballs, work })));
+
+  console.log('Tarball consumer check passed');
+} finally {
+  rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+}

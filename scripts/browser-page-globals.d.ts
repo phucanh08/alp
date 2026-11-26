@@ -1,4 +1,4 @@
-// Types only (never loaded at run time): the page globals that client-sdk-smoke.mjs reads inside
+// Types only (never loaded at run time): the page globals that client-sdk-smoke.ts reads inside
 // Playwright's page.evaluate()/waitForFunction() callbacks. Those callbacks run in the browser page,
 // where PAGE_ENTRY defines `window.sdk`; the scripts' tsconfig has no DOM lib, so `window` is declared
 // here with only what the smoke uses.

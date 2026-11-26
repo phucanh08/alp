@@ -1,7 +1,7 @@
 #!/bin/sh
 # The ALP bundle on a machine without a system Node (t-1807): CI runs this in debian:bookworm-slim on
 # Linux and under `env -i PATH=/usr/bin:/bin` on macOS; the bundle's own Node runs ALP.
-# scripts/binary-smoke.mjs (which needs Node for its fake provider and WebSocket client) covers the rest.
+# scripts/binary-smoke.ts (which needs Node for its fake provider and WebSocket client) covers the rest.
 #
 #   sh scripts/binary-smoke-nodeless.sh path/to/alp-<version>-<platform>/bin/alp
 set -eu

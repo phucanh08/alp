@@ -1,0 +1,37 @@
+#!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
+import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { spawnCommand } from './spawn-command.ts';
+import { workspaceLocations } from './workspaces.ts';
+// Test-only (t-37f1): ALP_VERSION_PACKAGE_ROOT points at a copy of the manifests and
+// ALP_VERSION_PACKAGE_SKIP_LOCK=1 skips the lockfile step. Never set them in a release job.
+const root = process.env.ALP_VERSION_PACKAGE_ROOT || path.resolve(import.meta.dirname, '..');
+const [workspace, version] = process.argv.slice(2);
+if (!workspace || !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(version ?? '')) throw new Error('Usage: pnpm run version:package <package-name> <semver>');
+const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+const packages = await Promise.all(workspaceLocations(root).map(async (location: string) => ({ location, manifest: JSON.parse(await readFile(path.join(root, location, 'package.json'), 'utf8')) })));
+const selected = packages.find(pkg => pkg.manifest.name === workspace);
+if (!selected || selected.manifest.private) throw new Error('Select a publishable workspace by its full npm name');
+selected.manifest.version = version;
+for (const pkg of packages) {
+  if (pkg.manifest.dependencies?.[workspace]) pkg.manifest.dependencies[workspace] = version;
+  await writeFile(path.join(root, pkg.location, 'package.json'), `${JSON.stringify(pkg.manifest, null, 2)}\n`);
+}
+// npm/alp (the @anhlp/alp wrapper) is not a workspace: it pins @anhlp/alp-cli exactly and ships at the same version.
+const wrapperPath = path.join(root, 'npm/alp/package.json');
+const wrapper = JSON.parse(await readFile(wrapperPath, 'utf8'));
+if (wrapper.dependencies?.[workspace]) {
+  wrapper.dependencies[workspace] = version;
+  wrapper.version = version;
+  await writeFile(wrapperPath, `${JSON.stringify(wrapper, null, 2)}\n`);
+}
+// The root names every workspace (devDependencies, so pnpm links each at the root as npm did): those pins move too.
+let rootChanged = false;
+for (const field of ['dependencies', 'devDependencies']) {
+  if (manifest[field]?.[workspace]) { manifest[field][workspace] = version; rootChanged = true; }
+}
+if (rootChanged) await writeFile(path.join(root, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+if (process.env.ALP_VERSION_PACKAGE_SKIP_LOCK === '1') process.exit(0);
+const result = spawnSync(...spawnCommand('pnpm', ['install', '--lockfile-only', '--ignore-scripts']), { cwd: root, stdio: 'inherit' });
+process.exitCode = result.status ?? 1;

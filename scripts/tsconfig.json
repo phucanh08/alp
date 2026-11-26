@@ -1,6 +1,7 @@
 {
-  // The scripts stay JavaScript (they are run by name from package.json, CI, tests and packaged code,
-  // and Node 22.12-22.17 cannot run .ts without a flag); this only type-checks them strictly.
+  // The scripts are TypeScript that Node (>= 22.18, the dev/CI floor) runs directly by stripping types:
+  // relative imports name the .ts file, type-only imports say so (verbatimModuleSyntax), and only erasable
+  // syntax is allowed. This only type-checks them strictly; nothing is emitted.
   // Run: pnpm exec tsc -p scripts/tsconfig.json
   "compilerOptions": {
     "target": "ES2022",
@@ -8,18 +9,21 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
-    "allowJs": true,
-    "checkJs": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
     "skipLibCheck": true,
     "types": ["node"],
     // Workspace imports (@anhlp/*) resolve to their TypeScript sources: no build needed to check.
     "customConditions": ["alp-source"],
-    // binary-smoke.mjs imports ../packages/cli/dist/commands/update/self-update.js (built at run time); this lets the
+    // ../apps/web/scripts/*.mjs stay JavaScript for now and carry // @ts-check: check them here too.
+    "allowJs": true,
+    "checkJs": true,
+    // binary-smoke.ts imports ../packages/cli/dist/commands/update/self-update.js (built at run time); this lets the
     // checker read packages/cli/src/commands/update/self-update.ts in its place, without a build.
     "rootDirs": ["../packages/cli/src", "../packages/cli/dist"]
   },
-  // ../apps/web/scripts/*.mjs: the web lib build script carries // @ts-check too.
-  // browser-page-globals.d.ts: types only, for the page callbacks of client-sdk-smoke.mjs.
-  "include": ["*.mjs", "*.js", "*.d.ts", "../apps/web/scripts/*.mjs"]
+  // browser-page-globals.d.ts: types only, for the page callbacks of client-sdk-smoke.ts.
+  "include": ["*.ts", "../apps/web/scripts/*.mjs"]
 }
