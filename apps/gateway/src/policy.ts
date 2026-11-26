@@ -1,6 +1,6 @@
 import { ATTACHMENTS, CAPABILITY, ERROR, PROMPT_IMAGES, RPC_METHODS, TERMINAL, TERMINAL_LIMIT_KEYS, WORKSPACE_FILES, WORKSPACE_GIT, attachmentChunkBytes, base64Bytes, blockedFilePath, isTerminalId } from '@anhlp/alp-protocol';
 import type { AttachmentInfo, AttachmentLimits, ConversationBranch, ForkProvenance, GitDiffFile, GitDiffHunk, GitDiffLine, GitDiffPage, GitStatus, GitStatusFile, TerminalInfo, TerminalLimits } from '@anhlp/alp-protocol';
-import type { Grant } from './credentials.js';
+import type { Grant } from './credentials.ts';
 
 /**
  * An answer from alpd (or a value a client sent) before the gateway checked it: each projection

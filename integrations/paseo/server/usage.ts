@@ -1,1 +1,1 @@
-export * from './panel/usage.js';
+export * from './panel/usage.ts';

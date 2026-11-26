@@ -1,6 +1,6 @@
-import type { PluginServerContext } from './compat.js';
+import type { PluginServerContext } from './compat.ts';
 import { alpHome, connect, readLock } from '@anhlp/alp-client/index';
-import { agentCompact, compactFirst } from '../../shared/compact.js';
+import { agentCompact, compactFirst } from '../../shared/compact.ts';
 
 /** In Paseo desktop alpd is reached over its socket, one connection per request. */
 export function registerCompactRpc(server: PluginServerContext, open = async () => {

@@ -9,6 +9,9 @@
     "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "types": [],
     "customConditions": [

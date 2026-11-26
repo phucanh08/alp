@@ -7,9 +7,9 @@ import {
   TimelineProjection,
   selectProjectedTimelinePage,
   type ProjectedTimelineRow,
-} from "./timeline-projection.js";
+} from "./timeline-projection.ts";
 import type { AgentTimelineItem } from "@getpaseo/protocol/agent-types";
-import type { AgentTimelineRow } from "./timeline-projection.js";
+import type { AgentTimelineRow } from "./timeline-projection.ts";
 
 export interface AgentTimelineCursor {
   epoch: string;

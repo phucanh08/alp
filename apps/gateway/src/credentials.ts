@@ -4,7 +4,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import path from 'node:path';
 import { alpHome, assertPrivateDirectory } from '@anhlp/alp-client';
 import { AGENT_NAME } from '@anhlp/alp-protocol';
-import { PERMISSIONS } from './policy.js';
+import { PERMISSIONS } from './policy.ts';
 import type { Logger } from '@anhlp/alp-core/log';
 
 /**

@@ -10,16 +10,16 @@ import {
   type ProviderContent,
   type ProviderPersistence,
   type ProviderTimelineItem,
-} from './compat.js';
-import { userPromptPart } from './provider-prompt.js';
+} from './compat.ts';
+import { userPromptPart } from './provider-prompt.ts';
 import { randomUUID } from 'node:crypto';
 import type { AttachmentLimits, DaemonConnection, Envelope, SessionSnapshot, TimelineItem } from '@anhlp/alp-protocol';
 import { attachments } from '@anhlp/alp-client/portable';
-import { alpdSessionOf, configModels, DEFAULT_TEAM, handleFor, MODES } from './mapping-wire.js';
-import { sessionTasks } from './session-tasks.js';
-import { paseoDetail } from './tool-detail.js';
-import { agentUsage } from './session-usage.js';
-import { displayName, mimeOf, storedName, uploadRequestId, type UploadedFile } from './upload-names.js';
+import { alpdSessionOf, configModels, DEFAULT_TEAM, handleFor, MODES } from './mapping-wire.ts';
+import { sessionTasks } from './session-tasks.ts';
+import { paseoDetail } from './tool-detail.ts';
+import { agentUsage } from './session-usage.ts';
+import { displayName, mimeOf, storedName, uploadRequestId, type UploadedFile } from './upload-names.ts';
 
 /**
  * Paseo is a viewer of alpd: this provider translates Paseo inputs into daemon calls and daemon

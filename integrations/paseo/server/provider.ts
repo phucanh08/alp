@@ -7,10 +7,10 @@ import { createDaemonServer } from '@anhlp/alp-daemon/server';
 import { alpHome, connect, lockAlive, readLock } from '@anhlp/alp-client/index';
 import { daemonHeld, startDaemon } from '@anhlp/alp-client/supervise';
 import type { DaemonConnection } from '@anhlp/alp-protocol';
-import type { ProviderRegistration } from './compat.js';
-import { models as runtimeModels, modes, teamModels, templates, toSessionSpec } from './mapping.js';
-import { createAlpProvider, type ProviderBackend } from './provider-core.js';
-import { createUploadReader } from './uploads.js';
+import type { ProviderRegistration } from './compat.ts';
+import { models as runtimeModels, modes, teamModels, templates, toSessionSpec } from './mapping.ts';
+import { createAlpProvider, type ProviderBackend } from './provider-core.ts';
+import { createUploadReader } from './uploads.ts';
 
 /**
  * The local and embedded provider (ALP's compatibility mode): alpd on this machine, found through

@@ -3,12 +3,12 @@ import { mkdir, stat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { deriveAgentStateBucket, getWorkspaceStateBucketPriority } from '@getpaseo/protocol/agent-state-bucket';
 import { normalizeWorkspaceLabelName, workspaceLabelKey, type WorkspaceLabelDefinition } from '@getpaseo/protocol/workspace-labels';
-import { firstMessage } from './prompt-content.js';
+import { firstMessage } from './prompt-content.ts';
 import type { AgentSnapshotPayload, SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
 import type { SessionSummary } from '@anhlp/alp-protocol/session';
-import type { ClientContext, Handler } from './gateway.js';
-import { checkoutCache, checkoutFacts, type CheckoutFacts } from './git.js';
-import { createCreationReceipts, creationDigest, type CreationReceipts, type CreationAttempt } from './create-receipts.js';
+import type { ClientContext, Handler } from './gateway.ts';
+import { checkoutCache, checkoutFacts, type CheckoutFacts } from './git.ts';
+import { createCreationReceipts, creationDigest, type CreationReceipts, type CreationAttempt } from './create-receipts.ts';
 
 /**
  * Paseo's projects and workspaces, kept by alpd (D31 step 6, ALPD §62). A project is a directory
@@ -54,7 +54,8 @@ const now = () => new Date().toISOString();
 const GIT_POLL_MS = 10_000;
 
 class RequestError extends Error {
-  constructor(message: string, readonly code?: string) { super(message); }
+  declare readonly code?: string;
+  constructor(message: string, code?: string) { super(message); this.code = code; }
 }
 
 async function isDirectory(directory: string) {

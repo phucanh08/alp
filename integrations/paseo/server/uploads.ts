@@ -1,7 +1,7 @@
 import { constants, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { displayName, type UploadedFile } from './upload-names.js';
+import { displayName, type UploadedFile } from './upload-names.ts';
 
 /**
  * Reads a file Paseo's daemon received through its own file upload (Paseo's file.upload frames,

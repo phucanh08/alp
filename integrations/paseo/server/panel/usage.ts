@@ -1,6 +1,6 @@
-import type { PluginServerContext } from './compat.js';
+import type { PluginServerContext } from './compat.ts';
 import { alpHome, connect, readLock } from '@anhlp/alp-client/index';
-import { usageGet } from '../../shared/usage.js';
+import { usageGet } from '../../shared/usage.ts';
 
 /** In Paseo desktop read alpd over its socket; the ALP web host supplies its own connection. */
 export function registerUsageRpc(server: PluginServerContext, read = async (refresh = false) => {

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { decodeFileTransferFrame, FileTransferOpcode, TerminalStreamOpcode } from '@getpaseo/protocol/binary-frames/index';
-import type { ClientContext, Outbound } from './gateway.js';
-import type { UploadedFile } from '../upload-names.js';
+import type { ClientContext, Outbound } from './gateway.ts';
+import type { UploadedFile } from '../upload-names.ts';
 
 /** Staging is socket-owned, memory-only, and never names a host file. Reservations include completed
  * files and leased expired files. Binary processing is synchronous: request/Begin/Chunk/End cannot

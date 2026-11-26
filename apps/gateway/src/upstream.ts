@@ -1,7 +1,7 @@
 import { AlpRpcClient, createReconnectingClient, hello } from '@anhlp/alp-client/portable';
 import type { AlpTransport } from '@anhlp/alp-client/portable';
 import type { Logger } from '@anhlp/alp-core/log';
-import type { Upstream } from './connection.js';
+import type { Upstream } from './connection.ts';
 
 /**
  * The gateway's side of alpd: client SDK connections over the daemon's private IPC socket. The

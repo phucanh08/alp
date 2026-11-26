@@ -9,11 +9,11 @@ import { alpHome, readLock } from '@anhlp/alp-client/index';
 import { superviseDaemon } from '@anhlp/alp-client/supervise';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { createLogger } from '@anhlp/alp-core/log';
-import { createWebServer } from './web.js';
-import { createShutdown } from './shutdown.js';
-import { assertPairingCaller, isUserOnlyRefusal, USER_ONLY_REGISTER_HINT } from './pairing-guard.js';
+import { createWebServer } from './web.ts';
+import { createShutdown } from './shutdown.ts';
+import { assertPairingCaller, isUserOnlyRefusal, USER_ONLY_REGISTER_HINT } from './pairing-guard.ts';
 import { createIntegrationLock } from '@anhlp/alp-client/integration-lock';
-import { createPaseoBridge } from './paseo/index.js';
+import { createPaseoBridge } from './paseo/index.ts';
 
 const log = createLogger({ component: 'alp-integration' });
 

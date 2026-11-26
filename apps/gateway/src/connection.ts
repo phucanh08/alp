@@ -4,18 +4,18 @@ import { homedir } from 'node:os';
 import { CAPABILITY, ERROR, PROTOCOL_VERSION, RPC_ERROR, TERMINAL, WORKSPACE_FILES, base64Bytes, blockedFilePath, resumeCommandOf } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 import { AGENT_CAPABILITY, isAlpClientError } from '@anhlp/alp-client/portable';
-import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, imagePreviewType, projectImagePreview, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, CATALOG_MODEL_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.js';
-import { projectGitDiff, projectGitStatus, gatewayAttachmentLimits, projectAttachment, projectUploadBegun } from './policy.js';
-import { CONFIGURE_REASONS, isGeneration, projectBranch, projectConfigured, projectConfigurePreview, projectConversation, projectForkedFrom } from './policy.js';
-import { TERMINAL_REFUSALS, gatewayTerminalLimits, projectTerminal, projectTerminalEvent } from './policy.js';
+import { CONTENT_TYPES, FORWARDED_CAPABILITIES, promptImageLimits, GATEWAY_ERROR, GATEWAY_REASON, LIBRARY_ENTRY_FIELDS, imagePreviewType, projectImagePreview, LIBRARY_ROW_FIELDS, MODEL_ROW_FIELDS, CATALOG_MODEL_FIELDS, SPEC_FIELDS, TEAM_ROW_FIELDS, exposureOf, hostLabel, isModelId, projectLibraryContent, safeAlpError, safeErrorText, workspaceOf } from './policy.ts';
+import { projectGitDiff, projectGitStatus, gatewayAttachmentLimits, projectAttachment, projectUploadBegun } from './policy.ts';
+import { CONFIGURE_REASONS, isGeneration, projectBranch, projectConfigured, projectConfigurePreview, projectConversation, projectForkedFrom } from './policy.ts';
+import { TERMINAL_REFUSALS, gatewayTerminalLimits, projectTerminal, projectTerminalEvent } from './policy.ts';
 import { assertProjectDataContent } from '@anhlp/alp-core/library-edit';
 import type { WebSocket, RawData } from 'ws';
 import type { AlpRpcClient } from '@anhlp/alp-client/portable';
 import type { Logger } from '@anhlp/alp-core/log';
 import type { AttachmentLimits, Envelope, GitDiffFile, GitDiffPage, TerminalLimits } from '@anhlp/alp-protocol';
-import type { Grant, Workspace } from './credentials.js';
-import type { OwnerHandler } from './owner.js';
-import type { Exposure } from './policy.js';
+import type { Grant, Workspace } from './credentials.ts';
+import type { OwnerHandler } from './owner.ts';
+import type { Exposure } from './policy.ts';
 
 /**
  * JSON from alpd or from a client before the gateway checked it. Every field the gateway reads is

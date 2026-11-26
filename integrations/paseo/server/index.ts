@@ -1,21 +1,21 @@
 import { createLogger } from '@anhlp/alp-core/log';
-import type { PluginServerContext } from './compat.js';
-import { createProvider, daemonEntry } from './provider.js';
-import { registerTaskRpc } from './tasks.js';
-import { registerLibraryRpc } from './library.js';
-import { registerUsageRpc } from './usage.js';
-import { registerCompactRpc } from './compact.js';
+import type { PluginServerContext } from './compat.ts';
+import { createProvider, daemonEntry } from './provider.ts';
+import { registerTaskRpc } from './tasks.ts';
+import { registerLibraryRpc } from './library.ts';
+import { registerUsageRpc } from './usage.ts';
+import { registerCompactRpc } from './compact.ts';
 import { alpHome } from '@anhlp/alp-client/index';
 import { superviseDaemon } from '@anhlp/alp-client/supervise';
-import { contributeRemote, gatewayConfig } from './remote/index.js';
-export { createProvider, daemonEntry } from './provider.js';
-export { createPaseoBridge, NOT_IMPLEMENTED, PASEO_PROTOCOL_VERSION } from './paseo/index.js';
-export { createWebServer, DEFAULT_WEB_PORT, webFile } from './web.js';
-export type { PaseoGateway } from './paseo/gateway.js';
-export { sessionTasks } from './session-tasks.js';
-export { mapSession, toSessionSpec, PaseoAdapter } from './mapping.js';
+import { contributeRemote, gatewayConfig } from './remote/index.ts';
+export { createProvider, daemonEntry } from './provider.ts';
+export { createPaseoBridge, NOT_IMPLEMENTED, PASEO_PROTOCOL_VERSION } from './paseo/index.ts';
+export { createWebServer, DEFAULT_WEB_PORT, webFile } from './web.ts';
+export type { PaseoGateway } from './paseo/gateway.ts';
+export { sessionTasks } from './session-tasks.ts';
+export { mapSession, toSessionSpec, PaseoAdapter } from './mapping.ts';
 export { ClaudeTransport, claudePermissions, CodexTransport } from '@anhlp/alp-runtime/index';
-export { contributeRemote, createRemoteProvider, gatewayConfig } from './remote/index.js';
+export { contributeRemote, createRemoteProvider, gatewayConfig } from './remote/index.ts';
 export default function contribute(server: PluginServerContext) {
   // Remote mode (docs/alp/paseo-remote.md): alpd on another host, through its gateway. A wrong
   // configuration fails here, and nothing on this machine is started instead.

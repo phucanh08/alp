@@ -1,10 +1,10 @@
 import type { SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
 import plugin from 'alp:plugin-client';
-import { registerLibraryRpc } from '../panel/library.js';
-import { registerTaskRpc } from '../panel/tasks.js';
-import { registerUsageRpc } from '../panel/usage.js';
-import type { PluginServerContext } from '../panel/compat.js';
-import type { Handler } from './gateway.js';
+import { registerLibraryRpc } from '../panel/library.ts';
+import { registerTaskRpc } from '../panel/tasks.ts';
+import { registerUsageRpc } from '../panel/usage.ts';
+import type { PluginServerContext } from '../panel/compat.ts';
+import type { Handler } from './gateway.ts';
 
 /** ALP panels over the bridge: native Paseo evaluates the catalog's clientBundle as a factory,
  * just as its own daemon's plugin runtime does. Keep the embedded client and the panel RPCs;

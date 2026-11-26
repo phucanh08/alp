@@ -7,7 +7,7 @@ import { catalogModels } from '@anhlp/alp-core/models';
 import { runCommand } from '@anhlp/alp-client/command';
 import { probeAcp } from '@anhlp/alp-client/acp-probe';
 import { probeAntigravity } from '@anhlp/alp-client/antigravity-probe';
-import type { Handler, Outbound } from './gateway.js';
+import type { Handler, Outbound } from './gateway.ts';
 
 /**
  * Provider snapshots contain an internal team entry for agent launchers, native runtimes, and ACP agents. Settings hides the internal entry; launchers show only it. ALP is carried first,

@@ -7,7 +7,7 @@ import { TERMINAL, type DaemonConnection } from '@anhlp/alp-protocol';
 import type { TerminalEvent, TerminalInfo, TerminalLimits } from '@anhlp/alp-protocol/rpc';
 import { alpHome, connect, readLock, watchTerminals } from '@anhlp/alp-client/index';
 import { frames, readTerminalConfig } from '@anhlp/alp-daemon/terminals';
-import type { ClientContext, Handler } from './gateway.js';
+import type { ClientContext, Handler } from './gateway.ts';
 
 /**
  * Terminals for the app (issue #121 H, ALPD §62): Paseo's terminal messages over alpd's
