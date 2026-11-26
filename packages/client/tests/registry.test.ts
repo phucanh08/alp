@@ -114,9 +114,11 @@ test('attachments().upload supports signal abort, run.abort(), onBegun and abort
         throw new Error(`unexpected ${method}`);
       },
     };
-    const run = attachments(daemon as RequestClient).upload({ sessionId: 's', name: 'f', mimeType: 'text/plain', data, requestId: 'r2', maxChunkBytes: 5 });
-    // Let begin complete
-    await new Promise<void>(resolve => setTimeout(resolve, 5));
+    let begun!: () => void;
+    const begin = new Promise<void>(resolve => { begun = resolve; });
+    const run = attachments(daemon as RequestClient).upload({ sessionId: 's', name: 'f', mimeType: 'text/plain', data, requestId: 'r2', maxChunkBytes: 5, onBegun: () => begun() });
+    // Let begin complete: wait for onBegun, not a fixed sleep (a .ts test file reaches begin after ~5 ms, the old sleep).
+    await begin;
     assert.equal(run.uploadId, 'upl_meth');
     await run.abort(new Error('user canceled'));
     resolveChunk({ received: 5, size: data.length });
