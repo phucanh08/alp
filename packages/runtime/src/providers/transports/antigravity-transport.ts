@@ -103,7 +103,21 @@ export function antigravityModeArgs(sandbox: unknown, cwd: string): string[] {
 
 /** Efforts `agy --effort` takes (agy --help: low|medium|high|xhigh|max); others leave agy's default. */
 export const AGY_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
-export function antigravityEffortArgs(thinking: unknown): string[] {
+
+/**
+ * The effort a model id already carries as its suffix (gemini-3.8-flash-high → high). agy lists such
+ * ids beside the base model, and agy 1.5.15 refuses any --effort next to one: "invalid model
+ * selection (--model "gemini-3.8-flash-high" --effort "medium"): --model gemini-3.8-flash-high
+ * conflicts with --effort=medium" (t-ca83). Paseo, over ACP, splits such an id into model and effort.
+ */
+export function antigravityModelEffort(model: unknown): string | undefined {
+  const suffix = typeof model === 'string' ? /-([a-z]+)$/.exec(model)?.[1] : undefined;
+  return suffix && AGY_EFFORTS.includes(suffix) ? suffix : undefined;
+}
+
+/** agy's --effort for ALP's thinking; none when the model id already names its effort, which then wins. */
+export function antigravityEffortArgs(thinking: unknown, model?: unknown): string[] {
+  if (antigravityModelEffort(model)) return [];
   return typeof thinking === 'string' && AGY_EFFORTS.includes(thinking) ? ['--effort', thinking] : [];
 }
 
@@ -300,7 +314,7 @@ export class AntigravityTransport {
     if (params.model) {
       args.push('--model', params.model);
     }
-    args.push(...antigravityEffortArgs(params.thinking));
+    args.push(...antigravityEffortArgs(params.thinking, params.model));
 
     if (params.threadId) {
       args.push('--conversation', params.threadId);

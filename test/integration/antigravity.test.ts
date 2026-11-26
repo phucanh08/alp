@@ -652,3 +652,77 @@ test('Antigravity passes ALP\'s effort as agy --effort when agy takes it, and le
   const [none] = await startArgs(log);
   assert.ok(!none.includes('--effort'), 'none is not an agy effort');
 });
+
+/**
+ * A stand-in for agy 1.5.15's flag check (t-ca83): a model id that carries its effort as a suffix
+ * conflicts with any --effort, and agy exits with this message, measured in the t-9ae1 R1 run.
+ * FAKE_AGY_REJECT_EFFORT makes it also refuse that one effort, to fail a session on purpose.
+ */
+async function strictAgy(t: TestContext): Promise<string> {
+  const defer = teardown(t);
+  const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-strict-'));
+  // Registered before setup(): teardown runs in reverse, so this goes after the runtime has stopped.
+  defer(() => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
+  const file = path.join(dir, 'strict-agy.mjs');
+  await writeFile(file, `
+import { pathToFileURL } from 'node:url';
+const args = process.argv.slice(2);
+const value = flag => args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined;
+const model = value('--model'), effort = value('--effort');
+if (model && effort && /-(low|medium|high|xhigh|max)$/.test(model)) {
+  process.stderr.write('error: invalid model selection (--model "' + model + '" --effort "' + effort + '"): --model ' + model + ' conflicts with --effort=' + effort + '\\n');
+  process.exit(1);
+}
+if (effort && effort === process.env.FAKE_AGY_REJECT_EFFORT) {
+  process.stderr.write('error: effort ' + effort + ' refused by this fake\\n');
+  process.exit(1);
+}
+await import(pathToFileURL(${JSON.stringify(FAKE_AGY)}).href);
+`);
+  return file;
+}
+
+const supervisorFailed = async (dir: string) => (await readFile(path.join(dir, 'runs', 'root.jsonl'), 'utf8').catch(() => ''))
+  .split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.event === 'supervisor.failed');
+
+test('an Antigravity supervisor on a model id that carries its effort starts without a conflicting --effort (t-ca83)', async t => {
+  const model = 'antigravity:gemini-3.8-flash-high';
+  const agy = await strictAgy(t);
+  const { root, runtime, dir } = await setup(t, {
+    supervisor: true,
+    provider: { args: [agy] },
+    settings: { workflow: { mode: 'pho', supervisor: true }, profile: { pho: Object.fromEntries(['main', 'peer', 'oracle', 'reviewer', 'supervisor'].map(name => [name, { profiles: [model] }])) } },
+  });
+  await runtime.open('root', { cwd: root });
+  await until(async () => runtime.list().some(session => session.agent === 'supervisor') || (await supervisorFailed(dir)).length, 'supervisor start or failure');
+  assert.deepEqual(await supervisorFailed(dir), []);
+  const supervisor = runtime.list().find(session => session.agent === 'supervisor');
+  assert.ok(supervisor, 'the supervisor runs');
+  const started = await startArgs(path.join(dir, 'agy.jsonl'));
+  assert.ok(started.length >= 2, 'root and supervisor started agy');
+  for (const args of started) {
+    assert.equal(args[args.indexOf('--model') + 1], 'gemini-3.8-flash-high');
+    assert.ok(!args.includes('--effort'), `no --effort beside a suffixed model: ${args.join(' ')}`);
+  }
+});
+
+test('a supervisor that cannot start tells the user in the root session instead of failing silently (t-ca83)', async t => {
+  const model = 'antigravity:gemini-2.5-pro';
+  const agy = await strictAgy(t);
+  const { root, runtime, dir, events } = await setup(t, {
+    supervisor: true,
+    provider: { args: [agy] },
+    env: { FAKE_AGY_REJECT_EFFORT: 'medium' },
+    settings: { workflow: { mode: 'pho', supervisor: true }, profile: { pho: Object.fromEntries(['main', 'peer', 'oracle', 'reviewer', 'supervisor'].map(name => [name, { profiles: [model] }])) } },
+  });
+  await runtime.open('root', { cwd: root, thinking: 'high' });
+  // ... and the supervisor's team effort is the one agy refuses.
+  await until(async () => (await supervisorFailed(dir)).length, 'supervisor.failed');
+  const notices = () => events.filter(entry => entry.sessionId === 'root' && entry.event.type === 'item' && entry.event.item.kind === 'notice').map(entry => entry.event.item);
+  await until(() => notices().length, 'a notice in the root session');
+  const [shown] = notices();
+  assert.equal(shown.level, 'warning');
+  assert.match(shown.text, /^The supervisor could not start, so ALP is not reviewing main's process: /);
+  assert.match(shown.text, /effort medium refused by this fake/);
+  assert.match(shown.text, /model and thinking/);
+});
