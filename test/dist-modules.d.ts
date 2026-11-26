@@ -27,7 +27,7 @@ declare module '*/apps/web/dist-lib/controller.js' {
     connection: { phase: string },
     sessions: { status: string },
     tree: Tree | null,
-    busy: { interrupt: boolean },
+    busy: Record<string, boolean>,
   };
   /** ControllerOptions: `open` and `reconnecting` take and return the gateway's link objects. */
   type ControllerOptions = {
