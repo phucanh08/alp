@@ -11,19 +11,24 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createTask, getTask, loadTasks } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime, reclaimWorktrees } from '@anhlp/alp-runtime';
+import type { PromptInput } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { connect, daemonPaths, bootTime, readLock } from '@anhlp/alp-client';
 
 import { fakeTransport, until, git, workspace } from '../../../test/support/recovery.ts';
+import type { FakeRuntime } from '../../../test/support/recovery.ts';
 import { setProfiles } from '../../../test/support/fake-agent.ts';
 import { teardown } from '../../../test/support/teardown.ts';
 
-const runLog = async (directory, rootId) => (await readFile(path.join(directory, 'runs', `${rootId}.jsonl`), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+// `any`: alpd's answers, events and run-log lines are JSON, and the transport factories pass every argument through; the tests read the fields they assert on.
+type Json = any;
+
+const runLog = async (directory: string, rootId: string) => (await readFile(path.join(directory, 'runs', `${rootId}.jsonl`), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
 
 test('a worktree assignment alpd stopped under continues in the next alpd: same thread, worktree, task and requester', async t => {
   const defer = teardown(t);
   const { directory, root, options } = await workspace(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
   await first.open('root', { cwd: root, persist: true });
   await first.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Build it' }] });
@@ -40,7 +45,7 @@ test('a worktree assignment alpd stopped under continues in the next alpd: same 
 
   // Stopping kept the assignment for the next alpd; its task is still in progress.
   const live = JSON.parse(await readFile(options.liveFile, 'utf8'));
-  assert.deepEqual(live.map(entry => [entry.assignmentId, entry.agent, entry.taskId, entry.isolation, entry.threadId]), [[id, 'peer', task.id, 'worktree', peer.threadId]]);
+  assert.deepEqual(live.map((entry: Json) => [entry.assignmentId, entry.agent, entry.taskId, entry.isolation, entry.threadId]), [[id, 'peer', task.id, 'worktree', peer.threadId]]);
   assert.equal((await getTask(root, task.id)).status, 'in_progress');
   assert.ok((await runLog(directory, 'root')).some(entry => entry.event === 'assignment.interrupted' && entry.assignmentId === id));
   // As alpd does at start: work left in worktrees goes to their branches.
@@ -48,10 +53,10 @@ test('a worktree assignment alpd stopped under continues in the next alpd: same 
 
   const second = createAlpRuntime({ ...options, transport: fakeTransport(runtimes), previousExit: { kind: 'crash', at: '2026-10-09T03:00:00.000Z' } });
   defer(() => second.shutdown());
-  const events = [];
+  const events: Json[] = [];
   second.onEvent(envelope => events.push(envelope));
   assert.deepEqual(second.recoverable().map(entry => entry.assignmentId), [id]);
-  await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot.threadId, runtime: snapshot.runtime, model: snapshot.model, workflow: snapshot.workflow } });
+  await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot!.threadId, runtime: snapshot!.runtime, model: snapshot!.model, workflow: snapshot!.workflow } });
   const outcomes = await second.recover('root', { continueRoot: true });
   assert.deepEqual(outcomes, [{ assignmentId: id, agent: 'peer', outcome: 'resumed' }]);
 
@@ -64,9 +69,9 @@ test('a worktree assignment alpd stopped under continues in the next alpd: same 
   assert.match(peerAgain.lastText(), /^ALP: alpd stopped unexpectedly while you worked on this assignment, and reopened this session\. Your earlier work in it and your worktree is intact/);
   assert.match(mainAgain.lastText(), new RegExp(`These assignments of yours continue and report to you: ${id} \\(peer, task ${task.id}\\)\\. Wait for them with alp_wait`));
   const retaken = await getTask(root, task.id);
-  assert.equal(retaken.assignee.assignment, id);
-  assert.equal(retaken.log.at(-1).event, 'resumed');
-  assert.notEqual(retaken.assignee.epoch, live[0].epoch);
+  assert.equal(retaken.assignee!.assignment, id);
+  assert.equal(retaken.log.at(-1)!.event, 'resumed');
+  assert.notEqual(retaken.assignee!.epoch, live[0].epoch);
   const notice = events.find(envelope => envelope.event.type === 'item' && envelope.event.item.kind === 'notice');
   assert.equal(notice.event.item.text, 'ALP: alpd stopped unexpectedly (around 2026-10-09T03:00:00.000Z). 1 of 1 running assignments reopened, and this session.');
 
@@ -85,7 +90,7 @@ test('a worktree assignment alpd stopped under continues in the next alpd: same 
 test('a runtime process that dies mid-turn is restarted and its assignment continues; repeated deaths without progress fail it', async t => {
   const defer = teardown(t);
   const { directory, root, options } = await workspace(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const runtime = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
   defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root });
@@ -100,7 +105,7 @@ test('a runtime process that dies mid-turn is restarted and its assignment conti
   await until(() => runtimes[2]?.started.length === 1, 'the restarted process');
   assert.equal(peer.closed, true);
   peer = runtimes[2];
-  assert.deepEqual(peer.calls.slice(0, 2).map(call => [call.method, call.params.threadId]), [['thread/resume', thread], ['turn/start', thread]]);
+  assert.deepEqual(peer.calls.slice(0, 2).map((call: Json) => [call.method, call.params.threadId]), [['thread/resume', thread], ['turn/start', thread]]);
   assert.match(peer.lastText(), /^ALP restarted your (Codex|Claude) process after it stopped in the middle of your turn\. Continue where you left off/);
   await until(async () => (await runLog(directory, 'root')).some(entry => entry.event === 'session.revived'), 'the revive in the run log');
   const log = await runLog(directory, 'root');
@@ -124,8 +129,8 @@ test('a runtime process that dies mid-turn is restarted and its assignment conti
   peer.failure(new Error('killed for good'));
   let finished;
   await until(async () => (finished = (await runLog(directory, 'root')).find(entry => entry.event === 'assignment.finished' && entry.assignmentId === assignmentId)), 'the assignment to end');
-  assert.equal(finished.status, 'failed');
-  assert.match(finished.error, /killed for good/);
+  assert.equal(finished!.status, 'failed');
+  assert.match(finished!.error, /killed for good/);
   assert.equal(runtimes.length, count);
   main.finish('ok');
 });
@@ -133,7 +138,7 @@ test('a runtime process that dies mid-turn is restarted and its assignment conti
 test('assignments the next alpd cannot continue end with their task reopened; parked recovery needs an explicit session prompt', async t => {
   const defer = teardown(t);
   const { directory, root, options } = await workspace(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const start = async () => {
     const runtime = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
     await runtime.open('root', { cwd: root, persist: true });
@@ -153,7 +158,7 @@ test('assignments the next alpd cannot continue end with their task reopened; pa
   assert.deepEqual(outcomes, [{ assignmentId: abandoned.assignmentId, agent: 'peer', outcome: 'failed', error: 'its root session cannot be reopened' }]);
   const task = await getTask(root, abandoned.task.id);
   assert.equal(task.status, 'open');
-  assert.match(task.log.at(-1).reason, /alpd restarted and it could not continue: its root session cannot be reopened/);
+  assert.match(task.log.at(-1)!.reason as string, /alpd restarted and it could not continue: its root session cannot be reopened/);
   assert.ok((await runLog(directory, 'root')).some(entry => entry.event === 'assignment.finished' && entry.assignmentId === abandoned.assignmentId && entry.status === 'failed' && entry.reconciled));
   assert.deepEqual(JSON.parse(await readFile(options.liveFile, 'utf8')), []);
   await second.shutdown();
@@ -161,32 +166,32 @@ test('assignments the next alpd cannot continue end with their task reopened; pa
   const parked = await start();
   const third = createAlpRuntime({ ...options, transport: fakeTransport(runtimes), recoveryResume: false });
   defer(() => third.shutdown());
-  const events = [];
+  const events: Json[] = [];
   third.onEvent(envelope => events.push(envelope));
-  await third.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: parked.snapshot.threadId, runtime: parked.snapshot.runtime, model: parked.snapshot.model, workflow: parked.snapshot.workflow } });
+  await third.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: parked.snapshot!.threadId, runtime: parked.snapshot!.runtime, model: parked.snapshot!.model, workflow: parked.snapshot!.workflow } });
   assert.deepEqual((await third.recover('root')).map(outcome => outcome.outcome), ['parked']);
   const peer = runtimes.at(-1);
   assert.equal(peer.started.length, 0);
   assert.deepEqual(third.pauses().parked.map(entry => [entry.assignmentId, entry.reason]), [[parked.assignmentId, 'alpd restarted']]);
   assert.match(events.find(envelope => envelope.event.item?.kind === 'notice').event.item.text, /1 of 1 running assignments reopened; they wait parked: send an explicit prompt to each parked session to continue it: alp send <session> --prompt <text>\./);
-  third.resume({ runtime: parked.snapshot.runtime });
+  third.resume({ runtime: parked.snapshot!.runtime });
   third.resume();
   // Queue barrier after both resume callbacks: manual recovery has no pause provenance.
   await third.recover('root');
   assert.equal(peer.started.length, 0);
-  assert.ok(third.snapshot(parked.assignmentId).parked);
+  assert.ok(third.snapshot(parked.assignmentId)!.parked);
   await third.prompt(parked.assignmentId, { clientMessageId: 'explicit-recovery', delivery: 'auto', content: [{ type: 'text', text: 'Continue recovered assignment' }] });
   await until(() => peer.started.length === 1);
-  assert.equal(third.snapshot(parked.assignmentId).parked, undefined);
+  assert.equal(third.snapshot(parked.assignmentId)!.parked, undefined);
   assert.match(peer.lastText(), /Continue recovered assignment/);
-  assert.equal((await loadTasks(root)).tasks.find(entry => entry.id === parked.task.id).status, 'in_progress');
+  assert.equal((await loadTasks(root)).tasks.find(entry => entry.id === parked.task.id)!.status, 'in_progress');
 });
 
 test('alpd reopens a tree by itself after a restart and its assignment continues with no client attached', async t => {
   const defer = teardown(t);
   const { directory, root, options } = await workspace(t);
   await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'] } }));
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const daemon = async () => {
     const runtime = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
     const store = createStore(path.join(directory, 'state'));
@@ -216,7 +221,7 @@ test('alpd reopens a tree by itself after a restart and its assignment continues
   assert.equal(mainAgain.started.length, 0);
   assert.equal(leadAgain.calls[0].params.threadId, runtimes[1].threadId);
   assert.match(leadAgain.lastText(), /^ALP: alpd restarted while you worked on this assignment/);
-  assert.equal(second.runtime.snapshot(delegated.assignmentId).parentId, session.id);
+  assert.equal(second.runtime.snapshot(delegated.assignmentId)!.parentId, session.id);
   // The lead finishes; main wakes for its result, then the tree closes since nobody watches it.
   await leadAgain.call('alp_handoff', { outcome: 'complete', summary: 'Worked' });
   leadAgain.finish('done');
@@ -241,7 +246,7 @@ test('an external shared writer recovers its write root, inspection scope and re
   git(core, 'add', '-A');
   git(core, 'commit', '-qm', 'init');
   const canonicalCore = await realpath(core);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
   defer(() => first.shutdown());
   await first.open('root', { cwd: root, persist: true });
@@ -254,7 +259,7 @@ test('an external shared writer recovers its write root, inspection scope and re
   assert.deepEqual([live[0].spec.writeRoot, live[0].spec.workdir, live[0].lease], [canonicalCore, canonicalCore, canonicalCore]);
   const second = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
   defer(() => second.shutdown());
-  await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot.threadId, runtime: snapshot.runtime, model: snapshot.model, workflow: snapshot.workflow } });
+  await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot!.threadId, runtime: snapshot!.runtime, model: snapshot!.model, workflow: snapshot!.workflow } });
   assert.equal((await second.recover('root', { continueRoot: true }))[0].outcome, 'resumed');
   const main = runtimes[2];
   const peer = runtimes[3];
@@ -271,11 +276,11 @@ test('recovery migrates an old thinking level and persists the resolved effort',
   const defer = teardown(t);
   const { root, options } = await workspace(t);
   await setProfiles(root, { peer: ['codex:gpt-6-astra'] });
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
   defer(() => first.shutdown());
   await first.open('root', { cwd: root, persist: true });
-  await first.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Work' }] });
+  await first.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Work' }] } as PromptInput);
   const main = runtimes[0];
   const args = { agent: 'peer', task: 'Inspect', mode: 'read-only', model: 'codex:gpt-6-astra' };
   assert.match((await main.call('alp_delegate', { ...args, thinking: 'high' })).error, /unsupported|takes effort/i);
@@ -292,11 +297,11 @@ test('recovery migrates an old thinking level and persists the resolved effort',
   await writeFile(options.liveFile, JSON.stringify(live));
   const second = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
   defer(() => second.shutdown());
-  await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot.threadId, runtime: snapshot.runtime, model: snapshot.model, workflow: snapshot.workflow } });
+  await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot!.threadId, runtime: snapshot!.runtime, model: snapshot!.model, workflow: snapshot!.workflow } });
   assert.deepEqual(await second.recover('root'), [{ assignmentId: started.assignmentId, agent: 'peer', outcome: 'resumed' }]);
   const resumed = runtimes.at(-1);
   await until(() => resumed.started.length === 1);
-  assert.equal(resumed.calls.find(call => call.method === 'thread/resume').params.threadId, peer.threadId);
+  assert.equal(resumed.calls.find((call: Json) => call.method === 'thread/resume').params.threadId, peer.threadId);
   assert.equal(resumed.started[0].params.effort, 'low');
   await second.shutdown();
   assert.equal(JSON.parse(await readFile(options.liveFile, 'utf8'))[0].spec.thinking, 'low');
@@ -305,11 +310,11 @@ test('recovery migrates an old thinking level and persists the resolved effort',
 test('finished shared assignments remain continuable after a daemon restart', async t => {
   const defer = teardown(t);
   const { root, options } = await workspace(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
   defer(() => first.shutdown());
   await first.open('root', { cwd: root, persist: true });
-  await first.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Work' }] });
+  await first.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Work' }] } as PromptInput);
   const main = runtimes[0];
   const started = await main.call('alp_delegate', { agent: 'peer', task: 'Read the code', mode: 'read-only' });
   const peer = runtimes.at(-1);
@@ -322,8 +327,8 @@ test('finished shared assignments remain continuable after a daemon restart', as
   await first.shutdown();
   const second = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
   defer(() => second.shutdown());
-  await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot.threadId, runtime: snapshot.runtime, model: snapshot.model, workflow: snapshot.workflow } });
-  await second.prompt('root', { clientMessageId: 'm2', content: [{ type: 'text', text: 'Continue' }] });
+  await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot!.threadId, runtime: snapshot!.runtime, model: snapshot!.model, workflow: snapshot!.workflow } });
+  await second.prompt('root', { clientMessageId: 'm2', content: [{ type: 'text', text: 'Continue' }] } as PromptInput);
   const continued = await runtimes.at(-1).call('alp_delegate', { agent: 'peer', task: 'Explain the parser', mode: 'read-only', continueFrom: started.assignmentId });
   assert.ok(continued.assignmentId, JSON.stringify(continued));
   const next = runtimes.at(-1);
@@ -338,10 +343,10 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
   test(`an isolated legacy usage-stopped root waits for an explicit prompt after daemon restart: ${mode}`, async t => {
     const defer = teardown(t);
     const { directory, root, options } = await workspace(t);
-    const runtimes = [];
+    const runtimes: Json[] = [];
     let used = 100;
     let failNext = mode === 'failed start';
-    const factory = fakeTransport(runtimes);
+    const factory: (...args: Json[]) => FakeRuntime = fakeTransport(runtimes);
     const pauseFile = path.join(directory, 'state', 'pause.json');
     const daemon = async () => {
       const runtime = createAlpRuntime({ ...options, pauseFile, autoResume: mode !== 'autoResume false', limitCheckMs: 20,
@@ -350,7 +355,7 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
           const request = agent.request.bind(agent);
           return Object.assign(agent, {
             async orchestrationContext() { return { usage: { available: true, limits: [{ windows: [{ usedPercent: used }] }] } }; },
-            async request(method, params) {
+            async request(method: string, params: Json) {
               if (failNext && method === 'turn/start' && agent.calls.some(call => call.method === 'thread/resume')) {
                 failNext = false;
                 throw new Error('resume start failed');
@@ -382,12 +387,12 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
     if (mode === 'manual pause') await first.runtime.pause({ runtime: 'codex' });
     client.close();
     await first.stop();
-    assert.ok((await first.store.list()).find(record => record.id === session.id).session.parked);
+    assert.ok((await first.store.list()).find(record => record.id === session.id)!.session!.parked);
     const before = runtimes.length;
     if (mode === 'reset before restart') { used = 0; await writeFile(pauseFile, JSON.stringify({ runtimes: {} })); }
     let second = await daemon();
     await until(() => second.runtime.snapshot(session.id)?.threadId === main.threadId, 'root thread reopened without client');
-    let again = runtimes.slice(before).find(agent => agent.calls.some(call => call.method === 'thread/resume' && call.params.threadId === main.threadId));
+    let again = runtimes.slice(before).find(agent => agent.calls.some((call: Json) => call.method === 'thread/resume' && call.params.threadId === main.threadId));
     assert.ok(again);
     await until(() => second.runtime.snapshot(session.id)?.parked, 'legacy root restored parked');
     assert.equal(await readFile(path.join(root, 'notes.txt'), 'utf8'), 'unfinished work');
@@ -395,7 +400,7 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
     // stand in for persistence completion. Other tests/files keep their normal I/O.
     await second.store.flush();
     const rename = fs.rename;
-    let releaseWrites;
+    let releaseWrites!: (value?: unknown) => void;
     let heldWrites = 0;
     if (mode === 'global pause') {
       const held = new Promise(resolve => { releaseWrites = resolve; });
@@ -411,7 +416,7 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
       if (mode === 'autoResume false' || mode === 'manual pause' || mode === 'global pause') {
         await new Promise(resolve => setTimeout(resolve, 80));
         assert.equal(again.started.length, 0);
-        assert.ok(second.runtime.snapshot(session.id).parked);
+        assert.ok(second.runtime.snapshot(session.id)!.parked);
         second.runtime.resume();
       }
       await until(() => !second.runtime.pauses().all && !second.runtime.pauses().runtimes.codex, 'provider pause lifted');
@@ -419,8 +424,8 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
       second.runtime.resume();
       await second.runtime.recover(session.id);
       assert.equal(again.started.length, 0, 'legacy reason cannot grant automatic scope resume');
-      assert.ok(second.runtime.snapshot(session.id).parked);
-      const prompt = clientMessageId => second.runtime.prompt(session.id, { clientMessageId, delivery: 'auto', content: [{ type: 'text', text: 'Continue the recovered notes' }] });
+      assert.ok(second.runtime.snapshot(session.id)!.parked);
+      const prompt = (clientMessageId: string) => second.runtime.prompt(session.id, { clientMessageId, delivery: 'auto', content: [{ type: 'text', text: 'Continue the recovered notes' }] });
       await prompt('explicit-recovery');
       if (mode === 'failed start') {
         await until(() => !failNext && second.runtime.snapshot(session.id)?.parked, 'failed start retains intent');
@@ -429,7 +434,7 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
         const retryIndex = runtimes.length;
         second = await daemon();
         await until(() => second.runtime.snapshot(session.id)?.threadId === main.threadId, 'failed start recovers on another restart');
-        again = runtimes.slice(retryIndex).find(agent => agent.calls.some(call => call.method === 'thread/resume' && call.params.threadId === main.threadId));
+        again = runtimes.slice(retryIndex).find(agent => agent.calls.some((call: Json) => call.method === 'thread/resume' && call.params.threadId === main.threadId));
         await until(() => second.runtime.snapshot(session.id)?.parked, 'failed explicit start remains parked after restart');
         assert.equal(again.started.length, 0);
         await prompt('explicit-recovery-retry');
@@ -451,19 +456,19 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
       assert.equal(second.runtime.snapshot(session.id), undefined, 'finished unwatched root closes');
       if (mode === 'global pause') {
         assert.ok(heldWrites > 0, 'a real record replacement is held');
-        assert.ok((await second.store.list()).find(record => record.id === session.id).session.parked, 'disk still has the parked record while replacement is held');
+        assert.ok((await second.store.list()).find(record => record.id === session.id)!.session!.parked, 'disk still has the parked record while replacement is held');
       }
       releaseWrites?.();
       await second.store.flush();
       const completed = (await second.store.list()).find(record => record.id === session.id);
-      assert.equal(completed.status, 'closed');
-      assert.equal(completed.session.parked, undefined);
+      assert.equal(completed!.status, 'closed');
+      assert.equal(completed!.session!.parked, undefined);
       await second.stop();
       const finishedIndex = runtimes.length;
       const third = await daemon();
       await new Promise(resolve => setTimeout(resolve, 50));
       assert.equal(third.runtime.snapshot(session.id), undefined, 'completed root stays closed after restart');
-      assert.ok(runtimes.slice(finishedIndex).every(agent => !agent.calls.some(call => call.method === 'thread/resume' && call.params.threadId === main.threadId)));
+      assert.ok(runtimes.slice(finishedIndex).every(agent => !agent.calls.some((call: Json) => call.method === 'thread/resume' && call.params.threadId === main.threadId)));
     } finally {
       releaseWrites?.();
       fs.rename = rename;
@@ -476,7 +481,7 @@ for (const mode of ['poll after restart', 'reset before restart', 'autoResume fa
 test('t-eae4: a recovery that fails to reopen a worktree assignment never deletes its uncommitted work', async t => {
   const defer = teardown(t);
   const { root, options } = await workspace(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
   await first.open('root', { cwd: root, persist: true });
   await first.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Build it' }] });
@@ -492,11 +497,11 @@ test('t-eae4: a recovery that fails to reopen a worktree assignment never delete
   assert.deepEqual(await reclaimWorktrees(options.worktreeDir), { kept: [], left: [{ name: delegated.assignmentId, path: path.join(options.worktreeDir, delegated.assignmentId), reason: 'other-branch', branch: 'fix/own-branch' }] });
 
   // The next alpd cannot reopen the peer's session (say the disk is still full).
-  const failing = fakeTransport(runtimes);
-  const transport = (...args) => { const r = failing(...args); if (runtimes.length > 3) r.initialize = async () => { throw new Error('ENOSPC: no space left on device'); }; return r; };
+  const failing: (...args: Json[]) => FakeRuntime = fakeTransport(runtimes);
+  const transport = (...args: Json[]) => { const r = failing(...args); if (runtimes.length > 3) r.initialize = async () => { throw new Error('ENOSPC: no space left on device'); }; return r; };
   const second = createAlpRuntime({ ...options, transport, previousExit: { kind: 'crash', at: '2026-10-29T03:00:00.000Z' } });
   defer(() => second.shutdown());
-  await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot.threadId, runtime: snapshot.runtime, model: snapshot.model, workflow: snapshot.workflow } });
+  await second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot!.threadId, runtime: snapshot!.runtime, model: snapshot!.model, workflow: snapshot!.workflow } });
   const outcomes = await second.recover('root', { continueRoot: true });
   assert.notEqual(outcomes[0].outcome, 'resumed');
   assert.equal(outcomes[0].assignmentId, delegated.assignmentId);
@@ -531,7 +536,7 @@ test('t-22be: alpd logs each worktree it leaves in place at start, with the reas
     if (lock?.ready && lock.pid === child.pid) break;
     await new Promise(resolve => setTimeout(resolve, 25));
   }
-  const client = await connect((await readLock(home)).socket, { name: 'reclaim-test', version: '0' });
+  const client = await connect((await readLock(home))!.socket, { name: 'reclaim-test', version: '0' });
   await client.request('daemon.shutdown').catch(() => {});
   client.close();
   await exited;

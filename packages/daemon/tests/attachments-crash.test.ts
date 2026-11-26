@@ -3,8 +3,10 @@
 // crash point, then restarted on the same home. Nothing half written is ever published, and what
 // was published survives.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { closeSync, openSync } from 'node:fs';
@@ -15,19 +17,22 @@ import { fileURLToPath } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
 import { connect, readLock } from '@anhlp/alp-client';
 
+// `any`: alpd's answers, events and errors are JSON whose shape depends on the method; the tests read the fields they assert on.
+type Json = any;
+
 const ALPD = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
 const FAKE_CODEX = fileURLToPath(new URL('./support/fake-codex.js', import.meta.url));
 const MODEL = 'codex:gpt-5.6-sol';
 const skip = process.platform === 'win32' && 'POSIX processes only; attachments are not served on Windows';
-const sha = data => createHash('sha256').update(data).digest('hex');
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const sha = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function until(check, what) {
+async function until(check: () => unknown, what: string) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await sleep(25); }
   assert.fail(`${what} did not happen`);
 }
 
-async function harness(t, { config } = {}) {
+async function harness(t: TestContext, { config }: { config?: unknown } = {}) {
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-attach-crash-')));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
@@ -37,12 +42,12 @@ async function harness(t, { config } = {}) {
   await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
   const logFile = path.join(directory, 'alpd.log');
-  const started = [];
+  const started: ChildProcess[] = [];
   t.after(async () => {
-    for (const child of started) if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    for (const child of started) if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid!, 'SIGKILL'); } catch {}
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
-  async function start({ crashAt } = {}) {
+  async function start({ crashAt }: { crashAt?: string } = {}) {
     const log = openSync(logFile, 'a');
     const child = spawn(process.execPath, [ALPD], {
       detached: true,
@@ -59,20 +64,20 @@ async function harness(t, { config } = {}) {
       const lock = await readLock(home);
       return lock?.ready && lock.pid === child.pid;
     }, 'alpd to be ready');
-    const client = await connect((await readLock(home)).socket, { name: 'attach-crash-test', version: '0' });
+    const client = await connect((await readLock(home))!.socket, { name: 'attach-crash-test', version: '0' });
     return {
-      request: (method, params) => client.request(method, params),
+      request: (method: string, params?: unknown) => client.request(method, params),
       async crashed() { const result = await exited; client.close(); assert.equal(result.signal, 'SIGKILL'); },
       async stop() { await client.request('daemon.shutdown').catch(() => {}); client.close(); await exited; },
     };
   }
-  return { home, root: path.join(home, 'state', 'attachments'), start, create: daemon => daemon.request('session.create', { spec: { cwd: project, persist: true, model: MODEL } }) };
+  return { home, root: path.join(home, 'state', 'attachments'), start, create: (daemon: Json) => daemon.request('session.create', { spec: { cwd: project, persist: true, model: MODEL } }) };
 }
 
 const data = Buffer.from('%PDF-1.4\n' + 'payload '.repeat(4000));
 
 /** Begins and fills an upload with `data`; `requestId` lets a restarted client find it again. */
-async function filled(daemon, sessionId, requestId) {
+async function filled(daemon: { request(method: string, params?: unknown): Promise<Json> }, sessionId: string, requestId: string) {
   const begun = await daemon.request('attachment.begin', { sessionId, name: 'report.pdf', size: data.length, mimeType: 'application/pdf', requestId });
   for (let offset = 0; offset < data.length; offset += 8192) {
     await daemon.request('attachment.chunk', { uploadId: begun.uploadId, offset, data: data.subarray(offset, offset + 8192).toString('base64') });

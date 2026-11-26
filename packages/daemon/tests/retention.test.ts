@@ -10,10 +10,13 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { teardown } from '../../../test/support/teardown.ts';
 
-const DAY = 24 * 60 * 60 * 1000;
-const ago = days => new Date(Date.now() - days * DAY).toISOString();
+// `any`: session.list answers are JSON; the test reads the fields it asserts on.
+type Json = any;
 
-async function until(check, what) {
+const DAY = 24 * 60 * 60 * 1000;
+const ago = (days: number) => new Date(Date.now() - days * DAY).toISOString();
+
+async function until(check: () => unknown, what: string) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
   assert.fail(`${what} did not happen`);
 }
@@ -28,12 +31,12 @@ test('retention keeps live trees and trees with receipts in their window, remove
   for (const name of ['sessions', 'timeline', 'receipts']) await mkdir(path.join(state, name), { recursive: true });
   await mkdir(runs);
   // Written when its record says, as alpd would have written it.
-  const record = async (id, rootId, status, updatedAt, extra = {}) => {
+  const record = async (id: string, rootId: string, status: string, updatedAt: string, extra = {}) => {
     const file = path.join(state, 'sessions', `${id}.json`);
     await writeFile(file, JSON.stringify({ version: 1, id, rootId, status, createdAt: updatedAt, updatedAt, session: { id, agent: 'main', ...(id === rootId ? {} : { parentId: rootId }) }, ...extra }));
     await utimes(file, new Date(updatedAt), new Date(updatedAt));
   };
-  const receipt = async (name, sessionId, days) => {
+  const receipt = async (name: string, sessionId: string, days: number) => {
     // Content and time land together, as a sweep may read the receipt at any moment.
     const file = path.join(state, 'receipts', `${name}.json`);
     const temporary = path.join(directory, `${name}.json`);
@@ -70,7 +73,7 @@ test('retention keeps live trees and trees with receipts in their window, remove
   defer(() => server.close());
   const client = await connect(daemonPaths(directory).socket, { name: 'test', version: '0' });
   defer(() => client.close());
-  const listed = async () => (await client.request('session.list', { includeClosed: true, includeArchived: true, rootsOnly: true })).sessions.map(row => row.id).sort();
+  const listed = async () => (await client.request('session.list', { includeClosed: true, includeArchived: true, rootsOnly: true })).sessions.map((row: Json) => row.id).sort();
 
   assert.deepEqual(await listed(), ['later', 'receipted', 'recent', 'restored', 'working']);
   assert.deepEqual((await readdir(path.join(state, 'timeline'))).sort(), ['later.jsonl', 'receipted.jsonl', 'recent.jsonl', 'restored.jsonl', 'working.jsonl']);

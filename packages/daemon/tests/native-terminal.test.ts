@@ -1,14 +1,18 @@
 // Actual native-owner tests, never a mocked platform or permission widening.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
+
+// `any`: the fake owner process (an EventEmitter given stdio streams), process.report and native exit events are untyped here; the tests read the fields they assert on.
+type Json = any;
 const skip = !['darwin', 'linux'].includes(process.platform);
-const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
-async function until(check) { const end = Date.now() + 8000; while (Date.now() < end) { if (await check()) return; await new Promise(r => setTimeout(r, 20)); } assert.fail('native condition timed out'); }
-async function open(t, command = []) {
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+async function until(check: () => unknown) { const end = Date.now() + 8000; while (Date.now() < end) { if (await check()) return; await new Promise(r => setTimeout(r, 20)); } assert.fail('native condition timed out'); }
+async function open(t: TestContext, command: string[] = []) {
   const { nativePtySpawn } = await import('../dist/native-terminal.js');
-  const pty = await nativePtySpawn('/bin/sh', command, { cwd: tmpdir(), env: { PATH: process.env.PATH, TERM: 'xterm-256color', PS1: 'NATIVE$ ' }, name: 'xterm-256color', cols: 80, rows: 24, killGraceMs: 100 });
+  const pty = await nativePtySpawn('/bin/sh', command, { cwd: tmpdir(), env: { PATH: process.env.PATH!, TERM: 'xterm-256color', PS1: 'NATIVE$ ' }, name: 'xterm-256color', cols: 80, rows: 24, killGraceMs: 100 });
   let output = ''; pty.onData(data => { output += data; });
   t.after(() => pty.cleanup());
   return { pty, text: () => output };
@@ -60,11 +64,11 @@ test('unrelated process with spoofed terminal marker is never adopted or signale
   const { pty } = await open(t);
   const result = await pty.cleanup();
   assert.equal(result.live, 0);
-  assert.equal(alive(stranger.pid), true);
+  assert.equal(alive(stranger.pid!), true);
 });
 test('natural root exit and cleanup completion are delivered separately', { skip }, async t => {
   const { pty } = await open(t, ['-c', 'exit 7']);
-  let event; pty.onExit(value => { event = value; });
+  let event: Json; pty.onExit(value => { event = value; });
   await until(() => event);
   assert.equal(event.exitCode, 7);
   const result = await pty.cleanup();
@@ -96,10 +100,10 @@ test('isolated shipped adapter runs with no compiler PATH and rejects a corrupte
   t.after(() => rm(root, { recursive: true, force: true }));
   await cp(fileURLToPath(new URL('../dist/native-terminal.js', import.meta.url)), path.join(root, 'owner.mjs'));
   await cp(fileURLToPath(new URL('../dist/terminal-native', import.meta.url)), path.join(root, 'terminal-native'), { recursive: true });
-  const run = source => new Promise((resolve, reject) => execFile(process.execPath, ['--input-type=module', '-e', source], { cwd: root, env: { PATH: '' }, timeout: 10000 }, (error, stdout, stderr) => error ? reject(new Error(`${error}\n${stderr}`)) : resolve(stdout)));
+  const run = (source: string) => new Promise<string>((resolve, reject) => execFile(process.execPath, ['--input-type=module', '-e', source], { cwd: root, env: { PATH: '' }, timeout: 10000 }, (error, stdout, stderr) => error ? reject(new Error(`${error}\n${stderr}`)) : resolve(stdout)));
   const source = `import { nativeTerminalCapability, nativePtySpawn } from './owner.mjs'; if (!nativeTerminalCapability().available) throw Error('unavailable'); const p=await nativePtySpawn('/bin/sh',['-c','printf SHIPPED_OK'],{name:'xterm',cols:80,rows:24,cwd:${JSON.stringify(root)},env:{},killGraceMs:100}); let text='';p.onData(v=>text+=v);await new Promise(resolve=>p.onExit(resolve));const r=await p.cleanup();if(r.live||r.uncertain)throw Error(JSON.stringify(r)); console.log(text);`;
   assert.match(await run(source), /SHIPPED_OK/);
-  const manifest = path.join(root, 'terminal-native/prebuilt', `${process.platform}-${process.arch}${process.platform === 'linux' ? (process.report.getReport().header.glibcVersionRuntime ? '-glibc' : '-musl') : ''}`, 'manifest.json');
+  const manifest = path.join(root, 'terminal-native/prebuilt', `${process.platform}-${process.arch}${process.platform === 'linux' ? ((process.report.getReport() as Json).header.glibcVersionRuntime ? '-glibc' : '-musl') : ''}`, 'manifest.json');
   const value = JSON.parse(await readFile(manifest, 'utf8')); value.sha256 = '0'.repeat(64); await writeFile(manifest, JSON.stringify(value));
   assert.match(await run("import {nativeTerminalCapability} from './owner.mjs'; console.log(JSON.stringify(nativeTerminalCapability()));"), /"available":false/);
 });
@@ -109,18 +113,18 @@ test('post-ready adapter output overflow cannot be overwritten by a clean native
   const { EventEmitter } = await import('node:events');
   const { PassThrough } = await import('node:stream');
   const { nativePtySpawn } = await import('../dist/native-terminal.js');
-  const fake = new EventEmitter();
+  const fake: Json = new EventEmitter();
   fake.stdin = new PassThrough(); fake.stdout = new PassThrough(); fake.stderr = new PassThrough();
   fake.stdio = [fake.stdin, fake.stdout, fake.stderr, new PassThrough(), new PassThrough()];
   const original = childProcess.spawn;
   childProcess.spawn = () => { queueMicrotask(() => fake.stdio[3].write('{"ready":80000,"protocol":1}\n')); return fake; };
   syncBuiltinESMExports();
-  let pty;
+  let pty: Json;
   try { pty = await nativePtySpawn('/bin/sh', [], { cwd: tmpdir(), env: {}, name: 'xterm', cols: 80, rows: 24 }); }
   finally { childProcess.spawn = original; syncBuiltinESMExports(); }
   // The real production window: owner ready, async host config check, no output listener yet.
   fake.stdout.write('a'.repeat(1024 * 1024)); fake.stdout.write('LOST');
-  let delivered = 0; pty.onData(value => { delivered += Buffer.byteLength(value); });
+  let delivered = 0; pty.onData((value: Json) => { delivered += Buffer.byteLength(value); });
   fake.stdio[3].write('{"exitCode":0,"signal":0}\n{"cleanup":true,"observed":1,"live":0,"uncertain":0}\n');
   fake.emit('close', 0);
   const result = await pty.cleanup();
@@ -134,21 +138,21 @@ test('pre-spawn mode change delivers acknowledgment challenge without inventing 
   const { EventEmitter } = await import('node:events');
   const { PassThrough } = await import('node:stream');
   const { nativePtySpawn } = await import('../dist/native-terminal.js');
-  const fake = new EventEmitter();
+  const fake: Json = new EventEmitter();
   fake.stdin = new PassThrough(); fake.stdout = new PassThrough(); fake.stderr = new PassThrough();
   fake.stdio = [fake.stdin, fake.stdout, fake.stderr, new PassThrough(), new PassThrough()];
   const original = childProcess.spawn;
   childProcess.spawn = () => { queueMicrotask(() => { fake.stdio[3].write('{"refused":"terminal_protection_ack_required"}\n{"cleanup":true,"observed":0,"live":0,"uncertain":0}\n'); fake.emit('close', 78); }); return fake; };
   syncBuiltinESMExports();
   try {
-    await assert.rejects(nativePtySpawn('/bin/sh', [], { cwd: tmpdir(), env: {}, name: 'xterm', cols: 80, rows: 24 }), error => error.terminalReason === 'terminal_protection_ack_required' && error.cleanupResult.uncertain === 0 && error.cleanupResult.observed === 0);
+    await assert.rejects(nativePtySpawn('/bin/sh', [], { cwd: tmpdir(), env: {}, name: 'xterm', cols: 80, rows: 24 }), (error: Json) => error.terminalReason === 'terminal_protection_ack_required' && error.cleanupResult.uncertain === 0 && error.cleanupResult.observed === 0);
   } finally { childProcess.spawn = original; syncBuiltinESMExports(); }
 });
 
 test('capability records never interpret generic errors, policy denials or malformed records as compatibility', async () => {
   const { nativeCapabilityOf } = await import('../dist/native-terminal.js');
   assert.deepEqual(nativeCapabilityOf({ status: 0, stdout: 'alp-terminal-owner:1:root-only\n' }, 'linux'), { available: true, protection: 'root-only', reason: 'bound_signal_unavailable' });
-  for (const platform of ['darwin', 'win32']) assert.equal(nativeCapabilityOf({ status: 0, stdout: 'alp-terminal-owner:1:root-only' }, platform).available, false);
+  for (const platform of ['darwin', 'win32'] as const) assert.equal(nativeCapabilityOf({ status: 0, stdout: 'alp-terminal-owner:1:root-only' }, platform).available, false);
   for (const probe of [{ status: 78, stdout: 'EPERM' }, { status: 78, stdout: 'ENOSYS' }, { status: null, stdout: '' }, { status: 0, stdout: 'alp-terminal-owner:1:root-only\nextra' }, { status: 1, stdout: 'alp-terminal-owner:1:root-only' }]) assert.equal(nativeCapabilityOf(probe, 'linux').available, false);
   assert.deepEqual(nativeCapabilityOf({ status: 0, stdout: 'alp-terminal-owner:1' }, 'linux'), { available: true });
 });

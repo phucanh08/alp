@@ -1,9 +1,10 @@
-import { failCommittedMarker } from './lifecycle-marker-fault.js';
+import { failCommittedMarker } from './lifecycle-marker-fault.ts';
 // session.configure with model, thinking or team, and session.configure.preview, in alpd
 // (docs/protocol/alp-json-rpc-v1.md §12.9, issue #121 branch D): the lifecycle journal, the idle barrier,
 // what the session's record keeps for a reopen, and refusals that change nothing. The runtime and its
 // fake processes are real ALP code; packages/runtime tests prove the restart, test/e2e the real runs.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -11,20 +12,27 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
+import type { RuntimeTransport } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
+import type { SessionRecord } from '@anhlp/alp-daemon';
 import { validateParams, validateResult } from '@anhlp/alp-protocol/contract';
 
-async function until(check, what = 'condition') {
+// `any`: alpd's answers, events and refusals are JSON, and the scripted native configure and transports are partial fakes; the tests read the fields they assert on.
+type Json = any;
+/** A scripted native transport, as fakeTransport hands it to the runtime and to the test: its helpers and handlers are reached by name. */
+type Scripted = RuntimeTransport & { calls: { method: string, params: Json }[], [member: string]: Json };
+
+async function until(check: () => unknown, what = 'condition') {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`${what} did not happen`);
 }
 
 /** A scripted native runtime: each turn/start answers a new turn id; finish() completes the latest. */
-function fakeTransport(transports) {
+function fakeTransport(transports: Scripted[]) {
   return () => {
     const index = transports.length;
     let turns = 0;
-    const transport = {
+    const transport: Scripted = {
       calls: [], threadId: `thread-${index}`, turnId: undefined,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -49,20 +57,20 @@ function fakeTransport(transports) {
 }
 
 /** A daemon with a real store; `start()` again on the same directory is a restart. The runtime's native fork is scripted. */
-async function setup(t) {
+async function setup(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-conversation-'));
   const project = path.join(directory, 'project');
   await initProject(project);
-  const transports = [];
-  const stops = [];
+  const transports: Json[] = [];
+  const stops: Json[] = [];
   t.after(async () => { for (const stop of stops.reverse()) await stop(); await rm(directory, { recursive: true, force: true }); });
   const state = path.join(directory, 'state');
-  const native = { configures: [], configure: undefined };
+  const native: { configures: Json[], configure: Json } = { configures: [], configure: undefined };
   let count = 0;
   async function start() {
     const runtime = createAlpRuntime({ supervisor: false, transport: fakeTransport(transports), runLogDir: path.join(directory, 'runs') });
     // The runtime's own reconfigure (restarting a fake process), or a scripted one.
-    const reconfigure = runtime.reconfigure;
+    const reconfigure = runtime.reconfigure!;
     runtime.reconfigure = async (sessionId, changes, options) => {
       native.configures.push({ sessionId, changes, options });
       return native.configure ? native.configure(sessionId, changes, options, reconfigure) : reconfigure(sessionId, changes, options);
@@ -71,13 +79,13 @@ async function setup(t) {
     const socketPath = daemonPaths(path.join(directory, `d${count++}`)).socket;
     const server = createDaemonServer({ runtime, socketPath, version: 'test', store });
     await server.listen();
-    const clients = [];
+    const clients: Json[] = [];
     const open = async () => {
       const client = await connect(socketPath, { name: 'test', version: '0' });
-      const events = [];
+      const events: Json[] = [];
       client.onEvent(envelope => events.push(envelope));
       clients.push(client);
-      return { client, events, request: (method, params) => client.request(method, params) };
+      return { client, events, request: (method: string, params?: unknown) => client.request(method, params) };
     };
     let stopped = false;
     const stop = async () => { if (stopped) return; stopped = true; clients.forEach(client => client.close()); await store.flush().catch(() => {}); await server.close().catch(() => {}); await runtime.shutdown(); };
@@ -90,9 +98,9 @@ async function setup(t) {
 }
 
 /** Opens a persistent root and runs `texts` as completed turns; answers the turn ids in order. */
-async function conversation(d, sessionId, texts) {
+async function conversation(d: Json, sessionId: string, texts: string[]) {
   await d.request('session.create', { sessionId, spec: { cwd: d.project ?? d.cwd, persist: true, model: 'codex:gpt-5.6-sol', thinking: 'medium' } });
-  const turns = [];
+  const turns: Json[] = [];
   for (const [index, text] of texts.entries()) {
     const transport = d.transports.at(-1);
     await d.request('session.prompt', { sessionId, clientMessageId: `${sessionId}-m${index}`, content: [{ type: 'text', text }] });
@@ -104,11 +112,11 @@ async function conversation(d, sessionId, texts) {
   return turns;
 }
 
-const generationOf = async (d, sessionId) => (await d.request('session.history', { sessionId, limit: 1 })).generation;
-const rpcError = (code, reason) => error => error.code === code && error.data?.reason === reason;
-const journalFiles = async state => (await readdir(path.join(state, 'lifecycle')).catch(() => [])).filter(name => name.endsWith('.json'));
-const journalOf = async state => Promise.all((await journalFiles(state)).map(async name => JSON.parse(await readFile(path.join(state, 'lifecycle', name), 'utf8'))));
-const threadCalls = transport => transport.calls.filter(call => call.method.startsWith('thread/'));
+const generationOf = async (d: Json, sessionId: string) => (await d.request('session.history', { sessionId, limit: 1 })).generation;
+const rpcError = (code: number, reason: string) => (error: Json) => error.code === code && error.data?.reason === reason;
+const journalFiles = async (state: Json) => (await readdir(path.join(state, 'lifecycle')).catch(() => [])).filter(name => name.endsWith('.json'));
+const journalOf = async (state: Json) => Promise.all((await journalFiles(state)).map(async name => JSON.parse(await readFile(path.join(state, 'lifecycle', name), 'utf8'))));
+const threadCalls = (transport: Json) => transport.calls.filter((call: Json) => call.method.startsWith('thread/'));
 
 test('configure: model and effort change on the same conversation; the record keeps them through close, reopen and a restart of alpd', async t => {
   const world = await setup(t);
@@ -138,7 +146,7 @@ test('configure: model and effort change on the same conversation; the record ke
   assert.equal(result.session.thinking, 'high');
   assert.equal(result.session.threadId, before.threadId, 'same conversation');
   assert.equal(world.transports.length, processes + 1, 'one new native process');
-  assert.deepEqual(threadCalls(world.transports.at(-1)).map(call => [call.method, call.params.threadId, call.params.model, call.params.thinking]), [['thread/resume', before.threadId, 'gpt-6.1-sol', 'high']]);
+  assert.deepEqual(threadCalls(world.transports.at(-1)).map((call: Json) => [call.method, call.params.threadId, call.params.model, call.params.thinking]), [['thread/resume', before.threadId, 'gpt-6.1-sol', 'high']]);
   assert.equal(await generationOf(d, 'c1'), generation, 'history untouched');
   // A repeat answers the first result and restarts nothing; other parameters under the id conflict.
   const repeat = await d.request('session.configure', params);
@@ -149,8 +157,8 @@ test('configure: model and effort change on the same conversation; the record ke
   // The next turn runs on the new model.
   const transport = world.transports.at(-1);
   await d.request('session.prompt', { sessionId: 'c1', clientMessageId: 'c1-m1', content: [{ type: 'text', text: 'two' }] });
-  await until(() => transport.calls.some(call => call.method === 'turn/start'), 'turn in the new process');
-  const turn = transport.calls.find(call => call.method === 'turn/start').params;
+  await until(() => transport.calls.some((call: Json) => call.method === 'turn/start'), 'turn in the new process');
+  const turn = transport.calls.find((call: Json) => call.method === 'turn/start').params;
   assert.equal(turn.model, 'gpt-6.1-sol');
   assert.equal(turn.effort, 'high');
   transport.finish();
@@ -159,7 +167,7 @@ test('configure: model and effort change on the same conversation; the record ke
   await d.request('session.close', { sessionId: 'c1' });
   await d.request('session.create', { sessionId: 'c1', spec: { cwd: d.project }, resume: true });
   const reopened = threadCalls(world.transports.at(-1));
-  assert.deepEqual(reopened.map(call => [call.method, call.params.threadId, call.params.model, call.params.thinking]), [['thread/resume', before.threadId, 'gpt-6.1-sol', 'high']]);
+  assert.deepEqual(reopened.map((call: Json) => [call.method, call.params.threadId, call.params.model, call.params.thinking]), [['thread/resume', before.threadId, 'gpt-6.1-sol', 'high']]);
   // A restart of alpd: the record says the same.
   await d.request('session.close', { sessionId: 'c1' });
   await d.stop();
@@ -180,7 +188,7 @@ test('configure: a team change runs the new team from the same conversation, and
   const preview = (await d.request('session.configure.preview', { sessionId: 'c2', team: 'cafe' })).preview;
   assert.deepEqual(preview.changes, ['team']);
   assert.deepEqual(preview.proposed.delegates, ['lead', 'oracle', 'reviewer']);
-  assert.ok(preview.teams.some(team => team.id === 'cafe' && team.label === 'Cafe'));
+  assert.ok(preview.teams.some((team: Json) => team.id === 'cafe' && team.label === 'Cafe'));
   const result = await d.request('session.configure', { sessionId: 'c2', team: 'cafe', requestId: 'cfg-team', ifGeneration: await generationOf(d, 'c2') });
   assert.equal(result.session.workflow.mode, 'cafe');
   assert.equal(result.session.teamLabel, 'Cafe');
@@ -199,15 +207,15 @@ test('configure: after a team change the next assignment runs on the new team; a
   const d = { ...await world.start(), ...world };
   let calls = 0;
   // A tool call of the transport's current turn, as the model makes it.
-  const tool = async (transport, name, args) => {
+  const tool = async (transport: Json, name: string, args: Json) => {
     const result = await transport.serverRequest('item/tool/call', { threadId: transport.threadId, turnId: transport.turnId, callId: `${name}-${++calls}`, namespace: null, tool: name, arguments: args });
     return { success: result.success, ...JSON.parse(result.contentItems[0].text) };
   };
   /** One turn of the root that delegates `agent` and waits for its handoff. */
-  const delegatedTurn = async (index, agent) => {
+  const delegatedTurn = async (index: number, agent: string) => {
     const main = world.transports.at(-1);
     await d.request('session.prompt', { sessionId: 'c3', clientMessageId: `c3-m${index}`, content: [{ type: 'text', text: `delegate ${agent}` }] });
-    await until(() => main.turnId && main.calls.some(call => call.method === 'turn/start' && JSON.stringify(call.params.input).includes(`delegate ${agent}`)), 'turn started');
+    await until(() => main.turnId && main.calls.some((call: Json) => call.method === 'turn/start' && JSON.stringify(call.params.input).includes(`delegate ${agent}`)), 'turn started');
     const refused = agent === 'lead' ? await tool(main, 'alp_delegate', { agent: 'peer', task: 'Not on this team', mode: 'read-only', wait: false }) : undefined;
     const count = world.transports.length;
     const started = await tool(main, 'alp_delegate', { agent, task: `Work as ${agent}`, mode: 'read-only', wait: false });
@@ -254,21 +262,21 @@ test('configure refusals record nothing and change nothing: stale view, a runnin
   const d = { ...await world.start(), ...world };
   await conversation(d, 'c3', ['one']);
   const generation = await generationOf(d, 'c3');
-  const ask = (params, extra = {}) => d.request('session.configure', { sessionId: 'c3', ifGeneration: generation, ...params, ...extra });
+  const ask = (params: Json, extra = {}) => d.request('session.configure', { sessionId: 'c3', ifGeneration: generation, ...params, ...extra });
   await assert.rejects(ask({ model: 'gpt-6.1-sol', requestId: 'r1', ifGeneration: 'f'.repeat(32) }), rpcError(1004, 'stale_generation'));
-  await assert.rejects(ask({ model: 'claude:claude-opus-5-5', requestId: 'r2' }), error => error.code === 1005 && error.data?.reason === 'runtime_mismatch' && error.data?.action === 'session.create');
+  await assert.rejects(ask({ model: 'claude:claude-opus-5-5', requestId: 'r2' }), (error: Json) => error.code === 1005 && error.data?.reason === 'runtime_mismatch' && error.data?.action === 'session.create');
   await assert.rejects(ask({ model: 'gpt-made-up', requestId: 'r3' }), rpcError(-32602, 'invalid_params'));
   await assert.rejects(ask({ team: 'nonesuch', requestId: 'r4' }), rpcError(1001, 'team_not_found'));
   await assert.rejects(d.request('session.configure', { sessionId: 'nobody', model: 'gpt-6.1-sol', requestId: 'r5', ifGeneration: generation }), rpcError(1001, 'not_found'));
-  await assert.rejects(d.request('session.configure', { sessionId: 'c3', model: 'gpt-6.1-sol' }), error => error.code === -32602);
+  await assert.rejects(d.request('session.configure', { sessionId: 'c3', model: 'gpt-6.1-sol' }), (error: Json) => error.code === -32602);
   // A running turn.
   const transport = world.transports.at(-1);
   await d.request('session.prompt', { sessionId: 'c3', clientMessageId: 'c3-busy', content: [{ type: 'text', text: 'busy' }] });
-  await until(() => transport.calls.filter(call => call.method === 'turn/start').length === 2, 'second turn');
+  await until(() => transport.calls.filter((call: Json) => call.method === 'turn/start').length === 2, 'second turn');
   await assert.rejects(ask({ model: 'gpt-6.1-sol', requestId: 'r6' }), rpcError(1004, 'session_busy'));
   // A question to the user, asked inside that turn.
   void transport.serverRequest('item/tool/call', { threadId: transport.threadId, turnId: transport.turnId, callId: 'ask-1', namespace: null, tool: 'alp_ask', arguments: { question: 'Which?', options: ['A', 'B'] } });
-  await until(async () => (await d.request('question.list', {})).questions?.some(question => question.rootId === 'c3'), 'question asked');
+  await until(async () => (await d.request('question.list', {})).questions?.some((question: Json) => question.rootId === 'c3'), 'question asked');
   await assert.rejects(ask({ model: 'gpt-6.1-sol', requestId: 'r7' }), rpcError(1004, 'session_busy'));
   const preview = (await d.request('session.configure.preview', { sessionId: 'c3', model: 'gpt-6.1-sol' })).preview;
   assert.equal(preview.allowed, false);
@@ -291,17 +299,17 @@ test('a wake still starting its turn when configure prepare ends (a runtime whos
   d.runtime.hold = () => undefined;
   // The preview answers what the runtime held when it began; before it resolves, mail wakes the root and
   // the wake's turn/start is sent, but not answered, so it has no turn id yet.
-  const preview = d.runtime.previewConfigure.bind(d.runtime);
-  let open;
+  const preview = d.runtime.previewConfigure!.bind(d.runtime);
+  let open: (() => void) | undefined;
   d.runtime.previewConfigure = async (sessionId, changes) => {
-    const answer = await preview(sessionId, changes);
+    const answer = await preview!(sessionId, changes);
     if (open) return answer;
-    const starts = transport.calls.filter(call => call.method === 'turn/start').length;
-    let resolve;
+    const starts = transport.calls.filter((call: Json) => call.method === 'turn/start').length;
+    let resolve!: (value?: unknown) => void;
     transport.hold = new Promise(done => { resolve = done; });
     open = () => { transport.hold = undefined; resolve(); };
     await d.request('session.message', { sessionId: 'cp', text: 'mail during configure' });
-    await until(() => transport.calls.filter(call => call.method === 'turn/start').length === starts + 1, 'the wake sent turn/start');
+    await until(() => transport.calls.filter((call: Json) => call.method === 'turn/start').length === starts + 1, 'the wake sent turn/start');
     return answer;
   };
   const change = { sessionId: 'cp', model: 'gpt-6.1-sol', requestId: 'cp1' };
@@ -312,7 +320,7 @@ test('a wake still starting its turn when configure prepare ends (a runtime whos
   try {
     await assert.rejects(d.request('session.configure', { ...change, ifGeneration: await generationOf(d, 'cp') }), rpcError(1004, 'session_busy'));
     assert.ok(open, 'the mail went out during prepare');
-    assert.equal(d.runtime.snapshot('cp').activeTurnId, undefined, 'the wake has no turn id when refused');
+    assert.equal(d.runtime.snapshot('cp')!.activeTurnId, undefined, 'the wake has no turn id when refused');
     assert.equal(world.native.configures.length, 0, 'the refusal never reached the runtime');
     assert.deepEqual(await journalFiles(d.state), [], 'nothing journaled');
   } finally { world.native.configure = undefined; open?.(); }
@@ -329,7 +337,7 @@ test('configure: a native refusal keeps the old configuration and is the answer 
   const d = { ...await world.start(), ...world };
   await conversation(d, 'c4', ['one']);
   const generation = await generationOf(d, 'c4');
-  world.native.configure = async () => { const error = new Error('Codex continued the conversation with gpt-5.6-sol, not gpt-6.1-sol'); error.data = { reason: 'native_refused' }; throw error; };
+  world.native.configure = async () => { const error: Json = new Error('Codex continued the conversation with gpt-5.6-sol, not gpt-6.1-sol'); error.data = { reason: 'native_refused' }; throw error; };
   const params = { sessionId: 'c4', model: 'gpt-6.1-sol', requestId: 'n1', ifGeneration: generation };
   await assert.rejects(d.request('session.configure', params), rpcError(1005, 'native_refused'));
   await assert.rejects(d.request('session.configure', params), rpcError(1005, 'native_refused'));
@@ -348,7 +356,7 @@ test('configure in flight when alpd stops is outcome_unknown after the restart, 
   await conversation(d, 'c5', ['one']);
   const generation = await generationOf(d, 'c5');
   // The runtime takes it (its session.updated reaches the record), then alpd stops before its commit.
-  world.native.configure = async (sessionId, changes, options, reconfigure) => { await reconfigure(sessionId, changes, options); return new Promise(() => {}); };
+  world.native.configure = async (sessionId: string, changes: Json, options: Json, reconfigure: Json) => { await reconfigure(sessionId, changes, options); return new Promise(() => {}); };
   const lost = d.request('session.configure', { sessionId: 'c5', model: 'gpt-6.1-sol', team: 'cafe', requestId: 'u1', ifGeneration: generation }).catch(error => error);
   await until(async () => (await d.request('session.get', { sessionId: 'c5' })).session.model === 'gpt-6.1-sol', 'runtime took it');
   await d.stop();
@@ -385,11 +393,11 @@ test('mail that wakes the root while a configure reads its history waits for the
   d.store.timeline = timeline;
   assert.ok(sent);
   assert.equal(result.session.model, 'gpt-6.1-sol');
-  assert.equal(old.calls.filter(call => call.method === 'turn/start').length, 1, 'no wake turn on the old process');
+  assert.equal(old.calls.filter((call: Json) => call.method === 'turn/start').length, 1, 'no wake turn on the old process');
   const fresh = world.transports.at(-1);
   assert.notEqual(fresh, old);
-  await until(() => fresh.calls.some(call => call.method === 'turn/start' && JSON.stringify(call.params).includes('mail during configure')), 'the mail reached the new process');
-  assert.equal(fresh.calls.find(call => call.method === 'turn/start').params.model, 'gpt-6.1-sol');
+  await until(() => fresh.calls.some((call: Json) => call.method === 'turn/start' && JSON.stringify(call.params).includes('mail during configure')), 'the mail reached the new process');
+  assert.equal(fresh.calls.find((call: Json) => call.method === 'turn/start').params.model, 'gpt-6.1-sol');
 });
 
 test('configure of a root with no turn yet starts its conversation anew with the new model; mode alone stays the old method', async t => {
@@ -398,7 +406,7 @@ test('configure of a root with no turn yet starts its conversation anew with the
   await d.request('session.create', { sessionId: 'c7', spec: { cwd: d.project, persist: true, model: 'codex:gpt-5.6-sol' } });
   const result = await d.request('session.configure', { sessionId: 'c7', model: 'gpt-6.1-sol', requestId: 'f1', ifGeneration: await generationOf(d, 'c7') });
   assert.equal(result.session.model, 'gpt-6.1-sol');
-  assert.deepEqual(threadCalls(world.transports.at(-1)).map(call => call.method), ['thread/start']);
+  assert.deepEqual(threadCalls(world.transports.at(-1)).map((call: Json) => call.method), ['thread/start']);
   const mode = await d.request('session.configure', { sessionId: 'c7', mode: 'read-only' });
   assert.equal(mode.session.mode, 'read-only');
   assert.equal(mode.configured, undefined);
@@ -438,7 +446,7 @@ test('configure: Codex must say which model it continued with; without it nothin
   const index = world.transports.length;
   const push = world.transports.push;
   world.transports.push = function (transport) {
-    if (this.length === index) { const request = transport.request.bind(transport); transport.request = async (method, params) => { const answer = await request(method, params); if (method === 'thread/resume') delete answer.model; return answer; }; }
+    if (this.length === index) { const request = transport.request.bind(transport); transport.request = async (method: string, params: Json) => { const answer = await request(method, params); if (method === 'thread/resume') delete answer.model; return answer; }; }
     return push.call(this, transport);
   };
   await assert.rejects(d.request('session.configure', { sessionId: 'c9', model: 'gpt-6.1-sol', requestId: 'e1', ifGeneration: await generationOf(d, 'c9') }), rpcError(1005, 'native_refused'));
@@ -453,7 +461,7 @@ test('an unknown configure the runtime took is reconciled once into agreement, a
   const d = { ...await world.start(), ...world };
   await conversation(d, 'c10', ['one']);
   // A: the runtime takes model and team, then alpd stops before its commit.
-  world.native.configure = async (sessionId, changes, options, reconfigure) => { await reconfigure(sessionId, changes, options); return new Promise(() => {}); };
+  world.native.configure = async (sessionId: string, changes: Json, options: Json, reconfigure: Json) => { await reconfigure(sessionId, changes, options); return new Promise(() => {}); };
   const lost = d.request('session.configure', { sessionId: 'c10', model: 'gpt-6.1-sol', team: 'cafe', requestId: 'A', ifGeneration: await generationOf(d, 'c10') }).catch(error => error);
   await until(async () => (await d.request('session.get', { sessionId: 'c10' })).session.model === 'gpt-6.1-sol', 'runtime took A');
   await d.stop();
@@ -482,7 +490,7 @@ test('when the runtime took a configure but the journal could not record it, the
   const d = { ...await world.start(), ...world };
   await conversation(d, 'c11', ['one']);
   const lifecycle = path.join(d.state, 'lifecycle');
-  world.native.configure = async (sessionId, changes, options, reconfigure) => {
+  world.native.configure = async (sessionId: string, changes: Json, options: Json, reconfigure: Json) => {
     const done = await reconfigure(sessionId, changes, options);
     await chmod(lifecycle, 0o500);
     return done;
@@ -550,7 +558,7 @@ for (const changes of [{ model: 'gpt-6.1-sol', thinking: 'high' }, { model: 'gpt
     const put = d.store.put.bind(d.store);
     let attempts = 0;
     d.store.put = async record => {
-      if (record.id === 'failed-save' && (record.spec.thinking === 'high' || record.spec.mode === 'read-only')) { attempts++; throw new Error('configure store unavailable'); }
+      if (record.id === 'failed-save' && (record.spec!.thinking === 'high' || record.spec!.mode === 'read-only')) { attempts++; throw new Error('configure store unavailable'); }
       return put(record);
     };
     const params = { sessionId: 'failed-save', ...changes, requestId: 'failed-save', ifGeneration: await generationOf(d, 'failed-save') };
@@ -558,8 +566,8 @@ for (const changes of [{ model: 'gpt-6.1-sol', thinking: 'high' }, { model: 'gpt
     assert.equal(attempts, 1, 'no unowned fallback write after apply failure');
     assert.equal(updates.length, 0, 'no successful update before durable persistence');
     assert.equal((await journalOf(world.state))[0].state, 'unknown');
-    const live = d.runtime.snapshot('failed-save');
-    for (const [key, value] of Object.entries(changes)) assert.equal(live[key], value);
+    const live: Json = d.runtime.snapshot('failed-save');
+    for (const [key, value] of Object.entries(changes)) assert.equal(live![key], value);
     await assert.rejects(d.request('session.configure', params), rpcError(1004, 'outcome_unknown'));
     assert.equal(world.native.configures.length, 1);
     d.store.put = put;
@@ -575,7 +583,7 @@ test('lost configure journal answer never overwrites a subsequent run-only mode 
   const d = { ...await world.start(), ...world };
   await conversation(d, 'legacy-order', ['one']);
   const directory = path.join(world.state, 'lifecycle');
-  world.native.configure = async (sessionId, changes, options, reconfigure) => {
+  world.native.configure = async (sessionId: string, changes: Json, options: Json, reconfigure: Json) => {
     const done = await reconfigure(sessionId, changes, options);
     await d.runtime.configure(sessionId, { mode: 'read-only' });
     await chmod(directory, 0o500);
@@ -586,12 +594,12 @@ test('lost configure journal answer never overwrites a subsequent run-only mode 
   } finally { await chmod(directory, 0o700); world.native.configure = undefined; }
   await d.store.flush();
   const record = (await d.store.list()).find(record => record.id === 'legacy-order');
-  assert.equal(record.session.mode, 'read-only', 'later runtime update remains the recorded snapshot');
-  assert.equal(record.spec.mode, 'full-access', 'run-only mode remains run-only');
-  assert.equal(record.session.model, 'gpt-6.1-sol');
+  assert.equal(record!.session!.mode, 'read-only', 'later runtime update remains the recorded snapshot');
+  assert.equal(record!.spec!.mode, 'full-access', 'run-only mode remains run-only');
+  assert.equal(record!.session!.model, 'gpt-6.1-sol');
   await d.request('session.close', { sessionId: 'legacy-order' });
   await d.request('session.create', { sessionId: 'legacy-order', spec: { cwd: world.project }, resume: true });
-  assert.equal(d.runtime.snapshot('legacy-order').mode, 'full-access');
+  assert.equal(d.runtime.snapshot('legacy-order')!.mode, 'full-access');
 });
 
 for (const route of ['legacy-mode', 'resume-mode', 'resume-thinking']) {
@@ -627,14 +635,14 @@ for (const route of ['legacy-mode', 'resume']) {
     const d = { ...await world.start(), ...world };
     await conversation(d, 'refused-spec', []);
     await d.store.flush();
-    const before = (await d.store.list()).find(record => record.id === 'refused-spec').spec;
+    const before = (await d.store.list()).find(record => record.id === 'refused-spec')!.spec;
     if (route === 'legacy-mode') await assert.rejects(d.request('session.configure', { sessionId: 'refused-spec', mode: 'invalid-mode' }));
     else {
       await d.request('session.close', { sessionId: 'refused-spec' });
       await assert.rejects(d.request('session.create', { sessionId: 'refused-spec', resume: true, spec: { cwd: world.project, mode: 'invalid-mode', thinking: 'high' } }));
     }
     await d.store.flush();
-    assert.deepEqual((await d.store.list()).find(record => record.id === 'refused-spec').spec, before);
+    assert.deepEqual((await d.store.list()).find(record => record.id === 'refused-spec')!.spec, before);
     if (route === 'legacy-mode') await d.request('session.close', { sessionId: 'refused-spec' });
     const opened = await d.request('session.create', { sessionId: 'refused-spec', resume: true, spec: { cwd: world.project } });
     assert.equal(opened.session.thinking, 'medium');
@@ -651,7 +659,7 @@ for (const route of ['legacy-mode', 'resume']) {
     const put = d.store.put.bind(d.store);
     let appliedWrites = 0;
     d.store.put = async record => {
-      if (record.id === 'unrecorded' && record.spec.mode === 'read-only') { appliedWrites++; throw new Error('store offline'); }
+      if (record.id === 'unrecorded' && record.spec!.mode === 'read-only') { appliedWrites++; throw new Error('store offline'); }
       return put(record);
     };
     const updates = [];
@@ -660,9 +668,9 @@ for (const route of ['legacy-mode', 'resume']) {
     const request = route === 'legacy-mode'
       ? d.request('session.configure', { sessionId: 'unrecorded', mode: 'read-only' })
       : d.request('session.create', { sessionId: 'unrecorded', resume: true, spec: { cwd: world.project, mode: 'read-only' } });
-    await assert.rejects(request, error => error.data?.reason === 'persistence_failed' && /runtime already applied/.test(error.message));
+    await assert.rejects(request, (error: Json) => error.data?.reason === 'persistence_failed' && /runtime already applied/.test(error.message));
     assert.equal(appliedWrites, 1);
-    assert.equal(d.runtime.snapshot('unrecorded').mode, 'read-only', 'native apply is not rolled back');
+    assert.equal(d.runtime.snapshot('unrecorded')!.mode, 'read-only', 'native apply is not rolled back');
     if (route === 'legacy-mode') assert.equal(updates.length, 0, 'failed persistence precedes session.updated');
     d.store.put = put;
   });
@@ -676,7 +684,7 @@ test('persistence: legacy mode is durably recorded before its session.updated', 
   let durable = false;
   let observed = false;
   d.store.put = async record => {
-    const saving = record.id === 'ordered-mode' && record.spec.mode === 'read-only';
+    const saving = record.id === 'ordered-mode' && record.spec!.mode === 'read-only';
     await put(record);
     if (saving) durable = true;
   };
@@ -739,7 +747,7 @@ test('an unfinished configure store commit blocks later native mutations and ret
   };
   await assert.rejects(d.request('session.configure', first), rpcError(1000, 'persistence_failed'));
   assert.equal(failed, true);
-  assert.equal(Object.values((await d.store.get(first.sessionId)).lifecycleCommits ?? {}).some(receipt => receipt.requestId === first.requestId), false, 'no queued save durably completed the commit');
+  assert.equal(Object.values((await d.store.get(first.sessionId))!.lifecycleCommits ?? {}).some(receipt => receipt.requestId === first.requestId), false, 'no queued save durably completed the commit');
   await assert.rejects(d.request('session.configure', { ...first, requestId: 'later', thinking: 'low' }), rpcError(1000, 'persistence_failed'));
   assert.equal((await journalOf(world.state)).some(entry => entry.requestId === 'later'), false, 'barrier refuses before preparing a new native attempt');
   assert.equal(world.native.configures.length, 1, 'later native operation stays behind incomplete commit');
@@ -757,7 +765,7 @@ test('marker fault restoration joins an in-flight scanner before touching its fi
   const world = await setup(t);
   const store = createStore(world.state);
   const underlyingPut = store.put;
-  const secondWritten = Promise.withResolvers();
+  const secondWritten = (Promise as Json).withResolvers();
   let writes = 0;
   store.put = async record => {
     await underlyingPut(record);
@@ -769,8 +777,8 @@ test('marker fault restoration joins an in-flight scanner before touching its fi
   const entry = { key: 'controlled', requestId: 'controlled', state: 'applied' };
   await mkdir(directory, { recursive: true });
   await writeFile(file, JSON.stringify(entry));
-  const entered = Promise.withResolvers();
-  const release = Promise.withResolvers();
+  const entered = (Promise as Json).withResolvers();
+  const release = (Promise as Json).withResolvers();
   let released = false;
   const restore = failCommittedMarker(store, world.state, entry.requestId, {
     async renameMarker(from, to) {
@@ -785,13 +793,13 @@ test('marker fault restoration joins an in-flight scanner before touching its fi
       return rm(...args);
     },
   });
-  const scanning = store.put({ id: 'controlled' });
-  let concurrent, restoring;
+  const scanning = store.put({ id: 'controlled' } as SessionRecord);
+  let concurrent: Json, restoring: Json;
   try {
     await entered.promise;
     // A second save can finish its underlying store write while the first wrapper
     // is still installing the fault. Neither it nor restore may overtake that work.
-    concurrent = store.put({ id: 'controlled' }).then(() => {
+    concurrent = store.put({ id: 'controlled' } as SessionRecord).then(() => {
       assert.equal(released, true, 'concurrent put must join fault installation');
     });
     await secondWritten.promise;
@@ -824,7 +832,7 @@ test('retained completion witness cannot complete a reused requestId attempt', a
   const old = await restore();
   assert.equal(old.state, 'applied', 'fault prevented the final committed marker');
   await d.request('session.configure', { ...params, requestId: 'middle', thinking: 'low' });
-  assert.equal(Object.keys((await d.store.get(params.sessionId)).lifecycleCommits).length, 2, 'pending marker witness retained');
+  assert.equal(Object.keys((await d.store.get(params.sessionId))!.lifecycleCommits!).length, 2, 'pending marker witness retained');
   // Terminal retention permits key reuse. Simulate expiration while its harmless witness remains.
   await rm(path.join(world.state, 'lifecycle', `${old.key}.json`));
   const put = d.store.put;
@@ -844,7 +852,7 @@ test('retained completion witness cannot complete a reused requestId attempt', a
   assert.equal(world.native.configures.length, 3);
   assert.equal(retried.session.thinking, 'high');
   await d.request('session.configure', { ...params, requestId: 'cleanup', thinking: 'low' });
-  assert.equal(Object.keys((await d.store.get(params.sessionId)).lifecycleCommits).length, 1, 'committed witnesses compact on the next commit');
+  assert.equal(Object.keys((await d.store.get(params.sessionId))!.lifecycleCommits!).length, 1, 'committed witnesses compact on the next commit');
 });
 
 test('a queued record save completing after commit failure keeps its durable witness through later saves', async t => {
@@ -865,7 +873,7 @@ test('a queued record save completing after commit failure keeps its durable wit
   await assert.rejects(d.request('session.configure', params), rpcError(1000, 'persistence_failed'));
   await queued;
   d.store.put = put;
-  const [witness] = Object.values((await d.store.get(params.sessionId)).lifecycleCommits);
+  const [witness] = Object.values((await d.store.get(params.sessionId))!.lifecycleCommits!);
   assert.equal(witness.result.configured.effective.thinking, 'high');
   await d.request('session.configure', { ...params, requestId: 'queued-new', thinking: 'low' });
   await d.stop();
@@ -887,8 +895,8 @@ test('legacy applied configure with newer journal evidence stays unfinished with
   await d.request('session.configure', { ...params, requestId: 'legacy-new', thinking: 'low' });
   await d.stop();
   const record = await d.store.get(params.sessionId);
-  delete record.lifecycleCommits;
-  await d.store.put(record);
+  delete record!.lifecycleCommits;
+  await d.store.put(record!);
   delete old.attemptId;
   await writeFile(path.join(world.state, 'lifecycle', `${old.key}.json`), JSON.stringify(old));
   const restarted = await world.start();

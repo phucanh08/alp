@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm, realpath, access, symlink } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
@@ -6,13 +7,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRegistry } from '@anhlp/alp-daemon/registry';
 import { createWorkspaceWorktrees } from '@anhlp/alp-daemon/worktrees';
-const git = (cwd, ...args) =>
+
+// `any`: alpd's answers and refusals are JSON, and the patched child_process.spawn passes every overload's arguments through; the tests read the fields they assert on.
+type Json = any;
+const git = (cwd: string, ...args: string[]) =>
   execFileSync('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', ...args], {
     cwd,
     encoding: 'utf8',
     env: { PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' }
   }).trim();
-async function fixture(t) {
+async function fixture(t: TestContext) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'alp-managed-')));
   t.after(() => rm(root, { recursive: true, force: true }));
   const home = path.join(root, 'home'),
@@ -54,7 +58,7 @@ test('prepared create survives registry commit failure and restart once; remove 
     mappingIds: ['approved'],
     authorizedRoots: [f.source]
   };
-  const guard = async (_dir, run) => run();
+  const guard = async <T>(_dir: string, run: () => Promise<T>) => run();
   const register = async () => {};
   let service = createWorkspaceWorktrees(f.home, registry, guard, register);
   const request = { workspaceId: source.id, mappingId: 'approved', ifRevision: 1, requestId: 'once' };
@@ -62,9 +66,9 @@ test('prepared create survives registry commit failure and restart once; remove 
   const prepared = await registry.snapshot();
   assert.equal(prepared.revision, 1);
   assert.equal(prepared.workspaces.length, 1);
-  const intent = Object.values(prepared.worktreeJournal)[0].intent;
+  const intent = Object.values(prepared.worktreeJournal!)[0].intent;
   await access(path.join(intent.directory, 'file'));
-  await assert.rejects(service.assertAvailable(intent.directory), (e) => e.data?.reason === 'reconciliation_required');
+  await assert.rejects(service.assertAvailable(intent.directory), (e: Json) => e.data?.reason === 'reconciliation_required');
   assert.equal(git(f.source, 'worktree', 'list', '--porcelain').split('worktree ').length - 1, 2);
   const restarted = createRegistry(f.home);
   service = createWorkspaceWorktrees(f.home, restarted, guard, register);
@@ -75,19 +79,19 @@ test('prepared create survives registry commit failure and restart once; remove 
   assert.equal((await restarted.snapshot()).workspaces.length, 2);
   await assert.rejects(
     service.mutate('create', { ...request, requestId: 'other' }, context),
-    (e) => e.data?.reason === 'stale_revision'
+    (e: Json) => e.data?.reason === 'stale_revision'
   );
   const before = await readFile(path.join(f.home, 'state', 'web-workspaces.json'), 'utf8');
   await assert.rejects(
     service.mutate('create', { ...request, requestId: 'denied', ifRevision: 2 }, { ...context, authorizedRoots: [] }),
-    (e) => e.code === 1003
+    (e: Json) => e.code === 1003
   );
   assert.equal(await readFile(path.join(f.home, 'state', 'web-workspaces.json'), 'utf8'), before);
   await writeFile(path.join(intent.directory, 'dirty'), 'retain');
   await assert.rejects(
     service.mutate('remove', { workspaceId: intent.id, ifRevision: 2, requestId: 'dirty' }, context)
   );
-  assert.equal(Object.keys((await restarted.snapshot()).worktreeJournal).length, 0);
+  assert.equal(Object.keys((await restarted.snapshot()).worktreeJournal!).length, 0);
   await rm(path.join(intent.directory, 'dirty'));
   const denied = createWorkspaceWorktrees(
     f.home,
@@ -122,7 +126,7 @@ test('prepared create survives registry commit failure and restart once; remove 
   assert.equal(removed.branchRetained, true);
   assert.deepEqual(await service.mutate('remove', remove, context), removed);
   assert.ok(git(f.source, 'rev-parse', `refs/heads/${intent.branch}`));
-  assert.equal(Object.keys((await finalRegistry.snapshot()).worktreeJournal).length, 0);
+  assert.equal(Object.keys((await finalRegistry.snapshot()).worktreeJournal!).length, 0);
 });
 test('owner requires host destination configuration; no managed deletion for registered/assignment paths', async (t) => {
   const f = await fixture(t);
@@ -137,11 +141,11 @@ test('owner requires host destination configuration; no managed deletion for reg
   );
   await assert.rejects(
     service.mutate('create', { workspaceId: w.id, mappingId: 'outside', requestId: 'no', ifRevision: 1 }),
-    (e) => e.code === 1003
+    (e: Json) => e.code === 1003
   );
   await assert.rejects(
     service.mutate('remove', { workspaceId: w.id, requestId: 'no', ifRevision: 1 }),
-    (e) => e.data?.reason === 'not_managed'
+    (e: Json) => e.data?.reason === 'not_managed'
   );
   assert.equal(git(f.source, 'worktree', 'list', '--porcelain').split('worktree ').length - 1, 1);
 });
@@ -173,7 +177,7 @@ test('actual subprocess crash after Git but before registry publication is recon
     async () => {}
   );
   const result = await service.mutate('create', request);
-  assert.equal(result.workspace.id, Object.values(before.worktreeJournal)[0].intent.id);
+  assert.equal(result.workspace.id, Object.values(before.worktreeJournal!)[0].intent.id);
   assert.equal((await recovered.snapshot()).workspaces.length, 2);
   assert.equal(git(f.source, 'worktree', 'list', '--porcelain').split('worktree ').length - 1, 2);
 });
@@ -223,9 +227,9 @@ test('committed derived grant refresh spawns no Git and rejects changed administ
   );
   const childProcess = (await import('node:child_process')).default;
   const { syncBuiltinESMExports } = await import('node:module');
-  const original = childProcess.spawn;
+  const original: (...args: Json[]) => Json = childProcess.spawn;
   let spawns = 0;
-  childProcess.spawn = (...args) => {
+  childProcess.spawn = (...args: Json[]) => {
     spawns++;
     return original(...args);
   };
@@ -259,7 +263,7 @@ test('restore quarantines host mappings and cannot revive derived grants after s
   const { createAlpRuntime } = await import('@anhlp/alp-runtime');
   const f = await fixture(t);
   const mapping = await readFile(path.join(f.home, 'worktree-destinations.json'));
-  const ledgerFile = home => path.join(home, 'state', 'assignment-results.json');
+  const ledgerFile = (home: string) => path.join(home, 'state', 'assignment-results.json');
   const runtime = createAlpRuntime({ assignmentResultFile: ledgerFile(f.home) });
   const registry = createRegistry(f.home);
   await registry.mutate('project.register', { directory: f.source }, { requestId: 'register' });
@@ -285,8 +289,8 @@ test('restore quarantines host mappings and cannot revive derived grants after s
       // Explicit host approval of the same mapping permits new work, but cannot restore old grants.
       await writeFile(path.join(home, 'worktree-destinations.json'), mapping, { mode: 0o600 });
       assert.equal((await restoredService.grants(context)).workspaces.length, 0);
-      await assert.rejects(restoredService.mutate('remove', { workspaceId: created.workspace.id, ifRevision: 2, requestId: 'remove' }, context), e => e.data.reason === 'not_managed');
-      await assert.rejects(restarted.withWorkspaceMutation(created.workspace.directory, async () => assert.fail('restored ownership allowed removal')), e => e.data.reason === 'workspace_assignment_result');
+      await assert.rejects(restoredService.mutate('remove', { workspaceId: created.workspace.id, ifRevision: 2, requestId: 'remove' }, context), (e: Json) => e.data.reason === 'not_managed');
+      await assert.rejects(restarted.withWorkspaceMutation(created.workspace.directory, async () => assert.fail('restored ownership allowed removal')), (e: Json) => e.data.reason === 'workspace_assignment_result');
       await access(path.join(created.workspace.directory, 'file'));
     } finally { await restarted.shutdown(); }
   }
@@ -306,14 +310,14 @@ test('restored pending native create remains unreconciled by its historical cred
   const context = { principalId: 'token', principalEpoch: 'epoch', mappingIds: ['approved'], authorizedRoots: [f.source] };
   const request = { workspaceId: source.id, mappingId: 'approved', ifRevision: 1, requestId: 'pending' };
   await assert.rejects(createWorkspaceWorktrees(f.home, registry, (_dir, run) => run(), async () => {}).mutate('create', request, context), /stop commit/);
-  const pending = Object.values((await registry.snapshot()).worktreeJournal)[0].intent;
+  const pending = Object.values((await registry.snapshot()).worktreeJournal!)[0].intent;
   const archive = path.join(f.root, 'pending.alpbackup');
   await backup.createBackup({ home: f.home, out: archive });
   await backup.restoreBackup({ home: f.home, file: archive, safety: false });
   await writeFile(path.join(f.home, 'worktree-destinations.json'), mapping, { mode: 0o600 });
   const restoredRegistry = createRegistry(f.home);
   const service = createWorkspaceWorktrees(f.home, restoredRegistry, (_dir, run) => run(), async () => assert.fail('restored intent registered a target'));
-  await assert.rejects(service.mutate('create', request, context), e => e.data?.reason === 'identity_changed');
+  await assert.rejects(service.mutate('create', request, context), (e: Json) => e.data?.reason === 'identity_changed');
   assert.equal((await restoredRegistry.snapshot()).workspaces.length, 1);
   await access(path.join(pending.directory, 'file'));
 });

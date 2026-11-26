@@ -9,10 +9,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
 import { connect, readLock } from '@anhlp/alp-client';
+
+// `any`: alpd's answers are JSON; the test reads the fields it asserts on.
+type Json = any;
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const requested = process.env.ALP_NATIVE_CONSUMER_BUNDLES?.split(',') ?? ['packages/daemon/dist/alpd.js'];
 const skip = !['darwin', 'linux'].includes(process.platform);
-async function until(check, what) {
+async function until(check: () => unknown, what: string) {
   const end = Date.now() + 10000;
   while (Date.now() < end) { if (await check()) return; await new Promise(r => setTimeout(r, 20)); }
   assert.fail(what);
@@ -28,7 +31,7 @@ for (const bundle of requested) test(`shipped native terminal in copied ${bundle
   await cp(path.join(root, path.dirname(bundle), 'terminal-native'), path.join(work, 'terminal-native'), { recursive: true });
   const child = spawn(process.execPath, [path.join(work, 'alpd.mjs')], { cwd: work, env: { ...process.env, ALP_HOME: home, SHELL: '/bin/sh', PATH: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = ''; child.stdout.on('data', v => { output += v; }); child.stderr.on('data', v => { output += v; });
-  const exited = once(child, 'exit'); let client;
+  const exited = once(child, 'exit'); let client: Awaited<ReturnType<typeof connect>> | undefined;
   t.after(async () => {
     if (client) { await client.request('daemon.shutdown').catch(() => {}); client.close(); }
     // This direct ChildProcess is our own unreaped fixture; no numeric discovery/group signal.
@@ -36,16 +39,16 @@ for (const bundle of requested) test(`shipped native terminal in copied ${bundle
     await exited; await rm(work, { recursive: true, force: true });
   });
   await until(async () => { assert.equal(child.exitCode, null, output); return (await readLock(home))?.ready; }, 'copied daemon startup');
-  client = await connect((await readLock(home)).socket, { name: 'native-consumer', version: '1' });
+  client = await connect((await readLock(home))!.socket, { name: 'native-consumer', version: '1' });
   const hello = await client.request('daemon.hello', { protocolVersion: 1 });
   assert.ok(hello.capabilities.includes('terminal'), JSON.stringify(hello));
   await client.request('project.register', { directory: project, ifRevision: 0, requestId: 'project' });
   const { workspaces } = await client.request('workspace.list', {});
-  const workspaceId = workspaces.find(w => w.directory === project || w.canonical === project)?.id;
+  const workspaceId = workspaces.find((w: Json) => w.directory === project || w.canonical === project)?.id;
   assert.ok(workspaceId, JSON.stringify(workspaces));
   const { terminal } = await client.request('terminal.create', { workspaceId, cols: 80, rows: 24, requestId: 'terminal' });
   await client.request('terminal.attach', { terminalId: terminal.terminalId });
   await client.request('terminal.input', { terminalId: terminal.terminalId, data: "printf '\\nPACKAGED_NATIVE_OK\\n'\r" });
-  await until(async () => (await client.request('terminal.capture', { terminalId: terminal.terminalId })).lines.some(line => line === 'PACKAGED_NATIVE_OK'), 'native output/capture');
+  await until(async () => (await client.request('terminal.capture', { terminalId: terminal.terminalId })).lines.some((line: Json) => line === 'PACKAGED_NATIVE_OK'), 'native output/capture');
   assert.deepEqual(await client.request('terminal.close', { terminalId: terminal.terminalId }), { closed: true });
 });

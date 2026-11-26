@@ -8,25 +8,28 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
 
+// `any`: each patched fs function takes the arguments of every overload and hands them on unchanged.
+type Args = any[];
+
 const flag = process.env.ALP_TEST_DISK_FULL;
 const only = process.env.ALP_TEST_DISK_FULL_ONLY;
 const home = process.env.ALP_HOME;
 const full = () => !!flag && fs.existsSync(flag);
-const enospc = syscall => Object.assign(new Error(`ENOSPC: no space left on device, ${syscall}`), { code: 'ENOSPC', errno: -28, syscall });
-const inHome = file => typeof file === 'string' && !!home && file.startsWith(home) && (!only || path.basename(file).includes(only));
+const enospc = (syscall: string) => Object.assign(new Error(`ENOSPC: no space left on device, ${syscall}`), { code: 'ENOSPC', errno: -28, syscall });
+const inHome = (file: unknown) => typeof file === 'string' && !!home && file.startsWith(home) && (!only || path.basename(file).includes(only));
 
-const writeSync = fs.writeSync;
-fs.writeSync = function (fd, ...rest) {
+const writeSync: (...args: Args) => number = fs.writeSync;
+fs.writeSync = function (this: unknown, fd: number, ...rest: Args) {
   if ((fd === 1 || fd === 2) && !only && full()) throw enospc('write');
   return writeSync.call(this, fd, ...rest);
 };
-const writeFile = fs.promises.writeFile;
-fs.promises.writeFile = async function (file, ...rest) {
+const writeFile: (...args: Args) => Promise<void> = fs.promises.writeFile;
+fs.promises.writeFile = async function (this: unknown, file: unknown, ...rest: Args) {
   if (inHome(file) && full()) throw enospc('open');
   return writeFile.call(this, file, ...rest);
 };
-const open = fs.promises.open;
-fs.promises.open = async function (file, ...rest) {
+const open: (...args: Args) => Promise<fs.promises.FileHandle> = fs.promises.open;
+fs.promises.open = async function (this: unknown, file: unknown, ...rest: Args) {
   const handle = await open.call(this, file, ...rest);
   if (inHome(file) && full()) handle.writeFile = async () => { throw enospc('write'); };
   return handle;

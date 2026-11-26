@@ -17,9 +17,9 @@ import { teardown } from '../../../test/support/teardown.ts';
 
 const ALPD = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
 const FAKE_CODEX = fileURLToPath(new URL('./support/fake-codex.js', import.meta.url));
-const PRELOAD = pathToFileURL(fileURLToPath(new URL('./support/enospc-preload.mjs', import.meta.url))).href;
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(check, what) {
+const PRELOAD = pathToFileURL(fileURLToPath(new URL('./support/enospc-preload.ts', import.meta.url))).href;
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+async function until(check: () => unknown, what: string) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await sleep(25); }
   assert.fail(`${what} did not happen`);
 }
@@ -32,14 +32,14 @@ test('disk errors are ENOSPC, EDQUOT and EROFS, also wrapped', () => {
 });
 
 function fakeRuntime() {
-  const calls = [];
+  const calls: [string, unknown][] = [];
   let held = false;
   return {
     calls,
-    holdForDisk(reason) { calls.push(['hold', reason]); held = true; },
-    releaseDisk(by) { calls.push(['release', by]); held = false; },
+    holdForDisk(reason: string) { calls.push(['hold', reason]); held = true; },
+    releaseDisk(by: string) { calls.push(['release', by]); held = false; },
     diskHeld: () => held,
-    diskLow(free) { calls.push(['low', free]); },
+    diskLow(free: string) { calls.push(['low', free]); },
     resumeByUser() { held = false; },
   };
 }
@@ -67,12 +67,12 @@ test('the disk guard holds on a disk error, ignores others, and releases once wr
   await guard.check();
   assert.deepEqual(runtime.calls.at(-1), ['release', 'alpd, after disk space returned']);
   assert.equal(guard.status().held, false);
-  assert.equal(guard.status().last.free, free);
+  assert.equal(guard.status().last!.free, free);
 });
 
 test('a log line about the full disk that itself fails does not hold again or recurse (review of t-2831)', () => {
   const runtime = fakeRuntime();
-  let guard;
+  let guard: ReturnType<typeof createDiskGuard>;
   let depth = 0;
   // The log writes to the full disk: its failure is reported straight back, as guardOutput does.
   const log = { warn() { if (++depth > 50) throw new Error('recursion'); guard.report(enospc()); }, info() {} };
@@ -127,14 +127,14 @@ test('a real alpd on a full disk keeps running and answering, pauses its work, a
     env: { ...process.env, ALP_HOME: home, ALP_MODEL_CATALOG: 'static', ALP_CODEX_BIN: FAKE_CODEX, FAKE_CODEX_JOURNAL: path.join(directory, 'provider.jsonl'), ALP_TEST_DISK_FULL: flag, ALP_DISK_CHECK_MS: '100' },
   });
   closeSync(log);
-  let exit;
+  let exit: { code: unknown, signal: unknown } | undefined;
   const exited = once(child, 'exit').then(([code, signal]) => { exit = { code, signal }; });
-  defer(async () => { if (!exit) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} await exited; } });
+  defer(async () => { if (!exit) { try { process.kill(-child.pid!, 'SIGKILL'); } catch {} await exited; } });
   await until(async () => {
     if (exit) assert.fail(`alpd exited (${JSON.stringify(exit)}):\n${await readFile(logFile, 'utf8')}`);
     return (await readLock(home))?.ready;
   }, 'alpd to be ready');
-  const client = await connect((await readLock(home)).socket, { name: 'disk-test', version: '0' });
+  const client = await connect((await readLock(home))!.socket, { name: 'disk-test', version: '0' });
   defer(() => client.close());
   // The disk fills while alpd runs.
   await writeFile(flag, '');
@@ -154,7 +154,7 @@ test('a real alpd on a full disk keeps running and answering, pauses its work, a
   assert.match(await readFile(logFile, 'utf8'), /ALP_DISK_BACK/);
   await client.request('daemon.shutdown').catch(() => {});
   await exited;
-  assert.equal(exit.code, 0);
+  assert.equal(exit!.code, 0);
 });
 
 test('a pause write the disk refuses holds work at once, not at the next disk check (t-e80a)', { skip: process.platform === 'win32' && 'POSIX file descriptors' }, async t => {
@@ -172,14 +172,14 @@ test('a pause write the disk refuses holds work at once, not at the next disk ch
     env: { ...process.env, ALP_HOME: home, ALP_MODEL_CATALOG: 'static', ALP_TEST_DISK_FULL: flag, ALP_TEST_DISK_FULL_ONLY: 'pause.json', ALP_DISK_CHECK_MS: '3600000' },
   });
   closeSync(log);
-  let exit;
+  let exit: { code: unknown, signal: unknown } | undefined;
   const exited = once(child, 'exit').then(([code, signal]) => { exit = { code, signal }; });
-  defer(async () => { if (!exit) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} await exited; } });
+  defer(async () => { if (!exit) { try { process.kill(-child.pid!, 'SIGKILL'); } catch {} await exited; } });
   await until(async () => {
     if (exit) assert.fail(`alpd exited (${JSON.stringify(exit)}):\n${await readFile(logFile, 'utf8')}`);
     return (await readLock(home))?.ready;
   }, 'alpd to be ready');
-  const client = await connect((await readLock(home)).socket, { name: 'disk-test', version: '0' });
+  const client = await connect((await readLock(home))!.socket, { name: 'disk-test', version: '0' });
   defer(() => client.close());
   await writeFile(flag, '');
   await client.request('daemon.pause', { runtime: 'codex' });
@@ -191,7 +191,7 @@ test('a pause write the disk refuses holds work at once, not at the next disk ch
   assert.match(await readFile(logFile, 'utf8'), /ALP_DISK_FULL/);
   await client.request('daemon.shutdown').catch(() => {});
   await exited;
-  assert.equal(exit.code, 0);
+  assert.equal(exit!.code, 0);
 });
 
 test('alpd that cannot write its lock on a full disk says so to the client that started it, and leaves no lock behind (t-e80a)', { skip: process.platform === 'win32' && 'POSIX file descriptors' }, async t => {
@@ -204,7 +204,7 @@ test('alpd that cannot write its lock on a full disk says so to the client that 
   // The disk is full before alpd starts: its log, its lock and its state take no writes.
   await writeFile(flag, '');
   const env = { ...process.env, ALP_MODEL_CATALOG: 'static', ALP_TEST_DISK_FULL: flag, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${PRELOAD}`.trim() };
-  await assert.rejects(ensureDaemon({ home, entry: ALPD, env, timeoutMs: 15_000 }), error => {
+  await assert.rejects(ensureDaemon({ home, entry: ALPD, env, timeoutMs: 15_000 }), (error: Error) => {
     assert.match(error.message, /ALP_DISK_FULL, alpd exited during startup \(1\): alpd failed to start while taking its lock: the disk is full \(ENOSPC\); free space on the disk that holds .*home, then start alpd again/);
     return true;
   });

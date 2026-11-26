@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TerminalScreen, SCREEN_LIMITS } from '../dist/terminals/terminal-screen.js';
 
+/** What a refused capture rejects with: an error whose data says why. */
+type Refusal = { data?: { reason?: string } };
+
 test('capture parses overwrite, erase, ANSI, alternate buffer and inclusive negative ranges', async t => {
   const screen = new TerminalScreen(20, 3);
   t.after(() => screen.dispose());
@@ -22,7 +25,7 @@ test('pending parse, hidden OSC and combining input have hard lifetime bounds an
   t.after(() => pending.dispose());
   pending.write('x'.repeat(SCREEN_LIMITS.pendingBytes + 1));
   assert.equal(pending.available, false);
-  await assert.rejects(pending.capture(), error => error.data?.reason === 'terminal_capture_unavailable');
+  await assert.rejects(pending.capture(), (error: Refusal) => error.data?.reason === 'terminal_capture_unavailable');
   for (const prefix of ['x', '\x1b]0;']) {
     const screen = new TerminalScreen(20, 3);
     t.after(() => screen.dispose());
@@ -33,7 +36,7 @@ test('pending parse, hidden OSC and combining input have hard lifetime bounds an
       await screen.capture({ start: 1, end: 0 });
     }
     assert.equal(screen.available, false, 'even invisible or combined text cannot grow without bound');
-    await assert.rejects(screen.capture(), error => error.data?.reason === 'terminal_capture_unavailable');
+    await assert.rejects(screen.capture(), (error: Refusal) => error.data?.reason === 'terminal_capture_unavailable');
   }
 });
 
@@ -42,7 +45,7 @@ test('disposal releases pending capture barriers instead of hanging requests', a
   screen.write('pending');
   const capture = screen.capture();
   screen.dispose();
-  await assert.rejects(capture, error => error.data?.reason === 'terminal_capture_unavailable');
+  await assert.rejects(capture, (error: Refusal) => error.data?.reason === 'terminal_capture_unavailable');
 });
 
 

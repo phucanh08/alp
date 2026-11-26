@@ -1,10 +1,11 @@
 import { tmpdir } from 'node:os';
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, realpath, writeFile, readFile, stat, symlink, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { createRegistry } from '@anhlp/alp-daemon/registry';
-async function setup(t) { const root = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-registry-test-'))); t.after(() => rm(root, { recursive: true, force: true })); const home = path.join(root, 'home'); const directory = path.join(root, 'project'); await mkdir(directory); return { root, home, directory }; }
+async function setup(t: TestContext) { const root = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-registry-test-'))); t.after(() => rm(root, { recursive: true, force: true })); const home = path.join(root, 'home'); const directory = path.join(root, 'project'); await mkdir(directory); return { root, home, directory }; }
 test('migration retains complete legacy IDs, labels, pins, placement and exact backup; private modes', async t => {
  const { home, directory } = await setup(t); await mkdir(path.join(home,'state'),{recursive:true});
  const legacy = { projects:[{id:'prj_0000000000000001',root:directory,customName:'Custom',addedAt:'old'}],workspaces:[{id:'wks_0000000000000001',projectId:'prj_0000000000000001',directory,title:'Title',pinnedAt:'pin',labels:['Bug'],createdAt:'old',idempotencyKey:'key'}],sessions:{s:'wks_0000000000000001'},labels:{generation:'gen',seq:8,catalog:[{name:'Bug',color:'red'}]} };
@@ -58,7 +59,7 @@ for (const status of ['archived', 'closed', 'error', 'running']) test(`historica
  const sessions=[{id:'mapped',projectRoot:directory,archived,status},{id:'unmapped',projectRoot:path.join(root,'never-existed'),archived,status}];
  await r.mutate('placement.prepare',{sessions},{requestId:'historical'});
  const after=await r.snapshot();assert.equal(after.sessions.mapped,before.sessions.mapped);assert.deepEqual(after.workspaces[0],before.workspaces[0]);
- assert.ok(after.sessions.unmapped);assert.equal(after.workspaces.find(w=>w.id===after.sessions.unmapped).directory,sessions[1].projectRoot);
+ assert.ok(after.sessions.unmapped);assert.equal(after.workspaces.find(w=>w.id===after.sessions.unmapped)!.directory,sessions[1].projectRoot);
  const restarted=createRegistry(home);await restarted.mutate('placement.prepare',{sessions},{requestId:'restart'});assert.deepEqual(await restarted.snapshot(),after);
  await assert.rejects(restarted.resolve(after.sessions.mapped));await assert.rejects(restarted.resolve(after.sessions.unmapped,undefined,true));
 });

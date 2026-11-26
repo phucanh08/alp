@@ -3,6 +3,7 @@
 // under Node's permission model so it cannot read the daemon's home or projects at all. Everything
 // it does goes through RPC to a real alpd, and what it wrote is still there after alpd restarts.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
@@ -16,29 +17,32 @@ import { initProject } from '@anhlp/alp-core/init';
 import { readLock } from '@anhlp/alp-client';
 import { validateResult } from '@anhlp/alp-protocol/contract';
 
+// `any`: alpd's answers, events and errors are JSON whose shape depends on the method; the tests read the fields they assert on.
+type Json = any;
+
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const ALPD = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
 const FAKE_CODEX = fileURLToPath(new URL('./support/fake-codex.js', import.meta.url));
-const CLIENT = fileURLToPath(new URL('./support/remote-client.mjs', import.meta.url));
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const CLIENT = fileURLToPath(new URL('./support/remote-client.ts', import.meta.url));
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const skip = process.platform === 'win32' && 'the fake provider is a Node script run as an executable';
 
 /** Node's permission model, by the flag this Node knows; network access only where it is gated. */
-function permissionFlags(readable) {
+function permissionFlags(readable: string[]) {
   const flag = spawnSync(process.execPath, ['--permission', '-e', '0']).status === 0 ? '--permission' : '--experimental-permission';
   const major = Number(process.versions.node.split('.')[0]);
-  return [flag, ...readable.map(entry => `--allow-fs-read=${entry}`), ...(major >= 25 ? ['--allow-net'] : [])];
+  return [flag, ...readable.map((entry: Json) => `--allow-fs-read=${entry}`), ...(major >= 25 ? ['--allow-net'] : [])];
 }
 
-async function startDaemon(t, home) {
+async function startDaemon(t: TestContext, home: string) {
   const logFile = path.join(home, '..', 'alpd.log');
   const log = openSync(logFile, 'a');
   const child = spawn(process.execPath, [ALPD], { detached: true, stdio: ['ignore', log, log], env: { ...process.env, ALP_HOME: home, ALP_CODEX_BIN: FAKE_CODEX } });
   closeSync(log);
   const exited = once(child, 'exit');
   const stop = async () => {
-    if (child.exitCode === null && child.signalCode === null) { try { process.kill(-child.pid, 'SIGTERM'); } catch {} await Promise.race([exited, sleep(5000)]); }
-    if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    if (child.exitCode === null && child.signalCode === null) { try { process.kill(-child.pid!, 'SIGTERM'); } catch {} await Promise.race([exited, sleep(5000)]); }
+    if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid!, 'SIGKILL'); } catch {}
   };
   t.after(stop);
   for (let i = 0; ; i++) {
@@ -68,7 +72,7 @@ test('a client with no shared filesystem runs tasks, library and settings throug
   assert.notEqual(denied.status, 0, 'the client process cannot read the daemon home');
   assert.match(denied.stderr, /ERR_ACCESS_DENIED/);
 
-  const remote = async (socket, steps) => {
+  const remote = async (socket: string, steps: [string, unknown][]) => {
     const { stdout } = await promisify(execFile)(process.execPath, [...flags, CLIENT, socket, JSON.stringify(steps)], {
       cwd: clientHome, env: { PATH: process.env.PATH, HOME: clientHome, ALP_HOME: path.join(clientHome, 'alp') },
     });
@@ -76,7 +80,7 @@ test('a client with no shared filesystem runs tasks, library and settings throug
     for (const call of report.calls) if (call.result) assert.deepEqual(validateResult(call.method, call.result), [], `${call.method}: ${JSON.stringify(call.result)}`);
     return report;
   };
-  const by = (report, method, index = 0) => report.calls.filter(call => call.method === method)[index];
+  const by = (report: Json, method: string, index = 0) => report.calls.filter((call: Json) => call.method === method)[index];
 
   let daemon = await startDaemon(t, home);
   const secret = 'Bearer sk-remote-42';
@@ -93,9 +97,9 @@ test('a client with no shared filesystem runs tasks, library and settings throug
   ]);
   for (const name of ['task', 'team', 'library', 'settings.language']) assert.ok(first.hello.capabilities.includes(name), name);
   const { id } = by(first, 'task.create').result;
-  assert.deepEqual(by(first, 'task.list').result.tasks.map(task => [task.id, task.title]), [[id, 'Từ máy khác']]);
-  assert.ok(by(first, 'team.list').result.teams.some(team => team.id === 'pho'));
-  assert.ok(by(first, 'library.list').result.entries.some(entry => entry.name === 'main'));
+  assert.deepEqual(by(first, 'task.list').result.tasks.map((task: Json) => [task.id, task.title]), [[id, 'Từ máy khác']]);
+  assert.ok(by(first, 'team.list').result.teams.some((team: Json) => team.id === 'pho'));
+  assert.ok(by(first, 'library.list').result.entries.some((entry: Json) => entry.name === 'main'));
   assert.deepEqual(by(first, 'library.get').result.secrets, ['/server/headers/Authorization']);
   assert.equal(by(first, 'task.list', 1).error.reason, 'not_alp_project');
   assert.equal(by(first, 'task.list', 2).error.reason, 'invalid_path');
@@ -119,7 +123,7 @@ test('a client with no shared filesystem runs tasks, library and settings throug
     ['library.save', { kind: 'mcp', name: 'docs', scope: 'library', content: by(first, 'library.get').result.content, revision: oldRevision }],
     ['task.update', { projectRoot: project, id, action: 'close', note: 'Đóng từ xa' }],
   ]);
-  assert.deepEqual(by(second, 'task.list').result.tasks.map(task => task.id), [id]);
+  assert.deepEqual(by(second, 'task.list').result.tasks.map((task: Json) => task.id), [id]);
   assert.equal(by(second, 'settings.language.get').result.language, 'English');
   const reread = by(second, 'library.get').result;
   assert.deepEqual(reread.content.server.headers, { Authorization: { $secret: 'keep' } });

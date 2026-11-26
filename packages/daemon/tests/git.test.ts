@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync } from 'node:fs';
@@ -11,6 +12,9 @@ import { GIT_READ, createGitReader, gitReadsRunning, scrubRemoteUrl, validBranch
 import { RegistryError } from '@anhlp/alp-daemon/registry';
 import { teardown } from '../../../test/support/teardown.ts';
 
+// `any`: alpd's git answers and refusals are JSON, and the reader is driven with params outside its types on purpose; the tests read the fields they assert on.
+type Json = any;
+
 /**
  * workspace.git.status and workspace.git.diff (docs/protocol/alp-json-rpc-v1.md §12.5) over real,
  * disposable repositories. Every trap a repository can set writes a marker when it runs; none may.
@@ -22,12 +26,12 @@ const skip = !hasGit ? 'git is not installed' : !posix ? 'the traps are POSIX sh
 
 /** The test's own Git: no configuration of the host, no GIT_* of the test runner. */
 const cleanEnv = () => {
-  const env = {};
+  const env: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(process.env)) if (!/^GIT_/i.test(key)) env[key] = value;
   return { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0' };
 };
 
-async function sandbox(t) {
+async function sandbox(t: TestContext) {
   const defer = teardown(t);
   const base = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-git-')));
   defer(() => rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
@@ -35,23 +39,23 @@ async function sandbox(t) {
 }
 
 /** A repository at `root` and the test's git in it. */
-async function repository(root, branch = 'main') {
+async function repository(root: string, branch = 'main') {
   await mkdir(root, { recursive: true });
-  const git = (...args) => execFileSync('git', ['-c', 'user.name=ALP', '-c', 'user.email=alp@example.com', '-c', 'protocol.file.allow=always', ...args], { cwd: root, env: cleanEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=ALP', '-c', 'user.email=alp@example.com', '-c', 'protocol.file.allow=always', ...args], { cwd: root, env: cleanEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   git('init', '-q', '-b', branch);
   return git;
 }
 
-const put = async (file, content) => { await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, content); };
+const put = async (file: string, content: string | Buffer) => { await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, content); };
 
-/** A reader whose registry knows `workspaces` (id → directory). */
-const readerFor = (workspaces, options = {}) => createGitReader({
+/** A reader whose registry knows `workspaces` (id → directory). Untyped (Json): the tests call it with params outside its types on purpose (unknown modes, forged cursors). */
+const readerFor = (workspaces: Record<string, string>, options: Omit<Parameters<typeof createGitReader>[0], 'registry'> = {}): Json => createGitReader({
   registry: { resolve: async id => { if (!Object.hasOwn(workspaces, id)) throw new RegistryError(1001, 'No workspace', { reason: 'not_found' }); return workspaces[id]; } },
   ...options,
 });
 
 /** A result checked against the v1 schema, and free of host paths. */
-function checked(method, result, base) {
+function checked(method: string, result: Json, base?: string) {
   const issues = validateResult(method, result);
   assert.deepEqual(issues, [], `${method} result matches the schema: ${JSON.stringify(issues)}`);
   if (base) assert.ok(!JSON.stringify(result).includes(base), `${method} result names no host path`);
@@ -59,8 +63,8 @@ function checked(method, result, base) {
 }
 
 /** The refusal of a promise: code, reason, and a message that names no host path. */
-async function refusal(promise, base) {
-  try { await promise; } catch (error) {
+async function refusal(promise: Promise<unknown>, base?: string) {
+  try { await promise; } catch (error: Json) {
     if (base) assert.ok(!String(error.message).includes(base), `no host path in "${error.message}"`);
     return { code: error.code, reason: error.data?.reason };
   }
@@ -68,8 +72,8 @@ async function refusal(promise, base) {
 }
 
 /** Every page of a diff, following nextCursor. */
-async function allPages(reader, params, base) {
-  const pages = [];
+async function allPages(reader: Json, params: Json, base?: string) {
+  const pages: Json[] = [];
   let cursor;
   do {
     const page = checked('workspace.git.diff', await reader.diff({ ...params, ...(cursor ? { cursor } : {}) }), base);
@@ -79,7 +83,7 @@ async function allPages(reader, params, base) {
   return pages;
 }
 
-const byPath = files => Object.fromEntries(files.map(file => [file.path, file]));
+const byPath = (files: Json[]) => Object.fromEntries(files.map((file: Json) => [file.path, file]));
 const PEM = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACDsecretsecretsecretsecretsecretsecretsecretsecretAAAA\n-----END OPENSSH PRIVATE KEY-----\n';
 
 test('no program the repository or alpd\'s environment names runs: planted git, drivers, filters, fsmonitor, pager, hooks, GIT_* variables', { skip }, async t => {
@@ -89,7 +93,7 @@ test('no program the repository or alpd\'s environment names runs: planted git, 
   const traps = path.join(base, 'traps');
   await mkdir(traps);
   /** A script that leaves a marker named `name` when anything runs it, then does `body`. */
-  const trap = async (name, body = '') => {
+  const trap = async (name: string, body = '') => {
     const file = path.join(base, `${name}.sh`);
     await writeFile(file, `#!/bin/sh\necho "$*" >> '${path.join(traps, name)}'\n${body}\n`);
     await chmod(file, 0o755);
@@ -159,14 +163,14 @@ test('no program the repository or alpd\'s environment names runs: planted git, 
   const reader = readerFor({ w: root });
 
   const status = checked('workspace.git.status', await reader.status('w'), base);
-  assert.deepEqual(status.files.map(file => [file.path, file.change]), [['a.txt', 'modified'], ['new.txt', 'untracked']], 'the workspace, not the decoy; b.txt only touched');
+  assert.deepEqual(status.files.map((file: Json) => [file.path, file.change]), [['a.txt', 'modified'], ['new.txt', 'untracked']], 'the workspace, not the decoy; b.txt only touched');
   for (const mode of ['uncommitted', 'staged', 'unstaged']) {
     for (const ignoreWhitespace of [false, true]) {
       const page = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode, ignoreWhitespace } }), base);
       if (mode !== 'staged') {
         const files = byPath(page.files);
         assert.deepEqual(Object.keys(files).sort(), ['a.txt', 'new.txt']);
-        assert.deepEqual(files['a.txt'].hunks[0].lines.map(line => [line.type, line.content]), [['context', 'one'], ['remove', 'two'], ['add', '2'], ['context', 'three']], 'the content itself, no textconv');
+        assert.deepEqual(files['a.txt'].hunks[0].lines.map((line: Json) => [line.type, line.content]), [['context', 'one'], ['remove', 'two'], ['add', '2'], ['context', 'three']], 'the content itself, no textconv');
       } else assert.deepEqual(page.files, []);
     }
   }
@@ -175,7 +179,7 @@ test('no program the repository or alpd\'s environment names runs: planted git, 
 
   // The traps are armed: Git run naively (PATH as alpd's, no overrides) runs them.
   for (const key of Object.keys(process.env)) if (/^GIT_/.test(key)) delete process.env[key];
-  const naive = args => { try { execFileSync('git', args, { cwd: root, env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' }, stdio: 'ignore' }); } catch {} };
+  const naive = (args: string[]) => { try { execFileSync('git', args, { cwd: root, env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' }, stdio: 'ignore' }); } catch {} };
   naive(['status']);
   naive(['diff', 'HEAD']);
   const ran = await readdir(traps);
@@ -183,7 +187,7 @@ test('no program the repository or alpd\'s environment names runs: planted git, 
   process.env.PATH = saved.PATH;
   naive(['status']);
   // Each trap on its own: a failing required filter would stop Git before the next one.
-  const without = (...keys) => keys.flatMap(key => ['-c', `${key}=${key.endsWith('required') ? 'false' : key === 'core.fsmonitor' ? 'false' : ''}`]);
+  const without = (...keys: string[]) => keys.flatMap(key => ['-c', `${key}=${key.endsWith('required') ? 'false' : key === 'core.fsmonitor' ? 'false' : ''}`]);
   // (An empty `process` disables `clean` as well, as the reader's override relies on.)
   naive([...without('filter.evil.process', 'filter.evil.clean', 'filter.evil.required', 'core.fsmonitor'), 'diff', 'HEAD']);
   naive([...without('filter.evil.process', 'filter.evil.clean', 'filter.evil.required', 'core.fsmonitor'), 'diff', '--no-ext-diff', 'HEAD']);
@@ -263,11 +267,11 @@ test('status: branch, upstream, base branch, remote without credentials, detache
   const unborn = readerFor({ f: fresh });
   status = checked('workspace.git.status', await unborn.status('f'), base);
   assert.deepEqual([status.branch, status.head, status.detached, status.baseRef, status.dirty], ['trunk', null, false, null, true]);
-  assert.deepEqual(status.files.map(file => [file.path, file.change, file.staged]), [['staged.txt', 'added', true], ['loose.txt', 'untracked', false]]);
+  assert.deepEqual(status.files.map((file: Json) => [file.path, file.change, file.staged]), [['staged.txt', 'added', true], ['loose.txt', 'untracked', false]]);
   const all = checked('workspace.git.diff', await unborn.diff({ workspaceId: 'f', compare: { mode: 'uncommitted' } }), base);
-  assert.deepEqual(all.files.map(file => [file.path, file.change, file.kind, file.additions]), [['staged.txt', 'added', 'text', 1], ['loose.txt', 'untracked', 'text', 1]]);
+  assert.deepEqual(all.files.map((file: Json) => [file.path, file.change, file.kind, file.additions]), [['staged.txt', 'added', 'text', 1], ['loose.txt', 'untracked', 'text', 1]]);
   const staged = checked('workspace.git.diff', await unborn.diff({ workspaceId: 'f', compare: { mode: 'staged' } }), base);
-  assert.deepEqual(staged.files.map(file => file.path), ['staged.txt']);
+  assert.deepEqual(staged.files.map((file: Json) => file.path), ['staged.txt']);
   assert.deepEqual(checked('workspace.git.diff', await unborn.diff({ workspaceId: 'f', compare: { mode: 'base' } }), base).files, []);
 });
 
@@ -322,7 +326,7 @@ test('secrets: blocked paths on either side of a rename, deleted keys, private k
   const base = await sandbox(t);
   const root = path.join(base, 'work');
   const git = await repository(root);
-  const lines = n => Array.from({ length: n }, (_, i) => `line ${i} of a file long enough to be found again`).join('\n') + '\n';
+  const lines = (n: number) => Array.from({ length: n }, (_, i) => `line ${i} of a file long enough to be found again`).join('\n') + '\n';
   await put(path.join(root, '.env'), `SECRET_FROM_ENV=1\n${lines(20)}`);
   await put(path.join(root, 'config.txt'), `PLAIN_CONFIG=1\n${lines(20)}`);
   await put(path.join(root, '.ssh', 'id_rsa'), PEM);
@@ -348,9 +352,9 @@ test('secrets: blocked paths on either side of a rename, deleted keys, private k
   const reader = readerFor({ w: root });
 
   const status = checked('workspace.git.status', await reader.status('w'), base);
-  const listed = status.files.map(file => file.path);
+  const listed = status.files.map((file: Json) => file.path);
   for (const hidden of ['renamed-from-env.txt', '.env', '.env.local', 'config.txt', '.ssh/id_rsa', 'id_ed25519']) {
-    assert.ok(!listed.includes(hidden) && !status.files.some(file => file.oldPath === hidden), `${hidden} is not listed`);
+    assert.ok(!listed.includes(hidden) && !status.files.some((file: Json) => file.oldPath === hidden), `${hidden} is not listed`);
   }
   assert.ok(status.hiddenCount >= 4, `hidden: ${status.hiddenCount}`);
   for (const mode of ['uncommitted', 'staged']) {
@@ -378,7 +382,7 @@ test('secrets: blocked paths on either side of a rename, deleted keys, private k
   const text = JSON.stringify(page);
   for (const secret of ['SECRET_FROM_ENV', 'PLAIN_CONFIG', 'PRIVATE KEY', 'OUTSIDE_SECRET', 'hosts']) assert.ok(!text.includes(secret), `base: ${secret} never shown`);
   // The deleted key file may pair with the committed one as a rename: by either side, withheld.
-  assert.equal(page.files.find(file => file.path === 'notes/old-key.txt' || file.oldPath === 'notes/old-key.txt')?.kind, 'withheld');
+  assert.equal(page.files.find((file: Json) => file.path === 'notes/old-key.txt' || file.oldPath === 'notes/old-key.txt')?.kind, 'withheld');
   assert.equal(byPath(page.files)['body.txt'].kind, 'withheld');
   // Asking for a blocked path by name is refused; its rename partner is hidden too.
   assert.deepEqual(await refusal(reader.diff({ workspaceId: 'w', compare: { mode: 'base' }, path: '.env' }), base), { code: 1003, reason: 'blocked_path' });
@@ -397,7 +401,7 @@ test('a work tree file changed between the scan and its patch is withheld, never
   await put(path.join(root, 'steady.txt'), 'steady and edited\n');
   // The racing writer: after alpd scanned swap.txt (no key), before Git reads it for the patch.
   let swaps = 0;
-  const reader = readerFor({ w: root }, { probe: async step => { if (step === 'scanned') { swaps++; await writeFile(path.join(root, 'swap.txt'), `first line\n${PEM}`); } } });
+  const reader = readerFor({ w: root }, { probe: async (step: Json) => { if (step === 'scanned') { swaps++; await writeFile(path.join(root, 'swap.txt'), `first line\n${PEM}`); } } });
   const page = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' } }), base);
   assert.equal(swaps, 1);
   const files = byPath(page.files);
@@ -448,7 +452,7 @@ test('kinds: text hunks, binary, too large, mode change, symlink, submodule, con
   await put(path.join(root, 'spaces.txt'), 'a  b\n');
   // The submodule moves to a new commit; inside it a trap that must never run.
   const subRoot = path.join(root, 'vendor', 'inner');
-  const subGit = (...args) => execFileSync('git', ['-c', 'user.name=ALP', '-c', 'user.email=alp@example.com', ...args], { cwd: subRoot, env: cleanEnv(), encoding: 'utf8' });
+  const subGit = (...args: string[]) => execFileSync('git', ['-c', 'user.name=ALP', '-c', 'user.email=alp@example.com', ...args], { cwd: subRoot, env: cleanEnv(), encoding: 'utf8' });
   await put(path.join(subRoot, 'x.txt'), 'y\n');
   subGit('commit', '-q', '-am', 'moved');
   const marker = path.join(base, 'submodule-trap');
@@ -474,13 +478,13 @@ test('kinds: text hunks, binary, too large, mode change, symlink, submodule, con
   assert.equal(files['vendor/inner'].kind, 'submodule');
   assert.ok(large.length > GIT_READ.windowBytes && large.length < GIT_READ.maxScanBytes);
   assert.deepEqual([files['large.txt'].kind, files['large.txt'].additions, files['large.txt'].deletions], ['text', 1, 1]);
-  assert.deepEqual(files[odd].hunks[0].lines.map(line => [line.type, line.content]), [['remove', 'before'], ['add', 'after']], 'a quoted header is matched');
+  assert.deepEqual(files[odd].hunks[0].lines.map((line: Json) => [line.type, line.content]), [['remove', 'before'], ['add', 'after']], 'a quoted header is matched');
   assert.deepEqual([files['to ü "q".txt'].oldPath, files['to ü "q".txt'].change, files['to ü "q".txt'].kind], ['from \t"q".txt', 'renamed', 'text']);
   assert.ok(files['conflict.txt'].hunks.length > 0);
   for (const file of page.files) if (file.kind !== 'text') assert.deepEqual([file.hunks, file.additions, file.deletions], [[], 0, 0], file.path);
   const unstaged = byPath(checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'unstaged' } }), base).files);
   assert.equal(unstaged['conflict.txt'].change, 'conflicted');
-  assert.ok(unstaged['conflict.txt'].hunks[0].lines.some(line => line.content.startsWith('<<<<<<<')), 'ours against the conflicted work tree');
+  assert.ok(unstaged['conflict.txt'].hunks[0].lines.some((line: Json) => line.content.startsWith('<<<<<<<')), 'ours against the conflicted work tree');
   const stagedConflict = byPath(checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'staged' } }), base).files)['conflict.txt'];
   assert.deepEqual([stagedConflict.change, stagedConflict.kind, stagedConflict.hunks], ['conflicted', 'text', []]);
   const whitespace = byPath(checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted', ignoreWhitespace: true } }), base).files)['spaces.txt'];
@@ -541,19 +545,19 @@ test('pages: at most 2 MiB of patch each, every file once, a stale snapshot and 
   assert.equal(pages.at(-1).truncated, false);
   assert.equal(pages.at(-1).nextCursor, undefined);
   for (const page of pages) {
-    const bytes = page.files.reduce((sum, file) => sum + file.hunks.reduce((s, hunk) => s + hunk.lines.reduce((n, line) => n + Buffer.byteLength(line.content) + 1, 0), 0), 0);
+    const bytes = page.files.reduce((sum: Json, file: Json) => sum + file.hunks.reduce((s: Json, hunk: Json) => s + hunk.lines.reduce((n: Json, line: Json) => n + Buffer.byteLength(line.content) + 1, 0), 0), 0);
     assert.ok(bytes <= WORKSPACE_GIT.maxTotalBytes, `page patch ${bytes}`);
   }
-  const seen = pages.flatMap(page => page.files.map(file => file.path));
+  const seen = pages.flatMap(page => page.files.map((file: Json) => file.path));
   assert.equal(seen.length, 60);
   assert.equal(new Set(seen).size, 60);
-  assert.ok(pages.every(page => page.files.every(file => file.kind === 'text' && file.additions === 1_500)));
+  assert.ok(pages.every(page => page.files.every((file: Json) => file.kind === 'text' && file.additions === 1_500)));
   const first = pages[0];
   // The cursor continues only the same workspace, comparison and path.
   for (const other of [{ ...params, workspaceId: 'v' }, { ...params, compare: { mode: 'unstaged' } }, { ...params, compare: { mode: 'uncommitted', ignoreWhitespace: true } }, { ...params, path: 'files/f00.txt' }]) {
     assert.deepEqual(await refusal(reader.diff({ ...other, cursor: first.nextCursor }), base), { code: -32602, reason: 'invalid_cursor' });
   }
-  const forged = first.nextCursor.replace(/^c1\.(\d+)\./, (_, n) => `c1.${Number(n) + 1}.`);
+  const forged = first.nextCursor.replace(/^c1\.(\d+)\./, (_: Json, n: Json) => `c1.${Number(n) + 1}.`);
   assert.notEqual(forged, first.nextCursor);
   assert.deepEqual(await refusal(reader.diff({ ...params, cursor: forged }), base), { code: -32602, reason: 'invalid_cursor' });
   assert.deepEqual(await refusal(reader.diff({ ...params, cursor: 'c1.garbage' }), base), { code: -32602, reason: 'invalid_cursor' });
@@ -611,15 +615,15 @@ test('compare and path are names, never Git arguments: options, revisions, paths
   assert.deepEqual(await refusal(reader.diff({ workspaceId: 'w', compare: { mode: 'base', baseRef: 'nope' } }), base), { code: 1001, reason: 'unknown_ref' });
   assert.equal(existsSync(output), false);
   const committed = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'base', baseRef: 'main' } }), base);
-  assert.deepEqual(committed.files.map(file => [file.path, file.change]), [['a.txt', 'modified']], 'committed changes only');
+  assert.deepEqual(committed.files.map((file: Json) => [file.path, file.change]), [['a.txt', 'modified']], 'committed changes only');
   assert.deepEqual(checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'base' } }), base).compare, { mode: 'base', baseRef: 'main', ignoreWhitespace: false });
   for (const magic of [':(glob)*.txt', '*.txt', ':!a.txt', ':/b.txt', 'b.*']) {
     assert.deepEqual(checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' }, path: magic }), base).files, [], magic);
   }
   const one = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' }, path: 'b.txt' }), base);
-  assert.deepEqual(one.files.map(file => file.path), ['b.txt']);
+  assert.deepEqual(one.files.map((file: Json) => file.path), ['b.txt']);
   const rename = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'staged' }, path: 'a.txt' }), base);
-  assert.deepEqual(rename.files.map(file => [file.path, file.oldPath, file.change]), [['moved.txt', 'a.txt', 'renamed']], 'a rename by its old path, both sides');
+  assert.deepEqual(rename.files.map((file: Json) => [file.path, file.oldPath, file.change]), [['moved.txt', 'a.txt', 'renamed']], 'a rename by its old path, both sides');
   for (const bad of ['../outside', '/etc/passwd', 'a//b', 'C:/x']) assert.deepEqual(await refusal(reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' }, path: bad }), base), { code: -32602, reason: 'invalid_path' }, bad);
 });
 
@@ -648,7 +652,7 @@ test('Git processes are bounded: concurrency, deadline (process group killed), o
   assert.deepEqual(await refusal(hanging.status('w'), base), { code: 1000, reason: 'git_failed' });
   assert.ok(Date.now() - started < 5_000);
   const [parent, child] = JSON.parse(await readFile(pids, 'utf8'));
-  const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
   for (let i = 0; i < 50 && (alive(parent) || alive(child)); i++) await new Promise(resolve => setTimeout(resolve, 20));
   assert.deepEqual([alive(parent), alive(child)], [false, false], 'the whole group is gone');
 
@@ -656,7 +660,7 @@ test('Git processes are bounded: concurrency, deadline (process group killed), o
   const chatty = path.join(base, 'chatty-git');
   await writeFile(chatty, `#!${process.execPath}\nconst chunk = Buffer.alloc(1 << 20, 'x');\nconst write = () => { while (process.stdout.write(chunk)); process.stdout.once('drain', write); };\nwrite();\n`);
   await chmod(chatty, 0o755);
-  const logged = [];
+  const logged: Json[] = [];
   const flooding = readerFor({ w: root }, { binary: chatty, log: (message, fields) => logged.push([message, fields]) });
   assert.deepEqual(await refusal(flooding.status('w'), base), { code: 1000, reason: 'git_failed' });
   assert.match(JSON.stringify(logged), /output over its bound/);
@@ -678,7 +682,7 @@ test('a linked worktree is read through its checked .git; a forged .git link is 
   await writeFile(path.join(forged, '.git'), `gitdir: ${path.join(root, '.git', 'worktrees', 'linked')}\n`);
   const reader = readerFor({ linked, forged });
   const status = checked('workspace.git.status', await reader.status('linked'), base);
-  assert.deepEqual([status.branch, status.files.map(file => file.path)], ['side', ['a.txt']]);
+  assert.deepEqual([status.branch, status.files.map((file: Json) => file.path)], ['side', ['a.txt']]);
   assert.deepEqual(await refusal(reader.status('forged'), base), { code: 1000, reason: 'git_failed' });
 });
 
@@ -703,12 +707,12 @@ test('alpd answers workspace.git.status and workspace.git.diff by registry works
   defer(async () => { client.close(); await daemon.close(); await runtime.shutdown(); });
   assert.ok((await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('workspace.git'));
   await client.request('project.register', { directory: root, ifRevision: 0, requestId: 'r1' });
-  const workspaceId = (await client.request('workspace.list', {})).workspaces.find(entry => entry.directory === root).id;
+  const workspaceId = (await client.request('workspace.list', {})).workspaces.find((entry: Json) => entry.directory === root).id;
   const status = checked('workspace.git.status', await client.request('workspace.git.status', { workspaceId }), base);
-  assert.deepEqual(status.files.map(file => file.path), ['a.txt']);
+  assert.deepEqual(status.files.map((file: Json) => file.path), ['a.txt']);
   const page = checked('workspace.git.diff', await client.request('workspace.git.diff', { workspaceId, compare: { mode: 'uncommitted' } }), base);
-  assert.deepEqual(page.files[0].hunks[0].lines.map(line => line.type), ['remove', 'add']);
-  const code = async promise => { try { await promise; } catch (error) { assert.ok(!String(error.message).includes(base)); return [error.code, error.data?.reason]; } assert.fail('expected a refusal'); };
+  assert.deepEqual(page.files[0].hunks[0].lines.map((line: Json) => line.type), ['remove', 'add']);
+  const code = async (promise: Json) => { try { await promise; } catch (error: Json) { assert.ok(!String(error.message).includes(base)); return [error.code, error.data?.reason]; } assert.fail('expected a refusal'); };
   assert.deepEqual(await code(client.request('workspace.git.status', { workspaceId: 'wks_0000000000000000' })), [1001, 'not_found']);
   assert.equal((await code(client.request('workspace.git.status', { workspaceId, projectRoot: root })))[0], -32602, 'no host path parameter');
   assert.equal((await code(client.request('workspace.git.diff', { workspaceId, compare: { mode: 'uncommitted', args: ['--ext-diff'] } })))[0], -32602);
@@ -731,7 +735,7 @@ test('an untracked directory link (a Windows junction) is listed as itself: noth
   const reader = readerFor({ w: root });
 
   const status = checked('workspace.git.status', await reader.status('w'), base);
-  assert.deepEqual(status.files.map(file => file.path).sort(), ['inner/own.txt', 'loop', 'outside']);
+  assert.deepEqual(status.files.map((file: Json) => file.path).sort(), ['inner/own.txt', 'loop', 'outside']);
   for (const mode of ['uncommitted', 'unstaged']) {
     const pages = await allPages(reader, { workspaceId: 'w', compare: { mode } }, base);
     const files = pages.flatMap(page => page.files);
@@ -742,7 +746,7 @@ test('an untracked directory link (a Windows junction) is listed as itself: noth
   }
   // Asked for by path: the link is the entry; a path behind it is no untracked file of this checkout.
   const one = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' }, path: 'outside' }), base);
-  assert.deepEqual(one.files.map(file => [file.path, file.kind]), [['outside', 'symlink']]);
+  assert.deepEqual(one.files.map((file: Json) => [file.path, file.kind]), [['outside', 'symlink']]);
   const behind = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' }, path: 'outside/note.txt' }), base);
   assert.ok(!JSON.stringify(behind).includes('OUTSIDE_SECRET'));
   assert.deepEqual(behind.files, []);
@@ -760,8 +764,8 @@ test('an untracked directory inspected as a link is collapsed to itself on every
   await put(path.join(root, 'outside', 'deep', 'more.txt'), 'OUTSIDE_DEEP\n');
   await put(path.join(root, 'plain', 'ok.txt'), 'plain\n');
   const linked = path.join(root, 'outside');
-  const inspected = [];
-  const inspect = async file => {
+  const inspected: Json[] = [];
+  const inspect = async (file: Json) => {
     inspected.push(file);
     const info = lstatSync(file);
     return file === linked ? Object.assign(Object.create(Object.getPrototypeOf(info)), info, { isSymbolicLink: () => true, isDirectory: () => false }) : info;
@@ -769,7 +773,7 @@ test('an untracked directory inspected as a link is collapsed to itself on every
   const reader = readerFor({ w: root }, { inspect });
 
   const status = checked('workspace.git.status', await reader.status('w'), base);
-  assert.deepEqual(status.files.map(file => file.path).sort(), ['outside', 'plain/ok.txt']);
+  assert.deepEqual(status.files.map((file: Json) => file.path).sort(), ['outside', 'plain/ok.txt']);
   for (const mode of ['uncommitted', 'unstaged']) {
     const pages = await allPages(reader, { workspaceId: 'w', compare: { mode } }, base);
     // The listing collapses to `outside`; its content read lstats the real path (a plain directory here, no link), so
@@ -800,8 +804,8 @@ for (const failure of ['EACCES', 'ENOENT']) {
     await put(path.join(root, 'outside', 'deep', 'more.txt'), 'OUTSIDE_DEEP\n');
     await put(path.join(root, 'plain', 'ok.txt'), 'plain\n');
     const blocked = path.join(root, 'outside');
-    const inspected = [];
-    const inspect = async file => {
+    const inspected: Json[] = [];
+    const inspect = async (file: Json) => {
       inspected.push(file);
       if (file === blocked) throw Object.assign(new Error(`${failure}: injected`), { code: failure });
       return lstatSync(file);
@@ -809,7 +813,7 @@ for (const failure of ['EACCES', 'ENOENT']) {
     const reader = readerFor({ w: root }, { inspect });
 
     const status = checked('workspace.git.status', await reader.status('w'), base);
-    assert.deepEqual(status.files.map(file => file.path).sort(), ['plain/ok.txt']);
+    assert.deepEqual(status.files.map((file: Json) => file.path).sort(), ['plain/ok.txt']);
     assert.equal(status.dirty, true);
     for (const mode of ['uncommitted', 'unstaged']) {
       const pages = await allPages(reader, { workspaceId: 'w', compare: { mode } }, base);
@@ -838,12 +842,12 @@ test('an untracked path whose ancestor is no longer a directory (changed since G
   await put(path.join(root, 'plain', 'ok.txt'), 'plain\n');
   const blocked = path.join(root, 'outside');
   const fileStats = lstatSync(path.join(root, 'kept.txt'));
-  const reader = readerFor({ w: root }, { inspect: file => (file === blocked ? fileStats : lstatSync(file)) });
+  const reader = readerFor({ w: root }, { inspect: (file: Json) => (file === blocked ? fileStats : lstatSync(file)) });
 
   const status = checked('workspace.git.status', await reader.status('w'), base);
-  assert.deepEqual(status.files.map(file => file.path).sort(), ['plain/ok.txt']);
+  assert.deepEqual(status.files.map((file: Json) => file.path).sort(), ['plain/ok.txt']);
   const page = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' } }), base);
-  assert.deepEqual(page.files.map(file => file.path), ['plain/ok.txt']);
+  assert.deepEqual(page.files.map((file: Json) => file.path), ['plain/ok.txt']);
   const one = checked('workspace.git.diff', await reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' }, path: 'outside/note.txt' }), base);
   assert.deepEqual(one.files, []);
 });
@@ -859,8 +863,8 @@ test('slow async ancestor checks yield, deduplicate and remain fail-closed in st
   let active = 0, peak = 0, ticks = 0, maxGap = 0;
   let previous = Date.now();
   const started = previous;
-  const yielded = [];
-  const reader = readerFor({ w: root }, { inspect: async file => {
+  const yielded: Json[] = [];
+  const reader = readerFor({ w: root }, { inspect: async (file: Json) => {
     calls.set(file, (calls.get(file) || 0) + 1);
     peak = Math.max(peak, ++active);
     const before = ticks;
@@ -875,8 +879,8 @@ test('slow async ancestor checks yield, deduplicate and remain fail-closed in st
   for (const read of [() => reader.status('w'), () => reader.diff({ workspaceId: 'w', compare: { mode: 'uncommitted' } })]) {
     calls = new Map();
     const result = await read();
-    assert.ok(result.files.some(file => file.path === 'dir0/nested/a.txt'));
-    assert.ok(!result.files.some(file => file.path.startsWith('dir1/')));
+    assert.ok(result.files.some((file: Json) => file.path === 'dir0/nested/a.txt'));
+    assert.ok(!result.files.some((file: Json) => file.path.startsWith('dir1/')));
     assert.ok([...calls.values()].every(count => count === 1), 'one stat per ancestor per listing');
   }
   assert.ok(yielded.length > 0 && yielded.every(Boolean), 'heartbeat runs during every filesystem wait');
@@ -901,7 +905,7 @@ test('a multi-chunk listing with slow ancestor checks keeps one consumer, every 
   const slow = new Set([100, 300, 600].map(i => path.join(root, names[i].split('/')[0])));
   const calls = new Map();
   let active = 0, peak = 0, pending = 0;
-  const reader = readerFor({ w: root }, { binary: fake, timeoutMs: 20_000, inspect: async file => {
+  const reader = readerFor({ w: root }, { binary: fake, timeoutMs: 20_000, inspect: async (file: Json) => {
     calls.set(file, (calls.get(file) || 0) + 1);
     peak = Math.max(peak, ++active);
     pending++;
@@ -915,7 +919,7 @@ test('a multi-chunk listing with slow ancestor checks keeps one consumer, every 
   assert.equal(gitReadsRunning(), 0);
   assert.equal(peak, 1, 'one ancestor check at a time');
   assert.equal(status.files.length, rows);
-  assert.deepEqual(status.files.map(file => file.path), names);
+  assert.deepEqual(status.files.map((file: Json) => file.path), names);
   assert.ok([...calls.values()].every(count => count === 1), 'one stat per ancestor');
 });
 
@@ -931,7 +935,7 @@ test('ancestor cache budget fails closed without evicting earlier answers', { sk
     '? ' + [String(i), ...Array(29).fill('d'), 'file.txt'].join('/') + '\0').join('');
   await writeFile(fake, `#!${process.execPath}\nif(process.argv.includes('status')) process.stdout.write(${JSON.stringify(fields)}); else {const r=require('node:child_process').spawnSync('git',process.argv.slice(2),{stdio:'inherit'});process.exit(r.status ?? 1);}`);
   await chmod(fake, 0o755);
-  const logged = [];
+  const logged: Json[] = [];
   let calls = 0;
   const reader = readerFor({ w: root }, { binary: fake,
     inspect: async () => { calls++; return directory; },
@@ -948,7 +952,7 @@ test('a pending async ancestor check cannot extend the Git deadline', { skip: !h
   await repository(root);
   await put(path.join(root, 'dir', 'nested', 'file.txt'), 'new\n');
   const directory = lstatSync(root);
-  let release;
+  let release!: (value?: unknown) => void;
   let calls = 0;
   const reader = readerFor({ w: root }, { timeoutMs: 3000, inspect: () => {
     calls++;

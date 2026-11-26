@@ -3,6 +3,7 @@
 // What the turn's input names, what the timeline shows, and what retries, restarts, tampering,
 // collection and forks of forks keep. Real Codex and Claude runs are test/e2e/attachments-real-e2e.ts.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises';
@@ -12,24 +13,30 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { ATTACHMENT_HEADER, ATTACHMENT_ROUTES, attachmentStageDir, createAlpRuntime } from '@anhlp/alp-runtime';
+import type { RuntimeTransport } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { createAttachmentStore } from '@anhlp/alp-daemon/attachments';
 import { validateResult } from '@anhlp/alp-protocol/contract';
 
-const skip = process.platform === 'win32' && 'attachments are not served on Windows';
-const sha = data => createHash('sha256').update(data).digest('hex');
+// `any`: alpd's answers, events and errors are JSON whose shape depends on the method; the tests read the fields they assert on.
+type Json = any;
+/** A scripted native transport, as fakeTransport hands it to the runtime and to the test: its helpers and handlers are reached by name. */
+type Scripted = RuntimeTransport & { calls: { method: string, params: Json }[], [member: string]: Json };
 
-async function until(check, what = 'condition') {
+const skip = process.platform === 'win32' && 'attachments are not served on Windows';
+const sha = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
+
+async function until(check: () => unknown, what = 'condition') {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`${what} did not happen`);
 }
 
 /** A scripted native runtime: turn/start answers a turn that finish() completes; its input is recorded. */
-function fakeTransport(transports) {
+function fakeTransport(transports: Scripted[]) {
   return () => {
     const index = transports.length;
     let turns = 0;
-    const transport = {
+    const transport: Scripted = {
       calls: [], threadId: `thread-${index}`, turnId: undefined,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -52,15 +59,17 @@ function fakeTransport(transports) {
 }
 
 /** A home with alpd in process; `start()` again on the same home is a restart. `stage: false` gives the runtime no staging directory. */
-async function setup(t, { stage = true } = {}) {
+type World = Awaited<ReturnType<typeof setup>>;
+type Daemon = Awaited<ReturnType<World['start']>>;
+async function setup(t: TestContext, { stage = true } = {}) {
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-attach-rt-')));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
   const project = path.join(directory, 'project');
   await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
-  const transports = [];
-  const stops = [];
+  const transports: Json[] = [];
+  const stops: Json[] = [];
   const clock = { now: Date.now() };
   const native = { next: 0 };
   t.after(async () => { for (const stop of stops.reverse()) await stop(); await rm(directory, { recursive: true, force: true }); });
@@ -68,25 +77,25 @@ async function setup(t, { stage = true } = {}) {
   async function start() {
     const runtime = createAlpRuntime({ supervisor: false, transport: fakeTransport(transports), runLogDir: path.join(directory, 'runs'), ...(stage ? { attachmentStageDir: attachmentStageDir(home) } : {}) });
     runtime.branch = async () => ({ threadId: `thread-branch-${++native.next}` });
-    runtime.rebind = async sessionId => runtime.snapshot(sessionId);
+    runtime.rebind = async sessionId => runtime.snapshot(sessionId)!;
     const store = createStore(path.join(home, 'state'));
     const socketPath = daemonPaths(path.join(directory, `d${count++}`)).socket;
     const server = createDaemonServer({ runtime, socketPath, version: 'test', store, home, attachmentOptions: { now: () => clock.now, sweepMs: 0 } });
     await server.listen();
     const client = await connect(socketPath, { name: 'test', version: '0' });
-    const events = [];
+    const events: Json[] = [];
     client.onEvent(envelope => events.push(envelope));
     let stopped = false;
     const stop = async () => { if (stopped) return; stopped = true; client.close(); await store.flush().catch(() => {}); await server.close().catch(() => {}); await runtime.shutdown(); };
     stops.push(stop);
-    const request = (method, params) => client.request(method, params);
+    const request = (method: string, params?: unknown) => client.request(method, params);
     await request('daemon.status');
     return { runtime, server, store, client, events, request, stop };
   }
   return { directory, home, project, transports, clock, stageRoot: attachmentStageDir(home), start };
 }
 
-async function upload(request, sessionId, data, { name = 'notes.txt', mimeType = 'text/plain', requestId = `r-${Math.random()}` } = {}) {
+async function upload(request: (method: string, params?: unknown) => Promise<Json>, sessionId: string, data: string | Buffer, { name = 'notes.txt', mimeType = 'text/plain', requestId = `r-${Math.random()}` } = {}) {
   const bytes = Buffer.from(data);
   const begun = await request('attachment.begin', { sessionId, name, size: bytes.length, mimeType, requestId });
   for (let offset = 0; offset < bytes.length; offset += 4096) await request('attachment.chunk', { uploadId: begun.uploadId, offset, data: bytes.subarray(offset, offset + 4096).toString('base64') });
@@ -94,11 +103,11 @@ async function upload(request, sessionId, data, { name = 'notes.txt', mimeType =
 }
 
 /** The attachment parts of a native turn input, parsed: the JSON after ATTACHMENT_HEADER. */
-const attachmentParts = input => input.filter(part => part.type === 'text' && part.text.startsWith(ATTACHMENT_HEADER)).map(part => JSON.parse(part.text.slice(ATTACHMENT_HEADER.length).split('\n', 1)[0]));
-const turnStarts = transports => transports.flatMap(transport => transport.calls.filter(call => call.method === 'turn/start'));
+const attachmentParts = (input: Json[]) => input.filter((part: Json) => part.type === 'text' && part.text.startsWith(ATTACHMENT_HEADER)).map((part: Json) => JSON.parse(part.text.slice(ATTACHMENT_HEADER.length).split('\n', 1)[0]));
+const turnStarts = (transports: Scripted[]) => transports.flatMap((transport: Json) => transport.calls.filter((call: Json) => call.method === 'turn/start'));
 
 /** Runs one prompt to a completed turn; answers the prompt's result. */
-async function turn(d, world, sessionId, clientMessageId, content) {
+async function turn(d: Daemon, world: World, sessionId: string, clientMessageId: string, content: Json[]) {
   const result = await d.request('session.prompt', { sessionId, clientMessageId, content });
   const transport = world.transports.at(-1);
   if (result.outcome === 'accepted' && !result.duplicate) {
@@ -151,13 +160,13 @@ test('a Codex session stages exact read-only copies its tools read by path; the 
   // The prompt is where CATALOG says; the attachment parts follow it, counted in the layout.
   const catalog = JSON.parse(start.params.input[0].text.replace(/^[^{]*/, ''));
   assert.equal(start.params.input[catalog.inputLayout.prompt].text, 'read these');
-  assert.equal(catalog.inputLayout.textParts, start.params.input.filter(part => part.type === 'text').length);
-  assert.deepEqual(catalog.attachments.map(entry => entry.attachmentId), [binary, pdf, textFile].map(entry => entry.attachmentId));
+  assert.equal(catalog.inputLayout.textParts, start.params.input.filter((part: Json) => part.type === 'text').length);
+  assert.deepEqual(catalog.attachments.map((entry: Json) => entry.attachmentId), [binary, pdf, textFile].map(entry => entry.attachmentId));
   assert.ok(!JSON.stringify(catalog.attachments).includes(world.directory), 'CATALOG names no path');
 
   // The timeline: ids, display names, types and sizes; no host path in anything a client replays.
   const history = await d.request('session.history', { sessionId: 'r1' });
-  const message = history.items.map(item => item.event).find(event => event?.type === 'item' && event.item.kind === 'user_message');
+  const message = history.items.map((item: Json) => item.event).find((event: Json) => event?.type === 'item' && event.item.kind === 'user_message');
   assert.deepEqual(message.item.attachments, [
     { attachmentId: binary.attachmentId, name: 'blob.bin', mimeType: 'application/octet-stream', size: BINARY.length },
     { attachmentId: pdf.attachmentId, name: 'report.PDF', mimeType: 'application/pdf', size: PDF.length },
@@ -205,8 +214,8 @@ test('the staging exposure warning (ALP_ATTACHMENT_STAGE_EXPOSED) is emitted at 
   const first = await upload(d.request, 'r-warn', 'first payload');
   const second = await upload(d.request, 'r-warn', 'second payload');
 
-  const lines = [];
-  t.mock.method(process.stderr, 'write', chunk => { lines.push(String(chunk)); return true; });
+  const lines: Json[] = [];
+  t.mock.method(process.stderr, 'write', (chunk: Json) => { lines.push(String(chunk)); return true; });
 
   try {
     await turn(d, world, 'r-warn', 'm1', [{ type: 'text', text: 'prompt 1' }, { type: 'attachment', attachmentId: first.attachmentId }]);
@@ -286,12 +295,12 @@ test('names never become paths: traversal and shell names stage under the id, wi
   for (const name of names) ids.push((await upload(d.request, 'r3', `#!/bin/sh\necho ${name}\n`, { name })).attachmentId);
   await turn(d, world, 'r3', 'm1', [{ type: 'text', text: 'names' }, ...ids.map(attachmentId => ({ type: 'attachment', attachmentId }))]);
   const parts = attachmentParts(turnStarts(world.transports)[0].params.input);
-  assert.deepEqual(parts.map(part => path.basename(part.path)), [`${ids[0]}.sh`, `${ids[1]}.txt`, `${ids[2]}.txt`, `${ids[3]}.c`, `${ids[4]}.txt`]);
+  assert.deepEqual(parts.map((part: Json) => path.basename(part.path)), [`${ids[0]}.sh`, `${ids[1]}.txt`, `${ids[2]}.txt`, `${ids[3]}.c`, `${ids[4]}.txt`]);
   for (const part of parts) {
     assert.equal(path.dirname(part.path), world.stageRoot);
     assert.equal((await lstat(part.path)).mode & 0o111, 0, 'not executable');
   }
-  assert.deepEqual((await readdir(world.stageRoot)).sort(), parts.map(part => path.basename(part.path)).sort(), 'every copy, and only they, in the staging directory');
+  assert.deepEqual((await readdir(world.stageRoot)).sort(), parts.map((part: Json) => path.basename(part.path)).sort(), 'every copy, and only they, in the staging directory');
   assert.deepEqual((await readdir(path.dirname(world.stageRoot))).filter(name => /evil|pwned|^c$/.test(name)), []);
 });
 
@@ -319,7 +328,7 @@ test('a staging directory that is a link, or a runtime without one, refuses the 
   await b.request('session.create', { sessionId: 'r5', spec: { cwd: bare.project, persist: true } });
   assert.equal((await b.request('session.get', { sessionId: 'r5' })).session.promptAttachments, undefined);
   const stored = await upload(b.request, 'r5', 'data');
-  await assert.rejects(b.request('session.prompt', { sessionId: 'r5', clientMessageId: 'm1', content: [{ type: 'attachment', attachmentId: stored.attachmentId }] }), error => error.code === 1005 && error.data?.reason === 'attachment_unsupported');
+  await assert.rejects(b.request('session.prompt', { sessionId: 'r5', clientMessageId: 'm1', content: [{ type: 'attachment', attachmentId: stored.attachmentId }] }), (error: Json) => error.code === 1005 && error.data?.reason === 'attachment_unsupported');
 });
 
 test('a collected object takes its staged copy with it', { skip }, async t => {
@@ -353,8 +362,8 @@ test('a fork of a fork keeps the attachments of its kept prompts after the first
   const fork1 = await d.request('session.fork', { sessionId: 'root', requestId: 'f1', ifGeneration: generation, boundary: { throughTurnId: fileTurn }, newSessionId: 'fork1' });
   assert.equal(fork1.session.id, 'fork1');
   // fork1's copy of the conversation still names the attachment by id.
-  const kept = (await d.request('session.history', { sessionId: 'fork1' })).items.map(item => item.event).filter(event => event?.item?.kind === 'user_message');
-  assert.deepEqual(kept.map(event => (event.item.attachments ?? []).map(entry => entry.attachmentId)), [[], [attachment.attachmentId]]);
+  const kept = (await d.request('session.history', { sessionId: 'fork1' })).items.map((item: Json) => item.event).filter((event: Json) => event?.item?.kind === 'user_message');
+  assert.deepEqual(kept.map((event: Json) => (event.item.attachments ?? []).map((entry: Json) => entry.attachmentId)), [[], [attachment.attachmentId]]);
   await d.stop();
 
   // The root's history is deleted as retention does: its record and timeline go, its references are released.
@@ -370,8 +379,8 @@ test('a fork of a fork keeps the attachments of its kept prompts after the first
   d = await world.start();
   const generation1 = (await d.request('session.history', { sessionId: 'fork1', limit: 1 })).generation;
   // Another principal, the owner's under another grant epoch, or a grant without the project may not carry it on.
-  for (const [requestId, as] of [['fb', { principalId: 'bbbbbbbbbbbbbbbb', principalEpoch: 'owner' }], ['fbe', { principalId: 'bbbbbbbbbbbbbbbb', principalEpoch: 'e1' }], ['fe', { principalId: 'owner', principalEpoch: 'other-epoch' }], ['fr', { authorizedRoots: [path.join(world.directory, 'elsewhere')] }]]) {
-    await assert.rejects(d.request('session.fork', { sessionId: 'fork1', requestId, ifGeneration: generation1, boundary: { throughTurnId: fileTurn }, ...as }), error => error.code === 1003 && error.data?.reason === 'attachment_forbidden', requestId);
+  for (const [requestId, as] of [['fb', { principalId: 'bbbbbbbbbbbbbbbb', principalEpoch: 'owner' }], ['fbe', { principalId: 'bbbbbbbbbbbbbbbb', principalEpoch: 'e1' }], ['fe', { principalId: 'owner', principalEpoch: 'other-epoch' }], ['fr', { authorizedRoots: [path.join(world.directory, 'elsewhere')] }]] as [string, Json][]) {
+    await assert.rejects(d.request('session.fork', { sessionId: 'fork1', requestId, ifGeneration: generation1, boundary: { throughTurnId: fileTurn }, ...as }), (error: Json) => error.code === 1003 && error.data?.reason === 'attachment_forbidden', requestId);
   }
   // A fork cut before the message that carried it holds nothing.
   const early = await d.request('session.fork', { sessionId: 'fork1', requestId: 'f-early', ifGeneration: generation1, boundary: { throughTurnId: plainTurn }, newSessionId: 'fork-early' });

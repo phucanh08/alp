@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
@@ -11,6 +12,9 @@ import { createDaemonServer } from '@anhlp/alp-daemon';
 import { createGitReader } from '@anhlp/alp-daemon/git';
 import { teardown } from '../../../test/support/teardown.ts';
 
+// `any`: workspace.git.facts answers and refusals are JSON of several shapes (GitFacts is a union by kind); the tests read the fields they assert on.
+type Json = any;
+
 /**
  * workspace.git.facts (docs/protocol/alp-json-rpc-v1.md §12.5): the owner's checkout facts of a
  * host directory that need not be a registry workspace, over real, disposable repositories. Each
@@ -22,26 +26,26 @@ const hasGit = (() => { try { execFileSync('git', ['--version'], { stdio: 'ignor
 const skip = !hasGit ? 'git is not installed' : !posix ? 'the traps are POSIX shell scripts' : false;
 
 const cleanEnv = () => {
-  const env = {};
+  const env: Record<string, string | undefined> = {};
   for (const [key, value] of Object.entries(process.env)) if (!/^GIT_/i.test(key)) env[key] = value;
   return { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0' };
 };
 
-async function sandbox(t) {
+async function sandbox(t: TestContext) {
   const defer = teardown(t);
   const base = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-git-facts-')));
   defer(() => rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   return base;
 }
 
-async function repository(root, branch = 'main') {
+async function repository(root: string, branch = 'main') {
   await mkdir(root, { recursive: true });
-  const git = (...args) => execFileSync('git', ['-c', 'user.name=ALP', '-c', 'user.email=alp@example.com', ...args], { cwd: root, env: cleanEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'user.name=ALP', '-c', 'user.email=alp@example.com', ...args], { cwd: root, env: cleanEnv(), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   git('init', '-q', '-b', branch);
   return git;
 }
 
-async function committed(root) {
+async function committed(root: string) {
   const git = await repository(root);
   await writeFile(path.join(root, 'a.txt'), 'one\n');
   git('add', '.');
@@ -50,15 +54,15 @@ async function committed(root) {
 }
 
 /** A result checked against the v1 schema. */
-function checked(result) {
+function checked(result: Json) {
   const issues = validateResult('workspace.git.facts', result);
   assert.deepEqual(issues, [], `workspace.git.facts result matches the schema: ${JSON.stringify(issues)}`);
   return result;
 }
 
 /** The refusal of a promise: code and reason, its message naming no host path. */
-async function refusal(promise, base) {
-  try { await promise; } catch (error) {
+async function refusal(promise: Promise<unknown>, base?: string) {
+  try { await promise; } catch (error: Json) {
     if (base) assert.ok(!String(error.message).includes(base), `no host path in "${error.message}"`);
     return { code: error.code, reason: error.data?.reason };
   }
@@ -74,13 +78,13 @@ test('a repository\'s top level is ok: branch, HEAD, a scrubbed origin, dirty fr
   const reader = createGitReader({});
   assert.deepEqual(checked(await reader.facts(root)), { kind: 'ok', repoRoot: root, branch: 'main', detached: false, head, hasRemote: true, remoteUrl: 'https://example.com/acme/shop.git', dirty: false });
   await writeFile(path.join(root, 'new.txt'), 'fresh\n');
-  assert.equal((await reader.facts(root)).dirty, true, 'an untracked file');
+  assert.equal((await reader.facts(root) as Json).dirty, true, 'an untracked file');
   await rm(path.join(root, 'new.txt'));
   await writeFile(path.join(root, 'a.txt'), 'two\n');
-  assert.equal((await reader.facts(root)).dirty, true, 'a modified file');
+  assert.equal((await reader.facts(root) as Json).dirty, true, 'a modified file');
   // A local path remote is a remote, with no URL to show.
   git('config', 'remote.origin.url', path.join(base, 'elsewhere'));
-  const local = await reader.facts(root);
+  const local: Json = await reader.facts(root);
   assert.deepEqual([local.hasRemote, local.remoteUrl], [true, null]);
   assert.ok(!JSON.stringify(local).includes('elsewhere'));
 });
@@ -106,11 +110,11 @@ test('a nested folder is not_repository_root with its enclosing repository\'s fa
   const head = git('rev-parse', 'HEAD').trim();
   assert.deepEqual(checked(await reader.facts(nested)), { kind: 'not_repository_root', repoRoot: root, branch: 'main', detached: false, head, hasRemote: false, remoteUrl: null, dirty: false });
   await writeFile(path.join(root, 'a.txt'), 'changed\n');
-  assert.equal((await reader.facts(nested)).dirty, true, 'the repository\'s change, outside the folder');
+  assert.equal((await reader.facts(nested) as Json).dirty, true, 'the repository\'s change, outside the folder');
   // A nested repository is its own top level.
   const inner = path.join(root, 'vendor', 'lib');
   await committed(inner);
-  assert.deepEqual([(await reader.facts(inner)).kind, (await reader.facts(inner)).repoRoot], ['ok', inner]);
+  assert.deepEqual([(await reader.facts(inner)).kind, (await reader.facts(inner) as Json).repoRoot], ['ok', inner]);
   for (const inside of [path.join(root, '.git'), path.join(root, '.git', 'objects'), path.join(inner, '.git', 'refs')]) {
     assert.deepEqual(checked(await reader.facts(inside)), { kind: 'unsupported', reason: 'inside_git_dir' }, inside);
   }
@@ -137,7 +141,7 @@ test('a link is read at its real path: repoRoot names the real directory', { ski
   await committed(root);
   const link = path.join(base, 'link');
   await symlink(root, link);
-  assert.equal((await createGitReader({}).facts(link)).repoRoot, root);
+  assert.equal((await createGitReader({}).facts(link) as Json).repoRoot, root);
   await mkdir(path.join(root, 'sub'));
   const nested = checked(await createGitReader({}).facts(path.join(link, 'sub')));
   assert.deepEqual([nested.kind, nested.repoRoot], ['not_repository_root', root]);
@@ -164,7 +168,7 @@ test('Git errors are explicit: no Git, an unusable .git; status and diff need a 
   const base = await sandbox(t);
   const root = path.join(base, 'repo');
   await committed(root);
-  const logged = [];
+  const logged: Json[] = [];
   assert.deepEqual(await refusal(createGitReader({ binary: path.join(base, 'no-git') }).facts(root), base), { code: 1005, reason: 'git_unavailable' });
   const broken = path.join(base, 'broken');
   await mkdir(broken);
@@ -182,7 +186,7 @@ test('nothing the repository names runs, at the top level or for a nested folder
   const root = path.join(base, 'repo');
   const traps = path.join(base, 'traps');
   await mkdir(traps);
-  const trap = async (name, body = '') => {
+  const trap = async (name: string, body = '') => {
     const file = path.join(base, `${name}.sh`);
     await writeFile(file, `#!/bin/sh\necho "$*" >> '${path.join(traps, name)}'\n${body}\n`);
     await chmod(file, 0o755);
@@ -213,8 +217,8 @@ test('nothing the repository names runs, at the top level or for a nested folder
   defer(() => { process.env.PATH = savedPath; });
   const indexBefore = await readFile(path.join(root, '.git', 'index'));
   const reader = createGitReader({});
-  assert.deepEqual([(await reader.facts(root)).kind, (await reader.facts(root)).dirty], ['ok', false]);
-  assert.deepEqual([(await reader.facts(nested)).kind, (await reader.facts(nested)).repoRoot], ['not_repository_root', root]);
+  assert.deepEqual([(await reader.facts(root)).kind, (await reader.facts(root) as Json).dirty], ['ok', false]);
+  assert.deepEqual([(await reader.facts(nested)).kind, (await reader.facts(nested) as Json).repoRoot], ['not_repository_root', root]);
   assert.deepEqual(await readdir(traps), [], 'no trap ran');
   assert.ok((await readFile(path.join(root, '.git', 'index'))).equals(indexBefore), 'the index is not rewritten');
   // The traps are armed: Git run naively in the repository runs them.
@@ -226,11 +230,11 @@ test('nothing the repository names runs, at the top level or for a nested folder
 function fakeTransport() {
   return () => ({
     async initialize() {}, onNotification() {}, onFailure() {}, onRequest() {}, async close() {},
-    async request(method) { return method.startsWith('thread/') ? { thread: { id: 'thread-1' } } : {}; },
+    async request(method: string) { return method.startsWith('thread/') ? { thread: { id: 'thread-1' } } : {}; },
   });
 }
 
-async function connectAs(socket, agent) {
+async function connectAs(socket: string, agent: boolean) {
   const saved = process.env.ALP_AGENT_SESSION;
   if (agent) process.env.ALP_AGENT_SESSION = '1'; else delete process.env.ALP_AGENT_SESSION;
   try { return await connect(socket, { name: 'facts-test', version: '0' }); }
@@ -256,10 +260,10 @@ test('alpd: listed without a home, the owner\'s connection answers, an agent\'s 
   assert.ok(!hello.capabilities.includes('workspace.git'));
   assert.equal((await owner.request('workspace.git.facts', { directory: root })).kind, 'ok');
   assert.equal((await owner.request('workspace.git.facts', { directory: path.join(root, '.git') })).kind, 'unsupported');
-  await assert.rejects(owner.request('workspace.git.facts', { directory: root, principalId: 'cred', authorizedRoots: [root] }), error => error.code === -32602);
-  await assert.rejects(owner.request('workspace.git.facts', { directory: 'repo' }), error => error.code === -32602 && error.data?.reason === 'invalid_path');
-  await assert.rejects(owner.request('workspace.git.status', { workspaceId: 'w' }), error => error.code === 1005);
+  await assert.rejects(owner.request('workspace.git.facts', { directory: root, principalId: 'cred', authorizedRoots: [root] }), (error: Json) => error.code === -32602);
+  await assert.rejects(owner.request('workspace.git.facts', { directory: 'repo' }), (error: Json) => error.code === -32602 && error.data?.reason === 'invalid_path');
+  await assert.rejects(owner.request('workspace.git.status', { workspaceId: 'w' }), (error: Json) => error.code === 1005);
   const agent = await connectAs(daemonPaths(base).socket, true);
   defer(() => agent.close());
-  await assert.rejects(agent.request('workspace.git.facts', { directory: root }), error => error.code === 1003 && error.data?.reason === 'user_only');
+  await assert.rejects(agent.request('workspace.git.facts', { directory: root }), (error: Json) => error.code === 1003 && error.data?.reason === 'user_only');
 });

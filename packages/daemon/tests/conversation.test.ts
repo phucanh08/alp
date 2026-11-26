@@ -1,9 +1,10 @@
-import { failCommittedMarker } from './lifecycle-marker-fault.js';
+import { failCommittedMarker } from './lifecycle-marker-fault.ts';
 // session.fork and session.rewind in alpd (docs/protocol/alp-json-rpc-v1.md §12.7, issue #121 branch C):
 // the lifecycle journal, the idle barrier, timeline cuts, history generations, branches and receipts.
 // The runtime's native side (runtime.branch / runtime.rebind) is scripted here; packages/runtime tests
 // prove it against the native contracts, and test/e2e the real Codex and Claude runs.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -12,22 +13,28 @@ import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
+import type { RuntimeTransport } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { validateResult } from '@anhlp/alp-protocol/contract';
 import { defaultForkTitle, turnsOf } from '@anhlp/alp-daemon/conversation';
 import { teardown } from '../../../test/support/teardown.ts';
 
-async function until(check, what = 'condition') {
+// `any`: alpd's answers, events and refusals are JSON, and the scripted native branch/rebind/reload and transports are partial fakes; the tests read the fields they assert on.
+type Json = any;
+/** A scripted native transport, as fakeTransport hands it to the runtime and to the test: its helpers and handlers are reached by name. */
+type Scripted = RuntimeTransport & { calls: { method: string, params: Json }[], [member: string]: Json };
+
+async function until(check: () => unknown, what = 'condition') {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`${what} did not happen`);
 }
 
 /** A scripted native runtime: each turn/start answers a new turn id; finish() completes the latest. */
-function fakeTransport(transports) {
+function fakeTransport(transports: Scripted[]) {
   return () => {
     const index = transports.length;
     let turns = 0;
-    const transport = {
+    const transport: Scripted = {
       calls: [], threadId: `thread-${index}`, turnId: undefined,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -51,18 +58,18 @@ function fakeTransport(transports) {
 }
 
 /** A daemon with a real store; `start()` again on the same directory is a restart. The runtime's native fork is scripted. */
-async function setup(t) {
+async function setup(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-conversation-'));
   const project = path.join(directory, 'project');
   await initProject(project);
-  const transports = [];
-  const stops = [];
+  const transports: Json[] = [];
+  const stops: Json[] = [];
   defer(async () => { for (const stop of stops.reverse()) await stop(); await rm(directory, { recursive: true, force: true }); });
   const state = path.join(directory, 'state');
-  const native = { branches: [], rebinds: [], reloads: [], next: 0, branch: undefined, rebind: undefined, reload: undefined };
+  const native: { branches: Json[], rebinds: Json[], reloads: string[], next: number, branch: Json, rebind: Json, reload: Json, seen?: Json } = { branches: [], rebinds: [], reloads: [], next: 0, branch: undefined, rebind: undefined, reload: undefined };
   let count = 0;
-  async function start(options = {}) {
+  async function start(options: Json = {}) {
     const { libraryDir, ...serverOptions } = options;
     const runtime = createAlpRuntime({ supervisor: false, transport: fakeTransport(transports), runLogDir: path.join(directory, 'runs'), ...(libraryDir ? { libraryDir } : {}) });
     runtime.branch = async request => {
@@ -76,7 +83,7 @@ async function setup(t) {
       return runtime.snapshot(sessionId);
     };
     // The runtime's own reload (restarting a fake process), or a scripted one.
-    const reload = runtime.reload;
+    const reload = runtime.reload!;
     runtime.reload = async sessionId => {
       native.reloads.push(sessionId);
       return native.reload ? native.reload(sessionId, reload) : reload(sessionId);
@@ -85,13 +92,13 @@ async function setup(t) {
     const socketPath = daemonPaths(path.join(directory, `d${count++}`)).socket;
     const server = createDaemonServer({ runtime, socketPath, version: 'test', store, ...serverOptions });
     await server.listen();
-    const clients = [];
+    const clients: Json[] = [];
     const open = async () => {
       const client = await connect(socketPath, { name: 'test', version: '0' });
-      const events = [];
+      const events: Json[] = [];
       client.onEvent(envelope => events.push(envelope));
       clients.push(client);
-      return { client, events, request: (method, params) => client.request(method, params) };
+      return { client, events, request: (method: string, params?: unknown) => client.request(method, params) };
     };
     let stopped = false;
     const stop = async () => { if (stopped) return; stopped = true; clients.forEach(client => client.close()); await store.flush().catch(() => {}); await server.close().catch(() => {}); await runtime.shutdown(); };
@@ -104,9 +111,9 @@ async function setup(t) {
 }
 
 /** Opens a persistent root and runs `texts` as completed turns; answers the turn ids in order. */
-async function conversation(d, sessionId, texts) {
+async function conversation(d: Json, sessionId: string, texts: string[]) {
   await d.request('session.create', { sessionId, spec: { cwd: d.project ?? d.cwd, persist: true } });
-  const turns = [];
+  const turns: Json[] = [];
   for (const [index, text] of texts.entries()) {
     const transport = d.transports.at(-1);
     await d.request('session.prompt', { sessionId, clientMessageId: `${sessionId}-m${index}`, content: [{ type: 'text', text }] });
@@ -119,17 +126,17 @@ async function conversation(d, sessionId, texts) {
 }
 
 /** Waits up to `ms` for `check`, without failing: a race test gives a wake the time it needs to start, if it can. */
-async function within(ms, check) {
+async function within(ms: number, check: () => unknown) {
   const end = Date.now() + ms;
   while (Date.now() < end) { if (await check()) return true; await new Promise(resolve => setTimeout(resolve, 5)); }
   return false;
 }
 
-const generationOf = async (d, sessionId) => (await d.request('session.history', { sessionId, limit: 1 })).generation;
-const rpcError = (code, reason) => error => error.code === code && error.data?.reason === reason;
+const generationOf = async (d: Json, sessionId: string) => (await d.request('session.history', { sessionId, limit: 1 })).generation;
+const rpcError = (code: number, reason: string) => (error: Json) => error.code === code && error.data?.reason === reason;
 
 test('turnsOf: a turn starts at its user message, ends at turn.ended; steers and children do not start turns', () => {
-  const e = (cursor, sessionId, event) => ({ sessionId, epoch: 'e', seq: cursor, ts: 't', cursor, event });
+  const e = (cursor: number, sessionId: string, event: Json) => ({ sessionId, epoch: 'e', seq: cursor, ts: 't', cursor, event });
   const log = [
     e(1, 'r', { type: 'session.opened' }),
     e(2, 'r', { type: 'item', item: { kind: 'user_message', id: 'user:a', clientMessageId: 'a', text: 'one' } }),
@@ -176,7 +183,7 @@ test('rewind: same id, the later turns become a recoverable branch, history gene
   // The history now holds the first turn and the marker; every older cursor is stale.
   const page = await d.request('session.history', { sessionId: 'r1' });
   assert.equal(page.generation, result.generation);
-  const texts = page.items.filter(item => item.event?.type === 'item').map(item => item.event.item.text);
+  const texts = page.items.filter((item: Json) => item.event?.type === 'item').map((item: Json) => item.event.item.text);
   assert.ok(texts.includes('one') && texts.includes('answer 0'));
   assert.ok(!texts.includes('two') && !texts.includes('three') && !texts.includes('answer 1'));
   assert.match(texts.at(-1), /Files were not changed/);
@@ -198,10 +205,10 @@ test('rewind: same id, the later turns become a recoverable branch, history gene
 
   // Receipts are never deleted: the second turn's prompt id still answers as delivered, and nothing is sent.
   const transport = world.transports.at(-1);
-  const turnStarts = transport.calls.filter(call => call.method === 'turn/start').length;
+  const turnStarts = transport.calls.filter((call: Json) => call.method === 'turn/start').length;
   const repeated = await d.request('session.prompt', { sessionId: 'r1', clientMessageId: 'r1-m1', content: [{ type: 'text', text: 'two' }] });
   assert.equal(repeated.duplicate, true);
-  assert.equal(transport.calls.filter(call => call.method === 'turn/start').length, turnStarts);
+  assert.equal(transport.calls.filter((call: Json) => call.method === 'turn/start').length, turnStarts);
 
   // The record names the new conversation; the branch keeps the old one; the branch file holds the old timeline.
   await d.stop();
@@ -222,7 +229,7 @@ test('rewind: same id, the later turns become a recoverable branch, history gene
   assert.equal(await generationOf(restarted, 'r1'), result.generation);
   // Reopening continues the new conversation.
   await restarted.request('session.create', { sessionId: 'r1', spec: { cwd: world.project, persist: true }, resume: true });
-  const resumed = world.transports.at(-1).calls.find(call => call.method === 'thread/resume');
+  const resumed = world.transports.at(-1).calls.find((call: Json) => call.method === 'thread/resume');
   assert.equal(resumed.params.threadId, 'thread-branch-1');
 });
 
@@ -254,14 +261,14 @@ test('rewind refusals record nothing: stale view, unknown turn, the first turn, 
   // Refusals before the journal record nothing: the same requestId works once the cause is gone.
   const current = await generationOf(d, 'r2');
   // A prompt sent while the rewind's native step runs waits, then reaches the rewound conversation.
-  let release;
+  let release!: (value?: unknown) => void;
   world.native.branch = () => new Promise(resolve => { release = () => resolve({ threadId: 'thread-rewound' }); });
   const rewinding = d.request('session.rewind', { sessionId: 'r2', requestId: 'x4', ifGeneration: current, beforeTurnId: second });
   await until(() => release, 'native step started');
-  const starts = transport.calls.filter(call => call.method === 'turn/start').length;
+  const starts = transport.calls.filter((call: Json) => call.method === 'turn/start').length;
   const prompting = d.request('session.prompt', { sessionId: 'r2', clientMessageId: 'r2-after', content: [{ type: 'text', text: 'after' }] });
   await new Promise(resolve => setTimeout(resolve, 50));
-  assert.equal(transport.calls.filter(call => call.method === 'turn/start').length, starts, 'the prompt waits for the rewind');
+  assert.equal(transport.calls.filter((call: Json) => call.method === 'turn/start').length, starts, 'the prompt waits for the rewind');
   release();
   const rewound = await rewinding;
   assert.equal(rewound.session.id, 'r2');
@@ -316,7 +323,7 @@ test('a rewind whose commit failed finishes from its journal at the next start',
   world.native.branch = undefined;
   // Until that rewind is finished the root is fenced: closed, no prompt, no reopen, no other rewind.
   assert.equal((await d.request('session.get', { sessionId: 'r4' })).session.status, 'closed');
-  await assert.rejects(d.request('session.prompt', { sessionId: 'r4', clientMessageId: 'fenced', content: [{ type: 'text', text: 'x' }] }), error => error.code === 1004 && error.data?.reason === 'session_busy' || error.code === 1001);
+  await assert.rejects(d.request('session.prompt', { sessionId: 'r4', clientMessageId: 'fenced', content: [{ type: 'text', text: 'x' }] }), (error: Json) => error.code === 1004 && error.data?.reason === 'session_busy' || error.code === 1001);
   await assert.rejects(d.request('session.create', { sessionId: 'r4', spec: { cwd: world.project, persist: true }, resume: true }), rpcError(1004, 'session_busy'));
   await d.stop();
   await rm(timeline, { force: true });
@@ -326,13 +333,13 @@ test('a rewind whose commit failed finishes from its journal at the next start',
   const session = (await restarted.request('session.get', { sessionId: 'r4' })).session;
   // No fence after the roll-forward: the root reopens on its new conversation.
   await restarted.request('session.create', { sessionId: 'r4', spec: { cwd: world.project, persist: true }, resume: true });
-  assert.equal(world.transports.at(-1).calls.find(call => call.method === 'thread/resume').params.threadId, 'thread-branch-1');
+  assert.equal(world.transports.at(-1).calls.find((call: Json) => call.method === 'thread/resume').params.threadId, 'thread-branch-1');
   assert.equal(session.threadId, 'thread-branch-1');
   assert.equal(session.branches.length, 1);
   const repeat = await restarted.request('session.rewind', { sessionId: 'r4', requestId: 'c1', ifGeneration: generation, beforeTurnId: second });
   assert.equal(repeat.branch.branchId, session.branches[0].branchId);
   assert.equal(world.native.branches.length, 1);
-  const texts = (await restarted.request('session.history', { sessionId: 'r4' })).items.filter(item => item.event?.type === 'item').map(item => item.event.item.text);
+  const texts = (await restarted.request('session.history', { sessionId: 'r4' })).items.filter((item: Json) => item.event?.type === 'item').map((item: Json) => item.event.item.text);
   assert.ok(texts.includes('one') && !texts.includes('two'));
 });
 
@@ -350,7 +357,7 @@ test('fork: a new closed root with the cut conversation and provenance; resumabl
   assert.deepEqual(fork.session.forkedFrom, fork.forkedFrom);
   assert.deepEqual(world.native.branches[0].cutoff, { throughTurnId: first });
   assert.equal(world.native.branches[0].targetCwd, undefined);
-  const texts = (await d.request('session.history', { sessionId: 'f5' })).items.filter(item => item.event?.type === 'item').map(item => item.event.item.text);
+  const texts = (await d.request('session.history', { sessionId: 'f5' })).items.filter((item: Json) => item.event?.type === 'item').map((item: Json) => item.event.item.text);
   assert.ok(texts.includes('one') && texts.includes('answer 0') && !texts.includes('two'));
   assert.match(texts.at(-1), /Forked from/);
   // The source is unchanged.
@@ -361,7 +368,7 @@ test('fork: a new closed root with the cut conversation and provenance; resumabl
   await assert.rejects(d.request('session.fork', { sessionId: 'r5', requestId: 'f2', ifGeneration: generation, boundary: { throughTurnId: first }, newSessionId: 'f5' }), rpcError(1004, 'request_conflict'));
   // The fork opens on its own native conversation.
   await d.request('session.create', { sessionId: 'f5', spec: { cwd: world.project, persist: true }, resume: true });
-  assert.equal(world.transports.at(-1).calls.find(call => call.method === 'thread/resume').params.threadId, 'thread-branch-1');
+  assert.equal(world.transports.at(-1).calls.find((call: Json) => call.method === 'thread/resume').params.threadId, 'thread-branch-1');
   // Rewind the source, then restore the discarded branch whole as a new session.
   const rewound = await d.request('session.rewind', { sessionId: 'r5', requestId: 'r1', ifGeneration: generation, beforeTurnId: second });
   const restored = await d.request('session.fork', { sessionId: 'r5', requestId: 'f3', ifGeneration: rewound.generation, branchId: rewound.branch.branchId });
@@ -369,11 +376,11 @@ test('fork: a new closed root with the cut conversation and provenance; resumabl
   assert.equal(restored.forkedFrom.branchId, rewound.branch.branchId);
   const branchCall = world.native.branches.at(-1);
   // The branch's conversation is the one the root continued before the rewind.
-  assert.equal(branchCall.source.threadId, world.native.branches[1].source.threadId);
-  assert.deepEqual(branchCall.turns, [first, second, third]);
+  assert.equal(branchCall!.source.threadId, world.native.branches[1].source.threadId);
+  assert.deepEqual(branchCall!.turns, [first, second, third]);
   // A whole fork is cut through the last turn prepare checked, never at whatever the source ends with later.
-  assert.deepEqual(branchCall.cutoff, { throughTurnId: third });
-  const restoredTexts = (await d.request('session.history', { sessionId: restored.session.id })).items.filter(item => item.event?.type === 'item').map(item => item.event.item.text);
+  assert.deepEqual(branchCall!.cutoff, { throughTurnId: third });
+  const restoredTexts = (await d.request('session.history', { sessionId: restored.session.id })).items.filter((item: Json) => item.event?.type === 'item').map((item: Json) => item.event.item.text);
   assert.ok(restoredTexts.includes('two') && restoredTexts.includes('three'));
   await assert.rejects(d.request('session.fork', { sessionId: 'r5', requestId: 'f4', ifGeneration: rewound.generation, branchId: 'br_0000000000000000' }), rpcError(1001, 'branch_not_found'));
   // A cut before the first turn has nothing to keep; a turn of another generation is unknown here.
@@ -396,7 +403,7 @@ test('a runtime without native forks lists neither capability and refuses both m
   defer(() => client.close());
   const hello = await client.request('daemon.hello', { protocolVersion: 1 });
   assert.ok(!hello.capabilities.includes('session.fork') && !hello.capabilities.includes('session.rewind'));
-  await assert.rejects(client.request('session.rewind', { sessionId: 's', requestId: 'r', ifGeneration: 'a'.repeat(32), beforeTurnId: 't' }), error => error.code === -32601);
+  await assert.rejects(client.request('session.rewind', { sessionId: 's', requestId: 'r', ifGeneration: 'a'.repeat(32), beforeTurnId: 't' }), (error: Json) => error.code === -32601);
 });
 
 test('a commit that fails is fenced until the same rewind is sent again, in the same alpd', async t => {
@@ -420,7 +427,7 @@ test('a commit that fails is fenced until the same rewind is sent again, in the 
   assert.equal(finished.branch.beforeTurnId, second);
   assert.equal(world.native.branches.length, 1);
   await d.request('session.create', { sessionId: 'r6', spec: { cwd: world.project, persist: true }, resume: true });
-  assert.equal(world.transports.at(-1).calls.find(call => call.method === 'thread/resume').params.threadId, 'thread-fenced');
+  assert.equal(world.transports.at(-1).calls.find((call: Json) => call.method === 'thread/resume').params.threadId, 'thread-fenced');
   assert.equal((await d.request('session.prompt', { sessionId: 'r6', clientMessageId: 'after', content: [{ type: 'text', text: 'after' }] })).outcome, 'accepted');
 });
 
@@ -430,19 +437,19 @@ test('mail that would wake the root during a rewind waits, then reaches it after
   const [, second] = await conversation(d, 'r7', ['one', 'two']);
   const generation = await generationOf(d, 'r7');
   const transport = world.transports.at(-1);
-  let release;
+  let release!: (value?: unknown) => void;
   world.native.branch = () => new Promise(resolve => { release = () => resolve({ threadId: 'thread-woken' }); });
   const rewinding = d.request('session.rewind', { sessionId: 'r7', requestId: 'w1', ifGeneration: generation, beforeTurnId: second });
   await until(() => release, 'native step started');
-  const starts = transport.calls.filter(call => call.method === 'turn/start').length;
+  const starts = transport.calls.filter((call: Json) => call.method === 'turn/start').length;
   // A note from the user to the idle root wakes it, unless a rewind holds its wakes.
   await d.request('session.message', { sessionId: 'r7', text: 'a note while rewinding' });
   await new Promise(resolve => setTimeout(resolve, 50));
-  assert.equal(transport.calls.filter(call => call.method === 'turn/start').length, starts, 'the wake waits for the rewind');
+  assert.equal(transport.calls.filter((call: Json) => call.method === 'turn/start').length, starts, 'the wake waits for the rewind');
   release();
   await rewinding;
   assert.equal(world.native.rebinds.length, 1);
-  await until(() => transport.calls.filter(call => call.method === 'turn/start').length === starts + 1, 'the wake after the rebind');
+  await until(() => transport.calls.filter((call: Json) => call.method === 'turn/start').length === starts + 1, 'the wake after the rebind');
 });
 
 test('a whole fork holds the live source: a prompt waits until the runtime read it', async t => {
@@ -451,17 +458,17 @@ test('a whole fork holds the live source: a prompt waits until the runtime read 
   const [first, second] = await conversation(d, 'r8', ['one', 'two']);
   const generation = await generationOf(d, 'r8');
   const transport = world.transports.at(-1);
-  let release;
-  world.native.branch = request => new Promise(resolve => { release = () => resolve({ threadId: 'thread-whole' }); world.native.seen = request; });
+  let release!: (value?: unknown) => void;
+  world.native.branch = (request: Json) => new Promise(resolve => { release = () => resolve({ threadId: 'thread-whole' }); world.native.seen = request; });
   const forking = d.request('session.fork', { sessionId: 'r8', requestId: 'w', ifGeneration: generation });
   await until(() => release, 'native step started');
   // The whole conversation is cut through its last turn, from the turns prepare checked.
   assert.deepEqual(world.native.seen.cutoff, { throughTurnId: second });
   assert.deepEqual(world.native.seen.turns, [first, second]);
-  const starts = transport.calls.filter(call => call.method === 'turn/start').length;
+  const starts = transport.calls.filter((call: Json) => call.method === 'turn/start').length;
   const prompting = d.request('session.prompt', { sessionId: 'r8', clientMessageId: 'during', content: [{ type: 'text', text: 'during' }] });
   await new Promise(resolve => setTimeout(resolve, 50));
-  assert.equal(transport.calls.filter(call => call.method === 'turn/start').length, starts, 'the prompt waits for the fork');
+  assert.equal(transport.calls.filter((call: Json) => call.method === 'turn/start').length, starts, 'the prompt waits for the fork');
   release();
   assert.equal((await forking).forkedFrom.boundary, 'whole');
   assert.equal((await prompting).outcome, 'accepted');
@@ -472,7 +479,7 @@ test('store.rewind keeps the lines after the marker in cursor order', async t =>
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-rewind-store-'));
   defer(() => rm(directory, { recursive: true, force: true }));
   const store = createStore(directory);
-  const e = (cursor, event, sessionId = 'root') => ({ sessionId, epoch: 'e', seq: cursor, ts: 't', cursor, event });
+  const e = (cursor: number, event: Json, sessionId = 'root') => ({ sessionId, epoch: 'e', seq: cursor, ts: 't', cursor, event });
   for (const envelope of [
     e(1, { type: 'item', item: { kind: 'user_message', id: 'u1', text: 'one' } }),
     e(2, { type: 'item', item: { kind: 'user_message', id: 'u2', text: 'two' } }),
@@ -505,7 +512,7 @@ test('a repeat of an older committed rewind does not lift the fence of a newer o
   // Two more turns on the rewound conversation, then a rewind whose commit fails.
   await d.request('session.create', { sessionId: 'r9', spec: { cwd: world.project, persist: true }, resume: true }).catch(() => {});
   const transport = world.transports.at(-1);
-  const turns = [];
+  const turns: Json[] = [];
   for (const text of ['three', 'four']) {
     await d.request('session.prompt', { sessionId: 'r9', clientMessageId: `r9-${text}`, content: [{ type: 'text', text }] });
     await until(() => transport.turnId && !turns.includes(transport.turnId), 'turn');
@@ -533,13 +540,13 @@ test('a fork that does not keep the latest turn holds nothing: prompts to the so
   const [, second] = await conversation(d, 'r10', ['one', 'two']);
   const generation = await generationOf(d, 'r10');
   const transport = world.transports.at(-1);
-  let release;
+  let release!: (value?: unknown) => void;
   world.native.branch = () => new Promise(resolve => { release = () => resolve({ threadId: 'thread-before' }); });
   const forking = d.request('session.fork', { sessionId: 'r10', requestId: 'b', ifGeneration: generation, boundary: { beforeTurnId: second } });
   await until(() => release, 'native step started');
-  const starts = transport.calls.filter(call => call.method === 'turn/start').length;
+  const starts = transport.calls.filter((call: Json) => call.method === 'turn/start').length;
   assert.equal((await d.request('session.prompt', { sessionId: 'r10', clientMessageId: 'free', content: [{ type: 'text', text: 'free' }] })).outcome, 'accepted');
-  assert.equal(transport.calls.filter(call => call.method === 'turn/start').length, starts + 1);
+  assert.equal(transport.calls.filter((call: Json) => call.method === 'turn/start').length, starts + 1);
   release();
   assert.equal((await forking).forkedFrom.boundary, 'before');
 });
@@ -564,7 +571,7 @@ test('reload: the same id, thread, history and receipts in a new process; a repe
   assert.equal(result.session.threadId, before.threadId);
   for (const key of ['model', 'mode', 'thinking', 'agent', 'runtime', 'projectRoot']) assert.equal(result.session[key], before[key], key);
   assert.equal(world.transports.length, processes + 1, 'one new native process');
-  assert.deepEqual(world.transports.at(-1).calls.filter(call => call.method.startsWith('thread/')).map(call => [call.method, call.params.threadId]), [['thread/resume', before.threadId]]);
+  assert.deepEqual(world.transports.at(-1).calls.filter((call: Json) => call.method.startsWith('thread/')).map((call: Json) => [call.method, call.params.threadId]), [['thread/resume', before.threadId]]);
   // History is untouched: same generation, same envelopes.
   assert.equal(await generationOf(d, 'rl'), generation);
   const after = await d.request('session.history', { sessionId: 'rl', limit: 50 });
@@ -580,8 +587,8 @@ test('reload: the same id, thread, history and receipts in a new process; a repe
   // The next prompt continues the same conversation in the new process.
   const transport = world.transports.at(-1);
   await d.request('session.prompt', { sessionId: 'rl', clientMessageId: 'rl-m2', content: [{ type: 'text', text: 'three' }] });
-  await until(() => transport.calls.some(call => call.method === 'turn/start'), 'turn in the new process');
-  assert.equal(transport.calls.find(call => call.method === 'turn/start').params.threadId, before.threadId);
+  await until(() => transport.calls.some((call: Json) => call.method === 'turn/start'), 'turn in the new process');
+  assert.equal(transport.calls.find((call: Json) => call.method === 'turn/start').params.threadId, before.threadId);
   // The generation is the precondition of the first request only (as for a rewind): a repeat answers its result.
   assert.equal((await d.request('session.reload', { sessionId: 'rl', requestId: 'reload-1', ifGeneration: 'f'.repeat(32) })).duplicate, true);
   assert.equal(world.native.reloads.length, 1);
@@ -600,7 +607,7 @@ test('reload refusals record nothing: stale view, no conversation yet, a busy tr
   // A running turn.
   const transport = world.transports.at(-1);
   await d.request('session.prompt', { sessionId: 'rb', clientMessageId: 'rb-busy', content: [{ type: 'text', text: 'busy' }] });
-  await until(() => transport.turnId === 'turn-0-2' || transport.calls.filter(call => call.method === 'turn/start').length === 2, 'second turn');
+  await until(() => transport.turnId === 'turn-0-2' || transport.calls.filter((call: Json) => call.method === 'turn/start').length === 2, 'second turn');
   await assert.rejects(d.request('session.reload', { sessionId: 'rb', requestId: 'x4', ifGeneration: generation }), rpcError(1004, 'session_busy'));
   transport.finish();
   await until(async () => !(await d.request('session.get', { sessionId: 'rb' })).session.activeTurnId, 'turn ended');
@@ -629,7 +636,7 @@ test('a reload whose new process cannot resume answers native_refused; the root 
   const generation = await generationOf(d, 'rf');
   world.transports.at(-1);
   const failing = world.transports.length;
-  world.native.reload = (sessionId, reload) => {
+  world.native.reload = (sessionId: string, reload: Json) => {
     // The next process refuses to resume, as a Claude CLI does for a missing transcript.
     const index = world.transports.length;
     const watch = setInterval(() => {
@@ -637,7 +644,7 @@ test('a reload whose new process cannot resume answers native_refused; the root 
       if (!next || next.patched) return;
       next.patched = true;
       const request = next.request.bind(next);
-      next.request = async (method, params) => { if (method === 'thread/resume') throw new Error(`no rollout found for thread id ${params.threadId}`); return request(method, params); };
+      next.request = async (method: string, params: Json) => { if (method === 'thread/resume') throw new Error(`no rollout found for thread id ${params.threadId}`); return request(method, params); };
     }, 0);
     return reload(sessionId).finally(() => clearInterval(watch));
   };
@@ -645,7 +652,7 @@ test('a reload whose new process cannot resume answers native_refused; the root 
   const original = world.transports.push;
   world.transports.push = function (transport) {
     const request = transport.request.bind(transport);
-    if (this.length === failing) transport.request = async (method, params) => { if (method === 'thread/resume') throw new Error(`no rollout found for thread id ${params.threadId}`); return request(method, params); };
+    if (this.length === failing) transport.request = async (method: string, params: Json) => { if (method === 'thread/resume') throw new Error(`no rollout found for thread id ${params.threadId}`); return request(method, params); };
     return original.call(this, transport);
   };
   await assert.rejects(d.request('session.reload', { sessionId: 'rf', requestId: 'f1', ifGeneration: generation }), rpcError(1005, 'native_refused'));
@@ -659,7 +666,7 @@ test('a reload whose new process cannot resume answers native_refused; the root 
   await assert.rejects(d.request('session.reload', { sessionId: 'rf', requestId: 'f1', ifGeneration: generation }), rpcError(1005, 'native_refused'));
   await d.request('session.create', { sessionId: 'rf', spec: { cwd: d.project }, resume: true });
   const reopened = world.transports.at(-1);
-  assert.deepEqual(reopened.calls.filter(call => call.method.startsWith('thread/')).map(call => [call.method, call.params.threadId]), [['thread/resume', threadId]]);
+  assert.deepEqual(reopened.calls.filter((call: Json) => call.method.startsWith('thread/')).map((call: Json) => [call.method, call.params.threadId]), [['thread/resume', threadId]]);
   const result = await d.request('session.reload', { sessionId: 'rf', requestId: 'f2', ifGeneration: await generationOf(d, 'rf') });
   assert.equal(result.session.threadId, threadId);
 });
@@ -685,21 +692,21 @@ test('a prompt sent during a reload waits for it, then reaches the new process',
   const d = { ...await world.start(), ...world };
   await conversation(d, 'rw', ['one']);
   const generation = await generationOf(d, 'rw');
-  let finish;
+  let finish!: (value?: unknown) => void;
   const gate = new Promise(resolve => { finish = resolve; });
-  world.native.reload = async (sessionId, reload) => { await gate; return reload(sessionId); };
+  world.native.reload = async (sessionId: string, reload: Json) => { await gate; return reload(sessionId); };
   const reloading = d.request('session.reload', { sessionId: 'rw', requestId: 'w1', ifGeneration: generation });
   await until(() => world.native.reloads.length === 1, 'reload started');
   const old = world.transports.at(-1);
   const prompt = d.request('session.prompt', { sessionId: 'rw', clientMessageId: 'rw-late', content: [{ type: 'text', text: 'late' }] });
   await new Promise(resolve => setTimeout(resolve, 30));
-  assert.equal(old.calls.filter(call => call.method === 'turn/start').length, 1, 'the prompt waits');
+  assert.equal(old.calls.filter((call: Json) => call.method === 'turn/start').length, 1, 'the prompt waits');
   finish();
   await reloading;
   await prompt;
   const fresh = world.transports.at(-1);
   assert.notEqual(fresh, old);
-  await until(() => fresh.calls.some(call => call.method === 'turn/start'), 'delivered to the new process');
+  await until(() => fresh.calls.some((call: Json) => call.method === 'turn/start'), 'delivered to the new process');
 });
 
 test('mail that wakes the root while a reload reads its history waits for the new process; the reload is not refused busy', async t => {
@@ -724,10 +731,10 @@ test('mail that wakes the root while a reload reads its history waits for the ne
   assert.ok(sent, 'the mail went out during prepare');
   assert.equal(result.session.id, 'rm');
   assert.equal(world.native.reloads.length, 1);
-  assert.equal(old.calls.filter(call => call.method === 'turn/start').length, 1, 'no wake turn on the old process');
+  assert.equal(old.calls.filter((call: Json) => call.method === 'turn/start').length, 1, 'no wake turn on the old process');
   const fresh = world.transports.at(-1);
   assert.notEqual(fresh, old);
-  await until(() => fresh.calls.some(call => call.method === 'turn/start'), 'the mail wakes the new process');
+  await until(() => fresh.calls.some((call: Json) => call.method === 'turn/start'), 'the mail wakes the new process');
 });
 
 test('mail that wakes the root while a rewind reads its timeline waits for the rebind; the cut is not run over by a wake turn', async t => {
@@ -736,7 +743,7 @@ test('mail that wakes the root while a rewind reads its timeline waits for the r
   const [, second] = await conversation(d, 'rw', ['one', 'two']);
   const generation = await generationOf(d, 'rw');
   const transport = world.transports.at(-1);
-  const starts = transport.calls.filter(call => call.method === 'turn/start').length;
+  const starts = transport.calls.filter((call: Json) => call.method === 'turn/start').length;
   // The read answers what the store held when it began; a session.message from another client lands before
   // it resolves, between the idle check and the end of prepare.
   const timeline = d.store.timeline.bind(d.store);
@@ -752,7 +759,7 @@ test('mail that wakes the root while a rewind reads its timeline waits for the r
   };
   let during;
   world.native.branch = () => {
-    during = { starts: transport.calls.filter(call => call.method === 'turn/start').length, active: d.runtime.snapshot('rw')?.activeTurnId };
+    during = { starts: transport.calls.filter((call: Json) => call.method === 'turn/start').length, active: d.runtime.snapshot('rw')?.activeTurnId };
     return { threadId: 'thread-after-wake' };
   };
   const result = await d.request('session.rewind', { sessionId: 'rw', requestId: 'rw1', ifGeneration: generation, beforeTurnId: second });
@@ -761,7 +768,7 @@ test('mail that wakes the root while a rewind reads its timeline waits for the r
   assert.equal(result.session.id, 'rw');
   assert.deepEqual(during, { starts, active: undefined }, 'no wake turn while the runtime cut the conversation');
   assert.equal(world.native.rebinds.length, 1);
-  await until(() => transport.calls.filter(call => call.method === 'turn/start').length === starts + 1, 'the mail wakes the root after the rebind');
+  await until(() => transport.calls.filter((call: Json) => call.method === 'turn/start').length === starts + 1, 'the mail wakes the root after the rebind');
 });
 
 test('mail that wakes the source while a whole fork re-reads its timeline waits for the fork; the cut is not run over by a wake turn', async t => {
@@ -770,7 +777,7 @@ test('mail that wakes the source while a whole fork re-reads its timeline waits 
   const [first, second] = await conversation(d, 'fw', ['one', 'two']);
   const generation = await generationOf(d, 'fw');
   const transport = world.transports.at(-1);
-  const starts = transport.calls.filter(call => call.method === 'turn/start').length;
+  const starts = transport.calls.filter((call: Json) => call.method === 'turn/start').length;
   // The second read is the one after the prompt hold; the mail lands before it resolves.
   const timeline = d.store.timeline.bind(d.store);
   let reads = 0;
@@ -785,8 +792,8 @@ test('mail that wakes the source while a whole fork re-reads its timeline waits 
     return read;
   };
   let during;
-  world.native.branch = request => {
-    during = { starts: transport.calls.filter(call => call.method === 'turn/start').length, active: d.runtime.snapshot('fw')?.activeTurnId, turns: request.turns };
+  world.native.branch = (request: Json) => {
+    during = { starts: transport.calls.filter((call: Json) => call.method === 'turn/start').length, active: d.runtime.snapshot('fw')?.activeTurnId, turns: request.turns };
     return { threadId: 'thread-fork-wake' };
   };
   const result = await d.request('session.fork', { sessionId: 'fw', requestId: 'fw1', ifGeneration: generation });
@@ -794,7 +801,7 @@ test('mail that wakes the source while a whole fork re-reads its timeline waits 
   assert.ok(sent, 'the mail went out during prepare');
   assert.equal(result.forkedFrom.boundary, 'whole');
   assert.deepEqual(during, { starts, active: undefined, turns: [first, second] }, 'no wake turn while the runtime read the source');
-  await until(() => transport.calls.filter(call => call.method === 'turn/start').length === starts + 1, 'the mail wakes the source after the fork');
+  await until(() => transport.calls.filter((call: Json) => call.method === 'turn/start').length === starts + 1, 'the mail wakes the source after the fork');
 });
 
 test('a turn that began during prepare anyway (a runtime whose hold keeps nothing back) is refused busy before prepared; the same request goes through later', async t => {
@@ -807,7 +814,7 @@ test('a turn that began during prepare anyway (a runtime whose hold keeps nothin
   const timeline = d.store.timeline.bind(d.store);
   const woken = new Set();
   const counts = new Map();
-  const wakeAt = { rh: 1, fh: 2 };
+  const wakeAt: Record<string, number> = { rh: 1, fh: 2 };
   d.store.timeline = async sessionId => {
     const read = await timeline(sessionId);
     counts.set(sessionId, (counts.get(sessionId) ?? 0) + 1);
@@ -826,7 +833,7 @@ test('a turn that began during prepare anyway (a runtime whose hold keeps nothin
   assert.equal(world.native.branches.length, 0, 'the runtime cut nothing');
   // The refusals recorded nothing: once the wake turns end, the same requests go through.
   for (const root of ['rh', 'fh']) {
-    const transport = world.transports.find(candidate => candidate.turnId === d.runtime.snapshot(root).activeTurnId);
+    const transport = world.transports.find(candidate => candidate.turnId === d.runtime.snapshot(root)!.activeTurnId);
     transport.finish('woken');
     await until(async () => !(await d.request('session.get', { sessionId: root })).session.activeTurnId, `the wake turn of ${root} ended`);
   }
@@ -840,8 +847,8 @@ test('a turn that began during prepare anyway (a runtime whose hold keeps nothin
 });
 
 /** Makes the next turn/start of `transport` wait until the returned function is called. */
-function gateStart(transport) {
-  let open;
+function gateStart(transport: Json) {
+  let open!: (value?: unknown) => void;
   transport.hold = new Promise(resolve => { open = resolve; });
   return () => { transport.hold = undefined; open(); };
 }
@@ -851,14 +858,14 @@ test('a whole fork refuses while a mail wake of the source is starting its turn 
   const d = { ...await world.start(), ...world };
   const [first, second] = await conversation(d, 'fs', ['one', 'two']);
   const transport = world.transports.at(-1);
-  const starts = transport.calls.filter(call => call.method === 'turn/start').length;
+  const starts = transport.calls.filter((call: Json) => call.method === 'turn/start').length;
   const open = gateStart(transport);
   const fork = { sessionId: 'fs', requestId: 'fs1' };
   // Opened however the checks end: a turn/start left waiting would keep the runtime from shutting down.
   try {
     await d.request('session.message', { sessionId: 'fs', text: 'mail before the fork' });
-    await until(() => transport.calls.filter(call => call.method === 'turn/start').length === starts + 1, 'the wake sent turn/start');
-    assert.equal(d.runtime.snapshot('fs').activeTurnId, undefined, 'no turn id yet');
+    await until(() => transport.calls.filter((call: Json) => call.method === 'turn/start').length === starts + 1, 'the wake sent turn/start');
+    assert.equal(d.runtime.snapshot('fs')!.activeTurnId, undefined, 'no turn id yet');
     await assert.rejects(d.request('session.fork', { ...fork, ifGeneration: await generationOf(d, 'fs') }), rpcError(1004, 'turn_in_progress'));
     assert.equal(world.native.branches.length, 0, 'the runtime read nothing while the wake turn started');
   } finally { open(); }
@@ -876,7 +883,7 @@ test('a whole fork refuses while a mail wake of the source is starting its turn 
 test('a wake still starting its turn when prepare ends (a runtime whose hold keeps nothing back) is refused busy before prepared: rewind, whole fork, reload', async t => {
   const world = await setup(t);
   const d = { ...await world.start(), ...world };
-  const transports = {};
+  const transports: Record<string, Json> = {};
   const [, second] = await conversation(d, 'rp', ['one', 'two']);
   transports.rp = world.transports.at(-1);
   await conversation(d, 'fp', ['one', 'two']);
@@ -889,16 +896,16 @@ test('a wake still starting its turn when prepare ends (a runtime whose hold kee
   const timeline = d.store.timeline.bind(d.store);
   const opens = new Map();
   const counts = new Map();
-  const wakeAt = { rp: 1, fp: 2, lp: 1 };
+  const wakeAt: Record<string, number> = { rp: 1, fp: 2, lp: 1 };
   d.store.timeline = async sessionId => {
     const read = await timeline(sessionId);
     counts.set(sessionId, (counts.get(sessionId) ?? 0) + 1);
     if (!(sessionId in wakeAt) || opens.has(sessionId) || counts.get(sessionId) < wakeAt[sessionId]) return read;
     const transport = transports[sessionId];
-    const starts = transport.calls.filter(call => call.method === 'turn/start').length;
+    const starts = transport.calls.filter((call: Json) => call.method === 'turn/start').length;
     opens.set(sessionId, gateStart(transport));
     await d.request('session.message', { sessionId, text: `mail during ${sessionId}` });
-    await until(() => transport.calls.filter(call => call.method === 'turn/start').length === starts + 1, `the wake of ${sessionId} sent turn/start`);
+    await until(() => transport.calls.filter((call: Json) => call.method === 'turn/start').length === starts + 1, `the wake of ${sessionId} sent turn/start`);
     return read;
   };
   const cases = [
@@ -916,7 +923,7 @@ test('a wake still starting its turn when prepare ends (a runtime whose hold kee
       try {
         await assert.rejects(d.request(method, { ...params, ifGeneration: await generationOf(d, root) }), rpcError(1004, 'session_busy'), method);
         assert.ok(opens.has(root), `the mail went out during the ${method} prepare`);
-        assert.equal(d.runtime.snapshot(root).activeTurnId, undefined, `the wake of ${root} has no turn id when refused`);
+        assert.equal(d.runtime.snapshot(root)!.activeTurnId, undefined, `the wake of ${root} has no turn id when refused`);
       } finally { opens.get(root)?.(); }
       await until(() => d.runtime.snapshot(root)?.activeTurnId, `the wake turn of ${root} started`);
       transports[root].finish('woken');
@@ -945,32 +952,32 @@ test('a parked source resumed while a whole fork reads it stays parked until the
   const d = { ...await world.start(), ...world };
   const [first, second] = await conversation(d, 'pf', ['one', 'two']);
   const transport = world.transports.at(-1);
-  const kind = d.runtime.snapshot('pf').runtime;
+  const kind = d.runtime.snapshot('pf')!.runtime;
   // A root parked while its runtime is paused (as alpd's recovery parks one); a whole fork may read it.
   d.runtime.pause({ runtime: kind });
   await d.runtime.recover('pf', { continueRoot: true });
-  assert.ok(d.runtime.snapshot('pf').parked, 'the source is parked');
-  const starts = transport.calls.filter(call => call.method === 'turn/start').length;
-  let release;
+  assert.ok(d.runtime.snapshot('pf')!.parked, 'the source is parked');
+  const starts = transport.calls.filter((call: Json) => call.method === 'turn/start').length;
+  let release!: (value?: unknown) => void;
   let during;
-  world.native.branch = request => new Promise(resolve => { release = () => resolve({ threadId: 'thread-fork-parked', turns: request.turns }); });
+  world.native.branch = (request: Json) => new Promise(resolve => { release = () => resolve({ threadId: 'thread-fork-parked', turns: request.turns }); });
   const forking = d.request('session.fork', { sessionId: 'pf', requestId: 'pf1', ifGeneration: await generationOf(d, 'pf') });
   // Released however the checks end, so the fork and the runtime can finish.
   try {
     await until(() => release, 'the runtime reads the source');
     // The runtime is resumed while the fork reads: unheld, the parked source continues in a new turn here.
     d.runtime.resume({ runtime: kind });
-    await within(500, () => transport.calls.filter(call => call.method === 'turn/start').length > starts);
-    during = { starts: transport.calls.filter(call => call.method === 'turn/start').length, parked: !!d.runtime.snapshot('pf').parked };
+    await within(500, () => transport.calls.filter((call: Json) => call.method === 'turn/start').length > starts);
+    during = { starts: transport.calls.filter((call: Json) => call.method === 'turn/start').length, parked: !!d.runtime.snapshot('pf')!.parked };
   } finally { release?.(); }
   const result = await forking;
   assert.equal(result.forkedFrom.boundary, 'whole');
   assert.deepEqual(world.native.branches.map(request => request.turns), [[first, second]]);
   assert.deepEqual(during, { starts, parked: true }, 'the source stayed parked while the runtime read it');
   // Not dropped: once the fork lets go of the source, it continues where it stopped.
-  await until(() => transport.calls.filter(call => call.method === 'turn/start').length === starts + 1, 'the source continues after the fork');
-  assert.match(JSON.stringify(transport.calls.filter(call => call.method === 'turn/start').at(-1).params), /alpd restarted during your turn.*Continue the user's request/);
-  assert.equal(d.runtime.snapshot('pf').parked, undefined);
+  await until(() => transport.calls.filter((call: Json) => call.method === 'turn/start').length === starts + 1, 'the source continues after the fork');
+  assert.match(JSON.stringify(transport.calls.filter((call: Json) => call.method === 'turn/start').at(-1).params), /alpd restarted during your turn.*Continue the user's request/);
+  assert.equal(d.runtime.snapshot('pf')!.parked, undefined);
 });
 
 for (const operation of ['fork', 'rewind', 'reload']) {
@@ -1024,7 +1031,7 @@ for (const replay of [false, true]) {
     const generation = await generationOf(d, 'handover');
     const before = await d.open();
     await before.request('session.attach', { sessionId: 'handover', replay: false, generation });
-    let release;
+    let release!: (value?: unknown) => void;
     const gate = new Promise(resolve => { release = resolve; });
     defer(release);
     let entered = false;
@@ -1049,7 +1056,7 @@ for (const replay of [false, true]) {
     await stale;
     await before.request('daemon.status');
     await during.request('daemon.status');
-    const markers = events => events.filter(e => e.event.type === 'item' && e.event.item.id === `rewind:${rewound.branch.branchId}`);
+    const markers = (events: Json[]) => events.filter((e: Json) => e.event.type === 'item' && e.event.item.id === `rewind:${rewound.branch.branchId}`);
     assert.equal(markers(before.events).length, 1, 'an already attached viewer receives one live marker');
     const marker = markers(before.events)[0];
     assert.ok(result.cursor >= marker.cursor, 'attach response includes the reserved marker in its tip');
@@ -1075,7 +1082,7 @@ test('rewind attach handover rereads history if a rewind finishes during the att
   const generation = await generationOf(d, 'read-race');
   // A closed root has no in-memory replay coverage, so attach reads the durable timeline.
   await d.request('session.close', { sessionId: 'read-race' });
-  let release;
+  let release!: (value?: unknown) => void;
   const gate = new Promise(resolve => { release = resolve; });
   defer(release);
   let entered = false;
@@ -1103,7 +1110,7 @@ test('rewind attach handover releases queued attaches on commit failure and repl
   const d = { ...await world.start(), ...world };
   const [, second] = await conversation(d, 'failed-handover', ['one', 'two']);
   const generation = await generationOf(d, 'failed-handover');
-  let release;
+  let release!: (value?: unknown) => void;
   const gate = new Promise(resolve => { release = resolve; });
   defer(release);
   let entered = false;
@@ -1138,7 +1145,7 @@ test('rewind attach handover revalidates generation if rewind finishes during th
   const d = { ...await world.start(), ...world };
   const [, second] = await conversation(d, 'checkpoint-race', ['one', 'two']);
   const generation = await generationOf(d, 'checkpoint-race');
-  let release;
+  let release!: (value?: unknown) => void;
   const gate = new Promise(resolve => { release = resolve; });
   defer(release);
   let entered = false;
@@ -1211,7 +1218,7 @@ test('fork marker loss replays continuation without replacing later target histo
   const generation = await generationOf(d, params.newSessionId);
   // Force the last viewer's disconnect to reap the idle target during stop's
   // pre-close flush. Otherwise server.close can win and suppress the close event.
-  let releaseClose;
+  let releaseClose!: (value?: unknown) => void;
   const closeGate = new Promise(resolve => { releaseClose = resolve; });
   defer(releaseClose);
   const close = transport.close;
@@ -1230,7 +1237,7 @@ test('fork marker loss replays continuation without replacing later target histo
   await d.stop();
   await d.store.flush();
   const timeline = await d.store.timeline(params.newSessionId);
-  assert.equal(timeline.at(-1).event.type, 'session.closed', 'disconnect closure is committed before the restart baseline');
+  assert.equal(timeline.at(-1)!.event.type, 'session.closed', 'disconnect closure is committed before the restart baseline');
   const restarted = await world.start();
   assert.equal((await restarted.request('session.get', { sessionId: params.newSessionId })).session.title, 'later target title');
   assert.equal(await generationOf(restarted, params.newSessionId), generation);
@@ -1251,8 +1258,8 @@ test('legacy applied rewind with newer journal evidence preserves the later thre
   const generation = await generationOf(d, params.sessionId);
   await d.stop();
   const record = await d.store.get(params.sessionId);
-  delete record.lifecycleCommits;
-  await d.store.put(record);
+  delete record!.lifecycleCommits;
+  await d.store.put(record!);
   delete old.attemptId;
   await writeFile(path.join(world.state, 'lifecycle', `${old.key}.json`), JSON.stringify(old));
   const restarted = await world.start();
@@ -1280,7 +1287,7 @@ for (const startupOnly of [false, true]) test(`fork marker loss: genuine target 
   t.mock.timers.setTime(Date.now() + 31 * 24 * 60 * 60 * 1000);
   if (startupOnly) {
     const restarted = await world.start();
-    await assert.rejects(restarted.request('session.get', { sessionId: params.newSessionId }), error => error.code === 1001);
+    await assert.rejects(restarted.request('session.get', { sessionId: params.newSessionId }), (error: Json) => error.code === 1001);
     assert.equal(world.native.branches.length, 1);
     assert.deepEqual(await restarted.store.timeline(params.newSessionId), []);
     return;
@@ -1291,7 +1298,7 @@ for (const startupOnly of [false, true]) test(`fork marker loss: genuine target 
   assert.equal(JSON.parse(await readFile(path.join(world.state, 'lifecycle', `${applied.key}.json`), 'utf8')).state, 'applied');
   await d.stop();
   const restarted = await world.start();
-  await assert.rejects(restarted.request('session.get', { sessionId: params.newSessionId }), error => error.code === 1001);
+  await assert.rejects(restarted.request('session.get', { sessionId: params.newSessionId }), (error: Json) => error.code === 1001);
   assert.equal(await restarted.store.get(params.newSessionId), undefined, 'no recreated target record');
   assert.deepEqual(await restarted.store.timeline(params.newSessionId), [], 'no recreated history');
   assert.equal(world.native.branches.length, 1, 'no second native fork');
@@ -1313,12 +1320,12 @@ test('fork unfinished source witness write: retention keeps both dependencies an
   };
   await assert.rejects(d.request('session.fork', params), rpcError(1000, 'persistence_failed'));
   assert.ok(await d.store.get(params.newSessionId), 'target record already committed');
-  assert.equal((await d.store.get(params.sessionId)).lifecycleCommits, undefined, 'in-memory witness is not persisted proof');
+  assert.equal((await d.store.get(params.sessionId))!.lifecycleCommits, undefined, 'in-memory witness is not persisted proof');
   t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   t.mock.timers.setTime(Date.now() + 31 * 24 * 60 * 60 * 1000);
   // An unrelated old closed root proves startup retention actually runs.
   const other = await d.store.get(params.newSessionId);
-  await put({ ...other, id: 'unrelated-old', rootId: 'unrelated-old' });
+  await put({ ...other!, id: 'unrelated-old', rootId: 'unrelated-old' });
   // Put the disposable control outside the restore grace window too.
   const { utimes } = await import('node:fs/promises');
   const old = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
@@ -1345,18 +1352,18 @@ for (const targetKind of ['missing', 'owned', 'unrelated', 'wrong-attempt']) tes
   const entry = await restore();
   await d.stop();
   const source = await d.store.get(params.sessionId);
-  delete source.lifecycleCommits;
-  await d.store.put(source);
+  delete source!.lifecycleCommits;
+  await d.store.put(source!);
   if (targetKind !== 'wrong-attempt') delete entry.plan.recoveryVersion;
   await writeFile(path.join(world.state, 'lifecycle', `${entry.key}.json`), JSON.stringify(entry));
   const target = await d.store.get(params.newSessionId);
   const history = await d.store.timeline(params.newSessionId);
-  if (targetKind === 'wrong-attempt') target.forkAttempt.attemptId = 'unrelated-attempt';
-  else delete target.forkAttempt;
+  if (targetKind === 'wrong-attempt') target!.forkAttempt!.attemptId = 'unrelated-attempt';
+  else delete target!.forkAttempt;
   if (targetKind === 'missing') await d.store.remove(params.newSessionId, [params.newSessionId]);
   else {
-    if (targetKind === 'unrelated') delete target.forkedFrom;
-    await d.store.put(target);
+    if (targetKind === 'unrelated') delete target!.forkedFrom;
+    await d.store.put(target!);
   }
   const restarted = await world.start();
   if (targetKind === 'owned') {
@@ -1378,7 +1385,7 @@ test('fork request key reused after real pruning cannot adopt an old source witn
   const restore = failCommittedMarker(d.store, world.state, params.requestId);
   await d.request('session.fork', params);
   const entry = await restore();
-  const previous = (await d.store.get(params.sessionId)).lifecycleCommits[entry.key];
+  const previous = (await d.store.get(params.sessionId))!.lifecycleCommits![entry.key];
   assert.equal((await d.request('session.fork', params)).duplicate, true, 'repair terminal marker');
   t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
   t.mock.timers.setTime(Date.now() + 31 * 24 * 60 * 60 * 1000);
@@ -1387,9 +1394,9 @@ test('fork request key reused after real pruning cannot adopt an old source witn
   const created = await d.request('session.fork', params);
   assert.equal(created.duplicate, undefined, 'new attempt is not historical success');
   assert.equal(world.native.branches.length, 2);
-  const next = (await d.store.get(params.sessionId)).lifecycleCommits[entry.key];
+  const next = (await d.store.get(params.sessionId))!.lifecycleCommits![entry.key];
   assert.notEqual(next.attemptId, previous.attemptId);
-  assert.equal((await d.store.get(params.newSessionId)).forkAttempt.attemptId, next.attemptId);
+  assert.equal((await d.store.get(params.newSessionId))!.forkAttempt!.attemptId, next.attemptId);
 });
 
 test('concurrent forks from two different sources with same explicit newSessionId: reservation and partial failure recovery', async t => {
@@ -1401,12 +1408,12 @@ test('concurrent forks from two different sources with same explicit newSessionI
   const genB = await generationOf(d, 'source-b');
   const targetId = 'contested-fork-target';
 
-  let releaseA;
+  let releaseA!: (value?: unknown) => void;
   const holdA = new Promise(resolve => { releaseA = resolve; });
   let branchACalled = false;
   let branchBCalled = false;
 
-  world.native.branch = async request => {
+  world.native.branch = async (request: Json) => {
     if (request.turns.includes(turnA)) {
       branchACalled = true;
       await holdA;
@@ -1462,7 +1469,7 @@ test('concurrent forks from two different sources with same explicit newSessionI
   // Partial failure recovery: if a fork fails before commit, reservation is cleanly released
   const recoverableTarget = 'recoverable-target';
   let failBranch = true;
-  world.native.branch = async request => {
+  world.native.branch = async (request: Json) => {
     if (failBranch) throw new Error('simulated native branch failure');
     return { threadId: `thread-branch-${++world.native.next}` };
   };
@@ -1541,7 +1548,7 @@ for (const [restart, state] of [[false, 'applied'], [true, 'applied'], [true, 'p
   }
   const result = await d.request('session.fork', a);
   assert.equal(result.forkedFrom.sessionId, a.sessionId);
-  assert.equal((await d.store.get(a.newSessionId)).forkedFrom.sessionId, a.sessionId);
+  assert.equal((await d.store.get(a.newSessionId))!.forkedFrom!.sessionId, a.sessionId);
   assert.equal(world.native.branches.length, 1, 'retry commits the existing native fork');
 });
 
@@ -1565,11 +1572,11 @@ test('session.commands: the runtime\'s commands its team settings name, then the
   await d.request('session.create', { sessionId: 'sd', spec: { cwd: d.project, persist: true } });
   d.transports.at(-1).commands = runtimeCommands;
   const plain = (await d.request('session.commands', { sessionId: 'sd' })).commands;
-  assert.deepEqual(plain.map(command => command.name), ['alp:xia', ...['architecture-docs', 'bug-loop', 'compact', 'curate', 'feature-architecture', 'goal-griller', 'prompt-leverage', 'release-readiness', 'safe-refactor', 'security-review', 'sequence-execution-plan', 'skill-authoring', 'smart-commits', 'test-strategy'].map(name => `alp:${name}`)]);
+  assert.deepEqual(plain.map((command: Json) => command.name), ['alp:xia', ...['architecture-docs', 'bug-loop', 'compact', 'curate', 'feature-architecture', 'goal-griller', 'prompt-leverage', 'release-readiness', 'safe-refactor', 'security-review', 'sequence-execution-plan', 'skill-authoring', 'smart-commits', 'test-strategy'].map(name => `alp:${name}`)]);
   // team.<team>.main.commands in .alp/settings.json names the runtime's commands the list offers too.
   const settingsFile = path.join(d.project, '.alp', 'settings.json');
   const settings = JSON.parse(await readFile(settingsFile, 'utf8'));
-  for (const team of Object.values(settings.team)) if (team.main) team.main.commands = ['compact'];
+  for (const team of Object.values(settings.team) as Json[]) if (team.main) team.main.commands = ['compact'];
   await writeFile(settingsFile, JSON.stringify(settings));
   await d.request('session.create', { sessionId: 'sc', spec: { cwd: d.project, persist: true } });
   const transport = d.transports.at(-1);
@@ -1577,12 +1584,12 @@ test('session.commands: the runtime\'s commands its team settings name, then the
   const { commands } = await d.request('session.commands', { sessionId: 'sc' });
   validateResult('session.commands', { commands });
   assert.deepEqual(commands[0], { name: 'compact', description: 'Clear history', argumentHint: '<what>', kind: 'command' });
-  assert.equal(commands.filter(command => command.name === 'compact').length, 1);
-  assert.ok(!commands.some(command => command.name === 'bad name'));
+  assert.equal(commands.filter((command: Json) => command.name === 'compact').length, 1);
+  assert.ok(!commands.some((command: Json) => command.name === 'bad name'));
   const skills = commands.slice(1);
-  assert.deepEqual(skills.map(command => command.name), ['architecture-docs', 'bug-loop', 'compact', 'curate', 'feature-architecture', 'goal-griller', 'prompt-leverage', 'release-readiness', 'safe-refactor', 'security-review', 'sequence-execution-plan', 'skill-authoring', 'smart-commits', 'test-strategy', 'xia'].map(name => `alp:${name}`), 'main\'s ALP skills, as Claude names them');
-  assert.ok(skills.every(command => command.description.length > 0));
-  assert.ok(skills.every(command => command.kind === 'skill' && !command.description.includes('/SKILL.md')));
+  assert.deepEqual(skills.map((command: Json) => command.name), ['architecture-docs', 'bug-loop', 'compact', 'curate', 'feature-architecture', 'goal-griller', 'prompt-leverage', 'release-readiness', 'safe-refactor', 'security-review', 'sequence-execution-plan', 'skill-authoring', 'smart-commits', 'test-strategy', 'xia'].map(name => `alp:${name}`), 'main\'s ALP skills, as Claude names them');
+  assert.ok(skills.every((command: Json) => command.description.length > 0));
+  assert.ok(skills.every((command: Json) => command.kind === 'skill' && !command.description.includes('/SKILL.md')));
   transport.commands = async () => { throw new Error('runtime gone'); };
   const fallback = await d.request('session.commands', { sessionId: 'sc' });
   assert.deepEqual(fallback.commands, skills, 'a runtime that cannot answer still leaves the skills');
@@ -1597,19 +1604,19 @@ test('a user prompt "/<skill> ..." reaches Codex with that skill as a skill inpu
   const d = { ...await world.start({ libraryDir }), ...world };
   await d.request('session.create', { sessionId: 'sk', spec: { cwd: d.project, persist: true, model: 'codex:gpt-5.6-sol' } });
   const transport = d.transports.at(-1);
-  const inputs = () => transport.calls.filter(call => call.method === 'turn/start').map(call => call.params.input);
+  const inputs = () => transport.calls.filter((call: Json) => call.method === 'turn/start').map((call: Json) => call.params.input);
   let sent = 0;
-  const send = async body => {
+  const send = async (body: Json) => {
     await d.request('session.prompt', { sessionId: 'sk', clientMessageId: `m${++sent}`, content: [{ type: 'text', text: body }] });
     await until(() => inputs().length === sent, 'turn started');
     transport.finish();
     return inputs().at(-1);
   };
   const input = await send('/xia find the README');
-  const skills = input.filter(part => part.type === 'skill');
+  const skills = input.filter((part: Json) => part.type === 'skill');
   assert.equal(skills.length, 1);
   assert.equal(skills[0].name, 'xia');
   assert.match(skills[0].path, /[\\/]xia[\\/]SKILL\.md$/);
-  assert.ok(input.some(part => part.type === 'text' && part.text === '/xia find the README'), 'the words stay as typed');
-  for (const body of ['/xiax no such skill', 'see /xia later', '/nope']) assert.ok(!(await send(body)).some(part => part.type === 'skill'), body);
+  assert.ok(input.some((part: Json) => part.type === 'text' && part.text === '/xia find the README'), 'the words stay as typed');
+  for (const body of ['/xiax no such skill', 'see /xia later', '/nope']) assert.ok(!(await send(body)).some((part: Json) => part.type === 'skill'), body);
 });

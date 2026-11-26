@@ -1,6 +1,7 @@
 // Paseo's Pin to top and labels per root session (capability `session.meta`, docs/protocol/alp-json-rpc-v1.md §12.1):
 // session.update and label.list over the registry's label catalog, kept in the session store.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -11,15 +12,18 @@ import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { fakeTransport } from '../../../test/support/fake-agent.ts';
 
+// `any`: alpd's answers, events and errors are JSON whose shape depends on the method; the tests read the fields they assert on.
+type Json = any;
+
 /** An alpd with a store and a registry under one directory; `start` again is a restart over both. */
-async function setup(t) {
+async function setup(t: TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), 'alpd-session-meta-'));
   const home = path.join(root, 'home');
   const state = path.join(root, 'state');
   const project = path.join(root, 'project');
   await seedLibrary(home);
   await initProject(project, { library: home });
-  const stops = [];
+  const stops: (() => Promise<void>)[] = [];
   t.after(async () => { for (const stop of stops.reverse()) await stop(); await rm(root, { recursive: true, force: true }); });
   async function start() {
     const runtime = createAlpRuntime({ libraryDir: home, supervisor: false, transport: fakeTransport([]) });
@@ -30,7 +34,7 @@ async function setup(t) {
     const stop = async () => { if (stopped) return; stopped = true; client.close(); await store.flush().catch(() => {}); await server.close().catch(() => {}); await runtime.shutdown(); };
     stops.push(stop);
     await client.request('daemon.hello', { protocolVersion: 1, client: { name: 'test', version: '0' } });
-    return { client, stop, request: (method, params) => client.request(method, params) };
+    return { client, stop, request: (method: string, params?: unknown) => client.request(method, params) };
   }
   /** Makes the store's sessions directory unwritable; returns the undo. */
   async function breakSessions() {
@@ -40,7 +44,7 @@ async function setup(t) {
     return async () => { await rm(dir, { force: true }); await rename(`${dir}.saved`, dir); };
   }
   /** The store's record file of a session, to edit while alpd is stopped. */
-  async function recordFile(id) {
+  async function recordFile(id: string) {
     const dir = path.join(state, 'sessions');
     const name = (await readdir(dir)).find(entry => entry === `${id}.json`);
     assert.ok(name, `no record file for ${id}`);
@@ -50,7 +54,7 @@ async function setup(t) {
 }
 
 /** Adds labels to the registry's catalog as the owner's workspace label menu does. */
-async function catalog(daemon, project, labels) {
+async function catalog(daemon: { request(method: string, params?: unknown): Promise<Json> }, project: string, labels: Json[]) {
   let { registry } = await daemon.request('registry.owner', {});
   if (!registry.workspaces.length) {
     await daemon.request('project.register', { directory: project, ifRevision: registry.revision, requestId: 'register' });
@@ -63,7 +67,7 @@ async function catalog(daemon, project, labels) {
   return registry;
 }
 
-const invalid = error => error.code === -32602;
+const invalid = (error: Json) => error.code === -32602;
 
 test('session.update pins and labels a root with catalog names; label.list is the catalog; neither is activity', async t => {
   const { project, start } = await setup(t);
@@ -76,7 +80,7 @@ test('session.update pins and labels a root with catalog names; label.list is th
 
   const older = (await daemon.request('session.create', { spec: { cwd: project, workflow: 'pho', persist: true } })).session;
   const newer = (await daemon.request('session.create', { spec: { cwd: project, workflow: 'pho', persist: true } })).session;
-  const order = async () => (await daemon.request('session.list', { projectRoot: project })).sessions.map(s => s.id);
+  const order = async () => (await daemon.request('session.list', { projectRoot: project })).sessions.map((s: Json) => s.id);
   const before = await order();
   const { session: listed } = await daemon.request('session.get', { sessionId: older.id });
   assert.equal(listed.pinnedAt, undefined);
@@ -93,14 +97,14 @@ test('session.update pins and labels a root with catalog names; label.list is th
   assert.equal(labelled.pinnedAt, pinned.pinnedAt, 'labels alone leave the pin');
   assert.equal(labelled.updatedAt, listed.updatedAt);
   assert.deepEqual(await order(), before, 'the list keeps its order');
-  const row = (await daemon.request('session.list', { projectRoot: project })).sessions.find(s => s.id === older.id);
+  const row = (await daemon.request('session.list', { projectRoot: project })).sessions.find((s: Json) => s.id === older.id);
   assert.deepEqual([row.pinnedAt, row.labels], [pinned.pinnedAt, ['Bug', 'Đang làm']]);
 
-  await assert.rejects(daemon.request('session.update', { sessionId: older.id, labels: ['Nope'] }), error => invalid(error) && error.data?.reason === 'unknown_label');
+  await assert.rejects(daemon.request('session.update', { sessionId: older.id, labels: ['Nope'] }), (error: Json) => invalid(error) && error.data?.reason === 'unknown_label');
   await assert.rejects(daemon.request('session.update', { sessionId: older.id }), invalid, 'pinned or labels');
   await assert.rejects(daemon.request('session.update', { sessionId: older.id, labels: Array.from({ length: 21 }, () => 'Bug') }), invalid, 'at most 20');
   await assert.rejects(daemon.request('session.update', { sessionId: older.id, pinned: 'yes' }), invalid);
-  await assert.rejects(daemon.request('session.update', { sessionId: 'missing', pinned: true }), error => error.code === 1001);
+  await assert.rejects(daemon.request('session.update', { sessionId: 'missing', pinned: true }), (error: Json) => error.code === 1001);
   assert.deepEqual((await daemon.request('session.get', { sessionId: older.id })).session.labels, ['Bug', 'Đang làm'], 'a refused update changes nothing');
 
   const cleared = (await daemon.request('session.update', { sessionId: older.id, pinned: false, labels: [] })).session;
@@ -130,7 +134,7 @@ test('pin and labels survive a restart; a catalog rename follows to the sessions
   ({ registry } = await daemon.request('registry.owner', { operation: 'label.update', args: { name: 'bug', newName: 'Defect' }, ifRevision: registry.revision, requestId: 'rename' }));
   ({ registry } = await daemon.request('registry.owner', { operation: 'label.delete', args: { name: 'later' }, ifRevision: registry.revision, requestId: 'delete' }));
   assert.deepEqual((await daemon.request('session.get', { sessionId: session.id })).session.labels, ['Defect', 'Idea']);
-  assert.deepEqual((await daemon.request('label.list', {})).labels.map(l => l.name), ['Defect', 'Idea']);
+  assert.deepEqual((await daemon.request('label.list', {})).labels.map((l: Json) => l.name), ['Defect', 'Idea']);
   await daemon.stop();
 
   // The records followed, not only the read: after a restart the renamed label is still there.
@@ -152,7 +156,7 @@ test('a session.update that cannot be saved fails with persistence_failed and ch
   const { session } = await daemon.request('session.create', { spec: { cwd: project, workflow: 'pho', persist: true } });
   const undo = await breakSessions();
   try {
-    await assert.rejects(daemon.request('session.update', { sessionId: session.id, pinned: true, labels: ['Bug'] }), error => error.data?.reason === 'persistence_failed');
+    await assert.rejects(daemon.request('session.update', { sessionId: session.id, pinned: true, labels: ['Bug'] }), (error: Json) => error.data?.reason === 'persistence_failed');
   } finally { await undo(); }
   const after = (await daemon.request('session.get', { sessionId: session.id })).session;
   assert.equal(after.pinnedAt, undefined);
@@ -227,7 +231,7 @@ test('a session.update racing a catalog rename never leaves the old name on the 
     daemon.request('session.update', { sessionId: session.id, labels: ['Bug'] }),
     daemon.request('registry.owner', { operation: 'label.update', args: { name: 'Bug', newName: 'Defect' }, ifRevision: registry.revision, requestId: 'race-rename' }),
   ]);
-  assert.equal(rename.status, 'fulfilled', rename.reason?.message);
+  assert.equal(rename.status, 'fulfilled', (rename as Json).reason?.message);
   // Either the update ran first and the rename followed it, or the rename ran first and the update
   // was refused for a name the catalog no longer has; never a session holding 'Bug'.
   if (update.status === 'fulfilled') assert.deepEqual((await daemon.request('session.get', { sessionId: session.id })).session.labels, ['Defect']);

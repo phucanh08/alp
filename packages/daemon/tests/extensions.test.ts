@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -12,6 +13,9 @@ import { createDaemonServer } from '@anhlp/alp-daemon';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { fakeTransport } from '../../../test/support/fake-agent.ts';
 
+// `any`: raw JSON-RPC frames, alpd's answers and extension invocations are JSON; the tests read the fields they assert on.
+type Json = any;
+
 /**
  * Extension RPC over the real socket (ALPD §3, §14): one connection owns a method with
  * extension.register, any caller invokes it, and alpd relays the call as extension.invoke to the
@@ -19,7 +23,7 @@ import { fakeTransport } from '../../../test/support/fake-agent.ts';
  * cap are exercised exactly as they happen between processes.
  */
 
-async function start(t) {
+async function start(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-extensions-'));
   const socketPath = daemonPaths(directory).socket;
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false, libraryDir: directory });
@@ -33,7 +37,7 @@ async function start(t) {
   return { daemon, socketPath };
 }
 
-async function untilFrame(frames, predicate, what, ms = 3_000) {
+async function untilFrame(frames: Json[], predicate: (frame: Json) => unknown, what: string, ms = 3_000) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
     const frame = frames.find(predicate);
@@ -44,14 +48,14 @@ async function untilFrame(frames, predicate, what, ms = 3_000) {
 }
 
 /** A raw JSON-RPC socket whose request ids the test controls, for exact frame-id scenarios. */
-async function rawClient(socketPath) {
+async function rawClient(socketPath: string) {
   const socket = net.createConnection(socketPath);
   await new Promise((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); });
   socket.setEncoding('utf8');
   let buffer = '';
-  const frames = [];
-  const waiters = [];
-  const deliver = frame => { const waiter = waiters.shift(); if (waiter) waiter(frame); else frames.push(frame); };
+  const frames: Json[] = [];
+  const waiters: Json[] = [];
+  const deliver = (frame: Json) => { const waiter = waiters.shift(); if (waiter) waiter(frame); else frames.push(frame); };
   socket.on('data', chunk => {
     buffer += chunk;
     for (let index = buffer.indexOf('\n'); index >= 0; index = buffer.indexOf('\n')) {
@@ -62,15 +66,15 @@ async function rawClient(socketPath) {
   });
   const client = {
     frames,
-    send(frame) { socket.write(encodeFrame(frame)); },
+    send(frame: Json) { socket.write(encodeFrame(frame)); },
     next(timeout = 3_000) {
       if (frames.length) return Promise.resolve(frames.shift());
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('timed out waiting for a frame')), timeout);
-        waiters.push(frame => { clearTimeout(timer); resolve(frame); });
+        waiters.push((frame: Json) => { clearTimeout(timer); resolve(frame); });
       });
     },
-    request(id, method, params = {}) { client.send({ jsonrpc: '2.0', id, method, params }); return client.next(); },
+    request(id: number, method: string, params = {}) { client.send({ jsonrpc: '2.0', id, method, params }); return client.next(); },
     async hello(id = 1) {
       const reply = await client.request(id, 'daemon.hello', { protocolVersion: PROTOCOL_VERSION, client: { name: 'raw', version: '0' } });
       assert.equal(reply.error, undefined, JSON.stringify(reply));
@@ -85,7 +89,7 @@ test('an owner registers a method and a caller invokes it over the socket', asyn
   const { daemon, socketPath } = await start(t);
   const owner = await connect(socketPath);
   t.after(() => owner.close());
-  const seen = [];
+  const seen: Json[] = [];
   owner.onRequest(async (method, params) => { seen.push([method, params]); return { echo: params.params.value }; });
   assert.deepEqual(await owner.request('extension.register', { method: 'ext.echo' }), { registered: 'ext.echo' });
 
@@ -179,22 +183,22 @@ test('unregister removes a method, is not found twice, and is refused for anothe
 
 test('a crossed id is served as a request and never consumes the pending invocation', async t => {
   const { daemon, socketPath } = await start(t);
-  const ownerFrames = [];
+  const ownerFrames: Json[] = [];
   const owner = daemon.accept(frame => ownerFrames.push(frame));
   owner.receive({ jsonrpc: '2.0', id: 1, method: 'daemon.hello', params: { protocolVersion: PROTOCOL_VERSION, client: { name: 'owner', version: '0' } } });
   owner.receive({ jsonrpc: '2.0', id: 2, method: 'extension.register', params: { method: 'ext.cross' } });
-  await untilFrame(ownerFrames, frame => frame.id === 2 && frame.result, 'the registration reply');
+  await untilFrame(ownerFrames, (frame: Json) => frame.id === 2 && frame.result, 'the registration reply');
 
   const caller = await connect(socketPath);
   t.after(() => caller.close());
   const pending = caller.request('ext.cross', { n: 1 });
-  const invoke = await untilFrame(ownerFrames, frame => frame.method === 'extension.invoke', 'the extension.invoke');
+  const invoke = await untilFrame(ownerFrames, (frame: Json) => frame.method === 'extension.invoke', 'the extension.invoke');
   assert.equal(invoke.id, 1);
 
   // The owner sends its own request with the same id as the in-flight invoke. It must be answered as
   // a request without touching the daemon's pending invocation.
   owner.receive({ jsonrpc: '2.0', id: 1, method: 'daemon.status', params: {} });
-  const status = await untilFrame(ownerFrames, frame => frame.id === 1 && frame.result, 'the daemon.status reply');
+  const status = await untilFrame(ownerFrames, (frame: Json) => frame.id === 1 && frame.result, 'the daemon.status reply');
   assert.ok(Number.isSafeInteger(status.result.pid));
 
   owner.receive({ jsonrpc: '2.0', id: 1, result: { ok: true } });
@@ -203,16 +207,16 @@ test('a crossed id is served as a request and never consumes the pending invocat
 
 test('a malformed or unknown response is dropped without leaking or mis-correlating the call', async t => {
   const { daemon, socketPath } = await start(t);
-  const ownerFrames = [];
+  const ownerFrames: Json[] = [];
   const owner = daemon.accept(frame => ownerFrames.push(frame));
   owner.receive({ jsonrpc: '2.0', id: 1, method: 'daemon.hello', params: { protocolVersion: PROTOCOL_VERSION, client: { name: 'owner', version: '0' } } });
   owner.receive({ jsonrpc: '2.0', id: 2, method: 'extension.register', params: { method: 'ext.malformed' } });
-  await untilFrame(ownerFrames, frame => frame.id === 2 && frame.result, 'the registration reply');
+  await untilFrame(ownerFrames, (frame: Json) => frame.id === 2 && frame.result, 'the registration reply');
 
   const caller = await connect(socketPath);
   t.after(() => caller.close());
   const pending = caller.request('ext.malformed', { n: 2 });
-  const invoke = await untilFrame(ownerFrames, frame => frame.method === 'extension.invoke', 'the extension.invoke');
+  const invoke = await untilFrame(ownerFrames, (frame: Json) => frame.method === 'extension.invoke', 'the extension.invoke');
 
   owner.receive({ id: invoke.id, result: { bad: true } }); // no jsonrpc
   owner.receive({ jsonrpc: '2.0', id: invoke.id, result: {}, error: { code: 1, message: 'both' } });
@@ -230,15 +234,15 @@ test('a malformed or unknown response is dropped without leaking or mis-correlat
 
 test('the pending cap rejects the overflow call without leaving a timer behind', async t => {
   const { daemon, socketPath } = await start(t);
-  const ownerFrames = [];
+  const ownerFrames: Json[] = [];
   const owner = daemon.accept(frame => ownerFrames.push(frame));
   owner.receive({ jsonrpc: '2.0', id: 1, method: 'daemon.hello', params: { protocolVersion: PROTOCOL_VERSION, client: { name: 'owner', version: '0' } } });
   owner.receive({ jsonrpc: '2.0', id: 2, method: 'extension.register', params: { method: 'ext.many' } });
-  await untilFrame(ownerFrames, frame => frame.id === 2 && frame.result, 'the registration reply');
+  await untilFrame(ownerFrames, (frame: Json) => frame.id === 2 && frame.result, 'the registration reply');
 
   const caller = await connect(socketPath);
   t.after(() => caller.close());
-  const calls = Array.from({ length: 129 }, (_, index) => caller.request('ext.many', { index }).then(value => ({ ok: true, value }), error => ({ ok: false, error })));
+  const calls = Array.from({ length: 129 }, (_, index) => caller.request('ext.many', { index }).then((value): Json => ({ ok: true, value }), (error): Json => ({ ok: false, error })));
   await untilFrame(ownerFrames, () => ownerFrames.filter(frame => frame.method === 'extension.invoke').length === 128, '128 in-flight invocations');
 
   const invokes = ownerFrames.filter(frame => frame.method === 'extension.invoke');
@@ -273,12 +277,12 @@ test('raw hello, jsonrpc and malformed request handling on a real socket', async
 
 test('security: closed callers release extension capacity and cannot register after disconnect', async t => {
   const { daemon } = await start(t);
-  const frames = [];
+  const frames: Json[] = [];
   const owner = daemon.accept(frame => frames.push(frame));
   t.after(() => owner.close());
   owner.receive({ jsonrpc: '2.0', id: 1, method: 'daemon.hello', params: { protocolVersion: PROTOCOL_VERSION } });
   owner.receive({ jsonrpc: '2.0', id: 2, method: 'extension.register', params: { method: 'ext.cleanup' } });
-  await untilFrame(frames, frame => frame.id === 2 && frame.result, 'registration');
+  await untilFrame(frames, (frame: Json) => frame.id === 2 && frame.result, 'registration');
   const caller = daemon.local();
   for (let i = 0; i < 128; i++) void caller.request('ext.cleanup').catch(() => {});
   await untilFrame(frames, () => frames.filter(frame => frame.method === 'extension.invoke').length === 128, 'full quota');
@@ -323,7 +327,7 @@ test('security: oversized UTF-8 extension payload is rejected before invoking ha
   assert.equal(invoked, false);
 });
 
-async function connectAs(socketPath, agent) {
+async function connectAs(socketPath: string, agent?: string) {
   const saved = process.env.ALP_AGENT_SESSION;
   if (agent) process.env.ALP_AGENT_SESSION = agent; else delete process.env.ALP_AGENT_SESSION;
   try { return await connect(socketPath, { name: 'extensions-test', version: '0' }); }
@@ -335,7 +339,7 @@ test('security: an agent connection may not register an extension method (user_o
   const agent = await connectAs(socketPath, '1');
   t.after(() => agent.close());
   await agent.request('daemon.hello', { protocolVersion: PROTOCOL_VERSION }).catch(() => {});
-  await assert.rejects(agent.request('extension.register', { method: 'web.pairing' }), error => error.code === ERROR.forbidden && error.data?.reason === 'user_only');
+  await assert.rejects(agent.request('extension.register', { method: 'web.pairing' }), (error: Json) => error.code === ERROR.forbidden && error.data?.reason === 'user_only');
   const owner = await connectAs(socketPath, undefined);
   t.after(() => owner.close());
   assert.deepEqual(await owner.request('extension.register', { method: 'web.pairing' }), { registered: 'web.pairing' });
@@ -345,7 +349,7 @@ test('security: alpd sets extension.invoke caller itself; a client-supplied call
   const { socketPath } = await start(t);
   const owner = await connectAs(socketPath, undefined);
   t.after(() => owner.close());
-  const seen = [];
+  const seen: Json[] = [];
   owner.onRequest(async (method, params) => { seen.push(params); return {}; });
   await owner.request('extension.register', { method: 'ext.who' });
   const user = await connectAs(socketPath, undefined);

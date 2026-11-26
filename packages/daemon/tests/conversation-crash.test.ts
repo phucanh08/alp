@@ -4,8 +4,10 @@
 // then restarted on the same home. Never a native step twice; one result for every repeat; the next
 // reply sees only the kept turns. No model is called.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { openSync, closeSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -15,21 +17,24 @@ import { fileURLToPath } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
 import { connect, readLock } from '@anhlp/alp-client';
 
+// `any`: alpd's answers, events and errors are JSON whose shape depends on the method; the tests read the fields they assert on.
+type Json = any;
+
 const ALPD = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
 const FAKE_CODEX = fileURLToPath(new URL('./support/fake-codex.js', import.meta.url));
 const MODEL = 'codex:gpt-5.6-sol';
 const skip = process.platform === 'win32' && 'POSIX processes only';
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
-async function until(check, what) {
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (error: Json) { return error.code === 'EPERM'; } };
+async function until(check: () => unknown, what: string) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await sleep(25); }
   assert.fail(`${what} did not happen`);
 }
-const text = body => [{ type: 'text', text: body }];
-const rpcError = (code, reason) => error => error?.code === code && error.data?.reason === reason;
+const text = (body: string) => [{ type: 'text', text: body }];
+const rpcError = (code: number, reason: string) => (error: Json) => error?.code === code && error.data?.reason === reason;
 
-async function harness(t) {
+async function harness(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-conv-crash-'));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
@@ -43,10 +48,10 @@ async function harness(t) {
   const journalFile = path.join(directory, 'provider.jsonl');
   const stateFile = path.join(directory, 'codex-state.jsonl');
   const logFile = path.join(directory, 'alpd.log');
-  const started = [];
+  const started: ChildProcess[] = [];
   const journal = async () => (await readFile(journalFile, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
 
-  async function start({ crashAt } = {}) {
+  async function start({ crashAt }: { crashAt?: string } = {}) {
     const log = openSync(logFile, 'a');
     const child = spawn(process.execPath, [ALPD], {
       detached: true, stdio: ['ignore', log, log],
@@ -62,22 +67,22 @@ async function harness(t) {
       const lock = await readLock(home);
       return lock?.ready && lock.pid === child.pid;
     }, 'alpd to be ready');
-    const client = await connect((await readLock(home)).socket, { name: 'conv-crash', version: '0' });
+    const client = await connect((await readLock(home))!.socket, { name: 'conv-crash', version: '0' });
     return {
-      client, request: (method, params) => client.request(method, params),
+      client, request: (method: string, params?: unknown) => client.request(method, params),
       async crashed() { const result = await exited; client.close(); assert.equal(result.signal, 'SIGKILL'); },
       async stop() { await client.request('daemon.shutdown').catch(() => {}); client.close(); await exited; },
     };
   }
 
   t.after(async () => {
-    for (const child of started) if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    for (const child of started) if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid!, 'SIGKILL'); } catch {}
     for (const { pid } of await journal()) if (alive(pid)) try { process.kill(pid, 'SIGKILL'); } catch {}
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 
   /** A root with completed turns, one per text; answers its id and turn ids. */
-  async function conversation(daemon, texts) {
+  async function conversation(daemon: { request(method: string, params?: unknown): Promise<Json> }, texts: string[]) {
     const { session } = await daemon.request('session.create', { spec: { cwd: project, persist: true, model: MODEL } });
     const turns = [];
     for (const [index, body] of texts.entries()) {
@@ -90,11 +95,11 @@ async function harness(t) {
   }
 
   /** The text of the last assistant message of a session after asking `[codewords]` with `messageId`. */
-  async function codewords(daemon, sessionId, messageId) {
+  async function codewords(daemon: { request(method: string, params?: unknown): Promise<Json> }, sessionId: string, messageId: string) {
     await daemon.request('session.prompt', { sessionId, clientMessageId: messageId, content: text('[codewords]') });
     let answer;
     await until(async () => {
-      const items = (await daemon.request('session.history', { sessionId })).items.filter(item => item.event?.type === 'item' && item.event.item.kind === 'assistant_message');
+      const items = (await daemon.request('session.history', { sessionId })).items.filter((item: Json) => item.event?.type === 'item' && item.event.item.kind === 'assistant_message');
       answer = items.at(-1)?.event.item.text;
       return answer?.startsWith('codewords:') && !(await daemon.request('session.get', { sessionId })).session.busy;
     }, 'codewords answer');
@@ -136,9 +141,9 @@ for (const crashAt of ['rewind.after-prepared', 'rewind.after-applied', 'rewind.
     assert.notEqual(session.threadId, threadBefore);
     assert.deepEqual(session.branches, [result.branch]);
     const items = (await second.request('session.history', { sessionId: id })).items;
-    const texts = items.filter(item => item.event?.type === 'item').map(item => item.event.item.text);
-    assert.ok(texts.some(entry => entry === 'codeword ALPHA') && !texts.some(entry => entry === 'codeword BRAVO'));
-    assert.equal(items.filter(item => item.event?.type === 'item' && item.event.item.id === `rewind:${result.branch.branchId}`).length, 1, 'one marker');
+    const texts = items.filter((item: Json) => item.event?.type === 'item').map((item: Json) => item.event.item.text);
+    assert.ok(texts.some((entry: Json) => entry === 'codeword ALPHA') && !texts.some((entry: Json) => entry === 'codeword BRAVO'));
+    assert.equal(items.filter((item: Json) => item.event?.type === 'item' && item.event.item.id === `rewind:${result.branch.branchId}`).length, 1, 'one marker');
     // The next reply sees only the kept turn; the source thread still has both; files are unchanged.
     await second.request('session.create', { sessionId: id, spec: { cwd: h.project, persist: true, model: MODEL }, resume: true });
     assert.equal(await h.codewords(second, id, 'ask-after'), 'codewords: ALPHA');
@@ -180,7 +185,7 @@ test('a live root rewinds without a restart: the fork keeps the model, the next 
   assert.equal((await h.forks()).length, 1);
   const forkState = (await readFile(h.stateFile, 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line)).find(entry => entry.type === 'fork');
   assert.equal(forkState.model, MODEL.replace(/^codex:/, ''));
-  assert.deepEqual(forkState.turns.map(turn => turn.id), [turns[0]]);
+  assert.deepEqual(forkState.turns.map((turn: Json) => turn.id), [turns[0]]);
   // The live session moved over: the next prompt goes to the fork without reopening.
   assert.equal(await h.codewords(daemon, id, 'ask-live'), 'codewords: ALPHA');
   // The prompt id of a set-aside turn is still a delivered one: nothing is sent.
@@ -199,7 +204,7 @@ test('a scheduled prompt a rewind set aside is not delivered again, before or af
   const delivered = async () => (await h.journal()).filter(entry => entry.method === 'turn/start' && entry.text?.includes('BRAVO scheduled')).length;
   await until(async () => (await daemon.request('schedule.get', { id: job.id, projectRoot: h.project })).job.status === 'delivered' && !(await daemon.request('session.get', { sessionId: id })).session.busy, 'the job delivered');
   const page = await daemon.request('session.history', { sessionId: id });
-  const scheduledTurn = page.items.filter(item => item.event?.type === 'turn.started').at(-1).event.turnId;
+  const scheduledTurn = page.items.filter((item: Json) => item.event?.type === 'turn.started').at(-1).event.turnId;
   await daemon.request('session.rewind', { sessionId: id, requestId: 'past-job', ifGeneration: page.generation, beforeTurnId: scheduledTurn });
   assert.equal((await daemon.request('schedule.get', { id: job.id, projectRoot: h.project })).job.status, 'delivered');
   await daemon.stop();

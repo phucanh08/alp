@@ -2,6 +2,7 @@
 // of uploaded files, in process with a real store and a scripted native runtime. Every refusal is
 // checked for its code and reason, and every answer for host paths.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import fsPromises from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
@@ -13,21 +14,27 @@ import { initProject } from '@anhlp/alp-core/init';
 import { ATTACHMENTS, CAPABILITY } from '@anhlp/alp-protocol';
 import { validateResult } from '@anhlp/alp-protocol/contract';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
+import type { AlpRuntime, RuntimeTransport } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { attachmentLimits, attachmentName, createAttachmentStore, readAttachmentConfig, sniffMimeType } from '@anhlp/alp-daemon/attachments';
 import { teardown } from '../../../test/support/teardown.ts';
 
-const skip = process.platform === 'win32' && 'attachments are not served on Windows (no O_NOFOLLOW, no POSIX modes)';
-const sha = data => createHash('sha256').update(data).digest('hex');
-const b64 = data => Buffer.from(data).toString('base64');
-const text = body => [{ type: 'text', text: body }];
+// `any`: alpd's answers, events and refusals are JSON, and the seam's runtime and patched fs functions are partial fakes; the tests read the fields they assert on.
+type Json = any;
+/** A scripted native transport, as fakeTransport hands it to the runtime and to the test: its helpers and handlers are reached by name. */
+type Scripted = RuntimeTransport & { calls: { method: string, params: Json }[], [member: string]: Json };
 
-/** A scripted native runtime (as persistence.test.js): every turn starts and is accepted. */
-function fakeTransport(runtimes) {
+const skip = process.platform === 'win32' && 'attachments are not served on Windows (no O_NOFOLLOW, no POSIX modes)';
+const sha = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
+const b64 = (data: string | Buffer) => Buffer.from(data).toString('base64');
+const text = (body: string) => [{ type: 'text', text: body }];
+
+/** A scripted native runtime (as persistence.test.ts): every turn starts and is accepted. */
+function fakeTransport(runtimes: Scripted[]) {
   return () => {
     const index = runtimes.length;
     let turns = 0;
-    const runtime = {
+    const runtime: Scripted = {
       calls: [], threadId: `thread-${index}`,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -55,27 +62,30 @@ function fakeTransport(runtimes) {
  * parts; what alpd delivered is recorded, and the native turn gets the text only. `failNext` makes
  * the next prompt throw before it reaches the provider.
  */
-function attachmentRuntime(base, control) {
+function attachmentRuntime(base: AlpRuntime, control: Control) {
   return {
     ...base,
-    takesAttachments: sessionId => control.accepts && !!base.snapshot(sessionId),
-    bindAttachments: reader => { control.reader = reader; },
-    async prompt(sessionId, input) {
+    takesAttachments: (sessionId: Json) => control.accepts && !!base.snapshot(sessionId),
+    bindAttachments: (reader: Json) => { control.reader = reader; },
+    async prompt(sessionId: string, input: Json) {
       control.delivered.push(structuredClone(input));
       if (control.failNext) { control.failNext = false; throw new Error('Session is not open'); }
-      const content = input.content.filter(part => part.type !== 'attachment');
+      const content = input.content.filter((part: Json) => part.type !== 'attachment');
       return base.prompt(sessionId, { ...input, content: content.length ? content : text('(attachments)') });
     },
   };
 }
 
-async function until(check, what = 'condition') {
+async function until(check: () => unknown, what = 'condition') {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`${what} did not happen`);
 }
 
 /** A home, a project and alpd in process; `start` again is a restart on the same home. */
-async function setup(t, { accepts = true, limits, io } = {}) {
+/** What the seam's runtime is told and records (see attachmentRuntime). */
+type Control = { accepts: boolean, delivered: Json[], reader: Json, failNext: boolean };
+
+async function setup(t: TestContext, { accepts = true, limits, io }: { accepts?: boolean, limits?: Json, io?: Json } = {}) {
   const defer = teardown(t);
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-attach-')));
   const home = path.join(directory, 'home');
@@ -87,12 +97,12 @@ async function setup(t, { accepts = true, limits, io } = {}) {
   await initProject(other);
   await writeFile(path.join(other, '.alp/settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
   const clock = { now: Date.now() };
-  const control = { accepts, delivered: [], reader: undefined, failNext: false };
-  const stops = [];
+  const control: Control = { accepts, delivered: [], reader: undefined, failNext: false };
+  const stops: Json[] = [];
   defer(async () => { for (const stop of stops.reverse()) await stop(); await rm(directory, { recursive: true, force: true }); });
   let count = 0;
   async function start() {
-    const runtimes = [];
+    const runtimes: Json[] = [];
     const base = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(directory, 'runs') });
     const runtime = attachmentRuntime(base, control);
     const store = createStore(path.join(home, 'state'));
@@ -102,7 +112,7 @@ async function setup(t, { accepts = true, limits, io } = {}) {
     const stop = async () => { if (stopped) return; stopped = true; owner.close(); await store.flush().catch(() => {}); await server.close().catch(() => {}); await base.shutdown(); };
     stops.push(stop);
     await owner.request('daemon.status');
-    const request = (method, params) => owner.request(method, params);
+    const request = (method: string, params?: unknown) => owner.request(method, params);
     const create = async (cwd = project) => (await request('session.create', { spec: { cwd, persist: true } })).session.id;
     return { server, store, runtime, owner, request, stop, create };
   }
@@ -113,7 +123,7 @@ const alice = { principalId: 'aaaaaaaaaaaaaaaa', principalEpoch: 'e1' };
 const bob = { principalId: 'bbbbbbbbbbbbbbbb', principalEpoch: 'e1' };
 
 /** Uploads `data` in chunks of `chunk` bytes and commits it. */
-async function upload(request, sessionId, data, { name = 'notes.txt', mimeType = 'text/plain', chunk = 4096, requestId = `r-${Math.random()}`, as = {} } = {}) {
+async function upload(request: (method: string, params?: unknown) => Promise<Json>, sessionId: string, data: string | Buffer, { name = 'notes.txt', mimeType = 'text/plain', chunk = 4096, requestId = `r-${Math.random()}`, as = {} } = {}) {
   const bytes = Buffer.from(data);
   const begun = await request('attachment.begin', { sessionId, name, size: bytes.length, mimeType, requestId, ...as });
   for (let offset = 0; offset < bytes.length; offset += chunk) {
@@ -124,8 +134,8 @@ async function upload(request, sessionId, data, { name = 'notes.txt', mimeType =
 }
 
 /** The refusal of a promise: code, reason, message and data, checked free of host paths. */
-async function refusal(promise, directory) {
-  try { await promise; } catch (error) {
+async function refusal(promise: Promise<unknown>, directory?: string) {
+  try { await promise; } catch (error: Json) {
     if (directory) assert.ok(!JSON.stringify({ message: error.message, data: error.data }).includes(directory), `no host path in ${error.message}`);
     return { code: error.code, reason: error.data?.reason, message: error.message, data: error.data };
   }
@@ -286,8 +296,8 @@ test('concurrent begins cannot oversubscribe the per-principal or daemon quota o
   const daemon = await env.start();
   const sessionId = await daemon.create();
   const carol = { principalId: 'cccccccccccccccc', principalEpoch: 'e1' };
-  const begin = (as, i, size) => daemon.request('attachment.begin', { sessionId, name: `f${i}.bin`, size, mimeType: 'application/octet-stream', requestId: `q${i}`, ...as });
-  const race = async (as, from, count, size) => {
+  const begin = (as: Json, i: number, size: number) => daemon.request('attachment.begin', { sessionId, name: `f${i}.bin`, size, mimeType: 'application/octet-stream', requestId: `q${i}`, ...as });
+  const race = async (as: Json, from: number, count: number, size: number) => {
     const settled = await Promise.allSettled(Array.from({ length: count }, (_, i) => begin(as, from + i, size)));
     const lost = settled.filter(result => result.status === 'rejected').map(result => result.reason);
     for (const error of lost) assert.deepEqual([error.code, error.data?.reason], [1005, 'quota_exceeded'], error.message);
@@ -343,12 +353,12 @@ test('a payload or object directory swapped for a link, a hard link or another f
   const daemon = await env.start();
   const sessionId = await daemon.create();
   const outside = path.join(env.directory, 'outside.txt');
-  const begin = async (requestId, bytes = 'abcdef') => {
+  const begin = async (requestId: string, bytes = 'abcdef') => {
     const begun = await daemon.request('attachment.begin', { sessionId, name: 'f.txt', size: bytes.length, mimeType: 'text/plain', requestId });
     await daemon.request('attachment.chunk', { uploadId: begun.uploadId, offset: 0, data: b64(bytes.slice(0, 3)) });
     return { ...begun, dir: path.join(env.root, begun.uploadId.slice(4)), bytes };
   };
-  const refusedAfter = async (upload, why) => {
+  const refusedAfter = async (upload: Json, why: string) => {
     const chunk = await refusal(daemon.request('attachment.chunk', { uploadId: upload.uploadId, offset: 3, data: b64(upload.bytes.slice(3)) }), env.directory);
     assert.deepEqual([chunk.code, chunk.reason], [1000, 'persistence_failed'], why);
     // The upload is gone with its reservation: nothing of it can be committed.
@@ -438,7 +448,7 @@ test('ids of another principal, epoch, project or session answer exactly as unkn
 test('a failed write (ENOSPC) aborts the upload: nothing half published, its reservation released', { skip }, async t => {
   const failing = { next: false };
   const env = await setup(t, { limits: { maxPrincipalBytes: 10 }, io: {
-    async write(handle, buffer, position) {
+    async write(handle: Json, buffer: Buffer, position: number) {
       if (failing.next) { failing.next = false; await handle.write(buffer, 0, 1, position); throw Object.assign(new Error(`ENOSPC: no space left on device, write ${path.join(tmpdir(), 'x')}`), { code: 'ENOSPC' }); }
       await handle.write(buffer, 0, buffer.length, position);
     },
@@ -463,12 +473,12 @@ test('prompts: attachments are refused honestly when the runtime cannot read the
   const daemon = await env.start();
   const sessionId = await daemon.create();
   const { attachment } = await upload(daemon.request, sessionId, 'twelve bytes');
-  const prompt = (clientMessageId, ids, extra = {}) => daemon.request('session.prompt', { sessionId, clientMessageId, content: [...text('read this'), ...ids.map(attachmentId => ({ type: 'attachment', attachmentId }))], ...extra });
+  const prompt = (clientMessageId: string, ids: string[], extra = {}) => daemon.request('session.prompt', { sessionId, clientMessageId, content: [...text('read this'), ...ids.map((attachmentId: string) => ({ type: 'attachment', attachmentId }))], ...extra });
 
   // Today's runtimes: 1005 attachment_unsupported, before any receipt; nothing pinned, nothing sent.
   const unsupported = await refusal(prompt('m1', [attachment.attachmentId]));
   assert.deepEqual([unsupported.code, unsupported.reason], [1005, 'attachment_unsupported']);
-  assert.deepEqual(env.control.delivered, []);
+  assert.deepEqual(env.control.delivered, [] as Json[]);
   assert.equal((await daemon.request('attachment.get', { attachmentId: attachment.attachmentId })).attachment.referenced, false);
   assert.deepEqual(await readdir(path.join(env.home, 'state', 'receipts')).catch(() => []), []);
 
@@ -496,7 +506,7 @@ test('prompts: attachments are refused honestly when the runtime cannot read the
   await chmod(payloadFile, 0o400);
   await assert.rejects(
     env.control.reader.open(attachment.attachmentId, sessionId),
-    err => err.code === 1005 && err.data?.reason === 'attachment_unavailable' && err.data?.attachmentId === attachment.attachmentId
+    (err: Json) => err.code === 1005 && err.data?.reason === 'attachment_unavailable' && err.data?.attachmentId === attachment.attachmentId
   );
   await chmod(payloadFile, 0o600);
   await writeFile(payloadFile, 'twelve bytes');
@@ -628,11 +638,11 @@ test('the store alone: release by session (the deletion seam) starts the grace p
 });
 
 /** A store alone on a fresh root (the session's project is the root's parent), closed after the test. */
-async function bareStore(t, options = {}) {
+async function bareStore(t: TestContext, options: Json = {}) {
   const defer = teardown(t);
   const root = options.root ?? path.join(await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-attach-store-'))), 'attachments');
   if (!options.root) defer(() => rm(path.dirname(root), { recursive: true, force: true }));
-  const store = createAttachmentStore({ root, sessionProject: () => path.dirname(root), sweepMs: 0, ...options, ...{ root } });
+  const store = createAttachmentStore({ root, sessionProject: () => path.dirname(root), sweepMs: 0, ...options, ...{ root } as Json });
   defer(() => store.close());
   return { root, store };
 }
@@ -665,7 +675,7 @@ test('a begin of a newer grant epoch releases the principal\'s uploads of earlie
   const { store } = await bareStore(t, { now: () => clock.now });
   const before = { id: 'pppppppppppppppp', epoch: 'e1' };
   const after = { id: 'pppppppppppppppp', epoch: 'e2' };
-  const begin = (as, requestId, size = 4) => store.begin(as, { sessionId: 's1', name: 'a.bin', size, mimeType: 'application/octet-stream', requestId });
+  const begin = (as: Json, requestId: string, size = 4) => store.begin(as, { sessionId: 's1', name: 'a.bin', size, mimeType: 'application/octet-stream', requestId });
   const stale = [await begin(before, 'a'), await begin(before, 'b')];
   await assert.rejects(begin(before, 'c'), { code: 1005 }, 'the earlier epoch holds every active upload slot');
   // The reissued credential (another epoch) is not locked out by uploads nobody can continue.
@@ -720,7 +730,7 @@ test('daemon IPC dispatcher sanitizes unexpected attachment errors without expos
 });
 
 function gate() {
-  let release;
+  let release!: (value?: unknown) => void;
   const waiting = new Promise(resolve => { release = resolve; });
   return { waiting, release };
 }
@@ -729,8 +739,8 @@ test('close drains a begin paused before it enters an object queue', { skip }, a
   const { root, store } = await bareStore(t);
   await store.ready();
   const entered = gate(), resume = gate();
-  const original = fsPromises.realpath;
-  fsPromises.realpath = async (...args) => {
+  const original: (...args: Json[]) => Promise<Json> = fsPromises.realpath;
+  fsPromises.realpath = async (...args: Json[]) => {
     if (args[0] === path.dirname(root)) { entered.release(); await resume.waiting; }
     return original(...args);
   };
@@ -760,13 +770,13 @@ test('close drains startup recovery before returning', { skip }, async t => {
   defer(() => rm(directory, { recursive: true, force: true }));
   const root = path.join(directory, 'attachments');
   const entered = gate(), resume = gate();
-  const original = fsPromises.mkdir;
-  fsPromises.mkdir = async (...args) => {
+  const original: (...args: Json[]) => Promise<Json> = fsPromises.mkdir;
+  fsPromises.mkdir = async (...args: Json[]) => {
     if (args[0] === root) { entered.release(); await resume.waiting; }
     return original(...args);
   };
   syncBuiltinESMExports();
-  let store, closing, closedEarly;
+  let store: Json, closing: Json, closedEarly: Json;
   try {
     store = createAttachmentStore({ root, sessionProject: () => directory, sweepMs: 0 });
     await entered.waiting;
