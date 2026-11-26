@@ -54,5 +54,6 @@ test('scratchDaemon refuses the user daemon and the real ALP home; a declared sc
   assert.equal(refused({ ALP_TEST_ALP_HOME: path.join(dir, '..foo') }), false, 'a "..foo" directory outside ~/.alp');
   assert.equal(refused({ ALP_TEST_ALP_HOME: scratchHome, ALP_TEST_PASEO_URL: 'ws://[::1]:16767/ws' }), false, 'a loopback scratch port');
   // The refusal says why and where to look.
-  assert.match(scratchDaemon({}).message, /ALP_TEST_ALP_HOME is not set.*paseo-plugin\.md/s);
+  // Without ALP_TEST_ALP_HOME scratchDaemon returns the refusal (an Error), never a configuration.
+  assert.match((scratchDaemon({}) as Error).message, /ALP_TEST_ALP_HOME is not set.*paseo-plugin\.md/s);
 });
