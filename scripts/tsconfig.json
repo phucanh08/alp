@@ -17,13 +17,10 @@
     "types": ["node"],
     // Workspace imports (@anhlp/*) resolve to their TypeScript sources: no build needed to check.
     "customConditions": ["alp-source"],
-    // ../apps/web/scripts/*.mjs stay JavaScript for now and carry // @ts-check: check them here too.
-    "allowJs": true,
-    "checkJs": true,
     // binary-smoke.ts imports ../packages/cli/dist/commands/update/self-update.js (built at run time); this lets the
     // checker read packages/cli/src/commands/update/self-update.ts in its place, without a build.
     "rootDirs": ["../packages/cli/src", "../packages/cli/dist"]
   },
   // browser-page-globals.d.ts: types only, for the page callbacks of client-sdk-smoke.ts.
-  "include": ["*.ts", "../apps/web/scripts/*.mjs"]
+  "include": ["*.ts", "../apps/web/scripts/*.ts"]
 }

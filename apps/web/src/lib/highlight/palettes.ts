@@ -1,7 +1,7 @@
 /*
  * Adapted from Paseo's @getpaseo/highlight 0.14.0 (packages/highlight/src/types.ts, colors.ts, themes.ts),
  * Copyright (c) 2025-present Mohamed Boudra, licensed under the Apache License, Version 2.0.
- * ALP web cannot bundle Paseo packages (build/browser-boundary.js), so the parts it uses are
+ * ALP web cannot bundle Paseo packages (build/browser-boundary.ts), so the parts it uses are
  * carried here unchanged in substance: the highlight roles,
  * GitHub's colors and the eight highlight themes.
  */

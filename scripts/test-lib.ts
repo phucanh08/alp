@@ -67,7 +67,7 @@ export function buildAll() {
   buildWorkspace('cli');
   buildWorkspace('gateway');
   // The web app's src/lib as JavaScript (apps/web/dist-lib): its unit tests and an integration test load it.
-  step('apps/web/scripts/build-lib.mjs');
+  step('apps/web/scripts/build-lib.ts');
 }
 
 /**
