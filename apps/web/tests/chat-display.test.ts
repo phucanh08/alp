@@ -4,13 +4,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { displayRows, isGroupable, summarizeWork, summaryLabel } from '../dist-lib/chat-display.js';
+import type { DisplayRow, Entry } from '../dist-lib/chat-display.js';
+
+type EntryRow = Extract<DisplayRow, { type: 'entry' }>;
+type GroupRow = Extract<DisplayRow, { type: 'group' }>;
+type TurnRow = Extract<DisplayRow, { type: 'turn' }>;
 
 let seq = 0;
-const entry = item => ({ key: `e${++seq}`, ts: '2026-10-30T00:00:00Z', item });
-const user = text => entry({ kind: 'user_message', text });
-const reply = text => entry({ kind: 'assistant_message', text });
-const tool = (type, extra = {}, status = 'completed') => entry({ kind: 'tool_call', name: type, status, detail: { type, ...extra } });
-const shape = rows => rows.map(row => row.type === 'entry' ? `${row.nested ? '>' : ''}${row.entry.item.kind}` : row.type === 'group' ? `group(${row.entries.length})` : `turn(${row.expanded ? 'open' : 'closed'})`);
+const entry = (item: unknown) => ({ key: `e${++seq}`, ts: '2026-10-30T00:00:00Z', item }) as Entry;
+const user = (text: string) => entry({ kind: 'user_message', text });
+const reply = (text: string) => entry({ kind: 'assistant_message', text });
+const tool = (type: string, extra = {}, status = 'completed') => entry({ kind: 'tool_call', name: type, status, detail: { type, ...extra } });
+const shape = (rows: DisplayRow[]) => rows.map(row => row.type === 'entry' ? `${row.nested ? '>' : ''}${row.entry.item.kind}` : row.type === 'group' ? `group(${row.entries.length})` : `turn(${row.expanded ? 'open' : 'closed'})`);
 
 test('the summary counts files once and commands each time, in Paseo\'s words', () => {
   const work = [tool('edit', { filePath: 'a.ts' }), tool('write', { filePath: 'a.ts' }), tool('edit', { filePath: 'b.ts' }), tool('shell'), tool('shell'), tool('read', { filePath: 'c.ts' }), tool('search'), tool('fetch'), reply('x')];
@@ -40,8 +45,8 @@ test('Collapse tool calls: runs of two or more become one group; one call, a pla
   const entries = [user('go'), tool('shell'), tool('read', { filePath: 'a' }), reply('mid'), tool('shell'), tool('plan'), tool('edit', { filePath: 'b' }), tool('shell', {}, 'running')];
   const rows = displayRows(entries, { display: 'collapseToolCalls', running: true });
   assert.deepEqual(shape(rows), ['user_message', 'group(2)', 'assistant_message', 'tool_call', 'tool_call', 'group(2)']);
-  assert.equal(rows[1].loading, false);
-  assert.equal(rows.at(-1).loading, true, 'a group with a running call shows as loading');
+  assert.equal((rows[1] as GroupRow).loading, false);
+  assert.equal((rows.at(-1) as GroupRow).loading, true, 'a group with a running call shows as loading');
   assert.equal(rows[1].key, `group:${entries[1].key}`, 'a group keeps the key of its first call');
 });
 
@@ -49,9 +54,9 @@ test('Collapse turns: a finished turn folds its work before the last reply into 
   const entries = [user('first'), tool('shell'), reply('thinking aloud'), tool('edit', { filePath: 'a' }), reply('done'), user('second'), tool('shell'), reply('ok')];
   const rows = displayRows(entries, { display: 'collapseTurns', running: false });
   assert.deepEqual(shape(rows), ['user_message', 'turn(closed)', 'assistant_message', 'user_message', 'turn(closed)', 'assistant_message']);
-  assert.equal(summaryLabel(rows[1].summary), 'Edited 1 file and ran 1 command');
-  assert.equal(rows[2].entry.item.text, 'done');
-  assert.equal(rows[1].entries.length, 3, 'the folded rows are kept for the reader to open');
+  assert.equal(summaryLabel((rows[1] as TurnRow).summary), 'Edited 1 file and ran 1 command');
+  assert.equal(((rows[2] as EntryRow).entry.item as { text?: string }).text, 'done');
+  assert.equal((rows[1] as TurnRow).entries.length, 3, 'the folded rows are kept for the reader to open');
 });
 
 test('Collapse turns: opening a turn shows its rows nested, ungrouped', () => {

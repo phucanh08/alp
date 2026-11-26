@@ -7,6 +7,7 @@ import {
   DEFAULT_USAGE_PREFS, USAGE_PREFS_KEY, balanceText, displayPercent, effectivePins, formatDisplayPct, formatResetLabel, formatResetTime, isCardOn,
   loadUsagePrefs, parseUsagePrefs, pinnedSummary, resolveWindow, serializeUsagePrefs, setCardOn, togglePin, updateUsagePrefs, windowTone,
 } from '../dist-lib/usage-prefs.js';
+import type { UsagePrefs, UsageProvider, UsageWindow } from '../dist-lib/usage-prefs.js';
 
 const CLAUDE = {
   runtime: 'claude', available: true, checkedAt: '2026-11-22T00:00:00Z', plan: 'max', planLabel: 'Max 5x', limited: false, pause: null, parked: 0,
@@ -22,22 +23,22 @@ const CODEX = {
 };
 
 function memory() {
-  const map = new Map();
-  return { getItem: key => map.get(key) ?? null, setItem: (key, value) => map.set(key, value), map };
+  const map = new Map<string, string>();
+  return { getItem: (key: string) => map.get(key) ?? null, setItem: (key: string, value: string) => map.set(key, value), map };
 }
 
 test('defaults: used, source pins, every card on, the summary shown; garbage and other versions give them', () => {
   for (const raw of [null, '', '{', '[]', JSON.stringify({ v: 2, displayAs: 'remaining' })]) assert.deepEqual(parseUsagePrefs(raw), { ...DEFAULT_USAGE_PREFS });
   const parsed = parseUsagePrefs(JSON.stringify({ v: 1, displayAs: 'nope', pins: [{ runtime: 'claude', windowId: 'weekly' }, { runtime: 1 }, { runtime: 'claude', windowId: 'weekly' }], cardsOff: ['codex', 3, 'codex'], inSidebar: 'yes', token: 'secret' }));
   assert.deepEqual(parsed, { displayAs: 'used', pins: [{ runtime: 'claude', windowId: 'weekly' }], cardsOff: ['codex'], inSidebar: true });
-  assert.ok(!serializeUsagePrefs({ ...parsed, token: 'secret' }).includes('secret'));
+  assert.ok(!serializeUsagePrefs({ ...parsed, token: 'secret' } as UsagePrefs).includes('secret'));
 });
 
 test('stored per browser under one key, read back as written', () => {
   const storage = memory();
   const next = updateUsagePrefs(storage, prefs => ({ ...prefs, displayAs: 'remaining', inSidebar: false }));
   assert.equal(next?.displayAs, 'remaining');
-  assert.deepEqual(JSON.parse(storage.map.get(USAGE_PREFS_KEY)), { v: 1, displayAs: 'remaining', pins: null, cardsOff: [], inSidebar: false });
+  assert.deepEqual(JSON.parse(storage.map.get(USAGE_PREFS_KEY)!), { v: 1, displayAs: 'remaining', pins: null, cardsOff: [], inSidebar: false });
   assert.deepEqual(loadUsagePrefs(storage), next);
   assert.equal(updateUsagePrefs({ getItem: () => null, setItem: () => { throw new Error('quota'); } }, prefs => prefs), null);
 });
@@ -46,7 +47,7 @@ test('windows: the host\'s id and label, else read from an older host\'s name; s
   assert.deepEqual(CLAUDE.windows.map(resolveWindow).map(window => [window.id, window.label, window.shortLabel]), [
     ['five_hour', 'Session', '5h'], ['weekly', 'Weekly', 'wk'], ['weekly:fable', 'Weekly · Fable', 'Fable wk'],
   ]);
-  assert.deepEqual([{ name: 'five_hour' }, { name: 'seven_day' }, { name: 'Codex · 5 hour window' }, { name: 'monthly_credits' }].map(resolveWindow).map(window => [window.id, window.label, window.shortLabel]), [
+  assert.deepEqual(([{ name: 'five_hour' }, { name: 'seven_day' }, { name: 'Codex · 5 hour window' }, { name: 'monthly_credits' }] as UsageWindow[]).map(resolveWindow).map(window => [window.id, window.label, window.shortLabel]), [
     ['five_hour', '5-hour', '5h'], ['seven_day', 'Weekly', 'wk'], ['Codex · 5 hour window', 'Codex · 5 hour window', '5h'], ['monthly_credits', 'Monthly credits', 'Monthly credits'],
   ]);
 });
@@ -68,7 +69,7 @@ test('default pins: windows marked summary, else the 5-hour and weekly ones, els
   const marked = { ...CLAUDE, windows: CLAUDE.windows.map(window => ({ ...window, summary: window.id === 'weekly:fable' })) };
   assert.deepEqual(effectivePins(prefs, [marked]), [{ runtime: 'claude', windowId: 'weekly:fable' }]);
   const other = { runtime: 'x', windows: [{ name: 'a', usedPercent: null }, { name: 'monthly', usedPercent: 3 }, { name: 'daily', usedPercent: 1 }] };
-  assert.deepEqual(effectivePins(prefs, [other]), [{ runtime: 'x', windowId: 'monthly' }]);
+  assert.deepEqual(effectivePins(prefs, [other as UsageProvider]), [{ runtime: 'x', windowId: 'monthly' }]);
 });
 
 test('the first pin edit keeps the defaults shown and toggles one; an empty selection stays empty', () => {
@@ -83,7 +84,7 @@ test('the first pin edit keeps the defaults shown and toggles one; an empty sele
 
 test('sidebar summary: pinned windows of cards that are on, in Percentages, nothing while Summary in sidebar is off', () => {
   const prefs = parseUsagePrefs(null);
-  const text = summary => summary.map(entry => [entry.runtime, entry.windows.map(window => `${window.text} ${window.shortLabel}`)]);
+  const text = (summary: ReturnType<typeof pinnedSummary>) => summary.map(entry => [entry.runtime, entry.windows.map(window => `${window.text} ${window.shortLabel}`)]);
   assert.deepEqual(text(pinnedSummary([CLAUDE, CODEX], prefs)), [['claude', ['4% 5h', '20% wk']], ['codex', ['4% 5h', '66% wk']]]);
   assert.deepEqual(text(pinnedSummary([CLAUDE, CODEX], { ...prefs, displayAs: 'remaining' })), [['claude', ['96% 5h', '80% wk']], ['codex', ['96% 5h', '34% wk']]]);
   const off = setCardOn(prefs, 'claude', false);
@@ -95,7 +96,7 @@ test('sidebar summary: pinned windows of cards that are on, in Percentages, noth
 
 test('reset datapoints: Paseo\'s two-unit countdown and the exact time (today, weekday, date)', () => {
   const now = new Date(2026, 10, 22, 8, 23).getTime();
-  const at = (minutes) => new Date(now + minutes * 60_000).toISOString();
+  const at = (minutes: number) => new Date(now + minutes * 60_000).toISOString();
   assert.equal(formatResetLabel(at(226), now), 'resets in 3h 46m');
   assert.equal(formatResetLabel(at(37), now), 'resets in 37m');
   assert.equal(formatResetLabel(at(120), now), 'resets in 2h');

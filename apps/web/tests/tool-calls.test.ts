@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { clipLines, detailKind, diffStats, editDiff, humanizeToolName, lineDiff, parseUnifiedDiff, presentToolCall, relativePath, safeLink, splitLines } from '../dist-lib/tool-calls.js';
 
 const roots = ['/home/me/project', '/private/home/me/project'];
-const row = (name, detail) => {
+const row = (name: string, detail: unknown) => {
   const { label, secondary, icon, kind } = presentToolCall({ name, detail }, roots);
   return { kind, label, secondary, icon };
 };
@@ -112,7 +112,7 @@ test('line diff stays bounded: a huge edit falls back to removals then additions
   assert.ok(Date.now() - started < 1000, 'no quadratic table for 3000×3000 lines');
   assert.equal(exact, false);
   assert.equal(lines.length, 6002);
-  assert.deepEqual([lines[0].type, lines[1].type, lines[3000].type, lines[3001].type, lines.at(-1).type], ['context', 'remove', 'remove', 'add', 'context']);
+  assert.deepEqual([lines[0].type, lines[1].type, lines[3000].type, lines[3001].type, lines.at(-1)!.type], ['context', 'remove', 'remove', 'add', 'context']);
   assert.deepEqual(lines.at(-1), { type: 'context', text: 'end', oldLine: 3002, newLine: 3002 });
   // Under the limit the same shape is diffed exactly.
   assert.equal(lineDiff('a\nb', 'c\nd', { cellLimit: 4 }).exact, true);

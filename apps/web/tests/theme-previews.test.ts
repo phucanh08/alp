@@ -9,11 +9,11 @@ import { THEME_PREVIEWS } from '../dist-lib/theme-previews.js';
 const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 
 /** The custom properties a theme ends with: :root, then each block naming that theme, in order. */
-function themeVars(theme) {
-  const vars = {};
+function themeVars(theme: string) {
+  const vars: Record<string, string> = {};
   for (const [, head, body] of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
     // The selector is what follows the last statement before the block (@import …;).
-    const list = head.split(';').at(-1).split(',').map(entry => entry.trim());
+    const list = head!.split(';').at(-1)!.split(',').map(entry => entry.trim());
     if (!list.includes(':root') && !list.includes(`:root[data-theme="${theme}"]`)) continue;
     for (const [, name, value] of body.matchAll(/--([\w-]+)\s*:\s*([^;]+);/g)) vars[name] = value.trim();
   }

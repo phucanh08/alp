@@ -5,8 +5,9 @@ import assert from 'node:assert/strict';
 import { FIND_LIMIT, findMatches, findStatus, isFindShortcut, stepMatch } from '../dist-lib/pane-find.js';
 import { insertMention, mentionAt, mentionText } from '../dist-lib/mentions.js';
 import { commandResults } from '../dist-lib/command-center.js';
+import type { CommandAction } from '../dist-lib/command-center.js';
 
-const key = (init) => ({ key: 'f', metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...init });
+const key = (init: { metaKey?: boolean, ctrlKey?: boolean, shiftKey?: boolean, altKey?: boolean, key?: string }) => ({ key: 'f', metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...init });
 
 test('Cmd+F on a Mac and Ctrl+F elsewhere is find; another modifier is not', () => {
   assert.equal(isFindShortcut(key({ metaKey: true }), true), true);
@@ -64,7 +65,7 @@ test('an "@" word at the caret is a file mention: at the start or after whitespa
   assert.deepEqual(mentionAt('see @src/ca', 11), { start: 4, end: 11, query: 'src/ca' });
   assert.deepEqual(mentionAt('see @src/ca and more', 11), { start: 4, end: 11, query: 'src/ca' });
   assert.deepEqual(mentionAt('line\n@rea', 9), { start: 5, end: 9, query: 'rea' });
-  for (const [text, caret] of [['mail@example.com', 16], ['@a b', 4], ['', 0], ['see @x', 3], ['@a@b', 4]]) assert.equal(mentionAt(text, caret), null, JSON.stringify([text, caret]));
+  for (const [text, caret] of [['mail@example.com', 16], ['@a b', 4], ['', 0], ['see @x', 3], ['@a@b', 4]] as [string, number][]) assert.equal(mentionAt(text, caret), null, JSON.stringify([text, caret]));
 });
 
 test('choosing a file puts @<path> and a space in place of the whole word', () => {
@@ -76,7 +77,7 @@ test('choosing a file puts @<path> and a space in place of the whole word', () =
 });
 
 test('the command center\'s agent rows show only when searched for, in their own Agent section', () => {
-  const actions = [
+  const actions: CommandAction[] = [
     { id: 'new-session', label: 'New session', group: 'workspace', always: true },
     { id: 'agent-model:codex:gpt-a', label: 'Model: GPT A', group: 'agent', checked: true, keywords: ['model'] },
     { id: 'agent-model:codex:gpt-b', label: 'Model: GPT B', group: 'agent', keywords: ['model'] },
@@ -87,7 +88,7 @@ test('the command center\'s agent rows show only when searched for, in their own
   const model = commandResults({ actions, sessions: [], query: 'model' });
   assert.deepEqual(model[0].title, 'Agent');
   // The model rows first ("Mode: …" holds the letters of "model" in order, so it may follow).
-  assert.deepEqual(model[0].rows.slice(0, 2).map(row => row.item.id), ['agent-model:codex:gpt-a', 'agent-model:codex:gpt-b']);
-  assert.deepEqual(commandResults({ actions, sessions: [], query: 'effort' })[0].rows.map(row => row.item.id), ['agent-thinking:high']);
-  assert.deepEqual(commandResults({ actions, sessions: [], query: 'permissions' })[0].rows.map(row => row.item.id), ['agent-mode:read-only']);
+  assert.deepEqual(model[0].rows.slice(0, 2).map(row => (row.item as CommandAction).id), ['agent-model:codex:gpt-a', 'agent-model:codex:gpt-b']);
+  assert.deepEqual(commandResults({ actions, sessions: [], query: 'effort' })[0].rows.map(row => (row.item as CommandAction).id), ['agent-thinking:high']);
+  assert.deepEqual(commandResults({ actions, sessions: [], query: 'permissions' })[0].rows.map(row => (row.item as CommandAction).id), ['agent-mode:read-only']);
 });

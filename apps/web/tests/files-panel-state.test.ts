@@ -14,8 +14,8 @@ const A = workspaceScope('https://host-a.example', '/Users/me/project');
 const B = workspaceScope('https://host-b.example', '/Users/me/project');
 
 function memory() {
-  const map = new Map();
-  return { getItem: key => map.get(key) ?? null, setItem: (key, value) => map.set(key, value), map };
+  const map = new Map<string, string>();
+  return { getItem: (key: string) => map.get(key) ?? null, setItem: (key: string, value: string) => map.set(key, value), map };
 }
 
 test('defaults: sorted by name, hidden files off, no folders; garbage and other versions give them', () => {
@@ -76,14 +76,14 @@ test('stored: these fields only, re-validated, round-trip; update reads, changes
   const storage = memory();
   const next = updateFilesPanelState(storage, state => ({ ...withExpanded(state, A, ['src', '../x'], 7), sort: 'size', showHidden: true, token: 'secret', gateway: 'g' }));
   assert.deepEqual(next, { sort: 'size', showHidden: true, workspaces: { [A]: { expanded: ['src'], at: 7 } } });
-  const text = storage.map.get(FILES_PANEL_KEY);
+  const text = storage.map.get(FILES_PANEL_KEY)!;
   assert.deepEqual(Object.keys(JSON.parse(text)).sort(), ['showHidden', 'sort', 'v', 'workspaces']);
   assert.ok(!text.includes('secret') && !text.includes('../x'));
   assert.deepEqual(loadFilesPanelState(storage), next);
 
   // Another tab's change since is kept: the update starts from what storage holds now.
   storage.setItem(FILES_PANEL_KEY, serializeFilesPanelState(withExpanded(next, B, ['lib'], 8)));
-  const after = updateFilesPanelState(storage, state => ({ ...state, sort: 'modified' }));
+  const after = updateFilesPanelState(storage, state => ({ ...state, sort: 'modified' }))!;
   assert.equal(after.sort, 'modified');
   assert.deepEqual(expandedFor(after, B), ['lib']);
   assert.deepEqual(expandedFor(after, A), ['src']);

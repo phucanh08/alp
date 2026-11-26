@@ -4,6 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSpec, effectiveModel, startNewSession, effortLabel, effortOptions, initialChoices, normalizeModels, parsePreview, previewRows, resolveThinking } from '../dist-lib/new-session.js';
+import type { Choices } from '../dist-lib/new-session.js';
 
 const models = normalizeModels([
   { id: 'codex:gpt-6.1-sol', label: 'codex · GPT-6.1-Sol', efforts: ['low', 'medium', 'high', 'xhigh', 'max', 'low'], effort: 'low' },
@@ -57,7 +58,7 @@ test('the spec carries only allowed fields, empty choices left to the host', () 
   assert.deepEqual(buildSpec('/w/a', {}), { cwd: '/w/a' });
   assert.deepEqual(buildSpec('/w/a', { team: 'cafe', mode: 'read-only', model: 'codex:gpt-6.1-sol', thinking: 'high' }, { persist: true }),
     { cwd: '/w/a', persist: true, workflow: 'cafe', mode: 'read-only', model: 'codex:gpt-6.1-sol', thinking: 'high' });
-  assert.deepEqual(buildSpec('/w/a', /** @type {any} */ ({ team: '', title: 'x', prompt: 'y', agent: 'evil' })), { cwd: '/w/a' });
+  assert.deepEqual(buildSpec('/w/a', { team: '', title: 'x', prompt: 'y', agent: 'evil' } as Choices), { cwd: '/w/a' });
 });
 
 test('a preview: checked, then read as rows', () => {
@@ -65,12 +66,12 @@ test('a preview: checked, then read as rows', () => {
   assert.equal(parsePreview({ preview: { team: 'pho' } }), undefined, 'no agent');
   const preview = parsePreview({ preview: { teams: [{ id: 'pho', label: 'Phở' }, { id: 7 }], team: 'pho', teamLabel: 'Phở', agent: 'main', runtime: 'codex', model: 'gpt-6.1-sol', mode: 'full-access', thinking: 'xhigh', extra: 1 } });
   assert.deepEqual(preview, { teams: [{ id: 'pho', label: 'Phở' }], team: 'pho', teamLabel: 'Phở', agent: 'main', runtime: 'codex', model: 'gpt-6.1-sol', mode: 'full-access', thinking: 'xhigh' });
-  assert.deepEqual(previewRows(preview, models).map(row => [row.label, row.value]), [
+  assert.deepEqual(previewRows(preview!, models).map(row => [row.label, row.value]), [
     ['Team', 'Phở'], ['Agent', 'main'], ['Runtime', 'Codex'], ['Model', 'codex · GPT-6.1-Sol'], ['Thinking', 'Extra high'], ['Permissions', 'Full access'],
   ]);
   // Without a label or a known model, the ids (`custom` reads Custom); empty fields leave their row out.
   const bare = parsePreview({ preview: { teams: [], team: 'custom', agent: 'lead', runtime: 'acp', model: 'x/y', mode: '', thinking: '' } });
-  assert.deepEqual(previewRows(bare).map(row => [row.label, row.value]), [['Team', 'Custom'], ['Agent', 'lead'], ['Runtime', 'ACP'], ['Model', 'x/y']]);
+  assert.deepEqual(previewRows(bare!).map(row => [row.label, row.value]), [['Team', 'Custom'], ['Agent', 'lead'], ['Runtime', 'ACP'], ['Model', 'x/y']]);
 });
 
 test('the team a start sends: chosen, else the current preview\'s, else the first listed once the preview cannot answer; none only when the host has no team', async () => {
@@ -78,13 +79,13 @@ test('the team a start sends: chosen, else the current preview\'s, else the firs
   const teams = [{ id: 'pho' }, { id: 'cafe' }];
   assert.deepEqual(startTeam({ chosen: 'cafe', previewTeam: 'pho', previewSettled: false, teams }), { team: 'cafe' });
   assert.deepEqual(startTeam({ previewTeam: 'pho', previewSettled: false, teams: [] }), { team: 'pho' });
-  assert.match(startTeam({ previewSettled: false, teams }).wait, /Checking/);
+  assert.match(startTeam({ previewSettled: false, teams }).wait!, /Checking/);
   assert.deepEqual(startTeam({ previewSettled: true, teams }), { team: 'pho' });
-  assert.match(startTeam({ previewSettled: true, previewError: 'denied', teams: [] }).wait, /Cannot tell which team.*denied/);
-  assert.match(startTeam({ previewSettled: true, teams: [], teamsKnown: false }).wait, /Cannot tell/);
+  assert.match(startTeam({ previewSettled: true, previewError: 'denied', teams: [] }).wait!, /Cannot tell which team.*denied/);
+  assert.match(startTeam({ previewSettled: true, teams: [], teamsKnown: false }).wait!, /Cannot tell/);
   assert.deepEqual(startTeam({ previewSettled: true, teams: [], teamsKnown: true }), {});
   // A preview is trusted for the model only when it answered the same team and model.
-  assert.equal(previewBase({ workflow: 'pho', model: 'm', thinking: 'high', cwd: '/w' }), previewBase({ workflow: 'pho', model: 'm' }));
+  assert.equal(previewBase({ workflow: 'pho', model: 'm', thinking: 'high', cwd: '/w' } as Parameters<typeof previewBase>[0]), previewBase({ workflow: 'pho', model: 'm' }));
   assert.notEqual(previewBase({ workflow: 'pho' }), previewBase({}));
   assert.notEqual(previewBase({ workflow: 'pho', model: 'm' }), previewBase({ workflow: 'pho' }));
   assert.equal(failedStartNotice('Refused.', '  '), 'Refused.');
@@ -95,11 +96,11 @@ test('the team a start sends: chosen, else the current preview\'s, else the firs
 
 test('a start that cannot tell its team says why and what unblocks it, and never starts without one', async () => {
   const { startTeam } = await import('../dist-lib/new-session.js');
-  const stuck = input => {
+  const stuck = (input: Partial<Parameters<typeof startTeam>[0]>) => {
     const result = startTeam({ previewSettled: true, teams: [], teamsKnown: false, ...input });
     assert.equal(result.team, undefined, 'fail closed: no create without a team');
-    assert.equal(result.stuck, true);
-    return result.wait;
+    assert.equal((result as { stuck?: boolean }).stuck, true);
+    return result.wait!;
   };
   // No project.read, and the preview blocked by a missing session.read: both grants named.
   const noRead = stuck({ teamsUnavailable: { reason: 'permission' }, previewBlocked: true, previewNeedsRead: true, previewError: 'Your access token cannot read sessions.' });
@@ -119,21 +120,21 @@ test('a start that cannot tell its team says why and what unblocks it, and never
   // No capability and no preview possible for another reason: says what host would do.
   assert.match(stuck({ teamsUnavailable: { reason: 'capability' }, previewBlocked: true, previewError: 'Not connected.' }), /connect to a host that lists teams or previews sessions/);
   // Not stuck while the preview may still answer.
-  assert.equal(startTeam({ previewSettled: false, teams: [], teamsUnavailable: { reason: 'permission' } }).stuck, undefined);
+  assert.equal((startTeam({ previewSettled: false, teams: [], teamsUnavailable: { reason: 'permission' } }) as { stuck?: boolean }).stuck, undefined);
 });
 
 test('a New session start takes its workspace and connection before waiting on the host', async () => {
   let workspace = '/w/shop';
-  const kept = [];
-  const notices = [];
+  const kept: { text: string, origin: { workspace: string | null, connection: number } }[] = [];
+  const notices: { level: string, text: string }[] = [];
   const controller = {
     startOrigin: () => ({ workspace, connection: 7 }),
     // The person moves to another workspace while the host answers, then the start fails.
-    createSession: async () => { workspace = '/w/other'; await Promise.resolve(); throw new Error('Refused.'); },
-    keepUnsentDraft: (text, origin) => kept.push({ text, origin }),
-    notify: (level, text) => notices.push({ level, text }),
+    createSession: async (): Promise<string> => { workspace = '/w/other'; await Promise.resolve(); throw new Error('Refused.'); },
+    keepUnsentDraft: (text: string, origin: { workspace: string | null, connection: number }) => kept.push({ text, origin }),
+    notify: (level: string, text: string) => notices.push({ level, text }),
   };
-  const screen = { mounted: () => false, describe: error => ({ message: error.message }), nameOf: path => path.split('/').pop() };
+  const screen = { mounted: () => false, describe: (error: unknown) => ({ message: (error as Error).message }), nameOf: (path: string) => path.split('/').pop()! };
   await assert.rejects(startNewSession(controller, { prompt: 'hi' }, 'hi', screen), /Refused/);
   assert.deepEqual(kept, [{ text: 'hi', origin: { workspace: '/w/shop', connection: 7 } }]);
   assert.deepEqual(notices, [{ level: 'error', text: 'Refused. Your first message was not sent; it is back in the New session box of shop.' }]);

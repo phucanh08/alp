@@ -2,15 +2,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { insertCommand, matchCommands, slashQuery } from '../dist-lib/slash-commands.js';
+import type { SessionCommand } from '../dist-lib/slash-commands.js';
 
-const commands = [
+const commands: SessionCommand[] = [
   { name: 'compact', description: 'Clear history', argumentHint: '<what>', kind: 'command' },
   { name: 'review', description: 'Review a PR', kind: 'command' },
   { name: 'alp:xia', description: 'Research', kind: 'skill' },
   { name: 'alp:bug-loop', description: 'Debug', kind: 'skill' },
   { name: 'alp:compact', description: 'Checkpoint', kind: 'skill' },
 ];
-const names = list => list.map(command => command.name);
+const names = (list: SessionCommand[] | null) => list!.map(command => command.name);
 
 test('only a "/" at the start of the box, before any space, is a command being typed', () => {
   assert.equal(slashQuery('/'), '');

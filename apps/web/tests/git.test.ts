@@ -5,29 +5,32 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Controller } from '../dist-lib/controller.js';
 import { GIT_ERROR_MESSAGES, GIT_MESSAGES, GitAccessError, appendDiffPage, baseLabel, branchLine, changeKind, changesEmptyAction, changesTree, committedDescription, describeGitError, diffRows, diffTotals, formatDiffCount, gitAccess, gitCompare, gitRequestPath, registryWorkspaceOf, restartsDiff } from '../dist-lib/git.js';
-import { FakeHost, until } from './support/fake-host.js';
+import type { TestContext } from 'node:test';
+import type { GitDiffFile, GitDiffLine, GitDiffPage, GitStatus } from '@anhlp/alp-protocol';
+import type { ControllerOptions } from '../dist-lib/controller.js';
+import { FakeHost, until } from './support/fake-host.ts';
 
 const READER = { id: 'p1', label: 'tests', permissions: ['session.read', 'session.write', 'project.read', 'files.read'], workspaces: ['/w/a'], workspaceRoots: [{ path: '/w/a', canonical: '/real/a' }] };
 const NO_FILES = { ...READER, permissions: ['session.read', 'session.write', 'project.read'] };
 const SESSIONS = { ...READER, permissions: ['session.read', 'session.write'] };
 
-const STATUS = { state: 'repository', branch: 'feature', detached: false, head: 'abcdef1234567', upstream: { ref: 'origin/feature', ahead: 2, behind: 1 }, baseRef: 'main', aheadBehind: { ahead: 3, behind: 0 }, hasRemote: true, remoteUrl: null, dirty: true, files: [{ path: 'src/app.ts', change: 'modified', staged: false, unstaged: true }], hiddenCount: 0, truncated: false, snapshot: 's1' };
-const hunk = (lines, at = 1) => ({ oldStart: at, oldCount: lines.filter(line => line.type !== 'add').length, newStart: at, newCount: lines.filter(line => line.type !== 'remove').length, lines });
-const FILE = { path: 'src/app.ts', change: 'modified', kind: 'text', additions: 1, deletions: 1, hunks: [hunk([{ type: 'context', content: 'a' }, { type: 'remove', content: 'b' }, { type: 'add', content: 'c', noNewline: true }], 10)] };
-const PAGE = { compare: { mode: 'uncommitted', ignoreWhitespace: false }, snapshot: 's1', files: [FILE], hiddenCount: 1, truncated: false };
+const STATUS: GitStatus = { state: 'repository', branch: 'feature', detached: false, head: 'abcdef1234567', upstream: { ref: 'origin/feature', ahead: 2, behind: 1 }, baseRef: 'main', aheadBehind: { ahead: 3, behind: 0 }, hasRemote: true, remoteUrl: null, dirty: true, files: [{ path: 'src/app.ts', change: 'modified', staged: false, unstaged: true }], hiddenCount: 0, truncated: false, snapshot: 's1' };
+const hunk = (lines: GitDiffLine[], at = 1) => ({ oldStart: at, oldCount: lines.filter(line => line.type !== 'add').length, newStart: at, newCount: lines.filter(line => line.type !== 'remove').length, lines });
+const FILE: GitDiffFile = { path: 'src/app.ts', change: 'modified', kind: 'text', additions: 1, deletions: 1, hunks: [hunk([{ type: 'context', content: 'a' }, { type: 'remove', content: 'b' }, { type: 'add', content: 'c', noNewline: true }], 10)] };
+const PAGE: GitDiffPage = { compare: { mode: 'uncommitted', ignoreWhitespace: false }, snapshot: 's1', files: [FILE], hiddenCount: 1, truncated: false };
 
-function setup(t, { principal = READER, capabilities = ['workspace.registry', 'workspace.git'], rows = [{ id: 'wks_a', projectId: 'prj_a', directory: '/real/a', labels: [], createdAt: 'old' }] } = {}) {
+function setup(t: TestContext, { principal = READER, capabilities = ['workspace.registry', 'workspace.git'], rows = [{ id: 'wks_a', projectId: 'prj_a', directory: '/real/a', labels: [], createdAt: 'old' }] } = {}) {
   const host = new FakeHost({ principal });
   host.capabilities.push(...capabilities);
   host.intercept.set('workspace.list', (_params, _connection, { answer }) => { answer({ workspaces: rows, revision: 1, total: rows.length, nextCursor: null }); return 'handled'; });
   host.intercept.set('workspace.git.status', (_params, _connection, { answer }) => { answer(STATUS); return 'handled'; });
   host.intercept.set('workspace.git.diff', (_params, _connection, { answer }) => { answer(PAGE); return 'handled'; });
-  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, attentionWatchPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500 });
+  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, attentionWatchPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500 } as ControllerOptions);
   t.after(() => controller.disconnect());
   return { host, controller, state: () => controller.getState() };
 }
 
-async function connected({ controller, state }, { registry = true } = {}) {
+async function connected({ controller, state }: Pick<ReturnType<typeof setup>, 'controller' | 'state'>, { registry = true } = {}) {
   controller.connect({ url: 'http://127.0.0.1:7434', token: 'alpgw1.0123456789abcdef.secret' });
   await until(() => state().connection.phase === 'open', 'open');
   controller.selectWorkspace('/w/a');
@@ -35,10 +38,10 @@ async function connected({ controller, state }, { registry = true } = {}) {
   if (registry) await until(() => state().registry.workspaces.length > 0, 'registry');
 }
 
-const gitCalls = host => host.calls.filter(call => call.method.startsWith('workspace.git.')).map(call => [call.method, call.params]);
+const gitCalls = (host: FakeHost) => host.calls.filter(call => call.method.startsWith('workspace.git.')).map(call => [call.method, call.params]);
 
-async function refusal(promise) {
-  try { await promise; } catch (error) { assert.ok(error instanceof GitAccessError, `a GitAccessError, not ${error?.name}: ${error?.message}`); return error; }
+async function refusal(promise: Promise<unknown>) {
+  try { await promise; } catch (error) { assert.ok(error instanceof GitAccessError, `a GitAccessError, not ${(error as Error | undefined)?.name}: ${(error as Error | undefined)?.message}`); return error; }
   assert.fail('expected a refusal');
 }
 
@@ -79,7 +82,7 @@ test('git: no capability, no project.read, no registry or an unregistered worksp
     ['no registry', { capabilities: ['workspace.git'] }, 'registry', GIT_MESSAGES.registry],
     ['unregistered', { rows: [{ id: 'wks_b', projectId: 'prj_b', directory: '/w/b', labels: [], createdAt: 'old' }] }, 'unregistered', GIT_MESSAGES.unregistered],
     ['archived', { rows: [{ id: 'wks_a', projectId: 'prj_a', directory: '/w/a', labels: [], createdAt: 'old', archivedAt: 'now' }] }, 'unregistered', GIT_MESSAGES.unregistered],
-  ]) {
+  ] as [string, Parameters<typeof setup>[1], string, string][]) {
     await t.test(label, async t => {
       const w = setup(t, options);
       await connected(w, { registry: false });
@@ -98,10 +101,10 @@ test('git: a blocked or malformed path is refused without a request; host refusa
   assert.equal((await refusal(w.controller.gitDiff({ compare: { mode: 'uncommitted' }, path: '.env' }))).reason, 'blocked_path');
   assert.equal((await refusal(w.controller.gitDiff({ compare: { mode: 'uncommitted' }, path: '../x' }))).reason, 'invalid_path');
   assert.deepEqual(gitCalls(w.host), []);
-  for (const [code, reason] of [[1004, 'stale_snapshot'], [-32602, 'invalid_cursor'], [1001, 'not_repository'], [1001, 'unknown_ref'], [1005, 'git_unavailable'], [1000, 'git_failed']]) {
+  for (const [code, reason] of [[1004, 'stale_snapshot'], [-32602, 'invalid_cursor'], [1001, 'not_repository'], [1001, 'unknown_ref'], [1005, 'git_unavailable'], [1000, 'git_failed']] as [number, string][]) {
     w.host.intercept.set('workspace.git.diff', (_params, _connection, { fail }) => { fail(code, 'host text', { reason }); return 'handled'; });
     const refused = await refusal(w.controller.gitDiff({ compare: { mode: 'base' }, cursor: 'c' }));
-    assert.deepEqual([refused.failure.code, refused.reason, refused.message], [code, reason, GIT_ERROR_MESSAGES[reason]]);
+    assert.deepEqual([refused.failure.code, refused.reason, refused.message], [code, reason, GIT_ERROR_MESSAGES[reason as keyof typeof GIT_ERROR_MESSAGES]]);
     assert.equal(restartsDiff(refused), reason === 'stale_snapshot' || reason === 'invalid_cursor', reason);
   }
   w.host.intercept.set('workspace.git.diff', (_params, _connection, { fail }) => { fail(1003, 'lacks', { reason: 'grant', permission: 'files.read' }); return 'handled'; });
@@ -206,7 +209,7 @@ test("changesTree: Paseo's tree, folders first in code-unit order, single-child 
     { path: 'apps/web/one.js', additions: 2, deletions: 1 },
     { path: 'apps/cli/two.js', additions: 0, deletions: 4 },
   ];
-  const shape = rows => rows.map(row => `${'  '.repeat(row.depth)}${row.kind === 'folder' ? `${row.name}/ +${row.additions} -${row.deletions}` : row.name}`);
+  const shape = (rows: ReturnType<typeof changesTree>) => rows.map(row => `${'  '.repeat(row.depth)}${row.kind === 'folder' ? `${row.name}/ +${row.additions} -${row.deletions}` : row.name}`);
   assert.deepEqual(shape(changesTree(files)), [
     'Zeta/ +1 -0', '  x.md',
     'apps/ +2 -5', '  cli/ +0 -4', '    two.js', '  web/ +2 -1', '    one.js',
@@ -216,7 +219,7 @@ test("changesTree: Paseo's tree, folders first in code-unit order, single-child 
   // The chain is keyed by its deepest directory; collapsing it hides its files, not its totals.
   const collapsed = changesTree(files, ['packages/app/src', 'apps/cli']);
   assert.deepEqual(shape(collapsed), ['Zeta/ +1 -0', '  x.md', 'apps/ +2 -5', '  cli/ +0 -4', '  web/ +2 -1', '    one.js', 'packages/app/src/ +4 -2', 'README.md']);
-  assert.equal(collapsed.find(row => row.kind === 'folder' && row.name === 'packages/app/src').dirPath, 'packages/app/src');
+  assert.equal((collapsed.find(row => row.kind === 'folder' && row.name === 'packages/app/src') as { dirPath: string }).dirPath, 'packages/app/src');
   // Files without counts (the status list) still build; a root file only is one row.
   assert.deepEqual(shape(changesTree([{ path: 'a/b/c.txt' }, { path: 'top' }])), ['a/b/ +0 -0', '  c.txt', 'top']);
   assert.deepEqual(changesTree([]), []);
@@ -231,7 +234,7 @@ test("changes labels: change kinds as Paseo's icons, the Committed description, 
   assert.equal(committedDescription('main', 'origin/main'), undefined);
   assert.equal(committedDescription(null, 'main'), undefined);
   assert.equal(committedDescription('feature', null), undefined);
-  const status = (dirty, ahead) => ({ dirty, aheadBehind: ahead === undefined ? null : { ahead, behind: 0 } });
+  const status = (dirty: boolean, ahead?: number) => ({ dirty, aheadBehind: ahead === undefined ? null : { ahead, behind: 0 } });
   assert.equal(changesEmptyAction({ mode: 'base', ignoreWhitespace: false, status: status(true) }), 'uncommitted');
   assert.equal(changesEmptyAction({ mode: 'base', ignoreWhitespace: false, status: status(false) }), null);
   assert.equal(changesEmptyAction({ mode: 'uncommitted', ignoreWhitespace: false, status: status(false, 2) }), 'base');
@@ -245,7 +248,7 @@ test("changes labels: change kinds as Paseo's icons, the Committed description, 
 // (hooks/use-changes-preferences/storage.ts hideWhitespace); the mode is not (Paseo keeps it in memory).
 test('Hide whitespace: remembered under its own key, anything else is off, storage that throws is ignored', async () => {
   const { HIDE_WHITESPACE_KEY, loadHideWhitespace, saveHideWhitespace } = await import('../dist-lib/git.js');
-  const memory = () => { const items = new Map(); return { items, getItem: key => items.get(key) ?? null, setItem: (key, value) => { items.set(key, String(value)); } }; };
+  const memory = () => { const items = new Map<string, string>(); return { items, getItem: (key: string) => items.get(key) ?? null, setItem: (key: string, value: string) => { items.set(key, String(value)); } }; };
   const storage = memory();
   assert.equal(HIDE_WHITESPACE_KEY, 'alp.changes.hideWhitespace');
   assert.equal(loadHideWhitespace(storage), false);

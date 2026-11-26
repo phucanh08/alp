@@ -8,29 +8,32 @@ import { readFile } from 'node:fs/promises';
 import { Controller } from '../dist-lib/controller.js';
 import { AuthenticationError, ConfigurationError, TransientError } from '../dist-lib/errors.js';
 import { LINK_NOT_LOOPBACK, LINK_TOKEN_INVALID, LINK_TOKEN_KEY, LINK_TOKEN_MALFORMED, STANDALONE_GATEWAY, defaultGatewayAddress, isLinkToken, isLoopbackPage, parseLinkHash, servedByAlpWeb, storedLinkToken, takeLinkToken } from '../dist-lib/link-token.js';
-import { FakeHost, until } from './support/fake-host.js';
+import type { TestContext } from 'node:test';
+import type { Phase } from '../dist-lib/controller.js';
+import type { TokenStorage } from '../dist-lib/link-token.js';
+import { FakeHost, until } from './support/fake-host.ts';
 
 const TOKEN = `alpgw1.0123456789abcdef.${'A'.repeat(42)}w`;
 const OTHER = `alpgw1.fedcba9876543210.${'b_-'.repeat(14)}x`;
 
 /** A Storage stand-in that records every call. */
-function memoryStorage(initial = {}) {
+function memoryStorage(initial: Record<string, string> = {}) {
   const items = new Map(Object.entries(initial));
-  const calls = [];
+  const calls: [string, string][] = [];
   return {
     items, calls,
-    getItem(key) { calls.push(['get', key]); return items.has(key) ? items.get(key) : null; },
-    setItem(key, value) { calls.push(['set', key]); items.set(key, String(value)); },
-    removeItem(key) { calls.push(['remove', key]); items.delete(key); },
+    getItem(key: string) { calls.push(['get', key]); return items.has(key) ? items.get(key)! : null; },
+    setItem(key: string, value: string) { calls.push(['set', key]); items.set(key, String(value)); },
+    removeItem(key: string) { calls.push(['remove', key]); items.delete(key); },
   };
 }
 
 /** A page at `href` with a history that records replaceState. */
-function page(href) {
+function page(href: string) {
   const url = new URL(href);
-  const replaced = [];
+  const replaced: { data: unknown, unused: string, next?: string }[] = [];
   const location = { hash: url.hash, pathname: url.pathname, search: url.search, origin: url.origin, protocol: url.protocol, hostname: url.hostname };
-  const history = { state: { kept: true }, replaceState(data, unused, next) { replaced.push({ data, unused, next }); location.hash = ''; } };
+  const history = { state: { kept: true }, replaceState(data: unknown, unused: string, next?: string) { replaced.push({ data, unused, next }); location.hash = ''; } };
   return { location, history, replaced };
 }
 
@@ -107,7 +110,7 @@ test('storage that throws (disabled) still connects this load', () => {
   const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
   assert.deepEqual(takeLinkToken({ ...page(`http://localhost:7433/#token=${TOKEN}`), storage: broken }), { url: 'http://localhost:7433', token: TOKEN });
   assert.equal(takeLinkToken({ ...page('http://localhost:7433/'), storage: broken }), undefined);
-  assert.equal(takeLinkToken({ ...page(`http://localhost:7433/#token=${TOKEN}`), storage: undefined }).token, TOKEN);
+  assert.equal((takeLinkToken({ ...page(`http://localhost:7433/#token=${TOKEN}`), storage: undefined }) as { token: string }).token, TOKEN);
 });
 
 test('main.tsx keeps the link token in sessionStorage, never in localStorage', async () => {
@@ -122,13 +125,13 @@ test('main.tsx keeps the link token in sessionStorage, never in localStorage', a
 
 // ---- the controller with a link token ---------------------------------------------------------
 
-function setup(t, linkStorage) {
+function setup(t: TestContext, linkStorage?: TokenStorage) {
   const host = new FakeHost();
-  const tokens = [];
-  const open = options => { tokens.push(options.token); return host.open(options); };
+  const tokens: string[] = [];
+  const open = (options: { url: string, token: string, signal?: AbortSignal }) => { tokens.push(options.token); return host.open(options); };
   const controller = new Controller({ open, linkStorage, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, attentionPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500 });
   t.after(() => controller.disconnect({ keepLink: true }));
-  const phases = [];
+  const phases: Phase[] = [];
   controller.subscribe(() => phases.push(controller.getState().connection.phase));
   return { host, controller, tokens, phases, state: () => controller.getState() };
 }
@@ -139,11 +142,11 @@ test('a socket closed with 4403 (grant changed) reconnects with the same token a
   w.controller.connect({ url: 'http://127.0.0.1:7433', token: TOKEN, link: true });
   await until(() => w.state().connection.phase === 'open' && w.state().principal, 'open');
   assert.equal(w.state().connection.link, true);
-  assert.deepEqual(w.state().principal.workspaces, ['/w/a', '/w/b']);
+  assert.deepEqual(w.state().principal!.workspaces, ['/w/a', '/w/b']);
   // alp-dashboard's grant follows alpd's registry: a new project, then the gateway closes every socket of the credential.
   w.host.principal = { ...w.host.principal, workspaces: ['/w/a', '/w/b', '/w/c'], workspaceRoots: [...w.host.principal.workspaceRoots, { path: '/w/c', canonical: '/w/c' }] };
   const opens = w.host.opens;
-  for (const connection of [...w.host.connections]) connection.end({ code: 4403, reason: 'credential grant changed' });
+  for (const connection of [...w.host.connections]) connection.end!({ code: 4403, reason: 'credential grant changed' });
   await until(() => w.host.opens > opens && w.state().connection.phase === 'open' && w.state().principal?.workspaces.includes('/w/c'), 'reconnected under the new grant');
   assert.deepEqual(new Set(w.tokens), new Set([TOKEN]), 'every open used the same token');
   assert.equal(w.phases.includes('failed'), false, 'never shown the connect form');
@@ -159,9 +162,9 @@ test('a link token the gateway refuses is forgotten, with a message to run alp d
   w.host.refuse = new AuthenticationError();
   w.host.drop();
   await until(() => w.state().connection.phase === 'failed', 'failed');
-  assert.equal(w.state().connection.error.message, LINK_TOKEN_INVALID);
+  assert.equal(w.state().connection.error!.message, LINK_TOKEN_INVALID);
   assert.match(LINK_TOKEN_INVALID, /no longer valid.*alp dashboard/);
-  assert.equal(w.state().connection.error.message.includes(TOKEN), false);
+  assert.equal(w.state().connection.error!.message.includes(TOKEN), false);
   assert.equal(storage.items.has(LINK_TOKEN_KEY), false, 'a reload shows the form instead of trying it again');
   assert.equal(w.state().principal, null);
   assert.equal(w.state().connection.gateway, 'http://127.0.0.1:7433', 'the form offers the same address');
@@ -173,7 +176,7 @@ test('a refused link token on the first connection is forgotten the same way', a
   w.host.refuse = new AuthenticationError();
   w.controller.connect({ url: 'http://127.0.0.1:7433', token: TOKEN, link: true });
   await until(() => w.state().connection.phase === 'failed', 'failed');
-  assert.equal(w.state().connection.error.message, LINK_TOKEN_INVALID);
+  assert.equal(w.state().connection.error!.message, LINK_TOKEN_INVALID);
   assert.equal(storage.items.has(LINK_TOKEN_KEY), false);
 });
 
@@ -195,7 +198,7 @@ test('a link waits for a host that is not up yet instead of failing; a form conn
   form.controller.connect({ url: 'http://127.0.0.1:7434', token: TOKEN });
   await until(() => form.state().connection.phase === 'failed', 'failed');
   assert.equal(form.host.opens, 1);
-  assert.equal(form.state().connection.error.message, 'Cannot reach the gateway.');
+  assert.equal(form.state().connection.error!.message, 'Cannot reach the gateway.');
 });
 
 test('a refused form token keeps the usual message; another terminal refusal of a link keeps its token', async t => {
@@ -203,14 +206,14 @@ test('a refused form token keeps the usual message; another terminal refusal of 
   form.host.refuse = new AuthenticationError();
   form.controller.connect({ url: 'http://127.0.0.1:7434', token: TOKEN });
   await until(() => form.state().connection.phase === 'failed', 'failed');
-  assert.match(form.state().connection.error.message, /refused this access token/);
+  assert.match(form.state().connection.error!.message, /refused this access token/);
 
   const storage = memoryStorage({ [LINK_TOKEN_KEY]: TOKEN });
   const w = setup(t, storage);
   w.host.refuse = new ConfigurationError('The gateway does not allow this page\'s origin.');
   w.controller.connect({ url: 'http://127.0.0.1:7433', token: TOKEN, link: true });
   await until(() => w.state().connection.phase === 'failed', 'failed');
-  assert.match(w.state().connection.error.message, /origin/);
+  assert.match(w.state().connection.error!.message, /origin/);
   assert.equal(storage.items.get(LINK_TOKEN_KEY), TOKEN, 'not a verdict on the token: a reload tries again');
 });
 
@@ -237,11 +240,11 @@ test('showError shows the connect form with a message', t => {
   const w = setup(t, memoryStorage());
   w.controller.showError(LINK_NOT_LOOPBACK);
   assert.equal(w.state().connection.phase, 'failed');
-  assert.equal(w.state().connection.error.message, LINK_NOT_LOOPBACK);
+  assert.equal(w.state().connection.error!.message, LINK_NOT_LOOPBACK);
 });
 
 test('the connect form defaults to the page origin on alp dashboard\'s loopback page, else to the standalone gateway', () => {
-  const at = href => page(href).location;
+  const at = (href: string) => page(href).location;
   // alp dashboard serves the app and its gateway on one loopback listener: the page's origin is the gateway.
   assert.equal(defaultGatewayAddress({ location: at('http://127.0.0.1:7433/') }), 'http://127.0.0.1:7433');
   assert.equal(defaultGatewayAddress({ location: at('http://localhost:9000/?x=1') }), 'http://localhost:9000');

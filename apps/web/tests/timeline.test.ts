@@ -4,10 +4,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyAttach, prependHistory, historyEnvelope, deliveredPrompts, emptyProjection, entriesOf, members, project, promptTurnOver } from '../dist-lib/timeline.js';
+import type { Envelope } from '../dist-lib/timeline.js';
 
-const env = (cursor, event, sessionId = 'r') => ({ sessionId, epoch: 'e', seq: cursor ?? 0, ts: '2026-10-16T00:00:00.000Z', event, ...(cursor === undefined ? {} : { cursor }) });
-const item = (cursor, id, text, sessionId = 'r') => env(cursor, { type: 'item', item: { kind: 'assistant_message', id, text } }, sessionId);
-const opened = (cursor, id, extra = {}) => env(cursor, { type: 'session.opened', session: { id, agent: 'main', mode: 'full-access', busy: false, ...extra }, cwd: '/w', effective: { model: 'm', thinking: 'low' } }, id);
+/** An entry's item with the text an assistant message or notice has. */
+type Text = { text?: string };
+
+const env = (cursor: number | undefined, event: unknown, sessionId = 'r') => ({ sessionId, epoch: 'e', seq: cursor ?? 0, ts: '2026-10-16T00:00:00.000Z', event, ...(cursor === undefined ? {} : { cursor }) }) as Envelope;
+const item = (cursor: number | undefined, id: string, text: string, sessionId = 'r') => env(cursor, { type: 'item', item: { kind: 'assistant_message', id, text } }, sessionId);
+const opened = (cursor: number | undefined, id: string, extra = {}) => env(cursor, { type: 'session.opened', session: { id, agent: 'main', mode: 'full-access', busy: false, ...extra }, cwd: '/w', effective: { model: 'm', thinking: 'low' } }, id);
 
 test('kept envelopes apply once; synthetic ones never move the cursor', () => {
   let state = emptyProjection('r');
@@ -16,7 +20,7 @@ test('kept envelopes apply once; synthetic ones never move the cursor', () => {
   state = project(state, item(3, 'm1', 'hello'));
   assert.equal(state.cursor, 3);
   assert.equal(entriesOf(state, 'r').length, 1, 'a streamed item updates in place');
-  assert.equal(entriesOf(state, 'r')[0].item.text, 'hello');
+  assert.equal((entriesOf(state, 'r')[0].item as Text).text, 'hello');
   // A replay of what was already applied changes nothing.
   const again = project(state, item(2, 'm1', 'hel'));
   assert.equal(again, state);
@@ -93,8 +97,8 @@ test('children join the tree in opening order; their timelines stay apart', () =
   state = project(state, item(3, 'm', 'child says', 'c1'));
   state = project(state, item(4, 'm', 'root says', 'r'));
   assert.deepEqual(members(state).map(member => member.id), ['r', 'c1']);
-  assert.equal(entriesOf(state, 'c1')[0].item.text, 'child says');
-  assert.equal(entriesOf(state, 'r')[0].item.text, 'root says', 'same item id in two sessions are two entries');
+  assert.equal((entriesOf(state, 'c1')[0].item as Text).text, 'child says');
+  assert.equal((entriesOf(state, 'r')[0].item as Text).text, 'root says', 'same item id in two sessions are two entries');
 });
 
 test('turn ends that failed or were canceled show in the timeline; prompt outcomes are tracked', () => {
@@ -105,7 +109,7 @@ test('turn ends that failed or were canceled show in the timeline; prompt outcom
   state = project(state, env(5, { type: 'turn.ended', turnId: 't', state: 'canceled' }));
   assert.ok(deliveredPrompts(state).has('c1'));
   assert.equal(state.prompts.c2.state, 'failed');
-  assert.equal(state.entries.at(-1).item.kind, 'turn_end');
+  assert.equal(state.entries.at(-1)!.item.kind, 'turn_end');
   assert.deepEqual(state.running, {});
 });
 
@@ -136,18 +140,18 @@ test('older pages merge item fragments without replacing newer snapshots or live
   let state = emptyProjection('r');
   for (const envelope of [item(500, 'x', 'latest'), item(600, 'y', 'newer')]) state = project(state, envelope);
   state = prependHistory(state, [item(1, 'old', 'first'), item(20, 'x', 'partial')]);
-  assert.deepEqual(state.entries.map(row => row.item.text), ['first', 'latest', 'newer']);
+  assert.deepEqual(state.entries.map(row => (row.item as Text).text), ['first', 'latest', 'newer']);
   assert.equal(state.cursor, 600);
   state = prependHistory(state, [item(1, 'old', 'first')]);
   assert.equal(state.entries.length, 3);
   state = project(state, historyEnvelope({ cursor: 601, oversized: { bytes: 900000 } }, 'r'));
-  assert.match(state.entries.at(-1).item.text, /900000 bytes/);
+  assert.match((state.entries.at(-1)!.item as Text).text!, /900000 bytes/);
 });
 
 test('a child item in a bounded tail remains reachable before its older opening is loaded', () => {
   const state = project(emptyProjection('r'), item(600, 'child-item', 'child tail', 'child'));
   assert.ok(members(state).some(member => member.id === 'child'));
-  assert.equal(entriesOf(state, 'child')[0].item.text, 'child tail');
+  assert.equal((entriesOf(state, 'child')[0].item as Text).text, 'child tail');
 });
 
 test('an older child opening enriches tail membership while newer descriptor fields win', () => {
@@ -158,5 +162,5 @@ test('an older child opening enriches tail membership while newer descriptor fie
   assert.equal(state.sessions.child.parentId, 'r');
   assert.equal(state.sessions.child.runtime, 'codex');
   assert.equal(state.sessions.child.title, 'Current title');
-  assert.equal(entriesOf(state, 'child')[0].item.text, 'child tail');
+  assert.equal((entriesOf(state, 'child')[0].item as Text).text, 'child tail');
 });

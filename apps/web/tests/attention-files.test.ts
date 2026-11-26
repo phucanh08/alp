@@ -7,17 +7,21 @@ import { Controller, FILES_FORBIDDEN, FILE_SEARCH_LIMIT, attentionReason, visibl
 import { faviconStatus, newlyEnded, sessionBucket, turnNotification } from '../dist-lib/attention.js';
 import { commandResults, describeFilePath, rankWorkspaces, workspaceRows } from '../dist-lib/command-center.js';
 import { FILE_SEARCH_DEBOUNCE_MS, FileSearch } from '../dist-lib/file-search.js';
-import { FakeHost, until } from './support/fake-host.js';
+import type { TestContext } from 'node:test';
+import type { ControllerOptions } from '../dist-lib/controller.js';
+import type { CommandAction, CommandFile, CommandSession } from '../dist-lib/command-center.js';
+import type { FileSearchRequest, FileSearchState } from '../dist-lib/file-search.js';
+import { FakeHost, until } from './support/fake-host.ts';
 
-function setup(t, hostOptions, controllerOptions = {}) {
+function setup(t: TestContext, hostOptions?: ConstructorParameters<typeof FakeHost>[0], controllerOptions = {}) {
   const host = new FakeHost(hostOptions);
-  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, attentionWatchPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500, ...controllerOptions });
+  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, attentionWatchPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500, ...controllerOptions } as ControllerOptions);
   t.after(() => controller.disconnect());
   const state = () => controller.getState();
   return { host, controller, state };
 }
 
-async function connected({ controller, state }, workspace = '/w/a') {
+async function connected({ controller, state }: Pick<ReturnType<typeof setup>, 'controller' | 'state'>, workspace = '/w/a') {
   controller.connect({ url: 'http://127.0.0.1:7434', token: 'alpgw1.0123456789abcdef.secret' });
   await until(() => state().connection.phase === 'open', 'open');
   controller.selectWorkspace(workspace);
@@ -25,7 +29,7 @@ async function connected({ controller, state }, workspace = '/w/a') {
 }
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 20));
-const watchCalls = host => host.calls.filter(call => call.method === 'question.watch');
+const watchCalls = (host: FakeHost) => host.calls.filter(call => call.method === 'question.watch');
 
 // ---- lib/attention.ts ----------------------------------------------------------------------
 
@@ -64,15 +68,15 @@ test('turn attention with question.watch.turns: other roots\' turn ends set fini
   assert.deepEqual(watchCalls(w.host)[0].params, { projectRoot: '/w/a', turns: true });
   w.controller.selectSession('ses_open');
   await until(() => w.state().tree?.status === 'attached', 'attached');
-  const cursor = w.state().tree.projection.cursor;
+  const cursor = w.state().tree!.projection.cursor;
 
   w.host.startTurn('ses_b');
   w.host.root('ses_b').summary.status = 'running';
   await w.controller.refreshSessions();
-  assert.equal(w.state().sessions.list.find(row => row.id === 'ses_b').status, 'running');
+  assert.equal(w.state().sessions.list.find(row => row.id === 'ses_b')!.status, 'running');
   w.host.endTurn('ses_b', 'completed');
   await until(() => attentionReason(w.state(), 'ses_b') === 'finished', 'finished');
-  assert.equal(w.state().sessions.list.find(row => row.id === 'ses_b').status, 'idle', 'its row stops running at once (running would outrank finished)');
+  assert.equal(w.state().sessions.list.find(row => row.id === 'ses_b')!.status, 'idle', 'its row stops running at once (running would outrank finished)');
   w.host.startTurn('ses_c');
   w.host.endTurn('ses_c', 'failed', { message: 'quota exceeded' });
   await until(() => attentionReason(w.state(), 'ses_c') === 'error', 'error');
@@ -80,8 +84,8 @@ test('turn attention with question.watch.turns: other roots\' turn ends set fini
   w.host.startTurn('ses_c');
   w.host.endTurn('ses_c', 'canceled');
   await until(() => !w.state().turnAttention.ses_c, 'a canceled turn asks for nothing (and clears the earlier one)');
-  assert.equal(w.state().tree.projection.cursor, cursor, 'copies never move the open tree\'s cursor');
-  assert.ok(!w.state().tree.projection.order.includes('ses_b'), 'nor reach its projection');
+  assert.equal(w.state().tree!.projection.cursor, cursor, 'copies never move the open tree\'s cursor');
+  assert.ok(!w.state().tree!.projection.order.includes('ses_b'), 'nor reach its projection');
 
   // Opening it clears it.
   w.controller.selectSession('ses_b');
@@ -100,7 +104,7 @@ test('turn attention on the open tree: only when the user does not see it; clear
   w.controller.setPresence({ visible: true, focused: true });
   w.host.startTurn('ses_a');
   w.host.endTurn('ses_a', 'completed');
-  await until(() => !('ses_a' in w.state().tree.projection.running), 'ended');
+  await until(() => !('ses_a' in w.state().tree!.projection.running), 'ended');
   await settle();
   assert.equal(attentionReason(w.state(), 'ses_a'), undefined, 'the user saw it finish');
 
@@ -177,8 +181,8 @@ test('turn attention: switching workspace forgets it', async t => {
 const SHARED = ['question.watch', 'question.watch.turns', 'session.attention'];
 
 /** A second page on the same host. */
-function page(t, host) {
-  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, attentionWatchPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500 });
+function page(t: TestContext, host: FakeHost) {
+  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, attentionWatchPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500 } as ControllerOptions);
   t.after(() => controller.disconnect());
   return { host, controller, state: () => controller.getState() };
 }
@@ -243,13 +247,13 @@ test('shared attention: an acknowledgement the host refuses shows the attention 
   assert.equal(one.host.calls.filter(call => call.method === 'session.attention.clear').length, 1, 'not asked over and over');
   // Held, then refused after the host told of a new turn: what the host told stands.
   one.controller.selectSession('ses_a');
-  let refuse;
+  let refuse: (() => void) | undefined;
   one.host.intercept.set('session.attention.clear', (_params, _connection, { fail }) => new Promise(resolve => { refuse = () => { fail(1000, 'Could not save'); resolve('handled'); }; }));
   one.controller.selectSession('ses_b');
   await until(() => refuse, 'acknowledging');
   one.host.startTurn('ses_b');
   await until(() => attentionReason(two.state(), 'ses_b') !== 'error', 'the new turn ended it');
-  refuse();
+  refuse!();
   await settle();
   assert.equal(one.state().turnAttention.ses_b, undefined, 'not brought back over the newer word of the host');
 });
@@ -369,7 +373,7 @@ test('file search: workspace.files.search in the open workspace; refusals in wor
   assert.equal(w.controller.filesSearchable, true);
   const answer = await w.controller.searchWorkspaceFiles({ query: 'app', limit: FILE_SEARCH_LIMIT });
   assert.deepEqual(answer, { files: [{ path: 'src/app.ts' }], truncated: false });
-  assert.deepEqual(w.host.calls.find(call => call.method === 'workspace.files.search').params, { projectRoot: '/w/a', query: 'app', limit: 100 });
+  assert.deepEqual(w.host.calls.find(call => call.method === 'workspace.files.search')!.params, { projectRoot: '/w/a', query: 'app', limit: 100 });
   // The gateway refuses a token without project.read (1003).
   w.host.principal.permissions = ['session.read'];
   await assert.rejects(w.controller.searchWorkspaceFiles({ query: 'x' }), { message: FILES_FORBIDDEN });
@@ -390,15 +394,15 @@ test('file search: a token without project.read is told without asking; a host w
 
 // ---- lib/file-search.ts --------------------------------------------------------------------
 
-function engine(search, debounceMs = 30) {
-  const seen = [];
+function engine(search: FileSearchRequest, debounceMs = 30) {
+  const seen: FileSearchState[] = [];
   const files = new FileSearch({ search, debounceMs, onChange: state => seen.push(state) });
   return { files, seen };
 }
 
 test('file search engine: Paseo\'s 100 ms debounce, at once for an empty query; one request for the last keystroke', async () => {
   assert.equal(FILE_SEARCH_DEBOUNCE_MS, 100);
-  const asked = [];
+  const asked: string[] = [];
   const { files } = engine(async query => { asked.push(query); return { files: [{ path: `src/${query || 'index'}.ts` }] }; });
   files.update({ enabled: true, source: '/w/a', query: '' });
   assert.equal(files.state.loading, true);
@@ -417,15 +421,15 @@ test('file search engine: Paseo\'s 100 ms debounce, at once for an empty query; 
 });
 
 test('file search engine: a stale answer is dropped; another workspace starts empty; errors and disabling', async () => {
-  const pending = new Map();
+  const pending = new Map<string, { resolve: (value: Awaited<ReturnType<FileSearchRequest>>) => void, reject: (error: unknown) => void }>();
   const { files } = engine(query => new Promise((resolve, reject) => pending.set(query, { resolve, reject })), 0);
   files.update({ enabled: true, source: '/w/a', query: 'old' });
   await until(() => pending.has('old'), 'old asked');
   files.update({ enabled: true, source: '/w/a', query: 'new' });
   await until(() => pending.has('new'), 'new asked');
-  pending.get('new').resolve({ files: [{ path: 'new.txt' }], truncated: true });
+  pending.get('new')!.resolve({ files: [{ path: 'new.txt' }], truncated: true });
   await until(() => !files.state.loading, 'new answered');
-  pending.get('old').resolve({ files: [{ path: 'old.txt' }] });
+  pending.get('old')!.resolve({ files: [{ path: 'old.txt' }] });
   await settle();
   assert.deepEqual(files.state.entries.map(entry => entry.path), ['new.txt'], 'the older answer that came later is dropped');
   assert.equal(files.state.truncated, true);
@@ -459,18 +463,18 @@ test('command center: Workspaces are the granted folders, by name, five with an 
 });
 
 test('command center: sections in Paseo\'s order, Files with a query or alone in their scope', () => {
-  const actions = [{ id: 'settings', label: 'Settings', group: 'actions', always: true }];
-  const sessions = [{ id: 'ses_a', title: 'Alpha', bucket: 'done' }, { id: 'ses_f', title: 'Finished one', bucket: 'attention', attention: true }];
+  const actions: CommandAction[] = [{ id: 'settings', label: 'Settings', group: 'actions', always: true }];
+  const sessions: CommandSession[] = [{ id: 'ses_a', title: 'Alpha', bucket: 'done' }, { id: 'ses_f', title: 'Finished one', bucket: 'attention', attention: true }];
   const workspaces = workspaceRows(['/w/a', '/w/b']);
   const files = ['src/a.ts', 'a.md'].map(describeFilePath);
   assert.deepEqual(describeFilePath('src\\lib\\x.js'), { path: 'src/lib/x.js', title: 'x.js', subtitle: 'src/lib' });
   const empty = commandResults({ actions, sessions, query: '', workspaces, files: [] });
   assert.deepEqual(empty.map(section => section.id), ['actions', 'workspaces', 'sessions']);
-  assert.deepEqual(empty[2].rows.map(row => row.item.id), ['ses_f', 'ses_a'], 'a session that ended unseen comes first, as Paseo\'s requiresAttention');
+  assert.deepEqual(empty[2].rows.map(row => (row.item as CommandSession).id), ['ses_f', 'ses_a'], 'a session that ended unseen comes first, as Paseo\'s requiresAttention');
   const typed = commandResults({ actions, sessions, query: 'a', workspaces, files });
   assert.deepEqual(typed.map(section => section.id), ['actions', 'workspaces', 'sessions', 'files'].filter(id => typed.some(section => section.id === id)));
-  assert.equal(typed.at(-1).id, 'files');
-  assert.deepEqual(typed.at(-1).rows.map(row => row.item.path), ['src/a.ts', 'a.md'], 'the host\'s order kept');
+  assert.equal(typed.at(-1)!.id, 'files');
+  assert.deepEqual(typed.at(-1)!.rows.map(row => (row.item as CommandFile).path), ['src/a.ts', 'a.md'], 'the host\'s order kept');
   assert.ok(!commandResults({ actions, sessions, query: 'a', workspaces }).some(section => section.id === 'files'), 'no Files without the capability');
   assert.deepEqual(commandResults({ actions, sessions, query: '', workspaces, files, scope: 'files' }).map(section => section.id), ['files'], 'the Files scope shows only files');
   assert.deepEqual(commandResults({ actions, sessions, query: '', workspaces, scope: 'files' }), []);
@@ -478,7 +482,7 @@ test('command center: sections in Paseo\'s order, Files with a query or alone in
 
 test('shortcuts: Cmd+P on a Mac, Ctrl+P elsewhere is Paseo\'s Search files, listed under General', async () => {
   const { helpSections, matchShortcut } = await import('../dist-lib/shortcuts.js');
-  const press = mods => ({ code: 'KeyP', key: 'p', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
+  const press = (mods: { metaKey?: boolean, ctrlKey?: boolean }) => ({ code: 'KeyP', key: 'p', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
   assert.equal(matchShortcut(press({ metaKey: true }), { mac: true })?.binding.action, 'command-center.files');
   assert.equal(matchShortcut(press({ ctrlKey: true }), { mac: false })?.binding.action, 'command-center.files');
   assert.equal(matchShortcut(press({ ctrlKey: true }), { mac: true }), null);
@@ -537,11 +541,11 @@ test('turn attention: the open root\'s turn end is seen while one of its agents 
   w.controller.setPresence({ visible: true, focused: true });
   w.host.startTurn('ses_a');
   w.host.openChild('ses_a', 'child-1');
-  await until(() => !!w.state().tree.projection.sessions['child-1'], 'child');
+  await until(() => !!w.state().tree!.projection.sessions['child-1'], 'child');
   w.controller.focusSession('child-1');
   assert.equal(w.state().focus, 'child-1');
   w.host.endTurn('ses_a', 'completed');
-  await until(() => !('ses_a' in w.state().tree.projection.running), 'ended');
+  await until(() => !('ses_a' in w.state().tree!.projection.running), 'ended');
   await settle();
   assert.equal(attentionReason(w.state(), 'ses_a'), undefined);
 });

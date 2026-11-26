@@ -4,6 +4,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { can, gatewayUrl, grantedWorkspace, openGateway } from '../dist-lib/gateway.js';
 import { AuthenticationError, ConfigurationError, TransientError, describe } from '../dist-lib/errors.js';
+import type { WebSocketConstructor } from '@anhlp/alp-client/websocket';
+
+/** What the ticket request was sent with. */
+type Init = { method: string, headers: Record<string, string>, credentials: string };
 
 const TOKEN = 'alpgw1.0123456789abcdef.c2VjcmV0LXNlY3JldC1zZWNyZXQ';
 const principal = { id: 'p', label: 'web', permissions: ['session.read', 'session.write'], workspaces: ['/w'], workspaceRoots: [{ path: '/w', canonical: '/real/w' }] };
@@ -19,27 +23,31 @@ test('gateway addresses: https anywhere, http only on loopback, nothing that can
 });
 
 /** A fetch double that records requests and answers with `status` and `body`. */
-function fetchDouble(status, body) {
-  const calls = [];
-  const fetch = async (url, init) => { calls.push({ url, init }); return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }); };
+function fetchDouble(status: number, body: unknown) {
+  const calls: { url: string, init: Init }[] = [];
+  const fetch = (async (url: string, init: Init) => { calls.push({ url, init }); return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }); }) as unknown as typeof globalThis.fetch;
   return { fetch, calls };
 }
 
 /** A WebSocket double that opens at once, offering the subprotocols it was given. */
 function socketDouble() {
-  const opened = [];
+  const opened: FakeSocket[] = [];
   class FakeSocket {
-    constructor(url, protocols) {
+    declare url: string;
+    declare protocols: string[];
+    declare readyState: number;
+    declare listeners: Record<string, ((event: unknown) => void)[]>;
+    constructor(url: string, protocols: string[]) {
       this.url = url; this.protocols = protocols; this.readyState = 0; this.listeners = {};
       opened.push(this);
       queueMicrotask(() => { this.readyState = 1; for (const listener of this.listeners.open ?? []) listener({}); });
     }
-    addEventListener(type, listener) { (this.listeners[type] ??= []).push(listener); }
-    removeEventListener(type, listener) { this.listeners[type] = (this.listeners[type] ?? []).filter(entry => entry !== listener); }
+    addEventListener(type: string, listener: (event: unknown) => void) { (this.listeners[type] ??= []).push(listener); }
+    removeEventListener(type: string, listener: (event: unknown) => void) { this.listeners[type] = (this.listeners[type] ?? []).filter(entry => entry !== listener); }
     send() {}
     close() { this.readyState = 3; }
   }
-  return { WebSocket: FakeSocket, opened };
+  return { WebSocket: FakeSocket as unknown as WebSocketConstructor, opened };
 }
 
 test('a ticket opens the socket with its subprotocols; the token stays in the header', async () => {
@@ -58,7 +66,7 @@ test('a ticket opens the socket with its subprotocols; the token stays in the he
 });
 
 test('ticket refusals: 401 stops, 403 and 421 are configuration, 429 and 503 are worth retrying', async () => {
-  const cases = [[401, {}, AuthenticationError], [403, { error: 'origin_not_allowed' }, ConfigurationError], [403, { error: 'tls_required' }, ConfigurationError], [421, {}, ConfigurationError], [429, {}, TransientError], [503, {}, TransientError]];
+  const cases: [number, object, new (...args: never[]) => Error][] = [[401, {}, AuthenticationError], [403, { error: 'origin_not_allowed' }, ConfigurationError], [403, { error: 'tls_required' }, ConfigurationError], [421, {}, ConfigurationError], [429, {}, TransientError], [503, {}, TransientError]];
   for (const [status, body, kind] of cases) {
     const { fetch } = fetchDouble(status, body);
     const error = await openGateway({ url: 'https://alp.example.com', token: TOKEN, fetch }).catch(failure => failure);

@@ -5,11 +5,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Controller, hostName } from '../dist-lib/controller.js';
 import { HIDDEN, isSecretMarker, libraryContentParts } from '../dist-lib/library.js';
-import { FakeHost, until } from './support/fake-host.js';
+import type { TestContext } from 'node:test';
+import { FakeHost, until } from './support/fake-host.ts';
+import type { Intercept } from './support/fake-host.ts';
 
 const MARK = { $secret: 'keep' };
 /** An intercept that answers `result` in place of the fake host's default. */
-const reply = result => (_params, _connection, { answer }) => { answer(typeof result === 'function' ? result() : result); return 'handled'; };
+const reply = (result: unknown): Intercept => (_params, _connection, { answer }) => { answer(typeof result === 'function' ? result() : result); return 'handled'; };
 
 test('libraryContentParts: Markdown files as text, configuration as JSON with every marker hidden', () => {
   assert.deepEqual(libraryContentParts({ instructions: '# Writer', config: { model: 'm', skills: ['style'] } }), [
@@ -30,7 +32,7 @@ test('hostName: a trimmed machine name, nothing for anything else', () => {
   for (const value of [undefined, null, 7, '', '  ', 'a\u001bb', 'a\u202eb', 'a\u200bb', 'x'.repeat(254)]) assert.equal(hostName(value), undefined, JSON.stringify(value));
 });
 
-function setup(t, hello) {
+function setup(t: TestContext, hello?: unknown) {
   const host = new FakeHost();
   if (hello) host.intercept.set('daemon.hello', reply(hello));
   const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500 });
@@ -38,7 +40,7 @@ function setup(t, hello) {
   return { host, controller, state: () => controller.getState() };
 }
 
-async function connect({ controller, state }) {
+async function connect({ controller, state }: Pick<ReturnType<typeof setup>, 'controller' | 'state'>) {
   controller.connect({ url: 'http://127.0.0.1:7434', token: 'alpgw1.0123456789abcdef.secret' });
   await until(() => state().connection.phase === 'open', 'open');
   controller.selectWorkspace('/w/a');
@@ -90,6 +92,6 @@ test('project library editor requires its own permission and new daemon capabili
   w.host.intercept.set('library.save', reply({ revision: 'new' }));
   const saved = await w.controller.writeLibrary('save', 'skills', { name: 'notes', content: { body: 'text' }, scope: 'library', projectRoot: '/other', revision: null });
   assert.equal(saved.revision, 'new');
-  assert.deepEqual(w.host.calls.filter(c => c.method === 'library.save').at(-1).params, { name: 'notes', content: { body: 'text' }, scope: 'project', projectRoot: '/w/a', kind: 'skills', revision: null });
+  assert.deepEqual(w.host.calls.filter(c => c.method === 'library.save').at(-1)!.params, { name: 'notes', content: { body: 'text' }, scope: 'project', projectRoot: '/w/a', kind: 'skills', revision: null });
   await assert.rejects(w.controller.writeLibrary('save', 'hooks', { name: 'run' }), /administrative/);
 });

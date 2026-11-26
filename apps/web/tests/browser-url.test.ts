@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DESKTOP_MARKER, MAX_BROWSERS, browserLabel, isBrowsableUrl, isDesktopApp, nextBrowserId, parseBrowsers, readAddress } from '../dist-lib/browser-url.js';
 import { parseLayout, serializeLayout } from '../dist-lib/layout.js';
+import type { Layout } from '../dist-lib/layout.js';
 
 test('browser: addresses read as Paseo reads them', () => {
   const cases = [
@@ -29,8 +30,8 @@ test('browser: no search, no other schemes', () => {
   for (const text of ['', '   ', 'two words', 'file:///etc/passwd', 'javascript:alert(1)', 'data:text/html,x', 'chrome://settings', 'about:config', 'ftp://example.com', 'http://']) {
     assert.ok('error' in readAddress(text), text);
   }
-  assert.match(/** @type {any} */ (readAddress('file:///etc/passwd')).error, /only http and https/);
-  assert.match(/** @type {any} */ (readAddress('two words')).error, /no search/);
+  assert.match((readAddress('file:///etc/passwd') as { error: string }).error, /only http and https/);
+  assert.match((readAddress('two words') as { error: string }).error, /no search/);
 });
 
 test('browser: what a tab may show', () => {
@@ -92,12 +93,12 @@ test('browser: saving drops the dashboard tab and fragments too', () => {
   Object.defineProperty(globalThis, 'location', { value: { origin: 'http://127.0.0.1:7433' }, configurable: true });
   try {
     const layout = { workspaces: { w: { tasks: [], panels: [], order: [], browsers: [{ id: 'b1', url: 'http://127.0.0.1:7433/#token=secret' }, { id: 'b2', url: 'https://example.com/#x' }], at: 1 } } };
-    const saved = serializeLayout(/** @type {any} */ (layout));
+    const saved = serializeLayout(layout as unknown as Layout);
     assert.ok(!saved.includes('secret') && !saved.includes('7433') && !saved.includes('#'), saved);
     assert.deepEqual(JSON.parse(saved).workspaces.w.browsers, [{ id: 'b2', url: 'https://example.com/' }]);
   } finally {
     if (previous) Object.defineProperty(globalThis, 'location', previous);
-    else delete (/** @type {any} */ (globalThis)).location;
+    else delete (globalThis as { location?: unknown }).location;
   }
 });
 
