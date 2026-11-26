@@ -19,25 +19,30 @@ import path from 'node:path';
 
 export class HomeGuardError extends Error {}
 
-const fold = value => (process.platform === 'darwin' || process.platform === 'win32' ? value.toLowerCase() : value);
+type Env = Record<string, string | undefined>;
+
+// The errno code of a thrown fs error, if any.
+const codeOf = (error: unknown) => (error as NodeJS.ErrnoException | null)?.code;
+
+const fold = (value: string) => (process.platform === 'darwin' || process.platform === 'win32' ? value.toLowerCase() : value);
 
 /** The real location `value` names, or a HomeGuardError. Missing tail components are kept as names. */
-export function resolveDeep(value) {
+export function resolveDeep(value: unknown) {
   if (typeof value !== 'string' || !value) throw new HomeGuardError('empty path');
   if (!path.isAbsolute(value)) throw new HomeGuardError(`not an absolute path: ${value}`);
   let existing = path.resolve(value);
-  const missing = [];
+  const missing: string[] = [];
   for (;;) {
     try {
       existing = realpathSync.native(existing);
       break;
     } catch (error) {
-      if (error?.code !== 'ENOENT') throw new HomeGuardError(`cannot resolve ${existing}: ${error?.code ?? error}`);
+      if (codeOf(error) !== 'ENOENT') throw new HomeGuardError(`cannot resolve ${existing}: ${codeOf(error) ?? error}`);
       // ENOENT from realpath also covers a dangling symlink (or a link through one); only a name
       // that is itself absent may be carried as a plain component.
       let present = true;
       try { lstatSync(existing); } catch (inner) {
-        if (inner?.code !== 'ENOENT') throw new HomeGuardError(`cannot inspect ${existing}: ${inner?.code ?? inner}`);
+        if (codeOf(inner) !== 'ENOENT') throw new HomeGuardError(`cannot inspect ${existing}: ${codeOf(inner) ?? inner}`);
         present = false;
       }
       if (present) throw new HomeGuardError(`${existing} exists but does not resolve (dangling or broken symlink)`);
@@ -51,15 +56,15 @@ export function resolveDeep(value) {
 }
 
 /** True when `child` is `parent` or under it (case-folded where the file system usually is). */
-export function within(child, parent) {
+export function within(child: string, parent: string) {
   const relative = path.relative(fold(parent), fold(child));
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 /** The account's home directories to protect: the real one, plus ALP_TEST_PROTECT_HOME if set. */
-function protectedHomes(env) {
-  let account;
-  try { account = userInfo().homedir; } catch (error) { throw new HomeGuardError(`cannot read the account's home directory: ${error?.message ?? error}`); }
+function protectedHomes(env: Env) {
+  let account: string;
+  try { account = userInfo().homedir; } catch (error) { throw new HomeGuardError(`cannot read the account's home directory: ${(error as Error | null)?.message ?? error}`); }
   const homes = [account];
   if (env.ALP_TEST_PROTECT_HOME) homes.push(env.ALP_TEST_PROTECT_HOME);
   return homes.map(home => {
@@ -72,7 +77,7 @@ function protectedHomes(env) {
  * Checks that `candidate` may serve as a lane's ALP home. Returns the resolved path, or throws a
  * HomeGuardError on any doubt. Pure apart from realpath/lstat/userInfo.
  */
-export function checkScratchHome(candidate, env = process.env) {
+export function checkScratchHome(candidate: string, env: Env = process.env) {
   const resolved = resolveDeep(candidate);
   const homes = protectedHomes(env);
   const scratch = env.ALP_TEST_SCRATCH_ROOT ? resolveDeep(env.ALP_TEST_SCRATCH_ROOT) : undefined;
@@ -89,7 +94,7 @@ export function checkScratchHome(candidate, env = process.env) {
  * temporary home is made under a checked tmpdir and checked again. Exits 2 with a message on refusal,
  * before the lane runs anything.
  */
-export async function laneHome({ env = process.env, prefix, acceptGiven = true, exit = code => process.exit(code) } = {}) {
+export async function laneHome({ env = process.env, prefix, acceptGiven = true, exit = (code: number) => process.exit(code) }: { env?: Env, prefix: string, acceptGiven?: boolean, exit?: (code: number) => void }) {
   try {
     if (acceptGiven && env.ALP_HOME) return { home: checkScratchHome(env.ALP_HOME, env), owned: false };
     checkScratchHome(tmpdir(), env);

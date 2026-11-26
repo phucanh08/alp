@@ -1,7 +1,7 @@
 // Attachments reaching a runtime (docs/protocol/alp-json-rpc-v1.md §12.6, issue #121 branch J): alpd's
 // store, the real ALP runtime and its staging of read-only copies, with a scripted native transport.
 // What the turn's input names, what the timeline shows, and what retries, restarts, tampering,
-// collection and forks of forks keep. Real Codex and Claude runs are test/e2e/attachments-real-e2e.mjs.
+// collection and forks of forks keep. Real Codex and Claude runs are test/e2e/attachments-real-e2e.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';

@@ -59,8 +59,8 @@ node node_modules/typescript/bin/tsc -p tsconfig.paseo.json
 node scripts/build-paseo.ts
 node --test
 npm test -w @anhlp/alp-core
-node test/e2e/paseo-e2e.mjs
-node test/e2e/runtime-e2e.mjs
+node test/e2e/paseo-e2e.ts
+node test/e2e/runtime-e2e.ts
 ```
 
 Hai lệnh E2E là opt-in, có yêu cầu daemon/runtime thực theo hướng dẫn. Các bài test mặc định không gọi model. Bằng chứng chạy cục bộ lưu trong `.alp-test/phase-5-e2e.json` và `.alp-test/runtime-e2e.json`; thư mục này không thuộc source phát hành.

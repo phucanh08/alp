@@ -10,11 +10,11 @@
 // question answered and one dismissed, cancel, a gateway restart in the middle of a turn, an alpd
 // restart, and checks that B stays empty and no token reaches a log. Prints one JSON line per flow.
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess, type SpawnSyncOptionsWithStringEncoding } from 'node:child_process';
 import { once } from 'node:events';
 import { closeSync, openSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
-import { createServer } from 'node:net';
+import { createServer, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -25,52 +25,52 @@ import '../../scripts/spawn-command.ts';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const keep = process.env.ALP_E2E_KEEP === '1';
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const freePort = () => new Promise(resolve => { const server = createServer(); server.listen(0, '127.0.0.1', () => { const { port } = server.address(); server.close(() => resolve(port)); }); });
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const freePort = () => new Promise<number>(resolve => { const server = createServer(); server.listen(0, '127.0.0.1', () => { const { port } = server.address() as AddressInfo; server.close(() => resolve(port)); }); });
 const base = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-paseo-remote-e2e-')));
 const dirs = Object.fromEntries(['tarballs', 'host', 'client', 'host-alp-home', 'client-alp-home', 'paseo-home', 'project', 'logs'].map(name => [name, path.join(base, name)]));
 for (const directory of Object.values(dirs)) await mkdir(directory, { recursive: true, mode: 0o700 });
-const results = [];
-function record(flow, status, detail = {}) {
+const results: object[] = [];
+function record(flow: string, status: 'pass' | 'fail', detail: object = {}) {
   const line = { flow, ...detail, status };
   results.push(line);
   if (status === 'fail') process.exitCode = 1;
   console.log(JSON.stringify(line));
 }
-function run(command, args, options = {}) {
+function run(command: string, args: string[], options: SpawnSyncOptionsWithStringEncoding | { cwd?: string, env?: NodeJS.ProcessEnv } = {}) {
   const result = spawnSync(command, args, { cwd: base, encoding: 'utf8', timeout: 300_000, maxBuffer: 64 * 1024 * 1024, ...options });
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed:\n${result.stdout}${result.stderr}${result.error ?? ''}`);
   return result.stdout;
 }
-async function until(check, what, ms = 60_000) {
+async function until(check: () => Promise<unknown>, what: string, ms = 60_000) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) { if (await check()) return; await sleep(100); }
   throw new Error(`${what} never happened`);
 }
-const children = new Set();
-function background(name, command, args, env) {
+const children = new Set<ChildProcess>();
+function background(name: string, command: string, args: string[], env: NodeJS.ProcessEnv) {
   const log = openSync(path.join(dirs.logs, `${name}.log`), 'a');
   const child = spawn(command, args, { cwd: base, env, stdio: ['ignore', log, log], detached: true });
   closeSync(log);
   children.add(child);
   return child;
 }
-async function stop(child) {
+async function stop(child: ChildProcess) {
   if (child.exitCode !== null || child.signalCode !== null) return;
   const exited = once(child, 'exit');
-  try { process.kill(-child.pid, 'SIGTERM'); } catch {}
+  try { process.kill(-child.pid!, 'SIGTERM'); } catch {}
   await Promise.race([exited, sleep(10_000)]);
   children.delete(child);
 }
 
-const hostEnv = { ...process.env, ALP_HOME: dirs['host-alp-home'] };
+const hostEnv: NodeJS.ProcessEnv = { ...process.env, ALP_HOME: dirs['host-alp-home'] };
 for (const key of Object.keys(hostEnv)) if (key.startsWith('ALP_') && key !== 'ALP_HOME' && key !== 'ALP_CODEX_BIN') delete hostEnv[key];
-let alpCli;
-let paseoClient;
+let alpCli: string | undefined;
+let paseoClient: ReturnType<typeof createPaseoClient> | undefined;
 const token = `BETA_${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
 try {
   // 1. Clean installs from the release tarballs.
-  const tarballs = {};
+  const tarballs: Record<string, string> = {};
   for (const location of workspaceLocations(root)) {
     const pkg = JSON.parse(await readFile(path.join(root, location, 'package.json'), 'utf8'));
     if (pkg.private) continue;
@@ -79,12 +79,12 @@ try {
   }
   const plugin = JSON.parse(await readFile(path.join(root, 'integrations/paseo/package.json'), 'utf8'));
   const hostDeps = Object.fromEntries(Object.entries(tarballs).filter(([name]) => name !== plugin.name));
-  const clientDeps = { ...tarballs };
+  const clientDeps: Record<string, string> = { ...tarballs };
   for (const name of Object.keys(plugin.peerDependencies ?? {})) {
     if (name === 'react' || name === 'react-native') continue;
     clientDeps[name] = JSON.parse(await readFile(path.join(root, 'node_modules', name, 'package.json'), 'utf8')).version;
   }
-  for (const [directory, dependencies] of [[dirs.host, hostDeps], [dirs.client, clientDeps]]) {
+  for (const [directory, dependencies] of [[dirs.host, hostDeps], [dirs.client, clientDeps]] as const) {
     await writeFile(path.join(directory, 'package.json'), JSON.stringify({ private: true, type: 'module', dependencies }));
     run('npm', ['install', '--ignore-scripts', '--legacy-peer-deps', '--no-audit', '--no-fund'], { cwd: directory });
   }
@@ -93,7 +93,7 @@ try {
   // 2. The host: alpd with real Codex and the gateway, both from the host install.
   alpCli = path.join(dirs.host, 'node_modules/@anhlp/alp-cli/dist/cli.js');
   const gatewayCli = path.join(dirs.host, 'node_modules/@anhlp/alp-gateway/dist/cli.js');
-  const alp = (...args) => run(process.execPath, [alpCli, ...args], { env: hostEnv });
+  const alp = (...args: string[]) => run(process.execPath, [alpCli!, ...args], { env: hostEnv });
   await writeFile(path.join(dirs['host-alp-home'], 'settings.json'), JSON.stringify({ language: 'English' }));
   alp('init', dirs.project);
   // Phở's main on Codex with low effort, no supervisor: one real model, quick turns.
@@ -103,7 +103,7 @@ try {
   const credential = JSON.parse(run(process.execPath, [gatewayCli, 'credential', 'create', '--label', 'paseo-beta', '--workspace', dirs.project, '--json'], { env: hostEnv }));
   assert.ok(credential.token);
   const gatewayPort = await freePort();
-  let gateway;
+  let gateway: ChildProcess | undefined;
   async function startGateway() {
     gateway = background('gateway', process.execPath, [gatewayCli, 'serve', '--port', String(gatewayPort)], hostEnv);
     await until(async () => (await fetch(`http://127.0.0.1:${gatewayPort}/readyz`).catch(() => ({ status: 0 }))).status === 200, 'gateway ready');
@@ -123,15 +123,16 @@ try {
   run('paseo', ['plugin', 'install', path.join(dirs.client, 'node_modules', plugin.name), '--home', dirs['paseo-home'], '--json'], { env: paseoEnv });
   paseoClient = createPaseoClient({ url, clientId: `alp-remote-e2e-${Date.now()}` });
   await paseoClient.connect();
-  let models;
-  await until(async () => { models = await paseoClient.providers.listModels('alp', { cwd: dirs.project }); return !models.error && models.models?.length; }, 'ALP teams in Paseo', 60_000);
-  const ids = models.models.map(model => model.id);
+  let models: Awaited<ReturnType<typeof paseoClient.providers.listModels>> | undefined;
+  await until(async () => { models = await paseoClient!.providers.listModels('alp', { cwd: dirs.project }); return !models.error && models.models?.length; }, 'ALP teams in Paseo', 60_000);
+  const ids = models!.models!.map(model => model.id);
   assert.ok(ids.includes('pho'), JSON.stringify(ids));
   record('paseo.plugin+teams', 'pass', { teams: ids });
 
   // 4. Create, prompt with a tool call, stream.
   const agent = await paseoClient.agents.create({ config: { provider: 'alp/pho', modeId: 'full-access' }, cwd: dirs.project, title: 'ALP remote beta' });
-  const streamed = [];
+  // `any`: timeline stream events are JSON of several shapes; the lane reads two optional fields.
+  const streamed: any[] = [];
   const unsubscribe = agent.timeline.subscribe(event => streamed.push(event));
   await unsubscribe.ready?.catch(() => {});
   const first = await agent.run('Run the shell command `cat token.txt` in this project and reply with only what it printed.', { timeoutMs: 240_000 });
@@ -140,15 +141,15 @@ try {
   record('session.create+prompt+tool+stream', 'pass', { agentStatus: first.status, reply: first.lastMessage, streamedEvents: streamed.length, kinds: [...new Set(kinds)] });
 
   // 5. A question answered, then one dismissed.
-  async function question(answer) {
+  async function question(answer: string | undefined) {
     // run() resolves when the turn needs attention, so the answer is awaited with waitForFinish().
     await agent.send('Use the alp_ask tool once to ask me exactly "Proceed with the beta?" with options "yes" and "no". Then reply with only the answer you received, or DISMISSED if the question was dismissed.');
-    let request;
+    let request: NonNullable<typeof agent.pendingPermissions>[number] | undefined;
     await until(async () => { await agent.refresh(); request = agent.pendingPermissions?.[0]; return !!request; }, 'question shown in Paseo', 180_000);
-    await agent.respondToPermission(answer ? { requestId: request.id, response: { behavior: 'allow', updatedInput: { answers: { Answer: answer } } } } : { requestId: request.id, response: { behavior: 'deny', message: 'Not now' } });
+    await agent.respondToPermission(answer ? { requestId: request!.id, response: { behavior: 'allow', updatedInput: { answers: { Answer: answer } } } } : { requestId: request!.id, response: { behavior: 'deny', message: 'Not now' } });
     await until(async () => { await agent.refresh(); return !agent.pendingPermissions?.length; }, 'question resolved', 60_000);
     const result = await agent.waitForFinish(240_000);
-    return { request: { name: request.name, kind: request.kind }, agentStatus: result.status, reply: result.lastMessage };
+    return { request: { name: request!.name, kind: request!.kind }, agentStatus: result.status, reply: result.lastMessage };
   }
   const allowed = await question('yes');
   assert.match(allowed.reply ?? '', /yes/i);
@@ -174,7 +175,7 @@ try {
   await agent.send(`Run the shell command \`sleep 8\`, then reply with only ${marker}.`);
   await until(async () => { await agent.refresh(); return agent.status === 'running'; }, 'turn running', 60_000);
   await sleep(1500);
-  await stop(gateway);
+  await stop(gateway!);
   await sleep(1500);
   await startGateway();
   const resumed = await agent.waitForFinish(240_000);
@@ -185,10 +186,10 @@ try {
 
   // 7b. The gateway goes down again right after it came back, while the plugin is attaching its
   // sessions again: it must keep them and reconnect once more.
-  await stop(gateway);
+  await stop(gateway!);
   await startGateway();
   await sleep(150);
-  await stop(gateway);
+  await stop(gateway!);
   await sleep(1500);
   await startGateway();
   const twice = await agent.run('Reply with only TWICE_OK.', { timeoutMs: 240_000 });
@@ -215,7 +216,7 @@ try {
   await agent.archive().catch(() => {});
   await stop(paseoDaemon);
 } catch (error) {
-  record('run', 'fail', { error: String(error?.stack ?? error) });
+  record('run', 'fail', { error: String((error as Error | undefined)?.stack ?? error) });
   process.exitCode = 1;
 } finally {
   await paseoClient?.close().catch(() => {});

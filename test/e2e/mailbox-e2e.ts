@@ -1,4 +1,4 @@
-// Opt-in: uses real models and a declared scratch Paseo daemon with the rebuilt plugin (scratch-daemon.mjs).
+// Opt-in: uses real models and a declared scratch Paseo daemon with the rebuilt plugin (scratch-daemon.ts).
 // It refuses the user's own daemon and ~/.alp before connecting or creating fixtures.
 // Scenarios: ask (question/answer), wake (idle requester woken by mail), steer (mail into a busy turn),
 // long (alp_ask and alp_wait held for minutes; ALP_TEST_WAIT_SECONDS, default 360).
@@ -9,7 +9,7 @@ import path from 'node:path';
 import { createPaseoApi } from '@getpaseo/client';
 import { DaemonClient } from '@getpaseo/client/internal/daemon-client';
 import { initProject } from '@anhlp/alp-core/init';
-import { readRunLog, requireScratchDaemon } from './scratch-daemon.mjs';
+import { readRunLog, requireScratchDaemon } from './scratch-daemon.ts';
 
 const { url, runLogDir } = requireScratchDaemon();
 
@@ -26,14 +26,16 @@ const noteToken = `NOTE_${randomUUID()}`;
 await writeFile(path.join(root, 'proof.txt'), token);
 
 const rules = 'Bounded integration test of ALP mail. Do not edit files, run tests, or use git. Use low effort for peers.';
-const prompts = {
+const prompts: Record<string, string> = {
   ask: `${rules} Use alp_delegate with wait false to assign peer this brief: "Call alp_ask exactly once with the question: Which token should I report? After the answer arrives, file alp_handoff with outcome complete and a summary containing exactly the answered token, then end your turn." Then call alp_wait. When the question arrives, answer it with alp_send kind answer, replyTo the question id, and body exactly ${token}. Then alp_wait for the result and reply with the token from the peer handoff.`,
   wake: `${rules} Use alp_delegate with wait false to assign peer this brief: "Read ALP.md, then .alp/settings.json, then proof.txt, one at a time. File alp_handoff with outcome complete and a summary containing the exact content of proof.txt, then end your turn." Right after alp_delegate returns, end your turn by replying only "Delegated." Do not call alp_wait. Later, when ALP mail delivers the peer result, reply with the exact content of proof.txt from the handoff.`,
   long: `${rules} Use alp_delegate with wait false to assign peer this brief: "Call alp_ask exactly once with the question: Which token should I report? After the answer arrives, file alp_handoff with outcome complete and a summary containing exactly the answered token, then end your turn." Then call alp_wait. When the question arrives, do not answer yet: first call alp_wait with timeoutMs ${waitSeconds * 1000} (it returns no events, because the peer is waiting for you). Only after that returns, answer with alp_send kind answer, replyTo the question id, and body exactly ${token}. Then alp_wait for the result and reply with the token from the peer handoff.`,
   steer: `${rules} First, use alp_delegate with wait false to assign peer this brief: "Immediately call alp_send with to parent, kind note, and body exactly ${noteToken}. Then read proof.txt, file alp_handoff with outcome complete and a summary containing its exact content, and end your turn." Second, without calling alp_wait, use alp_delegate (waiting) to assign another peer: "Read ALP.md, then .alp/settings.json, then proof.txt, one at a time, and file alp_handoff summarizing what each contains." After it returns, alp_wait for the first peer's result. Reply with the note token you received by ALP mail and the content of proof.txt.`,
 };
 
-const text = item => item?.text ?? '';
+const text = (item: unknown) => (item as { text?: string } | undefined)?.text ?? '';
+// user_message items carry the id the sender gave the message; the timeline type does not name it.
+const clientMessageId = (item: object) => (item as { clientMessageId?: string }).clientMessageId;
 const runLog = () => readRunLog(runLogDir, root);
 
 const driver = new DaemonClient({ url, clientId: `alp-mailbox-${Date.now()}` });
@@ -64,11 +66,11 @@ try {
 
   const children = await driver.listProviderSubagents(agent.id);
   const log = await runLog();
-  const mailInputs = entries.filter(entry => entry.item.type === 'user_message' && /^alp-(mail|wake)-/.test(entry.item.clientMessageId ?? ''));
+  const mailInputs = entries.filter(entry => entry.item.type === 'user_message' && /^alp-(mail|wake)-/.test(clientMessageId(entry.item) ?? ''));
   const evidencePath = `.alp-test/mailbox-${scenario}-${runtime}-e2e.json`;
   await writeFile(evidencePath, JSON.stringify({ scenario, provider, project: root, agent: agent.id, result, children, log, timeline: entries }, null, 2));
   const mail = log.filter(line => line.event === 'mail').map(line => ({ kind: line.kind, from: line.from, id: line.id, body: line.body, ts: line.ts }));
-  const delivery = mailInputs.map(entry => entry.item.clientMessageId.split('-').slice(0, 2).join('-'));
+  const delivery = mailInputs.map(entry => clientMessageId(entry.item)!.split('-').slice(0, 2).join('-'));
   const finalText = text(entries.filter(entry => entry.item.type === 'assistant_message').at(-1)?.item);
   console.log(JSON.stringify({ scenario, runtime, mail, delivery, final: finalText.slice(0, 300), children: children.subagents?.map(child => ({ title: child.title, status: child.status })), evidencePath }));
 
@@ -83,7 +85,7 @@ try {
   }
   if (scenario === 'long') {
     // The requester's alp_wait times out while the child's alp_ask waits, so both calls are held.
-    const at = kind => Date.parse(mail.find(line => line.kind === kind).ts);
+    const at = (kind: string) => Date.parse(mail.find(line => line.kind === kind)!.ts!);
     const held = (at('answer') - at('question')) / 1000;
     console.log(JSON.stringify({ scenario, runtime, heldSeconds: held }));
     assert.ok(held >= waitSeconds, `alp_ask and alp_wait were held only ${held} s`);

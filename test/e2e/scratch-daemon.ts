@@ -24,13 +24,20 @@ export const DEFAULT_SCRATCH_URL = 'ws://127.0.0.1:16767/ws';
 export const USER_PASEO_PORT = '6767';
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 
+type Env = Record<string, string | undefined>;
+/** One JSON line of an ALP run log: the fields the lanes read; every event carries others too. */
+export type RunLogLine = {
+  event?: string, project?: string, agent?: string, status?: string, kind?: string, from?: string, id?: string, body?: string, ts?: string,
+  handoff?: { summary?: string, [key: string]: unknown }, [key: string]: unknown,
+};
+
 /**
  * The path with every existing part resolved: realpath of the deepest existing ancestor, then the
  * missing segments as written, so a not-yet-created child of a symlink into ~/.alp still resolves into it.
  */
-const canonical = value => {
+const canonical = (value: string) => {
   let existing = path.resolve(value);
-  const missing = [];
+  const missing: string[] = [];
   for (;;) {
     try { existing = realpathSync.native(existing); break; } catch {
       const parent = path.dirname(existing);
@@ -43,28 +50,28 @@ const canonical = value => {
   return process.platform === 'darwin' || process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 };
 /** True when `child` is `parent` or under it; a name such as `..foo` is a child, not an escape. */
-const within = (child, parent) => {
+const within = (child: string, parent: string) => {
   const relative = path.relative(parent, child);
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 };
 /** Every spelling of the user's home: HOME may be redirected while userInfo still names the real one. */
 function userHomes() {
-  const homes = new Set();
+  const homes = new Set<string>();
   for (const read of [() => os.userInfo().homedir, () => os.homedir()]) {
     try { const home = read(); if (home) homes.add(home); } catch { /* no passwd entry */ }
   }
   return [...homes];
 }
-const overlaps = (candidate, real) => {
+const overlaps = (candidate: string, real: string) => {
   const a = canonical(candidate); const b = canonical(real);
   return within(a, b) || within(b, a);
 };
 
 /** The declared scratch daemon, or an Error explaining why the lane must not run. Pure: no I/O but realpath. */
-export function scratchDaemon(env = process.env) {
-  const refuse = message => new Error(`Refusing to run against a non-scratch Paseo daemon: ${message} See docs/alp/paseo-plugin.md "Repeat verification".`);
+export function scratchDaemon(env: Env = process.env) {
+  const refuse = (message: string) => new Error(`Refusing to run against a non-scratch Paseo daemon: ${message} See docs/alp/paseo-plugin.md "Repeat verification".`);
   const url = env.ALP_TEST_PASEO_URL || DEFAULT_SCRATCH_URL;
-  let parsed;
+  let parsed: URL;
   try { parsed = new URL(url); } catch { return refuse(`ALP_TEST_PASEO_URL is not a URL (${url}).`); }
   const port = parsed.port || (parsed.protocol === 'wss:' ? '443' : '80');
   if (port === USER_PASEO_PORT) return refuse(`${url} is port ${USER_PASEO_PORT}, the user's own Paseo daemon (its plugin uses the real ~/.alp).`);
@@ -84,7 +91,7 @@ export function scratchDaemon(env = process.env) {
 }
 
 /** scratchDaemon() for a lane's entry point: prints the refusal and exits 2 before anything else runs. */
-export function requireScratchDaemon(env = process.env) {
+export function requireScratchDaemon(env: Env = process.env) {
   const result = scratchDaemon(env);
   if (result instanceof Error) {
     console.error(result.message);
@@ -94,9 +101,9 @@ export function requireScratchDaemon(env = process.env) {
 }
 
 /** The run log lines of the root session that worked in `project`, from the scratch home's run logs. */
-export async function readRunLog(runLogDir, project) {
+export async function readRunLog(runLogDir: string, project: string): Promise<RunLogLine[]> {
   for (const name of await readdir(runLogDir).catch(() => [])) {
-    const lines = (await readFile(path.join(runLogDir, name), 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+    const lines = (await readFile(path.join(runLogDir, name), 'utf8')).trim().split('\n').filter(Boolean).map((line): RunLogLine => JSON.parse(line));
     if (lines.some(line => line.project === project)) return lines;
   }
   return [];

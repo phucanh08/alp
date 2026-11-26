@@ -15,7 +15,11 @@ const paseoHome = process.env.ALP_TEST_PASEO_HOME;
 const runLogDir = process.env.ALP_RUN_LOG_DIR;
 assert.ok(paseoHome && process.env.ALP_HOME && runLogDir, 'Set ALP_TEST_PASEO_HOME, ALP_HOME and ALP_RUN_LOG_DIR');
 const provider = process.env.ALP_TEST_PROVIDER ?? 'alp/cafe';
-const until = async (check, timeoutMs, label) => {
+// The fields of alpd's session.list answer this lane reads.
+// One JSON line of the run log; the fields this lane reads.
+type RunLogLine = { event?: string, agent?: string, status?: string, ts?: string, [key: string]: unknown };
+type SessionList = { sessions: Array<{ id: string, agent?: string, parentId?: string | null, projectRoot?: string }> };
+const until = async <T>(check: () => Promise<T>, timeoutMs: number, label: string): Promise<T> => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) { const value = await check(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 1000)); }
   throw new Error(`Timed out waiting for ${label}`);
@@ -34,28 +38,28 @@ const agent = await client.agents.create({ cwd: root, title: 'ALP viewer detach 
 console.log(JSON.stringify({ project: root, agent: agent.id }));
 void agent.run('Integration check: use alp_delegate exactly once to assign lead this task: "Run the peer verification assignment from your instructions and return its complete tool result." Do not read files or use shell commands. Return the complete lead tool result.', { timeoutMs: 600_000 }).catch(() => {});
 
-const alpd = await connect((await readLock(alpHome())).socket);
-const peer = await until(async () => (await alpd.request('session.list')).sessions.find(session => session.agent === 'peer'), 240_000, 'the peer to start');
-const rootId = (await alpd.request('session.list')).sessions.find(session => !session.parentId && session.projectRoot === root)?.id;
+const alpd = await connect((await readLock(alpHome()))!.socket);
+const peer = await until(async () => (await alpd.request('session.list') as SessionList).sessions.find(session => session.agent === 'peer'), 240_000, 'the peer to start');
+const rootId = (await alpd.request('session.list') as SessionList).sessions.find(session => !session.parentId && session.projectRoot === root)?.id;
 assert.ok(rootId, 'root session is live in alpd');
 
 // The viewer goes away while peer still works.
 await driver.close().catch(() => {});
 const stoppedAt = new Date().toISOString();
-const stop = spawnSync('paseo', ['daemon', 'stop', '--home', paseoHome], { encoding: 'utf8' });
+const stop = spawnSync('paseo', ['daemon', 'stop', '--home', paseoHome!], { encoding: 'utf8' });
 assert.equal(stop.status, 0, stop.stderr);
-console.log(JSON.stringify({ paseoStoppedAt: stoppedAt, peer: peer.id, root: rootId }));
+console.log(JSON.stringify({ paseoStoppedAt: stoppedAt, peer: peer!.id, root: rootId }));
 
 // alpd finishes the tree, then closes the root because no viewer is attached.
-await until(async () => !(await alpd.request('session.list')).sessions.some(session => session.id === rootId), 420_000, 'the tree to finish');
+await until(async () => !(await alpd.request('session.list') as SessionList).sessions.some(session => session.id === rootId), 420_000, 'the tree to finish');
 alpd.close();
-const log = (await readFile(path.join(runLogDir, `${rootId.replace(/[^\w.-]/g, '_')}.jsonl`), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+const log: RunLogLine[] = (await readFile(path.join(runLogDir!, `${rootId.replace(/[^\w.-]/g, '_')}.jsonl`), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
 const finished = log.filter(entry => entry.event === 'assignment.finished');
 await writeFile('.alp-test/viewer-detach-e2e.json', JSON.stringify({ project: root, rootId, stoppedAt, log }, null, 2));
 const peerDone = finished.find(entry => entry.agent === 'peer');
 const leadDone = finished.find(entry => entry.agent === 'lead');
 assert.equal(peerDone?.status, 'completed', JSON.stringify(finished));
 assert.equal(leadDone?.status, 'completed', JSON.stringify(finished));
-assert.ok(peerDone.ts > stoppedAt && leadDone.ts > stoppedAt, 'assignments finished after Paseo stopped');
+assert.ok(peerDone!.ts! > stoppedAt && leadDone!.ts! > stoppedAt, 'assignments finished after Paseo stopped');
 assert.ok(JSON.stringify(leadDone).includes(token), 'lead result carries the peer token');
 console.log(JSON.stringify({ passed: true, evidence: '.alp-test/viewer-detach-e2e.json' }));

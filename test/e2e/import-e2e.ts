@@ -41,10 +41,10 @@ try {
   await writeFile('.alp-test/import-e2e.json', JSON.stringify({ ...evidence, timeline }, null, 2));
   console.log(JSON.stringify(evidence));
   assert.ok(texts.includes(token), 'imported root timeline carries the peer token');
-  const find = name => children.subagents.find(child => child.title?.startsWith(`ALP ${name}`));
+  const find = (name: string) => children.subagents.find(child => child.title?.startsWith(`ALP ${name}`));
   assert.ok(find('lead'), 'lead replayed as a subagent');
   assert.ok(find('peer'), 'peer replayed as a subagent');
-  assert.equal(find('peer').parentSubagentId, find('lead').id);
+  assert.equal(find('peer')!.parentSubagentId, find('lead')!.id);
   console.log(JSON.stringify({ passed: true, evidence: '.alp-test/import-e2e.json' }));
 } finally {
   if (agentId) await driver.archiveAgent?.(agentId).catch(() => {});

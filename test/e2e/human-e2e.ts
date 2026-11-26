@@ -12,7 +12,7 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 
 const mode = process.argv[2] ?? 'cli';
-assert.ok(['cli', 'paseo', 'relay'].includes(mode), 'usage: human-e2e.mjs cli|paseo|relay');
+assert.ok(['cli', 'paseo', 'relay'].includes(mode), 'usage: human-e2e.ts cli|paseo|relay');
 const model = process.env.ALP_TEST_MODEL ?? 'codex:gpt-5.6-sol';
 const word = `ORCHID-${randomUUID().slice(0, 8)}`;
 const root = path.resolve('.alp-test', `human-${mode}-${Date.now()}`);
@@ -23,16 +23,20 @@ const prompt = mode === 'relay'
   ? 'Integration check: call alp_delegate exactly once with agent peer, mode read-only and task "Follow your instructions for this integration assignment." Do not use other tools. When the result arrives, reply with the code word the peer returns, verbatim.'
   : 'Integration check: call alp_ask exactly once with question "What is the code word?"; it asks the user. Do not use any other tool. Reply with the answer, verbatim.';
 
+// `any`: `alp run --json` envelopes and `alp questions --json` are JSON of every shape, and the evidence
+// record gathers them field by field; the lane reads the fields it asserts on.
+type Json = any;
+
 async function cli() {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-human-e2e-'));
   const env = { ...process.env, ALP_HOME: home, ALP_RUN_LOG_DIR: path.join(home, 'runs') };
-  const alp = (...args) => spawnSync(process.execPath, ['packages/cli/dist/cli.js', ...args], { env, encoding: 'utf8' });
+  const alp = (...args: string[]) => spawnSync(process.execPath, ['packages/cli/dist/cli.js', ...args], { env, encoding: 'utf8' });
   try {
     assert.equal(alp('daemon', 'start').status, 0);
-    const evidence = { mode, model, project: root, word };
-    const envelopes = await new Promise((resolve, reject) => {
+    const evidence: Json = { mode, model, project: root, word };
+    const envelopes = await new Promise<Json[]>((resolve, reject) => {
       const child = spawn(process.execPath, ['packages/cli/dist/cli.js', 'run', '--json', '--project', root, '--model', model, '--thinking', 'low', prompt], { env });
-      const seen = [];
+      const seen: Json[] = [];
       let buffer = '';
       let stderr = '';
       const timer = setTimeout(() => { child.kill('SIGINT'); reject(new Error('alp run timed out')); }, 600_000);
@@ -71,7 +75,7 @@ async function cli() {
       console.log(JSON.stringify({ ...evidence, sent: evidence.sent?.stderr.trim(), log: evidence.log.split('\n') }));
       assert.equal(evidence.sent?.status, 0, evidence.sent?.stderr);
       assert.match(evidence.sent.stderr, /Sent to peer as mail from the user/);
-      assert.ok(evidence.told.some(body => body.includes(`The user wrote to me directly: "The code word is ${word}"`)), 'ALP told main that the user wrote to peer');
+      assert.ok(evidence.told.some((body: string) => body.includes(`The user wrote to me directly: "The code word is ${word}"`)), 'ALP told main that the user wrote to peer');
       assert.ok(evidence.peerFinal.includes(word), 'the peer acted on the user\'s mail');
       assert.ok(evidence.final.includes(word), 'the word reaches main');
       assert.equal(envelopes.filter(e => e.event.type === 'question').length, 0, 'nobody asked the user');
@@ -80,7 +84,7 @@ async function cli() {
     }
     console.log(JSON.stringify({ ...evidence, top: evidence.top.split('\n'), answer: evidence.answer.stdout.trim(), log: evidence.log.split('\n') }));
     assert.equal(evidence.question?.agent, 'main');
-    assert.ok(evidence.listed.some(question => question.id === evidence.question.id), 'alp questions lists it');
+    assert.ok(evidence.listed.some((question: Json) => question.id === evidence.question.id), 'alp questions lists it');
     assert.match(evidence.top, /main\s+waiting_user/);
     assert.equal(evidence.answer.status, 0, evidence.answer.stderr);
     assert.deepEqual({ outcome: evidence.resolved?.outcome, answer: evidence.resolved?.answer }, { outcome: 'answered', answer: word });
@@ -100,7 +104,7 @@ async function paseo() {
   const driver = new DaemonClient({ url: process.env.ALP_TEST_PASEO_URL ?? 'ws://127.0.0.1:16767/ws', clientId: `alp-human-${Date.now()}` });
   const client = createPaseoApi(driver);
   let agent;
-  const requests = [];
+  const requests: Json[] = [];
   try {
     await driver.connect();
     agent = await client.agents.create({ cwd: root, title: 'ALP human channel smoke test', config: { provider, modeId: 'read-only', thinkingOptionId: 'low', options: { workflow: 'pho' } } });
@@ -119,7 +123,8 @@ async function paseo() {
     let final = '';
     for (const deadline = Date.now() + 300_000; Date.now() < deadline;) {
       const entries = (await agent.timeline.refetch({ limit: 300 })).entries ?? [];
-      const last = entries.filter(entry => entry.item.type === 'assistant_message').at(-1)?.item;
+      // The fields this lane reads of the last assistant message; the timeline item type is a union of every kind.
+      const last = entries.filter(entry => entry.item.type === 'assistant_message').at(-1)?.item as { text?: string, content?: string } | undefined;
       final = last?.text ?? last?.content ?? '';
       if (final.includes(word)) break;
       await new Promise(resolve => setTimeout(resolve, 2000));

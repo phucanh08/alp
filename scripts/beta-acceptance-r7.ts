@@ -9,7 +9,7 @@ import { ROOT, Run, capture } from './beta-acceptance-lib.ts';
 
 const USAGE = `Usage: node scripts/beta-acceptance-r7.ts --live --model codex:<model> [--model claude:<model>] [--sha <release SHA>] [--work DIR] [--runner NAME] [--evidence URL]
 
-Runs test/e2e/worktree-e2e.mjs in this checkout once per --model (ALP_TEST_MODEL), after
+Runs test/e2e/worktree-e2e.ts in this checkout once per --model (ALP_TEST_MODEL), after
 pnpm install --frozen-lockfile && pnpm run build at the release SHA. Real model calls; there is no --fake for R7.
 --sha checks that HEAD is the release SHA; without it HEAD is recorded as is.
 --evidence names where the row's evidence lives (e.g. the CI run); default the results file.
@@ -41,7 +41,7 @@ await run.step('R7-source', 'checkout at the release SHA, built', async () => {
 
 for (const model of models) {
   await run.step(`R7-${model.split(':')[0]}`, `worktree-e2e with ${model}`, async () => {
-    const result = run.exec(`R7-${model.split(':')[0]}`, process.execPath, ['test/e2e/worktree-e2e.mjs'], { cwd: ROOT, env: { ...process.env, ALP_TEST_MODEL: model } });
+    const result = run.exec(`R7-${model.split(':')[0]}`, process.execPath, ['test/e2e/worktree-e2e.ts'], { cwd: ROOT, env: { ...process.env, ALP_TEST_MODEL: model } });
     if (result.status !== 0) throw new Error(`exit ${result.status ?? result.error?.message}: ${(result.stderr || result.stdout).trim().split('\n').slice(-3).join(' | ').slice(0, 400)}`);
     run.record(`R7-${model.split(':')[0]}`, 'pass', `worktree-e2e exited 0 with ${model}`, { model });
   });

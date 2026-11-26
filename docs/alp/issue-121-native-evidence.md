@@ -2,7 +2,7 @@
 
 Task t-15b0.4 (issue #121, branches A and C). Part 1 records the native probes that shaped ALP's
 design (2026-10-22T19:45Z–20:12Z, raw scripts and logs kept outside the repository); part 2 records the
-real runs of ALP's implementation (`test/e2e/conversation-real-e2e.mjs`). The contract is
+real runs of ALP's implementation (`test/e2e/conversation-real-e2e.ts`). The contract is
 docs/protocol/alp-json-rpc-v1.md §12.7. Probe scripts and raw JSONL logs are not committed (they hold
 account metadata); the excerpts below are.
 
@@ -427,7 +427,7 @@ Afterwards:
 
 ## Part 2: ALP's implementation on the real runtimes
 
-`node scripts/build-workspace.ts daemon && node test/e2e/conversation-real-e2e.mjs codex claude` runs a
+`node scripts/build-workspace.ts daemon && node test/e2e/conversation-real-e2e.ts codex claude` runs a
 real alpd on an isolated `ALP_HOME`, a temporary project with a file no step may change, the installed
 Codex and Claude, small models (default `codex:gpt-6-luna` and `claude:claude-haiku-4-5`;
 `ALP_REAL_CODEX_MODEL`/`ALP_REAL_CLAUDE_MODEL` override them, and the final run below used

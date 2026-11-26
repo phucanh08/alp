@@ -2,7 +2,7 @@
 // Opt-in real-runtime proof of session.reload (docs/protocol/alp-json-rpc-v1.md §12.8, issue #121 branch
 // G2) on the installed Codex and Claude. It spends two small real turns per runtime, so it never runs in CI:
 //
-//   node scripts/build-workspace.ts daemon && ALP_HOME=<scratch> node test/e2e/reload-real-e2e.mjs codex claude
+//   node scripts/build-workspace.ts daemon && ALP_HOME=<scratch> node test/e2e/reload-real-e2e.ts codex claude
 //
 // A real alpd runs on its own temporary ALP_HOME. Per runtime: a root that was never prompted is refused
 // (1005 no_history: a Claude root then has no transcript, and a reload must never start an empty one);
@@ -28,9 +28,17 @@ const ALPD = path.join(here, '../../packages/daemon/dist/alpd.js');
 const MODELS = { codex: process.env.ALP_REAL_CODEX_MODEL ?? 'codex:gpt-6-luna', claude: process.env.ALP_REAL_CLAUDE_MODEL ?? 'claude:claude-haiku-4-5' };
 const ASK = 'In my earlier message in this chat I asked you to remember a codeword. Which one? Reply with the codeword only, or NONE.';
 const runtimes = process.argv.slice(2).filter(name => name === 'codex' || name === 'claude');
-if (!runtimes.length) { console.error('usage: reload-real-e2e.mjs codex|claude ...'); process.exit(2); }
+if (!runtimes.length) { console.error('usage: reload-real-e2e.ts codex|claude ...'); process.exit(2); }
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+type Client = Awaited<ReturnType<typeof connect>>;
+// `any`: alpd answers, history items and run log lines are JSON whose shape depends on the method or event.
+type Json = any;
+// The fields of Codex's account/rateLimits/read answer this script reads.
+type UsageWindow = { usedPercent?: number, windowDurationMins?: number };
+type RateLimit = { primary?: UsageWindow, secondary?: UsageWindow } | undefined;
+type RateLimits = { rateLimitsByLimitId?: Record<string, RateLimit>, rateLimits?: RateLimit } | undefined;
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-reload-real-')));
 const logDir = process.env.ALP_REAL_LOG_DIR ?? path.join(directory, 'logs');
 await mkdir(logDir, { recursive: true });
@@ -39,20 +47,20 @@ await mkdir(home, { mode: 0o700 });
 await writeFile(path.join(home, 'settings.json'), '{}');
 console.log(`ALP_HOME=${home}\nlogs=${logDir}`);
 let logFile = path.join(logDir, 'run.jsonl');
-const log = async entry => { const line = { at: new Date().toISOString(), ...entry }; console.log(JSON.stringify(line)); await appendFile(logFile, `${JSON.stringify(line)}\n`); };
+const log = async (entry: Record<string, unknown>) => { const line = { at: new Date().toISOString(), ...entry }; console.log(JSON.stringify(line)); await appendFile(logFile, `${JSON.stringify(line)}\n`); };
 // The child gets this run's home and run log only, never the caller's.
 const childEnv = { ...process.env, ALP_HOME: home, ALP_RUN_LOG_DIR: path.join(home, 'runs') };
 
-let child;
+let child: ReturnType<typeof spawn> | undefined;
 async function startAlpd() {
   const out = openSync(path.join(logDir, 'alpd.log'), 'a');
   child = spawn(process.execPath, [ALPD], { stdio: ['ignore', out, out], env: childEnv });
   closeSync(out);
-  for (let i = 0; i < 200; i++) { const lock = await readLock(home); if (lock?.ready && lock.pid === child.pid) break; await sleep(50); }
-  return connect((await readLock(home)).socket, { name: 'reload-real', version: '0' });
+  for (let i = 0; i < 200; i++) { const lock = await readLock(home); if (lock?.ready && lock.pid === child!.pid) break; await sleep(50); }
+  return connect((await readLock(home))!.socket, { name: 'reload-real', version: '0' });
 }
-async function stopAlpd(client) {
-  const exited = once(child, 'exit');
+async function stopAlpd(client: Client) {
+  const exited = once(child!, 'exit');
   await client.request('daemon.shutdown').catch(() => {});
   client.close();
   await exited;
@@ -62,16 +70,16 @@ async function codexHeadroom() {
   const transport = new CodexTransport(process.env.ALP_CODEX_BIN ?? 'codex', directory, childEnv);
   try {
     await transport.initialize();
-    const result = await transport.request('account/rateLimits/read', {});
+    const result = await transport.request('account/rateLimits/read', {}) as RateLimits;
     const limits = Object.values(result?.rateLimitsByLimitId ?? (result?.rateLimits ? { default: result.rateLimits } : {}));
-    const windows = limits.flatMap(limit => [limit?.primary, limit?.secondary].filter(Boolean));
+    const windows = limits.flatMap(limit => [limit?.primary, limit?.secondary].filter((window): window is UsageWindow => Boolean(window)));
     // Unknown usage is not headroom: without a reading, Codex does not run.
     return { windows: windows.map(window => ({ usedPercent: window.usedPercent, windowDurationMins: window.windowDurationMins })), ok: windows.length > 0 && windows.every(window => typeof window.usedPercent === 'number' && 100 - window.usedPercent > 10) };
   } finally { await transport.close(); }
 }
 
 /** Sends `text` and waits for the turn to end; answers the last assistant message. */
-async function ask(client, sessionId, id, text) {
+async function ask(client: Client, sessionId: string, id: string, text: string) {
   await client.request('session.prompt', { sessionId, clientMessageId: id, content: [{ type: 'text', text }] });
   const deadline = Date.now() + 240_000;
   for (;;) {
@@ -80,14 +88,14 @@ async function ask(client, sessionId, id, text) {
     if (Date.now() > deadline) throw new Error(`turn ${id} did not end`);
     await sleep(500);
   }
-  const items = (await client.request('session.history', { sessionId })).items.filter(item => item.event?.type === 'item' && item.event.item.kind === 'assistant_message');
+  const items = (await client.request('session.history', { sessionId })).items.filter((item: Json) => item.event?.type === 'item' && item.event.item.kind === 'assistant_message');
   return items.at(-1)?.event.item.text ?? '';
 }
-const runEvents = async sessionId => (await readFile(path.join(home, 'runs', `${sessionId.replace(/[^\w.-]/g, '_')}.jsonl`), 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
-const generationOf = async (client, sessionId) => (await client.request('session.history', { sessionId, limit: 1 })).generation;
+const runEvents = async (sessionId: string): Promise<Json[]> => (await readFile(path.join(home, 'runs', `${sessionId.replace(/[^\w.-]/g, '_')}.jsonl`), 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
+const generationOf = async (client: Client, sessionId: string) => (await client.request('session.history', { sessionId, limit: 1 })).generation;
 
-const made = { codex: new Set(), claude: new Set() };
-const results = {};
+const made = { codex: new Set<string>(), claude: new Set<string>() };
+const results: Record<string, string> = {};
 let client = await startAlpd();
 try {
   const hello = await client.request('daemon.hello', { protocolVersion: 1 });
@@ -147,7 +155,7 @@ try {
     results[runtime] = 'pass';
   }
 } catch (error) {
-  await log({ step: 'failed', error: error?.message ?? String(error) });
+  await log({ step: 'failed', error: (error as Error | undefined)?.message ?? String(error) });
   process.exitCode = 1;
 } finally {
   await stopAlpd(client).catch(() => {});

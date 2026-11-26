@@ -12,7 +12,9 @@ import { initProject } from '@anhlp/alp-core/init';
 const model = process.env.ALP_TEST_MODEL ?? 'codex:gpt-5.6-sol';
 const home = await mkdtemp(path.join(tmpdir(), 'alp-board-e2e-'));
 const env = { ...process.env, ALP_HOME: home, ALP_RUN_LOG_DIR: path.join(home, 'runs') };
-const alp = (...args) => spawnSync(process.execPath, ['packages/cli/dist/cli.js', ...args], { env, encoding: 'utf8' });
+// `any`: `alp run --json` envelopes and `alp board --json` pins are JSON of every shape; the lane reads the fields it asserts on.
+type Json = any;
+const alp = (...args: string[]) => spawnSync(process.execPath, ['packages/cli/dist/cli.js', ...args], { env, encoding: 'utf8' });
 const root = path.resolve('.alp-test', `board-${Date.now()}`);
 await initProject(root);
 await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ defaultAgent: 'main', workflow: { mode: 'pho', maxPeers: 2 } }));
@@ -33,9 +35,9 @@ const bob = [
   'Finally reply in this form: CLAIM: <granted, or refused because of which agent>; HASHING: <the password hashing decision on the board, verbatim>.',
 ].join(' ');
 
-function run(prompt) {
+function run(prompt: string) {
   const child = spawn(process.execPath, ['packages/cli/dist/cli.js', 'run', '--json', '--project', root, '--mode', 'workspace-write', '--model', model, '--thinking', 'low', prompt], { env });
-  const envelopes = [];
+  const envelopes: Json[] = [];
   let buffer = '';
   let stderr = '';
   child.stderr.on('data', chunk => { stderr += chunk; });
@@ -46,14 +48,14 @@ function run(prompt) {
       buffer = buffer.slice(index + 1);
     }
   });
-  const done = new Promise((resolve, reject) => {
+  const done = new Promise<Json[]>((resolve, reject) => {
     const timer = setTimeout(() => { child.kill('SIGINT'); reject(new Error('alp run timed out')); }, 600_000);
     child.on('close', code => { clearTimeout(timer); code === 0 ? resolve(envelopes) : reject(new Error(`alp run exited ${code}: ${stderr}`)); });
   });
   return { envelopes, done };
 }
 
-const final = envelopes => {
+const final = (envelopes: Json[]) => {
   const root = envelopes.find(e => e.event.type === 'session.opened' && !e.event.session.parentId)?.sessionId;
   return { root, text: envelopes.filter(e => e.sessionId === root && e.event.type === 'item' && e.event.item.kind === 'assistant_message').at(-1)?.event.item.text ?? '' };
 };
@@ -62,7 +64,7 @@ try {
   assert.equal(alp('daemon', 'start').status, 0);
   const a = run(alice);
   // Bob starts once Alice's claim and decision are on the board, while she is still at work.
-  const board = () => JSON.parse(alp('board', '--project', root, '--json').stdout || '[]');
+  const board = (): Json[] => JSON.parse(alp('board', '--project', root, '--json').stdout || '[]');
   for (const deadline = Date.now() + 300_000; board().filter(pin => pin.kind !== 'finding').length < 2;) {
     assert.ok(Date.now() < deadline, 'alice pinned her claim and decision');
     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -90,7 +92,7 @@ try {
   assert.ok(!pins.some(pin => pin.session === bobFinal.root && pin.kind === 'claim'), 'bob holds no claim on src/auth');
   assert.match(bobFinal.text, /refused/i);
   assert.ok(bobFinal.text.includes(hashing), 'bob read the decision from the board');
-  assert.ok(boardMail.some(body => body.includes(finding)), 'bob\'s finding reached alice as board mail');
+  assert.ok(boardMail.some((body: string) => body.includes(finding)), 'bob\'s finding reached alice as board mail');
   assert.ok(aliceFinal.text.includes(finding), 'alice read the finding in her running turn');
   // Alice's claim ended with her session; the decision and finding stay.
   const after = board();

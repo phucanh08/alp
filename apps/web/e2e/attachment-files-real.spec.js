@@ -26,7 +26,7 @@ const MODELS = { codex: process.env.ALP_REAL_CODEX_MODEL ?? 'codex:gpt-6-luna', 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const sha512 = bytes => createHash('sha512').update(bytes).digest('hex');
 /** The installed runtimes, through a command of the root package (apps/web imports no runtime package). */
-const NATIVE = fileURLToPath(new URL('../../../test/e2e/native-threads.mjs', import.meta.url));
+const NATIVE = fileURLToPath(new URL('../../../test/e2e/native-threads.ts', import.meta.url));
 const native = async (...args) => JSON.parse((await promisify(execFile)(process.execPath, [NATIVE, ...args], { env: { ...process.env, ALP_HOME: world.home } })).stdout);
 
 test.describe.configure({ mode: 'serial', timeout: 600_000 });

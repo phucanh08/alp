@@ -8,14 +8,14 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { teardown } from '../support/teardown.ts';
-import { HomeGuardError, checkScratchHome, resolveDeep } from '../e2e/home-guard.mjs';
+import { HomeGuardError, checkScratchHome, resolveDeep } from '../e2e/home-guard.ts';
 
 const here = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'e2e');
 
-function scene(t) {
+function scene(t: TestContext) {
   const defer = teardown(t);
   const base = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'home-guard-')));
   defer(() => rmSync(base, { recursive: true, force: true }));
@@ -31,7 +31,7 @@ function scene(t) {
   return { defer, base, fakeHome, fakeAlp, scratch, link, env };
 }
 
-const refuses = (candidate, env, pattern) => assert.throws(() => checkScratchHome(candidate, env), error => error instanceof HomeGuardError && (!pattern || pattern.test(error.message)));
+const refuses = (candidate: string, env: Record<string, string>, pattern?: RegExp) => assert.throws(() => checkScratchHome(candidate, env), error => error instanceof HomeGuardError && (!pattern || pattern.test(error.message)));
 
 test('the incident: a missing child under a symlink into the user ALP home is refused', t => {
   const { link, env } = scene(t);
@@ -104,7 +104,7 @@ test('a scratch home outside every protected home is accepted and resolved', t =
 
 // Each lane, run as the user would, with ALP_TEST_CLI a stub: the guard must exit 2 and the stub must
 // never have been called. PATH holds only node's directory, and the provider binaries name a missing path.
-for (const lane of ['alpd-e2e.mjs', 'persistence-e2e.mjs']) {
+for (const lane of ['alpd-e2e.ts', 'persistence-e2e.ts']) {
   test(`${lane} refuses before calling its CLI`, t => {
     const { scratch, link, fakeHome, env: protect } = scene(t);
     const calls = path.join(scratch, 'cli-calls.txt');
@@ -138,7 +138,7 @@ test('the stub check is live: a scratch ALP_HOME passes the alpd lane guard and 
     ALP_CODEX_BIN: missing, ALP_CLAUDE_BIN: missing, ALP_ANTIGRAVITY_BIN: missing,
     HOME: fakeHome, ALP_HOME: path.join(scratch, 'alp-home'), TMPDIR: scratch,
   };
-  const run = spawnSync(process.execPath, [path.join(here, 'alpd-e2e.mjs')], { cwd: scratch, env, encoding: 'utf8', timeout: 30_000 });
+  const run = spawnSync(process.execPath, [path.join(here, 'alpd-e2e.ts')], { cwd: scratch, env, encoding: 'utf8', timeout: 30_000 });
   assert.notEqual(run.status, 0);
   assert.equal(readFileSync(calls, 'utf8').split('\n')[0].split(' ')[0], 'init', 'the guard let a scratch home through to the first CLI call');
 });

@@ -12,14 +12,14 @@ const usage = 'Usage: test.ts [unit|integration|e2e|hermetic|all]';
 if (!['unit', 'integration', 'e2e', 'hermetic', 'all'].includes(scope)) throw new Error(usage);
 
 // Live e2e suites call real providers and, for some, a running Paseo host. The Paseo lanes drive only a
-// scratch daemon the caller declares (ALP_TEST_ALP_HOME, ALP_TEST_PASEO_URL; test/e2e/scratch-daemon.mjs)
+// scratch daemon the caller declares (ALP_TEST_ALP_HOME, ALP_TEST_PASEO_URL; test/e2e/scratch-daemon.ts)
 // and refuse the user's own daemon (:6767) and ~/.alp. Each runs without the caller's ALP session.
 const e2e = [
-  ['test/e2e/workflow-e2e.mjs', 'pho'], ['test/e2e/workflow-e2e.mjs', 'cafe'],
-  ['test/e2e/mailbox-e2e.mjs', 'ask'], ['test/e2e/mailbox-e2e.mjs', 'wake'], ['test/e2e/mailbox-e2e.mjs', 'steer'],
-  ['test/e2e/team-e2e.mjs'], ['test/e2e/claude-e2e.mjs'], ['test/e2e/claude-runtime-e2e.mjs'],
-  ['test/e2e/paseo-e2e.mjs'], ['test/e2e/alpd-e2e.mjs'], ['test/e2e/viewer-detach-e2e.mjs'], ['test/e2e/persistence-e2e.mjs'],
-  ['test/e2e/import-e2e.mjs'], ['test/e2e/worktree-e2e.mjs'], ['test/e2e/human-e2e.mjs', 'cli'], ['test/e2e/human-e2e.mjs', 'paseo'], ['test/e2e/board-e2e.mjs'],
+  ['test/e2e/workflow-e2e.ts', 'pho'], ['test/e2e/workflow-e2e.ts', 'cafe'],
+  ['test/e2e/mailbox-e2e.ts', 'ask'], ['test/e2e/mailbox-e2e.ts', 'wake'], ['test/e2e/mailbox-e2e.ts', 'steer'],
+  ['test/e2e/team-e2e.ts'], ['test/e2e/claude-e2e.ts'], ['test/e2e/claude-runtime-e2e.ts'],
+  ['test/e2e/paseo-e2e.ts'], ['test/e2e/alpd-e2e.ts'], ['test/e2e/viewer-detach-e2e.ts'], ['test/e2e/persistence-e2e.ts'],
+  ['test/e2e/import-e2e.ts'], ['test/e2e/worktree-e2e.ts'], ['test/e2e/human-e2e.ts', 'cli'], ['test/e2e/human-e2e.ts', 'paseo'], ['test/e2e/board-e2e.ts'],
 ];
 const unit = () => [...packages.flatMap(name => packageTests(name)), ...webTests()];
 

@@ -32,22 +32,23 @@ const exited = once(daemon, 'exit');
 let diagnostics = '';
 daemon.stdout.on('data', chunk => { diagnostics += chunk; });
 daemon.stderr.on('data', chunk => { diagnostics += chunk; });
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(check, label, timeout = 120000) {
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+async function until(check: () => unknown, label: string, timeout = 120000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) { if (await check()) return; await sleep(100); }
   throw new Error(`Timed out: ${label}; daemon diagnostics: ${diagnostics.slice(-2000)}`);
 }
-const cli = (...args) => {
+const cli = (...args: string[]) => {
   const result = spawnSync(process.execPath, [fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url)), 'schedule', ...args, '--project', project, '--json'], { env, encoding: 'utf8', timeout: 15000 });
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
 };
-let client;
-const events = [];
+let client: Awaited<ReturnType<typeof connect>> | undefined;
+// `any`: alpd event envelopes are JSON whose payload depends on the event type (the client types them so too).
+const events: any[] = [];
 try {
   await until(async () => { const lock = await readLock(home); return lock?.ready && lock.pid === daemon.pid; }, 'isolated daemon readiness', 30000);
-  client = await connect((await readLock(home)).socket, { name: 'real-scheduler-e2e', version: '1' });
+  client = await connect((await readLock(home))!.socket, { name: 'real-scheduler-e2e', version: '1' });
   client.onEvent(event => events.push(event));
   const { session } = await client.request('session.create', { spec: { cwd: project, persist: true, model, thinking: 'low', mode: 'read-only' } });
   await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'setup-only', content: [{ type: 'text', text: 'Harmless scheduler acceptance setup. Reply exactly READY and end this turn. Do not use tools or delegate.' }] });
@@ -59,7 +60,7 @@ try {
   const cancelled = cli('create', '--session', session.id, '--at', dueAt, '--prompt', 'Must never execute').job;
   assert.equal(cli('cancel', cancelled.id).job.status, 'cancelled');
   const { job } = cli('create', '--session', session.id, '--at', dueAt, '--prompt', prompt);
-  assert.ok(cli('list').jobs.some(entry => entry.id === job.id));
+  assert.ok(cli('list').jobs.some((entry: { id: string }) => entry.id === job.id));
   assert.equal(cli('show', job.id).job.sessionId, session.id);
   const boundary = events.length;
   console.log(JSON.stringify({ phase: 'idle_wait', sessionId: session.id, jobId: job.id, dueAt, delayMs, home }));
@@ -68,8 +69,8 @@ try {
   // Independently read the same account-free provider usage seam at wake time.
   // The runtime's per-turn snapshot injection is separately covered by daemon tests.
   const usage = await client.request('daemon.usage', { refresh: true });
-  const quota = usage.providers.find(provider => provider.runtime === model.split(':')[0]);
-  const known = quota?.windows.filter(window => typeof window.usedPercent === 'number') ?? [];
+  const quota = usage.providers.find((provider: { runtime: string }) => provider.runtime === model.split(':')[0]);
+  const known = quota?.windows.filter((window: { usedPercent?: number }) => typeof window.usedPercent === 'number') ?? [];
   const expectedAvailability = quota?.limited ? 'DENIED' : quota?.available && known.length ? 'VERIFIED' : 'UNKNOWN';
   await until(() => events.slice(boundary).some(envelope => envelope.sessionId === session.id && envelope.event.type === 'turn.ended'), 'scheduled same-session turn ended', 180000);
   const after = cli('show', job.id).job;
