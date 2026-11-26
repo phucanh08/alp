@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { resolveAgent } from '@anhlp/alp-core/resolver';
 import { compileAgent } from '@anhlp/alp-core/adapter';
+import type { AlpRuntimeAdapter } from '@anhlp/alp-core/adapter';
 import { FakeAdapter } from '../../../test/support/fake-adapter.ts';
 
 test('fake compiles main and filesystem custom agent without provider dependencies', async t => {
@@ -17,14 +18,15 @@ test('fake compiles main and filesystem custom agent without provider dependenci
     await mkdir(directory, { recursive: true }); await writeFile(path.join(directory, 'AGENT.md'), name);
     const agent = await resolveAgent(root, { agent: name });
     const before = JSON.stringify(agent);
-    const result = await compileAgent(new FakeAdapter(), agent);
+    // The fake compiles only the parts of an agent it reads (test/support/fake-adapter.ts), so it is no full adapter type.
+    const result = await compileAgent(new FakeAdapter() as unknown as AlpRuntimeAdapter<{ instructions: string }>, agent);
     assert.equal(result.agentName, name); assert.equal(result.material.instructions, `Project\n\n${name}`);
     assert.equal(JSON.stringify(agent), before);
     const unsupported = { ...agent, hooks: [{ name: 'start', path: path.join(root, 'start') }] };
-    await assert.rejects(compileAgent(new FakeAdapter(), unsupported), { code: 'UNSUPPORTED_CAPABILITY' });
-    await assert.rejects(compileAgent({ id: 'bad', capabilities: () => ({}), compile() {} }, agent), { code: 'INVALID_CAPABILITIES' });
-    const invalid = new FakeAdapter(); invalid.compile = async () => ({});
-    await assert.rejects(compileAgent(invalid, agent), { code: 'INVALID_COMPILED_AGENT' });
+    await assert.rejects(compileAgent(new FakeAdapter() as unknown as AlpRuntimeAdapter, unsupported), { code: 'UNSUPPORTED_CAPABILITY' });
+    await assert.rejects(compileAgent({ id: 'bad', capabilities: () => ({}), compile() {} } as unknown as AlpRuntimeAdapter, agent), { code: 'INVALID_CAPABILITIES' });
+    const invalid = new FakeAdapter(); invalid.compile = (async () => ({})) as unknown as FakeAdapter['compile'];
+    await assert.rejects(compileAgent(invalid as unknown as AlpRuntimeAdapter, agent), { code: 'INVALID_COMPILED_AGENT' });
   }
 });
 test('core import graph contains only node builtins and core-relative modules', async () => {

@@ -5,10 +5,11 @@ import { validateSettings, normalizeMcp, validateResolvedAgent } from '@anhlp/al
 
 test('resolved IR serializes and is consumed by a provider-neutral fake', () => {
   const root = path.resolve('fixture');
-  const agent = validateResolvedAgent({ name: 'main', projectRoot: root, instructions: { project: 'P', agent: 'A' }, skills: [{ name: 'demo', path: path.join(root, 'SKILL.md') }], hooks: [], runtime: { model: 'test-model' }, mcp: normalizeMcp({ mcpServers: { local: { command: './bin/server', cwd: '.', args: ['--ready'] } } }, root, 'fixture') });
+  // `any`: validateResolvedAgent returns unknown; the test reads the fields it built itself.
+  const agent: any = validateResolvedAgent({ name: 'main', projectRoot: root, instructions: { project: 'P', agent: 'A' }, skills: [{ name: 'demo', path: path.join(root, 'SKILL.md') }], hooks: [], runtime: { model: 'test-model' }, mcp: normalizeMcp({ mcpServers: { local: { command: './bin/server', cwd: '.', args: ['--ready'] } } }, root, 'fixture') });
   const restored = JSON.parse(JSON.stringify(agent));
   assert.deepEqual(validateResolvedAgent(restored), agent);
-  const fake = input => [input.instructions.project, input.instructions.agent].join('\n');
+  const fake = (input: { instructions: { project: string, agent: string } }) => [input.instructions.project, input.instructions.agent].join('\n');
   assert.equal(fake(restored), 'P\nA');
   assert.ok(path.isAbsolute(agent.mcp.mcpServers.local.command));
   assert.equal(agent.mcp.mcpServers.local.cwd, root);

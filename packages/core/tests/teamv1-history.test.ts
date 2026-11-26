@@ -12,14 +12,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { shippedRoleHashes } from '@anhlp/alp-core/upgrade';
-import { mainHistory, parseTeamV1, union } from './teamv1-history.js';
+import { mainHistory, parseTeamV1, union } from './teamv1-history.ts';
+import type { TeamLists } from './teamv1-history.ts';
 
 const snapshot = JSON.parse(await readFile(new URL('fixtures/teamv1-history.json', import.meta.url), 'utf8'));
 
 /** `lists`' hashes that today's teamV1 does not list, as "path hash" lines. */
-function unlisted(lists) {
+function unlisted(lists: TeamLists) {
   return Object.entries(lists).flatMap(([name, hashes]) => hashes
-    .filter(hash => !shippedRoleHashes[name]?.includes(hash))
+    .filter(hash => !(shippedRoleHashes as TeamLists)[name]?.includes(hash))
     .map(hash => `${name} ${hash}`));
 }
 const advice = 'teamV1 in packages/core/src/upgrade.ts is append-only: put these hashes back, never edit or remove a line';
@@ -49,6 +50,6 @@ test('every teamV1 hash ever on main is still listed (t-cc9e, git history)', t =
   }
   assert.deepEqual([...missing].map(([line, commit]) => `${line} (on main since ${commit})`), [], advice);
   // Hashes main had that the snapshot lacks are fine (appended since); report how many, for refreshes.
-  const newer = Object.entries(union(main.history)).flatMap(([name, hashes]) => hashes.filter(hash => !snapshot.hashes[name]?.includes(hash)));
+  const newer = Object.entries(union(main.history)).flatMap(([name, hashes]) => hashes.filter((hash: string) => !snapshot.hashes[name]?.includes(hash)));
   t.diagnostic(`${main.history.length} commits of ${main.ref.slice(0, 8)}; ${newer.length} hash(es) newer than the snapshot`);
 });

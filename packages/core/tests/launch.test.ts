@@ -8,7 +8,7 @@ import path from 'node:path';
 import { launchCommand } from '@anhlp/alp-core/providers';
 
 const windows = process.platform === 'win32';
-const shim = target => `@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n${target}\r\n`;
+const shim = (target: string) => `@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n${target}\r\n`;
 
 test('a command is started as it is outside Windows, and when it is a path or names its extension', () => {
   assert.deepEqual(launchCommand('/opt/bin/opencode', ['acp']), { command: '/opt/bin/opencode', args: ['acp'] });

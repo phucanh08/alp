@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
@@ -6,12 +7,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { installPack, listPacks, validatePack } from '@anhlp/alp-core/packs';
 import { ADVISORS, READ_ONLY_ROLES, commandDecision, profileFor } from '@anhlp/alp-core/permissions';
+import type { PermissionProfile } from '@anhlp/alp-core/permissions';
 import { BUILTIN_AGENTS, resolveAgent } from '@anhlp/alp-core/resolver';
 import { TEAM_ROLES, resolveTeam } from '@anhlp/alp-core/teams';
 
 // The research pack: two read-only advisors (librarian, scout) and two variant teams. Phở and Cafe stay as they are.
 
-async function scratch(t) {
+async function scratch(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-research-'));
   t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(directory, 'project');
@@ -26,7 +28,7 @@ const SCRATCH = mkdtempSync(path.join(tmpdir(), 'alp-research-root-'));
 test.after(() => rmSync(SCRATCH, { recursive: true, force: true }));
 const CACHE = `${SCRATCH}/alp-librarian`;
 /** The profile with its checked rules moved from /tmp/alp-librarian to `root`. */
-const scopedTo = (profile, root) => ({ ...profile, allow: profile.allow.map(rule => rule.replace(ROOT, root)) });
+const scopedTo = (profile: PermissionProfile | null, root: string) => ({ ...profile!, allow: profile!.allow.map(rule => rule.replace(ROOT, root)) });
 
 const ADVISORS_OF_PACK = ['librarian', 'scout'];
 // The librarian's profile, as pack.json carries it and the install writes it (t-6dc5 G5-B).
@@ -73,7 +75,7 @@ test('installing the pack adds librarian and scout, read-only, and both variant 
   assert.match(scout.instructions.agent, /^# Scout/);
   assert.match(scout.instructions.agent, /Không tìm thấy \/ chưa chắc/);
   assert.deepEqual(scout.skills, []);
-  for (const name of ADVISORS_OF_PACK) assert.equal((await profileFor(root, library, name)).base, 'read-only');
+  for (const name of ADVISORS_OF_PACK) assert.equal((await profileFor(root, library, name))!.base, 'read-only');
 });
 
 test('Phở + Research: main reaches scout and librarian; both are advisors that delegate to nobody', async t => {
@@ -121,7 +123,7 @@ test('Cafe + Research: lead reaches both, main reaches librarian only', async t 
 
 test('default Phở and Cafe gain no member and no delegation edge, installed or not', async t => {
   const { root, library } = await scratch(t);
-  const before = { pho: await resolveTeam(root, 'pho', { library }), cafe: await resolveTeam(root, 'cafe', { library }) };
+  const before: Record<string, Awaited<ReturnType<typeof resolveTeam>>> = { pho: await resolveTeam(root, 'pho', { library }), cafe: await resolveTeam(root, 'cafe', { library }) };
   await installPack('research', { scope: 'library', library });
   for (const id of ['pho', 'cafe']) {
     const team = await resolveTeam(root, id, { library });
@@ -143,14 +145,14 @@ test('serving as a team advisor, librarian and scout stay read-only even when se
   await writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify({ permissions: { agents: { librarian: 'full-access', scout: 'workspace-write' } } }));
   for (const [name, from] of [['librarian', 'full-access'], ['scout', 'workspace-write']]) {
     const profile = await profileFor(root, library, name, { readOnly: true });
-    assert.equal(profile.base, 'read-only');
-    assert.equal(profile.cappedFrom, from);
+    assert.equal(profile!.base, 'read-only');
+    assert.equal(profile!.cappedFrom, from);
   }
 });
 
 // t-6dc5 G5-B: the librarian may clone and fetch public repositories into /tmp/alp-librarian, and read them
 // there, through checked rules (permissions.js coversChecked); everything else stays read-only or asks.
-async function librarianProfile(t) {
+async function librarianProfile(t: TestContext) {
   const { root, library } = await scratch(t);
   await installPack('research', { scope: 'library', library });
   return { root, library, profile: scopedTo(await profileFor(root, library, 'librarian', { readOnly: true }), CACHE) };
@@ -158,7 +160,7 @@ async function librarianProfile(t) {
 
 // Each was allowed by a prefix rule the old matcher could express (Bash(git -C <root>*), Bash(git clone:*),
 // Bash(git fetch:*)); with the hardened profile none of them is allowed.
-const BYPASSES = [
+const BYPASSES: Array<[string, string | undefined]> = [
   [`git -C ${CACHE}/../x push`, 'deny'],
   [`git -C ${CACHE}/../repo log`, 'ask'],
   [`git -C ${CACHE}X log`, 'ask'],
@@ -297,8 +299,8 @@ test('@git-read allows only the options it lists, exactly: no abbreviation, clus
 
 test('the librarian root (/tmp/alp-librarian): created 0700 by the first clone; refused when a link, a file, not 0700 (0755/0777) or under a parent others may write', { skip: process.platform === 'win32' }, async t => {
   const { profile } = await librarianProfile(t);
-  const clone = target => commandDecision(profile, `git clone https://github.com/a/b ${target}`);
-  const read = target => commandDecision(profile, `git -C ${target} log --oneline`);
+  const clone = (target: string) => commandDecision(profile, `git clone https://github.com/a/b ${target}`);
+  const read = (target: string) => commandDecision(profile, `git -C ${target} log --oneline`);
   // Missing root: a read is not allowed, the first clone creates the root 0700 before git runs, so no one can put
   // a directory or link of theirs there between ALP's check and git's write.
   rmSync(CACHE, { recursive: true, force: true });
@@ -307,15 +309,15 @@ test('the librarian root (/tmp/alp-librarian): created 0700 by the first clone; 
   const made = statSync(CACHE);
   assert.ok(made.isDirectory());
   assert.equal(made.mode & 0o777, 0o700);
-  assert.equal(made.uid, process.getuid());
+  assert.equal(made.uid, process.getuid!());
   assert.equal(read(`${CACHE}/a-b`), 'allow');
 
   // Scratch roots stand in for a root another user squatted or swapped (only root may chown, so a squatted root
   // here is one this user does not hold as 0700: open to others, a link, or a file).
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-librarian-root-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const scoped = root => ({ ...profile, allow: profile.allow.map(rule => rule.replace(CACHE, root)) });
-  const decide = (root, command) => commandDecision(scoped(root), command);
+  const scoped = (root: string) => ({ ...profile, allow: profile.allow.map(rule => rule.replace(CACHE, root)) });
+  const decide = (root: string, command: string) => commandDecision(scoped(root), command);
   const squatted = path.join(directory, 'squatted');
   mkdirSync(squatted, { mode: 0o777 });
   await chmod(squatted, 0o777);
@@ -345,7 +347,7 @@ test('the librarian root (/tmp/alp-librarian): created 0700 by the first clone; 
   assert.equal(decide(path.join(parent, 'new'), `git clone https://github.com/a/b ${parent}/new/a-b`), 'ask');
   // A rule names an absolute root or ~/<dir>, nothing else.
   const files = { 'packs/x/agents/a/AGENT.md': '# A', 'packs/x/agents/a/agent.json': JSON.stringify({ mode: 'read-only' }) };
-  const pack = rule => validatePack('x', { label: 'X', description: 'x', agents: ['a'], permissions: { a: { base: 'read-only', allow: [rule] } } }, files);
+  const pack = (rule: unknown) => validatePack('x', { label: 'X', description: 'x', agents: ['a'], permissions: { a: { base: 'read-only', allow: [rule] } } }, files);
   assert.ok(pack('Bash(@git-read /tmp/alp-librarian)'));
   assert.ok(pack('Bash(@git-read ~/.alp-librarian-cache)'));
   for (const rule of ['Bash(@git-read ~)', 'Bash(@git-read ~/)', 'Bash(@git-read ~/../x)', 'Bash(@git-read ~user/x)', 'Bash(@git-read x)']) assert.throws(() => pack(rule), /a checked rule is/, rule);
@@ -370,7 +372,7 @@ test('the librarian stays read-only under a full-access parent and settings that
 
 test('a pack may give a read-only agent rules, never a wider base', async () => {
   const files = { 'packs/x/agents/a/AGENT.md': '# A', 'packs/x/agents/a/agent.json': JSON.stringify({ mode: 'read-only' }) };
-  const manifest = permissions => ({ label: 'X', description: 'x', agents: ['a'], permissions: { a: permissions } });
+  const manifest = (permissions: unknown) => ({ label: 'X', description: 'x', agents: ['a'], permissions: { a: permissions } });
   assert.ok(validatePack('x', manifest({ base: 'read-only', allow: ['Bash(@git-read /tmp/x)'], deny: ['Bash(@git-unsafe)'] }), files));
   assert.throws(() => validatePack('x', manifest('full-access'), files), /a is read-only \(agent\.json\), so its base must be read-only, not full-access/);
   assert.throws(() => validatePack('x', manifest({ base: 'workspace-write', allow: [] }), files), /base must be read-only, not workspace-write/);

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
@@ -6,7 +7,7 @@ import path from 'node:path';
 import { profileFor } from '@anhlp/alp-core/permissions';
 import { createTask, loadTasks } from '@anhlp/alp-core/tasks';
 
-async function fixture(t) {
+async function fixture(t: TestContext) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-security-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, '.alp'));
@@ -19,7 +20,7 @@ for (const name of ['constructor', 'toString', '__proto__']) {
     await writeFile(file, JSON.stringify({ permissions: { agents: { peer: name } } }));
     await assert.rejects(profileFor(root, undefined, 'peer'), { code: 'INVALID_SETTINGS' });
     await writeFile(file, JSON.stringify({ permissions: { agents: { peer: name }, profiles: { [name]: { base: 'read-only' } } } }));
-    assert.equal((await profileFor(root, undefined, 'peer')).base, 'read-only');
+    assert.equal((await profileFor(root, undefined, 'peer'))!.base, 'read-only');
     assert.equal(await profileFor(root, undefined, 'constructor'), null);
   });
 }
@@ -57,9 +58,9 @@ test('security: first-use library and settings create private ALP_HOME', { skip:
   const { stat } = await import('node:fs/promises');
   const root = await fixture(t);
   const actions = [
-    home => seedLibrary(home, { templates: { 'role-skills.json': '{}' } }),
-    home => setLanguage(home, 'English'),
-    home => saveEntry('skills', 'example', { body: 'Example' }, { scope: 'library', library: home }),
+    (home: string) => seedLibrary(home, { templates: { 'role-skills.json': '{}' } }),
+    (home: string) => setLanguage(home, 'English'),
+    (home: string) => saveEntry('skills', 'example', { body: 'Example' }, { scope: 'library', library: home }),
   ];
   for (const [i, action] of actions.entries()) {
     const home = path.join(root, `home-${i}`);

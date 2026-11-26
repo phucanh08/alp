@@ -13,14 +13,14 @@ const SECRETS = [
   'hunter2-very-secret',
 ];
 
-const capture = options => {
-  const lines = [];
-  return { lines, log: createLogger({ component: 'test', write: line => lines.push(line), now: () => new Date('2026-10-15T00:00:00.000Z'), ...options }) };
+const capture = (options?: object) => {
+  const lines: string[] = [];
+  return { lines, log: createLogger({ component: 'test', write: (line: string) => lines.push(line), now: () => new Date('2026-10-15T00:00:00.000Z'), ...options }) };
 };
 
 test('a record is one JSON line with time, level, component, code, message and correlation ids', () => {
   const { lines, log } = capture();
-  log.error('could not write', { code: 'ALP_PERSISTENCE_WRITE_FAILED', sessionId: 's1', rootId: 'r1', assignmentId: 'a1', clientMessageId: 'm1', requestId: 7, agent: 'peer', operation: 'record s1' });
+  log.error('could not write', { code: 'ALP_PERSISTENCE_WRITE_FAILED', sessionId: 's1', rootId: 'r1', assignmentId: 'a1', clientMessageId: 'm1', requestId: 7 as unknown as string, agent: 'peer', operation: 'record s1' });
   assert.equal(lines.length, 1);
   assert.ok(!lines[0].includes('\n'));
   assert.deepEqual(JSON.parse(lines[0]), {
@@ -71,7 +71,7 @@ test('secrets, prompts and environments never reach a record, wherever they hide
 test('text that is not secret is left alone, and long text, cycles and depth are bounded', () => {
   assert.equal(scrubText('unknown key: workfow; limits.autoResume must be true or false'), 'unknown key: workfow; limits.autoResume must be true or false');
   assert.match(scrubText('x'.repeat(5000)), /\.\.\. \(3000 more characters\)$/);
-  const cycle = { name: 'a' };
+  const cycle: { name: string, self?: unknown } = { name: 'a' };
   cycle.self = cycle;
   assert.equal(redact(cycle).self, '[circular]');
   assert.equal(redact({ a: { b: { c: { d: { e: { f: 1 } } } } } }).a.b.c.d.e, '[too deep]');
@@ -83,10 +83,10 @@ test('text that is not secret is left alone, and long text, cycles and depth are
 });
 
 test('the default sink writes to stderr and never to stdout', t => {
-  const out = [];
-  const err = [];
-  t.mock.method(process.stdout, 'write', chunk => { out.push(String(chunk)); return true; });
-  t.mock.method(process.stderr, 'write', chunk => { err.push(String(chunk)); return true; });
+  const out: string[] = [];
+  const err: string[] = [];
+  t.mock.method(process.stdout, 'write', (chunk: unknown) => { out.push(String(chunk)); return true; });
+  t.mock.method(process.stderr, 'write', (chunk: unknown) => { err.push(String(chunk)); return true; });
   createLogger({ component: 'test' }).warn('careful', { code: 'ALP_X' });
   assert.deepEqual(out, []);
   assert.equal(err.length, 1);
@@ -103,7 +103,8 @@ test('readLogTail returns records, scrubs older free-form lines, and tolerates a
   log.info('one');
   log.error('two', { code: 'ALP_X' });
   await writeFile(file, `2026-10-09T00:00:00.000Z fatal Error: token=${SECRETS[4]}\n${lines.join('\n')}\n{"truncated":`);
-  const records = await readLogTail(file);
+  // `any`: readLogTail returns records and scrubbed legacy lines mixed; the test knows which one each index holds.
+  const records: any[] = await readLogTail(file);
   assert.equal(records.length, 4);
   assert.ok(records[0].legacy && !records[0].legacy.includes(SECRETS[4]));
   assert.deepEqual(records.slice(1, 3).map(record => record.msg), ['one', 'two']);

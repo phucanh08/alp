@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -10,7 +11,7 @@ import { shippedTemplateRoot } from '@anhlp/alp-core/template-path';
 import { resolveAgent } from '@anhlp/alp-core/resolver';
 import { literal, templateTitle } from '../../../test/support/template-text.ts';
 
-async function fixture(t, main = '# Main agent\n\nHelp with tasks in this project.\n') {
+async function fixture(t: TestContext, main = '# Main agent\n\nHelp with tasks in this project.\n') {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-upgrade-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, '.alp/agents/main'), { recursive: true });
@@ -25,11 +26,11 @@ test('upgrade backs up original scaffold, enables routing, and preserves runtime
   assert.deepEqual(result.updated, ['ALP.md', '.alp/settings.json']);
   // main's copy was as shipped: it is put away, and the project uses the built-in main.
   assert.deepEqual(result.removed, ['.alp/agents/main']);
-  assert.equal(await readFile(path.join(result.backup, '.alp/agents/main/AGENT.md'), 'utf8'), '# Main agent\n\nHelp with tasks in this project.\n');
+  assert.equal(await readFile(path.join(result.backup!, '.alp/agents/main/AGENT.md'), 'utf8'), '# Main agent\n\nHelp with tasks in this project.\n');
   const main = await resolveAgent(root);
   assert.equal(main.source, 'builtin');
   assert.match(main.instructions.agent, literal(templateTitle('agents/main/AGENT.md')));
-  assert.equal(await readFile(path.join(result.backup, '.alp/settings.json'), 'utf8'), '{"defaultAgent":"main","runtime":{"model":"my-model"}}');
+  assert.equal(await readFile(path.join(result.backup!, '.alp/settings.json'), 'utf8'), '{"defaultAgent":"main","runtime":{"model":"my-model"}}');
   const settings = JSON.parse(await readFile(path.join(root, '.alp/settings.json'), 'utf8'));
   assert.equal(settings.runtime.model, 'my-model');
   assert.deepEqual(settings.workflow, { mode: 'pho', maxPeers: 2 });
@@ -64,7 +65,7 @@ test('upgrade recognizes a supervisor AGENT.md from an earlier release and repla
   assert.notEqual(now, historical);
   assert.equal(now, await readFile(new URL('agents/supervisor/AGENT.md', shippedTemplateRoot()), 'utf8'));
   // The copy it replaced is in the backup, not lost.
-  assert.equal(await readFile(path.join(result.backup, '.alp/agents/supervisor/AGENT.md'), 'utf8'), historical);
+  assert.equal(await readFile(path.join(result.backup!, '.alp/agents/supervisor/AGENT.md'), 'utf8'), historical);
 });
 
 // Keeps the list ahead of the templates: whoever changes a role definition must append the hash of
@@ -75,7 +76,7 @@ test('every shipped role definition is listed in teamV1', async () => {
     const template = name === 'ALP.md' ? 'ALP.md' : name.slice('.alp/'.length);
     const text = (await readFile(new URL(template, shippedTemplateRoot()), 'utf8')).replaceAll('\r\n', '\n');
     const hash = createHash('sha256').update(text).digest('hex');
-    if (!shippedRoleHashes[name].includes(hash)) missing.push(`${name} ${hash}`);
+    if (!(shippedRoleHashes as Record<string, string[]>)[name]!.includes(hash)) missing.push(`${name} ${hash}`);
   }
   assert.deepEqual(missing, [], `append these to teamV1 in packages/core/src/upgrade.ts:\n${missing.join('\n')}`);
 });

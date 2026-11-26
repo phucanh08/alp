@@ -1,11 +1,12 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseFrontmatter, skillReferences, specName, validateSkill } from '@anhlp/alp-core/skill-validate';
 
-async function skill(t, name, files) {
+async function skill(t: TestContext, name: string, files: Record<string, string | Buffer>) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-skill-validate-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const dir = path.join(root, name);
@@ -17,7 +18,7 @@ async function skill(t, name, files) {
   return dir;
 }
 const good = '---\nname: api-review\ndescription: "Review an HTTP API change for compatibility. Use when an endpoint, schema or status code changes."\n---\n\n# API review\n\nRead [references/rules.md](references/rules.md) when checking status codes.\n';
-const codes = list => list.map(finding => finding.code).sort();
+const codes = (list: Array<{ code: string }>) => list.map(finding => finding.code).sort();
 
 test('specification names: lowercase, digits, single hyphens, at most 64 characters', () => {
   for (const name of ['a', 'bug-loop', 'x1-2y']) assert.ok(specName(name), name);
@@ -100,7 +101,7 @@ test('every skill ALP ships, core and optional packs, passes strict validation',
   const { readdir } = await import('node:fs/promises');
   const { shippedTemplateRoot } = await import('@anhlp/alp-core/template-path');
   const root = new URL('../../../templates/', import.meta.url).pathname;
-  const dirs = async parent => (await readdir(parent, { withFileTypes: true }).catch(() => [])).filter(e => e.isDirectory()).map(e => path.join(parent, e.name));
+  const dirs = async (parent: string) => (await readdir(parent, { withFileTypes: true }).catch(() => [])).filter(e => e.isDirectory()).map(e => path.join(parent, e.name));
   const packs = await dirs(path.join(root, 'packs'));
   const skills = [...await dirs(path.join(root, 'skills')), ...(await Promise.all(packs.map(pack => dirs(path.join(pack, 'skills'))))).flat()];
   assert.ok(skills.length >= 8 && shippedTemplateRoot());

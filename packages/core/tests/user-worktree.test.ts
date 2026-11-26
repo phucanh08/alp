@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { user_worktree } from '@anhlp/alp-core';
 
-const git = (cwd, ...args) =>
+const git = (cwd: string, ...args: string[]) =>
   execFileSync('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', ...args], {
     cwd,
     env: { PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
