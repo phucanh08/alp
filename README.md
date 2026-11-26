@@ -75,7 +75,7 @@ For projects created with an earlier scaffold, run `alp update-template [directo
 
 ## Development
 
-Use Node 22 (22.12 or later) or 24 and an npm version compatible with your Node installation:
+Use Node 22 (22.18 or later) or 24 and pnpm (the version `packageManager` in package.json pins). The scripts and root tests are TypeScript that Node runs directly, which needs 22.18 or later; the published packages still run on 22.12 or later:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -360,7 +360,7 @@ To use the published plugin, follow [the plugin's README](integrations/paseo/REA
 
 ### Build and add the plugin to Paseo
 
-This section builds the plugin from a checkout of this repository. Prerequisites: Node.js 22 (22.12 or later) or 24, Paseo 0.11.1 or later, up to 0.12.x (the Tasks panel needs the 0.11.1 plugin client API), and a logged-in Codex CLI and/or Claude Code installation. Set `ALP_CODEX_BIN` or `ALP_CLAUDE_BIN` to an absolute native executable path when it is not available on `PATH`.
+This section builds the plugin from a checkout of this repository. Prerequisites: Node.js 22 (22.18 or later, to run the TypeScript build scripts) or 24, Paseo 0.11.1 or later, up to 0.12.x (the Tasks panel needs the 0.11.1 plugin client API), and a logged-in Codex CLI and/or Claude Code installation. Set `ALP_CODEX_BIN` or `ALP_CLAUDE_BIN` to an absolute native executable path when it is not available on `PATH`.
 
 Install dependencies, type-check the plugin, and build its server bundle:
 

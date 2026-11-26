@@ -16,7 +16,10 @@ app: that app (`paseo-web/`, `scripts/build-paseo-web.mjs`, `scripts/web-app-smo
 removed in t-55ce.3, and the browser app is tested by `alp-dashboard`. The existing
 Windows daemon subset remains in its own job. Core and Paseo retain Node 22/24 on
 Ubuntu; packaging and browser validation use Node 22. This is not a full OS/Node
-matrix or a publishing workflow.
+matrix or a publishing workflow. `node-version: 22` resolves to the newest 22.x, which
+must be 22.18 or later: the scripts and root tests are TypeScript that Node runs
+directly, and `scripts/test.ts` and `scripts/validate.ts` refuse an older Node. No lane
+pins the published packages' floor (engines `>=22.12`).
 
 No required lane invokes `test:e2e`, authenticates a provider, or needs model
 credentials. Tests inject fake transports; standalone core copies `fake-acp.ts`
