@@ -1,8 +1,8 @@
-import test, { after } from 'node:test';
+import test, { after, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { createServer as createNetServer } from 'node:net';
+import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
@@ -17,7 +17,7 @@ import { createDaemonServer } from '../../dist/daemon/index.js';
 import { createPaseoBridge } from '../../integrations/paseo/server/dist/index.js';
 import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary } from '@anhlp/alp-core/library';
-import { fakeTransport } from '../support/fake-agent.ts';
+import { fakeTransport, type FakeAgent } from '../support/fake-agent.ts';
 import { fixtureProcesses } from '../support/fixture-processes.ts';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
@@ -27,7 +27,15 @@ const cliDist = path.join(root, 'packages', 'cli', 'dist');
 const alpWebService = path.join(cliDist, 'alp-dashboard.js');
 const clientDist = path.join(root, 'packages', 'client', 'dist');
 const execFileAsync = promisify(execFile);
-const processFixtures = new Map();
+const processFixtures = new Map<string, Awaited<ReturnType<typeof fixtureProcesses>>>();
+// `any`: the home's JSON files, alpd's answers and Paseo frames are JSON of every shape; the tests read the fields they assert on.
+type Json = any;
+/** What run() resolves with: never a rejection. */
+type RunResult = { code: number, stdout: string, stderr: string, signal: NodeJS.Signals | null };
+/** What execFile's promise rejects with. */
+type ExecError = Error & { code?: number | string, stdout?: string, stderr?: string, signal?: NodeJS.Signals | null };
+/** createHome takes a test, or a stand-in that keeps the cleanup for the test to run itself. */
+type HasAfter = { after: (fn: () => Promise<void>) => unknown };
 
 // alp-dashboard serves the built apps/web files; these tests exercise the process lifecycle, so a stand-in
 // page keeps them independent of the web build (ALP_DASHBOARD_APP is the override).
@@ -44,18 +52,19 @@ const { bootTime, connect, readLock, lockAlive } = await import('../../packages/
  * Runs the CLI in a child process and never rejects: the caller reads the exit code and output.
  * A timeout is reported as `signal: 'SIGKILL'` with a code that is not 0, so a hang fails the test.
  */
-async function run(args, home, timeout = 60_000, extraEnv = {}, script = cli, cwd = undefined) {
+async function run(args: string[], home: string, timeout = 60_000, extraEnv: Record<string, string | undefined> = {}, script = cli, cwd: string | undefined = undefined): Promise<RunResult> {
   try {
     const { stdout, stderr } = await execFileAsync(process.execPath, [script, ...args], {
       cwd,
-      env: { ...process.env, ...extraEnv, ...processFixtures.get(home).env },
+      env: { ...process.env, ...extraEnv, ...processFixtures.get(home)!.env },
       encoding: 'utf8',
       timeout,
       killSignal: 'SIGKILL',
       maxBuffer: 8 * 1024 * 1024,
     });
     return { code: 0, stdout, stderr, signal: null };
-  } catch (error) {
+  } catch (caught) {
+    const error = caught as ExecError;
     return {
       code: typeof error.code === 'number' ? error.code : 1,
       stdout: error.stdout ?? '',
@@ -65,33 +74,33 @@ async function run(args, home, timeout = 60_000, extraEnv = {}, script = cli, cw
   }
 }
 
-async function homeJson(home, name) {
+async function homeJson(home: string, name: string): Promise<Json> {
   return readFile(path.join(home, name), 'utf8').then(JSON.parse, () => undefined);
 }
 
 // alp-dashboard (`alp dashboard`) is integration `web`: web.json and integrations/web.lock. The Paseo integration
 // (`alp dashboard pair`) is integration `paseo`: paseo.json and integrations/paseo.lock.
-const webJson = home => homeJson(home, 'dashboard.json');
-const webLock = home => homeJson(home, path.join('integrations', 'dashboard.lock'));
+const webJson = (home: string) => homeJson(home, 'dashboard.json');
+const webLock = (home: string) => homeJson(home, path.join('integrations', 'dashboard.lock'));
 // Their names before t-81b0.5 (alp dashboard of 0.0.1-beta.8, and the Paseo integration before its rename).
-const legacyWebJson = home => homeJson(home, 'web.json');
-const legacyWebLock = home => homeJson(home, path.join('integrations', 'web.lock'));
-const paseoJson = home => homeJson(home, 'paseo.json');
+const legacyWebJson = (home: string) => homeJson(home, 'web.json');
+const legacyWebLock = (home: string) => homeJson(home, path.join('integrations', 'web.lock'));
+const paseoJson = (home: string) => homeJson(home, 'paseo.json');
 // t-cde5: the Paseo password lives in the integration's credential directory, never in paseo.json.
-const paseoToken = async home => (await homeJson(home, path.join('paseo', 'token.json')))?.token;
-const paseoLock = home => homeJson(home, path.join('integrations', 'paseo.lock'));
-const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
+const paseoToken = async (home: string) => (await homeJson(home, path.join('paseo', 'token.json')))?.token;
+const paseoLock = (home: string) => homeJson(home, path.join('integrations', 'paseo.lock'));
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; } };
 
 /** The address `alp dashboard --print` printed: its port and the alpgw1 token in the fragment. */
-function printedUrl(result) {
+function printedUrl(result: RunResult) {
   const match = /^http:\/\/127\.0\.0\.1:(\d+)\/#token=(alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43})$/m.exec(result.stdout);
   assert.ok(match, `no loopback address with an alpgw1 token in: ${result.stdout}${result.stderr}`);
   return { url: match[0], port: Number(match[1]), token: match[2] };
 }
 
 /** Every regular file under `directory` whose bytes contain `needle`: the token is in no file (t-cee3). */
-async function filesContaining(directory, needle) {
-  const found = [];
+async function filesContaining(directory: string, needle: string) {
+  const found: string[] = [];
   for (const entry of await readdir(directory, { withFileTypes: true, recursive: true })) {
     if (!entry.isFile()) continue;
     const file = path.join(entry.parentPath ?? entry.path, entry.name);
@@ -101,23 +110,23 @@ async function filesContaining(directory, needle) {
 }
 
 /** POST /v1/tickets with `token`: 201 for a live credential, 401 otherwise. */
-async function ticketStatus(port, token) {
+async function ticketStatus(port: number, token: string) {
   const response = await fetch(`http://127.0.0.1:${port}/v1/tickets`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
   await response.body?.cancel();
   return response.status;
 }
 
 async function freePort() {
-  return new Promise((resolve, reject) => { const server = createNetServer(); server.once('error', reject); server.listen(0, '127.0.0.1', () => { const { port } = server.address(); server.close(() => resolve(port)); }); });
+  return new Promise<number>((resolve, reject) => { const server = createNetServer(); server.once('error', reject); server.listen(0, '127.0.0.1', () => { const { port } = server.address() as AddressInfo; server.close(() => resolve(port)); }); });
 }
 
-async function waitGone(pid) {
+async function waitGone(pid: number) {
   for (let i = 0; i < 200; i++) { try { process.kill(pid, 0); } catch { return; } await sleep(25); }
   assert.fail(`process ${pid} did not exit`);
 }
 
 /** A private home whose detached Node descendants are admitted before their entry points run. */
-async function createHome(t, { relay = { enabled: false }, ...dashboard } = {}) {
+async function createHome(t: HasAfter, { relay = { enabled: false }, ...dashboard }: { relay?: object, enabled?: boolean } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-integration-'));
   const home = path.join(directory, 'home');
   await mkdir(home, { recursive: true, mode: 0o700 });
@@ -133,7 +142,7 @@ async function createHome(t, { relay = { enabled: false }, ...dashboard } = {}) 
   return { directory, home };
 }
 
-async function startDaemon(home) {
+async function startDaemon(home: string) {
   const started = await run(['daemon', 'start'], home, 30_000);
   assert.equal(started.code, 0, started.signal ? `alp daemon start timed out (${started.signal})` : started.stderr || started.stdout);
   for (let i = 0; i < 100; i++) {
@@ -144,12 +153,12 @@ async function startDaemon(home) {
   assert.ok((await readLock(home).catch(() => undefined))?.ready, 'alpd did not become ready');
 }
 
-async function callDaemon(socket, method, params = {}) {
+async function callDaemon(socket: string, method: string, params = {}): Promise<Json> {
   const client = await connect(socket);
   try { return await client.request(method, params); } finally { client.close(); }
 }
 
-async function waitFor(fn, what, tries = 300, gap = 50) {
+async function waitFor<T>(fn: () => Promise<T>, what: string, tries = 300, gap = 50) {
   for (let i = 0; i < tries; i++) {
     const value = await fn().catch(() => undefined);
     if (value) return value;
@@ -159,9 +168,9 @@ async function waitFor(fn, what, tries = 300, gap = 50) {
 }
 
 test('cleanup stops unpublished detached daemon and service under gated startup load', async t => {
-  let cleanup;
+  let cleanup: (() => Promise<void>) | undefined;
   const { home } = await createHome({ after: hook => { cleanup = hook; } });
-  const owned = processFixtures.get(home);
+  const owned = processFixtures.get(home)!;
   // Preserve a private emergency shutdown controller even when exercising old teardown.
   t.after(async () => { await owned.stop(); await rm(path.dirname(home), { recursive: true, force: true }); });
   const gate = path.join(home, 'startup-gate.mjs');
@@ -187,13 +196,13 @@ test('cleanup stops unpublished detached daemon and service under gated startup 
     child.unref();
     return child;
   });
-  const pids = children.map(child => child.pid);
+  const pids = children.map(child => child.pid!);
   await waitFor(async () => (await readFile(arrived, 'utf8')).trim().split('\n').length === 2, 'both real processes blocked before metadata');
   assert.equal(await paseoJson(home), undefined);
   assert.equal(await paseoLock(home), undefined);
   assert.equal(await readLock(home), undefined);
   assert.ok(pids.every(pid => { try { process.kill(pid, 0); return true; } catch { return false; } }));
-  await cleanup();
+  await cleanup!();
   for (const pid of pids) await waitGone(pid);
   // A delayed launch holding a copied env must fail closed after the home is removed.
   const late = await execFileAsync(process.execPath, ['-e', 'process.exit(42)'], { env: { ...env, NODE_OPTIONS: owned.env.NODE_OPTIONS } }).catch(error => error);
@@ -202,11 +211,11 @@ test('cleanup stops unpublished detached daemon and service under gated startup 
 });
 
 test('cleanup ignores foreign metadata PIDs and drains an unrecorded detached descendant', async t => {
-  let cleanup;
+  let cleanup: (() => Promise<void>) | undefined;
   const { home } = await createHome({ after: hook => { cleanup = hook; } });
-  const owned = processFixtures.get(home);
+  const owned = processFixtures.get(home)!;
   const sentinel = await createHome(t);
-  const foreign = processFixtures.get(sentinel.home);
+  const foreign = processFixtures.get(sentinel.home)!;
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { env: { ...process.env, ...foreign.env }, stdio: 'ignore' });
   await waitFor(async () => (await foreign.running()).some(entry => entry.pid === child.pid), 'foreign sentinel admission');
   t.after(async () => { await owned.stop(); await rm(path.dirname(home), { recursive: true, force: true }); });
@@ -222,9 +231,9 @@ test('cleanup ignores foreign metadata PIDs and drains an unrecorded detached de
     await writeFile(path.join(home, file), JSON.stringify({ pid: child.pid }));
   }
   const pids = (await owned.running()).map(entry => entry.pid);
-  await cleanup();
+  await cleanup!();
   for (const pid of pids) await waitGone(pid);
-  assert.doesNotThrow(() => process.kill(child.pid, 0), 'another home survives stale/foreign metadata');
+  assert.doesNotThrow(() => process.kill(child.pid!, 0), 'another home survives stale/foreign metadata');
 });
 
 // ---- alp dashboard: alp-dashboard, integration `web` ----
@@ -241,7 +250,7 @@ test('cold alp dashboard starts alpd and alp-dashboard on dashboard.port, prints
   const info = await webJson(home);
   assert.equal(info.app, 'alp-dashboard');
   assert.equal((await webLock(home)).pid, info.pid, 'alp-dashboard owns the web lock');
-  assert.ok(info.pid !== daemon.pid && info.pid > 0, 'alp-dashboard is its own process');
+  assert.ok(info.pid !== daemon!.pid && info.pid > 0, 'alp-dashboard is its own process');
   assert.equal(info.port, webPort, 'alp-dashboard listens on dashboard.port');
   assert.equal(printed.port, webPort);
   // t-cee3: the token comes from the service's memory, over its token socket; no file holds it.
@@ -267,9 +276,9 @@ test('alp dashboard passes an ALP project it runs in to alp-dashboard\'s grant',
   const project = await realpath(path.join(directory, 'project'));
   const elsewhere = path.join(directory, 'elsewhere');
   await mkdir(elsewhere);
-  const runIn = (cwd, args) => execFileAsync(process.execPath, [cli, ...args], { cwd, env: { ...process.env, ...processFixtures.get(home).env }, encoding: 'utf8', timeout: 60_000 });
+  const runIn = (cwd: string, args: string[]) => execFileAsync(process.execPath, [cli, ...args], { cwd, env: { ...process.env, ...processFixtures.get(home)!.env }, encoding: 'utf8', timeout: 60_000 });
   await runIn(project, ['dashboard', '--print']);
-  const workspaces = async () => (await homeJson(home, path.join('dashboard', 'credentials.json'))).credentials.filter(entry => !entry.revokedAt).flatMap(entry => entry.workspaces.map(workspace => workspace.path));
+  const workspaces = async () => (await homeJson(home, path.join('dashboard', 'credentials.json'))).credentials.filter((entry: Json) => !entry.revokedAt).flatMap((entry: Json) => entry.workspaces.map((workspace: Json) => workspace.path));
   assert.ok((await workspaces()).includes(project), 'the project is granted');
   // Rotating from a non-project keeps explicitly registered projects in the grant.
   // Neither an unrelated cwd nor an unregistered ALP project is admitted.
@@ -423,7 +432,7 @@ test('alp dashboard rotate replaces the token: the old one gets 401, never while
   assert.equal(after.port, before.port, 'on the same port');
   assert.equal(await ticketStatus(after.port, before.token), 401, 'an open page with the old token loses access');
   assert.equal(await ticketStatus(after.port, after.token), 201);
-  const list = (await homeJson(home, path.join('dashboard', 'credentials.json'))).credentials;
+  const list: Json[] = (await homeJson(home, path.join('dashboard', 'credentials.json'))).credentials;
   assert.ok(list.find(entry => entry.id === info1.credentialId)?.revokedAt, 'the old credential is revoked');
   assert.deepEqual(list.filter(entry => !entry.revokedAt).map(entry => entry.id), [info2.credentialId]);
 });
@@ -434,7 +443,7 @@ test('alp dashboard rotate replaces the token: the old one gets 401, never while
  * `identity.app: 'alp-dashboard'`, alp dashboard of 0.0.1-beta.8 (its web.json then names its app and token).
  * SIGTERM releases the lock, as it did.
  */
-async function preRenamePaseo(t, home, identity) {
+async function preRenamePaseo(t: TestContext, home: string, identity: Json) {
   const script = path.join(home, 'old-paseo.mjs');
   await writeFile(script, `
     import { writeFileSync } from 'node:fs';
@@ -448,7 +457,7 @@ async function preRenamePaseo(t, home, identity) {
     process.on('SIGTERM', async () => { writeFileSync(home + '/old-paseo.stopped', 'SIGTERM'); await lock.release(); process.exit(0); });
     setInterval(() => {}, 1000);
   `);
-  const child = spawn(process.execPath, [script], { stdio: 'ignore', env: { ...process.env, ...processFixtures.get(home).env } });
+  const child = spawn(process.execPath, [script], { stdio: 'ignore', env: { ...process.env, ...processFixtures.get(home)!.env } });
   t.after(() => { try { child.kill('SIGKILL'); } catch {} });
   await waitFor(async () => (await legacyWebLock(home))?.ready && (await legacyWebJson(home))?.pid === child.pid, 'the pre-rename integration');
   return child;
@@ -500,7 +509,7 @@ test('the identity moves only into a home without paseo.json, and rotate moves i
   const old = await preRenamePaseo(t, other.home, IDENTITY);
   const rotated = await run(['dashboard', 'rotate'], other.home);
   assert.equal(rotated.code, 0, rotated.stderr || rotated.stdout);
-  await waitGone(old.pid);
+  await waitGone(old.pid!);
   assert.deepEqual(await paseoJson(other.home), { serverId: IDENTITY.serverId }, 'rotate stops the old integration and keeps its identity');
   assert.equal(await paseoToken(other.home) === IDENTITY.token, true);
   assert.equal((await webJson(other.home)).app, 'alp-dashboard');
@@ -512,7 +521,7 @@ test('the identity moves only into a home without paseo.json, and rotate moves i
  * Turns a stopped alp dashboard home into the layout alp web of 0.0.1-beta.8 left: web/ (its
  * credential store), web.json with `app: 'alp-web'`, web.* settings and alp-web.log.
  */
-async function toBeta8Layout(home, token) {
+async function toBeta8Layout(home: string, token: string) {
   await rename(path.join(home, 'dashboard'), path.join(home, 'web'));
   const info = await homeJson(home, 'dashboard.json');
   await rm(path.join(home, 'dashboard.json'));
@@ -622,7 +631,7 @@ test('--status changes nothing in a beta.8 home: it names the running alp web an
   assert.match(status.stdout, new RegExp(`alp web from before its rename to alp dashboard still runs \\(pid ${old.pid}\\)`));
   assert.match(status.stdout, /moved by the next `alp dashboard`: .*web\.json/);
   assert.match(status.stdout, /moved by the next `alp dashboard`: settings\.json web\.port/);
-  assert.ok(alive(old.pid), 'status stops nothing');
+  assert.ok(alive(old.pid!), 'status stops nothing');
   assert.equal(await readFile(path.join(home, 'settings.json'), 'utf8'), settings, 'nor rewrites settings');
   assert.ok(existsSync(path.join(home, 'web.json')) && existsSync(path.join(home, 'web')), 'nor moves files');
   assert.ok(!status.stdout.includes(beta8.token));
@@ -683,7 +692,7 @@ test('--stop fails while a web.lock holder alp cannot prove keeps running', asyn
 test('start flags: --host stays loopback, --port is checked, and --status with --stop is a usage error', async t => {
   const { home } = await createHome(t);
   const { port } = (await homeJson(home, 'settings.json')).dashboard;
-  const nothingStarted = async what => {
+  const nothingStarted = async (what: string) => {
     for (const file of ['dashboard.json', 'integrations/dashboard.lock', 'alpd.lock']) assert.equal(existsSync(path.join(home, file)), false, `${what}: ${file}`);
   };
   for (const host of ['0.0.0.0', '::1', '192.168.1.10']) {
@@ -715,7 +724,7 @@ test('start flags: --host stays loopback, --port is checked, and --status with -
 });
 
 /** The one JSON line `alp dashboard --print --json` puts on stdout (docs/alp/dashboard.md §3.3). */
-function printedJson(result) {
+function printedJson(result: RunResult) {
   const lines = result.stdout.split('\n').filter(Boolean);
   assert.equal(lines.length, 1, `stdout is exactly one line: ${result.stdout.replace(/alpgw1\.[^"\s]+/g, 'alpgw1.<token>')}${result.stderr}`);
   const answer = JSON.parse(lines[0]);
@@ -767,10 +776,10 @@ test('t-81b0.4: alp dashboard --print --json answers with one JSON line: the add
 
 test('t-81b0.4: every failure of --print --json is one JSON line with a class, and the class has its exit code', async t => {
   const { directory, home } = await createHome(t);
-  const nothingStarted = async what => {
+  const nothingStarted = async (what: string) => {
     for (const file of ['dashboard.json', 'integrations/dashboard.lock', 'alpd.lock']) assert.equal(existsSync(path.join(home, file)), false, `${what}: ${file}`);
   };
-  const failed = async (args, code, kind, message, extraEnv = {}, script = cli) => {
+  const failed = async (args: string[], code: number, kind: string, message: RegExp, extraEnv: Record<string, string> = {}, script = cli) => {
     const result = await run(args, home, 60_000, extraEnv, script);
     assert.equal(result.code, code, `${args.join(' ')}: ${result.stderr}${result.stdout}`);
     const answer = printedJson(result);
@@ -826,9 +835,9 @@ test('a web lock whose pid alp cannot prove is the integration is never signalle
   await startDaemon(home);
   // An unrelated live process of this user, named by a lock written an hour before it started (a
   // reused pid), with an app-less web.json naming it too.
-  const bystander = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', env: { ...process.env, ...processFixtures.get(home).env } });
+  const bystander = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', env: { ...process.env, ...processFixtures.get(home)!.env } });
   t.after(() => { try { bystander.kill('SIGKILL'); } catch {} });
-  await waitFor(async () => (await processFixtures.get(home).running()).some(entry => entry.pid === bystander.pid), 'the bystander');
+  await waitFor(async () => (await processFixtures.get(home)!.running()).some(entry => entry.pid === bystander.pid), 'the bystander');
   await mkdir(path.join(home, 'integrations'), { recursive: true, mode: 0o700 });
   await writeFile(path.join(home, 'web.json'), JSON.stringify({ pid: bystander.pid, port: 1, url: 'http://127.0.0.1:1/', ...IDENTITY }), { mode: 0o600 });
 
@@ -844,7 +853,7 @@ test('a web lock whose pid alp cannot prove is the integration is never signalle
       assert.notEqual(refused.code, 0, refused.stdout);
       assert.match(refused.stderr, /cannot prove[\s\S]*started after the lock was written/);
       assert.ok(Date.now() - began < 20_000, `${args.join(' ')} refused without waiting (${Date.now() - began} ms)`);
-      assert.ok(alive(bystander.pid), `${args.join(' ')} left the bystander alone`);
+      assert.ok(alive(bystander.pid!), `${args.join(' ')} left the bystander alone`);
     }
   }
   assert.equal((await legacyWebLock(home)).pid, bystander.pid, 'its lock is untouched');
@@ -861,9 +870,9 @@ test('a web lock whose pid alp cannot prove is the integration is never signalle
 test('alp dashboard refuses stale web.json when alp-dashboard died and its pid was reused by another process (t-9c7d)', async t => {
   const { home } = await createHome(t);
   await startDaemon(home);
-  const bystander = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', env: { ...process.env, ...processFixtures.get(home).env } });
+  const bystander = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', env: { ...process.env, ...processFixtures.get(home)!.env } });
   t.after(() => { try { bystander.kill('SIGKILL'); } catch {} });
-  await waitFor(async () => (await processFixtures.get(home).running()).some(entry => entry.pid === bystander.pid), 'the bystander');
+  await waitFor(async () => (await processFixtures.get(home)!.running()).some(entry => entry.pid === bystander.pid), 'the bystander');
   await mkdir(path.join(home, 'integrations'), { recursive: true, mode: 0o700 });
 
   // A dead alp-dashboard whose PID was reused: lock written before bystander started, web.json has app: 'alp-dashboard'
@@ -877,7 +886,7 @@ test('alp dashboard refuses stale web.json when alp-dashboard died and its pid w
   assert.notEqual(refused.code, 0, 'must refuse');
   assert.doesNotMatch(refused.stdout || '', new RegExp(deadUrl), 'must not print the dead URL');
   assert.match(refused.stderr, /cannot prove[\s\S]*started after the lock was written/);
-  assert.ok(alive(bystander.pid), 'bystander left alone');
+  assert.ok(alive(bystander.pid!), 'bystander left alone');
 });
 
 // ---- alp dashboard pair: the Paseo integration, integration `paseo` ----
@@ -889,7 +898,7 @@ for (const enabled of [false, true, undefined]) {
     const { home } = await createHome(t, enabled === undefined ? {} : { enabled });
     const daemon = await startDaemon(home);
     const service = spawn(process.execPath, [paseoEntry, '--service'], {
-      env: { ...process.env, ...processFixtures.get(home).env, ALP_SUPERVISE: '0' },
+      env: { ...process.env, ...processFixtures.get(home)!.env, ALP_SUPERVISE: '0' },
       stdio: 'ignore',
     });
     const ready = await Promise.race([
@@ -908,7 +917,7 @@ for (const enabled of [false, true, undefined]) {
     assert.match(paired.stdout, /relay is off/i);
     const info = await paseoJson(home);
     assert.equal(info.pid, service.pid, 'pair reuses the ready service');
-    assert.notEqual(info.pid, daemon.pid);
+    assert.notEqual(info.pid, daemon!.pid);
     assert.equal(await webLock(home), undefined, 'pair never starts alp-dashboard');
     if (enabled === false) {
       const refused = await run(['dashboard', '--print'], home);
@@ -930,7 +939,7 @@ for (const enabled of [false, true, undefined]) {
     assert.equal(paired.code, 0, paired.stderr || paired.stdout);
     assert.match(paired.stdout, /relay is off/i);
     const info = await paseoJson(home);
-    assert.ok(info?.pid && info.pid !== daemon.pid, 'pair starts the integration as its own process');
+    assert.ok(info?.pid && info.pid !== daemon!.pid, 'pair starts the integration as its own process');
     assert.equal((await paseoLock(home)).pid, info.pid);
     assert.equal(await webLock(home), undefined, 'pair does not start alp-dashboard');
   });
@@ -959,24 +968,24 @@ test('a restarted daemon is re-registered by the surviving Paseo integration', a
   const first = await run(['dashboard', 'pair', '--off'], home);
   assert.equal(first.code, 0, first.stderr || first.stdout);
   const info = await paseoJson(home);
-  await waitFor(async () => (await callDaemon(daemon1.socket, 'web.pairing', {})) && true, 'web.pairing on the first daemon');
+  await waitFor(async () => (await callDaemon(daemon1!.socket, 'web.pairing', {})) && true, 'web.pairing on the first daemon');
 
   const stopped = await run(['daemon', 'stop'], home, 20_000);
   assert.equal(stopped.code, 0, stopped.stderr || stopped.stdout);
-  await waitGone(daemon1.pid);
+  await waitGone(daemon1!.pid);
   assert.ok(!lockAlive(await readLock(home)), 'the old daemon is gone');
 
   const daemon2 = await startDaemon(home);
-  assert.notEqual(daemon2.pid, daemon1.pid, 'a new daemon process');
-  const pairing = await waitFor(async () => await callDaemon(daemon2.socket, 'web.pairing', {}), 'web.pairing after the daemon restarted');
+  assert.notEqual(daemon2!.pid, daemon1!.pid, 'a new daemon process');
+  const pairing = await waitFor(async () => await callDaemon(daemon2!.socket, 'web.pairing', {}), 'web.pairing after the daemon restarted');
   assert.equal(typeof pairing.relayEnabled, 'boolean');
   assert.equal((await paseoJson(home)).pid, info.pid, 'the integration survives the daemon restart');
   // web.pairing is the user's (t-d08b): alpd marks the caller, and the integration refuses an agent's.
   const saved = process.env.ALP_AGENT_SESSION;
   process.env.ALP_AGENT_SESSION = '1';
-  try { await assert.rejects(callDaemon(daemon2.socket, 'web.pairing', { enable: true }), error => error.code === 1003 && error.data?.reason === 'user_only'); }
+  try { await assert.rejects(callDaemon(daemon2!.socket, 'web.pairing', { enable: true }), error => (error as { code?: number, data?: { reason?: string } }).code === 1003 && (error as { code?: number, data?: { reason?: string } }).data?.reason === 'user_only'); }
   finally { if (saved === undefined) delete process.env.ALP_AGENT_SESSION; else process.env.ALP_AGENT_SESSION = saved; }
-  assert.equal((await callDaemon(daemon2.socket, 'web.pairing', {})).relayEnabled, pairing.relayEnabled, 'the refused call changed nothing');
+  assert.equal((await callDaemon(daemon2!.socket, 'web.pairing', {})).relayEnabled, pairing.relayEnabled, 'the refused call changed nothing');
 });
 
 test('stale paseo.json from a dead process is replaced by a live Paseo integration', async t => {
@@ -988,7 +997,7 @@ test('stale paseo.json from a dead process is replaced by a live Paseo integrati
   assert.equal(paired.code, 0, paired.stderr || paired.stdout);
   const info = await paseoJson(home);
   assert.notEqual(info.pid, dead, 'the stale pid is not reported');
-  assert.ok(info.pid !== daemon.pid && info.port > 1, 'a live integration serves');
+  assert.ok(info.pid !== daemon!.pid && info.port > 1, 'a live integration serves');
 });
 
 /** A globally installed integration binary that discovery always finds, whatever PATH says. */
@@ -1014,11 +1023,11 @@ const isolatedCli = path.join(isolatedDistribution, 'packages', 'cli', 'dist', '
  * Runs `fn` with a CLI that finds no distribution descriptor (the copy above) and an environment
  * that reaches no installed integration. `fn` gets that environment and a `run` for that CLI.
  */
-async function withoutDiscovery(t, fn) {
+async function withoutDiscovery(t: TestContext, fn: (env: Record<string, string>, runIsolated: (args: string[], home: string, timeout?: number, extraEnv?: Record<string, string>) => Promise<RunResult>) => Promise<unknown>) {
   const empty = await mkdtemp(path.join(tmpdir(), 'alp-no-home-'));
   t.after(() => rm(empty, { recursive: true, force: true }));
   const env = { PATH: empty, HOME: empty, USERPROFILE: empty, ALP_WEB_INTEGRATION: '', ALP_INTEGRATION_ENTRY: '', ALP_PASEO_INTEGRATION: '' };
-  const runIsolated = (args, home, timeout, extraEnv) => run(args, home, timeout, extraEnv, isolatedCli, isolatedDistribution);
+  const runIsolated = (args: string[], home: string, timeout?: number, extraEnv?: Record<string, string>) => run(args, home, timeout, extraEnv, isolatedCli, isolatedDistribution);
   return fn(env, runIsolated);
 }
 
@@ -1139,7 +1148,7 @@ test('t-cde5: the CLI finds the Paseo integration\'s token socket where the inte
   const { paseoTokenSocketPath } = await import('../../packages/cli/dist/commands/dashboard/paseo.js');
   const { tokenSocketFallback } = await import('@anhlp/alp-runtime/claude-transport');
   for (const home of ['/Users/someone/.alp', `/home/someone/${'y'.repeat(110)}/.alp`, '/tmp/a b/.alp', 'C:\\Users\\someone\\.alp']) {
-    for (const platform of ['darwin', 'linux', 'win32']) {
+    for (const platform of ['darwin', 'linux', 'win32'] as const) {
       assert.equal(paseoTokenSocketPath(home, { platform, uid: 501 }), tokenSocketPath(home, { platform, uid: 501 }), `${platform} ${home}`);
       // A read-only session is denied the /tmp directory the socket falls back to (t-cde5 M3).
       const served = tokenSocketPath(home, { platform, uid: 501 });
@@ -1151,7 +1160,7 @@ test('t-cde5: the CLI finds the Paseo integration\'s token socket where the inte
 });
 
 /** A Paseo hello on the integration's local socket at `port` with `password`: 'accepted' or the rejection's type. */
-async function paseoHello(port, password) {
+async function paseoHello(port: number, password: string) {
   const { default: WebSocket } = await import('ws');
   const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
   try {
@@ -1193,19 +1202,20 @@ test('alp-dashboard and the Paseo integration run side by side in one home', asy
 // A minimal Paseo socket, so the bridge can be driven without a browser (FrameSocket in gateway.ts).
 function fakeSocket() {
   const emitter = new EventEmitter();
-  const frames = [];
+  const frames: Json[] = [];
   const socket = {
     readyState: 1,
     frames,
-    send(data) { frames.push(JSON.parse(String(data))); return undefined; },
+    send(data: unknown) { frames.push(JSON.parse(String(data))); return undefined; },
     close() { if (socket.readyState === 3) return; socket.readyState = 3; emitter.emit('close', 1000, ''); },
-    on(event, listener) { emitter.on(event, listener); return socket; },
-    receive(frame) { emitter.emit('message', JSON.stringify(frame), false); },
+    // any: a listener's arguments depend on the event, as EventEmitter types them.
+    on(event: string, listener: (...args: any[]) => void) { emitter.on(event, listener); return socket; },
+    receive(frame: unknown) { emitter.emit('message', JSON.stringify(frame), false); },
   };
   return socket;
 }
 
-async function untilValue(check, what, tries = 2000, gap = 5) {
+async function untilValue<T>(check: () => T | Promise<T>, what: string, tries = 2000, gap = 5) {
   for (let i = 0; i < tries; i++) { const value = await check(); if (value) return value; await sleep(gap); }
   assert.fail(`Expected ${what} did not arrive`);
 }
@@ -1217,13 +1227,13 @@ test('a reconnected bridge re-attaches roots with a fresh epoch and streams with
   await seedLibrary(home);
   await initProject(project, { library: home });
 
-  const agents = [];
+  const agents: FakeAgent[] = [];
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(agents), supervisor: false, libraryDir: home });
   const daemon = createDaemonServer({ runtime, home, socketPath: '', version: 'test' });
-  const attachCalls = [];
-  const connections = [];
+  const attachCalls: Json[] = [];
+  const connections: Array<ReturnType<typeof daemon.local>> = [];
   let factoryCalls = 0;
-  const clientFactory = async onEvent => {
+  const clientFactory: NonNullable<Parameters<typeof createPaseoBridge>[0]['clientFactory']> = async onEvent => {
     factoryCalls += 1;
     const client = daemon.local();
     client.onEvent(onEvent);
@@ -1244,8 +1254,8 @@ test('a reconnected bridge re-attaches roots with a fresh epoch and streams with
   socket.receive({ type: 'hello', clientId: 'cid-test', protocolVersion: 1, auth: { kind: 'password', password: token } });
   await untilValue(() => socket.frames.some(frame => frame.message?.payload?.status === 'server_info'), 'server_info');
 
-  const session = message => socket.receive({ type: 'session', message });
-  const ask = async message => {
+  const session = (message: Json) => socket.receive({ type: 'session', message });
+  const ask = async (message: Json) => {
     session(message);
     const frame = await untilValue(() => socket.frames.find(candidate => candidate.message?.payload?.requestId === message.requestId), `reply to ${message.type}`);
     return frame.message;
@@ -1260,12 +1270,12 @@ test('a reconnected bridge re-attaches roots with a fresh epoch and streams with
   const before = (await ask({ type: 'fetch_agent_timeline_request', requestId: 'tl1', agentId })).payload;
   assert.equal(before.error, null);
   const epochBefore = before.epoch;
-  const texts = list => list.map(entry => entry.item.text);
+  const texts = (list: Json[]) => list.map(entry => entry.item.text);
   assert.deepEqual(texts(before.entries).filter(text => text === 'Hello'), ['Hello']);
 
   // Lose the daemon connection: the bridge must reconnect through the factory and re-subscribe.
   const attachesBefore = attachCalls.length;
-  connections.at(-1).close();
+  connections.at(-1)!.close();
   await untilValue(() => factoryCalls > 1, 'a reconnect');
   await untilValue(() => attachCalls.length > attachesBefore && attachCalls.at(-1)?.replay === true, 'a replay attach on the new connection');
 

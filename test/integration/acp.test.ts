@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,20 +7,25 @@ import { fileURLToPath } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
 import { getEntry, listEntries, saveEntry } from '@anhlp/alp-core/library-edit';
 import { testEntry } from '../../packages/client/dist/library-test.js';
+import type { AcpProbe } from '../../packages/client/src/acp-probe.ts';
 import { diagnose } from '../../packages/client/dist/doctor.js';
 import { ModelCatalog, acpDecision, acpPermission, createAlpRuntime, setActiveCatalog } from '../../dist/runtime/index.js';
 import { listProviders } from '@anhlp/alp-core/providers';
 import { literal, templateBodySentence, templateIndexDescription } from '../support/template-text.ts';
 
+// `any`: event envelopes are a union over every event type; the tests read the fields of the ones they filter.
+type Json = any;
+type Runtime = ReturnType<typeof createAlpRuntime>;
+
 const FAKE = fileURLToPath(new URL('../support/fake-acp.ts', import.meta.url));
 
-async function until(check, what = 'Expected condition') {
+async function until(check: () => unknown, what = 'Expected condition') {
   for (let i = 0; i < 1000; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`${what} did not arrive`);
 }
 
 /** A project, a library with the fake ACP provider, and a runtime that starts real transports. */
-async function setup(t, { env = {}, settings = {} } = {}) {
+async function setup(t: TestContext, { env = {}, settings = {} }: { env?: Record<string, string>, settings?: object } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-acp-'));
   const root = path.join(dir, 'project');
   const home = path.join(dir, 'home');
@@ -29,17 +34,17 @@ async function setup(t, { env = {}, settings = {} } = {}) {
   await writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify({ defaultAgent: 'main', workflow: { mode: 'pho', supervisor: false }, ...settings }));
   await saveEntry('providers', 'fake', { provider: { kind: 'acp', label: 'Fake', command: process.execPath, args: [FAKE], env: { FAKE_ACP_LOG: logFile, ...env } } }, { scope: 'library', library: home });
   const runtime = createAlpRuntime({ language: 'English', supervisor: false, libraryDir: home, runLogDir: path.join(dir, 'runs') });
-  const events = [];
+  const events: Json[] = [];
   runtime.onEvent(envelope => events.push(envelope));
   t.after(async () => { await runtime.shutdown(); await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   const received = async () => (await readFile(logFile, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
   let prompts = 0;
   /** Sends a prompt and waits for its turn to end; returns the turn's end and its assistant text. */
-  const turn = async (text, sessionId = 'root') => {
+  const turn = async (text: string, sessionId = 'root') => {
     const id = `m${++prompts}`;
     const start = events.length;
     await runtime.prompt(sessionId, { clientMessageId: id, delivery: 'auto', content: [{ type: 'text', text }] });
-    const ended = entry => entry.sessionId === sessionId && (entry.event.type === 'turn.ended' || (entry.event.type === 'prompt.failed' && entry.event.clientMessageId === id));
+    const ended = (entry: Json) => entry.sessionId === sessionId && (entry.event.type === 'turn.ended' || (entry.event.type === 'prompt.failed' && entry.event.clientMessageId === id));
     await until(() => events.slice(start).some(ended), `the turn of ${text}`);
     const mine = events.slice(start).filter(entry => entry.sessionId === sessionId);
     const said = mine.filter(entry => entry.event.type === 'item' && entry.event.item.kind === 'assistant_message').map(entry => entry.event.item.text);
@@ -65,21 +70,22 @@ test('a provider lives in the library only, names no built-in runtime, and is tr
   await saveEntry('agents', 'scout', { instructions: 'S', config: { provider: 'fake' } }, { scope: 'library', root, library: home });
   assert.deepEqual((await listEntries('providers', { root, library: home })).map(row => [row.name, row.source, row.usedBy]), [['fake', 'library', ['scout']]]);
   assert.deepEqual((await getEntry('providers', 'fake', { root, library: home })).usedBy, ['agent scout']);
-  const result = await testEntry('providers', 'fake', { root, library: home });
+  // A provider entry answers with its ACP probe.
+  const result = await testEntry('providers', 'fake', { root, library: home }) as Awaited<ReturnType<typeof testEntry>> & AcpProbe;
   assert.deepEqual([result.ok, result.agent, result.loadSession, result.protocolVersion], [true, { name: 'fake-acp', title: 'Fake ACP', version: '1.0.0' }, false, 1]);
   // Doctor warns what ALP cannot do for an ACP agent, and which providers cannot start.
   await saveEntry('providers', 'gone', { provider: { kind: 'acp', command: 'no-such-acp-agent' } }, { scope: 'library', library: home });
-  const check = (await diagnose({ home, env: { PATH: path.dirname(process.execPath) } })).find(entry => entry.id === 'providers');
+  const check = (await diagnose({ home, env: { PATH: path.dirname(process.execPath) } })).find(entry => entry.id === 'providers')!;
   assert.equal(check.status, 'warn');
   assert.match(check.summary, /^2 ACP providers \(fake, gone\); 1 cannot start$/);
-  assert.deepEqual(check.details[0], 'gone: no-such-acp-agent is not found');
-  assert.match(check.details[1], /no sandbox around an ACP agent/);
+  assert.deepEqual(check.details![0], 'gone: no-such-acp-agent is not found');
+  assert.match(check.details![1], /no sandbox around an ACP agent/);
 });
 
 // t-7679.11: an ACP agent gets inline images only when its initialize offered promptCapabilities.image.
 test('an ACP agent gets prompt images as ACP image blocks only when it takes them', async t => {
   const image = { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' };
-  const send = async (runtime, events, id) => {
+  const send = async (runtime: Runtime, events: Json[], id: string) => {
     await runtime.prompt('root', { clientMessageId: id, delivery: 'auto', content: [{ type: 'text', text: 'fake:say seen' }, image] });
     await until(() => events.some(entry => (entry.event.type === 'turn.ended') || (entry.event.type === 'prompt.failed' && entry.event.clientMessageId === id)));
     return events.find(entry => entry.event.type === 'prompt.failed' && entry.event.clientMessageId === id)?.event;
@@ -106,7 +112,7 @@ test('an ACP agent reports its context fill, cost and turn tokens as the session
     { contextWindowUsedTokens: 12000, contextWindowMaxTokens: 200000, totalCostUsd: 0.25, inputTokens: 9000, outputTokens: 300, cachedInputTokens: 8000 },
   ]);
   assert.ok(first.events.findIndex(event => event.type === 'usage') < first.events.findIndex(event => event.type === 'turn.ended'));
-  assert.deepEqual(runtime.snapshot('root').usage, usages[1]);
+  assert.deepEqual(runtime.snapshot('root')!.usage, usages[1]);
   // A report that changes nothing is not sent again.
   const same = await turn('fake:usage 12000 200000 0.25');
   assert.equal(same.events.filter(event => event.type === 'usage').length, 0);
@@ -124,13 +130,13 @@ test('a session on an ACP agent: instructions in its first prompt, its answer st
   assert.deepEqual([init.protocolVersion, init.clientCapabilities], [1, { fs: { readTextFile: false, writeTextFile: false }, terminal: false }]);
   const created = log.find(message => message.method === 'session/new').params;
   assert.equal(created.cwd, root);
-  assert.deepEqual(created.mcpServers.map(server => server.name), ['alp']);
+  assert.deepEqual(created.mcpServers.map((server: Json) => server.name), ['alp']);
   const prompts = log.filter(message => message.method === 'session/prompt').map(message => message.params.prompt);
   assert.match(prompts[0][0].text, /^Instructions from ALP, which runs you\.[\s\S]*ALP runtime identity: main\./);
   assert.match(prompts[0][0].text, /ALP's tools \(alp_\*\) come from the MCP server named alp\. ALP answers your permission requests by your full-access mode/);
   // Skills on ACP: the same Level 0 index as Codex (no native Skill tool is pretended); bodies stay in their files.
   assert.match(prompts[0][0].text, /Your skills: [^\n]*Open a skill's references only for the step that needs them/);
-  const indexed = prompts[0][0].text.split('\n').find(line => line.startsWith('- feature-architecture ('));
+  const indexed = prompts[0][0].text.split('\n').find((line: string) => line.startsWith('- feature-architecture ('));
   assert.ok(indexed, prompts[0][0].text.slice(0, 400));
   assert.match(indexed, /^- feature-architecture \([^)]+SKILL\.md\): /);
   assert.ok(indexed.endsWith(await templateIndexDescription('skills/feature-architecture/SKILL.md')), indexed);
@@ -153,7 +159,7 @@ test('a session on an ACP agent: instructions in its first prompt, its answer st
   assert.ok(ran.events.some(event => event.type === 'item' && event.item.name === 'shell' && event.item.status === 'completed' && event.item.detail.output === 'ran npm test'));
   // Instructions go only with the first prompt.
   const later = (await received()).filter(message => message.method === 'session/prompt').slice(1);
-  assert.ok(later.every(message => !message.params.prompt.some(block => block.text.startsWith('Instructions from ALP'))));
+  assert.ok(later.every(message => !message.params.prompt.some((block: Json) => block.text.startsWith('Instructions from ALP'))));
   assert.ok(events.some(entry => entry.event.type === 'pin'));
 });
 
@@ -182,7 +188,7 @@ test('ALP answers the agent\'s permission requests by its mode and profile, and 
   const decisions = (await permissions()).map(entry => [entry.command, entry.decision, entry.asked ?? false]);
   assert.deepEqual(decisions, [['rm -rf build', 'decline', false], [path.join(root, 'README.md'), 'accept', true], ['npm publish', 'decline', true]]);
   // The decision itself, without a session.
-  const edit = file => acpPermission({ kind: 'edit', title: 'Edit', locations: [{ path: file }] }, []);
+  const edit = (file: string) => acpPermission({ kind: 'edit', title: 'Edit', locations: [{ path: file }] }, []);
   assert.equal(acpDecision(edit(path.join(root, 'a.js')), 'workspace-write', null, root), 'allow');
   assert.equal(acpDecision(edit('/etc/hosts'), 'workspace-write', null, root), 'mode');
   assert.equal(acpDecision(edit('/etc/hosts'), 'full-access', null, root), 'allow');
@@ -234,7 +240,7 @@ test('models, resuming, and what an ACP session cannot do', async t => {
   const loaded = (await received()).filter(message => message.method === 'session/load');
   assert.deepEqual(loaded.map(message => message.params.sessionId), [sessionId]);
   const last = (await received()).filter(message => message.method === 'session/prompt').at(-1);
-  assert.ok(!last.params.prompt.some(block => block.text.startsWith('Instructions from ALP')));
+  assert.ok(!last.params.prompt.some((block: Json) => block.text.startsWith('Instructions from ALP')));
   // A review copy needs a sandbox ALP cannot give an ACP agent.
   await assert.rejects(runtime.open('copy', { cwd: root, model: 'acp:fake', workdir: root, copy: true }), /A review copy cannot run on an ACP agent/);
 });
@@ -251,7 +257,7 @@ test('models, resuming, and what an ACP session cannot do', async t => {
 
 test('t-d0b0: the first session/new teaches alpd\'s catalog the ACP provider\'s models; nothing is probed', async t => {
   const { root, home, runtime } = await setup(t, { env: { FAKE_ACP_MODELS: 'small,large' } });
-  const probed = [];
+  const probed: string[] = [];
   const catalog = new ModelCatalog({ home, probes: {}, refreshMs: 0, apply: false, acpProviders: () => listProviders(home), acpProbe: async provider => { probed.push(provider.id); return []; } });
   await catalog.start();
   setActiveCatalog(catalog);

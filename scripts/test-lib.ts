@@ -157,7 +157,7 @@ export const PROVIDER_COMMANDS = ['agy', 'claude', 'codex', 'gemini', 'opencode'
  * Paseo snapshot, doctor, model probes, alpd's transports) cannot start a provider either by the
  * variable or by falling back to the bare name. ALP_ANTIGRAVITY_BIN is deliberately NOT pinned: it
  * overrides the command a library provider configures (packages/runtime/src/providers/providers.ts), so pinning
- * it would also disable the fake agy test/integration/antigravity.test.js configures; `agy` is kept
+ * it would also disable the fake agy test/integration/antigravity.test.ts configures; `agy` is kept
  * out by the PATH guard instead (providerFreePath).
  */
 export const PINNED_PROVIDER_VARIABLES = ['ALP_CODEX_BIN', 'ALP_CLAUDE_BIN'];

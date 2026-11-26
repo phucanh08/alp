@@ -198,7 +198,7 @@ Thứ tự publish: protocol → core → runtime → client → daemon → cli 
   D8 cả trên macOS (job `core-paseo-macos`, Node 24) cho H2. Job macOS chưa là required check của
   `main`.
 - Windows: không có service; test dùng fake Codex hoặc process POSIX bị bỏ qua (ví dụ
-  `test/integration/backup-restore.test.js` bỏ qua trên win32); chưa có lane chạy toàn bộ suite.
+  `test/integration/backup-restore.test.ts` bỏ qua trên win32); chưa có lane chạy toàn bộ suite.
   [Local] Hai test hỏng vì môi trường Windows, không phải vì artifact:
   - `integrations/paseo/tests/panel.test.js:331` hỏng khi `TEMP` nằm dưới thư mục home có `~/.alp`
     thật (đi ngược lên thì gặp nó);
@@ -229,7 +229,7 @@ Thứ tự publish: protocol → core → runtime → client → daemon → cli 
   (`claude-transport.ts` đặt `includePartialMessages: false`). Codex stream bình thường; Stop vẫn
   chạy. Tìm ra ở R5 W3; anh chấp nhận là known issue cho beta.1 (2026-10-16), sửa ở bản sau
   ([#107](https://github.com/phucanh08/alp/issues/107), T13).
-- [Local] Một số E2E opt-in mặc định model `codex:gpt-5.6-sol` (`test/e2e/worktree-e2e.mjs:11`); khi
+- [Local] Một số E2E opt-in mặc định model `codex:gpt-5.6-sol` (`test/e2e/worktree-e2e.ts:11`); khi
   chạy cho gate, đặt `ALP_TEST_MODEL` rõ ràng theo catalog hiện tại.
 
 ## 6. Acceptance
@@ -268,7 +268,7 @@ macOS Node 24, Linux Node 22.18+ (harness là script .ts của checkout; gói ph
 | R4 | Linux | Claude Code | CLI/alpd: C1–C9 | anh, khi có thể (D7) | Không (D7) |
 | R5 | macOS | Codex và Claude (mỗi provider một session) | plugin trong Paseo 0.11.x, `alp web` loopback: W1–W6 | anh | Có |
 | R6 | Linux | Codex hoặc Claude | plugin trên Paseo 0.11.x, `alp web` loopback: W1–W6 (D4: anh đã xác nhận Paseo chạy được trên Linux) | anh, khi có thể (D7) | Không (D7) |
-| R7 | macOS và Linux | Codex và Claude | worktree/merge thật: `test/e2e/worktree-e2e.mjs` tại release SHA (mã nguồn, không phải tarball) | anh (macOS chặn; Linux khi có thể, D7) | Có (phần macOS) |
+| R7 | macOS và Linux | Codex và Claude | worktree/merge thật: `test/e2e/worktree-e2e.ts` tại release SHA (mã nguồn, không phải tarball) | anh (macOS chặn; Linux khi có thể, D7) | Có (phần macOS) |
 
 ### 6.2 Coverage của các tính năng Included được review
 
@@ -277,10 +277,10 @@ macOS Node 24, Linux Node 22.18+ (harness là script .ts của checkout; gói ph
 
 | Tính năng | Test tự động, fake provider (hermetic) | Provider thật đã có | Bước nghiệm thu bổ sung | Còn thiếu, việc phải bổ sung |
 |---|---|---|---|---|
-| **Duyệt quyền** (permission profile hỏi user: Allow once / Always allow / Deny, qua `alp answer` hoặc Paseo) | `test/integration/permissions.test.ts`: `:102` Codex hỏi ALP trước khi ra khỏi sandbox; `:191` Claude hỏi cho rule `ask` và cho việc mode read-only từ chối; `:213` user trả lời, Always allow ghi rule và thôi hỏi; `:320` Always allow ghi vào đúng file định nghĩa profile; `:285` câu hỏi và câu trả lời tiếng Việt. Paseo (T10, chưa commit): `integrations/paseo/tests/permissions.test.js:58` câu hỏi quyền là question card, Allow once / Always allow / Deny (Codex `requestApproval`, Claude `canUseTool`) về đúng request, Always allow ghi `Bash(npm install *)`, rule `ask` chỉ có hai lựa chọn; `:116` đóng card, trả lời rỗng, trả lời câu đã xử lý, Stop khi card đang chờ đều để request bị từ chối; `:154` Always allow còn hiệu lực với provider/runtime mới; `integrations/paseo/tests/bridge-socket.test.js:271` cùng luồng qua socket của Paseo bridge. Lane: `validate:paseo` (H1, H2) | Chưa có. `test/e2e/human-e2e.mjs` chỉ trả lời câu hỏi `alp_ask`, không phải câu hỏi quyền | C6 (CLI), W4 (Paseo) | (1) Test Paseo đã có (T10). [Local] Pass 17/17 trên Windows, Node 26.8.1, checkout bẩn; chưa pass trên release SHA. (2) Chưa có E2E thật; C6 và W4 là bằng chứng tối thiểu |
-| **Hủy / interrupt** (`alp interrupt`, Ctrl-C ở `alp run`, Stop trong Paseo) | `packages/runtime/tests/runtime.test.js:150` interrupt đóng subtree; `packages/daemon/tests/persistence.test.js:267` race giữa interrupt và prompt; `packages/daemon/tests/crash-recovery.test.js:187` provider chết giữa turn; `packages/runtime/tests/pause.test.js:222` `alp_cancel` một assignment đang park; `integrations/paseo/tests/team.test.js:118,:300,:559,:574` interrupt cả cây và peer; `integrations/paseo/tests/paseo.test.js:131` vòng đời có cancel | `test/e2e/runtime-e2e.mjs` (Codex, `session.interrupt` qua kết nối provider) | C5 (CLI), W3 (Paseo) | Không có E2E thật cho `alp interrupt`/Ctrl-C hay cho Claude; C5 và W3 phủ phần này |
-| **Restore từ backup** (`alp backup`, `alp restore`) | `packages/core/tests/backup.test.js:72` restore đúng session, task, settings và hoàn tác được; `:159` restore hỏng giữa chừng được rollback; `:186`; `:197` state mới hơn không bị ghi đè; `:335`; `test/integration/backup-restore.test.js:103,:153,:176,:207` qua alpd (bỏ qua trên Windows) | Không áp dụng trực tiếp: restore không gọi provider; phần cần provider là session chạy tiếp sau restore | C8, C9 | Chưa có test trên package đã cài từ tarball; C8–C9 phủ. Không cần test mới nếu C8–C9 pass |
-| **Worktree và `alp_merge`** | `packages/runtime/tests/worktree.test.js:84` peer ghi song song trong worktree và merge; `:126` conflict có marker, giữ branch, discard; `:183` việc chưa merge còn trên branch sau khi đóng hoặc crash; `:204` ngoài git báo lỗi rõ; `test/integration/verify.test.ts:160,:204` `alp_merge` chạy verify trước; `packages/daemon/tests/recovery.test.js:79` assignment worktree sống qua restart alpd; `test/integration/hooks.test.ts:160` hook chặn merge | `test/e2e/worktree-e2e.mjs`: mặc định Codex, chạy CLI từ mã nguồn repo | R7, C7 | Chưa có bằng chứng thật cho Claude và trên tarball. R7 chạy E2E có sẵn với cả hai provider; C7 là bước tay trên tarball |
+| **Duyệt quyền** (permission profile hỏi user: Allow once / Always allow / Deny, qua `alp answer` hoặc Paseo) | `test/integration/permissions.test.ts`: `:102` Codex hỏi ALP trước khi ra khỏi sandbox; `:191` Claude hỏi cho rule `ask` và cho việc mode read-only từ chối; `:213` user trả lời, Always allow ghi rule và thôi hỏi; `:320` Always allow ghi vào đúng file định nghĩa profile; `:285` câu hỏi và câu trả lời tiếng Việt. Paseo (T10, chưa commit): `integrations/paseo/tests/permissions.test.js:58` câu hỏi quyền là question card, Allow once / Always allow / Deny (Codex `requestApproval`, Claude `canUseTool`) về đúng request, Always allow ghi `Bash(npm install *)`, rule `ask` chỉ có hai lựa chọn; `:116` đóng card, trả lời rỗng, trả lời câu đã xử lý, Stop khi card đang chờ đều để request bị từ chối; `:154` Always allow còn hiệu lực với provider/runtime mới; `integrations/paseo/tests/bridge-socket.test.js:271` cùng luồng qua socket của Paseo bridge. Lane: `validate:paseo` (H1, H2) | Chưa có. `test/e2e/human-e2e.ts` chỉ trả lời câu hỏi `alp_ask`, không phải câu hỏi quyền | C6 (CLI), W4 (Paseo) | (1) Test Paseo đã có (T10). [Local] Pass 17/17 trên Windows, Node 26.8.1, checkout bẩn; chưa pass trên release SHA. (2) Chưa có E2E thật; C6 và W4 là bằng chứng tối thiểu |
+| **Hủy / interrupt** (`alp interrupt`, Ctrl-C ở `alp run`, Stop trong Paseo) | `packages/runtime/tests/runtime.test.js:150` interrupt đóng subtree; `packages/daemon/tests/persistence.test.js:267` race giữa interrupt và prompt; `packages/daemon/tests/crash-recovery.test.js:187` provider chết giữa turn; `packages/runtime/tests/pause.test.js:222` `alp_cancel` một assignment đang park; `integrations/paseo/tests/team.test.js:118,:300,:559,:574` interrupt cả cây và peer; `integrations/paseo/tests/paseo.test.js:131` vòng đời có cancel | `test/e2e/runtime-e2e.ts` (Codex, `session.interrupt` qua kết nối provider) | C5 (CLI), W3 (Paseo) | Không có E2E thật cho `alp interrupt`/Ctrl-C hay cho Claude; C5 và W3 phủ phần này |
+| **Restore từ backup** (`alp backup`, `alp restore`) | `packages/core/tests/backup.test.js:72` restore đúng session, task, settings và hoàn tác được; `:159` restore hỏng giữa chừng được rollback; `:186`; `:197` state mới hơn không bị ghi đè; `:335`; `test/integration/backup-restore.test.ts:113,:166,:189,:220` qua alpd (bỏ qua trên Windows) | Không áp dụng trực tiếp: restore không gọi provider; phần cần provider là session chạy tiếp sau restore | C8, C9 | Chưa có test trên package đã cài từ tarball; C8–C9 phủ. Không cần test mới nếu C8–C9 pass |
+| **Worktree và `alp_merge`** | `packages/runtime/tests/worktree.test.js:84` peer ghi song song trong worktree và merge; `:126` conflict có marker, giữ branch, discard; `:183` việc chưa merge còn trên branch sau khi đóng hoặc crash; `:204` ngoài git báo lỗi rõ; `test/integration/verify.test.ts:160,:204` `alp_merge` chạy verify trước; `packages/daemon/tests/recovery.test.js:79` assignment worktree sống qua restart alpd; `test/integration/hooks.test.ts:160` hook chặn merge | `test/e2e/worktree-e2e.ts`: mặc định Codex, chạy CLI từ mã nguồn repo | R7, C7 | Chưa có bằng chứng thật cho Claude và trên tarball. R7 chạy E2E có sẵn với cả hai provider; C7 là bước tay trên tarball |
 
 ### 6.3 Checklist provider thật
 
@@ -456,8 +456,8 @@ tunnel thất bại, mở trình duyệt ngay trên máy Linux.
 **Worktree thật từ mã nguồn** (R7), trong checkout ở release SHA sau `pnpm install --frozen-lockfile && pnpm run build`:
 
 ```sh
-ALP_TEST_MODEL=codex:<model Codex hiện tại>  node test/e2e/worktree-e2e.mjs
-ALP_TEST_MODEL=claude:<model Claude hiện tại> node test/e2e/worktree-e2e.mjs
+ALP_TEST_MODEL=codex:<model Codex hiện tại>  node test/e2e/worktree-e2e.ts
+ALP_TEST_MODEL=claude:<model Claude hiện tại> node test/e2e/worktree-e2e.ts
 ```
 
 Mong đợi: script kết thúc mã 0; hai file của hai peer được merge vào checkout.

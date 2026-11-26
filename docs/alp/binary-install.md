@@ -131,7 +131,7 @@ node scripts/binary-smoke.ts                           # full smoke: launcher, (
 node scripts/binary-update-smoke.ts                    # install.sh into a temporary root, then alp update from file:// and HTTP mirrors
 env -i PATH=/usr/bin:/bin sh scripts/binary-smoke-nodeless.sh dist/bundle/alp-<version>-<platform>/bin/alp   # no system Node
 node scripts/package-binary.ts pack --bundle dist/bundle/alp-<version>-<platform> --out dist/release
-node --test test/integration/binary-release.test.js     # archive layout and install.sh against a file:// mirror
+node --test test/integration/binary-release.test.ts     # archive layout and install.sh against a file:// mirror
 ```
 
 On Windows (PowerShell, from the repository):
@@ -140,12 +140,12 @@ On Windows (PowerShell, from the repository):
 pnpm install --frozen-lockfile; node scripts/build-bundle.ts                   # dist\bundle\alp-<version>-windows-x64
 node scripts/binary-smoke.ts
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\binary-smoke-nodeless.ps1 dist\bundle\alp-<version>-windows-x64\bin\alp.cmd
-node --test test/integration/binary-install-ps1.test.js  # changes your user Path and restores it
+node --test test/integration/binary-install-ps1.test.ts  # changes your user Path and restores it
 ```
 
 ## CI and releases
 
-- **`binary` in `ci.yml`** (`.github/workflows/binary-build.yml`) runs on every PR and push to main. It builds natively on five runners: macos-15 (darwin-arm64), macos-15-intel (darwin-x64), ubuntu-24.04 (linux-x64), ubuntu-24.04-arm (linux-arm64) and windows-2022 (windows-x64). It runs the full smoke, the install-and-update smoke (`install.sh`, or `install.ps1` on Windows), and the smoke without a system Node: in `debian:bookworm-slim` on Linux, under `env -i PATH=/usr/bin:/bin` on macOS, and on Windows as `scripts/binary-smoke-nodeless.ps1` with `PATH` cut down to the Windows system directories. On Windows it also runs `install.ps1`'s tests (`test/integration/binary-install-ps1.test.js`, against a local mirror; they change the runner's user `Path` and restore it). Then it packs the archive (`.zip` on Windows) and reports its size. A separate job runs shellcheck on `install.sh` and checks that the PowerShell scripts parse.
+- **`binary` in `ci.yml`** (`.github/workflows/binary-build.yml`) runs on every PR and push to main. It builds natively on five runners: macos-15 (darwin-arm64), macos-15-intel (darwin-x64), ubuntu-24.04 (linux-x64), ubuntu-24.04-arm (linux-arm64) and windows-2022 (windows-x64). It runs the full smoke, the install-and-update smoke (`install.sh`, or `install.ps1` on Windows), and the smoke without a system Node: in `debian:bookworm-slim` on Linux, under `env -i PATH=/usr/bin:/bin` on macOS, and on Windows as `scripts/binary-smoke-nodeless.ps1` with `PATH` cut down to the Windows system directories. On Windows it also runs `install.ps1`'s tests (`test/integration/binary-install-ps1.test.ts`, against a local mirror; they change the runner's user `Path` and restore it). Then it packs the archive (`.zip` on Windows) and reports its size. A separate job runs shellcheck on `install.sh` and checks that the PowerShell scripts parse.
 - **`release-binaries.yml`** is started by hand with `workflow_dispatch` from main, with a `sha` input that must be a full commit on main. Its `draft` job runs in the `release` environment, which admits deployments from main only. It runs the same build. Then it writes `SHA256SUMS`, attests build provenance for every archive, `install.sh` and `install.ps1`, and creates a **draft** release `v<version>` (the version comes from `packages/cli/package.json`). An existing draft is replaced. A published release is never touched. The workflow never publishes anything. The owner reviews the draft and publishes it, and publishing creates the tag.
 - **Version policy.** npm and the bundle share one version, the one in every `package.json`. npm keeps betas on the `beta` dist-tag. The binary release is a normal release, not a prerelease: the workflow creates the draft with `--prerelease=false` and fails if the draft says otherwise, because `releases/latest/download` resolves only to a published release that is not a prerelease. Do not tick "Set as a pre-release" when publishing, or `install.sh` without `--version` keeps installing the previous release.
 

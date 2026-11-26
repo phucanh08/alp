@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -8,10 +8,21 @@ import { fileURLToPath } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
 import { closeTask, createTask, epicReport, landedParents, loadTasks, recordVerification, startTask, submitTask, taskDigest } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
+import type { RuntimeOptions, RuntimeTransport } from '@anhlp/alp-runtime';
+
+// `any`: app-server messages and event envelopes are JSON of every shape; the tests read the fields they assert on.
+type Json = any;
+type Call = { method: string, params: Json };
+/** The fake app-server below: the transport the runtime drives, plus what the tests call on it. */
+type FakeRuntime = RuntimeTransport & {
+  kind?: string, calls: Call[], threadId: string, turnId: string | undefined, closed?: boolean,
+  notification?: (method: string, params: Json) => void, failure?: (error: unknown) => void, serverRequest?: (method: string, params: Json) => Promise<Json>,
+  readonly started: Call[], call(tool: string, args: Json): Promise<Json>, finish(text?: string): void,
+};
 
 const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 
-async function project(t) {
+async function project(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-epic-'));
   t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(directory, 'project');
@@ -64,28 +75,28 @@ test('an epic whose children are all closed is ready to close, and its report su
 });
 
 let calls = 0;
-function fakeTransport(runtimes) {
+function fakeTransport(runtimes: FakeRuntime[]): NonNullable<RuntimeOptions['transport']> {
   return (cwd, env, kind) => {
     const index = runtimes.length;
     let turns = 0;
-    const runtime = {
+    const runtime: FakeRuntime = {
       kind, calls: [], threadId: `thread-${index}`, turnId: undefined,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
       async close() { this.closed = true; },
-      async request(method, params) {
+      async request(method: string, params: Json) {
         this.calls.push({ method, params });
         if (method.startsWith('thread/')) return { thread: { id: this.threadId } };
         if (method === 'turn/start') { this.turnId = `turn-${index}-${++turns}`; return { turn: { id: this.turnId } }; }
         return {};
       },
       get started() { return this.calls.filter(call => call.method === 'turn/start'); },
-      async call(tool, args) {
-        return JSON.parse((await this.serverRequest('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text);
+      async call(tool: string, args: Json) {
+        return JSON.parse((await this.serverRequest!('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text);
       },
       finish(text = 'done') {
-        this.notification('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}-${turns}`, text } });
-        this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
+        this.notification!('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}-${turns}`, text } });
+        this.notification!('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
       },
     };
     runtimes.push(runtime);
@@ -93,7 +104,7 @@ function fakeTransport(runtimes) {
   };
 }
 
-async function until(check) {
+async function until(check: () => unknown) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail('Expected condition did not arrive');
 }
@@ -104,14 +115,14 @@ test('main closing the last child is told to close the epic; closing it reports 
   const other = path.join(directory, 'other');
   await initProject(root);
   await initProject(other);
-  const runtimes = [];
+  const runtimes: FakeRuntime[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: path.join(directory, 'runs') });
   t.after(async () => { await runtime.shutdown(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
-  const events = [];
+  const events: Json[] = [];
   runtime.onEvent(envelope => events.push(envelope));
   await runtime.open('root', { cwd: root });
   await runtime.open('elsewhere', { cwd: other });
-  const prompt = (id, text) => runtime.prompt('root', { clientMessageId: id, delivery: 'auto', content: [{ type: 'text', text }] });
+  const prompt = (id: string, text: string) => runtime.prompt('root', { clientMessageId: id, delivery: 'auto', content: [{ type: 'text', text }] });
   await prompt('m1', 'Plan');
   const main = runtimes[0];
   const epic = (await main.call('alp_task', { action: 'create', title: 'Release 0.4', type: 'epic' })).task;
@@ -137,7 +148,7 @@ test('main closing the last child is told to close the epic; closing it reports 
 test('alp task report prints an epic, and closing one prints its report', async t => {
   const { directory, root } = await project(t);
   const env = { ...process.env, ALP_HOME: path.join(directory, 'home') };
-  const run = (...args) => spawnSync(process.execPath, [CLI, ...args], { cwd: root, env, encoding: 'utf8' });
+  const run = (...args: string[]) => spawnSync(process.execPath, [CLI, ...args], { cwd: root, env, encoding: 'utf8' });
   const epic = await createTask(root, { title: 'Docs pass', type: 'epic' }, 'user');
   const child = await createTask(root, { title: 'README', parent: epic.id }, 'user');
   let result = run('task', 'report', epic.id);

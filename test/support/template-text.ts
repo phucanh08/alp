@@ -4,7 +4,7 @@
 // which were about the wording: they only needed "these instructions came from THIS template" or
 // "the skill index shows the skill's description". A copied sentence makes every rewording a test
 // failure, and — worse — makes a `doesNotMatch` silently vacuous the moment the sentence it names
-// stops existing (test/integration/acp.test.js had exactly that).
+// stops existing (test/integration/acp.test.ts had exactly that).
 //
 // So: anchor on STRUCTURE (a file's title, a frontmatter field, the one line that mentions a value)
 // and read the text at that anchor from the template at run time. A reworded template then changes

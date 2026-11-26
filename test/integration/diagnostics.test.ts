@@ -1,6 +1,6 @@
 // What an operator can learn about alpd from its log and from alp doctor (ALPD §67): a failed start,
 // an alpd that runs but is not reachable or not ready, and a log that never lands in the ACP stream.
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -15,15 +15,23 @@ import { diagnose, diskCheck, shellQuote } from '../../packages/client/dist/doct
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createDaemonServer, createStore } from '../../dist/daemon/index.js';
 import { teardown } from '../support/teardown.ts';
+import type { CommandRunner } from '../../packages/client/src/command.ts';
+
+// `any`: alpd's log records and `alp daemon status --json` are JSON whose shape depends on the record; the tests read the fields they assert on.
+type Json = any;
+/** What execFile's promise rejects with: the exit code and the output. */
+type ExecError = Error & { code?: number | string, stdout: string, stderr: string };
+/** ensureDaemon's refusal: an ALP code, and the error that caused it. */
+type DaemonError = Error & { code?: string, cause?: Error };
 
 const ALPD = fileURLToPath(new URL('../../dist/alpd.js', import.meta.url));
 const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 const run = promisify(execFile);
 const skip = process.platform === 'win32' && 'POSIX modes and sockets only';
-const realpathOf = file => realpath(file);
+const realpathOf = (file: string) => realpath(file);
 const SECRET = 'sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
 
-async function privateHome(t) {
+async function privateHome(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-diag-'));
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -34,7 +42,7 @@ async function privateHome(t) {
 }
 
 /** Runs alpd the way its detached launcher leaves it: output to its log file. Resolves with its exit. */
-async function alpd(home, args = []) {
+async function alpd(home: string, args: string[] = []) {
   const log = openSync(daemonPaths(home).log, 'a', 0o600);
   const child = spawn(process.execPath, [ALPD, ...args], { stdio: ['ignore', log, log], env: { ...process.env, ALP_HOME: home, ANTHROPIC_API_KEY: SECRET } });
   closeSync(log);
@@ -42,7 +50,7 @@ async function alpd(home, args = []) {
   return code;
 }
 
-const records = async home => (await readFile(daemonPaths(home).log, 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line));
+const records = async (home: string): Promise<Json[]> => (await readFile(daemonPaths(home).log, 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line));
 
 test('a start that cannot open its IPC endpoint says so in the log and doctor reads it', { skip }, async t => {
   const { home, directory } = await privateHome(t);
@@ -58,7 +66,7 @@ test('a start that cannot open its IPC endpoint says so in the log and doctor re
   assert.ok(!(await readFile(daemonPaths(home).log, 'utf8')).includes(SECRET));
 
   const checks = await diagnose({ home, env: { PATH: path.join(directory, 'empty') } });
-  const startup = checks.find(check => check.id === 'startup');
+  const startup = checks.find(check => check.id === 'startup')!;
   assert.equal(startup.status, 'fail');
   assert.match(startup.summary, /ALP_IPC_LISTEN_FAILED/);
 });
@@ -69,17 +77,17 @@ test('a launcher that fails at once reports why, in its error and not only in a 
   // Not empty, so alpd does not tighten it (t-37f1).
   await writeFile(path.join(home, 'logs', 'old.log'), '');
   await chmod(path.join(home, 'logs'), 0o755);
-  await assert.rejects(ensureDaemon({ home, entry: ALPD, timeoutMs: 2000 }), error => /launcher exited \(1\): ALP_HOME_UNUSABLE, alpd failed to start while preparing its home/.test(error.message) && !error.message.includes(SECRET));
+  await assert.rejects(ensureDaemon({ home, entry: ALPD, timeoutMs: 2000 }), (error: Error) => /launcher exited \(1\): ALP_HOME_UNUSABLE, alpd failed to start while preparing its home/.test(error.message) && !error.message.includes(SECRET));
 });
 
 test('startup admission reports an unusable home before launching a child', { skip }, async t => {
   const { directory, home } = await privateHome(t);
   await chmod(home, 0o755);
-  await assert.rejects(ensureDaemon({ home, entry: path.join(directory, 'must-not-launch.js'), env: { ...process.env, ALP_HOME: home } }), error => {
+  await assert.rejects(ensureDaemon({ home, entry: path.join(directory, 'must-not-launch.js'), env: { ...process.env, ALP_HOME: home } }), (error: DaemonError) => {
     assert.equal(error.code, 'ALP_HOME_UNUSABLE');
     assert.match(error.message, /ALP_HOME_UNUSABLE.*preparing its home/);
-    assert.match(error.cause.message, /private permissions/);
-    assert.ok(error.cause.message.includes(`fix it with: chmod 700 '${home}'`), error.cause.message);
+    assert.match(error.cause!.message, /private permissions/);
+    assert.ok(error.cause!.message.includes(`fix it with: chmod 700 '${home}'`), error.cause!.message);
     return true;
   });
 });
@@ -126,7 +134,7 @@ test('doctor and alp daemon status tell a ready alpd, one that is not ready, and
   const env = { ...process.env, ALP_HOME: home, PATH: path.join(directory, 'empty') };
   const status = async () => {
     try { const { stdout } = await run(process.execPath, [CLI, 'daemon', 'status', '--json'], { env }); return { code: 0, report: JSON.parse(stdout) }; }
-    catch (error) { return { code: error.code, report: JSON.parse(error.stdout) }; }
+    catch (error) { return { code: (error as ExecError).code, report: JSON.parse((error as ExecError).stdout) }; }
   };
   const lockFile = path.join(home, 'alpd.lock');
 
@@ -138,9 +146,9 @@ test('doctor and alp daemon status tell a ready alpd, one that is not ready, and
   assert.equal(ready.code, 0);
   assert.deepEqual([ready.report.running, ready.report.health.live, ready.report.health.ready], [true, true, true]);
   const good = await diagnose({ home, env: { PATH: path.join(directory, 'empty') } });
-  assert.equal(good.find(check => check.id === 'ipc').status, 'ok');
-  assert.equal(good.find(check => check.id === 'readiness').status, 'ok');
-  assert.equal(good.find(check => check.id === 'state').status, 'ok');
+  assert.equal(good.find(check => check.id === 'ipc')!.status, 'ok');
+  assert.equal(good.find(check => check.id === 'readiness')!.status, 'ok');
+  assert.equal(good.find(check => check.id === 'state')!.status, 'ok');
 
   // Alive, answering, and not ready: its state directory cannot be written.
   await store.list();
@@ -151,10 +159,10 @@ test('doctor and alp daemon status tell a ready alpd, one that is not ready, and
   assert.equal(broken.report.health.live, true);
   assert.equal(broken.report.health.ready, false);
   const bad = await diagnose({ home, env: { PATH: path.join(directory, 'empty') } });
-  const readiness = bad.find(check => check.id === 'readiness');
+  const readiness = bad.find(check => check.id === 'readiness')!;
   assert.equal(readiness.status, 'fail');
   assert.match(readiness.summary, /alive but not ready: ALP_STATE_NOT_WRITABLE/);
-  assert.equal(bad.find(check => check.id === 'ipc').status, 'ok');
+  assert.equal(bad.find(check => check.id === 'ipc')!.status, 'ok');
   const { stdout } = await run(process.execPath, [CLI, 'daemon', 'status'], { env }).catch(error => error);
   assert.match(stdout, /not ready: ALP_STATE_NOT_WRITABLE/);
   await rm(state);
@@ -166,7 +174,7 @@ test('doctor and alp daemon status tell a ready alpd, one that is not ready, and
   const gone = await status();
   assert.equal(gone.code, 4);
   assert.equal(gone.report.checks[0].code, 'ALP_IPC_FAILED');
-  const unreachable = (await diagnose({ home, env: { PATH: path.join(directory, 'empty') }, timeoutMs: 500 })).find(check => check.id === 'ipc');
+  const unreachable = (await diagnose({ home, env: { PATH: path.join(directory, 'empty') }, timeoutMs: 500 })).find(check => check.id === 'ipc')!;
   assert.equal(unreachable.status, 'fail');
   assert.match(unreachable.summary, /cannot be reached.*ALP_IPC_(SOCKET_MISSING|REFUSED)/);
 });
@@ -176,8 +184,8 @@ test('alp acp keeps stdout to protocol frames and puts structured, scrubbed diag
   // alpd cannot start in a home others can read, so the editor's request fails.
   await chmod(home, 0o755);
   const child = spawn(process.execPath, [CLI, 'acp'], { env: { ...process.env, ALP_HOME: home, ANTHROPIC_API_KEY: SECRET, ALP_DAEMON_ENTRY: ALPD }, stdio: ['pipe', 'pipe', 'pipe'] });
-  const out = [];
-  const err = [];
+  const out: Buffer[] = [];
+  const err: Buffer[] = [];
   child.stdout.on('data', chunk => out.push(chunk));
   child.stderr.on('data', chunk => err.push(chunk));
   const frames = [
@@ -193,8 +201,8 @@ test('alp acp keeps stdout to protocol frames and puts structured, scrubbed diag
   const stdout = Buffer.concat(out).toString().split('\n').filter(Boolean);
   assert.ok(stdout.length >= 2);
   for (const line of stdout) assert.equal(JSON.parse(line).jsonrpc, '2.0', `stdout carried a line that is not a protocol frame: ${line}`);
-  assert.ok(JSON.parse(stdout.find(line => line.includes('"id":2'))).error);
-  const stderr = Buffer.concat(err).toString().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  assert.ok(JSON.parse(stdout.find(line => line.includes('"id":2'))!).error);
+  const stderr: Json[] = Buffer.concat(err).toString().split('\n').filter(Boolean).map(line => JSON.parse(line));
   const failure = stderr.find(record => record.code === 'ALP_IPC_CONNECT_FAILED');
   assert.deepEqual([failure.component, failure.level], ['acp', 'warn']);
   assert.match(failure.error.message, /ALP_HOME_UNUSABLE/);
@@ -211,22 +219,22 @@ test('alp doctor reports free disk space and the worktrees earlier runs left, de
   const low = await diskCheck(home, { free: 1.2 * 1024 ** 3, tempDirs: [temp] });
   assert.equal(low.status, 'warn');
   assert.match(low.summary, /^1\.2 GB free where ALP_HOME lives; when the disk is full, alpd pauses all work until space returns$/);
-  assert.equal(low.details.length, 3);
-  assert.match(low.details[0], /^1 left in .*worktrees, \d+ (MB|GB)$/);
-  assert.match(low.details[1], /^1 left in .*alp-\*/);
+  assert.equal(low.details!.length, 3);
+  assert.match(low.details![0], /^1 left in .*worktrees, \d+ (MB|GB)$/);
+  assert.match(low.details![1], /^1 left in .*alp-\*/);
   // Neither is a git checkout: unknown, with no command (t-e80a).
-  assert.match(low.details[2], /^2 unknown \(/);
-  assert.deepEqual(low.leftovers.map(entry => [path.basename(entry.path), entry.state, entry.command]), [['alp-child-1', 'unknown', undefined], ['alp-group14', 'unknown', undefined]]);
-  assert.match(low.hint, /ALP deletes none of these/);
+  assert.match(low.details![2], /^2 unknown \(/);
+  assert.deepEqual(low.leftovers!.map(entry => [path.basename(entry.path), entry.state, entry.command]), [['alp-child-1', 'unknown', undefined], ['alp-group14', 'unknown', undefined]]);
+  assert.match(low.hint!, /ALP deletes none of these/);
   const plenty = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp] });
   assert.equal(plenty.status, 'ok');
-  assert.equal(plenty.details.length, 3);
+  assert.equal(plenty.details!.length, 3);
   assert.equal(plenty.summary, '50.0 GB free where ALP_HOME lives');
   assert.equal((await diskCheck(path.join(directory, 'empty-home'), { free: 50 * 1024 ** 3, tempDirs: [] })).status, 'ok');
   // Nothing was removed.
   await readFile(path.join(home, 'worktrees', 'alp-child-1', 'big'));
   const checks = await diagnose({ home, env: { PATH: path.join(directory, 'empty') } });
-  assert.equal(checks.find(check => check.id === 'disk').id, 'disk');
+  assert.equal(checks.find(check => check.id === 'disk')!.id, 'disk');
 });
 
 test('alp doctor classifies leftover worktrees and suggests a command only for clean and pushed ones (t-e80a)', { skip }, async t => {
@@ -234,7 +242,7 @@ test('alp doctor classifies leftover worktrees and suggests a command only for c
   const temp = path.join(directory, 'tmp');
   await mkdir(temp, { recursive: true });
   const env = { ...process.env, GIT_AUTHOR_NAME: 'ALP', GIT_AUTHOR_EMAIL: 'alp@example.invalid', GIT_COMMITTER_NAME: 'ALP', GIT_COMMITTER_EMAIL: 'alp@example.invalid', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(directory, 'gitconfig') };
-  const git = (cwd, ...args) => run('git', ['-C', cwd, ...args], { env });
+  const git = (cwd: string, ...args: string[]) => run('git', ['-C', cwd, ...args], { env });
   const origin = path.join(directory, 'origin.git');
   const main = path.join(directory, 'main');
   await run('git', ['init', '-q', '--bare', '-b', 'main', origin], { env });
@@ -245,7 +253,7 @@ test('alp doctor classifies leftover worktrees and suggests a command only for c
   await git(main, 'commit', '-qm', 'first');
   await git(main, 'remote', 'add', 'origin', origin);
   await git(main, 'push', '-q', 'origin', 'main');
-  const worktree = async (where, name) => { const target = path.join(where, name); await git(main, 'worktree', 'add', '-q', '-b', name, target, 'main'); return target; };
+  const worktree = async (where: string, name: string) => { const target = path.join(where, name); await git(main, 'worktree', 'add', '-q', '-b', name, target, 'main'); return target; };
   const clean = await worktree(temp, 'alp-clean');
   const dirty = await worktree(temp, 'alp-dirty');
   await writeFile(path.join(dirty, 'new.txt'), 'untracked\n');
@@ -285,42 +293,42 @@ test('alp doctor classifies leftover worktrees and suggests a command only for c
   await mkdir(path.join(temp, 'alp-plain'));
   // Every fixture is minutes old; recentMs 0 lets them be judged by their git state alone.
   const fresh = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory });
-  for (const name of ['alp-clean', 'alp-clone']) assert.deepEqual(fresh.leftovers.filter(entry => entry.path.endsWith(name)).map(entry => [entry.state, entry.reason, entry.command]), [['in-use', 'changed in the last day', undefined]]);
+  for (const name of ['alp-clean', 'alp-clone']) assert.deepEqual(fresh.leftovers!.filter(entry => entry.path.endsWith(name)).map(entry => [entry.state, entry.reason, entry.command]), [['in-use', 'changed in the last day', undefined]]);
   const check = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0 });
-  const states = Object.fromEntries(check.leftovers.map(entry => [path.basename(entry.path), entry.state]));
+  const states = Object.fromEntries(check.leftovers!.map(entry => [path.basename(entry.path), entry.state]));
   assert.deepEqual(states, {
     'alp-unpushed': 'unpushed', 'alp-live': 'in-use', 'alp-clean': 'clean-pushed', 'alp-dirty': 'dirty', 'alp-ignored': 'local-only', 'alp-modules': 'local-only', 'alp-hidden': 'unknown',
     'alp-clone': 'clean-pushed', 'alp-stashed': 'unpushed', 'alp-tagged': 'unpushed', 'alp-plain': 'unknown',
   });
-  const reasons = Object.fromEntries(check.leftovers.map(entry => [path.basename(entry.path), entry.reason]));
+  const reasons = Object.fromEntries(check.leftovers!.map(entry => [path.basename(entry.path), entry.reason]));
   assert.equal(reasons['alp-ignored'], 'ignored files: .env');
   assert.equal(reasons['alp-modules'], 'ignored files: node_modules/');
-  assert.match(reasons['alp-hidden'], /assume-unchanged/);
-  const commands = check.leftovers.filter(entry => entry.command).map(entry => entry.command).sort();
+  assert.match(reasons['alp-hidden']!, /assume-unchanged/);
+  const commands = check.leftovers!.filter(entry => entry.command).map(entry => entry.command).sort();
   assert.deepEqual(commands, [
     `git -C '${await realpathOf(main)}' worktree remove '${await realpathOf(clean)}'`,
     `rm -rf '${await realpathOf(clone)}'`,
   ].sort());
-  assert.ok(check.details.some(line => line.startsWith('2 clean and pushed (no changes, no untracked or ignored files')));
-  assert.ok(check.details.some(line => line.startsWith('2 local-only data (ignored files such as .env')));
-  assert.ok(!check.details.some(line => /nothing would be lost/.test(line)));
-  for (const state of ['dirty', 'in use']) assert.ok(check.details.some(line => line.startsWith(`1 ${state} (`)), state);
-  assert.ok(check.details.some(line => line.startsWith('2 unknown (')));
-  assert.ok(check.details.some(line => line.startsWith('3 unpushed (')));
+  assert.ok(check.details!.some(line => line.startsWith('2 clean and pushed (no changes, no untracked or ignored files')));
+  assert.ok(check.details!.some(line => line.startsWith('2 local-only data (ignored files such as .env')));
+  assert.ok(!check.details!.some(line => /nothing would be lost/.test(line)));
+  for (const state of ['dirty', 'in use']) assert.ok(check.details!.some(line => line.startsWith(`1 ${state} (`)), state);
+  assert.ok(check.details!.some(line => line.startsWith('2 unknown (')));
+  assert.ok(check.details!.some(line => line.startsWith('3 unpushed (')));
   // On Windows the commands are for PowerShell.
   const windows = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0, platform: 'win32' });
-  assert.equal(windows.leftovers.find(entry => entry.path.endsWith('alp-clone')).command, `Remove-Item -LiteralPath '${await realpathOf(clone)}' -Recurse -Force`);
-  for (const command of commands) assert.ok(check.details.includes(`  ${command}`));
+  assert.equal(windows.leftovers!.find(entry => entry.path.endsWith('alp-clone'))!.command, `Remove-Item -LiteralPath '${await realpathOf(clone)}' -Recurse -Force`);
+  for (const command of commands) assert.ok(check.details!.includes(`  ${command}`));
   // A clean clone that other worktrees were made from holds their repository: in use, no command.
   const parent = path.join(temp, 'alp-parent');
   await run('git', ['clone', '-q', origin, parent], { env });
   await git(parent, 'worktree', 'add', '-q', '--detach', path.join(directory, 'elsewhere'), 'HEAD');
-  const shared = (await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0 })).leftovers.find(entry => entry.path.endsWith('alp-parent'));
+  const shared = (await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0 })).leftovers!.find(entry => entry.path.endsWith('alp-parent'))!;
   assert.deepEqual([shared.state, shared.reason, shared.command], ['in-use', 'other worktrees use its repository', undefined]);
   await rm(parent, { recursive: true, force: true });
   // Running doctor from inside a leftover keeps it.
   const inside = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: path.join(clone), recentMs: 0 });
-  assert.equal(inside.leftovers.find(entry => entry.path.endsWith('alp-clone')).state, 'in-use');
+  assert.equal(inside.leftovers!.find(entry => entry.path.endsWith('alp-clone'))!.state, 'in-use');
   // Report only: every leftover is still there, with its changes.
   for (const target of [clean, dirty, ignored, modules, hidden, unpushed, live, clone, stashed, tagged]) await lstat(target);
   assert.equal(await readFile(path.join(ignored, '.env'), 'utf8'), 'SECRET=1\n');
@@ -329,19 +337,19 @@ test('alp doctor classifies leftover worktrees and suggests a command only for c
   await writeFile(path.join(clean, 'c.txt'), 'c\n');
   await git(clean, 'add', '.');
   await git(clean, 'commit', '-qm', 'not pushed');
-  assert.equal((await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0 })).leftovers.find(entry => entry.path.endsWith('alp-clean')).state, 'unpushed');
+  assert.equal((await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0 })).leftovers!.find(entry => entry.path.endsWith('alp-clean'))!.state, 'unpushed');
   // Out of time: nothing more is classified, and what was not reached is unknown, never clean.
   const late = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, classifyMs: 0, recentMs: 0 });
-  assert.ok(late.leftovers.every(entry => entry.state === 'unknown' && /^not checked/.test(entry.reason) && !entry.command));
-  assert.ok(late.details.includes('  11 of the unknown were not checked within 0 ms'));
+  assert.ok(late.leftovers!.every(entry => entry.state === 'unknown' && /^not checked/.test(entry.reason!) && !entry.command));
+  assert.ok(late.details!.includes('  11 of the unknown were not checked within 0 ms'));
   // The suggested command is one the user can paste as it is; git keeps the branch.
-  await run('sh', ['-c', commands.find(command => command.includes('worktree remove'))], { env });
+  await run('sh', ['-c', commands.find(command => command.includes('worktree remove'))!], { env });
   await assert.rejects(lstat(clean), { code: 'ENOENT' });
   assert.match((await git(main, 'branch', '--list', 'alp-clean')).stdout, /alp-clean/);
 });
 
 /** How PowerShell's own parser reads `command`: each statement's command elements as [kind, value]; undefined without pwsh. */
-async function powershellParse(command) {
+async function powershellParse(command: string) {
   const script = [
     '$tokens = $null; $errors = $null',
     '$ast = [System.Management.Automation.Language.Parser]::ParseInput($env:ALP_PS_COMMAND, [ref]$tokens, [ref]$errors)',
@@ -353,7 +361,7 @@ async function powershellParse(command) {
     const { stdout } = await run('pwsh', ['-NoProfile', '-NonInteractive', '-Command', script], { env: { ...process.env, ALP_PS_COMMAND: command } });
     return JSON.parse(stdout);
   } catch (error) {
-    if (error?.code === 'ENOENT') return undefined;
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return undefined;
     throw error;
   }
 }
@@ -371,7 +379,7 @@ test('shellQuote gives a command only for plain ASCII absolute paths, on sh and 
     '/tmp/alp-a\nb', '/tmp/alp-a\rb', '/tmp/alp-a\tb', '/tmp/alp-a\u0007b', '/tmp/alp-a\u007Fb', '/tmp/alp-a\u0085b', '/tmp/alp-a\u2028b', '/tmp/alp-a\u202Eb', '/tmp/alp-a\u200Bb', '/tmp/alp-a\u00A0b', '/tmp/alp-a\uFEFFb',
     '/tmp/alp-Phúc', 'alp-relative', '-rf', '',
   ];
-  for (const text of hostile) for (const platform of ['win32', 'linux', 'darwin']) assert.equal(shellQuote(text, platform), undefined, JSON.stringify([text, platform]));
+  for (const text of hostile) for (const platform of ['win32', 'linux', 'darwin'] as const) assert.equal(shellQuote(text, platform), undefined, JSON.stringify([text, platform]));
   // Where PowerShell is installed (GitHub's Linux runners), its own parser reads each safe command as one command with the path as one literal argument.
   for (const directory of ['C:\\Users\\John Doe\\alp-1', '/tmp/alp-a b/c_d.e-f:1', '\\\\server\\share\\alp-1']) {
     const parsed = await powershellParse(`Remove-Item -LiteralPath ${shellQuote(directory, 'win32')} -Recurse -Force`);
@@ -399,22 +407,22 @@ test('alp doctor gives a clean leftover with a hostile path no command, only its
   const names = ['alp-plain name', ...hostile, 'alp-new\nline'];
   for (const name of names) await run('git', ['clone', '-q', origin, path.join(temp, name)], { env });
   const real = await realpathOf(temp);
-  for (const platform of ['win32', 'linux']) {
+  for (const platform of ['win32', 'linux'] as const) {
     const check = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0, platform });
-    const found = Object.fromEntries(check.leftovers.map(entry => [path.basename(entry.path), entry]));
+    const found = Object.fromEntries(check.leftovers!.map(entry => [path.basename(entry.path), entry]));
     assert.equal(found['alp-plain name'].command, platform === 'win32' ? `Remove-Item -LiteralPath '${real}/alp-plain name' -Recurse -Force` : `rm -rf '${real}/alp-plain name'`);
     for (const name of hostile) {
       assert.deepEqual([found[name].state, found[name].command], ['clean-pushed', undefined], name);
-      assert.match(found[name].reason, /^no command: its path holds characters other than ASCII letters/);
+      assert.match(found[name].reason!, /^no command: its path holds characters other than ASCII letters/);
     }
     // A newline: git's line-by-line answer cannot name it, so it is unknown, with no command either.
     assert.deepEqual([found['alp-new\nline'].state, found['alp-new\nline'].command], ['unknown', undefined]);
     // The text lists those paths as shell comments, one line each, with format characters escaped.
-    assert.ok(check.details.includes(`  # remove by hand after checking (no safe command): ${real}/alp-bidi\\u{202e}txt`), check.details.join('\n'));
-    assert.ok(check.details.includes(`  # remove by hand after checking (no safe command): ${real}/alp-x'; touch pwned; '`));
-    assert.ok(check.details.every(line => !/[\n\u202E]/.test(line)));
+    assert.ok(check.details!.includes(`  # remove by hand after checking (no safe command): ${real}/alp-bidi\\u{202e}txt`), check.details!.join('\n'));
+    assert.ok(check.details!.includes(`  # remove by hand after checking (no safe command): ${real}/alp-x'; touch pwned; '`));
+    assert.ok(check.details!.every(line => !/[\n\u202E]/.test(line)));
     // Pasted into sh as a whole, the listed lines run nothing but the one safe command.
-    const lines = check.details.filter(line => /^ {2}(rm -rf|Remove-Item|#)/.test(line)).map(line => line.trim());
+    const lines = check.details!.filter(line => /^ {2}(rm -rf|Remove-Item|#)/.test(line)).map(line => line.trim());
     assert.equal(lines.length, 6);
     if (platform === 'linux') await run('sh', ['-c', lines.join('\n')], { env, cwd: directory });
   }
@@ -428,7 +436,7 @@ test('alp doctor counts a clone with local tags or refs no remote-tracking ref m
   const temp = path.join(directory, 'tmp');
   await mkdir(temp, { recursive: true });
   const env = { ...process.env, GIT_AUTHOR_NAME: 'ALP', GIT_AUTHOR_EMAIL: 'alp@example.invalid', GIT_COMMITTER_NAME: 'ALP', GIT_COMMITTER_EMAIL: 'alp@example.invalid', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(directory, 'gitconfig') };
-  const git = (cwd, ...args) => run('git', ['-C', cwd, ...args], { env });
+  const git = (cwd: string, ...args: string[]) => run('git', ['-C', cwd, ...args], { env });
   const origin = path.join(directory, 'origin.git');
   const seed = path.join(directory, 'seed');
   await run('git', ['init', '-q', '--bare', '-b', 'main', origin], { env });
@@ -437,7 +445,7 @@ test('alp doctor counts a clone with local tags or refs no remote-tracking ref m
   await git(seed, 'add', '.');
   await git(seed, 'commit', '-qm', 'first');
   await git(seed, 'push', '-q', origin, 'main');
-  const clone = async name => { const target = path.join(temp, name); await run('git', ['clone', '-q', origin, target], { env }); return target; };
+  const clone = async (name: string) => { const target = path.join(temp, name); await run('git', ['clone', '-q', origin, target], { env }); return target; };
   await clone('alp-plain-clone');
   await git(await clone('alp-slash-remote'), 'remote', 'rename', 'origin', 'group/origin');
   // Tags on a commit the remote already has: the commit is pushed, the tag may not be.
@@ -465,8 +473,8 @@ test('alp doctor counts a clone with local tags or refs no remote-tracking ref m
   await git(moved, 'fetch', '-q', 'origin');
   await git(moved, 'tag', '-f', '-a', '-m', 'retagged', 'v-remote', 'HEAD');
   const check = await diskCheck(home, { free: 50 * 1024 ** 3, tempDirs: [temp], env, cwd: directory, recentMs: 0 });
-  const found = Object.fromEntries(check.leftovers.map(entry => [path.basename(entry.path), [entry.state, entry.reason, Boolean(entry.command)]]));
-  const unpushed = ref => ['unpushed', `local refs no remote-tracking ref mirrors: ${ref}`, false];
+  const found = Object.fromEntries(check.leftovers!.map(entry => [path.basename(entry.path), [entry.state, entry.reason, Boolean(entry.command)]]));
+  const unpushed = (ref: string) => ['unpushed', `local refs no remote-tracking ref mirrors: ${ref}`, false];
   assert.deepEqual(found, {
     'alp-plain-clone': ['clean-pushed', undefined, true],
     'alp-slash-remote': ['clean-pushed', undefined, true],
@@ -489,12 +497,13 @@ test('alp doctor stops classifying leftovers at its deadline, even with git comm
   // Keep git pending until doctor returns. A setTimeout(timeoutMs) stub can fire a
   // millisecond early: its failed command is then legitimately classified before the
   // deadline. That tests timer rounding, not doctor's hard deadline.
-  const timeouts = [];
-  const releases = [];
+  const timeouts: number[] = [];
+  const releases: Array<() => void> = [];
   defer(() => { for (const release of releases) release(); });
-  const run = (command, args, { timeoutMs }) => {
+  const run: CommandRunner = (command, args, options) => {
+    const { timeoutMs } = options!;
     if (command !== 'git') return Promise.resolve({ code: 0, stdout: '', stderr: '' });
-    timeouts.push(timeoutMs);
+    timeouts.push(timeoutMs!);
     return new Promise(resolve => releases.push(() => resolve({ code: -1, stdout: '', stderr: 'killed' })));
   };
   const started = Date.now();
@@ -502,7 +511,7 @@ test('alp doctor stops classifying leftovers at its deadline, even with git comm
   const elapsed = Date.now() - started;
   assert.ok(elapsed < 2000, `took ${elapsed} ms`);
   assert.ok(timeouts.length > 0 && timeouts.every(ms => ms <= 300), String(timeouts));
-  assert.equal(check.leftovers.length, 20);
-  assert.ok(check.leftovers.every(entry => entry.state === 'unknown' && /^not checked/.test(entry.reason) && !entry.command));
-  assert.ok(check.details.includes('  20 of the unknown were not checked within 300 ms'));
+  assert.equal(check.leftovers!.length, 20);
+  assert.ok(check.leftovers!.every(entry => entry.state === 'unknown' && /^not checked/.test(entry.reason!) && !entry.command));
+  assert.ok(check.details!.includes('  20 of the unknown were not checked within 300 ms'));
 });

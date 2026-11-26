@@ -2,7 +2,7 @@
 // SHA256SUMS check with Get-FileHash, Unblock-File, app\<version> with the app\current junction,
 // alp.cmd (a running 0.0.1-beta.5/6 alp.exe is renamed aside), the user PATH entry added once, and
 // its refusals. The archive's node.exe is a copy of this Node. Windows only; POSIX uses install.sh.
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
@@ -19,7 +19,10 @@ const ROOT = path.resolve(import.meta.dirname, '../..');
 const INSTALL = path.join(ROOT, 'install.ps1');
 const windows = process.platform === 'win32';
 
-async function temp(t, prefix) {
+type InstallResult = { code: number | string, stdout: string, stderr: string };
+type SavedPath = { has: boolean, value: string, kind: string };
+
+async function temp(t: TestContext, prefix: string) {
   const defer = teardown(t);
   // The long form: the runner's TEMP is an 8.3 short path (RUNNER~1), and the installer writes the long one.
   const directory = realpathSync.native(await mkdtemp(path.join(os.tmpdir(), prefix)));
@@ -32,7 +35,7 @@ async function temp(t, prefix) {
 }
 
 /** A mirror with alp-<version>-windows-x64.zip (the fake bundle), SHA256SUMS and install.ps1. */
-async function mirror(t, versions = ['9.8.7'], tweak = async () => {}) {
+async function mirror(t: TestContext, versions = ['9.8.7'], tweak: (bundle: string, version: string) => Promise<unknown> = async () => {}) {
   const out = await temp(t, 'alp-ps-mirror-');
   for (const version of versions) {
     const bundle = await fakeBundle(await temp(t, 'alp-ps-bundle-'), version, 'windows-x64');
@@ -45,33 +48,33 @@ async function mirror(t, versions = ['9.8.7'], tweak = async () => {}) {
 }
 
 // HKCU\Environment Path, unexpanded, with its registry kind, so a restore puts back exactly what was there.
-const ps = script => execFileSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8' }).trim();
-const readUserPath = () => JSON.parse(ps("$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment'); $has = $k.GetValueNames() -contains 'Path'; @{ has = $has; value = [string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames'); kind = $(if ($has) { [string]$k.GetValueKind('Path') } else { '' }) } | ConvertTo-Json -Compress"));
+const ps = (script: string) => execFileSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8' }).trim();
+const readUserPath = (): SavedPath => JSON.parse(ps("$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment'); $has = $k.GetValueNames() -contains 'Path'; @{ has = $has; value = [string]$k.GetValue('Path', '', 'DoNotExpandEnvironmentNames'); kind = $(if ($has) { [string]$k.GetValueKind('Path') } else { '' }) } | ConvertTo-Json -Compress"));
 const userPath = () => readUserPath().value;
-const restoreUserPath = saved => execFileSync('powershell.exe', ['-NoProfile', '-Command',
+const restoreUserPath = (saved: SavedPath) => execFileSync('powershell.exe', ['-NoProfile', '-Command',
   "$k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment'); if ($env:ALP_TEST_HAS -eq '1') { $k.SetValue('Path', $env:ALP_TEST_PATH, $env:ALP_TEST_KIND) } else { $k.DeleteValue('Path', $false) }; $k.Close()"],
   { env: { ...process.env, ALP_TEST_HAS: saved.has ? '1' : '0', ALP_TEST_PATH: saved.value, ALP_TEST_KIND: saved.kind || 'ExpandString' } });
 
-const installEnv = (localAppData, extraEnv) => ({ ...process.env, LOCALAPPDATA: localAppData, ALP_INSTALL_BASE_URL: '', ALP_INSTALL_VERSION: '', ALP_INSTALL_DIR: '', ALP_INSTALL_ROOT: '', ALP_INSTALL_NO_MODIFY_PATH: '', ALP_INSTALL_MODIFY_PATH: '', ...extraEnv });
+const installEnv = (localAppData: string, extraEnv: Record<string, string>) => ({ ...process.env, LOCALAPPDATA: localAppData, ALP_INSTALL_BASE_URL: '', ALP_INSTALL_VERSION: '', ALP_INSTALL_DIR: '', ALP_INSTALL_ROOT: '', ALP_INSTALL_NO_MODIFY_PATH: '', ALP_INSTALL_MODIFY_PATH: '', ...extraEnv });
 // t-5294.5: how often, and how long, a version stays held after it ran shows in the lane's log.
-const noteWaits = stdout => { for (const line of stdout.match(/^alp-install: .*(is in use; waiting|was released after \d+ ms).*$/gm) ?? []) process.stderr.write(`[install.ps1 waited] ${line}\n`); };
+const noteWaits = (stdout: string) => { for (const line of stdout.match(/^alp-install: .*(is in use; waiting|was released after \d+ ms).*$/gm) ?? []) process.stderr.write(`[install.ps1 waited] ${line}\n`); };
 
 /** Runs install.ps1 with Windows PowerShell 5.1 (as a file), with a private LOCALAPPDATA. */
-function install(args, { localAppData, extraEnv = {} }) {
-  return new Promise(resolve => execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', INSTALL, ...args], {
+function install(args: string[], { localAppData, extraEnv = {} }: { localAppData: string, extraEnv?: Record<string, string> }) {
+  return new Promise<InstallResult>(resolve => execFile('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', INSTALL, ...args], {
     env: installEnv(localAppData, extraEnv), timeout: 120_000,
   }, (error, stdout, stderr) => { noteWaits(stdout); resolve({ code: error ? error.code ?? 1 : 0, stdout, stderr }); }));
 }
 
 /** install(), calling onLine with each line install.ps1 prints as it prints it. */
-function installWatching(args, { localAppData, extraEnv = {} }, onLine) {
-  return new Promise(resolve => {
+function installWatching(args: string[], { localAppData, extraEnv = {} }: { localAppData: string, extraEnv?: Record<string, string> }, onLine: (line: string) => void) {
+  return new Promise<InstallResult>(resolve => {
     const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', INSTALL, ...args], { env: installEnv(localAppData, extraEnv), windowsHide: true });
     let stdout = '', stderr = '', pending = '';
     const timer = setTimeout(() => child.kill(), 120_000);
     child.stdout.setEncoding('utf8').on('data', chunk => {
       stdout += chunk; pending += chunk;
-      const lines = pending.split(/\r?\n/); pending = lines.pop();
+      const lines = pending.split(/\r?\n/); pending = lines.pop()!;
       for (const line of lines) onLine(line);
     });
     child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
@@ -258,8 +261,8 @@ test('install.ps1 documents an environment variable for every option, and reads 
 });
 
 const CLI = path.join('lib', 'node_modules', '@anhlp', 'alp-cli', 'dist', 'cli.js');
-const resolvedCurrent = dir => realpathSync.native(path.join(dir, 'app', 'current')).toLowerCase();
-const version = command => execFileSync(command, ['--version'], { encoding: 'utf8', shell: true }).trim();
+const resolvedCurrent = (dir: string) => realpathSync.native(path.join(dir, 'app', 'current')).toLowerCase();
+const version = (command: string) => execFileSync(command, ['--version'], { encoding: 'utf8', shell: true }).trim();
 
 test('install.ps1: an upgrade refused before any move leaves the previous version current and the alp command running it (t-598d)', { skip: !windows }, async t => {
   const localAppData = await temp(t, 'alp-ps-lad-');

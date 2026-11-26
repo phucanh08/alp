@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -14,12 +14,12 @@ const FIXTURE = fileURLToPath(new URL('../fixtures/architecture-app/', import.me
 const run = promisify(execFile);
 
 /** The checker as an agent or CI runs it: exit code and output. */
-async function check(root, ...args) {
+async function check(root: string, ...args: string[]) {
   try { const { stdout, stderr } = await run(process.execPath, [CHECKER, '--root', root, ...args]); return { code: 0, stdout, stderr }; }
-  catch (error) { return { code: error.code, stdout: error.stdout, stderr: error.stderr }; }
+  catch (error) { const failed = error as { code: number, stdout: string, stderr: string }; return { code: failed.code, stdout: failed.stdout, stderr: failed.stderr }; }
 }
 
-async function project(t) {
+async function project(t: TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-arch-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await cp(FIXTURE, root, { recursive: true });
@@ -27,9 +27,9 @@ async function project(t) {
 }
 
 /** A feature made from the project's boilerplate, as feature-architecture step 4 tells an agent to. */
-async function featureFromTemplate(root, name) {
+async function featureFromTemplate(root: string, name: string) {
   const Name = name[0].toUpperCase() + name.slice(1);
-  const fill = async (template, target) => {
+  const fill = async (template: string, target: string) => {
     const text = (await readFile(path.join(root, 'templates/features/__name__', template), 'utf8')).replaceAll('__Name__', Name).replaceAll('__name__', name);
     await writeFile(path.join(root, target), text);
   };
@@ -69,7 +69,7 @@ test('a dependency against the layering and a forbidden package are reported wit
   assert.match(broken.stdout, /^src\/domain\/invoice\.ts:2 {2}domain -> api \(\.\.\/api\/orders\.js\): domain may import only shared$/m);
   assert.match(broken.stdout, /^src\/domain\/invoice\.ts:3 {2}domain -> express \(express\): domain must not import package express$/m);
   const json = JSON.parse((await check(root, '--json')).stdout);
-  assert.deepEqual(json.violations.map(v => [v.file, v.line, v.from, v.to]), [['src/domain/invoice.ts', 2, 'domain', 'api'], ['src/domain/invoice.ts', 3, 'domain', 'express']]);
+  assert.deepEqual(json.violations.map((v: { file: string, line: number, from: string, to: string }) => [v.file, v.line, v.from, v.to]), [['src/domain/invoice.ts', 2, 'domain', 'api'], ['src/domain/invoice.ts', 3, 'domain', 'express']]);
 });
 
 test('an exception needs a reason and an approver; a recorded one lets the import pass and is listed', async t => {
@@ -117,7 +117,7 @@ test('an exception is narrow and dated: one file, a named import, and it stops e
   await writeFile(path.join(root, 'src/domain/legacy.ts'), "import { postOrder } from '../api/orders.js';\nexport const legacy = postOrder;\n");
   const contractFile = path.join(root, 'docs/architecture/contract.json');
   const contract = JSON.parse(await readFile(contractFile, 'utf8'));
-  const withException = exception => writeFile(contractFile, JSON.stringify({ ...contract, exceptions: [{ reason: 'predates layering', approvedBy: 'main', ...exception }] }));
+  const withException = (exception: Record<string, unknown>) => writeFile(contractFile, JSON.stringify({ ...contract, exceptions: [{ reason: 'predates layering', approvedBy: 'main', ...exception }] }));
   await withException({ file: 'src/domain/*.ts', import: 'src/api/**' });
   assert.match((await check(root)).stderr, /exceptions\[0\]\.file must name one file/);
   await withException({ file: 'src/domain/legacy.ts', import: '**' });
@@ -143,7 +143,7 @@ test('an exception is narrow and dated: one file, a named import, and it stops e
 
 test('with --base, a contract loosened since the base fails until a reviewer is named; tightening passes (P1)', async t => {
   const root = await project(t);
-  const git = (...args) => run('git', ['-C', root, ...args], { env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+  const git = (...args: string[]) => run('git', ['-C', root, ...args], { env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
   await git('init', '-q', '-b', 'main');
   await git('add', '-A');
   await git('commit', '-q', '-m', 'base');
@@ -178,7 +178,7 @@ test('with --base, a contract loosened since the base fails until a reviewer is 
 
 test('as a blocking hook with --base, a loosened contract refuses the handoff (P1)', async t => {
   const root = await project(t);
-  const git = (...args) => run('git', ['-C', root, ...args], { env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+  const git = (...args: string[]) => run('git', ['-C', root, ...args], { env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
   await mkdir(path.join(root, 'tools'));
   await cp(CHECKER, path.join(root, 'tools/check-boundaries.mjs'));
   await git('init', '-q', '-b', 'main');

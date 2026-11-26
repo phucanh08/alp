@@ -1,6 +1,6 @@
 // t-1807: the release archive layout (the ALP bundle), SHA256SUMS, install.sh against a file:// mirror,
 // and the process.execPath lint. The real bundle is smoked by scripts/binary-*smoke*.{mjs,sh} in CI.
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -20,14 +20,14 @@ const INSTALL = path.join(ROOT, 'install.sh');
 const posix = process.platform !== 'win32';
 const PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64'];
 
-async function temp(t, prefix) {
+async function temp(t: TestContext, prefix: string) {
   const directory = await mkdtemp(path.join(os.tmpdir(), prefix));
   t.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }
 
 /** A release mirror: one archive per platform for each version, SHA256SUMS and install.sh. */
-async function mirror(t, versions = ['9.8.7'], options = {}) {
+async function mirror(t: TestContext, versions = ['9.8.7'], options: { nativeDaemon?: string } = {}) {
   const out = await temp(t, 'alp-mirror-');
   for (const version of versions) {
     const work = await temp(t, 'alp-bundles-');
@@ -39,9 +39,9 @@ async function mirror(t, versions = ['9.8.7'], options = {}) {
 }
 
 /** Runs install.sh with a private HOME and a PATH without the install directory. */
-function install(args, { home, shell = '/bin/sh', extraEnv = {}, umask }) {
+function install(args: string[], { home, shell = '/bin/sh', extraEnv = {}, umask }: { home: string, shell?: string, extraEnv?: Record<string, string>, umask?: string }) {
   const command = umask ? ['-c', `umask ${umask} && exec /bin/sh "$0" "$@"`, INSTALL, ...args] : [INSTALL, ...args];
-  return new Promise(resolve => execFile('/bin/sh', command, {
+  return new Promise<{ code: number | string, stdout: string, stderr: string }>(resolve => execFile('/bin/sh', command, {
     env: { HOME: home, SHELL: shell, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}), ...extraEnv }, timeout: 60_000,
   }, (error, stdout, stderr) => resolve({ code: error ? error.code ?? 1 : 0, stdout, stderr })));
 }
@@ -99,7 +99,7 @@ test('install.sh installs the latest release to ~/.alp/app/<version>, links ~/.a
 
 test('install.sh creates a missing ALP home 0700 under a 022 umask, so alpd accepts it; an existing home keeps its mode (t-66a4)', { skip: !posix }, async t => {
   const releases = await mirror(t);
-  const mode = async directory => (await stat(directory)).mode & 0o777;
+  const mode = async (directory: string) => (await stat(directory)).mode & 0o777;
   // A fresh machine: no ~/.alp. alpd's home check must accept what install.sh leaves.
   const home = await temp(t, 'alp-home-');
   const fresh = await install(['--no-modify-path', '--base-url', releases], { home, umask: '022' });
@@ -195,7 +195,7 @@ test('install.sh refuses a corrupted archive, a malformed SHA256SUMS, bad option
   const releases = await mirror(t);
   const home = await temp(t, 'alp-home-');
   const name = (await readFile(path.join(releases, 'SHA256SUMS'), 'utf8')).match(/alp-9\.8\.7-[a-z]+-[a-z0-9]+\.tar\.gz/g);
-  for (const archive of name) await writeFile(path.join(releases, archive), 'corrupted');
+  for (const archive of name!) await writeFile(path.join(releases, archive), 'corrupted');
   const corrupted = await install(['--base-url', releases], { home });
   assert.notEqual(corrupted.code, 0);
   assert.match(corrupted.stderr, /checksum mismatch/);
@@ -222,10 +222,10 @@ test('install.sh refuses a corrupted archive, a malformed SHA256SUMS, bad option
 });
 
 test('the execPath lint catches property and element access and destructuring of process.execPath', () => {
-  const hits = text => {
+  const hits = (text: string) => {
     const source = ts.createSourceFile('x.mjs', text, ts.ScriptTarget.Latest, true);
     let count = 0;
-    (function visit(node) { if (namesExecPath(node)) count++; ts.forEachChild(node, visit); })(source);
+    (function visit(node: ts.Node) { if (namesExecPath(node)) count++; ts.forEachChild(node, visit); })(source);
     return count;
   };
   assert.equal(hits('spawn(process.execPath, [x]);'), 1);
@@ -263,7 +263,7 @@ test('the native alpd (t-81b0.9): Bun targets per platform, Windows excluded, an
   const pins = JSON.parse(await readFile(path.join(ROOT, 'scripts/bun-runtime.json'), 'utf8'));
   assert.equal(pins.version, await pinnedBun(), 'bun-runtime.json and apps/desktop/package.json pin one Bun');
   assert.deepEqual(Object.keys(pins.archives).sort(), [...NATIVE_PLATFORMS].sort());
-  for (const { sha256 } of Object.values(pins.archives)) assert.match(sha256, /^[0-9a-f]{64}$/);
+  for (const { sha256 } of Object.values(pins.archives as Record<string, { sha256: string }>)) assert.match(sha256, /^[0-9a-f]{64}$/);
 });
 
 test('install.sh refuses a bundle whose native alpd cannot run here, unless ALP_NATIVE_DAEMON=0 (t-81b0.9)', { skip: !posix }, async t => {

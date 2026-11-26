@@ -210,7 +210,7 @@ await hello(client, { name: 'web', version });
 |---|---|---|
 | Fake transport | `packages/client/tests/{rpc-client,framing,reconnect,websocket}.test.js` | correlation, notification, frame hỏng, send failure, timeout/abort không gửi hủy, disconnect, cleanup listener/timer, giới hạn pending, request từ daemon, reconnect không resend, stop, backoff |
 | Node IPC | `packages/client/tests/ipc.test.js` với fake alpd trên socket/named pipe; test của alpd, CLI, plugin | qua; kiểm tra quyền socket/thư mục với `connect` và `connectSocket` (Unix; Windows bỏ qua vì ACL pipe) |
-| alpd thật, IPC + WebSocket | `test/integration/client-sdk.test.js`: cùng kịch bản qua IPC, `ws` inject, WebSocket global của Node; cầu nối WS chỉ cho test | qua 5/5 lần: handshake, `daemon.status`, session + event stream, abort cục bộ alpd vẫn nhận, disconnect có close code, reconnect resend 0 frame và cursor liên tục |
+| alpd thật, IPC + WebSocket | `test/integration/client-sdk.test.ts`: cùng kịch bản qua IPC, `ws` inject, WebSocket global của Node; cầu nối WS chỉ cho test | qua 5/5 lần: handshake, `daemon.status`, session + event stream, abort cục bộ alpd vẫn nhận, disconnect có close code, reconnect resend 0 frame và cursor liên tục |
 | Bundle | integration test (esbuild `browser` và `neutral` + `react-native`), `tests/portable-imports.test.js` (đồ thị import) | chỉ 9 module portable; không `node:`, `process.`, `Buffer`, `require(`; bundle `.` cho browser thất bại như mong đợi |
 | Browser thật | `node scripts/client-sdk-smoke.ts browser` (Playwright từ `$ALP_PASEO_SRC`, `ALP_SMOKE_BROWSER` mặc định `chrome`) | Chrome 155 headless: page không có `process`/`Buffer`; handshake, request, stream event, abort, disconnect 4000 đều qua. Chromium 1208 trong cache Playwright local cài thiếu framework nên không chạy được |
 | React Native / Metro | `node scripts/client-sdk-smoke.ts metro` | Metro 0.83.8 resolve và bundle `ios`/`android` qua package exports; bundle chạy trong VM context trần (không `process`, `Buffer`, `require`) với WebSocket double. **Chưa chạy Hermes hay thiết bị**: repo không có `@react-native/babel-preset` và runtime RN. Private class field (`#x`) cần preset RN như mọi app RN |
@@ -246,7 +246,7 @@ principal. Cầu nối WS trong test chỉ chuyển frame và không xác thực
   `description`.
 - `packages/client/src/index.js`: `AlpClient` thành lớp con của `AlpRpcClient`; thêm
   `connectSocket`, `export *` từ `./portable.js`.
-- `test/integration/client-sdk.test.js` (mới, chạy cùng `node scripts/test.ts integration`).
+- `test/integration/client-sdk.test.ts` (mới, chạy cùng `node scripts/test.ts integration`).
 - `scripts/client-sdk-smoke.ts` (mới). Task 04B đang sửa `scripts/tarball-consumer.ts`,
   `scripts/validate.ts`, `scripts/pack-check.ts` và `.github/workflows/ci.yml`; nhánh này
   không đụng các file đó. Đưa `client-sdk-smoke.ts tarball`/`metro` vào CI (và `browser` vào

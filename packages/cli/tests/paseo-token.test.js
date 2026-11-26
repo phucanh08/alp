@@ -10,7 +10,7 @@ import { teardown } from '../../../test/support/teardown.ts';
 /**
  * t-cde5: `alp dashboard pair` gets the Paseo password over the integration's private token socket.
  * That the CLI's path matches the integration's (integrations/paseo/server/web.ts tokenSocketPath)
- * and that it reads a live integration is in test/integration/dashboard-process.test.js: the CLI does
+ * and that it reads a live integration is in test/integration/dashboard-process.test.ts: the CLI does
  * not depend on the Paseo integration package.
  */
 
