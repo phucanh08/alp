@@ -24,7 +24,7 @@ function job(name) {
 
 test('release acceptance checks out Paseo\'s compiler before release-consumer and requires it', () => {
   const lines = job('acceptance');
-  const checkout = lines.findIndex(line => /^\s+run: node scripts\/paseo-checkout\.mjs\s*$/.test(line));
+  const checkout = lines.findIndex(line => /^\s+run: node scripts\/paseo-checkout\.ts\s*$/.test(line));
   const consumer = lines.findIndex(line => /^\s+- run: pnpm run release:consumer\b/.test(line));
   assert.ok(consumer >= 0, 'the acceptance job no longer runs release:consumer');
   assert.ok(checkout >= 0, 'the acceptance job never runs scripts/paseo-checkout.ts: the #111 compile half is skipped on every row');
@@ -48,7 +48,7 @@ function compileWithoutCheckout(t, env) {
 test('with ALP_REQUIRE_PASEO_COMPILER=1 a missing Paseo checkout fails the check', t => {
   const result = compileWithoutCheckout(t, { ALP_REQUIRE_PASEO_COMPILER: '1' });
   assert.equal(result.status, 7, result.stdout + result.stderr);
-  assert.match(result.stderr, /Paseo's plugin compiler is missing at .*run scripts\/paseo-checkout\.mjs first/);
+  assert.match(result.stderr, /Paseo's plugin compiler is missing at .*run scripts\/paseo-checkout\.ts first/);
 });
 
 test('without it a skip is loud: it says the compile was not checked, and warns in GitHub Actions', t => {
