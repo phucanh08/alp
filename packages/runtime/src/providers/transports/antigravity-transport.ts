@@ -686,8 +686,9 @@ export class AntigravityTransport {
       // agy can leave an empty file behind (issue #310): treat empty or whitespace-only as {}.
       if (!text.trim()) text = '{}';
       let config;
-      try { config = JSON.parse(text); } catch (error: any) {
-        throw new Error(`antigravity: MCP configuration ${configFile} is not valid JSON (${error.message}); ` +
+      // The parse message is left out: it can quote the file, which may hold other servers' secrets.
+      try { config = JSON.parse(text); } catch {
+        throw new Error(`antigravity: MCP configuration ${configFile} is not valid JSON; ` +
           'ALP left it unchanged. Fix the JSON, or delete the file (or replace it with {}) and ALP will register its server again.');
       }
       if (!config || typeof config !== 'object' || Array.isArray(config) ||
