@@ -206,3 +206,13 @@ test('every place that names the Windows tar path agrees (t-ffe4.6)', () => {
   assert.equal(systemTar('darwin', {}), 'tar');
   assert.equal(systemTar('linux', { SystemRoot: 'E:\\Win' }), 'tar', 'SystemRoot does not reach a POSIX host');
 });
+
+test('under pnpm run, the npm_config_* variables pnpm sets are removed before npm starts; otherwise nothing is', async () => {
+  const { clearPnpmConfig } = await import('../../scripts/spawn-command.mjs');
+  const env = { npm_config_user_agent: 'pnpm/10.34.9 npm/? node/v22', npm_config_globalconfig: '/x/pnpm/rc', NPM_CONFIG_NODE_LINKER: 'hoisted', npm_execpath: '/x/pnpm.cjs', PATH: '/bin' };
+  assert.deepEqual(clearPnpmConfig(env).sort(), ['NPM_CONFIG_NODE_LINKER', 'npm_config_globalconfig', 'npm_config_user_agent']);
+  assert.deepEqual(env, { npm_execpath: '/x/pnpm.cjs', PATH: '/bin' });
+  const npm = { npm_config_user_agent: 'npm/10.9.0 node/v22', npm_config_cache: '/c' };
+  assert.deepEqual(clearPnpmConfig(npm), []);
+  assert.deepEqual(npm, { npm_config_user_agent: 'npm/10.9.0 node/v22', npm_config_cache: '/c' });
+});

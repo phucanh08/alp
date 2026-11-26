@@ -18,6 +18,23 @@ import path from 'node:path';
 const entries = { npm: 'npm-cli.js', npx: 'npx-cli.js' };
 
 /**
+ * `pnpm run` hands a script its own settings as npm_config_* variables (globalconfig naming pnpm's
+ * rc, node_gyp naming pnpm's copy, node_linker, frozen_lockfile, …). The npm these scripts start as
+ * a consumer would read them as its own config and warn on the unknown ones, on stderr that some
+ * callers parse with stdout. Removed here, once, before any child starts, so npm sees what it saw
+ * under `npm run` or `node scripts/…`. npm_execpath stays: spawnCommand('pnpm') needs it.
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string[]} the removed names
+ */
+export function clearPnpmConfig(env = process.env) {
+  if (!/^pnpm\//.test(env.npm_config_user_agent ?? '')) return [];
+  const removed = Object.keys(env).filter(key => /^npm_config_/i.test(key));
+  for (const key of removed) delete env[key];
+  return removed;
+}
+clearPnpmConfig();
+
+/**
  * Windows' own bsdtar, whatever PATH says.
  *
  * DUPLICATE, deliberately (t-ffe4.6): `systemTar` in packages/cli/src/self-update.ts is the same
