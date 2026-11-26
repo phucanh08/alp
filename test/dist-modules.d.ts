@@ -57,6 +57,7 @@ declare module '*/dist/runtime/index.js' { const m: typeof import('../packages/r
 declare module '*/integrations/paseo/server/dist/index.js' {
   type Server = typeof import('../integrations/paseo/server/index.ts');
   export const createProvider: Server['createProvider'];
+  export const createPaseoBridge: Server['createPaseoBridge'];
   const contribute: Server['default'];
   export default contribute;
 }
@@ -70,3 +71,20 @@ declare module '*/packages/client/dist/mcp-probe.js' { const m: typeof import('.
 declare module '*/packages/client/dist/portable.js' { const m: typeof import('../packages/client/src/portable.ts'); export = m; }
 declare module '*/packages/client/dist/render.js' { const m: typeof import('../packages/client/src/render.ts'); export = m; }
 declare module '*/packages/client/dist/service.js' { const m: typeof import('../packages/client/src/service.ts'); export = m; }
+declare module '*/dist/daemon/index.js' { const m: typeof import('../packages/daemon/src/index.ts'); export = m; }
+declare module '*/integrations/paseo/server/dist/web.js' { const m: typeof import('../integrations/paseo/server/web.ts'); export = m; }
+declare module '*/packages/cli/dist/commands/dashboard/paseo.js' { const m: typeof import('../packages/cli/src/commands/dashboard/paseo.ts'); export = m; }
+declare module '*/packages/client/dist/acp-probe.js' { const m: typeof import('../packages/client/src/acp-probe.ts'); export = m; }
+declare module '*/packages/client/dist/antigravity-probe.js' { const m: typeof import('../packages/client/src/antigravity-probe.ts'); export = m; }
+declare module '*/packages/client/dist/doctor.js' { const m: typeof import('../packages/client/src/doctor.ts'); export = m; }
+declare module '*/packages/client/dist/library-test.js' { const m: typeof import('../packages/client/src/library-test.ts'); export = m; }
+
+// Written by hand: the feature-architecture skill's checker is a JavaScript template copied into user
+// projects, with no TypeScript source to point at. These are the three exports architecture-contract.test.ts
+// calls, as the script's own JSDoc and return statements describe them.
+declare module '*/feature-architecture/scripts/check-boundaries.mjs' {
+  type Violation = { file: string, line: number, from: string, to: string, specifier: string, target: string, rule: string };
+  export function globRegExp(glob: string): RegExp;
+  export function importsOf(text: string): Array<{ specifier: string, line: number }>;
+  export function checkBoundaries(root: string, contractValue: unknown, options?: { today?: Date }): Promise<{ files: number, violations: Violation[], excepted: object[], unusedExceptions: object[] }>;
+}
