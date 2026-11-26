@@ -389,7 +389,7 @@ PASEO_PID=$!
 - Workflow `release-acceptance` (D6, D7). Chỉ dùng fake: không secret, không tốn tiền, không gọi
   provider thật; kết quả luôn là rehearsal, không phải evidence cho R1–R7.
   - job `pack`: clone ở `sha` (phải nằm trên `main`), tạo tag `v0.0.0-beta.1` **chỉ trên runner**
-    (không push; anh push tag ở P5), `pnpm install --frozen-lockfile`, `build:web`, `build:packages`, `release:pack`,
+    (không push; anh push tag ở P5), `pnpm install --frozen-lockfile`, `build:packages`, `release:pack`,
     `release:verify --sha`; upload artifact `alp-release` (90 ngày). Đây là bộ tarball duy nhất của
     release; R1, R2, R5 trên macOS tải đúng artifact này (`gh run download <run> -n alp-release`).
   - `packs_run`: dùng lại artifact của một run trước, không pack lại.
@@ -563,8 +563,7 @@ git -C /tmp/alp-release/src rev-parse HEAD        # phải bằng RELEASE_SHA
 cd /tmp/alp-release/src
 node -v; npm -v                                   # ghi lại; Node 22.12+ hoặc 24
 pnpm install --frozen-lockfile
-pnpm run build:web
-pnpm run build:packages
+pnpm run build:packages                           # gồm cả alp-dashboard (apps/web), không có script build:web riêng
 OUT=/tmp/alp-release/v0.0.0-beta.1                # thư mục mới hoặc rỗng; script không ghi vào thư mục đã có file
 pnpm run release:pack --out "$OUT"
 ```
@@ -862,8 +861,9 @@ Soạn ngày 2026-10-17 (task t-4393.2), trên nhánh `release/beta.2` từ `ori
 
 - Cùng 8 package, cùng dist-tag `beta`, cùng nền tảng và mức hỗ trợ như §2–§4. Mọi manifest (8
   package phát hành và 3 workspace private) ở `0.0.0-beta.2`; dependency nội bộ pin đúng version
-  (`npm run version:package` cho 7 workspace phát hành, root và 3 workspace private sửa tay như
-  T1, rồi `npm install --package-lock-only`). `scripts/beta-acceptance-lib.ts` `VERSION` khi đó
+  (`pnpm run version:package` cho 7 workspace phát hành, root và 3 workspace private sửa tay như
+  T1, rồi `pnpm install --lockfile-only`; lúc phát hành beta.2 repo còn dùng npm: `npm run version:package`
+  và `npm install --package-lock-only`). `scripts/beta-acceptance-lib.ts` `VERSION` khi đó
   còn là hằng số viết thẳng trong script nên phải sửa tay theo. **Nay không còn đúng:** từ t-ffe4.1,
   `releaseVersion()` đọc version từ `package.json` ở root, nên bump version không phải sửa gì trong
   `beta-acceptance-lib.ts` — đừng sửa tay `VERSION` ở đó nữa.
@@ -904,7 +904,7 @@ Lệnh gate local đã chạy trên nhánh release (chưa phải release SHA; ch
 1. **P0.** PR `chore(release): 0.0.0-beta.2` xanh CI và merge vào `main` theo branch protection.
    `RELEASE_SHA` = commit đó trên `main`; `git status` sạch.
 2. **P1–P3 (D6).** Chạy workflow `release-acceptance` ở `sha=$RELEASE_SHA`: job `pack` tạo tag
-   `v0.0.0-beta.2` chỉ trên runner, `pnpm install --frozen-lockfile`, `build:web`, `build:packages`, `release:pack`,
+   `v0.0.0-beta.2` chỉ trên runner, `pnpm install --frozen-lockfile`, `build:packages`, `release:pack`,
    `release:verify --sha`, upload artifact `alp-release`. Tải về đúng artifact này:
    `gh run download <run> -n alp-release -D /tmp/alp-release` (artifact đã chứa thư mục
    `v0.0.0-beta.2/`), rồi `OUT=/tmp/alp-release/v0.0.0-beta.2`; trong `$OUT` kiểm
@@ -912,7 +912,7 @@ Lệnh gate local đã chạy trên nhánh release (chưa phải release SHA; ch
    `git.sha` = `RELEASE_SHA`, `git.dirty` false, `pack.rehearsal` false; khóa thư mục
    (`chmod -R a-w`) và lưu một bản sao.
 3. **P4.** `pnpm run release:gate "$OUT" --init release-evidence-beta2.json` (file **ngoài**
-   `$OUT`); A5 (`release:verify -- "$OUT" --sha "$RELEASE_SHA" --record …`), `release:consumer`,
+   `$OUT`); A5 (`release:verify "$OUT" --sha "$RELEASE_SHA" --record …`), `release:consumer`,
    R1, R2, R5, R7 (harness §6.3, `PACKS=$OUT`), H1–H5 (link CI), L1, S1 vào evidence;
    `pnpm run release:gate "$OUT" release-evidence-beta2.json --phase publish` exit 0.
    Kiểm registry: `npm whoami` = `anhlp`; cả 8 package E404 ở `0.0.0-beta.2`.
