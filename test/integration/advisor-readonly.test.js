@@ -7,8 +7,8 @@ import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { profileFor } from '@anhlp/alp-core/permissions';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
-import { fakeTransport, until } from '../support/fake-agent.js';
-import { teardown } from '../support/teardown.js';
+import { fakeTransport, until } from '../support/fake-agent.ts';
+import { teardown } from '../support/teardown.ts';
 
 /**
  * A custom agent serving as a team's advisor or reviewer is read-only, whatever its name, its

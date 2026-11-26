@@ -3,7 +3,7 @@
 // branch J) on the installed Codex and Claude. It spends a few small real turns per runtime, so it never
 // runs in CI:
 //
-//   node scripts/build-workspace.mjs daemon && ALP_HOME=<scratch> node test/e2e/attachments-real-e2e.mjs codex claude
+//   node scripts/build-workspace.ts daemon && ALP_HOME=<scratch> node test/e2e/attachments-real-e2e.mjs codex claude
 //
 // A real alpd runs on its own temporary ALP_HOME. Per runtime, in a read-only session (the strictest
 // sandbox; nothing is widened): three files are uploaded into alpd's store (random binary with NUL bytes,

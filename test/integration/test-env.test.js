@@ -1,10 +1,10 @@
-// The environment scripts/test-lib.mjs gives a test run (t-bf7f, t-bfbd): no caller session, and with
+// The environment scripts/test-lib.ts gives a test run (t-bf7f, t-bfbd): no caller session, and with
 // privateHome no caller executables or home either.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { CALLER_SESSION_VARIABLES, XDG_BASE_DIRECTORIES, clearCallerSession, hermeticEnv, homelessEnv, isCallerBinary } from '../../scripts/test-lib.mjs';
-import { teardown } from '../support/teardown.js';
+import { CALLER_SESSION_VARIABLES, XDG_BASE_DIRECTORIES, clearCallerSession, hermeticEnv, homelessEnv, isCallerBinary } from '../../scripts/test-lib.ts';
+import { teardown } from '../support/teardown.ts';
 
 /** The POSIX base directories homelessEnv points at the private home, for a deepEqual on its output. */
 const xdg = home => Object.fromEntries(Object.entries(XDG_BASE_DIRECTORIES).map(([name, relative]) => [name, path.join(home, relative)]));
@@ -71,7 +71,7 @@ test('normal runner isolates sessions and permits an unreferenced esbuild servic
     if(process.platform==='win32') assert.equal(process.env.HOMEDRIVE+process.env.HOMEPATH,process.env.USERPROFILE);
     await build({stdin:{contents:'export const value=1'},write:false});
     console.log('scratch='+JSON.stringify([process.env.ALP_HOME,process.env.TMPDIR,process.env.HOME]));`);
-  const runner = new URL('../../scripts/test-lib.mjs',import.meta.url).href;
+  const runner = new URL('../../scripts/test-lib.ts',import.meta.url).href;
   const env = {...process.env,ALP_AGENT_SESSION:'injected-session',ALP_BRIDGE_TOKEN:'injected-token'};
   delete env.NODE_TEST_CONTEXT;
   const output = await promisify(execFile)(process.execPath,['--input-type=module','-e',
@@ -116,7 +116,7 @@ test('hard timeout names the leaking file, returns boundedly, retains scratch an
     import {writeFileSync} from 'node:fs';
     const child=spawn(process.execPath,['-e','setTimeout(()=>{},8000)'],{detached:true,stdio:'inherit'});
     writeFileSync(${JSON.stringify(pidFile)},String(child.pid));child.unref();setInterval(()=>{},50);`);
-  const runner=new URL('../../scripts/test-lib.mjs',import.meta.url).href;
+  const runner=new URL('../../scripts/test-lib.ts',import.meta.url).href;
   // Never the Windows opt-in, whatever the caller has set: its listing may take up to 8 s, past this
   // test's 7 s bound, and this test is about the hard return, not the dump.
   const env={...process.env};delete env.NODE_TEST_CONTEXT;delete env.ALP_WATCHDOG_WIN_PROCS;
@@ -157,7 +157,7 @@ test('a file stopped at the deadline first dumps its subtests, failures, process
       t.after(() => new Promise(resolve => server.close(resolve)));
     });
     test('a later test still passes', () => {});`);
-  const runner = new URL('../../scripts/test-lib.mjs',import.meta.url).href;
+  const runner = new URL('../../scripts/test-lib.ts',import.meta.url).href;
   const env = {...process.env};delete env.NODE_TEST_CONTEXT;
   // The opt-in is SET here, never inherited (t-5294.7): the Windows listing runs only with
   // ALP_WATCHDOG_WIN_PROCS=1, so a suite run that happened to have it set used to flip this test's
@@ -221,10 +221,10 @@ test('abnormal coordinator exit retains all runner scratch', {timeout:15000}, as
   // Target the coordinator itself, independently of which node:test process
   // executes --import on a given Node version. runNodeTests creates its scratch
   // marker before spawning this process, so an abrupt exit must retain it.
-  const watchdog=new URL('../../scripts/test-file-watchdog.mjs',import.meta.url);
+  const watchdog=new URL('../../scripts/test-file-watchdog.ts',import.meta.url);
   const {fileURLToPath}=await import('node:url');
   const preload='data:text/javascript,'+encodeURIComponent(`if(process.argv[1]===${JSON.stringify(fileURLToPath(watchdog))}) process.kill(process.pid,'SIGKILL');`);
-  const runner=new URL('../../scripts/test-lib.mjs',import.meta.url).href;
+  const runner=new URL('../../scripts/test-lib.ts',import.meta.url).href;
   const env={...process.env,NODE_OPTIONS:`--import=${preload}`};delete env.NODE_TEST_CONTEXT;
   const result=await promisify(execFile)(process.execPath,['--input-type=module','-e',
     `import {runNodeTests} from ${JSON.stringify(runner)};process.exitCode=runNodeTests([${JSON.stringify(file)}],{privateHome:true});`],{env,timeout:10000}).catch(error=>error);
@@ -238,10 +238,10 @@ test('abnormal coordinator exit retains all runner scratch', {timeout:15000}, as
 // then announces `principal.agent`, and the user-only guards refuse it. That is correct for an agent
 // doing the user's business — and wrong for a VERIFICATION run, which exists to check what the user's
 // install does. Until this was fixed no agent could finish `npm run validate:core` (it exited 1 at
-// scripts/core-standalone-smoke.mjs:138, where the installed CLI answered "alp web is the user's:
+// scripts/core-standalone-smoke.ts:138, where the installed CLI answered "alp web is the user's:
 // ... this process was started by an ALP agent" instead of the expected "alp web is not built") or
 // `npm run validate:packages` ("Only the user answers a question; this connection was opened by an
-// ALP agent", in tarball-consumer.mjs's installed-plugin regressions). CI never saw it: a GitHub
+// ALP agent", in tarball-consumer.ts's installed-plugin regressions). CI never saw it: a GitHub
 // runner has no ALP and sets no session variable.
 test('clearCallerSession removes exactly the caller session from the live env and reports what it removed', async t => {
   const { execFile } = await import('node:child_process');
@@ -265,7 +265,7 @@ test('clearCallerSession removes exactly the caller session from the live env an
   assert.deepEqual(clearCallerSession(), [], 'nothing left to remove, so nothing is claimed');
 
   // The point of doing it in place: a child spawned with no env of its own is clean too, which is
-  // how scripts/validate.mjs isolates every step it runs.
+  // how scripts/validate.ts isolates every step it runs.
   const child = await promisify(execFile)(process.execPath, ['-p', 'JSON.stringify([process.env.ALP_AGENT_SESSION, process.env.ALP_BRIDGE_TOKEN, process.env.ALP_KEEP_ME])'], { timeout: 20_000 });
   assert.deepEqual(JSON.parse(child.stdout), [null, null, 'kept']);
 });
@@ -279,12 +279,12 @@ test('every verification entry point that drives a user-facing CLI isolates the 
   const ts = (await import('typescript')).default;
   const entries = {
     // The wrapper: its steps spawn without an env of their own, so clearing here covers the lane.
-    'scripts/validate.mjs': 'pnpm run validate:core / :paseo / :packages / :web',
+    'scripts/validate.ts': 'pnpm run validate:core / :paseo / :packages / :web',
     // Also run directly, so each clears for itself rather than trusting the wrapper.
-    'scripts/core-standalone-smoke.mjs': 'pnpm run test:core:standalone',
-    'scripts/tarball-consumer.mjs': 'pnpm run release:tarball-check',
-    'scripts/package-smoke.mjs': 'pnpm run test:packages:smoke',
-    'scripts/binary-smoke.mjs': 'the binary-build CI lane, and by hand on a built bundle',
+    'scripts/core-standalone-smoke.ts': 'pnpm run test:core:standalone',
+    'scripts/tarball-consumer.ts': 'pnpm run release:tarball-check',
+    'scripts/package-smoke.ts': 'pnpm run test:packages:smoke',
+    'scripts/binary-smoke.ts': 'the binary-build CI lane, and by hand on a built bundle',
   };
   const STARTERS = /^(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork|run|npm|pnpm|node)$/;
   const callee = node => { const c = node.expression; return ts.isIdentifier(c) ? c.text : ts.isPropertyAccessExpression(c) ? c.name.text : ''; };
@@ -294,9 +294,9 @@ test('every verification entry point that drives a user-facing CLI isolates the 
    * Where a script clears the caller session, and where it first starts a child process, as indexes
    * into its top-level statements. A function or class DECLARATION only defines something, so a
    * `spawnSync` inside one is not work this file has done yet — which is why reading offsets out of
-   * the text is not enough: scripts/package-smoke.mjs declares its `run()` wrapper above the
+   * the text is not enough: scripts/package-smoke.ts declares its `run()` wrapper above the
    * isolation and calls it below. But a CALL to such a wrapper IS work, and looking only at the
-   * callee's NAME missed it: validate.mjs printed its banner through `commit()`, a local function
+   * callee's NAME missed it: validate.ts printed its banner through `commit()`, a local function
    * that spawns git through an arrow it declares inside itself, and this check reported nothing —
    * `work` came out as 5 instead of 2, so the ordering assertion could never have caught the defect
    * its own comment describes (review finding on t-5294.3). The limit is an imported module that
@@ -315,7 +315,7 @@ test('every verification entry point that drives a user-facing CLI isolates the 
      * Calls in this subtree. `deep` false stops at a function this subtree merely DEFINES (the call
      * has not happened yet); `deep` true is used once a wrapper has been called, because then its
      * whole body runs — including a helper it declares inside itself, which is exactly how
-     * validate.mjs's `commit()` reached git: through a local arrow `git = (...a) => spawnSync(...)`.
+     * validate.ts's `commit()` reached git: through a local arrow `git = (...a) => spawnSync(...)`.
      */
     const calls = (node, visit, deep) => {
       let found = false;
@@ -338,7 +338,7 @@ test('every verification entry point that drives a user-facing CLI isolates the 
     };
   };
 
-  // The shape validate.mjs had at a4093a5: a banner printed through a local `commit()` that spawns
+  // The shape validate.ts had at a4093a5: a banner printed through a local `commit()` that spawns
   // git, BEFORE the clear. The check must report it, or it is not checking anything.
   const old = analyse(`import { clearCallerSession } from './test-lib.mjs';
 function commit() { return spawnSync('git', ['rev-parse', 'HEAD']).stdout.trim(); }
@@ -351,7 +351,7 @@ const cleared = clearCallerSession();`, 'old-validate.mjs');
     const { statements, cleared, work } = analyse(source, relative);
     assert.ok(cleared >= 0, `${relative} (${how}) must clear the caller's ALP session variables at the top level: an agent running it otherwise hits a user-only refusal that has nothing to do with what it checks`);
     // And it must come first. The point is the CHILD's environment, so a clear after the first child
-    // has started changes nothing for that child: validate.mjs printed its banner — two `git` calls —
+    // has started changes nothing for that child: validate.ts printed its banner — two `git` calls —
     // before clearing, until this assertion said so.
     assert.ok(work < 0 || cleared < work,
       `${relative} (${how}) clears the caller session in top-level statement ${cleared}, after statement ${work} already started a child process:\n  ${statements[work].getText().split('\n')[0]}`);
@@ -387,11 +387,11 @@ test('homelessEnv: HOMESHARE and the XDG base directories cannot reach past the 
 });
 
 // t-5294.7 (2): nothing ever ran the Windows opt-in process listing, so its WMI parsing and tree
-// walk were only ever read, never executed. scripts/test-file-watchdog.mjs is an executable script
+// walk were only ever read, never executed. scripts/test-file-watchdog.ts is an executable script
 // (it reads process.argv[2] and finishes with a top-level await), so a test cannot import it; the
 // listing lives in its own module for exactly this reason, with platform, env and capture injected.
 test('the watchdog lists no Windows processes unless ALP_WATCHDOG_WIN_PROCS=1 asks for them (t-5294.7)', async () => {
-  const { processSummary } = await import('../../scripts/test-file-watchdog-processes.mjs');
+  const { processSummary } = await import('../../scripts/test-file-watchdog-processes.ts');
   let called = 0;
   const capture = () => { called++; return Promise.resolve({ stdout: '' }); };
   const lines = await processSummary(1234, { platform: 'win32', env: {}, capture });
@@ -403,7 +403,7 @@ test('the watchdog lists no Windows processes unless ALP_WATCHDOG_WIN_PROCS=1 as
 });
 
 test('the watchdog opt-in lists the file\'s own Windows process tree and nothing else (t-5294.7)', async () => {
-  const { processSummary } = await import('../../scripts/test-file-watchdog-processes.mjs');
+  const { processSummary } = await import('../../scripts/test-file-watchdog-processes.ts');
   // What `Get-CimInstance Win32_Process` prints through the script's format string: pid, ppid,
   // command line, tab separated, CRLF ended. 1234 is the file's process; 5678 and 9012 descend from
   // it (a grandchild); 4 and 777 are unrelated and must not appear. 31 has no parent row at all.
@@ -442,7 +442,7 @@ test('the watchdog opt-in lists the file\'s own Windows process tree and nothing
 test('the watchdog\'s real process listing names a live process and its child once it is given the time (t-5294.7)', { timeout: 60_000 }, async t => {
   const { spawn } = await import('node:child_process');
   const { once } = await import('node:events');
-  const { capture, processSummary } = await import('../../scripts/test-file-watchdog-processes.mjs');
+  const { capture, processSummary } = await import('../../scripts/test-file-watchdog-processes.ts');
   const defer = teardown(t);
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });
   defer(() => child.exitCode !== null || child.signalCode !== null ? undefined : new Promise(resolve => { child.once('exit', resolve); child.kill(); }));
@@ -459,7 +459,7 @@ test('the watchdog\'s real process listing names a live process and its child on
 });
 
 test('the watchdog process capture returns stdout, a bad status and a timeout, and outlives neither (t-5294.7)', async () => {
-  const { capture } = await import('../../scripts/test-file-watchdog-processes.mjs');
+  const { capture } = await import('../../scripts/test-file-watchdog-processes.ts');
   assert.deepEqual(await capture(process.execPath, ['-e', 'process.stdout.write("a\tb\tc")'], 5000), { stdout: 'a\tb\tc' });
   assert.deepEqual(await capture(process.execPath, ['-e', 'process.exit(3)'], 5000), { error: 'status 3' });
   const absent = await capture(path.join(import.meta.dirname, 'no-such-listing-command'), [], 5000);

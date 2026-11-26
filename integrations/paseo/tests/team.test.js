@@ -6,8 +6,8 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { createProvider } from '@anhlp/alp-paseo';
 import { PROVIDER_CAPABILITIES, ProviderEventSchema } from '@getpaseo/plugin/server/provider';
-import { teardown } from '../../../test/support/teardown.js';
-import { literal, templateTitle } from '../../../test/support/template-text.js';
+import { teardown } from '../../../test/support/teardown.ts';
+import { literal, templateTitle } from '../../../test/support/template-text.ts';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 async function until(check) {

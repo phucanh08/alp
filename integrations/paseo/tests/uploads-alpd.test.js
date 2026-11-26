@@ -15,7 +15,7 @@ import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
 import { createUploadReader } from '../server/dist/uploads.js';
 import { createAlpProvider } from '../server/dist/provider-core.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const skip = process.platform === 'win32' && 'attachments are macOS and Linux only';

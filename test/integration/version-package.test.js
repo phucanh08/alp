@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const SCRIPT = fileURLToPath(new URL('../../scripts/version-package.mjs', import.meta.url));
+const SCRIPT = fileURLToPath(new URL('../../scripts/version-package.ts', import.meta.url));
 const json = async file => JSON.parse(await readFile(file, 'utf8'));
 const put = async (file, value) => { await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, `${JSON.stringify(value, null, 2)}\n`); };
 

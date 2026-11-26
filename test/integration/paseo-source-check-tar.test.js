@@ -1,4 +1,4 @@
-// t-ffe4.2: scripts/paseo-source-check.mjs reads the packed plugin's package.json with `tar`.
+// t-ffe4.2: scripts/paseo-source-check.ts reads the packed plugin's package.json with `tar`.
 // Release acceptance runs under `shell: bash`, where Windows puts Git's GNU tar
 // (C:\Program Files\Git\usr\bin) ahead of the system's bsdtar on PATH, and GNU tar reads an
 // archive path such as `D:\a\_temp\…\x.tgz` as a remote `host:file`. That failure was swallowed
@@ -10,7 +10,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { packedManifest } from '../../scripts/paseo-source-check.mjs';
+import { packedManifest } from '../../scripts/paseo-source-check.ts';
 
 /** A gzipped ustar archive of `files` ({ name: content }), built without any tar binary. */
 function tarball(files) {

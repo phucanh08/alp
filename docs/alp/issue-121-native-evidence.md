@@ -427,7 +427,7 @@ Afterwards:
 
 ## Part 2: ALP's implementation on the real runtimes
 
-`node scripts/build-workspace.mjs daemon && node test/e2e/conversation-real-e2e.mjs codex claude` runs a
+`node scripts/build-workspace.ts daemon && node test/e2e/conversation-real-e2e.mjs codex claude` runs a
 real alpd on an isolated `ALP_HOME`, a temporary project with a file no step may change, the installed
 Codex and Claude, small models (default `codex:gpt-6-luna` and `claude:claude-haiku-4-5`;
 `ALP_REAL_CODEX_MODEL`/`ALP_REAL_CLAUDE_MODEL` override them, and the final run below used

@@ -1,4 +1,4 @@
-# The workspaces (they were package.json "workspaces" under npm). scripts/workspaces.mjs reads this list.
+# The workspaces (they were package.json "workspaces" under npm). scripts/workspaces.ts reads this list.
 packages:
   - packages/protocol
   - packages/core

@@ -10,7 +10,7 @@ import { createTask } from '@anhlp/alp-core/tasks';
 import { connect, daemonPaths, ensureDaemon, findDaemonEntry, readLock, PROTOCOL_VERSION } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 async function until(check) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }

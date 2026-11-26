@@ -7,7 +7,7 @@ import WebSocket from 'ws';
 import { AlpRpcClient, hello } from '@anhlp/alp-client/portable';
 import { connectWebSocket } from '@anhlp/alp-client/websocket';
 import { CredentialStore, createCredential, createGateway, createGatewayLogger, resolveConfig } from '../../dist/index.js';
-import { teardown } from '../../../../test/support/teardown.js';
+import { teardown } from '../../../../test/support/teardown.ts';
 
 export const ORIGIN = 'https://app.example';
 

@@ -14,7 +14,7 @@ apps/           standalone applications
   tui/          @anhlp/alp-tui (reserved, private)
 ```
 
-Workspaces are `packages/*` (the six libraries), `integrations/paseo` and `apps/tui`; package names, versions and public exports did not change with the move. Dependencies run one way: `packages/*` never depend on `integrations/*` or `apps/*`, and nothing depends on an integration or an app. `pnpm run check:boundaries` fails on any such edge, on dependencies outside the allowed graph, and on cycles. Update path-based tooling through `scripts/test-lib.mjs` (`workspaceDirectory`) and `scripts/build-workspace.mjs` (`locations`).
+Workspaces are `packages/*` (the six libraries), `integrations/paseo` and `apps/tui`; package names, versions and public exports did not change with the move. Dependencies run one way: `packages/*` never depend on `integrations/*` or `apps/*`, and nothing depends on an integration or an app. `pnpm run check:boundaries` fails on any such edge, on dependencies outside the allowed graph, and on cycles. Update path-based tooling through `scripts/test-lib.ts` (`workspaceDirectory`) and `scripts/build-workspace.ts` (`locations`).
 
 The plugin depends on the daemon only for its embedded mode and for the `alpd` it bundles; every other interaction goes through `@anhlp/alp-client` and `@anhlp/alp-protocol` over IPC. The daemon, runtime, core, client and cli packages do not import it.
 
@@ -83,7 +83,7 @@ pnpm --filter @anhlp/alp-core test # one package, independently
 
 Every run uses an isolated `ALP_HOME`. `pnpm run test:packages` runs each package's own `pnpm test` in turn; it overlaps with `test:unit` and is meant for checking that a package tests on its own. Live `test:e2e:*` scripts require authenticated providers (and sometimes a running Paseo host). `test/integration/layout.test.js` fails when a test file sits outside these directories, is selected twice, or names a package its own package does not depend on.
 
-Every core workspace — protocol, core, runtime, client, daemon and CLI — compiles and tests without a web build; `scripts/build-core.mjs` emits the neutral core bundles and the six core packages' tests never build the plugin. Packing needs only the packages' own builds:
+Every core workspace — protocol, core, runtime, client, daemon and CLI — compiles and tests without a web build; `scripts/build-core.ts` emits the neutral core bundles and the six core packages' tests never build the plugin. Packing needs only the packages' own builds:
 
 ```sh
 pnpm run build:packages

@@ -15,7 +15,7 @@ import { validateResult } from '@anhlp/alp-protocol/contract';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { attachmentLimits, attachmentName, createAttachmentStore, readAttachmentConfig, sniffMimeType } from '@anhlp/alp-daemon/attachments';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const skip = process.platform === 'win32' && 'attachments are not served on Windows (no O_NOFOLLOW, no POSIX modes)';
 const sha = data => createHash('sha256').update(data).digest('hex');

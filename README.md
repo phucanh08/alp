@@ -96,7 +96,7 @@ Tests are split by owner:
 
 `pnpm test` runs unit and integration; `pnpm run test:all` adds E2E. A package test imports only its own package and the packages it declares as dependencies; `pnpm run check:boundaries` and `test/integration/layout.test.js` enforce that. The core packages (protocol, core, runtime, client, daemon, cli) test without installing Paseo.
 
-Runtime tests drive scripted agents from `test/support/fake-agent.js` instead of Codex or Claude: they call ALP tools, report context fill, hand off slowly, crash mid-turn or hit a usage limit on cue. `packages/client/tests/golden.test.js` compares what `alp log`, `alp ps` and `alp task report` print with `packages/client/tests/golden/*.txt`; after checking an intended change, accept it with `ALP_UPDATE_GOLDEN=1 pnpm --filter @anhlp/alp-client test`.
+Runtime tests drive scripted agents from `test/support/fake-agent.ts` instead of Codex or Claude: they call ALP tools, report context fill, hand off slowly, crash mid-turn or hit a usage limit on cue. `packages/client/tests/golden.test.js` compares what `alp log`, `alp ps` and `alp task report` print with `packages/client/tests/golden/*.txt`; after checking an intended change, accept it with `ALP_UPDATE_GOLDEN=1 pnpm --filter @anhlp/alp-client test`.
 
 ## Project files
 

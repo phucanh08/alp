@@ -14,7 +14,7 @@ import { closeWorldAfter } from './support/cleanup.js';
 import { dashboardSettings, startDashboard } from './support/dashboard.js';
 import { connect } from './support/app.js';
 
-const FAKE_ACP = fileURLToPath(new URL('../../../test/support/fake-acp.js', import.meta.url));
+const FAKE_ACP = fileURLToPath(new URL('../../../test/support/fake-acp.ts', import.meta.url));
 
 /** @type {Awaited<ReturnType<typeof startWorld>>} */
 let world;

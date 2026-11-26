@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createWorkspaces } from '../server/dist/paseo/workspaces.js';
 import { directorySuggestions, fileExplorer } from '../server/dist/paseo/files.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const registry = { projects: [{ id: 'p', root: '/registered', addedAt: 'old' }], workspaces: [{ id: 'w', projectId: 'p', directory: '/registered', labels: [], createdAt: 'old' }], sessions: {}, labels: { generation: 'g', seq: 0, catalog: [] } };
 const state = { state: 'repository', branch: 'from-daemon', remoteUrl: 'https://host/repo', dirty: true };

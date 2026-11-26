@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, realpath, rm, symlink, unlink } from 'node:fs/promises'
 import { fakeDaemon } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
 import { DEFAULT_PERMISSIONS } from '../dist/policy.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 test('registry: exact existing grants, filtered pagination/count, explicit projection, opt-in writes and authorize before replay', async t => {
   const defer = teardown(t);

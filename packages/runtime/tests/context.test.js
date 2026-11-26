@@ -6,8 +6,8 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { validateAgentConfig } from '@anhlp/alp-core/validation';
 import { ClaudeTransport, createAlpRuntime } from '@anhlp/alp-runtime';
-import { fakeTransport, until } from '../../../test/support/fake-agent.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
+import { teardown } from '../../../test/support/teardown.ts';
 
 async function project(t) {
   const defer = teardown(t);

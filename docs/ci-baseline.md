@@ -8,7 +8,7 @@ startup error) stops its lane and returns a nonzero exit status.
 | --- | --- |
 | `pnpm run validate:core` / `core` | Source boundaries; core typecheck; daemon + CLI workspace builds and neutral root bundles; artifact boundaries; all six core workspaces' unit tests; clean core-only source build/prepack; isolated six-package and main-distribution tarball installs with CLI/IPC/fake ACP stdio smoke |
 | `pnpm run validate:paseo` / `paseo` | Existing server + client typechecks; workspace/plugin/root builds; Paseo unit tests; all cross-package integration tests |
-| `pnpm run validate:packages` / `packages-and-web` | Pinned checkout of Paseo's plugin compiler (`scripts/paseo-checkout.mjs`); workspace/plugin/root builds; artifact boundaries; packed exports/bins; the release-pack rehearsal (eight tarballs, A5); isolated core and plugin tarball consumers, the plugin compiled by Paseo's own compiler (#111); package/compatibility-root installation smoke; gateway smoke |
+| `pnpm run validate:packages` / `packages-and-web` | Pinned checkout of Paseo's plugin compiler (`scripts/paseo-checkout.ts`); workspace/plugin/root builds; artifact boundaries; packed exports/bins; the release-pack rehearsal (eight tarballs, A5); isolated core and plugin tarball consumers, the plugin compiled by Paseo's own compiler (#111); package/compatibility-root installation smoke; gateway smoke |
 | `pnpm run validate:web` / `alp-dashboard` | apps/web typecheck, unit tests, and Playwright end to end against a real gateway and alpd (Ubuntu and macOS) |
 
 `packages-and-web` keeps its name, a required check, but no longer builds or smokes Paseo's web
@@ -19,7 +19,7 @@ Ubuntu; packaging and browser validation use Node 22. This is not a full OS/Node
 matrix or a publishing workflow.
 
 No required lane invokes `test:e2e`, authenticates a provider, or needs model
-credentials. Tests inject fake transports; standalone core copies `fake-acp.js`
+credentials. Tests inject fake transports; standalone core copies `fake-acp.ts`
 and its driver into a temporary consumer outside the repository, installs only
 the six core tarballs plus Node types, and rejects Paseo/React dependencies. It
 exercises the installed runtime, daemon IPC, disconnect/replay and shutdown.
@@ -28,7 +28,7 @@ The packaging lane needs network access to Paseo's repository (the pinned compil
 Builds precede artifact checks explicitly. `check:boundaries` still supports
 source-only runs before a build; CI uses `--require-artifacts` after building so
 missing/unreadable bundles or manifests fail. The validation lane invokes
-`pack-check.mjs --ignore-scripts` to inspect existing outputs rather than rebuild
+`pack-check.ts --ignore-scripts` to inspect existing outputs rather than rebuild
 through `prepack`. The existing `release:pack-check` and publishing/prepack
 behavior is unchanged. No failure is marked `continue-on-error`, and no
 test is filtered out to obtain a green baseline. Cross-package tests are labeled
@@ -61,7 +61,7 @@ After wiring changes:
 - `npm run validate:packages`: passed; pinned web build/provenance, all 7 public
   package exports/bins, isolated core and real-SDK plugin consumers, and the
   installed CLI/daemon/compatibility-root web integration smoke. The final
-  `pack-check.mjs --ignore-scripts` path also passed independently.
+  `pack-check.ts --ignore-scripts` path also passed independently.
 
 - `node scripts/web-app-smoke.mjs`: passed in Chrome; connected start page and
   ALP plugin registration verified (86 seconds).

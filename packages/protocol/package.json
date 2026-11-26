@@ -103,8 +103,8 @@
   },
   "dependencies": {},
   "scripts": {
-    "build": "node ../../scripts/build-workspace.mjs protocol",
-    "test": "node ../../scripts/test-package.mjs protocol",
+    "build": "node ../../scripts/build-workspace.ts protocol",
+    "test": "node ../../scripts/test-package.ts protocol",
     "prepack": "npm run build",
     "generate": "node scripts/generate.mjs"
   },

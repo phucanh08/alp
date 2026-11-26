@@ -13,8 +13,8 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 
-import { fakeTransport, until, workspace } from '../../../test/support/recovery.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { fakeTransport, until, workspace } from '../../../test/support/recovery.ts';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const ISO = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/;
 const notices = envelopes => envelopes.filter(envelope => envelope.event?.type === 'item' && envelope.event.item.kind === 'notice');

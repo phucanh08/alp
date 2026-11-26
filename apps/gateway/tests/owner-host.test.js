@@ -12,7 +12,7 @@ import { CAPABILITY } from '@anhlp/alp-protocol';
 import { EXPOSURE } from '../dist/index.js';
 import { fakeDaemon } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 /** The host pages' owner methods, and a valid request of each. */
 const HOST = {

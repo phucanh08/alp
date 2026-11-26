@@ -14,7 +14,7 @@ import { EXPOSURE, unclassified } from '../dist/index.js';
 import { hostLabel, projectLibraryContent, promptImageLimits } from '../dist/policy.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway, until } from './support/harness.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 async function world(t, { modes, maxFrame } = {}) {
   const defer = teardown(t);

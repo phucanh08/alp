@@ -15,7 +15,7 @@ import { CONTENT_TYPES, DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, P
 import { reissueCredential, revokeCredential } from '../dist/credentials.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway, until } from './support/harness.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const CAPABILITIES = ['attach.after', 'prompt.receipts', 'prompt.images', 'attachments'];
 const UPLOAD = `upl_${'1'.repeat(32)}`;

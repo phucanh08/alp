@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createWebServer, credentialDir, legacyRelayKeyFile, relayKeyFile, serveToken, tokenFile, tokenSocketPath, webFile } from '@anhlp/alp-paseo/web';
 import { relayKeyPair } from '@anhlp/alp-paseo/paseo/relay';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 /**
  * t-cde5: the Paseo password and the relay's secret key live only in the credential directory

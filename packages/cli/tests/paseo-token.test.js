@@ -5,7 +5,7 @@ import net from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { paseoTokenSocketPath, readPaseoToken } from '../dist/commands/dashboard/paseo.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 /**
  * t-cde5: `alp dashboard pair` gets the Paseo password over the integration's private token socket.

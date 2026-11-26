@@ -11,9 +11,9 @@
  *
  * Nothing touches the user's ~/.alp, alpd or dashboard: HOME, ALP_HOME and TMPDIR are under the test's
  * scratch directory, launchd is never asked, and every Node process the host starts is admitted by
- * test/support/fixture-processes.js. With ALP_DESKTOP_SHOTS=<dir> it saves two screenshots there.
+ * test/support/fixture-processes.ts. With ALP_DESKTOP_SHOTS=<dir> it saves two screenshots there.
  *
- * Needs `node scripts/build-workspace.mjs cli` and the root npm install; `bun run e2e` runs it.
+ * Needs `node scripts/build-workspace.ts cli` and the root npm install; `bun run e2e` runs it.
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,7 +26,7 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { fixtureProcesses } from '../../../test/support/fixture-processes.js';
+import { fixtureProcesses } from '../../../test/support/fixture-processes.ts';
 import { APP, bounded, cleanEnv, connectedTo, freePort, launch, scratch, waitFor } from './support.mjs';
 
 const ROOT = path.resolve(APP, '..', '..');

@@ -1,7 +1,7 @@
 /**
  * The desktop shell end to end (docs/alp/desktop.md): the real Electron app, driven by Playwright's
  * `_electron`, against a disposable alp dashboard host and a fake `alp` (./support.mjs). Run with
- * `bun run e2e` in apps/desktop after building packages/cli (`node scripts/build-workspace.mjs cli`).
+ * `bun run e2e` in apps/desktop after building packages/cli (`node scripts/build-workspace.ts cli`).
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';

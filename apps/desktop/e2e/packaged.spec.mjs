@@ -20,7 +20,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright-core';
 import { appEnv, fakeAlp, freePort, host, noAlpEnv, releaseMirror, scratch, TEST_SWITCHES, waitFor } from './support.mjs';
-import { hermeticEnv } from '../../../scripts/test-lib.mjs';
+import { hermeticEnv } from '../../../scripts/test-lib.ts';
 import { DESKTOP_BUNDLE_ID, readBundleId } from '../../../packages/cli/dist/commands/desktop/index.js';
 
 const run = promisify(execFile);

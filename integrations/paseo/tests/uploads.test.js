@@ -12,7 +12,7 @@ import path from 'node:path';
 import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
 import { createUploadReader, paseoHome } from '../server/dist/uploads.js';
 import { createAlpProvider } from '../server/dist/provider-core.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const posix = process.platform !== 'win32';

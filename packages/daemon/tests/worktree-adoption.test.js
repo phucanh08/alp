@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createRegistry } from '@anhlp/alp-daemon/registry';
 import { createWorkspaceWorktrees } from '@anhlp/alp-daemon/worktrees';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 // t-c1ba: owner-audited adoption of managed worktrees made before birth certification existed.
 const git = (cwd, ...args) =>

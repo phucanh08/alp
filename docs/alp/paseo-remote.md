@@ -66,13 +66,13 @@ Paseo UI ─▶ Paseo daemon ─▶ plugin (remote) ─▶ @anhlp/alp-client/por
 
 ### 3.1 Ranh giới import (gate build)
 
-- `scripts/build-paseo.mjs` build riêng `server/remote/index.ts` thành `server/dist/remote/index.js`
-  với metafile; `assertRemoteInputs` (`scripts/build-manifest.mjs`) làm build **fail** nếu bundle
+- `scripts/build-paseo.ts` build riêng `server/remote/index.ts` thành `server/dist/remote/index.js`
+  với metafile; `assertRemoteInputs` (`scripts/build-manifest.ts`) làm build **fail** nếu bundle
   có input từ `packages/{core,runtime,daemon,cli}`, file client ngoài `portable.js`/`websocket.js`/
   `rpc/`, file local của plugin (`provider`, `mapping`, `index`, `main`, `web`, `tasks`, `library`,
   `usage`, `panel/*` trừ `session-tasks`/`compat`, `paseo/*`), hoặc import `fs`, `child_process`,
   `worker_threads`, `cluster`, `module`, `vm`.
-- `scripts/check-boundaries.mjs`: file trong `server/remote/` không được import trực tiếp các
+- `scripts/check-boundaries.ts`: file trong `server/remote/` không được import trực tiếp các
   package/module trên.
 - Entry plugin mà Paseo nạp (`index.server.ts` → `server/dist/index.js`) vẫn chứa cả code local,
   vì cùng một plugin phục vụ hai chế độ. Ở remote mode `contribute()` trả về trước khi gọi tới code
@@ -145,7 +145,7 @@ Paseo UI ─▶ Paseo daemon ─▶ plugin (remote) ─▶ @anhlp/alp-client/por
 
 | Bộ test | Chạy bằng | Nội dung |
 |---|---|---|
-| `test/integration/paseo-remote.test.js` | `node scripts/test.mjs integration`; lane paseo | 3 process không chung file: alpd (`ALP_HOME` A, **fake Codex**), `alp-gateway serve`, phía Paseo (`dist/remote/index.js` + plugin host giả) chạy với `node --permission --allow-fs-read=<repo> --allow-net`. Probe: đọc A/project và spawn → `ERR_ACCESS_DENIED`. Catalog, create (notice env), prompt + stream, câu hỏi allow/deny, tasks add/list/close, library list/models/language, các RPC unavailable, interrupt → `canceled`, gateway restart giữa turn → `turn.ended` tới đúng một lần bằng replay, alpd restart → prompt tiếp được, không item trùng, mỗi prompt tới provider một lần, không token trong output/log. Credential `read-only`: catalog chỉ có `read-only`, full-access và thư mục ngoài grant bị từ chối |
+| `test/integration/paseo-remote.test.js` | `node scripts/test.ts integration`; lane paseo | 3 process không chung file: alpd (`ALP_HOME` A, **fake Codex**), `alp-gateway serve`, phía Paseo (`dist/remote/index.js` + plugin host giả) chạy với `node --permission --allow-fs-read=<repo> --allow-net`. Probe: đọc A/project và spawn → `ERR_ACCESS_DENIED`. Catalog, create (notice env), prompt + stream, câu hỏi allow/deny, tasks add/list/close, library list/models/language, các RPC unavailable, interrupt → `canceled`, gateway restart giữa turn → `turn.ended` tới đúng một lần bằng replay, alpd restart → prompt tiếp được, không item trùng, mỗi prompt tới provider một lần, không token trong output/log. Credential `read-only`: catalog chỉ có `read-only`, full-access và thư mục ngoài grant bị từ chối |
 | `apps/gateway/tests/*.test.js` | lane core | `workspaceRoots` trong principal; `workflow` theo quy tắc tên |
 | Local/embedded regression | `integrations/paseo/tests/*` (lane paseo) | toàn bộ test cũ của provider/panels chạy trên `provider.ts` mới |
 | Gate build | `pnpm run build` / lane packages | `assertRemoteInputs`, `check-boundaries` |

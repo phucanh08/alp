@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { follow, interruptTurn, Run } from '../../scripts/beta-acceptance-lib.mjs';
+import { follow, interruptTurn, Run } from '../../scripts/beta-acceptance-lib.ts';
 
 // Real child stdout, including multiple envelopes in one chunk, rather than a mocked next().
 async function fixture(t, events, { hold = false, afterInterrupt, resistTermination = false, startupDelay = 0 } = {}) {

@@ -8,7 +8,7 @@ import path from 'node:path';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
 const ago = days => new Date(Date.now() - days * DAY).toISOString();

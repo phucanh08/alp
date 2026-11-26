@@ -11,7 +11,7 @@ import { gzipSync } from 'node:zlib';
 import {
   GATE_PHASES, GATE_ROWS, MANIFEST_FILE, RELEASE_NAMES, RELEASE_PACKAGES, SUMS_FILE, createReleaseManifest, digests, evaluateGate,
   formatSha256Sums, gateTemplate, installedProblems, parseSha256Sums, readTarball, releaseArtifacts, shippedWebProblems, SHIPPED_WEB_FILES, sourceProblems, tarballFilename, verifyRelease,
-} from '../../scripts/release-lib.mjs';
+} from '../../scripts/release-lib.ts';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
 // Synthetic semver: unrelated to any current or published release.
@@ -159,7 +159,7 @@ test('the source check wants exactly the eight packages public, one version, pin
 
 test('this repository passes the release source check at its own version', () => {
   withRelease({}, directory => {
-    const result = spawnSync(process.execPath, ['scripts/release-check.mjs'], { cwd: root, env: fixtureEnv(directory), encoding: 'utf8' });
+    const result = spawnSync(process.execPath, ['scripts/release-check.ts'], { cwd: root, env: fixtureEnv(directory), encoding: 'utf8' });
     assert.equal(result.status, 0, result.stdout + result.stderr);
   });
 });
@@ -236,7 +236,7 @@ test('a dirty, untagged or script-less pack is a rehearsal, never gate evidence'
     assert.deepEqual(rehearsal.problems, []);
     assert.deepEqual(rehearsal.notes, strict);
     assert.equal(releaseArtifacts(directory).length, 8);
-    const cli = spawnSync(process.execPath, ['scripts/release-verify.mjs', directory, '--rehearsal', '--sha', SHA, '--record', path.join(directory, 'evidence.json')], { cwd: root, env: fixtureEnv(directory), encoding: 'utf8' });
+    const cli = spawnSync(process.execPath, ['scripts/release-verify.ts', directory, '--rehearsal', '--sha', SHA, '--record', path.join(directory, 'evidence.json')], { cwd: root, env: fixtureEnv(directory), encoding: 'utf8' });
     assert.notEqual(cli.status, 0);
     assert.match(cli.stderr, /--record needs --sha <RELEASE_SHA> and a non-rehearsal run/);
   });
@@ -245,24 +245,24 @@ test('a dirty, untagged or script-less pack is a rehearsal, never gate evidence'
 test('release-verify and release-gate run on a saved release; the gate stays open until every row has evidence', () => withRelease({}, (directory, manifest) => {
   const evidence = path.join(directory, 'evidence.json');
   const run = (...args) => spawnSync(process.execPath, args, { cwd: root, env: fixtureEnv(directory), encoding: 'utf8' });
-  const verify = run('scripts/release-verify.mjs', directory, '--sha', SHA, '--record', evidence);
+  const verify = run('scripts/release-verify.ts', directory, '--sha', SHA, '--record', evidence);
   assert.equal(verify.status, 0, verify.stdout + verify.stderr);
   assert.match(verify.stdout, /A5 passed: 8 tarballs of 42\.17\.9-fixture\.314/);
   const recorded = JSON.parse(readFileSync(evidence, 'utf8'));
   assert.equal(recorded.rows.A5.status, 'pass');
   assert.equal(recorded.rows.A5.artifacts, manifest.sha256sums);
   assert.equal(recorded.rows.R1.status, 'pending');
-  const gate = run('scripts/release-gate.mjs', directory, evidence);
+  const gate = run('scripts/release-gate.ts', directory, evidence);
   assert.equal(gate.status, 1);
   assert.match(gate.stdout, /PASS  A5/);
   assert.match(gate.stdout, /OPEN  R1 .*status pending/);
   assert.match(gate.stdout, /info  R3  \(not blocking\)/);
   assert.match(gate.stdout, /Gate "publish" NOT passed: 10 blocking row\(s\) open\./);
-  assert.match(run('scripts/release-gate.mjs', directory, '--init', evidence).stderr, /exists; the gate template never overwrites/);
+  assert.match(run('scripts/release-gate.ts', directory, '--init', evidence).stderr, /exists; the gate template never overwrites/);
 
   const file = path.join(directory, tarballFilename('@anhlp/alp-runtime', VERSION));
   writeFileSync(file, Buffer.concat([readFileSync(file), Buffer.from('x')]));
-  const tampered = run('scripts/release-verify.mjs', directory);
+  const tampered = run('scripts/release-verify.ts', directory);
   assert.equal(tampered.status, 1);
   assert.match(tampered.stderr, /A5 FAILED[\s\S]*@anhlp\/alp-runtime/);
 }));

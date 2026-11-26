@@ -14,7 +14,7 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { CAPABILITY } from '@anhlp/alp-protocol';
 import { validateResult } from '@anhlp/alp-protocol/contract';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 /** Agents whose turns complete by themselves, so mail they take counts as taken. */
 function fakeTransport() {

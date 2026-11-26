@@ -24,8 +24,8 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { connect, daemonPaths, readLock } from '@anhlp/alp-client';
 import { diagnose } from '@anhlp/alp-client/doctor';
 
-import { fakeTransport, until as soon, workspace } from '../../../test/support/recovery.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { fakeTransport, until as soon, workspace } from '../../../test/support/recovery.ts';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const ALPD = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
 const FAKE_CODEX = fileURLToPath(new URL('./support/fake-codex.js', import.meta.url));

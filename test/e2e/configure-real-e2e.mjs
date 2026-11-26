@@ -3,7 +3,7 @@
 // branch D) on the installed Codex and Claude. It spends four small real turns per runtime, so it never runs
 // in CI:
 //
-//   node scripts/build-workspace.mjs daemon && ALP_HOME=<scratch> node test/e2e/configure-real-e2e.mjs codex claude
+//   node scripts/build-workspace.ts daemon && ALP_HOME=<scratch> node test/e2e/configure-real-e2e.mjs codex claude
 //
 // A real alpd runs on its own temporary ALP_HOME. Per runtime, on a Phở root with model A: one turn gives
 // codeword ALPHA; a change while a turn runs is refused session_busy and a model of the other runtime

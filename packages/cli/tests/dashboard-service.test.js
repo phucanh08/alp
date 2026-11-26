@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createServer } from 'node:http';
 import { bootId, bootTime } from '@anhlp/alp-client/index';
 import { isServiceClaimed, isDashboardReady, refusal, serviceOwner } from '../dist/dashboard-service.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 test('serviceOwner accepts live integration across clock jumps when bootId matches', async (t) => {
   const defer = teardown(t);

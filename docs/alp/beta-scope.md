@@ -354,10 +354,10 @@ PASEO_PID=$!
 
 | Dòng | Lệnh |
 |---|---|
-| R1 (macOS), R3 (Linux) | `node scripts/beta-acceptance-cli.mjs --packs "$PACKS" --live --provider codex` |
-| R2 (macOS), R4 (Linux) | `node scripts/beta-acceptance-cli.mjs --packs "$PACKS" --live --provider claude` |
-| R5 (macOS), R6 (Linux) | `ALP_HOME=<home mà Paseo dùng> node scripts/beta-acceptance-web.mjs --packs "$PACKS" --live --provider codex` (chạy lại với `claude` cho R5) |
-| R7 | `node scripts/beta-acceptance-r7.mjs --live --sha "$RELEASE_SHA" --model codex:<m> --model claude:<m>`, sau `pnpm install --frozen-lockfile && pnpm run build` ở release SHA |
+| R1 (macOS), R3 (Linux) | `node scripts/beta-acceptance-cli.ts --packs "$PACKS" --live --provider codex` |
+| R2 (macOS), R4 (Linux) | `node scripts/beta-acceptance-cli.ts --packs "$PACKS" --live --provider claude` |
+| R5 (macOS), R6 (Linux) | `ALP_HOME=<home mà Paseo dùng> node scripts/beta-acceptance-web.ts --packs "$PACKS" --live --provider codex` (chạy lại với `claude` cho R5) |
+| R7 | `node scripts/beta-acceptance-r7.ts --live --sha "$RELEASE_SHA" --model codex:<m> --model claude:<m>`, sau `pnpm install --frozen-lockfile && pnpm run build` ở release SHA |
 | Rehearsal, không phải evidence | thay `--live --provider …` bằng `--fake [--provider codex\|claude]` (fake Codex hoặc fake Claude của repo); row luôn có status `rehearsal` |
 | CI (D6, D7): pack, `release:consumer`, rehearsal fake trên macOS, Linux, Windows | workflow `release-acceptance` (`workflow_dispatch`: `sha`, `packs_run`); xem dưới |
 
@@ -446,11 +446,11 @@ Ghi lại các session id và kết quả vào §6.4.
 | W3 | Trong Paseo: tạo session ALP · Phở ở `/tmp/alp-beta/project`, gửi prompt dài, bấm Stop | stream; Stop dừng turn; prompt tiếp theo chạy được |
 | W4 | Dùng profile ở C6 (base `workspace-write`); tạo session Paseo mới với chế độ quyền "Read only" (như `--mode read-only` của C6), rồi gửi "Chạy đúng lệnh: touch w4-once.txt" → Allow once, rồi "touch w4-deny.txt" → Deny | câu hỏi quyền hiện thành question card trong Paseo; `w4-once.txt` có, `w4-deny.txt` không có |
 | W5 | Tasks panel: thêm, đóng, mở lại một task | `.alp/tasks` đổi đúng; panel làm mới |
-| W6 | `alp web --print` (service `alp-web`, không cần plugin); mở địa chỉ trên máy đó (Linux headless: `ssh -L <port>:127.0.0.1:<port> <host>`, mở trên máy mình) | in `http://127.0.0.1:<port>/#token=alpgw1.…`; `GET /` trả app; `POST /v1/tickets` trả 401 khi không có token hoặc token sai, 201 với token đã in (`scripts/beta-acceptance-web.mjs`); trên trình duyệt thấy project và session của W3, hỏi đáp và Tasks hoạt động |
+| W6 | `alp web --print` (service `alp-web`, không cần plugin); mở địa chỉ trên máy đó (Linux headless: `ssh -L <port>:127.0.0.1:<port> <host>`, mở trên máy mình) | in `http://127.0.0.1:<port>/#token=alpgw1.…`; `GET /` trả app; `POST /v1/tickets` trả 401 khi không có token hoặc token sai, 201 với token đã in (`scripts/beta-acceptance-web.ts`); trên trình duyệt thấy project và session của W3, hỏi đáp và Tasks hoạt động |
 
 [Suy luận] Hai điểm chưa được thử: thêm plugin từ `node_modules` của project consumer (để các
 dependency `@anhlp/*` chưa publish được tìm thấy), và `alp web` qua SSH tunnel (host header vẫn là
-`127.0.0.1`). Nếu W1 thất bại, ghi lỗi và thử cách cài của `scripts/tarball-consumer.mjs`. Nếu W6 qua
+`127.0.0.1`). Nếu W1 thất bại, ghi lỗi và thử cách cài của `scripts/tarball-consumer.ts`. Nếu W6 qua
 tunnel thất bại, mở trình duyệt ngay trên máy Linux.
 
 **Worktree thật từ mã nguồn** (R7), trong checkout ở release SHA sau `pnpm install --frozen-lockfile && pnpm run build`:
@@ -493,7 +493,7 @@ pnpm run release:gate "$OUT" --init release-evidence.json
 | R1 | `2230aa5` | khớp | macOS 27 arm64, Node 24.22.0, Codex CLI 0.162.1, `gpt-6.1-sol` | pass (C5 anh xác nhận) | `--unattended`; C5: bị ngắt trước khi có output, câu trả lời đúng |
 | R2 | `2230aa5` | khớp | như R1, Claude Code 2.1.300, `claude-opus-5-5` | pass 10/10 | `--unattended` |
 | R5 | `2230aa5` | khớp | như R1, Paseo 0.11.4 | pass: W1–W6 (Codex, Claude); W5, W6 anh xác nhận; W3 Claude không stream: known issue #107 anh chấp nhận | harness web, W3/W4 qua API Paseo |
-| R7 | `2230aa5` | — (mã nguồn) | như R1 | pass (Codex, Claude) | `beta-acceptance-r7.mjs` |
+| R7 | `2230aa5` | — (mã nguồn) | như R1 | pass (Codex, Claude) | `beta-acceptance-r7.ts` |
 | P4 | `2230aa5` | `SHA256SUMS` = `523cf5cc…b81c` (`shasum -c` OK) | macOS arm64, Node 24.22.0, npm 11.19.1 | pass | `release:gate --phase publish` exit 0; `npm whoami` = `anhlp`; cả 8 package E404 ở `0.0.0-beta.1`; không tên nào bị unpublish |
 | P5 | `2230aa5` | asset tải lại: `shasum -c` OK, giống từng byte | như P4 | **go**, anh quyết định 2026-10-16 | tag `v0.0.0-beta.1` (annotated) đã push, trỏ `2230aa5`; GitHub prerelease ở dạng draft, 8 tarball + `SHA256SUMS` + `release-manifest.json`; T7 hoãn (§10) |
 | Publish (§7.4) | `2230aa5` | `shasum -c` OK trước và sau; dry-run: tên, version, tag `beta`, số file khớp manifest, không có bước build | như P4, không cần OTP | pass 8/8, 2026-10-16 | `npm publish ./<file>.tgz --tag beta --access public`, từng package một; `dist.integrity` trên registry khớp manifest cho cả 8 (bảng dưới) |
@@ -731,7 +731,7 @@ Trạng thái ngày 2026-10-16, ở release SHA `2230aa5`.
 | T10 | Test fake-provider cho câu hỏi quyền trong Paseo (§6.2, hàng duyệt quyền, ý 1) | Có | xong: test đã merge, pass trong `validate:paseo` ở release SHA (H1, H2) |
 | T11 | Sửa F3 (`linkify-it@2.2.0` trong `alp web`); owner anh | Không chặn beta.1; chặn beta.2, hạn 2026-11-15 | xong cho beta.2: patch `paseo-web/patches/0020-ALP-bound-linkify-on-long-messages.patch` (PR #126, `7469721`); D9 = sửa (§11.5) |
 | T13 | Claude stream text vào Paseo/`alp web` (`includePartialMessages`, map `stream_event`) | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16) | Đã triển khai trong source sau beta.2: bật partial messages, stream text theo message ID và đối chiếu từng block hoàn tất từ SDK; kiểm tra replay và SDK giả lập qua public runtime, gồm resume/stop/error. Đã kiểm chứng Claude thật trên Windows 2026-10-19 qua public runtime (45 delta, nội dung khớp final) và giao diện `alp web` bằng Chromium (25 dòng xuất hiện dần trong khi Stop còn hiện; chữ đầu ~1,8 giây, hoàn tất ~5 giây). Chưa kiểm tra ứng dụng Paseo native, chưa phát hành; ghi nhận beta.1/beta.2 bên dưới vẫn là lịch sử. [#107](https://github.com/phucanh08/alp/issues/107) |
-| T14 | `paseo plugin add npm:@anhlp/alp-paseo@beta` cài được: không ship `.d.ts` import type từ peer `@getpaseo/*` (hoặc bỏ hẳn `.d.ts` của plugin); thêm kiểm CI cài plugin như Paseo cài nguồn `npm:` (`--legacy-peer-deps`); rồi bỏ cách tạm khỏi docs | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16); chặn beta.2 | xong: plugin không ship `.d.ts`; `scripts/paseo-source-check.mjs` trong `release:tarball-check`/`validate:packages`; docs dùng `npm:`, cách tạm chỉ còn cho beta.1. Q3 của beta.2 (2026-10-18): `paseo plugin add npm:@anhlp/alp-paseo@beta` cài được; [#111](https://github.com/phucanh08/alp/issues/111) đã đóng |
+| T14 | `paseo plugin add npm:@anhlp/alp-paseo@beta` cài được: không ship `.d.ts` import type từ peer `@getpaseo/*` (hoặc bỏ hẳn `.d.ts` của plugin); thêm kiểm CI cài plugin như Paseo cài nguồn `npm:` (`--legacy-peer-deps`); rồi bỏ cách tạm khỏi docs | Không chặn beta.1 (known issue, anh chấp nhận 2026-10-16); chặn beta.2 | xong: plugin không ship `.d.ts`; `scripts/paseo-source-check.ts` trong `release:tarball-check`/`validate:packages`; docs dùng `npm:`, cách tạm chỉ còn cho beta.1. Q3 của beta.2 (2026-10-18): `paseo plugin add npm:@anhlp/alp-paseo@beta` cài được; [#111](https://github.com/phucanh08/alp/issues/111) đã đóng |
 
 ## 9. Không thuộc tài liệu này
 
@@ -863,10 +863,10 @@ Soạn ngày 2026-10-17 (task t-4393.2), trên nhánh `release/beta.2` từ `ori
 - Cùng 8 package, cùng dist-tag `beta`, cùng nền tảng và mức hỗ trợ như §2–§4. Mọi manifest (8
   package phát hành và 3 workspace private) ở `0.0.0-beta.2`; dependency nội bộ pin đúng version
   (`npm run version:package` cho 7 workspace phát hành, root và 3 workspace private sửa tay như
-  T1, rồi `npm install --package-lock-only`). `scripts/beta-acceptance-lib.mjs` `VERSION` khi đó
+  T1, rồi `npm install --package-lock-only`). `scripts/beta-acceptance-lib.ts` `VERSION` khi đó
   còn là hằng số viết thẳng trong script nên phải sửa tay theo. **Nay không còn đúng:** từ t-ffe4.1,
   `releaseVersion()` đọc version từ `package.json` ở root, nên bump version không phải sửa gì trong
-  `beta-acceptance-lib.mjs` — đừng sửa tay `VERSION` ở đó nữa.
+  `beta-acceptance-lib.ts` — đừng sửa tay `VERSION` ở đó nữa.
 - Thay đổi so với beta.1: PR #113, #123, #124 (danh sách: `beta-release-notes.md`, mục "What
   changed since 0.0.0-beta.1"). Phần vào package phát hành: plugin cài được từ `npm:` (#111,
   T14), bridge Paseo không stream lại cả message, chi tiết tool có kiểu trong Paseo, các RPC
@@ -894,7 +894,7 @@ Như §6.1, §6.4 và §7.1–§7.3, với `0.0.0-beta.2` thay cho `0.0.0-beta.1
 | R1, R2 | macOS, Codex và Claude, CLI C1–C9 trên tarball mới | Có |
 | R5 | macOS, plugin và `alp web`, W1–W6, như beta.1. W1 thêm plugin bằng đường dẫn trong consumer (đã có peer), nên không thử đường `npm:` của Paseo; đường đó do H3 (`paseo-source-check`) kiểm trên tarball và Q3 kiểm trên registry | Có |
 | R3, R4, R6 | Linux, khi có thể (D7) | Không |
-| R7 | `beta-acceptance-r7.mjs` ở release SHA, Codex và Claude, macOS | Có (phần macOS) |
+| R7 | `beta-acceptance-r7.ts` ở release SHA, Codex và Claude, macOS | Có (phần macOS) |
 | T11/F3 | sửa xong, hoặc anh ghi D9 chấp nhận lại (§11.5) — đã sửa (PR #126, D9) | Có, theo §8 |
 
 Lệnh gate local đã chạy trên nhánh release (chưa phải release SHA; chỉ để định hướng): §11.6.
@@ -971,7 +971,7 @@ deprecate khác của T7. Cuối cùng `release:gate … --phase announce` exit 
 | R1 | `1b16b14` | khớp | macOS 27 arm64, Node 24.22.0, Codex CLI 0.162.1, `gpt-6.1-sol` | pass; C5 do lead đọc | `--unattended`: 9 pass, C5 `check`: turn bị hủy 5 giây sau khi bắt đầu, trước khi có output; `alp ps` không còn session chạy; câu trả lời "Mình chưa đếm ra số nào trước khi bị ngắt." đúng (cùng trường hợp anh xác nhận ở beta.1) |
 | R2 | `1b16b14` | khớp | như R1, Claude Code 2.1.300, `claude-opus-5-5` | pass 10/10 | `--unattended` |
 | R5 | `1b16b14` | khớp | như R1, Paseo 0.11.4 chạy **daemon riêng** (xem dưới) | pass: W1–W6 (Codex, Claude); W3 Claude không stream (#107) | W1/W2 harness; W3/W4 qua `paseo` CLI (`run`, `stop`, `send`, `permit allow --input`); W5/W6 qua Chromium headless (Playwright) trên `alp web`, có ảnh chụp; W3–W6 do lead chấm từ log và ảnh |
-| R7 | `1b16b14` | — (mã nguồn) | như R1 | pass (Codex `gpt-6.1-sol`, Claude `claude-opus-5-5`) | `beta-acceptance-r7.mjs --live --sha`, sau `npm ci && npm run build` trong worktree ở release SHA |
+| R7 | `1b16b14` | — (mã nguồn) | như R1 | pass (Codex `gpt-6.1-sol`, Claude `claude-opus-5-5`) | `beta-acceptance-r7.ts --live --sha`, sau `npm ci && npm run build` trong worktree ở release SHA |
 | P4 | `1b16b14` | `SHA256SUMS` = `916f49a9…0364` (`shasum -c` OK) | macOS arm64, Node 24.22.0, npm 11.19.1 | pass | `release:gate --phase publish` exit 0; `npm whoami` = `anhlp`, owner của các tên; cả 8 package E404 ở `0.0.0-beta.2`; trước publish `beta` = `latest` = `0.0.0-beta.1` cả 8 |
 | P5 | `1b16b14` | asset tải lại: `shasum -c` OK, giống từng byte (10/10) | như P4 | go (anh đồng ý publish 2026-10-17) | tag `v0.0.0-beta.2` (annotated `eb2e1bf`) đã push, trỏ `1b16b14`; GitHub prerelease draft, 8 tarball + `SHA256SUMS` + `release-manifest.json` |
 | Publish (§7.4) | `1b16b14` | `shasum -c` OK trước khi publish; dry-run: tên, version, tag `beta`, số file (44, 144, 97, 69, 36, 47, 119, 175) khớp manifest, không có bước build | như P4, không cần OTP | pass 8/8, 2026-10-18 | `npm publish ./<file>.tgz --tag beta --access public`, từng package; `dist.integrity` trên registry khớp manifest cả 8 (bảng dưới) |
@@ -1034,7 +1034,7 @@ Soạn ngày 2026-10-20 (task t-3627), trên nhánh `release/0.0.1-beta.3` từ 
   trợ như §2–§4, trừ Paseo. Mọi manifest (8 package phát hành và 3 workspace private) ở
   `0.0.1-beta.3`, dependency nội bộ pin đúng version (`npm run version:package` cho 7 workspace phát
   hành, root và 3 workspace private sửa tay, rồi `npm install --package-lock-only`; lockfile chỉ đổi
-  chuỗi version). `scripts/beta-acceptance-lib.mjs` `VERSION` khi đó phải sửa tay theo; từ t-ffe4.1
+  chuỗi version). `scripts/beta-acceptance-lib.ts` `VERSION` khi đó phải sửa tay theo; từ t-ffe4.1
   thì không, nó đọc từ `package.json` ở root (xem ghi chú §11.1).
 - **Lý do chính: Paseo 0.12.** Plugin `0.0.0-beta.2` (và cũ hơn) khai `requirements.paseo`
   `>=0.11.1 <0.12.0`; host Paseo 0.12.0 từ chối nạp (`assertPluginCompatibility`). PR #166 (t-e5dc)
@@ -1054,7 +1054,7 @@ Như §11.2, với `0.0.1-beta.3`, release SHA mới và bộ 8 tarball mới pa
 | # | Ở beta.3 | Chặn |
 |---|---|---|
 | H1–H4 | CI ở release SHA; thêm job `paseo-sdk-floor` (Paseo SDK 0.11.1) của #166 | Có |
-| H6 | `paseo-compat` (`check-paseo-compat.mjs --latest`, Paseo mới nhất = 0.12.0) chạy `workflow_dispatch` ở release SHA | Có |
+| H6 | `paseo-compat` (`check-paseo-compat.ts --latest`, Paseo mới nhất = 0.12.0) chạy `workflow_dispatch` ở release SHA | Có |
 | R5 | macOS, W1–W6 (Codex, Claude) trên **Paseo 0.11.4** như beta.2, W3 với Claude phải stream (#107) | Có |
 | R5b | macOS, W1–W3 với một provider trên **Paseo 0.12.0**, daemon Paseo riêng (`PASEO_HOME`, `ALP_HOME`, cổng riêng, §6.3); plugin nạp được, không có lỗi `requires Paseo` | Có |
 
@@ -1087,7 +1087,7 @@ Paseo 0.11.4. Không deprecate `0.0.0-beta.2` (bản tốt với Paseo 0.11.x); 
 | R2 | `18aa65f` | khớp | macOS 27 arm64, Node 24.22.0, Claude Code 2.1.304, `claude-opus-5-5` | pass; C5 lead chạy lại, anh xác nhận | `--unattended` 9/10: C5 fail do race (đếm tới 200 xong trước SIGINT). Chạy lại Ctrl-C trên cùng bản cài với đếm tới 3000: `turn.ended` canceled lúc SIGINT, `alp ps` không còn session chạy, `alp send` được trả lời |
 | R5 | `18aa65f` | khớp | như R2, Paseo 0.11.4 daemon riêng, `ALP_HOME` mới; chỉ Claude (nửa Codex bỏ qua) | pass; W3–W6 lead chấm, anh xác nhận | harness 7/7; W3 Claude **stream** (#107 đã sửa): dòng log 107→375→643→911, Stop ở 932, prompt sau chạy; W4 once chạy / deny bị từ chối; W5 thêm/đóng/mở lại task trong `alp web`; W6 cổng token và hỏi đáp trên web |
 | R5b | `18aa65f` | khớp | như R2, **Paseo 0.12.0** (`@getpaseo/cli` trong prefix riêng), daemon riêng 127.0.0.1:61857, tắt relay, `ALP_HOME` mới | pass; W3 lead chấm, anh xác nhận | W1 `paseo plugin add` (consumer) exit 0, `alp-provider` running, 0 dòng `requires Paseo`; W2 Phở và Cafe; W3 Claude stream (dòng 205→419→675→939→1199→1369), Stop ở 1178, prompt sau trả lời đúng |
-| R7 | `18aa65f` | — (mã nguồn) | như R2, sau `npm ci && npm run build` ở release SHA; chỉ Claude (nửa Codex bỏ qua) | pass | `beta-acceptance-r7.mjs --live --sha`: R7-source pass, R7-claude `worktree-e2e` exit 0 |
+| R7 | `18aa65f` | — (mã nguồn) | như R2, sau `npm ci && npm run build` ở release SHA; chỉ Claude (nửa Codex bỏ qua) | pass | `beta-acceptance-r7.ts --live --sha`: R7-source pass, R7-claude `worktree-e2e` exit 0 |
 | P4 | `18aa65f` | `c6fa00c2…8eee` (`shasum -c` OK) | macOS 27 arm64, Node 24.22.0, npm 11.19.1 | pass, trừ R1 (waived) | `release:gate --phase publish`: mọi dòng chặn pass trừ R1; `npm whoami` = `anhlp`; cả 8 E404 ở `0.0.1-beta.3`; trước publish `beta` = `latest` = `0.0.0-beta.2` cả 8 |
 | P5 | `18aa65f` | asset tải lại: `shasum -c` 8/8 OK, manifest giống từng byte | như P4 | **go**, anh quyết định 2026-10-20 (bỏ qua các dòng Codex) | tag `v0.0.1-beta.3` (annotated `cbb7317`) đã push, trỏ `18aa65f`; GitHub prerelease draft, 8 tarball + `SHA256SUMS` + `release-manifest.json` |
 | Publish (§7.4) | `18aa65f` | `shasum -c` OK trước khi publish; dry-run: tên, version, tag `beta`, số file (44, 144, 97, 69, 36, 47, 120, 175) và integrity khớp manifest, không có bước build | như P4; token granular bypass 2FA (không OTP) | pass 8/8, 2026-10-20 | `npm publish ./<file>.tgz --tag beta --access public`, từng package; `dist.integrity` trên registry khớp manifest cả 8 (bảng dưới). Lần thử đầu 04:04Z dừng ở protocol với `E403 E_STAGE_REQUIRED` (token đầu chỉ được staged publish); không có gì lên registry; anh cấp token khác, chạy lại cùng script từ đầu |

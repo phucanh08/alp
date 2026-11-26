@@ -6,8 +6,8 @@ import path from 'node:path';
 import { DEFAULT_LANGUAGE, languageSetting, setLanguage, userLanguage } from '@anhlp/alp-core/user-settings';
 import { initProject } from '@anhlp/alp-core/init';
 import { CHOICES, createAlpRuntime, isVietnamese, words } from '../../dist/runtime/index.js';
-import { fakeTransport, tree, until } from '../support/fake-agent.js';
-import { teardown } from '../support/teardown.js';
+import { fakeTransport, tree, until } from '../support/fake-agent.ts';
+import { teardown } from '../support/teardown.ts';
 
 /**
  * The user's language (ALPD §54): set in $ALP_HOME/settings.json, Vietnamese when unset.

@@ -12,7 +12,7 @@ bun test test      # unit tests of the pure modules
 bun run typecheck
 bun run build      # dist/main.cjs + dist/pages
 bun run start      # build, then run Electron (ELECTRON_RUN_AS_NODE unset)
-bun run e2e        # Electron e2e; needs the root `pnpm install --frozen-lockfile` and `node scripts/build-workspace.mjs cli`
+bun run e2e        # Electron e2e; needs the root `pnpm install --frozen-lockfile` and `node scripts/build-workspace.ts cli`
 bun run dist       # release/ALP-<version>-arm64.dmg and -x64.dmg: ad-hoc signed, not notarized, not published
 ALP_DESKTOP_DMG=release/ALP-0.0.0-arm64.dmg bun run e2e:packaged   # tests ALP.app from that DMG
 ```

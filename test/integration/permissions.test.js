@@ -11,8 +11,8 @@ import { initProject } from '@anhlp/alp-core/init';
 import { installPack } from '@anhlp/alp-core/packs';
 import { addAllowRule, commandDecision, parseRule, plainCommands, profileFor, simpleCommands, unwrapShell, validatePermissions } from '@anhlp/alp-core/permissions';
 import { claudePermissions, createAlpRuntime, createCopy, reclaimCopies, removeCopy, resolveSession } from '../../dist/runtime/index.js';
-import { teardown } from '../support/teardown.js';
-import { setProfiles } from '../support/fake-agent.js';
+import { teardown } from '../support/teardown.ts';
+import { setProfiles } from '../support/fake-agent.ts';
 
 const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 
@@ -153,13 +153,13 @@ test('a plain allow rule covers only a line of plain words: what bash or zsh rea
 
 test('the plain-word allow table: common commands that stay allowed, and those that now ask (t-cde5 g5)', () => {
   const profile = {
-    allow: ['Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git status:*)', 'Bash(npm test:*)', 'Bash(node scripts/test.mjs:*)', 'Bash(node --test:*)',
+    allow: ['Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git status:*)', 'Bash(npm test:*)', 'Bash(node scripts/test.ts:*)', 'Bash(node --test:*)',
       'Bash(cd:*)', 'Bash(find:*)', 'Bash(grep:*)', 'Bash(tail:*)', 'Bash(echo:*)', 'Bash(ls:*)', 'Bash(cat:*)', 'Bash(git commit:*)'],
     deny: ['Bash(git push:*)'],
   };
   const allowed = ['git diff', 'git diff --stat', 'git diff HEAD~1 -- src/a.js', 'git diff origin/main...HEAD', 'git log --oneline -3', 'git log --format=%h%x09%s -5', 'git log v1..v2',
     'git show --stat HEAD', 'git show HEAD^', 'git show HEAD:packages/core/src/permissions.js', 'git status --short', 'npm test', 'npm test 2>&1 | tail -20', 'npm test >/dev/null 2>&1',
-    'npm test > /dev/null', 'cd pkg && npm test', 'node scripts/test.mjs unit', 'node scripts/test.mjs unit 2>&1', 'node --test test/x.test.js', "find . -name '*.js'", "grep -rn 'a|b' src",
+    'npm test > /dev/null', 'cd pkg && npm test', 'node scripts/test.ts unit', 'node scripts/test.ts unit 2>&1', 'node --test test/x.test.js', "find . -name '*.js'", "grep -rn 'a|b' src",
     'grep -rn "createServer(" src', 'echo "(a)"', "git commit -m 'fix: a $b'", 'git commit -m "Sửa lỗi"', 'git status\nnpm test', "/bin/zsh -lc 'git status'", '/bin/zsh -lc "npm test 2>&1"',
     "/bin/bash -lc 'cd pkg && npm test'", `/bin/zsh -lc 'git log --oneline -3 | tail -1'`];
   for (const command of allowed) assert.equal(commandDecision(profile, command), 'allow', JSON.stringify(command));
@@ -217,15 +217,15 @@ test('Claude enforces deny rules and non-Bash allow rules itself; ALP decides Ba
 
 test('the path hardening leaves plain allowed commands allowed, and stops x/.. from leaving a path rule', () => {
   // Profiles that allow these today (the docs' review profile, and rules a reviewer is commonly given).
-  const review = { allow: ['Bash(npm test:*)', 'Bash(node --test:*)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(node scripts/test.mjs:*)', 'Bash(./gradlew test:*)'], ask: ['Bash(npm install *)'], deny: ['Bash(rm:*)', 'Bash(git push:*)'] };
+  const review = { allow: ['Bash(npm test:*)', 'Bash(node --test:*)', 'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(node scripts/test.ts:*)', 'Bash(./gradlew test:*)'], ask: ['Bash(npm install *)'], deny: ['Bash(rm:*)', 'Bash(git push:*)'] };
   for (const command of ['npm test', 'node --test packages/core/tests/research-pack.test.js', 'git diff', 'git diff HEAD~1 -- src/a.js', 'git diff origin/main...HEAD', 'git log --oneline -5', 'git log v1..v2', 'git show HEAD:packages/core/src/permissions.js',
-    'node scripts/test.mjs unit', 'node scripts/test.mjs unit 2>&1', './gradlew test --info', 'git diff && npm test']) assert.equal(commandDecision(review, command), 'allow', command);
+    'node scripts/test.ts unit', 'node scripts/test.ts unit 2>&1', './gradlew test --info', 'git diff && npm test']) assert.equal(commandDecision(review, command), 'allow', command);
   assert.equal(commandDecision(review, 'npm install left-pad'), 'ask');
   assert.equal(commandDecision(review, 'git push'), 'deny');
   // A rule that names a path covers only paths in normal form.
-  const scoped = { allow: ['Bash(cat /srv/data/*)', 'Bash(node scripts/test.mjs:*)'], deny: [] };
+  const scoped = { allow: ['Bash(cat /srv/data/*)', 'Bash(node scripts/test.ts:*)'], deny: [] };
   assert.equal(commandDecision(scoped, 'cat /srv/data/a.txt'), 'allow');
-  for (const command of ['cat /srv/data/../../etc/passwd', 'cat /srv/data//x', 'cat /srv/data/./x', 'node scripts/test.mjs ../../x', 'node scripts/test.mjs ~/x', 'node scripts/test.mjs --out=../x']) assert.equal(commandDecision(scoped, command), undefined, command);
+  for (const command of ['cat /srv/data/../../etc/passwd', 'cat /srv/data//x', 'cat /srv/data/./x', 'node scripts/test.ts ../../x', 'node scripts/test.ts ~/x', 'node scripts/test.ts --out=../x']) assert.equal(commandDecision(scoped, command), undefined, command);
 });
 
 // t-6dc5 G5-B round 2: the librarian profile the research pack installs, fed to Claude's canUseTool as a session gets it.

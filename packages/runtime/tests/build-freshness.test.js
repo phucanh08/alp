@@ -6,14 +6,14 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-// test-package.mjs builds workspace artifacts, not the legacy root bundles. Check the
+// test-package.ts builds workspace artifacts, not the legacy root bundles. Check the
 // shared helper in an isolated process where root dist is unavailable, even if a
 // developer's checkout happens to contain a previously built bundle.
 test('scripted runtime tests do not depend on root dist bundles', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-runtime-build-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const rootDist = new URL('../../../dist/', import.meta.url).href;
-  const helper = new URL('../../../test/support/fake-agent.js', import.meta.url).href;
+  const helper = new URL('../../../test/support/fake-agent.ts', import.meta.url).href;
   const loader = path.join(directory, 'no-root-dist.mjs');
   await writeFile(loader, `
     export async function resolve(specifier, context, nextResolve) {

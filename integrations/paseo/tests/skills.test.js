@@ -10,7 +10,7 @@ import { resolveAgent } from '@anhlp/alp-core/resolver';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { PaseoAdapter } from '@anhlp/alp-paseo';
 import { skillDescription } from '@anhlp/alp-runtime';
-import { legacyProject } from '../../../test/support/legacy.js';
+import { legacyProject } from '../../../test/support/legacy.ts';
 
 const expected = {
   main: ['architecture-docs', 'bug-loop', 'compact', 'curate', 'feature-architecture', 'goal-griller', 'prompt-leverage', 'release-readiness', 'safe-refactor', 'security-review', 'sequence-execution-plan', 'skill-authoring', 'smart-commits', 'test-strategy', 'xia'],

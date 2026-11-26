@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { initProject } from '@anhlp/alp-core/init';
 import { upgradeProject } from '@anhlp/alp-core/upgrade';
 import { agentSources, libraryEntries, resolveAgent } from '@anhlp/alp-core/resolver';
-import { legacyProject } from '../../../test/support/legacy.js';
+import { legacyProject } from '../../../test/support/legacy.ts';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-library-'));

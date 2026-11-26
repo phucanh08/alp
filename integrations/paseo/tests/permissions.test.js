@@ -9,7 +9,7 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { createProvider } from '@anhlp/alp-paseo';
 import { PROVIDER_CAPABILITIES, ProviderEventSchema } from '@getpaseo/plugin/server/provider';
-import { fakeTransport, until } from '../../../test/support/fake-agent.js';
+import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
 
 // The C6 profile of beta-scope §6.3, on main.
 const PROFILE = { profiles: { review: { base: 'read-only', ask: ['Bash(git push *)'], beyondMode: 'ask' } }, agents: { main: 'review' } };

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 // session.compact rewrites the user's conversation context, so an ALP agent's connection is refused (t-de1a review).
 async function connectAs(socket, agent) {

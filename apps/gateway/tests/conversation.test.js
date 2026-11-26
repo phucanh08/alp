@@ -15,7 +15,7 @@ import { DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, PERMISSIONS, pro
 import { credentialsFile, renameWithRetry } from '../dist/credentials.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway, until } from './support/harness.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const CAPABILITIES = ['attach.after', 'prompt.receipts', 'workspace.registry', 'session.history', 'session.fork', 'session.rewind'];
 const GEN = '0123456789abcdef0123456789abcdef';

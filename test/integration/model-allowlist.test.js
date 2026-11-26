@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
-import { fakeTransport, until } from '../support/fake-agent.js';
-import { teardown } from '../support/teardown.js';
+import { fakeTransport, until } from '../support/fake-agent.ts';
+import { teardown } from '../support/teardown.ts';
 
 /**
  * A target's model profiles are its allowlist, for one profile as for several (P2 of

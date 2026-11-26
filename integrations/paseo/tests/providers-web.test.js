@@ -10,14 +10,14 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { createWebServer } from '@anhlp/alp-paseo';
 import { createPaseoBridge } from '@anhlp/alp-paseo';
-import { fakeTransport } from '../../../test/support/fake-agent.js';
+import { fakeTransport } from '../../../test/support/fake-agent.ts';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { saveEntry } from '@anhlp/alp-core/library-edit';
 import { loadProvider } from '@anhlp/alp-core/providers';
 import { initProject } from '@anhlp/alp-core/init';
 import { resolveSession, ModelCatalog } from '@anhlp/alp-runtime';
 
-const FAKE = fileURLToPath(new URL('../../../test/support/fake-acp.js', import.meta.url));
+const FAKE = fileURLToPath(new URL('../../../test/support/fake-acp.ts', import.meta.url));
 
 /** alpd with its web socket, and an app past hello whose frames must pass Paseo's validator. */
 async function setup(t, { modelCatalog } = {}) {
@@ -187,7 +187,7 @@ test('default provider switches persist and disabled providers cannot open sessi
 test('Antigravity supports partial provider edits and can be disabled', async t => {
   const { home, ask } = await setup(t);
   const added = await ask({ type: 'set_daemon_config_request', config: { providers: { antigravity: {
-    extends: 'antigravity', command: [process.execPath, fileURLToPath(new URL('../../../test/support/fake-agy.js', import.meta.url))],
+    extends: 'antigravity', command: [process.execPath, fileURLToPath(new URL('../../../test/support/fake-agy.ts', import.meta.url))],
   } } } });
   assert.equal(added.type, 'set_daemon_config_response');
   const changed = await ask({ type: 'set_daemon_config_request', config: { providers: { antigravity: { enabled: false, label: 'AGY local' } } } });

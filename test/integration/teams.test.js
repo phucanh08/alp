@@ -10,12 +10,12 @@ import { listTeams, resolveTeam } from '@anhlp/alp-core/teams';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createProvider } from '../../integrations/paseo/server/dist/index.js';
 import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
-import { teardown } from '../support/teardown.js';
-import { templateText } from '../support/template-text.js';
+import { teardown } from '../support/teardown.ts';
+import { templateText } from '../support/template-text.ts';
 
 // The user library is $ALP_HOME (default ~/.alp), read when a session resolves its team and
 // providers. Give this file an empty library of its own, so it never reads the user's real one
-// whether or not a runner (scripts/test.mjs) already isolated ALP_HOME.
+// whether or not a runner (scripts/test.ts) already isolated ALP_HOME.
 const previousHome = process.env.ALP_HOME;
 let isolatedHome;
 before(async () => { isolatedHome = await mkdtemp(path.join(tmpdir(), 'alp-teams-home-')); process.env.ALP_HOME = isolatedHome; });

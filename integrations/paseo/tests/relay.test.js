@@ -13,8 +13,8 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { createWebServer } from '@anhlp/alp-paseo';
 import { createPaseoBridge } from '@anhlp/alp-paseo';
-import { fakeTransport, until } from '../../../test/support/fake-agent.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
+import { teardown } from '../../../test/support/teardown.ts';
 
 /**
  * A relay as Paseo's (protocol v2) behaves: the daemon's control socket hears which devices

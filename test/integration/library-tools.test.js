@@ -11,9 +11,9 @@ import { runHook } from '@anhlp/alp-core/hook-run';
 import { probeMcp } from '../../packages/client/dist/mcp-probe.js';
 import { saveEntry } from '@anhlp/alp-core/library-edit';
 import contribute from '../../integrations/paseo/server/dist/index.js';
-import { teardown } from '../support/teardown.js';
+import { teardown } from '../support/teardown.ts';
 
-const fakeMcp = fileURLToPath(new URL('../support/fake-mcp.js', import.meta.url));
+const fakeMcp = fileURLToPath(new URL('../support/fake-mcp.ts', import.meta.url));
 const cli = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 
 async function fixture(t) {

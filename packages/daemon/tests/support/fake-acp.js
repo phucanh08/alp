@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// A stand-in ACP agent (Agent Client Protocol over stdio) for the bundle smoke (scripts/binary-smoke.mjs,
+// A stand-in ACP agent (Agent Client Protocol over stdio) for the bundle smoke (scripts/binary-smoke.ts,
 // t-81b0.9). On session/new it starts the MCP bridge alpd hands it (the `node -e` bridge, so this proves
 // the native alpd names a Node that evaluates it), asks it for alpd's tools, and on each prompt answers
 // with what it found: `bridge <command> tools <names>`, or `bridge failed: <reason>`.

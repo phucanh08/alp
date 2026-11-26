@@ -13,8 +13,8 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { follow, userTurnAnswers } from '../../scripts/beta-acceptance-lib.mjs';
-import { teardown } from '../support/teardown.js';
+import { follow, userTurnAnswers } from '../../scripts/beta-acceptance-lib.ts';
+import { teardown } from '../support/teardown.ts';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const ALP = path.join(ROOT, 'packages/cli/dist/cli.js');

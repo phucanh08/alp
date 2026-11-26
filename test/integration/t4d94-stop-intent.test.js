@@ -10,7 +10,7 @@ import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { initProject } from '@anhlp/alp-core/init';
 import { createReconnectingClient } from '@anhlp/alp-client/portable';
 import { Controller } from '../../apps/web/dist-lib/controller.js';
-import { fakeTransport } from '../support/fake-agent.js';
+import { fakeTransport } from '../support/fake-agent.ts';
 
 async function until(check, message) {
   for (let i = 0; i < 600; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }

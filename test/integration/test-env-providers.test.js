@@ -1,5 +1,5 @@
 // A test run never reaches the caller's AI providers (t-a87f). On a developer's machine agy, codex,
-// claude and opencode are installed and logged in; scripts/test-lib.mjs gives every run a private
+// claude and opencode are installed and logged in; scripts/test-lib.ts gives every run a private
 // home, provider executables pinned to a missing path and a PATH without provider commands. Every
 // "provider" here is a RECORDING FAKE in a scratch directory that only appends its own argv to a
 // log: nothing real is started, and no path under the real home is used.
@@ -10,8 +10,8 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { PINNED_PROVIDER_VARIABLES, PROVIDER_COMMANDS, providerFreePath } from '../../scripts/test-lib.mjs';
-import { teardown } from '../support/teardown.js';
+import { PINNED_PROVIDER_VARIABLES, PROVIDER_COMMANDS, providerFreePath } from '../../scripts/test-lib.ts';
+import { teardown } from '../support/teardown.ts';
 
 const posix = process.platform !== 'win32';
 
@@ -104,7 +104,7 @@ test('the run environment reaches no provider', () => {
   assert.equal(spawnSync('sh', ['-c', 'exit 0']).status, 0);
 });
 `);
-  const runner = new URL('../../scripts/test-lib.mjs', import.meta.url).href;
+  const runner = new URL('../../scripts/test-lib.ts', import.meta.url).href;
   const env = { ...process.env, PATH: `${fakes}${path.delimiter}${process.env.PATH}`, HOME: callerHome,
     ALP_CODEX_BIN: path.join(fakes, 'codex'), ALP_CLAUDE_BIN: path.join(fakes, 'claude'), ALP_ANTIGRAVITY_BIN: path.join(fakes, 'agy') };
   delete env.NODE_TEST_CONTEXT;

@@ -9,7 +9,7 @@ import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime, ModelCatalog } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { validateResult } from '@anhlp/alp-protocol/contract';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const transport = () => () => ({ async initialize() {}, onNotification() {}, onFailure() {}, onRequest() {}, async close() {}, async request() { return {}; } });
 
@@ -131,7 +131,7 @@ test('production daemon catalog wiring isolates malformed providers, exposes err
   await writeFile(providerFile, JSON.stringify(native));
   await writeFile(path.join(home, 'providers/bad.json'), '{bad');
   await writeFile(path.join(home, 'providers/good.json'), JSON.stringify({ kind: 'acp', command: process.execPath,
-    args: [fileURLToPath(new URL('../../../test/support/fake-acp.js', import.meta.url))], env: { FAKE_ACP_LOG: log, FAKE_ACP_MODELS: 'current' } }));
+    args: [fileURLToPath(new URL('../../../test/support/fake-acp.ts', import.meta.url))], env: { FAKE_ACP_LOG: log, FAKE_ACP_MODELS: 'current' } }));
   const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/alpd.js', import.meta.url))], {
     cwd: directory, env: { ...process.env, ALP_HOME: home, ALP_MODEL_CATALOG: 'live', ALP_CODEX_BIN: path.join(directory, 'missing-codex'), ALP_CLAUDE_BIN: path.join(directory, 'missing-claude') }, stdio: ['ignore', 'pipe', 'pipe'],
   });

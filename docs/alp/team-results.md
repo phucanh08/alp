@@ -21,7 +21,7 @@ execution through the Paseo provider's Codex adapter.
 
 ## Commands and artifacts
 
-- `node scripts/build-paseo.mjs`
+- `node scripts/build-paseo.ts`
 - `node --test` — 51/51 passed.
 - `node node_modules/typescript/bin/tsc -p tsconfig.paseo.json` — passed.
 - Node 24: `node test/e2e/team-e2e.mjs` — passed on isolated Paseo at 127.0.0.1:16767.

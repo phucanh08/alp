@@ -83,7 +83,7 @@ test('security: claude sandbox floors do not grant broad host socket access', as
 test('security: Bash allow rules reach canUseTool; every role keeps the outcome it had', async () => {
   const root = path.join(os.tmpdir(), 'alp-test-repo-root');
   const bash = (gate, command, leave = false) => gate.canUseTool('Bash', { command, ...(leave ? { dangerouslyDisableSandbox: true } : {}) }).then(result => result.behavior);
-  const verify = ['git diff', 'git diff HEAD~1 --stat', 'git log --oneline -5', 'git show HEAD:package.json', 'node scripts/test.mjs unit'];
+  const verify = ['git diff', 'git diff HEAD~1 --stat', 'git log --oneline -5', 'git show HEAD:package.json', 'node scripts/test.ts unit'];
 
   // Reviewer, its default profile (read-only, no rules) under the read-only floor: its checks run in the sandbox, as before.
   const reviewer = claudePermissions('read-only', () => 'read-only', { allow: [], ask: [], deny: [], beyondMode: 'refuse', floor: 'read-only', floorRoot: root });
@@ -93,12 +93,12 @@ test('security: Bash allow rules reach canUseTool; every role keeps the outcome 
   for (const command of verify) assert.equal(await bash(reviewer, command, true), 'deny', command);
 
   // A reviewer given allow rules (the docs' review profile): what they cover runs, in the sandbox or out of it.
-  const review = { allow: ['Bash(npm test:*)', 'Bash(node --test:*)', 'Bash(node scripts/test.mjs:*)', 'Bash(git diff:*)'], ask: ['Bash(npm install *)'], deny: ['Bash(rm:*)', 'Bash(git push:*)'], beyondMode: 'refuse' };
+  const review = { allow: ['Bash(npm test:*)', 'Bash(node --test:*)', 'Bash(node scripts/test.ts:*)', 'Bash(git diff:*)'], ask: ['Bash(npm install *)'], deny: ['Bash(rm:*)', 'Bash(git push:*)'], beyondMode: 'refuse' };
   const reviewing = claudePermissions('read-only', () => 'read-only', { ...review, floor: 'read-only', floorRoot: root });
   assert.equal(reviewing.allowedTools, undefined, 'no Bash allow rule goes to Claude');
   // The user's deny rules stay native, followed (a read-only session, t-cde5) by the Paseo credentials' denials.
   assert.deepEqual(reviewing.disallowedTools.filter(rule => rule.startsWith('Bash(')), ['Bash(rm:*)', 'Bash(git push:*)'], 'deny rules stay native');
-  for (const command of ['npm test', 'node scripts/test.mjs unit', 'git diff --stat']) {
+  for (const command of ['npm test', 'node scripts/test.ts unit', 'git diff --stat']) {
     assert.equal(await bash(reviewing, command), 'allow', command);
     assert.equal(await bash(reviewing, command, true), 'allow', `${command} outside the sandbox`);
   }

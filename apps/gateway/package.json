@@ -58,8 +58,8 @@
     "ws": "^8.22.0"
   },
   "scripts": {
-    "build": "node ../../scripts/build-workspace.mjs gateway",
-    "test": "node ../../scripts/test-package.mjs gateway",
+    "build": "node ../../scripts/build-workspace.ts gateway",
+    "test": "node ../../scripts/test-package.ts gateway",
     "prepack": "npm run build"
   },
   "publishConfig": {

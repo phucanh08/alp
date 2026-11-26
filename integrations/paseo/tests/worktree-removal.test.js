@@ -9,7 +9,7 @@ import { createDaemonServer } from '@anhlp/alp-daemon';
 import { createWorkspaces } from '@anhlp/alp-paseo/paseo/workspaces';
 import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary } from '@anhlp/alp-core/library';
-import { fakeTransport } from '../../../test/support/fake-agent.js';
+import { fakeTransport } from '../../../test/support/fake-agent.ts';
 import { SessionInboundMessageSchema, SessionOutboundMessageSchema } from '@getpaseo/protocol/messages';
 
 async function fixture(t) {

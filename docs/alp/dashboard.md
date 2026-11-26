@@ -300,7 +300,7 @@ Test: `test/integration/dashboard-process.test.js` (hai test `t-81b0.4`: định
 - `tests/boundary.test.js` chứng minh hai điều:
   - một import bắc cầu sang `@anhlp/alp-client` (entry Node) làm build thất bại;
   - bundle của app chỉ chứa các module SDK được phép.
-- `scripts/check-boundaries.mjs` khai báo `@anhlp/alp-web` → `alp-client`, `alp-protocol`.
+- `scripts/check-boundaries.ts` khai báo `@anhlp/alp-web` → `alp-client`, `alp-protocol`.
 
 ### 4.2 Credential và dữ liệu
 
@@ -804,7 +804,7 @@ Commit implementation `739ebc0` (nhánh `feat/alp-web`), macOS, Node 26 cục b�
 |---|---|
 | `npm run validate:web` | tsc sạch; unit 43/43; build web (boundary chỉ gồm SDK portable/websocket, rpc/*, protocol public/wire); Playwright 9/9 |
 | `npm run validate:core` | xanh (gate cũ không đổi) |
-| `node scripts/check-boundaries.mjs` | 10 workspace boundary, không có cycle |
+| `node scripts/check-boundaries.ts` | 10 workspace boundary, không có cycle |
 
 - Mọi E2E dùng fake Codex. Chưa chạy smoke với provider thật (§8).
 - Ảnh desktop và mobile: đính kèm PR.

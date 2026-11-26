@@ -10,7 +10,7 @@ import { PROTOCOL_VERSION, ERROR, encodeFrame } from '@anhlp/alp-protocol';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { connect, daemonPaths } from '@anhlp/alp-client';
-import { fakeTransport } from '../../../test/support/fake-agent.js';
+import { fakeTransport } from '../../../test/support/fake-agent.ts';
 
 /**
  * Extension RPC over the real socket (ALPD §3, §14): one connection owns a method with

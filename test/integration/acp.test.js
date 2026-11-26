@@ -10,9 +10,9 @@ import { testEntry } from '../../packages/client/dist/library-test.js';
 import { diagnose } from '../../packages/client/dist/doctor.js';
 import { ModelCatalog, acpDecision, acpPermission, createAlpRuntime, setActiveCatalog } from '../../dist/runtime/index.js';
 import { listProviders } from '@anhlp/alp-core/providers';
-import { literal, templateBodySentence, templateIndexDescription } from '../support/template-text.js';
+import { literal, templateBodySentence, templateIndexDescription } from '../support/template-text.ts';
 
-const FAKE = fileURLToPath(new URL('../support/fake-acp.js', import.meta.url));
+const FAKE = fileURLToPath(new URL('../support/fake-acp.ts', import.meta.url));
 
 async function until(check, what = 'Expected condition') {
   for (let i = 0; i < 1000; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }

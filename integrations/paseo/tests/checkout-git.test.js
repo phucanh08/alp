@@ -11,7 +11,7 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { createWebServer, createPaseoBridge } from '@anhlp/alp-paseo';
 import { seedLibrary } from '@anhlp/alp-core/library';
-import { fakeTransport } from '../../../test/support/fake-agent.js';
+import { fakeTransport } from '../../../test/support/fake-agent.ts';
 
 /**
  * The Paseo checkout panels over alpd's workspace.git (issue #121, G1): the bridge runs no Git of

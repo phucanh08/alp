@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { createAlpRuntime, nativeCommandRefusal } from '@anhlp/alp-runtime';
-import { fakeTransport, until } from '../../../test/support/fake-agent.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const text = value => [{ type: 'text', text: value }];
 

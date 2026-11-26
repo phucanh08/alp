@@ -9,10 +9,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import ts from 'typescript';
-import { archiveName, pack, sums } from '../../scripts/package-binary.mjs';
-import { namesExecPath } from '../../scripts/execpath-lint.mjs';
-import { spawnCommand } from '../../scripts/spawn-command.mjs';
-import { fakeBundle } from '../support/fake-bundle.mjs';
+import { archiveName, pack, sums } from '../../scripts/package-binary.ts';
+import { namesExecPath } from '../../scripts/execpath-lint.ts';
+import { spawnCommand } from '../../scripts/spawn-command.ts';
+import { fakeBundle } from '../support/fake-bundle.ts';
 import { assertPrivateDirectory } from '../../packages/client/dist/index.js';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
@@ -238,7 +238,7 @@ test('the execPath lint catches property and element access and destructuring of
 });
 
 test('build-bundle pins exactly the third-party packages the lockfile holds at one version', async () => {
-  const { lockedVersions } = await import('../../scripts/build-bundle.mjs');
+  const { lockedVersions } = await import('../../scripts/build-bundle.ts');
   // pnpm-lock.yaml's packages: `<name>@<version>` keys; the workspaces are links, not listed.
   const pins = lockedVersions({ packages: {
     'a@1.0.0': {}, '@s/b@2.0.0': {}, 'c@1.0.0': {}, 'c@2.0.0': {}, '@anhlp/alp-gateway@1.0.0': {}, 'd@https://example.com/d.tgz': {},
@@ -247,7 +247,7 @@ test('build-bundle pins exactly the third-party packages the lockfile holds at o
 });
 
 test('the native alpd (t-81b0.9): Bun targets per platform, Windows excluded, and the build-path leak check', async () => {
-  const { bunTarget, leakedPaths, NATIVE_PLATFORMS, pinnedBun } = await import('../../scripts/build-alpd-native.mjs');
+  const { bunTarget, leakedPaths, NATIVE_PLATFORMS, pinnedBun } = await import('../../scripts/build-alpd-native.ts');
   assert.deepEqual(NATIVE_PLATFORMS, ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64']);
   assert.equal(bunTarget('darwin-arm64'), 'bun-darwin-arm64');
   assert.equal(bunTarget('darwin-x64'), 'bun-darwin-x64-baseline');

@@ -1,7 +1,7 @@
 # The ALP bundle (t-1807, docs/alp/binary-install.md): ALP's npm install beside the official Node
 # release, plus the native alpd (bin/alpd, bun --compile, t-81b0.9) on macOS and Linux, built by
-# scripts/build-bundle.mjs on a native runner per platform, smoked there with the
-# runner's Node driving it (scripts/binary-smoke.mjs, scripts/binary-update-smoke.mjs: install.sh or
+# scripts/build-bundle.ts on a native runner per platform, smoked there with the
+# runner's Node driving it (scripts/binary-smoke.ts, scripts/binary-update-smoke.ts: install.sh or
 # install.ps1, then alp update) and with no system Node at all (scripts/binary-smoke-nodeless.sh:
 # debian:bookworm-slim on Linux, `env -i PATH=/usr/bin:/bin` on macOS; scripts/binary-smoke-nodeless.ps1
 # with a system-only PATH on Windows), then packed as alp-<version>-<os>-<arch>.tar.gz
@@ -65,7 +65,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # The native alpd (t-81b0.9, scripts/build-alpd-native.mjs) is compiled with the Bun that
+      # The native alpd (t-81b0.9, scripts/build-alpd-native.ts) is compiled with the Bun that
       # apps/desktop/package.json pins; Windows keeps alpd.js on the bundle's Node and needs no Bun.
       - if: runner.os != 'Windows'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -74,16 +74,16 @@ jobs:
       - name: The runner is the platform (native build and smoke, no emulation)
         run: |
           node -e 'const want = process.argv[1]; const have = `${process.platform}-${process.arch}`; if (have !== want) { console.error(`runner is ${have}, platform ${want}`); process.exit(1); }' '${{ matrix.host }}'
-      - run: node scripts/build-bundle.mjs --platform ${{ matrix.platform }}
+      - run: node scripts/build-bundle.ts --platform ${{ matrix.platform }}
       - name: Bundle directory
         run: |
           version=$(node -p "require('./packages/cli/package.json').version")
           echo "BUNDLE=dist/bundle/alp-$version-${{ matrix.platform }}" >> "$GITHUB_ENV"
           echo "LAUNCHER=dist/bundle/alp-$version-${{ matrix.platform }}/bin/${{ runner.os == 'Windows' && 'alp.cmd' || 'alp' }}" >> "$GITHUB_ENV"
       - name: Smoke (driven by the runner's Node)
-        run: node scripts/binary-smoke.mjs "$BUNDLE"
+        run: node scripts/binary-smoke.ts "$BUNDLE"
       - name: install.sh / install.ps1 and alp update against local file:// and HTTP mirrors
-        run: node scripts/binary-update-smoke.mjs "$BUNDLE"
+        run: node scripts/binary-update-smoke.ts "$BUNDLE"
       - name: Smoke without Node (debian:bookworm-slim)
         if: runner.os == 'Linux'
         run: |
@@ -102,7 +102,7 @@ jobs:
         if: runner.os == 'Windows'
         run: node --test test/integration/binary-install-ps1.test.js
       - name: Pack
-        run: node scripts/package-binary.mjs pack --bundle "$BUNDLE" --out dist/release
+        run: node scripts/package-binary.ts pack --bundle "$BUNDLE" --out dist/release
       - name: Size
         run: |
           if [ -f "$BUNDLE/bin/alpd" ]; then

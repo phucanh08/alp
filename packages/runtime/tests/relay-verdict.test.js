@@ -9,8 +9,8 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { RELAY_CHARS } from '@anhlp/alp-runtime/mailbox';
-import { fakeTransport, until } from '../../../test/support/fake-agent.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const criterion = result => ({ criterion: 'Retries stop after three attempts', result, evidence: `src/retry.ts:40 ${result}` });
 const failing = { result: 'fail', criteria: [criterion('fail')], findings: [{ severity: 'high', where: 'src/retry.ts:41', problem: 'Retries forever' }] };

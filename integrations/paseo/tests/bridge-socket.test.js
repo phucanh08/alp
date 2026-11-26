@@ -13,7 +13,7 @@ import { createDaemonServer } from '@anhlp/alp-daemon';
 import { createWebServer } from '@anhlp/alp-paseo';
 import { createPaseoBridge } from '@anhlp/alp-paseo';
 import { initProject } from '@anhlp/alp-core/init';
-import { fakeTransport, until } from '../../../test/support/fake-agent.js';
+import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
 import { seedLibrary } from '@anhlp/alp-core/library';
 
 /** alpd in this process behind the Paseo bridge's local socket (ALPD §62), as Paseo's app speaks to it. */

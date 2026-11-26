@@ -10,10 +10,10 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { archiveName, pack, sums } from '../../scripts/package-binary.mjs';
-import { windowsTar } from '../../scripts/spawn-command.mjs';
-import { fakeBundle } from '../support/fake-bundle.mjs';
-import { teardown } from '../support/teardown.js';
+import { archiveName, pack, sums } from '../../scripts/package-binary.ts';
+import { windowsTar } from '../../scripts/spawn-command.ts';
+import { fakeBundle } from '../support/fake-bundle.ts';
+import { teardown } from '../support/teardown.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const INSTALL = path.join(ROOT, 'install.ps1');

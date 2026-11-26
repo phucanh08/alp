@@ -17,9 +17,9 @@ import { fileURLToPath } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
 import { saveEntry } from '@anhlp/alp-core/library-edit';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
-import { teardown } from '../support/teardown.js';
+import { teardown } from '../support/teardown.ts';
 
-const FAKE_AGY = fileURLToPath(new URL('../support/fake-agy.js', import.meta.url));
+const FAKE_AGY = fileURLToPath(new URL('../support/fake-agy.ts', import.meta.url));
 const MODEL = 'antigravity:gemini-3.8-flash-high';
 const DENIAL = 'permission check failed for read_file "/private/etc/hosts": user denied permission for read_file(/private/etc/hosts)\nDo not attempt to circumvent this denial by rephrasing the command, using alternative tools/scripts (e.g. python, sh, curl), or accessing the same target resource. Proceed without performing this action.';
 

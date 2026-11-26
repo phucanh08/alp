@@ -319,7 +319,7 @@ session, khác origin), Node, preload, cửa sổ mới, quyền, file trên đ�
 nó. Test của nó (`apps/desktop/test`, `bun:test`) được miễn khỏi luật bố cục test trong
 `test/integration/layout.test.js` chỉ khi script `test` của nó là `bun test test`; job CI
 `desktop-macos` chạy `bun install --frozen-lockfile`, `bun test test`, typecheck và build, rồi
-`pnpm install --frozen-lockfile`, `node scripts/build-workspace.mjs cli`, e2e (`bun run e2e`), rồi build hai DMG và chạy
+`pnpm install --frozen-lockfile`, `node scripts/build-workspace.ts cli`, e2e (`bun run e2e`), rồi build hai DMG và chạy
 e2e của app đã đóng gói trên từng DMG (§6). Lệnh: xem `apps/desktop/README.md` (`bun install`, `bun test test`, `bun run build`,
 `bun run start`).
 
@@ -336,7 +336,7 @@ gốc và luật bố cục test không chọn nó) chạy app Electron thật b
 
 - **Host dùng một lần:** `packages/cli/dist/alp-dashboard.js --service` đã build từ checkout này, chạy với
   `ALP_HOME` và `HOME` tạm, `dashboard.port` riêng và `ALP_SUPERVISE=0`, nên không có alpd. Biến session
-  của agent (`ALP_AGENT_SESSION`…) bị bỏ bằng `hermeticEnv` của `scripts/test-lib.mjs`, giống runner
+  của agent (`ALP_AGENT_SESSION`…) bị bỏ bằng `hermeticEnv` của `scripts/test-lib.ts`, giống runner
   test gốc; alp-dashboard không bao giờ thấy `~/.alp`.
 - **`alp` giả:** một script shell in địa chỉ của host đó, báo lỗi hoặc chờ trước khi in, được chỉ tới
   qua `ALP_DESKTOP_ALP`.
@@ -416,11 +416,11 @@ làm gì thì chỉ báo lại). Một phím đầu tiên (A) phải tới đư�
 không cho process gửi phím: thiếu quyền Accessibility, có thể là CI). Một lần bấm chỉ được lặp lại (tối
 đa ba lần) khi cửa sổ mất focus trong lúc bấm; phím bị mất khi cửa sổ vẫn giữ focus thì test fail.
 
-Teardown dùng `defer` của `test/support/teardown.js`: đóng Electron (quá 15 giây thì SIGKILL), dừng
+Teardown dùng `defer` của `test/support/teardown.ts`: đóng Electron (quá 15 giây thì SIGKILL), dừng
 host (với `owner.spec.mjs`, `browser.spec.mjs` và `shortcut-capture.spec.mjs`: `alp dashboard --stop`, rồi `alp daemon stop`), rồi mới xóa thư mục. App chạy với `HOME` tạm.
 
 ```sh
-pnpm install --frozen-lockfile && node scripts/build-workspace.mjs cli   # ở gốc repo
+pnpm install --frozen-lockfile && node scripts/build-workspace.ts cli   # ở gốc repo
 cd apps/desktop && bun run e2e
 ```
 

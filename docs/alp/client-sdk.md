@@ -212,13 +212,13 @@ await hello(client, { name: 'web', version });
 | Node IPC | `packages/client/tests/ipc.test.js` với fake alpd trên socket/named pipe; test của alpd, CLI, plugin | qua; kiểm tra quyền socket/thư mục với `connect` và `connectSocket` (Unix; Windows bỏ qua vì ACL pipe) |
 | alpd thật, IPC + WebSocket | `test/integration/client-sdk.test.js`: cùng kịch bản qua IPC, `ws` inject, WebSocket global của Node; cầu nối WS chỉ cho test | qua 5/5 lần: handshake, `daemon.status`, session + event stream, abort cục bộ alpd vẫn nhận, disconnect có close code, reconnect resend 0 frame và cursor liên tục |
 | Bundle | integration test (esbuild `browser` và `neutral` + `react-native`), `tests/portable-imports.test.js` (đồ thị import) | chỉ 9 module portable; không `node:`, `process.`, `Buffer`, `require(`; bundle `.` cho browser thất bại như mong đợi |
-| Browser thật | `node scripts/client-sdk-smoke.mjs browser` (Playwright từ `$ALP_PASEO_SRC`, `ALP_SMOKE_BROWSER` mặc định `chrome`) | Chrome 155 headless: page không có `process`/`Buffer`; handshake, request, stream event, abort, disconnect 4000 đều qua. Chromium 1208 trong cache Playwright local cài thiếu framework nên không chạy được |
-| React Native / Metro | `node scripts/client-sdk-smoke.mjs metro` | Metro 0.83.8 resolve và bundle `ios`/`android` qua package exports; bundle chạy trong VM context trần (không `process`, `Buffer`, `require`) với WebSocket double. **Chưa chạy Hermes hay thiết bị**: repo không có `@react-native/babel-preset` và runtime RN. Private class field (`#x`) cần preset RN như mọi app RN |
-| Tarball | `node scripts/client-sdk-smoke.mjs tarball` | pack protocol/core/client, cài offline vào project rỗng; mọi entry import được; bundle browser từ package đã cài chỉ có module portable; `.d.ts` type-check với project chỉ có DOM (không `@types/node`) và project Node, cả `bundler` lẫn `node16` |
+| Browser thật | `node scripts/client-sdk-smoke.ts browser` (Playwright từ `$ALP_PASEO_SRC`, `ALP_SMOKE_BROWSER` mặc định `chrome`) | Chrome 155 headless: page không có `process`/`Buffer`; handshake, request, stream event, abort, disconnect 4000 đều qua. Chromium 1208 trong cache Playwright local cài thiếu framework nên không chạy được |
+| React Native / Metro | `node scripts/client-sdk-smoke.ts metro` | Metro 0.83.8 resolve và bundle `ios`/`android` qua package exports; bundle chạy trong VM context trần (không `process`, `Buffer`, `require`) với WebSocket double. **Chưa chạy Hermes hay thiết bị**: repo không có `@react-native/babel-preset` và runtime RN. Private class field (`#x`) cần preset RN như mọi app RN |
+| Tarball | `node scripts/client-sdk-smoke.ts tarball` | pack protocol/core/client, cài offline vào project rỗng; mọi entry import được; bundle browser từ package đã cài chỉ có module portable; `.d.ts` type-check với project chỉ có DOM (không `@types/node`) và project Node, cả `bundler` lẫn `node16` |
 
-Chạy: `pnpm --filter @anhlp/alp-client test`; `node scripts/test.mjs integration`;
-`node scripts/client-sdk-smoke.mjs [browser|metro|tarball]` sau
-`node scripts/build-workspace.mjs client && node scripts/build-core.mjs`. Smoke dùng
+Chạy: `pnpm --filter @anhlp/alp-client test`; `node scripts/test.ts integration`;
+`node scripts/client-sdk-smoke.ts [browser|metro|tarball]` sau
+`node scripts/build-workspace.ts client && node scripts/build-core.ts`. Smoke dùng
 `ALP_HOME` tạm, không đọc hay ghi `~/.alp`.
 
 ## 8. Phụ thuộc còn mở
@@ -246,10 +246,10 @@ principal. Cầu nối WS trong test chỉ chuyển frame và không xác thực
   `description`.
 - `packages/client/src/index.js`: `AlpClient` thành lớp con của `AlpRpcClient`; thêm
   `connectSocket`, `export *` từ `./portable.js`.
-- `test/integration/client-sdk.test.js` (mới, chạy cùng `node scripts/test.mjs integration`).
-- `scripts/client-sdk-smoke.mjs` (mới). Task 04B đang sửa `scripts/tarball-consumer.mjs`,
-  `scripts/validate.mjs`, `scripts/pack-check.mjs` và `.github/workflows/ci.yml`; nhánh này
-  không đụng các file đó. Đưa `client-sdk-smoke.mjs tarball`/`metro` vào CI (và `browser` vào
+- `test/integration/client-sdk.test.js` (mới, chạy cùng `node scripts/test.ts integration`).
+- `scripts/client-sdk-smoke.ts` (mới). Task 04B đang sửa `scripts/tarball-consumer.ts`,
+  `scripts/validate.ts`, `scripts/pack-check.ts` và `.github/workflows/ci.yml`; nhánh này
+  không đụng các file đó. Đưa `client-sdk-smoke.ts tarball`/`metro` vào CI (và `browser` vào
   job đang chạy `web-app-smoke`) là việc tích hợp sau 04B.
 - Không đổi root `package.json` hay lockfile: `ws`, `esbuild`, `metro`, `typescript` đã là
   devDependency/hoisted ở root.

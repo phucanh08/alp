@@ -6,8 +6,8 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { createTask, getTask, loadTasks, startTask, submitTask, taskDigest } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
-import { fakeTransport, until } from '../../../test/support/fake-agent.js';
-import { literal, templateLineWith } from '../../../test/support/template-text.js';
+import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
+import { literal, templateLineWith } from '../../../test/support/template-text.ts';
 
 const criterion = (result, text = 'Retries stop after three attempts') => ({ criterion: text, result, evidence: `src/retry.ts:40 ${result}` });
 

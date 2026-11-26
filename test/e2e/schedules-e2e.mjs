@@ -1,6 +1,6 @@
 // Opt-in real-provider acceptance: a disposable main goes idle, then alpd wakes the
 // same session without a client prompt. Never uses an existing ALP_HOME/session.
-// Build first: node scripts/build-workspace.mjs cli
+// Build first: node scripts/build-workspace.ts cli
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';

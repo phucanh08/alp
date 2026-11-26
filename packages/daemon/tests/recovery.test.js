@@ -14,9 +14,9 @@ import { createAlpRuntime, reclaimWorktrees } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { connect, daemonPaths, bootTime, readLock } from '@anhlp/alp-client';
 
-import { fakeTransport, until, git, workspace } from '../../../test/support/recovery.js';
-import { setProfiles } from '../../../test/support/fake-agent.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { fakeTransport, until, git, workspace } from '../../../test/support/recovery.ts';
+import { setProfiles } from '../../../test/support/fake-agent.ts';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const runLog = async (directory, rootId) => (await readFile(path.join(directory, 'runs', `${rootId}.jsonl`), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
 

@@ -8,8 +8,8 @@ import { createProvider, mapSession, sessionTasks, default as contribute } from 
 import { ProviderEventSchema, PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
 import { connect, readLock } from '@anhlp/alp-client';
 import { createTask } from '@anhlp/alp-core/tasks';
-import { teardown } from '../../../test/support/teardown.js';
-import { literal, templateTitle } from '../../../test/support/template-text.js';
+import { teardown } from '../../../test/support/teardown.ts';
+import { literal, templateTitle } from '../../../test/support/template-text.ts';
 
 async function fixture(t) {
   const defer = teardown(t);

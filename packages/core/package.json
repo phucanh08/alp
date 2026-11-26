@@ -319,8 +319,8 @@
     "@anhlp/alp-protocol": "0.0.1-beta.14"
   },
   "scripts": {
-    "build": "node ../../scripts/build-workspace.mjs core",
-    "test": "node ../../scripts/test-package.mjs core",
+    "build": "node ../../scripts/build-workspace.ts core",
+    "test": "node ../../scripts/test-package.ts core",
     "prepack": "npm run build"
   },
   "publishConfig": {

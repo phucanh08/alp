@@ -9,7 +9,7 @@ import { WORKSPACE_GIT } from '@anhlp/alp-protocol';
 import { validateResult } from '@anhlp/alp-protocol/contract';
 import { GIT_READ, createGitReader, gitReadsRunning, scrubRemoteUrl, validBranchName } from '@anhlp/alp-daemon/git';
 import { RegistryError } from '@anhlp/alp-daemon/registry';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 /**
  * workspace.git.status and workspace.git.diff (docs/protocol/alp-json-rpc-v1.md §12.5) over real,
@@ -687,7 +687,7 @@ test('alpd answers workspace.git.status and workspace.git.diff by registry works
   const { createAlpRuntime } = await import('@anhlp/alp-runtime');
   const { createDaemonServer } = await import('@anhlp/alp-daemon');
   const { seedLibrary } = await import('@anhlp/alp-core/library');
-  const { fakeTransport } = await import('../../../test/support/fake-agent.js');
+  const { fakeTransport } = await import('../../../test/support/fake-agent.ts');
   const base = await sandbox(t);
   const home = path.join(base, 'home');
   await seedLibrary(home);

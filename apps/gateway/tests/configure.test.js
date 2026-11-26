@@ -12,7 +12,7 @@ import path from 'node:path';
 import { DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, PERMISSIONS, projectConfigurePreview, projectConfigured, projectConversation, projectEffective } from '../dist/policy.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const CAPABILITIES = ['attach.after', 'prompt.receipts', 'session.history', 'session.reload', 'session.configure.live'];
 const GEN = '0123456789abcdef0123456789abcdef';

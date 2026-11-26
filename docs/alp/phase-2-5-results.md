@@ -56,7 +56,7 @@ Giới hạn prototype được ghi tại `paseo-plugin.md`: hooks và interacti
 
 ```sh
 node node_modules/typescript/bin/tsc -p tsconfig.paseo.json
-node scripts/build-paseo.mjs
+node scripts/build-paseo.ts
 node --test
 npm test -w @anhlp/alp-core
 node test/e2e/paseo-e2e.mjs

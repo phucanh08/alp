@@ -15,7 +15,7 @@ import WebSocket from 'ws';
 import { AGENT_CAPABILITY, AlpRpcClient } from '@anhlp/alp-client/portable';
 import { connectWebSocket } from '@anhlp/alp-client/websocket';
 import { ORIGIN, startGateway } from './support/harness.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const OWNER_METHODS = Object.entries(EXPOSURE).filter(([, entry]) => entry.status === 'owner').map(([method]) => method);
 const USAGE = { providers: [{ provider: 'claude', windows: [] }] };

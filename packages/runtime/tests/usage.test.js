@@ -172,7 +172,7 @@ test('the limit watch reads orchestrationContext, never usageReport: no email on
   const { tmpdir } = await import('node:os');
   const path = await import('node:path');
   const { createAlpRuntime } = await import('@anhlp/alp-runtime');
-  const { fakeTransport, until } = await import('../../../test/support/fake-agent.js');
+  const { fakeTransport, until } = await import('../../../test/support/fake-agent.ts');
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-usage-watch-'));
   const file = path.join(directory, 'pause.json');
   await writeFile(file, JSON.stringify({ runtimes: { codex: { since: new Date().toISOString(), by: 'alpd', reason: 'Codex usage limit reached', resetsAt: new Date(Date.now() + 3_600_000).toISOString() } } }));

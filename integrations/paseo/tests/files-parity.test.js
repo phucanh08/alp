@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
-import { fakeTransport } from '../../../test/support/fake-agent.js';
+import { fakeTransport } from '../../../test/support/fake-agent.ts';
 import { directorySuggestions, fileExplorer } from '../server/dist/paseo/files.js';
 
 const hasGit = (() => { try { execFileSync('git', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; } })();

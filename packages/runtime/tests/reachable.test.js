@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tree, until } from '../../../test/support/fake-agent.js';
+import { tree, until } from '../../../test/support/fake-agent.ts';
 
 /**
  * Main stays reachable while its assignments run (ALPD §48): the user's words end its

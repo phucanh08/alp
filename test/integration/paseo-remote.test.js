@@ -1,6 +1,6 @@
 // The Paseo remote mode end to end (docs/alp/paseo-remote.md §6): three processes that share no
 // files. alpd runs with its own ALP_HOME (A) and a fake Codex; the gateway CLI serves it; the Paseo
-// side (the built remote entry, test/integration/support/paseo-remote-client.mjs) runs with another
+// side (the built remote entry, test/integration/support/paseo-remote-client.ts) runs with another
 // home (B) under Node's permission model: it may read the code and use the network, nothing else,
 // so it cannot read A or the project, and cannot start a process. Through it: authentication,
 // catalog, create, prompt and stream, a question answered and one dismissed, tasks, the library
@@ -24,7 +24,7 @@ import { AlpRpcClient, hello } from '../../packages/client/dist/portable.js';
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const ALPD = path.join(ROOT, 'packages/daemon/dist/alpd.js');
 const GATEWAY = path.join(ROOT, 'apps/gateway/dist/cli.js');
-const CLIENT = path.join(ROOT, 'test/integration/support/paseo-remote-client.mjs');
+const CLIENT = path.join(ROOT, 'test/integration/support/paseo-remote-client.ts');
 const REMOTE_ENTRY = path.join(ROOT, 'integrations/paseo/server/dist/remote/index.js');
 const FAKE_CODEX = path.join(ROOT, 'packages/daemon/tests/support/fake-codex.js');
 const flags = process.allowedNodeEnvironmentFlags;

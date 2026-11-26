@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { diagnoseProviders, editorCommand, editorHost, EDITORS, installedEditors, locateEditor, methods, ownerRegistry, projectDirectory, providerOptions, PROVIDER_CHECKS, revealCommand, revealer } from '../dist/dashboard/owner/host.js';
 import { TERMINAL_WARNING, terminalCommand } from '../dist/commands/terminal/index.js';
 
-const FAKE_ACP = fileURLToPath(new URL('../../../test/support/fake-acp.js', import.meta.url));
+const FAKE_ACP = fileURLToPath(new URL('../../../test/support/fake-acp.ts', import.meta.url));
 
 async function scratch(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-owner-host-'));

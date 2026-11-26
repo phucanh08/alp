@@ -10,7 +10,7 @@ import path from 'node:path';
 import { EXPOSURE } from '../dist/policy.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 async function world(t) {
   const defer = teardown(t);

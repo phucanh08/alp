@@ -793,7 +793,7 @@ release and npm (8 packages) carry the same version from one main SHA.
   platform packages `@anhlp/alp-<os>-<arch>` are retired and will not be published; a release is 8
   tarballs. `release:pack` no longer takes `--binaries`/`--binaries-release`, and
   `release-acceptance.yml` no longer takes `binaries_run`/`binaries_release`. CI smokes the wrapper
-  with `npm install -g` (`scripts/npm-wrapper-smoke.mjs`). See [binary-install.md](binary-install.md#npm-packages).
+  with `npm install -g` (`scripts/npm-wrapper-smoke.ts`). See [binary-install.md](binary-install.md#npm-packages).
 
 # ALP 0.0.1-beta.6 — release notes
 
@@ -806,7 +806,7 @@ Prepared 2026-10-30 (task t-693e). Not published yet; publishing is the owner's 
   executable's entry now imports the SDK by its literal name and registers it
   ([binary-install.md](binary-install.md)). Codex sessions were not affected. If you installed the
   beta.5 executable, run `alp update` once beta.6 is published, or re-run `install.sh`.
-- **New check:** `scripts/binary-smoke.mjs` runs a Claude turn (with a fake Claude) through the
+- **New check:** `scripts/binary-smoke.ts` runs a Claude turn (with a fake Claude) through the
   embedded SDK on all five binary-build platforms. Before this, no smoke started a Claude session,
   which is how beta.5 shipped broken.
 - **npm:** beta.5 was never published to npm. `0.0.1-beta.6` is the first npm release of the

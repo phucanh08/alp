@@ -176,7 +176,7 @@ commands, give the profile base `workspace-write` and start the session read-onl
   Any other line (`echo $HOME`, `ls *.js`, `cat ~/x`, `git diff HEAD@{1}`, `npm test # x`)
   gets no decision from a plain allow rule: ALP asks, or the mode refuses it. Quote the word
   to keep it allowed (`ls '*.js'` lists that name only; `git diff 'HEAD@{1}'` works).
-- An allow rule that names a path (`Bash(cat /srv/data/*)`, `Bash(node scripts/test.mjs:*)`)
+- An allow rule that names a path (`Bash(cat /srv/data/*)`, `Bash(node scripts/test.ts:*)`)
   covers a command only when the paths in it are in normal form: no `..` or `.` segment
   (a leading `./` aside), no `//`, no leading `~`. `/srv/data/../x` leaves any prefix.
 - Checked rules, for what a prefix cannot say. Their specifier starts with `@`; ALP parses

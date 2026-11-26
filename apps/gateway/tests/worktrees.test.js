@@ -6,7 +6,7 @@ import os from 'node:os';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway, until } from './support/harness.js';
 import { DEFAULT_PERMISSIONS } from '../dist/policy.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 test('worktree grants are opt-in, creator+scope-epoch bound and refreshed before cached events/resources; mappings never grant siblings', async (t) => {
   const defer = teardown(t);
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'alp-gw-wt-')));

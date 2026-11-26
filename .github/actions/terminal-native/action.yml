@@ -6,5 +6,5 @@ runs:
     - shell: bash
       run: |
         ls -l packages/daemon/native/prebuilt/*/terminal-owner
-        node scripts/terminal-native-assets.mjs --require-matrix
+        node scripts/terminal-native-assets.ts --require-matrix
         test -z "$(git status --porcelain -- packages/daemon/native/prebuilt)" || { git status --porcelain -- packages/daemon/native/prebuilt; exit 1; }

@@ -2,7 +2,7 @@
 // Opt-in real-runtime proof of session.reload (docs/protocol/alp-json-rpc-v1.md §12.8, issue #121 branch
 // G2) on the installed Codex and Claude. It spends two small real turns per runtime, so it never runs in CI:
 //
-//   node scripts/build-workspace.mjs daemon && ALP_HOME=<scratch> node test/e2e/reload-real-e2e.mjs codex claude
+//   node scripts/build-workspace.ts daemon && ALP_HOME=<scratch> node test/e2e/reload-real-e2e.mjs codex claude
 //
 // A real alpd runs on its own temporary ALP_HOME. Per runtime: a root that was never prompted is refused
 // (1005 no_history: a Claude root then has no transcript, and a reload must never start an empty one);

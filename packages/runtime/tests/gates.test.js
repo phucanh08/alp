@@ -7,7 +7,7 @@ import { initProject } from '@anhlp/alp-core/init';
 import { addGate, createTask, getTask, resolveGate } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { words } from '@anhlp/alp-runtime/language';
-import { fakeTransport, until } from '../../../test/support/fake-agent.js';
+import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
 
 // Human gates mirrored as cards on main (t-ccac): the task files stay the source of truth.
 

@@ -14,7 +14,7 @@ import { createAlpRuntime } from '../../dist/runtime/index.js';
 
 // Hook commands are sh; Windows runs them under cmd.exe, where these node scripts do the same.
 const windows = process.platform === 'win32';
-const support = name => fileURLToPath(new URL(`../support/${name}.js`, import.meta.url));
+const support = name => fileURLToPath(new URL(`../support/${name}.ts`, import.meta.url));
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
 let calls = 0;
 
