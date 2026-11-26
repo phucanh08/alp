@@ -53,6 +53,8 @@ npm install -g @anhlp/alp@beta
 npm ls -g @anhlp/alp                      # @anhlp/alp@0.0.1-beta.14
 ```
 
+With pnpm instead: `pnpm add -g @anhlp/alp@beta`, then `pnpm ls -g @anhlp/alp`.
+
 The package provides `alp`; `alp` starts `alpd`, the per-user daemon that runs sessions.
 
 ### 2. Sign in to a provider, then check
