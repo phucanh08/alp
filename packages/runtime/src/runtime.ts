@@ -1059,15 +1059,19 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }).catch(error => supervisorFailed(rootId, `could not review ${root.mapping.agent.name}'s last turn`, error));
   }
 
+  /** Roots already told that their supervisor failed: one notice each, so a broken one cannot repeat it every turn. */
+  const supervisorNoticed = new Set<string>();
+
   /**
-   * A supervisor that failed is logged and shown in its root, so the user learns that the process is
-   * not being reviewed (t-ca83); it never fails the root itself.
+   * A supervisor that failed is logged every time and shown once in its root, so the user learns that
+   * the process is not being reviewed (t-ca83); it never fails the root itself.
    */
   function supervisorFailed(rootId: string, what: string, error: unknown) {
     const message = errorData(error).message;
     runLog(rootId, { event: 'supervisor.failed', error: message });
     const root = sessions.get(rootId);
-    if (!root || root.closed) return;
+    if (!root || root.closed || supervisorNoticed.has(rootId)) return;
+    supervisorNoticed.add(rootId);
     const watcher = root.mapping.team?.supervisor ? root.mapping.team.supervisor.agent : 'supervisor';
     const text = `The ${watcher} ${what}: ${clip(message, 400)} Check the ${watcher}'s model and thinking in the team or profile settings.`;
     emit(rootId, { type: 'item', item: { kind: 'notice', id: `notice-${randomUUID().slice(0, 8)}`, level: 'warning', text } });

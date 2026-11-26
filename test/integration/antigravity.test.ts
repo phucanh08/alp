@@ -691,19 +691,22 @@ test('an Antigravity supervisor on a model id that carries its effort starts wit
   const { root, runtime, dir } = await setup(t, {
     supervisor: true,
     provider: { args: [agy] },
-    settings: { workflow: { mode: 'pho', supervisor: true }, profile: { pho: Object.fromEntries(['main', 'peer', 'oracle', 'reviewer', 'supervisor'].map(name => [name, { profiles: [model] }])) } },
+    // Main runs on an id without a suffix, so only the supervisor meets the conflict, as in t-9ae1 R1.
+    settings: { workflow: { mode: 'pho', supervisor: true }, profile: { pho: { main: { profiles: ['antigravity:gemini-2.5-pro'] }, supervisor: { profiles: [model] } } } },
   });
-  await runtime.open('root', { cwd: root });
+  await runtime.open('root', { cwd: root, thinking: 'high' });
   await until(async () => runtime.list().some(session => session.agent === 'supervisor') || (await supervisorFailed(dir)).length, 'supervisor start or failure');
   assert.deepEqual(await supervisorFailed(dir), []);
   const supervisor = runtime.list().find(session => session.agent === 'supervisor');
   assert.ok(supervisor, 'the supervisor runs');
+  // The team asks the supervisor for an effort; agy takes the one in the model id instead.
+  assert.equal(supervisor.thinking, 'medium');
   const started = await startArgs(path.join(dir, 'agy.jsonl'));
-  assert.ok(started.length >= 2, 'root and supervisor started agy');
-  for (const args of started) {
-    assert.equal(args[args.indexOf('--model') + 1], 'gemini-3.8-flash-high');
-    assert.ok(!args.includes('--effort'), `no --effort beside a suffixed model: ${args.join(' ')}`);
-  }
+  const suffixed = started.filter(args => args[args.indexOf('--model') + 1] === 'gemini-3.8-flash-high');
+  assert.equal(suffixed.length, 1, 'the supervisor started agy on the suffixed model');
+  assert.ok(!suffixed[0].includes('--effort'), `no --effort beside a suffixed model: ${suffixed[0].join(' ')}`);
+  const plain = started.find(args => args[args.indexOf('--model') + 1] === 'gemini-2.5-pro');
+  assert.equal(plain?.[plain.indexOf('--effort') + 1], 'high', 'an id without a suffix keeps --effort');
 });
 
 test('a supervisor that cannot start tells the user in the root session instead of failing silently (t-ca83)', async t => {
