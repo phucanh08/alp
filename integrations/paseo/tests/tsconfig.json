@@ -5,7 +5,17 @@
   // from, so the check needs no build. Run: pnpm run check:test
   "extends": "../../../test/tsconfig.json",
   "compilerOptions": {
-    "rootDirs": ["../server", "../server/dist"]
+    "rootDirs": ["../server", "../server/dist"],
+    // The plugin's own exports have no alp-source condition (its package.json ships only server/dist),
+    // so the tests' self-imports of @anhlp/alp-paseo are mapped to the sources here, for the check only.
+    "paths": {
+      "@anhlp/alp-paseo": ["../server/index.ts"],
+      "@anhlp/alp-paseo/main": ["../server/main.ts"],
+      "@anhlp/alp-paseo/web": ["../server/web.ts"],
+      "@anhlp/alp-paseo/remote": ["../server/remote/index.ts"],
+      "@anhlp/alp-paseo/paseo/*": ["../server/paseo/*.ts"],
+      "@anhlp/alp-paseo/panel/*": ["../server/panel/*.ts"]
+    }
   },
   "include": ["**/*.ts", "../server/alp-templates.d.ts"],
   // Data the tests copy or read, not code checked here.
