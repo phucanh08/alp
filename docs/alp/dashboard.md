@@ -49,10 +49,10 @@ thiếu thì panel ghi lý do và không mở terminal.
 
 ```sh
 pnpm install --frozen-lockfile                       # ở gốc repo
-pnpm run dev:alp-dashboard          # Vite dev server: http://127.0.0.1:7435
-pnpm run build:alp-dashboard        # bundle tĩnh ở apps/web/dist
-pnpm run typecheck:alp-dashboard
-pnpm run test:alp-dashboard         # unit test (node:test)
+pnpm run dev:alp-web          # Vite dev server: http://127.0.0.1:7435
+pnpm run build:alp-web        # bundle tĩnh ở apps/web/dist
+pnpm run typecheck:alp-web
+pnpm run test:alp-web         # unit test (node:test)
 pnpm run test:alp-web:e2e     # build cli, daemon, web rồi chạy Playwright
 pnpm run validate:web         # cả lane CI: tsc, unit, boundary, build, E2E
 ```
