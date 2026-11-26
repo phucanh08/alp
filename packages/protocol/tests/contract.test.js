@@ -128,7 +128,7 @@ test('every valid golden value type-checks against the TypeScript projection', {
     lines.push(`// ${fixture.name}`, `check<${type}>(${JSON.stringify(fixture.value)});`);
   }
   await writeFile(path.join(directory, 'projection.ts'), `${lines.join('\n')}\n`);
-  const result = spawnSync(process.execPath, [path.join(here, '../../../node_modules/typescript/bin/tsc'), '--noEmit', '--allowJs', '--strict', '--skipLibCheck', '--exactOptionalPropertyTypes', '--target', 'es2022', '--module', 'nodenext', '--moduleResolution', 'nodenext', path.join(directory, 'projection.ts')], { encoding: 'utf8' });
+  const result = spawnSync(process.execPath, [path.join(here, '../../../node_modules/typescript/bin/tsc'), '--noEmit', '--allowImportingTsExtensions', '--allowJs', '--strict', '--skipLibCheck', '--exactOptionalPropertyTypes', '--target', 'es2022', '--module', 'nodenext', '--moduleResolution', 'nodenext', path.join(directory, 'projection.ts')], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
