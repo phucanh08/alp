@@ -12,6 +12,8 @@ export const TYPE_STRIPPING_NODE = '22.18';
  * Exits with a clear message unless this Node strips types by default: the scripts, the root tests and
  * their support files are TypeScript that Node runs directly (dev and CI need Node >= 22.18; the
  * published packages still run on Node >= 22.12). `what` names the entry point for the message.
+ * It catches a Node >= 22.18 with stripping turned off; Node 22.12-22.17 cannot load this .ts module
+ * at all and stops earlier with ERR_UNKNOWN_FILE_EXTENSION (the root engines field says >=22.18).
  */
 export function assertTypeStripping(what: string, { version = process.versions.node, features = process.features }: { version?: string, features?: { typescript?: unknown } } = {}) {
   const [major = 0, minor = 0] = version.split('.').map(Number);

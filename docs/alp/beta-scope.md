@@ -258,7 +258,7 @@ Mọi dòng chạy trên **cùng release SHA** và, với các dòng cài đặt
 | A5 | `pnpm run release:verify "$OUT" --sha "$RELEASE_SHA" --record release-evidence.json` (`release:pack` cũng tự chạy A5). Kiểm: checksum khớp `SHA256SUMS`; đúng 8 tarball, không có tgz thừa (gateway); version `0.0.0-beta.1`; `entryCount` khớp số file trong tgz; dependency nội bộ trong `package.json` **đã pack** pin đúng version và chỉ trỏ tới 8 package; LICENSE mọi tarball giống tarball root; NOTICE; THIRD-PARTY-NOTICES liệt kê mọi module esbuild đã inline; plugin có `LICENSE.paseo.txt` (đến t-55ce.3: `web-app/LICENSE.paseo.txt` và `NOTICE.txt` của web Paseo, đã gỡ), và NOTICE = NOTICE root + Paseo; core không có đường dẫn hay dependency Paseo | máy build | người build (§7.2) | Có |
 
 **Provider thật trên tarball** (checklist §6.3). Đề xuất chia Node để cả hai major đều có smoke thật:
-macOS Node 24, Linux Node 22.12+.
+macOS Node 24, Linux Node 22.18+ (harness là script .ts của checkout; gói phát hành vẫn chạy trên 22.12+).
 
 | # | OS | Provider | Phạm vi | Người chạy | Chặn |
 |---|---|---|---|---|---|
@@ -288,7 +288,7 @@ macOS Node 24, Linux Node 22.12+.
 - PowerShell: `wsl --install -d Ubuntu-24.04`. Các distro `docker-desktop*` có sẵn trong `wsl -l`
   không dùng được cho việc này.
 - Trong Ubuntu:
-  - cài git và Node 22.12+ (ví dụ qua nvm);
+  - cài git và Node 22.18+ (ví dụ qua nvm; script .ts của checkout cần 22.18+);
   - cài và đăng nhập Codex CLI và Claude Code, Paseo 0.11.x;
   - làm việc trong `~` của Linux, không trong `/mnt/c`, để tránh lỗi quyền và lỗi socket.
 - WSL2 mặc định đẩy cổng `localhost` sang Windows: W6 mở `alp web` bằng trình duyệt Windows ở đúng
@@ -561,7 +561,7 @@ kiểm và đánh giá gate; chúng không publish. Automation publish vẫn def
 git clone --branch v0.0.0-beta.1 "file://$(pwd)" /tmp/alp-release/src   # từ repo cục bộ: tag chưa push
 git -C /tmp/alp-release/src rev-parse HEAD        # phải bằng RELEASE_SHA
 cd /tmp/alp-release/src
-node -v; npm -v                                   # ghi lại; Node 22.12+ hoặc 24
+node -v; pnpm -v                                  # ghi lại; Node 22.18+ hoặc 24 (script .ts)
 pnpm install --frozen-lockfile
 pnpm run build:packages                           # gồm cả alp-dashboard (apps/web), không có script build:web riêng
 OUT=/tmp/alp-release/v0.0.0-beta.1                # thư mục mới hoặc rỗng; script không ghi vào thư mục đã có file
