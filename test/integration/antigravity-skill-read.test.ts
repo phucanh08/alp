@@ -133,6 +133,20 @@ async function until(check: () => unknown, what: string) {
   assert.fail(`${what} did not arrive`);
 }
 
+/**
+ * The run log once `assignmentId`'s assignment.finished line is in it (t-3616, as t-a509). The
+ * runtime appends run-log lines on a chain it does not await before posting the result, so they
+ * can land after the requester has it; the chain is ordered, so every earlier line (the peer's
+ * skill and skill-resource lines) is in too. Only complete lines are read: a line still being
+ * appended is skipped.
+ */
+async function finishedRunLog(dir: string, assignmentId: string) {
+  const read = async () => (await readFile(path.join(dir, 'runs', 'root.jsonl'), 'utf8').catch(() => '')).split('\n').slice(0, -1).map(line => JSON.parse(line));
+  let log: Json[] = [];
+  await until(async () => (log = await read()).some(entry => entry.event === 'assignment.finished' && entry.assignmentId === assignmentId), `assignment.finished for ${assignmentId} in the run log`);
+  return log;
+}
+
 /** Delegates one workspace-write peer on Antigravity and returns what the requester's alp_delegate got back. */
 async function delegate({ runtime, events }: Awaited<ReturnType<typeof setup>>) {
   const task = 'Fix the bug: open the library skill bug-loop first, edit fixed.txt, run the check, and file your handoff.';
@@ -205,7 +219,7 @@ test('a workspace-write Antigravity peer opens its library skill with alp_skill_
   assert.ok(peerStart, 'the peer ran in workspace-write');
   assert.ok(!peerStart.args.some((arg: string) => arg.includes(path.join(home, 'skills'))), peerStart.args.join(' '));
   // The run log records the skill's use and the reference it opened.
-  const runLog = (await readFile(path.join(dir, 'runs', 'root.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  const runLog = await finishedRunLog(dir, result.sessionId);
   assert.deepEqual(runLog.filter(entry => entry.event === 'skill' && entry.agent === 'peer').map(entry => [entry.skill, entry.via]), [['bug-loop', 'tool']]);
   assert.deepEqual(runLog.filter(entry => entry.event === 'skill-resource' && entry.agent === 'peer').map(entry => entry.resource), ['references/test-proof.md']);
 });

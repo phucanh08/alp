@@ -112,6 +112,19 @@ async function until(check: () => unknown, what: string) {
   assert.fail(`${what} did not arrive`);
 }
 
+/**
+ * The run log once `assignmentId`'s assignment.finished line is in it (t-3616, as t-a509). The
+ * runtime appends run-log lines on a chain it does not await before posting the result, so the
+ * line can land after the requester has it; the chain is ordered, so every earlier line (such as
+ * turn.denied) is in too. Only complete lines are read: a line still being appended is skipped.
+ */
+async function finishedRunLog(dir: string, assignmentId: string) {
+  const read = async () => (await readFile(path.join(dir, 'runs', 'root.jsonl'), 'utf8').catch(() => '')).split('\n').slice(0, -1).map(line => JSON.parse(line));
+  let log: Json[] = [];
+  await until(async () => (log = await read()).some(entry => entry.event === 'assignment.finished' && entry.assignmentId === assignmentId), `assignment.finished for ${assignmentId} in the run log`);
+  return log;
+}
+
 /** Delegates one workspace-write assignment that agy's denial fails, and returns what the requester's alp_delegate got back. */
 async function delegate({ runtime, events }: { runtime: ReturnType<typeof createAlpRuntime>, events: Json[] }) {
   const task = 'Open the library skill you need, then make the change and file your handoff.';
@@ -160,7 +173,7 @@ for (const variant of ['error', 'done', 't1']) {
     if (variant === 't1') assert.equal(reads[1].status, 'completed');
     assert.match(await readFile(path.join(setupResult.dir, 'replay.jsonl'), 'utf8'), /library skill you need/);
     // The run log names the denial, and the finished assignment carries it.
-    const runLog = (await readFile(path.join(setupResult.dir, 'runs', 'root.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    const runLog = await finishedRunLog(setupResult.dir, result.sessionId);
     assert.deepEqual(runLog.find(entry => entry.event === 'turn.denied')?.denied, result.denied);
     assert.equal(runLog.find(entry => entry.event === 'assignment.finished')?.status, 'failed');
   });
