@@ -91,7 +91,10 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
       // ERR_MODULE_NOT_FOUND before the first owned process starts, and this test fails with a
       // missing pids.jsonl that says nothing about why.
       await copyFile(path.join(root, 'scripts/test-lib.mjs'), path.join(scripts, 'test-lib.mjs'));
-      await writeFile(path.join(base, 'package.json'), JSON.stringify({ name: '@anhlp/alp', version: '0.0.0-fixture', workspaces: [] }));
+      await writeFile(path.join(base, 'package.json'), JSON.stringify({ name: '@anhlp/alp', version: '0.0.0-fixture' }));
+      // The saved packs replace packing the workspaces, so the workspace list is never read; a stub
+      // keeps the fixture free of pnpm-workspace.yaml and the yaml package.
+      await writeFile(path.join(scripts, 'workspaces.mjs'), `export const workspaceLocations = () => []; export const readPnpmLock = () => ({});`);
       await writeFile(path.join(scripts, 'release-lib.mjs'), `export const LAUNCHER = '@anhlp/alp';
       export const LAUNCHER_LOCATION = 'npm/alp';
       export const releaseArtifacts = () => [
