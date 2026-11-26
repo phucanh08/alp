@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
 import { profileFor } from '@anhlp/alp-core/permissions';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const CLI = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
 

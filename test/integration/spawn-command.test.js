@@ -1,7 +1,7 @@
 // t-ffe4.5: one place knows how to start tar and how to describe a failed spawnSync. The Windows
 // tar workaround (the system's bsdtar, never Git Bash's GNU tar that comes first on PATH under
 // `shell: bash`) used to be hand-written per script; a third script missed it and turned the Windows
-// release-acceptance row red, and check-paseo-compat.mjs still ran bare `tar`.
+// release-acceptance row red, and check-paseo-compat.ts still ran bare `tar`.
 // t-ffe4.6: the scan below used to read only scripts/*.mjs and only for `spawn('tar'` written out in
 // full, so four copies of the same knowledge outside scripts/ were invisible to it, as was any
 // `execFileSync('tar')` or command held in a variable. It now parses every source file in the repo.
@@ -11,7 +11,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
 import { systemTar } from '../../packages/cli/dist/commands/update/self-update.js';
-import { exitDescription, spawnCommand, windowsTar } from '../../scripts/spawn-command.mjs';
+import { exitDescription, spawnCommand, windowsTar } from '../../scripts/spawn-command.ts';
 
 const root = path.resolve(import.meta.dirname, '../..');
 
@@ -48,7 +48,7 @@ test('exitDescription names the start error, then the signal, then the exit stat
 
 // How tar may be started. `spawnCommand` is the helper; `windowsTar` and the shipped `systemTar` are
 // the two places allowed to name the System32 path. A local function that forwards its own command
-// to spawnCommand (check-paseo-compat.mjs's `run`, for one) counts as the helper too.
+// to spawnCommand (check-paseo-compat.ts's `run`, for one) counts as the helper too.
 const HELPERS = new Set(['spawnCommand', 'windowsTar', 'systemTar']);
 // Everything that starts a process in this repository. The old scan knew only the first two, so
 // `execFileSync('tar', …)` passed it (t-ffe4.6).
@@ -57,7 +57,7 @@ const namesTar = text => /(^|[\\/\s'"])tar(\.exe)?$/.test(text.trim());
 // Declared, with the reason. Only files that may legitimately hold the knowledge are here, and each
 // is held to the others by a test: 'every place that names the Windows tar path agrees' below.
 const ALLOWED = new Map([
-  ['scripts/spawn-command.mjs', 'defines spawnCommand and windowsTar'],
+  ['scripts/spawn-command.ts', 'defines spawnCommand and windowsTar'],
   ['packages/cli/src/commands/update/self-update.ts', 'defines systemTar: shipped code cannot import scripts/, so this copy is deliberate and pinned equal to windowsTar by a test'],
   ['test/integration/spawn-command.test.js', 'this file: it asserts on the literals'],
 ]);
@@ -208,7 +208,7 @@ test('every place that names the Windows tar path agrees (t-ffe4.6)', () => {
 });
 
 test('under pnpm run, the npm_config_* variables pnpm sets are removed before npm starts; otherwise nothing is', async () => {
-  const { clearPnpmConfig } = await import('../../scripts/spawn-command.mjs');
+  const { clearPnpmConfig } = await import('../../scripts/spawn-command.ts');
   const env = { npm_config_user_agent: 'pnpm/10.34.9 npm/? node/v22', npm_config_globalconfig: '/x/pnpm/rc', NPM_CONFIG_NODE_LINKER: 'hoisted', npm_execpath: '/x/pnpm.cjs', PATH: '/bin' };
   assert.deepEqual(clearPnpmConfig(env).sort(), ['NPM_CONFIG_NODE_LINKER', 'npm_config_globalconfig', 'npm_config_user_agent']);
   assert.deepEqual(env, { npm_execpath: '/x/pnpm.cjs', PATH: '/bin' });

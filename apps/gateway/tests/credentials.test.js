@@ -12,7 +12,7 @@ import * as credentials from '../dist/credentials.js';
 import { fakeDaemon } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
 import { CredentialStore, TicketBook, createCredential, createGatewayLogger, credentialsFile, listCredentials, parseToken, revokeCredential, rotateCredential, scrubGatewaySecrets } from '../dist/index.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 async function home(t) {
   const defer = teardown(t);

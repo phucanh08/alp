@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { resolveAgent } from '@anhlp/alp-core/resolver';
 import { compileAgent } from '@anhlp/alp-core/adapter';
-import { FakeAdapter } from '../../../test/support/fake-adapter.js';
+import { FakeAdapter } from '../../../test/support/fake-adapter.ts';
 
 test('fake compiles main and filesystem custom agent without provider dependencies', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-adapter-'));

@@ -20,8 +20,8 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
       HOME: path.join(base, 'os-home'), ALP_HOME: path.join(base, 'outer-alp'), PASEO_HOME: path.join(base, 'paseo'),
       XDG_CACHE_HOME: path.join(base, 'cache'), npm_config_cache: path.join(base, 'npm-cache'), npm_config_prefix: path.join(base, 'prefix') };
     await mkdir(env.HOME);
-    await copyFile(path.join(root, 'scripts/beta-acceptance-web.mjs'), path.join(base, 'beta-acceptance-web.mjs'));
-    await copyFile(path.join(root, 'scripts/beta-web-lifecycle.mjs'), path.join(base, 'beta-web-lifecycle.mjs'));
+    await copyFile(path.join(root, 'scripts/beta-acceptance-web.ts'), path.join(base, 'beta-acceptance-web.ts'));
+    await copyFile(path.join(root, 'scripts/beta-web-lifecycle.ts'), path.join(base, 'beta-web-lifecycle.ts'));
     await writeFile(path.join(base, 'worker.mjs'), `
       import fs from 'node:fs'; import net from 'node:net'; import path from 'node:path';
       const [role, home] = process.argv.slice(2);
@@ -41,7 +41,7 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
       const lock = path.join(home, role === 'web' ? 'integrations/paseo.lock' : 'alpd.lock');
       for (let i = 0; !fs.existsSync(lock); i++) { if (i > 500) process.exit(1); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10); }
     `);
-    await writeFile(path.join(base, 'beta-acceptance-lib.mjs'), `
+    await writeFile(path.join(base, 'beta-acceptance-lib.ts'), `
       import fs from 'node:fs'; import path from 'node:path'; import { spawnSync } from 'node:child_process';
       const base = process.env.FIXTURE_BASE; const scenario = process.env.FIXTURE_SCENARIO;
       export const CHOICES = {}; export const gateRow = () => 'R5'; export const manual = () => {};
@@ -76,32 +76,32 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
         }
       }
     `);
-    let entry = path.join(base, 'beta-acceptance-web.mjs');
+    let entry = path.join(base, 'beta-acceptance-web.ts');
     if (scenario === 'package-startup-failure') {
       const scripts = path.join(base, 'scripts');
       await mkdir(scripts);
-      let source = await readFile(path.join(root, 'scripts/package-smoke.mjs'), 'utf8');
+      let source = await readFile(path.join(root, 'scripts/package-smoke.ts'), 'utf8');
       source = source.replace("from 'node:child_process'", "from './fixture-child-process.mjs'");
-      entry = path.join(scripts, 'package-smoke.mjs');
+      entry = path.join(scripts, 'package-smoke.ts');
       await writeFile(entry, source);
-      await copyFile(path.join(root, 'scripts/beta-web-lifecycle.mjs'), path.join(scripts, 'beta-web-lifecycle.mjs'));
-      // t-5294.3: package-smoke.mjs clears the caller's ALP session variables through
-      // scripts/test-lib.mjs, which imports only node builtins — copied, not stubbed, so the fixture
+      await copyFile(path.join(root, 'scripts/beta-web-lifecycle.ts'), path.join(scripts, 'beta-web-lifecycle.ts'));
+      // t-5294.3: package-smoke.ts clears the caller's ALP session variables through
+      // scripts/test-lib.ts, which imports only node builtins — copied, not stubbed, so the fixture
       // runs the real isolation rather than a hand-written double of it. Without it the entry dies on
       // ERR_MODULE_NOT_FOUND before the first owned process starts, and this test fails with a
       // missing pids.jsonl that says nothing about why.
-      await copyFile(path.join(root, 'scripts/test-lib.mjs'), path.join(scripts, 'test-lib.mjs'));
+      await copyFile(path.join(root, 'scripts/test-lib.ts'), path.join(scripts, 'test-lib.ts'));
       await writeFile(path.join(base, 'package.json'), JSON.stringify({ name: '@anhlp/alp', version: '0.0.0-fixture' }));
       // The saved packs replace packing the workspaces, so the workspace list is never read; a stub
       // keeps the fixture free of pnpm-workspace.yaml and the yaml package.
-      await writeFile(path.join(scripts, 'workspaces.mjs'), `export const workspaceLocations = () => []; export const readPnpmLock = () => ({});`);
-      await writeFile(path.join(scripts, 'release-lib.mjs'), `export const LAUNCHER = '@anhlp/alp';
+      await writeFile(path.join(scripts, 'workspaces.ts'), `export const workspaceLocations = () => []; export const readPnpmLock = () => ({});`);
+      await writeFile(path.join(scripts, 'release-lib.ts'), `export const LAUNCHER = '@anhlp/alp';
       export const LAUNCHER_LOCATION = 'npm/alp';
       export const releaseArtifacts = () => [
         { name: '@anhlp/alp', file: 'unused.tgz', files: new Map(['package.json', 'bin/alp.js'].map(p => [p, ''])) },
         { name: '@anhlp/alp-paseo', file: 'unused-plugin.tgz', manifest: { peerDependencies: {} } }
       ];`);
-      await writeFile(path.join(scripts, 'spawn-command.mjs'), `export const spawnCommand = (command, args) => [command, args];`);
+      await writeFile(path.join(scripts, 'spawn-command.ts'), `export const spawnCommand = (command, args) => [command, args];`);
       await writeFile(path.join(scripts, 'fixture-child-process.mjs'), `
         import { spawnSync as realSpawnSync } from 'node:child_process'; import fs from 'node:fs'; import path from 'node:path';
         export function spawnSync(command, args, options) {

@@ -61,8 +61,8 @@
     "tag": "beta"
   },
   "scripts": {
-    "build": "node ../../scripts/build-workspace.mjs paseo",
-    "test": "node ../../scripts/test-package.mjs paseo",
+    "build": "node ../../scripts/build-workspace.ts paseo",
+    "test": "node ../../scripts/test-package.ts paseo",
     "prepack": "npm run build"
   },
   "bin": {

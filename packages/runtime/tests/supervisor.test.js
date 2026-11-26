@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { createAlpRuntime, claudeToolShapes } from '@anhlp/alp-runtime';
-import { flatten, literal, templateBullets, templateTitle } from '../../../test/support/template-text.js';
+import { flatten, literal, templateBullets, templateTitle } from '../../../test/support/template-text.ts';
 
 async function until(check) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }

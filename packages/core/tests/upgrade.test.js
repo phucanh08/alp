@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { upgradeProject, shippedRoleHashes } from '@anhlp/alp-core/upgrade';
 import { shippedTemplateRoot } from '@anhlp/alp-core/template-path';
 import { resolveAgent } from '@anhlp/alp-core/resolver';
-import { literal, templateTitle } from '../../../test/support/template-text.js';
+import { literal, templateTitle } from '../../../test/support/template-text.ts';
 
 async function fixture(t, main = '# Main agent\n\nHelp with tasks in this project.\n') {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-upgrade-'));

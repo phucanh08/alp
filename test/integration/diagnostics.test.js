@@ -14,7 +14,7 @@ import { assertPrivateDirectory, bootTime, daemonPaths, ensureDaemon } from '../
 import { diagnose, diskCheck, shellQuote } from '../../packages/client/dist/doctor.js';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createDaemonServer, createStore } from '../../dist/daemon/index.js';
-import { teardown } from '../support/teardown.js';
+import { teardown } from '../support/teardown.ts';
 
 const ALPD = fileURLToPath(new URL('../../dist/alpd.js', import.meta.url));
 const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));

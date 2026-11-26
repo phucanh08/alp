@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { checkScenarios, disclosure } from '../../scripts/skill-eval.mjs';
+import { checkScenarios, disclosure } from '../../scripts/skill-eval.ts';
 
 test('the trigger scenarios agree with the shipped role mapping', async () => {
   assert.deepEqual(await checkScenarios(), []);

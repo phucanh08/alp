@@ -10,7 +10,7 @@ import { addGate, createTask, loadTasks } from '@anhlp/alp-core/tasks';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 function fakeTransport() {
   return () => ({

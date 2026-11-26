@@ -17,7 +17,7 @@ import { createSocketTransport } from '@anhlp/alp-client/ipc';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { createTerminalService, frames, readTerminalConfig } from '@anhlp/alp-daemon/terminals';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const skip = !['darwin', 'linux'].includes(process.platform) && 'terminals are served on macOS and Linux only';
 // A predictable shell: alpd picks $SHELL when /etc/shells lists it, else /bin/sh.

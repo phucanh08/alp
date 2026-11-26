@@ -10,7 +10,7 @@ import { closeTask, createTask, getTask, loadTasks, recordVerification, startTas
 import { describeVerification, runVerify, validateVerify, verifyConfig } from '@anhlp/alp-core/verify';
 import { validateSettings } from '@anhlp/alp-core/validation';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
-import { teardown } from '../support/teardown.js';
+import { teardown } from '../support/teardown.ts';
 
 // Verify commands are sh; Windows runs them under cmd.exe, whose echo ends its lines with CRLF and which has no sleep.
 const windows = process.platform === 'win32';

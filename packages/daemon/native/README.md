@@ -72,11 +72,11 @@ Kernel proof anchors (oracle 275c5e36, advice only; not implementation review):
 
 ## Build, distribution and remaining platform evidence
 
-`node scripts/build-terminal-native.mjs` is an EXPLICIT developer build, never
+`node scripts/build-terminal-native.ts` is an EXPLICIT developer build, never
 terminal startup or postinstall. Darwin also accepts `--arch=x64`/`--arch=arm64`
 using the existing Apple compiler and ad-hoc codesign; capability execution must
 succeed before a manifest is written. Hashes bind protocol, source and binary.
-`node scripts/terminal-native-assets.mjs --require-matrix` and release pack-check
+`node scripts/terminal-native-assets.ts --require-matrix` and release pack-check
 FAIL until all six slots exist: Darwin arm64/x64, Linux arm64/x64 × glibc/musl.
 Builds copy only verified prebuilt assets beside root, daemon, CLI and Paseo bundles;
 source-package daemon consumers also carry native source/hash manifests. They do
@@ -100,14 +100,14 @@ not bit-for-bit provenance.
 
 When `terminal-owner.c` changes, rebuild ALL six slots in the same commit:
 
-1. Darwin: on macOS, `node scripts/build-terminal-native.mjs --arch=arm64` and
+1. Darwin: on macOS, `node scripts/build-terminal-native.ts --arch=arm64` and
    `--arch=x64` (x64 capability executes through Rosetta).
 2. Linux: push the source change; the terminal-native jobs fail as stale but still upload
    `terminal-native-<slot>` artifacts built from that exact revision. Download them into
    an empty directory (`gh run download <run-id> -p 'terminal-native-*' -D <dir>`; each
    lands as `<dir>/terminal-native-<slot>/<slot>.tar`) and extract each with
    `tar -C packages/daemon/native/prebuilt -xpf <tar>` (tar keeps the exec bit).
-3. `node scripts/terminal-native-assets.mjs --require-matrix`, commit all six slots, and
+3. `node scripts/terminal-native-assets.ts --require-matrix`, commit all six slots, and
    check the next CI run is green.
 
 Current artifacts: Darwin arm64 executed on macOS27, Darwin x64 capability executed

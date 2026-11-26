@@ -140,8 +140,8 @@
     "@xterm/headless": "6.0.0"
   },
   "scripts": {
-    "build": "node ../../scripts/build-workspace.mjs daemon",
-    "test": "node ../../scripts/test-package.mjs daemon",
+    "build": "node ../../scripts/build-workspace.ts daemon",
+    "test": "node ../../scripts/test-package.ts daemon",
     "prepack": "npm run build"
   },
   "publishConfig": {

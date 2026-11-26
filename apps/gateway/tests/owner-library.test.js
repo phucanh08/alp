@@ -16,7 +16,7 @@ import WebSocket from 'ws';
 import { AGENT_CAPABILITY, AlpRpcClient } from '@anhlp/alp-client/portable';
 import { connectWebSocket } from '@anhlp/alp-client/websocket';
 import { ORIGIN, startGateway } from './support/harness.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const notExposed = method => error => error.code === -32601 && error.message === `${method} is not available through the gateway` && error.data?.reason === 'not_exposed';
 

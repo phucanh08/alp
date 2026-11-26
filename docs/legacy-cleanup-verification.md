@@ -34,12 +34,12 @@ No user data or templates were intentionally touched. Root `templates/` remains 
 
 ## Build/tooling changes
 
-- `scripts/build-paseo.mjs` now builds root compatibility artifacts from canonical package sources and no longer copies output into `plugins/paseo` or `integrations/paseo-plugin`.
+- `scripts/build-paseo.ts` now builds root compatibility artifacts from canonical package sources and no longer copies output into `plugins/paseo` or `integrations/paseo-plugin`.
 - `scripts/build-paseo-web.mjs` now targets only `dist/web-app` and `packages/paseo/server/dist/web-app`.
 - `tsconfig.paseo.json` and `tsconfig.client.json` no longer include deleted directories.
 - Active tests and E2E scripts now import from `packages/*` and use `packages/cli/src/cli.js`.
 - The old wrapper-parity assertion in `test/monorepo.test.js` was replaced with a regression checking canonical plugin build artifacts, root CLI build presence, selector/package metadata, and absence of the three deleted directories after builds.
-- `FakeAdapter` moved from `src/adapters/fake.js` to `test/support/fake-adapter.js`; `test/adapter.test.js` updated.
+- `FakeAdapter` moved from `src/adapters/fake.js` to `test/support/fake-adapter.ts`; `test/adapter.test.js` updated.
 
 ## Before / after test counts
 

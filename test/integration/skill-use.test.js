@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { claudePermissions, skillPlugin, SKILL_PLUGIN } from '../../dist/runtime/index.js';
 import { renderLog } from '../../packages/client/dist/render.js';
-import { tree, until } from '../support/fake-agent.js';
-import { templateIndexDescription } from '../support/template-text.js';
+import { tree, until } from '../support/fake-agent.ts';
+import { templateIndexDescription } from '../support/template-text.ts';
 
 /**
  * The one index line for `name`, asserted to point at that skill's SKILL.md and to carry the

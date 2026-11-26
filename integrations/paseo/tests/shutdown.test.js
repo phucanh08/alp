@@ -9,7 +9,7 @@ import net from 'node:net';
 import { createShutdown } from '../server/dist/shutdown.js';
 import { createWebServer } from '../server/dist/web.js';
 import { childMessages } from './support/child-message.mjs';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const stages = ['unregister', 'web', 'relay', 'bridge', 'supervision', 'release'];
 for (const hung of stages) test(`total deadline exits when ${hung} never settles`, { timeout: 4000 }, async t => {

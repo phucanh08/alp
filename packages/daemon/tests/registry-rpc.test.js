@@ -7,7 +7,7 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary } from '@anhlp/alp-core/library';
-import { fakeTransport } from '../../../test/support/fake-agent.js';
+import { fakeTransport } from '../../../test/support/fake-agent.ts';
 test('host workspace resolution, legacy cwd, existing root mismatch and failed open placement rollback',async t=>{
  const root=await mkdtemp(path.join(tmpdir(),'alp-registry-rpc-'));const home=path.join(root,'home');await seedLibrary(home);
  const a=path.join(root,'a'),b=path.join(root,'b');await initProject(a,{library:home});await initProject(b,{library:home});

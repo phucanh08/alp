@@ -6,8 +6,8 @@ import assert from 'node:assert/strict';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { issued, MAIL_LATE_MS, publicEvent, renderMail, replayedNotice } from '@anhlp/alp-runtime/mailbox';
 
-import { fakeTransport, until, workspace } from '../../../test/support/recovery.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { fakeTransport, until, workspace } from '../../../test/support/recovery.ts';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const POSTED = Date.parse('2026-10-29T11:52:53.033Z');
 const note = extra => ({ id: '#7', kind: 'note', from: 'peer', assignment: 'alp-child-1', body: 'alpd restarted; ALP reopened this assignment and it continues. It reports when done.', ...extra });

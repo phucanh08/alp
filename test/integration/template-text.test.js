@@ -1,10 +1,10 @@
-// t-814a: the readers in test/support/template-text.js are what eight test files now trust instead
+// t-814a: the readers in test/support/template-text.ts are what eight test files now trust instead
 // of a copied sentence, so they must fail loudly rather than return something an assertion passes
 // against for free. A reader that quietly returned '' would make every `assert.match(x, literal(…))`
 // trivially true and every `doesNotMatch` trivially false.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { literal, templateBodySentence, templateDescription, templateLineWith, templateText, templateTitle } from '../support/template-text.js';
+import { literal, templateBodySentence, templateDescription, templateLineWith, templateText, templateTitle } from '../support/template-text.ts';
 
 test('the template readers return what templates/ says at a structural anchor', () => {
   assert.match(templateText('agents/peer/AGENT.md'), /^# /);

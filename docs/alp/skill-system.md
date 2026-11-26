@@ -47,7 +47,7 @@ How each runtime gets skills:
 | Codex | instructions index | reading `SKILL.md` and its files |
 | ACP agents (OpenCode, Gemini CLI, …) and Antigravity | the same index, sent with the first prompt | reading the files with the agent's own tools; no Skill tool is emulated |
 
-Measured with `node scripts/skill-eval.mjs disclosure` (characters measured with the home
+Measured with `node scripts/skill-eval.ts disclosure` (characters measured with the home
 written as `~/.alp`, tokens estimated as characters / 4):
 
 | Role | Skills before / after v2 | Index chars before / after | Bodies + resources not loaded, after |
@@ -202,7 +202,7 @@ For projects with architecture docs or boilerplate:
    dependency direction, run the checks, update docs only when a boundary changed.
 3. Make the rules checkable. Use the project's own tool when it has one (ESLint boundaries,
    dependency-cruiser, Nx, import-linter, ArchUnit). For JavaScript/TypeScript without one,
-   the skill ships `scripts/check-boundaries.mjs`, which reads
+   the skill ships `scripts/check-boundaries.ts`, which reads
    `docs/architecture/contract.json` (modules, allowed dependencies, denied packages,
    exceptions with reason and approver); its format is in the skill's
    `references/architecture-contract.md`. Copy it into the repository for CI.
@@ -223,9 +223,9 @@ a refused peer handoff (`test/integration/hooks.test.js`).
 ## Evaluation
 
 ```sh
-node scripts/skill-eval.mjs disclosure          # Level 0 size per role, bodies never injected
-node scripts/skill-eval.mjs triggers            # scenarios agree with the role mapping
-node scripts/skill-eval.mjs triggers --live     # ask a model (Claude API; costs money)
+node scripts/skill-eval.ts disclosure          # Level 0 size per role, bodies never injected
+node scripts/skill-eval.ts triggers            # scenarios agree with the role mapping
+node scripts/skill-eval.ts triggers --live     # ask a model (Claude API; costs money)
 ```
 
 `test/evals/skills/triggers.json` holds positive, negative, ambiguous, role-specific and

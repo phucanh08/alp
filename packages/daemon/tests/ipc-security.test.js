@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { connect } from '@anhlp/alp-client';
-import { fakeTransport } from '../../../test/support/fake-agent.js';
+import { fakeTransport } from '../../../test/support/fake-agent.ts';
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-ipc-'));

@@ -17,8 +17,8 @@ import { createDaemonServer } from '../../dist/daemon/index.js';
 import { createPaseoBridge } from '../../integrations/paseo/server/dist/index.js';
 import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary } from '@anhlp/alp-core/library';
-import { fakeTransport } from '../support/fake-agent.js';
-import { fixtureProcesses } from '../support/fixture-processes.js';
+import { fakeTransport } from '../support/fake-agent.ts';
+import { fixtureProcesses } from '../support/fixture-processes.ts';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
 const cli = path.join(root, 'packages', 'cli', 'dist', 'cli.js');

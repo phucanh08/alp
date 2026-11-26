@@ -12,7 +12,7 @@ import path from 'node:path';
 import { CODEX_COMMAND, providerLaunch, readNpmShim } from '@anhlp/alp-runtime/provider-command';
 import { CodexTransport } from '@anhlp/alp-runtime/transport';
 import { createTransport } from '@anhlp/alp-runtime/providers';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const windows = process.platform === 'win32';
 

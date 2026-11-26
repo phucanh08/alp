@@ -6,7 +6,7 @@
  *   with no alpd. Never the user's ~/.alp.
  * - The fake `alp` is a shell script the test rewrites at will: it prints the host's address, fails,
  *   or waits first. The app finds it through ALP_DESKTOP_ALP.
- * - Every resource is undone through test/support/teardown.js's `defer`, in reverse order: Electron
+ * - Every resource is undone through test/support/teardown.ts's `defer`, in reverse order: Electron
  *   closes and the host stops before their directory is removed.
  */
 import { execFile, spawn } from 'node:child_process';
@@ -20,11 +20,11 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { _electron } from 'playwright-core';
-import { fixtureProcesses } from '../../../test/support/fixture-processes.js';
+import { fixtureProcesses } from '../../../test/support/fixture-processes.ts';
 import { readToken } from '../../../packages/cli/dist/dashboard-service.js';
-import { teardown } from '../../../test/support/teardown.js';
-import { hermeticEnv } from '../../../scripts/test-lib.mjs';
-import { spawnCommand } from '../../../scripts/spawn-command.mjs';
+import { teardown } from '../../../test/support/teardown.ts';
+import { hermeticEnv } from '../../../scripts/test-lib.ts';
+import { spawnCommand } from '../../../scripts/spawn-command.ts';
 
 export const APP = path.resolve(import.meta.dirname, '..');
 const ROOT = path.resolve(APP, '..', '..');

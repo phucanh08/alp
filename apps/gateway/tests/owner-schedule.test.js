@@ -11,7 +11,7 @@ import path from 'node:path';
 import { EXPOSURE } from '../dist/index.js';
 import { fakeDaemon } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const JOB = { id: 'sch_0123456789abcdef', projectRoot: '/work/project', sessionId: 'ses_0123456789abcdef', prompt: 'Check the provider quota and continue.', dueAt: '2026-10-20T10:00:00.000Z', status: 'pending', attempts: 0, createdAt: '2026-10-20T09:59:00.000Z', updatedAt: '2026-10-20T09:59:00.000Z' };
 const READS = {

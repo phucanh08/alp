@@ -3,7 +3,7 @@
 // issue #121 branch C) on the installed Codex and Claude. It spends real turns of the user's plans
 // (about 7 small turns per runtime), so it never runs in CI:
 //
-//   node scripts/build-workspace.mjs daemon && node test/e2e/conversation-real-e2e.mjs codex claude
+//   node scripts/build-workspace.ts daemon && node test/e2e/conversation-real-e2e.mjs codex claude
 //
 // A real alpd runs on an isolated ALP_HOME and a temporary project with a file no step may change. Per
 // runtime: two turns give codewords ALPHA and BRAVO; a fork through the first turn must see only ALPHA

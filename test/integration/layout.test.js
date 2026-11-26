@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { readFileSync, readdirSync } from 'node:fs';
-import { integrationTests, packageTests, packages, testFiles, webTests, workspaceDirectory } from '../../scripts/test-lib.mjs';
-import { paseoImportSpecifiers, referencedPackages } from '../support/layout.js';
+import { integrationTests, packageTests, packages, testFiles, webTests, workspaceDirectory } from '../../scripts/test-lib.ts';
+import { paseoImportSpecifiers, referencedPackages } from '../support/layout.ts';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
 const manifest = name => JSON.parse(readFileSync(path.join(root, workspaceDirectory(name), 'package.json'), 'utf8'));
@@ -61,7 +61,7 @@ test('the root runner selects every test file exactly once', () => {
 test('every workspace with tests runs them through its own test script', () => {
   for (const name of packages) {
     const script = manifest(name).scripts?.test;
-    if (packageTests(name).length) assert.equal(script, `node ../../scripts/test-package.mjs ${name}`, `${name} must run its own tests`);
+    if (packageTests(name).length) assert.equal(script, `node ../../scripts/test-package.ts ${name}`, `${name} must run its own tests`);
   }
 });
 

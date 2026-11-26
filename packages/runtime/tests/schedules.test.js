@@ -5,7 +5,7 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { initProject } from '@anhlp/alp-core/init';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
-import { fakeTransport, until } from '../../../test/support/fake-agent.js';
+import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
 
 async function setup(t) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-schedule-tool-'));

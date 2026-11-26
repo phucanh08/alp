@@ -9,7 +9,7 @@ import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { createGitReader } from '@anhlp/alp-daemon/git';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 /**
  * workspace.git.facts (docs/protocol/alp-json-rpc-v1.md §12.5): the owner's checkout facts of a

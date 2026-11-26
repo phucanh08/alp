@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { serveToken } from '../dist/dashboard/token-socket.js';
 import { readToken, tokenSocketPath } from '../dist/dashboard-service.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 /**
  * The token socket of alp dashboard (t-cee3): the only way to the token of the running service. It is

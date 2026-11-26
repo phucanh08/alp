@@ -15,7 +15,7 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { validateResult } from '@anhlp/alp-protocol/contract';
 import { defaultForkTitle, turnsOf } from '@anhlp/alp-daemon/conversation';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 async function until(check, what = 'condition') {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }

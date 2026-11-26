@@ -9,10 +9,10 @@
  *
  * Nothing touches the user's ~/.alp, alpd or dashboard: HOME, ALP_HOME and TMPDIR are under the test's
  * scratch directory, launchd is never asked (ALP_LAUNCHCTL=/usr/bin/false), and every Node process the
- * host starts is admitted by test/support/fixture-processes.js, which ends them before the directory
+ * host starts is admitted by test/support/fixture-processes.ts, which ends them before the directory
  * goes. Sessions run a fake Codex (apps/web/e2e/support/fake-codex.js); no model is called.
  *
- * Needs `node scripts/build-workspace.mjs cli` (alpd, alp-dashboard and the web app) and the root
+ * Needs `node scripts/build-workspace.ts cli` (alpd, alp-dashboard and the web app) and the root
  * npm install; `bun run e2e` in apps/desktop runs it with the other specs.
  */
 import test from 'node:test';
@@ -22,7 +22,7 @@ import { chmod, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { fixtureProcesses } from '../../../test/support/fixture-processes.js';
+import { fixtureProcesses } from '../../../test/support/fixture-processes.ts';
 import { APP, cleanEnv, connectedTo, freePort, launch, scratch, waitFor } from './support.mjs';
 
 const ROOT = path.resolve(APP, '..', '..');

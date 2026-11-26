@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { claudeToolShapes, inputLimitError, POUR_VARS, TOOL_INPUT } from '@anhlp/alp-runtime';
 import { MCP_TOOLS, openMcpTools } from '@anhlp/alp-runtime/mcp-tools';
 
-const fakeMcp = new URL('../../../test/support/fake-mcp.js', import.meta.url).pathname;
+const fakeMcp = new URL('../../../test/support/fake-mcp.ts', import.meta.url).pathname;
 const limits = { bytes: 100, items: 5, depth: 2, string: 10 };
 
 test('inputLimitError stops at the first cap a value passes: text, values, nesting, bytes', () => {

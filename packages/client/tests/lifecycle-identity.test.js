@@ -19,7 +19,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import * as client from '../dist/index.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const { bootTime, holdOps, readDaemonLifecycle, withDaemonLifecycle } = client;
 const windows = process.platform === 'win32';

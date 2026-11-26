@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const entry = path.resolve(import.meta.dirname, '..', 'server', 'dist', 'main.js');
 const logFile = home => path.join(home, 'logs', 'integrations', 'paseo.log');

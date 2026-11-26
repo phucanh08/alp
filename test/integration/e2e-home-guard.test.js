@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { teardown } from '../support/teardown.js';
+import { teardown } from '../support/teardown.ts';
 import { HomeGuardError, checkScratchHome, resolveDeep } from '../e2e/home-guard.mjs';
 
 const here = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'e2e');

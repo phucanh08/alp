@@ -12,9 +12,9 @@ import { diagnose } from '../../packages/client/dist/doctor.js';
 import { probeAntigravity } from '../../packages/client/dist/antigravity-probe.js';
 import { validateProvider } from '@anhlp/alp-core/providers';
 import { createAlpRuntime, resolveSession, AntigravityTransport } from '../../dist/runtime/index.js';
-import { teardown } from '../support/teardown.js';
+import { teardown } from '../support/teardown.ts';
 
-const FAKE_AGY = fileURLToPath(new URL('../support/fake-agy.js', import.meta.url));
+const FAKE_AGY = fileURLToPath(new URL('../support/fake-agy.ts', import.meta.url));
 
 async function until(check, what = 'Expected condition') {
   for (let i = 0; i < 1000; i++) {
@@ -338,7 +338,7 @@ test('MCP routes concurrent sessions separately without persisting session crede
 test('Antigravity bridges session MCP tools without persisting external server credentials', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-external-mcp-'));
   removeLast(t, dir);
-  const server = label => ({ command: process.execPath, args: [path.resolve('test/support/fake-mcp.js')], env: { FAKE_MCP_LABEL: label } });
+  const server = label => ({ command: process.execPath, args: [path.resolve('test/support/fake-mcp.ts')], env: { FAKE_MCP_LABEL: label } });
   const a = await transportFixture(t, dir, ['alp_test'], { docs: server('session-a') });
   const b = await transportFixture(t, dir, [], { docs: server('session-b') });
   const one = await a.turn('tools');
@@ -351,7 +351,7 @@ test('Antigravity bridges session MCP tools without persisting external server c
   const config = await readFile(a.configFile, 'utf8');
   assert.equal(config.includes('session-a'), false);
   assert.equal(config.includes('session-b'), false);
-  assert.equal(config.includes('fake-mcp.js'), false);
+  assert.equal(config.includes('fake-mcp.ts'), false);
   await a.transport.close();
   assert.match(await b.turn(`call_tool ${search} {}`), /session-b/);
 });
@@ -389,7 +389,7 @@ test('failed external MCP startup closes servers already opened and names do not
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-mcp-failure-'));
   removeLast(t, dir);
   const pidFile = path.join(dir, 'mcp.pid');
-  const server = { command: process.execPath, args: [path.resolve('test/support/fake-mcp.js')], env: { FAKE_MCP_PID_FILE: pidFile } };
+  const server = { command: process.execPath, args: [path.resolve('test/support/fake-mcp.ts')], env: { FAKE_MCP_PID_FILE: pidFile } };
   await assert.rejects(transportFixture(t, dir, [], { docs: server, broken: { command: 'alp-test-missing-mcp-command' } }), /External MCP server 'broken'/);
   const pid = Number(await readFile(pidFile, 'utf8'));
   await until(() => { try { process.kill(pid, 0); return false; } catch (e) { return e.code === 'ESRCH'; } }, 'MCP process cleanup');
@@ -412,7 +412,7 @@ test('closing while the MCP config is locked cannot launch a late AGY process', 
   }, { id: 'antigravity', label: 'fake', command: process.execPath, args: [FAKE_AGY] });
   defer(() => transport.close());
   const opening = transport.request('thread/start', { cwd: dir, sandbox: 'full-access', mcpServers: {
-    docs: { command: process.execPath, args: [path.resolve('test/support/fake-mcp.js')], env: { FAKE_MCP_PID_FILE: pidFile } },
+    docs: { command: process.execPath, args: [path.resolve('test/support/fake-mcp.ts')], env: { FAKE_MCP_PID_FILE: pidFile } },
   } }).then(() => null, error => error);
   await until(() => transport.bridge, 'bridge waiting for the config lock');
   await transport.close();
@@ -431,7 +431,7 @@ test('closing during a stalled external MCP handshake aborts and cleans its proc
   const transport = new AntigravityTransport(process.execPath, dir, process.env, { id: 'antigravity', label: 'fake', command: process.execPath, args: [FAKE_AGY] });
   defer(() => transport.close());
   const opening = transport.request('thread/start', { cwd: dir, sandbox: 'full-access', mcpServers: {
-    docs: { command: process.execPath, args: [path.resolve('test/support/fake-mcp.js')], env: { FAKE_MCP_PID_FILE: pidFile, FAKE_MCP_HANG_INITIALIZE: '1' } },
+    docs: { command: process.execPath, args: [path.resolve('test/support/fake-mcp.ts')], env: { FAKE_MCP_PID_FILE: pidFile, FAKE_MCP_HANG_INITIALIZE: '1' } },
   } }).then(() => null, error => error);
   await until(async () => readFile(pidFile).then(() => true, () => false), 'external MCP startup');
   await transport.close();

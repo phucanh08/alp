@@ -9,7 +9,7 @@ import { chmod, link, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, s
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { MASK_TEXT, OWNER_LIBRARY_KINDS, TEST_OUTPUT_CHARS, libraryTest, listWorkspaceFiles, maskIn, methods, previewWorkspaceImage, readWorkspaceFile, writeWorkspaceFile } from '../dist/dashboard/owner/library.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const sha = text => createHash('sha256').update(text).digest('hex');
 

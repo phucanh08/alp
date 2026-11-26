@@ -109,8 +109,8 @@ SBOM. Đây không phải finding, chỉ là giới hạn đã biết.
 
   Bằng chứng: thử trên bản sao tarball (`exp/`), consumer cài mặc định còn 0 lỗ hổng, 146
   package. `@getpaseo/*` vẫn được cài, nên `alp-web-integration`/`alp web` vẫn có SDK host.
-  `scripts/tarball-consumer.mjs:151-152` vốn đã lọc optional peer và có comment "Optional peers
-  (react-native, client-side only) are left out". `scripts/package-smoke.mjs:52` đang bỏ qua
+  `scripts/tarball-consumer.ts:151-152` vốn đã lọc optional peer và có comment "Optional peers
+  (react-native, client-side only) are left out". `scripts/package-smoke.ts:52` đang bỏ qua
   react/react-native. Paseo không đọc `peerDependencies` của plugin (grep `packages/*/src`).
   Nếu peer có mặt nhưng sai range, npm vẫn báo conflict.
 - Ảnh hưởng phụ: câu "Normal npm installs bring the plugin's Paseo **and React** peers" ở
@@ -194,7 +194,7 @@ khi xử lý input không tin cậy. Không chặn beta.
 ### F5. Dev/test của repo ALP. Trạng thái: **không bị ảnh hưởng** (không ship)
 
 `ajv` (dev, contract test) và chuỗi `react-native@0.81.5` (dev gốc, client SDK smoke) không vào
-tarball nào: các tarball core có `files` giới hạn, và `scripts/package-smoke.mjs:45-47` chặn
+tarball nào: các tarball core có `files` giới hạn, và `scripts/package-smoke.ts:45-47` chặn
 đường dẫn `integrations/`/`web-app/`/`@getpaseo/`. Không tính vào S1.
 
 ## 5. Bảng tổng hợp cho S1

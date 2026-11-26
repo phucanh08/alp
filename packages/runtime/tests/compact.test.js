@@ -6,8 +6,8 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary, librarySkills } from '@anhlp/alp-core/library';
 import { ClaudeTransport, createAlpRuntime, checkpointPrompt, compactDue, compactSettings, contextFill, seedPrompt } from '@anhlp/alp-runtime';
-import { fakeTransport, until } from '../../../test/support/fake-agent.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const CHECKPOINT = '**Assignment đang chạy:** none\n**Bước tiếp theo:** review PR #9';
 

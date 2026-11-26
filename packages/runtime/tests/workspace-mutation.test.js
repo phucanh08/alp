@@ -146,7 +146,7 @@ test('permanent result ownership survives restart and recall expiry; lost ledger
 });
 
 test('unfinished writers remain owned if recovery books disappear before their first result',async()=>{
- const {initProject}=await import('@anhlp/alp-core/init');const {fakeTransport}=await import('../../../test/support/fake-agent.js');const {readFile,realpath}=await import('node:fs/promises');
+ const {initProject}=await import('@anhlp/alp-core/init');const {fakeTransport}=await import('../../../test/support/fake-agent.ts');const {readFile,realpath}=await import('node:fs/promises');
  const root=await realpath(await mkdtemp(path.join(os.tmpdir(),'alp-unfinished-owner-')));const project=path.join(root,'project'),target=path.join(root,'managed');await initProject(project);await mkdir(target);const assignmentResultFile=path.join(root,'results.json'),liveFile=path.join(root,'live.json'),recallFile=path.join(root,'recall.json');
  const options={assignmentResultFile,liveFile,recallFile,supervisor:false,libraryDir:path.join(root,'library')};const agents=[];let runtime=createAlpRuntime({...options,transport:fakeTransport(agents)});
  try{
@@ -188,7 +188,7 @@ test('ancestor ownership refuses mutation while boundary siblings remain indepen
 
 test('a shared writer result holds its checkout until its requester resolves it; then it is archived and recall no longer holds it', async () => {
   const { initProject } = await import('@anhlp/alp-core/init');
-  const { fakeTransport } = await import('../../../test/support/fake-agent.js');
+  const { fakeTransport } = await import('../../../test/support/fake-agent.ts');
   const { readFile, readdir, realpath } = await import('node:fs/promises');
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'alp-shared-result-')));
   const project = path.join(root, 'project'), target = path.join(root, 'managed');

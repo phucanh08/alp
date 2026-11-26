@@ -21,7 +21,7 @@ import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chmod, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fixtureProcesses } from '../../../test/support/fixture-processes.js';
+import { fixtureProcesses } from '../../../test/support/fixture-processes.ts';
 import { APP, bounded, cleanEnv, connectedTo, freePort, launch, scratch, waitFor } from './support.mjs';
 
 const CLI = path.join(APP, '..', '..', 'packages/cli/dist/cli.js');

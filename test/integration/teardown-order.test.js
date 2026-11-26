@@ -11,11 +11,11 @@ import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { teardown } from '../support/teardown.js';
-import { ALLOWED, scan, teardownProblems, unitOf } from '../../scripts/check-teardown-order.mjs';
+import { teardown } from '../support/teardown.ts';
+import { ALLOWED, scan, teardownProblems, unitOf } from '../../scripts/check-teardown-order.ts';
 
-const HELPER = new URL('../support/teardown.js', import.meta.url).href;
-const RUNNER = new URL('../../scripts/test-lib.mjs', import.meta.url).href;
+const HELPER = new URL('../support/teardown.ts', import.meta.url).href;
+const RUNNER = new URL('../../scripts/test-lib.ts', import.meta.url).href;
 
 /** Runs one throwaway test file through the real runner with a short deadline; returns its output. */
 async function runFile(source, { timeoutMs = 2500 } = {}) {
@@ -37,7 +37,7 @@ async function runFile(source, { timeoutMs = 2500 } = {}) {
 /**
  * A test that opens a listening socket, then tears down in `steps` — written as the file under test
  * would write them. `shape: 'bare'` registers each step as its own `t.after` (the old shape, FIFO);
- * `shape: 'defer'` registers them through test/support/teardown.js (reverse order, every step runs).
+ * `shape: 'defer'` registers them through test/support/teardown.ts (reverse order, every step runs).
  */
 const fixture = (shape, steps) => `import test from 'node:test';
 import net from 'node:net';
@@ -206,11 +206,11 @@ test('no allowlist entry is stale: each one still names a site the scan reports'
   const everything = await scan({ allowed: {} });
   const sites = new Set(everything.map(problem => problem.site));
   const stale = Object.keys(ALLOWED).filter(site => !sites.has(site));
-  assert.deepEqual(stale, [], `allowlisted in scripts/check-teardown-order.mjs but no longer reported: ${stale.join(', ')}. The site was fixed or its line moved — delete the entry (or re-point it) instead of leaving it to excuse nothing.`);
+  assert.deepEqual(stale, [], `allowlisted in scripts/check-teardown-order.ts but no longer reported: ${stale.join(', ')}. The site was fixed or its line moved — delete the entry (or re-point it) instead of leaving it to excuse nothing.`);
   // And the allowlist is the only thing standing between the scan and a clean build, so the default
   // scan must be empty: a real new defect cannot hide behind the excused ones.
   const open = await scan();
-  assert.deepEqual(open.map(problem => problem.detail), [], 'scripts/check-teardown-order.mjs reports a teardown-order defect that is not allowlisted');
+  assert.deepEqual(open.map(problem => problem.detail), [], 'scripts/check-teardown-order.ts reports a teardown-order defect that is not allowlisted');
 });
 
 // Review finding M, t-5294.6. The hang shape can live in a SUPPORT MODULE, and then nothing in the
@@ -223,7 +223,7 @@ test('no allowlist entry is stale: each one still names a site the scan reports'
 // So the lint follows a fixture helper out of the file it is imported from, and treats the one hook
 // `teardown(t)` registers as a single unit at the point it was registered. That makes the three
 // shapes below one rule. `load` is the seam: the scan reads the real file, a test passes a map.
-const SUPPORT = `import { teardown } from '../../../test/support/teardown.js';
+const SUPPORT = `import { teardown } from '../../../test/support/teardown.ts';
 export async function startGateway(t, options) {
   const directory = await mkdtemp('gw');
   const gateway = createGateway(options);
@@ -265,7 +265,7 @@ test('one', async t => {
   // runs the teardown hook first because it was registered first, so the whole defer list — rm
   // included — runs BEFORE the helper's close. Converting one side only makes it worse, not better.
   const half = `import test from 'node:test';
-import { teardown } from '../support/teardown.js';
+import { teardown } from '../support/teardown.ts';
 import { startGateway } from './support/harness.js';
 test('one', async t => {
   const defer = teardown(t);

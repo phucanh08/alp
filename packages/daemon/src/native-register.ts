@@ -1,4 +1,4 @@
-// The native alpd (t-81b0.9, scripts/build-alpd-native.mjs): registers this process as the native
+// The native alpd (t-81b0.9, scripts/build-alpd-native.ts): registers this process as the native
 // alpd before alpd's own modules load (native-entry.ts imports this first). The Claude Agent SDK is
 // imported here by its literal name so the build embeds it in the executable; claude-transport.ts
 // reaches it through this registration instead of its computed import.

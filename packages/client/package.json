@@ -154,8 +154,8 @@
     "@anhlp/alp-protocol": "0.0.1-beta.14"
   },
   "scripts": {
-    "build": "node ../../scripts/build-workspace.mjs client",
-    "test": "node ../../scripts/test-package.mjs client",
+    "build": "node ../../scripts/build-workspace.ts client",
+    "test": "node ../../scripts/test-package.ts client",
     "prepack": "npm run build"
   },
   "publishConfig": {

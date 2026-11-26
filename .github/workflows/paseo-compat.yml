@@ -16,8 +16,8 @@ on:
       - integrations/paseo/package.json
       - integrations/paseo/paseo-plugin.json
       - pnpm-lock.yaml
-      - scripts/check-paseo-compat.mjs
-      - scripts/use-paseo-sdk.mjs
+      - scripts/check-paseo-compat.ts
+      - scripts/use-paseo-sdk.ts
       - .github/workflows/paseo-compat.yml
       - .github/workflows/terminal-native.yml
       - .github/actions/terminal-native/**
@@ -41,7 +41,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: node scripts/check-paseo-compat.mjs --latest
+      - run: node scripts/check-paseo-compat.ts --latest
 
   # Linux helpers from this revision, staged before the plugin's terminal tests (t-9f0d).
   terminal-native:
@@ -62,9 +62,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - uses: ./.github/actions/terminal-native
-      - run: node scripts/use-paseo-sdk.mjs latest
+      - run: node scripts/use-paseo-sdk.ts latest
       - run: pnpm install --frozen-lockfile
-      - run: node scripts/use-paseo-sdk.mjs --verify
+      - run: node scripts/use-paseo-sdk.ts --verify
       - run: pnpm run validate:paseo
 
   report:

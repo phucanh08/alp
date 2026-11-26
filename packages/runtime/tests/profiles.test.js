@@ -6,7 +6,7 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { upgradeProject } from '@anhlp/alp-core/upgrade';
 import { validateSettings } from '@anhlp/alp-core/validation';
-import { fakeTransport, until } from '../../../test/support/fake-agent.js';
+import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
 import { createAlpRuntime, resolveSession } from '@anhlp/alp-runtime';
 
 test('project profile resolves model/effort, supervisor and dual lenses; caller can override', async t => {

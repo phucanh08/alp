@@ -104,7 +104,7 @@ import { initProject } from '@anhlp/alp-core/init';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 for (const socket of [false, true]) test(`real ${socket ? 'socket' : 'embedded'} daemon takes rendered user context and images`, async t => {
   const defer = teardown(t);

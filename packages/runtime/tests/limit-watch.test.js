@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createAlpRuntime, usageAllows } from '@anhlp/alp-runtime';
 import { codexUsage } from '@anhlp/alp-runtime/runtime-context';
-import { fakeTransport, tree, until } from '../../../test/support/fake-agent.js';
+import { fakeTransport, tree, until } from '../../../test/support/fake-agent.ts';
 
 const codex = (...used) => ({ available: true, limits: [{ windows: used.map(usedPercent => ({ usedPercent, windowMinutes: 300, resetsAt: 1_900_000_000 })), spendControlReached: false }] });
 const noticesOf = (events, sessionId = 'root') => events.filter(envelope => envelope.sessionId === sessionId && envelope.event.type === 'item' && envelope.event.item.kind === 'notice').map(envelope => envelope.event.item.text);

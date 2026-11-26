@@ -51,10 +51,10 @@ jobs:
             *-glibc)
               # The runner's official Node binary supports glibc 2.28, so it runs inside the floor image.
               docker run --rm -v "$PWD:/w" -v "$(dirname "$(dirname "$(command -v node)")"):/opt/hostnode:ro" -w /w "$IMAGE" \
-                sh -ec 'cc --version; ldd --version | head -1; /opt/hostnode/bin/node scripts/build-terminal-native.mjs' ;;
+                sh -ec 'cc --version; ldd --version | head -1; /opt/hostnode/bin/node scripts/build-terminal-native.ts' ;;
             *-musl)
               docker run --rm -v "$PWD:/w" -w /w "$IMAGE" \
-                sh -ec 'apk add --no-cache build-base linux-headers nodejs >/dev/null; cc --version; node scripts/build-terminal-native.mjs' ;;
+                sh -ec 'apk add --no-cache build-base linux-headers nodejs >/dev/null; cc --version; node scripts/build-terminal-native.ts' ;;
           esac
           sudo chown -R "$(id -u):$(id -g)" packages/daemon/native/prebuilt
           dir="packages/daemon/native/prebuilt/$SLOT"

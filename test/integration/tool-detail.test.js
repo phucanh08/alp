@@ -11,8 +11,8 @@ import { initProject } from '@anhlp/alp-core/init';
 import { saveEntry } from '@anhlp/alp-core/library-edit';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 
-const FAKE_ACP = fileURLToPath(new URL('../support/fake-acp.js', import.meta.url));
-const FAKE_AGY = fileURLToPath(new URL('../support/fake-agy.js', import.meta.url));
+const FAKE_ACP = fileURLToPath(new URL('../support/fake-acp.ts', import.meta.url));
+const FAKE_AGY = fileURLToPath(new URL('../support/fake-agy.ts', import.meta.url));
 const FAKE_CLAUDE = fileURLToPath(new URL('../../packages/daemon/tests/support/fake-claude.js', import.meta.url));
 
 async function until(check, what = 'Expected condition') {

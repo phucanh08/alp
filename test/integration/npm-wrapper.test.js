@@ -6,7 +6,7 @@ import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promi
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { LAUNCHER, launcherProblems } from '../../scripts/release-lib.mjs';
+import { LAUNCHER, launcherProblems } from '../../scripts/release-lib.ts';
 
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const WRAPPER = path.join(ROOT, 'npm/alp');

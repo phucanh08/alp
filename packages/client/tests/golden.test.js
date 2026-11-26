@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { renderLog, renderPs } from '../dist/render.js';
 import { epicReport } from '@anhlp/alp-core/tasks';
-import { tree, until } from '../../../test/support/fake-agent.js';
+import { tree, until } from '../../../test/support/fake-agent.ts';
 
 /**
  * Golden output of `alp log`, `alp ps` and `alp task report` (ALPD §39). A change to

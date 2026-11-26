@@ -15,7 +15,7 @@ import { DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, PERMISSIONS, TER
 import { reissueCredential, revokeCredential } from '../dist/credentials.js';
 import { fakeDaemon } from './support/fake-daemon.js';
 import { startGateway, until } from './support/harness.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const T1 = `term_${'1'.repeat(32)}`;
 const T2 = `term_${'2'.repeat(32)}`;

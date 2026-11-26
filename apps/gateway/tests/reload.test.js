@@ -12,7 +12,7 @@ import { resumeCommandOf } from '@anhlp/alp-protocol';
 import { EXPOSURE, FORWARDED_CAPABILITIES, projectConversation } from '../dist/policy.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const CAPABILITIES = ['attach.after', 'prompt.receipts', 'session.history', 'session.fork', 'session.rewind', 'session.reload', 'session.resumeCommand'];
 const GEN = '0123456789abcdef0123456789abcdef';

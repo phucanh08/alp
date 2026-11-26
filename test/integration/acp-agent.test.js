@@ -8,7 +8,7 @@ import { initProject } from '@anhlp/alp-core/init';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createDaemonServer } from '../../dist/daemon/index.js';
 import { createAcpAgent, hostServers, promptText } from '../../dist/acp/agent.js';
-import { fakeTransport, until } from '../support/fake-agent.js';
+import { fakeTransport, until } from '../support/fake-agent.ts';
 
 /** alpd in this process with scripted agents, and an editor that talks to `alp acp`. */
 async function setup(t) {

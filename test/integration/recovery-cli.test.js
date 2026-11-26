@@ -6,8 +6,8 @@ import path from 'node:path';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { connect, daemonPaths, bootTime } from '@anhlp/alp-client';
-import { fakeTransport, until, workspace } from '../support/recovery.js';
-import { teardown } from '../support/teardown.js';
+import { fakeTransport, until, workspace } from '../support/recovery.ts';
+import { teardown } from '../support/teardown.ts';
 
 // Built CLI -> real socket daemon -> runtime -> scripted native transport. Every home is disposable.
 test('explicit CLI prompt continues a manual recovery child; default send remains mail', async t => {

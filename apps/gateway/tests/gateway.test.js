@@ -12,7 +12,7 @@ import path from 'node:path';
 import { revokeCredential, rotateCredential, resolveConfig } from '../dist/index.js';
 import { fakeDaemon, summary } from './support/fake-daemon.js';
 import { ORIGIN, startGateway, until } from './support/harness.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 async function workspaces(t) {
   const defer = teardown(t);

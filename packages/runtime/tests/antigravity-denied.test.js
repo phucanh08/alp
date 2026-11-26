@@ -15,8 +15,8 @@ import { initProject } from '@anhlp/alp-core/init';
 import { createTask, getTask } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { AntigravityTransport } from '@anhlp/alp-runtime/antigravity-transport';
-import { fakeTransport, until } from '../../../test/support/fake-agent.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
+import { teardown } from '../../../test/support/teardown.ts';
 
 // The refusal text agy 1.5.15 gave in M0, verbatim.
 const DENIAL = 'permission check failed for read_file "/private/etc/hosts": user denied permission for read_file(/private/etc/hosts)\nDo not attempt to circumvent this denial by rephrasing the command, using alternative tools/scripts (e.g. python, sh, curl), or accessing the same target resource. Proceed without performing this action.';

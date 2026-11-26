@@ -247,8 +247,8 @@
     "zod": "4.6.7"
   },
   "scripts": {
-    "build": "node ../../scripts/build-workspace.mjs runtime",
-    "test": "node ../../scripts/test-package.mjs runtime",
+    "build": "node ../../scripts/build-workspace.ts runtime",
+    "test": "node ../../scripts/test-package.ts runtime",
     "prepack": "npm run build"
   },
   "publishConfig": {

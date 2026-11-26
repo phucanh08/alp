@@ -26,8 +26,8 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-import { fakeTransport, until, workspace } from '../../../test/support/recovery.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { fakeTransport, until, workspace } from '../../../test/support/recovery.ts';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const text = body => [{ type: 'text', text: body }];

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { workspaceLocations } from '../../scripts/workspaces.mjs';
+import { workspaceLocations } from '../../scripts/workspaces.ts';
 
 /**
  * The canonical Paseo plugin and the root compatibility distribution. This lives with the Paseo

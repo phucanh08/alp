@@ -12,7 +12,7 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { connect, daemonPaths, readLock } from '@anhlp/alp-client/index';
-import { fixtureProcesses } from '../../../test/support/fixture-processes.js';
+import { fixtureProcesses } from '../../../test/support/fixture-processes.ts';
 import { readToken, tokenSocketPath } from '../dist/dashboard-service.js';
 
 /**

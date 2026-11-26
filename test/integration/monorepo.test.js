@@ -4,12 +4,12 @@ import { readFile, mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
-import { validateBuildManifest } from '../../scripts/build-manifest.mjs';
+import { validateBuildManifest } from '../../scripts/build-manifest.ts';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
 
 test('workspace source dependencies are declared, acyclic and stay inside their packages', () => {
-  const result = spawnSync(process.execPath, ['scripts/check-boundaries.mjs'], { cwd: root, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['scripts/check-boundaries.ts'], { cwd: root, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
@@ -44,7 +44,7 @@ test('the boundary checker rejects Paseo deps, imports, createRequire aliases an
   await write('packages/daemon/src/index.ts', "import { createRequire } from 'node:module';\nconst req = createRequire(import.meta.url);\nconst plugin = req('@getpaseo/plugin');\nexport default plugin;\n");
   await write('packages/daemon/src/escape.ts', "import '../../outside.js';\nexport {};\n");
 
-  const result = spawnSync(process.execPath, ['scripts/check-boundaries.mjs', '--root', fixture], { cwd: root, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, ['scripts/check-boundaries.ts', '--root', fixture], { cwd: root, encoding: 'utf8' });
   const output = (result.stdout + result.stderr).replaceAll('\\', '/'); // the checker prints file paths with the OS separator
   assert.equal(result.status, 1, output);
   assert.match(output, /@anhlp\/alp-core: forbidden Paseo dependency @getpaseo\/plugin/);
@@ -66,7 +66,7 @@ test('the boundary checker rejects process.execPath outside the runtime-neutral 
   await write('packages/core/src/packaged.ts', "export const self = () => process.execPath;\n");
   await write('packages/daemon/src/ok.ts', "export function start({ execPath = process.execPath } = {}) { return execPath; }\nexport const shown = { nodePath: process.execPath /* alp-allow-execpath: reported only */ };\n");
   await write('packages/daemon/tests/spawn.test.js', "import { spawn } from 'node:child_process';\nspawn(process.execPath, ['x.js']);\n");
-  const check = () => { const result = spawnSync(process.execPath, ['scripts/check-boundaries.mjs', '--root', fixture], { cwd: root, encoding: 'utf8' }); return { status: result.status, output: (result.stdout + result.stderr).replaceAll('\\', '/') }; };
+  const check = () => { const result = spawnSync(process.execPath, ['scripts/check-boundaries.ts', '--root', fixture], { cwd: root, encoding: 'utf8' }); return { status: result.status, output: (result.stdout + result.stderr).replaceAll('\\', '/') }; };
   const clean = check();
   assert.equal(clean.status, 0, clean.output);
   await write('packages/daemon/src/main.ts', "import { spawn } from 'node:child_process';\nspawn(process.execPath, [import.meta.filename]);\nspawn(process.execPath, ['-e', 'code']);\n");
@@ -81,7 +81,7 @@ test('the CLI may bundle the private gateway only as a devDependency; other pack
   const fixture = await mkdtemp(path.join(os.tmpdir(), 'alp-bundled-app-'));
   t.after(() => rm(fixture, { recursive: true, force: true }));
   const write = async (relative, contents) => { await mkdir(path.dirname(path.join(fixture, relative)), { recursive: true }); await writeFile(path.join(fixture, relative), contents); };
-  const check = () => { const result = spawnSync(process.execPath, ['scripts/check-boundaries.mjs', '--root', fixture], { cwd: root, encoding: 'utf8' }); return { status: result.status, output: result.stdout + result.stderr }; };
+  const check = () => { const result = spawnSync(process.execPath, ['scripts/check-boundaries.ts', '--root', fixture], { cwd: root, encoding: 'utf8' }); return { status: result.status, output: result.stdout + result.stderr }; };
   await write('package.json', JSON.stringify({ private: true }));
   await write('pnpm-workspace.yaml', `packages: ${JSON.stringify(['packages/cli', 'packages/daemon', 'apps/gateway'])}\n`);
   await write('apps/gateway/package.json', JSON.stringify({ name: '@anhlp/alp-gateway', version: '0.0.0', private: true }));
@@ -115,7 +115,7 @@ test('strict boundary checks fail when build artifacts are missing', async t => 
   t.after(() => rm(fixture, { recursive: true, force: true }));
   await writeFile(path.join(fixture, 'package.json'), JSON.stringify({}));
   await writeFile(path.join(fixture, 'pnpm-workspace.yaml'), 'packages: []\n');
-  const check = (...args) => spawnSync(process.execPath, ['scripts/check-boundaries.mjs', '--root', fixture, ...args], { cwd: root, encoding: 'utf8' });
+  const check = (...args) => spawnSync(process.execPath, ['scripts/check-boundaries.ts', '--root', fixture, ...args], { cwd: root, encoding: 'utf8' });
   assert.equal(check().status, 0);
   const strict = check('--require-artifacts');
   assert.equal(strict.status, 1, strict.stdout + strict.stderr);
@@ -125,7 +125,7 @@ test('strict boundary checks fail when build artifacts are missing', async t => 
 });
 
 test('root distribution boundary rejects direct/optional/peer/dev/bundled SDK and plugin artifacts', async t => {
-  const { corePackageProblems } = await import('../../scripts/core-package-boundary.mjs');
+  const { corePackageProblems } = await import('../../scripts/core-package-boundary.ts');
   for (const field of ['dependencies', 'optionalDependencies', 'peerDependencies', 'devDependencies']) {
     assert.match(corePackageProblems({ name: '@anhlp/alp', [field]: { '@getpaseo/plugin': '*' } }).join('\n'), /forbidden Paseo dependency/);
   }
@@ -139,13 +139,13 @@ test('root distribution boundary rejects direct/optional/peer/dev/bundled SDK an
   t.after(() => rm(fixture, { recursive: true, force: true }));
   await writeFile(path.join(fixture, 'pnpm-workspace.yaml'), 'packages: []\n');
   await writeFile(path.join(fixture, 'package.json'), JSON.stringify({ name: '@anhlp/alp', dependencies: { '@getpaseo/plugin': '*' } }));
-  const result = spawnSync(process.execPath, ['scripts/check-boundaries.mjs', '--root', fixture], { encoding: 'utf8', cwd: root });
+  const result = spawnSync(process.execPath, ['scripts/check-boundaries.ts', '--root', fixture], { encoding: 'utf8', cwd: root });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /@anhlp\/alp: forbidden Paseo dependency/);
 });
 
 test('the Paseo remote bundle gate rejects local-only inputs and host imports', async () => {
-  const { assertRemoteInputs } = await import('../../scripts/build-manifest.mjs');
+  const { assertRemoteInputs } = await import('../../scripts/build-manifest.ts');
   const portable = { inputs: { 'packages/client/src/portable.ts': {}, 'packages/client/src/rpc/index.ts': {}, 'integrations/paseo/server/provider-core.ts': {}, 'integrations/paseo/server/remote/link.ts': {} }, outputs: { 'out.js': { imports: [{ path: 'ws', external: true }, { path: 'node:crypto', external: true }] } } };
   assert.doesNotThrow(() => assertRemoteInputs(portable, 'remote'));
   for (const input of ['packages/core/src/index.ts', 'packages/runtime/src/index.ts', 'packages/daemon/src/server.ts', 'packages/client/src/index.ts', 'packages/client/src/supervise.ts', 'integrations/paseo/server/provider.ts', 'integrations/paseo/server/mapping.ts', 'integrations/paseo/server/panel/library.ts', 'integrations/paseo/server/paseo/agents.ts']) {

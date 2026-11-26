@@ -12,7 +12,7 @@ import { validateWSOutboundMessage } from '@getpaseo/protocol/validation/ws-outb
 import { decodeBinaryFrame, TerminalStreamOpcode } from '@getpaseo/protocol/binary-frames/index';
 import { TerminalInputModeTracker } from '@getpaseo/protocol/terminal-input-mode';
 import { createTerminals, TERMINALS_OFF } from '@anhlp/alp-paseo/paseo/terminals';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const decoder = new TextDecoder();
 const text = bytes => decoder.decode(bytes);

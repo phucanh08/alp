@@ -19,9 +19,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { createPaseoClient } from '@getpaseo/client';
-import { workspaceLocations } from '../../scripts/workspaces.mjs';
+import { workspaceLocations } from '../../scripts/workspaces.ts';
 // Imported for its effect: pnpm's npm_config_* variables do not reach the npm this e2e starts.
-import '../../scripts/spawn-command.mjs';
+import '../../scripts/spawn-command.ts';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const keep = process.env.ALP_E2E_KEEP === '1';

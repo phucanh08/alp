@@ -13,7 +13,7 @@ import { WORKSPACE_GIT } from '@anhlp/alp-protocol';
 import { DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, gitPath, gitRemoteUrl, projectGitDiff, projectGitStatus } from '../dist/policy.js';
 import { fakeDaemon } from './support/fake-daemon.js';
 import { startGateway } from './support/harness.js';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 const CAPABILITIES = ['attach.after', 'prompt.receipts', 'workspace.registry', 'workspace.git'];
 

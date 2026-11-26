@@ -12,9 +12,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
-    "pretest": "node ../../scripts/build-workspace.mjs client && node scripts/build-lib.mjs",
+    "pretest": "node ../../scripts/build-workspace.ts client && node scripts/build-lib.mjs",
     "test": "node --test tests/*.test.js",
-    "pretest:e2e": "node ../../scripts/build-workspace.mjs cli && node ../../scripts/build-workspace.mjs gateway && node ../../scripts/build-workspace.mjs daemon && node scripts/build-lib.mjs && vite build",
+    "pretest:e2e": "node ../../scripts/build-workspace.ts cli && node ../../scripts/build-workspace.ts gateway && node ../../scripts/build-workspace.ts daemon && node scripts/build-lib.mjs && vite build",
     "test:e2e": "playwright test"
   },
   "dependencies": {

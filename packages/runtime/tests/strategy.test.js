@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { createAlpRuntime, claudeToolShapes } from '@anhlp/alp-runtime';
-import { teardown } from '../../../test/support/teardown.js';
+import { teardown } from '../../../test/support/teardown.ts';
 
 // alp_strategy (t-003a): main and lead record a strategy (rush, smart, deep, large). It is guidance
 // only: one change per root user turn, logged, and nothing else about the session changes.

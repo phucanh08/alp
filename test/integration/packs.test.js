@@ -10,9 +10,9 @@ import { profileFor } from '@anhlp/alp-core/permissions';
 import { resolveAgent } from '@anhlp/alp-core/resolver';
 import { resolveTeam } from '@anhlp/alp-core/teams';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
-import { fakeTransport, until } from '../support/fake-agent.js';
-import { teardown } from '../support/teardown.js';
-import { literal, templateTitle } from '../support/template-text.js';
+import { fakeTransport, until } from '../support/fake-agent.ts';
+import { teardown } from '../support/teardown.ts';
+import { literal, templateTitle } from '../support/template-text.ts';
 
 async function dirs(t) {
   const defer = teardown(t);
