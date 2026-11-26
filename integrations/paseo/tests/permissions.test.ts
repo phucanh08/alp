@@ -10,11 +10,15 @@ import { initProject } from '@anhlp/alp-core/init';
 import { createProvider } from '@anhlp/alp-paseo';
 import { PROVIDER_CAPABILITIES, ProviderEventSchema } from '@getpaseo/plugin/server/provider';
 import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
+import type { TestContext } from 'node:test';
+
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 
 // The C6 profile of beta-scope §6.3, on main.
 const PROFILE = { profiles: { review: { base: 'read-only', ask: ['Bash(git push *)'], beyondMode: 'ask' } }, agents: { main: 'review' } };
 
-async function project(t) {
+async function project(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-paseo-permissions-'));
   t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const root = path.join(directory, 'project');
@@ -27,32 +31,32 @@ async function project(t) {
 }
 
 /** Paseo's side of the plugin: a provider connection with one ALP session that has started a turn. */
-async function paseo(t, { directory, root, home }, sessionId = 'paseo-root') {
-  const agents = [];
+async function paseo(t: TestContext, { directory, root, home }: Json, sessionId = 'paseo-root') {
+  const agents: Json[] = [];
   const provider = createProvider({ language: 'English', supervisor: false, transport: fakeTransport(agents), libraryDir: home, runLogDir: path.join(directory, 'runs') });
   const connection = await provider.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
   let open = true;
   const close = async () => { if (open) { open = false; await connection.close(); } };
   t.after(close);
-  const events = [];
-  connection.onEvent(event => { ProviderEventSchema.parse(event); events.push(event); });
+  const events: Json[] = [];
+  connection.onEvent((event: Json) => { ProviderEventSchema.parse(event); events.push(event); });
   await connection.send({ type: 'session.open', requestId: 'open', sessionId, history: 'skip', config: { cwd: root, env: {}, mcpServers: {}, settings: {}, persist: true, mode: 'full-access' } });
   await connection.send({ type: 'session.prompt', sessionId, prompt: { clientMessageId: 'go', delivery: 'auto', input: { type: 'message', content: [{ type: 'text', text: 'Go' }] } } });
   await until(() => agents[0]?.started.length === 1, 'the first turn');
   const main = agents[0];
   const cards = () => events.filter(event => event.type === 'session.permission');
   /** Waits for the next question card after the `seen` cards already handled. */
-  const card = async seen => { await until(() => cards().length > seen, 'a question card'); return cards()[seen].request; };
-  const resolved = id => until(() => events.some(event => event.type === 'session.permission_resolved' && event.permissionId === id), `resolution of ${id}`);
-  const choose = (request, label) => connection.send({ type: 'session.permission', sessionId, permissionId: request.id, response: { behavior: 'allow', updatedInput: { ...request.input, answers: { Answer: label } } } });
-  const dismiss = (request, message) => connection.send({ type: 'session.permission', sessionId, permissionId: request.id, response: { behavior: 'deny', ...(message ? { message } : {}) } });
+  const card = async (seen: Json) => { await until(() => cards().length > seen, 'a question card'); return cards()[seen].request; };
+  const resolved = (id: Json) => until(() => events.some(event => event.type === 'session.permission_resolved' && event.permissionId === id), `resolution of ${id}`);
+  const choose = (request: Json, label: Json) => connection.send({ type: 'session.permission', sessionId, permissionId: request.id, response: { behavior: 'allow', updatedInput: { ...request.input, answers: { Answer: label } } } });
+  const dismiss = (request: Json, message: Json) => connection.send({ type: 'session.permission', sessionId, permissionId: request.id, response: { behavior: 'deny', ...(message ? { message } : {}) } });
   // Codex asking to leave its sandbox, and Claude asking through canUseTool.
-  const codex = (command, extra = {}) => main.serverRequest('item/commandExecution/requestApproval', { kind: 'command', threadId: main.threadId, command, ...extra });
-  const claude = request => main.serverRequest('item/permission/request', request);
+  const codex = (command: Json, extra = {}) => main.serverRequest('item/commandExecution/requestApproval', { kind: 'command', threadId: main.threadId, command, ...extra });
+  const claude = (request: Json) => main.serverRequest('item/permission/request', request);
   return { connection, events, main, cards, card, resolved, choose, dismiss, codex, claude, close, sessionId };
 }
 
-const permissionLog = async directory => (await readFile(path.join(directory, 'runs', 'paseo-root.jsonl'), 'utf8').catch(() => ''))
+const permissionLog = async (directory: Json) => (await readFile(path.join(directory, 'runs', 'paseo-root.jsonl'), 'utf8').catch(() => ''))
   .split('\n').filter(Boolean).map(line => JSON.parse(line));
 
 test('a permission question is a Paseo question card; Allow once, Always allow and Deny each reach the request that asked', async t => {
@@ -139,7 +143,7 @@ test('closing the card, an empty answer, a stale answer and an interrupted turn 
   const waiting = codex("/bin/zsh -lc 'touch b'");
   const third = await card(2);
   await connection.send({ type: 'session.interrupt', requestId: 'stop', sessionId });
-  await until(() => main.calls.some(call => call.method === 'turn/interrupt'), 'the interrupt');
+  await until(() => main.calls.some((call: Json) => call.method === 'turn/interrupt'), 'the interrupt');
   main.notification('turn/completed', { threadId: main.threadId, turn: { id: main.turnId, status: 'interrupted' } });
   assert.deepEqual(await waiting, { decision: 'decline' });
   await resolved(third.id);

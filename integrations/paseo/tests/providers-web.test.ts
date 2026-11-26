@@ -16,11 +16,15 @@ import { saveEntry } from '@anhlp/alp-core/library-edit';
 import { loadProvider } from '@anhlp/alp-core/providers';
 import { initProject } from '@anhlp/alp-core/init';
 import { resolveSession, ModelCatalog } from '@anhlp/alp-runtime';
+import type { TestContext } from 'node:test';
+
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 
 const FAKE = fileURLToPath(new URL('../../../test/support/fake-acp.ts', import.meta.url));
 
 /** alpd with its web socket, and an app past hello whose frames must pass Paseo's validator. */
-async function setup(t, { modelCatalog } = {}) {
+async function setup(t: TestContext, { modelCatalog }: Json = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-providers-'));
   const home = path.join(directory, 'home');
   await seedLibrary(home);
@@ -31,20 +35,20 @@ async function setup(t, { modelCatalog } = {}) {
   }
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false, libraryDir: home });
   const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test', home, ...(modelCatalog ? { modelCatalog: modelCatalog(home) } : {}) });
-  let web;
-  const gateway = createPaseoBridge({ clientFactory: async (onEvent) => {
+  let web: Json;
+  const gateway = createPaseoBridge({ clientFactory: (async (onEvent: Json) => {
     const client = daemon.local();
     client.onEvent(onEvent);
     return { request: client.request.bind(client), close: client.close.bind(client), onClose: client.onClose.bind(client) };
-  }, version: 'test', home, token: () => web.token, serverId: () => web.serverId });
+  }) as Json, version: 'test', home, token: () => web.token, serverId: () => web.serverId });
   web = createWebServer({ home, port: 0, gateway });
   const info = await web.listen();
   t.after(async () => { await web.close(); await runtime.shutdown(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   const ws = new WebSocket(`ws://127.0.0.1:${info.port}/ws`);
   t.after(() => ws.terminate());
   await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
-  const frames = [];
-  const waiting = [];
+  const frames: Json[] = [];
+  const waiting: Json[] = [];
   ws.on('message', data => {
     const frame = JSON.parse(String(data));
     const checked = validateWSOutboundMessage(frame);
@@ -52,24 +56,24 @@ async function setup(t, { modelCatalog } = {}) {
     frames.push(frame);
     for (const wait of [...waiting]) if (wait.test(frame)) { waiting.splice(waiting.indexOf(wait), 1); wait.resolve(frame); }
   });
-  const next = test => new Promise(resolve => { const found = frames.find(test); if (found) resolve(found); else waiting.push({ test, resolve }); });
+  const next = (test: Json) => new Promise<Json>(resolve => { const found = frames.find(test); if (found) resolve(found); else waiting.push({ test, resolve }); });
   /** Waits for a frame that arrives from now on. */
-  const later = test => new Promise(resolve => waiting.push({ test, resolve }));
-  const send = frame => ws.send(JSON.stringify(frame));
+  const later = (test: Json) => new Promise(resolve => waiting.push({ test, resolve }));
+  const send = (frame: Json) => ws.send(JSON.stringify(frame));
   send({ type: 'hello', clientId: 'cid-providers', clientType: 'browser', protocolVersion: 1, capabilities: { helloRejection: true }, auth: { kind: 'password', password: info.token } });
-  const hello = await next(frame => frame.message?.payload?.status === 'server_info');
+  const hello: Json = await next((frame: Json) => frame.message?.payload?.status === 'server_info');
   assert.equal(hello.message.payload.features.providerRemoval, true, 'the app offers Remove on providers');
   let sequence = 0;
-  const ask = async message => {
+  const ask = async (message: Json) => {
     const requestId = `r${++sequence}`;
     send({ type: 'session', message: { ...message, requestId } });
-    return (await next(frame => frame.message?.payload?.requestId === requestId)).message;
+    return (await next((frame: Json) => frame.message?.payload?.requestId === requestId)).message;
   };
   return { home, ask, later, runtime };
 }
 
-const providerOf = (frame, id) => frame.message.payload.entries.find(entry => entry.provider === id);
-const ready = id => frame => frame.message?.type === 'providers_snapshot_update' && providerOf(frame, id)?.status === 'ready';
+const providerOf = (frame: Json, id: Json) => frame.message.payload.entries.find((entry: Json) => entry.provider === id);
+const ready = (id: Json) => (frame: Json) => frame.message?.type === 'providers_snapshot_update' && providerOf(frame, id)?.status === 'ready';
 
 test('the app adds an ACP agent from its catalog; alpd keeps it in the library and lists its models', async t => {
   const { home, ask, later } = await setup(t);
@@ -83,15 +87,15 @@ test('the app adds an ACP agent from its catalog; alpd keeps it in the library a
   assert.deepEqual(file, { kind: 'acp', label: 'Fake', description: 'A scripted agent', command: process.execPath, args: [FAKE], env: { FAKE_ACP_MODELS: 'fast,deep' }, params: { supportsMcpServers: false } });
 
   const snapshot = await ask({ type: 'get_providers_snapshot_request', cwd: home });
-  assert.deepEqual(snapshot.payload.entries.map(entry => [entry.provider, entry.source]), [['alp', 'builtin'], ['claude', 'builtin'], ['codex', 'builtin'], ['antigravity', 'custom'], ['fake', 'custom'], ['opencode', 'custom']]);
+  assert.deepEqual(snapshot.payload.entries.map((entry: Json) => [entry.provider, entry.source]), [['alp', 'builtin'], ['claude', 'builtin'], ['codex', 'builtin'], ['antigravity', 'custom'], ['fake', 'custom'], ['opencode', 'custom']]);
   const fake = providerOf(await discovered, 'fake');
-  assert.deepEqual(fake.models.map(model => [model.id, model.isDefault ?? false]), [['fast', true], ['deep', false]]);
+  assert.deepEqual(fake.models.map((model: Json) => [model.id, model.isDefault ?? false]), [['fast', true], ['deep', false]]);
   assert.equal(fake.label, 'Fake');
   assert.equal(fake.enabled, true);
 
-  const extra = later(frame => frame.message?.type === 'providers_snapshot_update' && providerOf(frame, 'fake')?.models.some(model => model.id === 'extra'));
+  const extra = later((frame: Json) => frame.message?.type === 'providers_snapshot_update' && providerOf(frame, 'fake')?.models.some((model: Json) => model.id === 'extra'));
   await ask({ type: 'set_daemon_config_request', config: { providers: { fake: { additionalModels: [{ id: 'extra', label: 'Extra', isDefault: false }] } } } });
-  assert.deepEqual(providerOf(await extra, 'fake').models.map(model => model.id), ['fast', 'deep', 'extra'], 'added models come after the agent\'s own');
+  assert.deepEqual(providerOf(await extra, 'fake').models.map((model: Json) => model.id), ['fast', 'deep', 'extra'], 'added models come after the agent\'s own');
   assert.deepEqual(JSON.parse(await readFile(path.join(home, 'providers', 'fake.json'), 'utf8')).additionalModels, [{ id: 'extra', label: 'Extra' }]);
 
   const diagnostic = await ask({ type: 'provider_diagnostic_request', provider: 'fake' });
@@ -99,7 +103,7 @@ test('the app adds an ACP agent from its catalog; alpd keeps it in the library a
   assert.match(diagnostic.payload.diagnostic, /Models: fast, deep/);
   assert.equal((await ask({ type: 'refresh_providers_snapshot_request', providers: ['fake'] })).payload.acknowledged, true);
 
-  const off = later(frame => frame.message?.type === 'providers_snapshot_update' && providerOf(frame, 'fake')?.enabled === false);
+  const off = later((frame: Json) => frame.message?.type === 'providers_snapshot_update' && providerOf(frame, 'fake')?.enabled === false);
   const disabled = await ask({ type: 'set_daemon_config_request', config: { providers: { fake: { enabled: false } } } });
   assert.equal(disabled.payload.config.providers.fake.enabled, false);
   await off;
@@ -107,7 +111,7 @@ test('the app adds an ACP agent from its catalog; alpd keeps it in the library a
   const removed = await ask({ type: 'set_daemon_config_request', config: { removeProviders: ['fake'] } });
   assert.deepEqual(Object.keys(removed.payload.config.providers), ['antigravity', 'opencode']);
   await assert.rejects(access(path.join(home, 'providers', 'fake.json')));
-  assert.deepEqual((await ask({ type: 'get_providers_snapshot_request', cwd: home })).payload.entries.map(entry => entry.provider), ['alp', 'claude', 'codex', 'antigravity', 'opencode']);
+  assert.deepEqual((await ask({ type: 'get_providers_snapshot_request', cwd: home })).payload.entries.map((entry: Json) => entry.provider), ['alp', 'claude', 'codex', 'antigravity', 'opencode']);
 });
 
 test('ALP itself, other kinds of provider and ids Paseo would not make are refused', async t => {
@@ -118,7 +122,7 @@ test('ALP itself, other kinds of provider and ids Paseo would not make are refus
     [{ providers: { Bad_ID: { extends: 'acp', command: ['x'] } } }, /cannot name a provider/],
     [{ providers: { empty: { extends: 'acp', label: 'Empty' } } }, /needs a command/],
     [{ removeProviders: ['alp'] }, /cannot be removed/],
-  ]) {
+  ] as Json[][]) {
     const answer = await ask({ type: 'set_daemon_config_request', config });
     assert.equal(answer.type, 'rpc_error', JSON.stringify(config));
     assert.match(answer.payload.error, error);
@@ -133,32 +137,32 @@ test('host Settings lists providers without previewing a project in the home dir
   const snapshot = await ask({ type: 'get_providers_snapshot_request' });
   assert.equal(snapshot.type, 'get_providers_snapshot_response');
   assert.equal(snapshot.payload.entries[0].provider, 'alp');
-  assert.deepEqual(snapshot.payload.entries[0].models.map(model => model.id), ['pho', 'cafe']);
+  assert.deepEqual(snapshot.payload.entries[0].models.map((model: Json) => model.id), ['pho', 'cafe']);
 });
 
 test('provider snapshots expose native runtimes and ACP agents alongside the internal team entry', async t => {
   const { ask } = await setup(t);
   const snapshot = await ask({ type: 'get_providers_snapshot_request' });
-  assert.deepEqual(snapshot.payload.entries.map(entry => entry.provider), ['alp', 'claude', 'codex', 'antigravity', 'opencode']);
+  assert.deepEqual(snapshot.payload.entries.map((entry: Json) => entry.provider), ['alp', 'claude', 'codex', 'antigravity', 'opencode']);
   for (const provider of ['claude', 'codex']) {
-    const entry = snapshot.payload.entries.find(entry => entry.provider === provider);
+    const entry = snapshot.payload.entries.find((entry: Json) => entry.provider === provider);
     assert.equal(entry.source, 'builtin');
     assert.ok(entry.models.length > 0);
-    assert.ok(entry.models.every(model => model.provider === provider));
+    assert.ok(entry.models.every((model: Json) => model.provider === provider));
   }
 });
 
 test('native providers list the models of alpd\'s live catalog cache (t-e5ee), read fresh on each snapshot', async t => {
   const { home, ask } = await setup(t);
   const before = await ask({ type: 'get_providers_snapshot_request' });
-  assert.ok(!before.payload.entries.find(entry => entry.provider === 'codex').models.some(model => model.id === 'gpt-6.1-terra'));
+  assert.ok(!before.payload.entries.find((entry: Json) => entry.provider === 'codex').models.some((model: Json) => model.id === 'gpt-6.1-terra'));
   await mkdir(path.join(home, 'cache'), { recursive: true });
   await writeFile(path.join(home, 'cache', 'models.json'), JSON.stringify({ fetchedAt: new Date().toISOString(), providers: { codex: { status: 'ok', models: [{ id: 'gpt-6.1-terra', label: 'GPT-6.1 Terra', efforts: ['low'] }] } } }));
   const after = await ask({ type: 'get_providers_snapshot_request' });
-  const codex = after.payload.entries.find(entry => entry.provider === 'codex');
+  const codex = after.payload.entries.find((entry: Json) => entry.provider === 'codex');
   assert.equal(codex.models[0].id, 'gpt-6.1-terra');
   assert.equal(codex.models[0].isDefault, true);
-  assert.ok(codex.models.some(model => model.id === 'gpt-6.1-sol'), 'static rows stay as fallback');
+  assert.ok(codex.models.some((model: Json) => model.id === 'gpt-6.1-sol'), 'static rows stay as fallback');
 });
 
 test('default provider switches persist and disabled providers cannot open sessions', async t => {
@@ -173,9 +177,9 @@ test('default provider switches persist and disabled providers cannot open sessi
     assert.equal(changed.type, 'set_daemon_config_response');
     assert.equal(changed.payload.config.providers[id].enabled, false);
     await seedLibrary(home);
-    assert.equal((await loadProvider(home, id)).enabled, false);
+    assert.equal((await loadProvider(home, id))!.enabled, false);
     const snapshot = await ask({ type: 'get_providers_snapshot_request' });
-    const entry = snapshot.payload.entries.find(entry => entry.provider === id);
+    const entry = snapshot.payload.entries.find((entry: Json) => entry.provider === id);
     assert.equal(entry.enabled, false);
     assert.equal(entry.source, 'custom', 'library providers have an enabled switch');
     await assert.rejects(resolveSession({ cwd: root, model, mode: 'full-access' }, { library: home }), /turned off/);
@@ -199,7 +203,7 @@ test('Antigravity supports partial provider edits and can be disabled', async t 
 
 test('a native provider\'s diagnostic and refresh ask alpd to refresh its live model list (t-086c)', async t => {
   let calls = 0;
-  const { ask } = await setup(t, { modelCatalog: home => new ModelCatalog({ home, refreshMs: 0, apply: false, probes: { codex: async () => { calls++; return [{ id: 'gpt-live-probe', label: 'Live probe' }]; } } }) });
+  const { ask } = await setup(t, { modelCatalog: (home: Json) => new ModelCatalog({ home, refreshMs: 0, apply: false, probes: { codex: async () => { calls++; return [{ id: 'gpt-live-probe', label: 'Live probe' }]; } } }) });
   const diagnostic = await ask({ type: 'provider_diagnostic_request', provider: 'codex' });
   assert.equal(calls, 1);
   assert.match(diagnostic.payload.diagnostic, /Model list refreshed/);
@@ -208,7 +212,7 @@ test('a native provider\'s diagnostic and refresh ask alpd to refresh its live m
   for (let i = 0; i < 100 && calls < 2; i++) await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(calls, 2);
   const snapshot = await ask({ type: 'get_providers_snapshot_request' });
-  assert.ok(snapshot.payload.entries.find(entry => entry.provider === 'codex').models.some(model => model.id === 'gpt-live-probe'));
+  assert.ok(snapshot.payload.entries.find((entry: Json) => entry.provider === 'codex').models.some((model: Json) => model.id === 'gpt-live-probe'));
 });
 
 test('without a live catalog the native diagnostic says the model list was not refreshed (t-086c)', async t => {

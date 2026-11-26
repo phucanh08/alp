@@ -1,13 +1,16 @@
 // The Paseo integration entry (server/main.ts) owns the `paseo` integration lock from
 // @anhlp/alp-client/integration-lock; the lock's own protocol tests live in packages/client/tests.
 import test, { after } from 'node:test';
-import { childMessages } from './support/child-message.mjs';
+import { childMessages } from './support/child-message.ts';
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 
 const outer = await mkdtemp(path.join(tmpdir(), 'alp-integration-lock-'));
 process.env.ALP_HOME = path.join(outer, 'outer-home');
@@ -24,7 +27,7 @@ test('a real integration whose release fails at shutdown still exits once, retai
   const f = await fixture();
   await writeFile(path.join(f.home, 'settings.json'), JSON.stringify({ web: { port: 40_000 + Math.floor(Math.random() * 20_000), relay: { enabled: false } } }));
   const main = new URL('../server/dist/main.js', import.meta.url);
-  const preload = new URL('./support/integration-main-preload.mjs', import.meta.url).href;
+  const preload = new URL('./support/integration-main-preload.ts', import.meta.url).href;
   const child = fork(main, ['--service'], { execArgv: ['--import', preload], env: { ...process.env, ALP_HOME: f.home, ALP_LOCK_FIXTURE: path.dirname(f.home), ALP_SUPERVISE: '0' }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
   t.after(async () => { if (child.exitCode === null && child.signalCode === null) { const gone = once(child, 'exit'); child.kill('SIGKILL'); await gone; } });
   const exited = once(child, 'exit');
@@ -33,7 +36,7 @@ test('a real integration whose release fails at shutdown still exits once, retai
   const owned = JSON.parse(await readFile(f.file, 'utf8')); assert.equal(owned.pid, child.pid);
   child.kill('SIGTERM'); await message('gate');
   // A second signal and an uncaught exception arrive while release is still in flight.
-  child.kill('SIGTERM'); await message('signal', m => m.signals === 2);
+  child.kill('SIGTERM'); await message('signal', (m: Json) => m.signals === 2);
   child.send({ command: 'throw' }); await message('thrown');
   child.send({ command: 'resume' });
   let bound;
@@ -58,7 +61,7 @@ test('a real integration bounds a stalled release and retains ownership after re
   const f = await fixture();
   await writeFile(path.join(f.home, 'settings.json'), JSON.stringify({ web: { relay: { enabled: false } } }));
   const child = fork(new URL('../server/dist/main.js', import.meta.url), ['--service'], {
-    execArgv: ['--import', new URL('./support/integration-main-preload.mjs', import.meta.url).href],
+    execArgv: ['--import', new URL('./support/integration-main-preload.ts', import.meta.url).href],
     env: { ...process.env, ALP_HOME: f.home, ALP_LOCK_FIXTURE: path.dirname(f.home), ALP_SUPERVISE: '0' },
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
   });
@@ -72,7 +75,7 @@ test('a real integration bounds a stalled release and retains ownership after re
   await message('handlers');
   const owned = JSON.parse(await readFile(f.file, 'utf8'));
   child.kill('SIGTERM'); await message('gate');
-  child.kill('SIGTERM'); await message('signal', m => m.signals === 2);
+  child.kill('SIGTERM'); await message('signal', (m: Json) => m.signals === 2);
   // Leave release gated forever: the production total deadline must terminate without a retry.
   assert.deepEqual(await exited, [1, null]);
   assert.equal(seen.filter(m => m.event === 'release-attempt').length, 1);

@@ -4,10 +4,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { TimelineDeltas, paseoDetail } from '@anhlp/alp-paseo/paseo/timeline-items';
 
-const call = (detail, extra = {}) => ({ kind: 'tool_call', id: 't1', callId: 't1', name: 'Read', status: 'completed', detail, ...extra });
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+const call = (detail: Json, extra = {}): Json => ({ kind: 'tool_call', id: 't1', callId: 't1', name: 'Read', status: 'completed', detail, ...extra });
 
 test('typed details pass to Paseo as they are; shell and unknown as before', () => {
-  const typed = [
+  const typed: Json[] = [
     { type: 'read', filePath: '/p/a.ts', content: 'x', offset: 1, limit: 10 },
     { type: 'edit', filePath: '/p/a.ts', oldString: 'a', newString: 'b', unifiedDiff: '@@\n-a\n+b\n' },
     { type: 'write', filePath: '/p/n.md', content: '# N' },
@@ -19,11 +22,11 @@ test('typed details pass to Paseo as they are; shell and unknown as before', () 
   ];
   for (const detail of typed) assert.deepEqual(paseoDetail(detail), detail);
   assert.deepEqual(paseoDetail({ type: 'sub_agent', subAgentType: 'Explore', description: 'Find it' }), { type: 'sub_agent', subAgentType: 'Explore', description: 'Find it', log: '', actions: [] });
-  assert.deepEqual(paseoDetail({ type: 'sub_agent', log: 'report' }).log, 'report');
+  assert.deepEqual((paseoDetail({ type: 'sub_agent', log: 'report' } as Json) as Json).log, 'report');
   assert.deepEqual(paseoDetail({ type: 'shell', command: 'npm test', output: 'ok', exitCode: 0 }), { type: 'shell', command: 'npm test', output: 'ok', exitCode: 0 });
   assert.deepEqual(paseoDetail({ type: 'unknown', input: { a: 1 }, output: undefined }), { type: 'unknown', input: { a: 1 }, output: null });
   // A later detail type: unknown, with its input and output if it has them.
-  assert.deepEqual(paseoDetail({ type: 'diagram', input: { src: 'x' } }), { type: 'unknown', input: { src: 'x' }, output: null });
+  assert.deepEqual(paseoDetail({ type: 'diagram', input: { src: 'x' } } as Json), { type: 'unknown', input: { src: 'x' }, output: null });
 });
 
 test('the timeline log appends a typed call, and its failure with the error', () => {

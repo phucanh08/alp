@@ -9,30 +9,33 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgents } from '../server/dist/paseo/agents.js';
 
-const directory = {
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+const directory: Json = {
   load: async () => {}, prepare: async () => {}, workspaceIdFor: () => 'workspace',
   placement: () => ({ projectKey: 'p', projectName: 'p', directory: '/' }), assign: () => {}, changed: () => {},
 };
 const GENERATION = '0123456789abcdef0123456789abcdef';
 const CONVERSATION = { fork: true, rewind: true, reload: true, configure: true };
-const summary = (id, extra = {}) => ({ id, projectRoot: '/work', agent: 'main', runtime: 'codex', model: 'gpt-5.6-sol', mode: 'workspace-write', thinking: 'medium', workflow: { mode: 'pho', maxPeers: 2, supervisor: false }, threadId: 't', persistent: true, busy: false, status: 'idle', conversation: CONVERSATION, ...extra });
+const summary = (id: Json, extra = {}) => ({ id, projectRoot: '/work', agent: 'main', runtime: 'codex', model: 'gpt-5.6-sol', mode: 'workspace-write', thinking: 'medium', workflow: { mode: 'pho', maxPeers: 2, supervisor: false }, threadId: 't', persistent: true, busy: false, status: 'idle', conversation: CONVERSATION, ...extra });
 
-function world({ sessions, capabilities = ['session.history', 'session.configure.live'], configureError }) {
-  const calls = [];
+function world({ sessions, capabilities = ['session.history', 'session.configure.live'], configureError }: Json) {
+  const calls: Json[] = [];
   const connection = {
     capabilities,
     onEvent: () => {}, onClose: () => {}, close() {},
-    async request(method, params) {
+    async request(method: Json, params: Json) {
       calls.push({ method, params });
       if (method === 'session.list') return { sessions };
       if (method === 'question.list') return { questions: [] };
-      if (method === 'session.attach') return { session: sessions.find(session => session.id === params.sessionId), cursor: 0 };
+      if (method === 'session.attach') return { session: sessions.find((session: Json) => session.id === params.sessionId), cursor: 0 };
       if (method === 'session.history') return { generation: GENERATION, hasOlder: false, tipCursor: 0, items: [] };
       if (method === 'session.preview') return { preview: { teams: [{ id: 'pho', label: 'Phở' }, { id: 'cafe', label: 'Cafe' }], team: 'pho', mode: 'workspace-write' } };
-      if (method === 'session.create') { const session = sessions.find(row => row.id === params.sessionId); session.status = 'idle'; return { session }; }
+      if (method === 'session.create') { const session = sessions.find((row: Json) => row.id === params.sessionId); session.status = 'idle'; return { session }; }
       if (method === 'session.configure') {
         if (configureError) throw configureError;
-        const session = sessions.find(row => row.id === params.sessionId);
+        const session = sessions.find((row: Json) => row.id === params.sessionId);
         if (params.team) session.workflow = { ...session.workflow, mode: params.team };
         if (params.model) session.model = params.model.replace(/^codex:/, '');
         if (params.thinking) session.thinking = params.thinking;
@@ -41,13 +44,13 @@ function world({ sessions, capabilities = ['session.history', 'session.configure
       throw new Error(`unexpected request ${method}`);
     },
   };
-  const agents = createAgents({ clientFactory: async () => connection, broadcast: () => {}, directory });
+  const agents: Json = createAgents({ clientFactory: (async () => connection) as Json, broadcast: () => {}, directory });
   return { agents, calls };
 }
 
-const sent = (calls, method) => calls.filter(call => call.method === method).map(call => call.params);
-const setModel = (agents, modelId, agentId = 'ses_a', requestId = 'req-1') => agents.handlers.set_agent_model_request({ type: 'set_agent_model_request', agentId, modelId, requestId });
-const setThinking = (agents, thinkingOptionId, agentId = 'ses_a', requestId = 'req-2') => agents.handlers.set_agent_thinking_request({ type: 'set_agent_thinking_request', agentId, thinkingOptionId, requestId });
+const sent = (calls: Json, method: Json) => calls.filter((call: Json) => call.method === method).map((call: Json) => call.params);
+const setModel = (agents: Json, modelId: Json, agentId = 'ses_a', requestId = 'req-1') => agents.handlers.set_agent_model_request({ type: 'set_agent_model_request', agentId, modelId, requestId });
+const setThinking = (agents: Json, thinkingOptionId: Json, agentId = 'ses_a', requestId = 'req-2') => agents.handlers.set_agent_thinking_request({ type: 'set_agent_thinking_request', agentId, thinkingOptionId, requestId });
 
 test('the model picker changes a team root\'s team, and a custom root\'s model; the thinking picker its effort', async () => {
   const { agents, calls } = world({ sessions: [summary('ses_a'), summary('ses_c', { workflow: { mode: 'custom', maxPeers: 2, supervisor: false } })] });

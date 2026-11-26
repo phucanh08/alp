@@ -11,8 +11,12 @@ import { seedLibrary } from '@anhlp/alp-core/library';
 import { PaseoAdapter } from '@anhlp/alp-paseo';
 import { skillDescription } from '@anhlp/alp-runtime';
 import { legacyProject } from '../../../test/support/legacy.ts';
+import type { TestContext } from 'node:test';
 
-const expected = {
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+const expected: Record<string, Json> = {
   main: ['architecture-docs', 'bug-loop', 'compact', 'curate', 'feature-architecture', 'goal-griller', 'prompt-leverage', 'release-readiness', 'safe-refactor', 'security-review', 'sequence-execution-plan', 'skill-authoring', 'smart-commits', 'test-strategy', 'xia'],
   lead: ['architecture-docs', 'bug-loop', 'feature-architecture', 'prompt-leverage', 'release-readiness', 'safe-refactor', 'security-review', 'sequence-execution-plan', 'smart-commits', 'test-strategy', 'xia'],
   peer: ['bug-loop', 'feature-architecture', 'safe-refactor', 'smart-commits', 'test-strategy', 'xia'],
@@ -24,12 +28,12 @@ const LEGACY = {
   lead: ['bug-loop', 'prompt-leverage', 'sequence-execution-plan', 'smart-commits', 'xia'],
   peer: ['bug-loop', 'smart-commits', 'xia'],
 };
-async function fixture(t) {
+async function fixture(t: TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-skills-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }
-const template = name => readFile(new URL(`${name}`, shippedTemplateRoot()), 'utf8');
+const template = (name: Json) => readFile(new URL(`${name}`, shippedTemplateRoot()), 'utf8');
 
 test('the user library is seeded with the intended role skills and their references', async t => {
   const [root, library] = [await fixture(t), await fixture(t)];
@@ -148,7 +152,7 @@ test('upgrade archives project skill copies that match the shipped skills and ke
   assert.deepEqual(result.removed.filter(name => !name.includes('/skills/')), ['.alp/agents/main', '.alp/agents/lead', '.alp/agents/oracle', '.alp/agents/reviewer', '.alp/agents/supervisor']);
   assert.equal(await readFile(custom, 'utf8'), 'Custom research method');
   assert.deepEqual(await readdir(path.join(root, '.alp/agents')), ['peer']);
-  assert.equal(await readFile(path.join(result.backup, '.alp/agents/main/skills/bug-loop/references/test-proof.md'), 'utf8'), await template('skills/bug-loop/references/test-proof.md'));
+  assert.equal(await readFile(path.join(result.backup!, '.alp/agents/main/skills/bug-loop/references/test-proof.md'), 'utf8'), await template('skills/bug-loop/references/test-proof.md'));
   assert.deepEqual((await upgradeProject(root)).removed, []);
 });
 
@@ -165,7 +169,7 @@ test('upgrade recognizes shipped team-v1 instructions and backs up each role', a
   assert.deepEqual(result.removed, ['main', 'lead', 'peer', 'oracle', 'reviewer', 'supervisor'].map(name => `.alp/agents/${name}`));
   for (const role of Object.keys(LEGACY)) {
     const old = await readFile(new URL(`./fixtures/team-v1/${role}/AGENT.md`, import.meta.url), 'utf8');
-    assert.equal(await readFile(path.join(result.backup, `.alp/agents/${role}/AGENT.md`), 'utf8'), old);
+    assert.equal(await readFile(path.join(result.backup!, `.alp/agents/${role}/AGENT.md`), 'utf8'), old);
     const resolved = await resolveAgent(root, { agent: role, library });
     assert.equal(resolved.source, 'builtin');
     assert.equal(resolved.instructions.agent, await template(`agents/${role}/AGENT.md`));
@@ -202,7 +206,7 @@ test('upgrade archives the retired router from each role and does not reinstall 
   assert.equal(result.removed.length, 9);
   for (const role of Object.keys(LEGACY)) {
     assert.deepEqual((await resolveAgent(root, { agent: role })).skills, []);
-    assert.equal(await readFile(path.join(result.backup, `.alp/agents/${role}/skills/ask-alp/SKILL.md`), 'utf8'), original);
+    assert.equal(await readFile(path.join(result.backup!, `.alp/agents/${role}/skills/ask-alp/SKILL.md`), 'utf8'), original);
   }
   assert.deepEqual((await initProject(root)).created, []);
   assert.deepEqual((await upgradeProject(root)).removed, []);
@@ -221,7 +225,7 @@ test('upgrade preserves a customized retired skill for explicit review', async t
 
 test('a skill\'s description is read from its frontmatter: plain, quoted, folded, missing, or clipped', async t => {
   const root = await fixture(t);
-  const write = async (name, text) => { const file = path.join(root, name, 'SKILL.md'); await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, text); return file; };
+  const write = async (name: Json, text: Json) => { const file = path.join(root, name, 'SKILL.md'); await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, text); return file; };
   assert.equal(await skillDescription(await write('plain', '---\nname: plain\ndescription: Use for plain work.\n---\n# Body')), 'Use for plain work.');
   assert.equal(await skillDescription(await write('quoted', '---\nname: quoted\ndescription: "Use: when quoted."\n---\n')), 'Use: when quoted.');
   assert.equal(await skillDescription(await write('folded', '---\nname: folded\ndescription: >\n  Use for work\n  over two lines.\nother: x\n---\n')), 'Use for work over two lines.');

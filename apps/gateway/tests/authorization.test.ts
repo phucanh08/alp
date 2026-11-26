@@ -12,11 +12,15 @@ import { RPC_METHODS } from '@anhlp/alp-protocol';
 import { METHODS_V1 } from '@anhlp/alp-protocol/contract';
 import { EXPOSURE, unclassified } from '../dist/index.js';
 import { hostLabel, projectLibraryContent, promptImageLimits } from '../dist/policy.js';
-import { fakeDaemon, summary } from './support/fake-daemon.js';
-import { startGateway, until } from './support/harness.js';
+import { fakeDaemon, summary } from './support/fake-daemon.ts';
+import { startGateway, until } from './support/harness.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
 
-async function world(t, { modes, maxFrame } = {}) {
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+async function world(t: TestContext, { modes, maxFrame }: Json = {}) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-authz-'));
   defer(() => rm(directory, { recursive: true, force: true }));
@@ -38,7 +42,7 @@ async function world(t, { modes, maxFrame } = {}) {
       { id: 'q-b-222', sessionId: 'sb', rootId: 'sb', agent: 'main', body: 'b?', askedAt: '2026-10-15T00:00:00.000Z' },
     ],
   });
-  // Every exposed method in a row from one connection: the rate limit (tested in gateway.test.js) is lifted here.
+  // Every exposed method in a row from one connection: the rate limit (tested in gateway.test.ts) is lifted here.
   const gw = await startGateway(t, { daemon, config: { limits: { rate: 100_000, burst: 100_000, ...(maxFrame ? { maxFrame } : {}) } }, credentials: {
     alice: { workspaces: [a], permissions: ['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write'], ...(modes ? { modes } : {}) },
     reader: { workspaces: [a], permissions: ['session.read'] },
@@ -49,23 +53,23 @@ async function world(t, { modes, maxFrame } = {}) {
 }
 
 /** Requests of `method` that reached alpd after `mark`. */
-const reached = (daemon, mark, method) => daemon.calls().slice(mark).filter(call => call.method === method);
+const reached = (daemon: Json, mark: Json, method: Json) => daemon.calls().slice(mark).filter((call: Json) => call.method === method);
 
 // One out-of-scope call per exposed method, with what the client must get back. Lookups the
 // gateway itself makes (session.get, question.list, session.list) are allowed to reach alpd;
 // the method under test must not.
 const text = [{ type: 'text', text: 'hi' }];
-const OUT_OF_SCOPE = {
-  'workspace.worktree.options': null, 'workspace.worktree.create': null, 'workspace.worktree.remove': null, // worktrees.test.js checks exact derived grants and mutation scope
+const OUT_OF_SCOPE: Record<string, Json> = {
+  'workspace.worktree.options': null, 'workspace.worktree.create': null, 'workspace.worktree.remove': null, // worktrees.test.ts checks exact derived grants and mutation scope
 
-  'project.list': null, 'workspace.list': null, 'workspace.get': null, 'project.register': null, 'project.remove': null, 'workspace.update': null, // registry.test.js checks scoped rows and every mutation
-  'workspace.git.status': null, 'workspace.git.diff': null, // git.test.js checks registry scope, both permissions, paths and projection
-  'attachment.begin': null, 'attachment.chunk': null, 'attachment.commit': null, 'attachment.abort': null, 'attachment.get': null, 'attachment.delete': null, // attachments.test.js checks the session scope, both permissions and the principal context; alpd's binding is tested against its store
+  'project.list': null, 'workspace.list': null, 'workspace.get': null, 'project.register': null, 'project.remove': null, 'workspace.update': null, // registry.test.ts checks scoped rows and every mutation
+  'workspace.git.status': null, 'workspace.git.diff': null, // git.test.ts checks registry scope, both permissions, paths and projection
+  'attachment.begin': null, 'attachment.chunk': null, 'attachment.commit': null, 'attachment.abort': null, 'attachment.get': null, 'attachment.delete': null, // attachments.test.ts checks the session scope, both permissions and the principal context; alpd's binding is tested against its store
 
   'terminal.capture': null, 'terminal.watch': null, 'terminal.unwatch': null,
-  'terminal.create': null, 'terminal.list': null, 'terminal.attach': null, 'terminal.input': null, 'terminal.resize': null, 'terminal.close': null, // terminal.test.js checks terminal.exec, the registry scope, the principal context and event filtering; alpd's binding is tested against real PTYs
+  'terminal.create': null, 'terminal.list': null, 'terminal.attach': null, 'terminal.input': null, 'terminal.resize': null, 'terminal.close': null, // terminal.test.ts checks terminal.exec, the registry scope, the principal context and event filtering; alpd's binding is tested against real PTYs
   'catalog.get': null, // global: the catalogue of models and modes; provider errors are dropped (catalog projection test)
-  'session.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
+  'session.list': ({ b }: Json) => [{ projectRoot: b }, 1003, 'outside_workspace'],
   'session.get': () => [{ sessionId: 'sb' }, 1001],
   'session.status': () => [{ sessionId: 'mix' }, 1001],
   'session.log': () => [{ sessionId: 'sb-c' }, 1001],
@@ -76,15 +80,15 @@ const OUT_OF_SCOPE = {
   'session.attention.mark': () => [{ sessionId: 'sb' }, 1001],
   'session.update': () => [{ sessionId: 'sb', pinned: true }, 1001],
   'label.list': null, // the host's label catalogue: names and colours, as catalog.get (label projection test)
-  'session.preview': ({ b }) => [{ spec: { cwd: b } }, 1003, 'outside_workspace'],
-  'question.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
-  'question.watch': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
-  'board.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
-  'workspace.files.search': ({ b }) => [{ projectRoot: b, query: 'x' }, 1003, 'outside_workspace'],
-  'workspace.files.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
-  'workspace.files.read': ({ b }) => [{ projectRoot: b, path: 'README.md' }, 1003, 'outside_workspace'],
-  'workspace.files.preview': ({ b }) => [{ projectRoot: b, path: 'logo.png' }, 1003, 'outside_workspace'],
-  'session.create': ({ b }) => [{ spec: { cwd: b } }, 1003, 'outside_workspace'],
+  'session.preview': ({ b }: Json) => [{ spec: { cwd: b } }, 1003, 'outside_workspace'],
+  'question.list': ({ b }: Json) => [{ projectRoot: b }, 1003, 'outside_workspace'],
+  'question.watch': ({ b }: Json) => [{ projectRoot: b }, 1003, 'outside_workspace'],
+  'board.list': ({ b }: Json) => [{ projectRoot: b }, 1003, 'outside_workspace'],
+  'workspace.files.search': ({ b }: Json) => [{ projectRoot: b, query: 'x' }, 1003, 'outside_workspace'],
+  'workspace.files.list': ({ b }: Json) => [{ projectRoot: b }, 1003, 'outside_workspace'],
+  'workspace.files.read': ({ b }: Json) => [{ projectRoot: b, path: 'README.md' }, 1003, 'outside_workspace'],
+  'workspace.files.preview': ({ b }: Json) => [{ projectRoot: b, path: 'logo.png' }, 1003, 'outside_workspace'],
+  'session.create': ({ b }: Json) => [{ spec: { cwd: b } }, 1003, 'outside_workspace'],
   'session.prompt': () => [{ sessionId: 'mix', clientMessageId: 'm', content: text }, 1001],
   'session.interrupt': () => [{ sessionId: 'sb' }, 1001],
   'session.configure': () => [{ sessionId: 'sb', mode: 'read-only' }, 1001],
@@ -92,34 +96,34 @@ const OUT_OF_SCOPE = {
   'session.rename': () => [{ sessionId: 'sb', title: 'mine now' }, 1001],
   'session.archive': () => [{ sessionId: 'sb' }, 1001],
   'session.message': () => [{ sessionId: 'sb', text: 'hello' }, 1001],
-  // conversation.test.js covers children (not_root), destinations, new ids and the principal context.
+  // conversation.test.ts covers children (not_root), destinations, new ids and the principal context.
   'session.fork': () => [{ sessionId: 'sb', requestId: 'r', ifGeneration: '0'.repeat(32), boundary: { throughTurnId: 't' } }, 1001],
   'session.rewind': () => [{ sessionId: 'sb-c', requestId: 'r', ifGeneration: '0'.repeat(32), beforeTurnId: 't' }, 1001],
-  // reload.test.js covers children (not_root), modes and the projected answer.
+  // reload.test.ts covers children (not_root), modes and the projected answer.
   'session.reload': () => [{ sessionId: 'sb', requestId: 'r', ifGeneration: '0'.repeat(32) }, 1001],
-  // compact.test.js covers children (not_root), modes and the projected answer.
+  // compact.test.ts covers children (not_root), modes and the projected answer.
   'session.compact': () => [{ sessionId: 'sb' }, 1001],
   'session.configure.preview': () => [{ sessionId: 'sb', model: 'gpt' }, 1001],
   'session.resumeCommand': () => [{ sessionId: 'sb-c' }, 1001],
   'session.commands': () => [{ sessionId: 'sb-c' }, 1001],
   'question.answer': () => [{ questionId: 'q-b-222', text: 'yes' }, 1001],
-  'team.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
-  'task.list': ({ b }) => [{ projectRoot: b }, 1003, 'outside_workspace'],
-  'task.create': ({ b }) => [{ projectRoot: b, title: 'theirs' }, 1003, 'outside_workspace'],
-  'task.update': ({ b }) => [{ projectRoot: b, id: 't-a000', action: 'close' }, 1003, 'outside_workspace'],
-  'task.gate.resolve': ({ b }) => [{ projectRoot: b, id: 't-a000', gate: 'review' }, 1003, 'outside_workspace'],
-  'library.list': ({ b }) => [{ kind: 'mcp', projectRoot: b }, 1003, 'outside_workspace'],
-  'library.get': ({ b }) => [{ kind: 'mcp', name: 'x', projectRoot: b }, 1003, 'outside_workspace'],
-  'library.save': ({ b }) => [{ kind: 'skills', scope: 'project', projectRoot: b, name: 'writer', content: { body: 'text' } }, 1003, 'outside_workspace'],
-  'library.delete': ({ b }) => [{ kind: 'skills', scope: 'project', projectRoot: b, name: 'writer' }, 1003, 'outside_workspace'],
-  'library.duplicate': ({ b }) => [{ kind: 'skills', scope: 'project', projectRoot: b, from: 'writer', to: 'copy' }, 1003, 'outside_workspace'],
-  'library.rename': ({ b }) => [{ kind: 'skills', scope: 'project', projectRoot: b, from: 'writer', to: 'copy' }, 1003, 'outside_workspace'],
+  'team.list': ({ b }: Json) => [{ projectRoot: b }, 1003, 'outside_workspace'],
+  'task.list': ({ b }: Json) => [{ projectRoot: b }, 1003, 'outside_workspace'],
+  'task.create': ({ b }: Json) => [{ projectRoot: b, title: 'theirs' }, 1003, 'outside_workspace'],
+  'task.update': ({ b }: Json) => [{ projectRoot: b, id: 't-a000', action: 'close' }, 1003, 'outside_workspace'],
+  'task.gate.resolve': ({ b }: Json) => [{ projectRoot: b, id: 't-a000', gate: 'review' }, 1003, 'outside_workspace'],
+  'library.list': ({ b }: Json) => [{ kind: 'mcp', projectRoot: b }, 1003, 'outside_workspace'],
+  'library.get': ({ b }: Json) => [{ kind: 'mcp', name: 'x', projectRoot: b }, 1003, 'outside_workspace'],
+  'library.save': ({ b }: Json) => [{ kind: 'skills', scope: 'project', projectRoot: b, name: 'writer', content: { body: 'text' } }, 1003, 'outside_workspace'],
+  'library.delete': ({ b }: Json) => [{ kind: 'skills', scope: 'project', projectRoot: b, name: 'writer' }, 1003, 'outside_workspace'],
+  'library.duplicate': ({ b }: Json) => [{ kind: 'skills', scope: 'project', projectRoot: b, from: 'writer', to: 'copy' }, 1003, 'outside_workspace'],
+  'library.rename': ({ b }: Json) => [{ kind: 'skills', scope: 'project', projectRoot: b, from: 'writer', to: 'copy' }, 1003, 'outside_workspace'],
   'library.models': null, // model ids and labels, as catalog.get
   'settings.language.get': null, // the language the user reads
 };
 
 /** Schema-valid params in scope for every exposed method, for permission checks. */
-const IN_SCOPE = ({ a }) => ({
+const IN_SCOPE = ({ a }: Json) => ({
   'workspace.worktree.options': {workspaceId:'wks_a'}, 'workspace.worktree.create': {workspaceId:'wks_a',mappingId:'approved',requestId:'r',ifRevision:0}, 'workspace.worktree.remove': {workspaceId:'wks_a',requestId:'r',ifRevision:0},
   'project.list': {}, 'workspace.list': {}, 'workspace.get': { workspaceId: 'wks_a' },
   'project.register': { directory: a, ifRevision: 0, requestId: 'r' },
@@ -166,7 +170,7 @@ test('every v1 method is classified, and every exposed one has a permission, par
   }
   assert.deepEqual(Object.keys(OUT_OF_SCOPE).sort(), [...exposed].sort());
   assert.deepEqual(Object.keys(IN_SCOPE({ a: '/x' })).sort(), [...exposed].sort());
-  // Owner methods (owner.test.js): each names its tests, and one alpd answers lists its params.
+  // Owner methods (owner.test.ts): each names its tests, and one alpd answers lists its params.
   for (const [method, entry] of Object.entries(EXPOSURE).filter(([, entry]) => entry.status === 'owner')) {
     assert.ok(entry.tests?.includes('owner'), `${method}: an owner method names the 'owner' test`);
     assert.ok(!entry.permission, `${method}: an owner method needs no permission a credential could hold`);
@@ -199,7 +203,7 @@ test('the exposure matrix agrees with the daemon\'s x-alp annotations', t => {
   // Host-level reads the gateway exposes on purpose: static catalogues and the user's language.
   const hostReads = new Set(['catalog.get', 'library.models', 'settings.language.get', 'label.list']);
   for (const [method, entry] of annotated) {
-    const { effect, scope, risks = [] } = entry['x-alp'];
+    const { effect, scope, risks = [] }: Json = entry['x-alp'];
     const exposure = EXPOSURE[method];
     assert.ok(exposure, `${method} is annotated but not classified in src/policy.ts`);
     if (exposure.status !== 'exposed') continue;
@@ -210,7 +214,7 @@ test('the exposure matrix agrees with the daemon\'s x-alp annotations', t => {
     // Terminals execute on purpose (the user's decision of 2026-10-20, issue #121 H): only with the
     // opt-in terminal.exec, which nothing implies, and the host owner's own switch.
     const mitigated = method.startsWith('library.') && exposure.permission === 'library.write' ? /^exec-config/ : method.startsWith('terminal.') && exposure.permission === 'terminal.exec' ? /execution|runs any command/ : { 'session.create': /^exec: spec\.env and stdio spec\.mcpServers/ }[method];
-    assert.ok(!risks.some(risk => /admin|exec/.test(risk) && !mitigated?.test(risk)), `${method}: an administrative or code-executing method is exposed`);
+    assert.ok(!risks.some((risk: Json) => /admin|exec/.test(risk) && !mitigated?.test(risk)), `${method}: an administrative or code-executing method is exposed`);
     if (effect === 'mutation' && !readerMutations.has(method)) assert.match(exposure.permission ?? '', /(?:\.write$|^workspace\.manage$|^terminal\.exec$)/, `${method} writes and needs a write permission`);
     // The resource the daemon names is the one the gateway checks.
     if (scope?.param === 'projectRoot') assert.ok(exposure.params?.includes('projectRoot'), `${method} forwards projectRoot`);
@@ -221,12 +225,12 @@ test('the exposure matrix agrees with the daemon\'s x-alp annotations', t => {
 test('methods not exposed answer -32601 and never reach alpd: host, administration, library writes and unknown methods', async t => {
   const { daemon, sdk } = await world(t);
   const { client } = await sdk('alice');
-  // Owner methods too: this gateway has no owner, so they answer as denied ones (owner.test.js).
+  // Owner methods too: this gateway has no owner, so they answer as denied ones (owner.test.ts).
   const refused = [...Object.entries(EXPOSURE).filter(([, entry]) => entry.status === 'denied' || entry.status === 'prohibited' || entry.status === 'owner').map(([method]) => method), 'subscribe', 'provider.list'];
   const mark = daemon.calls().length;
   for (const method of refused) {
     const params = method === 'extension.register' ? { method: 'x.y' } : method === 'assignment.recall' ? { question: 'q' } : {};
-    await assert.rejects(client.request(method, params), error => error.code === -32601, method);
+    await assert.rejects(client.request(method, params), (error: Json) => error.code === -32601, method);
   }
   assert.deepEqual(daemon.calls().slice(mark), [], 'nothing reached alpd');
 });
@@ -235,14 +239,14 @@ test('a credential gets 1003 grant for every method its permissions do not cover
   const env = await world(t);
   const { daemon, sdk } = env;
   const valid = IN_SCOPE(env);
-  for (const [label, held] of [['reader', ['session.read']], ['sessions', ['session.read', 'session.write']]]) {
+  for (const [label, held] of [['reader', ['session.read']], ['sessions', ['session.read', 'session.write']]] as Array<[string, string[]]>) {
     let { client } = await sdk(label);
     let sent = 0;
-    for (const method of exposed.filter(name => !held.includes(EXPOSURE[name].permission))) {
+    for (const method of exposed.filter(name => !held.includes(EXPOSURE[name].permission!))) {
       // One connection per batch: the rate limit is per connection.
       if (++sent % 30 === 0) ({ client } = await sdk(label));
       const mark = daemon.calls().length;
-      await assert.rejects(client.request(method, valid[method]), error => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === EXPOSURE[method].permission, `${label} ${method}`);
+      await assert.rejects(client.request(method, (valid as Json)[method]), (error: Json) => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === EXPOSURE[method].permission, `${label} ${method}`);
       assert.deepEqual(daemon.calls().slice(mark), [], `${label} ${method} reached alpd`);
     }
     // What the grant covers still works.
@@ -259,7 +263,7 @@ test('every exposed method refuses resources outside the grant before alpd sees 
     if (!make) continue;
     const [params, code, reason] = make(env);
     const mark = daemon.calls().length;
-    await assert.rejects(client.request(method, params), error => error.code === code && (reason === undefined || error.data?.reason === reason), `${method} ${JSON.stringify(params)}`);
+    await assert.rejects(client.request(method, params), (error: Json) => error.code === code && (reason === undefined || error.data?.reason === reason), `${method} ${JSON.stringify(params)}`);
     // The gateway's own lookups use session.get, question.list and session.list; the method under test must not run.
     if (!LOOKUPS.has(method)) assert.deepEqual(reached(daemon, mark, method), [], `${method} reached alpd`);
   }
@@ -272,10 +276,10 @@ test('in-scope calls work, with paths named either way, and unknown params never
   assert.deepEqual((await client.request('board.list', { projectRoot: a })).pins, []);
   assert.deepEqual((await client.request('board.list', { projectRoot: canonicalA })).pins, []);
   await client.request('session.close', { sessionId: 'sa', force: true, sessionIds: ['sb'] });
-  assert.deepEqual(daemon.calls('session.close').at(-1).params, { sessionId: 'sa' });
+  assert.deepEqual(daemon.calls('session.close').at(-1)!.params, { sessionId: 'sa' });
   // A path the grant does not list exactly, even one inside the workspace or naming it another way, is refused.
   for (const cwd of [path.join(a, 'sub'), `${a}/`, `${a}/../${path.basename(a)}`]) {
-    await assert.rejects(client.request('session.preview', { spec: { cwd } }), error => error.code === 1003, cwd);
+    await assert.rejects(client.request('session.preview', { spec: { cwd } }), (error: Json) => error.code === 1003, cwd);
   }
 });
 
@@ -283,11 +287,11 @@ test('lists keep only what the grant covers', async t => {
   const { sdk, a } = await world(t);
   const { client } = await sdk('alice');
   const { sessions } = await client.request('session.list', { includeClosed: true });
-  assert.deepEqual(sessions.map(session => session.id).sort(), ['ro', 'sa', 'sa-c']);
+  assert.deepEqual(sessions.map((session: Json) => session.id).sort(), ['ro', 'sa', 'sa-c']);
   const named = await client.request('session.list', { projectRoot: a, includeClosed: true });
-  assert.deepEqual(named.sessions.map(session => session.id).sort(), ['ro', 'sa', 'sa-c']);
+  assert.deepEqual(named.sessions.map((session: Json) => session.id).sort(), ['ro', 'sa', 'sa-c']);
   const { questions } = await client.request('question.list');
-  assert.deepEqual(questions.map(question => question.id), ['q-a-111']);
+  assert.deepEqual(questions.map((question: Json) => question.id), ['q-a-111']);
 });
 
 test('session.list pages: alpd lists the granted workspaces only, reads on past rows the grant drops, and cursors are sealed', async t => {
@@ -295,30 +299,30 @@ test('session.list pages: alpd lists the granted workspaces only, reads on past 
   const { client } = await sdk('alice');
   const mark = daemon.calls().length;
   const first = await client.request('session.list', { limit: 2 });
-  assert.deepEqual(first.sessions.map(row => row.id), ['sa', 'sa-c']);
+  assert.deepEqual(first.sessions.map((row: Json) => row.id), ['sa', 'sa-c']);
   // The cursor is the gateway's own: alpd's ('@2' here) never reaches the client.
   assert.match(first.nextCursor, /^g1\./);
   assert.ok(!first.nextCursor.includes('@2'));
   // alpd's next page is mix (in a, but in b's tree: dropped) and ro: the gateway reads on.
   const second = await client.request('session.list', { limit: 1, cursor: first.nextCursor });
-  assert.deepEqual([second.sessions.map(row => row.id), second.nextCursor], [['ro'], undefined]);
-  const sent = reached(daemon, mark, 'session.list').map(call => call.params);
-  assert.deepEqual(sent.map(params => [params.limit, params.cursor]), [[2, undefined], [1, '@2'], [1, '@3']]);
+  assert.deepEqual([second.sessions.map((row: Json) => row.id), second.nextCursor], [['ro'], undefined]);
+  const sent = reached(daemon, mark, 'session.list').map((call: Json) => call.params);
+  assert.deepEqual(sent.map((params: Json) => [params.limit, params.cursor]), [[2, undefined], [1, '@2'], [1, '@3']]);
   for (const params of sent) assert.deepEqual([...params.projectRoots].sort(), [...new Set([a, canonicalA])].sort(), 'only the grant\'s workspaces');
   // A cursor whose last alpd row was dropped names nothing the client can read.
   const dropped = await client.request('session.list', { limit: 1, cursor: (await client.request('session.list', { limit: 2 })).nextCursor });
   assert.equal(dropped.sessions[0].id, 'ro');
   // A cursor the gateway did not give, or gave another credential, is refused before alpd.
   const before = daemon.calls('session.list').length;
-  await assert.rejects(client.request('session.list', { limit: 1, cursor: '@4' }), error => error.code === -32602);
-  await assert.rejects(client.request('session.list', { limit: 1, cursor: `${first.nextCursor.slice(0, -2)}AA` }), error => error.code === -32602);
+  await assert.rejects(client.request('session.list', { limit: 1, cursor: '@4' }), (error: Json) => error.code === -32602);
+  await assert.rejects(client.request('session.list', { limit: 1, cursor: `${first.nextCursor.slice(0, -2)}AA` }), (error: Json) => error.code === -32602);
   const other = (await sdk('both')).client;
-  await assert.rejects(other.request('session.list', { limit: 1, cursor: first.nextCursor }), error => error.code === -32602);
+  await assert.rejects(other.request('session.list', { limit: 1, cursor: first.nextCursor }), (error: Json) => error.code === -32602);
   assert.equal(daemon.calls('session.list').length, before);
   // A query is passed on; the client's projectRoot narrows projectRoots and is not sent itself.
   const named = await client.request('session.list', { projectRoot: canonicalA, limit: 1, query: 'sa' });
-  assert.deepEqual(named.sessions.map(row => row.id), ['sa']);
-  const last = daemon.calls('session.list').at(-1).params;
+  assert.deepEqual(named.sessions.map((row: Json) => row.id), ['sa']);
+  const last = daemon.calls('session.list').at(-1)!.params;
   assert.deepEqual([last.limit, last.query, last.projectRoot], [1, 'sa', undefined]);
   // A query naming a session outside the grant finds nothing of it, even paged.
   for (const query of ['sb', 'sb-c', 'mix']) {
@@ -326,7 +330,7 @@ test('session.list pages: alpd lists the granted workspaces only, reads on past 
     assert.deepEqual([found.sessions, found.nextCursor], [[], undefined], query);
   }
   // The grant of two workspaces lists both.
-  assert.deepEqual((await other.request('session.list', {})).sessions.map(row => row.id).sort(), ['mix', 'ro', 'sa', 'sa-c', 'sb', 'sb-c'], 'mix too: its tree is in b');
+  assert.deepEqual((await other.request('session.list', {})).sessions.map((row: Json) => row.id).sort(), ['mix', 'ro', 'sa', 'sa-c', 'sb', 'sb-c'], 'mix too: its tree is in b');
 });
 
 test('session.list for a grant too large to name to alpd: the whole list, searched by the gateway, never alpd\'s query', async t => {
@@ -342,22 +346,22 @@ test('session.list for a grant too large to name to alpd: the whole list, search
   const { sdk } = await startGateway(t, { daemon, credentials: { many: { workspaces } } });
   const { client } = await sdk('many');
   const found = await client.request('session.list', { limit: 1, query: 'fix' });
-  assert.deepEqual([found.sessions.map(row => row.id), found.nextCursor], [['in-1'], undefined]);
-  const sent = daemon.calls('session.list').at(-1).params;
+  assert.deepEqual([found.sessions.map((row: Json) => row.id), found.nextCursor], [['in-1'], undefined]);
+  const sent = daemon.calls('session.list').at(-1)!.params;
   assert.deepEqual([sent.query, sent.limit, sent.cursor, sent.projectRoots], [undefined, undefined, undefined, undefined], 'nothing alpd would match or page across the host');
-  assert.deepEqual((await client.request('session.list', { limit: 1 })).sessions.map(row => row.id).sort(), ['in-1', 'in-2']);
+  assert.deepEqual((await client.request('session.list', { limit: 1 })).sessions.map((row: Json) => row.id).sort(), ['in-1', 'in-2']);
 });
 
 test('question.watch: the list and the events stay in the grant, and in the workspace it names', async t => {
   const { daemon, sdk, a } = await world(t);
-  const question = (id, sessionId, rootId) => ({ type: 'question', question: { id, sessionId, rootId, agent: 'main', body: `${id}?`, askedAt: '2026-10-15T00:00:00.000Z' } });
+  const question = (id: Json, sessionId: Json, rootId: Json) => ({ type: 'question', question: { id, sessionId, rootId, agent: 'main', body: `${id}?`, askedAt: '2026-10-15T00:00:00.000Z' } });
   const { client } = await sdk('alice');
   assert.ok((await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('question.watch'));
-  const seen = [];
+  const seen: Json[] = [];
   client.onEvent(envelope => seen.push([envelope.sessionId, envelope.event.type, envelope.cursor]));
   const listed = await client.request('question.watch', { projectRoot: a });
-  assert.deepEqual(listed.questions.map(q => q.id), ['q-a-111']);
-  assert.deepEqual(daemon.calls('question.watch').at(-1).params, {}, 'alpd is asked for every tree');
+  assert.deepEqual(listed.questions.map((q: Json) => q.id), ['q-a-111']);
+  assert.deepEqual(daemon.calls('question.watch').at(-1)!.params, {}, 'alpd is asked for every tree');
   daemon.emit('sb', question('q-b-1', 'sb', 'sb'));
   daemon.emit('mix', question('q-mix', 'mix', 'sb'));
   daemon.emit('sa-c', question('q-a-1', 'sa-c', 'sa'));
@@ -374,9 +378,9 @@ test('question.watch: the list and the events stay in the grant, and in the work
 
   // A grant of two workspaces watching one: the other's questions only once it attaches there.
   const both = (await sdk('both')).client;
-  const heard = [];
+  const heard: Json[] = [];
   both.onEvent(envelope => heard.push([envelope.sessionId, envelope.event.type, envelope.cursor !== undefined]));
-  assert.deepEqual((await both.request('question.watch', { projectRoot: a })).questions.map(q => q.id), ['q-a-111']);
+  assert.deepEqual((await both.request('question.watch', { projectRoot: a })).questions.map((q: Json) => q.id), ['q-a-111']);
   daemon.emit('sb', question('q-b-2', 'sb', 'sb'));
   daemon.emit('sa', question('q-a-2', 'sa', 'sa'));
   await until(() => heard.length === 1, 'the question of a');
@@ -394,18 +398,18 @@ test('question.watch: the list and the events stay in the grant, and in the work
 
 test('question.watch with turns: roots\' turn ends of the grant, of the workspace named, and only when asked', async t => {
   const { daemon, sdk, a, b } = await world(t);
-  const ended = state => ({ type: 'turn.ended', turnId: 't1', state });
+  const ended = (state: Json) => ({ type: 'turn.ended', turnId: 't1', state });
   const both = (await sdk('both')).client;
   assert.ok((await both.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('question.watch.turns'));
-  const heard = [];
+  const heard: Json[] = [];
   both.onEvent(envelope => heard.push([envelope.sessionId, envelope.event.type, envelope.event.state, envelope.cursor !== undefined]));
   // Without turns: no turn ends.
   await both.request('question.watch', { projectRoot: a });
-  assert.deepEqual(daemon.calls('question.watch').at(-1).params, {});
+  assert.deepEqual(daemon.calls('question.watch').at(-1)!.params, {});
   daemon.emit('sa', ended('completed'));
   // With turns, of workspace a: alpd is asked for every tree, the gateway keeps a's.
   await both.request('question.watch', { projectRoot: a, turns: true });
-  assert.deepEqual(daemon.calls('question.watch').at(-1).params, { turns: true }, 'turns and nothing else reach alpd');
+  assert.deepEqual(daemon.calls('question.watch').at(-1)!.params, { turns: true }, 'turns and nothing else reach alpd');
   daemon.emit('sb', ended('completed'));
   daemon.emit('sa', ended('failed'));
   await until(() => heard.length === 1, 'the turn end of a');
@@ -416,7 +420,7 @@ test('question.watch with turns: roots\' turn ends of the grant, of the workspac
   assert.deepEqual(heard, [['sa', 'turn.ended', 'failed', false], ['sb', 'turn.ended', 'completed', false]]);
   // A grant of a only never hears b's, nor of a tree mixing workspaces.
   const alice = (await sdk('alice')).client;
-  const got = [];
+  const got: Json[] = [];
   alice.onEvent(envelope => got.push([envelope.sessionId, envelope.event.state]));
   await alice.request('question.watch', { turns: true });
   daemon.emit('sb', ended('completed'));
@@ -436,14 +440,14 @@ test('session.attention: question.watch answers and tells the grant\'s attention
   daemon.state.sessions.get('mix').attention = { reason: 'finished', at };
   const { client } = await sdk('reader');
   assert.ok((await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('session.attention'));
-  const heard = [];
+  const heard: Json[] = [];
   client.onEvent(envelope => heard.push([envelope.sessionId, envelope.event.type, envelope.event.attention?.reason ?? null, envelope.cursor !== undefined]));
   // Without attention: alpd is not asked for it, and nothing is answered.
   assert.equal((await client.request('question.watch', { projectRoot: a })).attention, undefined);
-  assert.deepEqual(daemon.calls('question.watch').at(-1).params, {});
+  assert.deepEqual(daemon.calls('question.watch').at(-1)!.params, {});
   const watched = await client.request('question.watch', { projectRoot: a, attention: true });
-  assert.deepEqual(daemon.calls('question.watch').at(-1).params, { attention: true }, 'attention and nothing else reach alpd');
-  assert.deepEqual(watched.attention.map(entry => [entry.sessionId, entry.attention.reason]), [['sa', 'error']], 'only the grant\'s, of the workspace named');
+  assert.deepEqual(daemon.calls('question.watch').at(-1)!.params, { attention: true }, 'attention and nothing else reach alpd');
+  assert.deepEqual(watched.attention.map((entry: Json) => [entry.sessionId, entry.attention.reason]), [['sa', 'error']], 'only the grant\'s, of the workspace named');
   assert.ok(!watched.attention[0].attention.message.includes(a), 'a host path in the message is hidden as in turn.ended');
   daemon.emit('sb', { type: 'attention', attention: { reason: 'finished', at } });
   daemon.emit('mix', { type: 'attention', attention: { reason: 'finished', at } });
@@ -452,30 +456,30 @@ test('session.attention: question.watch answers and tells the grant\'s attention
   // A reader acknowledges it: its look clears it for every client.
   assert.deepEqual(await client.request('session.attention.clear', { sessionId: 'sa', at }), { cleared: true });
   await until(() => heard.length === 2, 'the clearing');
-  await assert.rejects(client.request('session.attention.clear', { sessionId: 'sb' }), error => error.code === 1001);
+  await assert.rejects(client.request('session.attention.clear', { sessionId: 'sb' }), (error: Json) => error.code === 1001);
   assert.equal(daemon.state.sessions.get('sb').attention.reason, 'finished', 'outside the grant: untouched');
   assert.deepEqual(heard, [['sa', 'attention', 'finished', false], ['sa', 'attention', null, false]]);
   // The allow-list stays exact: unknown params never reach alpd, an unknown method nowhere.
   await client.request('question.watch', { projectRoot: a, attention: true, turns: false, everything: true, sessionId: 'sb' });
-  assert.deepEqual(daemon.calls('question.watch').at(-1).params, { attention: true });
+  assert.deepEqual(daemon.calls('question.watch').at(-1)!.params, { attention: true });
   await client.request('session.attention.clear', { sessionId: 'sa', at, force: true, sessionIds: ['sb'] });
-  assert.deepEqual(daemon.calls('session.attention.clear').at(-1).params, { sessionId: 'sa', at });
+  assert.deepEqual(daemon.calls('session.attention.clear').at(-1)!.params, { sessionId: 'sa', at });
   const mark = daemon.calls().length;
-  for (const method of ['session.attention.set', 'session.attention', 'attention.clear']) await assert.rejects(client.request(method, { sessionId: 'sa' }), error => error.code === -32601, method);
+  for (const method of ['session.attention.set', 'session.attention', 'attention.clear']) await assert.rejects(client.request(method, { sessionId: 'sa' }), (error: Json) => error.code === -32601, method);
   assert.deepEqual(daemon.calls().slice(mark), [], 'nothing reached alpd');
 });
 
 test('session.attention.mark: Mark as unread needs session.write and a root in the grant; only sessionId reaches alpd; the answer projected', async t => {
   const { daemon, sdk } = await world(t);
   const reader = (await sdk('reader')).client;
-  await assert.rejects(reader.request('session.attention.mark', { sessionId: 'sa' }), error => error.code === 1003, 'a reader only clears, by looking');
+  await assert.rejects(reader.request('session.attention.mark', { sessionId: 'sa' }), (error: Json) => error.code === 1003, 'a reader only clears, by looking');
   const { client } = await sdk('alice');
   const marked = await client.request('session.attention.mark', { sessionId: 'sa', at: 'x', sessionIds: ['sb'] });
   assert.deepEqual(Object.keys(marked).sort(), ['attention', 'marked']);
   assert.deepEqual(Object.keys(marked.attention).sort(), ['at', 'reason'], 'projected: nothing else alpd answers');
-  assert.deepEqual(daemon.calls('session.attention.mark').at(-1).params, { sessionId: 'sa' });
+  assert.deepEqual(daemon.calls('session.attention.mark').at(-1)!.params, { sessionId: 'sa' });
   assert.deepEqual(await client.request('session.attention.mark', { sessionId: 'sa' }), { marked: false }, 'already asks');
-  await assert.rejects(client.request('session.attention.mark', { sessionId: 'sb' }), error => error.code === 1001, 'outside the grant');
+  await assert.rejects(client.request('session.attention.mark', { sessionId: 'sb' }), (error: Json) => error.code === 1001, 'outside the grant');
   assert.equal(daemon.state.sessions.get('sb').attention, undefined, 'untouched');
 });
 
@@ -483,7 +487,7 @@ test('session.update: Pin to top and labels need session.write and a root in the
   const { daemon, sdk } = await world(t);
   const reader = (await sdk('reader')).client;
   const mark = daemon.calls().length;
-  await assert.rejects(reader.request('session.update', { sessionId: 'sa', pinned: true }), error => error.code === 1003, 'a reader may not pin');
+  await assert.rejects(reader.request('session.update', { sessionId: 'sa', pinned: true }), (error: Json) => error.code === 1003, 'a reader may not pin');
   assert.deepEqual(reached(daemon, mark, 'session.update'), [], 'nothing reached alpd');
   assert.deepEqual(await reader.request('label.list', {}), { labels: [{ name: 'Bug', color: 'red' }] }, 'a reader lists the catalogue, projected');
   const { client } = await sdk('alice');
@@ -492,11 +496,11 @@ test('session.update: Pin to top and labels need session.write and a root in the
   assert.equal(updated.session.id, 'sa');
   assert.match(updated.session.pinnedAt, /^\d{4}-/);
   assert.deepEqual(updated.session.labels, ['Bug']);
-  assert.deepEqual(daemon.calls('session.update').at(-1).params, { sessionId: 'sa', pinned: true, labels: ['Bug'] });
+  assert.deepEqual(daemon.calls('session.update').at(-1)!.params, { sessionId: 'sa', pinned: true, labels: ['Bug'] });
   // The row shows them on session.get and session.list too.
   assert.deepEqual((await client.request('session.get', { sessionId: 'sa' })).session.labels, ['Bug']);
-  assert.equal((await client.request('session.list', {})).sessions.find(s => s.id === 'sa').pinnedAt, updated.session.pinnedAt);
-  await assert.rejects(client.request('session.update', { sessionId: 'sb', pinned: true }), error => error.code === 1001, 'outside the grant');
+  assert.equal((await client.request('session.list', {})).sessions.find((s: Json) => s.id === 'sa').pinnedAt, updated.session.pinnedAt);
+  await assert.rejects(client.request('session.update', { sessionId: 'sb', pinned: true }), (error: Json) => error.code === 1001, 'outside the grant');
   assert.equal(daemon.state.sessions.get('sb').pinnedAt, undefined, 'untouched');
   const cleared = await client.request('session.update', { sessionId: 'sa', pinned: false, labels: [] });
   assert.deepEqual([cleared.session.pinnedAt, cleared.session.labels], [undefined, undefined]);
@@ -518,7 +522,7 @@ test('session.attention through a gateway to an alpd without it: not offered, an
   const { client } = await sdk('reader');
   assert.ok(!(await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('session.attention'));
   assert.deepEqual(await client.request('question.watch', { attention: true }), { questions: [] });
-  await assert.rejects(client.request('session.attention.clear', { sessionId: 'sa' }), error => error.code === -32601);
+  await assert.rejects(client.request('session.attention.clear', { sessionId: 'sa' }), (error: Json) => error.code === -32601);
 });
 
 test('workspace.files.search: a granted workspace only, sent as its canonical path, needing project.read, answered paths kept relative', async t => {
@@ -529,13 +533,13 @@ test('workspace.files.search: a granted workspace only, sent as its canonical pa
   assert.ok((await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('workspace.files'));
   const found = await client.request('workspace.files.search', { projectRoot: a, query: 'server', limit: 50, extra: 'dropped' });
   assert.deepEqual(found, { files: [{ path: 'src/server.ts' }, { path: 'docs/sửa lỗi.md' }] }, 'only plainly relative paths');
-  assert.deepEqual(daemon.calls('workspace.files.search').at(-1).params, { projectRoot: canonicalA, query: 'server', limit: 50 }, 'the canonical path, no unknown params');
+  assert.deepEqual(daemon.calls('workspace.files.search').at(-1)!.params, { projectRoot: canonicalA, query: 'server', limit: 50 }, 'the canonical path, no unknown params');
   const mark = daemon.calls().length;
   for (const projectRoot of [b, path.join(a, 'src'), `${a}/`, `${a}/../a`, '/', 'relative']) {
-    await assert.rejects(client.request('workspace.files.search', { projectRoot }), error => error.code === 1003 && error.data?.reason === 'outside_workspace', projectRoot);
+    await assert.rejects(client.request('workspace.files.search', { projectRoot }), (error: Json) => error.code === 1003 && error.data?.reason === 'outside_workspace', projectRoot);
   }
   const { client: reader } = await sdk('reader');
-  await assert.rejects(reader.request('workspace.files.search', { projectRoot: a }), error => error.code === 1003 && error.data?.reason === 'grant');
+  await assert.rejects(reader.request('workspace.files.search', { projectRoot: a }), (error: Json) => error.code === 1003 && error.data?.reason === 'grant');
   assert.deepEqual(reached(daemon, mark, 'workspace.files.search'), [], 'no refused search reached alpd');
 });
 
@@ -543,7 +547,7 @@ test('workspace.files.list and read: files.read only, never a default; canonical
   const { daemon, sdk, a, canonicalA } = await world(t);
   let { client } = await sdk('alice');
   assert.ok((await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('workspace.files.read'));
-  daemon.state.handlers['workspace.files.list'] = ({ path: directory }) => ({
+  daemon.state.handlers['workspace.files.list'] = ({ path: directory }: Json) => ({
     entries: [
       { name: 'server.ts', path: directory ? `${directory}/server.ts` : 'server.ts', kind: 'file', size: 3, modifiedAt: '2026-10-17T00:00:00.000Z', inode: 42, host: '/etc', target: 'elsewhere/server.ts' },
       { name: 'deep', path: directory ? `${directory}/deep` : 'deep', kind: 'directory' },
@@ -562,30 +566,30 @@ test('workspace.files.list and read: files.read only, never a default; canonical
   });
   const listed = await client.request('workspace.files.list', { projectRoot: a, path: 'src', includeIgnored: true, extra: 'dropped', cursor: 'WzEsImEiXQ', internalLinks: true });
   assert.deepEqual(listed, { entries: [{ name: 'server.ts', path: 'src/server.ts', kind: 'file', size: 3, modifiedAt: '2026-10-17T00:00:00.000Z' }, { name: 'deep', path: 'src/deep', kind: 'directory' }], truncated: true });
-  assert.deepEqual(daemon.calls('workspace.files.list').at(-1).params, { projectRoot: canonicalA, path: 'src', includeIgnored: true }, 'the canonical path, no unknown params');
-  assert.deepEqual((await client.request('workspace.files.list', { projectRoot: a })).entries.map(entry => entry.path), ['server.ts', 'deep']);
-  daemon.state.handlers['workspace.files.read'] = ({ path: file }) => ({ path: file, content: 'export {};\n', size: 11, modifiedAt: '2026-10-17T00:00:00.000Z', revision: '1:2:3' });
+  assert.deepEqual(daemon.calls('workspace.files.list').at(-1)!.params, { projectRoot: canonicalA, path: 'src', includeIgnored: true }, 'the canonical path, no unknown params');
+  assert.deepEqual((await client.request('workspace.files.list', { projectRoot: a })).entries.map((entry: Json) => entry.path), ['server.ts', 'deep']);
+  daemon.state.handlers['workspace.files.read'] = ({ path: file }: Json) => ({ path: file, content: 'export {};\n', size: 11, modifiedAt: '2026-10-17T00:00:00.000Z', revision: '1:2:3' });
   assert.deepEqual(await client.request('workspace.files.read', { projectRoot: a, path: 'src/server.ts' }), { path: 'src/server.ts', content: 'export {};\n', size: 11, modifiedAt: '2026-10-17T00:00:00.000Z' });
-  assert.deepEqual(daemon.calls('workspace.files.read').at(-1).params, { projectRoot: canonicalA, path: 'src/server.ts' });
+  assert.deepEqual(daemon.calls('workspace.files.read').at(-1)!.params, { projectRoot: canonicalA, path: 'src/server.ts' });
 
   // Refused by the gateway itself, before alpd sees the method (one connection per batch: the rate limit is per connection).
   const mark = daemon.calls().length;
   ({ client } = await sdk('alice'));
   for (const file of ['.env', 'config/.env.local', '.git/config', 'sub/.GIT/HEAD', '.alp/mcp/docs.json', 'id_ed25519', 'certs/tls.key', 'server.PEM', 'credentials.json', '.npmrc', '.aws/credentials']) {
-    await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: file }), error => error.code === 1003 && error.data?.reason === 'blocked_path' && !error.message.includes(a), file);
-    await assert.rejects(client.request('workspace.files.list', { projectRoot: a, path: file }), error => error.code === 1003 && error.data?.reason === 'blocked_path', file);
+    await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: file }), (error: Json) => error.code === 1003 && error.data?.reason === 'blocked_path' && !error.message.includes(a), file);
+    await assert.rejects(client.request('workspace.files.list', { projectRoot: a, path: file }), (error: Json) => error.code === 1003 && error.data?.reason === 'blocked_path', file);
   }
   ({ client } = await sdk('alice'));
   for (const file of ['/etc/passwd', '../b/x', 'src/../../x', './x', 'a//b', 'C:/x', 'a\\b', 'src/']) {
-    await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: file }), error => error.code === -32602 && error.data?.reason === 'invalid_path', file);
+    await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: file }), (error: Json) => error.code === -32602 && error.data?.reason === 'invalid_path', file);
   }
-  await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: '' }), error => error.code === -32602, 'an empty path fails the schema');
-  await assert.rejects(client.request('workspace.files.read', { projectRoot: `${a}/`, path: 'x' }), error => error.code === 1003 && error.data?.reason === 'outside_workspace');
+  await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: '' }), (error: Json) => error.code === -32602, 'an empty path fails the schema');
+  await assert.rejects(client.request('workspace.files.read', { projectRoot: `${a}/`, path: 'x' }), (error: Json) => error.code === 1003 && error.data?.reason === 'outside_workspace');
   // Without files.read: the default credentials (session and project permissions) are refused.
   for (const label of ['both', 'reader', 'sessions']) {
     const { client: other } = await sdk(label);
-    for (const [method, params] of [['workspace.files.list', { projectRoot: a }], ['workspace.files.read', { projectRoot: a, path: 'README.md' }]]) {
-      await assert.rejects(other.request(method, params), error => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === 'files.read', `${label} ${method}`);
+    for (const [method, params] of [['workspace.files.list', { projectRoot: a }], ['workspace.files.read', { projectRoot: a, path: 'README.md' }]] as Json[][]) {
+      await assert.rejects(other.request(method, params), (error: Json) => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === 'files.read', `${label} ${method}`);
     }
   }
   assert.deepEqual(daemon.calls().slice(mark).filter(call => call.method.startsWith('workspace.files.')), [], 'no refused call reached alpd');
@@ -593,9 +597,9 @@ test('workspace.files.list and read: files.read only, never a default; canonical
   // An answer for another file, or over the limit, is refused.
   ({ client } = await sdk('alice'));
   daemon.state.handlers['workspace.files.read'] = () => ({ path: 'other.txt', content: 'SENTINEL', size: 8 });
-  await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: 'x.txt' }), error => error.code === 1000 && !error.message.includes('SENTINEL'));
-  daemon.state.handlers['workspace.files.read'] = ({ path: file }) => ({ path: file, content: 'é'.repeat(512 * 1024 + 1), size: 1 });
-  await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: 'x.txt' }), error => error.code === 1000);
+  await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: 'x.txt' }), (error: Json) => error.code === 1000 && !error.message.includes('SENTINEL'));
+  daemon.state.handlers['workspace.files.read'] = ({ path: file }: Json) => ({ path: file, content: 'é'.repeat(512 * 1024 + 1), size: 1 });
+  await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: 'x.txt' }), (error: Json) => error.code === 1000);
   // alpd's refusals: code and reason pass, the message is the gateway's fixed text (no host path, no quote).
   ({ client } = await sdk('alice'));
   for (const reason of ['ignored', 'linked', 'not_found', 'binary', 'too_large', 'not_directory', 'unreadable', 'something_new']) {
@@ -610,48 +614,48 @@ test('workspace.files.list and read: files.read only, never a default; canonical
   // A raw failure (no code): the gateway's own generic text.
   ({ client } = await sdk('alice'));
   daemon.state.handlers['workspace.files.read'] = () => { throw new Error(`EACCES: ${canonicalA}/x.txt`); };
-  await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: 'x.txt' }), failure => !failure.message.includes(canonicalA));
+  await assert.rejects(client.request('workspace.files.read', { projectRoot: a, path: 'x.txt' }), (failure: Json) => !failure.message.includes(canonicalA));
 });
 
 // A 1x1 PNG, and alpd's preview answer for it (packages/daemon/src/files.ts previewWorkspaceFile).
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
-const previewOf = (file, bytes = PNG, extra = {}) => ({ path: file, kind: 'image', mimeType: { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }[file.slice(file.lastIndexOf('.') + 1).toLowerCase()] ?? 'image/svg+xml', size: bytes.length, modifiedAt: '2026-11-22T00:00:00.000Z', revision: 'rABC', encoding: 'base64', content: bytes.toString('base64'), offset: 0, ...extra });
+const previewOf = (file: Json, bytes = PNG, extra = {}) => ({ path: file, kind: 'image', mimeType: ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' } as Json)[file.slice(file.lastIndexOf('.') + 1).toLowerCase()] ?? 'image/svg+xml', size: bytes.length, modifiedAt: '2026-11-22T00:00:00.000Z', revision: 'rABC', encoding: 'base64', content: bytes.toString('base64'), offset: 0, ...extra });
 
 test('workspace.files.preview: files.read only; raster images by extension (never SVG), whole, at most 1 MiB, never through a link; answers checked (t-a35b)', async t => {
   const { daemon, sdk, a, canonicalA } = await world(t);
   let { client } = await sdk('alice');
   // The capability that also covers workspace.files.find and internal links is not passed on.
   assert.ok(!(await client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('workspace.files.browse'));
-  daemon.state.handlers['workspace.files.preview'] = ({ path: file }) => previewOf(file, PNG, { target: undefined, inode: 7, host: '/etc' });
+  daemon.state.handlers['workspace.files.preview'] = ({ path: file }: Json) => previewOf(file, PNG, { target: undefined, inode: 7, host: '/etc' });
   const shown = await client.request('workspace.files.preview', { projectRoot: a, path: 'assets/logo.png', includeIgnored: true, maxBytes: 50 * 1024 * 1024, extra: 'dropped' });
   assert.deepEqual(shown, { path: 'assets/logo.png', kind: 'image', mimeType: 'image/png', size: PNG.length, modifiedAt: '2026-11-22T00:00:00.000Z', encoding: 'base64', content: PNG.toString('base64') }, 'only the image fields; no revision, offset or host detail');
-  assert.deepEqual(daemon.calls('workspace.files.preview').at(-1).params, { projectRoot: canonicalA, path: 'assets/logo.png', includeIgnored: true, maxBytes: 1024 * 1024 }, 'the canonical workspace; maxBytes forced to 1 MiB whatever the client asked');
+  assert.deepEqual(daemon.calls('workspace.files.preview').at(-1)!.params, { projectRoot: canonicalA, path: 'assets/logo.png', includeIgnored: true, maxBytes: 1024 * 1024 }, 'the canonical workspace; maxBytes forced to 1 MiB whatever the client asked');
   // Any case of an allowed extension.
   for (const file of ['A.PNG', 'b.Jpg', 'c.JPEG', 'd.gif', 'e.WebP', 'dir.png/f.jpeg']) {
     assert.equal((await client.request('workspace.files.preview', { projectRoot: a, path: file })).path, file, file);
-    assert.equal(daemon.calls('workspace.files.preview').at(-1).params.maxBytes, 1024 * 1024, file);
+    assert.equal(daemon.calls('workspace.files.preview').at(-1)!.params.maxBytes, 1024 * 1024, file);
   }
   const small = await client.request('workspace.files.preview', { projectRoot: a, path: 'small.png', maxBytes: 1 });
   assert.equal(small.size, PNG.length);
-  assert.equal(daemon.calls('workspace.files.preview').at(-1).params.maxBytes, 1024 * 1024, 'a smaller client maxBytes is not forwarded either');
+  assert.equal(daemon.calls('workspace.files.preview').at(-1)!.params.maxBytes, 1024 * 1024, 'a smaller client maxBytes is not forwarded either');
 
   // Refused by the gateway before alpd: SVG, other files, no extension, chunks, links, blocked or non-relative paths.
   const mark = daemon.calls().length;
   ({ client } = await sdk('alice'));
   for (const file of ['logo.svg', 'LOGO.SVG', 'icon.svgz', 'README.md', 'archive.zip', 'image.png.txt', 'png', '.png', 'dir.png/file', 'x.bmp', 'x.tiff', 'x.ico', 'x.avif', 'x.heic', 'page.html']) {
-    await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: file }), error => error.code === 1003 && error.data?.reason === 'not_image', file);
+    await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: file }), (error: Json) => error.code === 1003 && error.data?.reason === 'not_image', file);
   }
   for (const params of [{ offset: 4 }, { revision: 'rABC' }, { internalLinks: true }, { offset: 0, revision: 'r' }]) {
-    await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: 'logo.png', ...params }), error => error.code === -32602 && error.data?.reason === 'invalid_params', JSON.stringify(params));
+    await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: 'logo.png', ...params }), (error: Json) => error.code === -32602 && error.data?.reason === 'invalid_params', JSON.stringify(params));
   }
   ({ client } = await sdk('alice'));
   for (const file of ['.env.png', '.git/logo.png', '.alp/x.png', 'id_rsa.png', 'certs/tls.key', 'secrets/credentials.json']) {
-    await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: file }), error => error.code === 1003 && (error.data?.reason === 'blocked_path' || error.data?.reason === 'not_image'), file);
+    await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: file }), (error: Json) => error.code === 1003 && (error.data?.reason === 'blocked_path' || error.data?.reason === 'not_image'), file);
   }
   for (const file of ['/etc/x.png', '../b/x.png', 'src/../../x.png', './x.png', 'a//b.png', 'C:/x.png', 'a\\b.png', `${canonicalA}/x.png`]) {
-    await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: file }), error => error.code === -32602 && error.data?.reason === 'invalid_path', file);
+    await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: file }), (error: Json) => error.code === -32602 && error.data?.reason === 'invalid_path', file);
   }
-  await assert.rejects(client.request('workspace.files.preview', { projectRoot: `${a}/`, path: 'x.png' }), error => error.code === 1003 && error.data?.reason === 'outside_workspace');
+  await assert.rejects(client.request('workspace.files.preview', { projectRoot: `${a}/`, path: 'x.png' }), (error: Json) => error.code === 1003 && error.data?.reason === 'outside_workspace');
   // Without files.read: exactly workspace.files.read's refusal.
   for (const label of ['both', 'reader', 'sessions']) {
     const { client: other } = await sdk(label);
@@ -665,25 +669,25 @@ test('workspace.files.preview: files.read only; raster images by extension (neve
   // Answers that are not one whole raster image of the file asked for are refused.
   const big = Buffer.alloc(1024 * 1024 + 1, 1);
   const bad = {
-    'another file': file => previewOf(`other/${file}`),
-    'through a link': file => previewOf(file, PNG, { target: 'elsewhere/logo.png' }),
-    'svg kind': file => ({ ...previewOf(file), mimeType: 'image/svg+xml' }),
-    'text kind': file => ({ ...previewOf(file), kind: 'text', mimeType: 'text/plain' }),
-    'binary kind': file => ({ ...previewOf(file), kind: 'binary', encoding: 'none', content: undefined }),
-    'other mime': file => ({ ...previewOf(file), mimeType: 'image/jpeg' }),
-    'not base64': file => ({ ...previewOf(file), content: '<svg onload=alert(1)>' }),
-    'size mismatch': file => ({ ...previewOf(file), size: 1 }),
-    'over 1 MiB': file => previewOf(file, big),
-    'a later chunk': file => ({ ...previewOf(file), offset: 8 }),
+    'another file': (file: Json) => previewOf(`other/${file}`),
+    'through a link': (file: Json) => previewOf(file, PNG, { target: 'elsewhere/logo.png' }),
+    'svg kind': (file: Json) => ({ ...previewOf(file), mimeType: 'image/svg+xml' }),
+    'text kind': (file: Json) => ({ ...previewOf(file), kind: 'text', mimeType: 'text/plain' }),
+    'binary kind': (file: Json) => ({ ...previewOf(file), kind: 'binary', encoding: 'none', content: undefined }),
+    'other mime': (file: Json) => ({ ...previewOf(file), mimeType: 'image/jpeg' }),
+    'not base64': (file: Json) => ({ ...previewOf(file), content: '<svg onload=alert(1)>' }),
+    'size mismatch': (file: Json) => ({ ...previewOf(file), size: 1 }),
+    'over 1 MiB': (file: Json) => previewOf(file, big),
+    'a later chunk': (file: Json) => ({ ...previewOf(file), offset: 8 }),
   };
   ({ client } = await sdk('alice'));
   for (const [label, answer] of Object.entries(bad)) {
-    daemon.state.handlers['workspace.files.preview'] = ({ path: file }) => answer(file);
-    await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: 'logo.png' }), error => error.code === 1000 && !error.message.includes('svg'), label);
+    daemon.state.handlers['workspace.files.preview'] = ({ path: file }: Json) => answer(file);
+    await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: 'logo.png' }), (error: Json) => error.code === 1000 && !error.message.includes('svg'), label);
   }
   // More to come (nextOffset): too_large, as a file over the limit alpd refuses itself.
-  daemon.state.handlers['workspace.files.preview'] = ({ path: file }) => previewOf(file, PNG, { nextOffset: PNG.length });
-  await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: 'logo.png' }), error => error.code === 1000 && error.data?.reason === 'too_large');
+  daemon.state.handlers['workspace.files.preview'] = ({ path: file }: Json) => previewOf(file, PNG, { nextOffset: PNG.length });
+  await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: 'logo.png' }), (error: Json) => error.code === 1000 && error.data?.reason === 'too_large');
   // alpd's refusals: code and reason pass, the message is the gateway's fixed text.
   for (const reason of ['ignored', 'linked', 'not_found', 'too_large', 'blocked_path', 'invalid_path', 'changed', 'something_new']) {
     daemon.state.handlers['workspace.files.preview'] = () => { throw { code: reason === 'too_large' ? 1000 : 1003, message: `${canonicalA}/logo.png: SENTINEL quote`, data: { reason, file: `${canonicalA}/logo.png` } }; };
@@ -692,14 +696,14 @@ test('workspace.files.preview: files.read only; raster images by extension (neve
     assert.ok(!caught.message.includes(canonicalA) && !caught.message.includes('SENTINEL') && !JSON.stringify(caught.data).includes(canonicalA), `${reason}: ${caught.message}`);
   }
   daemon.state.handlers['workspace.files.preview'] = () => { throw new Error(`EACCES: ${canonicalA}/logo.png`); };
-  await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: 'logo.png' }), failure => !failure.message.includes(canonicalA));
+  await assert.rejects(client.request('workspace.files.preview', { projectRoot: a, path: 'logo.png' }), (failure: Json) => !failure.message.includes(canonicalA));
 });
 
 test('question.answer needs an exact id in scope: a prefix that alpd would expand is refused', async t => {
   const { daemon, sdk } = await world(t);
   const { client } = await sdk('alice');
-  await assert.rejects(client.request('question.answer', { questionId: 'q-', text: 'x' }), error => error.code === 1001);
-  await assert.rejects(client.request('question.answer', { questionId: 'q-a', text: 'x' }), error => error.code === 1001);
+  await assert.rejects(client.request('question.answer', { questionId: 'q-', text: 'x' }), (error: Json) => error.code === 1001);
+  await assert.rejects(client.request('question.answer', { questionId: 'q-a', text: 'x' }), (error: Json) => error.code === 1001);
   assert.deepEqual(daemon.calls('question.answer'), []);
   assert.equal((await client.request('question.answer', { questionId: 'q-a-111', text: 'yes' })).questionId, 'q-a-111');
 });
@@ -707,16 +711,16 @@ test('question.answer needs an exact id in scope: a prefix that alpd would expan
 test('session.create: spec fields are allow-listed, cwd is sent as the canonical workspace, and the gateway names new roots', async t => {
   const { daemon, sdk, a, canonicalA } = await world(t);
   const { client } = await sdk('alice');
-  const events = [];
+  const events: Json[] = [];
   client.onEvent(envelope => events.push(envelope));
   for (const field of ['env', 'mcpServers', 'workdir', 'writeRoot', 'copy', 'copyOf', 'restore', 'systemPrompt', 'keepThread']) {
-    await assert.rejects(client.request('session.create', { spec: { cwd: a, [field]: field === 'env' || field === 'restore' ? { X: '1' } : 'x' } }), error => error.code === 1003 && error.data?.reason === 'spec_field' && error.data.field === field, field);
-    await assert.rejects(client.request('session.preview', { spec: { cwd: a, [field]: field === 'restore' ? {} : 'x' } }), error => error.code === 1003 && error.data?.reason === 'spec_field', field);
+    await assert.rejects(client.request('session.create', { spec: { cwd: a, [field]: field === 'env' || field === 'restore' ? { X: '1' } : 'x' } }), (error: Json) => error.code === 1003 && error.data?.reason === 'spec_field' && error.data.field === field, field);
+    await assert.rejects(client.request('session.preview', { spec: { cwd: a, [field]: field === 'restore' ? {} : 'x' } }), (error: Json) => error.code === 1003 && error.data?.reason === 'spec_field', field);
   }
   for (const agent of ['../x', 'a/b', '..', '']) {
-    await assert.rejects(client.request('session.create', { spec: { cwd: a, agent } }), error => error.code === 1003 && error.data?.field === 'agent', agent);
+    await assert.rejects(client.request('session.create', { spec: { cwd: a, agent } }), (error: Json) => error.code === 1003 && error.data?.field === 'agent', agent);
     // A team is named the same way: a plain name the daemon host resolves.
-    await assert.rejects(client.request('session.create', { spec: { cwd: a, workflow: agent } }), error => error.code === 1003 && error.data?.field === 'workflow', `workflow ${agent}`);
+    await assert.rejects(client.request('session.create', { spec: { cwd: a, workflow: agent } }), (error: Json) => error.code === 1003 && error.data?.field === 'workflow', `workflow ${agent}`);
   }
   assert.deepEqual(daemon.calls('session.create'), []);
   const { session } = await client.request('session.create', { spec: { cwd: a, model: 'codex:gpt', workflow: 'cafe' } });
@@ -728,39 +732,39 @@ test('session.create: spec fields are allow-listed, cwd is sent as the canonical
   await until(() => events.some(envelope => envelope.sessionId === session.id && envelope.event.type === 'session.ready'), 'events of the new root');
   // Resuming an existing root in scope works; one in another workspace is refused before alpd.
   assert.equal((await client.request('session.create', { sessionId: 'sa', spec: { cwd: a } })).attached, true);
-  await assert.rejects(client.request('session.create', { sessionId: 'sb', spec: { cwd: a } }), error => error.code === 1003 && error.data?.reason === 'outside_workspace');
+  await assert.rejects(client.request('session.create', { sessionId: 'sb', spec: { cwd: a } }), (error: Json) => error.code === 1003 && error.data?.reason === 'outside_workspace');
   assert.equal(daemon.calls('session.create').length, 2);
 });
 
 test('a created root that turns out to be outside the grant is released and refused', async t => {
   const { daemon, sdk, a, b } = await world(t);
-  daemon.state.handlers['session.create'] = ({ sessionId }) => ({ session: summary(sessionId, b), attached: true });
+  daemon.state.handlers['session.create'] = ({ sessionId }: Json) => ({ session: summary(sessionId, b), attached: true });
   const { client } = await sdk('alice');
-  await assert.rejects(client.request('session.create', { sessionId: 'raced', spec: { cwd: a } }), error => error.code === 1003);
-  assert.equal(daemon.calls('session.release').at(-1).params.sessionId, 'raced');
+  await assert.rejects(client.request('session.create', { sessionId: 'raced', spec: { cwd: a } }), (error: Json) => error.code === 1003);
+  assert.equal(daemon.calls('session.release').at(-1)!.params.sessionId, 'raced');
 });
 
 test('prompts carry text and inline images only, within the gateway image limits (t-7679.11)', async t => {
   const { daemon, sdk } = await world(t);
   const { client } = await sdk('alice');
-  const prompt = content => client.request('session.prompt', { sessionId: 'sa', clientMessageId: 'm', content });
+  const prompt = (content: Json) => client.request('session.prompt', { sessionId: 'sa', clientMessageId: 'm', content });
   for (const part of [{ type: 'file', path: '/etc/passwd' }, { type: 'resource', uri: 'file:///etc/passwd' }, { type: 'localImage', path: '/etc/passwd' }]) {
-    await assert.rejects(prompt([part]), error => error.code === 1003 && error.data?.reason === 'content_type');
+    await assert.rejects(prompt([part]), (error: Json) => error.code === 1003 && error.data?.reason === 'content_type');
   }
   // An image is inline base64 of an allowed type and nothing else: no path, URL or other field.
   const png = { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' };
   for (const part of [{ type: 'image', data: 'xx' }, { ...png, path: '/etc/passwd' }, { ...png, url: 'file:///etc/passwd' }, { ...png, mimeType: 'image/svg+xml' }, { ...png, data: '../../etc/passwd' }]) {
-    await assert.rejects(prompt([part]), error => error.code === -32602);
+    await assert.rejects(prompt([part]), (error: Json) => error.code === -32602);
   }
-  const size = bytes => ({ ...png, data: 'A'.repeat(Math.ceil(bytes / 3) * 4) });
+  const size = (bytes: Json) => ({ ...png, data: 'A'.repeat(Math.ceil(bytes / 3) * 4) });
   for (const content of [Array.from({ length: 5 }, () => png), [size(2 * 1024 * 1024 + 3)], [size(1.3 * 1024 * 1024), size(1.3 * 1024 * 1024)]]) {
-    await assert.rejects(prompt(content), error => error.code === 1003 && error.data?.reason === 'image_limit' && error.data.maxCount === 4);
+    await assert.rejects(prompt(content), (error: Json) => error.code === 1003 && error.data?.reason === 'image_limit' && error.data.maxCount === 4);
   }
   assert.deepEqual(daemon.calls('session.prompt'), []);
   assert.equal((await prompt(text)).outcome, 'accepted');
   const images = [{ type: 'text', text: 'see' }, ...Array.from({ length: 4 }, () => png)];
   assert.equal((await client.request('session.prompt', { sessionId: 'sa', clientMessageId: 'm2', content: images })).outcome, 'accepted');
-  assert.deepEqual(daemon.calls('session.prompt').at(-1).params.content, images);
+  assert.deepEqual(daemon.calls('session.prompt').at(-1)!.params.content, images);
 });
 
 test('the image limits shrink with a smaller limits.maxFrame, so images that fit are never cut by the frame', () => {
@@ -775,10 +779,10 @@ test('the image limits shrink with a smaller limits.maxFrame, so images that fit
 test('a grant limited to some modes cannot create, configure or prompt beyond them', async t => {
   const { daemon, sdk, a } = await world(t, { modes: ['read-only'] });
   const { client } = await sdk('alice');
-  await assert.rejects(client.request('session.create', { spec: { cwd: a } }), error => error.data?.reason === 'mode', 'the default mode may be full access');
-  await assert.rejects(client.request('session.create', { spec: { cwd: a, mode: 'full-access' } }), error => error.data?.reason === 'mode');
-  await assert.rejects(client.request('session.configure', { sessionId: 'ro', mode: 'full-access' }), error => error.data?.reason === 'mode');
-  await assert.rejects(client.request('session.prompt', { sessionId: 'sa', clientMessageId: 'm', content: text }), error => error.data?.reason === 'mode', 'sa runs in workspace-write');
+  await assert.rejects(client.request('session.create', { spec: { cwd: a } }), (error: Json) => error.data?.reason === 'mode', 'the default mode may be full access');
+  await assert.rejects(client.request('session.create', { spec: { cwd: a, mode: 'full-access' } }), (error: Json) => error.data?.reason === 'mode');
+  await assert.rejects(client.request('session.configure', { sessionId: 'ro', mode: 'full-access' }), (error: Json) => error.data?.reason === 'mode');
+  await assert.rejects(client.request('session.prompt', { sessionId: 'sa', clientMessageId: 'm', content: text }), (error: Json) => error.data?.reason === 'mode', 'sa runs in workspace-write');
   assert.deepEqual([...daemon.calls('session.create'), ...daemon.calls('session.configure'), ...daemon.calls('session.prompt')], []);
   assert.equal((await client.request('session.prompt', { sessionId: 'ro', clientMessageId: 'm', content: text })).outcome, 'accepted');
   assert.equal((await client.request('session.create', { spec: { cwd: a, mode: 'read-only' } })).session.mode, 'read-only');
@@ -787,7 +791,7 @@ test('a grant limited to some modes cannot create, configure or prompt beyond th
 test('events of trees outside the grant never reach the client, and order is kept around scope lookups', async t => {
   const { daemon, sdk } = await world(t);
   const { client } = await sdk('alice');
-  const seen = [];
+  const seen: Json[] = [];
   client.onEvent(envelope => seen.push(`${envelope.sessionId}:${envelope.event.type}`));
   await client.request('session.attach', { sessionId: 'sa', replay: false });
   // As if alpd delivered another tree on this connection by mistake.
@@ -811,16 +815,16 @@ test('replay before the attach answer stays before it', async t => {
   await call('daemon.hello', { protocolVersion: 1 });
   const answer = await call('session.attach', { sessionId: 'sa', after: 2 });
   assert.equal(answer.result.cursor, 5);
-  const index = frames.findIndex(frame => frame.id === answer.id);
-  assert.deepEqual(frames.slice(0, index).filter(frame => frame.method === 'event').map(frame => frame.params.cursor), [3, 4, 5]);
+  const index = frames.findIndex((frame: Json) => frame.id === answer.id);
+  assert.deepEqual(frames.slice(0, index).filter((frame: Json) => frame.method === 'event').map((frame: Json) => frame.params.cursor), [3, 4, 5]);
 });
 
 test('project resources: tasks and teams of a granted workspace, identity params dropped, host scope refused', async t => {
   const { daemon, sdk, a, canonicalA } = await world(t);
   const { client } = await sdk('alice');
   const { id } = await client.request('task.create', { projectRoot: a, title: 'ship it', by: 'mallory', requestId: 'r1' });
-  assert.deepEqual(daemon.calls('task.create').at(-1).params, { projectRoot: a, title: 'ship it', requestId: 'r1' }, 'no identity reaches alpd');
-  assert.deepEqual((await client.request('task.list', { projectRoot: a })).tasks.map(task => task.id), [id]);
+  assert.deepEqual(daemon.calls('task.create').at(-1)!.params, { projectRoot: a, title: 'ship it', requestId: 'r1' }, 'no identity reaches alpd');
+  assert.deepEqual((await client.request('task.list', { projectRoot: a })).tasks.map((task: Json) => task.id), [id]);
   // Only where the temp directory sits behind a symlink (macOS /tmp → /private/tmp) are they two names.
   if (canonicalA !== a) assert.deepEqual((await client.request('task.list', { projectRoot: canonicalA })).tasks, [], 'the canonical name is another project string to alpd');
   assert.equal((await client.request('task.update', { projectRoot: a, id, action: 'close' })).status, 'closed');
@@ -832,11 +836,11 @@ test('project resources: tasks and teams of a granted workspace, identity params
   const mark = daemon.calls().length;
   for (const [method, params] of [
     ['team.list', {}], ['library.list', { kind: 'mcp' }], ['library.get', { kind: 'mcp', name: 'x' }], ['library.get', { kind: 'providers', name: 'x', scope: 'library' }],
-  ]) {
-    await assert.rejects(client.request(method, params), error => error.code === 1003 && error.data?.reason === 'host_scope', `${method} ${JSON.stringify(params)}`);
+  ] as Json[][]) {
+    await assert.rejects(client.request(method, params), (error: Json) => error.code === 1003 && error.data?.reason === 'host_scope', `${method} ${JSON.stringify(params)}`);
   }
   for (const projectRoot of [path.join(a, 'sub'), `${a}/`, path.dirname(a)]) {
-    await assert.rejects(client.request('task.create', { projectRoot, title: 'x' }), error => error.code === 1003 && error.data?.reason === 'outside_workspace', projectRoot);
+    await assert.rejects(client.request('task.create', { projectRoot, title: 'x' }), (error: Json) => error.code === 1003 && error.data?.reason === 'outside_workspace', projectRoot);
   }
   assert.deepEqual(daemon.calls().slice(mark), []);
 });
@@ -846,9 +850,9 @@ test('project resources: tasks and teams of a granted workspace, identity params
 // is read only through the gateway, under project.read like library.list, and its content leaves
 // through projectLibraryContent (docs/alp/remote-gateway.md §5.4, §10): listed fields only, every
 // field that can hold a secret answered as a marker. library.save and the other writes stay -32601.
-const S = tag => `SENTINEL-${tag}`;
+const S = (tag: Json) => `SENTINEL-${tag}`;
 const MARK = { $secret: 'keep' };
-const STORED = {
+const STORED: Record<string, Json> = {
   agents: { instructions: '# Writer\nWrite notes.', config: { $schema: S('schema'), description: 'notes', provider: 'claude', model: 'claude-sonnet-5-5', thinking: 'medium', mode: 'workspace-write', context: 400000, autocompact: 'auto', skills: ['style'], mcp: ['docs'], hooks: ['tests'], token: S('agent-unknown') } },
   skills: { body: '# Style\nShort sentences.', path: S('skill-path') },
   mcp: { server: { command: 'npx', args: ['-y', `--api-key=${S('mcp-arg')}`], env: { GITHUB_TOKEN: S('mcp-env') }, headers: { Authorization: `Bearer ${S('mcp-header')}` }, url: `https://u:${S('mcp-userinfo')}@mcp.example/s/${S('mcp-path')}?key=${S('mcp-query')}`, cwd: `/home/me/${S('mcp-cwd')}`, extra: S('mcp-unknown') } },
@@ -856,7 +860,7 @@ const STORED = {
   teams: { team: { $schema: S('team-schema'), label: 'Mine', description: 'team', main: 'main', maxPeers: 2, members: { main: { role: 'main', model: 'claude:claude-opus-5-5', thinking: 'high', token: S('member-unknown') }, peer: { role: 'peer' } }, delegation: { main: ['peer'] }, supervisor: { agent: 'supervisor', model: 'claude:claude-opus-5-5', secret: S('supervisor-unknown') }, oracleModels: ['claude:claude-opus-5-5'], oracleThinking: { claude: 'high' }, modelSetup: { mode: 'default', preset: 'claude' }, hidden: S('team-unknown') }, houseRules: 'Be brief.' },
   providers: { provider: { kind: 'acp', label: 'Gemini', description: 'g', command: `env TOKEN=${S('provider-command')} gemini`, args: ['--experimental-acp', `--key=${S('provider-arg')}`], env: { GEMINI_API_KEY: S('provider-env') }, params: { apiKey: S('provider-params') }, models: [{ id: 'gemini-2.5-pro', label: 'Pro', secret: S('model-unknown') }], additionalModels: [], enabled: true } },
 };
-const SHOWN = {
+const SHOWN: Record<string, Json> = {
   agents: { content: { instructions: '# Writer\nWrite notes.', config: { description: 'notes', provider: 'claude', model: 'claude-sonnet-5-5', thinking: 'medium', mode: 'workspace-write', context: 400000, autocompact: 'auto', skills: ['style'], mcp: ['docs'], hooks: ['tests'] } }, secrets: [] },
   skills: { content: { body: '# Style\nShort sentences.' }, secrets: [] },
   mcp: { content: { server: { command: 'npx', args: [MARK, MARK], env: { GITHUB_TOKEN: MARK }, headers: { Authorization: MARK }, url: MARK, cwd: MARK } }, secrets: ['/server/args/0', '/server/args/1', '/server/env/GITHUB_TOKEN', '/server/headers/Authorization', '/server/url', '/server/cwd'] },
@@ -884,7 +888,7 @@ test('projectLibraryContent: listed fields only, every field that can hold a sec
 
 test('library.get: read only under project.read, in a granted workspace, its content redacted for every kind', async t => {
   const { daemon, sdk, a } = await world(t);
-  daemon.state.handlers['library.get'] = ({ kind, name }) => ({
+  daemon.state.handlers['library.get'] = ({ kind, name }: Json) => ({
     kind, name, source: 'library', overrides: 'builtin', content: structuredClone(STORED[kind]), revision: 'rabc', usedBy: ['agent main'],
     ...(kind === 'agents' ? { librarySkills: ['style'] } : {}), secrets: ['/server/env/GITHUB_TOKEN'],
     path: `/home/me/.alp/${kind}/${name}?${S('result-path')}`, raw: S('result-unknown'),
@@ -897,7 +901,7 @@ test('library.get: read only under project.read, in a granted workspace, its con
       kind, name: 'x', source: 'library', overrides: 'builtin', revision: 'rabc', usedBy: ['agent main'],
       ...(kind === 'agents' ? { librarySkills: ['style'] } : {}), content: SHOWN[kind].content, ...(SHOWN[kind].secrets.length ? { secrets: SHOWN[kind].secrets } : {}),
     }, kind);
-    assert.deepEqual(daemon.calls('library.get').at(-1).params, { kind, name: 'x', projectRoot: a, scope: 'library' }, 'listed params only');
+    assert.deepEqual(daemon.calls('library.get').at(-1)!.params, { kind, name: 'x', projectRoot: a, scope: 'library' }, 'listed params only');
   }
   // Executable writes stay closed; host skills.set remains unexposed.
   const mark = daemon.calls().length;
@@ -907,8 +911,8 @@ test('library.get: read only under project.read, in a granted workspace, its con
     ['library.duplicate', { kind: 'mcp', from: 'x', to: 'y', scope: 'project', projectRoot: a }],
     ['library.rename', { kind: 'mcp', from: 'x', to: 'y', scope: 'project', projectRoot: a }],
     ['library.skills.set', { agent: 'main', skills: [] }],
-  ]) {
-    await assert.rejects(client.request(method, params), error => method === 'library.skills.set' ? error.code === -32601 && error.data?.reason === 'not_exposed' : error.code === 1003 && error.data?.reason === 'library_policy', method);
+  ] as Json[][]) {
+    await assert.rejects(client.request(method, params), (error: Json) => method === 'library.skills.set' ? error.code === -32601 && error.data?.reason === 'not_exposed' : error.code === 1003 && error.data?.reason === 'library_policy', method);
   }
   assert.deepEqual(daemon.calls().slice(mark), []);
 });
@@ -917,13 +921,13 @@ test('library.get: read only under project.read, in a granted workspace, its con
 // which may hold a secret: the gateway passes on the code and the reason only.
 test('library.get errors from alpd carry no host path or file content to the client', async t => {
   const { daemon, sdk, a } = await world(t);
-  const failures = {
+  const failures: Record<string, Json> = {
     broken: { code: -32602, message: `/home/me/.alp/mcp/broken.json: Unexpected token 'S', ..."env":{"T":${S('error-quote')}"... is not valid JSON`, data: { reason: 'invalid_entry', file: `/home/me/${S('error-data')}` } },
     linked: { code: 1003, message: `/work/a/.alp/mcp/linked.json is a symbolic link to /home/me/${S('error-link')}`, data: { reason: 'unsafe_path' } },
     missing: { code: 1001, message: `No mcp entry 'missing' in the project at /home/me/${S('error-missing')}`, data: { reason: 'not_found' } },
     odd: { code: 1000, message: S('error-odd'), data: { reason: `bad ${S('error-reason')}` } },
   };
-  daemon.state.handlers['library.get'] = ({ name }) => { throw failures[name]; };
+  daemon.state.handlers['library.get'] = ({ name }: Json) => { throw failures[name]; };
   const { client } = await sdk('alice');
   const seen = [];
   for (const name of Object.keys(failures)) {
@@ -946,10 +950,10 @@ test('library.get errors from alpd carry no host path or file content to the cli
 // reason the contract names) and answer every other failure with a fixed message.
 test('errors of library, team, model, settings and session readers carry no host path or file content', async t => {
   const { daemon, sdk, a } = await world(t);
-  const quote = tag => `/home/me/.alp/${tag}.json: Unexpected token 'S', ..."T": ${S(tag)}"... is not valid JSON`;
-  const raw = message => ({ code: 1000, message });
-  const failure = (tag, code, reason) => ({ code, message: quote(tag), data: { ...(reason ? { reason } : {}), file: `/home/me/${S(`${tag}-data`)}` } });
-  const cases = [
+  const quote = (tag: Json) => `/home/me/.alp/${tag}.json: Unexpected token 'S', ..."T": ${S(tag)}"... is not valid JSON`;
+  const raw = (message: Json) => ({ code: 1000, message });
+  const failure = (tag: Json, code: Json, reason?: Json) => ({ code, message: quote(tag), data: { ...(reason ? { reason } : {}), file: `/home/me/${S(`${tag}-data`)}` } });
+  const cases: Json[][] = [
     ['library.list', { kind: 'mcp', projectRoot: a }, failure('library-list', 1000, 'unreadable'), { code: 1000, message: 'The mcp entries cannot be read on the daemon host', data: { reason: 'unreadable' } }],
     ['library.list', { kind: 'agents', projectRoot: a }, failure('library-list-raw', 1000), { code: 1000, message: 'The agents entries cannot be read on the daemon host', data: undefined }],
     ['team.list', { projectRoot: a }, failure('team-list', -32602, 'invalid_entry'), { code: -32602, message: 'The teams cannot be read on the daemon host', data: { reason: 'invalid_entry' } }],
@@ -985,14 +989,14 @@ test('errors of library, team, model, settings and session readers carry no host
   assert.ok(!JSON.stringify(seen).includes('SENTINEL') && !JSON.stringify(seen).includes('/home/me'), JSON.stringify(seen));
   // A protocol refusal of a session method, with a reason the contract names, is passed on as alpd gave it.
   daemon.state.handlers['session.create'] = () => { throw { code: 1004, message: 'Message m-1 was already sent with different content', data: { reason: 'key_conflict' } }; };
-  await assert.rejects(client.request('session.create', { spec: { cwd: a } }), error => error.code === 1004 && error.message === 'Message m-1 was already sent with different content' && error.data?.reason === 'key_conflict');
+  await assert.rejects(client.request('session.create', { spec: { cwd: a } }), (error: Json) => error.code === 1004 && error.message === 'Message m-1 was already sent with different content' && error.data?.reason === 'key_conflict');
 });
 
 // task.list answers task files that do not parse with V8's quote of the file: the client learns
 // which file, not what it holds.
 test('task.list names unreadable task files without their content', async t => {
   const { daemon, sdk, a } = await world(t);
-  daemon.state.handlers['task.list'] = ({ projectRoot }) => ({ projectRoot, tasks: [], revision: 'r1', unreadable: [
+  daemon.state.handlers['task.list'] = ({ projectRoot }: Json) => ({ projectRoot, tasks: [], revision: 'r1', unreadable: [
     { file: '.alp/tasks/t-aaaa.json', error: `Unexpected token 'S', "{"x": ${S('task-quote')}"... is not valid JSON` },
     { file: `/home/me/${S('task-abs')}.json`, error: S('task-abs-error') },
     { error: S('task-nofile') },
@@ -1012,18 +1016,18 @@ test('task.list names unreadable task files without their content', async t => {
 // the text of a runtime, a provider or alpd's store, which names host paths (EACCES on alpd's state
 // directory, a CLI's location) and may run on with a stack or a CLI's stderr. The client keeps the
 // code and the first line, host paths outside the grant replaced, its own workspace's made relative.
-const HOSTED = tag => `EACCES: permission denied, open '/home/me/.alp/state/${S(tag)}.json'\n    at ${S(`${tag}-stack`)} (/home/me/${S(`${tag}-frame`)}.js:1:2)`;
+const HOSTED = (tag: Json) => `EACCES: permission denied, open '/home/me/.alp/state/${S(tag)}.json'\n    at ${S(`${tag}-stack`)} (/home/me/${S(`${tag}-frame`)}.js:1:2)`;
 const HOSTED_SHOWN = "EACCES: permission denied, open '<host path>'";
-const clean = value => { const text = JSON.stringify(value); assert.ok(!text.includes('SENTINEL') && !text.includes('/home/me'), text); };
+const clean = (value: Json) => { const text = JSON.stringify(value); assert.ok(!text.includes('SENTINEL') && !text.includes('/home/me'), text); };
 
 test('session summaries carry no host path in lastError or parked (t-d27c)', async t => {
   const { daemon, sdk, a } = await world(t);
   const { client } = await sdk('alice');
   const sa = daemon.state.sessions.get('sa');
   Object.assign(sa, { status: 'error', lastError: { code: 'turn_failed', message: HOSTED('last-error'), file: S('last-error-extra') }, parked: `Usage limit; see /home/me/${S('parked')}.log` });
-  const answers = {
+  const answers: Json = {
     get: (await client.request('session.get', { sessionId: 'sa' })).session,
-    list: (await client.request('session.list', { projectRoot: a })).sessions.find(session => session.id === 'sa'),
+    list: (await client.request('session.list', { projectRoot: a })).sessions.find((session: Json) => session.id === 'sa'),
     attach: (await client.request('session.attach', { sessionId: 'sa', replay: false })).session,
     configure: (await client.request('session.configure', { sessionId: 'sa' })).session,
     rename: (await client.request('session.rename', { sessionId: 'sa', title: 'named' })).session,
@@ -1034,7 +1038,7 @@ test('session summaries carry no host path in lastError or parked (t-d27c)', asy
   const row = (await client.request('session.status', { sessionId: 'sa' })).status.sessions[0];
   answers.status = { ...row, lastError: { code: 'turn_failed', message: HOSTED_SHOWN }, ...(row.lastError ? { lastError: row.lastError } : {}) };
   // Each surface on its own, so a failure names every method that leaks.
-  const wrong = Object.entries(answers).filter(([, session]) => !isDeepStrictEqual({ lastError: session.lastError, parked: session.parked, status: session.status }, { lastError: { code: 'turn_failed', message: HOSTED_SHOWN }, parked: 'Usage limit; see <host path>', status: 'error' })).map(([method]) => method);
+  const wrong = Object.entries(answers).filter(([, session]: Json) => !isDeepStrictEqual({ lastError: session.lastError, parked: session.parked, status: session.status }, { lastError: { code: 'turn_failed', message: HOSTED_SHOWN }, parked: 'Usage limit; see <host path>', status: 'error' })).map(([method]) => method);
   assert.deepEqual(wrong, [], `leaking: ${wrong.join(', ')}`);
   clean(answers);
 });
@@ -1042,7 +1046,7 @@ test('session summaries carry no host path in lastError or parked (t-d27c)', asy
 test('alpd errors of session.attach, interrupt, close and message name no host path (t-d27c)', async t => {
   const { daemon, sdk, canonicalA } = await world(t);
   const { client } = await sdk('alice');
-  const cases = [
+  const cases: Json[][] = [
     ['session.attach', { sessionId: 'sa' }, HOSTED('attach'), HOSTED_SHOWN],
     ['session.interrupt', { sessionId: 'sa' }, `codex app-server at /home/me/${S('bin')}/codex did not answer turn/interrupt`, 'codex app-server at <host path> did not answer turn/interrupt'],
     ['session.close', { sessionId: 'sa' }, `could not remove /home/me/.alp/worktrees/${S('close')}: EBUSY`, 'could not remove <host path>: EBUSY'],
@@ -1073,7 +1077,7 @@ test('a failed prompt receipt reaches the client without host paths (t-d27c)', a
 test('session.failed, prompt.failed, turn.ended, session.updated and notices reach the client without host paths (t-d27c)', async t => {
   const { daemon, sdk, canonicalA } = await world(t);
   const { client } = await sdk('alice');
-  const seen = [];
+  const seen: Json[] = [];
   client.onEvent(envelope => seen.push(envelope.event));
   await client.request('session.attach', { sessionId: 'sa', replay: false });
   const limit = "You've hit your limit · resets 3pm (Europe/Berlin); see https://status.anthropic.com/v1/incidents";
@@ -1100,7 +1104,7 @@ test('safeErrorText keeps useful text and replaces host paths (t-d27c)', async (
   const { safeErrorText, safeAlpError } = await import('../dist/policy.js');
   assert.equal(typeof safeErrorText, 'function', 'policy.js exports safeErrorText');
   const workspaces = [{ path: '/tmp/my ws', canonical: '/private/tmp/my ws' }];
-  const cases = [
+  const cases: Json[][] = [
     ['429 Too Many Requests: rate limited, 50/min; retry after 20s', '429 Too Many Requests: rate limited, 50/min; retry after 20s'],
     ['POST https://api.openai.com/v1/responses failed (ECONNRESET)', 'POST https://api.openai.com/v1/responses failed (ECONNRESET)'],
     ['cannot read /private/tmp/my ws/a b/c.txt or /tmp/my ws.', 'cannot read a b/c.txt or <workspace>.'],
@@ -1140,10 +1144,10 @@ test('the hello names the host as alpd does, and nothing when alpd sends no usab
 test('library and team rows carry only their listed fields, and a team error names no host path', async t => {
   const { daemon, sdk, a } = await world(t);
   const secret = 'SENTINEL-row-secret';
-  daemon.state.handlers['library.list'] = ({ projectRoot }) => ({ projectRoot, entries: [
+  daemon.state.handlers['library.list'] = ({ projectRoot }: Json) => ({ projectRoot, entries: [
     { name: 'x', source: 'project', description: 'search', usedBy: ['agent main'], overrides: 'library', path: `/home/me/.alp/mcp/x.json?${secret}`, content: { url: `https://u:${secret}@example.test/mcp` } },
   ] });
-  daemon.state.handlers['team.list'] = ({ projectRoot }) => ({ projectRoot, teams: [
+  daemon.state.handlers['team.list'] = ({ projectRoot }: Json) => ({ projectRoot, teams: [
     { id: 'pho', source: 'builtin', label: 'Phở', description: 'default' },
     { id: 'broken', source: 'library', error: `/home/me/.alp/teams/broken/team.json: unexpected token near "${secret}"`, path: '/home/me/.alp/teams/broken' },
   ] });
@@ -1152,7 +1156,7 @@ test('library and team rows carry only their listed fields, and a team error nam
   const listed = await client.request('library.list', { kind: 'mcp', projectRoot: a });
   assert.deepEqual(listed.entries, [{ name: 'x', source: 'project', description: 'search', usedBy: ['agent main'], overrides: 'library' }]);
   const { teams } = await client.request('team.list', { projectRoot: a });
-  assert.deepEqual(teams.map(team => Object.keys(team).sort()), [['description', 'id', 'label', 'source'], ['error', 'id', 'source']]);
+  assert.deepEqual(teams.map((team: Json) => Object.keys(team).sort()), [['description', 'id', 'label', 'source'], ['error', 'id', 'source']]);
   assert.ok(!teams[1].error.includes('/home/me') && !teams[1].error.includes(secret), teams[1].error);
   const { models } = await client.request('library.models');
   assert.deepEqual(models, [{ id: 'acp:custom/vendor-model', label: 'Custom · vendor', efforts: [] }]);
@@ -1170,7 +1174,7 @@ test('spec.model takes the ids library.models lists, ACP ones included, and refu
   assert.equal(daemon.calls('session.create')[0].params.spec.model, 'acp:custom/vendor-model');
   const mark = daemon.calls().length;
   for (const model of ['', ' ', 'acp:', 'acp:/x', 'acp:../x', 'acp:a b/c', 'acp:x/ y', 'acp:x/', 'codex:', 'codex: x', '/etc/passwd', '../x', 'x\u0000y', 'x\ny', 'mcp:x', `acp:p/${'m'.repeat(300)}`]) {
-    await assert.rejects(client.request('session.preview', { spec: { cwd: a, model } }), error => error.code === 1003 && error.data?.reason === 'spec_field' && error.data.field === 'model', JSON.stringify(model));
+    await assert.rejects(client.request('session.preview', { spec: { cwd: a, model } }), (error: Json) => error.code === 1003 && error.data?.reason === 'spec_field' && error.data.field === 'model', JSON.stringify(model));
   }
   assert.deepEqual(daemon.calls().slice(mark), []);
 });
@@ -1181,14 +1185,14 @@ test('spec.model takes the ids library.models lists, ACP ones included, and refu
 // is refused rather than shown.
 test('session.status answers only a tree wholly inside the grant', async t => {
   const { daemon, sdk, canonicalA, b } = await world(t);
-  const tree = (...sessions) => () => ({ status: { rootId: 'sa', sessions: sessions.map(([id, projectRoot]) => ({ id, projectRoot })), assignments: [], questions: [], worktrees: [], leases: [], claims: [] } });
+  const tree = (...sessions: Json[]) => () => ({ status: { rootId: 'sa', sessions: sessions.map(([id, projectRoot]) => ({ id, projectRoot })), assignments: [], questions: [], worktrees: [], leases: [], claims: [] } });
   const { client } = await sdk('alice');
   daemon.state.handlers['session.status'] = tree(['sa', canonicalA], ['sa-c', canonicalA]);
   assert.equal((await client.request('session.status', { sessionId: 'sa-c' })).status.sessions.length, 2);
   daemon.state.handlers['session.status'] = tree(['sa', canonicalA], ['elsewhere', b]);
-  await assert.rejects(client.request('session.status', { sessionId: 'sa' }), error => error.code === 1001);
+  await assert.rejects(client.request('session.status', { sessionId: 'sa' }), (error: Json) => error.code === 1001);
   daemon.state.handlers['session.status'] = () => ({ status: { rootId: 'sb', sessions: [], assignments: [], questions: [], worktrees: [], leases: [], claims: [] } });
-  await assert.rejects(client.request('session.status', { sessionId: 'sa' }), error => error.code === 1001, 'another root than the one checked');
+  await assert.rejects(client.request('session.status', { sessionId: 'sa' }), (error: Json) => error.code === 1001, 'another root than the one checked');
 });
 
 
@@ -1196,25 +1200,25 @@ test('library.write is opt-in and forces the safe project policy without executa
   const { daemon, sdk, a, canonicalA } = await world(t);
   const { client } = await sdk('alice');
   for (const method of ['save', 'delete', 'duplicate', 'rename']) {
-    const params = IN_SCOPE({ a })['library.' + method];
+    const params = (IN_SCOPE({ a }) as Json)['library.' + method];
     daemon.state.handlers['library.' + method] = () => method === 'delete' ? { removed: true } : { revision: 'r1' };
     await client.request('library.' + method, { ...params, policy: 'project-data' });
-    assert.deepEqual(daemon.calls('library.' + method).at(-1).params, { ...params, projectRoot: canonicalA, policy: 'project-data' });
+    assert.deepEqual(daemon.calls('library.' + method).at(-1)!.params, { ...params, projectRoot: canonicalA, policy: 'project-data' });
     const mark = daemon.calls().length;
     for (const altered of [{ scope: 'library' }, { projectRoot: undefined }, { kind: 'hooks' }, { kind: 'mcp' }, { kind: 'teams' }, { kind: 'providers' }]) {
-      await assert.rejects(client.request('library.' + method, { ...params, ...altered }), e => e.code === 1003);
+      await assert.rejects(client.request('library.' + method, { ...params, ...altered }), (e: Json) => e.code === 1003);
       assert.deepEqual(reached(daemon, mark, 'library.' + method), []);
     }
   }
   for (const content of [{ instructions: 'text', config: { provider: 'host' } }, { instructions: 'text', config: { model: 'acp:host' } }, { instructions: 'text', config: { hooks: ['run'] } }, { instructions: 'text', config: { mcp: ['run'] } }, { instructions: 'text', config: { skills: ['run'] } }, { instructions: 'text', unknown: true }]) {
     const mark = daemon.calls().length;
-    await assert.rejects(client.request('library.save', { kind: 'agents', name: 'safe', scope: 'project', projectRoot: a, content }), e => e.code === 1003 && e.data.reason === 'library_policy');
+    await assert.rejects(client.request('library.save', { kind: 'agents', name: 'safe', scope: 'project', projectRoot: a, content }), (e: Json) => e.code === 1003 && e.data.reason === 'library_policy');
     assert.deepEqual(reached(daemon, mark, 'library.save'), []);
   }
-  await assert.rejects(client.request('library.save', { ...IN_SCOPE({ a })['library.save'], sync: 'known-projects' }), e => e.code === 1003);
+  await assert.rejects(client.request('library.save', { ...IN_SCOPE({ a })['library.save'], sync: 'known-projects' }), (e: Json) => e.code === 1003);
   const { client: defaultClient } = await sdk('both');
-  await assert.rejects(defaultClient.request('library.save', IN_SCOPE({ a })['library.save']), e => e.code === 1003 && e.data.permission === 'library.write');
-  await assert.rejects(client.request('library.skills.set', { agent: 'main', skills: [] }), e => e.code === -32601);
+  await assert.rejects(defaultClient.request('library.save', IN_SCOPE({ a })['library.save']), (e: Json) => e.code === 1003 && e.data.permission === 'library.write');
+  await assert.rejects(client.request('library.skills.set', { agent: 'main', skills: [] }), (e: Json) => e.code === -32601);
 });
 
 test('older daemon cannot receive project-data writes; image hello advertises effective frame limits only with capability', async t => {
@@ -1224,7 +1228,7 @@ test('older daemon cannot receive project-data writes; image hello advertises ef
     const { client, hello } = await sdk('writer');
     assert.deepEqual(hello.promptImageLimits, capability ? promptImageLimits(1024 * 1024) : undefined);
     const mark = daemon.calls().length;
-    await assert.rejects(client.request('library.save', { kind: 'skills', name: 'writer', scope: 'project', projectRoot: process.cwd(), content: { body: 'text' } }), e => e.code === 1005 && e.data.capability === 'library.project.write');
+    await assert.rejects(client.request('library.save', { kind: 'skills', name: 'writer', scope: 'project', projectRoot: process.cwd(), content: { body: 'text' } }), (e: Json) => e.code === 1005 && e.data.capability === 'library.project.write');
     assert.deepEqual(reached(daemon, mark, 'library.save'), []);
   }
 });
@@ -1232,7 +1236,7 @@ test('older daemon cannot receive project-data writes; image hello advertises ef
 // Session mode is separate from the permission to read project configuration.
 test('library viewer requires project.read and a granted workspace; no write grant is implied', async t => {
   const daemon = fakeDaemon({ capabilities: ['library'] });
-  daemon.state.handlers['library.get'] = ({ kind, name }) => ({ kind, name, source: 'builtin', content: { body: 'Viewable instructions' }, revision: null, usedBy: [] });
+  daemon.state.handlers['library.get'] = ({ kind, name }: Json) => ({ kind, name, source: 'builtin', content: { body: 'Viewable instructions' }, revision: null, usedBy: [] });
   const { sdk } = await startGateway(t, { daemon, credentials: {
     viewer: { workspaces: [process.cwd()], permissions: ['project.read'], modes: ['read-only'] },
     noProject: { workspaces: [process.cwd()], permissions: ['session.read'] },
@@ -1242,25 +1246,25 @@ test('library viewer requires project.read and a granted workspace; no write gra
   assert.equal((await client.request('library.get', params)).content.body, 'Viewable instructions');
   const deniedMark = daemon.calls().length;
   const { client: denied } = await sdk('noProject');
-  await assert.rejects(denied.request('library.get', params), e => e.code === 1003 && e.data.reason === 'grant');
-  await assert.rejects(client.request('library.get', { ...params, projectRoot: path.dirname(process.cwd()) }), e => e.code === 1003 && e.data.reason === 'outside_workspace');
-  await assert.rejects(client.request('library.save', { ...params, scope: 'project', content: { body: 'Attempted write' } }), e => e.code === 1003 && e.data.permission === 'library.write');
+  await assert.rejects(denied.request('library.get', params), (e: Json) => e.code === 1003 && e.data.reason === 'grant');
+  await assert.rejects(client.request('library.get', { ...params, projectRoot: path.dirname(process.cwd()) }), (e: Json) => e.code === 1003 && e.data.reason === 'outside_workspace');
+  await assert.rejects(client.request('library.save', { ...params, scope: 'project', content: { body: 'Attempted write' } }), (e: Json) => e.code === 1003 && e.data.permission === 'library.write');
   assert.deepEqual(reached(daemon, deniedMark, 'library.get'), []);
   assert.deepEqual(reached(daemon, deniedMark, 'library.save'), []);
 });
 
 test('history authorizes before cursor forwarding and replaces untrusted byte budgets', async t => {
   const { daemon, sdk } = await world(t, { maxFrame: 8192 });
-  daemon.state.handlers['session.history'] = params => ({ generation: 'g', items: [], hasOlder: false, tipCursor: 0 });
+  daemon.state.handlers['session.history'] = (params: Json) => ({ generation: 'g', items: [], hasOlder: false, tipCursor: 0 });
   const { client: reader } = await sdk('reader');
   await reader.request('session.history', { sessionId: 'sa', maxBytes: 524288, before: 'opaque' });
   const call = daemon.calls().find(call => call.method === 'session.history');
-  assert.equal(call.params.before, 'opaque');
-  assert.equal(call.params.maxBytes, 4096);
+  assert.equal(call!.params.before, 'opaque');
+  assert.equal(call!.params.maxBytes, 4096);
   const mark = daemon.calls().length;
-  await assert.rejects(reader.request('session.history', { sessionId: 'sb', before: 'broken' }), error => error.code === 1001);
+  await assert.rejects(reader.request('session.history', { sessionId: 'sb', before: 'broken' }), (error: Json) => error.code === 1001);
   assert.equal(reached(daemon, mark, 'session.history').length, 0);
-  const events = [];
+  const events: Json[] = [];
   reader.onEvent(event => events.push(event));
   await reader.request('session.attach', { sessionId: 'sa', replay: false });
   daemon.emit('sa', { type: 'item', item: { kind: 'notice', id: 'huge', level: 'info', text: 'x'.repeat(70000) } });

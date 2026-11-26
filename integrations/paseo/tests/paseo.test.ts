@@ -10,8 +10,12 @@ import { connect, readLock } from '@anhlp/alp-client';
 import { createTask } from '@anhlp/alp-core/tasks';
 import { teardown } from '../../../test/support/teardown.ts';
 import { literal, templateTitle } from '../../../test/support/template-text.ts';
+import type { TestContext } from 'node:test';
 
-async function fixture(t) {
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+async function fixture(t: TestContext) {
   const defer = teardown(t);
   const root = await mkdtemp(path.join(tmpdir(), 'alp-paseo-'));
   defer(() => rm(root, { recursive: true, force: true }));
@@ -24,16 +28,16 @@ async function fixture(t) {
   await writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
   return root;
 }
-const config = cwd => ({ cwd, env: { ALP_TEST: 'session' }, systemPrompt: 'Host instructions', mcpServers: {}, settings: {}, persist: true });
-function fakeRuntime() {
-  let notification;
+const config = (cwd: Json) => ({ cwd, env: { ALP_TEST: 'session' }, systemPrompt: 'Host instructions', mcpServers: {}, settings: {}, persist: true });
+function fakeRuntime(): Json {
+  let notification: Json;
   return {
-    calls: [], closed: false, fail: undefined,
+    calls: [] as Json[], closed: false, fail: undefined,
     initialize: async () => {},
-    onNotification(fn) { notification = fn; }, onFailure(fn) { this.fail = fn; }, onRequest(fn) { this.serverRequest = fn; },
-    notify(method, params) { notification(method, params); },
+    onNotification(fn: Json) { notification = fn; }, onFailure(fn: Json) { this.fail = fn; }, onRequest(fn: Json) { this.serverRequest = fn; },
+    notify(method: Json, params: Json) { notification(method, params); },
     async close() { this.closed = true; },
-    async request(method, params) {
+    async request(method: Json, params: Json) {
       this.calls.push({ method, params });
       if (method.startsWith('thread/')) return { thread: { id: 'native-thread', turns: method === 'thread/resume' ? [{ items: [{ type: 'agentMessage', id: 'old', text: 'Previous output' }] }] : [] }, cwd: params.cwd, model: params.model, reasoningEffort: 'low' };
       if (method === 'turn/start') return { turn: { id: `turn-${this.calls.length}` } };
@@ -41,18 +45,18 @@ function fakeRuntime() {
     },
   };
 }
-async function connection(t, root) {
+async function connection(t: TestContext, root: Json) {
   const defer = teardown(t);
-  const runtimes = []; const environments = [];
-  const registration = createProvider({ environment: { PATH: 'baseline', PASEO_TOKEN: 'removed', CODEX_THREAD_ID: 'removed' }, transport: (cwd, env) => { environments.push(env); const r = fakeRuntime(); runtimes.push(r); return r; } });
+  const runtimes: Json[] = []; const environments: Json[] = [];
+  const registration = createProvider({ environment: { PATH: 'baseline', PASEO_TOKEN: 'removed', CODEX_THREAD_ID: 'removed' }, transport: (cwd: Json, env: Json) => { environments.push(env); const r = fakeRuntime(); runtimes.push(r); return r; } });
   const conn = await registration.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
   defer(() => conn.close());
-  const events = []; conn.onEvent(e => { ProviderEventSchema.parse(e); events.push(e); });
+  const events: Json[] = []; conn.onEvent((e: Json) => { ProviderEventSchema.parse(e); events.push(e); });
   await conn.send({ type: 'session.open', requestId: 'open', sessionId: 's', config: config(root), history: 'skip' });
   assert.ok(events.some(e => e.type === 'session.ready'), JSON.stringify(events));
   return { conn, events, runtimes, environments };
 }
-const prompt = (id, delivery = 'auto') => ({ type: 'session.prompt', sessionId: 's', prompt: { clientMessageId: id, delivery, input: { type: 'message', content: [{ type: 'text', text: 'Hello' }] } } });
+const prompt = (id: Json, delivery = 'auto'): Json => ({ type: 'session.prompt', sessionId: 's', prompt: { clientMessageId: id, delivery, input: { type: 'message', content: [{ type: 'text', text: 'Hello' }] } } });
 
 test('plugin registers ALP with public SDK contract', async t => {
   // The registered provider starts the user's alpd; keep it in a throwaway home.
@@ -72,20 +76,20 @@ test('plugin registers ALP with public SDK contract', async t => {
     if (previous === undefined) delete process.env.ALP_HOME; else process.env.ALP_HOME = previous;
     await rm(home, { recursive: true, force: true });
   });
-  let registration; const rpc = [];
-  dispose = contribute({ registerProvider(p) { registration = p; }, handle(contract) { rpc.push(contract.name); } });
-  assert.equal(registration.id, 'alp');
+  let registration; const rpc: Json[] = [];
+  dispose = contribute({ registerProvider(p: Json) { registration = p; }, handle(contract: Json) { rpc.push(contract.name); } } as Json);
+  assert.equal(registration!.id, 'alp');
   assert.deepEqual(rpc, ['alp.tasks.list', 'alp.tasks.add', 'alp.tasks.change', 'alp.library.models', 'alp.library.list', 'alp.library.get', 'alp.library.save', 'alp.library.skills', 'alp.settings.language.get', 'alp.settings.language.set', 'alp.library.delete', 'alp.library.duplicate', 'alp.library.rename', 'alp.library.test', 'alp.usage.get', 'alp.agent.compact']);
-  await assert.rejects(registration.connect({ versions: [99], capabilities: [] }), /protocol/);
-  const conn = await registration.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
-  const events = []; conn.onEvent(e => events.push(e));
+  await assert.rejects(registration!.connect({ versions: [99], capabilities: [] }), /protocol/);
+  const conn = await registration!.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
+  const events: Json[] = []; conn.onEvent((e: Json) => events.push(e));
   await conn.send({ type: 'catalog', requestId: 'catalog' });
   // Paseo offers the two profiles in place of models; each fixes main's model and effort.
   assert.equal(events[0].catalog.defaultModel, 'pho');
-  assert.deepEqual(events[0].catalog.models.map(model => [model.id, model.label, model.thinkingOptions.length]), [['pho', 'Phở', 0], ['cafe', 'Cafe', 0]]);
+  assert.deepEqual(events[0].catalog.models.map((model: Json) => [model.id, model.label, model.thinkingOptions.length]), [['pho', 'Phở', 0], ['cafe', 'Cafe', 0]]);
   assert.deepEqual(events[0].catalog.thinkingOptions, []);
   assert.equal(events[0].catalog.defaultMode, 'full-access');
-  assert.ok(events[0].catalog.modes.some(mode => mode.id === 'full-access'));
+  assert.ok(events[0].catalog.modes.some((mode: Json) => mode.id === 'full-access'));
   // Permission prompts carry questions agents ask the user; per-tool approval stays unsupported.
   assert.equal(conn.capabilities.includes('permission'), true);
   assert.equal(conn.capabilities.includes('permission.tool_policy'), false);
@@ -119,7 +123,7 @@ test('mapping resolves defaults/custom, combines instructions, normalizes MCP an
   const root = await fixture(t);
   await writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify({ runtime: { model: 'configured-model', reasoning: 'high' } }));
   await writeFile(path.join(root, '.alp', 'agents', 'main', '.mcp.json'), JSON.stringify({ mcpServers: { local: { command: 'node', cwd: '.', args: ['server.js'] }, remote: { url: 'https://example.test/mcp', headers: { Accept: 'application/json' } } } }));
-  const result = await mapSession(config(root));
+  const result: Json = await mapSession(config(root));
   assert.equal(result.agent.name, 'main'); assert.equal(result.model, 'configured-model'); assert.equal(result.thinking, 'high');
   assert.equal(result.instructions, 'Project instructions\n\nAgent main\n\nHost instructions');
   assert.equal(result.mcp.local.cwd, path.join(root, '.alp', 'agents', 'main'));
@@ -133,7 +137,7 @@ test('mapping resolves defaults/custom, combines instructions, normalizes MCP an
   await writeFile(path.join(root, '.alp', 'settings.json'), '{}');
   const profile = await mapSession({ ...config(root), model: 'cafe', thinkingOption: 'low' });
   assert.deepEqual([profile.runtimeKind, profile.model, profile.thinking, profile.mode, profile.workflow.mode], ['claude', 'claude-opus-5-5', 'high', 'full-access', 'cafe']);
-  for (const change of [{ cwd: '.' }, { mode: 'danger-full-access' }, { providerOptions: { unknown: true } }, { settings: { x: true } }, { mcpServers: { local: { type: 'stdio', command: 'node' } } }, { mcpServers: { remote2: { type: 'sse', url: 'https://example.test' } } }]) await assert.rejects(mapSession({ ...config(root), ...change }));
+  for (const change of [{ cwd: '.' }, { mode: 'danger-full-access' }, { providerOptions: { unknown: true } }, { settings: { x: true } }, { mcpServers: { local: { type: 'stdio', command: 'node' } } }, { mcpServers: { remote2: { type: 'sse', url: 'https://example.test' } } }]) await assert.rejects(mapSession({ ...config(root), ...change } as Json));
 });
 test('lifecycle: open, prompt, steering, cancellation, persistence/reload preserve project files', async t => {
   const root = await fixture(t);
@@ -145,7 +149,7 @@ test('lifecycle: open, prompt, steering, cancellation, persistence/reload preser
   assert.match(start.params.developerInstructions, /Project instructions[\s\S]*Agent main/);
   await conn.send(prompt('m1')); await conn.send(prompt('m1'));
   assert.equal(events.filter(e => e.type === 'session.prompt_result' && e.clientMessageId === 'm1').length, 1);
-  assert.equal(runtimes[0].calls.filter(c => c.method === 'turn/start').length, 1);
+  assert.equal(runtimes[0].calls.filter((c: Json) => c.method === 'turn/start').length, 1);
   await conn.send(prompt('m2', 'steer'));
   assert.equal(events.find(e => e.type === 'session.prompt_result' && e.clientMessageId === 'm2').result.type, 'steer');
   await conn.send({ type: 'session.interrupt', sessionId: 's', requestId: 'stop' });
@@ -181,13 +185,13 @@ test('early completion is buffered until turn acknowledgement; failed opens rele
   const defer = teardown(t);
   const root = await fixture(t);
   const runtime = fakeRuntime(); const original = runtime.request.bind(runtime);
-  runtime.request = async (method, params) => {
+  runtime.request = async (method: Json, params: Json) => {
     const result = await original(method, params);
-    if (method === 'turn/start') runtime.notify('turn/completed', { threadId: 'native-thread', turn: { id: result.turn.id, status: 'completed' } });
+    if (method === 'turn/start') runtime.notify('turn/completed', { threadId: 'native-thread', turn: { id: result.turn!.id, status: 'completed' } });
     return result;
   };
   const conn = await createProvider({ transport: () => runtime }).connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
-  defer(() => conn.close()); const events = []; conn.onEvent(e => events.push(e));
+  defer(() => conn.close()); const events: Json[] = []; conn.onEvent((e: Json) => events.push(e));
   await conn.send({ type: 'session.open', sessionId: 's', requestId: 'o', config: config(root), history: 'skip' });
   await conn.send(prompt('m1'));
   assert.deepEqual(events.filter(e => e.type === 'session.turn').map(e => e.state), ['started', 'completed']);
@@ -205,7 +209,7 @@ test('session permissions can change while idle and apply to the next Codex turn
   assert.ok(events.some(e => e.type === 'request.completed' && e.requestId === 'mode'), JSON.stringify(events));
   assert.ok(events.some(e => e.type === 'session.config' && e.config?.mode === 'workspace-write'));
   await conn.send(prompt('write'));
-  const params = runtimes[0].calls.find(c => c.method === 'turn/start').params;
+  const params = runtimes[0].calls.find((c: Json) => c.method === 'turn/start').params;
   assert.equal(params.sandboxPolicy.type, 'workspaceWrite');
   await conn.send({ type: 'session.configure', requestId: 'busy', sessionId: 's', changes: { mode: 'read-only' } });
   assert.ok(events.some(e => e.type === 'request.failed' && e.requestId === 'busy'));
@@ -214,13 +218,13 @@ test('session permissions can change while idle and apply to the next Codex turn
 test('invalid permission changes leave the session mode unchanged', async t => {
   const root = await fixture(t);
   const { conn, events, runtimes } = await connection(t, root);
-  for (const [requestId, changes] of [['invalid', { mode: 'danger-full-access' }], ['model', { model: 'cafe' }], ['workflow', { settings: { workflow: 'cafe' } }], ['thinking', { thinkingOption: 'low' }]]) {
+  for (const [requestId, changes] of [['invalid', { mode: 'danger-full-access' }], ['model', { model: 'cafe' }], ['workflow', { settings: { workflow: 'cafe' } }], ['thinking', { thinkingOption: 'low' }]] as Json[][]) {
     await conn.send({ type: 'session.configure', sessionId: 's', requestId, changes });
     assert.ok(events.some(e => e.type === 'request.failed' && e.requestId === requestId));
   }
   assert.match(events.find(e => e.type === 'request.failed' && e.requestId === 'model').error.message, /team is fixed/);
   await conn.send(prompt('still-full-access'));
-  assert.equal(runtimes[0].calls.find(c => c.method === 'turn/start').params.sandboxPolicy.type, 'dangerFullAccess');
+  assert.equal(runtimes[0].calls.find((c: Json) => c.method === 'turn/start').params.sandboxPolicy.type, 'dangerFullAccess');
 });
 
 test('Claude permission changes reach the runtime and failed changes are not published', async t => {
@@ -229,7 +233,7 @@ test('Claude permission changes reach the runtime and failed changes are not pub
   const runtime = fakeRuntime();
   const conn = await createProvider({ transport: () => runtime }).connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
   defer(() => conn.close());
-  const events = []; conn.onEvent(e => { ProviderEventSchema.parse(e); events.push(e); });
+  const events: Json[] = []; conn.onEvent((e: Json) => { ProviderEventSchema.parse(e); events.push(e); });
   await conn.send({ type: 'session.open', requestId: 'open', sessionId: 's', config: { ...config(root), model: 'claude:sonnet' }, history: 'skip' });
   await conn.send({ type: 'session.configure', requestId: 'write', sessionId: 's', changes: { mode: 'workspace-write' } });
   assert.deepEqual(runtime.calls.at(-1), { method: 'session/configure', params: { sandbox: 'workspace-write' } });
@@ -277,16 +281,16 @@ test('a team session shows its team, and main starts its supervisor as a child o
   const root = await mkdtemp(path.join(tmpdir(), 'alp-paseo-profile-'));
   // Undone LAST: teardown runs the steps in reverse, so everything living in here is released first.
   defer(() => rm(root, { recursive: true, force: true }));
-  const runtimes = [];
-  const conn = await createProvider({ transport: () => { const r = fakeRuntime(); r.onRequest = fn => { r.serverRequest = fn; }; runtimes.push(r); return r; } }).connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
+  const runtimes: Json[] = [];
+  const conn = await createProvider({ transport: () => { const r: Json = fakeRuntime(); r.onRequest = (fn: Json) => { r.serverRequest = fn; }; runtimes.push(r); return r; } }).connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
   defer(() => conn.close());
-  const events = []; conn.onEvent(e => { ProviderEventSchema.parse(e); events.push(e); });
+  const events: Json[] = []; conn.onEvent((e: Json) => { ProviderEventSchema.parse(e); events.push(e); });
   await conn.send({ type: 'session.open', requestId: 'open', sessionId: 's', config: { ...config(root), model: 'cafe' }, history: 'skip' });
   assert.ok(events.some(e => e.type === 'session.ready' && e.sessionId === 's'), JSON.stringify(events));
   const rootConfig = events.find(e => e.type === 'session.config' && e.sessionId === 's').config;
   assert.equal(rootConfig.model, 'cafe');
   // The team is fixed for the session, so its config offers only that team; the catalog lists every team.
-  assert.deepEqual(rootConfig.models.map(model => model.label), ['Cafe']);
+  assert.deepEqual(rootConfig.models.map((model: Json) => model.label), ['Cafe']);
   assert.deepEqual(rootConfig.settings, []);
   for (let i = 0; i < 100 && !events.some(e => e.type === 'session.ready' && e.sessionId !== 's'); i++) await new Promise(resolve => setTimeout(resolve, 5));
   const child = events.find(e => e.type === 'session.opened' && e.sessionId !== 's');
@@ -295,10 +299,10 @@ test('a team session shows its team, and main starts its supervisor as a child o
   const childConfig = events.find(e => e.type === 'session.config' && e.sessionId === child.sessionId).config;
   assert.equal(childConfig.model, 'claude:claude-sonnet-5');
   assert.equal(childConfig.mode, 'read-only');
-  const start = runtimes[1].calls.find(c => c.method === 'thread/start').params;
-  assert.deepEqual(start.dynamicTools.map(tool => tool.name), ['alp_send', 'alp_board', 'alp_task']);
+  const start = runtimes[1].calls.find((c: Json) => c.method === 'thread/start').params;
+  assert.deepEqual(start.dynamicTools.map((tool: Json) => tool.name), ['alp_send', 'alp_board', 'alp_task']);
   assert.match(start.developerInstructions, literal(templateTitle('agents/supervisor/AGENT.md')));
-  assert.ok(runtimes[0].calls.find(c => c.method === 'thread/start').params.dynamicTools.some(tool => tool.name === 'alp_lesson'));
+  assert.ok(runtimes[0].calls.find((c: Json) => c.method === 'thread/start').params.dynamicTools.some((tool: Json) => tool.name === 'alp_lesson'));
 });
 
 test('tasks main worked on go to the Tasks pill, not to a todo list of Paseo\'s own (ALPD §55)', async t => {

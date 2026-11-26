@@ -9,11 +9,15 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fakeDaemon, summary } from './support/fake-daemon.js';
-import { startGateway } from './support/harness.js';
+import { fakeDaemon, summary } from './support/fake-daemon.ts';
+import { startGateway } from './support/harness.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
 
-async function world(t) {
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+async function world(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-modes-'));
   defer(() => rm(directory, { recursive: true, force: true }));
@@ -37,11 +41,11 @@ async function world(t) {
 }
 
 const text = [{ type: 'text', text: 'hi' }];
-const DRIVES = /** @type {const} */ (['session.prompt', 'session.message', 'question.answer']);
-const drive = (method, target) => method === 'session.prompt' ? { sessionId: target, clientMessageId: `m-${target}`, content: text }
+const DRIVES = ['session.prompt', 'session.message', 'question.answer'] as const;
+const drive = (method: Json, target: Json) => method === 'session.prompt' ? { sessionId: target, clientMessageId: `m-${target}`, content: text }
   : method === 'session.message' ? { sessionId: target, text: 'carry on' }
   : { questionId: `q-${target}`, text: 'yes' };
-const mode = error => error.code === 1003 && error.data?.reason === 'mode' && Array.isArray(error.data.modes);
+const mode = (error: Json) => error.code === 1003 && error.data?.reason === 'mode' && Array.isArray(error.data.modes);
 
 test('a read-only grant cannot prompt, message or answer a full-access session: refused before alpd', async t => {
   const { daemon, sdk } = await world(t);
@@ -101,7 +105,7 @@ test('stopping, reading and naming stay possible; stopping an assignment of a tr
   assert.deepEqual(await client.request('session.interrupt', { sessionId: 'fa' }), {});
   assert.deepEqual(await client.request('session.close', { sessionId: 'fa' }), {});
   for (const [method, params] of [['session.get', { sessionId: 'fa-ro' }], ['session.status', { sessionId: 'fa' }], ['session.log', { sessionId: 'fa' }], ['session.attach', { sessionId: 'fa' }],
-    ['session.rename', { sessionId: 'fa', title: 'seen' }], ['session.archive', { sessionId: 'fa' }], ['session.release', { sessionId: 'fa' }]]) {
+    ['session.rename', { sessionId: 'fa', title: 'seen' }], ['session.archive', { sessionId: 'fa' }], ['session.release', { sessionId: 'fa' }]] as Json[][]) {
     await client.request(method, params);
   }
   // Lowering a session into the grant is allowed; raising one is not.

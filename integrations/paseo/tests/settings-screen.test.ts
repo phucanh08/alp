@@ -8,12 +8,15 @@ import * as sdk from '@getpaseo/plugin';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
 const require = createRequire(import.meta.url);
 const plugin = fileURLToPath(new URL('../', import.meta.url));
 // The modules Paseo 0.11.1 supplies to plugin client code; anything else fails to load.
 const HOST = ['@getpaseo/plugin', '@getpaseo/plugin/client', '@getpaseo/plugin/client/react-native', '@getpaseo/plugin/client/ui', '@tanstack/react-query', 'react', 'react/jsx-runtime', 'react-native', 'zod'];
 
-async function compileClient(entry) {
+async function compileClient(entry: Json) {
   const result = await build({
     entryPoints: [path.join(plugin, entry)], bundle: true, format: 'cjs', jsx: 'automatic', write: false, metafile: true,
     platform: 'neutral', target: 'es2020', mainFields: ['module', 'main'], supported: { 'async-await': false }, external: HOST, logLevel: 'silent',
@@ -23,20 +26,20 @@ async function compileClient(entry) {
   return { code: result.outputFiles[0].text, externals: [...externals], inputs };
 }
 
-const tag = name => ({ children, accessibilityLabel, onPress: _onPress, style: _style, contentContainerStyle: _c, ...rest }) =>
+const tag = (name: Json) => ({ children, accessibilityLabel, onPress: _onPress, style: _style, contentContainerStyle: _c, ...rest }: Json) =>
   createElement(name, { 'data-label': accessibilityLabel, ...(rest.value !== undefined ? { 'data-value': rest.value } : {}), ...(rest.placeholder ? { 'data-placeholder': rest.placeholder } : {}) }, children);
 // The settings kit, as plain elements carrying what each row shows.
 const kit = {
-  SettingsSection: ({ title, info, trailing, children }) => createElement('section', { 'data-title': title }, createElement('h2', null, title), info, trailing, children),
-  SettingsRow: ({ label, hint }) => createElement('row', { 'data-label': label }, label, hint ? ` (${hint})` : ''),
-  SettingsSwitch: ({ label, value, hint, disabled }) => createElement('switch', { 'data-label': label, 'data-value': String(value), ...(disabled ? { 'data-disabled': 'true' } : {}) }, label, hint ? ` (${hint})` : ''),
-  SettingsSelect: ({ label, value, options }) => createElement('select', { 'data-label': label, 'data-value': value }, options.map(option => createElement('option', { key: option.value, value: option.value }, option.label))),
-  SettingsInput: ({ label, initialValue, error }) => createElement('field', { 'data-label': label, 'data-value': initialValue ?? '' }, label, error ? ` error: ${error}` : ''),
-  SettingsAction: ({ label, actionLabel }) => createElement('action', { 'data-label': label }, actionLabel),
+  SettingsSection: ({ title, info, trailing, children }: Json) => createElement('section', { 'data-title': title }, createElement('h2', null, title), info, trailing, children),
+  SettingsRow: ({ label, hint }: Json) => createElement('row', { 'data-label': label }, label, hint ? ` (${hint})` : ''),
+  SettingsSwitch: ({ label, value, hint, disabled }: Json) => createElement('switch', { 'data-label': label, 'data-value': String(value), ...(disabled ? { 'data-disabled': 'true' } : {}) }, label, hint ? ` (${hint})` : ''),
+  SettingsSelect: ({ label, value, options }: Json) => createElement('select', { 'data-label': label, 'data-value': value }, options.map((option: Json) => createElement('option', { key: option.value, value: option.value }, option.label))),
+  SettingsInput: ({ label, initialValue, error }: Json) => createElement('field', { 'data-label': label, 'data-value': initialValue ?? '' }, label, error ? ` error: ${error}` : ''),
+  SettingsAction: ({ label, actionLabel }: Json) => createElement('action', { 'data-label': label }, actionLabel),
 };
 
-function load(code, overrides = {}) {
-  const modules = {
+function load(code: Json, overrides = {}): Json {
+  const modules: Record<string, Json> = {
     '@getpaseo/plugin': sdk, zod: require('zod'), react: require('react'), 'react/jsx-runtime': require('react/jsx-runtime'),
     'react-native': { View: tag('view'), Text: tag('text'), Pressable: tag('button'), TextInput: tag('input') },
     '@getpaseo/plugin/client/react-native': { ScrollView: tag('scroll'), Icon: tag('icon'), TextInput: tag('input'), useToast: () => ({ show() {}, error() {} }) },
@@ -45,7 +48,7 @@ function load(code, overrides = {}) {
     ...overrides,
   };
   const module = { exports: {} };
-  new Function('require', 'module', 'exports', code)(id => {
+  new Function('require', 'module', 'exports', code)((id: Json) => {
     if (!(id in modules)) throw new Error(`Module "${id}" is not available in plugin client code`);
     return modules[id];
   }, module, module.exports);
@@ -67,15 +70,15 @@ test('the client registers the ALP settings screen and the project panel, with o
   const { code, externals, inputs } = await compileClient('index.client.tsx');
   assert.deepEqual(externals.filter(id => !HOST.includes(id)), []);
   assert.deepEqual(inputs.filter(input => !/^(index\.client\.tsx|client\/|shared\/)/.test(path.relative(plugin, path.resolve(input)).split(path.sep).join('/'))), []);
-  const screens = [];
-  const panels = [];
+  const screens: Json[] = [];
+  const panels: Json[] = [];
   const cleanup = load(code).default({
-    addSettingsScreen: screen => { screens.push(screen); return () => {}; },
-    addWorkspacePanel: panel => { panels.push(panel); return () => {}; },
+    addSettingsScreen: (screen: Json) => { screens.push(screen); return () => {}; },
+    addWorkspacePanel: (panel: Json) => { panels.push(panel); return () => {}; },
     addCommandCenterItem: () => () => {},
     addScreen: () => () => {},
     addSlashCommand: () => () => {},
-    // The Tasks pills (test/panel.test.js) find no agents here.
+    // The Tasks pills (test/panel.test.ts) find no agents here.
     paseo: { agents: { list: async () => { throw new Error('offline'); } } },
   });
   assert.equal(typeof cleanup, 'function');
@@ -85,7 +88,7 @@ test('the client registers the ALP settings screen and the project panel, with o
 });
 
 /** The markup of one settings section, by its title. */
-const section = (html, title) => {
+const section = (html: Json, title: Json) => {
   const start = html.indexOf(`<section data-title="${title}">`);
   assert.ok(start >= 0, `no section ${title}`);
   return html.slice(start, html.indexOf('</section>', start));
@@ -95,12 +98,12 @@ const where = { projectRoot: null, library: '/home/u/.alp' };
 test('the settings screen has an aside of kinds and entries, and lists a kind with where entries come from and who uses them', async () => {
   const { code } = await compileClient('client/library.tsx');
   const { LibraryWorkspace, navGroups } = load(code);
-  assert.deepEqual(navGroups('library', lists).map(group => [group.label, group.items.map(item => `${item.label} ${item.count}`)]), [
+  assert.deepEqual(navGroups('library', lists).map((group: Json) => [group.label, group.items.map((item: Json) => `${item.label} ${item.count}`)]), [
     ['General', ['Language undefined']], ['Organisation', ['Teams 3', 'Agents 4']], ['Capabilities', ['Skills 1', 'MCP servers 0', 'Hooks 1']], ['Runtimes', ['Providers 1']],
   ]);
   // Providers and the user's language live in the library only.
-  assert.ok(!navGroups('project', lists).some(group => group.items.some(item => item.key === 'providers' || item.key === 'language')));
-  const render = (kind, extra = {}) => renderToStaticMarkup(createElement(LibraryWorkspace, { theme, compact: false, scope: 'library', where, lists, error: null, selection: { kind }, entry: null, actions, ...extra }));
+  assert.ok(!navGroups('project', lists).some((group: Json) => group.items.some((item: Json) => item.key === 'providers' || item.key === 'language')));
+  const render = (kind: Json, extra = {}) => renderToStaticMarkup(createElement(LibraryWorkspace, { theme, compact: false, scope: 'library', where, lists, error: null, selection: { kind }, entry: null, actions, ...extra }));
   const html = render('agents');
   const order = ['Teams', 'Agents', 'Skills', 'MCP servers', 'Hooks', 'Providers'].map(title => html.indexOf(`data-label="${title}"`));
   assert.ok(order.every(position => position >= 0), html);
@@ -122,7 +125,7 @@ test('the settings screen has an aside of kinds and entries, and lists a kind wi
 test('the library screen sets the language the user reads; unset, Vietnamese applies (ALPD §54)', async () => {
   const { code } = await compileClient('client/library.tsx');
   const { LibraryWorkspace } = load(code);
-  const render = language => renderToStaticMarkup(createElement(LibraryWorkspace, { theme, compact: false, scope: 'library', where, lists, error: null, selection: { kind: 'language' }, entry: null, actions, language }));
+  const render = (language: Json) => renderToStaticMarkup(createElement(LibraryWorkspace, { theme, compact: false, scope: 'library', where, lists, error: null, selection: { kind: 'language' }, entry: null, actions, language }));
   assert.match(render(null), /Loading…/);
   const unset = render({ language: null, applies: 'Vietnamese', default: 'Vietnamese' });
   assert.match(unset, /<text>Library<\/text><text>\/<\/text><text>Language<\/text>/);
@@ -146,7 +149,7 @@ test('the project panel overrides an entry here, or drops the override to use th
   assert.match(html, /What this project overrides/);
   assert.match(html, /<text>Project<\/text><text>\/<\/text><text>Agents<\/text>/);
   assert.doesNotMatch(html, /data-label="Providers"/);
-  const rowOf = name => html.slice(html.indexOf(`data-label="Open agent ${name}"`), html.indexOf(`data-label="Duplicate agent ${name}"`));
+  const rowOf = (name: Json) => html.slice(html.indexOf(`data-label="Open agent ${name}"`), html.indexOf(`data-label="Duplicate agent ${name}"`));
   assert.match(rowOf('main'), /<text>project<\/text>[\s\S]*<text>overrides built-in<\/text>[\s\S]*<text>Use library<\/text>/);
   assert.match(rowOf('peer'), /<text>built-in<\/text>[\s\S]*<text>Override in this project<\/text>/);
   // A project-only agent has nothing below it to return to.
@@ -159,7 +162,7 @@ test('editors: an agent picks skills, MCP servers and hooks; a team its members,
   const { code } = await compileClient('client/library.tsx');
   const { EntryEditor, LibraryWorkspace, delegationCycle, blank, entryTabs } = load(code);
   const layout = { title: 'ALP library', groups: [], onSelect() {} };
-  const editor = (kind, entry, tab, scope = 'library') => renderToStaticMarkup(createElement(EntryEditor, { theme, compact: false, scope, kind, entry, lists, actions, layout, initialTab: tab }));
+  const editor = (kind: Json, entry: Json, tab?: Json, scope = 'library') => renderToStaticMarkup(createElement(EntryEditor, { theme, compact: false, scope, kind, entry, lists, actions, layout, initialTab: tab }));
   const main = { kind: 'agents', name: 'main', source: 'builtin', content: { instructions: '# Main\n', config: { skills: ['style'] } }, revision: null, usedBy: ['team pho'] };
   const general = editor('agents', main);
   assert.match(general, /Built into ALP\. Saving makes your library&#x27;s own main, which overrides it\./);
@@ -194,7 +197,7 @@ test('editors: an agent picks skills, MCP servers and hooks; a team its members,
     team: { label: 'Docs', main: 'main', members: { main: { model: 'claude:claude-opus-5-5' }, writer: { role: 'peer' } }, delegation: { main: ['writer'] }, supervisor: { agent: 'supervisor', model: 'claude:claude-sonnet-4-6' } },
     houseRules: 'Review every page.\n',
   } };
-  assert.deepEqual(entryTabs('teams', true).map(tab => tab.label), ['Models & effort', 'General', 'Members', 'Delegation', 'Supervisor', 'House rules']);
+  assert.deepEqual(entryTabs('teams', true).map((tab: Json) => tab.label), ['Models & effort', 'General', 'Members', 'Delegation', 'Supervisor', 'House rules']);
   assert.doesNotMatch(editor('teams', team, 'general'), /data-label="Main"/);
   const models = editor('teams', team);
   assert.match(section(models, 'main · main'), /<select data-label="Model" data-value="claude:claude-opus-5-5">/);
@@ -267,7 +270,7 @@ test('direct Host settings screens open their own library category', async () =>
     ['HooksSettings', 'Hooks', 'New hook'],
     ['McpSettings', 'MCP servers', 'New MCP server'],
   ]) {
-    const html = renderToStaticMarkup(createElement(screens[component], { theme, layout: { compact: false } }));
+    const html = renderToStaticMarkup(createElement((screens as Json)[component], { theme, layout: { compact: false } }));
     assert.doesNotMatch(html, /ALP library|Expand navigation|Collapse navigation|Open navigation|GENERAL|ORGANISATION/, `${component} uses Host navigation`);
     assert.ok(html.includes(`data-label="${createLabel}"`), `${component} exposes its editor actions`);
   }
@@ -315,7 +318,7 @@ test('in ALP remote mode entries open read-only without write or execution contr
   const { LibraryWorkspace, navGroups } = load(code);
   const readOnly = { reason: 'ALP remote mode: the library of the ALP host is viewed here with secrets hidden; changes require the ALP host.' };
   const remote = { projectRoot: '/w', library: 'the ALP host', readOnly };
-  const render = (scope, where, extra = {}) => renderToStaticMarkup(createElement(LibraryWorkspace, { theme, compact: false, scope, where, lists, error: null, selection: { kind: 'agents' }, entry: null, actions, ...extra }));
+  const render = (scope: Json, where: Json, extra = {}) => renderToStaticMarkup(createElement(LibraryWorkspace, { theme, compact: false, scope, where, lists, error: null, selection: { kind: 'agents' }, entry: null, actions, ...extra }));
   for (const scope of ['library', 'project']) {
     const html = render(scope, remote);
     assert.match(html, /viewed here with secrets hidden/);
@@ -323,7 +326,7 @@ test('in ALP remote mode entries open read-only without write or execution contr
     assert.doesNotMatch(html, /New agent|Duplicate agent|Override in this project|Use library/);
     assert.doesNotMatch(html, /Loading…/);
   }
-  assert.ok(navGroups('library', lists).some(group => group.items.some(item => item.children?.some(child => child.key === 'main'))), 'the aside offers authorized entries');
+  assert.ok(navGroups('library', lists).some((group: Json) => group.items.some((item: Json) => item.children?.some((child: Json) => child.key === 'main'))), 'the aside offers authorized entries');
   for (const kind of ['teams', 'agents', 'skills', 'mcp', 'hooks', 'providers']) {
     const html = render('library', remote, { selection: { kind, name: 'example' }, entry: { kind, name: 'example', source: 'library', content: { body: '<script>example</script>', token: { $secret: 'keep' } }, revision: 'r1', usedBy: ['main'], secrets: ['/token'], librarySkills: ['style'] } });
     assert.match(html, /&lt;script&gt;example&lt;\/script&gt;/);
@@ -356,10 +359,10 @@ test('in ALP remote mode entries open read-only without write or execution contr
 // Keep the real row condition and event: rendering only text would miss a disabled Pressable.
 test('remote library row press selects the entry and the aside routes its child', async () => {
   const { code } = await compileClient('client/library.tsx');
-  const presses = [];
-  const selected = [];
-  const { LibraryWorkspace } = load(code, { 'react-native': { View: tag('view'), Text: tag('text'), TextInput: tag('input'), Pressable: props => { presses.push(props); return createElement('button', null, props.children); } } });
-  renderToStaticMarkup(createElement(LibraryWorkspace, { theme, compact: false, scope: 'library', where: { projectRoot: '/w', library: 'host', readOnly: { reason: 'Read only' } }, lists, error: null, selection: { kind: 'agents' }, entry: null, actions: { ...actions, select: value => selected.push(value) } }));
+  const presses: Json[] = [];
+  const selected: Json[] = [];
+  const { LibraryWorkspace } = load(code, { 'react-native': { View: tag('view'), Text: tag('text'), TextInput: tag('input'), Pressable: (props: Json) => { presses.push(props); return createElement('button', null, props.children); } } });
+  renderToStaticMarkup(createElement(LibraryWorkspace, { theme, compact: false, scope: 'library', where: { projectRoot: '/w', library: 'host', readOnly: { reason: 'Read only' } }, lists, error: null, selection: { kind: 'agents' }, entry: null, actions: { ...actions, select: (value: Json) => selected.push(value) } }));
   const row = presses.find(props => props.accessibilityLabel === 'Open agent main');
   assert.ok(row, 'opening row exists');
   assert.ok(!row.disabled, 'opening row enabled');

@@ -7,45 +7,48 @@ import assert from 'node:assert/strict';
 import { createRemoteProvider, GatewayAuthError } from '@anhlp/alp-paseo/remote';
 import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
 
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
 const principal = { id: 'c1', permissions: ['session.read', 'session.write'], workspaces: ['/w'], workspaceRoots: [{ path: '/w', canonical: '/w' }] };
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(check, what, ms = 5_000) {
+const sleep = (ms: Json) => new Promise(resolve => setTimeout(resolve, ms));
+async function until(check: Json, what: Json, ms = 5_000) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) { if (check()) return; await sleep(10); }
   assert.fail(`${what} never happened`);
 }
 const closedError = () => Object.assign(new Error('ALP daemon connection closed'), { name: 'AlpClientError', reason: 'disconnected' });
-const rpcError = (code, message, data) => Object.assign(new Error(message), { code, ...(data ? { data } : {}) });
+const rpcError = (code: Json, message: Json, data?: Json) => Object.assign(new Error(message), { code, ...(data ? { data } : {}) });
 
 /** A connection whose answers come from `answer(method, params, connection)`; it can emit events and drop. */
-function fakeConnection(name, answer = healthy) {
-  const closes = new Set();
-  const listeners = new Set();
+function fakeConnection(name: Json, answer: (method: Json, params: Json, connection: Json) => Json = healthy) {
+  const closes = new Set<Json>();
+  const listeners = new Set<Json>();
   const connection = {
     name,
     closed: false,
-    requests: [],
-    async request(method, params) {
+    requests: [] as Json[],
+    async request(method: Json, params: Json) {
       if (connection.closed) throw closedError();
       connection.requests.push({ method, params });
       return answer(method, params, connection);
     },
-    onEvent(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-    onClose(listener) { closes.add(listener); return () => closes.delete(listener); },
+    onEvent(listener: Json) { listeners.add(listener); return () => listeners.delete(listener); },
+    onClose(listener: Json) { closes.add(listener); return () => closes.delete(listener); },
     close() { connection.drop(closedError()); },
-    drop(error = closedError()) {
+    drop(error: Error = closedError()) {
       if (connection.closed) return;
       connection.closed = true;
       for (const listener of [...closes]) listener(error);
     },
-    emit(envelope) { for (const listener of [...listeners]) listener(envelope); },
+    emit(envelope: Json) { for (const listener of [...listeners]) listener(envelope); },
     listenerCount: () => listeners.size,
-    sent: method => connection.requests.filter(request => request.method === method),
+    sent: (method: Json) => connection.requests.filter(request => request.method === method),
   };
   return connection;
 }
 
-function healthy(method, params) {
+function healthy(method: Json, params: Json) {
   if (method === 'library.models') return { models: [] };
   if (method === 'session.get') return { session: { id: params.sessionId, status: 'idle', projectRoot: '/w' } };
   if (method === 'session.attach') return { cursor: params.after ?? 0 };
@@ -54,17 +57,17 @@ function healthy(method, params) {
 }
 
 let seq = 0;
-const envelope = (sessionId, cursor, event) => ({ sessionId, epoch: 'e1', seq: ++seq, cursor, event });
-const started = (sessionId, cursor, turnId) => envelope(sessionId, cursor, { type: 'turn.started', turnId, origin: 'user' });
-const ended = (sessionId, cursor, turnId) => envelope(sessionId, cursor, { type: 'turn.ended', turnId, state: 'completed' });
+const envelope = (sessionId: Json, cursor: Json, event: Json) => ({ sessionId, epoch: 'e1', seq: ++seq, cursor, event });
+const started = (sessionId: Json, cursor: Json, turnId: Json) => envelope(sessionId, cursor, { type: 'turn.started', turnId, origin: 'user' });
+const ended = (sessionId: Json, cursor: Json, turnId: Json) => envelope(sessionId, cursor, { type: 'turn.ended', turnId, state: 'completed' });
 
 /** Providers still open: a failed assertion must not leave one reconnecting and the process alive. */
-const live = new Set();
+const live = new Set<Json>();
 test.afterEach(async () => { for (const connection of live) await connection.close().catch(() => {}); live.clear(); });
 
 /** A provider over `links` (each open() takes the next; a function entry may throw), with roots opened. */
-async function provider(links, sessions = ['p1']) {
-  const opened = [];
+async function provider(links: Json, sessions = ['p1']) {
+  const opened: Json[] = [];
   const registration = createRemoteProvider({ url: 'http://127.0.0.1:1', token: 'alpgw1.x.y' }, {
     open: async () => {
       const next = links[Math.min(opened.length, links.length - 1)];
@@ -75,18 +78,18 @@ async function provider(links, sessions = ['p1']) {
   });
   const connection = await registration.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
   live.add(connection);
-  const events = [];
-  connection.onEvent(event => events.push(event));
+  const events: Json[] = [];
+  connection.onEvent((event: Json) => events.push(event));
   for (const sessionId of sessions) {
     await connection.send({ type: 'session.open', requestId: `open-${sessionId}`, sessionId, config: { cwd: '/w', model: 'pho', mode: 'workspace-write', settings: {}, env: {}, mcpServers: {}, persist: true }, history: 'skip' });
   }
   return { connection, events, opened };
 }
 
-const prompt = (sessionId, clientMessageId) => ({ type: 'session.prompt', sessionId, prompt: { clientMessageId, delivery: 'auto', input: { type: 'message', content: [{ type: 'text', text: 'hi' }] } } });
-const failedRoots = events => events.filter(event => event.type === 'session.runtime_failed').map(event => event.sessionId);
-const turns = (events, sessionId) => events.filter(event => event.type === 'session.turn' && event.sessionId === sessionId).map(event => `${event.turnId}:${event.state}`);
-const dropsAt = method => (asked, params, connection) => {
+const prompt = (sessionId: Json, clientMessageId: Json): Json => ({ type: 'session.prompt', sessionId, prompt: { clientMessageId, delivery: 'auto', input: { type: 'message', content: [{ type: 'text', text: 'hi' }] } } });
+const failedRoots = (events: Json) => events.filter((event: Json) => event.type === 'session.runtime_failed').map((event: Json) => event.sessionId);
+const turns = (events: Json, sessionId: Json) => events.filter((event: Json) => event.type === 'session.turn' && event.sessionId === sessionId).map((event: Json) => `${event.turnId}:${event.state}`);
+const dropsAt = (method: Json): Json => (asked: Json, params: Json, connection: Json) => {
   if (asked === method) { connection.drop(); throw closedError(); }
   return healthy(asked, params);
 };
@@ -95,7 +98,7 @@ test('a connection that drops during reattach does not end the session and is re
   const first = fakeConnection('first');
   // The second link drops while the root is being attached again (a gateway or alpd restart).
   const second = fakeConnection('second', dropsAt('session.attach'));
-  const third = fakeConnection('third', (method, params, connection) => {
+  const third = fakeConnection('third', (method: Json, params: Json, connection: Json) => {
     // alpd replays from the cursor asked for; the provider already saw 1 and 2.
     if (method === 'session.attach') {
       for (const replayed of [started('p1', 1, 't1'), ended('p1', 2, 't1'), started('p1', 3, 't2')]) if (replayed.cursor > params.after) connection.emit(replayed);
@@ -158,7 +161,7 @@ test('a transient error answering reattach keeps the root for the next attempt',
 
 test('with several roots, one that is gone fails alone and the others survive a drop mid-reattach', async () => {
   const first = fakeConnection('first');
-  const second = fakeConnection('second', (method, params, connection) => {
+  const second = fakeConnection('second', (method: Json, params: Json, connection: Json) => {
     if (method === 'session.get' && params.sessionId === 'p2') throw rpcError(1001, 'No session p2');
     if (method === 'session.attach' && params.sessionId === 'p3') { connection.drop(); throw closedError(); }
     return healthy(method, params);
@@ -206,7 +209,7 @@ test('a refused credential fails the sessions once and stops reconnecting', asyn
 test('a root alpd closed while nobody watched stays open in Paseo and is reopened by the next prompt', async () => {
   const first = fakeConnection('first');
   // alpd closed the idle root when its last viewer left; the replay after reconnecting carries it.
-  const second = fakeConnection('second', (method, params, connection) => {
+  const second = fakeConnection('second', (method: Json, params: Json, connection: Json) => {
     if (method === 'session.get') return { session: { id: params.sessionId, status: 'closed', projectRoot: '/w' } };
     if (method === 'session.attach') { connection.emit(envelope('p1', 3, { type: 'session.closed' })); return { cursor: 3 }; }
     return healthy(method, params);

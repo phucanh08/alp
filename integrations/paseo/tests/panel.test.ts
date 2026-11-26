@@ -12,6 +12,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import contribute from '@anhlp/alp-paseo';
 import { addGate, closeTask, createTask, getTask, startTask, submitTask } from '@anhlp/alp-core/tasks';
 
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
 const require = createRequire(import.meta.url);
 const plugin = fileURLToPath(new URL('../', import.meta.url));
 
@@ -19,7 +22,7 @@ const plugin = fileURLToPath(new URL('../', import.meta.url));
 const HOST = ['@getpaseo/plugin', '@getpaseo/plugin/client', '@getpaseo/plugin/client/react-native', '@getpaseo/plugin/client/ui', '@tanstack/react-query', 'react', 'react/jsx-runtime', 'react-native', 'zod'];
 
 /** Bundles client code the way Paseo's plugin compiler does. */
-async function compileClient(entry) {
+async function compileClient(entry: Json) {
   const result = await build({
     entryPoints: [path.join(plugin, entry)], bundle: true, format: 'cjs', jsx: 'automatic', write: false, metafile: true,
     platform: 'neutral', target: 'es2020', mainFields: ['module', 'main'], supported: { 'async-await': false }, external: HOST, logLevel: 'silent',
@@ -30,7 +33,7 @@ async function compileClient(entry) {
   return { code: result.outputFiles[0].text, externals: [...externals], inputs };
 }
 
-const tag = name => ({ children, accessibilityLabel, onPress: _onPress, style: _style, contentContainerStyle: _c, ...rest }) =>
+const tag = (name: Json) => ({ children, accessibilityLabel, onPress: _onPress, style: _style, contentContainerStyle: _c, ...rest }: Json) =>
   createElement(name, { 'data-label': accessibilityLabel, ...(rest.value !== undefined ? { 'data-value': rest.value } : {}), ...(rest.placeholder ? { 'data-placeholder': rest.placeholder } : {}) }, children);
 
 /** Host modules for rendering in Node: React Native views become plain elements. */
@@ -43,17 +46,17 @@ function hostModules(overrides = {}) {
     'react-native': { View: tag('view'), Text: tag('text'), Pressable: tag('button'), TextInput: tag('input') },
     '@getpaseo/plugin/client/react-native': { ScrollView: tag('scroll'), Icon: tag('icon'), TextInput: tag('input'), useToast: () => ({ show() {}, error() {} }) },
     '@getpaseo/plugin/client': { useRpc: () => async () => ({}), useWorkspace: () => null },
-    // The settings kit; test/settings-screen.test.js renders it.
+    // The settings kit; test/settings-screen.test.ts renders it.
     '@getpaseo/plugin/client/ui': {},
     ...overrides,
   };
 }
 
-function load(code, modules = hostModules()) {
+function load(code: Json, modules = hostModules()): Json {
   const module = { exports: {} };
-  new Function('require', 'module', 'exports', code)(id => {
+  new Function('require', 'module', 'exports', code)((id: Json) => {
     if (!(id in modules)) throw new Error(`Module "${id}" is not available in plugin client code`);
-    return modules[id];
+    return (modules as Json)[id];
   }, module, module.exports);
   return module.exports;
 }
@@ -66,38 +69,38 @@ const settle = async () => { for (let i = 0; i < 10; i += 1) await new Promise(r
  * A client context with a host of agents: what the pills see of Paseo's agents.list,
  * workspaces and plugin RPC. Test code drives the subscription through `host`.
  */
-function fakeClient(boards) {
-  const host = { observers: [], released: false, pills: [], screens: [], opened: [], panels: [], commands: [], slash: [], reads: [] };
-  const page = entries => ({ entries: entries.map(agent => ({ agent })), pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } });
-  host.snapshot = agents => host.observers.forEach(observer => observer.snapshot({ ...page(agents), subscriptionId: 's1' }));
-  host.update = payload => host.observers.forEach(observer => observer.update({ type: 'agent_update', payload }));
+function fakeClient(boards: Json) {
+  const host: Json = { observers: [] as Json[], released: false, pills: [] as Json[], screens: [] as Json[], opened: [] as Json[], panels: [] as Json[], commands: [] as Json[], slash: [] as Json[], reads: [] as Json[] };
+  const page = (entries: Json) => ({ entries: entries.map((agent: Json) => ({ agent })), pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } });
+  host.snapshot = (agents: Json) => host.observers.forEach((observer: Json) => observer.snapshot({ ...page(agents), subscriptionId: 's1' }));
+  host.update = (payload: Json) => host.observers.forEach((observer: Json) => observer.update({ type: 'agent_update', payload }));
   const client = {
     paseo: {
       agents: {
-        list: async options => ({
+        list: async (options: Json) => ({
           ...page([]),
-          subscription: options.subscribe ? { release: async () => { host.released = true; }, subscribe: observer => { host.observers.push(observer); return () => {}; } } : undefined,
+          subscription: options.subscribe ? { release: async () => { host.released = true; }, subscribe: (observer: Json) => { host.observers.push(observer); return () => {}; } } : undefined,
         }),
       },
-      workspaces: { ref: id => ({ refresh: async () => ({ id, workspaceDirectory: `/w/${id}`, projectRootPath: '/w' }) }) },
+      workspaces: { ref: (id: Json) => ({ refresh: async () => ({ id, workspaceDirectory: `/w/${id}`, projectRootPath: '/w' }) }) },
     },
-    rpc: async (contract, input) => { host.reads.push([contract.name, input.directory]); return boards[input.directory] ?? { projectRoot: null, tasks: [], unreadable: [] }; },
-    openScreen: input => host.opened.push(input),
-    addScreen: screen => { host.screens.push(screen); return () => {}; },
-    addComposerPill: contribution => {
+    rpc: async (contract: Json, input: Json) => { host.reads.push([contract.name, input.directory]); return boards[input.directory] ?? { projectRoot: null, tasks: [], unreadable: [] }; },
+    openScreen: (input: Json) => host.opened.push(input),
+    addScreen: (screen: Json) => { host.screens.push(screen); return () => {}; },
+    addComposerPill: (contribution: Json) => {
       const pill = { ...contribution, removed: false, updates: 0 };
       host.pills.push(pill);
-      return { update: patch => { pill.button = { ...pill.button, ...patch }; pill.updates += 1; }, remove: () => { pill.removed = true; } };
+      return { update: (patch: Json) => { pill.button = { ...pill.button, ...patch }; pill.updates += 1; }, remove: () => { pill.removed = true; } };
     },
-    addWorkspacePanel: panel => { host.panels.push(panel); return () => {}; },
-    addCommandCenterItem: item => { host.commands.push(item); return () => {}; },
-    addSlashCommand: command => { host.slash.push(command); return () => {}; },
+    addWorkspacePanel: (panel: Json) => { host.panels.push(panel); return () => {}; },
+    addCommandCenterItem: (item: Json) => { host.commands.push(item); return () => {}; },
+    addSlashCommand: (command: Json) => { host.slash.push(command); return () => {}; },
     addSettingsScreen: () => () => {},
   };
   return { client, host };
 }
 
-const row = (id, title, extra = {}) => ({ id, title, type: 'task', priority: 2, status: 'open', ready: false, updatedAt: '2026-10-09T00:00:00Z', ...extra });
+const row = (id: Json, title: Json, extra = {}) => ({ id, title, type: 'task', priority: 2, status: 'open', ready: false, updatedAt: '2026-10-09T00:00:00Z', ...extra });
 
 test('the client entry bundles with only the modules Paseo supplies and registers the Tasks panel, screen, commands and pills', async () => {
   const { code, externals, inputs } = await compileClient('index.client.tsx');
@@ -107,19 +110,19 @@ test('the client entry bundles with only the modules Paseo supplies and register
   const { client, host } = fakeClient({});
   const cleanup = load(code).default(client);
   assert.equal(typeof cleanup, 'function');
-  assert.deepEqual(host.panels.filter(panel => panel.id === 'alp-tasks').map(panel => [panel.id, panel.title, panel.icon, panel.context, typeof panel.Component]), [['alp-tasks', 'Tasks', 'ListTodo', 'workspace', 'function']]);
-  assert.equal(typeof host.panels.find(panel => panel.id === 'alp-usage')?.Component, 'function');
-  assert.deepEqual(host.screens.map(screen => [screen.id, screen.title({}), screen.title({ taskId: 't-0003' }), typeof screen.Component]), [['alp-tasks', 'ALP tasks', 'ALP task t-0003', 'function']]);
+  assert.deepEqual(host.panels.filter((panel: Json) => panel.id === 'alp-tasks').map((panel: Json) => [panel.id, panel.title, panel.icon, panel.context, typeof panel.Component]), [['alp-tasks', 'Tasks', 'ListTodo', 'workspace', 'function']]);
+  assert.equal(typeof host.panels.find((panel: Json) => panel.id === 'alp-usage')?.Component, 'function');
+  assert.deepEqual(host.screens.map((screen: Json) => [screen.id, screen.title({}), screen.title({ taskId: 't-0003' }), typeof screen.Component]), [['alp-tasks', 'ALP tasks', 'ALP task t-0003', 'function']]);
 
   // The desktop opens the panel; the full-screen item and /alp-tasks open the screen, which phones reach.
   const workspace = { id: 'ws1', directory: '/w/ws1', projectRootPath: '/w' };
-  const opened = [];
-  host.commands.find(item => item.id === 'alp-open-tasks').onSelect({ openPanel: id => opened.push(id) });
-  host.commands.find(item => item.id === 'alp-open-tasks-screen').onSelect({ workspace, openScreen: input => opened.push(input) });
+  const opened: Json[] = [];
+  host.commands.find((item: Json) => item.id === 'alp-open-tasks')!.onSelect({ openPanel: (id: Json) => opened.push(id) });
+  host.commands.find((item: Json) => item.id === 'alp-open-tasks-screen')!.onSelect({ workspace, openScreen: (input: Json) => opened.push(input) });
   const [slash] = host.slash;
   assert.deepEqual([slash.name, slash.context, slash.argumentHint], ['alp-tasks', 'agent', '[task id]']);
-  slash.onSubmit({ workspace, agent: { id: 'a1' }, args: '', openScreen: input => opened.push(input) });
-  slash.onSubmit({ workspace: { ...workspace, directory: '' }, agent: { id: 'a1' }, args: ' t-0003 ', openScreen: input => opened.push(input) });
+  slash.onSubmit({ workspace, agent: { id: 'a1' }, args: '', openScreen: (input: Json) => opened.push(input) });
+  slash.onSubmit({ workspace: { ...workspace, directory: '' }, agent: { id: 'a1' }, args: ' t-0003 ', openScreen: (input: Json) => opened.push(input) });
   assert.deepEqual(opened, [
     'alp-tasks',
     { screenId: 'alp-tasks', params: { workspaceId: 'ws1', directory: '/w/ws1' } },
@@ -155,16 +158,16 @@ test('each ALP agent\'s composer gets a Tasks pill whose menu opens the screen o
     { id: 'a4', provider: 'alp', workspaceId: 'ws1', cwd: '/w', archivedAt: '2026-10-09T00:00:00Z' },
   ]);
   await settle();
-  assert.deepEqual(host.pills.map(pill => [pill.id, pill.workspaceId, pill.agentId]), [['alp-tasks', 'ws1', 'a1']]);
+  assert.deepEqual(host.pills.map((pill: Json) => [pill.id, pill.workspaceId, pill.agentId]), [['alp-tasks', 'ws1', 'a1']]);
   const [pill] = host.pills;
   // The tasks of the workspace's directory, as the panel reads them.
   assert.deepEqual(host.reads, [['alp.tasks.list', '/w/ws1']]);
   assert.deepEqual([pill.button.label, pill.button.title, pill.button.visible], ['Tasks · 5', 'ALP tasks: 5 open', true]);
   const items = pill.button.behavior.items;
-  assert.deepEqual(items.map(item => item.kind === 'item' ? item.title : '---'), [
+  assert.deepEqual(items.map((item: Json) => item.kind === 'item' ? item.title : '---'), [
     'Approve · Ship the release', 'Review · Add --json', 'In progress · Normalize', 'Ready · Fix colors', 'Blocked · Docs', '---', 'All tasks',
   ]);
-  assert.ok(items.every(item => /^[a-z][a-z0-9-]*$/.test(item.id)), 'menu ids are what the host accepts');
+  assert.ok(items.every((item: Json) => /^[a-z][a-z0-9-]*$/.test(item.id)), 'menu ids are what the host accepts');
   items[4].behavior.onPress();
   items.at(-1).behavior.onPress();
   assert.deepEqual(host.opened, [
@@ -178,26 +181,26 @@ test('each ALP agent\'s composer gets a Tasks pill whose menu opens the screen o
   await settle();
   assert.equal(pill.updates, updates);
   // Outside an ALP project the pill hides; a removed agent loses it.
-  const other = host.pills.find(entry => entry.agentId === 'a5');
-  assert.equal(other.button.visible, false);
+  const other = host.pills.find((entry: Json) => entry.agentId === 'a5');
+  assert.equal(other!.button.visible, false);
   host.update({ kind: 'remove', agentId: 'a1' });
   assert.equal(pill.removed, true);
   await stop();
-  assert.deepEqual([other.removed, host.released], [true, true]);
+  assert.deepEqual([other!.removed, host.released], [true, true]);
 
   // The menu keeps eight tasks, what waits for the user first; epics and closed tasks stay on the board.
-  assert.deepEqual(menuTasks(tasks).map(entry => entry.task.id), ['t-0001', 't-0002', 't-0003', 't-0004', 't-0004.1']);
+  assert.deepEqual(menuTasks(tasks).map((entry: Json) => entry.task.id), ['t-0001', 't-0002', 't-0003', 't-0004', 't-0004.1']);
   const many = Array.from({ length: 11 }, (_, index) => row(`t-${100 + index}`, `Task ${index}`, { ready: true }));
   const full = taskButton({ projectRoot: '/w', tasks: many }, () => {});
   assert.deepEqual([full.label, full.behavior.items.length, full.behavior.items.at(-1).title], ['Tasks · 11', 10, 'All tasks (3 more)']);
   const unread = taskButton(null, () => {});
-  assert.deepEqual([unread.label, unread.visible, unread.behavior.items.map(item => item.title)], ['Tasks', true, ['All tasks']]);
+  assert.deepEqual([unread.label, unread.visible, unread.behavior.items.map((item: Json) => item.title)], ['Tasks', true, ['All tasks']]);
 
   // The tasks the agent's session worked on come first, done ones too, and the label counts them.
   const sessions = { 'provider-s1': ['t-0006', 't-0003', 't-gone'] };
   const mine = taskButton({ projectRoot: '/w', tasks, sessions }, () => {}, ['provider-s1', 'a1']);
   assert.deepEqual([mine.label, mine.title], ['Tasks · 1/2', 'ALP tasks: 1 of 2 done in this session, 5 open']);
-  assert.deepEqual(mine.behavior.items.map(item => item.kind === 'item' ? item.title : '---'), [
+  assert.deepEqual(mine.behavior.items.map((item: Json) => item.kind === 'item' ? item.title : '---'), [
     'Done · Old', 'In progress · Normalize', '---', 'Approve · Ship the release', 'Review · Add --json', 'Ready · Fix colors', 'Blocked · Docs', '---', 'All tasks',
   ]);
   assert.equal(taskButton({ projectRoot: '/w', tasks, sessions }, () => {}, ['other']).label, 'Tasks · 5');
@@ -219,7 +222,7 @@ test('a pill finds its session by the agent\'s persistence handle', async () => 
 test('the Tasks screen shows the board of the directory it was opened with', async () => {
   const { code } = await compileClient('client/tasks-panel.tsx');
   const { TasksScreen } = load(code);
-  const render = params => renderToStaticMarkup(createElement(TasksScreen, { theme, layout: { compact: true, platform: 'ios' }, host: { id: 'h', label: 'h' }, params }));
+  const render = (params: Json) => renderToStaticMarkup(createElement(TasksScreen, { theme, layout: { compact: true, platform: 'ios' }, host: { id: 'h', label: 'h' }, params }));
   assert.match(render({ workspaceId: 'ws1', directory: '/w/ws1', taskId: 't-0003' }), /Loading tasks…/);
   assert.match(render({ workspaceId: 'ws1' }), /needs a workspace/);
 });
@@ -237,7 +240,7 @@ test('the panel lists tasks the way beads views them: grouped list, detail, boar
     row('t-0007', 'CLI polish', { type: 'epic', progress: { done: 0, total: 2 } }),
   ];
   const props = { theme, compact: false, directory: '/p', projectRoot: '/p', tasks, unreadable: 1, error: null, onAdd: async () => true, onAction() {}, onRefresh() {} };
-  const render = initial => renderToStaticMarkup(createElement(TaskBoard, { ...props, initial }));
+  const render = (initial: Json) => renderToStaticMarkup(createElement(TaskBoard, { ...props, initial }));
 
   // The list groups what waits for the user first; Open hides closed tasks.
   const html = render({ filter: 'all' });
@@ -250,8 +253,8 @@ test('the panel lists tasks the way beads views them: grouped list, detail, boar
   assert.match(html, /1 unreadable task file in \/p\/\.alp\/tasks/);
   assert.match(html, /<text>Open <text>6<\/text><\/text>/);
   assert.doesNotMatch(render({}), /Open t-0006/);
-  assert.deepEqual(filterTasks(tasks, 'ready', '').map(task => task.id), ['t-0004']);
-  assert.deepEqual(filterTasks(tasks, 'all', 'peer json').map(task => task.id), ['t-0002']);
+  assert.deepEqual(filterTasks(tasks, 'ready', '').map((task: Json) => task.id), ['t-0004']);
+  assert.deepEqual(filterTasks(tasks, 'all', 'peer json').map((task: Json) => task.id), ['t-0002']);
   assert.equal(age('2026-10-07T00:00:00Z', Date.parse('2026-10-09T00:00:00Z')), '2d');
 
   // A task's detail: its fields, handoff and the action its state allows.
@@ -286,12 +289,12 @@ test('the plugin server lists, adds, closes, reopens and approves tasks as the u
   // Only the task handlers matter here: the plugin must not start or watch an alpd.
   const supervise = process.env.ALP_SUPERVISE;
   process.env.ALP_SUPERVISE = '0';
-  const dispose = contribute({ registerProvider() {}, handle: (contract, handler) => handlers.set(contract.name, { contract, handler }) });
+  const dispose = contribute({ registerProvider() {}, handle: (contract: Json, handler: Json) => handlers.set(contract.name, { contract, handler }) } as Json);
   if (supervise === undefined) delete process.env.ALP_SUPERVISE; else process.env.ALP_SUPERVISE = supervise;
   t.after(() => dispose());
   assert.deepEqual([...handlers.keys()].sort(), ['alp.agent.compact', 'alp.library.delete', 'alp.library.duplicate', 'alp.library.get', 'alp.library.list', 'alp.library.models', 'alp.library.rename', 'alp.library.save', 'alp.library.skills', 'alp.library.test', 'alp.settings.language.get', 'alp.settings.language.set', 'alp.tasks.add', 'alp.tasks.change', 'alp.tasks.list', 'alp.usage.get']);
   // Like the SDK's callPluginRpc: input and output are checked against the shared contract.
-  const call = async (name, input) => {
+  const call = async (name: Json, input: Json) => {
     const { contract, handler } = handlers.get(name);
     return contract.output.parseAsync(await handler(await contract.input.parseAsync(input), {}));
   };
@@ -305,7 +308,7 @@ test('the plugin server lists, adds, closes, reopens and approves tasks as the u
   // A directory inside the project finds it.
   const listed = await call('alp.tasks.list', { directory: path.join(root, 'src', 'deep') });
   assert.equal(listed.projectRoot, root);
-  const byId = new Map(listed.tasks.map(task => [task.id, task]));
+  const byId: Json = new Map(listed.tasks.map((task: Json) => [task.id, task]));
   assert.deepEqual(byId.get(gated.id).approvals, [{ gate: 'g1', note: 'Approve the release?' }]);
   assert.equal(byId.get(gated.id).ready, false);
   assert.deepEqual(byId.get(reviewed.id).handoff, { outcome: 'complete', summary: 'Done', agent: 'peer' });
@@ -315,21 +318,21 @@ test('the plugin server lists, adds, closes, reopens and approves tasks as the u
   await assert.rejects(call('alp.tasks.add', { directory: root, title: '  ' }));
 
   assert.equal((await call('alp.tasks.change', { directory: root, id: gated.id, action: 'approve', gate: 'g1' })).status, 'open');
-  assert.equal((await getTask(root, gated.id)).gates[0].resolved.by, 'user');
-  assert.equal((await getTask(root, gated.id)).gates[0].resolved.channel, 'paseo', 'alpd reads the channel and tells main');
+  assert.equal((await getTask(root, gated.id)).gates[0].resolved!.by, 'user');
+  assert.equal((await getTask(root, gated.id)).gates[0].resolved!.channel, 'paseo', 'alpd reads the channel and tells main');
   // A gate with options: reject keeps it open; an option approves it with that choice (t-ccac).
   await addGate(root, gated.id, { kind: 'human', note: 'Which channel?', options: ['beta', 'stable'] }, 'main');
-  assert.deepEqual((await call('alp.tasks.list', { directory: root })).tasks.find(task => task.id === gated.id).approvals, [{ gate: 'g2', note: 'Which channel?', options: ['beta', 'stable'] }]);
+  assert.deepEqual((await call('alp.tasks.list', { directory: root })).tasks.find((task: Json) => task.id === gated.id).approvals, [{ gate: 'g2', note: 'Which channel?', options: ['beta', 'stable'] }]);
   assert.equal((await call('alp.tasks.change', { directory: root, id: gated.id, action: 'reject', gate: 'g2', note: 'Not this week' })).status, 'open');
-  let approval = (await call('alp.tasks.list', { directory: root })).tasks.find(task => task.id === gated.id).approvals[0];
+  let approval = (await call('alp.tasks.list', { directory: root })).tasks.find((task: Json) => task.id === gated.id).approvals[0];
   assert.equal(approval.rejected.reason, 'Not this week');
   await assert.rejects(call('alp.tasks.change', { directory: root, id: gated.id, action: 'approve', gate: 'g2', choice: 'nightly' }), /choice must be one of: beta, stable/);
   await call('alp.tasks.change', { directory: root, id: gated.id, action: 'approve', gate: 'g2', choice: 'stable' });
   const second = (await getTask(root, gated.id)).gates[1];
-  assert.deepEqual([second.resolved.choice, second.resolved.channel, second.rejected.channel], ['stable', 'paseo', 'paseo']);
-  assert.equal((await call('alp.tasks.list', { directory: root })).tasks.find(task => task.id === gated.id).ready, true);
+  assert.deepEqual([second.resolved!.choice, second.resolved!.channel, second.rejected!.channel], ['stable', 'paseo', 'paseo']);
+  assert.equal((await call('alp.tasks.list', { directory: root })).tasks.find((task: Json) => task.id === gated.id).ready, true);
   assert.equal((await call('alp.tasks.change', { directory: root, id: reviewed.id, action: 'close', note: 'Looks good' })).status, 'closed');
-  assert.equal((await getTask(root, reviewed.id)).closed.summary, 'Looks good');
+  assert.equal((await getTask(root, reviewed.id))!.closed!.summary, 'Looks good');
   assert.equal((await call('alp.tasks.change', { directory: root, id: reviewed.id, action: 'reopen' })).status, 'open');
   await assert.rejects(call('alp.tasks.change', { directory: root, id: 't-ffff', action: 'close' }), /No task t-ffff/);
   // Closing an epic shows the first line of its report.

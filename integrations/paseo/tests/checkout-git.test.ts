@@ -12,6 +12,10 @@ import { createDaemonServer } from '@anhlp/alp-daemon';
 import { createWebServer, createPaseoBridge } from '@anhlp/alp-paseo';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { fakeTransport } from '../../../test/support/fake-agent.ts';
+import type { TestContext } from 'node:test';
+
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 
 /**
  * The Paseo checkout panels over alpd's workspace.git (issue #121, G1): the bridge runs no Git of
@@ -23,12 +27,12 @@ const posix = process.platform !== 'win32';
 const hasGit = (() => { try { execFileSync('git', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 const skip = !hasGit ? 'git is not installed' : !posix ? 'the traps are POSIX shell scripts' : false;
 const cleanEnv = () => {
-  const env = {};
+  const env: Record<string, Json> = {};
   for (const [key, value] of Object.entries(process.env)) if (!/^GIT_/i.test(key)) env[key] = value;
   return { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
 };
 
-async function setup(t, { without = [] } = {}) {
+async function setup(t: TestContext, { without = [] }: { without?: string[] } = {}) {
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-paseo-git-')));
   const home = path.join(directory, 'home');
   await seedLibrary(home);
@@ -39,27 +43,27 @@ async function setup(t, { without = [] } = {}) {
   }
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false, libraryDir: home });
   const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test', home });
-  const calls = [];
-  let web;
-  const gateway = createPaseoBridge({ clientFactory: async onEvent => {
+  const calls: Json[] = [];
+  let web: Json;
+  const gateway = createPaseoBridge({ clientFactory: (async (onEvent: Json) => {
     const client = daemon.local();
     client.onEvent(onEvent);
     return {
       // An older alpd: the methods it lacks are unknown to it.
-      request: (method, params) => { calls.push(method); return without.includes(method) ? Promise.reject(new AlpRpcError({ code: -32601, message: `Unknown method '${method}'` })) : client.request(method, params); },
+      request: (method: Json, params: Json) => { calls.push(method); return without.includes(method) ? Promise.reject(new AlpRpcError({ code: -32601, message: `Unknown method '${method}'` })) : client.request(method, params); },
       close: client.close.bind(client), onClose: client.onClose.bind(client),
     };
-  }, version: 'test', home, token: () => web.token, serverId: () => web.serverId });
+  }) as Json, version: 'test', home, token: () => web.token, serverId: () => web.serverId });
   web = createWebServer({ home, port: 0, gateway });
   const info = await web.listen();
   t.after(async () => { await web.close(); await runtime.shutdown(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
-  const client = await new Promise((resolve, reject) => {
+  const client: Json = await new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://127.0.0.1:${info.port}/ws`, []);
-    const frames = [];
-    const waiting = [];
+    const frames: Json[] = [];
+    const waiting: Json[] = [];
     ws.on('message', data => {
       const frame = JSON.parse(String(data));
-      const checked = validateWSOutboundMessage(frame);
+      const checked: Json = validateWSOutboundMessage(frame);
       assert.ok(checked.success, `a frame Paseo's app drops: ${JSON.stringify(frame).slice(0, 300)}\n${checked.error}`);
       frames.push(frame);
       for (const wait of [...waiting]) if (wait.test(frame)) { waiting.splice(waiting.indexOf(wait), 1); wait.resolve(frame); }
@@ -67,24 +71,24 @@ async function setup(t, { without = [] } = {}) {
     ws.on('error', reject);
     ws.on('open', () => {
       t.after(() => ws.close());
-      const next = test => new Promise(done => { const found = frames.find(test); if (found) done(found); else waiting.push({ test, resolve: done }); });
-      resolve({ ws, frames, next, send: frame => ws.send(JSON.stringify(frame)) });
+      const next = (test: Json) => new Promise(done => { const found = frames.find(test); if (found) done(found); else waiting.push({ test, resolve: done }); });
+      resolve({ ws, frames, next, send: (frame: Json) => ws.send(JSON.stringify(frame)) });
     });
   });
   client.send({ type: 'hello', clientId: 'cid-git', clientType: 'browser', protocolVersion: 1, capabilities: { helloRejection: true }, auth: { kind: 'password', password: info.token } });
-  await client.next(frame => frame.message?.payload?.status === 'server_info');
-  const ask = async message => {
+  await client.next((frame: Json) => frame.message?.payload?.status === 'server_info');
+  const ask = async (message: Json) => {
     client.send({ type: 'session', message });
-    return (await client.next(frame => frame.message?.payload?.requestId === message.requestId)).message.payload;
+    return (await client.next((frame: Json) => frame.message?.payload?.requestId === message.requestId)).message.payload;
   };
   let opened = 0;
-  const open = async cwd => assert.equal((await ask({ type: 'open_project_request', requestId: `open-${opened++}`, cwd })).error, null);
+  const open = async (cwd: Json) => assert.equal((await ask({ type: 'open_project_request', requestId: `open-${opened++}`, cwd })).error, null);
   return { directory, ask, open, calls, client };
 }
 
-async function repository(root) {
+async function repository(root: Json) {
   await mkdir(root, { recursive: true });
-  const git = (...args) => execFileSync('git', ['-c', 'user.name=ALP', '-c', 'user.email=alp@example.com', ...args], { cwd: root, env: cleanEnv(), encoding: 'utf8' });
+  const git = (...args: Json[]) => execFileSync('git', ['-c', 'user.name=ALP', '-c', 'user.email=alp@example.com', ...args], { cwd: root, env: cleanEnv(), encoding: 'utf8' });
   git('init', '-q', '-b', 'main');
   return git;
 }
@@ -105,7 +109,7 @@ test('the checkout panels run nothing the repository names, and never show its s
   // The repository's traps, set after the test's own git is done with it.
   const traps = path.join(directory, 'traps');
   await mkdir(traps);
-  const trap = async (name, body = '') => {
+  const trap = async (name: Json, body = '') => {
     const file = path.join(directory, `${name}.sh`);
     await writeFile(file, `#!/bin/sh\necho ran >> '${path.join(traps, name)}'\n${body}\n`);
     await chmod(file, 0o755);
@@ -124,8 +128,8 @@ test('the checkout panels run nothing the repository names, and never show its s
   assert.deepEqual([status.isGit, status.repoRoot, status.mainRepoRoot, status.isDirty, status.error], [true, root, null, true, null]);
   const diff = await ask({ type: 'subscribe_checkout_diff_request', requestId: 'd1', subscriptionId: 'sub-1', cwd: root, compare: { mode: 'uncommitted' } });
   assert.deepEqual(await readdir(traps), [], 'no trap ran');
-  assert.deepEqual(diff.files.map(file => [file.path, file.status]), [['a.txt', 'ok']], 'the .env rename is not listed, on either side');
-  assert.deepEqual(diff.files[0].hunks[0].lines.map(line => [line.type, line.content]), [['header', '@@ -1,2 +1,2 @@'], ['context', 'one'], ['remove', 'two'], ['add', '2']]);
+  assert.deepEqual(diff.files.map((file: Json) => [file.path, file.status]), [['a.txt', 'ok']], 'the .env rename is not listed, on either side');
+  assert.deepEqual(diff.files[0].hunks[0].lines.map((line: Json) => [line.type, line.content]), [['header', '@@ -1,2 +1,2 @@'], ['context', 'one'], ['remove', 'two'], ['add', '2']]);
   assert.ok(!JSON.stringify(client.frames).includes('hunter2'));
   const refreshed = await ask({ type: 'checkout.refresh.request', requestId: 'r1', cwd: root });
   assert.equal(refreshed.success, true);
@@ -150,14 +154,14 @@ test('only a registry workspace at its repository\'s top level is a checkout; ba
   const status = await ask({ type: 'checkout_status_request', requestId: 's1', cwd: root });
   assert.deepEqual([status.currentBranch, status.baseRef, status.aheadBehind, status.upstreamRef, status.aheadOfOrigin], ['feature', 'main', { ahead: 1, behind: 0 }, null, null]);
   const base = await ask({ type: 'subscribe_checkout_diff_request', requestId: 'd1', cwd: root, compare: { mode: 'base', baseRef: 'main' } });
-  assert.deepEqual([base.error, base.files.map(file => file.path)], [null, ['pkg/a.txt']]);
+  assert.deepEqual([base.error, base.files.map((file: Json) => file.path)], [null, ['pkg/a.txt']]);
   const unknown = await ask({ type: 'subscribe_checkout_diff_request', requestId: 'd2', cwd: root, compare: { mode: 'base', baseRef: 'no-such-branch' } });
   assert.deepEqual([unknown.error, unknown.files], [null, []], 'as before: no such base compares nothing');
   const option = await ask({ type: 'subscribe_checkout_diff_request', requestId: 'd3', cwd: root, compare: { mode: 'base', baseRef: '--output=/tmp/alp-x' } });
   assert.deepEqual([option.error, option.files], [null, []]);
 
   const listing = await ask({ type: 'fetch_workspaces_request', requestId: 'nested-list' });
-  const nested = listing.entries.find(row => row.workspaceDirectory === path.join(root, 'pkg'));
+  const nested = listing.entries.find((row: Json) => row.workspaceDirectory === path.join(root, 'pkg'));
   assert.equal(nested.project.checkout.worktreeRoot, root, 'unsupported nested metadata retains the actual ancestor root');
   const sub = await ask({ type: 'checkout_status_request', requestId: 's2', cwd: path.join(root, 'pkg') });
   assert.deepEqual([sub.isGit, sub.error?.code], [false, 'NOT_ALLOWED'], 'a directory inside a repository is not read');

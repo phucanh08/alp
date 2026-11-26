@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { fakeDaemon, summary } from './support/fake-daemon.js';
-import { startGateway, until } from './support/harness.js';
+import { fakeDaemon, summary } from './support/fake-daemon.ts';
+import { startGateway, until } from './support/harness.ts';
 import { DEFAULT_PERMISSIONS } from '../dist/policy.js';
 import { teardown } from '../../../test/support/teardown.ts';
+
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 test('worktree grants are opt-in, creator+scope-epoch bound and refreshed before cached events/resources; mappings never grant siblings', async (t) => {
   const defer = teardown(t);
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'alp-gw-wt-')));
@@ -41,7 +44,7 @@ test('worktree grants are opt-in, creator+scope-epoch bound and refreshed before
     createdAt: 'now',
     worktree: { kind: 'user', source, mappingId: 'approved', principalId: env.ids.owner, grantEpoch: '' }
   };
-  daemon.state.handlers['registry.worktree'] = (p) => {
+  daemon.state.handlers['registry.worktree'] = (p: Json) => {
     epoch ??= p.principalEpoch;
     w.worktree.grantEpoch = epoch;
     return {
@@ -56,7 +59,7 @@ test('worktree grants are opt-in, creator+scope-epoch bound and refreshed before
           : []
     };
   };
-  daemon.state.handlers['workspace.get'] = (p) => ({
+  daemon.state.handlers['workspace.get'] = (p: Json) => ({
     workspace:
       p.workspaceId === 'wks_source'
         ? { id: 'wks_source', directory: source }
@@ -65,7 +68,7 @@ test('worktree grants are opt-in, creator+scope-epoch bound and refreshed before
           : { id: 'sibling', directory: sibling },
     revision: 0
   });
-  daemon.state.handlers['workspace.list'] = (p) => ({
+  daemon.state.handlers['workspace.list'] = (p: Json) => ({
     workspaces: p.projectRoots.includes(dest)
       ? [{ ...w, worktree: undefined, managedWorktree: true, branch: 'generated', ownerSecret: 'hidden' }]
       : [],
@@ -86,7 +89,7 @@ test('worktree grants are opt-in, creator+scope-epoch bound and refreshed before
   for (const label of ['other', 'missing']) {
     const { client: other } = await env.sdk(label);
     assert.equal((await other.request('workspace.list', {})).total, 0);
-    await assert.rejects(other.request('session.get', { sessionId: 'generated' }), (e) => e.code === 1001);
+    await assert.rejects(other.request('session.get', { sessionId: 'generated' }), (e: Json) => e.code === 1001);
   }
   const { client: defaults } = await env.sdk('defaults');
   await assert.rejects(
@@ -96,10 +99,10 @@ test('worktree grants are opt-in, creator+scope-epoch bound and refreshed before
       requestId: 'x',
       ifRevision: 0
     }),
-    (e) => e.code === 1003
+    (e: Json) => e.code === 1003
   );
   assert.equal(writes, 0);
-  await assert.rejects(client.request('registry.worktree', {}), (e) => e.code === -32601);
+  await assert.rejects(client.request('registry.worktree', {}), (e: Json) => e.code === -32601);
   await assert.rejects(
     client.request('workspace.worktree.create', {
       workspaceId: 'sibling',
@@ -107,11 +110,11 @@ test('worktree grants are opt-in, creator+scope-epoch bound and refreshed before
       requestId: 'x',
       ifRevision: 0
     }),
-    (e) => e.code === 1003
+    (e: Json) => e.code === 1003
   );
   assert.equal(writes, 0);
-  await assert.rejects(client.request('session.get', { sessionId: 'sibling' }), (e) => e.code === 1001);
-  const events = [];
+  await assert.rejects(client.request('session.get', { sessionId: 'sibling' }), (e: Json) => e.code === 1001);
+  const events: Json[] = [];
   client.onEvent((e) => events.push(e));
   await client.request('session.attach', { sessionId: 'generated' });
   daemon.emit('generated', { type: 'notice', text: 'before' });
@@ -122,5 +125,5 @@ test('worktree grants are opt-in, creator+scope-epoch bound and refreshed before
   await new Promise((r) => setTimeout(r, 40));
   assert.equal(events.length, count);
   assert.equal((await client.request('workspace.list', {})).total, 0);
-  await assert.rejects(client.request('session.get', { sessionId: 'generated' }), (e) => e.code === 1001);
+  await assert.rejects(client.request('session.get', { sessionId: 'generated' }), (e: Json) => e.code === 1001);
 });

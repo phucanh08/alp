@@ -11,17 +11,21 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { EXPOSURE } from '../dist/index.js';
-import { fakeDaemon } from './support/fake-daemon.js';
+import { fakeDaemon } from './support/fake-daemon.ts';
 import WebSocket from 'ws';
 import { AGENT_CAPABILITY, AlpRpcClient } from '@anhlp/alp-client/portable';
 import { connectWebSocket } from '@anhlp/alp-client/websocket';
-import { ORIGIN, startGateway } from './support/harness.js';
+import { ORIGIN, startGateway } from './support/harness.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
 
-const notExposed = method => error => error.code === -32601 && error.message === `${method} is not available through the gateway` && error.data?.reason === 'not_exposed';
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+const notExposed = (method: Json) => (error: Json) => error.code === -32601 && error.message === `${method} is not available through the gateway` && error.data?.reason === 'not_exposed';
 
 /** One valid request per group C owner method, as the app sends it. */
-const REQUESTS = {
+const REQUESTS: Record<string, Json> = {
   'host.library.get': { kind: 'mcp', name: 'search', scope: 'library' },
   'host.library.save': { kind: 'mcp', name: 'search', scope: 'library', content: { server: { command: 'npx', env: { TOKEN: { $secret: 'keep' } } } }, revision: 'r1' },
   'host.library.delete': { kind: 'hooks', name: 'notify', scope: 'library', revision: 'r1' },
@@ -34,15 +38,15 @@ const REQUESTS = {
 const HANDLED = Object.keys(REQUESTS);
 const LANGUAGE = { language: 'English', applies: 'English', default: 'Vietnamese' };
 
-async function world(t, { owner = true, without = [] } = {}) {
+async function world(t: TestContext, { owner = true, without = [] }: { owner?: boolean, without?: string[] } = {}) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-owner-library-'));
   defer(() => rm(directory, { recursive: true, force: true }));
   const daemon = fakeDaemon();
   daemon.state.handlers['catalog.refresh'] = () => ({ models: [], modes: [], fetchedAt: '2026-11-21T00:00:00.000Z', providers: [] });
-  daemon.state.handlers['settings.language.set'] = params => ({ ...LANGUAGE, language: params.language, applies: params.language ?? 'Vietnamese' });
-  const ran = [];
-  const handlers = Object.fromEntries(HANDLED.filter(method => !without.includes(method)).map(method => [method, async context => {
+  daemon.state.handlers['settings.language.set'] = (params: Json) => ({ ...LANGUAGE, language: params.language, applies: params.language ?? 'Vietnamese' });
+  const ran: Json[] = [];
+  const handlers = Object.fromEntries(HANDLED.filter(method => !without.includes(method)).map(method => [method, async (context: Json) => {
     ran.push({ method, params: context.params });
     return { handled: method };
   }]));
@@ -56,7 +60,7 @@ async function world(t, { owner = true, without = [] } = {}) {
       other: { workspaces: [path.join(directory, 'a')], permissions: ['session.read', 'project.read', 'project.write', 'files.read', 'library.write', 'workspace.write'] },
       plain: { workspaces: [path.join(directory, 'a')], permissions: ['session.read', 'project.read'] },
     },
-    ...(owner ? { owner: ids => { current.id = ids.owner; return { credentialId: () => current.id, methods: handlers }; } } : {}),
+    ...(owner ? { owner: (ids: Json) => { current.id = ids.owner; return { credentialId: () => current.id, methods: handlers }; } } : {}),
   });
   return { daemon, ran, directory, ...gw };
 }
@@ -66,10 +70,10 @@ test('owner-library: the group C entries are owner methods; the dashboard\'s are
     const entry = EXPOSURE[method];
     assert.equal(entry?.status, 'owner', method);
     assert.equal(entry.handler, true, method);
-    assert.ok(entry.tests.includes('owner'), method);
+    assert.ok(entry.tests!.includes('owner'), method);
     assert.equal(entry.permission, undefined, method);
     // Every key the app sends is listed, so it reaches the handler.
-    assert.deepEqual(Object.keys(REQUESTS[method]).filter(key => !entry.params.includes(key)), [], method);
+    assert.deepEqual(Object.keys(REQUESTS[method]).filter(key => !entry.params!.includes(key)), [], method);
   }
   assert.equal(EXPOSURE['settings.language.set'].status, 'owner');
   assert.deepEqual(EXPOSURE['settings.language.set'].params, ['language']);
@@ -113,7 +117,7 @@ test('owner-library: the owner gets each handler\'s answer with only the listed 
   assert.equal((await client.request('catalog.refresh', { force: true })).fetchedAt, '2026-11-21T00:00:00.000Z');
   assert.deepEqual(daemon.calls().slice(before).map(call => [call.method, call.params]), [['catalog.refresh', {}]]);
   // alpd's v1 schema still checks the language before alpd sees it.
-  await assert.rejects(client.request('settings.language.set', { language: 'x'.repeat(41) }), error => error.code === -32602);
+  await assert.rejects(client.request('settings.language.set', { language: 'x'.repeat(41) }), (error: Json) => error.code === -32602);
 });
 
 test('owner-library: on an owner gateway with no handler registered for a handler method, even the owner is refused and nothing reaches alpd', async t => {
@@ -132,9 +136,9 @@ test('owner-library: in a granted workspace with no .alp (not_alp_project), only
   const notProject = { code: 1001, message: 'not an ALP project; run alp init there', data: { reason: 'not_alp_project' } };
   // alpd as it answers a plain directory: every library read with a projectRoot is refused; without
   // one it answers the library and built-in layers. A request with projectRoot never answers rows.
-  const refuseWithRoot = answer => params => { if (params.projectRoot !== undefined) throw notProject; return answer(params); };
+  const refuseWithRoot = (answer: Json) => (params: Json) => { if (params.projectRoot !== undefined) throw notProject; return answer(params); };
   daemon.state.handlers['library.list'] = refuseWithRoot(() => ({ projectRoot: null, entries: [{ name: 'notify', source: 'library', description: 'd' }] }));
-  daemon.state.handlers['library.get'] = refuseWithRoot(params => ({ kind: params.kind, name: params.name, source: 'library', content: { event: 'handoff' }, revision: 'r1', usedBy: [] }));
+  daemon.state.handlers['library.get'] = refuseWithRoot((params: Json) => ({ kind: params.kind, name: params.name, source: 'library', content: { event: 'handoff' }, revision: 'r1', usedBy: [] }));
   daemon.state.handlers['team.list'] = refuseWithRoot(() => ({ projectRoot: null, teams: [{ id: 'default', name: 'Default' }] }));
   const root = path.join(directory, 'a');
   const READS = {
@@ -142,7 +146,7 @@ test('owner-library: in a granted workspace with no .alp (not_alp_project), only
     'library.get': { kind: 'hooks', name: 'notify', projectRoot: root },
     'team.list': { projectRoot: root },
   };
-  const isNotProject = error => error.code === 1001 && error.data?.reason === 'not_alp_project';
+  const isNotProject = (error: Json) => error.code === 1001 && error.data?.reason === 'not_alp_project';
 
   // Not the owner, with project.read and library.write, or project.read only: alpd's refusal, asked once.
   for (const name of ['other', 'plain']) {
@@ -169,9 +173,9 @@ test('owner-library: in a granted workspace with no .alp (not_alp_project), only
   // The owner: asked again without projectRoot, and gets the library rows.
   const { client } = await sdk('owner');
   const mark = { list: daemon.calls('library.list').length, get: daemon.calls('library.get').length, team: daemon.calls('team.list').length };
-  assert.deepEqual((await client.request('library.list', READS['library.list'])).entries.map(entry => entry.name), ['notify']);
+  assert.deepEqual((await client.request('library.list', READS['library.list'])).entries.map((entry: Json) => entry.name), ['notify']);
   assert.equal((await client.request('library.get', READS['library.get'])).source, 'library');
-  assert.deepEqual((await client.request('team.list', READS['team.list'])).teams.map(team => team.id), ['default']);
+  assert.deepEqual((await client.request('team.list', READS['team.list'])).teams.map((team: Json) => team.id), ['default']);
   assert.deepEqual(daemon.calls('library.list').slice(mark.list).map(call => call.params.projectRoot), [root, undefined]);
   assert.deepEqual(daemon.calls('library.get').slice(mark.get).map(call => call.params.projectRoot), [root, undefined]);
   assert.deepEqual(daemon.calls('team.list').slice(mark.team).map(call => call.params.projectRoot), [root, undefined]);
@@ -182,6 +186,6 @@ test('owner-library: in a granted workspace with no .alp (not_alp_project), only
   // Any other refusal is not asked again either.
   daemon.state.handlers['library.list'] = () => { throw { code: 1001, message: 'gone', data: { reason: 'not_found' } }; };
   const other = daemon.calls('library.list').length;
-  await assert.rejects(client.request('library.list', READS['library.list']), error => error.code === 1001 && error.data?.reason === 'not_found');
+  await assert.rejects(client.request('library.list', READS['library.list']), (error: Json) => error.code === 1001 && error.data?.reason === 'not_found');
   assert.equal(daemon.calls('library.list').length - other, 1);
 });

@@ -15,19 +15,23 @@ import { createWebServer } from '@anhlp/alp-paseo';
 import { createPaseoBridge } from '@anhlp/alp-paseo';
 import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
+
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 
 /**
  * A relay as Paseo's (protocol v2) behaves: the daemon's control socket hears which devices
  * connect, the daemon opens a data socket per device, and the relay passes bytes between them.
  */
-async function fakeRelay(t) {
-  const server = http.createServer();
+async function fakeRelay(t: TestContext) {
+  const server: Json = http.createServer();
   const sockets = new WebSocketServer({ server, path: '/ws' });
   const controls = new Map();
   const devices = new Map();
-  const seen = [];
+  const seen: Json[] = [];
   sockets.on('connection', (ws, request) => {
-    const url = new URL(request.url, 'http://relay');
+    const url = new URL(request.url!, 'http://relay');
     const serverId = url.searchParams.get('serverId');
     const role = url.searchParams.get('role');
     const connectionId = url.searchParams.get('connectionId');
@@ -39,7 +43,7 @@ async function fakeRelay(t) {
     }
     if (role === 'client') {
       const id = randomUUID();
-      const device = { ws, queue: [], daemon: undefined };
+      const device = { ws, queue: [] as Json[], daemon: undefined as Json };
       devices.set(id, device);
       ws.on('message', (data, binary) => device.daemon ? device.daemon.send(data, { binary }) : device.queue.push([data, binary]));
       ws.on('close', () => { devices.delete(id); device.daemon?.close(); controls.get(serverId)?.send(JSON.stringify({ type: 'disconnected', connectionId: id })); });
@@ -58,17 +62,17 @@ async function fakeRelay(t) {
   return { endpoint: `127.0.0.1:${server.address().port}`, seen, controls };
 }
 
-async function setup(t, relay = {}) {
+async function setup(t: TestContext, relay = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-relay-'));
   const home = path.join(directory, 'home');
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false, libraryDir: home });
   const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test', home });
-  let web;
-  const gateway = createPaseoBridge({ clientFactory: async (onEvent) => {
+  let web: Json;
+  const gateway = createPaseoBridge({ clientFactory: (async (onEvent: Json) => {
     const client = daemon.local();
     client.onEvent(onEvent);
     return { request: client.request.bind(client), close: client.close.bind(client), onClose: client.onClose.bind(client) };
-  }, version: 'test', home, token: () => web.token, serverId: () => web.serverId, relay, listen: () => 'here' });
+  }) as Json, version: 'test', home, token: () => web.token, serverId: () => web.serverId, relay, listen: () => 'here' });
   web = createWebServer({ home, port: 0, gateway });
   const info = await web.listen();
   await gateway.relay.start();
@@ -77,48 +81,48 @@ async function setup(t, relay = {}) {
 }
 
 /** The app's side of a socket: frames in, frames out, each checked against Paseo's validator. */
-function frames(t, send) {
-  const received = [];
-  const waiting = [];
+function frames(t: TestContext, send: Json) {
+  const received: Json[] = [];
+  const waiting: Json[] = [];
   return {
     received,
-    take(frame) {
+    take(frame: Json) {
       const checked = validateWSOutboundMessage(frame);
       assert.ok(checked.success, `alpd sent a frame Paseo's app drops: ${JSON.stringify(frame).slice(0, 300)}`);
       received.push(frame);
       for (const wait of [...waiting]) if (wait.test(frame)) { waiting.splice(waiting.indexOf(wait), 1); wait.resolve(frame); }
     },
-    next: test => new Promise(resolve => { const found = received.find(test); if (found) resolve(found); else waiting.push({ test, resolve }); }),
-    send: frame => send(JSON.stringify(frame)),
+    next: (test: Json) => new Promise<Json>(resolve => { const found = received.find(test); if (found) resolve(found); else waiting.push({ test, resolve }); }),
+    send: (frame: Json) => send(JSON.stringify(frame)),
   };
 }
 
 /** A device as Paseo's app pairs: it reads the link, opens the relay as a client and runs the E2EE handshake. */
-async function device(t, url, release = step => t.after(step)) {
+async function device(t: TestContext, url: Json, release = (step: Json) => t.after(step)) {
   const offer = parseConnectionOfferFromUrl(url);
   assert.ok(offer, 'the pairing link carries an offer');
   const ws = new WebSocket(`ws://${offer.relay.endpoint}/ws?serverId=${encodeURIComponent(offer.serverId)}&role=client&v=2`);
   release(() => ws.terminate());
   await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
-  const transport = { send: data => ws.send(data), close: (code, reason) => ws.close(code, reason), onmessage: null, onclose: null, onerror: null };
-  ws.on('message', (data, isBinary) => transport.onmessage?.({ data: isBinary ? new Uint8Array(data).buffer : String(data), isBinary }));
+  const transport: Json = { send: (data: Json) => ws.send(data), close: (code: Json, reason: Json) => ws.close(code, reason), onmessage: null, onclose: null, onerror: null };
+  ws.on('message', (data, isBinary) => transport.onmessage?.({ data: isBinary ? new Uint8Array(data as Buffer).buffer : String(data), isBinary }));
   ws.on('close', (code, reason) => transport.onclose?.(code, String(reason)));
-  let app;
+  let app: Json;
   const channel = await createClientChannel(transport, offer.daemonPublicKeyB64, { onmessage: data => app.take(JSON.parse(String(data))) });
-  app = frames(t, data => channel.send(data));
+  app = frames(t, (data: Json) => channel.send(data));
   const closed = new Promise(resolve => ws.on('close', code => resolve(code)));
   return { ...app, offer, closed };
 }
 
-const hello = password => ({ type: 'hello', clientId: `cid-${randomUUID()}`, clientType: 'mobile', protocolVersion: 1, capabilities: { helloRejection: true }, ...(password ? { auth: { kind: 'password', password } } : {}) });
+const hello = (password?: Json) => ({ type: 'hello', clientId: `cid-${randomUUID()}`, clientType: 'mobile', protocolVersion: 1, capabilities: { helloRejection: true }, ...(password ? { auth: { kind: 'password', password } } : {}) });
 
 test('the pairing link is a Paseo offer with alpd\'s server id, its kept public key and the relay', async t => {
   const relay = await fakeRelay(t);
   const { home, info, gateway } = await setup(t, { enabled: true, endpoint: relay.endpoint, useTls: false });
   const { url, relayEnabled } = await gateway.relay.offer();
   assert.equal(relayEnabled, true);
-  assert.match(url, /^https:\/\/app\.paseo\.sh\/#offer=/);
-  const offer = parseConnectionOfferFromUrl(url);
+  assert.match(url!, /^https:\/\/app\.paseo\.sh\/#offer=/);
+  const offer = parseConnectionOfferFromUrl(url!)!;
   assert.equal(offer.serverId, info.serverId);
   assert.deepEqual(offer.relay, { endpoint: relay.endpoint, useTls: false });
   // The key pair is kept in the credential directory (t-cde5), never beside the home's other files.
@@ -130,8 +134,8 @@ test('the pairing link is a Paseo offer with alpd\'s server id, its kept public 
     assert.equal((await stat(path.join(home, 'paseo', 'relay-keypair.json'))).mode & 0o777, 0o600);
     assert.equal((await stat(path.join(home, 'paseo'))).mode & 0o777, 0o700);
   }
-  assert.equal(parseConnectionOfferFromUrl((await gateway.relay.offer()).url).daemonPublicKeyB64, offer.daemonPublicKeyB64, 'the key is kept');
-  assert.equal(url.includes(info.token), false, 'the link carries no token');
+  assert.equal(parseConnectionOfferFromUrl((await gateway.relay.offer()).url!)!.daemonPublicKeyB64, offer.daemonPublicKeyB64, 'the key is kept');
+  assert.equal(url!.includes(info.token), false, 'the link carries no token');
 });
 
 test('a paired device reaches alpd through the relay, encrypted, and signs in with the token', async t => {
@@ -143,16 +147,16 @@ test('a paired device reaches alpd through the relay, encrypted, and signs in wi
 
   const stranger = await device(t, url);
   stranger.send(hello());
-  const refused = await stranger.next(frame => frame.type === 'hello.rejected');
+  const refused = await stranger.next((frame: Json) => frame.type === 'hello.rejected');
   assert.equal(refused.reason, 'password_required', 'the link alone does not let a device in');
 
   const phone = await device(t, url);
   phone.send(hello(info.token));
-  const status = await phone.next(frame => frame.message?.payload?.status === 'server_info');
+  const status = await phone.next((frame: Json) => frame.message?.payload?.status === 'server_info');
   assert.equal(status.message.payload.serverId, info.serverId);
   assert.equal(status.message.payload.features.relayConfig, true);
   phone.send({ type: 'session', message: { type: 'daemon.get_status.request', requestId: 's1' } });
-  const daemonStatus = (await phone.next(frame => frame.message?.payload?.requestId === 's1')).message.payload;
+  const daemonStatus = (await phone.next((frame: Json) => frame.message?.payload?.requestId === 's1')).message.payload;
   assert.equal(daemonStatus.relay.enabled, true);
   assert.equal(daemonStatus.relay.endpoint, relay.endpoint);
   assert.equal(daemonStatus.listen, 'here');
@@ -165,12 +169,12 @@ test('the web app turns the relay on and off, kept in settings.json; other confi
   const ws = new WebSocket(`ws://127.0.0.1:${info.port}/ws`);
   t.after(() => ws.terminate());
   await new Promise((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject); });
-  const app = frames(t, data => ws.send(data));
+  const app = frames(t, (data: Json) => ws.send(data));
   ws.on('message', data => app.take(JSON.parse(String(data))));
   app.send(hello(info.token));
-  const features = (await app.next(frame => frame.message?.payload?.status === 'server_info')).message.payload.features;
+  const features = (await app.next((frame: Json) => frame.message?.payload?.status === 'server_info')).message.payload.features;
   assert.equal(features.daemonStatusRpc, true);
-  const ask = async message => { app.send({ type: 'session', message }); return (await app.next(frame => frame.message?.payload?.requestId === message.requestId)).message; };
+  const ask = async (message: Json) => { app.send({ type: 'session', message }); return (await app.next((frame: Json) => frame.message?.payload?.requestId === message.requestId)).message; };
 
   const off = await ask({ type: 'daemon.get_pairing_offer.request', requestId: 'p1' });
   assert.deepEqual([off.payload.relayEnabled, off.payload.url], [false, '']);
@@ -179,11 +183,11 @@ test('the web app turns the relay on and off, kept in settings.json; other confi
 
   const on = await ask({ type: 'set_daemon_config_request', requestId: 'c2', config: { relay: { enabled: true } } });
   assert.equal(on.payload.config.relay.enabled, true);
-  await app.next(frame => frame.message?.payload?.status === 'daemon_config_changed');
+  await app.next((frame: Json) => frame.message?.payload?.status === 'daemon_config_changed');
   assert.equal(JSON.parse(await readFile(path.join(home, 'settings.json'), 'utf8')).web.relay.enabled, true);
   await until(() => gateway.relay.connected);
   const paired = await ask({ type: 'daemon.get_pairing_offer.request', requestId: 'p2' });
-  assert.equal(parseConnectionOfferFromUrl(paired.payload.url).serverId, info.serverId);
+  assert.equal(parseConnectionOfferFromUrl(paired.payload.url)!.serverId, info.serverId);
 
   const other = await ask({ type: 'set_daemon_config_request', requestId: 'c3', config: { autoArchiveAfterMerge: true } });
   assert.equal(other.type, 'rpc_error');
@@ -197,16 +201,16 @@ test('the web app turns the relay on and off, kept in settings.json; other confi
 // ---- t-cde5: the password and the relay key live in <home>/paseo/; a restart keeps them, a rotation replaces the password ----
 
 /** The integration's listener and bridge on `home`, as main.ts wires them (the rotation also restarts the relay). */
-async function startIntegration(defer, home, relay) {
+async function startIntegration(defer: Json, home: Json, relay: Json) {
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false, libraryDir: home });
   defer(() => runtime.shutdown());
   const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test', home });
-  let web;
-  const gateway = createPaseoBridge({ clientFactory: async (onEvent) => {
+  let web: Json;
+  const gateway = createPaseoBridge({ clientFactory: (async (onEvent: Json) => {
     const client = daemon.local();
     client.onEvent(onEvent);
     return { request: client.request.bind(client), close: client.close.bind(client), onClose: client.onClose.bind(client) };
-  }, version: 'test', home, token: () => web.token, serverId: () => web.serverId, relay, listen: () => 'here' });
+  }) as Json, version: 'test', home, token: () => web.token, serverId: () => web.serverId, relay, listen: () => 'here' });
   web = createWebServer({ home, port: 0, gateway, onRotate: async () => { await gateway.relay.stop(); await gateway.relay.start(); } });
   const info = await web.listen();
   await gateway.relay.start();
@@ -217,10 +221,10 @@ async function startIntegration(defer, home, relay) {
 }
 
 /** A paired device's sign-in through the relay: the server_info frame, or the rejection. */
-async function signIn(t, url, password) {
+async function signIn(t: TestContext, url: Json, password: Json) {
   const phone = await device(t, url, teardown(t));
   phone.send(hello(password));
-  const answer = await phone.next(frame => frame.type === 'hello.rejected' || frame.message?.payload?.status === 'server_info');
+  const answer = await phone.next((frame: Json) => frame.type === 'hello.rejected' || frame.message?.payload?.status === 'server_info');
   return { phone, answer, accepted: answer.type !== 'hello.rejected' };
 }
 

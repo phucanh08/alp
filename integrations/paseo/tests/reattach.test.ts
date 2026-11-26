@@ -13,47 +13,51 @@ import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { createAgents } from '../server/dist/paseo/agents.js';
+import type { TestContext } from 'node:test';
 
-const directory = {
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+const directory: Json = {
   load: async () => {}, prepare: async () => {}, workspaceIdFor: () => 'workspace',
   placement: () => ({ projectKey: 'p', projectName: 'p', directory: '/' }), assign: async () => {}, changed: () => {},
 };
 
-async function until(check, what = 'condition') {
+async function until(check: Json, what = 'condition') {
   for (let i = 0; i < 600; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`${what} did not happen`);
 }
 
 /** What Paseo shows of a timeline entry: its kind and its text. */
-const shown = entries => entries.map(({ item }) => `${item.type}:${item.text ?? item.message ?? item.items?.map(entry => entry.text).join(',')}`);
-const timeline = (agents, agentId) => agents.handlers.fetch_agent_timeline_request({ type: 'fetch_agent_timeline_request', agentId, requestId: `timeline-${Math.random()}`, direction: 'tail', limit: 500 });
-const subagents = async (agents, parentAgentId) => (await agents.handlers['agent.provider_subagents.list.request']({ type: 'agent.provider_subagents.list.request', requestId: `list-${Math.random()}`, parentAgentId })).payload;
-const subagentRows = async (agents, parentAgentId, subagentId) => {
+const shown = (entries: Json) => entries.map(({ item }: Json) => `${item.type}:${item.text ?? item.message ?? item.items?.map((entry: Json) => entry.text).join(',')}`);
+const timeline = (agents: Json, agentId: Json) => agents.handlers.fetch_agent_timeline_request({ type: 'fetch_agent_timeline_request', agentId, requestId: `timeline-${Math.random()}`, direction: 'tail', limit: 500 });
+const subagents = async (agents: Json, parentAgentId: Json) => (await agents.handlers['agent.provider_subagents.list.request']({ type: 'agent.provider_subagents.list.request', requestId: `list-${Math.random()}`, parentAgentId })).payload;
+const subagentRows = async (agents: Json, parentAgentId: Json, subagentId: Json) => {
   const { payload } = await agents.handlers['agent.provider_subagents.timeline.get.request']({ type: 'agent.provider_subagents.timeline.get.request', requestId: `rows-${Math.random()}`, parentAgentId, subagentId, direction: 'tail', limit: 500 });
   return payload.error ? [`error:${payload.error}`] : shown(payload.rows);
 };
-const agentRow = async (agents, agentId) => (await agents.handlers.fetch_agent_request({ type: 'fetch_agent_request', requestId: `agent-${Math.random()}`, agentId })).payload.agent;
+const agentRow = async (agents: Json, agentId: Json) => (await agents.handlers.fetch_agent_request({ type: 'fetch_agent_request', requestId: `agent-${Math.random()}`, agentId })).payload.agent;
 
 /** A scripted native runtime per session: tools are called and items told as the test says. */
-function fakeTransport(runtimes) {
+function fakeTransport(runtimes: Json) {
   return () => {
     const index = runtimes.length;
     let turns = 0;
-    const runtime = {
+    const runtime: Json = {
       threadId: `thread-${index}`, turnId: undefined,
       async initialize() {},
-      onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
+      onNotification(fn: Json) { this.notification = fn; }, onFailure(fn: Json) { this.failure = fn; }, onRequest(fn: Json) { this.serverRequest = fn; },
       async close() {},
-      async request(method, params) {
+      async request(method: Json, params: Json) {
         if (method === 'thread/resume') { this.threadId = params.threadId; return { thread: { id: params.threadId } }; }
         if (method.startsWith('thread/')) return { thread: { id: this.threadId } };
         if (method === 'turn/start') { this.turnId = `turn-${index}-${++turns}`; return { turn: { id: this.turnId } }; }
         return {};
       },
-      call(tool, args) {
+      call(tool: Json, args: Json) {
         return this.serverRequest('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${Math.random()}`, namespace: null, tool, arguments: args });
       },
-      say(text) { this.notification('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `out-${index}-${Math.random()}`, text } }); },
+      say(text: Json) { this.notification('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `out-${index}-${Math.random()}`, text } }); },
     };
     runtimes.push(runtime);
     return runtime;
@@ -64,22 +68,22 @@ function fakeTransport(runtimes) {
  * A real alpd with a store. Its root `r1` delegates to a lead that stays at work; then the root says
  * more than a history page holds, so the page's tail no longer has the lead's opening.
  */
-async function treeDaemon(t) {
+async function treeDaemon(t: TestContext) {
   const dir = await mkdtemp(path.join(tmpdir(), 'paseo-reattach-'));
   const project = path.join(dir, 'project');
   await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'], lead: ['peer'] } }));
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const runtime = createAlpRuntime({ supervisor: false, transport: fakeTransport(runtimes), runLogDir: path.join(dir, 'runs') });
   const store = createStore(path.join(dir, 'state'));
   const socketPath = daemonPaths(path.join(dir, 'd')).socket;
   const server = createDaemonServer({ runtime, socketPath, version: 'test', store });
   await server.listen();
   const client = await connect(socketPath, { name: 'test', version: '0' });
-  const events = [];
+  const events: Json[] = [];
   client.onEvent(envelope => events.push(envelope));
   t.after(async () => { client.close(); await store.flush().catch(() => {}); await server.close().catch(() => {}); await runtime.shutdown(); await rm(dir, { recursive: true, force: true }); });
-  const request = (method, params) => client.request(method, params);
+  const request = (method: Json, params: Json) => client.request(method, params);
   await request('session.create', { sessionId: 'r1', spec: { cwd: project, persist: true } });
   await request('session.attach', { sessionId: 'r1' });
   await request('session.prompt', { sessionId: 'r1', clientMessageId: 'go', content: [{ type: 'text', text: 'Delegate' }] });
@@ -96,16 +100,16 @@ async function treeDaemon(t) {
 }
 
 /** The bridge on its own connection to alpd; `drop()` closes that connection as a lost socket would. */
-function bridge(t, socketPath) {
-  const clients = [];
-  const clientFactory = async onEvent => {
+function bridge(t: TestContext, socketPath: Json) {
+  const clients: Json[] = [];
+  const clientFactory: Json = async (onEvent: Json) => {
     const client = await connect(socketPath, { name: 'paseo-bridge', version: '0' });
     client.onEvent(onEvent);
     clients.push(client);
     return client;
   };
-  const frames = [];
-  const agents = createAgents({ clientFactory, broadcast: frame => frames.push(frame), directory });
+  const frames: Json[] = [];
+  const agents: Json = createAgents({ clientFactory, broadcast: frame => frames.push(frame), directory });
   t.after(() => agents.close());
   return { agents, frames, drop: () => clients.at(-1).close(), connections: () => clients.length };
 }
@@ -113,12 +117,12 @@ function bridge(t, socketPath) {
 test('a member that opened before the history page and is silent in it keeps its later events, and its own members theirs', async t => {
   const d = await treeDaemon(t);
   const page = await d.request('session.history', { sessionId: 'r1' });
-  assert.ok(!page.items.some(item => item.sessionId === d.lead), 'the lead is silent in the tail page');
+  assert.ok(!page.items.some((item: Json) => item.sessionId === d.lead), 'the lead is silent in the tail page');
   const { agents } = bridge(t, d.socketPath);
   await agents.start();
   assert.equal((await timeline(agents, 'r1')).payload.error, null);
   const listed = await subagents(agents, 'r1');
-  assert.deepEqual(listed.subagents.map(subagent => subagent.id), [d.lead], 'the working lead is the root\'s subagent');
+  assert.deepEqual(listed.subagents.map((subagent: Json) => subagent.id), [d.lead], 'the working lead is the root\'s subagent');
 
   // The lead speaks, and delegates to a peer of its own that speaks.
   d.runtimes[1].say('lead says hi');
@@ -128,7 +132,7 @@ test('a member that opened before the history page and is silent in it keeps its
   await until(async () => (await subagentRows(agents, 'r1', d.lead)).includes('assistant_message:lead says hi'), 'the lead\'s item in its timeline');
   const peer = d.events.find(envelope => envelope.event.type === 'session.opened' && envelope.event.session.parentId === d.lead).sessionId;
   await until(async () => (await subagentRows(agents, 'r1', peer)).includes('assistant_message:peer says hi'), 'the peer\'s item in its timeline');
-  const after = Object.fromEntries((await subagents(agents, 'r1')).subagents.map(subagent => [subagent.id, subagent]));
+  const after = Object.fromEntries((await subagents(agents, 'r1')).subagents.map((subagent: Json) => [subagent.id, subagent]));
   assert.equal(after[peer].parentSubagentId, d.lead);
 });
 
@@ -137,8 +141,8 @@ test('a reconnect re-attaches a root whose tail page holds an item of a known me
   d.runtimes[1].say('lead before the bridge');
   await d.settled();
   const page = await d.request('session.history', { sessionId: 'r1' });
-  assert.ok(page.items.some(item => item.sessionId === d.lead), 'the tail page holds the lead\'s item');
-  assert.ok(!page.items.some(item => item.sessionId === d.lead && item.event.type === 'session.opened'), 'but not its opening');
+  assert.ok(page.items.some((item: Json) => item.sessionId === d.lead), 'the tail page holds the lead\'s item');
+  assert.ok(!page.items.some((item: Json) => item.sessionId === d.lead && item.event.type === 'session.opened'), 'but not its opening');
   const { agents, drop, connections } = bridge(t, d.socketPath);
   await agents.start();
   assert.equal((await timeline(agents, 'r1')).payload.error, null);
@@ -163,28 +167,28 @@ test('a reconnect re-attaches a root whose tail page holds an item of a known me
 const ROOT = { id: 'r1', projectRoot: '/work', agent: 'main', runtime: 'codex', model: 'gpt-5.5', mode: 'workspace-write', thinking: 'medium', workflow: { mode: 'pho', maxPeers: 2, supervisor: false }, threadId: 't', persistent: true, busy: false, status: 'idle' };
 const G1 = 'a'.repeat(32);
 const G2 = 'b'.repeat(32);
-const env = (cursor, sessionId, event) => ({ sessionId, epoch: 'e', seq: cursor, ts: `2026-10-23T00:00:${String(cursor).padStart(2, '0')}.000Z`, ...(cursor !== undefined ? { cursor } : {}), event });
-const say = (cursor, text, sessionId = 'r1') => env(cursor, sessionId, { type: 'item', item: { kind: 'assistant_message', id: `out:${text}`, text } });
-const opened = (cursor, id, parentId = 'r1') => env(cursor, id, { type: 'session.opened', session: { ...ROOT, id, parentId, agent: 'peer' }, cwd: '/work', effective: { model: 'gpt-5.5', thinking: 'medium' } });
-const started = (cursor, turnId) => env(cursor, 'r1', { type: 'turn.started', turnId });
-const ended = (cursor, turnId, state = 'completed') => env(cursor, 'r1', { type: 'turn.ended', turnId, state });
+const env = (cursor: Json, sessionId: Json, event: Json) => ({ sessionId, epoch: 'e', seq: cursor, ts: `2026-10-23T00:00:${String(cursor).padStart(2, '0')}.000Z`, ...(cursor !== undefined ? { cursor } : {}), event });
+const say = (cursor: Json, text: Json, sessionId = 'r1') => env(cursor, sessionId, { type: 'item', item: { kind: 'assistant_message', id: `out:${text}`, text } });
+const opened = (cursor: Json, id: Json, parentId = 'r1') => env(cursor, id, { type: 'session.opened', session: { ...ROOT, id, parentId, agent: 'peer' }, cwd: '/work', effective: { model: 'gpt-5.5', thinking: 'medium' } });
+const started = (cursor: Json, turnId: Json) => env(cursor, 'r1', { type: 'turn.started', turnId });
+const ended = (cursor: Json, turnId: Json, state = 'completed') => env(cursor, 'r1', { type: 'turn.ended', turnId, state });
 
 /**
  * A scripted alpd connection. `history(call)` and `attach(params, call, listener)` answer by call number;
  * `sessions` is what session.list answers.
  */
-function scripted({ capabilities = ['session.history'], sessions = [ROOT], history, attach, get, extra = () => undefined }) {
-  const world = { calls: [], listener: () => {}, sessions };
+function scripted({ capabilities = ['session.history'], sessions = [ROOT], history, attach, get, extra = () => undefined }: Json) {
+  const world: Json = { calls: [] as Json[], listener: () => {}, sessions };
   let histories = 0;
   let attaches = 0;
   const connection = {
     capabilities,
     onEvent: () => {}, onClose: () => {}, close() {},
-    async request(method, params) {
+    async request(method: Json, params: Json) {
       world.calls.push({ method, params });
-      if (method === 'session.list') return { sessions: params?.rootsOnly ? world.sessions.filter(session => !session.parentId) : world.sessions };
+      if (method === 'session.list') return { sessions: params?.rootsOnly ? world.sessions.filter((session: Json) => !session.parentId) : world.sessions };
       if (method === 'question.list') return { questions: [] };
-      if (method === 'session.get') return get ? get(params) : { session: world.sessions.find(session => session.id === params.sessionId) };
+      if (method === 'session.get') return get ? get(params) : { session: world.sessions.find((session: Json) => session.id === params.sessionId) };
       if (method === 'session.history') return history(histories++, params);
       if (method === 'session.attach') return attach(params, attaches++, world.listener);
       const answer = await extra(method, params);
@@ -192,17 +196,17 @@ function scripted({ capabilities = ['session.history'], sessions = [ROOT], histo
       throw new Error(`unexpected request ${method}`);
     },
   };
-  const frames = [];
-  world.agents = createAgents({ clientFactory: async onEvent => { world.listener = onEvent; return connection; }, broadcast: frame => frames.push(frame), directory });
+  const frames: Json[] = [];
+  world.agents = createAgents({ clientFactory: (async (onEvent: Json) => { world.listener = onEvent; return connection; }) as Json, broadcast: frame => frames.push(frame), directory });
   world.frames = frames;
   return world;
 }
 
 test('alpd\'s history_gap answer to an attach makes the bridge read the history again', async t => {
-  const world = scripted({
+  const world: Json = scripted({
     sessions: [{ ...ROOT, status: 'closed' }],
     history: () => ({ generation: G1, hasOlder: false, tipCursor: 1, items: [say(1, 'one')] }),
-    attach(params, call) {
+    attach(params: Json, call: Json) {
       if (call === 0) throw Object.assign(new Error('History advanced beyond replay coverage; retry attach'), { code: 1005, data: { reason: 'history_gap' } });
       return { session: ROOT, cursor: 1 };
     },
@@ -212,24 +216,24 @@ test('alpd\'s history_gap answer to an attach makes the bridge read the history 
   const { payload } = await timeline(world.agents, 'r1');
   assert.equal(payload.error, null);
   assert.deepEqual(shown(payload.entries), ['assistant_message:one']);
-  assert.equal(world.calls.filter(call => call.method === 'session.history').length, 2, 'read again');
+  assert.equal(world.calls.filter((call: Json) => call.method === 'session.history').length, 2, 'read again');
 });
 
 test('without a history page, the attach\'s replay and live events on an attached connection apply once', async t => {
   // A todo list is shown again at each event: an event applied twice shows twice.
-  const say = (cursor, text) => env(cursor, 'r1', { type: 'item', item: { kind: 'todo', id: 'plan', items: [{ id: 's', text, status: 'pending' }] } });
-  const world = scripted({
+  const say = (cursor: Json, text: Json) => env(cursor, 'r1', { type: 'item', item: { kind: 'todo', id: 'plan', items: [{ id: 's', text, status: 'pending' }] } });
+  const world: Json = scripted({
     capabilities: [],
     sessions: [{ ...ROOT, status: 'closed' }],
     history: () => { throw new Error('no history'); },
-    attach(params, call, listener) {
+    attach(params: Json, call: Json, listener: Json) {
       // An attached connection: a live event comes before the replay that brings it again.
       if (call === 0) { listener(say(1, 'one')); listener(say(2, 'two')); return { session: ROOT, cursor: 2 }; }
       listener(say(3, 'three'));
       for (const envelope of [say(1, 'one'), say(2, 'two'), say(3, 'three')]) listener(envelope);
       return { session: ROOT, cursor: 3 };
     },
-    extra: method => method === 'session.create' ? {} : undefined,
+    extra: (method: Json) => method === 'session.create' ? {} : undefined,
   });
   t.after(() => world.agents.close());
   await world.agents.start();
@@ -245,43 +249,43 @@ test('without a history page, the attach\'s replay and live events on an attache
 
 for (const outcome of ['page', 'error']) test(`an attach a later one replaced while it read the history applies nothing of its ${outcome}`, async t => {
   let releaseFirst; const firstGate = new Promise(resolve => { releaseFirst = resolve; });
-  let reachedFirst; const atFirst = new Promise(resolve => { reachedFirst = resolve; });
-  const world = scripted({
+  let reachedFirst: Json; const atFirst = new Promise(resolve => { reachedFirst = resolve; });
+  const world: Json = scripted({
     sessions: [{ ...ROOT, status: 'closed' }],
-    async history(call) {
+    async history(call: Json) {
       if (call === 0) { reachedFirst(); await firstGate; if (outcome === 'error') throw Object.assign(new Error('connection lost'), { code: -32000 }); return { generation: G1, hasOlder: true, olderCursor: 'old', tipCursor: 7, items: [say(6, 'stale six'), say(7, 'stale seven')] }; }
       return { generation: G2, hasOlder: false, tipCursor: 2, items: [say(1, 'one'), say(2, 'two')] };
     },
-    async attach(params) {
+    async attach(params: Json) {
       if (params.generation === G1) throw Object.assign(new Error('History generation changed'), { code: 1004, data: { reason: 'stale_cursor' } });
       return { session: ROOT, cursor: 2 };
     },
-    extra: method => method === 'session.create' ? {} : undefined,
+    extra: (method: Json) => method === 'session.create' ? {} : undefined,
   });
   t.after(() => world.agents.close());
   await world.agents.start();
   const first = timeline(world.agents, 'r1');
   await atFirst;
   await world.agents.handlers.refresh_agent_request({ type: 'refresh_agent_request', agentId: 'r1', requestId: 'reload' });
-  await until(async () => world.calls.filter(call => call.method === 'session.attach').length === 1, 'the later attach');
+  await until(async () => world.calls.filter((call: Json) => call.method === 'session.attach').length === 1, 'the later attach');
   const later = (await timeline(world.agents, 'r1')).payload;
   assert.deepEqual(shown(later.entries), ['assistant_message:one', 'assistant_message:two']);
-  releaseFirst();
+  releaseFirst!();
   const { payload } = await first;
   assert.equal(payload.error, null, 'the replaced attach\'s awaiter gets the later timeline');
   assert.deepEqual(shown(payload.entries), ['assistant_message:one', 'assistant_message:two'], 'nothing of the replaced attach\'s page');
   assert.equal(payload.hasOlder, false, 'nor its older cursor');
-  assert.equal(world.calls.filter(call => call.method === 'session.attach').length, 1, 'the replaced attach never attaches');
+  assert.equal(world.calls.filter((call: Json) => call.method === 'session.attach').length, 1, 'the replaced attach never attaches');
 });
 
 test('an attach a later one replaced while it attached throws nothing to its awaiters on stale_cursor or reset', async t => {
   for (const answer of ['stale_cursor', 'reset']) {
     let releaseAttach; const attachGate = new Promise(resolve => { releaseAttach = resolve; });
-    let reachedAttach; const atAttach = new Promise(resolve => { reachedAttach = resolve; });
-    const world = scripted({
+    let reachedAttach: Json; const atAttach = new Promise(resolve => { reachedAttach = resolve; });
+    const world: Json = scripted({
       sessions: [{ ...ROOT, status: 'closed' }],
-      history: call => call === 0 ? { generation: G1, hasOlder: false, tipCursor: 1, items: [say(1, 'one')] } : { generation: G2, hasOlder: false, tipCursor: 2, items: [say(1, 'one'), say(2, 'two')] },
-      async attach(params) {
+      history: (call: Json) => call === 0 ? { generation: G1, hasOlder: false, tipCursor: 1, items: [say(1, 'one')] } : { generation: G2, hasOlder: false, tipCursor: 2, items: [say(1, 'one'), say(2, 'two')] },
+      async attach(params: Json) {
         if (params.generation === G1) {
           reachedAttach(); await attachGate;
           if (answer === 'reset') return { session: ROOT, cursor: 2, reset: true };
@@ -289,19 +293,19 @@ test('an attach a later one replaced while it attached throws nothing to its awa
         }
         return { session: ROOT, cursor: 2 };
       },
-      extra: method => method === 'session.create' ? {} : undefined,
+      extra: (method: Json) => method === 'session.create' ? {} : undefined,
     });
     try {
       await world.agents.start();
       const first = timeline(world.agents, 'r1');
       await atAttach;
       await world.agents.handlers.refresh_agent_request({ type: 'refresh_agent_request', agentId: 'r1', requestId: 'reload' });
-      await until(async () => world.calls.filter(call => call.method === 'session.attach').length === 2, `${answer}: the later attach`);
-      releaseAttach();
+      await until(async () => world.calls.filter((call: Json) => call.method === 'session.attach').length === 2, `${answer}: the later attach`);
+      releaseAttach!();
       const { payload } = await first;
       assert.equal(payload.error, null, answer);
       assert.deepEqual(shown(payload.entries), ['assistant_message:one', 'assistant_message:two'], answer);
-      assert.equal(world.calls.filter(call => call.method === 'session.history').length, 2, `${answer}: the replaced attach does not read again`);
+      assert.equal(world.calls.filter((call: Json) => call.method === 'session.history').length, 2, `${answer}: the replaced attach does not read again`);
     } finally { world.agents.close(); }
   }
 });
@@ -311,9 +315,9 @@ test('a rewind drops the members of the branch it set aside', async t => {
   const kept = opened(2, 'c-kept');
   const gone = opened(4, 'c-gone');
   const sessions = [ROOT, { ...kept.event.session, status: 'closed' }, { ...gone.event.session, status: 'closed' }];
-  const world = scripted({
+  const world: Json = scripted({
     sessions,
-    history: call => call === 0
+    history: (call: Json) => call === 0
       ? { generation: G1, hasOlder: false, tipCursor: 6, items: [say(1, 'one'), kept, say(3, 'kept says hi', 'c-kept'), gone, say(5, 'gone says hi', 'c-gone'), say(6, 'kept, set aside', 'c-kept')] }
       // The rewind kept what lay before cursor 4 and added its marker.
       : { generation: NEXT, hasOlder: false, tipCursor: 9, items: [say(1, 'one'), kept, say(3, 'kept says hi', 'c-kept'), env(9, 'r1', { type: 'item', item: { kind: 'notice', id: 'rewind:br', level: 'info', text: 'Conversation rewound' } })] },
@@ -321,27 +325,27 @@ test('a rewind drops the members of the branch it set aside', async t => {
   });
   t.after(() => world.agents.close());
   await world.agents.start();
-  assert.deepEqual((await subagents(world.agents, 'r1')).subagents.map(subagent => subagent.id).sort(), ['c-gone', 'c-kept']);
+  assert.deepEqual((await subagents(world.agents, 'r1')).subagents.map((subagent: Json) => subagent.id).sort(), ['c-gone', 'c-kept']);
   assert.deepEqual(await subagentRows(world.agents, 'r1', 'c-kept'), ['assistant_message:kept says hi', 'assistant_message:kept, set aside']);
   world.listener(env(undefined, 'r1', { type: 'history.reset', generation: NEXT, reason: 'rewind', branchId: 'br' }));
   await until(async () => shown((await timeline(world.agents, 'r1')).payload.entries).includes('notification:Conversation rewound'), 'the rewound timeline');
-  assert.deepEqual((await subagents(world.agents, 'r1')).subagents.map(subagent => subagent.id), ['c-kept']);
+  assert.deepEqual((await subagents(world.agents, 'r1')).subagents.map((subagent: Json) => subagent.id), ['c-kept']);
   assert.deepEqual(await subagentRows(world.agents, 'r1', 'c-kept'), ['assistant_message:kept says hi'], 'the kept member\'s timeline is the rewound history\'s');
-  assert.ok(world.frames.some(frame => frame.type === 'agent.provider_subagents.update' && frame.payload.kind === 'remove' && frame.payload.subagentId === 'c-gone'), 'clients are told the member is gone');
+  assert.ok(world.frames.some((frame: Json) => frame.type === 'agent.provider_subagents.update' && frame.payload.kind === 'remove' && frame.payload.subagentId === 'c-gone'), 'clients are told the member is gone');
 });
 
 test('a turn that ends between the history read and the attach\'s answer asks for attention; a replayed start clears none', async t => {
-  const world = scripted({
+  const world: Json = scripted({
     sessions: [{ ...ROOT, status: 'closed' }],
-    history: call => call === 0
+    history: (call: Json) => call === 0
       ? { generation: G1, hasOlder: false, tipCursor: 1, items: [say(1, 'one')] }
       : { generation: G1, hasOlder: false, tipCursor: 4, items: [say(1, 'one'), started(2, 't1'), say(3, 'answer'), ended(4, 't1')] },
-    attach(params, call, listener) {
+    attach(params: Json, call: Json, listener: Json) {
       // The turn runs and ends after the history read, before the attach's answer.
       if (call === 0) { for (const envelope of [started(2, 't1'), say(3, 'answer'), ended(4, 't1')]) listener(envelope); return { session: ROOT, cursor: 4 }; }
       return { session: ROOT, cursor: 4 };
     },
-    extra: method => method === 'session.create' ? {} : undefined,
+    extra: (method: Json) => method === 'session.create' ? {} : undefined,
   });
   t.after(() => world.agents.close());
   await world.agents.start();
@@ -349,16 +353,16 @@ test('a turn that ends between the history read and the attach\'s answer asks fo
   const agent = await agentRow(world.agents, 'r1');
   assert.equal(agent.requiresAttention, true, 'the finished turn asks for attention');
   assert.equal(agent.attentionReason, 'finished');
-  assert.ok(world.frames.some(frame => frame.type === 'agent_stream' && frame.payload.event.type === 'attention_required'), 'clients are told');
+  assert.ok(world.frames.some((frame: Json) => frame.type === 'agent_stream' && frame.payload.event.type === 'attention_required'), 'clients are told');
   // A re-attach replays the page with that turn's start: the attention stays.
   await world.agents.handlers.refresh_agent_request({ type: 'refresh_agent_request', agentId: 'r1', requestId: 'reload' });
-  await until(() => world.calls.filter(call => call.method === 'session.attach').length === 2, 'the re-attach');
+  await until(() => world.calls.filter((call: Json) => call.method === 'session.attach').length === 2, 'the re-attach');
   assert.equal((await timeline(world.agents, 'r1')).payload.error, null);
   assert.equal((await agentRow(world.agents, 'r1')).requiresAttention, true, 'a replayed turn.started clears no attention');
 });
 
 test('an event at or before the cursor an attach covered that comes after its answer is not applied again', async t => {
-  const world = scripted({
+  const world: Json = scripted({
     history: () => ({ generation: G1, hasOlder: true, olderCursor: 'older', tipCursor: 6, items: [say(5, 'five'), say(6, 'six')] }),
     attach: () => ({ session: ROOT, cursor: 6 }),
   });
@@ -377,29 +381,29 @@ test('a rewind\'s set-aside members are removed for clients by the attach that s
   const kept = opened(2, 'c-kept');
   const gone = opened(4, 'c-gone');
   let release; const gate = new Promise(resolve => { release = resolve; });
-  let reached; const atGate = new Promise(resolve => { reached = resolve; });
+  let reached: Json; const atGate = new Promise(resolve => { reached = resolve; });
   const rewound = { generation: NEXT, hasOlder: false, tipCursor: 9, items: [say(1, 'one'), kept, say(3, 'kept says hi', 'c-kept'), env(9, 'r1', { type: 'item', item: { kind: 'notice', id: 'rewind:br', level: 'info', text: 'Conversation rewound' } })] };
-  const world = scripted({
+  const world: Json = scripted({
     sessions: [{ ...ROOT, status: 'closed' }, { ...kept.event.session, status: 'closed' }, { ...gone.event.session, status: 'closed' }],
-    history: call => call === 0 ? { generation: G1, hasOlder: false, tipCursor: 5, items: [say(1, 'one'), kept, say(3, 'kept says hi', 'c-kept'), gone, say(5, 'gone says hi', 'c-gone')] } : rewound,
+    history: (call: Json) => call === 0 ? { generation: G1, hasOlder: false, tipCursor: 5, items: [say(1, 'one'), kept, say(3, 'kept says hi', 'c-kept'), gone, say(5, 'gone says hi', 'c-gone')] } : rewound,
     // The attach after the history.reset waits; a reload replaces it meanwhile (as a rewind's own answer does).
-    async attach(params, call) { if (call === 1) { reached(); await gate; } return { session: ROOT, cursor: 9 }; },
-    extra: method => method === 'session.create' ? {} : undefined,
+    async attach(params: Json, call: Json) { if (call === 1) { reached(); await gate; } return { session: ROOT, cursor: 9 }; },
+    extra: (method: Json) => method === 'session.create' ? {} : undefined,
   });
   t.after(() => world.agents.close());
   await world.agents.start();
-  assert.deepEqual((await subagents(world.agents, 'r1')).subagents.map(subagent => subagent.id).sort(), ['c-gone', 'c-kept']);
+  assert.deepEqual((await subagents(world.agents, 'r1')).subagents.map((subagent: Json) => subagent.id).sort(), ['c-gone', 'c-kept']);
   world.listener(env(undefined, 'r1', { type: 'history.reset', generation: NEXT, reason: 'rewind', branchId: 'br' }));
   await atGate;
   await world.agents.handlers.refresh_agent_request({ type: 'refresh_agent_request', agentId: 'r1', requestId: 'reload' });
-  assert.deepEqual((await subagents(world.agents, 'r1')).subagents.map(subagent => subagent.id), ['c-kept']);
-  assert.ok(world.frames.some(frame => frame.type === 'agent.provider_subagents.update' && frame.payload.kind === 'remove' && frame.payload.subagentId === 'c-gone'), 'clients are told the member is gone');
-  release();
+  assert.deepEqual((await subagents(world.agents, 'r1')).subagents.map((subagent: Json) => subagent.id), ['c-kept']);
+  assert.ok(world.frames.some((frame: Json) => frame.type === 'agent.provider_subagents.update' && frame.payload.kind === 'remove' && frame.payload.subagentId === 'c-gone'), 'clients are told the member is gone');
+  release!();
 });
 
 test('a listed member that is idle is no subagent until it shows in the history or acts', async t => {
   const idle = { ...ROOT, id: 'sup', parentId: 'r1', agent: 'supervisor', status: 'idle' };
-  const world = scripted({
+  const world: Json = scripted({
     sessions: [ROOT, idle],
     history: () => ({ generation: G1, hasOlder: false, tipCursor: 1, items: [say(1, 'one')] }),
     attach: () => ({ session: ROOT, cursor: 1 }),
@@ -416,15 +420,15 @@ test('an attach a later one replaced while it looked up a member of its page add
   // A member alpd did not list yet: the first page shows it, the attach looks it up; a reload replaces the attach meanwhile.
   const late = { ...ROOT, id: 'late', parentId: 'r1', agent: 'peer', status: 'closed' };
   let release; const gate = new Promise(resolve => { release = resolve; });
-  let reached; const atGate = new Promise(resolve => { reached = resolve; });
-  const world = scripted({
+  let reached: Json; const atGate = new Promise(resolve => { reached = resolve; });
+  const world: Json = scripted({
     sessions: [{ ...ROOT, status: 'closed' }],
-    history: call => call === 0
+    history: (call: Json) => call === 0
       ? { generation: G1, hasOlder: false, tipCursor: 2, items: [say(1, 'one'), say(2, 'late says hi', 'late')] }
       : { generation: G2, hasOlder: false, tipCursor: 1, items: [say(1, 'one')] },
-    async get(params) { if (params.sessionId === 'late') { reached(); await gate; } return { session: late }; },
+    async get(params: Json) { if (params.sessionId === 'late') { reached(); await gate; } return { session: late }; },
     attach: () => ({ session: ROOT, cursor: 2 }),
-    extra: method => method === 'session.create' ? {} : undefined,
+    extra: (method: Json) => method === 'session.create' ? {} : undefined,
   });
   t.after(() => world.agents.close());
   await world.agents.start();
@@ -432,7 +436,7 @@ test('an attach a later one replaced while it looked up a member of its page add
   await atGate;
   await world.agents.handlers.refresh_agent_request({ type: 'refresh_agent_request', agentId: 'r1', requestId: 'reload' });
   assert.deepEqual((await subagents(world.agents, 'r1')).subagents, []);
-  release();
+  release!();
   assert.equal((await first).payload.error, null);
   assert.deepEqual((await subagents(world.agents, 'r1')).subagents, [], 'the replaced attach\'s member is not added');
 });

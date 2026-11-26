@@ -1,7 +1,7 @@
 // Paseo's uploaded files as ALP attachments (issue #121 J, docs/protocol/alp-json-rpc-v1.md §12.6):
 // the reader that only takes files from Paseo's uploads directory (server/uploads.ts), and the
 // provider's translation of `uploaded_file` parts into attachment parts against a fake alpd
-// attachment store (server/provider-core.ts). The web facade's side is facade-attachments.test.js.
+// attachment store (server/provider-core.ts). The web facade's side is facade-attachments.test.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
@@ -13,12 +13,16 @@ import { PROVIDER_CAPABILITIES } from '@getpaseo/plugin/server/provider';
 import { createUploadReader, paseoHome } from '../server/dist/uploads.js';
 import { createAlpProvider } from '../server/dist/provider-core.js';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
 
-const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+const sha256 = (bytes: Json) => createHash('sha256').update(bytes).digest('hex');
 const posix = process.platform !== 'win32';
 
 /** A Paseo home with one upload written as Paseo writes it, and a directory outside it. */
-async function paseoFixture(t) {
+async function paseoFixture(t: TestContext) {
   const defer = teardown(t);
   const root = await mkdtemp(path.join(os.tmpdir(), 'alp-paseo-uploads-'));
   defer(() => rm(root, { recursive: true, force: true }));
@@ -26,7 +30,7 @@ async function paseoFixture(t) {
   const outside = path.join(root, 'outside');
   await mkdir(outside, { recursive: true });
   await writeFile(path.join(outside, 'secret.txt'), 'top secret');
-  const upload = async (fileName, content) => {
+  const upload = async (fileName: Json, content: Json): Promise<Json> => {
     const id = `upload_${randomUUID()}`;
     const dir = path.join(home, 'uploads', id);
     await mkdir(dir, { recursive: true });
@@ -38,8 +42,8 @@ async function paseoFixture(t) {
 }
 
 /** The refusal names the file and no host path. */
-async function refused(promise, fixture, pattern) {
-  const error = await promise.then(() => assert.fail('expected a refusal'), error => error);
+async function refused(promise: Json, fixture: Json, pattern: Json) {
+  const error = await promise.then(() => assert.fail('expected a refusal'), (error: Json) => error);
   assert.match(error.message, pattern);
   assert.ok(!error.message.includes(fixture.root), `the message names no host path: ${error.message}`);
   assert.ok(!error.message.includes(os.tmpdir()), `the message names no host path: ${error.message}`);
@@ -73,7 +77,7 @@ test('the reader refuses anything that is not exactly one of Paseo\'s uploads', 
   const linked = await fixture.upload('placeholder.txt', 'x');
   const linkPath = path.join(path.dirname(linked.path), 'link.txt');
   await symlink(path.join(fixture.outside, 'secret.txt'), linkPath);
-  await refused(read({ ...linked, fileName: 'link.txt', path: linkPath, size: 10 }, 1024), fixture, notUpload);
+  await refused(read({ ...linked, fileName: 'link.txt', path: linkPath, size: 10 } as Json, 1024), fixture, notUpload);
 
   // The upload's directory is a link to a directory outside.
   const id = `upload_${randomUUID()}`;
@@ -82,20 +86,20 @@ test('the reader refuses anything that is not exactly one of Paseo\'s uploads', 
 
   // `..` in the path, even when it resolves back inside.
   const good = await fixture.upload('good.txt', 'good');
-  await refused(read({ ...good, path: `${path.join(fixture.home, 'uploads', good.id)}/../${good.id}/good.txt` }, 1024), fixture, notUpload);
-  await refused(read({ ...good, path: `${path.join(fixture.home, 'uploads', good.id)}//good.txt` }, 1024), fixture, notUpload);
+  await refused(read({ ...good, path: `${path.join(fixture.home, 'uploads', good.id)}/../${good.id}/good.txt` } as Json, 1024), fixture, notUpload);
+  await refused(read({ ...good, path: `${path.join(fixture.home, 'uploads', good.id)}//good.txt` } as Json, 1024), fixture, notUpload);
 
   // An absolute path outside the uploads, a relative one, and one in another upload's directory.
-  await refused(read({ ...good, path: path.join(fixture.outside, 'secret.txt'), size: 10 }, 1024), fixture, notUpload);
-  await refused(read({ ...good, path: '/etc/hosts' }, 1024), fixture, notUpload);
-  await refused(read({ ...good, path: `uploads/${good.id}/good.txt` }, 1024), fixture, notUpload);
+  await refused(read({ ...good, path: path.join(fixture.outside, 'secret.txt'), size: 10 } as Json, 1024), fixture, notUpload);
+  await refused(read({ ...good, path: '/etc/hosts' } as Json, 1024), fixture, notUpload);
+  await refused(read({ ...good, path: `uploads/${good.id}/good.txt` } as Json, 1024), fixture, notUpload);
   const other = await fixture.upload('other.txt', 'other');
-  await refused(read({ ...good, path: other.path }, 1024), fixture, notUpload);
+  await refused(read({ ...good, path: other.path } as Json, 1024), fixture, notUpload);
   // A nested file below an upload directory, and an id that is not Paseo's.
   await mkdir(path.join(fixture.home, 'uploads', good.id, 'deeper'));
   await writeFile(path.join(fixture.home, 'uploads', good.id, 'deeper', 'x.txt'), 'good');
-  await refused(read({ ...good, path: path.join(fixture.home, 'uploads', good.id, 'deeper', 'x.txt') }, 1024), fixture, notUpload);
-  await refused(read({ ...good, id: '../outside' }, 1024), fixture, notUpload);
+  await refused(read({ ...good, path: path.join(fixture.home, 'uploads', good.id, 'deeper', 'x.txt') } as Json, 1024), fixture, notUpload);
+  await refused(read({ ...good, id: '../outside' } as Json, 1024), fixture, notUpload);
 
   // The uploads directory itself is a link.
   const swapped = await paseoFixture(t);
@@ -108,20 +112,20 @@ test('the reader refuses anything that is not exactly one of Paseo\'s uploads', 
   const hard = await fixture.upload('placeholder2.txt', 'x');
   const hardPath = path.join(path.dirname(hard.path), 'hard.txt');
   await link(path.join(fixture.outside, 'secret.txt'), hardPath);
-  await refused(read({ ...hard, fileName: 'hard.txt', path: hardPath, size: 10 }, 1024), fixture, /ALP cannot attach "hard\.txt": it has other links/);
+  await refused(read({ ...hard, fileName: 'hard.txt', path: hardPath, size: 10 } as Json, 1024), fixture, /ALP cannot attach "hard\.txt": it has other links/);
 
   // A size other than declared, a size over the limit (not read at all), a FIFO (never blocks), a file gone.
   const sized = await fixture.upload('sized.txt', '12345');
-  await refused(read({ ...sized, size: 4 }, 1024), fixture, /ALP cannot attach "sized\.txt": it holds 5 bytes, not the 4 Paseo declared/);
+  await refused(read({ ...sized, size: 4 } as Json, 1024), fixture, /ALP cannot attach "sized\.txt": it holds 5 bytes, not the 4 Paseo declared/);
   await refused(read(sized, 4), fixture, /ALP cannot attach "sized\.txt": it is larger than ALP takes \(4 bytes\)/);
   const fifo = await fixture.upload('fifo-placeholder', 'x');
   const fifoPath = path.join(path.dirname(fifo.path), 'pipe');
   execFileSync('mkfifo', [fifoPath]);
-  await refused(read({ ...fifo, fileName: 'pipe', path: fifoPath, size: 0 }, 1024), fixture, notUpload);
-  await refused(read({ ...sized, path: path.join(path.dirname(sized.path), 'gone.txt'), fileName: 'gone.txt' }, 1024), fixture, /ALP cannot attach "gone\.txt": it is no longer among Paseo's uploads/);
+  await refused(read({ ...fifo, fileName: 'pipe', path: fifoPath, size: 0 } as Json, 1024), fixture, notUpload);
+  await refused(read({ ...sized, path: path.join(path.dirname(sized.path), 'gone.txt'), fileName: 'gone.txt' } as Json, 1024), fixture, /ALP cannot attach "gone\.txt": it is no longer among Paseo's uploads/);
 
   // A name that is a path is shown by its last segment only.
-  await refused(read({ ...good, fileName: `${fixture.outside}/secret.txt`, path: '/etc/hosts' }, 1024), fixture, /ALP cannot attach "secret\.txt"/);
+  await refused(read({ ...good, fileName: `${fixture.outside}/secret.txt`, path: '/etc/hosts' } as Json, 1024), fixture, /ALP cannot attach "secret\.txt"/);
 });
 
 /**
@@ -129,20 +133,20 @@ test('the reader refuses anything that is not exactly one of Paseo\'s uploads', 
  * upload, or the committed object), chunks appended at `received`, commit checks the SHA-256.
  * `fail` lets a test make one method throw.
  */
-function fakeAlpd({ limits = {}, capabilities = ['attachments', 'prompt.images'], handshake = true, hello, fail = () => undefined } = {}) {
+function fakeAlpd({ limits = {}, capabilities = ['attachments', 'prompt.images'], handshake = true, hello, fail = () => undefined }: Json = {}) {
   const uploads = new Map();
   const objects = new Map();
   const connection = {
     // handshake: false is an adapter without handshake capabilities; the provider asks daemon.hello.
     ...(handshake ? { capabilities } : {}),
-    requests: [],
+    requests: [] as Json[],
     closed: false,
     onEvent: () => () => {},
     onClose: () => () => {},
     close() { connection.closed = true; },
-    sent: method => connection.requests.filter(request => request.method === method),
+    sent: (method: Json) => connection.requests.filter(request => request.method === method),
     objects,
-    async request(method, params) {
+    async request(method: Json, params: Json) {
       connection.requests.push({ method, params });
       const failure = fail(method, params, connection);
       if (failure) throw failure;
@@ -180,7 +184,7 @@ function fakeAlpd({ limits = {}, capabilities = ['attachments', 'prompt.images']
 }
 
 /** The ALP provider over `alpd`, with one root `s` open and Paseo's uploads at `home`. */
-async function providerOver(t, alpd, { home, reader = true } = {}) {
+async function providerOver(t: TestContext, alpd: Json, { home, reader = true }: Json = {}) {
   const defer = teardown(t);
   const registration = createAlpProvider({
     description: 'test',
@@ -195,10 +199,10 @@ async function providerOver(t, alpd, { home, reader = true } = {}) {
   });
   const connection = await registration.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
   defer(() => connection.close());
-  const events = [];
+  const events: Json[] = [];
   connection.onEvent(event => events.push(event));
   await connection.send({ type: 'session.open', requestId: 'open', sessionId: 's', config: { cwd: '/w', model: 'pho', mode: 'full-access', settings: {}, env: {}, mcpServers: {}, persist: true }, history: 'skip' });
-  const prompt = (clientMessageId, content) => connection.send({ type: 'session.prompt', sessionId: 's', prompt: { clientMessageId, delivery: 'auto', input: { type: 'message', content } } });
+  const prompt = (clientMessageId: Json, content: Json) => connection.send({ type: 'session.prompt', sessionId: 's', prompt: { clientMessageId, delivery: 'auto', input: { type: 'message', content } } });
   const failures = () => events.filter(event => event.type === 'session.prompt_result' && event.result.type === 'failed');
   return { connection, events, prompt, failures };
 }
@@ -242,7 +246,7 @@ test('uploaded files become attachment parts in place, order kept, other parts u
 test('the same prompt sent again reuses its upload and object; an interrupted upload resumes', { skip: !posix }, async t => {
   const fixture = await paseoFixture(t);
   let dropChunks = 1;
-  const alpd = fakeAlpd({ fail: (method, params) => method === 'attachment.chunk' && params.offset >= 4 && dropChunks-- > 0 ? Object.assign(new Error('ALP daemon connection closed'), { reason: 'disconnected' }) : undefined });
+  const alpd = fakeAlpd({ fail: ((method: Json, params: Json) => method === 'attachment.chunk' && params.offset >= 4 && dropChunks-- > 0 ? Object.assign(new Error('ALP daemon connection closed'), { reason: 'disconnected' }) : undefined) as Json });
   const { prompt, failures } = await providerOver(t, alpd, { home: fixture.home });
   const file = await fixture.upload('long.txt', 'abcdefghijkl');
   // The first attempt fails after the first chunk: the prompt fails and nothing is sent.
@@ -269,12 +273,12 @@ test('the same prompt sent again reuses its upload and object; an interrupted up
   assert.deepEqual(prompts[0].params.content, [{ type: 'attachment', attachmentId: 'att-1' }]);
   // Another message with the same file is another upload request.
   await prompt('m2', [file]);
-  assert.notEqual(alpd.sent('attachment.begin').at(-1).params.requestId, begins[0].params.requestId);
+  assert.notEqual(alpd.sent('attachment.begin').at(-1)!.params.requestId, begins[0].params.requestId);
 });
 
 test('a runtime that cannot read attachments (1005) fails the prompt, never succeeds', { skip: !posix }, async t => {
   const fixture = await paseoFixture(t);
-  const alpd = fakeAlpd({ fail: method => method === 'session.prompt' ? Object.assign(new Error('This session\'s runtime cannot read attachments yet; they stay stored and the prompt was not sent'), { code: 1005, data: { reason: 'attachment_unsupported' } }) : undefined });
+  const alpd = fakeAlpd({ fail: ((method: Json) => method === 'session.prompt' ? Object.assign(new Error('This session\'s runtime cannot read attachments yet; they stay stored and the prompt was not sent'), { code: 1005, data: { reason: 'attachment_unsupported' } }) : undefined) as Json });
   const { prompt, events, failures } = await providerOver(t, alpd, { home: fixture.home });
   await prompt('m1', [{ type: 'text', text: 'see file' }, await fixture.upload('a.txt', 'aaa')]);
   assert.equal(failures().length, 1);
@@ -284,7 +288,7 @@ test('a runtime that cannot read attachments (1005) fails the prompt, never succ
 
 test('refusals happen before anything is sent and name files, never host paths', { skip: !posix }, async t => {
   const fixture = await paseoFixture(t);
-  const check = async (alpd, content, pattern, options = {}) => {
+  const check = async (alpd: Json, content: Json, pattern: Json, options = {}) => {
     const { prompt, failures } = await providerOver(t, alpd, { home: fixture.home, ...options });
     await prompt(`m-${randomUUID()}`, content);
     assert.equal(failures().length, 1);
@@ -314,7 +318,7 @@ test('refusals happen before anything is sent and name files, never host paths',
 test('the provider fails closed on what alpd offers: capability and attachmentLimits from daemon.hello', { skip: !posix }, async t => {
   const fixture = await paseoFixture(t);
   const file = await fixture.upload('a.txt', 'aaa');
-  const refused = async (alpd, pattern) => {
+  const refused = async (alpd: Json, pattern: Json) => {
     const { prompt, failures } = await providerOver(t, alpd, { home: fixture.home });
     await prompt(`m-${randomUUID()}`, [file]);
     assert.equal(failures().length, 1);
@@ -344,7 +348,7 @@ test('the provider fails closed on what alpd offers: capability and attachmentLi
   // A failed hello refuses the files, and is asked again for the next prompt.
   {
     let helloFails = 1;
-    const alpd = fakeAlpd({ fail: method => method === 'daemon.hello' && helloFails-- > 0 ? new Error('hello went wrong') : undefined });
+    const alpd = fakeAlpd({ fail: ((method: Json) => method === 'daemon.hello' && helloFails-- > 0 ? new Error('hello went wrong') : undefined) as Json });
     const { prompt, failures } = await providerOver(t, alpd, { home: fixture.home });
     await prompt('m-1', [file]);
     assert.equal(failures().length, 1);

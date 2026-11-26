@@ -7,11 +7,15 @@ import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { EXPOSURE, FORWARDED_CAPABILITIES } from '../dist/policy.js';
-import { fakeDaemon, summary } from './support/fake-daemon.js';
-import { startGateway } from './support/harness.js';
+import { fakeDaemon, summary } from './support/fake-daemon.ts';
+import { startGateway } from './support/harness.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
 
-async function world(t, { capabilities = ['attach.after', 'prompt.receipts', 'session.commands'] } = {}) {
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+async function world(t: TestContext, { capabilities = ['attach.after', 'prompt.receipts', 'session.commands'] } = {}) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-commands-'));
   defer(() => rm(directory, { recursive: true, force: true }));
@@ -53,7 +57,7 @@ test('the answer keeps only name, description, argumentHint and kind, bounded; o
   assert.deepEqual(commands[2], { name: 'odd', description: '', kind: 'command' });
   assert.ok(!JSON.stringify(commands).includes('secret') && !JSON.stringify(commands).includes('/home/u'));
   const mark = daemon.calls().length;
-  await assert.rejects(client.request('session.commands', { sessionId: 'sb' }), error => error.code === 1001);
-  await assert.rejects((await sdk('none')).client.request('session.commands', { sessionId: 'sa' }), error => error.code === 1003);
+  await assert.rejects(client.request('session.commands', { sessionId: 'sb' }), (error: Json) => error.code === 1001);
+  await assert.rejects((await sdk('none')).client.request('session.commands', { sessionId: 'sa' }), (error: Json) => error.code === 1003);
   assert.equal(daemon.calls().slice(mark).filter(call => call.method === 'session.commands').length, 0);
 });

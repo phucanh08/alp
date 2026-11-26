@@ -11,13 +11,16 @@ import { AgentSnapshotPayloadSchema, AgentStreamMessageSchema } from '@getpaseo/
 
 import { createAgents } from '../server/dist/paseo/agents.js';
 
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
 /**
  * The four lifecycle-review fixes on the agents bridge: a failed first factory must not poison
  * every later handler, and a connection that connected but whose first refresh failed is
  * half-open and must be dropped and retried rather than spun on. Both are driven with an injected
  * client factory, so no daemon is involved and the failure order is exact.
  */
-const directory = {
+const directory: Json = {
   load: async () => {},
   prepare: async () => {},
   workspaceIdFor: () => 'workspace',
@@ -27,15 +30,15 @@ const directory = {
 };
 
 /** A DaemonConnection the bridge can attach to, recording calls and answering the two list RPCs. */
-function fakeConnection({ onRequest } = {}) {
-  const listeners = { event: [], close: [] };
+function fakeConnection({ onRequest }: Json = {}) {
+  const listeners = { event: [] as Json[], close: [] as Json[] };
   const connection = {
-    calls: [],
+    calls: [] as Json[],
     closed: false,
-    onEvent: listener => listeners.event.push(listener),
-    onClose: listener => listeners.close.push(listener),
+    onEvent: (listener: Json) => listeners.event.push(listener),
+    onClose: (listener: Json) => listeners.close.push(listener),
     close() { if (connection.closed) return; connection.closed = true; for (const listener of listeners.close) listener(); },
-    async request(method, params) {
+    async request(method: Json, params: Json) {
       connection.calls.push(method);
       if (onRequest) return onRequest(method, params, connection);
       if (method === 'session.list') return { sessions: [] };
@@ -52,30 +55,30 @@ function fakeConnection({ onRequest } = {}) {
  * this file's stub). A mismatch is collected, not thrown: frames sent from a background refresh
  * would swallow a throw. Each test asserts it collected none.
  */
-function checked(frame, problems) {
-  const result = frame.type === 'agent_stream' ? AgentStreamMessageSchema.safeParse(frame)
+function checked(frame: Json, problems: Json) {
+  const result: Json = frame.type === 'agent_stream' ? AgentStreamMessageSchema.safeParse(frame)
     : frame.type === 'agent_update' && frame.payload.kind === 'upsert' ? AgentSnapshotPayloadSchema.safeParse(frame.payload.agent)
     : { success: true };
   if (!result.success) problems.push({ type: frame.type, issues: result.error.issues });
   return frame;
 }
 
-async function until(check, what, tries = 200) {
+async function until(check: Json, what: Json, tries = 200) {
   for (let i = 0; i < tries; i++) { if (check()) return; await sleep(25); }
   assert.fail(`Expected ${what} did not happen`);
 }
 
 test('a failed first factory is retried, not memoized, and the bridge recovers', async () => {
-  const connections = [];
+  const connections: Json[] = [];
   let factoryCalls = 0;
-  const clientFactory = async () => {
+  const clientFactory: Json = async () => {
     factoryCalls += 1;
     if (factoryCalls === 1) throw new Error('daemon not up yet');
     const connection = fakeConnection();
     connections.push(connection);
     return connection;
   };
-  const agents = createAgents({ clientFactory, broadcast: () => {}, directory });
+  const agents: Json = createAgents({ clientFactory, broadcast: () => {}, directory });
   try {
     await assert.rejects(() => agents.start(), /daemon not up yet/);
     // The scheduled initial reconnect brings a connection up without any second start() call.
@@ -87,13 +90,13 @@ test('a failed first factory is retried, not memoized, and the bridge recovers',
 });
 
 test('a connection whose first refresh fails is dropped as half-open and replaced', async () => {
-  const connections = [];
+  const connections: Json[] = [];
   let factoryCalls = 0;
-  const clientFactory = async () => {
+  const clientFactory: Json = async () => {
     factoryCalls += 1;
     const call = factoryCalls;
     const connection = fakeConnection({
-      onRequest: method => {
+      onRequest: (method: Json) => {
         if (method === 'session.list' && call === 2) throw new Error('daemon is restarting');
         if (method === 'session.list') return { sessions: [] };
         if (method === 'question.list') return { questions: [] };
@@ -103,7 +106,7 @@ test('a connection whose first refresh fails is dropped as half-open and replace
     connections.push(connection);
     return connection;
   };
-  const agents = createAgents({ clientFactory, broadcast: () => {}, directory });
+  const agents: Json = createAgents({ clientFactory, broadcast: () => {}, directory });
   try {
     await agents.start();
     assert.equal(connections.length, 1, 'the first connection is live');
@@ -113,29 +116,29 @@ test('a connection whose first refresh fails is dropped as half-open and replace
     // third connection must be used instead of spinning on the dead one.
     await until(() => connections.length >= 3 && connections[2].calls.includes('session.list'), 'the refresh to succeed on a replacement connection');
     assert.equal(connections[1].closed, true, 'the half-open connection was dropped');
-    assert.equal(connections[2].calls.filter(method => method === 'session.list').length, 1, 'the replacement refreshed exactly once');
+    assert.equal(connections[2].calls.filter((method: Json) => method === 'session.list').length, 1, 'the replacement refreshed exactly once');
   } finally { agents.close(); }
 });
 
 test('a changed alpd epoch resets the delta state for a root; within one epoch only suffixes stream', async () => {
   const session = { id: 'root-1', status: 'idle', projectRoot: '/', agent: 'main', title: 'root', runtime: 'claude', model: 'opus', mode: 'default', workflow: { mode: 'custom' }, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
-  let emit, connection;
-  const clientFactory = async onEvent => {
+  let emit: Json, connection: Json;
+  const clientFactory: Json = async (onEvent: Json) => {
     emit = onEvent;
     return connection = fakeConnection({
-      onRequest: method => {
+      onRequest: (method: Json) => {
         if (method === 'session.list') return { sessions: [session] };
         if (method === 'question.list') return { questions: [] };
         return {};
       },
     });
   };
-  const frames = [];
-  const agents = createAgents({ clientFactory, broadcast: frame => frames.push(frame), directory });
+  const frames: Json[] = [];
+  const agents: Json = createAgents({ clientFactory, broadcast: frame => frames.push(frame), directory });
   const texts = () => frames
     .filter(frame => frame.type === 'agent_stream' && frame.payload.agentId === session.id && frame.payload.event.type === 'timeline' && frame.payload.event.item.type === 'assistant_message')
     .map(frame => frame.payload.event.item.text);
-  const item = (epoch, text) => emit({ sessionId: session.id, epoch, ts: new Date().toISOString(), event: { type: 'item', item: { id: 'msg-1', kind: 'assistant_message', text } } });
+  const item = (epoch: Json, text: Json) => emit({ sessionId: session.id, epoch, ts: new Date().toISOString(), event: { type: 'item', item: { id: 'msg-1', kind: 'assistant_message', text } } });
   try {
     await agents.start();
     // The refresh attaches the live root; once the attach has answered, its timeline exists and is not replaying.
@@ -155,12 +158,12 @@ test('a changed alpd epoch resets the delta state for a root; within one epoch o
 test('a root removed from alpd drops its timeline; when it reappears it replays freshly, without stale or repeated rows', async () => {
   const session = { id: 'root-1', status: 'idle', projectRoot: '/', agent: 'main', title: 'root', runtime: 'claude', model: 'opus', mode: 'default', workflow: { mode: 'custom' }, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
   let listed = [session];
-  let emit, connection;
-  const item = text => ({ sessionId: session.id, epoch: 'epoch-A', ts: new Date().toISOString(), event: { type: 'item', item: { id: 'msg-1', kind: 'assistant_message', text } } });
-  const clientFactory = async onEvent => {
+  let emit: Json, connection: Json;
+  const item = (text: Json) => ({ sessionId: session.id, epoch: 'epoch-A', ts: new Date().toISOString(), event: { type: 'item', item: { id: 'msg-1', kind: 'assistant_message', text } } });
+  const clientFactory: Json = async (onEvent: Json) => {
     emit = onEvent;
     return connection = fakeConnection({
-      onRequest: method => {
+      onRequest: (method: Json) => {
         if (method === 'session.list') return { sessions: listed };
         if (method === 'question.list') return { questions: [] };
         // alpd replays the root's history as it is now: the fully streamed message.
@@ -169,12 +172,12 @@ test('a root removed from alpd drops its timeline; when it reappears it replays 
       },
     });
   };
-  const frames = [];
-  const problems = [];
-  const agents = createAgents({ clientFactory, broadcast: frame => frames.push(checked(frame, problems)), directory });
+  const frames: Json[] = [];
+  const problems: Json[] = [];
+  const agents: Json = createAgents({ clientFactory, broadcast: frame => frames.push(checked(frame, problems)), directory });
   const live = () => frames.filter(frame => frame.type === 'agent_stream' && frame.payload.agentId === session.id && frame.payload.event.type === 'timeline').map(frame => frame.payload.event.item.text);
   const timeline = async () => (await agents.handlers.fetch_agent_timeline_request({ type: 'fetch_agent_timeline_request', requestId: 'r', agentId: session.id })).payload;
-  const attaches = () => connection.calls.filter(method => method === 'session.attach').length;
+  const attaches = () => connection.calls.filter((method: Json) => method === 'session.attach').length;
   // A root opening makes the bridge read alpd's roots again, as its poll does, known or not.
   const relist = async () => { emit({ sessionId: session.id, epoch: 'epoch-A', ts: new Date().toISOString(), event: { type: 'session.opened', session, cwd: '/' } }); await sleep(20); };
   try {
@@ -182,7 +185,7 @@ test('a root removed from alpd drops its timeline; when it reappears it replays 
     await until(() => attaches() === 1, 'the live root to attach');
     await sleep(10);
     const first = await timeline();
-    assert.deepEqual(first.entries.map(entry => entry.item.text), ['Hello world']);
+    assert.deepEqual(first.entries.map((entry: Json) => entry.item.text), ['Hello world']);
 
     // The root goes away in alpd: the bridge removes it and forgets its timeline.
     listed = [];
@@ -200,7 +203,7 @@ test('a root removed from alpd drops its timeline; when it reappears it replays 
     await sleep(10);
     const second = await timeline();
     assert.notEqual(second.epoch, first.epoch, 'clients see a new epoch and reset');
-    assert.deepEqual(second.entries.map(entry => entry.item.text), ['Hello world'], 'the replay seeds the message once, with no stale suffix');
+    assert.deepEqual(second.entries.map((entry: Json) => entry.item.text), ['Hello world'], 'the replay seeds the message once, with no stale suffix');
     // Within the new timeline, streaming continues by suffix: the replayed message is not appended whole again.
     frames.length = 0;
     emit(item('Hello world!'));
@@ -212,24 +215,24 @@ test('a root removed from alpd drops its timeline; when it reappears it replays 
 
 test("a root's usage is the agent's lastUsage, and its turn's usage when the turn completes (t-7679.12)", async () => {
   const usage = { contextWindowUsedTokens: 50_000, contextWindowMaxTokens: 200_000, inputTokens: 40_000, cachedInputTokens: 30_000, outputTokens: 10_000 };
-  let session = { id: 'root-1', status: 'idle', projectRoot: '/', agent: 'main', title: 'root', runtime: 'claude', model: 'opus', mode: 'default', workflow: { mode: 'custom' }, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', usage };
-  let emit, connection;
-  const clientFactory = async onEvent => {
+  let session: Json = { id: 'root-1', status: 'idle', projectRoot: '/', agent: 'main', title: 'root', runtime: 'claude', model: 'opus', mode: 'default', workflow: { mode: 'custom' }, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', usage };
+  let emit: Json, connection: Json;
+  const clientFactory: Json = async (onEvent: Json) => {
     emit = onEvent;
     return connection = fakeConnection({
-      onRequest: method => {
+      onRequest: (method: Json) => {
         if (method === 'session.list') return { sessions: [structuredClone(session)] };
         if (method === 'question.list') return { questions: [] };
         return {};
       },
     });
   };
-  const frames = [];
-  const problems = [];
+  const frames: Json[] = [];
+  const problems: Json[] = [];
   // Every agent and stream frame must be one Paseo's own clients accept.
-  const agents = createAgents({ clientFactory, broadcast: frame => frames.push(checked(frame, problems)), directory });
+  const agents: Json = createAgents({ clientFactory, broadcast: frame => frames.push(checked(frame, problems)), directory });
   const fetched = async () => (await agents.handlers.fetch_agent_request({ type: 'fetch_agent_request', requestId: 'r', agentId: session.id })).payload.agent;
-  const event = (sessionId, body) => emit({ sessionId, epoch: 'e', ts: new Date().toISOString(), event: body });
+  const event = (sessionId: Json, body: Json) => emit({ sessionId, epoch: 'e', ts: new Date().toISOString(), event: body });
   try {
     await agents.start();
     await until(() => connection.calls.includes('session.attach'), 'the live root to attach');
@@ -239,7 +242,7 @@ test("a root's usage is the agent's lastUsage, and its turn's usage when the tur
     event(session.id, { type: 'turn.started', turnId: 'turn-1' });
     await sleep(20);
     frames.length = 0;
-    const next = { contextWindowUsedTokens: 60_000, contextWindowMaxTokens: 200_000, inputTokens: 50_000, outputTokens: 10_000, totalCostUsd: 0.25 };
+    const next: Json = { contextWindowUsedTokens: 60_000, contextWindowMaxTokens: 200_000, inputTokens: 50_000, outputTokens: 10_000, totalCostUsd: 0.25 };
     session = { ...session, usage: next };
     event(session.id, { type: 'usage', usage: next });
     const upserts = frames.filter(frame => frame.type === 'agent_update' && frame.payload.kind === 'upsert');
@@ -264,18 +267,18 @@ test("a root's usage is the agent's lastUsage, and its turn's usage when the tur
 test('an attach that a later one replaced leaves the later timeline alone when it settles', async () => {
   const session = { id: 'root-1', status: 'idle', projectRoot: '/', agent: 'main', title: 'root', runtime: 'claude', model: 'opus', mode: 'default', workflow: { mode: 'custom' }, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' };
   let listed = [session];
-  let emit, connection;
-  let failFirst;
-  const item = text => ({ sessionId: session.id, epoch: 'epoch-A', ts: new Date().toISOString(), event: { type: 'item', item: { id: 'msg-1', kind: 'assistant_message', text } } });
-  const clientFactory = async onEvent => {
+  let emit: Json, connection: Json;
+  let failFirst: Json;
+  const item = (text: Json) => ({ sessionId: session.id, epoch: 'epoch-A', ts: new Date().toISOString(), event: { type: 'item', item: { id: 'msg-1', kind: 'assistant_message', text } } });
+  const clientFactory: Json = async (onEvent: Json) => {
     emit = onEvent;
     return connection = fakeConnection({
-      onRequest: method => {
+      onRequest: (method: Json) => {
         if (method === 'session.list') return { sessions: listed };
         if (method === 'question.list') return { questions: [] };
         if (method === 'session.attach') {
           // The first attach hangs, then fails late (as on a connection that went away); the next replays.
-          if (connection.calls.filter(call => call === 'session.attach').length === 1) return new Promise((_, reject) => { failFirst = () => reject(new Error('connection lost')); });
+          if (connection.calls.filter((call: Json) => call === 'session.attach').length === 1) return new Promise((_, reject) => { failFirst = () => reject(new Error('connection lost')); });
           emit(item('Hello world'));
           return {};
         }
@@ -283,11 +286,11 @@ test('an attach that a later one replaced leaves the later timeline alone when i
       },
     });
   };
-  const frames = [];
-  const problems = [];
-  const agents = createAgents({ clientFactory, broadcast: frame => frames.push(checked(frame, problems)), directory });
+  const frames: Json[] = [];
+  const problems: Json[] = [];
+  const agents: Json = createAgents({ clientFactory, broadcast: frame => frames.push(checked(frame, problems)), directory });
   const live = () => frames.filter(frame => frame.type === 'agent_stream' && frame.payload.agentId === session.id && frame.payload.event.type === 'timeline').map(frame => frame.payload.event.item.text);
-  const attaches = () => connection.calls.filter(method => method === 'session.attach').length;
+  const attaches = () => connection.calls.filter((method: Json) => method === 'session.attach').length;
   // The root is replaying, so its own events do not refresh: a root the bridge does not know yet does, as the poll would.
   const relist = async () => { emit({ sessionId: 'unknown', epoch: 'epoch-A', ts: new Date().toISOString(), event: { type: 'session.opened', session: { ...session, id: 'unknown' }, cwd: '/' } }); await sleep(20); };
   try {
@@ -305,7 +308,7 @@ test('an attach that a later one replaced leaves the later timeline alone when i
     await sleep(20);
     const page = (await agents.handlers.fetch_agent_timeline_request({ type: 'fetch_agent_timeline_request', requestId: 'r', agentId: session.id })).payload;
     assert.equal(page.error, null);
-    assert.deepEqual(page.entries.map(entry => entry.item.text), ['Hello world']);
+    assert.deepEqual(page.entries.map((entry: Json) => entry.item.text), ['Hello world']);
     assert.equal(attaches(), 2, 'the timeline was kept, so nothing attached again');
     frames.length = 0;
     emit(item('Hello world!'));
@@ -316,15 +319,15 @@ test('an attach that a later one replaced leaves the later timeline alone when i
 
 test('durable backward pages rebuild split snapshots at stable source positions and attach at fixed generation watermark', async () => {
   const session = { id: 'root-history', status: 'idle', projectRoot: '/', agent: 'main', title: 'root', runtime: 'codex', model: 'm', mode: 'read-only', workflow: { mode: 'custom' }, createdAt: '', updatedAt: '' };
-  const envelopes = Array.from({ length: 650 }, (_, i) => ({ sessionId: session.id, epoch: 'old', seq: i + 1, cursor: i + 1, ts: '2026-10-20T00:00:00Z', event: { type: 'item', item: { kind: 'assistant_message', id: i === 449 || i === 450 ? 'split' : `m${i}`, text: i === 449 ? 'hello' : i === 450 ? 'hello world' : `text ${i}` } } }));
+  const envelopes: Json[] = Array.from({ length: 650 }, (_, i) => ({ sessionId: session.id, epoch: 'old', seq: i + 1, cursor: i + 1, ts: '2026-10-20T00:00:00Z', event: { type: 'item', item: { kind: 'assistant_message', id: i === 449 || i === 450 ? 'split' : `m${i}`, text: i === 449 ? 'hello' : i === 450 ? 'hello world' : `text ${i}` } } }));
   const child = { ...session, id: 'history-child', parentId: session.id, status: 'closed', agent: 'peer' };
   envelopes[0] = { ...envelopes[0], sessionId: child.id, event: { type: 'session.opened', session: child, cwd: '/', effective: { model: 'm', thinking: 'low' } } };
   envelopes[500] = { ...envelopes[500], sessionId: child.id };
-  const calls = [];
+  const calls: Json[] = [];
   let emit;
-  const clientFactory = async listener => {
+  const clientFactory: Json = async (listener: Json) => {
     emit = listener;
-    const connection = fakeConnection({ onRequest(method, params) {
+    const connection: Json = fakeConnection({ onRequest(method: Json, params: Json) {
       calls.push({ method, params });
       if (method === 'session.list') return { sessions: [session] };
       if (method === 'session.get') return { session: child };
@@ -339,13 +342,13 @@ test('durable backward pages rebuild split snapshots at stable source positions 
     connection.capabilities = ['session.history'];
     return connection;
   };
-  const agents = createAgents({ clientFactory, broadcast() {}, directory });
+  const agents: Json = createAgents({ clientFactory, broadcast() {}, directory });
   try {
     await agents.start();
-    const fetch = (extra = {}) => agents.handlers.fetch_agent_timeline_request({ type: 'fetch_agent_timeline_request', requestId: 'r', agentId: session.id, ...extra }).then(reply => reply.payload);
+    const fetch = (extra = {}) => agents.handlers.fetch_agent_timeline_request({ type: 'fetch_agent_timeline_request', requestId: 'r', agentId: session.id, ...extra }).then((reply: Json) => reply.payload);
     const first = await fetch();
     assert.equal(first.entries.length, 199);
-    const childFetch = () => agents.handlers['agent.provider_subagents.timeline.get.request']({ type: 'agent.provider_subagents.timeline.get.request', requestId: 'c', parentAgentId: session.id, subagentId: child.id, limit: 0 }).then(reply => reply.payload);
+    const childFetch = () => agents.handlers['agent.provider_subagents.timeline.get.request']({ type: 'agent.provider_subagents.timeline.get.request', requestId: 'c', parentAgentId: session.id, subagentId: child.id, limit: 0 }).then((reply: Json) => reply.payload);
     const childPage = await childFetch();
     assert.equal(childPage.error, null);
     assert.equal(childPage.rows.length, 1);
@@ -356,8 +359,8 @@ test('durable backward pages rebuild split snapshots at stable source positions 
     assert.deepEqual(attach.params, { sessionId: session.id, replay: true, after: 650, generation: 'durable' });
     const before = await fetch({ direction: 'before', cursor: first.startCursor });
     assert.equal(before.error, null);
-    assert.ok(before.entries.every(entry => entry.seqStart < first.startCursor.seq));
-    const boundary = before.entries.find(entry => entry.item.messageId === 'split');
+    assert.ok(before.entries.every((entry: Json) => entry.seqStart < first.startCursor.seq));
+    const boundary = before.entries.find((entry: Json) => entry.item.messageId === 'split');
     assert.ok(boundary, 'the crossing projected item is explicitly returned for update');
     assert.equal(boundary.seqStart, 450);
     assert.equal(boundary.seqEnd, 451);
@@ -367,14 +370,14 @@ test('durable backward pages rebuild split snapshots at stable source positions 
     assert.equal(continued.reset, false, 'an existing cursor remains valid after prepending');
     assert.equal(continued.entries.length, 0);
     const merged = await fetch({ limit: 0 });
-    const split = merged.entries.filter(entry => entry.item.messageId === 'split');
+    const split = merged.entries.filter((entry: Json) => entry.item.messageId === 'split');
     assert.equal(split.length, 1);
     assert.equal(split[0].item.text, 'hello world');
     const childAgain = await childFetch();
     assert.equal(childAgain.rows.length, 1, 'child source snapshot remains once after older-page rebuild');
     assert.equal(childAgain.rows[0].seqEnd, 501);
     assert.equal(childAgain.epoch, childPage.epoch);
-    emit(envelopes.at(-1));
+    emit!(envelopes.at(-1));
     const again = await fetch({ limit: 0 });
     assert.equal(again.entries.length, merged.entries.length, 'stable cursor replay is deduplicated');
   } finally { agents.close(); }
@@ -385,18 +388,18 @@ test('root snapshots wait for committed placement preparation', async () => {
   const session = { id: 'root-prepared', status: 'idle', projectRoot: '/', agent: 'main', runtime: 'codex', model: 'm', mode: 'read-only', workflow: { mode: 'custom' }, updatedAt: '' };
   let release; let prepared = false; let entered = false;
   const gate = new Promise(resolve => { release = resolve; });
-  const sent = [];
-  const agents = createAgents({
-    clientFactory: async () => fakeConnection({ onRequest(method) { if (method === 'session.list') return { sessions: [session] }; if (method === 'question.list') return { questions: [] }; return {}; } }),
+  const sent: Json[] = [];
+  const agents: Json = createAgents({
+    clientFactory: (async () => fakeConnection({ onRequest(method: Json) { if (method === 'session.list') return { sessions: [session] }; if (method === 'question.list') return { questions: [] }; return {}; } })) as Json,
     broadcast: message => sent.push(message),
     directory: { ...directory, async prepare(sessions) { assert.deepEqual(sessions, [session]); entered = true; await gate; prepared = true; }, workspaceIdFor() { assert.ok(prepared); return 'workspace'; }, placement() { assert.ok(prepared); return directory.placement(); } },
   });
   try {
     const started = agents.start(); await until(() => entered, 'placement prepare');
     assert.equal(sent.filter(message => message.type === 'agent_update').length, 0);
-    release(); await started;
+    release!(); await started;
     assert.ok(sent.some(message => message.type === 'agent_update'));
-  } finally { release(); agents.close(); }
+  } finally { release!(); agents.close(); }
 });
 
 for (const historical of ['archived', 'closed', 'error', 'running']) test(`bridge starts with a live root and mapped/unmapped missing ${historical} roots`, async t => {
@@ -410,7 +413,7 @@ for (const historical of ['archived', 'closed', 'error', 'running']) test(`bridg
   const base = { status: 'idle', agent: 'main', runtime: 'codex', model: 'm', mode: 'read-only', workflow: { mode: 'custom' }, updatedAt: '2026-01-01T00:00:00Z' };
   const past = historical === 'archived' ? { archived: true } : { status: historical };
   const sessions = [{ ...base, id: 'live', projectRoot: live }, { ...base, ...past, id: 'mapped', projectRoot: missing }, { ...base, ...past, id: 'unmapped', projectRoot: path.join(root, 'never-existed') }];
-  const sent = []; let agents;
+  const sent: Json[] = []; let agents: Json;
   const workspaces = createWorkspaces({
     rpc: async (method, params) => {
       assert.equal(method, 'registry.owner');
@@ -419,25 +422,25 @@ for (const historical of ['archived', 'closed', 'error', 'running']) test(`bridg
     },
     broadcast: message => sent.push(message), agents: () => agents.view, inDevelopment: async () => 'unavailable',
   });
-  agents = createAgents({ directory: workspaces, broadcast: message => sent.push(message), clientFactory: async () => fakeConnection({ onRequest(method, params) {
+  agents = createAgents({ directory: workspaces, broadcast: message => sent.push(message), clientFactory: (async () => fakeConnection({ onRequest(method: Json, params: Json) {
     if (method === 'session.list') { assert.equal(params.includeClosed, true); assert.equal(params.includeArchived, true); return { sessions }; }
     if (method === 'question.list') return { questions: [] };
     return {};
-  } }) });
+  } })) as Json });
   try {
     await agents.start();
     assert.deepEqual(sent.filter(m => m.type === 'agent_update' && m.payload.kind === 'upsert').map(m => m.payload.agent.id).sort(), ['live', 'mapped', 'unmapped']);
-    assert.deepEqual(agents.view.roots().map(s => s.id).sort(), ['live', 'mapped', 'unmapped']);
+    assert.deepEqual(agents.view.roots().map((s: Json) => s.id).sort(), ['live', 'mapped', 'unmapped']);
     const after = await registry.snapshot(); assert.equal(after.sessions.mapped, original.sessions.mapped);
     assert.ok(after.sessions.unmapped); assert.ok(after.sessions.live);
   } finally { agents.close(); await workspaces.close(); }
 });
 
 test('archive facade shares single-agent behavior, accepts closed roots and refuses unknown children', async t => {
-  const root = { id: 'archive-root', status: 'closed', projectRoot: '/', agent: 'main', runtime: 'codex', model: 'm', mode: 'read-only', workflow: { mode: 'custom' }, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' };
-  const mutations = [];
+  const root: Json = { id: 'archive-root', status: 'closed', projectRoot: '/', agent: 'main', runtime: 'codex', model: 'm', mode: 'read-only', workflow: { mode: 'custom' }, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' };
+  const mutations: Json[] = [];
   let refuseArchive = false;
-  const connection = fakeConnection({ onRequest(method, params) {
+  const connection = fakeConnection({ onRequest(method: Json, params: Json) {
     if (method === 'session.list') return { sessions: [root] };
     if (method === 'question.list') return { questions: [] };
     if (method === 'session.archive') {
@@ -448,7 +451,7 @@ test('archive facade shares single-agent behavior, accepts closed roots and refu
     }
     throw new Error(`unexpected ${method}`);
   } });
-  const agents = createAgents({ clientFactory: async () => connection, broadcast: () => {}, directory });
+  const agents: Json = createAgents({ clientFactory: (async () => connection) as Json, broadcast: () => {}, directory });
   t.after(() => agents.close());
   await agents.start();
   await assert.rejects(agents.archive('child-of-root'), /No agent child-of-root/);

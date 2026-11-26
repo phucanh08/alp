@@ -6,8 +6,12 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { upgradeProject } from '@anhlp/alp-core/upgrade';
 import { mapSession, CodexTransport } from '@anhlp/alp-paseo';
+import type { TestContext } from 'node:test';
 
-async function setup(t) {
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+async function setup(t: TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-workflow-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await initProject(root);
@@ -41,7 +45,7 @@ test('main runs on Opus 5.5 high with full access unless settings or the caller 
   assert.deepEqual([main.runtimeKind, main.model, main.thinking, main.mode, main.workflow.supervisor], ['claude', 'claude-opus-5-5', 'high', 'full-access', true]);
   assert.equal((await mapSession({ ...config, mode: 'read-only' })).mode, 'read-only');
   for (const agent of ['oracle', 'reviewer', 'supervisor']) {
-    const advisor = await mapSession({ ...config, mode: 'full-access', providerOptions: { agent } }).catch(error => error);
+    const advisor = await mapSession({ ...config, mode: 'full-access', providerOptions: { agent } }).catch((error: Json) => error);
     if (agent === 'oracle') assert.match(advisor.message, /claude:claude-fable-5-1 or codex:gpt-6-astra/);
     else assert.equal(advisor.mode, 'read-only');
   }
@@ -66,7 +70,7 @@ test('explicit upgrade preserves supervised behavior for old shipped topology an
 });
 
 test('Codex usage snapshot strips account data, preserves reset windows, and handles unavailable usage', async () => {
-  const context = await CodexTransport.prototype.orchestrationContext.call({ request: async method => method === 'model/list'
+  const context: Json = await CodexTransport.prototype.orchestrationContext.call({ request: async (method: Json) => method === 'model/list'
     ? { data: [{ model: 'best', description: 'Highest capability', supportedReasoningEfforts: [{ reasoningEffort: 'high' }] }] }
     : { accountId: 'PRIVATE', rateLimits: { planType: 'pro', primary: { usedPercent: 80, resetsAt: 123, windowDurationMins: 300 } } } });
   assert.equal(context.usage.limits[0].windows[0].remainingPercent, 20);
@@ -79,7 +83,7 @@ test('Codex usage snapshot strips account data, preserves reset windows, and han
 
 test('Claude usage context exposes only plan/windows and tolerates unsupported experimental API', async () => {
   const { ClaudeTransport } = await import('@anhlp/alp-paseo');
-  const context = await ClaudeTransport.prototype.orchestrationContext.call({ query: {
+  const context: Json = await ClaudeTransport.prototype.orchestrationContext.call({ query: {
     supportedModels: async () => [{ value: 'premium', displayName: 'Premium', description: 'Highest capability', supportedEffortLevels: ['high'] }],
     usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => ({
       email: 'PRIVATE', subscription_type: 'max', rate_limits_available: true,
@@ -97,7 +101,7 @@ test('Claude resolves PATH to an explicit executable instead of SDK binaries ins
   const { ClaudeTransport } = await import('@anhlp/alp-paseo');
   const { realpathSync } = await import('node:fs');
   const runtime = new ClaudeTransport(path.basename(process.execPath), process.cwd(), { PATH: path.dirname(process.execPath) });
-  assert.equal(runtime.command, realpathSync(process.execPath));
+  assert.equal((runtime as Json).command, realpathSync(process.execPath));
   assert.throws(() => new ClaudeTransport('alp-missing-claude', process.cwd(), { PATH: '' }), /ALP_CLAUDE_BIN/);
 });
 
@@ -105,8 +109,8 @@ test('Claude read-only sessions can delegate without plan approval and cannot wr
   const { claudePermissions } = await import('@anhlp/alp-paseo');
   const policy = claudePermissions('read-only');
   assert.equal(policy.permissionMode, 'default');
-  assert.ok(!policy.tools.includes('Write'));
-  assert.ok(!policy.tools.includes('Bash'));
+  assert.ok(!policy.tools!.includes('Write'));
+  assert.ok(!policy.tools!.includes('Bash'));
   for (const name of ['Write', 'Edit', 'Bash', 'ExitPlanMode', 'EnterPlanMode', 'mcp__other__mutate']) {
     assert.equal((await policy.canUseTool(name, {})).behavior, 'deny');
   }

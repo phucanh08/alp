@@ -1,18 +1,22 @@
 // session.compact through the gateway (t-de1a): session.write, a root in the grant looked up afresh and
 // driven within the grant's modes (as session.prompt: the checkpoint turn drives the session); only the
 // status passes back, and alpd's errors leave as fixed text. alpd's own behaviour (checkpoint, native
-// compaction, fallback) is tested in packages/runtime/tests/compact.test.js.
+// compaction, fallback) is tested in packages/runtime/tests/compact.test.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { EXPOSURE } from '../dist/policy.js';
-import { fakeDaemon, summary } from './support/fake-daemon.js';
-import { startGateway } from './support/harness.js';
+import { fakeDaemon, summary } from './support/fake-daemon.ts';
+import { startGateway } from './support/harness.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
 
-async function world(t) {
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+async function world(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-compact-'));
   defer(() => rm(directory, { recursive: true, force: true }));
@@ -34,7 +38,7 @@ async function world(t) {
   return { daemon, ...gw };
 }
 
-const calls = (daemon, mark) => daemon.calls().slice(mark).filter(call => call.method === 'session.compact');
+const calls = (daemon: Json, mark: Json) => daemon.calls().slice(mark).filter((call: Json) => call.method === 'session.compact');
 
 test('the matrix: session.compact is exposed with session.write, mode-checked, sessionId only', () => {
   const entry = EXPOSURE['session.compact'];
@@ -42,7 +46,7 @@ test('the matrix: session.compact is exposed with session.write, mode-checked, s
   assert.equal(entry.permission, 'session.write');
   assert.equal(entry.alsoRequires, undefined);
   assert.deepEqual(entry.params, ['sessionId']);
-  for (const kind of ['permission', 'session-scope', 'mode', 'result-filter']) assert.ok(entry.tests.includes(kind), kind);
+  for (const kind of ['permission', 'session-scope', 'mode', 'result-filter']) assert.ok(entry.tests!.includes(kind), kind);
 });
 
 test('compact: permission, scope, a child, extra params and the grant\'s modes are refused before alpd hears of it', async t => {
@@ -51,11 +55,11 @@ test('compact: permission, scope, a child, extra params and the grant\'s modes a
   const { client: writer } = await sdk('writer');
   const { client: limited } = await sdk('limited');
   const mark = daemon.calls().length;
-  await assert.rejects(reader.request('session.compact', { sessionId: 'sa' }), error => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === 'session.write');
-  await assert.rejects(writer.request('session.compact', { sessionId: 'sb' }), error => error.code === 1001);
-  await assert.rejects(writer.request('session.compact', { sessionId: 'sa-c' }), error => error.code === 1003 && error.data?.reason === 'not_root' && /root/.test(error.message));
-  await assert.rejects(writer.request('session.compact', { sessionId: 'sa', threshold: 0.1 }), error => error.code === -32602);
-  await assert.rejects(limited.request('session.compact', { sessionId: 'sa' }), error => error.code === 1003 && error.data?.reason === 'mode');
+  await assert.rejects(reader.request('session.compact', { sessionId: 'sa' }), (error: Json) => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === 'session.write');
+  await assert.rejects(writer.request('session.compact', { sessionId: 'sb' }), (error: Json) => error.code === 1001);
+  await assert.rejects(writer.request('session.compact', { sessionId: 'sa-c' }), (error: Json) => error.code === 1003 && error.data?.reason === 'not_root' && /root/.test(error.message));
+  await assert.rejects(writer.request('session.compact', { sessionId: 'sa', threshold: 0.1 }), (error: Json) => error.code === -32602);
+  await assert.rejects(limited.request('session.compact', { sessionId: 'sa' }), (error: Json) => error.code === 1003 && error.data?.reason === 'mode');
   assert.deepEqual(calls(daemon, mark), [], 'alpd never heard of a refused compaction');
   const { client: fitting } = await sdk('fitting');
   assert.deepEqual(await fitting.request('session.compact', { sessionId: 'sa' }), { status: 'started' });
@@ -70,7 +74,7 @@ test('compact: only sessionId reaches alpd; only the status passes back; alpd\'s
   }
   assert.deepEqual(Object.keys(calls(daemon, 0).at(-1).params), ['sessionId']);
   daemon.state.compactAnswer = { status: 'done' };
-  await assert.rejects(client.request('session.compact', { sessionId: 'sa' }), error => error.code === 1000);
+  await assert.rejects(client.request('session.compact', { sessionId: 'sa' }), (error: Json) => error.code === 1000);
   daemon.state.compactAnswer = undefined;
   daemon.state.compactError = { code: 1005, message: 'The session is not open at /Users/u/.alp', data: { reason: 'session_busy', path: '/Users/u' } };
   const error = await client.request('session.compact', { sessionId: 'sa' }).catch(failure => failure);

@@ -12,13 +12,16 @@ import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { createAlpProvider } from '../server/dist/provider-core.js';
 import { createProvider } from '../server/dist/provider.js';
 
-function fakeClient(capabilities = PROVIDER_CAPABILITIES) {
-  let onClose;
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+function fakeClient(capabilities = PROVIDER_CAPABILITIES): Json {
+  let onClose: Json;
   const client = {
     closed: false,
     capabilities,
     onEvent: () => () => {},
-    onClose: listener => { onClose = listener; return () => {}; },
+    onClose: (listener: Json) => { onClose = listener; return () => {}; },
     request: async () => ({}),
     close() { client.closed = true; },
     drop(error = new Error('daemon connection closed')) {
@@ -77,7 +80,7 @@ test('close() awaits in-flight relink and stops background loop', async () => {
   assert.equal(closeFinished, false, 'close() must await in-flight relinking');
 
   // Now resolve relink
-  resolveRelink();
+  resolveRelink!();
   await closePromise;
   assert.equal(closeFinished, true);
   assert.equal(relinkSettled, true);
@@ -85,7 +88,7 @@ test('close() awaits in-flight relink and stops background loop', async () => {
 });
 
 test('in-flight relink receives abort signal when close() is called', async () => {
-  let receivedSignal;
+  let receivedSignal: Json;
   let resolveRelink;
   const relinkGate = new Promise(resolve => { resolveRelink = resolve; });
 
@@ -121,7 +124,7 @@ test('in-flight relink receives abort signal when close() is called', async () =
   const closePromise = connection.close();
   assert.equal(receivedSignal.aborted, true, 'signal must be aborted when close() is called');
 
-  resolveRelink();
+  resolveRelink!();
   await closePromise;
   assert.equal(nextClient.closed, true);
 });
@@ -228,12 +231,12 @@ test('defensive: if backend.relink resolves after close timeout, connection is c
   await connection.close(); // Times out and finishes
 
   // Late resolution occurs after close() has settled
-  resolveRelink(lateClient);
+  resolveRelink!(lateClient);
   await new Promise(resolve => setTimeout(resolve, 20));
 
   assert.equal(lateClient.closed, true, 'lateClient must be defensively closed upon late resolution');
   assert.rejects(async () => {
-    await connection.send({ type: 'session.open', requestId: 'req-1', sessionId: 's1', config: { cwd: '/w' } });
+    await connection.send({ type: 'session.open', requestId: 'req-1', sessionId: 's1', config: { cwd: '/w' } as Json } as Json);
   }, /closed/);
 });
 
@@ -253,7 +256,7 @@ test('real createProvider: cancelled queued relink never launches after admissio
   await server.listen();
   await writeFile(daemonPaths(home).lock, JSON.stringify({ pid: process.pid, bootTime: bootTime(), uid: process.getuid?.() ?? -1, version: 'test', protocolVersion: 1, socket, ready: true, startedAt: new Date().toISOString() }));
 
-  const events = [];
+  const events: Json[] = [];
   const conn = await createProvider({ home, daemonEntry: entry }).connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
   conn.onEvent(e => events.push(e));
 
@@ -262,8 +265,8 @@ test('real createProvider: cancelled queued relink never launches after admissio
   await writeFile(path.join(root, '.alp', 'agents', 'main', 'AGENT.md'), 'Agent main');
   await conn.send({ type: 'session.open', requestId: 'open', sessionId: 's', history: 'skip', config: { cwd: root, env: {}, settings: {}, mcpServers: {}, systemPrompt: '', persist: true } });
   assert.ok(events.some(e => e.type === 'session.opened'), 'root opened before disconnect');
-  let release;
-  let admitted;
+  let release: Json;
+  let admitted: Json;
   const entered = new Promise(resolve => { admitted = resolve; });
   const gate = new Promise(resolve => { release = resolve; });
   const blocking = withDaemonLifecycle(home, 'stop', async () => { admitted(); await gate; });
@@ -281,7 +284,7 @@ test('real createProvider: cancelled queued relink never launches after admissio
   await unlink(daemonPaths(home).lock);
   await store.flush();
   await server.close();
-  const until = async (check, label) => {
+  const until = async (check: Json, label: Json) => {
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
       if (await check()) return;

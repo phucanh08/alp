@@ -11,9 +11,12 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { createProvider, daemonEntry } from '@anhlp/alp-paseo';
 
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
 const ENTRY = fileURLToPath(new URL('../../../packages/daemon/dist/alpd.js', import.meta.url));
 
-async function until(check, what = 'condition', ms = 15_000) {
+async function until(check: Json, what = 'condition', ms = 15_000) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 25)); }
   assert.fail(`Expected ${what} did not arrive`);
@@ -32,17 +35,17 @@ const QUIET_MS = 3_000;
  * none outlives the test (#117: a stop asked of an alpd still starting failed silently, and the
  * teardown then waited for a stop nobody had asked for, and left that alpd running).
  */
-async function shutdown(home) {
-  let current;
+async function shutdown(home: Json) {
+  let current: Json;
   for (let quiet = Date.now(); Date.now() - quiet < QUIET_MS;) {
     const lock = await readLock(home).catch(() => undefined);
     if (lockAlive(lock)) {
       quiet = Date.now();
-      if (current?.pid !== lock.pid) current = { pid: lock.pid, since: Date.now(), asked: false };
-      if (lock.ready && !current.asked) {
-        current.asked = await connect(lock.socket).then(client => client.request('daemon.shutdown').finally(() => client.close())).then(() => true, () => false);
+      if (current?.pid !== lock!.pid) current = { pid: lock!.pid, since: Date.now(), asked: false };
+      if (lock!.ready && !current.asked) {
+        current.asked = await connect(lock!.socket).then(client => client.request('daemon.shutdown').finally(() => client.close())).then(() => true, () => false);
       }
-      if (Date.now() - current.since > STOP_MS) { try { process.kill(lock.pid, 'SIGKILL'); } catch {} }
+      if (Date.now() - current.since > STOP_MS) { try { process.kill(lock!.pid, 'SIGKILL'); } catch {} }
     }
     await new Promise(resolve => setTimeout(resolve, 50));
   }
@@ -50,7 +53,7 @@ async function shutdown(home) {
 
 test('the plugin keeps alpd up: started with Paseo, started again after a crash, left alone after alp daemon stop', async t => {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-keep-'));
-  const logged = [];
+  const logged: Json[] = [];
   // Two misses must take longer than alpd takes to start, as with the real 5 s interval.
   const stop = superviseDaemon({ home, entry: ENTRY, intervalMs: 600, by: 'Paseo', log: message => logged.push(message) });
   // The home goes even if stopping failed: an alpd whose lock is gone stops at its next heartbeat.
@@ -61,18 +64,18 @@ test('the plugin keeps alpd up: started with Paseo, started again after a crash,
   });
   await stop.started;
   const first = await readLock(home);
-  assert.ok(lockAlive(first) && first.ready);
+  assert.ok(lockAlive(first) && first!.ready);
   assert.deepEqual(logged, ['alpd started with Paseo']);
 
   // The alpd of this test's own home, killed as a crash would.
-  process.kill(first.pid, 'SIGKILL');
-  await until(async () => { const lock = await readLock(home); return lockAlive(lock) && lock.ready && lock.pid !== first.pid; }, 'a new alpd');
+  process.kill(first!.pid, 'SIGKILL');
+  await until(async () => { const lock = await readLock(home); return lockAlive(lock) && lock!.ready && lock!.pid !== first!.pid; }, 'a new alpd');
   await until(() => logged.length === 2, 'the restart to be logged');
   assert.equal(logged[1], 'alpd was down; started it again');
 
   // A deliberate stop holds it down.
   await holdDaemon(home);
-  const { socket } = await readLock(home);
+  const { socket } = (await readLock(home))!;
   await connect(socket).then(client => client.request('daemon.shutdown').finally(() => client.close()));
   await until(async () => !lockAlive(await readLock(home)), 'alpd to stop');
   await new Promise(resolve => setTimeout(resolve, 2_000));
@@ -85,16 +88,16 @@ test('the plugin keeps alpd up: started with Paseo, started again after a crash,
   assert.ok(lockAlive(await readLock(home)));
 });
 
-function fakeRuntime(runtimes) {
+function fakeRuntime(runtimes: Json) {
   return () => {
-    let notification;
-    const runtime = {
-      calls: [],
+    let notification: Json;
+    const runtime: Json = {
+      calls: [] as Json[],
       initialize: async () => {},
-      onNotification(fn) { notification = fn; }, onFailure() {}, onRequest() {},
-      notify(method, params) { notification(method, params); },
+      onNotification(fn: Json) { notification = fn; }, onFailure() {}, onRequest() {},
+      notify(method: Json, params: Json) { notification(method, params); },
       async close() {},
-      async request(method, params) {
+      async request(method: Json, params: Json) {
         this.calls.push({ method, params });
         if (method.startsWith('thread/')) return { thread: { id: 'native-thread', turns: [] }, cwd: params.cwd, model: params.model, reasoningEffort: 'low' };
         if (method === 'turn/start') return { turn: { id: `turn-${runtimes.length}-${this.calls.length}` } };
@@ -113,8 +116,8 @@ test('a Paseo connection survives alpd going away: it reconnects, and the next p
   await mkdir(path.join(root, '.alp', 'agents', 'main'), { recursive: true });
   await writeFile(path.join(root, '.alp', 'agents', 'main', 'AGENT.md'), 'Agent main');
   await mkdir(home, { recursive: true, mode: 0o700 });
-  const runtimes = [];
-  const daemons = [];
+  const runtimes: Json[] = [];
+  const daemons: Json[] = [];
   const { socket } = daemonPaths(home);
   // The provider starts alpd when its home has none. This test's alpd runs in-process, so any start
   // is a fault: the provider gets an entry that records the start and fails, never a real alpd,
@@ -135,7 +138,7 @@ test('a Paseo connection survives alpd going away: it reconnects, and the next p
     daemons.push(handle);
     return handle;
   }
-  let conn;
+  let conn: Json;
   // The connection closes before its alpd goes: one still open would reconnect and, once the home
   // and its lock are gone, start an alpd there.
   t.after(async () => {
@@ -158,11 +161,11 @@ test('a Paseo connection survives alpd going away: it reconnects, and the next p
 
   const first = await daemon();
   conn = await createProvider({ home, daemonEntry: entry }).connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
-  const events = [];
-  conn.onEvent(event => events.push(event));
+  const events: Json[] = [];
+  conn.onEvent((event: Json) => events.push(event));
   const config = { cwd: root, env: {}, systemPrompt: '', mcpServers: {}, settings: {}, persist: true };
-  const prompt = id => ({ type: 'session.prompt', sessionId: 's', prompt: { clientMessageId: id, delivery: 'auto', input: { type: 'message', content: [{ type: 'text', text: id }] } } });
-  const result = id => events.find(event => event.type === 'session.prompt_result' && event.clientMessageId === id)?.result;
+  const prompt = (id: Json) => ({ type: 'session.prompt', sessionId: 's', prompt: { clientMessageId: id, delivery: 'auto', input: { type: 'message', content: [{ type: 'text', text: id }] } } });
+  const result = (id: Json) => events.find(event => event.type === 'session.prompt_result' && event.clientMessageId === id)?.result;
   await conn.send({ type: 'session.open', requestId: 'open', sessionId: 's', config, history: 'skip' });
   await conn.send(prompt('m1'));
   runtimes[0].notify('turn/completed', { threadId: 'native-thread', turn: { id: result('m1').turnId, status: 'completed' } });
@@ -180,7 +183,7 @@ test('a Paseo connection survives alpd going away: it reconnects, and the next p
   assert.equal(result('m2').type, 'turn');
   // Main's own process, beside its supervisor's.
   const resumed = runtimes.slice(before).find(runtime => runtime.calls[0]?.method === 'thread/resume');
-  assert.deepEqual(resumed.calls.slice(0, 2).map(call => [call.method, call.params.threadId]), [['thread/resume', 'native-thread'], ['turn/start', 'native-thread']]);
+  assert.deepEqual(resumed.calls.slice(0, 2).map((call: Json) => [call.method, call.params.threadId]), [['thread/resume', 'native-thread'], ['turn/start', 'native-thread']]);
   assert.equal(events.filter(event => event.type === 'session.opened' && event.sessionId === 's').length, 1, 'Paseo sees its session opened once');
   resumed.notify('turn/completed', { threadId: 'native-thread', turn: { id: result('m2').turnId, status: 'completed' } });
 

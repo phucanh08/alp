@@ -13,9 +13,13 @@ import path from 'node:path';
 import { ATTACHMENTS, attachmentChunkBytes } from '@anhlp/alp-protocol';
 import { CONTENT_TYPES, DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, PERMISSIONS, gatewayAttachmentLimits, projectAttachment, projectUploadBegun } from '../dist/policy.js';
 import { reissueCredential, revokeCredential } from '../dist/credentials.js';
-import { fakeDaemon, summary } from './support/fake-daemon.js';
-import { startGateway, until } from './support/harness.js';
+import { fakeDaemon, summary } from './support/fake-daemon.ts';
+import { startGateway, until } from './support/harness.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
+
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 
 const CAPABILITIES = ['attach.after', 'prompt.receipts', 'prompt.images', 'attachments'];
 const UPLOAD = `upl_${'1'.repeat(32)}`;
@@ -24,7 +28,7 @@ const SHA = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 const info = (extra = {}) => ({ attachmentId: ATTACHMENT, sessionId: 'sa', name: 'report.pdf', mimeType: 'application/pdf', detectedMimeType: 'application/pdf', size: 3, sha256: SHA, createdAt: '2026-10-22T00:00:00.000Z', committedAt: '2026-10-22T00:00:01.000Z', referenced: false, ...extra });
 const daemonLimits = { ...Object.fromEntries(Object.entries(ATTACHMENTS).filter(([key]) => key !== 'maxNameBytes')), maxObjectBytes: 1024 * 1024 };
 
-async function world(t, { maxFrame, capabilities = CAPABILITIES } = {}) {
+async function world(t: TestContext, { maxFrame, capabilities = CAPABILITIES }: Json = {}) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-attach-'));
   defer(() => rm(directory, { recursive: true, force: true }));
@@ -44,8 +48,8 @@ async function world(t, { maxFrame, capabilities = CAPABILITIES } = {}) {
   const canonicalB = await realpath(b);
   const daemon = fakeDaemon({ capabilities, sessions: [summary('sa', canonicalA), summary('sb', canonicalB)] });
   daemon.state.handlers['daemon.hello'] = () => ({ protocolVersion: 1, daemonVersion: 'fake', pid: 4242, hostname: 'fake-host', capabilities, attachmentLimits: daemonLimits });
-  daemon.state.handlers['attachment.begin'] = params => ({ uploadId: UPLOAD, state: 'uploading', received: 0, size: params.size, maxChunkBytes: ATTACHMENTS.maxChunkBytes, expiresAt: '2026-10-22T01:00:00.000Z' });
-  daemon.state.handlers['attachment.chunk'] = params => ({ received: params.offset + Buffer.from(params.data, 'base64').length, size: 3 });
+  daemon.state.handlers['attachment.begin'] = (params: Json) => ({ uploadId: UPLOAD, state: 'uploading', received: 0, size: params.size, maxChunkBytes: ATTACHMENTS.maxChunkBytes, expiresAt: '2026-10-22T01:00:00.000Z' });
+  daemon.state.handlers['attachment.chunk'] = (params: Json) => ({ received: params.offset + Buffer.from(params.data, 'base64').length, size: 3 });
   daemon.state.handlers['attachment.commit'] = () => ({ attachment: info() });
   daemon.state.handlers['attachment.abort'] = () => ({ aborted: true });
   daemon.state.handlers['attachment.get'] = () => ({ attachment: info() });
@@ -55,7 +59,7 @@ async function world(t, { maxFrame, capabilities = CAPABILITIES } = {}) {
   return { daemon, a, b, canonicalA, canonicalB, ...gw };
 }
 
-const attachmentCalls = (daemon, mark) => daemon.calls().slice(mark).filter(call => call.method.startsWith('attachment.') || call.method === 'session.prompt');
+const attachmentCalls = (daemon: Json, mark: Json) => daemon.calls().slice(mark).filter((call: Json) => call.method.startsWith('attachment.') || call.method === 'session.prompt');
 
 test('the matrix: attachments.write with session.write (session.read for get), never a default, implying nothing', () => {
   assert.ok(PERMISSIONS.includes('attachments.write'));
@@ -71,7 +75,7 @@ test('the matrix: attachments.write with session.write (session.read for get), n
   assert.deepEqual(EXPOSURE['attachment.get'].alsoRequires, ['session.read']);
   // No principal context from the client is ever forwarded.
   for (const method of Object.keys(EXPOSURE).filter(name => name.startsWith('attachment.'))) {
-    for (const field of ['principalId', 'principalEpoch', 'authorizedRoots']) assert.ok(!EXPOSURE[method].params.includes(field), `${method} ${field}`);
+    for (const field of ['principalId', 'principalEpoch', 'authorizedRoots']) assert.ok(!EXPOSURE[method].params!.includes(field), `${method} ${field}`);
   }
 });
 
@@ -103,7 +107,7 @@ test('hello: the capability and effective limits, lowered to the gateway\'s fram
 
 test('permissions: refused with 1003 grant naming what is missing, before alpd hears of it', async t => {
   const { daemon, sdk } = await world(t);
-  const cases = [
+  const cases: Json[][] = [
     ['sessions', 'attachment.begin', { sessionId: 'sa', name: 'x', size: 3, mimeType: 'text/plain', requestId: 'r' }, 'attachments.write'],
     ['sessions', 'attachment.chunk', { uploadId: UPLOAD, offset: 0, data: 'AAAA' }, 'attachments.write'],
     ['sessions', 'attachment.commit', { uploadId: UPLOAD, sha256: SHA }, 'attachments.write'],
@@ -119,7 +123,7 @@ test('permissions: refused with 1003 grant naming what is missing, before alpd h
   for (const [label, method, params, permission] of cases) {
     const { client } = await sdk(label);
     const mark = daemon.calls().length;
-    await assert.rejects(client.request(method, params), error => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === permission, `${label} ${method}`);
+    await assert.rejects(client.request(method, params), (error: Json) => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === permission, `${label} ${method}`);
     assert.deepEqual(attachmentCalls(daemon, mark), [], `${label} ${method} reached alpd`);
   }
   // attachments.write and session.read read metadata (only its own, alpd decides); session.write's prompts without attachments are unchanged.
@@ -134,28 +138,28 @@ test('begin: a session outside the grant answers as a missing one; alpd gets the
   const { client } = await sdk('uploader');
   const mark = daemon.calls().length;
   for (const sessionId of ['sb', 'ses_missing']) {
-    await assert.rejects(client.request('attachment.begin', { sessionId, name: 'x', size: 3, mimeType: 'text/plain', requestId: 'r' }), error => error.code === 1001, sessionId);
+    await assert.rejects(client.request('attachment.begin', { sessionId, name: 'x', size: 3, mimeType: 'text/plain', requestId: 'r' }), (error: Json) => error.code === 1001, sessionId);
   }
   assert.deepEqual(attachmentCalls(daemon, mark), [], 'alpd never heard of a begin outside the grant');
   // A client naming a principal of its own: dropped; the gateway's is sent.
   const begun = await client.request('attachment.begin', { sessionId: 'sa', name: 'r.pdf', size: 3, mimeType: 'application/pdf', requestId: 'r', principalId: 'owner', principalEpoch: 'owner', authorizedRoots: ['/'] });
   assert.deepEqual(Object.keys(begun).sort(), ['expiresAt', 'maxChunkBytes', 'received', 'size', 'state', 'uploadId']);
-  const sent = daemon.calls('attachment.begin').at(-1).params;
+  const sent = daemon.calls('attachment.begin').at(-1)!.params;
   const grant = store.grant(ids.uploader);
-  assert.deepEqual(sent, { sessionId: 'sa', name: 'r.pdf', size: 3, mimeType: 'application/pdf', requestId: 'r', principalId: ids.uploader, principalEpoch: grant.scopeId, authorizedRoots: [canonicalA] });
-  for (const [method, params] of [['attachment.chunk', { uploadId: UPLOAD, offset: 0, data: 'AAAA', principalId: 'owner' }], ['attachment.commit', { uploadId: UPLOAD, sha256: SHA }], ['attachment.abort', { uploadId: UPLOAD }], ['attachment.get', { attachmentId: ATTACHMENT }], ['attachment.delete', { attachmentId: ATTACHMENT }]]) {
+  assert.deepEqual(sent, { sessionId: 'sa', name: 'r.pdf', size: 3, mimeType: 'application/pdf', requestId: 'r', principalId: ids.uploader, principalEpoch: grant!.scopeId, authorizedRoots: [canonicalA] });
+  for (const [method, params] of [['attachment.chunk', { uploadId: UPLOAD, offset: 0, data: 'AAAA', principalId: 'owner' }], ['attachment.commit', { uploadId: UPLOAD, sha256: SHA }], ['attachment.abort', { uploadId: UPLOAD }], ['attachment.get', { attachmentId: ATTACHMENT }], ['attachment.delete', { attachmentId: ATTACHMENT }]] as Json[][]) {
     await client.request(method, params);
-    const forwarded = daemon.calls(method).at(-1).params;
-    assert.deepEqual([forwarded.principalId, forwarded.principalEpoch, forwarded.authorizedRoots], [ids.uploader, grant.scopeId, [canonicalA]], method);
+    const forwarded = daemon.calls(method).at(-1)!.params;
+    assert.deepEqual([forwarded.principalId, forwarded.principalEpoch, forwarded.authorizedRoots], [ids.uploader, grant!.scopeId, [canonicalA]], method);
   }
   // A prompt with an attachment carries the context too; one without stays as before.
   await client.request('session.prompt', { sessionId: 'sa', clientMessageId: 'm1', content: [{ type: 'text', text: 'see' }, { type: 'attachment', attachmentId: ATTACHMENT }] });
-  assert.equal(daemon.calls('session.prompt').at(-1).params.principalId, ids.uploader);
+  assert.equal(daemon.calls('session.prompt').at(-1)!.params.principalId, ids.uploader);
   await client.request('session.prompt', { sessionId: 'sa', clientMessageId: 'm2', content: [{ type: 'text', text: 'see' }] });
-  assert.equal(daemon.calls('session.prompt').at(-1).params.principalId, undefined);
+  assert.equal(daemon.calls('session.prompt').at(-1)!.params.principalId, undefined);
   // An attachment part with anything but its id fails the schema before alpd.
   const before = daemon.calls().length;
-  await assert.rejects(client.request('session.prompt', { sessionId: 'sa', clientMessageId: 'm3', content: [{ type: 'attachment', attachmentId: ATTACHMENT, path: '/etc/passwd' }] }), error => error.code === -32602);
+  await assert.rejects(client.request('session.prompt', { sessionId: 'sa', clientMessageId: 'm3', content: [{ type: 'attachment', attachmentId: ATTACHMENT, path: '/etc/passwd' }] }), (error: Json) => error.code === -32602);
   assert.deepEqual(attachmentCalls(daemon, before), []);
 });
 
@@ -212,7 +216,7 @@ test('a credential revoked mid-upload loses its connection at once: no further c
   const before = await rawSession('other');
   await before.call('daemon.hello', { protocolVersion: 1 });
   await before.call('attachment.begin', { sessionId: 'sb', name: 'x', size: 1, mimeType: 'text/plain', requestId: 'e1' });
-  const first = daemon.calls('attachment.begin').at(-1).params;
+  const first = daemon.calls('attachment.begin').at(-1)!.params;
   const { token } = await reissueCredential(home, ids.other, { permissions: ['session.read', 'session.write', 'attachments.write'] });
   assert.equal((await before.closed).code, 4401, 'a reissue replaces the secret: its connections close');
   tokens.other = token;
@@ -220,7 +224,7 @@ test('a credential revoked mid-upload loses its connection at once: no further c
   const after = await rawSession('other');
   await after.call('daemon.hello', { protocolVersion: 1 });
   await after.call('attachment.begin', { sessionId: 'sb', name: 'x', size: 1, mimeType: 'text/plain', requestId: 'e1' });
-  const second = daemon.calls('attachment.begin').at(-1).params;
+  const second = daemon.calls('attachment.begin').at(-1)!.params;
   assert.equal(second.principalId, first.principalId);
   assert.notEqual(second.principalEpoch, first.principalEpoch);
 });

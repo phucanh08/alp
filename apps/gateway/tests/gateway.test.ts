@@ -10,20 +10,24 @@ import { WebSocketServer } from 'ws';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { revokeCredential, rotateCredential, resolveConfig } from '../dist/index.js';
-import { fakeDaemon, summary } from './support/fake-daemon.js';
-import { ORIGIN, startGateway, until } from './support/harness.js';
+import { fakeDaemon, summary } from './support/fake-daemon.ts';
+import { ORIGIN, startGateway, until } from './support/harness.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
 
-async function workspaces(t) {
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+async function workspaces(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-ws-'));
   defer(() => rm(directory, { recursive: true, force: true }));
   return { a: path.join(directory, 'a'), b: path.join(directory, 'b') };
 }
 
-async function setup(t, { config, sessions = [], fixture = {} } = {}) {
+async function setup(t: TestContext, { config, sessions = [], fixture = {} }: Json = {}) {
   const { a, b } = await workspaces(t);
-  const daemon = fakeDaemon({ sessions: sessions.map(([id, where, extra]) => summary(id, where === 'a' ? a : b, extra)), ...fixture });
+  const daemon = fakeDaemon({ sessions: sessions.map(([id, where, extra]: Json) => summary(id, where === 'a' ? a : b, extra)), ...fixture });
   const gw = await startGateway(t, { daemon, config, credentials: { alice: { workspaces: [a] }, reader: { workspaces: [a], permissions: ['session.read'] }, projects: { workspaces: [a], permissions: ['project.read'] }, bob: { workspaces: [b] } } });
   return { daemon, a, b, ...gw };
 }
@@ -35,7 +39,7 @@ test('healthz is live and readyz follows alpd', async t => {
   daemon.state.refuse = true;
   daemon.drop();
   await until(async () => (await fetch(`${base}/readyz`)).status === 503, 'not ready after alpd went away');
-  const body = await (await fetch(`${base}/readyz`)).json();
+  const body: Json = await (await fetch(`${base}/readyz`)).json();
   assert.equal(body.ready, false);
   assert.equal(body.checks[0].code, 'ALP_GATEWAY_DAEMON_UNREACHABLE');
   daemon.state.refuse = false;
@@ -79,7 +83,7 @@ test('CORS preflight answers only allowed origins', async t => {
   const { base } = await setup(t);
   const allowed = await fetch(`${base}/v1/tickets`, { method: 'OPTIONS', headers: { origin: ORIGIN, 'access-control-request-method': 'POST' } });
   assert.equal(allowed.status, 204);
-  assert.match(allowed.headers.get('access-control-allow-headers'), /authorization/);
+  assert.match(allowed.headers.get('access-control-allow-headers')!, /authorization/);
   const other = await fetch(`${base}/v1/tickets`, { method: 'OPTIONS', headers: { origin: 'https://evil.example' } });
   assert.equal(other.status, 403);
 });
@@ -87,7 +91,7 @@ test('CORS preflight answers only allowed origins', async t => {
 test('an unknown Host is refused (DNS rebinding), and forwarded headers count only from a trusted proxy', async t => {
   const { base, tokens } = await setup(t, { config: { trustProxy: ['127.0.0.1'], hosts: ['alp.example.com'] } });
   const port = new URL(base).port;
-  const request = (headers) => new Promise((resolve, reject) => {
+  const request = (headers: Json) => new Promise((resolve, reject) => {
     import('node:http').then(http => {
       const outgoing = http.request({ host: '127.0.0.1', port, path: '/healthz', headers }, response => { response.resume(); resolve(response.statusCode); });
       outgoing.on('error', reject);
@@ -99,7 +103,7 @@ test('an unknown Host is refused (DNS rebinding), and forwarded headers count on
   assert.equal(await request({ host: 'alp.example.com', 'x-forwarded-for': '203.0.113.9', 'x-forwarded-proto': 'http' }), 403, 'plaintext through the proxy');
   assert.equal(await request({ host: `127.0.0.1:${port}` }), 200, 'a direct loopback client');
   // Repeated failures from one forwarded address are throttled, others are not.
-  const fail = ip => fetch(`${base}/v1/tickets`, { method: 'POST', headers: { authorization: 'Bearer nope', host: 'alp.example.com', 'x-forwarded-for': ip, 'x-forwarded-proto': 'https' } }).then(response => response.status);
+  const fail = (ip: Json) => fetch(`${base}/v1/tickets`, { method: 'POST', headers: { authorization: 'Bearer nope', host: 'alp.example.com', 'x-forwarded-for': ip, 'x-forwarded-proto': 'https' } }).then(response => response.status);
   for (let i = 0; i < 20; i++) assert.equal(await fail('203.0.113.7'), 401);
   assert.equal(await fail('203.0.113.7'), 429);
   assert.equal(await fail('203.0.113.8'), 401);
@@ -126,7 +130,7 @@ test('frames are checked as protocol §5.2 orders it, and nothing reaches alpd b
   socket.send(JSON.stringify({ jsonrpc: '2.0', id: null, method: 'catalog.get' }));
   socket.send(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'catalog.get', params: [] }));
   await until(() => frames.length >= 5, 'answers');
-  assert.deepEqual(frames.slice(0, 5).map(frame => [frame.id, frame.error.code, frame.error.data?.reason]), [
+  assert.deepEqual(frames.slice(0, 5).map((frame: Json) => [frame.id, frame.error.code, frame.error.data?.reason]), [
     [null, -32700, undefined], [null, -32600, 'batch_unsupported'], [null, -32600, undefined], [null, -32600, 'invalid_id'], [3, -32602, 'invalid_params'],
   ]);
   assert.equal((await call('catalog.get')).error.data.reason, 'hello_required');
@@ -153,10 +157,10 @@ test('catalog.get through the gateway keeps each provider\'s status but drops it
   daemon.state.handlers['catalog.get'] = () => ({ models: [], modes: [], defaultModel: 'codex:x', fetchedAt: 'now', providers: { codex: { status: 'failed', fetchedAt: 'then', error: 'spawn /home/me/bin/codex ENOENT' }, claude: { status: 'ok' } } });
   const { socket, frames } = await rawSession('alice');
   socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'h', method: 'daemon.hello', params: { protocolVersion: 1 } }));
-  await until(() => frames.some(frame => frame.id === 'h'), 'hello');
+  await until(() => frames.some((frame: Json) => frame.id === 'h'), 'hello');
   socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'c', method: 'catalog.get' }));
-  await until(() => frames.some(frame => frame.id === 'c'), 'catalog');
-  const { result } = frames.find(frame => frame.id === 'c');
+  await until(() => frames.some((frame: Json) => frame.id === 'c'), 'catalog');
+  const { result } = frames.find((frame: Json) => frame.id === 'c');
   assert.deepEqual(result.providers, { codex: { status: 'failed', fetchedAt: 'then' }, claude: { status: 'ok' } });
   assert.equal(JSON.stringify(result).includes('/home/me'), false);
 });
@@ -170,34 +174,34 @@ test('catalog.get through the gateway drops disabled ACP rows and unknown row fi
   ], modes: [], defaultModel: 'codex:x' });
   const { socket, frames } = await rawSession('alice');
   socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'h', method: 'daemon.hello', params: { protocolVersion: 1 } }));
-  await until(() => frames.some(frame => frame.id === 'h'), 'hello');
+  await until(() => frames.some((frame: Json) => frame.id === 'h'), 'hello');
   socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'c', method: 'catalog.get' }));
-  await until(() => frames.some(frame => frame.id === 'c'), 'catalog');
-  const { result } = frames.find(frame => frame.id === 'c');
-  assert.deepEqual(result.models.map(model => model.id), ['codex:x', 'acp:on']);
+  await until(() => frames.some((frame: Json) => frame.id === 'c'), 'catalog');
+  const { result } = frames.find((frame: Json) => frame.id === 'c');
+  assert.deepEqual(result.models.map((model: Json) => model.id), ['codex:x', 'acp:on']);
   assert.equal(JSON.stringify(result).includes('/home/me'), false);
   assert.deepEqual(result.models[1], { id: 'acp:on', label: 'On', description: '', thinkingOptions: [], runtime: 'acp', provider: 'on', source: 'configured', status: 'unprobed' });
 });
 
 test('catalog.updated reaches clients that may read the catalog, fetchedAt only; catalog.refresh stays denied (t-086c)', async t => {
   const { daemon, rawSession } = await setup(t);
-  const open = async name => {
+  const open = async (name: Json) => {
     const session = await rawSession(name);
     session.socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'h', method: 'daemon.hello', params: { protocolVersion: 1 } }));
-    await until(() => session.frames.some(frame => frame.id === 'h'), 'hello');
+    await until(() => session.frames.some((frame: Json) => frame.id === 'h'), 'hello');
     return session;
   };
   const reader = await open('reader');
   const writer = await open('projects');
   for (const link of daemon.state.links) link.send({ jsonrpc: '2.0', method: 'catalog.updated', params: { fetchedAt: '2026-10-31T00:00:00.000Z', providers: { codex: { error: '/home/me/bin/codex' } } } });
-  await until(() => reader.frames.some(frame => frame.method === 'catalog.updated'), 'catalog.updated');
-  assert.deepEqual(reader.frames.find(frame => frame.method === 'catalog.updated').params, { fetchedAt: '2026-10-31T00:00:00.000Z' });
+  await until(() => reader.frames.some((frame: Json) => frame.method === 'catalog.updated'), 'catalog.updated');
+  assert.deepEqual(reader.frames.find((frame: Json) => frame.method === 'catalog.updated').params, { fetchedAt: '2026-10-31T00:00:00.000Z' });
   const mark = daemon.calls().length;
   reader.socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'r', method: 'catalog.refresh' }));
-  await until(() => reader.frames.some(frame => frame.id === 'r'), 'refresh answer');
-  assert.equal(reader.frames.find(frame => frame.id === 'r').error.code, -32601);
+  await until(() => reader.frames.some((frame: Json) => frame.id === 'r'), 'refresh answer');
+  assert.equal(reader.frames.find((frame: Json) => frame.id === 'r').error.code, -32601);
   assert.deepEqual(daemon.calls().slice(mark), [], 'catalog.refresh never reached alpd');
-  assert.equal(writer.frames.some(frame => frame.method === 'catalog.updated'), false, 'no session.read, no catalog news');
+  assert.equal(writer.frames.some((frame: Json) => frame.method === 'catalog.updated'), false, 'no session.read, no catalog news');
 });
 
 test('a client that never says hello is closed with 4408', async t => {
@@ -211,12 +215,12 @@ test('rate and pending limits answer errors, and a client that keeps flooding is
   daemon.state.handlers['catalog.get'] = () => new Promise(() => {});
   const { socket, frames, closed } = await rawSession('alice');
   socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'h', method: 'daemon.hello', params: { protocolVersion: 1 } }));
-  await until(() => frames.some(frame => frame.id === 'h'), 'hello');
+  await until(() => frames.some((frame: Json) => frame.id === 'h'), 'hello');
   for (let i = 0; i < 3; i++) socket.send(JSON.stringify({ jsonrpc: '2.0', id: i, method: 'catalog.get' }));
-  await until(() => frames.some(frame => frame.error?.data?.reason === 'too_many_pending'), 'pending limit');
+  await until(() => frames.some((frame: Json) => frame.error?.data?.reason === 'too_many_pending'), 'pending limit');
   for (let i = 10; i < 20; i++) socket.send(JSON.stringify({ jsonrpc: '2.0', id: i, method: 'catalog.get' }));
-  await until(() => frames.some(frame => frame.error?.data?.reason === 'rate_limited'), 'rate limit');
-  assert.equal(frames.find(frame => frame.error?.data?.reason === 'rate_limited').error.code, 1005);
+  await until(() => frames.some((frame: Json) => frame.error?.data?.reason === 'rate_limited'), 'rate limit');
+  assert.equal(frames.find((frame: Json) => frame.error?.data?.reason === 'rate_limited').error.code, 1005);
   assert.equal((await closed).code, 4429);
 });
 
@@ -226,7 +230,7 @@ test('a client that does not read is closed as a slow consumer without holding u
   const slow = await rawSession('alice');
   slow.socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'h', method: 'daemon.hello', params: { protocolVersion: 1 } }));
   slow.socket.send(JSON.stringify({ jsonrpc: '2.0', id: 'a', method: 'session.attach', params: { sessionId: 's1', replay: false } }));
-  await until(() => slow.frames.some(frame => frame.id === 'a'), 'attached');
+  await until(() => slow.frames.some((frame: Json) => frame.id === 'a'), 'attached');
   slow.socket.pause();
   slow.socket._socket.pause();
   const fast = await sdk('alice');
@@ -235,7 +239,7 @@ test('a client that does not read is closed as a slow consumer without holding u
   await fast.client.request('session.attach', { sessionId: 's1', replay: false });
   const big = 'x'.repeat(16 * 1024);
   let emitted = 0;
-  let ended;
+  let ended: Json;
   slow.closed.then(close => { ended = close; });
   // Kernel buffers take the first megabytes; keep producing until the gateway gives up on the reader.
   while (!ended && emitted < 20_000) {
@@ -255,7 +259,7 @@ test('two clients at once get only their own answers and the events of trees the
   const { daemon, sdk } = await setup(t, { sessions: [['s1', 'a'], ['s2', 'a']] });
   const one = await sdk('alice');
   const two = await sdk('alice');
-  const events = { one: [], two: [] };
+  const events = { one: [] as Json[], two: [] as Json[] };
   one.client.onEvent(envelope => events.one.push(envelope.sessionId));
   two.client.onEvent(envelope => events.two.push(envelope.sessionId));
   await one.client.request('session.attach', { sessionId: 's1', replay: false });
@@ -290,7 +294,7 @@ test('when alpd goes away, waiting requests fail with an unknown outcome and the
   await until(() => daemon.calls('session.interrupt').length === 1, 'at alpd');
   daemon.drop();
   assert.equal((await closed).code, 4503);
-  const answer = frames.find(frame => frame.id === 'w');
+  const answer = frames.find((frame: Json) => frame.id === 'w');
   assert.equal(answer.error.code, 1000);
   assert.equal(answer.error.data.reason, 'daemon_disconnected');
   assert.equal(daemon.calls('session.interrupt').length, 1, 'never resent');
@@ -318,7 +322,7 @@ test('closing the gateway closes clients with 1001 and leaves sessions to alpd',
 test('typed tool-call details reach a reader of the tree unchanged, later detail types too, and no other tree', async t => {
   const { daemon, b, sdk } = await setup(t, { sessions: [['s1', 'a'], ['s2', 'b']] });
   const reader = await sdk('reader');
-  const seen = [];
+  const seen: Json[] = [];
   reader.client.onEvent(envelope => envelope.event.type === 'item' && seen.push(envelope));
   await reader.client.request('session.attach', { sessionId: 's1', replay: false });
   const items = [
@@ -343,7 +347,7 @@ test('conditional interrupt forwards its identity and answer only to a capable d
     const response = await call('session.interrupt', { sessionId: 's1', turnId: 'original' });
     if (capable) {
       assert.deepEqual(response.result, { interrupted: false });
-      assert.deepEqual(w.daemon.calls('session.interrupt').at(-1).params, { sessionId: 's1', turnId: 'original' });
+      assert.deepEqual(w.daemon.calls('session.interrupt').at(-1)!.params, { sessionId: 's1', turnId: 'original' });
     } else {
       assert.equal(response.error.data.reason, 'capability');
       assert.equal(w.daemon.calls('session.interrupt').length, 0);
@@ -351,12 +355,12 @@ test('conditional interrupt forwards its identity and answer only to a capable d
   }
 });
 
-/** One plain HTTP request with exactly these headers. @returns {Promise<{ status: number, body: string, headers: import('node:http').IncomingHttpHeaders }>} */
-async function plainRequest(base, { method = 'GET', path: target = '/', headers = {} } = {}) {
+/** One plain HTTP request with exactly these headers. */
+async function plainRequest(base: string, { method = 'GET', path: target = '/', headers = {} }: { method?: string, path?: string, headers?: Record<string, string> } = {}) {
   const http = await import('node:http');
-  return new Promise((resolve, reject) => {
+  return new Promise<{ status: number | undefined, body: string, headers: import('node:http').IncomingHttpHeaders }>((resolve, reject) => {
     const outgoing = http.request({ host: '127.0.0.1', port: new URL(base).port, method, path: target, headers }, response => {
-      const chunks = [];
+      const chunks: Json[] = [];
       response.on('data', chunk => chunks.push(chunk));
       response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8'), headers: response.headers }));
     });
@@ -369,15 +373,15 @@ test('without a static hook, other paths answer 404 as before', async t => {
   const { base } = await setup(t);
   const host = `127.0.0.1:${new URL(base).port}`;
   for (const method of ['GET', 'HEAD']) {
-    const answer = await plainRequest(base, { method, path: '/index.html', headers: { host } });
+    const answer: Json = await plainRequest(base, { method, path: '/index.html', headers: { host } });
     assert.equal(answer.status, 404, method);
     if (method === 'GET') assert.deepEqual(JSON.parse(answer.body), { error: 'not_found' });
   }
 });
 
 test('a static hook answers GET and HEAD outside the gateway paths, only behind the Host and TLS checks', async t => {
-  const calls = [];
-  const serveStatic = (request, response) => {
+  const calls: Json[] = [];
+  const serveStatic = (request: Json, response: Json) => {
     calls.push(`${request.method} ${request.url}`);
     if (request.url === '/missing') return false;
     if (request.url === '/boom') throw new Error('broken hook');
@@ -389,7 +393,7 @@ test('a static hook answers GET and HEAD outside the gateway paths, only behind 
   const { a } = await workspaces(t);
   const gw = await startGateway(t, { daemon, serveStatic, config: { trustProxy: ['127.0.0.1'], hosts: ['alp.example.com'] }, credentials: { alice: { workspaces: [a] } } });
   const host = `127.0.0.1:${new URL(gw.base).port}`;
-  const send = (target, options = {}) => plainRequest(gw.base, { path: target, ...options, headers: { host, ...options.headers } });
+  const send = (target: string, options: { method?: string, headers?: Record<string, string> } = {}) => plainRequest(gw.base, { path: target, ...options, headers: { host, ...options.headers } });
 
   // Refused before the hook: a Host the gateway does not serve (DNS rebinding), plaintext beyond loopback.
   assert.equal((await send('/index.html', { headers: { host: 'attacker.example' } })).status, 421);
@@ -397,11 +401,11 @@ test('a static hook answers GET and HEAD outside the gateway paths, only behind 
   assert.equal((await send('/index.html', { headers: { host: 'alp.example.com', 'x-forwarded-for': '203.0.113.9', 'x-forwarded-proto': 'http' } })).status, 403);
   assert.deepEqual(calls, [], 'the hook saw no refused request');
 
-  const page = await send('/index.html');
+  const page: Json = await send('/index.html');
   assert.deepEqual([page.status, page.headers['content-type'], page.body], [200, 'text/html', 'hello']);
-  const head = await send('/index.html', { method: 'HEAD' });
+  const head: Json = await send('/index.html', { method: 'HEAD' });
   assert.deepEqual([head.status, head.body], [200, '']);
-  const proxied = await send('/app.js', { headers: { host: 'alp.example.com', 'x-forwarded-for': '203.0.113.9', 'x-forwarded-proto': 'https' } });
+  const proxied: Json = await send('/app.js', { headers: { host: 'alp.example.com', 'x-forwarded-for': '203.0.113.9', 'x-forwarded-proto': 'https' } });
   assert.equal(proxied.status, 200, 'an allowed Host over TLS through the proxy');
   assert.deepEqual(calls, ['GET /index.html', 'HEAD /index.html', 'GET /app.js']);
 
@@ -431,9 +435,9 @@ test('a static hook answers GET and HEAD outside the gateway paths, only behind 
 });
 
 /** One request written to the socket byte for byte, for targets an HTTP client refuses to send. */
-function rawExchange(base, lines) {
+function rawExchange(base: string, lines: string[]) {
   const { hostname, port } = new URL(base);
-  return new Promise((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     const socket = net.connect(Number(port), hostname, () => socket.end(`${lines.join('\r\n')}\r\n\r\n`));
     let text = '';
     socket.setEncoding('latin1');
@@ -494,8 +498,8 @@ test('socket closing before upgrade cleans up perPrincipal entry without memory 
   const port = Number(new URL(base).port);
 
   // Hold the upgrade after the gateway reserves a slot, before a WebSocket exists.
-  let reservedSocket;
-  const upgrade = t.mock.method(WebSocketServer.prototype, 'handleUpgrade', (_request, socket) => { reservedSocket = socket; });
+  let reservedSocket: Json;
+  const upgrade = t.mock.method(WebSocketServer.prototype, 'handleUpgrade', (_request: Json, socket: Json) => { reservedSocket = socket; });
   const clientSocket = net.connect(port, '127.0.0.1');
   const req = [
     'GET /v1/ws HTTP/1.1',
@@ -561,11 +565,11 @@ test('an agent credential marks its alpd connection whatever the client says; a 
   assert.ok(order.indexOf('mark') >= 0 && order.indexOf('mark') < order.indexOf('task.list'), order.join(','));
 
   // Failing to mark an agent credential's connection closes it, with no hello answer (fail closed).
-  daemon.state.handlers['daemon.hello'] = params => { if (params.capabilities) throw { code: 1005, message: 'down' }; return { protocolVersion: 1, capabilities: [] }; };
+  daemon.state.handlers['daemon.hello'] = (params: Json) => { if (params.capabilities) throw { code: 1005, message: 'down' }; return { protocolVersion: 1, capabilities: [] }; };
   const failing = await h.rawSession('bot');
   const pending = failing.call('daemon.hello', { protocolVersion: 1, client: { name: 'pretends-to-be-web', version: '0' } });
   assert.equal((await failing.closed).code, 1011);
-  assert.ok(!failing.frames.some(frame => frame.result), 'no hello answer without the mark');
+  assert.ok(!failing.frames.some((frame: Json) => frame.result), 'no hello answer without the mark');
   void pending;
   // The user's credential still connects unmarked while marking fails.
   const user = await h.rawSession('alice');
@@ -621,10 +625,10 @@ test('a client that announces principal.agent has its own alpd connection say so
   // A mark in a later hello lands on alpd before a request sent right behind it.
   const late = await h.rawSession('alice');
   await late.call('daemon.hello', { protocolVersion: 1, client: { name: 'late', version: '0' } });
-  const lateLink = hellos().at(-1).link;
+  const lateLink = hellos().at(-1)!.link;
   let release;
   const held = new Promise(resolve => { release = resolve; });
-  daemon.state.handlers['daemon.hello'] = async params => { if (params.capabilities) await held; return { protocolVersion: 1, capabilities: [] }; };
+  daemon.state.handlers['daemon.hello'] = async (params: Json) => { if (params.capabilities) await held; return { protocolVersion: 1, capabilities: [] }; };
   const marking = late.call('daemon.hello', { protocolVersion: 1, client: { name: 'late', version: '0' }, capabilities: ['principal.agent'] });
   const listed = late.call('task.list', { projectRoot: path.join(tmpdir(), 'alp-e706-a') });
   await until(() => daemon.state.calls.some(call => call.link === lateLink && call.params?.capabilities), 'the re-mark');
@@ -641,15 +645,15 @@ test('a client that announces principal.agent has its own alpd connection say so
   assert.ok((await malformed).error);
   await new Promise(resolve => setTimeout(resolve, 50));
   assert.ok(!daemon.state.calls.some(call => call.link === lateLink && call.method === 'task.list'), 'nor behind a malformed hello');
-  release();
+  release!();
   await marking; await listed; await unmarked; await listedAgain; await listedThird;
   const order = daemon.state.calls.filter(call => call.link === lateLink).map(call => call.params?.capabilities ? 'mark' : call.method);
   assert.ok(order.indexOf('mark') < order.indexOf('task.list'), order.join(','));
 
-  daemon.state.handlers['daemon.hello'] = params => { if (params.capabilities) throw { code: 1005, message: 'down' }; return { protocolVersion: 1, capabilities: [] }; };
+  daemon.state.handlers['daemon.hello'] = (params: Json) => { if (params.capabilities) throw { code: 1005, message: 'down' }; return { protocolVersion: 1, capabilities: [] }; };
   const failing = await h.rawSession('alice');
   const answer = failing.call('daemon.hello', { protocolVersion: 1, client: { name: 'agent', version: '0' }, capabilities: ['principal.agent'] });
   assert.equal((await failing.closed).code, 1011);
-  assert.ok(!failing.frames.some(frame => frame.result), 'no hello answer without the mark');
+  assert.ok(!failing.frames.some((frame: Json) => frame.result), 'no hello answer without the mark');
   void answer;
 });

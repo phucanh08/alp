@@ -8,12 +8,16 @@ import WebSocket from 'ws';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { webFile, createWebServer } from '@anhlp/alp-paseo';
 import { tokenFile } from '@anhlp/alp-paseo/web';
+import type { TestContext } from 'node:test';
+
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 
 /** What paseo.json names: listen()'s answer without the token, which stays in the credential directory (t-cde5). */
-const published = ({ token: _token, ...rest }) => rest;
+const published = ({ token: _token, ...rest }: Json) => rest;
 
 /** The Paseo integration's local listener (ALPD §62): a token-guarded socket, no page (paseo-web was removed in t-55ce.3). */
-async function setup(t, options = {}) {
+async function setup(t: TestContext, options: Json = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-web-'));
   const home = path.join(directory, 'home');
   const web = createWebServer({ home, port: 0, ...options });
@@ -23,7 +27,7 @@ async function setup(t, options = {}) {
 }
 
 /** The status of an upgrade to /ws, or 'open'. */
-const upgrade = (info, headers) => new Promise(resolve => {
+const upgrade = (info: Json, headers: Json) => new Promise(resolve => {
   const ws = new WebSocket(`ws://127.0.0.1:${info.port}/ws`, { headers });
   ws.on('unexpected-response', (_request, response) => resolve(response.statusCode));
   ws.on('open', () => { ws.close(); resolve('open'); });
@@ -38,7 +42,7 @@ test('the listener serves no page at any address, on 127.0.0.1 only, and without
   for (const address of ['/', '/workspace/abc', '/index.html', '/alp-plugins.js', '/_expo/static/js/web/index-1.js']) {
     const page = await fetch(`${origin}${address}`);
     assert.equal(page.status, 404);
-    assert.match(page.headers.get('content-type'), /^text\/plain/);
+    assert.match(page.headers.get('content-type')!, /^text\/plain/);
     assert.match(await page.text(), /not a web page[\s\S]*alp dashboard/);
     assert.equal(page.headers.get('content-security-policy'), "default-src 'none'; frame-ancestors 'none'");
     assert.equal(page.headers.get('x-frame-options'), 'DENY');
@@ -54,7 +58,7 @@ test('the listener serves no page at any address, on 127.0.0.1 only, and without
 
 test('with the bridge, the socket opens only without a browser Origin and with its loopback host; pages stay 404', async t => {
   const attached = [];
-  const gateway = { attach: (ws, options) => { attached.push(options); ws.close(); } };
+  const gateway = { attach: (ws: Json, options: Json) => { attached.push(options); ws.close(); } };
   const { info, origin } = await setup(t, { gateway });
   assert.equal((await fetch(`${origin}/`)).status, 404);
   assert.equal(await upgrade(info, { Origin: 'http://attacker.example' }), 403);
@@ -74,7 +78,7 @@ test('with the bridge, the socket opens only without a browser Origin and with i
 test('the integration records itself in paseo.json and carries over only its own pre-rename web.json identity', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-web-identity-'));
   t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
-  const start = async (home, legacy) => {
+  const start = async (home: Json, legacy: Json) => {
     await mkdir(home, { recursive: true });
     if (legacy) await writeFile(path.join(home, 'web.json'), JSON.stringify(legacy));
     const web = createWebServer({ home });
