@@ -1,0 +1,31 @@
+# The workspaces (they were package.json "workspaces" under npm). scripts/workspaces.mjs reads this list.
+packages:
+  - packages/protocol
+  - packages/core
+  - packages/runtime
+  - packages/client
+  - packages/daemon
+  - packages/cli
+  - apps/tui
+  - apps/gateway
+  - integrations/paseo
+  - apps/web
+
+# npm's flat node_modules: apps/desktop's e2e takes Playwright from the root install, tests read
+# node_modules/typescript and node_modules/@anhlp at the root, and the published packages are
+# checked against that layout. pnpm's default isolated layout would hide undeclared packages.
+nodeLinker: hoisted
+
+# The internal dependencies are exact versions ("0.0.1-beta.14"), not workspace: specs, so the
+# published package.json files stay as they are; this links them to the local workspaces.
+linkWorkspacePackages: true
+
+# The former .npmrc had legacy-peer-deps=true: peers are not installed on their own.
+autoInstallPeers: false
+strictPeerDependencies: false
+
+# The dependencies whose install scripts ran under npm.
+onlyBuiltDependencies:
+  - esbuild
+  - fsevents
+  - node-pty

@@ -3,7 +3,7 @@
 // Claude. Their own tools must report each file's exact SHA-256 and byte count. It spends real turns,
 // so it runs only when asked:
 //
-//   ALP_WEB_E2E_REAL_RUNTIMES=codex,claude npx playwright test e2e/attachment-files-real.spec.js --project=desktop
+//   ALP_WEB_E2E_REAL_RUNTIMES=codex,claude pnpm exec playwright test e2e/attachment-files-real.spec.js --project=desktop
 //
 // Each session is created read-only (the strictest sandbox) by the host's owner on a small model, then
 // opened in the browser. The turn's descriptor of a file already names its SHA-256 and size, so the

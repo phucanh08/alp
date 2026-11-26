@@ -268,7 +268,7 @@ async function tarball() {
   try {
     const packs = path.join(work, 'packs');
     await mkdir(packs);
-    for (const name of ['protocol', 'core', 'client']) run('npm', ['pack', '--ignore-scripts', '--pack-destination', packs, '--workspace', `@anhlp/alp-${name}`], { cwd: root });
+    for (const name of ['protocol', 'core', 'client']) run('npm', ['pack', `./packages/${name}`, '--ignore-scripts', '--pack-destination', packs], { cwd: root });
     const files = (await readdir(packs)).map(file => path.join(packs, file));
     const consumer = path.join(work, 'consumer');
     await mkdir(consumer);

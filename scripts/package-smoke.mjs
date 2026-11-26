@@ -11,6 +11,7 @@ import { clearCallerSession } from './test-lib.mjs';
 import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { workspaceLocations } from './workspaces.mjs';
 const root = path.resolve(import.meta.dirname, '..');
 const packsAt = process.argv.indexOf('--packs');
 const saved = packsAt >= 0 ? releaseArtifacts(path.resolve(process.argv[packsAt + 1] ?? '')) : undefined;
@@ -47,10 +48,10 @@ try {
     dependencies[artifact.name] = `file:${artifact.file}`;
     if (artifact.name !== LAUNCHER) workspaceNames.push(artifact.name);
   }
-  for (const location of saved ? [] : manifest.workspaces) {
+  for (const location of saved ? [] : workspaceLocations(root)) {
     const pkg = JSON.parse(await readFile(path.join(root, location, 'package.json'), 'utf8'));
     if (pkg.private) continue;
-    const packed = JSON.parse(run('npm', ['pack', '--workspace', pkg.name, '--ignore-scripts', '--json', '--pack-destination', directory], { cwd: root }))[0];
+    const packed = JSON.parse(run('npm', ['pack', `./${location}`, '--ignore-scripts', '--json', '--pack-destination', directory], { cwd: root }))[0];
     dependencies[pkg.name] = `file:${path.join(directory, packed.filename)}`;
     workspaceNames.push(pkg.name);
   }

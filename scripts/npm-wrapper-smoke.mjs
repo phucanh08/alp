@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync 
 import os from 'node:os';
 import path from 'node:path';
 import { spawnCommand } from './spawn-command.mjs';
-import { LAUNCHER, LAUNCHER_LOCATION, RELEASE_PACKAGES, releaseArtifacts } from './release-lib.mjs';
+import { LAUNCHER, RELEASE_PACKAGES, releaseArtifacts } from './release-lib.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const version = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version;
@@ -60,9 +60,8 @@ try {
   } else {
     const packs = path.join(work, 'packs');
     mkdirSync(packs);
-    tarballs = RELEASE_PACKAGES.map(({ name, kind }) => {
-      const where = kind === 'launcher' ? [`./${LAUNCHER_LOCATION}`] : ['--workspace', name];
-      const output = run('npm', ['pack', ...where, '--ignore-scripts', '--json', '--pack-destination', packs], { cwd: root });
+    tarballs = RELEASE_PACKAGES.map(({ location }) => {
+      const output = run('npm', ['pack', `./${location}`, '--ignore-scripts', '--json', '--pack-destination', packs], { cwd: root });
       const start = output.search(/^\[/m);
       return path.join(packs, JSON.parse(output.slice(start >= 0 ? start : 0))[0].filename);
     });

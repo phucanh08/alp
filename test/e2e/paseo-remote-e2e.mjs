@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { createPaseoClient } from '@getpaseo/client';
+import { workspaceLocations } from '../../scripts/workspaces.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const keep = process.env.ALP_E2E_KEEP === '1';
@@ -67,12 +68,11 @@ let paseoClient;
 const token = `BETA_${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
 try {
   // 1. Clean installs from the release tarballs.
-  const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
   const tarballs = {};
-  for (const location of manifest.workspaces) {
+  for (const location of workspaceLocations(root)) {
     const pkg = JSON.parse(await readFile(path.join(root, location, 'package.json'), 'utf8'));
     if (pkg.private) continue;
-    const packed = JSON.parse(run('npm', ['pack', '--workspace', pkg.name, '--ignore-scripts', '--json', '--pack-destination', dirs.tarballs], { cwd: root }))[0];
+    const packed = JSON.parse(run('npm', ['pack', `./${location}`, '--ignore-scripts', '--json', '--pack-destination', dirs.tarballs], { cwd: root }))[0];
     tarballs[pkg.name] = `file:${path.join(dirs.tarballs, packed.filename)}`;
   }
   const plugin = JSON.parse(await readFile(path.join(root, 'integrations/paseo/package.json'), 'utf8'));

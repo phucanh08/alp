@@ -134,7 +134,9 @@ test('tarballs are read under package/, long names through the ustar prefix and 
 test('the source check wants exactly the eight packages public, one version, pinned dependencies and the lockfile in step', () => {
   const workspaces = RELEASE_PACKAGES.map(({ name, location }) => ({ location, pkg: JSON.parse(packageFiles(name)['package.json']) }));
   workspaces.push({ location: 'apps/gateway', pkg: { name: '@anhlp/alp-gateway', version: VERSION, private: true } });
-  const lock = { packages: Object.fromEntries(workspaces.map(({ location, pkg }) => [location === '.' ? '' : location, { version: pkg.version, dependencies: pkg.dependencies }])) };
+  const locationOf = Object.fromEntries(workspaces.map(({ location, pkg }) => [pkg.name, location]));
+  const locked = (from, dependencies = {}) => Object.fromEntries(Object.entries(dependencies).map(([name, specifier]) => [name, { specifier, version: name in locationOf ? `link:${path.posix.relative(from, locationOf[name]) || '.'}` : specifier }]));
+  const lock = { importers: Object.fromEntries(workspaces.map(({ location, pkg }) => [location, { dependencies: locked(location, pkg.dependencies) }])) };
   assert.deepEqual(sourceProblems({ workspaces, lock, version: VERSION }), []);
 
   const broken = structuredClone(workspaces);
@@ -144,12 +146,14 @@ test('the source check wants exactly the eight packages public, one version, pin
   assert.deepEqual(sourceProblems({ workspaces: broken, lock, version: VERSION }), [
     '@anhlp/alp-gateway is public but not a release package; mark it "private": true',
     '@anhlp/alp-runtime: dependencies @anhlp/alp-protocol@^42.17.9-fixture.314, not pinned to 42.17.9-fixture.314',
-    '@anhlp/alp-runtime: package-lock.json dependencies @anhlp/alp-protocol@42.17.9-fixture.314 differs from package.json ^42.17.9-fixture.314; run npm install',
+    '@anhlp/alp-runtime: pnpm-lock.yaml dependencies @anhlp/alp-protocol@42.17.9-fixture.314 differs from package.json ^42.17.9-fixture.314; run pnpm install',
     '@anhlp/alp-client: version 0.0.0-beta, expected 42.17.9-fixture.314',
   ]);
   const staleLock = structuredClone(lock);
-  staleLock.packages['packages/core'].version = '0.10.0';
-  assert.deepEqual(sourceProblems({ workspaces, lock: staleLock, version: VERSION }), ['@anhlp/alp-core: package-lock.json records 0.10.0, expected 42.17.9-fixture.314']);
+  staleLock.importers['packages/core'].dependencies['@anhlp/alp-protocol'].version = '42.17.9-fixture.314';
+  assert.deepEqual(sourceProblems({ workspaces, lock: staleLock, version: VERSION }), ['@anhlp/alp-core: pnpm-lock.yaml resolves dependencies @anhlp/alp-protocol to 42.17.9-fixture.314, not the workspace (link:../protocol)']);
+  delete staleLock.importers['packages/cli'];
+  assert.deepEqual(sourceProblems({ workspaces, lock: staleLock, version: VERSION }).at(-1), '@anhlp/alp-cli: pnpm-lock.yaml has no importer packages/cli');
   assert.match(sourceProblems({ workspaces, lock, version: 'beta' })[0], /not a semver version/);
 });
 

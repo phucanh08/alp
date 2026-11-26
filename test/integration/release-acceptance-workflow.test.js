@@ -25,7 +25,7 @@ function job(name) {
 test('release acceptance checks out Paseo\'s compiler before release-consumer and requires it', () => {
   const lines = job('acceptance');
   const checkout = lines.findIndex(line => /^\s+run: node scripts\/paseo-checkout\.mjs\s*$/.test(line));
-  const consumer = lines.findIndex(line => /^\s+- run: npm run release:consumer\b/.test(line));
+  const consumer = lines.findIndex(line => /^\s+- run: pnpm run release:consumer\b/.test(line));
   assert.ok(consumer >= 0, 'the acceptance job no longer runs release:consumer');
   assert.ok(checkout >= 0, 'the acceptance job never runs scripts/paseo-checkout.mjs: the #111 compile half is skipped on every row');
   assert.ok(checkout < consumer, 'scripts/paseo-checkout.mjs must run before release:consumer');

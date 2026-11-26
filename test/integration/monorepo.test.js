@@ -35,7 +35,8 @@ test('the boundary checker rejects Paseo deps, imports, createRequire aliases an
   const fixture = await mkdtemp(path.join(os.tmpdir(), 'alp-boundaries-'));
   t.after(() => rm(fixture, { recursive: true, force: true }));
   const write = async (relative, contents) => { await mkdir(path.dirname(path.join(fixture, relative)), { recursive: true }); await writeFile(path.join(fixture, relative), contents); };
-  await write('package.json', JSON.stringify({ private: true, workspaces: ['packages/core', 'packages/daemon', 'apps/tui'] }));
+  await write('package.json', JSON.stringify({ private: true }));
+  await write('pnpm-workspace.yaml', `packages: ${JSON.stringify(['packages/core', 'packages/daemon', 'apps/tui'])}\n`);
   await write('apps/tui/package.json', JSON.stringify({ name: '@anhlp/alp-tui', version: '0.0.0', dependencies: {} }));
   await write('packages/core/package.json', JSON.stringify({ name: '@anhlp/alp-core', version: '0.0.0', dependencies: { '@getpaseo/plugin': '*' } }));
   await write('packages/core/src/index.ts', "import value from '@getpaseo/plugin';\nexport default value;\n");
@@ -58,7 +59,8 @@ test('the boundary checker rejects process.execPath outside the runtime-neutral 
   const fixture = await mkdtemp(path.join(os.tmpdir(), 'alp-execpath-'));
   t.after(() => rm(fixture, { recursive: true, force: true }));
   const write = async (relative, contents) => { await mkdir(path.dirname(path.join(fixture, relative)), { recursive: true }); await writeFile(path.join(fixture, relative), contents); };
-  await write('package.json', JSON.stringify({ private: true, workspaces: ['packages/core', 'packages/daemon'] }));
+  await write('package.json', JSON.stringify({ private: true }));
+  await write('pnpm-workspace.yaml', `packages: ${JSON.stringify(['packages/core', 'packages/daemon'])}\n`);
   await write('packages/core/package.json', JSON.stringify({ name: '@anhlp/alp-core', version: '0.0.0' }));
   await write('packages/daemon/package.json', JSON.stringify({ name: '@anhlp/alp-daemon', version: '0.0.0' }));
   await write('packages/core/src/packaged.ts', "export const self = () => process.execPath;\n");
@@ -80,7 +82,8 @@ test('the CLI may bundle the private gateway only as a devDependency; other pack
   t.after(() => rm(fixture, { recursive: true, force: true }));
   const write = async (relative, contents) => { await mkdir(path.dirname(path.join(fixture, relative)), { recursive: true }); await writeFile(path.join(fixture, relative), contents); };
   const check = () => { const result = spawnSync(process.execPath, ['scripts/check-boundaries.mjs', '--root', fixture], { cwd: root, encoding: 'utf8' }); return { status: result.status, output: result.stdout + result.stderr }; };
-  await write('package.json', JSON.stringify({ private: true, workspaces: ['packages/cli', 'packages/daemon', 'apps/gateway'] }));
+  await write('package.json', JSON.stringify({ private: true }));
+  await write('pnpm-workspace.yaml', `packages: ${JSON.stringify(['packages/cli', 'packages/daemon', 'apps/gateway'])}\n`);
   await write('apps/gateway/package.json', JSON.stringify({ name: '@anhlp/alp-gateway', version: '0.0.0', private: true }));
   await write('packages/daemon/package.json', JSON.stringify({ name: '@anhlp/alp-daemon', version: '0.0.0' }));
   await write('packages/cli/src/dashboard/main.js', "import { createGateway } from '@anhlp/alp-gateway';\nexport default createGateway;\n");
@@ -110,7 +113,8 @@ test('the CLI may bundle the private gateway only as a devDependency; other pack
 test('strict boundary checks fail when build artifacts are missing', async t => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), 'alp-missing-artifacts-'));
   t.after(() => rm(fixture, { recursive: true, force: true }));
-  await writeFile(path.join(fixture, 'package.json'), JSON.stringify({ workspaces: [] }));
+  await writeFile(path.join(fixture, 'package.json'), JSON.stringify({}));
+  await writeFile(path.join(fixture, 'pnpm-workspace.yaml'), 'packages: []\n');
   const check = (...args) => spawnSync(process.execPath, ['scripts/check-boundaries.mjs', '--root', fixture, ...args], { cwd: root, encoding: 'utf8' });
   assert.equal(check().status, 0);
   const strict = check('--require-artifacts');
@@ -133,7 +137,8 @@ test('root distribution boundary rejects direct/optional/peer/dev/bundled SDK an
   }
   const fixture = await mkdtemp(path.join(os.tmpdir(), 'alp-root-boundary-'));
   t.after(() => rm(fixture, { recursive: true, force: true }));
-  await writeFile(path.join(fixture, 'package.json'), JSON.stringify({ name: '@anhlp/alp', workspaces: [], dependencies: { '@getpaseo/plugin': '*' } }));
+  await writeFile(path.join(fixture, 'pnpm-workspace.yaml'), 'packages: []\n');
+  await writeFile(path.join(fixture, 'package.json'), JSON.stringify({ name: '@anhlp/alp', dependencies: { '@getpaseo/plugin': '*' } }));
   const result = spawnSync(process.execPath, ['scripts/check-boundaries.mjs', '--root', fixture], { encoding: 'utf8', cwd: root });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /@anhlp\/alp: forbidden Paseo dependency/);

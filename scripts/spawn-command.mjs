@@ -3,6 +3,7 @@
 //
 // - npm and npx are .cmd shims on Windows, which spawn refuses to start without a shell since
 //   Node's CVE-2024-27980 fix. There they run as their JavaScript entry under this Node instead.
+//   So does pnpm, whose entry is the one that started this script (`pnpm run …` sets npm_execpath).
 // - tar on Windows is the system's bsdtar (%SystemRoot%\System32\tar.exe), never whatever comes first
 //   on PATH. Under Git Bash (the release workflows' `shell: bash`) that is Git's GNU tar, which reads a
 //   drive-letter path such as `D:\a\…\plugin.tgz` as a remote `host:file` archive ("tar (child):
@@ -34,6 +35,11 @@ export const windowsTar = (env = process.env) => path.win32.join(env.SystemRoot 
 export function spawnCommand(name, args) {
   if (process.platform !== 'win32') return [name, args];
   if (name === 'tar') return [windowsTar(), args];
+  if (name === 'pnpm') {
+    const entry = process.env.npm_execpath;
+    if (!entry || !/pnpm\.c?js$/.test(entry)) throw new Error('pnpm on Windows: start this script through pnpm (pnpm run …), which names its entry in npm_execpath');
+    return [process.execPath, [entry, ...args]];
+  }
   if (!entries[name]) return [name, args];
   const fromNpm = name === 'npm' && process.env.npm_execpath?.endsWith(entries.npm) ? process.env.npm_execpath : undefined;
   const entry = fromNpm ?? path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', entries[name]);
