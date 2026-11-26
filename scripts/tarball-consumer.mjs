@@ -25,6 +25,7 @@ import { requireRelativeImports } from './relative-imports.mjs';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { workspaceLocations } from './workspaces.mjs';
 
 // t-5294.3: the installed-plugin regressions below are the published packages as a USER installs
 // them. Run from an ALP agent's shell, the inherited ALP_AGENT_SESSION made the installed client
@@ -37,7 +38,6 @@ const clearedSession = clearCallerSession();
 if (clearedSession.length) console.log(`tarball consumer: cleared the caller's ALP session variables, so the installed packages run as the user's: ${clearedSession.join(', ')}`);
 
 const root = path.resolve(import.meta.dirname, '..');
-const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
 const packsAt = process.argv.indexOf('--packs');
 const savedPacks = packsAt >= 0 ? path.resolve(process.argv[packsAt + 1] ?? '') : undefined;
 const TYPES_NODE = '@types/node@22.20.5';
@@ -143,12 +143,12 @@ try {
     publicPackages.push(/** @type {import('./release-lib.mjs').PackageJson} */ (artifact.manifest));
     tarballs.set(artifact.name, artifact.file);
   }
-  for (const location of /** @type {string[]} */ (savedPacks ? [] : manifest.workspaces)) {
+  for (const location of savedPacks ? [] : workspaceLocations(root)) {
     /** @type {import('./release-lib.mjs').PackageJson & { name: string }} */
     const pkg = JSON.parse(readFileSync(path.join(root, location, 'package.json'), 'utf8'));
     if (pkg.private) continue;
     publicPackages.push(pkg);
-    const output = run('npm', ['pack', '--workspace', pkg.name, '--pack-destination', packs, '--ignore-scripts', '--json'], { capture: true });
+    const output = run('npm', ['pack', `./${location}`, '--pack-destination', packs, '--ignore-scripts', '--json'], { capture: true });
     /** @type {[{ filename: string }]} */
     const [{ filename }] = JSON.parse(output.slice(output.indexOf('[')));
     tarballs.set(pkg.name, path.join(packs, filename));

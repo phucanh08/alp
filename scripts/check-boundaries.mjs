@@ -7,12 +7,14 @@ import { corePackageProblems } from './core-package-boundary.mjs';
 import { namesExecPath } from './execpath-lint.mjs';
 import { builtinModules } from 'node:module';
 import { coreManifestPaths, validateBuildManifest } from './build-manifest.mjs';
+import { workspaceLocations } from './workspaces.mjs';
 
 // The default root is this repository; tests point --root at a throwaway fixture to prove the
 // checker catches forbidden dependencies, imports and require aliases without touching the tree.
 const argument = process.argv.indexOf('--root');
 const root = path.resolve(argument >= 0 && process.argv[argument + 1] ? process.argv[argument + 1] : path.join(import.meta.dirname, '..'));
 const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+const workspaces = workspaceLocations(root);
 /** @type {Map<string, string[]>} */
 const graph = new Map();
 /** @type {Record<string, string[]>} */
@@ -69,10 +71,10 @@ function requireAliases(source) {
 // Where each workspace lives: libraries under packages/, external integrations under integrations/, applications under apps/.
 // Nothing may depend on an integration or an application, so no package gains a reverse dependency on one.
 const locationOf = new Map();
-for (const location of manifest.workspaces ?? []) {
+for (const location of workspaces) {
   try { locationOf.set(JSON.parse(await readFile(path.join(root, location, 'package.json'), 'utf8')).name, location); } catch {}
 }
-for (const location of manifest.workspaces ?? []) {
+for (const location of workspaces) {
   const directory = path.join(root, location);
   const pkg = JSON.parse(await readFile(path.join(directory, 'package.json'), 'utf8'));
   if (pkg.name !== '@anhlp/alp-paseo') failures.push(...corePackageProblems(pkg));

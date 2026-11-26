@@ -27,6 +27,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { spawnCommand } from './spawn-command.mjs';
 import { buildNativeDaemon, NATIVE_PLATFORMS, pinnedBun } from './build-alpd-native.mjs';
+import { readPnpmLock } from './workspaces.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 export const PLATFORMS = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64', 'windows-x64'];
@@ -76,7 +77,7 @@ const sha256 = /** @param {Buffer} bytes */ bytes => createHash('sha256').update
  * @returns {string}
  */
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8', shell: process.platform === 'win32' && command === 'npm', ...options });
+  const result = spawnSync(command, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8', shell: process.platform === 'win32' && (command === 'npm' || command === 'pnpm'), ...options });
   if (result.status !== 0) throw new Error(`${command} ${args.join(' ')} failed (${result.status ?? result.error})`);
   return /** @type {string} */ (result.stdout); // encoding 'utf8' (callers do not override it)
 }
@@ -107,18 +108,19 @@ export async function nodeArchive(platform, cache) {
 }
 
 /**
- * Third-party packages the lockfile holds at exactly one version: name → version.
- * @param {{ packages?: Record<string, { link?: boolean, version?: string }> }} lock
+ * Third-party packages the lockfile (pnpm-lock.yaml, parsed) holds at exactly one version: name → version.
+ * Its `packages` keys are `<name>@<version>`; the workspaces are links and are not among them.
+ * @param {{ packages?: Record<string, unknown> }} lock
  * @returns {Map<string, string>}
  */
 export function lockedVersions(lock) {
   /** @type {Map<string, Set<string>>} */
   const seen = new Map();
-  for (const [key, entry] of Object.entries(lock.packages ?? {})) {
-    const match = /(?:^|\/)node_modules\/((?:@[^/]+\/)?[^/]+)$/.exec(key);
-    if (!match || entry.link || !entry.version || match[1].startsWith('@anhlp/')) continue;
+  for (const key of Object.keys(lock.packages ?? {})) {
+    const match = /^((?:@[^/@]+\/)?[^/@]+)@(\d[^()]*)$/.exec(key);
+    if (!match || match[1].startsWith('@anhlp/')) continue;
     const versions = seen.get(match[1]) ?? new Set();
-    versions.add(entry.version);
+    versions.add(match[2]);
     seen.set(match[1], versions);
   }
   return new Map([...seen].filter(([, versions]) => versions.size === 1).map(([name, versions]) => [name, [...versions][0]]));
@@ -165,7 +167,7 @@ into @anhlp/alp-cli's dist follow Node's.
   // The native alpd (t-81b0.9) is the Bun runtime with alpd's JavaScript inside.
   if (bunVersion) parts.push(`\n${'='.repeat(100)}\nBun ${bunVersion} (bin/alpd)\n${'='.repeat(100)}\n\nbin/alpd is built with \`bun build --compile\` and contains the Bun runtime ${bunVersion}\n(https://github.com/oven-sh/bun, MIT License, Copyright (c) Jarred Sumner and Oven contributors).\nBun statically links JavaScriptCore and WebKit's bmalloc/WTF (LGPL-2.1, source at\nhttps://github.com/oven-sh/WebKit) and other third-party libraries; their licences are listed at\nhttps://bun.com/docs/project/licensing. The JavaScript inside bin/alpd is the same as\nlib/node_modules/@anhlp/alp-cli/dist/alpd.js plus @anthropic-ai/claude-agent-sdk, whose notices follow\nor ship in lib/node_modules.\n`);
   for (const source of ['packages/cli/dist/THIRD-PARTY-NOTICES.txt', 'packages/cli/dist/alp-dashboard/THIRD-PARTY-NOTICES.txt']) {
-    const text = await readFile(path.join(ROOT, source), 'utf8').catch(() => { throw new Error(`${source} is missing; run npm run build first`); });
+    const text = await readFile(path.join(ROOT, source), 'utf8').catch(() => { throw new Error(`${source} is missing; run pnpm run build first`); });
     parts.push(`\n${'='.repeat(100)}\n${source}\n${'='.repeat(100)}\n\n${text.trim()}\n`);
   }
   return parts.join('');
@@ -179,7 +181,7 @@ into @anhlp/alp-cli's dist follow Node's.
 export async function buildBundle({ platform, out, build = true, nodeCache = path.join(ROOT, '.cache/node'), bun, nativeDaemon = NATIVE_PLATFORMS.includes(platform) }) {
   if (!PLATFORMS.includes(platform)) throw new Error(`Unsupported platform ${platform}; expected one of ${PLATFORMS.join(', ')}`);
   const windows = platform.startsWith('windows-');
-  if (build) run('npm', ['run', 'build'], { stdio: 'inherit' });
+  if (build) run('pnpm', ['run', 'build'], { stdio: 'inherit' });
   const { version } = JSON.parse(await readFile(path.join(ROOT, 'packages/cli/package.json'), 'utf8'));
   const name = `alp-${version}-${platform}`;
   const directory = path.resolve(out, name);
@@ -201,7 +203,7 @@ export async function buildBundle({ platform, out, build = true, nodeCache = pat
     const target = npmTarget(platform);
     // The repository's lockfile decides every third-party version, so the five platforms ship the
     // tree CI tested: each package locked at one version is pinned to it through overrides.
-    const overrides = lockedVersions(JSON.parse(await readFile(path.join(ROOT, 'package-lock.json'), 'utf8')));
+    const overrides = lockedVersions(readPnpmLock(ROOT));
     await writeFile(path.join(lib, 'package.json'), JSON.stringify({ private: true, dependencies: Object.fromEntries(Object.entries(tarballs).map(([pkg, file]) => [pkg, `file:${file}`])), overrides: Object.fromEntries(overrides) }));
     run('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock', '--ignore-scripts', `--os=${target.os}`, `--cpu=${target.cpu}`, ...(target.os === 'linux' ? ['--libc=glibc'] : [])], { cwd: lib, stdio: ['ignore', 'inherit', 'inherit'] });
     await rm(path.join(lib, 'package.json'), { force: true });
@@ -213,7 +215,7 @@ export async function buildBundle({ platform, out, build = true, nodeCache = pat
       const installed = await readFile(path.join(modules, pkg, 'package.json'), 'utf8').then(text => JSON.parse(text).version, () => undefined);
       if (installed !== undefined && installed !== version) drift.push(`${pkg} ${installed} (locked ${version})`);
     }
-    if (drift.length) throw new Error(`The bundle's dependencies differ from package-lock.json: ${drift.join(', ')}`);
+    if (drift.length) throw new Error(`The bundle's dependencies differ from pnpm-lock.yaml: ${drift.join(', ')}`);
     await prune(modules, platform);
     // 3. Node itself: only the executable and its licence (no npm, headers or docs).
     const node = await nodeArchive(platform, nodeCache);

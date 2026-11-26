@@ -3,8 +3,8 @@ import path from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
 // Each spec starts its own disposable host (e2e/support/world.js): alpd with a fake Codex in a
-// temporary home, alp-gateway, and the built app on free loopback ports. `npm run test:e2e` builds
-// them first (pretest:e2e); a direct `npx playwright test` does not (see docs/alp/dashboard.md).
+// temporary home, alp-gateway, and the built app on free loopback ports. `pnpm run test:e2e` builds
+// them first (pretest:e2e); a direct `pnpm exec playwright test` does not (see docs/alp/dashboard.md).
 export default defineConfig({
   testDir: 'e2e',
   // Traces and screenshots of failures; CI points this at a directory it uploads.

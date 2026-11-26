@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnCommand } from './spawn-command.mjs';
 import { LAUNCHER_LOCATION, MANIFEST_FILE, RELEASE_PACKAGES, SUMS_FILE, createReleaseManifest, digests, formatSha256Sums, shippedWebProblems, sourceProblems, verifyRelease } from './release-lib.mjs';
+import { readPnpmLock, workspaceLocations } from './workspaces.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
@@ -34,12 +35,12 @@ function run(command, commandArgs) {
 }
 const git = /** @param {string[]} gitArgs */ (...gitArgs) => spawnSync('git', gitArgs, { cwd: root, encoding: 'utf8' });
 
-// `any`: package.json, every workspace's package.json and package-lock.json; sourceProblems types what it reads.
+// `any`: package.json and every workspace's package.json; sourceProblems types what it reads.
 const readJson = /** @param {string} file @returns {any} */ file => JSON.parse(readFileSync(path.join(root, file), 'utf8'));
 const manifest = readJson('package.json');
 const version = manifest.version;
-const workspaces = ['.', ...manifest.workspaces, LAUNCHER_LOCATION].map(location => ({ location, pkg: location === '.' ? manifest : readJson(path.join(location, 'package.json')) }));
-const problems = sourceProblems({ workspaces, lock: readJson('package-lock.json'), version });
+const workspaces = ['.', ...workspaceLocations(root), LAUNCHER_LOCATION].map(location => ({ location, pkg: location === '.' ? manifest : readJson(path.join(location, 'package.json')) }));
+const problems = sourceProblems({ workspaces, lock: readPnpmLock(root), version });
 if (problems.length) throw new Error(`release source check failed:\n- ${problems.join('\n- ')}`);
 
 const sha = git('rev-parse', 'HEAD').stdout?.trim() || null;
@@ -52,10 +53,10 @@ if (existsSync(out) && readdirSync(out).length) throw new Error(`${out} is not e
 mkdirSync(out, { recursive: true });
 
 const artifacts = [];
-for (const { name, location, kind } of RELEASE_PACKAGES) {
+for (const { name, location } of RELEASE_PACKAGES) {
   console.log(`[release-pack] npm pack ${name}`);
-  const where = kind === 'launcher' ? [`./${location}`] : ['--workspace', name];
-  const output = run('npm', ['pack', ...where, '--pack-destination', out, '--json', ...(ignoreScripts ? ['--ignore-scripts'] : [])]);
+  // npm packs and publishes (docs/alp/beta-scope.md §7.2); by path, since the workspace list is pnpm's.
+  const output = run('npm', ['pack', `./${location}`, '--pack-destination', out, '--json', ...(ignoreScripts ? ['--ignore-scripts'] : [])]);
   // Lifecycle output can precede npm's JSON array.
   const start = output.search(/^\[/m);
   /** npm pack --json: one entry per packed package. @type {{ name: string, version: string, filename: string, integrity: string, shasum: string, entryCount: number }[]} */

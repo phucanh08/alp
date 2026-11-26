@@ -76,8 +76,8 @@ async function stop(child) {
  *   `terminal` holds terminal.exec.
  */
 export async function startWorld({ webPort, gatewayPort, provider = 'fake', serveWeb = true, worktrees = false, terminal = false, gateway: standalone = true, settings: hostSettings = {} } = {}) {
-  for (const file of [ALPD, CLI]) if (!existsSync(file)) throw new Error(`${path.relative(REPOSITORY, file)} is missing: run npm run build:alp-web:e2e-deps (node scripts/build-workspace.mjs cli && node scripts/build-workspace.mjs daemon)`);
-  if (serveWeb && !existsSync(path.join(WEB, 'dist/index.html'))) throw new Error('apps/web/dist is missing: run npm run build:alp-web');
+  for (const file of [ALPD, CLI]) if (!existsSync(file)) throw new Error(`${path.relative(REPOSITORY, file)} is missing: run pnpm run build:alp-web:e2e-deps (node scripts/build-workspace.mjs cli && node scripts/build-workspace.mjs daemon)`);
+  if (serveWeb && !existsSync(path.join(WEB, 'dist/index.html'))) throw new Error('apps/web/dist is missing: run pnpm run build:alp-web');
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-web-e2e-'));
   const home = path.join(directory, 'home');
   const gatewayHome = path.join(directory, 'gateway');

@@ -239,10 +239,9 @@ test('the execPath lint catches property and element access and destructuring of
 
 test('build-bundle pins exactly the third-party packages the lockfile holds at one version', async () => {
   const { lockedVersions } = await import('../../scripts/build-bundle.mjs');
+  // pnpm-lock.yaml's packages: `<name>@<version>` keys; the workspaces are links, not listed.
   const pins = lockedVersions({ packages: {
-    '': {}, 'node_modules/a': { version: '1.0.0' }, 'node_modules/@s/b': { version: '2.0.0' },
-    'node_modules/c': { version: '1.0.0' }, 'node_modules/x/node_modules/c': { version: '2.0.0' },
-    'node_modules/@anhlp/alp-core': { link: true }, 'packages/cli/node_modules/a': { version: '1.0.0' }, 'node_modules/@anhlp/alp-gateway': { version: '1.0.0' },
+    'a@1.0.0': {}, '@s/b@2.0.0': {}, 'c@1.0.0': {}, 'c@2.0.0': {}, '@anhlp/alp-gateway@1.0.0': {}, 'd@https://example.com/d.tgz': {},
   } });
   assert.deepEqual(Object.fromEntries(pins), { a: '1.0.0', '@s/b': '2.0.0' });
 });

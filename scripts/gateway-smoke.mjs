@@ -38,7 +38,7 @@ const children = [];
 try {
   const packs = path.join(work, 'packs');
   await mkdir(packs);
-  for (const name of ['@anhlp/alp-protocol', '@anhlp/alp-core', '@anhlp/alp-client', '@anhlp/alp-gateway']) run('npm', ['pack', '--ignore-scripts', '--pack-destination', packs, '--workspace', name], { cwd: root });
+  for (const location of ['packages/protocol', 'packages/core', 'packages/client', 'apps/gateway']) run('npm', ['pack', `./${location}`, '--ignore-scripts', '--pack-destination', packs], { cwd: root });
   const consumer = path.join(work, 'consumer');
   await mkdir(consumer);
   await writeFile(path.join(consumer, 'package.json'), JSON.stringify({ name: 'gateway-consumer', private: true, type: 'module' }));

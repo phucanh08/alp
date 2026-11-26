@@ -6,12 +6,12 @@
 //   node scripts/use-paseo-sdk.mjs floor    the lowest release requirements.paseo admits
 //   node scripts/use-paseo-sdk.mjs latest   the latest published release
 //   node scripts/use-paseo-sdk.mjs 0.12.0   an exact release
-//   node scripts/use-paseo-sdk.mjs --verify after npm ci: the installed SDK is the pinned one
+//   node scripts/use-paseo-sdk.mjs --verify after pnpm install: the installed SDK is the pinned one
 //
-// It pins the four @getpaseo/* devDependencies of @anhlp/alp-paseo to that version, drops their
-// entries from package-lock.json so npm places them afresh (an in-place update nests them under
-// integrations/paseo, where tests in test/ cannot resolve them), and refreshes the lockfile only.
-// Run `npm ci` next.
+// It pins the four @getpaseo/* devDependencies of @anhlp/alp-paseo to that version and refreshes
+// pnpm-lock.yaml only. Run `pnpm install --frozen-lockfile` next; --verify then checks that the
+// hoisted layout put them at the root, where tests in test/ resolve them, not nested under
+// integrations/paseo.
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -29,7 +29,7 @@ function run(command, args) {
 
 const target = process.argv[2];
 if (target === '--verify' && process.argv.length === 3) {
-  // A lane must test the release it names: fail if npm placed another copy where the code resolves it.
+  // A lane must test the release it names: fail if pnpm placed another copy where the code resolves it.
   const pinned = JSON.parse(readFileSync(path.join(ROOT, 'integrations/paseo/package.json'), 'utf8')).devDependencies;
   const wrong = [];
   for (const name of SDK) {
@@ -56,13 +56,5 @@ const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'));
 for (const name of SDK) manifest.devDependencies[name] = version;
 writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
 
-const lockFile = path.join(ROOT, 'package-lock.json');
-const lock = JSON.parse(readFileSync(lockFile, 'utf8'));
-for (const key of Object.keys(lock.packages)) {
-  if (SDK.some(name => key === `node_modules/${name}` || key.endsWith(`/node_modules/${name}`))) delete lock.packages[key];
-}
-lock.packages['integrations/paseo'].devDependencies = manifest.devDependencies;
-writeFileSync(lockFile, `${JSON.stringify(lock, null, 2)}\n`);
-
-run('npm', ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund']);
-console.log(`integrations/paseo now uses Paseo SDK ${version} (${SDK.join(', ')}); run npm ci next.`);
+run('pnpm', ['install', '--lockfile-only', '--ignore-scripts']);
+console.log(`integrations/paseo now uses Paseo SDK ${version} (${SDK.join(', ')}); run pnpm install --frozen-lockfile next.`);

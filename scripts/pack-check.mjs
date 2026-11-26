@@ -8,6 +8,7 @@ import { spawnCommand } from './spawn-command.mjs';
 import { corePackageProblems } from './core-package-boundary.mjs';
 import { THIRD_PARTY_NOTICES, packageDirectory, packageName } from './third-party-notices.mjs';
 import { LAUNCHER, LAUNCHER_LOCATION, launcherProblems, shippedWebProblems } from './release-lib.mjs';
+import { workspaceLocations } from './workspaces.mjs';
 const root = path.resolve(import.meta.dirname, '..');
 await verifyTerminalNative({ requireMatrix: true });
 const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
@@ -70,10 +71,10 @@ async function licenceProblems(location, pkg, files) {
 }
 
 // The workspaces and the npm wrapper (npm/alp, outside the workspaces).
-for (const location of ['.', ...manifest.workspaces, LAUNCHER_LOCATION]) {
+for (const location of ['.', ...workspaceLocations(root), LAUNCHER_LOCATION]) {
   const pkg = JSON.parse(await readFile(path.join(root, location, 'package.json'), 'utf8'));
   if (pkg.private) continue;
-  const result = spawnSync(...spawnCommand('npm', ['pack', ...(location === LAUNCHER_LOCATION ? [`./${location}`] : ['--workspace', pkg.name]), '--dry-run', '--json', ...(process.argv.includes('--ignore-scripts') ? ['--ignore-scripts'] : [])]), { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  const result = spawnSync(...spawnCommand('npm', ['pack', `./${location}`, '--dry-run', '--json', ...(process.argv.includes('--ignore-scripts') ? ['--ignore-scripts'] : [])]), { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   if (result.status !== 0) { console.error(result.stdout + result.stderr); process.exit(result.status ?? 1); }
   // npm lifecycle progress appears before the JSON array on some npm versions.
   const start = result.stdout.indexOf('[\n');

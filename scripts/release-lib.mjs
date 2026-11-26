@@ -156,12 +156,14 @@ export function launcherProblems(pkg, version) {
 
 /**
  * Source checks before packing: exactly the release packages are public, all at `version` with
- * internal dependencies pinned to it, and package-lock.json agrees with the workspace manifests.
+ * internal dependencies pinned to it, and pnpm-lock.yaml agrees with the workspace manifests: it
+ * records each internal dependency with the manifest's specifier, linked to the local workspace
+ * (`link:<path>`), never fetched from the registry.
  * `workspaces` is `[{ location, pkg }]` for the root (`.`), every workspace and the launcher
  * (npm/alp, outside the workspaces).
  * @param {{
  *   workspaces: { location: string, pkg: PackageJson }[],
- *   lock?: { packages?: Record<string, { version?: string } & Partial<Record<DependencyField, Record<string, string>>>> },
+ *   lock?: { importers?: Record<string, Partial<Record<DependencyField, Record<string, { specifier?: string, version?: string }>>>> },
  *   version?: string,
  * }} source
  */
@@ -179,12 +181,17 @@ export function sourceProblems({ workspaces, lock, version }) {
     if (found.pkg.version !== version) problems.push(`${expected.name}: version ${found.pkg.version}, expected ${version}`);
     problems.push(...internalDependencyProblems(found.pkg, version));
     if (expected.kind === 'launcher') { problems.push(...launcherProblems(found.pkg, version)); continue; }
-    const locked = lock?.packages?.[expected.location === '.' ? '' : expected.location];
-    if (!locked) { problems.push(`${expected.name}: package-lock.json has no entry for ${expected.location}`); continue; }
-    if (locked.version !== version) problems.push(`${expected.name}: package-lock.json records ${locked.version}, expected ${version}`);
-    for (const field of DEPENDENCY_FIELDS) {
+    const locked = lock?.importers?.[expected.location];
+    if (!locked) { problems.push(`${expected.name}: pnpm-lock.yaml has no importer ${expected.location}`); continue; }
+    // pnpm-lock.yaml records no peerDependencies; no release package has an internal peer.
+    for (const field of /** @type {DependencyField[]} */ (['dependencies', 'optionalDependencies'])) {
       for (const [name, spec] of Object.entries(found.pkg[field] ?? {})) {
-        if (name.startsWith('@anhlp/') && locked[field]?.[name] !== spec) problems.push(`${expected.name}: package-lock.json ${field} ${name}@${locked[field]?.[name]} differs from package.json ${spec}; run npm install`);
+        if (!name.startsWith('@anhlp/')) continue;
+        const entry = locked[field]?.[name];
+        if (entry?.specifier !== spec) { problems.push(`${expected.name}: pnpm-lock.yaml ${field} ${name}@${entry?.specifier} differs from package.json ${spec}; run pnpm install`); continue; }
+        const target = workspaces.find(({ pkg }) => pkg.name === name)?.location;
+        const link = target === undefined ? undefined : `link:${path.posix.relative(expected.location, target) || '.'}`;
+        if (entry.version !== link) problems.push(`${expected.name}: pnpm-lock.yaml resolves ${field} ${name} to ${entry.version}, not the workspace (${link ?? 'none'})`);
       }
     }
   }

@@ -39,9 +39,9 @@ function node(script, ...args) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 /** @param {string[]} args */
-function npm(...args) {
-  console.log(`\n[validate:${scope}] npm ${args.join(' ')}`);
-  const result = spawnSync(...spawnCommand('npm', args), { cwd: ROOT, stdio: 'inherit' });
+function pnpm(...args) {
+  console.log(`\n[validate:${scope}] pnpm ${args.join(' ')}`);
+  const result = spawnSync(...spawnCommand('pnpm', args), { cwd: ROOT, stdio: 'inherit' });
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 /** @param {string[]} files */
@@ -57,7 +57,7 @@ if (scope === 'all' || scope === 'core') {
   node('scripts/check-teardown-order.mjs');
   node('node_modules/typescript/bin/tsc', '-p', 'tsconfig.core.json');
   node('node_modules/typescript/bin/tsc', '-p', 'tsconfig.gateway.json');
-  // The scripts themselves: strictly type-checked JavaScript (scripts/tsconfig.json, npm run check:scripts).
+  // The scripts themselves: strictly type-checked JavaScript (scripts/tsconfig.json, pnpm run check:scripts).
   node('node_modules/typescript/bin/tsc', '-p', 'scripts/tsconfig.json');
   buildWorkspace('daemon');
   buildWorkspace('cli');
@@ -111,5 +111,5 @@ if (scope === 'all' || scope === 'web') {
   node('node_modules/typescript/bin/tsc', '-p', 'apps/web/tsconfig.json');
   tests(webTests());
   // pretest:e2e in apps/web builds the CLI, daemon and app bundle first.
-  npm('run', 'test:e2e', '--workspace', '@anhlp/alp-web');
+  pnpm('--filter', '@anhlp/alp-web', 'run', 'test:e2e');
 }

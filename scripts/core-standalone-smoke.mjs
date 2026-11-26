@@ -16,6 +16,7 @@ import path from 'node:path';
 import { corePackageProblems } from './core-package-boundary.mjs';
 import { clearCallerSession } from './test-lib.mjs';
 import { requireRelativeImports } from './relative-imports.mjs';
+import { workspaceLocations } from './workspaces.mjs';
 
 // t-5294.3: this smoke is the installed CLI as a USER runs it, and `alp dashboard --print` below is one of
 // the things it checks. Run from an ALP agent's shell, the inherited ALP_AGENT_SESSION made the
@@ -92,9 +93,14 @@ try {
   // prepack lifecycles here prove builds do not silently depend on an existing plugin checkout.
   const source = path.join(work, 'source');
   mkdirSync(source);
-  const sourceManifest = { ...manifest, workspaces: manifest.workspaces.filter(/** @param {string} location */ location => location.startsWith('packages/')) };
-  writeFileSync(path.join(source, 'package.json'), JSON.stringify(sourceManifest));
+  // The copy is built with npm, as a source checkout without pnpm would be: its package.json names
+  // the copied workspaces in npm's "workspaces" field, and drops pnpm's packageManager pin.
+  const { packageManager: _pnpm, ...npmManifest } = manifest;
+  const sourceManifest = { ...npmManifest, workspaces: workspaceLocations(root).filter(location => location.startsWith('packages/')) };
   const copied = new Set(sourceManifest.workspaces.map(/** @param {string} location */ location => JSON.parse(readFileSync(path.join(root, location, 'package.json'), 'utf8')).name));
+  // The root's devDependencies name every workspace (so each is linked at the root, as npm did); the ones not copied go.
+  for (const name of Object.keys(sourceManifest.devDependencies ?? {})) if (name.startsWith('@anhlp/alp-') && !copied.has(name)) delete sourceManifest.devDependencies[name];
+  writeFileSync(path.join(source, 'package.json'), JSON.stringify(sourceManifest));
   for (const location of sourceManifest.workspaces) {
     mkdirSync(path.join(source, location), { recursive: true });
     // The CLI bundles the private gateway (apps/gateway) as a devDependency; a core-only copy has no
