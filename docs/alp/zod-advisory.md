@@ -17,6 +17,7 @@ hạn. Từ 4.6.6, danh sách vượt giới hạn bị từ chối ngay ở gi�
   `integrations/paseo`) và `package-lock.json` đều ghim `zod` **4.6.7**. 4.6.7 là `latest` trên npm và
   là bản `npm audit` đề xuất; mã của nó giống hệt 4.6.6, chỉ khác chuỗi version.
 - `npm audit --audit-level=high` của repo: 0 lỗ hổng.
+- (Ghi chú sau: đây là bản ghi thời repo còn dùng npm; từ t-fa0a.7 lockfile là `pnpm-lock.yaml`.)
 - Các bundle ALP tự build (alpd, CLI, plugin Paseo) lấy zod từ `node_modules`, nên khi build lại sẽ
   nhúng bản 4.6.7.
 - Regression: `packages/runtime/tests/zod-security.test.js` kiểm bản zod cài đặt, hành vi của

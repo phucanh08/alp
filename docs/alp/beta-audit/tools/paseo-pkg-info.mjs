@@ -1,5 +1,7 @@
 // Reports lockfile entries for package names in the Paseo checkout, and greps a package's files.
 // Usage: node paseo-pkg-info.mjs <paseoRoot> <name,name,...> [grepPkgDir] [regex]
+// Historical audit tool: it reads the Paseo checkout's own package-lock.json, not this repository's
+// lockfile (pnpm-lock.yaml since t-fa0a.7).
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 const [root, names, grepPkg, re] = process.argv.slice(2);

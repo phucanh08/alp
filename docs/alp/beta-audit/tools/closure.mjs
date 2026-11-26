@@ -2,6 +2,8 @@
 // (dependencies + non-optional peerDependencies, which npm >=7 auto-installs;
 // optional deps included and flagged), then intersects it with npm audit output.
 // Usage: node closure.mjs <repoRoot> <audit.json> <out.json>
+// Historical (the beta audit, when this repository used npm): it reads package-lock.json, which the
+// repository no longer has since the move to pnpm (t-fa0a.7); run it on a checkout from that time.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 

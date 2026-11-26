@@ -244,7 +244,7 @@ Mọi dòng chạy trên **cùng release SHA** và, với các dòng cài đặt
 | # | Kiểm tra | Môi trường | Người chạy | Chặn |
 |---|---|---|---|---|
 | H1 | CI `core` và `paseo` (`validate:core`, `validate:paseo`) | Ubuntu, Node 22 và 24 | CI | Có |
-| H2 | `npm run validate:core` và `npm run validate:paseo` tại release SHA | macOS, Node 24 (CI `core-paseo-macos`, D8) | CI | Có; evidence là link run CI ở release SHA |
+| H2 | `pnpm run validate:core` và `pnpm run validate:paseo` tại release SHA | macOS, Node 24 (CI `core-paseo-macos`, D8) | CI | Có; evidence là link run CI ở release SHA |
 | H3 | CI `packages-and-web` (`validate:packages`; đến t-55ce.3 còn `web-app-smoke`, đã gỡ cùng web của Paseo) | Ubuntu, Node 22 | CI | Có |
 | H4 | CI `windows-daemon` | Windows, Node 22 và 24 | CI | Có (giữ lane xanh) |
 | H5 | CI `alp-web` | Ubuntu, macOS | CI | Không (app chưa phát hành) |
@@ -255,7 +255,7 @@ Mọi dòng chạy trên **cùng release SHA** và, với các dòng cài đặt
 
 | # | Kiểm tra | Môi trường | Người chạy | Chặn |
 |---|---|---|---|---|
-| A5 | `npm run release:verify -- "$OUT" --sha "$RELEASE_SHA" --record release-evidence.json` (`release:pack` cũng tự chạy A5). Kiểm: checksum khớp `SHA256SUMS`; đúng 8 tarball, không có tgz thừa (gateway); version `0.0.0-beta.1`; `entryCount` khớp số file trong tgz; dependency nội bộ trong `package.json` **đã pack** pin đúng version và chỉ trỏ tới 8 package; LICENSE mọi tarball giống tarball root; NOTICE; THIRD-PARTY-NOTICES liệt kê mọi module esbuild đã inline; plugin có `LICENSE.paseo.txt` (đến t-55ce.3: `web-app/LICENSE.paseo.txt` và `NOTICE.txt` của web Paseo, đã gỡ), và NOTICE = NOTICE root + Paseo; core không có đường dẫn hay dependency Paseo | máy build | người build (§7.2) | Có |
+| A5 | `pnpm run release:verify "$OUT" --sha "$RELEASE_SHA" --record release-evidence.json` (`release:pack` cũng tự chạy A5). Kiểm: checksum khớp `SHA256SUMS`; đúng 8 tarball, không có tgz thừa (gateway); version `0.0.0-beta.1`; `entryCount` khớp số file trong tgz; dependency nội bộ trong `package.json` **đã pack** pin đúng version và chỉ trỏ tới 8 package; LICENSE mọi tarball giống tarball root; NOTICE; THIRD-PARTY-NOTICES liệt kê mọi module esbuild đã inline; plugin có `LICENSE.paseo.txt` (đến t-55ce.3: `web-app/LICENSE.paseo.txt` và `NOTICE.txt` của web Paseo, đã gỡ), và NOTICE = NOTICE root + Paseo; core không có đường dẫn hay dependency Paseo | máy build | người build (§7.2) | Có |
 
 **Provider thật trên tarball** (checklist §6.3). Đề xuất chia Node để cả hai major đều có smoke thật:
 macOS Node 24, Linux Node 22.12+.
@@ -306,7 +306,7 @@ macOS Node 24, Linux Node 22.12+.
   `/tmp/alp-beta/packs`, rồi kiểm: `shasum -a 256 -c SHA256SUMS` (macOS) hoặc `sha256sum -c SHA256SUMS`
   (Linux).
 - Kiểm hermetic, không gọi provider, trong một checkout ở `RELEASE_SHA`:
-  `npm run release:consumer -- /tmp/alp-beta/packs`. Script cài đúng các tarball đã lưu (cả 8), so
+  `pnpm run release:consumer /tmp/alp-beta/packs`. Script cài đúng các tarball đã lưu (cả 8), so
   `integrity`/`resolved` (`file:`) trong lockfile với manifest, chạy `tarball-consumer` và
   `package-smoke` với `--packs`, rồi kiểm lại SHA-256 sau khi chạy. Bước này không thay các dòng R.
 
@@ -357,7 +357,7 @@ PASEO_PID=$!
 | R1 (macOS), R3 (Linux) | `node scripts/beta-acceptance-cli.mjs --packs "$PACKS" --live --provider codex` |
 | R2 (macOS), R4 (Linux) | `node scripts/beta-acceptance-cli.mjs --packs "$PACKS" --live --provider claude` |
 | R5 (macOS), R6 (Linux) | `ALP_HOME=<home mà Paseo dùng> node scripts/beta-acceptance-web.mjs --packs "$PACKS" --live --provider codex` (chạy lại với `claude` cho R5) |
-| R7 | `node scripts/beta-acceptance-r7.mjs --live --sha "$RELEASE_SHA" --model codex:<m> --model claude:<m>`, sau `npm ci && npm run build` ở release SHA |
+| R7 | `node scripts/beta-acceptance-r7.mjs --live --sha "$RELEASE_SHA" --model codex:<m> --model claude:<m>`, sau `pnpm install --frozen-lockfile && pnpm run build` ở release SHA |
 | Rehearsal, không phải evidence | thay `--live --provider …` bằng `--fake [--provider codex\|claude]` (fake Codex hoặc fake Claude của repo); row luôn có status `rehearsal` |
 | CI (D6, D7): pack, `release:consumer`, rehearsal fake trên macOS, Linux, Windows | workflow `release-acceptance` (`workflow_dispatch`: `sha`, `packs_run`); xem dưới |
 
@@ -389,7 +389,7 @@ PASEO_PID=$!
 - Workflow `release-acceptance` (D6, D7). Chỉ dùng fake: không secret, không tốn tiền, không gọi
   provider thật; kết quả luôn là rehearsal, không phải evidence cho R1–R7.
   - job `pack`: clone ở `sha` (phải nằm trên `main`), tạo tag `v0.0.0-beta.1` **chỉ trên runner**
-    (không push; anh push tag ở P5), `npm ci`, `build:web`, `build:packages`, `release:pack`,
+    (không push; anh push tag ở P5), `pnpm install --frozen-lockfile`, `build:web`, `build:packages`, `release:pack`,
     `release:verify --sha`; upload artifact `alp-release` (90 ngày). Đây là bộ tarball duy nhất của
     release; R1, R2, R5 trên macOS tải đúng artifact này (`gh run download <run> -n alp-release`).
   - `packs_run`: dùng lại artifact của một run trước, không pack lại.
@@ -453,7 +453,7 @@ dependency `@anhlp/*` chưa publish được tìm thấy), và `alp web` qua SSH
 `127.0.0.1`). Nếu W1 thất bại, ghi lỗi và thử cách cài của `scripts/tarball-consumer.mjs`. Nếu W6 qua
 tunnel thất bại, mở trình duyệt ngay trên máy Linux.
 
-**Worktree thật từ mã nguồn** (R7), trong checkout ở release SHA sau `npm ci && npm run build`:
+**Worktree thật từ mã nguồn** (R7), trong checkout ở release SHA sau `pnpm install --frozen-lockfile && pnpm run build`:
 
 ```sh
 ALP_TEST_MODEL=codex:<model Codex hiện tại>  node test/e2e/worktree-e2e.mjs
@@ -467,7 +467,7 @@ Mong đợi: script kết thúc mã 0; hai file của hai peer được merge v�
 Có thể giữ song song bằng file evidence. Đặt file **ngoài** `$OUT`, vì `$OUT` đã khóa:
 
 ```sh
-npm run release:gate -- "$OUT" --init release-evidence.json
+pnpm run release:gate "$OUT" --init release-evidence.json
 ```
 
 - Mỗi dòng (H1–H5, L1, S1, A5, R1–R7, Q1–Q5) có `{status, sha, artifacts, environment, runner,
@@ -478,7 +478,7 @@ npm run release:gate -- "$OUT" --init release-evidence.json
   - với A5, R1–R6, Q1–Q5: `artifacts` = `sha256sums` trong manifest;
   - có `evidence`.
 - H5 không chặn.
-- Các mốc chạy `npm run release:gate -- "$OUT" release-evidence.json --phase <mốc>`; lệnh phải exit 0:
+- Các mốc chạy `pnpm run release:gate "$OUT" release-evidence.json --phase <mốc>`; lệnh phải exit 0:
   - `--phase publish`: ở P4 và P5;
   - `--phase latest` (pre-publish và Q1–Q3): trước Q4 (D2);
   - `--phase announce` (tới Q5): trước khi bỏ draft GitHub release.
@@ -562,11 +562,11 @@ git clone --branch v0.0.0-beta.1 "file://$(pwd)" /tmp/alp-release/src   # từ r
 git -C /tmp/alp-release/src rev-parse HEAD        # phải bằng RELEASE_SHA
 cd /tmp/alp-release/src
 node -v; npm -v                                   # ghi lại; Node 22.12+ hoặc 24
-npm ci
-npm run build:web
-npm run build:packages
+pnpm install --frozen-lockfile
+pnpm run build:web
+pnpm run build:packages
 OUT=/tmp/alp-release/v0.0.0-beta.1                # thư mục mới hoặc rỗng; script không ghi vào thư mục đã có file
-npm run release:pack -- --out "$OUT"
+pnpm run release:pack --out "$OUT"
 ```
 
 - `release:pack`:
@@ -597,7 +597,7 @@ npm run release:pack -- --out "$OUT"
     Ghi home/log/cổng và PID do lần chạy tạo vào evidence; sau gate dọn/chờ đúng PID đó theo §6.3,
     kể cả khi fail hoặc startup lỗi. Không lấy PID từ ghi chú lịch sử làm quyền dừng process.
   - Điền §6.4. Mọi dòng "Chặn: Có" phải pass. Dòng nào TBD chưa có người chạy thì gate chưa qua.
-    `npm run release:gate -- "$OUT" release-evidence.json --phase publish` phải exit 0.
+    `pnpm run release:gate "$OUT" release-evidence.json --phase publish` phải exit 0.
   - Kiểm registry trước khi publish:
     - `npm whoami` đúng tài khoản; tài khoản là owner của scope `@anhlp`;
     - với từng package, `npm view <pkg>@0.0.0-beta.1 version` phải không có (E404);
@@ -904,17 +904,17 @@ Lệnh gate local đã chạy trên nhánh release (chưa phải release SHA; ch
 1. **P0.** PR `chore(release): 0.0.0-beta.2` xanh CI và merge vào `main` theo branch protection.
    `RELEASE_SHA` = commit đó trên `main`; `git status` sạch.
 2. **P1–P3 (D6).** Chạy workflow `release-acceptance` ở `sha=$RELEASE_SHA`: job `pack` tạo tag
-   `v0.0.0-beta.2` chỉ trên runner, `npm ci`, `build:web`, `build:packages`, `release:pack`,
+   `v0.0.0-beta.2` chỉ trên runner, `pnpm install --frozen-lockfile`, `build:web`, `build:packages`, `release:pack`,
    `release:verify --sha`, upload artifact `alp-release`. Tải về đúng artifact này:
    `gh run download <run> -n alp-release -D /tmp/alp-release` (artifact đã chứa thư mục
    `v0.0.0-beta.2/`), rồi `OUT=/tmp/alp-release/v0.0.0-beta.2`; trong `$OUT` kiểm
    `shasum -a 256 -c SHA256SUMS`, `release-manifest.json` có `version` `0.0.0-beta.2`,
    `git.sha` = `RELEASE_SHA`, `git.dirty` false, `pack.rehearsal` false; khóa thư mục
    (`chmod -R a-w`) và lưu một bản sao.
-3. **P4.** `npm run release:gate -- "$OUT" --init release-evidence-beta2.json` (file **ngoài**
+3. **P4.** `pnpm run release:gate "$OUT" --init release-evidence-beta2.json` (file **ngoài**
    `$OUT`); A5 (`release:verify -- "$OUT" --sha "$RELEASE_SHA" --record …`), `release:consumer`,
    R1, R2, R5, R7 (harness §6.3, `PACKS=$OUT`), H1–H5 (link CI), L1, S1 vào evidence;
-   `npm run release:gate -- "$OUT" release-evidence-beta2.json --phase publish` exit 0.
+   `pnpm run release:gate "$OUT" release-evidence-beta2.json --phase publish` exit 0.
    Kiểm registry: `npm whoami` = `anhlp`; cả 8 package E404 ở `0.0.0-beta.2`.
 4. **P5.** Anh go/no-go. `git tag -a v0.0.0-beta.2 "$RELEASE_SHA" -m "ALP 0.0.0-beta.2"`,
    `git push origin v0.0.0-beta.2`; draft prerelease (§7.6, đổi version), notes từ
