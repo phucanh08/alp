@@ -1,6 +1,6 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -453,6 +453,48 @@ test('invalid MCP configuration is preserved and prevents launch', async t => {
   await writeFile(file, '{invalid');
   await assert.rejects(transportFixture(t, dir, ['test']), /JSON|property|Invalid/);
   assert.equal(await readFile(file, 'utf8'), '{invalid');
+});
+
+for (const [label, content] of [['empty', ''], ['whitespace-only', ' \n\t\r\n ']] as const) {
+  test(`${label} MCP configuration is treated as {} and registers the ALP server (#310)`, async t => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-empty-config-'));
+    removeLast(t, dir);
+    await writeFile(path.join(dir, 'mcp_config.json'), content);
+    const { turn, configFile } = await transportFixture(t, dir, ['only_test']);
+    assert.equal(await turn('tools'), 'tools: only_test');
+    const config = JSON.parse(await readFile(configFile, 'utf8'));
+    assert.deepEqual(Object.keys(config), ['mcpServers']);
+    assert.deepEqual(Object.keys(config.mcpServers), ['alp']);
+  });
+}
+
+test('non-JSON MCP configuration is preserved and the error names antigravity, the file and the fix', async t => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-bad-json-'));
+  removeLast(t, dir);
+  const file = path.join(dir, 'mcp_config.json');
+  await writeFile(file, '{"mcpServers": {');
+  const error = await transportFixture(t, dir, ['test']).then(() => null, (e: Error) => e);
+  assert.ok(error);
+  assert.match(error.message, /antigravity/i);
+  assert.ok(error.message.includes(file), error.message);
+  assert.match(error.message, /not valid JSON/);
+  assert.match(error.message, /fix|delete/i);
+  assert.equal(await readFile(file, 'utf8'), '{"mcpServers": {');
+});
+
+test('a valid MCP configuration that already has the ALP launcher is not rewritten', async t => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-unchanged-'));
+  removeLast(t, dir);
+  await writeFile(path.join(dir, 'mcp_config.json'), JSON.stringify({ mcpServers: { other: { command: 'x' } } }));
+  const first = await transportFixture(t, dir, []);
+  const before = await stat(first.configFile);
+  const text = await readFile(first.configFile, 'utf8');
+  await first.transport.close();
+  const second = await transportFixture(t, dir, []);
+  const after = await stat(second.configFile);
+  assert.equal(after.ino, before.ino, 'an unchanged config is not replaced');
+  assert.equal(after.mtimeMs, before.mtimeMs);
+  assert.equal(await readFile(second.configFile, 'utf8'), text);
 });
 
 test('interrupt ends one turn and the next prompt resumes the conversation', async t => {
