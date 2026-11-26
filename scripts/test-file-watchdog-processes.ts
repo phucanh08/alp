@@ -6,7 +6,7 @@
 // windows-daemon lane and broke the deadline's own bound), which meant nothing ever executed its
 // WMI parsing or its process-tree walk. Here `platform`, `env` and `capture` are injected, so a test
 // drives both platforms and both sides of the opt-in on any host (t-5294.7, ci.yml lanes `core`,
-// `core-paseo-macos` and `windows-daemon`, which all run test/integration/test-env.test.js).
+// `core-paseo-macos` and `windows-daemon`, which all run test/integration/test-env.test.ts).
 //
 // Processes are listed, never signalled: this is diagnosis, not containment.
 import { spawn } from 'node:child_process';

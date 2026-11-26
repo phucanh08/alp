@@ -141,10 +141,10 @@ try {
   copyFileSync(path.join(root, 'test/support/recovery.ts'), path.join(core, 'test/support/recovery.ts'));
   // recovery.ts registers its teardown through the shared helper (t-5294.6), so the copy needs it too.
   copyFileSync(path.join(root, 'test/support/teardown.ts'), path.join(core, 'test/support/teardown.ts'));
-  copyFileSync(path.join(root, 'test/integration/recovery-cli.test.js'), path.join(core, 'test/integration/recovery-cli.test.js'));
+  copyFileSync(path.join(root, 'test/integration/recovery-cli.test.ts'), path.join(core, 'test/integration/recovery-cli.test.ts'));
   // And say which support file is missing here, rather than as an ERR_MODULE_NOT_FOUND inside the
   // `node --test` run below, in a temporary directory, with nothing pointing back at this copy.
-  for (const file of ['test/support/recovery.ts', 'test/integration/recovery-cli.test.js']) {
+  for (const file of ['test/support/recovery.ts', 'test/integration/recovery-cli.test.ts']) {
     await requireRelativeImports(path.join(core, file), 'scripts/core-standalone-smoke.ts');
   }
   for (const [directory, cli] of [[core, 'node_modules/@anhlp/alp-cli/dist/cli.js']]) {
@@ -169,7 +169,7 @@ try {
     copyFileSync(path.join(root, 'scripts/cli-standalone-driver.ts'), path.join(directory, 'cli-driver.ts'));
     run(process.execPath, ['cli-driver.ts', cli], { cwd: directory, timeout: 180_000, env: { HOME: noHome, USERPROFILE: noHome, ALP_HOME: path.join(directory, 'cli-home'), ALP_WEB_INTEGRATION: '', ALP_INTEGRATION_ENTRY: '', PATH: path.dirname(process.execPath), NODE_PATH: '' } });
     // Installed CLI -> installed daemon/runtime, with disposable state and scripted native turns.
-    run(process.execPath, ['--test', '--test-name-pattern=explicit CLI prompt', 'test/integration/recovery-cli.test.js'], { cwd: core, timeout: 60_000, env: { HOME: noHome, USERPROFILE: noHome, ALP_HOME: path.join(directory, 'recovery-home'), ALP_TEST_RECOVERY_CLI: path.join(directory, cli), NODE_PATH: '' } });
+    run(process.execPath, ['--test', '--test-name-pattern=explicit CLI prompt', 'test/integration/recovery-cli.test.ts'], { cwd: core, timeout: 60_000, env: { HOME: noHome, USERPROFILE: noHome, ALP_HOME: path.join(directory, 'recovery-home'), ALP_TEST_RECOVERY_CLI: path.join(directory, cli), NODE_PATH: '' } });
   }
   console.log('Standalone core smoke passed');
 } finally {

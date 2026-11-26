@@ -218,7 +218,7 @@ exception is a recorded decision in the contract (one file, `reason`, `approvedB
 optional `expires`), never a silent edit; with `--base`, any loosening of the contract since
 that ref also refuses until a reviewer runs the check with `--approved-by`. `test/fixtures/architecture-app` and `test/integration/architecture-contract.test.js`
 show a valid feature passing and a deliberate violation caught, both by the checker and as
-a refused peer handoff (`test/integration/hooks.test.js`).
+a refused peer handoff (`test/integration/hooks.test.ts`).
 
 ## Evaluation
 

@@ -24,7 +24,7 @@
 // Usage: node scripts/check-teardown-order.ts [--root <dir>] [--json]
 // Exit 0 when clean, 1 with a report when not. Run by scripts/validate.ts (scope all|core, so the
 // CI lanes `core` and `core-paseo-macos`), as `pnpm run check:teardown-order`, and by
-// test/integration/teardown-order.test.js, which also fails on a STALE entry in ALLOWED below.
+// test/integration/teardown-order.test.ts, which also fails on a STALE entry in ALLOWED below.
 import { readFileSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -53,7 +53,7 @@ const RELEASES = /\.(?:close|closeAllConnections|shutdown|stop|kill|destroy|disc
  * Sites to leave alone, each with the reason. A file-level `test.after` already runs after every
  * per-test hook, so it never needs an entry. Key: `<repo-relative path>:<line>`.
  *
- * This list is NOT a baseline: test/integration/teardown-order.test.js fails when an entry here is
+ * This list is NOT a baseline: test/integration/teardown-order.test.ts fails when an entry here is
  * no longer reported by a scan that ignores the list, so a site that has been fixed (or a line that
  * has moved) must be deleted from it rather than left to rot. Every entry below is a real defect
  * owned by another agent's branch in the same wave of work; each one goes when that branch lands.
@@ -280,7 +280,7 @@ export function teardownProblems(relative: string, source: string, allowed: Reco
     // Registration order, which is `registrations` as hooksOf built it — NOT line order. A test that
     // calls the same fixture twice registers two sets of hooks from the same lines, and the first
     // set's removal really does come before the second set's release (test/integration/
-    // teams.test.js:68 is that shape). Sorting by position would merge the two frames and lose it.
+    // teams.test.ts:83 is that shape). Sorting by position would merge the two frames and lose it.
     // Only the FIRST teardown(t) becomes a list: calling it again returns the same defer, so it
     // registers no second hook, however many fixtures in the chain ask for one.
     let listPlaced = false;
@@ -365,7 +365,7 @@ export async function scan({ allowed = ALLOWED }: { allowed?: Record<string,stri
   return problems;
 }
 
-// Only when run as a command: test/integration/teardown-order.test.js imports teardownProblems and
+// Only when run as a command: test/integration/teardown-order.test.ts imports teardownProblems and
 // ALLOWED, and must not inherit this script's exit code.
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const problems = await scan();

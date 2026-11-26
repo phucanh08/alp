@@ -221,7 +221,7 @@ export const notInstalledMessage = (root: string): string => `alp: ${root} is no
  * DUPLICATE, deliberately (t-ffe4.6): `windowsTar` in scripts/spawn-command.ts is the same
  * knowledge for the repository's own scripts. This package is published, so it cannot import from
  * scripts/, and scripts/ must keep working before anything is built. Change one and change the
- * other; test/integration/spawn-command.test.js asserts the two agree, and refuses any third copy.
+ * other; test/integration/spawn-command.test.ts asserts the two agree, and refuses any third copy.
  */
 export const systemTar = (platform: string = process.platform, env: Record<string, string | undefined> = process.env): string =>
   platform === 'win32' ? path.win32.join(env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';

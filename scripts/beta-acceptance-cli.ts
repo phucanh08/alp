@@ -156,7 +156,7 @@ try {
 
   await run.step('C6', 'permission questions through alp questions / alp answer', async () => {
     if (opts.fake) {
-      run.record('C6', 'skip', `the fake ${provider} asks no permission; covered hermetically by integrations/paseo/tests/permissions.test.js and test/integration/permissions.test.js`);
+      run.record('C6', 'skip', `the fake ${provider} asks no permission; covered hermetically by integrations/paseo/tests/permissions.test.js and test/integration/permissions.test.ts`);
       return;
     }
     const original = readFileSync(settingsFile, 'utf8');
