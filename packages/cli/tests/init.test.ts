@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import { shippedTemplateRoot } from '@anhlp/alp-core/template-path';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
@@ -21,14 +22,14 @@ process.env.ALP_HOME = path.join(isolatedHome, '.alp');
 process.env.PATH = process.platform === 'win32' ? process.env.PATH : [path.dirname(process.execPath), '/usr/bin', '/bin'].join(path.delimiter);
 test.after(() => rmSync(isolatedHome, { recursive: true, force: true }));
 
-async function fixture(t) {
+async function fixture(t: TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-init-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }
 
-async function entries(root, prefix = '') {
-  const result = [];
+async function entries(root: string, prefix = ''): Promise<string[]> {
+  const result: string[] = [];
   for (const entry of await readdir(path.join(root, prefix), { withFileTypes: true })) {
     const name = prefix + entry.name;
     result.push(name + (entry.isDirectory() ? '/' : ''));
@@ -102,7 +103,7 @@ test('CLI supports cwd and explicit new directory, and rejects invalid usage', a
   const root = await fixture(t);
   const home = await fixture(t);
   const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
-  const run = (...args) => spawnSync(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, ALP_HOME: home } });
+  const run = (...args: string[]) => spawnSync(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, ALP_HOME: home } });
   assert.match(run('init').stdout, /Skill library .*: \d+ files added/);
   assert.ok(JSON.parse(await readFile(path.join(home, 'role-skills.json'), 'utf8')).main.includes('xia'));
   assert.ok(JSON.parse(await readFile(path.join(home, 'role-skills.json'), 'utf8')).main.includes('curate'));

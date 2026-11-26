@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import { shippedTemplateRoot } from '@anhlp/alp-core/template-path';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, writeFile, rm } from 'node:fs/promises';
@@ -11,19 +12,19 @@ import { upgradeProject } from '@anhlp/alp-core/upgrade';
 import { agentSources, libraryEntries, resolveAgent } from '@anhlp/alp-core/resolver';
 import { legacyProject } from '../../../test/support/legacy.ts';
 
-async function fixture(t) {
+async function fixture(t: TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-library-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }
-async function files(root, entries) {
+async function files(root: string, entries: Record<string, unknown>) {
   for (const [name, content] of Object.entries(entries)) {
     const file = path.join(root, name);
     await mkdir(path.dirname(file), { recursive: true });
     await writeFile(file, typeof content === 'string' ? content : JSON.stringify(content));
   }
 }
-const template = name => readFile(new URL(`${name}`, shippedTemplateRoot()), 'utf8');
+const template = (name: string) => readFile(new URL(`${name}`, shippedTemplateRoot()), 'utf8');
 
 test('an agent comes from the built-ins, then the library, then the project, and the later one wins whole', async t => {
   const [root, library] = [await fixture(t), await fixture(t)];
@@ -42,7 +43,7 @@ test('an agent comes from the built-ins, then the library, then the project, and
     { name: 'main', source: 'project', path: path.join(root, '.alp/agents/main'), overrides: 'library' },
     { name: 'scout', source: 'library', path: path.join(library, 'agents/scout') },
   ]);
-  assert.equal((await libraryEntries('agents', root, { library })).find(row => row.name === 'lead').source, 'builtin');
+  assert.equal((await libraryEntries('agents', root, { library })).find(row => row.name === 'lead')!.source, 'builtin');
 });
 
 test('agent.json picks the runtime and mode and names skills, MCP servers and hooks; the project entry wins', async t => {
@@ -75,11 +76,11 @@ test('agent.json picks the runtime and mode and names skills, MCP servers and ho
 test('a reference that does not resolve, or a malformed definition, fails with its file named', async t => {
   const [root, library] = [await fixture(t), await fixture(t)];
   await initProject(root);
-  const agent = config => files(root, { '.alp/agents/writer/AGENT.md': 'Write', '.alp/agents/writer/agent.json': config });
+  const agent = (config: unknown) => files(root, { '.alp/agents/writer/AGENT.md': 'Write', '.alp/agents/writer/agent.json': config });
   const resolve = () => resolveAgent(root, { agent: 'writer', library });
   for (const [config, code] of [[{ skills: ['absent'] }, 'SKILL_NOT_FOUND'], [{ mcp: ['absent'] }, 'MCP_NOT_FOUND'], [{ hooks: ['absent'] }, 'HOOK_NOT_FOUND']]) {
     await agent(config);
-    await assert.rejects(resolve(), error => error.code === code && error.message.includes(path.join(root, '.alp/agents/writer/agent.json')));
+    await assert.rejects(resolve(), (error: NodeJS.ErrnoException) => error.code === code && error.message.includes(path.join(root, '.alp/agents/writer/agent.json')));
   }
   await agent({ modle: 'x' });
   await assert.rejects(resolve(), /unknown setting 'modle'; did you mean 'mode'\?/);
@@ -91,9 +92,9 @@ test('a reference that does not resolve, or a malformed definition, fails with i
   await assert.rejects(resolve(), { code: 'INVALID_AGENT_CONFIG' });
   // A hook ALP cannot run is refused before any session uses it.
   await agent({ hooks: ['notify'] });
-  for (const [hook, pattern] of [[{ event: 'turn.end', command: 'x', blocking: true }, /only handoff, task.close, merge hooks can block/], [{ event: 'commit', command: 'x' }, /event must be one of/], [{ event: 'merge' }, /command must be/], [{ event: 'merge', command: 'x', timeoutSec: 0 }, /timeoutSec/], [{ event: 'merge', command: 'x', blockng: true }, /did you mean 'blocking'/]]) {
+  for (const [hook, pattern] of [[{ event: 'turn.end', command: 'x', blocking: true }, /only handoff, task.close, merge hooks can block/], [{ event: 'commit', command: 'x' }, /event must be one of/], [{ event: 'merge' }, /command must be/], [{ event: 'merge', command: 'x', timeoutSec: 0 }, /timeoutSec/], [{ event: 'merge', command: 'x', blockng: true }, /did you mean 'blocking'/]] as Array<[object, RegExp]>) {
     await files(root, { '.alp/hooks/notify.json': hook });
-    await assert.rejects(resolve(), error => error.code === 'INVALID_HOOK' && pattern.test(error.message) && error.message.includes('notify.json'));
+    await assert.rejects(resolve(), (error: NodeJS.ErrnoException) => error.code === 'INVALID_HOOK' && pattern.test(error.message) && error.message.includes('notify.json'));
   }
   // A server named in agent.json and again in the agent's .mcp.json is ambiguous.
   await files(root, { '.alp/mcp/docs.json': { url: 'https://example.test/mcp' }, '.alp/agents/writer/.mcp.json': { mcpServers: { docs: { command: 'node' } } } });
@@ -111,7 +112,7 @@ test('upgrade keeps a shipped copy the user added to, brings its instructions up
   assert.deepEqual(result.updated, ['.alp/agents/main/AGENT.md']);
   assert.deepEqual(result.removed, ['lead', 'peer', 'oracle', 'reviewer', 'supervisor'].map(name => `.alp/agents/${name}`));
   assert.equal(await readFile(path.join(root, '.alp/agents/main/AGENT.md'), 'utf8'), await template('agents/main/AGENT.md'));
-  assert.equal(await readFile(path.join(result.backup, '.alp/agents/main/AGENT.md'), 'utf8'), legacy);
+  assert.equal(await readFile(path.join(result.backup!, '.alp/agents/main/AGENT.md'), 'utf8'), legacy);
   assert.deepEqual(await readdir(path.join(root, '.alp/agents')), ['main']);
   assert.deepEqual(Object.keys((await resolveAgent(root)).mcp.mcpServers), ['local']);
   const again = await upgradeProject(root);
@@ -124,7 +125,7 @@ test('alp agents, skills, mcp and hooks list each entry with its source', async 
   await files(home, { 'mcp/docs.json': { url: 'https://example.test/mcp' } });
   await files(root, { '.alp/mcp/docs.json': { command: 'node' }, '.alp/agents/main/AGENT.md': 'Mine', '.alp/agents/main/agent.json': { mcp: ['docs'] } });
   const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
-  const run = (...args) => spawnSync(process.execPath, [cli, ...args, '--project', root], { encoding: 'utf8', env: { ...process.env, ALP_HOME: home } });
+  const run = (...args: string[]) => spawnSync(process.execPath, [cli, ...args, '--project', root], { encoding: 'utf8', env: { ...process.env, ALP_HOME: home } });
   const agents = run('agents');
   assert.equal(agents.status, 0, agents.stderr);
   assert.match(agents.stdout, /^main\s+project\s+overrides the built-in one$/m);
@@ -142,7 +143,7 @@ test('alp skills --retired lists retired skills and alp skill restore brings one
     'retired-skills/old-2026-09-01T00-00-00-000Z/SKILL.md': '# Old\n',
   });
   const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
-  const run = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', cwd: home, env: { ...process.env, ALP_HOME: home } });
+  const run = (...args: string[]) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', cwd: home, env: { ...process.env, ALP_HOME: home } });
   const list = run('skills', '--retired');
   assert.equal(list.status, 0, list.stderr);
   assert.match(list.stdout, /^style\s+2026-11-01T00:00:00.000Z\s+roles: main; by lead\s/m);
@@ -168,7 +169,7 @@ test('alp skills --retired lists retired skills and alp skill restore brings one
 test('alp skill new is strict for new skills; cp, mv and --from keep the frontmatter name in step (skill system v2)', async t => {
   const home = await fixture(t);
   const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
-  const run = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', cwd: home, env: { ...process.env, ALP_HOME: home } });
+  const run = (...args: string[]) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', cwd: home, env: { ...process.env, ALP_HOME: home } });
   const plain = path.join(home, 'plain.md');
   await writeFile(plain, 'Just text, no frontmatter\n');
   const refused = run('skill', 'new', 'plain', '--file', plain);
@@ -200,7 +201,7 @@ test('retired text lists warn about unreadable metadata; removed provider flag g
   await mkdir(path.join(bad, 'retired.json'), { recursive: true });
   await writeFile(path.join(bad, 'SKILL.md'), 'bad');
   const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
-  const run = (...args) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', cwd: home, env: { ...process.env, ALP_HOME: home } });
+  const run = (...args: string[]) => spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', cwd: home, env: { ...process.env, ALP_HOME: home } });
   const listed = run('skills', '--retired');
   assert.equal(listed.status, 0, listed.stderr);
   assert.match(listed.stdout, /warning: invalid retired metadata:/);

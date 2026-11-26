@@ -10,7 +10,7 @@ const CLI = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
 test('schedule rejects ambiguous times and incomplete commands before contacting or starting alpd', async t => {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-cli-schedule-'));
   t.after(() => rm(home, { recursive: true, force: true }));
-  const run = args => spawnSync(process.execPath, [CLI, 'schedule', ...args], { env: { ...process.env, ALP_HOME: home }, encoding: 'utf8' });
+  const run = (args: string[]) => spawnSync(process.execPath, [CLI, 'schedule', ...args], { env: { ...process.env, ALP_HOME: home }, encoding: 'utf8' });
   for (const args of [
     ['create', '--session', 'root', '--at', '2026-10-21T09:00:00', '--prompt', 'Resume'],
     ['create', '--session', 'root', '--at', '2026-10-21T09:00:00Z'],

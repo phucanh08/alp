@@ -1,6 +1,8 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
@@ -14,6 +16,9 @@ import { promisify } from 'node:util';
 import { connect, daemonPaths, readLock } from '@anhlp/alp-client/index';
 import { fixtureProcesses } from '../../../test/support/fixture-processes.ts';
 import { readToken, tokenSocketPath } from '../dist/dashboard-service.js';
+
+// `any`: the service's JSON files, credentials and HTTP answers are read field by field; the shapes are those of the dashboard sources.
+type Json = any;
 
 /**
  * alp-dashboard (packages/cli/dist/alp-dashboard.js), the service behind `alp dashboard`, as a real process under a
@@ -33,7 +38,7 @@ const posix = process.platform !== 'win32';
 const limit = { timeout: 120_000 };
 
 /** Waits until `probe` answers something truthy; polls a condition, never sleeps for ordering. */
-async function waitFor(probe, what, timeoutMs = 30_000) {
+async function waitFor<T>(probe: () => Promise<T>, what: string, timeoutMs = 30_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await probe().catch(() => undefined);
@@ -47,21 +52,22 @@ async function waitFor(probe, what, timeoutMs = 30_000) {
 async function freePorts() {
   for (;;) {
     const server = net.createServer();
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    const { port } = server.address();
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as net.AddressInfo;
     await new Promise(resolve => server.close(resolve));
     if (port >= 65_000) continue;
     const next = net.createServer();
-    const free = await new Promise(resolve => { next.once('error', () => resolve(false)); next.listen(port + 1, '127.0.0.1', () => resolve(true)); });
+    const free = await new Promise<boolean>(resolve => { next.once('error', () => resolve(false)); next.listen(port + 1, '127.0.0.1', () => resolve(true)); });
     if (free) { await new Promise(resolve => next.close(resolve)); return port; }
   }
 }
 
 /** One HTTP exchange with the raw request target exactly as given. */
-function request(port, target, { method = 'GET', headers = {}, body } = {}) {
-  return new Promise((resolve, reject) => {
+type Answer = { status: number | undefined, headers: http.IncomingHttpHeaders, body: string };
+function request(port: number, target: string, { method = 'GET', headers = {}, body }: { method?: string, headers?: Record<string, string>, body?: string } = {}) {
+  return new Promise<Answer>((resolve, reject) => {
     const sent = http.request({ host: '127.0.0.1', port, method, path: target, headers: { host: `127.0.0.1:${port}`, ...headers }, agent: false }, response => {
-      const chunks = [];
+      const chunks: Buffer[] = [];
       response.on('data', chunk => chunks.push(chunk));
       response.on('end', () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks).toString('utf8') }));
     });
@@ -71,8 +77,8 @@ function request(port, target, { method = 'GET', headers = {}, body } = {}) {
 }
 
 /** A request line written to the socket byte for byte, for targets an HTTP client refuses to send. */
-function rawRequest(port, line) {
-  return new Promise((resolve, reject) => {
+function rawRequest(port: number, line: string) {
+  return new Promise<string>((resolve, reject) => {
     const socket = net.connect(port, '127.0.0.1', () => socket.end(`${line}\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`));
     let text = '';
     socket.setEncoding('latin1');
@@ -82,11 +88,11 @@ function rawRequest(port, line) {
   });
 }
 
-const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
-const tickets = (port, token, headers = {}) => request(port, '/v1/tickets', { method: 'POST', headers: { authorization: `Bearer ${token}`, ...headers } });
+const readJson = async (file: string): Promise<Json> => JSON.parse(await readFile(file, 'utf8'));
+const tickets = (port: number, token: string, headers: Record<string, string> = {}) => request(port, '/v1/tickets', { method: 'POST', headers: { authorization: `Bearer ${token}`, ...headers } });
 
 /** A temporary ALP_HOME whose detached descendants (the service, the alpd it starts) are stopped after the test. */
-async function createHome(t, settings = {}) {
+async function createHome(t: TestContext, settings = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-web-service-'));
   const home = path.join(directory, 'home');
   await mkdir(home, { recursive: true, mode: 0o700 });
@@ -100,7 +106,7 @@ async function createHome(t, settings = {}) {
 }
 
 /** The fixture app: an index, a content-named asset, a dot file, and symlinks that point outside. */
-async function fixtureApp(directory) {
+async function fixtureApp(directory: string) {
   const app = path.join(directory, 'app');
   const outside = path.join(directory, 'outside');
   await mkdir(path.join(app, 'assets'), { recursive: true });
@@ -119,7 +125,9 @@ async function fixtureApp(directory) {
  * Starts the service; resolves once its lock is ready and dashboard.json names it. `web` is
  * dashboard.json with the token the service hands over its token socket (no file holds it, t-cee3).
  */
-async function startService(context, { args = [], env = {}, wait = true } = {}) {
+type Context = { home: string, env: NodeJS.ProcessEnv };
+type Service = { child: ChildProcess, exited: Promise<unknown[]>, web?: Json };
+async function startService(context: Context, { args = [], env = {}, wait = true }: { args?: string[], env?: NodeJS.ProcessEnv, wait?: boolean } = {}): Promise<Service> {
   const child = spawn(process.execPath, [SERVICE, '--service', ...args], { stdio: 'ignore', env: { ...process.env, ...context.env, ...env } });
   const exited = once(child, 'exit');
   if (!wait) return { child, exited };
@@ -140,11 +148,11 @@ async function startService(context, { args = [], env = {}, wait = true } = {}) 
   return { child, exited, web };
 }
 
-const serviceLog = home => readFile(path.join(home, 'logs', 'integrations', 'alp-dashboard.log'), 'utf8').catch(() => '(no log)');
+const serviceLog = (home: string) => readFile(path.join(home, 'logs', 'integrations', 'alp-dashboard.log'), 'utf8').catch(() => '(no log)');
 
 /** The process's exit [code, signal], or a failure after `timeoutMs` (a hang fails the test, it never waits forever). */
-async function exitOf(service, timeoutMs = 30_000) {
-  let timer;
+async function exitOf(service: Service, timeoutMs = 30_000): Promise<Json> {
+  let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`alp-dashboard (pid ${service.child.pid}) did not exit within ${timeoutMs} ms`)), timeoutMs); });
   try { return await Promise.race([service.exited, timeout]); } finally { clearTimeout(timer); }
 }
@@ -156,17 +164,17 @@ async function exitOf(service, timeoutMs = 30_000) {
  */
 const STOPPED = posix ? 0 : null;
 
-async function stopService(service) {
+async function stopService(service: Service) {
   service.child.kill('SIGTERM');
   const [code] = await exitOf(service);
   return code;
 }
 
-const credentialsOf = async home => (await readJson(path.join(home, 'dashboard', 'credentials.json'))).credentials;
+const credentialsOf = async (home: string): Promise<Json[]> => (await readJson(path.join(home, 'dashboard', 'credentials.json'))).credentials;
 
 /** Every regular file under `directory` whose bytes contain `needle` (a token in no file, t-cee3). */
-async function filesContaining(directory, needle) {
-  const found = [];
+async function filesContaining(directory: string, needle: string) {
+  const found: string[] = [];
   for (const entry of await readdir(directory, { withFileTypes: true, recursive: true })) {
     if (!entry.isFile()) continue;
     const file = path.join(entry.parentPath ?? entry.path, entry.name);
@@ -213,7 +221,7 @@ test('alp-dashboard serves the app and the gateway on one loopback listener, wit
   assert.equal(credential.id, web.credentialId);
   assert.equal(credential.label, 'alp dashboard (this machine)');
   assert.deepEqual(credential.permissions, DEFAULT_GRANT);
-  assert.deepEqual(credential.workspaces.map(entry => entry.path), [project]);
+  assert.deepEqual(credential.workspaces.map((entry: Json) => entry.path), [project]);
 
   // alpd is supervised: /readyz turns 200 once it answers.
   await waitFor(async () => (await request(port, '/readyz')).status === 200, '/readyz 200');
@@ -228,8 +236,8 @@ test('alp-dashboard serves the app and the gateway on one loopback listener, wit
   assert.equal(page.headers['x-content-type-options'], 'nosniff');
   assert.equal(page.headers['x-frame-options'], 'DENY');
   assert.equal(page.headers['referrer-policy'], 'no-referrer');
-  assert.match(page.headers['content-security-policy'], /frame-ancestors 'none'/);
-  assert.match(page.headers['content-security-policy'], new RegExp(`connect-src 'self' http://127\\.0\\.0\\.1:${port} ws://127\\.0\\.0\\.1:${port}`));
+  assert.match(page.headers['content-security-policy'] as string, /frame-ancestors 'none'/);
+  assert.match(page.headers['content-security-policy'] as string, new RegExp(`connect-src 'self' http://127\\.0\\.0\\.1:${port} ws://127\\.0\\.0\\.1:${port}`));
   const head = await request(port, '/', { method: 'HEAD' });
   assert.equal(head.status, 200);
   assert.equal(head.body, '');
@@ -257,13 +265,13 @@ test('alp-dashboard serves the app and the gateway on one loopback listener, wit
   for (const host of [`localhost:${port}`, `[::1]:${port}`]) assert.equal((await request(port, '/', { headers: { host } })).status, 200, host);
 
   // Raw targets the static server must normalize itself: never a file outside the app, never the index.
-  const attempts = [
+  const attempts: Array<[string, number]> = [
     ['/../secret.txt', 404], ['/%2e%2e/secret.txt', 404], ['/assets/../../secret.txt', 404], ['/%252e%252e/secret.txt', 404],
     ['/..%2fsecret.txt', 400], ['/%2e%2e%2fsecret.txt', 400], ['/assets/..%2f..%2fsecret.txt', 400], ['/%2fsecret.txt', 400],
     ['//secret.txt', 400], ['//etc/passwd', 400], ['/assets//app-0123abcd.js', 400],
     ['/..\\secret.txt', 400], ['/\\..\\secret.txt', 400], ['/%5c..%5csecret.txt', 400], ['/assets%5capp-0123abcd.js', 400],
     ['/%00', 400], ['/index.html%00', 400], ['/index.html%00.js', 400], ['/%E0%A4%A', 400],
-    ['/.hidden', 400], ['/C:/secret.txt', 400], ['/index.html::$DATA', 400], ['/escape/secret.txt', 404], ...(posix ? [['/leak.txt', 404]] : []),
+    ['/.hidden', 400], ['/C:/secret.txt', 400], ['/index.html::$DATA', 400], ['/escape/secret.txt', 404], ...(posix ? [['/leak.txt', 404] as [string, number]] : []),
   ];
   for (const [target, status] of attempts) {
     const answer = await request(port, target);
@@ -325,9 +333,9 @@ test('every start mints a new token and revokes the last one, and the built app 
   const credentials = await credentialsOf(context.home);
   assert.ok(credentials.find(entry => entry.id === first.web.credentialId).revokedAt, 'the last start\'s credential is revoked');
   const live = credentials.filter(entry => !entry.revokedAt);
-  assert.deepEqual(live.map(entry => entry.id), [second.web.credentialId]);
+  assert.deepEqual(live.map((entry: Json) => entry.id), [second.web.credentialId]);
   // With nothing registered and no --project, a private empty directory stands in for a workspace.
-  assert.deepEqual(live[0].workspaces.map(entry => entry.path), [path.join(context.home, 'dashboard', 'no-project')]);
+  assert.deepEqual(live[0].workspaces.map((entry: Json) => entry.path), [path.join(context.home, 'dashboard', 'no-project')]);
   assert.equal((await tickets(port, first.web.token)).status, 401, 'the last start\'s token is refused');
   assert.equal((await tickets(port, second.web.token)).status, 201);
   assert.deepEqual(await filesContaining(context.home, second.web.token), [], 'no file under the home holds the token');
@@ -368,10 +376,10 @@ test('a token an earlier version left in dashboard.json leaves the file and its 
 test('a SIGTERM while startup waits on alpd exits 0, publishes nothing and releases the lock', { ...limit, skip: !posix && 'a Unix socket stands in for alpd' }, async t => {
   const context = await createHome(t, { dashboard: { port: await freePorts() } });
   // An "alpd" that accepts and never answers: the first grant refresh of startup waits on it (bounded).
-  const connections = [];
+  const connections: net.Socket[] = [];
   const silent = net.createServer(socket => connections.push(socket));
   const socketPath = daemonPaths(context.home).socket;
-  await new Promise(resolve => silent.listen(socketPath, resolve));
+  await new Promise<void>(resolve => silent.listen(socketPath, resolve));
   await chmod(socketPath, 0o600);
   t.after(() => { for (const socket of connections) socket.destroy(); return new Promise(resolve => silent.close(resolve)); });
   const service = await startService(context, { env: { ALP_SUPERVISE: '0' }, wait: false });
@@ -398,7 +406,7 @@ test('dashboard.enabled=false starts nothing', limit, async t => {
 test('a busy dashboard.port moves to the next port, and dashboard.permissions adds only known permissions', limit, async t => {
   const port = await freePorts();
   const busy = net.createServer();
-  await new Promise(resolve => busy.listen(port, '127.0.0.1', resolve));
+  await new Promise<void>(resolve => busy.listen(port, '127.0.0.1', resolve));
   t.after(() => new Promise(resolve => busy.close(resolve)));
   const context = await createHome(t, { dashboard: { port, permissions: ['files.read'] } });
   const service = await startService(context, { env: { ALP_SUPERVISE: '0' } });
@@ -433,7 +441,7 @@ test('the credentials directory and file keep the gateway\'s private-mode checks
   assert.equal(await stopService(first), STOPPED);
   const file = path.join(context.home, 'dashboard', 'credentials.json');
   const kept = { credentials: await readFile(file, 'utf8'), web: await readFile(path.join(context.home, 'dashboard.json'), 'utf8') };
-  const refused = async (what, pattern) => {
+  const refused = async (what: string, pattern: RegExp) => {
     const service = await startService(context, { env: { ALP_SUPERVISE: '0' }, wait: false });
     assert.deepEqual(await exitOf(service), [1, null], `${what}: it does not start`);
     assert.match(await serviceLog(context.home), pattern, what);
@@ -477,8 +485,8 @@ test('the grant follows alpd\'s project registry without a new token', limit, as
   const service = await startService(context, { args: ['--project', first], env: { ALP_DASHBOARD_GRANT_REFRESH_MS: '100' } });
   t.after(() => stopService(service).catch(() => {}));
   const lock = await waitFor(async () => { const value = await readLock(context.home); return value?.ready ? value : undefined; }, 'alpd ready');
-  assert.equal(lock.socket, daemonPaths(context.home).socket);
-  const client = await connect(lock.socket);
+  assert.equal(lock!.socket, daemonPaths(context.home).socket);
+  const client = await connect(lock!.socket);
   try {
     const { revision } = await client.request('project.list', {});
     await client.request('project.register', { directory: second, ifRevision: revision, requestId: 'alp-web-test' });
@@ -486,9 +494,9 @@ test('the grant follows alpd\'s project registry without a new token', limit, as
 
   const granted = await waitFor(async () => {
     const [credential] = await credentialsOf(context.home);
-    return credential.workspaces.some(entry => entry.path === second) ? credential : undefined;
+    return credential.workspaces.some((entry: Json) => entry.path === second) ? credential : undefined;
   }, 'the registered project in the grant');
-  assert.deepEqual(granted.workspaces.map(entry => entry.path).sort(), [first, second].sort());
+  assert.deepEqual(granted.workspaces.map((entry: Json) => entry.path).sort(), [first, second].sort());
   assert.ok(granted.updatedAt, 'updated in place');
   assert.equal(granted.id, service.web.credentialId);
   assert.equal((await readToken(context.home)).token, service.web.token, 'the service hands out the same token');
@@ -498,7 +506,7 @@ test('the grant follows alpd\'s project registry without a new token', limit, as
 });
 
 // A real dead process with prior-boot metadata must remain refused (never reclaimed).
-async function priorBootLock(context) {
+async function priorBootLock(context: Context) {
   const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
   await once(child, 'exit');
   const file = path.join(context.home, 'integrations', 'dashboard.lock');
@@ -572,7 +580,7 @@ test('alp dashboard from another project registers it and adds it to the running
 
   const credsA = await credentialsOf(context.home);
   assert.equal(credsA.length, 1);
-  const workspacesA = credsA[0].workspaces.map(w => w.canonical ?? w.path);
+  const workspacesA = credsA[0].workspaces.map((w: Json) => w.canonical ?? w.path);
   assert.ok(workspacesA.includes(projectA), 'projectA is in the initial grant');
   assert.ok(!workspacesA.includes(projectB), 'projectB is not yet in the grant');
   const initialToken = new URL(urlA).hash.slice('#token='.length);
@@ -586,7 +594,7 @@ test('alp dashboard from another project registers it and adds it to the running
 
   const credsB = await credentialsOf(context.home);
   assert.equal(credsB.length, 1);
-  const workspacesB = credsB[0].workspaces.map(w => w.canonical ?? w.path);
+  const workspacesB = credsB[0].workspaces.map((w: Json) => w.canonical ?? w.path);
   assert.ok(workspacesB.includes(projectA), 'projectA remains in the grant');
   assert.ok(workspacesB.includes(projectB), 'projectB is added to the grant');
   const web = { token: new URL(urlB).hash.slice('#token='.length) };
@@ -596,7 +604,7 @@ test('alp dashboard from another project registers it and adds it to the running
   const third = await exec(process.execPath, [CLI, 'dashboard', '--print'], { cwd: outside, env, timeout: 30_000 });
   assert.equal(third.stderr, '');
   const credsC = await credentialsOf(context.home);
-  const workspacesC = credsC[0].workspaces.map(w => w.canonical ?? w.path);
+  const workspacesC = credsC[0].workspaces.map((w: Json) => w.canonical ?? w.path);
   assert.ok(!workspacesC.includes(outside), 'non-project directory is not added');
   assert.deepEqual(workspacesC.sort(), [projectA, projectB].sort());
 
@@ -604,17 +612,17 @@ test('alp dashboard from another project registers it and adds it to the running
   const ticket = await tickets(port, web.token);
   assert.equal(ticket.status, 201);
   const issued = JSON.parse(ticket.body);
-  const principalWorkspaces = issued.principal.workspaces.map(p => path.resolve(p));
+  const principalWorkspaces = issued.principal.workspaces.map((p: Json) => path.resolve(p));
   assert.ok(principalWorkspaces.includes(projectA));
   assert.ok(principalWorkspaces.includes(projectB));
   assert.ok(!principalWorkspaces.includes(outside));
 
   // 5. Verify projectB is registered in alpd's registry
   const lock = await readLock(context.home);
-  const client = await connect(lock.socket);
+  const client = await connect(lock!.socket);
   try {
     const list = await client.request('project.list', { limit: 50 });
-    const roots = list.projects.map(p => p.canonical ?? p.root);
+    const roots = list.projects.map((p: Json) => p.canonical ?? p.root);
     assert.ok(roots.includes(projectB), 'projectB is in alpd registry');
   } finally {
     client.close();

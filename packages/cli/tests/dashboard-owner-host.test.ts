@@ -2,6 +2,7 @@
 // docs/alp/dashboard.md §4.7): each one reuses the CLI (alp provider add/test, alp doctor, alp
 // terminal) or alpd's registry, and refuses bad values before anything runs or reaches alpd.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
@@ -10,9 +11,12 @@ import { fileURLToPath } from 'node:url';
 import { diagnoseProviders, editorCommand, editorHost, EDITORS, installedEditors, locateEditor, methods, ownerRegistry, projectDirectory, providerOptions, PROVIDER_CHECKS, revealCommand, revealer } from '../dist/dashboard/owner/host.js';
 import { TERMINAL_WARNING, terminalCommand } from '../dist/commands/terminal/index.js';
 
+// `any`: the owner handlers take and return JSON params and results, and the fakes answer with JSON of each method; the tests read the fields they assert on.
+type Json = any;
+
 const FAKE_ACP = fileURLToPath(new URL('../../../test/support/fake-acp.ts', import.meta.url));
 
-async function scratch(t) {
+async function scratch(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-owner-host-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const home = path.join(directory, 'home');
@@ -21,13 +25,13 @@ async function scratch(t) {
 }
 
 /** A fake alpd connection: records each request and answers from `answers`. */
-function fakeDaemon(answers = {}) {
-  const calls = [];
-  return { calls, request: async (method, params) => { calls.push([method, params]); return typeof answers[method] === 'function' ? answers[method](params) : answers[method] ?? {}; } };
+function fakeDaemon(answers: Record<string, Json> = {}) {
+  const calls: Json[] = [];
+  return { calls, request: async (method: string, params: Json) => { calls.push([method, params]); return typeof answers[method] === 'function' ? answers[method](params) : answers[method] ?? {}; } };
 }
 
-const call = (method, params, context) => methods[method]({ method, params, principal: 'owner', socket: '/none', daemon: fakeDaemon(), ...context });
-const invalid = pattern => error => error.code === -32602 && pattern.test(error.message);
+const call = (method: string, params: Json, context?: Json): Json => (methods as Json)[method]({ method, params, principal: 'owner', socket: '/none', daemon: fakeDaemon(), ...context });
+const invalid = (pattern: RegExp) => (error: Json) => error.code === -32602 && pattern.test(error.message);
 
 test('host.provider.add writes what alp provider add writes, create only; bad values are refused before anything is written', async t => {
   const { home } = await scratch(t);
@@ -40,7 +44,7 @@ test('host.provider.add writes what alp provider add writes, create only; bad va
   // The answer carries env names, never values.
   assert.ok(!JSON.stringify(saved).includes('s3cret'));
   // Create only: an existing provider is never overwritten (as the CLI's add).
-  await assert.rejects(call('host.provider.add', { id: 'echo-agent', command: '/bin/false' }, { home }), error => error.code === 1004 && /already exists/.test(error.message));
+  await assert.rejects(call('host.provider.add', { id: 'echo-agent', command: '/bin/false' }, { home }), (error: Json) => error.code === 1004 && /already exists/.test(error.message));
   assert.equal(JSON.parse(await readFile(file, 'utf8')).command, process.execPath);
   // Refused values.
   for (const [params, pattern] of [
@@ -53,9 +57,9 @@ test('host.provider.add writes what alp provider add writes, create only; bad va
     [{ id: 'a', command: 'x', env: ['A=1'] }, /env must be an object/],
     [{ id: 'a', command: 'x', models: ['a,b'] }, /models must be/],
     [{ id: 'a', command: 'x\0y' }, /command must be/],
-  ]) await assert.rejects(call('host.provider.add', params, { home }), invalid(pattern), JSON.stringify(params));
+  ] as Array<[Json, RegExp]>) await assert.rejects(call('host.provider.add', params, { home }), invalid(pattern), JSON.stringify(params));
   // A name the library refuses is a params error, not a gateway failure.
-  await assert.rejects(call('host.provider.add', { id: '../escape', command: 'x' }, { home }), error => error.code === -32602 && error.data.reason === 'invalid_name');
+  await assert.rejects(call('host.provider.add', { id: '../escape', command: 'x' }, { home }), (error: Json) => error.code === -32602 && error.data.reason === 'invalid_name');
   await assert.rejects(lstat(path.join(home, 'providers', 'a.json')));
 });
 
@@ -72,7 +76,7 @@ test('host.provider.test starts the library provider as alp provider test does; 
   assert.equal(result.ok, true);
   assert.equal(result.name, 'fake');
   assert.equal(typeof result.protocolVersion, 'number');
-  await assert.rejects(call('host.provider.test', { name: 'missing' }, { home }), error => typeof error.code === 'number');
+  await assert.rejects(call('host.provider.test', { name: 'missing' }, { home }), (error: Json) => typeof error.code === 'number');
   await assert.rejects(call('host.provider.test', {}, { home }), invalid(/name must be/));
 });
 
@@ -88,11 +92,11 @@ test('host.provider.diagnose answers alp doctor\'s runtime and provider checks o
     assert.ok(PROVIDER_CHECKS.includes(check.id), check.id);
     assert.ok(['ok', 'warn', 'fail'].includes(check.status));
     assert.equal(typeof check.summary, 'string');
-    assert.equal(check.fix, undefined);
+    assert.equal((check as Json).fix, undefined);
   }
-  const providers = checks.find(check => check.id === 'providers');
+  const providers: Json = checks.find(check => check.id === 'providers');
   assert.match(providers.summary, /gone/);
-  assert.ok(providers.details.some(line => /gone: \/nonexistent\/acp-agent is not found/.test(line)));
+  assert.ok(providers.details.some((line: string) => /gone: \/nonexistent\/acp-agent is not found/.test(line)));
   for (const runtime of ['codex', 'claude', 'antigravity']) assert.equal(checks.find(check => check.id === runtime)?.status, 'fail', runtime);
 });
 
@@ -102,15 +106,15 @@ test('host.terminal.set: allow needs confirm, writes what alp terminal allow --y
   let status = await call('host.terminal.status', {}, { home });
   assert.equal(status.allowRemoteTerminal, false);
   assert.equal(status.warning, TERMINAL_WARNING());
-  await assert.rejects(call('host.terminal.set', { allow: true }, { home }), error => error.code === -32602 && error.data.reason === 'confirm_required' && error.data.warning === TERMINAL_WARNING());
+  await assert.rejects(call('host.terminal.set', { allow: true }, { home }), (error: Json) => error.code === -32602 && error.data.reason === 'confirm_required' && error.data.warning === TERMINAL_WARNING());
   await assert.rejects(call('host.terminal.set', { allow: 'yes', confirm: true }, { home }), invalid(/allow must be/));
   await assert.rejects(lstat(file), 'nothing written without confirm');
   status = await call('host.terminal.set', { allow: true, confirm: true }, { home });
   assert.equal(status.allowRemoteTerminal, true);
   assert.equal((await lstat(file)).mode & 0o777, 0o600);
   // The CLI reads the same file the same way.
-  const lines = [];
-  await terminalCommand(['status', '--json'], { home, out: line => lines.push(line) });
+  const lines: string[] = [];
+  await terminalCommand(['status', '--json'], { home, out: (line: string) => lines.push(line) });
   assert.equal(JSON.parse(lines[0]).allowRemoteTerminal, true);
   status = await call('host.terminal.set', { allow: false }, { home });
   assert.equal(status.allowRemoteTerminal, false);
@@ -164,8 +168,8 @@ test('host.registry: live projects, their workspaces (archived too), labels; no 
   const result = await call('host.registry', {}, { home: '/h', daemon });
   assert.deepEqual(daemon.calls, [['registry.owner', {}]]);
   assert.deepEqual(result, ownerRegistry(REGISTRY));
-  assert.deepEqual(result.projects.map(project => project.id), ['prj_a']);
-  assert.deepEqual(result.workspaces.map(workspace => [workspace.id, workspace.archivedAt, workspace.managedWorktree, workspace.sessions]), [['wks_a', null, false, 2], ['wks_b', 't3', true, 0]]);
+  assert.deepEqual(result.projects.map((project: Json) => project.id), ['prj_a']);
+  assert.deepEqual(result.workspaces.map((workspace: Json) => [workspace.id, workspace.archivedAt, workspace.managedWorktree, workspace.sessions]), [['wks_a', null, false, 2], ['wks_b', 't3', true, 0]]);
   assert.deepEqual(result.labels, [{ name: 'Client', color: 'sky' }]);
   assert.ok(!JSON.stringify(result).includes('canonical'));
   assert.ok(!JSON.stringify(result).includes('s1'));
@@ -176,7 +180,7 @@ test('host.workspace.update archives through alpd workspace.update, without cred
   assert.deepEqual(await call('host.workspace.update', { workspaceId: 'wks_a', archived: true, ifRevision: 4, requestId: 'r1' }, { home: '/h', daemon }), { revision: 5 });
   assert.deepEqual(daemon.calls, [['workspace.update', { workspaceId: 'wks_a', archived: true, ifRevision: 4, requestId: 'dashboard-owner:r1' }]]);
   for (const params of [{ workspaceId: 'wks_a', ifRevision: 4, requestId: 'r' }, { workspaceId: 'wks_a', archived: 1, ifRevision: 4, requestId: 'r' }, { workspaceId: 'wks_a', archived: true, requestId: 'r' }, { workspaceId: 'wks_a', archived: true, ifRevision: 4 }, { archived: true, ifRevision: 4, requestId: 'r' }]) {
-    await assert.rejects(call('host.workspace.update', params, { home: '/h', daemon }), error => error.code === -32602, JSON.stringify(params));
+    await assert.rejects(call('host.workspace.update', params, { home: '/h', daemon }), (error: Json) => error.code === -32602, JSON.stringify(params));
   }
   assert.equal(daemon.calls.length, 1);
 });
@@ -191,7 +195,7 @@ test('host.workspace.reveal opens a live registry workspace\'s directory by id w
     workspaces: [...REGISTRY.workspaces, { id: 'wks_s', projectId: 'prj_s', directory: project, labels: [], createdAt: 't' }, { id: 'wks_missing', projectId: 'prj_s', directory: path.join(directory, 'missing'), labels: [], createdAt: 't' }],
   };
   const daemon = fakeDaemon({ 'registry.owner': { registry } });
-  const runs = [];
+  const runs: unknown[] = [];
   const original = revealer.run;
   revealer.run = async (file, args) => { runs.push([file, args]); };
   t.after(() => { revealer.run = original; });
@@ -199,11 +203,11 @@ test('host.workspace.reveal opens a live registry workspace\'s directory by id w
   assert.deepEqual(runs, [revealCommand(process.platform, project)]);
   assert.deepEqual(daemon.calls, [['registry.owner', {}]], 'reads the registry only');
   for (const [workspaceId, code] of [['wks_b', 1001], ['wks_gone', 1001], ['wks_nope', 1001], ['wks_missing', -32602], [undefined, -32602], [7, -32602]]) {
-    await assert.rejects(call('host.workspace.reveal', { workspaceId }, { home: '/h', daemon }), error => error.code === code, String(workspaceId));
+    await assert.rejects(call('host.workspace.reveal', { workspaceId }, { home: '/h', daemon }), (error: Json) => error.code === code, String(workspaceId));
   }
   assert.equal(runs.length, 1, 'archived, removed, unknown or missing: nothing opened');
   revealer.run = async () => { throw new Error('spawn ENOENT'); };
-  await assert.rejects(call('host.workspace.reveal', { workspaceId: 'wks_s' }, { home: '/h', daemon }), error => error.code === 1000 && error.data.reason === 'reveal_failed');
+  await assert.rejects(call('host.workspace.reveal', { workspaceId: 'wks_s' }, { home: '/h', daemon }), (error: Json) => error.code === 1000 && error.data.reason === 'reveal_failed');
   assert.deepEqual(revealCommand('darwin', '/p/a', {}), ['/usr/bin/open', ['/p/a']]);
   assert.deepEqual(revealCommand('darwin', '/p/a', { ALP_DASHBOARD_FILE_MANAGER: '/opt/fm' }), ['/opt/fm', ['/p/a']]);
   assert.deepEqual(revealCommand('darwin', '/p/a', { ALP_DASHBOARD_FILE_MANAGER: 'fm' }), ['/usr/bin/open', ['/p/a']], 'only an absolute program');
@@ -212,13 +216,13 @@ test('host.workspace.reveal opens a live registry workspace\'s directory by id w
 });
 
 /** A probe of a fake file system: `dirs` are directories, `files` executable files, `listing` folder entries. */
-function fakeProbe({ dirs = [], files = [], listing = {} } = {}) {
-  const asked = [];
+function fakeProbe({ dirs = [], files = [], listing = {} }: { dirs?: string[], files?: string[], listing?: Record<string, string[]> } = {}) {
+  const asked: string[] = [];
   return {
     asked,
-    isDirectory: async file => { asked.push(file); return dirs.includes(file); },
-    isExecutable: async file => { asked.push(file); return files.includes(file); },
-    list: async directory => { asked.push(directory); return listing[directory] ?? []; },
+    isDirectory: async (file: string) => { asked.push(file); return dirs.includes(file); },
+    isExecutable: async (file: string) => { asked.push(file); return files.includes(file); },
+    list: async (directory: string) => { asked.push(directory); return listing[directory] ?? []; },
   };
 }
 
@@ -295,7 +299,7 @@ test('host.workspace.editors and host.workspace.open: a fixed, installed editor 
     workspaces: [...REGISTRY.workspaces, { id: 'wks_s', projectId: 'prj_s', directory: project, labels: [], createdAt: 't' }, { id: 'wks_missing', projectId: 'prj_s', directory: path.join(directory, 'missing'), labels: [], createdAt: 't' }],
   };
   const daemon = fakeDaemon({ 'registry.owner': { registry } });
-  const runs = [];
+  const runs: unknown[] = [];
   const original = { run: revealer.run, ...editorHost };
   revealer.run = async (file, args) => { runs.push([file, args]); };
   Object.assign(editorHost, { platform: 'darwin', env: {}, home: '/Users/u', probe: fakeProbe({ dirs: ['/Applications/Cursor.app', '/Applications/Zed.app'] }) });
@@ -333,7 +337,7 @@ test('host.workspace.editors and host.workspace.open: a fixed, installed editor 
     [{ workspaceId: 'wks_s', editor: 'xcode' }, 1001, 'editor_not_installed'],
   ];
   for (const [params, code, reason] of refused) {
-    await assert.rejects(call('host.workspace.open', params, { home: '/h', daemon }), error => error.code === code && error.data.reason === reason, JSON.stringify(params));
+    await assert.rejects(call('host.workspace.open', params, { home: '/h', daemon }), (error: Json) => error.code === code && error.data.reason === reason, JSON.stringify(params));
   }
   assert.equal(runs.length, 2, 'nothing opened for a refused request');
 
@@ -342,10 +346,10 @@ test('host.workspace.editors and host.workspace.open: a fixed, installed editor 
   assert.deepEqual(await call('host.workspace.editors', {}, { home: '/h', daemon }), { editors: [{ id: 'vscode', label: 'Visual Studio Code' }, { id: 'finder', label: 'Finder' }] });
   assert.deepEqual(await call('host.workspace.open', { workspaceId: 'wks_s', editor: 'vscode' }, { home: '/h', daemon }), { opened: true });
   assert.deepEqual(runs[2], ['/opt/record', ['vscode', project]]);
-  await assert.rejects(call('host.workspace.open', { workspaceId: 'wks_s', editor: 'cursor' }, { home: '/h', daemon }), error => error.code === 1001 && error.data.reason === 'editor_not_installed');
+  await assert.rejects(call('host.workspace.open', { workspaceId: 'wks_s', editor: 'cursor' }, { home: '/h', daemon }), (error: Json) => error.code === 1001 && error.data.reason === 'editor_not_installed');
 
   revealer.run = async () => { throw new Error('spawn ENOENT'); };
-  await assert.rejects(call('host.workspace.open', { workspaceId: 'wks_s', editor: 'vscode' }, { home: '/h', daemon }), error => error.code === 1000 && error.data.reason === 'open_failed');
+  await assert.rejects(call('host.workspace.open', { workspaceId: 'wks_s', editor: 'vscode' }, { home: '/h', daemon }), (error: Json) => error.code === 1000 && error.data.reason === 'open_failed');
 });
 
 test('host.workspace.open really spawns with argv and no shell: a directory with shell metacharacters reaches the program as one argument', async t => {
@@ -362,7 +366,7 @@ test('host.workspace.open really spawns with argv and no shell: a directory with
   if (process.platform === 'win32') return t.skip('a shebang runner is POSIX only');
   assert.deepEqual(await call('host.workspace.open', { workspaceId: 'wks_s', editor: 'zed' }, { home: '/h', daemon: fakeDaemon({ 'registry.owner': { registry } }) }), { opened: true });
   let argv;
-  for (let i = 0; i < 100 && !argv; i++) argv = await readFile(record, 'utf8').then(JSON.parse, () => new Promise(resolve => setTimeout(resolve, 50)));
+  for (let i = 0; i < 100 && !argv; i++) argv = await readFile(record, 'utf8').then(JSON.parse, () => new Promise<void>(resolve => setTimeout(resolve, 50)));
   assert.deepEqual(argv, ['zed', project]);
   await assert.rejects(lstat(path.join(directory, 'pwned')));
   await assert.rejects(lstat(path.join(process.cwd(), 'pwned')));
@@ -370,7 +374,7 @@ test('host.workspace.open really spawns with argv and no shell: a directory with
 
 test('host.workspace.label maps to registry.owner label operations only, never placement', async () => {
   const daemon = fakeDaemon({ 'registry.owner': { result: { workspaceLabels: ['Client'] }, registry: REGISTRY } });
-  const run = params => call('host.workspace.label', { ifRevision: 4, requestId: 'r', ...params }, { home: '/h', daemon });
+  const run = (params: Json) => call('host.workspace.label', { ifRevision: 4, requestId: 'r', ...params }, { home: '/h', daemon });
   const answer = await run({ action: 'assign', workspaceId: 'wks_a', name: '  New   label ', color: 'teal' });
   assert.deepEqual(answer.result, { workspaceLabels: ['Client'] });
   assert.deepEqual(answer.registry, ownerRegistry(REGISTRY));
@@ -385,7 +389,7 @@ test('host.workspace.label maps to registry.owner label operations only, never p
   ]);
   for (const call of daemon.calls) assert.deepEqual([call[1].ifRevision, call[1].requestId], [4, 'dashboard-owner:r']);
   for (const params of [{ action: 'placement.assign', workspaceId: 'wks_a', name: 'x' }, { action: 'assign', workspaceId: 'wks_a', name: 'x', color: 'chartreuse' }, { action: 'assign', workspaceId: 'wks_a', name: '   ', color: 'sky' }, { action: 'update', name: 'x' }, { action: 'assign', name: 'x', color: 'sky' }]) {
-    await assert.rejects(run(params), error => error.code === -32602, JSON.stringify(params));
+    await assert.rejects(run(params), (error: Json) => error.code === -32602, JSON.stringify(params));
   }
   assert.equal(daemon.calls.length, 4);
 });
@@ -410,7 +414,7 @@ test('host.project.register checks the directory on the host (absolute, normaliz
   const dangling = path.join(directory, 'dangling');
   await symlink(path.join(directory, 'gone'), dangling);
   await assert.rejects(projectDirectory(dangling), invalid(/not a directory/));
-  for (const [value, pattern] of [['relative/dir', /absolute/], [`${project}/../project`, /normalized/], [`${project}/`, /normalized/], [path.join(directory, 'missing'), /does not exist/], [file, /not a directory/], [42, /directory must be/]]) {
+  for (const [value, pattern] of [['relative/dir', /absolute/], [`${project}/../project`, /normalized/], [`${project}/`, /normalized/], [path.join(directory, 'missing'), /does not exist/], [file, /not a directory/], [42, /directory must be/]] as Array<[Json, RegExp]>) {
     await assert.rejects(call('host.project.register', { directory: value, ifRevision: 8, requestId: 'r' }, { home: '/h', daemon }), invalid(pattern), String(value));
   }
   assert.equal(daemon.calls.length, 1);

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
@@ -18,7 +19,7 @@ const posix = process.platform !== 'win32';
 const TOKEN = `alpgw1.${'a'.repeat(16)}.${'B'.repeat(43)}`;
 
 /** A scratch home and its `defer`: teardown runs in reverse order (ALP.md), so a socket closes before its directory goes. */
-async function scratchHome(t) {
+async function scratchHome(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(os.tmpdir(), 'alp-token-socket-'));
   const home = path.join(directory, 'home');
@@ -28,8 +29,8 @@ async function scratchHome(t) {
 }
 
 /** Connects and returns everything the server sends before it closes, after writing `request` (if any). */
-function exchange(socketPath, request) {
-  return new Promise((resolve, reject) => {
+function exchange(socketPath: string, request?: string) {
+  return new Promise<string>((resolve, reject) => {
     const socket = net.connect(socketPath);
     let text = '';
     socket.setEncoding('utf8');

@@ -2,19 +2,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { answerLabel, printer } from '../dist/commands/session/output.js';
 
+// `any`: results and fakes here are JSON or tagged unions the tests read field by field after asserting which case they hold.
+type Json = any;
+
 // t-beb5: `alp run` follows the root until it is idle, so its human output can show a turn ALP
 // started after the answer (a supervisor's check-in, mail). A person must tell the answer to their
 // prompt from that turn's text; `--json` output is unchanged.
 
-const e = (sessionId, event) => ({ sessionId, event });
-const opened = (id, agent, parentId) => e(id, { type: 'session.opened', session: { agent, runtime: 'codex', model: 'gpt', mode: 'full-access', ...(parentId ? { parentId } : {}) } });
-const say = (sessionId, id, text) => e(sessionId, { type: 'item', item: { kind: 'assistant_message', id, text } });
-const turn = (sessionId, origin, turnId) => [e(sessionId, { type: 'turn.started', origin, turnId }), e(sessionId, { type: 'turn.ended', turnId, state: 'completed' })];
+const e = (sessionId: string, event: Json) => ({ sessionId, event });
+const opened = (id: string, agent: string, parentId?: string) => e(id, { type: 'session.opened', session: { agent, runtime: 'codex', model: 'gpt', mode: 'full-access', ...(parentId ? { parentId } : {}) } });
+const say = (sessionId: string, id: string, text: string) => e(sessionId, { type: 'item', item: { kind: 'assistant_message', id, text } });
+const turn = (sessionId: string, origin: string, turnId: string) => [e(sessionId, { type: 'turn.started', origin, turnId }), e(sessionId, { type: 'turn.ended', turnId, state: 'completed' })];
 
-function capture(envelopes, json = false) {
-  const lines = [];
+function capture(envelopes: Json[], json = false) {
+  const lines: string[] = [];
   const original = console.log;
-  console.log = (...args) => { lines.push(args.join(' ')); };
+  console.log = (...args: unknown[]) => { lines.push(args.join(' ')); };
   try {
     const print = printer(json);
     for (const envelope of envelopes) print(envelope);

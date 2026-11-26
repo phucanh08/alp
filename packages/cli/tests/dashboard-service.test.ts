@@ -9,6 +9,9 @@ import { bootId, bootTime } from '@anhlp/alp-client/index';
 import { isServiceClaimed, isDashboardReady, refusal, serviceOwner } from '../dist/dashboard-service.js';
 import { teardown } from '../../../test/support/teardown.ts';
 
+// `any`: results and fakes here are JSON or tagged unions the tests read field by field after asserting which case they hold.
+type Json = any;
+
 test('serviceOwner accepts live integration across clock jumps when bootId matches', async (t) => {
   const defer = teardown(t);
   const curId = bootId();
@@ -57,7 +60,7 @@ test('serviceOwner accepts live integration across clock jumps when bootId match
     { mode: 0o600 }
   );
 
-  const owner = await serviceOwner(home);
+  const owner: Json = await serviceOwner(home);
   assert.equal(owner.pid, child.pid);
   assert.equal(owner.app, 'alp-dashboard');
 });
@@ -106,7 +109,7 @@ test('serviceOwner refuses lock from another boot as foreign (cross-boot PID reu
     { mode: 0o600 }
   );
 
-  const owner = await serviceOwner(home);
+  const owner: Json = await serviceOwner(home);
   assert.equal(owner.alive, true);
   assert.equal(owner.kind, 'foreign');
   assert.match(owner.reason, /from another boot/);
@@ -134,7 +137,7 @@ test('serviceOwner detects reused PID via startedUptime even if wall clock stepp
   });
 
   // Wait a small moment so child has positive elapsed time
-  await new Promise((resolve) => setTimeout(resolve, 1500));
+  await new Promise<void>((resolve) => setTimeout(resolve, 1500));
 
   // Lock was recorded with startedUptime: 0 (way in the past relative to child start)
   // Wall clock stepped backward: startedAt is set to the future or past
@@ -163,7 +166,7 @@ test('serviceOwner detects reused PID via startedUptime even if wall clock stepp
     { mode: 0o600 }
   );
 
-  const owner = await serviceOwner(home);
+  const owner: Json = await serviceOwner(home);
   assert.equal(owner.alive, true);
   assert.equal(owner.kind, 'foreign');
   assert.match(owner.reason, /reused pid/);
@@ -186,7 +189,7 @@ test('isDashboardReady verifies reachable loopback HTTP endpoints and rejects cl
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   defer(() => new Promise((resolve) => server.close(resolve)));
 
   const addr = server.address();
@@ -203,7 +206,7 @@ test('isServiceClaimed rejects stale metadata on reused PID, cross-boot, or unre
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   defer(() => new Promise((resolve) => server.close(resolve)));
 
   const addr = server.address();

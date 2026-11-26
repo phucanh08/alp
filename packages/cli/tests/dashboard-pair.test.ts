@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { requestPairing } from '../dist/commands/dashboard/pair.js';
 
+// `any`: results and fakes here are JSON or tagged unions the tests read field by field after asserting which case they hold.
+type Json = any;
+
 /**
  * `alp dashboard pair` runs right after `alp daemon restart`, where the integration is still
  * re-registering `web.pairing` on the new daemon connection. The old code called the method once
@@ -10,11 +13,11 @@ import { requestPairing } from '../dist/commands/dashboard/pair.js';
  */
 
 /** A client whose `web.pairing` reply is "unknown method" for `pending` calls, then succeeds. */
-function lateRegistrationClient(pending, value) {
+function lateRegistrationClient(pending: number, value: Json) {
   let calls = 0;
   return {
     calls: () => calls,
-    request: async (method, params) => {
+    request: async (method: string, params?: unknown): Promise<Json> => {
       assert.equal(method, 'web.pairing');
       calls += 1;
       if (calls <= pending) throw Object.assign(new Error(`unknown method: ${method}`), { code: -32601 });

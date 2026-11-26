@@ -4,6 +4,7 @@
 // No test reaches the network: PATH holds only a link to git and (when a test wants one) a fake gh,
 // and GH_CONFIG_DIR, HOME point into the scratch directory.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
@@ -12,12 +13,15 @@ import path from 'node:path';
 import { FACTS, ICON_CANDIDATES, ciOf, createWorkspaceFacts, factsParams, iconOf, isInside, looksLike, onPath, methods, numstat, prOf, readFacts } from '../dist/dashboard/owner/workspace-facts.js';
 import { teardown } from '../../../test/support/teardown.ts';
 
+// `any`: the fake alpd and the facts handler exchange JSON params and results of the registry and facts methods; the tests read the fields they assert on.
+type Json = any;
+
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(24, 1)]);
 const SVG = '<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>\n';
 const GIT = execFileSync('/bin/sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
 const skipGit = process.platform === 'win32' ? 'POSIX shell fake gh' : false;
 
-async function scratch(t) {
+async function scratch(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-owner-facts-'));
   defer(() => rm(directory, { recursive: true, force: true }));
@@ -31,20 +35,20 @@ async function scratch(t) {
 }
 
 /** A fake gh (shell builtins only: PATH holds nothing else): prints $FAKE_GH_JSON's file and exits $FAKE_GH_EXIT, logging its args. */
-async function fakeGh(bin, directory) {
+async function fakeGh(bin: string, directory: string) {
   const log = path.join(directory, 'gh.log');
   await writeFile(path.join(bin, 'gh'), '#!/bin/sh\necho "$PWD $*" >> "$FAKE_GH_LOG"\nif [ -n "$FAKE_GH_JSON" ]; then while IFS= read -r line || [ -n "$line" ]; do printf "%s\\n" "$line"; done < "$FAKE_GH_JSON"; fi\nexit "${FAKE_GH_EXIT:-0}"\n');
   await chmod(path.join(bin, 'gh'), 0o755);
   return log;
 }
 
-const git = (cwd, ...args) => execFileSync(GIT, ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: cwd, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } });
+const git = (cwd: string, ...args: string[]) => execFileSync(GIT, ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...args], { cwd, encoding: 'utf8', env: { PATH: process.env.PATH, HOME: cwd, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } });
 
 /**
  * A repository on branch `feature`: main has a 10-line file, origin/main points at it; feature
  * commits +3/-1, and the work tree adds 1 more line uncommitted and an untracked file.
  */
-async function repository(directory, { remote = true } = {}) {
+async function repository(directory: string, { remote = true } = {}) {
   const repo = path.join(directory, 'repo');
   await mkdir(repo);
   git(repo, 'init', '-q');
@@ -70,7 +74,7 @@ test('the pure parts: params, ci, pr, numstat, magic bytes', () => {
   assert.deepEqual(factsParams({ workspaceIds: ['a', 'a', 'b'] }), { workspaceIds: ['a', 'b'] });
   assert.deepEqual(factsParams({ workspaceIds: ['a'], refresh: true }), { workspaceIds: ['a'], refresh: true });
   for (const params of [{}, { workspaceIds: [] }, { workspaceIds: 'a' }, { workspaceIds: [1] }, { workspaceIds: [''] }, { workspaceIds: Array.from({ length: FACTS.maxIds + 1 }, (_, i) => `w${i}`) }, { workspaceIds: ['a'], refresh: 'yes' }])
-    assert.throws(() => factsParams(params), error => error.code === -32602, JSON.stringify(params).slice(0, 80));
+    assert.throws(() => factsParams(params), (error: Json) => error.code === -32602, JSON.stringify(params).slice(0, 80));
   assert.doesNotThrow(() => factsParams({ workspaceIds: Array.from({ length: FACTS.maxIds }, (_, i) => `w${i}`) }));
 
   assert.equal(ciOf(undefined), undefined);
@@ -118,7 +122,7 @@ test('readFacts: merged PR with failed CI; draft PR with pending CI; no checks â
   const repo = await repository(directory);
   const log = await fakeGh(bin, directory);
   const json = path.join(directory, 'pr.json');
-  const read = async view => { await writeFile(json, JSON.stringify(view)); return readFacts(repo, { env: { ...env, FAKE_GH_JSON: json, FAKE_GH_LOG: log } }); };
+  const read = async (view: unknown) => { await writeFile(json, JSON.stringify(view)); return readFacts(repo, { env: { ...env, FAKE_GH_JSON: json, FAKE_GH_LOG: log } }); };
   let facts = await read({ number: 5, state: 'MERGED', isDraft: false, statusCheckRollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }, { status: 'COMPLETED', conclusion: 'FAILURE' }] });
   assert.deepEqual([facts.pr, facts.ci], [{ number: 5, state: 'merged' }, 'failed']);
   facts = await read({ number: 6, state: 'OPEN', isDraft: true, statusCheckRollup: [{ state: 'PENDING' }] });
@@ -241,11 +245,11 @@ test('icon: a good PNG and SVG; a link out of the root, an oversize file, wrong 
 });
 
 /** A fake alpd connection that answers registry.owner with these workspaces (and a removed project's). */
-function registryDaemon(workspaces) {
-  const calls = [];
+function registryDaemon(workspaces: string[][]) {
+  const calls: unknown[] = [];
   return {
     calls,
-    request: async (method, params) => {
+    request: async (method: string, params: unknown) => {
       calls.push([method, params]);
       assert.equal(method, 'registry.owner');
       return { registry: { revision: 1, projects: [{ id: 'p', root: '/p' }, { id: 'gone', root: '/gone', removedAt: '2026-01-01T00:00:00Z' }], workspaces: [...workspaces.map(([id, directory]) => ({ id, projectId: 'p', directory, labels: [] })), { id: 'w-removed', projectId: 'gone', directory: '/gone', labels: [] }], sessions: {}, labels: { catalog: [] } } };
@@ -260,7 +264,7 @@ test('the handler: ids resolved through the registry only (unknown and removed o
   const json = path.join(directory, 'pr.json');
   await writeFile(json, JSON.stringify({ number: 9, state: 'OPEN', isDraft: false, statusCheckRollup: [] }));
   await writeFile(path.join(repo, 'logo.svg'), SVG);
-  const { handler } = createWorkspaceFacts({ env: { ...env, FAKE_GH_JSON: json, FAKE_GH_LOG: log } });
+  const { handler }: Json = createWorkspaceFacts({ env: { ...env, FAKE_GH_JSON: json, FAKE_GH_LOG: log } });
   const daemon = registryDaemon([['w1', repo]]);
   const result = await handler({ method: 'host.workspace.facts', params: { workspaceIds: ['w1', 'nope', 'w-removed', repo] }, principal: 'owner', daemon });
   assert.deepEqual(Object.keys(result.workspaces), ['w1']);
@@ -268,7 +272,7 @@ test('the handler: ids resolved through the registry only (unknown and removed o
   assert.ok(!Number.isNaN(Date.parse(fetchedAt)));
   assert.deepEqual(facts, { branch: 'feature', additions: 4, deletions: 1, pr: { number: 9, state: 'open' }, icon: `data:image/svg+xml;base64,${Buffer.from(SVG).toString('base64')}` });
   assert.deepEqual(daemon.calls, [['registry.owner', {}]]);
-  await assert.rejects(handler({ params: { workspaceIds: [] }, daemon }), error => error.code === -32602);
+  await assert.rejects(handler({ params: { workspaceIds: [] }, daemon }), (error: Json) => error.code === -32602);
   // The exported table registers the method.
   assert.equal(typeof methods['host.workspace.facts'], 'function');
 });
@@ -276,23 +280,22 @@ test('the handler: ids resolved through the registry only (unknown and removed o
 test('the handler is bounded: cached for the TTL, refresh rate limited, one read per directory in flight, at most FACTS.concurrency at once', async t => {
   let clock = 1_000_000;
   let reads = 0, running = 0, most = 0;
-  /** @type {Array<() => void>} */
-  let gates = [];
+  let gates: Array<() => void> = [];
   const read = async () => {
     reads++; running++; most = Math.max(most, running);
-    await new Promise(resolve => gates.push(resolve));
+    await new Promise<void>(resolve => gates.push(resolve));
     running--;
     return { branch: `b${reads}` };
   };
-  const { handler } = createWorkspaceFacts({ env: {}, now: () => clock, read });
+  const { handler }: Json = createWorkspaceFacts({ env: {}, now: () => clock, read });
   const ids = Array.from({ length: 10 }, (_, i) => [`w${i}`, `/ws/${i}`]);
   const daemon = registryDaemon(ids);
-  const ask = (workspaceIds, refresh) => handler({ params: { workspaceIds, ...(refresh ? { refresh } : {}) }, daemon });
+  const ask = (workspaceIds: string[], refresh?: boolean) => handler({ params: { workspaceIds, ...(refresh ? { refresh } : {}) }, daemon });
   /** Opens every gate until `promise` settles. */
-  const settle = async promise => {
+  const settle = async (promise: Promise<Json>) => {
     let done = false;
     promise.finally(() => { done = true; }).catch(() => {});
-    while (!done) { const open = gates; gates = []; open.forEach(resolve => resolve()); await new Promise(resolve => setImmediate(resolve)); }
+    while (!done) { const open = gates; gates = []; open.forEach(resolve => resolve()); await new Promise<void>(resolve => setImmediate(resolve)); }
     return promise;
   };
 
@@ -318,7 +321,7 @@ test('the handler is bounded: cached for the TTL, refresh rate limited, one read
   assert.equal((await settle(ask(['w1']))).workspaces.w1.branch, 'b12');
   assert.equal(reads, 12);
   // A read that throws is an answer without facts, not an error.
-  const failing = createWorkspaceFacts({ env: {}, now: () => clock, read: async () => { throw new Error('boom'); } });
+  const failing: Json = createWorkspaceFacts({ env: {}, now: () => clock, read: async () => { throw new Error('boom'); } });
   const answer = await failing.handler({ params: { workspaceIds: ['w2'] }, daemon });
   assert.deepEqual(Object.keys(answer.workspaces.w2), ['fetchedAt']);
 });
@@ -326,7 +329,7 @@ test('the handler is bounded: cached for the TTL, refresh rate limited, one read
 test('review fixes (PR #354): an empty or failed read is cached only for FACTS.refreshMinMs; an all-digit branch asks no gh; isInside is not fooled by "..name"', { skip: skipGit }, async t => {
   // An empty or failed answer is read again after FACTS.refreshMinMs, without refresh.
   let clock = 1_000_000, reads = 0;
-  const { handler } = createWorkspaceFacts({ env: {}, now: () => clock, read: async () => { reads++; if (reads === 1) throw new Error('timeout'); return reads === 2 ? {} : { branch: 'b' }; } });
+  const { handler }: Json = createWorkspaceFacts({ env: {}, now: () => clock, read: async () => { reads++; if (reads === 1) throw new Error('timeout'); return reads === 2 ? {} : { branch: 'b' }; } });
   const daemon = registryDaemon([['w0', '/ws/0']]);
   const ask = () => handler({ params: { workspaceIds: ['w0'] }, daemon });
   await ask();
