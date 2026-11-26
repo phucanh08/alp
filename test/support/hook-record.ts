@@ -1,5 +1,5 @@
 // What the hook tests' POSIX recorder does in sh, for Windows' cmd.exe: appends "<event> <agent> <task> <stdin>"
-// to $ALP_PROJECT/out/<name>.log. Usage: node hook-record.js <name>
+// to $ALP_PROJECT/out/<name>.log. Usage: node hook-record.ts <name>
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 
 const [name] = process.argv.slice(2);

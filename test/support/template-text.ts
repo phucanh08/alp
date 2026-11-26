@@ -15,7 +15,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-// Through the PACKAGE, never a relative path into packages/core: scripts/tarball-consumer.mjs copies
+// Through the PACKAGE, never a relative path into packages/core: scripts/tarball-consumer.ts copies
 // test/support modules into an isolated consumer project where only the published packages exist, and
 // a relative import would die there with ERR_MODULE_NOT_FOUND (group C's lesson, board p-dd50ae3b).
 // `@anhlp/alp-core` ships `templates/`, so this resolves in the repository and in a consumer alike.
@@ -27,18 +27,18 @@ import { shippedTemplateRoot } from '@anhlp/alp-core/template-path';
 // this repository is routinely in (board p-a5af690e), and would report it as a product failure.
 const TEMPLATES = path.resolve(fileURLToPath(shippedTemplateRoot()));
 
-/** The text of `<shipped template root>/<relative>`. @param {string} relative */
-export function templateText(relative) {
+/** The text of `<shipped template root>/<relative>`. */
+export function templateText(relative: string) {
   const file = path.join(TEMPLATES, relative);
-  let text;
+  let text: string;
   try { text = readFileSync(file, 'utf8'); }
-  catch (error) { throw new Error(`no template at ${relative} (${error.code}) under ${TEMPLATES}; a test anchored on it must be updated, not deleted`); }
+  catch (error) { throw new Error(`no template at ${relative} (${(error as NodeJS.ErrnoException).code}) under ${TEMPLATES}; a test anchored on it must be updated, not deleted`); }
   if (!text.trim()) throw new Error(`${relative} is empty`);
   return text;
 }
 
 /** A template's first-level title, without the leading `# `: "Peer — người đóng góp...". */
-export function templateTitle(relative) {
+export function templateTitle(relative: string) {
   const title = templateText(relative).match(/^#\s+(.+?)\s*$/m)?.[1];
   if (!title) throw new Error(`${relative} has no '# ' title to anchor on`);
   return title;
@@ -48,7 +48,7 @@ export function templateTitle(relative) {
  * A SKILL.md's frontmatter `description`, raw. For comparing against what an agent was GIVEN use
  * `templateIndexDescription`, which applies the runtime's own rule instead of a second copy of it.
  */
-export function templateDescription(relative) {
+export function templateDescription(relative: string) {
   const frontmatter = templateText(relative).match(/^---\n([\s\S]*?)\n---/);
   if (!frontmatter) throw new Error(`${relative} has no frontmatter`);
   const description = frontmatter[1].match(/^description:\s*(.+?)\s*$/m)?.[1];
@@ -60,9 +60,8 @@ export function templateDescription(relative) {
  * The ONE line of a template that contains `needle`, trimmed of list and indent markers. Throws on
  * zero lines (the anchor is gone) and on more than one (the anchor is ambiguous), so neither
  * degrades into a passing assertion.
- * @param {string} relative @param {string} needle
  */
-export function templateLineWith(relative, needle) {
+export function templateLineWith(relative: string, needle: string) {
   const lines = templateText(relative).split('\n').filter(line => line.includes(needle));
   if (!lines.length) throw new Error(`no line of ${relative} contains ${JSON.stringify(needle)}`);
   if (lines.length > 1) throw new Error(`${lines.length} lines of ${relative} contain ${JSON.stringify(needle)}; anchor on something that appears once:\n${lines.join('\n')}`);
@@ -74,7 +73,7 @@ export function templateLineWith(relative, needle) {
  * reach an agent that was given only the skill index. Reading it from the template is the whole
  * point — a `doesNotMatch` against a copied sentence passes for free once the copy goes stale.
  */
-export function templateBodySentence(relative) {
+export function templateBodySentence(relative: string) {
   const text = templateText(relative);
   const description = templateDescription(relative);
   const body = text.slice(text.indexOf('\n---', 3) + 4);
@@ -91,9 +90,8 @@ export function templateBodySentence(relative) {
  * OWN `skillDescription`, not by a copy of its rule here: it flattens the frontmatter to one line
  * and truncates past 400 characters with an ellipsis, and a second implementation of that would be
  * one more place to drift (t-ffe4.6 was four such places for tar).
- * @param {string} relative
  */
-export async function templateIndexDescription(relative) {
+export async function templateIndexDescription(relative: string) {
   const { skillDescription } = await import('@anhlp/alp-runtime');
   const description = await skillDescription(path.join(TEMPLATES, relative));
   if (!description) throw new Error(`${relative} has no description the skill index would show`);
@@ -105,14 +103,13 @@ export async function templateIndexDescription(relative) {
  * joined and its whitespace flattened. Asserting on the whole list, read from the template, is what
  * makes a test about "this section reached the agent" instead of about one sentence's wording.
  * Throws when the heading is gone or the section has no bullets.
- * @param {string} relative @param {string} heading
  */
-export function templateBullets(relative, heading) {
+export function templateBullets(relative: string, heading: string) {
   const text = templateText(relative);
   const at = text.indexOf(`## ${heading}`);
   if (at < 0) throw new Error(`${relative} has no '## ${heading}' section to anchor on`);
   const section = text.slice(at).split(/\n## /)[0];
-  const bullets = [];
+  const bullets: string[] = [];
   for (const line of section.split('\n').slice(1)) {
     if (/^[-*] /.test(line)) bullets.push(line.replace(/^[-*] /, ''));
     else if (/^\s+\S/.test(line) && bullets.length) bullets[bullets.length - 1] += ` ${line.trim()}`;
@@ -122,7 +119,7 @@ export function templateBullets(relative, heading) {
 }
 
 /** Text with every run of whitespace as one space: compare prose without depending on line wrapping. */
-export const flatten = text => text.replace(/\s+/g, ' ').trim();
+export const flatten = (text: string) => text.replace(/\s+/g, ' ').trim();
 
 /** `text` as a RegExp that matches it literally. */
-export const literal = (text, flags) => new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
+export const literal = (text: string, flags?: string) => new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);

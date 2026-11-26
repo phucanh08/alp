@@ -4,15 +4,34 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
-import { teardown } from './teardown.js';
+import { teardown } from './teardown.ts';
 
 let calls = 0;
+
+// `any`: the app-server messages the fake answers and sends are JSON of every shape; tests read their fields.
+type Message = any;
+type Handler = (method: string, params: Message) => Message;
+/** One fake native harness, as fakeTransport hands it to the runtime and to the test. */
+export type FakeRuntime = {
+  kind: string, cwd: string, calls: { method: string, params: Message }[], threadId: string, turnId: string | undefined, closed: boolean,
+  notification?: Handler, failure?: (error: unknown) => void, serverRequest?: Handler,
+  initialize(): Promise<void>,
+  onNotification(fn: Handler): void, onFailure(fn: (error: unknown) => void): void, onRequest(fn: Handler): void,
+  close(): Promise<void>,
+  request(method: string, params: Message): Promise<Message>,
+  readonly started: { method: string, params: Message }[],
+  lastText(): string,
+  call(tool: string, args: Message): Promise<Message>,
+  item(text?: string): void,
+  finish(text?: string): void,
+};
 /** A fake native harness; resuming a thread keeps its id, as Codex and Claude do. */
-export function fakeTransport(runtimes) {
-  return (cwd, env, kind) => {
+export function fakeTransport(runtimes: FakeRuntime[]) {
+  return (cwd: string, env: unknown, kind: string) => {
     const index = runtimes.length;
     let turns = 0;
-    const runtime = {
+    // The handlers are set by the runtime before it starts a turn; the `!`s below rely on that, as before.
+    const runtime: FakeRuntime = {
       kind, cwd, calls: [], threadId: `thread-${index}`, turnId: undefined, closed: false,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -27,14 +46,14 @@ export function fakeTransport(runtimes) {
       get started() { return this.calls.filter(call => call.method === 'turn/start'); },
       lastText() { return this.started.at(-1)?.params.input.at(-1).text ?? ''; },
       async call(tool, args) {
-        return JSON.parse((await this.serverRequest('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text);
+        return JSON.parse((await this.serverRequest!('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text);
       },
       item(text = 'working') {
-        this.notification('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `item-${index}-${++calls}`, text } });
+        this.notification!('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `item-${index}-${++calls}`, text } });
       },
       finish(text = 'done') {
         this.item(text);
-        this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
+        this.notification!('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
       },
     };
     runtimes.push(runtime);
@@ -42,18 +61,18 @@ export function fakeTransport(runtimes) {
   };
 }
 
-export async function until(check, what = 'condition') {
+export async function until(check: () => unknown, what = 'condition') {
   for (let i = 0; i < 600; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`Expected ${what} did not arrive`);
 }
 
-export const git = (cwd, ...args) => {
+export const git = (cwd: string, ...args: string[]) => {
   const result = spawnSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim();
 };
 
-export async function workspace(t) {
+export async function workspace(t: Parameters<typeof teardown>[0]) {
   // Through the shared list, not a bare `t.after` (t-5294.6): this removal was registered before
   // every runtime/daemon the calling test then starts, so one ENOTEMPTY here stranded all of them.
   const defer = teardown(t);

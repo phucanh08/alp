@@ -4,7 +4,7 @@ import { createInterface } from 'node:readline';
 import { writeFileSync } from 'node:fs';
 
 const pages = [[{ name: 'search', description: 'Search the docs', inputSchema: { type: 'object' } }], [{ name: 'fetch', inputSchema: { type: 'object' } }]];
-const send = message => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
+const send = (message: Record<string, unknown>) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
 if (process.env.FAKE_MCP_FAIL) { console.error('fake-mcp: cannot start'); process.exit(4); }
 if (process.env.FAKE_MCP_PID_FILE) writeFileSync(process.env.FAKE_MCP_PID_FILE, String(process.pid));
 createInterface({ input: process.stdin }).on('line', line => {
