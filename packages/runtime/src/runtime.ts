@@ -1056,7 +1056,22 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         `${agent}'s session: ${root.runtimeKind}:${root.mapping.model}, thinking ${root.mapping.thinking ?? 'default'}, mode ${root.mapping.mode}. Judge ${agent} by this session and its own instructions; your system prompt describes your session (your model, attribution lines, tools), not ${agent}'s.\n\n` +
         `Review the process against ALP.md, ${agent}'s AGENT.md and the recorded lessons. Ask ${agent} about each mistake with one alp_send to: "parent", kind note, or send nothing when the process was sound.`;
       await startPrompt(supervisorId, { clientMessageId: `alp-review-${randomUUID()}`, delivery: 'auto', content: [{ type: 'text', text }] }, 'assignment');
-    }).catch(error => runLog(rootId, { event: 'supervisor.failed', error: errorData(error).message }));
+    }).catch(error => supervisorFailed(rootId, `could not review ${root.mapping.agent.name}'s last turn`, error));
+  }
+
+  /**
+   * A supervisor that failed is logged and shown in its root, so the user learns that the process is
+   * not being reviewed (t-ca83); it never fails the root itself.
+   */
+  function supervisorFailed(rootId: string, what: string, error: unknown) {
+    const message = errorData(error).message;
+    runLog(rootId, { event: 'supervisor.failed', error: message });
+    const root = sessions.get(rootId);
+    if (!root || root.closed) return;
+    const watcher = root.mapping.team?.supervisor ? root.mapping.team.supervisor.agent : 'supervisor';
+    const text = `The ${watcher} ${what}: ${clip(message, 400)} Check the ${watcher}'s model and thinking in the team or profile settings.`;
+    emit(rootId, { type: 'item', item: { kind: 'notice', id: `notice-${randomUUID().slice(0, 8)}`, level: 'warning', text } });
+    runLog(rootId, { event: 'notice', level: 'warning', text });
   }
 
   /** Starts a root's supervisor beside it; a supervisor that cannot start never fails its root. */
@@ -1076,7 +1091,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
         runLog(rootId, { event: 'supervisor.started', sessionId: id, model: `${snapshot.runtime}:${snapshot.model}` });
       }
     } catch (error) {
-      runLog(rootId, { event: 'supervisor.failed', error: errorData(error).message });
+      supervisorFailed(rootId, `could not start, so ALP is not reviewing ${root.mapping.agent.name}'s process`, error);
     } finally {
       childContexts.delete(id);
     }
