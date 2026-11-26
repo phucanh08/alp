@@ -462,7 +462,7 @@ test('without the built files the page says how to build them and the gateway st
   const page = await request(port, '/');
   assert.equal(page.status, 503);
   assert.match(page.body, /not built/);
-  assert.match(page.body, /build-alp-dashboard\.mjs/);
+  assert.match(page.body, /build-alp-dashboard\.ts/);
   assert.equal(page.headers['x-frame-options'], 'DENY');
   assert.equal((await request(port, '/healthz')).status, 200);
   assert.equal((await tickets(port, service.web.token)).status, 201);
