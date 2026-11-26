@@ -22,6 +22,7 @@ import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, watch as wat
 import { appendFile, mkdir, open, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { checkFrontmatter, skillReferences, splitSkill } from '@anhlp/alp-core/skill-validate';
 import { resourceUses } from './skill-resources.ts';
+import { readSkillFile, readsSkillsByTool } from './skill-files.ts';
 import { moveFile, writeAtomic } from '@anhlp/alp-core/atomic';
 import os from 'node:os';
 import path from 'node:path';
@@ -1693,6 +1694,28 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
   }
 
   /**
+   * alp_skill_read (t-4b59): one file of the session's own skills, for a runtime whose file tools
+   * cannot reach them. Opening SKILL.md counts as using the skill and any other file as reading a
+   * resource, logged once each as skillUse and skillResources log them.
+   */
+  async function skillReadTool(sessionId: string, session: Session, args: unknown) {
+    const read = await readSkillFile(session.mapping.agent.skills, args);
+    if (!read.ok) return toolResult(false, { error: read.error });
+    const { skill, file } = read.value;
+    if (file === 'SKILL.md') {
+      if (!session.skillsUsed?.has(skill)) {
+        (session.skillsUsed ??= new Set()).add(skill);
+        runLog(rootOf(sessionId), { event: 'skill', sessionId, agent: session.mapping.agent.name, skill, via: 'tool' });
+        if (session.supervisor) session.journal.push(stamp(`${session.mapping.agent.name} used skill ${skill}`));
+      }
+    } else if (!session.skillResourcesUsed?.has(`read:${skill}/${file}`)) {
+      (session.skillResourcesUsed ??= new Set()).add(`read:${skill}/${file}`);
+      runLog(rootOf(sessionId), { event: 'skill-resource', sessionId, agent: session.mapping.agent.name, skill, resource: file, action: 'read' });
+    }
+    return toolResult(true, read.value);
+  }
+
+  /**
    * A compaction of the session's context, from its start to its end (ALPD §57): shown in
    * its timeline and the run log; once done, ALP tells the session what it holds of its
    * work, which the runtime's summary may have lost.
@@ -3191,7 +3214,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     }
 
     if (
-      !['alp_delegate', 'alp_handoff', 'alp_wait', 'alp_cancel', 'alp_send', 'alp_ask', 'alp_merge', 'alp_discard', 'alp_resolve', 'alp_recall', 'alp_verify', 'alp_pin', 'alp_board', 'alp_unpin', 'alp_lesson', 'alp_lesson_curate', 'alp_skill', 'alp_skill_retire', 'alp_issue', 'alp_task', 'alp_schedule', 'alp_strategy'].includes(params.tool) ||
+      !['alp_delegate', 'alp_handoff', 'alp_wait', 'alp_cancel', 'alp_send', 'alp_ask', 'alp_merge', 'alp_discard', 'alp_resolve', 'alp_recall', 'alp_verify', 'alp_pin', 'alp_board', 'alp_unpin', 'alp_lesson', 'alp_lesson_curate', 'alp_skill', 'alp_skill_retire', 'alp_issue', 'alp_task', 'alp_schedule', 'alp_strategy', 'alp_skill_read'].includes(params.tool) ||
       params.namespace != null ||
       typeof params.callId !== 'string'
     ) {
@@ -3208,7 +3231,9 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     const oversized = inputLimitError(args, TOOL_INPUT, `${params.tool} input`);
     if (oversized) return toolResult(false, { error: oversized });
     // The supervisor only reads the board and tasks, and writes to main.
-    if (session.role === 'supervisor' && !['alp_send', 'alp_board', 'alp_task'].includes(params.tool)) return toolResult(false, { error: 'The supervisor only uses alp_send, alp_board and alp_task' });
+    // An Antigravity supervisor may also open its own skills (t-4b59).
+    if (session.role === 'supervisor' && !['alp_send', 'alp_board', 'alp_task'].includes(params.tool) && !(params.tool === 'alp_skill_read' && readsSkillsByTool(session.runtimeKind, session.mapping.agent.skills))) return toolResult(false, { error: 'The supervisor only uses alp_send, alp_board and alp_task' });
+    if (params.tool === 'alp_skill_read' && !readsSkillsByTool(session.runtimeKind, session.mapping.agent.skills)) return toolResult(false, { error: 'Read your skills with your own file tools; alp_skill_read is for Antigravity sessions' });
     if (['alp_lesson', 'alp_lesson_curate', 'alp_skill', 'alp_skill_retire'].includes(params.tool) && !supervises(session)) return toolResult(false, { error: 'Only a supervised main records lessons and skills' });
     if (params.tool === 'alp_issue' && (session.parent || session.mapping.agent.name !== mainOf(session.mapping))) return toolResult(false, { error: 'Only main files issues; report the problem to your requester' });
     const work =
@@ -3232,6 +3257,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
       : params.tool === 'alp_cancel' ? cancelTool(sessionId, session, args)
       : params.tool === 'alp_merge' || params.tool === 'alp_discard' ? worktreeTool(sessionId, session, args, params.tool === 'alp_merge' ? 'merge' : 'discard')
       : params.tool === 'alp_send' ? Promise.resolve(sendTool(sessionId, session, args))
+      : params.tool === 'alp_skill_read' ? skillReadTool(sessionId, session, args)
       : hookedHandoff(sessionId, session, args);
 
     // A root that keeps calling tools while the user waits for an answer is reminded on each result.

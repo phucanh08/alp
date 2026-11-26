@@ -6,6 +6,7 @@ export type { RuntimeCommand, BranchRequest, ConversationErrorReason, NativeBase
 export type { AlpEvent, AlpError, Envelope, SessionSnapshot, TimelineItem, TurnOrigin, AssignmentSnapshot, UserQuestion, TreeStatus, SessionState } from './events.ts';
 export { resolveSession, InstructionsAdapter, skillDescription } from './resolve.ts';
 export { resourceUses, pathActions } from './skill-resources.ts';
+export { readSkillFile, readsSkillsByTool, SKILL_FILE_BYTES } from './skill-files.ts';
 export type { SessionSpec, HostMcpServer, ResolvedSession, RuntimeKind } from './resolve.ts';
 export { DEFAULT_MODEL, DEFAULT_CLAUDE_MODEL, entries as catalogEntries, models, modes, thinkingOptions, thinkingOptionsFor } from './catalog.ts';
 export type { CatalogEntry } from './catalog.ts';
