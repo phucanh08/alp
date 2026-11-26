@@ -62,7 +62,7 @@ pnpm run validate:web         # cả lane CI: tsc, unit, boundary, build, E2E
 - E2E cần Chromium của Playwright: `pnpm exec playwright install chromium` (Linux:
   `--with-deps`).
 - Thử bằng tay với host dùng một lần (alpd + fake Codex + gateway trong thư mục tạm):
-  `node apps/web/e2e/support/serve.js`. Script in URL và token. Ctrl-C dừng mọi thứ và xóa thư mục
+  `node apps/web/e2e/support/serve.ts`. Script in URL và token. Ctrl-C dừng mọi thứ và xóa thư mục
   tạm. Không đụng `~/.alp` và không đụng alpd thật.
 
 ## 3. Triển khai
@@ -291,13 +291,13 @@ Test: `test/integration/dashboard-process.test.ts` (hai test `t-81b0.4`: định
 - Code trình duyệt chỉ import:
   - `@anhlp/alp-client/portable` và `@anhlp/alp-client/websocket`;
   - type của `@anhlp/alp-protocol`.
-- Plugin Vite `build/browser-boundary.js` (`enforce: 'pre'`) dừng build ngay ở module đầu tiên vượt
+- Plugin Vite `build/browser-boundary.ts` (`enforce: 'pre'`) dừng build ngay ở module đầu tiên vượt
   ranh giới, kể cả qua import bắc cầu. Module bị chặn:
   - `node:*`, module Vite thay bằng `__vite-browser-external`;
   - `ws`, `@anhlp/alp-{core,runtime,daemon,cli,gateway}`, Paseo, `@anhlp/alp-paseo`;
   - mọi file khác trong `packages/`, `integrations/`, `apps/`.
 - Mỗi lần build ghi `dist/alp-boundary.json`, liệt kê các module ALP có trong bundle.
-- `tests/boundary.test.js` chứng minh hai điều:
+- `tests/boundary.test.ts` chứng minh hai điều:
   - một import bắc cầu sang `@anhlp/alp-client` (entry Node) làm build thất bại;
   - bundle của app chỉ chứa các module SDK được phép.
 - `scripts/check-boundaries.ts` khai báo `@anhlp/alp-web` → `alp-client`, `alp-protocol`.
@@ -568,7 +568,7 @@ receipt của credential khác trong registry.
 Kiểm thử: `apps/gateway/tests/owner-host.test.ts` (gateway không owner, credential khác, kết nối có
 header chuyển tiếp: `-32601 not_exposed`, handler và alpd không nhận gì; owner tới đúng handler với đúng
 params), `packages/cli/tests/dashboard-owner-host.test.ts` (từng handler, giá trị sai bị từ chối trước khi
-chạy gì), `apps/web/e2e/settings-host.spec.js` (owner qua link `alp dashboard` làm việc chính của từng
+chạy gì), `apps/web/e2e/settings-host.spec.ts` (owner qua link `alp dashboard` làm việc chính của từng
 trang và host thấy kết quả; credential của `alp-gateway` riêng vẫn thấy bảng "not available").
 
 ### 4.8 Settings: library and app pages (t-a95b nhóm C)
@@ -634,7 +634,7 @@ các trang y như trước, kể cả thông báo Unavailable. Các method owner
 Kiểm chứng: `apps/gateway/tests/owner-library.test.ts` (không owner và credential khác → `-32601
 not_exposed`, không handler nào chạy, alpd không nhận gì; owner nhận kết quả với đúng params),
 `packages/cli/tests/dashboard-owner-library.test.ts` (từng lần từ chối, conflict, mask, marker),
-`apps/web/e2e/settings-library.spec.js` (qua `alp dashboard` thật: `e2e/support/dashboard.js`).
+`apps/web/e2e/settings-library.spec.ts` (qua `alp dashboard` thật: `e2e/support/dashboard.ts`).
 
 ### 4.9 Sidebar như Paseo (t-ff83)
 
@@ -706,7 +706,7 @@ thì bỏ qua, hàng giữ dữ liệu cũ. Schedules đọc khi mở màn và m
 - Link mới chỉ được dùng khi mọi attach đã xong và link vẫn sống.
 - Disconnect và lỗi terminal (token bị từ chối, origin hay TLS bị cấm) dừng mọi retry.
 - `session.closed` đến trong replay không làm mất session khỏi list.
-- E2E `recovery.spec.js` kiểm tra:
+- E2E `recovery.spec.ts` kiểm tra:
   - gateway restart giữa turn, rồi hai lần lúc idle;
   - alpd restart;
   - reload trang;
@@ -745,7 +745,7 @@ thì bỏ qua, hàng giữ dữ liệu cũ. Schedules đọc khi mở màn và m
     - fake Codex tất định; Claude và Antigravity trỏ tới chương trình không tồn tại;
     - `alp-gateway` với `--origin` của trang;
     - bundle đã build.
-  - Bảo vệ fail-closed (`e2e/support/world.js`): khi dọn host, nếu có session alpd ghi lại mà
+  - Bảo vệ fail-closed (`e2e/support/world.ts`): khi dọn host, nếu có session alpd ghi lại mà
     không chạy trên fake Codex thì spec thất bại ("a real runtime may have been called"). E2E chỉ
     chạy runtime giả.
   - Mọi thứ chạy trên port ngẫu nhiên và home tạm. Spec dừng mọi process và xóa thư mục khi xong.
@@ -783,7 +783,7 @@ thì bỏ qua, hàng giữ dữ liệu cũ. Schedules đọc khi mở màn và m
 - Chỉ một cây session được attach tại một thời điểm. Session khác cập nhật qua poll list mỗi 15
   giây.
 - Children/delegation chỉ có unit test. Fake provider của E2E không delegate.
-- E2E thường dùng fake provider. Riêng `e2e/attachment-files-real.spec.js` (opt-in, không chạy trong CI) gửi file qua trình duyệt tới Codex và Claude thật; các lần chạy thật khác của #121 là script `test/e2e/*-real-e2e.ts` không qua trình duyệt ([issue-121-acceptance.md](issue-121-acceptance.md)).
+- E2E thường dùng fake provider. Riêng `e2e/attachment-files-real.spec.ts` (opt-in, không chạy trong CI) gửi file qua trình duyệt tới Codex và Claude thật; các lần chạy thật khác của #121 là script `test/e2e/*-real-e2e.ts` không qua trình duyệt ([issue-121-acceptance.md](issue-121-acceptance.md)).
 - Library qua gateway mở nội dung đã redaction bằng `library.get` với `project.read`
   trong workspace được cấp: file Markdown hiển thị dưới dạng text, cấu hình dưới dạng JSON,
   secret hiển thị là `‹hidden on the host›`. Ghi chỉ dành cho instruction agents/skills riêng của project
