@@ -7,6 +7,7 @@ import { mkdtemp, rm, lstat, readFile, writeFile } from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
+import type { once as eventsOnce } from 'node:events';
 
 test('a failed fstat after the exclusive create leaves no lock behind', async t => {
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-lock-fstat-'));
@@ -56,7 +57,7 @@ test('fstat failure must not unlink a successor lock (t-50af)', async t => {
 
 test('a daemon lock held by a separate live process refuses another owner (t-50af)', { timeout: 10_000 }, async t => {
   const { fork } = await import('node:child_process');
-  const { once } = await import('node:events');
+  const { once } = await import('node:events') as unknown as { once: typeof eventsOnce };
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-lock-child-'));
   const module = new URL('../dist/index.js', import.meta.url).href;
   const fixture = path.join(home, 'owner.mjs');
@@ -73,7 +74,7 @@ test('a daemon lock held by a separate live process refuses another owner (t-50a
   assert.equal(message.ready, true);
   const { acquireDaemonLock, readLock } = await import('../dist/index.js');
   await assert.rejects(acquireDaemonLock(home, { version: 't', protocolVersion: 1, socket: 's' }), /daemon already running/);
-  assert.equal((await readLock(home)).pid, child.pid, 'the competing owner remains intact');
+  assert.equal((await readLock(home))!.pid, child.pid, 'the competing owner remains intact');
 });
 
 test('when neither descriptor stat works, failure preserves the unidentified lock (t-50af)', async t => {

@@ -2,8 +2,10 @@
 // pid of a killed alpd to another process within seconds while processes are being created, so a
 // live pid alone does not prove a live alpd: the lock counts as held only while its hold is open.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { fork, spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { openSync, closeSync } from 'node:fs';
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
@@ -20,23 +22,24 @@ const moduleUrl = new URL('../dist/index.js', import.meta.url).href;
  * Teardown in reverse order of setup: node:test runs t.after hooks FIFO and stops at the first that
  * throws, so every step runs here and the first error is rethrown (ALP.md, node:test teardown order).
  */
-function teardown(t) {
-  const steps = [];
+function teardown(t: TestContext) {
+  const steps: Array<() => unknown> = [];
   t.after(async () => {
     let failure;
     for (const step of steps.reverse()) try { await step(); } catch (error) { failure ??= error; }
     if (failure) throw failure;
   });
-  return step => { steps.push(step); };
+  return (step: () => unknown) => { steps.push(step); };
 }
+type Defer = ReturnType<typeof teardown>;
 
-async function scratch(defer, prefix) {
+async function scratch(defer: Defer, prefix: string) {
   const home = await mkdtemp(path.join(os.tmpdir(), prefix));
   defer(() => rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   return home;
 }
 
-async function stop(child) {
+async function stop(child: ChildProcess) {
   if (child.exitCode !== null || child.signalCode !== null) return;
   const exited = once(child, 'exit');
   child.kill('SIGKILL');
@@ -44,11 +47,11 @@ async function stop(child) {
 }
 
 /** A process that is not alpd and holds nothing: the stand-in for a pid Windows reused. */
-async function unrelated(defer) {
+async function unrelated(defer: Defer) {
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
   defer(() => stop(child));
   await once(child, 'spawn');
-  return child.pid;
+  return child.pid!;
 }
 
 const sameBoot = () => ({ bootTime: bootTime() });
@@ -64,14 +67,14 @@ test('lockAlive on Windows: a live pid whose hold is free is no live alpd', asyn
   const dead = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
   const [code] = await once(dead, 'exit');
   assert.equal(code, 0);
-  assert.equal(lockAlive({ ...lock, pid: dead.pid }, { platform: 'win32', taken: () => true }), false, 'a dead pid is gone whatever the hold says');
+  assert.equal(lockAlive({ ...lock, pid: dead.pid! }, { platform: 'win32', taken: () => true }), false, 'a dead pid is gone whatever the hold says');
   assert.equal(lockAlive(lock, { platform: 'linux', taken: () => false }), true, 'other systems ignore the hold');
 });
 
 /** Hold operations that touch nothing: `take` gives a fake descriptor and `close` records it. */
-function fakeOps({ take = () => 7, taken = () => true } = {}) {
-  const closed = [];
-  return { closed, ops: { take, taken, close: fd => { closed.push(fd); } } };
+function fakeOps({ take = () => 7, taken = (): boolean => true }: { take?: () => number, taken?: () => boolean } = {}) {
+  const closed: unknown[] = [];
+  return { closed, ops: { take, taken, close: (fd: number) => { closed.push(fd); } } };
 }
 
 test('acquire on Windows replaces a marked lock whose pid was reused', async t => {
@@ -85,7 +88,7 @@ test('acquire on Windows replaces a marked lock whose pid was reused', async t =
   const lock = await acquireDaemonLock(home, contents, { platform: 'win32', ops });
   assert.equal(lock.pid, process.pid);
   assert.equal(lock.hold, hold);
-  assert.equal((await readLock(home)).hold, hold);
+  assert.equal((await readLock(home))!.hold, hold);
   assert.deepEqual(closed, [], 'the hold stays open while the lock is ours');
   await releaseDaemonLock(home);
   assert.equal(await readLock(home), undefined);
@@ -100,7 +103,7 @@ test('acquire on Windows still refuses an unmarked lock of a live pid and closes
   const { closed, ops } = fakeOps();
   await assert.rejects(acquireDaemonLock(home, contents, { platform: 'win32', ops }), /already running/);
   assert.deepEqual(closed, [7]);
-  assert.equal((await readLock(home)).pid, pid, 'the other lock stays');
+  assert.equal((await readLock(home))!.pid, pid, 'the other lock stays');
 });
 
 test('acquire on Windows refuses while another handle has the hold', async t => {
@@ -131,7 +134,7 @@ test('acquire on Windows goes on by pid alone when the hold does not exclude a s
 const onWindows = { skip: !windows && 'the hold is a Windows handle', timeout: 30_000 };
 
 /** A process that takes the lock of `home` and reports ready; `then` runs after (in its module). */
-async function holder(defer, home, then = '') {
+async function holder(defer: Defer, home: string, then = '') {
   const fixture = path.join(home, `holder-${Math.random().toString(36).slice(2)}.mjs`);
   await writeFile(fixture, `import { acquireDaemonLock } from ${JSON.stringify(moduleUrl)};
     import { spawn } from 'node:child_process';
@@ -142,7 +145,7 @@ async function holder(defer, home, then = '') {
     setInterval(() => {}, 1000);`);
   const child = fork(fixture, { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
   let stderr = '';
-  child.stderr.on('data', chunk => { stderr += chunk; });
+  child.stderr!.on('data', chunk => { stderr += chunk; });
   defer(() => stop(child));
   const [message] = await Promise.race([
     once(child, 'message', { signal: AbortSignal.timeout(10_000) }),
@@ -158,8 +161,8 @@ test('a lock held by a live process refuses; once it is killed, its reused pid d
   const { lock: file, hold } = daemonPaths(home);
   const { child } = await holder(defer, home);
   const held = await readLock(home);
-  assert.equal(held.pid, child.pid);
-  assert.equal(held.hold, hold);
+  assert.equal(held!.pid, child.pid);
+  assert.equal(held!.hold, hold);
   assert.equal(lockAlive(held), true);
   await assert.rejects(acquireDaemonLock(home, contents), /already running/);
   await stop(child);
@@ -214,6 +217,6 @@ test('maintenance in this process releases its hold for the next alpd', onWindow
   assert.equal(holdOps.taken(hold), false);
   assert.equal(await readLock(home), undefined);
   const { child } = await holder(defer, home);
-  assert.equal((await readLock(home)).pid, child.pid);
+  assert.equal((await readLock(home))!.pid, child.pid);
   assert.equal(JSON.parse(await readFile(daemonPaths(home).lock, 'utf8')).maintenance, undefined);
 });

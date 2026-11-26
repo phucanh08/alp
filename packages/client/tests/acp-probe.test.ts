@@ -14,9 +14,9 @@ test('ACP probe abort closes the provider before its request timeout', async t =
   const controller = new AbortController();
   const probing = probeAcp({ command: process.execPath, args: [script] }, { cwd, signal: controller.signal, timeoutMs: 10000 });
   // Attach rejection immediately; abort is deliberately triggered only after provider startup.
-  const rejected = assert.rejects(probing, error => error.name === 'AbortError');
+  const rejected = assert.rejects(probing, (error: NodeJS.ErrnoException) => error.name === 'AbortError');
   let pid;
-  for (let i = 0; i < 200; i++) { pid = Number(await readFile(ready, 'utf8').catch(() => '')); if (pid) break; await new Promise(resolve => setTimeout(resolve, 10)); }
+  for (let i = 0; i < 200; i++) { pid = Number(await readFile(ready, 'utf8').catch(() => '')); if (pid) break; await new Promise<void>(resolve => setTimeout(resolve, 10)); }
   assert.ok(pid);
   const start = Date.now();
   controller.abort();

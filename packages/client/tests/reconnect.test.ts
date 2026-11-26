@@ -3,13 +3,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AlpRpcError, backoffDelay, createReconnectingClient, hello, isAlpClientError, retryable } from '@anhlp/alp-client/portable';
-import { fakeTransport, tick } from './fake-transport.js';
+import { fakeTransport, tick } from './fake-transport.ts';
 
-const until = async check => { for (let i = 0; i < 200 && !check(); i++) await new Promise(resolve => setTimeout(resolve, 2)); assert.ok(check(), 'condition never held'); };
+// `any`: client errors carry `data` and `code` loosely typed, and frames are JSON of every method; the tests read the fields they assert on.
+type Json = any;
+type FakeTransport = ReturnType<typeof fakeTransport>;
+const until = async (check: () => unknown) => { for (let i = 0; i < 200 && !check(); i++) await new Promise<void>(resolve => setTimeout(resolve, 2)); assert.ok(check(), 'condition never held'); };
 
 /** A daemon side that answers hello and records every transport the helper opened. */
 function daemon() {
-  const transports = [];
+  const transports: FakeTransport[] = [];
   return {
     transports,
     async connect() {
@@ -35,13 +38,13 @@ test('backoff grows by the factor up to the maximum, with bounded jitter', () =>
 
 test('after a disconnect it connects again, runs onConnect with reconnect set, and never resends', async () => {
   const side = daemon();
-  const hooks = [];
-  const disconnects = [];
-  const states = [];
+  const hooks: unknown[] = [];
+  const disconnects: unknown[] = [];
+  const states: unknown[] = [];
   const client = createReconnectingClient({
     connect: side.connect,
     onConnect: async (rpc, context) => { hooks.push(context.reconnect); await hello(rpc, { name: 'test', version: '0' }); },
-    onDisconnect: (error, context) => disconnects.push([error.reason, context.reconnect]),
+    onDisconnect: (error, context) => disconnects.push([(error as Json).reason, context.reconnect]),
     backoff: { initialMs: 1, jitter: 0 },
   });
   client.onState(state => states.push(state));
@@ -49,8 +52,8 @@ test('after a disconnect it connects again, runs onConnect with reconnect set, a
   assert.equal(client.state, 'open');
   const inFlight = client.request('session.prompt', { clientMessageId: 'm1' });
   side.transports[0].drop({ error: new Error('ECONNRESET') });
-  await assert.rejects(inFlight, error => isAlpClientError(error, 'disconnected'));
-  await assert.rejects(client.request('session.list'), error => isAlpClientError(error, 'disconnected'), 'requests while down fail at once');
+  await assert.rejects(inFlight, (error: NodeJS.ErrnoException) => isAlpClientError(error, 'disconnected'));
+  await assert.rejects(client.request('session.list'), (error: NodeJS.ErrnoException) => isAlpClientError(error, 'disconnected'), 'requests while down fail at once');
   await until(() => client.state === 'open' && client.client !== rpc);
   assert.deepEqual(hooks, [false, true]);
   assert.deepEqual(disconnects, [['disconnected', false]]);
@@ -61,7 +64,7 @@ test('after a disconnect it connects again, runs onConnect with reconnect set, a
 
 test('events reach listeners across reconnects, including a replay onConnect asks for', async () => {
   const side = daemon();
-  const seen = [];
+  const seen: unknown[] = [];
   const client = createReconnectingClient({
     connect: side.connect,
     onConnect: async rpc => {
@@ -93,7 +96,7 @@ test('a failing connect is retried with backoff until it succeeds or attempts ru
   assert.equal(calls, 3);
   client.stop();
 
-  const states = [];
+  const states: unknown[] = [];
   const limited = createReconnectingClient({ connect: async () => { throw new Error('down'); }, maxAttempts: 2, backoff: { initialMs: 1, jitter: 0 } });
   limited.onState((state, error) => states.push([state, error?.message]));
   await assert.rejects(limited.ready(), /down/);
@@ -108,7 +111,7 @@ test('a refused handshake (unsupported protocol version) stops instead of retryi
     onConnect: async () => { throw new AlpRpcError({ code: 1006, message: 'Unsupported protocol version' }); },
     backoff: { initialMs: 1, jitter: 0 },
   });
-  await assert.rejects(client.ready(), error => error.code === 1006);
+  await assert.rejects(client.ready(), (error: Json) => error.code === 1006);
   assert.equal(calls, 1);
   assert.equal(retryable(new Error('ECONNREFUSED')), true);
 });
@@ -122,18 +125,18 @@ test('stop() ends a wait for the next attempt, closes the connection and release
   assert.equal(client.state, 'waiting');
   client.stop();
   assert.equal(client.state, 'stopped');
-  await assert.rejects(client.ready(), error => isAlpClientError(error, 'closed'));
-  await assert.rejects(client.request('session.list'), error => isAlpClientError(error, 'closed'));
+  await assert.rejects(client.ready(), (error: NodeJS.ErrnoException) => isAlpClientError(error, 'closed'));
+  await assert.rejects(client.request('session.list'), (error: NodeJS.ErrnoException) => isAlpClientError(error, 'closed'));
   // A 60 s backoff timer left behind would keep node --test from finishing.
 });
 
 test('stop() during a connect discards the transport that arrives late', async () => {
-  let release;
+  let release!: () => void;
   const late = fakeTransport();
   const client = createReconnectingClient({ connect: () => new Promise(resolve => { release = () => resolve(late); }) });
   const waiting = client.ready();
   client.stop();
-  await assert.rejects(waiting, error => isAlpClientError(error, 'closed'));
+  await assert.rejects(waiting, (error: NodeJS.ErrnoException) => isAlpClientError(error, 'closed'));
   release();
   await tick();
   assert.equal(late.state, 'closed');
@@ -145,15 +148,15 @@ test('ready() honours its abort signal', async () => {
   const controller = new AbortController();
   const waiting = client.ready({ signal: controller.signal });
   controller.abort();
-  await assert.rejects(waiting, error => isAlpClientError(error, 'aborted'));
+  await assert.rejects(waiting, (error: NodeJS.ErrnoException) => isAlpClientError(error, 'aborted'));
   client.stop();
 });
 
 test('a caller listener that throws does not stop the others', async () => {
   const side = daemon();
-  const reported = [];
-  const client = createReconnectingClient({ connect: side.connect, onConnect: rpc => hello(rpc), client: { onListenerError: error => reported.push(error.message) } });
-  const heard = [];
+  const reported: unknown[] = [];
+  const client = createReconnectingClient({ connect: side.connect, onConnect: rpc => hello(rpc), client: { onListenerError: error => reported.push((error as Error).message) } });
+  const heard: unknown[] = [];
   client.onEvent(() => { throw new Error('boom'); });
   client.onEvent(envelope => heard.push(envelope.seq));
   await client.ready();
@@ -169,10 +172,10 @@ test('stop() from an onState listener stays stopped, whatever state it heard', a
     const client = createReconnectingClient({ connect: side.connect, onConnect: rpc => hello(rpc), backoff: { initialMs: 1, jitter: 0 } });
     await client.ready();
     let giveUp = true;
-    const heard = [];
+    const heard: unknown[] = [];
     client.onState(state => { heard.push(state); if (state === at && giveUp) { giveUp = false; client.stop(); } });
     side.transports[0].drop({});
-    await new Promise(resolve => setTimeout(resolve, 30));
+    await new Promise<void>(resolve => setTimeout(resolve, 30));
     assert.equal(client.state, 'stopped', at);
     assert.equal(client.client, undefined, at);
     assert.equal(side.transports.length, 1, `${at}: no connection after stop()`);
@@ -181,7 +184,7 @@ test('stop() from an onState listener stays stopped, whatever state it heard', a
 });
 
 test('stop() during onConnect closes the connection being set up and sends nothing more on it', async () => {
-  const transports = [];
+  const transports: FakeTransport[] = [];
   const client = createReconnectingClient({
     connect: async () => { const transport = fakeTransport(); transports.push(transport); return transport; },
     onConnect: async rpc => {
@@ -192,7 +195,7 @@ test('stop() during onConnect closes the connection being set up and sends nothi
   await until(() => transports[0]?.sent.length === 1);
   const waiting = client.ready();
   client.stop();
-  await assert.rejects(waiting, error => isAlpClientError(error, 'closed'));
+  await assert.rejects(waiting, (error: NodeJS.ErrnoException) => isAlpClientError(error, 'closed'));
   await tick();
   assert.equal(transports[0].state, 'closed', 'the handshaking transport is closed');
   assert.deepEqual(transports[0].sent.map(frame => frame.method), ['daemon.hello'], 'session.attach was never sent');
@@ -201,10 +204,10 @@ test('stop() during onConnect closes the connection being set up and sends nothi
 
 test('a connection that drops right after the handshake counts as a failed attempt', async () => {
   const side = daemon();
-  const states = [];
+  const states: unknown[] = [];
   const client = createReconnectingClient({
     connect: side.connect,
-    onConnect: async rpc => { await hello(rpc); setTimeout(() => side.transports.at(-1).drop({ code: 4000 }), 1); },
+    onConnect: async rpc => { await hello(rpc); setTimeout(() => side.transports.at(-1)!.drop({ code: 4000 }), 1); },
     backoff: { initialMs: 1, jitter: 0 },
     maxAttempts: 3,
     stableMs: 1_000,
@@ -220,8 +223,8 @@ test('a connection that stayed up starts the next one from a fresh backoff', asy
   const client = createReconnectingClient({ connect: side.connect, onConnect: rpc => hello(rpc), backoff: { initialMs: 1, jitter: 0 }, maxAttempts: 2, stableMs: 20 });
   for (let round = 0; round < 3; round++) {
     await until(() => client.state === 'open' && side.transports.length === round + 1);
-    await new Promise(resolve => setTimeout(resolve, 30));
-    side.transports.at(-1).drop({});
+    await new Promise<void>(resolve => setTimeout(resolve, 30));
+    side.transports.at(-1)!.drop({});
   }
   await until(() => client.state === 'open' && side.transports.length === 4);
   assert.equal(client.state, 'open', 'maxAttempts counts consecutive failures, not lifetime reconnects');
@@ -230,10 +233,10 @@ test('a connection that stayed up starts the next one from a fresh backoff', asy
 
 test('connect and onConnect get a real AbortSignal where the platform has one', async () => {
   const side = daemon();
-  const seen = [];
+  const seen: unknown[] = [];
   const client = createReconnectingClient({
     connect: async ({ signal }) => { seen.push(signal instanceof AbortSignal); return side.connect(); },
-    onConnect: async (rpc, { signal }) => { seen.push(signal instanceof AbortSignal); AbortSignal.any([signal]); await hello(rpc); },
+    onConnect: async (rpc, { signal }) => { seen.push(signal instanceof AbortSignal); AbortSignal.any([signal as AbortSignal]); await hello(rpc); },
   });
   await client.ready();
   assert.deepEqual(seen, [true, true]);

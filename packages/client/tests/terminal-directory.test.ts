@@ -1,14 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { watchTerminals } from '../dist/portable.js';
-const id = n => String(n).padStart(32, '0');
-function connection(request) {
-  const listeners = new Set();
-  return { request, onNotification(fn) { listeners.add(fn); return () => listeners.delete(fn); }, onClose() { return () => {}; }, changed(watchId, cursor) { for (const fn of listeners) fn('terminal.changed', { watchId, cursor }); } };
+
+// `any`: the fake host answers terminal.* requests with JSON of each method's result; snapshots are read by field.
+type Json = any;
+const id = (n: number) => String(n).padStart(32, '0');
+function connection(request: (method: string, params?: unknown) => Promise<Json>) {
+  const listeners = new Set<(method: string, params: unknown) => void>();
+  return { request, onNotification(fn: (method: string, params: unknown) => void) { listeners.add(fn); return () => listeners.delete(fn); }, onClose() { return () => {}; }, changed(watchId: string, cursor: string) { for (const fn of listeners) fn('terminal.changed', { watchId, cursor }); } };
 }
 test('invalidation between snapshot and reply is recovered, then duplicates are ignored', async () => {
   let calls = 0;
-  const snapshots = [];
+  const snapshots: Json[] = [];
   const conn = connection(async method => {
     if (method === 'terminal.unwatch') return {};
     calls++;
@@ -28,8 +31,8 @@ test('invalidation between snapshot and reply is recovered, then duplicates are 
 test('older hosts explicitly poll and close cancels future reads; errors remain observable', async t => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   let calls = 0;
-  const modes = [], errors = [];
-  const watcher = watchTerminals(connection(async method => { assert.equal(method, 'terminal.list'); calls++; if (calls === 2) throw new Error('refused'); return { terminals: [] }; }), { capabilities: ['terminal'], pollMs: 50, onSnapshot() {}, onError: error => errors.push(error.message), onMode: mode => modes.push(mode) });
+  const modes: unknown[] = [], errors: unknown[] = [];
+  const watcher = watchTerminals(connection(async method => { assert.equal(method, 'terminal.list'); calls++; if (calls === 2) throw new Error('refused'); return { terminals: [] }; }), { capabilities: ['terminal'], pollMs: 50, onSnapshot() {}, onError: error => errors.push((error as Error).message), onMode: mode => modes.push(mode) });
   await watcher.ready;
   t.mock.timers.tick(50);
   await watcher.refresh();
@@ -40,8 +43,8 @@ test('older hosts explicitly poll and close cancels future reads; errors remain 
   assert.equal(calls, 2);
 });
 test('close during a pending snapshot never delivers late host data', async () => {
-  let answer;
-  const snapshots = [];
+  let answer!: (value: Json) => void;
+  const snapshots: unknown[] = [];
   const watcher = watchTerminals(connection(() => new Promise(resolve => { answer = resolve; })), { capabilities: [], onSnapshot: value => snapshots.push(value) });
   watcher.close();
   answer({ terminals: [{ terminalId: 'late' }] });

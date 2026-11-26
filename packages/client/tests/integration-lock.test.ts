@@ -1,10 +1,15 @@
 import test, { after } from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+
+// `any`: the lock worker answers over IPC with JSON messages of several shapes; the tests read the fields they assert on.
+type Json = any;
 
 const outer = await mkdtemp(path.join(tmpdir(), 'alp-integration-lock-'));
 process.env.ALP_HOME = path.join(outer, 'outer-home');
@@ -12,12 +17,12 @@ await mkdir(process.env.ALP_HOME, { mode: 0o700 });
 after(() => rm(outer, { recursive: true, force: true }));
 // Any integration name works; the Paseo plugin passes `web` (its shutdown regression lives in integrations/paseo/tests).
 const NAME = 'sample';
-const worker = new URL('./support/integration-lock-worker.mjs', import.meta.url);
-async function fixture(t) {
+const worker = new URL('./support/integration-lock-worker.ts', import.meta.url);
+async function fixture(t: TestContext) {
   const home = await mkdtemp(path.join(outer, 'home-'));
   const file = path.join(home, 'integrations', `${NAME}.lock`);
   await mkdir(path.dirname(file), { mode: 0o700 });
-  const children = [];
+  const children: ChildProcess[] = [];
   t.after(async () => {
     await Promise.all(children.map(async child => {
       if (child.exitCode !== null || child.signalCode !== null) return;
@@ -27,10 +32,10 @@ async function fixture(t) {
   async function start(gate = '', extraEnv = {}) {
     const child = fork(worker, [], { env: { ...process.env, ...extraEnv, ALP_HOME: home, ALP_LOCK_FIXTURE: outer, ALP_LOCK_GATE: gate, ALP_LOCK_NAME: NAME }, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
     children.push(child);
-    let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; });
-    const queued = [], waiting = [];
+    let stderr = ''; child.stderr!.on('data', chunk => { stderr += chunk; });
+    const queued: Json[] = [], waiting: Array<(message: Json) => void> = [];
     child.on('message', message => { const next = waiting.shift(); next ? next(message) : queued.push(message); });
-    const next = () => {
+    const next = (): Promise<Json> => {
       if (queued.length) return Promise.resolve(queued.shift());
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('lock worker stalled: ' + stderr)), 10_000);
@@ -38,11 +43,11 @@ async function fixture(t) {
       });
     };
     assert.equal((await next()).event, 'started', stderr);
-    return { child, next, send: command => child.send(command), async call(command) { child.send(command); return next(); } };
+    return { child, next, send: (command: Json) => child.send(command), async call(command: Json) { child.send(command); return next(); } };
   }
   return { home, file, guard: file + '.reclaim', start };
 }
-async function age(file) { const old = new Date(Date.now() - 60_000); await utimes(file, old, old); }
+async function age(file: string) { const old = new Date(Date.now() - 60_000); await utimes(file, old, old); }
 
 for (const boundary of ['initialize', 'reclaim']) {
   test(`a stalled ${boundary} cannot admit a second live owner, regardless of age`, async t => {
@@ -63,8 +68,8 @@ for (const boundary of ['initialize', 'reclaim']) {
     const winner = await first.next(); assert.equal(winner.value.acquired, true);
     const loser = observed.event === 'result' ? observed : await second.next();
     assert.equal(loser.value.acquired, false, 'two live processes must never both return acquired=true');
-    assert.doesNotThrow(() => process.kill(first.child.pid, 0));
-    assert.doesNotThrow(() => process.kill(second.child.pid, 0));
+    assert.doesNotThrow(() => process.kill(first.child.pid!, 0));
+    assert.doesNotThrow(() => process.kill(second.child.pid!, 0));
     assert.equal(JSON.parse(await readFile(f.file, 'utf8')).pid, first.child.pid);
   });
 }
@@ -75,7 +80,7 @@ test('complete killed owners recover, concurrent contenders converge, and normal
   const stopped = once(dead.child, 'exit'); dead.child.kill('SIGKILL'); await stopped;
   const a = await f.start(), b = await f.start();
   a.send({ command: 'acquire' }); b.send({ command: 'acquire' });
-  const result = async child => { let m; do { m = await child.next(); } while (m.event === 'blocked'); return m; };
+  const result = async (child: { next(): Promise<Json> }) => { let m; do { m = await child.next(); } while (m.event === 'blocked'); return m; };
   const [ra, rb] = await Promise.all([result(a), result(b)]);
   assert.deepEqual([ra.value.acquired, rb.value.acquired].sort(), [false, true]);
   const owner = ra.value.acquired ? a : b;
@@ -252,7 +257,7 @@ test('unsupported metadata and dead owners with uncertain boot context are retai
 test('the name selects integrations/<name>.lock and its guard; names are single path segments', async () => {
   const { createIntegrationLock } = await import('@anhlp/alp-client/integration-lock');
   for (const bad of [undefined, '', 'Web', '../web', 'a/b', 'a\\b', '.hidden', 'web.lock', '-web']) {
-    assert.throws(() => createIntegrationLock(outer, bad), TypeError, String(bad));
+    assert.throws(() => createIntegrationLock(outer, bad as string), TypeError, String(bad));
   }
   const home = await mkdtemp(path.join(outer, 'names-'));
   const paseo = createIntegrationLock(home, 'paseo'), web = createIntegrationLock(home, 'web');
@@ -270,7 +275,7 @@ test('the name selects integrations/<name>.lock and its guard; names are single 
   assert.equal(JSON.parse(await readFile(path.join(home, 'integrations/web.lock'), 'utf8')).pid, process.pid);
   // Recovery errors name the selected lock and guard.
   await writeFile(path.join(home, 'integrations/broken.lock'), 'malformed');
-  await assert.rejects(createIntegrationLock(home, 'broken').acquire(), error => {
+  await assert.rejects(createIntegrationLock(home, 'broken').acquire(), (error: NodeJS.ErrnoException) => {
     assert.ok(error.message.includes(path.join(home, 'integrations/broken.lock')) && error.message.includes('broken.lock.reclaim'), error.message);
     return true;
   });

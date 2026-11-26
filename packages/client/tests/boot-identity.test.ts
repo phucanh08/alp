@@ -22,7 +22,7 @@ test('bootId() returns a non-empty string or undefined on unsupported platforms'
   const id = bootId();
   if (['linux', 'darwin'].includes(process.platform)) {
     assert.equal(typeof id, 'string');
-    assert.ok(id.length > 0);
+    assert.ok(id!.length > 0);
   } else {
     assert.ok(id === undefined || typeof id === 'string');
   }

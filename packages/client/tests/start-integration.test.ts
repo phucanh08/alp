@@ -2,16 +2,21 @@
 // selected home, and no descriptor, environment or PATH candidate is consulted. Without an entry the
 // discovery path is unchanged.
 import test, { after } from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { discoverIntegration, startIntegration } from '@anhlp/alp-client/index';
 
+// `any`: the spawn and setTimeout stand-ins forward whatever arguments the code under test passes.
+type Json = any;
+
 const outer = await mkdtemp(path.join(tmpdir(), 'alp-start-integration-'));
-const pids = [];
+const pids: number[] = [];
 after(async () => {
   // Also stop any service a failing run started but never read back.
   for (const file of await readdir(outer, { recursive: true }).catch(() => [])) {
@@ -24,7 +29,7 @@ after(async () => {
 });
 
 /** A service entry: records how it was started, then publishes its ready lock and <name>.json and stays up. */
-function entrySource(tag) {
+function entrySource(tag: string) {
   return `import { mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,25 +42,25 @@ setInterval(() => {}, 60_000);
 `;
 }
 
-async function fixture(name) {
+async function fixture(name: string) {
   const directory = await mkdtemp(path.join(outer, 'case-'));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
-  const write = async (file, tag) => { await writeFile(file, entrySource(tag)); return file; };
+  const write = async (file: string, tag: string) => { await writeFile(file, entrySource(tag)); return file; };
   return { directory, home, name, write };
 }
 
-async function started(home, tag) {
+async function started(home: string, tag: string) {
   const record = JSON.parse(await readFile(path.join(home, `started-${tag}.json`), 'utf8'));
   pids.push(record.pid);
   return record;
 }
 
-const absent = file => stat(file).then(() => false, error => error.code === 'ENOENT');
-const escape = text => text.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+const absent = (file: string) => stat(file).then(() => false, error => error.code === 'ENOENT');
+const escape = (text: string) => text.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
 
 /** Sets (or, for undefined, deletes) these variables and every discovery override for `name`, restoring them after the test. */
-function environment(t, name, values) {
+function environment(t: TestContext, name: string, values: Record<string, string | undefined>) {
   const keys = new Set(['ALP_WEB_INTEGRATION', 'ALP_INTEGRATION_ENTRY', `ALP_${name.toUpperCase()}_INTEGRATION`, 'TEST_INTEGRATION_NAME', ...Object.keys(values)]);
   const saved = new Map([...keys].map(key => [key, process.env[key]]));
   for (const key of keys) delete process.env[key];
@@ -68,18 +73,18 @@ function environment(t, name, values) {
  * deadline with no lock. Child startup has no 150ms upper bound on a loaded machine.
  * Only the late schedule advances the clock, after the real exit, to avoid a 30s test.
  */
-async function exitSchedule(t, { releaseAfterCheck } = {}, run) {
+async function exitSchedule(t: TestContext, { releaseAfterCheck }: { releaseAfterCheck?: () => unknown } = {}, run: () => Promise<unknown>) {
   const spawn = childProcess.spawn;
   const setTimeout = globalThis.setTimeout;
   const now = Date.now;
-  let exit, child, offset = 0;
-  const events = [];
-  const children = [];
-  const spawnMock = t.mock.method(childProcess, 'spawn', (...args) => {
-    child = spawn(...args);
-    const stopped = new Promise(resolve => child.once('close', resolve));
+  let exit!: Promise<void>, child!: ChildProcess, offset = 0;
+  const events: unknown[] = [];
+  const children: Array<{ child: ChildProcess, stopped: Promise<void> }> = [];
+  const spawnMock = t.mock.method(childProcess, 'spawn', (...args: Json[]) => {
+    child = (spawn as (...args: Json[]) => ChildProcess)(...args);
+    const stopped = new Promise<void>(resolve => child.once('close', resolve));
     children.push({ child, stopped });
-    exit = new Promise(resolve => child.once('exit', code => {
+    exit = new Promise<void>(resolve => child.once('exit', code => {
       events.push(`exit:${code}`);
       resolve();
     }));
@@ -87,7 +92,7 @@ async function exitSchedule(t, { releaseAfterCheck } = {}, run) {
   });
   syncBuiltinESMExports();
   const clockMock = t.mock.method(Date, 'now', () => now() + offset);
-  const timerMock = t.mock.method(globalThis, 'setTimeout', (callback, ms, ...args) => {
+  const timerMock = t.mock.method(globalThis, 'setTimeout', (callback: (...args: Json[]) => void, ms?: number, ...args: Json[]) => {
     if (ms === 150) return setTimeout(async () => {
       if (!releaseAfterCheck) {
         child.ref();
@@ -130,7 +135,7 @@ async function exitSchedule(t, { releaseAfterCheck } = {}, run) {
 test('the exit schedule stops its detached child when the caller fails before polling', async t => {
   const f = await fixture('cleanup');
   const service = await f.write(path.join(f.directory, 'service.mjs'), 'cleanup');
-  let child;
+  let child!: ChildProcess;
   const failure = new Error('caller failed before readiness polling');
   await assert.rejects(exitSchedule(t, { releaseAfterCheck: () => assert.fail('must not poll') }, async () => {
     child = childProcess.spawn(process.execPath, [service], {
@@ -142,7 +147,7 @@ test('the exit schedule stops its detached child when the caller fails before po
     throw failure;
   }), error => error === failure);
   assert.equal(child.signalCode, 'SIGKILL');
-  assert.throws(() => process.kill(child.pid, 0), { code: 'ESRCH' });
+  assert.throws(() => process.kill(child.pid!, 0), { code: 'ESRCH' });
 });
 
 test('an explicit entry is started with --service under the selected home and skips discovery', async t => {
@@ -186,7 +191,8 @@ test('a missing or invalid entry fails before anything is spawned, even when dis
   environment(t, f.name, { ALP_INTEGRATION_ENTRY: discovered });
   const missing = path.join(f.directory, 'missing.mjs');
   await assert.rejects(startIntegration({ name: f.name, entry: missing, home: f.home }), new RegExp(`entry not found: ${escape(missing)}`));
-  for (const entry of ['', 42, null]) await assert.rejects(startIntegration({ name: f.name, entry, home: f.home }), TypeError);
+  // Values of the wrong type are the point: startIntegration must refuse them at run time.
+  for (const entry of ['', 42, null] as unknown as string[]) await assert.rejects(startIntegration({ name: f.name, entry, home: f.home }), TypeError);
   await assert.rejects(startIntegration({ name: f.name, entry: f.directory, home: f.home }), /entry not found/);
   assert.ok(await absent(path.join(f.home, 'started-discovered.json')));
 });
@@ -195,7 +201,7 @@ test('integration names are single lowercase path segments, with or without an e
   const f = await fixture('names');
   const service = await f.write(path.join(f.directory, 'service.mjs'), 'names');
   environment(t, f.name, { ALP_INTEGRATION_ENTRY: service });
-  for (const name of ['', 'Web', '../x', 'a/b', 'a\\b', '.web', '-web', 'web.lock', 7]) {
+  for (const name of ['', 'Web', '../x', 'a/b', 'a\\b', '.web', '-web', 'web.lock', 7] as unknown as string[]) {
     await assert.rejects(startIntegration({ name, entry: service, home: f.home }), TypeError, String(name));
     await assert.rejects(startIntegration({ name, home: f.home }), TypeError, String(name));
   }
@@ -210,7 +216,7 @@ test('discoverIntegration validates the name before reading any descriptor or ov
   await writeFile(path.join(f.home, 'outside.json'), JSON.stringify({ main: service }));
   environment(t, f.name, { ALP_INTEGRATION_ENTRY: '' });
   assert.equal(await discoverIntegration(f.name, { home: f.home }), undefined, 'the fixture registers nothing by default');
-  for (const name of ['../outside', '', 'Web', 'a/b', 'a\\b', '.web', '-web', 'web.lock', 7, null]) {
+  for (const name of ['../outside', '', 'Web', 'a/b', 'a\\b', '.web', '-web', 'web.lock', 7, null] as unknown as string[]) {
     await assert.rejects(discoverIntegration(name, { home: f.home }), TypeError, String(name));
   }
   // Even an explicit override is not returned for an invalid name.
@@ -236,7 +242,7 @@ test('args follow --service, and must be strings', async t => {
   const record = await started(f.home, 'args');
   assert.deepEqual(record.argv, ['--service', '--project', '/some where']);
   assert.equal(lock.pid, record.pid);
-  for (const args of ['--project', [1], [null]]) await assert.rejects(startIntegration({ name: f.name, entry: service, home: f.home, args }), /args must be a list of strings/);
+  for (const args of ['--project', [1], [null]] as unknown as string[][]) await assert.rejects(startIntegration({ name: f.name, entry: service, home: f.home, args }), /args must be a list of strings/);
 });
 
 test('dashboard.enabled=false (or web.enabled from before the rename) refuses dashboard only; messages name the integration, its entry and its own log', async t => {

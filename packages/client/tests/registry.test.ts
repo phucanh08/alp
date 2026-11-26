@@ -3,12 +3,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { workspaceRegistry } from '@anhlp/alp-client/portable';
+type RequestClient = Parameters<typeof workspaceRegistry>[0];
+
+// `any`: the fake daemons answer each method with its JSON result and read the params the helper sent.
+type Json = any;
 
 test('gitStatus and gitDiff send workspace.git.status and workspace.git.diff as given (capability workspace.git)', async () => {
-  const sent = [];
-  const registry = workspaceRegistry({ request: async (method, params) => { sent.push([method, params]); return { method }; } });
+  const sent: unknown[] = [];
+  const registry = workspaceRegistry({ request: async (method, params) => { sent.push([method, params]); return { method }; } } as RequestClient);
   assert.deepEqual(await registry.gitStatus('wks_a'), { method: 'workspace.git.status' });
-  const page = { workspaceId: 'wks_a', compare: { mode: 'base', baseRef: 'main', ignoreWhitespace: true }, path: 'src/app.ts', cursor: 'c1' };
+  const page = { workspaceId: 'wks_a', compare: { mode: 'base', baseRef: 'main', ignoreWhitespace: true }, path: 'src/app.ts', cursor: 'c1' } as Parameters<ReturnType<typeof workspaceRegistry>['gitDiff']>[0];
   assert.deepEqual(await registry.gitDiff(page), { method: 'workspace.git.diff' });
   assert.deepEqual(sent, [['workspace.git.status', { workspaceId: 'wks_a' }], ['workspace.git.diff', page]]);
 });
@@ -23,8 +27,8 @@ test('attachment helpers send their methods as given; upload chunks within the a
   const sample = new TextEncoder().encode('hello');
   assert.equal(await sha256Hex(sample), createHash('sha256').update('hello').digest('hex'));
 
-  const sent = [];
-  const plain = attachments({ request: async (method, params) => { sent.push([method, params]); return { method }; } });
+  const sent: unknown[] = [];
+  const plain = attachments({ request: async (method, params) => { sent.push([method, params]); return { method }; } } as RequestClient);
   await plain.abort('upl_x');
   await plain.get('att_x');
   await plain.delete('att_x');
@@ -32,11 +36,11 @@ test('attachment helpers send their methods as given; upload chunks within the a
 
   // A daemon that already holds 4 bytes (a resumed upload) and once answers offset_mismatch.
   const data = new Uint8Array(randomBytes(23));
-  const stored = [];
-  const calls = [];
+  const stored: number[] = [];
+  const calls: unknown[] = [];
   let mismatched = false;
   const daemon = {
-    async request(method, params) {
+    async request(method: string, params: Json) {
       calls.push(method);
       if (method === 'attachment.begin') { stored.push(...data.subarray(0, 4)); return { uploadId: 'upl_1', state: 'uploading', received: 4, size: data.length, maxChunkBytes: 8, expiresAt: 'later' }; }
       if (method === 'attachment.chunk') {
@@ -55,14 +59,14 @@ test('attachment helpers send their methods as given; upload chunks within the a
       throw new Error(`unexpected ${method}`);
     },
   };
-  const progress = [];
-  const attachment = await attachments(daemon).upload({ sessionId: 's', name: 'x.bin', mimeType: 'application/octet-stream', data, requestId: 'r', maxChunkBytes: 5, onProgress: received => progress.push(received) });
+  const progress: unknown[] = [];
+  const attachment = await attachments(daemon as RequestClient).upload({ sessionId: 's', name: 'x.bin', mimeType: 'application/octet-stream', data, requestId: 'r', maxChunkBytes: 5, onProgress: received => progress.push(received) });
   assert.deepEqual(attachment, { attachmentId: 'att_1', size: data.length });
   assert.equal(calls[0], 'attachment.begin');
   assert.equal(calls.at(-1), 'attachment.commit');
   assert.equal(progress.at(-1), data.length);
   // A repeat after the commit only reads the attachment back.
-  const done = await attachments({ request: async method => method === 'attachment.begin' ? { uploadId: 'upl_1', state: 'committed', received: 3, size: 3, maxChunkBytes: 8, attachmentId: 'att_1' } : { attachment: { attachmentId: 'att_1' } } }).upload({ sessionId: 's', name: 'x', mimeType: 'text/plain', data: new Uint8Array(3), requestId: 'r', sha256: '0'.repeat(64) });
+  const done = await attachments({ request: async method => method === 'attachment.begin' ? { uploadId: 'upl_1', state: 'committed', received: 3, size: 3, maxChunkBytes: 8, attachmentId: 'att_1' } : { attachment: { attachmentId: 'att_1' } } } as RequestClient).upload({ sessionId: 's', name: 'x', mimeType: 'text/plain', data: new Uint8Array(3), requestId: 'r', sha256: '0'.repeat(64) });
   assert.deepEqual(done, { attachmentId: 'att_1' });
 });
 
@@ -72,10 +76,10 @@ test('attachments().upload supports signal abort, run.abort(), onBegun and abort
 
   // 1. Abort via AbortSignal mid-chunk
   {
-    const calls = [];
+    const calls: unknown[] = [];
     const controller = new AbortController();
     const daemon = {
-      async request(method, params) {
+      async request(method: string, params: Json) {
         calls.push(method);
         if (method === 'attachment.begin') return { uploadId: 'upl_sig', state: 'uploading', received: 0, size: data.length, maxChunkBytes: 5 };
         if (method === 'attachment.chunk') {
@@ -88,8 +92,8 @@ test('attachments().upload supports signal abort, run.abort(), onBegun and abort
     };
     let begunId;
     await assert.rejects(
-      attachments(daemon).upload({ sessionId: 's', name: 'f', mimeType: 'text/plain', data, requestId: 'r1', maxChunkBytes: 5, signal: controller.signal, onBegun: id => { begunId = id; } }),
-      err => err.message === 'signal canceled'
+      attachments(daemon as RequestClient).upload({ sessionId: 's', name: 'f', mimeType: 'text/plain', data, requestId: 'r1', maxChunkBytes: 5, signal: controller.signal, onBegun: id => { begunId = id; } }),
+      (err: Error) => err.message === 'signal canceled'
     );
     assert.equal(begunId, 'upl_sig');
     assert.ok(calls.includes('attachment.abort'));
@@ -97,10 +101,10 @@ test('attachments().upload supports signal abort, run.abort(), onBegun and abort
 
   // 2. Abort via run.abort()
   {
-    const calls = [];
-    let resolveChunk;
+    const calls: unknown[] = [];
+    let resolveChunk!: (value: unknown) => void;
     const daemon = {
-      async request(method, params) {
+      async request(method: string, params: Json) {
         calls.push(method);
         if (method === 'attachment.begin') return { uploadId: 'upl_meth', state: 'uploading', received: 0, size: data.length, maxChunkBytes: 5 };
         if (method === 'attachment.chunk') {
@@ -110,30 +114,30 @@ test('attachments().upload supports signal abort, run.abort(), onBegun and abort
         throw new Error(`unexpected ${method}`);
       },
     };
-    const run = attachments(daemon).upload({ sessionId: 's', name: 'f', mimeType: 'text/plain', data, requestId: 'r2', maxChunkBytes: 5 });
+    const run = attachments(daemon as RequestClient).upload({ sessionId: 's', name: 'f', mimeType: 'text/plain', data, requestId: 'r2', maxChunkBytes: 5 });
     // Let begin complete
-    await new Promise(resolve => setTimeout(resolve, 5));
+    await new Promise<void>(resolve => setTimeout(resolve, 5));
     assert.equal(run.uploadId, 'upl_meth');
     await run.abort(new Error('user canceled'));
     resolveChunk({ received: 5, size: data.length });
-    await assert.rejects(run, err => err.message === 'user canceled');
+    await assert.rejects(run, (err: NodeJS.ErrnoException) => err.message === 'user canceled');
     assert.ok(calls.includes('attachment.abort'));
   }
 
   // 3. Abort before begin throws immediately without begin
   {
-    const calls = [];
+    const calls: unknown[] = [];
     const controller = new AbortController();
     controller.abort(new Error('aborted early'));
     const daemon = {
-      async request(method, params) {
+      async request(method: string, params: Json) {
         calls.push(method);
         return {};
       },
     };
     await assert.rejects(
-      attachments(daemon).upload({ sessionId: 's', name: 'f', mimeType: 'text/plain', data, requestId: 'r3', maxChunkBytes: 5, signal: controller.signal }),
-      err => err.message === 'aborted early'
+      attachments(daemon as RequestClient).upload({ sessionId: 's', name: 'f', mimeType: 'text/plain', data, requestId: 'r3', maxChunkBytes: 5, signal: controller.signal }),
+      (err: Error) => err.message === 'aborted early'
     );
     assert.equal(calls.length, 0);
   }
@@ -141,8 +145,8 @@ test('attachments().upload supports signal abort, run.abort(), onBegun and abort
 
 test('conversation helpers send session.fork and session.rewind exactly as given (capabilities session.fork, session.rewind)', async () => {
   const { conversation } = await import('@anhlp/alp-client/portable');
-  const sent = [];
-  const api = conversation({ request: async (method, params) => { sent.push([method, params]); return { method }; } });
+  const sent: unknown[] = [];
+  const api = conversation({ request: async (method, params) => { sent.push([method, params]); return { method }; } } as RequestClient);
   const fork = { sessionId: 'ses_1', requestId: 'fork-1', ifGeneration: '0123456789abcdef0123456789abcdef', boundary: { throughTurnId: 'turn-1' }, workspaceId: 'wks_1', newSessionId: 'ses_f1', title: 'Try another way' };
   const rewind = { sessionId: 'ses_1', requestId: 'rewind-1', ifGeneration: '0123456789abcdef0123456789abcdef', beforeTurnId: 'turn-2' };
   assert.deepEqual(await api.fork(fork), { method: 'session.fork' });
@@ -152,8 +156,8 @@ test('conversation helpers send session.fork and session.rewind exactly as given
 
 test('conversation helpers send session.reload and session.resumeCommand exactly as given (§12.8)', async () => {
   const { conversation } = await import('@anhlp/alp-client/portable');
-  const sent = [];
-  const api = conversation({ request: async (method, params) => { sent.push([method, params]); return { method }; } });
+  const sent: unknown[] = [];
+  const api = conversation({ request: async (method, params) => { sent.push([method, params]); return { method }; } } as RequestClient);
   const reload = { sessionId: 'ses_1', requestId: 'reload-1', ifGeneration: '0123456789abcdef0123456789abcdef' };
   assert.deepEqual(await api.reload(reload), { method: 'session.reload' });
   assert.deepEqual(await api.resumeCommand({ sessionId: 'ses_1' }), { method: 'session.resumeCommand' });
@@ -162,8 +166,8 @@ test('conversation helpers send session.reload and session.resumeCommand exactly
 
 test('conversation helpers send a live session.configure and its preview exactly as given (§12.9)', async () => {
   const { conversation } = await import('@anhlp/alp-client/portable');
-  const sent = [];
-  const api = conversation({ request: async (method, params) => { sent.push([method, params]); return { method }; } });
+  const sent: unknown[] = [];
+  const api = conversation({ request: async (method, params) => { sent.push([method, params]); return { method }; } } as RequestClient);
   const configure = { sessionId: 'ses_1', model: 'codex:gpt-6.1-sol', thinking: 'high', requestId: 'configure-1', ifGeneration: '0123456789abcdef0123456789abcdef' };
   assert.deepEqual(await api.configure(configure), { method: 'session.configure' });
   assert.deepEqual(await api.configurePreview({ sessionId: 'ses_1', team: 'cafe' }), { method: 'session.configure.preview' });
@@ -172,7 +176,7 @@ test('conversation helpers send a live session.configure and its preview exactly
 
 for (const callback of ['onBegun', 'onProgress']) test(`upload aborts uncommitted reservation when ${callback} throws`, async () => {
   const { attachments } = await import('@anhlp/alp-client/portable');
-  const calls = [];
+  const calls: unknown[] = [];
   const failure = new Error('callback failed');
   const api = attachments({ request: async (method, params) => {
     calls.push(method);
@@ -180,22 +184,22 @@ for (const callback of ['onBegun', 'onProgress']) test(`upload aborts uncommitte
     if (method === 'attachment.chunk') return { received: 5 };
     if (method === 'attachment.abort') throw new Error('abort unavailable');
     throw new Error(`unexpected ${method}`);
-  } });
-  await assert.rejects(api.upload({ sessionId: 's', name: 'x', mimeType: 'text/plain', data: new Uint8Array(5), requestId: 'callback', sha256: '0'.repeat(64), [callback]: () => { throw failure; } }), error => error === failure);
+  } } as RequestClient);
+  await assert.rejects(api.upload({ sessionId: 's', name: 'x', mimeType: 'text/plain', data: new Uint8Array(5), requestId: 'callback', sha256: '0'.repeat(64), [callback]: () => { throw failure; } }), (error: NodeJS.ErrnoException) => error === failure);
   assert.equal(calls.at(-1), 'attachment.abort', 'best-effort abort preserves the original callback error');
 });
 
 test('callback failure preserves committed uploads and transport errors remain resumable', async () => {
   const { attachments } = await import('@anhlp/alp-client/portable');
   for (const committed of [false, true]) {
-    const calls = [];
+    const calls: unknown[] = [];
     const failure = new Error('failed');
     const api = attachments({ request: async method => {
       calls.push(method);
       if (method === 'attachment.begin') return { uploadId: 'upl_resume', state: committed ? 'committed' : 'uploading', attachmentId: committed ? 'att_done' : undefined, received: 0, maxChunkBytes: 5 };
       throw failure;
-    } });
-    await assert.rejects(api.upload({ sessionId: 's', name: 'x', mimeType: 'text/plain', data: new Uint8Array(5), requestId: 'resume', sha256: '0'.repeat(64), ...(committed ? { onBegun: () => { throw failure; } } : {}) }), error => error === failure);
+    } } as RequestClient);
+    await assert.rejects(api.upload({ sessionId: 's', name: 'x', mimeType: 'text/plain', data: new Uint8Array(5), requestId: 'resume', sha256: '0'.repeat(64), ...(committed ? { onBegun: () => { throw failure; } } : {}) }), (error: NodeJS.ErrnoException) => error === failure);
     assert.ok(!calls.includes('attachment.abort'), 'committed attachments and interrupted transports keep resumable state');
   }
 });
