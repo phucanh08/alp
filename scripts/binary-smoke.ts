@@ -1,0 +1,200 @@
+#!/usr/bin/env node
+// Smoke test of the ALP bundle (t-1807), in a throwaway ALP_HOME, run by the bundle's own Node:
+// its launcher, init, daemon start/status, alp dashboard (HTTP, token gate, ticket, WebSocket), a terminal
+// (the native helper; node-pty on Windows), provider turns with the fake Codex and the fake Claude
+// (the Claude Agent SDK from the bundle's node_modules), the ACP bridge subcommand, and daemon stop.
+//
+//   node scripts/binary-smoke.ts [dist/bundle/alp-<version>-<platform>]   (build it with scripts/build-bundle.ts)
+import { execFile, spawn } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import net from 'node:net';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import WebSocket from 'ws';
+import { AlpRpcClient, hello } from '@anhlp/alp-client/portable';
+import { connectWebSocket } from '@anhlp/alp-client/websocket';
+
+import { bundleCommand } from '../packages/cli/dist/commands/update/self-update.js';
+import { hostPlatform } from './build-bundle.ts';
+import { clearCallerSession } from './test-lib.ts';
+
+const ROOT = path.resolve(import.meta.dirname, '..');
+const version = JSON.parse(await readFile(path.join(ROOT, 'packages/cli/package.json'), 'utf8')).version;
+const bundle = await realpath(path.resolve(process.argv[2] ?? path.join(ROOT, 'dist/bundle', `alp-${version}-${hostPlatform()}`))).catch(() => undefined);
+if (!bundle || !existsSync(path.join(bundle, 'alp-bundle.json'))) throw new Error(`${process.argv[2] ?? 'dist/bundle'} is not a built bundle; build it with node scripts/build-bundle.ts`);
+const windows = process.platform === 'win32';
+const launcher = path.join(bundle, 'bin', windows ? 'alp.cmd' : 'alp');
+// The bundle's own Node and CLI (bin/alp runs exactly this); Windows starts alp.cmd only through a shell.
+const { command: node, args: cliArgs } = bundleCommand(bundle);
+const manifest = JSON.parse(await readFile(path.join(bundle, 'alp-bundle.json'), 'utf8'));
+// The native alpd (t-81b0.9) where the bundle ships one, else alpd.js on the bundle's Node.
+const native = manifest.daemon === 'native';
+const alpd = native ? path.join(bundle, 'bin', windows ? 'alpd.exe' : 'alpd') : path.join(bundle, 'lib/node_modules/@anhlp/alp-cli/dist/alpd.js');
+const log = (message: string) => console.log(`[binary-smoke] ${message}`);
+const run = promisify(execFile);
+const work = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-binary-smoke-')));
+const home = path.join(work, 'home');
+// t-5294.3: `alp dashboard --print` below is a user-only command, so this smoke must not inherit the ALP
+// session of an agent's shell; otherwise the installed CLI answers "alp dashboard is the user's ... started
+// by an ALP agent" and the smoke fails for a reason that has nothing to do with the package. Same
+// mechanism as scripts/core-standalone-smoke.ts:138; the product guard is unchanged.
+const clearedSession = clearCallerSession();
+if (clearedSession.length) log(`cleared the caller's ALP session variables, so the bundled CLI runs as the user's: ${clearedSession.join(', ')}`);
+const env: NodeJS.ProcessEnv = { ...process.env, ALP_HOME: home, SHELL: '/bin/sh', ALP_CODEX_BIN: path.join(ROOT, 'packages/daemon/tests/support/fake-codex.js'), ALP_CLAUDE_BIN: path.join(ROOT, 'packages/daemon/tests/support/fake-claude.js'), ALP_DAEMON_ENTRY: '', ALP_DASHBOARD_APP: '' };
+delete env.ALP_DAEMON_ENTRY; delete env.ALP_DASHBOARD_APP; delete env.ALP_WEB_APP;
+const alp = async (args: string[], cwd: string = work) => (await run(node, [...cliArgs, ...args], { env, cwd, timeout: 60_000 })).stdout.trim();
+const check = (condition: unknown, message: string) => { if (!condition) throw new Error(message); log(`ok: ${message}`); };
+
+try {
+  await mkdir(home, { mode: 0o700 });
+  // recovery.autoResume off: the kill check below finds the interrupted root parked instead of continued.
+  await writeFile(path.join(home, 'settings.json'), JSON.stringify({ dashboard: { permissions: ['terminal.exec'] }, recovery: { autoResume: false } }));
+  // The stand-in ACP agent of the bridge check below (a provider of the user's library).
+  await mkdir(path.join(home, 'providers'), { recursive: true });
+  await writeFile(path.join(home, 'providers', 'fakeacp.json'), JSON.stringify({ kind: 'acp', label: 'Fake ACP', command: path.join(ROOT, 'packages/daemon/tests/support/fake-acp.js') }));
+  check(await alp(['--version']) === version, 'alp --version');
+  check((await run(launcher, ['--version'], { env, timeout: 60_000, shell: windows })).stdout.trim() === version, 'the launcher runs the bundle');
+  if (!windows) {
+    // ~/.alp/bin/alp is a symlink to the launcher: it must still find its bundle.
+    const link = path.join(work, 'alp-link');
+    await symlink(launcher, link);
+    check((await run(link, ['--version'], { env, timeout: 60_000 })).stdout.trim() === version, 'the launcher reached through a symlink');
+  }
+  const sdk = readdirSync(path.join(bundle, 'lib/node_modules/@anthropic-ai'));
+  check(sdk.includes('claude-agent-sdk') && !sdk.some(name => name.startsWith('claude-agent-sdk-')), `the Claude Agent SDK is bundled without its native claude (${sdk.join(', ')})`);
+  const { findDaemonEntry } = await import('@anhlp/alp-client/index');
+  check(native === existsSync(path.join(bundle, 'bin', windows ? 'alpd.exe' : 'alpd')), `alp-bundle.json says daemon ${manifest.daemon} and bin/ agrees`);
+  check(await findDaemonEntry({ home: path.join(work, 'none'), env: { PATH: path.join(bundle, 'bin') } }) === alpd, `discovery finds ${native ? 'the native alpd' : 'alpd.js'} behind the launcher on PATH`);
+  const project = path.join(work, 'project');
+  await mkdir(project);
+  await alp(['init', project]);
+  check(existsSync(path.join(project, '.alp', 'ALP.md')) || existsSync(path.join(project, 'ALP.md')), 'alp init writes its templates');
+  await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
+  await alp(['terminal', 'allow', '--yes']);
+  const started = Date.now();
+  check(/running \(pid \d+\)/.test(await alp(['daemon', 'start'])), `alp daemon start (detached ${native ? 'native alpd' : 'alpd under the bundled Node'}, ${Date.now() - started} ms)`);
+  check((await alp(['daemon', 'status'])).includes('ready'), 'alp daemon status');
+  const record = JSON.parse(await readFile(path.join(home, 'alpd.json'), 'utf8'));
+  check(record.entry === alpd, `the install record names the bundle's ${native ? 'native alpd' : 'alpd.js'} (${record.entry})`);
+  if (native && !windows) {
+    // The detached alpd is the executable itself with no script argument (no /$bunfs path, no self-spawn chain).
+    const { pid } = JSON.parse(await readFile(path.join(home, 'alpd.lock'), 'utf8'));
+    const command = (await run('ps', ['-o', 'command=', '-p', String(pid)])).stdout.trim();
+    check(command === alpd || command.startsWith(`${alpd} `) && !command.includes('$bunfs'), `the running alpd is the native executable (${command})`);
+    const children = (await run('ps', ['-A', '-o', 'ppid=,command=']).catch(() => ({ stdout: '' }))).stdout.split('\n').filter(line => line.trim().startsWith(`${pid} `) && line.includes(alpd));
+    check(children.length === 0, 'the native alpd started no copy of itself');
+  }
+  const url = await alp(['dashboard', '--print'], project);
+  const token = url.split('#token=')[1];
+  const base = url.replace(/\/#.*$/, '');
+  check((await fetch(base)).status === 200, 'alp dashboard serves its app over HTTP');
+  check((await fetch(`${base}/v1/tickets`, { method: 'POST' })).status === 401, 'a ticket without a token is refused');
+  check((await fetch(`${base}/v1/tickets`, { method: 'POST', headers: { authorization: 'Bearer alpgw1.x.y' } })).status === 401, 'a ticket with a wrong token is refused');
+  const ticket = (await (await fetch(`${base}/v1/tickets`, { method: 'POST', headers: { authorization: `Bearer ${token}` } })).json() as { websocket: string, subprotocols: string[] });
+  const client = new AlpRpcClient(await connectWebSocket(base.replace(/^http/, 'ws') + ticket.websocket, { WebSocket, protocols: ticket.subprotocols }));
+  try {
+    const greeting = await hello(client, { name: 'binary-smoke', version: '0' });
+    check((greeting.capabilities as string[]).includes('terminal.watch'), 'WebSocket upgrade and hello through the gateway');
+    const events = ([] as string[]), output = ([] as string[]), payloads = ([] as string[]);
+    client.onEvent(envelope => { events.push(envelope.event.type); payloads.push(JSON.stringify(envelope.event)); });
+    const exits = [];
+    client.onNotification((method, event) => {
+      if (method === 'terminal.event' && event.type === 'output') output.push(event.data);
+      if (method === 'terminal.event' && event.type === 'exit') exits.push(event);
+    });
+    {
+      // POSIX: the native helper running /bin/sh. Windows: node-pty (ConPTY) running cmd.exe.
+      const { workspaces } = await client.request('workspace.list', {});
+      const workspace = workspaces.find((row: { id: string; directory?: string; canonical?: string; }) => row.directory === project || row.canonical === project || row.directory?.toLowerCase() === project.toLowerCase());
+      const { terminal } = await client.request('terminal.create', { workspaceId: workspace.id, cols: 80, rows: 24, requestId: 'smoke' });
+      await client.request('terminal.attach', { terminalId: terminal.terminalId });
+      // The typed line echoes back too, so the expected text is one the input does not contain.
+      const [input, expected] = windows ? ['set /a 19*19+1000\r', '1361'] : ['echo SMOKE-$((19*19))\r', 'SMOKE-361'];
+      // Type only once the shell shows its prompt (cmd.exe may drop input sent while ConPTY starts), then retry.
+      const prompt = windows ? />\s*(\u001b\][^\u0007]*\u0007)?(\u001b\[\?25h)?\s*$/ : /./;
+      for (let i = 0; !prompt.test(output.join('')) && i < 400; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      for (let attempt = 0; attempt < 3 && !output.join('').includes(expected); attempt++) {
+        await client.request('terminal.input', { terminalId: terminal.terminalId, data: input });
+        for (let i = 0; !output.join('').includes(expected) && i < 300; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      if (!output.join('').includes(expected)) log(`terminal output so far (${output.length} chunks): ${JSON.stringify(output.join('').slice(-2000))}`);
+      check(output.join('').includes(expected), windows ? 'a terminal through node-pty (ConPTY)' : 'a terminal through the native helper');
+      await client.request('terminal.close', { terminalId: terminal.terminalId });
+      for (let i = 0; exits.length === 0 && i < 400; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      check(exits.length > 0, 'the terminal ended on close');
+    }
+    const { session } = await client.request('session.create', { spec: { cwd: project, model: 'codex:gpt-5.6-sol' }, history: 'skip' });
+    await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'smoke-1', content: [{ type: 'text', text: 'hello' }] });
+    for (let i = 0; !events.includes('turn.ended') && i < 400; i++) await new Promise(resolve => setTimeout(resolve, 25));
+    check(events.includes('turn.ended'), 'a provider turn with the fake Codex');
+    // beta.5 regression: the Claude transport must load the Claude Agent SDK (here from the bundle's node_modules).
+    events.length = 0;
+    const claude = await client.request('session.create', { spec: { cwd: project, model: 'claude:claude-opus-5-5' }, history: 'skip' });
+    await client.request('session.prompt', { sessionId: claude.session.id, clientMessageId: 'smoke-2', content: [{ type: 'text', text: 'hello' }] });
+    for (let i = 0; !events.includes('turn.ended') && i < 400; i++) await new Promise(resolve => setTimeout(resolve, 25));
+    check(events.includes('turn.ended') && payloads.some(text => text.includes('ok 1: hello')), 'a provider turn with the fake Claude through the bundled Claude Agent SDK');
+    // An ACP agent (a JavaScript stand-in, run by its shebang) gets alpd's MCP bridge and runs it: the
+    // native alpd must hand it a Node that evaluates the bridge's -e source, not itself (t-81b0.9).
+    if (!windows) {
+      events.length = 0; payloads.length = 0;
+      const acp = await client.request('session.create', { spec: { cwd: project, model: 'acp:fakeacp', agent: 'main' }, history: 'skip' });
+      await client.request('session.prompt', { sessionId: acp.session.id, clientMessageId: 'smoke-3', content: [{ type: 'text', text: 'hello' }] });
+      for (let i = 0; !events.includes('turn.ended') && i < 600; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      const reply = payloads.join('\n').match(/bridge (\S+) tools ([^"\\]*)|bridge failed: [^"\\]*/)?.[0] ?? '';
+      const bridgeNode = path.join(bundle, 'node', 'bin', 'node');
+      check(events.includes('turn.ended') && reply.startsWith(`bridge ${bridgeNode} tools `) && /alp_/.test(reply), `an ACP agent ran alpd's MCP bridge with the bundle's Node and listed alpd's tools (${reply.slice(0, 160)})`);
+    }
+  } finally { client.close(); }
+
+  // alpd killed mid-turn (SIGKILL) and started again: its lock is taken over, and the interrupted turn is
+  // reported as daemon_restarted, as under Node (t-81b0.9 hazard f; ALPD §66).
+  if (!windows) {
+    const { connect, readLock } = await import('@anhlp/alp-client/index');
+    // alpd was started above, so its lock exists; the cast only drops readLock's `undefined`.
+    const first = ((await readLock(home)) as import('@anhlp/alp-client').DaemonLock);
+    const direct = await connect(first.socket, { name: 'binary-smoke', version: '0' });
+    const started: string[] = [];
+    direct.onEvent(envelope => started.push(envelope.event.type));
+    const { session } = await direct.request('session.create', { spec: { cwd: project, model: 'codex:gpt-5.6-sol' }, history: 'skip' });
+    await direct.request('session.attach', { sessionId: session.id });
+    await direct.request('session.prompt', { sessionId: session.id, clientMessageId: 'kill-1', content: [{ type: 'text', text: 'hold on [hold]' }] });
+    for (let i = 0; !started.includes('turn.started') && i < 400; i++) await new Promise(resolve => setTimeout(resolve, 25));
+    check(started.includes('turn.started'), 'a held turn runs before the kill');
+    process.kill(first.pid, 'SIGKILL');
+    direct.close();
+    for (let i = 0; i < 200; i++) { try { process.kill(first.pid, 0); } catch { break; } await new Promise(resolve => setTimeout(resolve, 25)); }
+    check(/running \(pid \d+\)/.test(await alp(['daemon', 'start'])), 'alp daemon start after alpd was killed takes over its lock');
+    const second = ((await readLock(home)) as import('@anhlp/alp-client').DaemonLock);
+    check(second.pid !== first.pid && second.socket === first.socket, `a new alpd (pid ${second.pid}) listens on the same socket`);
+    const again = await connect(second.socket, { name: 'binary-smoke', version: '0' });
+    try {
+      const ended: { state?: string; error?: { code?: string; }; }[] = [];
+      again.onEvent(envelope => { if (envelope.event.type === 'turn.ended') ended.push(envelope.event); });
+      for (let i = 0; i < 400 && !(await again.request('session.list', { includeClosed: true })).sessions.find((row: { id: string; parked?: boolean; }) => row.id === session.id)?.parked; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      await again.request('session.attach', { sessionId: session.id });
+      for (let i = 0; !ended.some(event => event.error?.code === 'daemon_restarted') && i < 400; i++) await new Promise(resolve => setTimeout(resolve, 25));
+      check(ended.some(event => event.state === 'failed' && event.error?.code === 'daemon_restarted'), 'the restarted alpd reports the interrupted turn as daemon_restarted');
+    } finally { again.close(); }
+  }
+
+  // alp bridge acp: speaks MCP on stdio to alpd's bridge socket; here a stand-in socket that accepts the token.
+  if (process.platform !== 'win32') {
+    const socket = path.join(work, 'bridge.sock');
+    const server = net.createServer(connection => connection.on('data', () => {}));
+    await (new Promise(resolve => server.listen(socket, resolve)) as Promise<void>);
+    const bridge = spawn(node, [...cliArgs, 'bridge', 'acp'], { env: { ...env, ALP_BRIDGE_SOCKET: socket, ALP_BRIDGE_TOKEN: 't' }, stdio: ['pipe', 'pipe', 'inherit'] });
+    bridge.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })}\n`);
+    const reply = await new Promise<string>((resolve, reject) => { bridge.stdout.once('data', chunk => resolve(String(chunk))); setTimeout(() => reject(new Error('alp bridge acp did not answer')), 10_000); });
+    check(JSON.parse(reply).result?.serverInfo?.name === 'alp', 'alp bridge acp answers initialize');
+    bridge.kill(); server.close();
+  }
+  check((await alp(['daemon', 'stop'])).includes('stopped'), 'alp daemon stop');
+  log('ok');
+} finally {
+  const web = await readFile(path.join(home, 'dashboard.json'), 'utf8').then(text => JSON.parse(text).pid, () => undefined);
+  if (web) try { process.kill(web, 'SIGTERM'); } catch {}
+  await run(node, [...cliArgs, 'daemon', 'stop'], { env, timeout: 20_000 }).catch(() => {});
+  await rm(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}

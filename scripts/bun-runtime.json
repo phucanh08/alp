@@ -1,5 +1,5 @@
 {
-  "comment": "The Bun runtime inside the native alpd (scripts/build-alpd-native.mjs, t-81b0.9), from https://github.com/oven-sh/bun/releases/download/bun-v<version>/SHASUMS256.txt. The version must match apps/desktop/package.json packageManager. x64 uses Bun's baseline build (no AVX2 needed).",
+  "comment": "The Bun runtime inside the native alpd (scripts/build-alpd-native.ts, t-81b0.9), from https://github.com/oven-sh/bun/releases/download/bun-v<version>/SHASUMS256.txt. The version must match apps/desktop/package.json packageManager. x64 uses Bun's baseline build (no AVX2 needed).",
   "version": "1.4.2",
   "archives": {
     "darwin-arm64": { "file": "bun-darwin-aarch64.zip", "sha256": "90987a3a16d7db556d886ac3d551e7b6d3edf0a1cf43acaed622e8676be1d12f" },
