@@ -202,7 +202,7 @@ Thứ tự publish: protocol → core → runtime → client → daemon → cli 
   [Local] Hai test hỏng vì môi trường Windows, không phải vì artifact:
   - `integrations/paseo/tests/panel.test.ts:282` hỏng khi `TEMP` nằm dưới thư mục home có `~/.alp`
     thật (đi ngược lên thì gặp nó);
-  - `integrations/paseo/tests/paseo.test.ts:323` hỏng khi `TEMP=C:\Windows\TEMP` (esbuild).
+  - `integrations/paseo/tests/paseo.test.ts:352` hỏng khi `TEMP=C:\Windows\TEMP` (esbuild).
 - Script `release:check` không đổi và không đủ làm gate. [Local] `validate:packages` (H3) giờ chạy
   chuỗi `release-check` → `release-pack` (rehearsal, `--ignore-scripts`) → `release-consumer`. Gate
   thật dùng các lane CI, công cụ release ở §7.2 và các dòng chạy tay ở §6.
