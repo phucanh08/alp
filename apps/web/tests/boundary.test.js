@@ -1,4 +1,4 @@
-// The browser bundle's import boundary (build/browser-boundary.js), on Vite's real module graph:
+// The browser bundle's import boundary (build/browser-boundary.ts), on Vite's real module graph:
 // the app's own build holds only the portable SDK, and an entry that reaches the Node client
 // through another file fails the build.
 import test from 'node:test';
@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
-import { boundaryProblem, browserBoundary } from '../build/browser-boundary.js';
+import { boundaryProblem, browserBoundary } from '../build/browser-boundary.ts';
 
 const web = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repository = path.resolve(web, '../..');
@@ -35,7 +35,7 @@ test('a transitive import of the Node client fails the build', async () => {
 test('the app build lists only portable SDK modules', async () => {
   const out = await mkdtemp(path.join(tmpdir(), 'alp-web-build-'));
   try {
-    await build({ configFile: path.join(web, 'vite.config.js'), logLevel: 'silent', build: { outDir: out, emptyOutDir: true } });
+    await build({ configFile: path.join(web, 'vite.config.ts'), logLevel: 'silent', build: { outDir: out, emptyOutDir: true } });
     const { alpModules } = JSON.parse(await readFile(path.join(out, 'alp-boundary.json'), 'utf8'));
     assert.ok(alpModules.includes('packages/client/dist/portable.js'));
     assert.ok(alpModules.every(file => /^packages\/(client\/dist\/(portable|connection\/websocket|rpc\/)|protocol\/dist\/(public|wire)\.js)/.test(file)), alpModules.join(', '));

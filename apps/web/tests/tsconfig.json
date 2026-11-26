@@ -1,0 +1,21 @@
+{
+  // Type-checks the web app's unit tests strictly, with the options of test/tsconfig.json (Node >= 22.18
+  // runs them directly by stripping types), plus the browser lib and Bundler resolution that src/lib
+  // is written for. The tests import src/lib built into ../dist-lib/*.js (scripts/build-lib.ts);
+  // rootDirs types those imports against the src/lib/*.ts they are built from, so the check needs no
+  // build. The build plugin and the Vite config the tests load are checked here too.
+  // Run: pnpm run check:test
+  "extends": "../../../test/tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "rootDirs": ["../src/lib", "../dist-lib"],
+    "baseUrl": "..",
+    "paths": { "@/*": ["src/*"] }
+  },
+  "include": ["**/*.ts", "../build/*.ts", "../vite.config.ts"],
+  // Entry files the boundary test hands to Vite, not code checked here.
+  "exclude": ["fixtures/**"]
+}

@@ -1,0 +1,19 @@
+{
+  // Type-checks the web app's end-to-end specs and their support strictly, with the options of
+  // test/tsconfig.json (Playwright loads the .ts files itself; no build), plus the browser lib for
+  // page callbacks and the Bundler resolution src/lib is written for. Support files import src/lib
+  // built into ../dist-lib/*.js; rootDirs types those imports against src/lib/*.ts, so the check
+  // needs no build. The Playwright config is checked here too.
+  // Run: pnpm run check:test
+  "extends": "../../../test/tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "rootDirs": ["../src/lib", "../dist-lib"],
+    "baseUrl": "..",
+    "paths": { "@/*": ["src/*"] }
+  },
+  "include": ["**/*.ts", "../playwright.config.ts"]
+}

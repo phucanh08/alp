@@ -1,5 +1,5 @@
-// @ts-check
 import path from 'node:path';
+import type { Plugin } from 'vite';
 
 /**
  * The web app's import boundary, checked on the whole module graph Vite bundles (transitive
@@ -20,9 +20,9 @@ const FORBIDDEN_PACKAGES = /(^|\/)node_modules\/(@getpaseo\/|@anhlp\/alp-paseo\/
 
 /**
  * Why a module may not be in the browser bundle, or undefined when it may.
- * @param {string} id a module id as Rollup reports it @param {string} repository the repository root
+ * `id` is a module id as Rollup reports it, `repository` the repository root.
  */
-export function boundaryProblem(id, repository) {
+export function boundaryProblem(id: string, repository: string): string | undefined {
   const file = id.replaceAll('\\', '/');
   if (file.includes('__vite-browser-external') || /^\0?node:/.test(file)) return 'a Node built-in';
   if (FORBIDDEN_PACKAGES.test(file)) return 'a host-only or Paseo package';
@@ -33,8 +33,7 @@ export function boundaryProblem(id, repository) {
   return undefined;
 }
 
-/** @param {{ repository: string }} options @returns {import('vite').Plugin} */
-export function browserBoundary({ repository }) {
+export function browserBoundary({ repository }: { repository: string }): Plugin {
   return {
     name: 'alp-browser-boundary',
     apply: 'build',
@@ -47,8 +46,8 @@ export function browserBoundary({ repository }) {
     },
     // And the whole graph once more, for ids no load hook saw (virtual modules, externals).
     generateBundle() {
-      const problems = [];
-      const sdk = [];
+      const problems: string[] = [];
+      const sdk: string[] = [];
       for (const id of this.getModuleIds()) {
         const problem = boundaryProblem(id, repository);
         if (problem) problems.push(`${path.relative(repository, id) || id}: ${problem}`);

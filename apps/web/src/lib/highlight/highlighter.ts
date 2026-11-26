@@ -1,7 +1,7 @@
 /*
  * Adapted from Paseo's @getpaseo/highlight 0.14.0 (packages/highlight/src/syntax-roles.ts, parsers.ts, highlighter.ts),
  * Copyright (c) 2025-present Mohamed Boudra, licensed under the Apache License, Version 2.0.
- * ALP web cannot bundle Paseo packages (build/browser-boundary.js), so the parts it uses are
+ * ALP web cannot bundle Paseo packages (build/browser-boundary.ts), so the parts it uses are
  * carried here unchanged in substance: the Lezer tags mapped to
  * roles, the parsers by file extension (Svelte, Astro, Vue, C#, Nix and Elixir left out, as their
  * grammars live in Paseo's own package) and the line tokenizer.

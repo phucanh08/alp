@@ -66,7 +66,7 @@ export async function buildAlpDashboard({ outDir = ALP_DASHBOARD_DIR, log = cons
     },
   };
   await build({
-    configFile: path.join(ROOT, 'apps/web/vite.config.js'),
+    configFile: path.join(ROOT, 'apps/web/vite.config.ts'),
     root: path.join(ROOT, 'apps/web'),
     logLevel: 'warn',
     plugins: [collect],

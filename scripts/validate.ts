@@ -107,7 +107,7 @@ if (scope === 'all' || scope === 'web') {
   // The app and its unit tests import @anhlp/alp-client, whose default export is its built dist.
   buildWorkspace('client');
   // Its unit tests load src/lib built into apps/web/dist-lib.
-  node('apps/web/scripts/build-lib.mjs');
+  node('apps/web/scripts/build-lib.ts');
   node('node_modules/typescript/bin/tsc', '-p', 'apps/web/tsconfig.json');
   tests(webTests());
   // pretest:e2e in apps/web builds the CLI, daemon and app bundle first.
