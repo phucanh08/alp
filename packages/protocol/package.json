@@ -106,7 +106,7 @@
     "build": "node ../../scripts/build-workspace.ts protocol",
     "test": "node ../../scripts/test-package.ts protocol",
     "prepack": "npm run build",
-    "generate": "node scripts/generate.mjs"
+    "generate": "node scripts/generate.ts"
   },
   "publishConfig": {
     "access": "public",
