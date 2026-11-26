@@ -19,6 +19,9 @@ nodeLinker: hoisted
 # The internal dependencies are exact versions ("0.0.1-beta.14"), not workspace: specs, so the
 # published package.json files stay as they are; this links them to the local workspaces.
 linkWorkspacePackages: true
+# Every workspace dependency is linked at the root already (the root devDependencies); without this
+# pnpm also links them under each workspace's own node_modules, where npm put nothing.
+dedupeDirectDeps: true
 
 # The former .npmrc had legacy-peer-deps=true: peers are not installed on their own.
 autoInstallPeers: false
