@@ -9,6 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fork, spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import fs from 'node:fs/promises';
@@ -22,25 +23,28 @@ import * as client from '../dist/index.js';
 import { teardown } from '../../../test/support/teardown.ts';
 
 const { bootTime, holdOps, readDaemonLifecycle, withDaemonLifecycle } = client;
+type Defer = ReturnType<typeof teardown>;
+type Action = 'start' | 'stop';
+type LifecycleOptions = Parameters<typeof withDaemonLifecycle>[3];
 const windows = process.platform === 'win32';
 const moduleUrl = new URL('../dist/index.js', import.meta.url).href;
 /** What an ALP from before t-dc0e accepts as a token name: it must keep reading ours. */
 const LEGACY_NAME = /^owner-(\d+)-(\d+)-(start|stop)-[a-f0-9-]+$/;
 const PROOF = /-([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})-(c\d+|b\d{14}|e)$/;
 
-const stateOf = home => path.join(home, 'state');
-const directoryOf = home => path.join(home, 'state', 'alpd.starting');
-const holdOf = (home, id) => path.join(home, 'state', `alpd.lifecycle-${id}.held`);
+const stateOf = (home: string) => path.join(home, 'state');
+const directoryOf = (home: string) => path.join(home, 'state', 'alpd.starting');
+const holdOf = (home: string, id: string | undefined) => path.join(home, 'state', `alpd.lifecycle-${id}.held`);
 /** Everything a lifecycle may leave in state/: the published directory, candidates and holds. */
-const leftovers = async home => (await readdir(stateOf(home))).filter(name => name.startsWith('alpd.starting') || name.startsWith('alpd.lifecycle-'));
+const leftovers = async (home: string) => (await readdir(stateOf(home))).filter(name => name.startsWith('alpd.starting') || name.startsWith('alpd.lifecycle-'));
 
-async function scratch(defer, prefix) {
+async function scratch(defer: Defer, prefix: string) {
   const home = await mkdtemp(path.join(os.tmpdir(), prefix));
   defer(() => rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   return home;
 }
 
-async function stop(child) {
+async function stop(child: ChildProcess) {
   if (child.exitCode !== null || child.signalCode !== null) return;
   const exited = once(child, 'exit');
   child.kill('SIGKILL');
@@ -48,15 +52,15 @@ async function stop(child) {
 }
 
 /** A process that is no alp command and holds nothing: the one that got the crashed owner's pid. */
-async function unrelated(defer) {
+async function unrelated(defer: Defer) {
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
   defer(() => stop(child));
   await once(child, 'spawn');
-  return child.pid;
+  return child.pid!;
 }
 
 /** A real process inside withDaemonLifecycle for `home`; it leaves on any message. */
-async function holder(defer, home, action = 'start') {
+async function holder(defer: Defer, home: string, action: Action = 'start') {
   const fixture = path.join(home, `holder-${randomUUID()}.mjs`);
   await writeFile(fixture, `import { withDaemonLifecycle } from ${JSON.stringify(moduleUrl)};
     let release;
@@ -69,7 +73,7 @@ async function holder(defer, home, action = 'start') {
     process.exit(0);`);
   const child = fork(fixture, { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
   let stderr = '';
-  child.stderr.on('data', chunk => { stderr += chunk; });
+  child.stderr!.on('data', chunk => { stderr += chunk; });
   defer(() => stop(child));
   const [message] = await Promise.race([
     once(child, 'message', { signal: AbortSignal.timeout(20_000) }),
@@ -84,18 +88,18 @@ async function holder(defer, home, action = 'start') {
  * Runs a lifecycle that must be admitted. The code before t-dc0e never returns here: the signal
  * ends that wait, so the test fails with the reason instead of hanging its file.
  */
-async function admitted(home, action, options = {}) {
+async function admitted(home: string, action: Action, options: LifecycleOptions = {}) {
   const started = Date.now();
   try {
     return await withDaemonLifecycle(home, action, async () => 'admitted', { signal: AbortSignal.timeout(10_000), ...options });
   } catch (error) {
-    if (error?.name !== 'AbortError' && error?.name !== 'TimeoutError') throw error;
+    if ((error as Error)?.name !== 'AbortError' && (error as Error)?.name !== 'TimeoutError') throw error;
     return assert.fail(`the lifecycle was still not admitted after ${Date.now() - started} ms: ${(await leftovers(home)).join(', ')}`);
   }
 }
 
 /** A lifecycle that must give up by itself with ALP_LIFECYCLE_BUSY, never run, and not hang. */
-async function refused(home, action, options) {
+async function refused(home: string, action: Action, options?: LifecycleOptions) {
   let ran = false;
   const outcome = await withDaemonLifecycle(home, action, async () => { ran = true; }, { signal: AbortSignal.timeout(10_000), ...options }).then(() => undefined, error => error);
   assert.equal(ran, false, 'the lifecycle must not be entered');
@@ -137,8 +141,8 @@ test('a token proves its owner on this system, and an older ALP still reads its 
     // where the tests run, or the fix would do nothing there and no test would say so.
     assert.equal(PROOF.exec(token)?.[2]?.[0], windows ? 'e' : process.platform === 'linux' ? 'c' : 'b', token);
     const owner = await readDaemonLifecycle(home);
-    assert.equal(owner.pid, process.pid);
-    assert.equal(owner.action, 'stop');
+    assert.equal(owner!.pid, process.pid);
+    assert.equal(owner!.action, 'stop');
   });
   // A service joins a start with a token of its own, not with the requester's.
   await withDaemonLifecycle(home, 'start', async () => {
@@ -160,7 +164,7 @@ test('a live owner keeps the lifecycle: the wait ends by itself, names it, and a
   assert.equal(error.pid, child.pid);
   assert.match(error.message, new RegExp(`^Could not stop alpd: waited \\d+ s for another start of alpd \\(pid ${child.pid}\\) that still runs`));
   assert.deepEqual(await readdir(directoryOf(home)), [token], 'the owner was not reaped');
-  assert.equal((await readDaemonLifecycle(home)).pid, child.pid);
+  assert.equal((await readDaemonLifecycle(home))!.pid, child.pid);
   assert.deepEqual((await leftovers(home)).filter(name => name.startsWith('alpd.starting-')), [], 'the one that gave up left no candidate');
 
   const exited = once(child, 'exit');
@@ -214,31 +218,31 @@ test('admission that cannot take the directory while nobody holds it gives up an
 test('processBirth is the same for one process, and gone with it', { skip: windows && 'Windows has no birth to read: the hold is its proof' }, async t => {
   const defer = teardown(t);
   const own = client.processBirth(process.pid);
-  assert.match(own, process.platform === 'linux' ? /^c\d+$/ : /^b\d{14}$/);
+  assert.match(own!, process.platform === 'linux' ? /^c\d+$/ : /^b\d{14}$/);
   assert.equal(client.processBirth(process.pid), own);
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
   defer(() => stop(child));
   await once(child, 'spawn');
-  const born = client.processBirth(child.pid);
-  assert.match(born, /^[bc]\d+$/);
+  const born = client.processBirth(child.pid!);
+  assert.match(born!, /^[bc]\d+$/);
   // The caller's time zone and locale do not change the answer: two alp commands must agree.
   const saved = { TZ: process.env.TZ, LC_ALL: process.env.LC_ALL };
   defer(() => { for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } });
   process.env.TZ = 'Pacific/Kiritimati';
   process.env.LC_ALL = 'de_DE.UTF-8';
-  assert.equal(client.processBirth(child.pid), born);
+  assert.equal(client.processBirth(child.pid!), born);
   await stop(child);
-  assert.equal(client.processBirth(child.pid), undefined);
-  assert.equal(client.processBirth(child.pid, { platform: 'win32' }), undefined);
+  assert.equal(client.processBirth(child.pid!), undefined);
+  assert.equal(client.processBirth(child.pid!, { platform: 'win32' }), undefined);
   assert.equal(client.processBirth(0), undefined);
 });
 
 // The Windows hold with the handle replaced: `take` gives a fake descriptor, `taken` says what
 // the test wants, `close` records. The real handle is in the tests above when they run on Windows.
-function fakeOps({ taken = () => true } = {}) {
-  const taking = [];
-  const closed = [];
-  return { taking, closed, ops: { take: file => { taking.push(file); return 7; }, taken, close: fd => { closed.push(fd); } } };
+function fakeOps({ taken = () => true }: { taken?: (file: string) => boolean } = {}) {
+  const taking: unknown[] = [];
+  const closed: unknown[] = [];
+  return { taking, closed, ops: { take: (file: string) => { taking.push(file); return 7; }, taken, close: (fd: number) => { closed.push(fd); } } };
 }
 
 test('on Windows the owner holds a file for its token and lets go of it after the token', async t => {
@@ -248,11 +252,11 @@ test('on Windows the owner holds a file for its token and lets go of it after th
   await withDaemonLifecycle(home, 'start', async () => {
     const [token] = await readdir(directoryOf(home));
     assert.match(token, LEGACY_NAME);
-    const [, id, proof] = PROOF.exec(token);
+    const [, id, proof] = PROOF.exec(token)!;
     assert.equal(proof, 'e');
     assert.deepEqual(taking, [holdOf(home, id)], 'the hold is outside the directory that is renamed');
     assert.deepEqual(closed, [], 'the hold stays open while the token is there');
-    assert.equal((await readDaemonLifecycle(home, { platform: 'win32', ops })).pid, process.pid);
+    assert.equal((await readDaemonLifecycle(home, { platform: 'win32', ops }))!.pid, process.pid);
   }, { platform: 'win32', ops });
   assert.deepEqual(closed, [7]);
   assert.deepEqual(await leftovers(home), []);
@@ -265,7 +269,7 @@ test('on Windows a hold that does not exclude a second open is no proof', async 
   await withDaemonLifecycle(home, 'start', async () => {
     const [token] = await readdir(directoryOf(home));
     assert.doesNotMatch(token, PROOF, 'no marker that would prove nothing');
-    assert.equal((await readDaemonLifecycle(home, { platform: 'win32', ops })).pid, process.pid, 'judged by its pid');
+    assert.equal((await readDaemonLifecycle(home, { platform: 'win32', ops }))!.pid, process.pid, 'judged by its pid');
   }, { platform: 'win32', ops });
   assert.deepEqual(closed, [7]);
   assert.deepEqual(await leftovers(home), []);
@@ -286,7 +290,7 @@ test('on Windows a token whose hold is free is reaped although its pid runs; one
   assert.match(error.message, new RegExp(`for another stop of alpd \\(pid ${pid}\\) that still runs`));
   assert.deepEqual(await readdir(directoryOf(home)), [token]);
   // Elsewhere nobody can look at a Windows hold: the token is judged by its pid, and said so.
-  assert.equal((await readDaemonLifecycle(home, { platform: 'linux' })).pid, pid);
+  assert.equal((await readDaemonLifecycle(home, { platform: 'linux' }))!.pid, pid);
 
   // The owner dies while a start waits behind it and its pid lives on: seen without a new token.
   let open = true;

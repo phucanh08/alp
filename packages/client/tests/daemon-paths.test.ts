@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
 const client = new URL('../dist/index.js', import.meta.url).href;
-function paths(platform, homes) {
+function paths(platform: string, homes: unknown) {
   return JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', `
     Object.defineProperty(process, 'platform', { value: ${JSON.stringify(platform)} });
     const { daemonPaths } = await import(${JSON.stringify(client)});

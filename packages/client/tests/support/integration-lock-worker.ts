@@ -3,6 +3,10 @@ import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+
+// `any`: the worker wraps fs/promises functions and FileHandle methods of every signature, forwarding their
+// arguments and results unchanged; the parent's commands are JSON messages over IPC.
+type Json = any;
 const home = process.env.ALP_HOME;
 if (!home || !process.env.ALP_LOCK_FIXTURE || !home.startsWith(process.env.ALP_LOCK_FIXTURE + path.sep)) throw new Error('private fixture home required');
 const lockName = process.env.ALP_LOCK_NAME;
@@ -11,14 +15,14 @@ const file = path.join(home, 'integrations', `${lockName}.lock`);
 const guard = file + '.reclaim';
 let gated = false, blocked = false, failed = false;
 let opened = 0, closed = 0;
-function fault(point) { if (!failed && process.env.ALP_LOCK_FAIL === point) { failed = true; throw Object.assign(new Error('injected ' + point), { code: 'EIO' }); } }
+function fault(point: string) { if (!failed && process.env.ALP_LOCK_FAIL === point) { failed = true; throw Object.assign(new Error('injected ' + point), { code: 'EIO' }); } }
 async function gate() {
-  process.send({ event: 'gate' });
-  await new Promise(resolve => { const receive = m => { if (m.command === 'resume') { process.off('message', receive); resolve(); } }; process.on('message', receive); });
+  process.send!({ event: 'gate' });
+  await new Promise<void>(resolve => { const receive = (m: Json) => { if (m.command === 'resume') { process.off('message', receive); resolve(); } }; process.on('message', receive); });
 }
 for (const name of ['open', 'mkdir', 'rename', 'unlink', 'rmdir']) {
-  const original = fs[name];
-  fs[name] = async (...args) => {
+  const original = (fs as Record<string, Json>)[name];
+  (fs as Record<string, Json>)[name] = async (...args: Json[]) => {
     const target = String(name === 'rename' ? args[1] : args[0]);
     const token = path.dirname(target) === guard;
     if (!gated && ((process.env.ALP_LOCK_GATE === 'guard-initialize' && name === 'open' && token) || (process.env.ALP_LOCK_GATE === 'guard-cleanup' && name === 'rmdir' && target === guard) || (process.env.ALP_LOCK_GATE === 'guard-unlink' && name === 'unlink' && token))) { gated = true; await gate(); }
@@ -37,17 +41,17 @@ for (const name of ['open', 'mkdir', 'rename', 'unlink', 'rmdir']) {
         const kind = token ? 'guard' : target === file ? 'main' : 'ready';
         result.close = async () => { await close(); closed++; fault(kind + '-close'); };
         const write = result.writeFile.bind(result), stat = result.stat.bind(result);
-        result.writeFile = async (...args) => { fault(kind + '-write'); return write(...args); };
-        result.stat = async (...args) => { fault(kind + '-stat'); return stat(...args); };
+        result.writeFile = async (...args: Json[]) => { fault(kind + '-write'); return write(...args); };
+        result.stat = async (...args: Json[]) => { fault(kind + '-stat'); return stat(...args); };
       }
       if (name === 'open' && args[1] === 'wx' && target === file && !gated && process.env.ALP_LOCK_GATE === 'initialize') {
         gated = true;
         const write = result.writeFile.bind(result);
-        result.writeFile = async (...args) => { await gate(); return write(...args); };
+        result.writeFile = async (...args: Json[]) => { await gate(); return write(...args); };
       }
       return result;
     } catch (error) {
-      if (!blocked && name === 'mkdir' && target === guard && ['EEXIST', 'ENOTEMPTY', 'EISDIR'].includes(error.code)) { blocked = true; process.send({ event: 'blocked' }); }
+      if (!blocked && name === 'mkdir' && target === guard && ['EEXIST', 'ENOTEMPTY', 'EISDIR'].includes((error as NodeJS.ErrnoException).code!)) { blocked = true; process.send!({ event: 'blocked' }); }
       throw error;
     }
   };
@@ -58,7 +62,7 @@ syncBuiltinESMExports();
 const entry = process.env.ALP_LOCK_MODULE;
 const { createIntegrationLock } = await import(!entry ? '@anhlp/alp-client/integration-lock' : entry.startsWith('file:') ? entry : pathToFileURL(entry).href);
 const lock = createIntegrationLock(home, lockName);
-async function invoke(message) {
+async function invoke(message: Json) {
   if (message.command === 'resume') return;
   try {
     const value = message.command === 'acquire' ? await lock.acquire()
@@ -66,8 +70,8 @@ async function invoke(message) {
       : message.command === 'state' ? { opened, closed }
       : message.command === 'release' ? await lock.release()
       : undefined;
-    process.send({ event: 'result', command: message.command, value });
-  } catch (error) { process.send({ event: 'error', command: message.command, message: error.message }); }
+    process.send!({ event: 'result', command: message.command, value });
+  } catch (error) { process.send!({ event: 'error', command: message.command, message: (error as Error).message }); }
 }
 process.on('message', message => { void invoke(message); });
-process.send({ event: 'started' });
+process.send!({ event: 'started' });

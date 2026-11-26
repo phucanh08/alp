@@ -2,6 +2,7 @@
 // make `alp restore --stop` or `alp daemon install` report a failed start; ALP_DAEMON_START_TIMEOUT_MS
 // sets another wait. A lock that is alive but not ready stands in for an alpd still starting.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -9,7 +10,7 @@ import path from 'node:path';
 import { DAEMON_START_TIMEOUT_MS, acquireDaemonLock, daemonPaths, daemonStartTimeoutMs, ensureDaemon, releaseDaemonLock } from '@anhlp/alp-client/index';
 import { startDaemon } from '@anhlp/alp-client/supervise';
 
-async function startingHome(t) {
+async function startingHome(t: TestContext) {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-start-timeout-'));
   await chmod(home, 0o700);
   t.after(() => rm(home, { recursive: true, force: true }));

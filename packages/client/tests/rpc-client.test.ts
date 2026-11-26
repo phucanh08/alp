@@ -3,9 +3,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AlpClientError, AlpRpcClient, AlpRpcError, hello, isAlpClientError, PROTOCOL_VERSION } from '@anhlp/alp-client/portable';
-import { fakeTransport, liveTimers, tick } from './fake-transport.js';
+import { fakeTransport, liveTimers, tick } from './fake-transport.ts';
 
-const reason = expected => error => isAlpClientError(error, expected);
+// `any`: client errors carry `data` and `cause` as unknown, and frames and envelopes are JSON of every method; the tests read the fields they assert on.
+type Json = any;
+
+const reason = (expected: Parameters<typeof isAlpClientError>[1]) => (error: unknown) => isAlpClientError(error, expected);
 
 test('responses reach their requests whatever order they arrive in', async () => {
   const transport = fakeTransport();
@@ -17,7 +20,7 @@ test('responses reach their requests whatever order they arrive in', async () =>
   transport.reply({ id: 'b' }, transport.sent[1].id);
   transport.deliver({ jsonrpc: '2.0', id: transport.sent[0].id, error: { code: 1001, message: 'No session a', data: { reason: 'missing' } } });
   assert.deepEqual(await second, { id: 'b' });
-  await assert.rejects(first, error => error instanceof AlpRpcError && error.code === 1001 && error.data.reason === 'missing');
+  await assert.rejects(first, (error: Json) => error instanceof AlpRpcError && error.code === 1001 && (error.data as Json).reason === 'missing');
   assert.equal(client.pendingCount, 0);
 });
 
@@ -34,8 +37,8 @@ test('hello sends the protocol version and client name', async () => {
 test('event notifications reach onEvent and onNotification; other notifications only onNotification', () => {
   const transport = fakeTransport();
   const client = new AlpRpcClient(transport);
-  const events = [];
-  const notifications = [];
+  const events: unknown[] = [];
+  const notifications: unknown[] = [];
   client.onEvent(envelope => events.push(envelope));
   const stop = client.onNotification((method, params) => notifications.push([method, params]));
   const envelope = { sessionId: 'ses_1', epoch: 'e', seq: 1, ts: '2026-10-14T00:00:00.000Z', event: { type: 'session.ready' } };
@@ -50,9 +53,9 @@ test('event notifications reach onEvent and onNotification; other notifications 
 
 test('a throwing listener does not stop the others and is reported', () => {
   const transport = fakeTransport();
-  const reported = [];
-  const client = new AlpRpcClient(transport, { onListenerError: error => reported.push(error.message) });
-  const heard = [];
+  const reported: unknown[] = [];
+  const client = new AlpRpcClient(transport, { onListenerError: error => reported.push((error as Error).message) });
+  const heard: unknown[] = [];
   client.onEvent(() => { throw new Error('boom'); });
   client.onEvent(envelope => heard.push(envelope.seq));
   transport.deliver({ jsonrpc: '2.0', method: 'event', params: { seq: 7 } });
@@ -63,7 +66,7 @@ test('a throwing listener does not stop the others and is reported', () => {
 test('a frame that is not JSON closes the connection as a protocol error and rejects what waits', async () => {
   const transport = fakeTransport();
   const client = new AlpRpcClient(transport);
-  const closes = [];
+  const closes: unknown[] = [];
   client.onClose(error => closes.push(error));
   const waiting = client.request('daemon.status');
   transport.deliver('{not json');
@@ -109,7 +112,7 @@ test('responses to unknown ids and id-less errors are ignored', async () => {
 test('a send the transport refuses rejects as send_failed and leaves nothing pending', async () => {
   const transport = fakeTransport({ failSend: new Error('EPIPE') });
   const client = new AlpRpcClient(transport);
-  await assert.rejects(client.request('daemon.status'), error => isAlpClientError(error, 'send_failed') && error.cause.message === 'EPIPE');
+  await assert.rejects(client.request('daemon.status'), (error: Json) => isAlpClientError(error, 'send_failed') && (error.cause as Json).message === 'EPIPE');
   assert.equal(client.pendingCount, 0);
   assert.equal(client.closed, false, 'one failed send does not end the connection');
 });
@@ -122,7 +125,7 @@ test('a request larger than the frame limit is refused before it is sent', async
 });
 
 test('the frame limit counts the newline a stream transport adds, as alpd does', async () => {
-  const frameOf = text => JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'm', params: { text } });
+  const frameOf = (text: string) => JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'm', params: { text } });
   const limit = frameOf('x'.repeat(20)).length;
   const exact = new AlpRpcClient(fakeTransport(), { maxFrame: limit });
   await assert.rejects(exact.request('m', { text: 'x'.repeat(20) }), reason('send_failed'), 'frame + newline is one byte over');
@@ -163,14 +166,14 @@ test('a timeout longer than a timer can wait means none, instead of an instant t
   const transport = fakeTransport();
   const client = new AlpRpcClient(transport, { timeoutMs: Number.MAX_SAFE_INTEGER });
   const waiting = client.request('session.create', {}, { timeoutMs: 2 ** 31 });
-  await new Promise(resolve => setTimeout(resolve, 10));
+  await new Promise<void>(resolve => setTimeout(resolve, 10));
   assert.equal(client.pendingCount, 1, 'still waiting');
   assert.equal(timers.size, 0, 'no timer armed');
   transport.reply('made');
   assert.equal(await waiting, 'made');
   await assert.rejects(client.request('a', {}, { timeoutMs: -5 }), TypeError);
   await assert.rejects(client.request('a', {}, { timeoutMs: Number.NaN }), TypeError);
-  assert.throws(() => new AlpRpcClient(fakeTransport(), { timeoutMs: '10' }), TypeError);
+  assert.throws(() => new AlpRpcClient(fakeTransport(), { timeoutMs: '10' as unknown as number }), TypeError);
 });
 
 test('a default timeout applies unless the request overrides it', async () => {
@@ -178,7 +181,7 @@ test('a default timeout applies unless the request overrides it', async () => {
   const client = new AlpRpcClient(transport, { timeoutMs: 5 });
   await assert.rejects(client.request('a'), reason('timeout'));
   const unlimited = client.request('b', {}, { timeoutMs: Infinity });
-  await new Promise(resolve => setTimeout(resolve, 15));
+  await new Promise<void>(resolve => setTimeout(resolve, 15));
   transport.reply('kept');
   assert.equal(await unlimited, 'kept');
 });
@@ -189,7 +192,7 @@ test('an abort ends only the local wait and removes its listener', async () => {
   const controller = new AbortController();
   const waiting = client.request('session.prompt', {}, { signal: controller.signal });
   controller.abort(new Error('user left'));
-  await assert.rejects(waiting, error => isAlpClientError(error, 'aborted') && error.cause.message === 'user left');
+  await assert.rejects(waiting, (error: Json) => isAlpClientError(error, 'aborted') && (error.cause as Json).message === 'user left');
   assert.deepEqual(transport.sent.map(frame => frame.method), ['session.prompt'], 'no cancellation was sent');
   assert.equal(client.pendingCount, 0);
   await assert.rejects(client.request('session.get', {}, { signal: controller.signal }), reason('aborted'));
@@ -226,21 +229,21 @@ test('a send on a transport that is already gone closes the client before the re
   // The transport is gone but has not reported its close yet, as a socket alpd just half-closed.
   Object.defineProperty(transport, 'state', { get: () => 'closed' });
   transport.send = () => { throw new Error('socket ended'); };
-  const closes = [];
+  const closes: unknown[] = [];
   client.onClose(error => closes.push(error));
-  await assert.rejects(client.request('session.prompt'), error => isAlpClientError(error, 'disconnected') && client.closed);
+  await assert.rejects(client.request('session.prompt'), (error: NodeJS.ErrnoException) => isAlpClientError(error, 'disconnected') && client.closed);
   assert.equal(closes.length, 1);
 });
 
 test('a disconnect rejects every waiting request as disconnected, once, and clears listeners', async () => {
   const transport = fakeTransport();
   const client = new AlpRpcClient(transport);
-  const closes = [];
+  const closes: Json[] = [];
   client.onClose(error => closes.push(error));
   client.onEvent(() => {});
   const waiting = [client.request('a'), client.request('b', {}, { timeoutMs: 60_000 })];
   transport.drop({ error: new Error('ECONNRESET') });
-  for (const request of waiting) await assert.rejects(request, error => isAlpClientError(error, 'disconnected') && error.message === 'ECONNRESET');
+  for (const request of waiting) await assert.rejects(request, (error: NodeJS.ErrnoException) => isAlpClientError(error, 'disconnected') && error.message === 'ECONNRESET');
   assert.equal(closes.length, 1);
   assert.equal(closes[0].reason, 'disconnected');
   assert.equal(transport.listenerCount, 0, 'the transport holds no listener of this client');
@@ -255,18 +258,18 @@ test('a WebSocket close code and reason come with the disconnect', async () => {
   const client = new AlpRpcClient(transport);
   const waiting = client.request('a');
   transport.drop({ code: 1012, reason: 'restart' });
-  await assert.rejects(waiting, error => isAlpClientError(error, 'disconnected') && error.data.code === 1012 && error.data.reason === 'restart');
+  await assert.rejects(waiting, (error: Json) => isAlpClientError(error, 'disconnected') && (error.data as Json).code === 1012 && (error.data as Json).reason === 'restart');
 });
 
 test('close() rejects waiting requests as closed, closes the transport and is idempotent', async () => {
   const transport = fakeTransport();
   const client = new AlpRpcClient(transport);
-  const closes = [];
+  const closes: unknown[] = [];
   client.onClose(error => closes.push(error));
   const waiting = client.request('a');
   client.close();
   client.close();
-  await assert.rejects(waiting, error => isAlpClientError(error, 'closed') && /connection closed/.test(error.message));
+  await assert.rejects(waiting, (error: NodeJS.ErrnoException) => isAlpClientError(error, 'closed') && /connection closed/.test(error.message));
   assert.equal(transport.closeCalls, 1);
   assert.equal(closes.length, 1);
   await assert.rejects(client.request('b'), reason('closed'));

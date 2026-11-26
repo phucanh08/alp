@@ -4,8 +4,9 @@ import { PassThrough } from 'node:stream';
 import { Cancelled, select } from '../dist/prompt.js';
 
 const terminal = () => {
-  const input = Object.assign(new PassThrough(), { isTTY: true, isRaw: false, setRawMode(mode) { this.isRaw = mode; } });
-  const output = new PassThrough();
+  // A PassThrough stands in for the TTY streams select() reads and writes; it has the members select uses.
+  const input = Object.assign(new PassThrough(), { isTTY: true, isRaw: false, setRawMode(mode: boolean) { this.isRaw = mode; } }) as PassThrough & NodeJS.ReadStream & { isRaw: boolean };
+  const output = new PassThrough() as PassThrough & NodeJS.WriteStream;
   let shown = '';
   output.on('data', chunk => { shown += chunk; });
   return { input, output, shown: () => shown.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '') };

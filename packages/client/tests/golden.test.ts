@@ -6,12 +6,15 @@ import { renderLog, renderPs } from '../dist/render.js';
 import { epicReport } from '@anhlp/alp-core/tasks';
 import { tree, until } from '../../../test/support/fake-agent.ts';
 
+// `any`: run-log entries, sessions and tasks are JSON records of many shapes; the fixtures build the fields the renderers read.
+type Json = any;
+
 /**
  * Golden output of `alp log`, `alp ps` and `alp task report` (ALPD §39). A change to
  * what users read shows up as a diff of packages/client/tests/golden/*.txt; after checking it, run
  * ALP_UPDATE_GOLDEN=1 pnpm --filter @anhlp/alp-client test to accept it.
  */
-async function golden(name, text) {
+async function golden(name: string, text: string) {
   const file = fileURLToPath(new URL(`./golden/${name}.txt`, import.meta.url));
   if (process.env.ALP_UPDATE_GOLDEN === '1') { await writeFile(file, text); return; }
   const expected = await readFile(file, 'utf8').catch(() => assert.fail(`No ${file}; run with ALP_UPDATE_GOLDEN=1 to create it`));
@@ -19,17 +22,17 @@ async function golden(name, text) {
 }
 
 /** The run log with what differs between runs replaced: times, ids, paths, digests and durations. */
-function normalize(entries, project) {
-  const ids = new Map();
-  const stable = (value, prefix) => {
+function normalize(entries: Json[], project: string) {
+  const ids = new Map<string, string>();
+  const stable = (value: string, prefix: string) => {
     if (!ids.has(value)) ids.set(value, `${prefix}${[...ids.values()].filter(id => id.startsWith(prefix)).length + 1}`);
-    return ids.get(value);
+    return ids.get(value)!;
   };
   let text = JSON.stringify(entries);
   for (const id of new Set(text.match(/alp-child-[0-9a-f-]{36}/g))) text = text.replaceAll(id, stable(id, 'a'));
   for (const id of new Set(text.match(/p-[0-9a-f]{8}/g))) text = text.replaceAll(id, stable(id, 'p'));
   text = text.replaceAll(project, '/work/project');
-  return JSON.parse(text).map((entry, index) => ({
+  return JSON.parse(text).map((entry: Json, index: number) => ({
     ...entry,
     ts: `2026-01-01T10:${String(Math.floor(index / 60)).padStart(2, '0')}:${String(index % 60).padStart(2, '0')}.000Z`,
     ...(entry.event === 'instructions' ? { sha: `${entry.agent}-sha`, chars: 1000, parts: { project: 'alp-md', agent: `${entry.agent}-md` } } : {}),
@@ -39,7 +42,7 @@ function normalize(entries, project) {
 
 test('alp log of a tree whose agents are slow, crash mid-turn and hit a usage limit', async t => {
   const { root, main, agents, runtime, runLog } = await tree(t, { prefix: 'alp-golden-', open: { model: 'codex:gpt-5.6-sol' }, options: directory => ({ language: 'English', pauseFile: `${directory}/pause.json` }), profiles: { peer: ['codex:gpt-5.6-sol'], reviewer: ['codex:gpt-5.6-sol'] } });
-  const finished = id => until(async () => (await runLog()).some(entry => entry.event === 'assignment.finished' && entry.assignmentId === id), `${id} to finish`);
+  const finished = (id: string) => until(async () => (await runLog()).some(entry => entry.event === 'assignment.finished' && entry.assignmentId === id), `${id} to finish`);
 
   // A writer that pins a decision, fills its context until it is compacted, and is slow to hand off.
   const writer = await main.call('alp_delegate', { agent: 'peer', task: 'Write the parser', model: 'codex:gpt-5.6-sol', wait: false });
@@ -83,7 +86,7 @@ test('alp log of a tree whose agents are slow, crash mid-turn and hit a usage li
 });
 
 test('alp ps of live trees: running, waiting, parked, failed and idle sessions', async () => {
-  const session = (id, agent, extra = {}) => ({ id, agent, runtime: 'codex', model: 'gpt-5.6-sol', mode: 'workspace-write', status: 'running', projectRoot: '/work/project', ...extra });
+  const session = (id: string, agent: string, extra = {}): Json => ({ id, agent, runtime: 'codex', model: 'gpt-5.6-sol', mode: 'workspace-write', status: 'running', projectRoot: '/work/project', ...extra });
   const sessions = [
     session('root', 'main', { activeTurnId: 'turn-1', title: 'Parser' }),
     session('a1', 'lead', { parentId: 'root', busy: true }),
@@ -96,8 +99,8 @@ test('alp ps of live trees: running, waiting, parked, failed and idle sessions',
 });
 
 test('alp task report of a landed epic with rework, a handback and mixed verification', async () => {
-  const at = minutes => new Date(Date.UTC(2026, 0, 1, 9, minutes)).toISOString();
-  const task = (id, title, extra = {}) => ({ id, title, type: 'task', status: 'closed', priority: 2, parent: 'e-1', blockedBy: [], related: [], labels: [], paths: [], gates: [], log: [], createdAt: at(0), verified: null, closed: { reason: 'done', by: 'main', at: at(30) }, ...extra });
+  const at = (minutes: number) => new Date(Date.UTC(2026, 0, 1, 9, minutes)).toISOString();
+  const task = (id: string, title: string, extra = {}): Json => ({ id, title, type: 'task', status: 'closed', priority: 2, parent: 'e-1', blockedBy: [], related: [], labels: [], paths: [], gates: [], log: [], createdAt: at(0), verified: null, closed: { reason: 'done', by: 'main', at: at(30) }, ...extra });
   const tasks = [
     task('e-1', 'Parser', { type: 'epic', parent: null, closed: { reason: 'done', by: 'main', at: at(130), summary: 'The parser landed with tests.' } }),
     task('t-1', 'Tokenizer', { verified: { passed: true, commands: [] }, closed: { reason: 'done', by: 'main', at: at(40), summary: 'Tokenizer with 30 cases' } }),

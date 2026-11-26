@@ -2,36 +2,41 @@
 // the compatibility client (`connect`, `new AlpClient(socket)`) and the new `connectSocket` share
 // the portable engine and keep the private-socket checks (docs/alp/client-sdk.md).
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdtemp, rm } from 'node:fs/promises';
 import net from 'node:net';
+import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { AlpClient, AlpRpcClient, connect, connectSocket, daemonPaths, hello, isAlpClientError, PROTOCOL_VERSION } from '@anhlp/alp-client';
 
 const windows = process.platform === 'win32';
 
+// `any`: the fake daemon reads and writes JSON-RPC frames of every method; the tests read the fields they assert on.
+type Json = any;
+
 /** A fake alpd that speaks the handshake and a few test methods; writes go out in fragments. */
-async function fakeDaemon(t) {
+async function fakeDaemon(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-ipc-'));
   const socketPath = daemonPaths(directory).socket;
-  const connections = new Set();
-  const received = [];
+  const connections = new Set<Socket>();
+  const received: Json[] = [];
   const server = net.createServer(socket => {
     connections.add(socket);
     socket.on('close', () => connections.delete(socket));
     socket.on('error', () => {});
     socket.setEncoding('utf8');
     let buffer = '';
-    const asked = new Map();
+    const asked = new Map<string, (message: Json) => void>();
     // Fragmented writes prove the client reassembles frames that arrive in pieces.
-    let queue = Promise.resolve();
-    const write = value => {
+    let queue: Promise<unknown> = Promise.resolve();
+    const write = (value: Json) => {
       const text = `${JSON.stringify(value)}\n`;
       const cut = Math.floor(text.length / 2);
       queue = queue.then(async () => {
         socket.write(text.slice(0, cut));
-        await new Promise(resolve => setTimeout(resolve, 1));
+        await new Promise<void>(resolve => setTimeout(resolve, 1));
         socket.write(text.slice(cut));
       });
     };
@@ -42,7 +47,7 @@ async function fakeDaemon(t) {
         buffer = buffer.slice(index + 1);
         received.push(message);
         if (!message.method) { asked.get(message.id)?.(message); continue; }
-        const reply = result => write({ jsonrpc: '2.0', id: message.id, result });
+        const reply = (result: Json) => write({ jsonrpc: '2.0', id: message.id, result });
         switch (message.method) {
           case 'daemon.hello': reply({
             protocolVersion: PROTOCOL_VERSION,
@@ -57,7 +62,7 @@ async function fakeDaemon(t) {
             setTimeout(() => reply({ streamed: 3 }), 5);
             break;
           case 'test.ask':
-            asked.set('d1', answer => reply({ answer: answer.result ?? answer.error }));
+            asked.set('d1', (answer: Json) => reply({ answer: answer.result ?? answer.error }));
             write({ jsonrpc: '2.0', id: 'd1', method: 'extension.call', params: { x: 1 } });
             break;
           case 'test.huge': socket.write(`${'x'.repeat(4096)}`); break;
@@ -68,7 +73,7 @@ async function fakeDaemon(t) {
       }
     });
   });
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
   if (!windows) await chmod(socketPath, 0o600);
   t.after(async () => {
     for (const socket of connections) socket.destroy();
@@ -93,7 +98,7 @@ test('connect: handshake, requests, streamed events and frames arriving in piece
   assert.deepEqual(client.terminalLimits, { maxPerPrincipal: 2, maxPerDaemon: 8, maxInputBytes: 1024, maxOutputFrameBytes: 2048, replayBytes: 4096, idleMs: 60000, maxLifetimeMs: 3600000, reconnectMs: 30000 });
   assert.ok(Object.isFrozen(client.terminalLimits));
   assert.deepEqual(daemon.received[0].params, { protocolVersion: PROTOCOL_VERSION, client: { name: 'test', version: '1' } });
-  const events = [];
+  const events: number[] = [];
   client.onEvent(envelope => events.push(envelope.seq));
   assert.deepEqual(await client.request('test.stream'), { streamed: 3 });
   assert.deepEqual(events, [1, 2, 3]);
@@ -126,11 +131,11 @@ test('the socket constructor still accepts a socket that is still connecting', a
 test('a daemon that drops the connection rejects what waits as disconnected, and onClose runs once', async t => {
   const daemon = await fakeDaemon(t);
   const client = await connect(daemon.socketPath);
-  const closes = [];
+  const closes: unknown[] = [];
   client.onClose(error => closes.push(error));
   const never = client.request('test.never');
-  await assert.rejects(client.request('test.kill'), error => isAlpClientError(error, 'disconnected'));
-  await assert.rejects(never, error => isAlpClientError(error, 'disconnected'));
+  await assert.rejects(client.request('test.kill'), (error: NodeJS.ErrnoException) => isAlpClientError(error, 'disconnected'));
+  await assert.rejects(never, (error: NodeJS.ErrnoException) => isAlpClientError(error, 'disconnected'));
   assert.equal(closes.length, 1);
   await assert.rejects(client.request('daemon.status'), /ALP daemon connection closed/);
 });
@@ -139,17 +144,17 @@ test('close() rejects what waits with the message callers match on and ends the 
   const daemon = await fakeDaemon(t);
   const client = await connect(daemon.socketPath);
   const never = client.request('test.never');
-  await new Promise(resolve => setTimeout(resolve, 10));
+  await new Promise<void>(resolve => setTimeout(resolve, 10));
   client.close();
   await assert.rejects(never, /ALP daemon connection closed/);
-  for (let i = 0; i < 100 && daemon.connections.size; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  for (let i = 0; i < 100 && daemon.connections.size; i++) await new Promise<void>(resolve => setTimeout(resolve, 5));
   assert.equal(daemon.connections.size, 0, 'the daemon saw the connection end');
 });
 
 test('a frame over the limit closes the connection as a protocol error', async t => {
   const daemon = await fakeDaemon(t);
   const client = await connect(daemon.socketPath, undefined, { maxFrame: 1024 });
-  await assert.rejects(client.request('test.huge'), error => isAlpClientError(error, 'protocol') && error.message === 'ALP daemon frame exceeds size limit');
+  await assert.rejects(client.request('test.huge'), (error: NodeJS.ErrnoException) => isAlpClientError(error, 'protocol') && error.message === 'ALP daemon frame exceeds size limit');
   assert.equal(client.closed, true);
 });
 
@@ -157,7 +162,7 @@ test('the write buffer is bounded; a send beyond it fails without being queued',
   const daemon = await fakeDaemon(t);
   const client = new AlpClient(net.createConnection(daemon.socketPath), { maxBufferedBytes: 16 });
   t.after(() => client.close());
-  await assert.rejects(client.request('daemon.status', { padding: 'x'.repeat(64) }), error => isAlpClientError(error, 'send_failed'));
+  await assert.rejects(client.request('daemon.status', { padding: 'x'.repeat(64) }), (error: NodeJS.ErrnoException) => isAlpClientError(error, 'send_failed'));
   assert.equal(client.closed, false);
 });
 
@@ -191,18 +196,18 @@ test('a request made after alpd ends the connection, before Node reports the clo
 test('close() releases the socket even when the peer keeps its side open', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-ipc-'));
   const socketPath = daemonPaths(directory).socket;
-  const peers = [];
+  const peers: Socket[] = [];
   const server = net.createServer({ allowHalfOpen: true }, peer => { peers.push(peer); peer.on('error', () => {}); });
-  await new Promise(resolve => server.listen(socketPath, resolve));
+  await new Promise<void>(resolve => server.listen(socketPath, resolve));
   if (!windows) await chmod(socketPath, 0o600);
   t.after(async () => { for (const peer of peers) peer.destroy(); await new Promise(resolve => server.close(resolve)); await rm(directory, { recursive: true, force: true }); });
   const transport = await connectSocket(socketPath);
   transport.send('{"jsonrpc":"2.0","id":1,"method":"daemon.status","params":{}}');
   transport.close();
-  await new Promise(resolve => { const wait = () => (peers.length ? resolve() : setTimeout(wait, 5)); wait(); });
-  const peer = peers[0];
+  await new Promise<void>(resolve => { const wait = () => (peers.length ? resolve() : setTimeout(wait, 5)); wait(); });
+  const peer = peers[0]!;
   peer.resume();
-  await new Promise(resolve => (peer.readableEnded ? resolve() : peer.once('end', resolve)));
+  await new Promise<void>(resolve => (peer.readableEnded ? resolve() : peer.once('end', resolve)));
   // The peer never ends its side and keeps writing. A client that only half-closed would keep
   // reading forever; one that released its socket makes these writes fail and the peer close.
   const released = await new Promise(resolve => {

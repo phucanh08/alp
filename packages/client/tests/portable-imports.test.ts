@@ -16,11 +16,11 @@ const IMPORT = /(?:^|\n)\s*(?:import|export)\s[^'"]*?from\s*['"]([^'"]+)['"]|imp
 const NODE_GLOBALS = /\b(?:process\s*\.|Buffer\b|require\s*\(|__dirname|__filename|global\s*\.|setImmediate\b)/;
 
 /** Code without comments, so prose that names Buffer or process does not count. @param {string} text */
-const code = text => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+const code = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
 
-async function graph(entry) {
+async function graph(entry: string) {
   const seen = new Map();
-  const visit = async (file, from) => {
+  const visit = async (file: string, from?: string) => {
     if (seen.has(file)) return;
     const text = code(await readFile(file, 'utf8'));
     seen.set(file, text);

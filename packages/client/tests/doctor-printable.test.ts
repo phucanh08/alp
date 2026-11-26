@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { printable } from '../dist/doctor.js';
 
-const decode = text => text.replace(/\\\\|\\u\{([0-9a-f]+)\}/g, (match, hex) => hex === undefined ? '\\' : String.fromCodePoint(parseInt(hex, 16)));
+const decode = (text: string) => text.replace(/\\\\|\\u\{([0-9a-f]+)\}/g, (match: string, hex: string | undefined) => hex === undefined ? '\\' : String.fromCodePoint(parseInt(hex, 16)));
 
 const samples = [
   '/tmp/alp-plain', '/tmp/alp-a\nb', '/tmp/alp-a\\u{a}b', '/tmp/alp-a\\\nb', '/tmp/alp-a\\\\u{a}b',
