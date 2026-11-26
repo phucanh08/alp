@@ -8,11 +8,13 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { runConformance } from '../conformance/run.mjs';
+import type { Profile } from '../conformance/run.mjs';
 const exec = promisify(execFile);
 const runner = fileURLToPath(new URL('../conformance/run.mjs', import.meta.url));
 
 test('unknown and empty profile selections are rejected before connecting', async () => {
-  for (const profiles of [[], ['wrie'], ['wire', 'typo']]) {
+  // The misspelled names are the point: the runner must refuse them, so they are typed as profiles here.
+  for (const profiles of [[], ['wrie'], ['wire', 'typo']] as Profile[][]) {
     await assert.rejects(runConformance({ socket: 'missing', profiles }), /profile/i);
   }
 });
@@ -22,7 +24,7 @@ test('CLI follows symlinks and importing from a same-named wrapper has no CLI ef
   t.after(() => rm(dir, { recursive: true, force: true }));
   const link = path.join(dir, 'runner.mjs');
   await symlink(runner, link);
-  await assert.rejects(exec(process.execPath, [link, '--socket', 'missing', '--profiles', 'typo']), error => error.code !== 0 && /profile/i.test(error.stderr));
+  await assert.rejects(exec(process.execPath, [link, '--socket', 'missing', '--profiles', 'typo']), (error: { code: number, stderr: string }) => error.code !== 0 && /profile/i.test(error.stderr));
   await mkdir(path.join(dir, 'conformance'));
   const wrapper = path.join(dir, 'conformance/run.mjs');
   await writeFile(wrapper, `import ${JSON.stringify(new URL('../conformance/run.mjs', import.meta.url).href)}; console.log('imported');`);
@@ -48,14 +50,14 @@ test('malformed JSON values and duplicate responses fail cases without crashing 
       }
     });
   });
-  await new Promise(resolve => server.listen(socket, resolve));
+  await new Promise<void>(resolve => server.listen(socket, resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   // After hooks run in the order they are added: remove the files only once that has stopped.
   t.after(() => rm(dir, { recursive: true, force: true }));
   for (const badValues of [false, true]) {
     malformed = badValues;
     const results = await runConformance({ socket, profiles: ['handshake'] });
-    assert.equal(results.find(result => result.id === 'handshake.repeat').ok, false);
-    assert.match(results.find(result => result.id === 'handshake.repeat').error, badValues ? /invalid|object/ : /unexpected|duplicate/);
+    assert.equal(results.find(result => result.id === 'handshake.repeat')!.ok, false);
+    assert.match(results.find(result => result.id === 'handshake.repeat')!.error!, badValues ? /invalid|object/ : /unexpected|duplicate/);
   }
 });

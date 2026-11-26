@@ -14,7 +14,7 @@ const HOSTILE = [
 ];
 
 /** What /bin/sh passes to the program for a command line: printf prints each argument NUL-terminated. */
-function viaSh(line) {
+function viaSh(line: string) {
   const out = execFileSync('/bin/sh', ['-c', `printf '%s\\0' ${line}`], { encoding: 'utf8' });
   return out.split('\0').slice(0, -1);
 }
@@ -24,7 +24,7 @@ function viaSh(line) {
  * in a quoted argument is ^-escaped, so cmd.exe never enters it): `^x` is x, and a bare metacharacter
  * would be interpreted (redirection, pipes, variables), which fails here.
  */
-function viaCmd(line) {
+function viaCmd(line: string) {
   let out = '';
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
@@ -39,7 +39,7 @@ function viaCmd(line) {
  * The shim's second reading of `%*` (a batch line): a `"` toggles quoting, and outside quotes a bare
  * metacharacter would be interpreted, which fails here; `%` and `!` would expand anywhere.
  */
-function viaShim(line) {
+function viaShim(line: string) {
   let quoted = false;
   for (const ch of line) {
     assert.ok(ch !== '%' && ch !== '!', `${ch} would expand in ${line}`);
@@ -53,8 +53,8 @@ const WINDOWS_REFUSED = /["%!]/;
 const WINDOWS_HOSTILE = HOSTILE.filter(arg => !WINDOWS_REFUSED.test(arg));
 
 /** How the Microsoft C runtime (CommandLineToArgvW) splits a command line into argv. */
-function msvcrtArgv(line) {
-  const argv = [];
+function msvcrtArgv(line: string) {
+  const argv: string[] = [];
   let i = 0;
   while (i < line.length) {
     while (line[i] === ' ' || line[i] === '\t') i++;
@@ -116,7 +116,7 @@ test('an argument with a control character is refused: a pasted line break would
     assert.throws(() => quotePosix(arg), /control characters/);
     assert.throws(() => quoteWindows(arg), /control characters/);
   }
-  assert.throws(() => quotePosix(/** @type {any} */ (42)), /string/);
+  assert.throws(() => quotePosix(42 as unknown as string), /string/);
 });
 
 test('resumeCommandOf is the ALP CLI attach, never a native runtime command', () => {
@@ -129,5 +129,5 @@ test('resumeCommandOf is the ALP CLI attach, never a native runtime command', ()
   assert.equal(odd.posix, 'alp attach A.b:c-d_9');
   assert.equal(odd.windows, 'alp attach A.b:c-d_9');
   // Anything else is not a session id, whatever quoting could do with it.
-  for (const id of ['', 'a b', 'a"b', '%X%', 'x'.repeat(129), 'a/b', /** @type {any} */ (7)]) assert.throws(() => resumeCommandOf(id, 'posix'), /session id/, String(id));
+  for (const id of ['', 'a b', 'a"b', '%X%', 'x'.repeat(129), 'a/b', 7 as unknown as string]) assert.throws(() => resumeCommandOf(id, 'posix'), /session id/, String(id));
 });
