@@ -1,8 +1,8 @@
 import { parseArgs } from 'node:util';
 import { ago } from '@anhlp/alp-client/render';
 import { AGENT_MARKER, isAgentProcess } from '@anhlp/alp-core/tasks';
-import { UsageError } from '../_shared/usage.js';
-import { running } from '../daemon/index.js';
+import { UsageError } from '../_shared/usage.ts';
+import { running } from '../daemon/index.ts';
 
 export async function questions(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { json: { type: 'boolean' } } });

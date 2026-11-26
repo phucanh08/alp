@@ -3,8 +3,8 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { connect, daemonPaths, startIntegration } from '@anhlp/alp-client/index';
 import type { AlpClient } from '@anhlp/alp-client/index';
-import { classify, dashboardDisabled, failure, readPublished, readServiceLock } from './common.js';
-import { DASHBOARD, isDashboardReady, isServiceClaimed, readToken, refusal, serviceOwner } from '../../dashboard-service.js';
+import { classify, dashboardDisabled, failure, readPublished, readServiceLock } from './common.ts';
+import { DASHBOARD, isDashboardReady, isServiceClaimed, readToken, refusal, serviceOwner } from '../../dashboard-service.ts';
 
 /** Whether the current working directory is an ALP project: its grant then covers it. */
 async function currentProject() {

@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { runCommand } from './command.js';
-import type { CommandRunner } from './command.js';
+import { runCommand } from './command.ts';
+import type { CommandRunner } from './command.ts';
 import { entryCommand, stablePath } from '@anhlp/alp-core/packaged';
 
 /**

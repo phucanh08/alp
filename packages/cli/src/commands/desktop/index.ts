@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { UsageError } from '../_shared/usage.js';
+import { UsageError } from '../_shared/usage.ts';
 
 /**
  * alp desktop (t-81b0.5): opens ALP's desktop app (apps/desktop, an Electron shell for macOS). The

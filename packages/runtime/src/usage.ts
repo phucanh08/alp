@@ -1,4 +1,4 @@
-import type { SessionUsage } from './events.js';
+import type { SessionUsage } from './events.ts';
 
 /**
  * A provider's usage as daemon.usage answers it (ALPD §58; docs/alp/dashboard.md §4.7). `name` is

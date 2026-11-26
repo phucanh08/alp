@@ -1,4 +1,4 @@
-import { gatesOf, loadTasks, readyTasks, summarize } from './tasks.js';
+import { gatesOf, loadTasks, readyTasks, summarize } from './tasks.ts';
 
 /**
  * A project's tasks as task screens show them (ALPD §22): readiness, what blocks or waits,

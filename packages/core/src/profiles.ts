@@ -1,12 +1,12 @@
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
-import { knownModel } from './models.js';
-import { resolveTeam, teamSources } from './teams.js';
-import { agentSources, builtinText, optionalText } from './resolver.js';
-import type { AgentSource } from './resolver.js';
-import type { ResolvedTeam } from './teams.js';
-import type { AgentModelConfig, AgentProfilesConfig, RawSettings } from './types.js';
+import { knownModel } from './models.ts';
+import { resolveTeam, teamSources } from './teams.ts';
+import { agentSources, builtinText, optionalText } from './resolver.ts';
+import type { AgentSource } from './resolver.ts';
+import type { ResolvedTeam } from './teams.ts';
+import type { AgentModelConfig, AgentProfilesConfig, RawSettings } from './types.ts';
 
 /** A profile's parts, in whichever form a caller holds them. */
 type ProfileLike = { provider?: string; model?: string; effort?: string };
@@ -37,7 +37,7 @@ export const agentProfiles = (config: AgentProfilesConfig | undefined, name: str
 export const parseProfile = (profile: string | AgentModelConfig): AgentModelConfig => {
   if (typeof profile !== 'string') return profile;
   const [provider, model, effort] = profile.split(':');
-  return <AgentModelConfig>{ provider, model, ...(effort ? { effort } : {}) };
+  return { provider, model, ...(effort ? { effort } : {}) } as AgentModelConfig;
 };
 /** The string form of a profile: "provider:model", with ":effort" when it has one. */
 export const profileString = (profile: ProfileLike): string => `${profileModel(profile)}${profile.effort ? `:${profile.effort}` : ''}`;

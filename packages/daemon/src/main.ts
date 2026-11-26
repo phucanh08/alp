@@ -7,16 +7,16 @@ import templates from 'alp:templates';
 import { alpHome, daemonPaths, assertPrivateDirectory, PROTOCOL_VERSION, withDaemonLifecycle } from '@anhlp/alp-client/index';
 import { attachmentStageDir, createAlpRuntime, reclaimCopies, reclaimWorktrees, setActiveCatalog } from '@anhlp/alp-runtime/index';
 import type { LeftWorktree } from '@anhlp/alp-runtime/index';
-import { createDaemonServer } from './server.js';
-import { acquireLock, heartbeat, releaseLock, updateLock } from './lock.js';
-import { createStore } from './store.js';
-import { createDiskGuard, guardOutput, isDiskError } from './disk.js';
-import { readAttachmentConfig } from './attachments.js';
+import { createDaemonServer } from './server.ts';
+import { acquireLock, heartbeat, releaseLock, updateLock } from './lock.ts';
+import { createStore } from './store.ts';
+import { createDiskGuard, guardOutput, isDiskError } from './disk.ts';
+import { readAttachmentConfig } from './attachments.ts';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
 import { clearRestoredMarker, readRestoredMarker, recoverInterruptedRestore } from '@anhlp/alp-core/backup';
 import { migrateState } from '@anhlp/alp-core/migrations';
 import { createLogger } from '@anhlp/alp-core/log';
-import { createModelCatalog } from './model-catalog.js';
+import { createModelCatalog } from './model-catalog.ts';
 import { selfCommand, selfEntry } from '@anhlp/alp-core/packaged';
 
 declare const __ALP_VERSION__: string;
@@ -50,8 +50,10 @@ type StartupFailure = { code: string; message: string };
 
 /** alpd failed to start and said why; the launcher reports it with alpd's own code. */
 class ChildStartupError extends Error {
-  constructor(readonly failure: StartupFailure, exit: number | string | null) {
+  declare readonly failure: StartupFailure;
+  constructor(failure: StartupFailure, exit: number | string | null) {
     super(`alpd exited during startup (${exit}): ${failure.message}`);
+    this.failure = failure;
   }
 }
 

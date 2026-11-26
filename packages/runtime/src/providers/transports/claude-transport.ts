@@ -1,14 +1,14 @@
-import { writablePath } from '../../permission-path.js';
+import { writablePath } from '../../permission-path.ts';
 import { accessSync, constants, existsSync, mkdirSync, realpathSync, rmdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { optionalRead, claudeUsage, claudeAccount } from '../../runtime-context.js';
+import { optionalRead, claudeUsage, claudeAccount } from '../../runtime-context.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { BOARD_KINDS_INPUT, PIN_BODY_CHARS, PIN_KINDS, PIN_PATH_CHARS, PIN_PATHS, PIN_PATHS_INPUT } from '../../board/board.js';
-import { RESULT_OUTCOMES } from '../../assignments/completion/assignment-results.js';
-import { inputLimitError, POUR_VARS, VAR_NAME, type InputLimits } from '../../input-limits.js';
-import { claudeToolDetail, resultText } from '../../tool-detail.js';
+import { BOARD_KINDS_INPUT, PIN_BODY_CHARS, PIN_KINDS, PIN_PATH_CHARS, PIN_PATHS, PIN_PATHS_INPUT } from '../../board/board.ts';
+import { RESULT_OUTCOMES } from '../../assignments/completion/assignment-results.ts';
+import { inputLimitError, POUR_VARS, VAR_NAME, type InputLimits } from '../../input-limits.ts';
+import { claudeToolDetail, resultText } from '../../tool-detail.ts';
 import { CLOSE_REASONS, GATE_KINDS, TASK_STATUSES, TASK_TYPES } from '@anhlp/alp-core/tasks';
 import { commandDecision, unwrapShell } from '@anhlp/alp-core/permissions';
 import { alpHome } from '@anhlp/alp-core/library';
@@ -573,6 +573,26 @@ export async function claudeChain(sessionId: string, dir?: string): Promise<Arra
 
 /** Maps Claude Agent SDK streaming sessions to the normalized runtime protocol. */
 export class ClaudeTransport {
+  declare private readonly command: string;
+  declare private readonly cwd: string;
+  declare private readonly env: NodeJS.ProcessEnv;
+  constructor(command: string, cwd: string, env: NodeJS.ProcessEnv) {
+    this.command = command;
+    this.cwd = cwd;
+    this.env = env;
+    if (!path.isAbsolute(command)) {
+      const names = process.platform === 'win32' && !path.extname(command) ? [command, `${command}.exe`] : [command];
+      const candidates = (env.PATH ?? '').split(path.delimiter).filter(Boolean).flatMap(directory => names.map(name => path.resolve(directory, name)));
+      const executable = candidates.find(candidate => {
+        try { accessSync(candidate, constants.X_OK); return statSync(candidate).isFile(); } catch { return false; }
+      });
+      if (!executable) throw new Error('Claude executable not found on PATH; set ALP_CLAUDE_BIN to an absolute native executable');
+      this.command = realpathSync(executable);
+    }
+    if (/\.(cmd|bat|ps1)$/i.test(this.command)) {
+      throw new Error('Claude executable must be a native binary, not a shell launcher');
+    }
+  }
   private listeners = new Set<Listener>();
   private failures = new Set<(error: Error) => void>();
   private requestHandler?: RequestHandler;
@@ -605,24 +625,6 @@ export class ClaudeTransport {
   private rejectBoot?: (error: Error) => void;
   private bootError?: Error;
 
-  constructor(
-    private readonly command: string,
-    private readonly cwd: string,
-    private readonly env: NodeJS.ProcessEnv,
-  ) {
-    if (!path.isAbsolute(command)) {
-      const names = process.platform === 'win32' && !path.extname(command) ? [command, `${command}.exe`] : [command];
-      const candidates = (env.PATH ?? '').split(path.delimiter).filter(Boolean).flatMap(directory => names.map(name => path.resolve(directory, name)));
-      const executable = candidates.find(candidate => {
-        try { accessSync(candidate, constants.X_OK); return statSync(candidate).isFile(); } catch { return false; }
-      });
-      if (!executable) throw new Error('Claude executable not found on PATH; set ALP_CLAUDE_BIN to an absolute native executable');
-      this.command = realpathSync(executable);
-    }
-    if (/\.(cmd|bat|ps1)$/i.test(this.command)) {
-      throw new Error('Claude executable must be a native binary, not a shell launcher');
-    }
-  }
 
   async orchestrationContext() {
     const [catalog, usage] = await Promise.all([

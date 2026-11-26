@@ -56,8 +56,10 @@ function namedProject(root?: string): string | undefined {
 
 /** A refusal of the job store: what it refused, and why. */
 export class ScheduleStoreError extends Error {
-  constructor(public code: 'INVALID_SCHEDULE' | 'SCHEDULE_NOT_FOUND' | 'SCHEDULE_NOT_PENDING', message: string) {
+  declare code: 'INVALID_SCHEDULE' | 'SCHEDULE_NOT_FOUND' | 'SCHEDULE_NOT_PENDING';
+  constructor(code: 'INVALID_SCHEDULE' | 'SCHEDULE_NOT_FOUND' | 'SCHEDULE_NOT_PENDING', message: string) {
     super(message);
+    this.code = code;
     this.name = 'ScheduleStoreError';
   }
 }

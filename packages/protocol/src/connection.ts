@@ -1,5 +1,5 @@
-import type { Envelope } from './events.js';
-import type { AttachmentLimits, TerminalLimits } from './rpc.js';
+import type { Envelope } from './events.ts';
+import type { AttachmentLimits, TerminalLimits } from './rpc.ts';
 
 export type DaemonConnection = {
   // any: callers that pass no T get an untyped result to narrow themselves, as every adapter and caller

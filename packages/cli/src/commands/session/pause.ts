@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { ago } from '@anhlp/alp-client/render';
-import { UsageError } from '../_shared/usage.js';
-import { running } from '../daemon/index.js';
+import { UsageError } from '../_shared/usage.ts';
+import { running } from '../daemon/index.ts';
 
 /** Pauses and parked assignments, one line each; `always` also says when nothing is paused. */
 // any: daemon.pauses as alpd sends it (all, runtimes, parked).

@@ -1,7 +1,7 @@
 import { mkdir, unlink, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { daemonStartTimeoutMs, ensureDaemon, lockAlive, readLock, withDaemonLifecycle } from './index.js';
-import { installedProgram, serviceFor, startService } from './service.js';
+import { daemonStartTimeoutMs, ensureDaemon, lockAlive, readLock, withDaemonLifecycle } from './index.ts';
+import { installedProgram, serviceFor, startService } from './service.ts';
 
 /**
  * Keeping alpd up (ALPD §40). Whoever starts alpd goes through its login service when

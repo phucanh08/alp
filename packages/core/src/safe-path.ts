@@ -1,6 +1,6 @@
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
-import { AlpError } from './errors.js';
+import { AlpError } from './errors.ts';
 
 /** Preflight static repository paths. Does not isolate concurrent same-user processes. */
 export async function assertNoSymlinks(directory: string, relative: string): Promise<void> {

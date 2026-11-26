@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { realpathSync } from 'node:fs';
-import type { InputLimits } from '../input-limits.js';
+import type { InputLimits } from '../input-limits.ts';
 
 /**
  * The project board (plans/reference/ALPD.md §18): one group channel per project that every

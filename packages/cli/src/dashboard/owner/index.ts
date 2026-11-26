@@ -1,6 +1,6 @@
-import { methods as host } from './host.js';
-import { methods as library } from './library.js';
-import { methods as workspaceFacts } from './workspace-facts.js';
+import { methods as host } from './host.ts';
+import { methods as library } from './library.ts';
+import { methods as workspaceFacts } from './workspace-facts.ts';
 import type { OwnerHandler } from '@anhlp/alp-gateway/owner';
 
 /**

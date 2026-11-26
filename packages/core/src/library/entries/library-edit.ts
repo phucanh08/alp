@@ -1,14 +1,14 @@
 import { cp, lstat, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { moveFile } from '../../atomic.js';
-import { AlpError } from '../../errors.js';
-import { assertNoSymlinks } from '../../safe-path.js';
-import { agentSources, builtinText, jsonObject, libraryEntries, optionalText } from '../../resolver.js';
-import { teamSources, validateTeam } from '../../teams.js';
-import { normalizeMcp, validateAgentConfig, validateHook } from '../../validation.js';
-import { validateProvider } from '../../providers.js';
-import { checkFrontmatter, skillReferences, specName, splitSkill } from '../templates/skill-validate.js';
+import { moveFile } from '../../atomic.ts';
+import { AlpError } from '../../errors.ts';
+import { assertNoSymlinks } from '../../safe-path.ts';
+import { agentSources, builtinText, jsonObject, libraryEntries, optionalText } from '../../resolver.ts';
+import { teamSources, validateTeam } from '../../teams.ts';
+import { normalizeMcp, validateAgentConfig, validateHook } from '../../validation.ts';
+import { validateProvider } from '../../providers.ts';
+import { checkFrontmatter, skillReferences, specName, splitSkill } from '../templates/skill-validate.ts';
 
 type Layer = 'builtin' | 'library' | 'project';
 /** An entry's content: its files' text and JSON by field, as the kind defines them (see below). */
@@ -151,7 +151,7 @@ async function readLayer(kind: string, name: string, directory: string): Promise
     catch (cause) { throw new AlpError('INVALID_ENTRY', `${target}: ${(cause as Error).message}`, { cause }); }
   }
   // An agent or skill is its instructions; a team its team.json.
-  const main = (<Record<string, string>>{ agents: 'instructions', skills: 'body', teams: 'team' })[kind];
+  const main = ({ agents: 'instructions', skills: 'body', teams: 'team' } as Record<string, string>)[kind];
   return found && (!main || content[main] !== undefined) ? content : undefined;
 }
 
@@ -194,7 +194,7 @@ export async function getEntry(kind: 'agents' | 'skills' | 'mcp' | 'hooks' | 'te
   const order: Layer[] = scope ? [scope] : ['project', 'library', 'builtin'];
   const source = order.find(layer => found[layer] !== undefined);
   if (!source) fail('NOT_FOUND', `No ${kind} entry '${name}'${scope ? ` in the ${scope}` : ''}`);
-  const below = (<Layer[]>['builtin', 'library', 'project']).slice(0, ['builtin', 'library', 'project'].indexOf(source)).reverse().find(layer => found[layer] !== undefined);
+  const below = (['builtin', 'library', 'project'] as Layer[]).slice(0, ['builtin', 'library', 'project'].indexOf(source)).reverse().find(layer => found[layer] !== undefined);
   return {
     kind, name, source: /** @type {'builtin' | 'library' | 'project'} */ (source), ...(below ? { overrides: /** @type {'builtin' | 'library'} */ (below) } : {}), content: found[source]!, revision: revisionOf(found[source]), usedBy: await usersOf(kind, name, { root, library, templates }),
     // The skills the library gives an agent by name, whatever layer defines it (ALPD §49).

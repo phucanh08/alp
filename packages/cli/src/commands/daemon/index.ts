@@ -4,9 +4,9 @@ import { installedProgram, installService, serviceFor, uninstallService } from '
 import { holdDaemon, startDaemon } from '@anhlp/alp-client/supervise';
 import { alpHome, connect, daemonStartTimeoutMs, lockAlive, readLock, withDaemonLifecycle } from '@anhlp/alp-client/index';
 import { scrubText } from '@anhlp/alp-core/log';
-import { UsageError } from '../_shared/usage.js';
-import { DAEMON_ENTRY, DAEMON_SCRIPT } from '../../paths.js';
-import { runRole } from '../_shared/run-role.js';
+import { UsageError } from '../_shared/usage.ts';
+import { DAEMON_ENTRY, DAEMON_SCRIPT } from '../../paths.ts';
+import { runRole } from '../_shared/run-role.ts';
 
 // `lock!` in this file: lockAlive() is false for a missing lock, and start()/ready() return only
 // once alpd's lock exists, so the lock read after them is defined.

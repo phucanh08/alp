@@ -1,5 +1,5 @@
-import { DESCRIPTION_CHARS, MAX_LABELS, TASK_TYPES, batch, isTaskId } from './records/tasks.js';
-import type { Task, TaskBatch, TaskType } from './records/tasks.js';
+import { DESCRIPTION_CHARS, MAX_LABELS, TASK_TYPES, batch, isTaskId } from './records/tasks.ts';
+import type { Task, TaskBatch, TaskType } from './records/tasks.ts';
 
 /** A beads JSONL issue: a parsed JSON object whose fields are checked where they are read. */
 type BeadsRecord = Record<string, any>; // any: fields of an untrusted beads record, each checked where it is read

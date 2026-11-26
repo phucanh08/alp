@@ -4,10 +4,10 @@ import { lstat, open, opendir, realpath, stat, type FileHandle } from 'node:fs/p
 import os from 'node:os';
 import path from 'node:path';
 import { ERROR, RPC_ERROR, WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
-import { gitIgnored, IgnoreUnknown, GIT_CHECK, type GitCheckOptions } from './gitignore.js';
+import { gitIgnored, IgnoreUnknown, GIT_CHECK, type GitCheckOptions } from './gitignore.ts';
 
 // For tests: which git alpd would run, and how many run now.
-export { gitChecksRunning, resolveGit, GIT_CHECK } from './gitignore.js';
+export { gitChecksRunning, resolveGit, GIT_CHECK } from './gitignore.ts';
 
 /**
  * `workspace.files.search` (docs/protocol/alp-json-rpc-v1.md §12.3): the files of a workspace whose
@@ -295,8 +295,12 @@ export function createFindPages({ now = Date.now, git }: { now?: () => number; g
  * path or anything read from a file.
  */
 export class FileAccessError extends Error {
-  constructor(message: string, readonly code: number, readonly reason: string) {
+  declare readonly code: number;
+  declare readonly reason: string;
+  constructor(message: string, code: number, reason: string) {
     super(message);
+    this.code = code;
+    this.reason = reason;
   }
 }
 

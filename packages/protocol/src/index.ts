@@ -1,7 +1,7 @@
-export * from './wire.js';
-export type * from './dto.js';
-export type * from './events.js';
-export type * from './connection.js';
-export type * from './session.js';
-export type * from './schedule.js';
-export type * from './rpc.js';
+export * from './wire.ts';
+export type * from './dto.ts';
+export type * from './events.ts';
+export type * from './connection.ts';
+export type * from './session.ts';
+export type * from './schedule.ts';
+export type * from './rpc.ts';

@@ -10,17 +10,17 @@ import path from 'node:path';
 import { scrubText } from '@anhlp/alp-core/log';
 import { entryCommand, isNativeDaemonName, NATIVE_DAEMON } from '@anhlp/alp-core/packaged';
 import { dashboardSettings } from '@anhlp/alp-core/user-settings';
-import { createSocketTransport } from './connection/ipc.js';
-import { AlpRpcClient } from './rpc/client.js';
-import { hello } from './rpc/connection/handshake.js';
+import { createSocketTransport } from './connection/ipc.ts';
+import { AlpRpcClient } from './rpc/client.ts';
+import { hello } from './rpc/connection/handshake.ts';
 import type { Stats } from 'node:fs';
 import type { Socket } from 'node:net';
 import type { AttachmentLimits, TerminalLimits } from '@anhlp/alp-protocol';
 export { PROTOCOL_VERSION, MAX_FRAME, AlpRpcError, encodeFrame } from '@anhlp/alp-protocol';
 // The Node entry carries the whole portable API and the WebSocket transport too, so Node callers need one import.
-export * from './portable.js';
-export { connectWebSocket, createWebSocketTransport, redactUrl, CLOSE_CODE } from './connection/websocket.js';
-export { createSocketTransport } from './connection/ipc.js';
+export * from './portable.ts';
+export { connectWebSocket, createWebSocketTransport, redactUrl, CLOSE_CODE } from './connection/websocket.ts';
+export { createSocketTransport } from './connection/ipc.ts';
 
 /** What alpd writes into its lock beyond the fields every lock has. */
 export type DaemonLockContents = { version: string, protocolVersion: number, socket: string, maintenance?: string };

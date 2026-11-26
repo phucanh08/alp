@@ -7,10 +7,10 @@ import path from 'node:path';
 import { user_worktree } from '@anhlp/alp-core';
 import { ERROR, RPC_ERROR, WORKSPACE_GIT, blockedFilePath } from '@anhlp/alp-protocol';
 import type { GitChange, GitCompare, GitDiffFile, GitDiffHunk, GitDiffPage, GitFacts, GitStatus, GitStatusFile } from '@anhlp/alp-protocol';
-import { FileAccessError, PRIVATE_KEY, likelyBinary, readConfinedFile, relativeSegments } from './files.js';
-import { IgnoreUnknown, resolveGit, searchPathOutside } from './gitignore.js';
-import { RegistryError } from './registry.js';
-import { RpcError } from './rpc-error.js';
+import { FileAccessError, PRIVATE_KEY, likelyBinary, readConfinedFile, relativeSegments } from './files.ts';
+import { IgnoreUnknown, resolveGit, searchPathOutside } from './gitignore.ts';
+import { RegistryError } from './registry.ts';
+import { RpcError } from './rpc-error.ts';
 
 /**
  * `workspace.git.status` and `workspace.git.diff` (docs/protocol/alp-json-rpc-v1.md §12.5): the
@@ -88,7 +88,8 @@ const FIXED = Object.freeze({
 
 /** A Git read that failed: answered as `1000 git_failed` with a fixed message; `cause` is logged only. */
 export class GitReadFailed extends Error {
-  constructor(readonly cause: string) { super(FIXED.failed); }
+  declare readonly cause: string;
+  constructor(cause: string) { super(FIXED.failed); this.cause = cause; }
 }
 
 const failed = (why: string): never => { throw new GitReadFailed(why); };

@@ -1,8 +1,8 @@
 import { parseArgs } from 'node:util';
 import { renderPs } from '@anhlp/alp-client/render';
-import { UsageError } from '../_shared/usage.js';
-import { running } from '../daemon/index.js';
-import { printPauses } from './pause.js';
+import { UsageError } from '../_shared/usage.ts';
+import { running } from '../daemon/index.ts';
+import { printPauses } from './pause.ts';
 
 export async function ps(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { all: { type: 'boolean' } } });

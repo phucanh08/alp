@@ -1,7 +1,7 @@
 import { readdir, readFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { AlpError } from './errors.js';
-import { writeAtomic } from './atomic.js';
+import { AlpError } from './errors.ts';
+import { writeAtomic } from './atomic.ts';
 
 /**
  * The version of alpd's durable state in $ALP_HOME/state (plans/reference/ALPD.md §68).

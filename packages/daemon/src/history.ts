@@ -11,7 +11,8 @@ const WIDTH = 24;
 type Meta = { generation: string; secret: string; ino: number; bytes: number; count: number; tip: number };
 export type HistoryItem = Envelope | { cursor: number; oversized: { bytes: number } };
 export class HistoryError extends Error {
-  constructor(public reason: 'invalid_cursor' | 'stale_cursor', message: string) { super(message); }
+  declare reason: 'invalid_cursor' | 'stale_cursor';
+  constructor(reason: 'invalid_cursor' | 'stale_cursor', message: string) { super(message); this.reason = reason; }
 }
 export function createHistoryIndex(file: string) {
   let pending: Promise<unknown> = Promise.resolve();

@@ -7,8 +7,8 @@ import { deleteEntry, duplicateEntry, getEntry, renameEntry, restoreSkill, saveE
 import { testEntry } from '@anhlp/alp-client/library-test';
 import { formatValidation, validateSkill } from '@anhlp/alp-core/skill-validate';
 import { alpHome } from '@anhlp/alp-client/index';
-import { projectFlag, taskProject } from '../_shared/project.js';
-import { UsageError } from '../_shared/usage.js';
+import { projectFlag, taskProject } from '../_shared/project.ts';
+import { UsageError } from '../_shared/usage.ts';
 
 /** The library kinds an entry command edits. */
 type EntryKind = 'agents' | 'skills' | 'mcp' | 'hooks' | 'teams' | 'providers';

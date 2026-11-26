@@ -1,5 +1,5 @@
-import { UsageError } from '../_shared/usage.js';
-import { running } from '../daemon/index.js';
+import { UsageError } from '../_shared/usage.ts';
+import { running } from '../daemon/index.ts';
 
 /** alp compact <session>: compacts a root's context now, or at its next turn boundary (t-0e56). */
 export async function compact(args: string[]) {

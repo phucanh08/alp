@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util';
 import { listTeams, resolveTeam } from '@anhlp/alp-core/teams';
 import { alpHome } from '@anhlp/alp-client/index';
 import type { ResolvedTeam, TeamRow } from '@anhlp/alp-core/teams';
-import { UsageError } from '../_shared/usage.js';
+import { UsageError } from '../_shared/usage.ts';
 
 /** alp teams: each team with where it comes from, its main, members and delegation. */
 export async function teamsCommand(args: string[]) {

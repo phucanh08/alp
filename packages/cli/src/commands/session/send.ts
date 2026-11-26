@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { parseArgs } from 'node:util';
 import { connect } from '@anhlp/alp-client/index';
-import { UsageError } from '../_shared/usage.js';
-import { start } from '../daemon/index.js';
-import { follow, printer } from './output.js';
+import { UsageError } from '../_shared/usage.ts';
+import { start } from '../daemon/index.ts';
+import { follow, printer } from './output.ts';
 
 /** Steers a running root, prompts an idle one, or resumes a closed one; then follows it until idle. */
 

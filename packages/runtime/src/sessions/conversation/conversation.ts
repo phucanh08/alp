@@ -1,4 +1,4 @@
-import { ConversationError, type BranchRequest } from '../../contracts.js';
+import { ConversationError, type BranchRequest } from '../../contracts.ts';
 
 /**
  * Conversation cuts for fork and rewind (docs/protocol/alp-json-rpc-v1.md §12.7). Pure helpers of

@@ -1,4 +1,4 @@
-import type { RuntimeKind, MailEvent, Pin } from './dto.js';
+import type { RuntimeKind, MailEvent, Pin } from './dto.ts';
 
 /** Provider-neutral session events (plans/reference/ALPD.md §4). Viewers project them; the runtime never imports a viewer. */
 

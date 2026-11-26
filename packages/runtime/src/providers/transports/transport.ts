@@ -1,7 +1,7 @@
-import { optionalRead, codexUsage, codexAccount } from '../../runtime-context.js';
+import { optionalRead, codexUsage, codexAccount } from '../../runtime-context.ts';
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { CODEX_COMMAND, providerLaunch } from '../../provider-command.js';
+import { CODEX_COMMAND, providerLaunch } from '../../provider-command.ts';
 
 /**
  * A request that was written but never answered: the process died, timed out or closed, so

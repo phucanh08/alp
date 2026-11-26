@@ -2,9 +2,9 @@ import { realpathSync } from 'node:fs';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { alpHome } from '../library/entries/library.js';
-import { AlpError } from '../errors.js';
-import type { GateChannel, Task, TaskGate } from './records/tasks.js';
+import { alpHome } from '../library/entries/library.ts';
+import { AlpError } from '../errors.ts';
+import type { GateChannel, Task, TaskGate } from './records/tasks.ts';
 
 /** One ledgered human gate: when ALP opened it, and the clear ALP itself recorded. */
 export type LedgerEntry = { opened?: string; resolved?: { at: string; by: string; channel?: GateChannel; removed?: true } };
@@ -105,7 +105,7 @@ export function applyLedger(tasks: Task[], ledger: GateLedger): Task[] {
       const { resolved, ...open } = gate;
       task.gates = task.gates.map(item => item === gate ? { ...open, kind: 'human', at, ...(open.note ? {} : { note: 'restored: this human gate was changed outside ALP' }), tampered: { at: resolved?.at ?? null, by: resolved?.by ?? null } } : item);
     } else {
-      task.gates = [...task.gates, <TaskGate>{ id: gateId, kind: 'human', note: 'restored: this human gate was removed outside ALP', at, tampered: { removed: true } }];
+      task.gates = [...task.gates, { id: gateId, kind: 'human', note: 'restored: this human gate was removed outside ALP', at, tampered: { removed: true } } as TaskGate];
     }
     // A step closed by the forged approval opens again.
     if (task.step?.human && task.status === 'closed') { task.status = 'open'; task.closed = null; }

@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
 import { access, lstat, open, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { ownerRegistry } from './host.js';
-import type { DashboardOwnerHandler } from './index.js';
+import { ownerRegistry } from './host.ts';
+import type { DashboardOwnerHandler } from './index.ts';
 
 /**
  * host.workspace.facts (t-ff83; docs/alp/remote-gateway.md §5.19): what the owner's sidebar shows

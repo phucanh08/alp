@@ -3,11 +3,11 @@ import { AlpError } from '@anhlp/alp-core/errors';
 import { getEntry } from '@anhlp/alp-core/library-edit';
 import { runHook, samplePayload } from '@anhlp/alp-core/hook-run';
 import { normalizeMcp } from '@anhlp/alp-core/validation';
-import { probeMcp } from './mcp-probe.js';
-import { probeAcp } from './acp-probe.js';
-import { probeAntigravity } from './antigravity-probe.js';
+import { probeMcp } from './mcp-probe.ts';
+import { probeAcp } from './acp-probe.ts';
+import { probeAntigravity } from './antigravity-probe.ts';
 import { loadProvider } from '@anhlp/alp-core/providers';
-import type { McpServer } from './mcp-probe.js';
+import type { McpServer } from './mcp-probe.ts';
 
 /** A library hook as testEntry runs it: the fields of a hook entry it reads. */
 type LibraryHook = { event: string, command: string, timeoutSec?: number, match?: { agent?: string }, blocking?: boolean };

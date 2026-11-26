@@ -2,9 +2,9 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { alpHome } from '@anhlp/alp-client/index';
 import { isAgentProcess } from '@anhlp/alp-core/tasks';
-import { UsageError } from '../_shared/usage.js';
-import { running, start } from '../daemon/index.js';
-import { PASEO, readPaseoToken, startPaseoIntegration } from './paseo.js';
+import { UsageError } from '../_shared/usage.ts';
+import { running, start } from '../daemon/index.ts';
+import { PASEO, readPaseoToken, startPaseoIntegration } from './paseo.ts';
 
 /**
  * `web.pairing` is an extension the integration registers on its alpd connection. Right after an

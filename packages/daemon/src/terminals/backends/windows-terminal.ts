@@ -4,7 +4,7 @@
  * which ends the shell; processes it started may keep running. Terminals report `protection: 'none'`.
  */
 import { createRequire } from 'node:module';
-import type { PtySpawn } from '../terminals.js';
+import type { PtySpawn } from '../terminals.ts';
 
 /** The node-pty surface the win32 owner uses. */
 export type NodePty = { spawn(file: string, args: string[], options: Record<string, unknown>): {

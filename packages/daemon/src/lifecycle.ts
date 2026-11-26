@@ -1,8 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { replaceFile } from './lock.js';
-import { RpcError } from './rpc-error.js';
+import { replaceFile } from './lock.ts';
+import { RpcError } from './rpc-error.ts';
 
 /**
  * The lifecycle journal (docs/protocol/alp-json-rpc-v1.md §12.7): one record per mutation of a session's

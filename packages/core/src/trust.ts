@@ -1,5 +1,5 @@
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
-import { moveFile } from './atomic.js';
+import { moveFile } from './atomic.ts';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 

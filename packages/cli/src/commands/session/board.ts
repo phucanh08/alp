@@ -1,8 +1,8 @@
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { ago } from '@anhlp/alp-client/render';
-import { UsageError } from '../_shared/usage.js';
-import { running } from '../daemon/index.js';
+import { UsageError } from '../_shared/usage.ts';
+import { running } from '../daemon/index.ts';
 
 /** The project board every agent on the project shares: live claims, then decisions and findings. */
 

@@ -1,9 +1,9 @@
 import { parseArgs } from 'node:util';
 import { diagnose, repair } from '@anhlp/alp-client/doctor';
 import { alpHome } from '@anhlp/alp-client/index';
-import { taskProject } from '../_shared/project.js';
-import { UsageError } from '../_shared/usage.js';
-import { DAEMON_ENTRY } from '../../paths.js';
+import { taskProject } from '../_shared/project.ts';
+import { UsageError } from '../_shared/usage.ts';
+import { DAEMON_ENTRY } from '../../paths.ts';
 
 const DOCTOR_MARK = { ok: '✓', info: '·', warn: '!', fail: '✗' };
 

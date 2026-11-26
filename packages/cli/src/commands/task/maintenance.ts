@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process';
 import { parseArgs } from 'node:util';
 import { scriptCommand } from '@anhlp/alp-core/packaged';
 import { checkGates, compactTasks, describeGate, gateOpen, loadTasks } from '@anhlp/alp-core/tasks';
-import { taskProject } from '../_shared/project.js';
-import { UsageError } from '../_shared/usage.js';
+import { taskProject } from '../_shared/project.ts';
+import { UsageError } from '../_shared/usage.ts';
 
 /** The GitHub CLI, for gh:pr and gh:run gates. */
 

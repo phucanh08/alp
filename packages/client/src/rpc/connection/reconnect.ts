@@ -1,7 +1,7 @@
 import { AlpRpcError, ERROR } from '@anhlp/alp-protocol';
-import { AlpRpcClient } from '../client.js';
-import { AlpClientError } from '../errors.js';
-import type { AlpTransport, AlpRpcClientOptions, RequestOptions, AbortSignalLike } from '../client.js';
+import { AlpRpcClient } from '../client.ts';
+import { AlpClientError } from '../errors.ts';
+import type { AlpTransport, AlpRpcClientOptions, RequestOptions, AbortSignalLike } from '../client.ts';
 
 /**
  * Keeps an ALP connection up: connects, runs the caller's `onConnect` (handshake, reattach and

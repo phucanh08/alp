@@ -10,7 +10,7 @@ import { catalogEntries } from '@anhlp/alp-runtime/index';
 import { listProviders } from '@anhlp/alp-core/providers';
 import { languageSetting, setLanguage, LANGUAGE_CHARS } from '@anhlp/alp-core/user-settings';
 import { syncProjectSettings } from '@anhlp/alp-core/init';
-import { RpcError } from './rpc-error.js';
+import { RpcError } from './rpc-error.ts';
 
 /**
  * The project, task, library and settings methods (docs/protocol/alp-json-rpc-v1.md §12, §15):

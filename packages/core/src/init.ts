@@ -1,10 +1,10 @@
-import { shippedTemplateRoot } from './template-path.js';
+import { shippedTemplateRoot } from './template-path.ts';
 import { mkdir, writeFile, lstat, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { projectProfiles, profileDefaults, syncTemplateProfiles } from './profiles.js';
-import { validateSettings } from './validation.js';
-import { INIT_TEAM } from './workflow.js';
+import { projectProfiles, profileDefaults, syncTemplateProfiles } from './profiles.ts';
+import { validateSettings } from './validation.ts';
+import { INIT_TEAM } from './workflow.ts';
 
 /**
  * Fill missing scaffold files without replacing existing user content: ALP.md and

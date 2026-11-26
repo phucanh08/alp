@@ -6,7 +6,7 @@ import { Transform, type Readable } from 'node:stream';
 import { ATTACHMENTS, ERROR, RPC_ERROR, attachmentChunkBytes } from '@anhlp/alp-protocol';
 import type { AttachmentInfo, AttachmentLimits } from '@anhlp/alp-protocol/rpc';
 import type { RuntimeAttachment } from '@anhlp/alp-protocol/session';
-import { RpcError } from './rpc-error.js';
+import { RpcError } from './rpc-error.ts';
 
 /**
  * Non-image attachments (capability `attachments`, docs/protocol/alp-json-rpc-v1.md §12.6, issue

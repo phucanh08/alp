@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { dashboardSettings } from '@anhlp/alp-core/user-settings';
-import type { DashboardMigration } from './migrate.js';
-import { DASHBOARD, LEGACY_WEB } from '../../dashboard-service.js';
+import type { DashboardMigration } from './migrate.ts';
+import { DASHBOARD, LEGACY_WEB } from '../../dashboard-service.ts';
 
 /** Whether settings.json turns alp dashboard off (`dashboard.enabled`, else `web.enabled` from before the rename). */
 export async function dashboardDisabled(home: string) {

@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { alpHome } from '@anhlp/alp-client/index';
 import { languageSetting, setLanguage } from '@anhlp/alp-core/user-settings';
-import { UsageError } from '../_shared/usage.js';
+import { UsageError } from '../_shared/usage.ts';
 
 /** alp language: the language the user reads (ALPD §54); new sessions use it. */
 export async function language(args: string[]) {

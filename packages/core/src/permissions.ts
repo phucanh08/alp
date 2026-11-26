@@ -3,8 +3,8 @@ import { lstatSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
-import { moveFile } from './atomic.js';
-import { AlpError } from './errors.js';
+import { moveFile } from './atomic.ts';
+import { AlpError } from './errors.ts';
 
 export type PermissionBase = 'read-only' | 'workspace-write' | 'full-access';
 export type PermissionProfile = { name: string; base: PermissionBase; allow: string[]; ask: string[]; deny: string[]; beyondMode: 'refuse' | 'ask'; workdir?: 'copy'; cappedFrom?: PermissionBase };

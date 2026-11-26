@@ -1,9 +1,9 @@
 /** Portable JSON-RPC structures; implementations and provider SDKs stay outside protocol. */
-import type { RuntimeKind, Pin } from './dto.js';
-import type { AlpError, Envelope, SessionSnapshot, TreeStatus, TurnAttention, UserQuestion } from './events.js';
-import type { ConfigureOutcome, ConfigurePreview, ConversationBranch, ForkProvenance, PauseState, PromptContent, RecallAnswer, ResumeCommand, SessionPreview, SessionSpec, SessionSummary } from './session.js';
-import type { EntryName, LanguageSetting, LibraryEntryRow, LibraryKind, LibraryScope, LibrarySource, TaskRow, TeamRow } from './dto.js';
-import type { ScheduleJob, ScheduleStatus } from './schedule.js';
+import type { RuntimeKind, Pin } from './dto.ts';
+import type { AlpError, Envelope, SessionSnapshot, TreeStatus, TurnAttention, UserQuestion } from './events.ts';
+import type { ConfigureOutcome, ConfigurePreview, ConversationBranch, ForkProvenance, PauseState, PromptContent, RecallAnswer, ResumeCommand, SessionPreview, SessionSpec, SessionSummary } from './session.ts';
+import type { EntryName, LanguageSetting, LibraryEntryRow, LibraryKind, LibraryScope, LibrarySource, TaskRow, TeamRow } from './dto.ts';
+import type { ScheduleJob, ScheduleStatus } from './schedule.ts';
 
 /** One window of daemon.usage: `name` ALP's own, `id`/`label` Paseo's (t-9116). */
 export type UsageWindow = { name: string; usedPercent: number | null; resetsAt: string | null; id?: string; label?: string };

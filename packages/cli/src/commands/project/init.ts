@@ -3,7 +3,7 @@ import { upgradeProject } from '@anhlp/alp-core/upgrade';
 import type { UpgradeResult } from '@anhlp/alp-core/upgrade';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { alpHome } from '@anhlp/alp-client/index';
-import { UsageError } from '../_shared/usage.js';
+import { UsageError } from '../_shared/usage.ts';
 
 export async function project(command: 'init' | 'upgrade', args: string[]) {
   if (args.length > 1) throw new UsageError();

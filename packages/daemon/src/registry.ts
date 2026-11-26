@@ -7,7 +7,9 @@ export type WorkspaceRecord = { id: string; projectId: string; directory: string
 export type ManagedWorktree = { kind: 'user'; sourceWorkspaceId: string; source: string; commonDir: string; gitDir: string; mappingId: string; principalId: string; grantEpoch: string; requestId?: string; ifRevision?: number; branch: string; head: string; removedAt?: string };
 export type Registry = { version: 1; revision: number; projects: ProjectRecord[]; workspaces: WorkspaceRecord[]; sessions: Record<string, string>; labels: { generation: string; seq: number; catalog: { name: string; color: string }[] }; worktreeJournal?: Record<string, { fingerprint: string; intent: any }>; receipts: Record<string, { fingerprint: string; result: unknown }> };
 export class RegistryError extends Error {
-  constructor(readonly code: number, message: string, readonly data: { reason: string }) { super(message); }
+  declare readonly code: number;
+  declare readonly data: { reason: string };
+  constructor(code: number, message: string, data: { reason: string }) { super(message); this.code = code; this.data = data; }
 }
 function fail(reason: string, message: string, code = 1004): never { throw new RegistryError(code, message, { reason }); }
 const hex = () => randomBytes(8).toString('hex');

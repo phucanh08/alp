@@ -1,8 +1,8 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AlpError } from '../errors.js';
-import { DESCRIPTION_CHARS, TASK_TYPES, batch } from './records/tasks.js';
-import type { Task, TaskType } from './records/tasks.js';
+import { AlpError } from '../errors.ts';
+import { DESCRIPTION_CHARS, TASK_TYPES, batch } from './records/tasks.ts';
+import type { Task, TaskType } from './records/tasks.ts';
 
 export type FormulaStep = { id: string; title: string; description?: string; type: string; needs: string[]; priority?: number; labels?: string[]; paths?: string[] };
 export type Formula = {

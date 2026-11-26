@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import net from 'node:net';
 import { assertPrivateDirectory, bootTime, isSameBoot, readLock } from '@anhlp/alp-client/index';
-import { distributionEntry } from './paths.js';
+import { distributionEntry } from './paths.ts';
 import { selfEntry } from '@anhlp/alp-core/packaged';
 
 /**

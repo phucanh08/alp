@@ -2,8 +2,8 @@ import { createLogger } from '@anhlp/alp-core/log';
 import type { AlpRuntime } from '@anhlp/alp-runtime/index';
 import type { PromptContent } from '@anhlp/alp-protocol/session';
 import type { ScheduleJob } from '@anhlp/alp-protocol/index';
-import type { ScheduleStore } from './schedules.js';
-import { projectKey } from './schedules.js';
+import type { ScheduleStore } from './schedules.ts';
+import { projectKey } from './schedules.ts';
 
 /**
  * The scheduler of alpd: a tick that finds the jobs whose time has come

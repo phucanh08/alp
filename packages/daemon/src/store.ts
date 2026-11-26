@@ -1,6 +1,6 @@
-import { createHistoryIndex } from './history.js';
+import { createHistoryIndex } from './history.ts';
 import { appendFile, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { replaceFile } from './lock.js';
+import { replaceFile } from './lock.ts';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { createLogger } from '@anhlp/alp-core/log';

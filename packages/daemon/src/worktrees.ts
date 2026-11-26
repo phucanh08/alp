@@ -3,7 +3,7 @@ import { constants } from 'node:fs';
 import { lstat, mkdir, open, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { user_worktree } from '@anhlp/alp-core';
-import { RegistryError, type RegistryService, type Registry, type WorkspaceRecord } from './registry.js';
+import { RegistryError, type RegistryService, type Registry, type WorkspaceRecord } from './registry.ts';
 
 type Mapping = { id: string; source: string; commonDir: string; parent: string };
 type Context = { principalId?: string; principalEpoch?: string; mappingIds?: string[]; authorizedRoots?: string[] };

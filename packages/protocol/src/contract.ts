@@ -1,7 +1,7 @@
 // The normative v1 contract (schema/methods-v1.json) as data, with checks over it.
 // No Node or runtime imports: daemons, clients and conformance runners share it.
-import { METHODS_V1 } from './contract-v1.js';
-import { validateSchema, type SchemaIssue } from './validate.js';
+import { METHODS_V1 } from './contract-v1.ts';
+import { validateSchema, type SchemaIssue } from './validate.ts';
 
 export { METHODS_V1, validateSchema };
 

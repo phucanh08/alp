@@ -4,10 +4,10 @@
  * the effective configuration a resolved session runs with, and what of it can run commands.
  */
 import { createHash } from 'node:crypto';
-import { entries } from '../../catalog.js';
+import { entries } from '../../catalog.ts';
 import { profileModel } from '@anhlp/alp-core/profiles';
 import type { ConfigureChange, EffectiveConfig } from '@anhlp/alp-protocol/session';
-import type { ResolvedSession, RuntimeKind } from '../../resolve.js';
+import type { ResolvedSession, RuntimeKind } from '../../resolve.ts';
 
 export type { ConfigureChange, EffectiveConfig } from '@anhlp/alp-protocol/session';
 

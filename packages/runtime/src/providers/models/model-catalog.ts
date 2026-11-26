@@ -7,7 +7,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { MODELS, MODEL_POLICY, catalogCacheFile, mergeCatalog as mergeCatalogRows } from '@anhlp/alp-core/models';
 import { writeAtomic } from '@anhlp/alp-core/atomic';
-import { applyCatalog, type CatalogEntry } from '../../catalog.js';
+import { applyCatalog, type CatalogEntry } from '../../catalog.ts';
 
 export type CatalogRuntime = 'codex' | 'claude' | 'antigravity';
 /** A model as a provider reports it. */
@@ -83,6 +83,18 @@ export function acpSessionModels(result: any): LiveModel[] {
 type Listener = (snapshot: CatalogSnapshot, entries: CatalogEntry[]) => void;
 
 export class ModelCatalog {
+  declare private readonly options: { home?: string; probes: Partial<Record<CatalogRuntime, Probe>>; timeoutMs?: number; refreshMs?: number; now?: () => Date; apply?: boolean;
+    acpProviders?: () => Promise<AcpProviderConfig[] | { providers: AcpProviderConfig[]; error?: string }>; acpProbe?: AcpProbe };
+  /**
+   * ACP providers (t-d0b0) come from `acpProviders` (the library's providers/<id>.json) without starting
+   * them; their models are learned from sessions (learnAcp) and probed (acpProbe) only by refreshAcp,
+   * which alpd calls on catalog.refresh and when the user enables a provider. Never at start or on the timer.
+   */
+  constructor(options: { home?: string; probes: Partial<Record<CatalogRuntime, Probe>>; timeoutMs?: number; refreshMs?: number; now?: () => Date; apply?: boolean;
+    acpProviders?: () => Promise<AcpProviderConfig[] | { providers: AcpProviderConfig[]; error?: string }>; acpProbe?: AcpProbe }) {
+    this.options = options;
+    this.file = options.home ? catalogCacheFile(options.home) : undefined;
+  }
   private snapshot: CatalogSnapshot = { providers: {} };
   private current: CatalogEntry[] = staticRows();
   private listeners = new Set<Listener>();
@@ -97,16 +109,6 @@ export class ModelCatalog {
   private writes = new Set<Promise<void>>();
   /** Set once stop() has drained: a late answer (a session's models, an ingest) still updates memory but writes nothing. */
   private stopped = false;
-
-  /**
-   * ACP providers (t-d0b0) come from `acpProviders` (the library's providers/<id>.json) without starting
-   * them; their models are learned from sessions (learnAcp) and probed (acpProbe) only by refreshAcp,
-   * which alpd calls on catalog.refresh and when the user enables a provider. Never at start or on the timer.
-   */
-  constructor(private readonly options: { home?: string; probes: Partial<Record<CatalogRuntime, Probe>>; timeoutMs?: number; refreshMs?: number; now?: () => Date; apply?: boolean;
-    acpProviders?: () => Promise<AcpProviderConfig[] | { providers: AcpProviderConfig[]; error?: string }>; acpProbe?: AcpProbe }) {
-    this.file = options.home ? catalogCacheFile(options.home) : undefined;
-  }
 
   entries() { return this.current; }
   state() { return this.snapshot; }

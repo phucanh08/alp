@@ -2,10 +2,10 @@ import { realpathSync } from 'node:fs';
 import { access, chmod, constants, lstat, readdir, readFile, statfs, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { runCommand } from './command.js';
-import type { CommandResult, CommandRunner } from './command.js';
-import { assertPrivateSocket, connect, daemonPaths, lockAlive, readLock } from './index.js';
-import { installedProgram, serviceFor } from './service.js';
+import { runCommand } from './command.ts';
+import type { CommandResult, CommandRunner } from './command.ts';
+import { assertPrivateSocket, connect, daemonPaths, lockAlive, readLock } from './index.ts';
+import { installedProgram, serviceFor } from './service.ts';
 import { jsonObject, agentSources, resolveAgent } from '@anhlp/alp-core/resolver';
 import { loadHooks } from '@anhlp/alp-core/hooks';
 import { isTrusted } from '@anhlp/alp-core/trust';
@@ -19,7 +19,7 @@ import type { LogRecord } from '@anhlp/alp-core/log';
 import type { Provider } from '@anhlp/alp-core/providers';
 import type { StateSchemaInfo } from '@anhlp/alp-core/state-schema';
 
-export type { CommandResult, CommandRunner } from './command.js';
+export type { CommandResult, CommandRunner } from './command.ts';
 
 /** One finding of alp doctor; `fix` is what --fix may do about it. */
 export type DoctorCheck = {
