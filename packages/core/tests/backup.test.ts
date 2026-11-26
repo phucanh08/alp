@@ -1,6 +1,7 @@
 // Backups, restores and state migrations (ALPD §68): round trips, refused backups that leave the
 // current data as it was, restores and migrations cut short, and state from a newer ALP.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -20,9 +21,9 @@ const MIGRATIONS_MODULE = new URL('../dist/migrations.js', import.meta.url).href
 const posix = process.platform !== 'win32';
 
 /** Every file, directory and link under `root` by relative path; `backups/` is left out. */
-async function tree(root) {
-  const found = {};
-  async function walk(relative) {
+async function tree(root: string) {
+  const found: Record<string, string> = {};
+  async function walk(relative: string) {
     for (const entry of await readdir(path.join(root, relative), { withFileTypes: true }).catch(() => [])) {
       const name = relative ? `${relative}/${entry.name}` : entry.name;
       if (name === 'backups') continue;
@@ -36,10 +37,10 @@ async function tree(root) {
   return found;
 }
 
-const record = (id, rootId, extra = {}) => JSON.stringify({ version: 1, id, rootId, status: 'closed', createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', session: { id, runtime: 'codex', threadId: `thread-${id}`, projectRoot: extra.project }, spec: { cwd: extra.project } });
+const record = (id: string, rootId: string, extra: { project?: string } = {}) => JSON.stringify({ version: 1, id, rootId, status: 'closed', createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', session: { id, runtime: 'codex', threadId: `thread-${id}`, projectRoot: extra.project }, spec: { cwd: extra.project } });
 
 /** A home with sessions, a timeline, a receipt, settings and library, and one project with tasks. */
-async function fixture(t) {
+async function fixture(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-backup-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const home = path.join(directory, 'home');
@@ -101,7 +102,7 @@ test('a backup restores sessions, tasks and settings exactly, and the restore ca
   // Live work of the later time is cleared, and alpd is told not to start anything by itself.
   const marker = await readRestoredMarker(home);
   await clearRestoredMarker(home);
-  assert.equal(marker.from, file);
+  assert.equal(marker!.from, file);
   const expected = { ...homeBefore };
   delete expected['state/live.json'];
   assert.deepEqual(await tree(home), expected);
@@ -125,16 +126,16 @@ test('corrupt, cut-short, tampered, missing and unsupported backups are refused 
   const good = await readFile(file);
   const lines = gunzipSync(good).toString('utf8').split('\n').filter(Boolean);
   const before = { home: await tree(home), project: await tree(project) };
-  const write = async (name, body) => { const target = path.join(directory, name); await writeFile(target, body); return target; };
-  const rebuild = list => gzipSync(list.map(line => `${line}\n`).join(''));
+  const write = async (name: string, body: Buffer) => { const target = path.join(directory, name); await writeFile(target, body); return target; };
+  const rebuild = (list: string[]) => gzipSync(list.map(line => `${line}\n`).join(''));
 
   const flipped = Buffer.from(good);
   flipped[Math.floor(flipped.length / 2)] ^= 0xff;
   const fileLine = lines.findIndex(line => JSON.parse(line).t === 'data');
   const tampered = [...lines];
   tampered[fileLine] = JSON.stringify({ t: 'data', b: Buffer.from('something else').toString('base64') });
-  const header = JSON.parse(lines[0]);
-  const cases = [
+  const header = JSON.parse(lines[0]!);
+  const cases: Array<[string, Buffer, RegExp]> = [
     ['flipped.alpbackup', flipped, /BACKUP_INVALID/],
     ['cut.alpbackup', good.subarray(0, Math.floor(good.length / 2)), /BACKUP_INVALID/],
     ['no-end.alpbackup', rebuild(lines.slice(0, -1)), /BACKUP_INVALID/],
@@ -146,8 +147,8 @@ test('corrupt, cut-short, tampered, missing and unsupported backups are refused 
   ];
   for (const [name, body, code] of cases) {
     const target = await write(name, body);
-    await assert.rejects(verifyBackup(target), error => code.test(error.code), name);
-    await assert.rejects(restoreBackup({ home, file: target }), error => code.test(error.code), name);
+    await assert.rejects(verifyBackup(target), (error: NodeJS.ErrnoException) => code.test(error.code!), name);
+    await assert.rejects(restoreBackup({ home, file: target }), (error: NodeJS.ErrnoException) => code.test(error.code!), name);
     assert.deepEqual({ home: await tree(home), project: await tree(project) }, before, `${name} left the data as it was`);
   }
   await assert.rejects(restoreBackup({ home, file: path.join(directory, 'missing.alpbackup') }), { code: 'BACKUP_NOT_FOUND' });
@@ -177,7 +178,7 @@ test('a restore that fails part way is rolled back; one whose process dies is ro
     const journal = JSON.parse(await readFile(path.join(home, 'restore-journal.json'), 'utf8'));
     assert.ok(journal.units.length > at, 'the kill happened between swaps');
     const recovered = await recoverInterruptedRestore(home);
-    assert.equal(recovered.outcome, 'rolled back');
+    assert.equal(recovered!.outcome, 'rolled back');
     assert.deepEqual({ home: await tree(home), project: await tree(project) }, now, `killed before swap ${at}`);
     assert.equal(await recoverInterruptedRestore(home), undefined);
   }
@@ -189,7 +190,7 @@ test('a restore past its commit is finished at the next start', async t => {
   const aside = `${target}.pre-restore-abc`;
   await writeFile(aside, '{"old":true}');
   await writeFile(path.join(home, 'restore-journal.json'), JSON.stringify({ id: 'abc', phase: 'committed', units: [{ unit: 'settings.json', target, aside, existed: true }], staging: [path.join(home, '.restore-abc')] }));
-  assert.equal((await recoverInterruptedRestore(home)).outcome, 'completed');
+  assert.equal((await recoverInterruptedRestore(home))!.outcome, 'completed');
   assert.equal(JSON.parse(await readFile(target, 'utf8')).language, 'Vietnamese');
   await assert.rejects(lstat(aside));
 });
@@ -201,7 +202,7 @@ test('state of a newer schema is neither restored over nor migrated, and stays u
   await writeFile(path.join(home, 'state', 'schema.json'), JSON.stringify({ schema: STATE_SCHEMA + 1, by: 'alpd 9.9.9' }));
   const before = await tree(home);
   await assert.rejects(restoreBackup({ home, file }), { code: 'STATE_SCHEMA_TOO_NEW' });
-  await assert.rejects(migrateState(home), error => error.code === 'STATE_SCHEMA_TOO_NEW' && /alpd 9\.9\.9/.test(error.message));
+  await assert.rejects(migrateState(home), (error: NodeJS.ErrnoException) => error.code === 'STATE_SCHEMA_TOO_NEW' && /alpd 9\.9\.9/.test(error.message));
   assert.deepEqual(await tree(home), before);
   await writeFile(path.join(home, 'state', 'schema.json'), 'not json');
   await assert.rejects(migrateState(home), { code: 'STATE_SCHEMA_UNREADABLE' });
@@ -211,7 +212,7 @@ test('state of a newer schema is neither restored over nor migrated, and stays u
 });
 
 /** A schema 1 state: no marker, and timeline lines from before cursors. */
-async function legacyHome(t) {
+async function legacyHome(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-migrate-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const home = path.join(directory, 'home');
@@ -225,7 +226,7 @@ async function legacyHome(t) {
   return { directory, home };
 }
 
-const cursors = async (home, name) => (await readFile(path.join(home, 'state', 'timeline', `${name}.jsonl`), 'utf8')).split('\n').filter(Boolean).map(line => { try { return JSON.parse(line).cursor; } catch { return line; } });
+const cursors = async (home: string, name: string) => (await readFile(path.join(home, 'state', 'timeline', `${name}.jsonl`), 'utf8')).split('\n').filter(Boolean).map(line => { try { return JSON.parse(line).cursor; } catch { return line; } });
 
 test('schema 1 state is migrated: cursors written, marker set, a backup kept; running it again changes nothing', async t => {
   const { home } = await legacyHome(t);
@@ -271,8 +272,8 @@ test('a migration cut short continues at the next start; a failing one is rolled
   // A step that throws: the state is put back from the backup taken before it.
   const { home: other } = await legacyHome(t);
   const original = await tree(other);
-  const failing = [{ ...MIGRATIONS[0], async run(home) { await MIGRATIONS[0].run(home); throw new Error('cannot migrate'); } }];
-  await assert.rejects(migrateState(other, { migrations: failing }), error => error.code === 'STATE_MIGRATION_FAILED' && /cannot migrate/.test(error.message));
+  const failing = [{ ...MIGRATIONS[0], async run(home: string) { await MIGRATIONS[0]!.run(home); throw new Error('cannot migrate'); } }];
+  await assert.rejects(migrateState(other, { migrations: failing }), (error: NodeJS.ErrnoException) => error.code === 'STATE_MIGRATION_FAILED' && /cannot migrate/.test(error.message));
   assert.deepEqual(await tree(other), original);
   assert.equal((await readStateSchema(other)).schema, 1);
   assert.equal((await readdir(path.join(other, 'backups'))).length, 1);
@@ -296,7 +297,7 @@ test('a backup cannot write through its own links, list a unit twice, or leave a
   const outside = path.join(directory, 'outside');
   await mkdir(outside);
   /** A crafted backup with a consistent end, so only the new rules can refuse it. */
-  const craft = async (name, list) => {
+  const craft = async (name: string, list: string[]) => {
     const digest = createHash('sha256');
     let files = 0;
     let bytes = 0;
@@ -306,7 +307,7 @@ test('a backup cannot write through its own links, list a unit twice, or leave a
     return target;
   };
   const body = Buffer.from('escaped');
-  const fileEntry = entryPath => [JSON.stringify({ t: 'file', area: 'home', path: entryPath, mode: 0o644, size: body.length, sha256: createHash('sha256').update(body).digest('hex'), chunks: 1 }), JSON.stringify({ t: 'data', b: body.toString('base64') })];
+  const fileEntry = (entryPath: string) => [JSON.stringify({ t: 'file', area: 'home', path: entryPath, mode: 0o644, size: body.length, sha256: createHash('sha256').update(body).digest('hex'), chunks: 1 }), JSON.stringify({ t: 'data', b: body.toString('base64') })];
   const units = [{ path: 'skills', kind: 'dir' }, { path: 'settings.json', kind: 'file' }];
   const before = { home: await tree(home), project: await tree(project) };
   const cases = {
@@ -351,8 +352,8 @@ test('a restore failing after the tasks moved rolls back under the task lock, ma
   await assert.rejects(lstat(path.join(home, 'state', 'migration.json')));
 
   await writeFile(path.join(home, 'state', 'schema.json'), JSON.stringify({ schema: STATE_SCHEMA + 1 }));
-  await assert.rejects(restoreBackup({ home, file }), error => error.code === 'STATE_SCHEMA_TOO_NEW' && /--replace-newer/.test(error.message));
+  await assert.rejects(restoreBackup({ home, file }), (error: NodeJS.ErrnoException) => error.code === 'STATE_SCHEMA_TOO_NEW' && /--replace-newer/.test(error.message));
   const result = await restoreBackup({ home, file, replaceNewer: true });
   assert.equal((await readStateSchema(home)).schema, STATE_SCHEMA);
-  await assert.rejects(verifyBackup(result.safety), { code: 'BACKUP_SCHEMA_TOO_NEW' });
+  await assert.rejects(verifyBackup(result.safety!), { code: 'BACKUP_SCHEMA_TOO_NEW' });
 });

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -6,7 +7,7 @@ import path from 'node:path';
 import { explainProfile, permissionScopes, profileFor } from '@anhlp/alp-core/permissions';
 import { teardown } from '../../../test/support/teardown.ts';
 
-async function fixture(t) {
+async function fixture(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(os.tmpdir(), 'alp-scopes-'));
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -17,8 +18,8 @@ async function fixture(t) {
   const projectFile = path.join(root, '.alp', 'settings.json');
   const userFile = path.join(home, 'settings.json');
   /** Writes each scope's `permissions`; `undefined` leaves the scope without a settings file. */
-  const write = async (project, user) => {
-    for (const [file, permissions] of [[projectFile, project], [userFile, user]]) {
+  const write = async (project: unknown, user: unknown) => {
+    for (const [file, permissions] of [[projectFile, project], [userFile, user]] as Array<[string, unknown]>) {
       if (permissions === undefined) await rm(file, { force: true });
       else await writeFile(file, JSON.stringify({ permissions }));
     }
@@ -27,15 +28,15 @@ async function fixture(t) {
 }
 
 /** What a call settles to, in a form two calls can be compared by: the exact JSON text, or the error. */
-async function settled(promise) {
+async function settled(promise: Promise<unknown>) {
   try { return { value: JSON.stringify(await promise) }; }
-  catch (error) { return { error: { code: error.code, message: error.message } }; }
+  catch (error) { return { error: { code: (error as NodeJS.ErrnoException).code, message: (error as Error).message } }; }
 }
 
 // One scope's `permissions`. Together they cover: no file, no mapping, a mapping to a defined profile,
 // to a bare base name, to a profile nobody or only the other scope defines, every base, rules that
 // overlap between scopes, beyondMode, workdir copy (valid and not), and the advisors.
-const SCOPES = [
+const SCOPES: unknown[] = [
   undefined,
   {},
   { agents: { peer: 'dev' }, profiles: { dev: { base: 'full-access', allow: ['Bash(npm test:*)', 'Edit(src/**)'], deny: ['Bash(rm:*)'], beyondMode: 'ask' } } },
@@ -124,16 +125,16 @@ test('defaults, bare base names and the user scope are told apart', async t => {
   assert.deepEqual((await permissionScopes(root, undefined)).map(scope => scope.scope), ['project']);
   // An advisor without a mapping is read-only by default, from no file.
   const advisor = await explainProfile(root, home, 'reviewer');
-  assert.deepEqual(advisor.provenance.base, { value: 'read-only', scope: 'default', reason: 'reviewer is an advisor' });
+  assert.deepEqual(advisor.provenance!.base, { value: 'read-only', scope: 'default', reason: 'reviewer is an advisor' });
   assert.deepEqual(advisor.warnings, []);
   // The user's own settings alone never warn, whatever they grant.
   await write(undefined, { agents: { peer: 'full-access', main: 'dev' }, profiles: { dev: { allow: ['Bash(make:*)'], beyondMode: 'ask' } } });
   const bare = await explainProfile(root, home, 'peer');
-  assert.deepEqual(bare.provenance.base, { value: 'full-access', scope: 'user', file: userFile, key: 'permissions.agents.peer', reason: 'a bare base name' });
+  assert.deepEqual(bare.provenance!.base, { value: 'full-access', scope: 'user', file: userFile, key: 'permissions.agents.peer', reason: 'a bare base name' });
   assert.deepEqual(bare.warnings, []);
   const main = await explainProfile(root, home, 'main');
-  assert.deepEqual(main.provenance.base, { value: 'full-access', scope: 'default', reason: "profile 'dev' sets no base" });
-  assert.deepEqual(main.provenance.allow, [{ rule: 'Bash(make:*)', sources: [{ scope: 'user', file: userFile }] }]);
+  assert.deepEqual(main.provenance!.base, { value: 'full-access', scope: 'default', reason: "profile 'dev' sets no base" });
+  assert.deepEqual(main.provenance!.allow, [{ rule: 'Bash(make:*)', sources: [{ scope: 'user', file: userFile }] }]);
   assert.deepEqual(main.warnings, []);
   // A project that only restricts (a lower base, deny and ask rules) does not warn either.
   await write({ agents: { peer: 'dev' }, profiles: { dev: { base: 'read-only', deny: ['Bash(rm:*)'], ask: ['Bash(git push *)'] } } }, { agents: { peer: 'full-access' } });
@@ -142,7 +143,7 @@ test('defaults, bare base names and the user scope are told apart', async t => {
 
 test('warnings say what the project gives beyond the user scope, and never change the profile', async t => {
   const { root, home, write } = await fixture(t);
-  const codes = async (agent, options) => {
+  const codes = async (agent: string, options?: { readOnly?: boolean }) => {
     const result = await explainProfile(root, home, agent, options);
     assert.deepEqual(result.profile, await profileFor(root, home, agent, options));
     return result.warnings.map(warning => warning.code);
@@ -161,8 +162,8 @@ test('warnings say what the project gives beyond the user scope, and never chang
   // A read-only role caps the base; the warning still names what the project asked for.
   await write({ agents: { peer: 'full-access' } }, { agents: { peer: 'read-only' } });
   const capped = await explainProfile(root, home, 'peer', { readOnly: true });
-  assert.equal(capped.profile.base, 'read-only');
-  assert.equal(capped.provenance.base.cappedFrom, 'full-access');
+  assert.equal(capped.profile!.base, 'read-only');
+  assert.equal(capped.provenance!.base.cappedFrom, 'full-access');
   assert.match(capped.warnings[0].message, /sets base full-access .* capped to read-only by the member's read-only role\.$/);
   // The project maps the agent to another profile than the user's: the user's deny and ask rules are not loaded.
   await write(

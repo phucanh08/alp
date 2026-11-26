@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, rm, writeFile, mkdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -8,12 +9,12 @@ import { resolveAgent } from '@anhlp/alp-core/resolver';
 import { resolveTeam } from '@anhlp/alp-core/teams';
 import { deleteEntry, duplicateEntry, getEntry, listEntries, listRetiredSkills, renameEntry, restoreSkill, saveEntry, setGivenSkills } from '@anhlp/alp-core/library-edit';
 
-async function fixture(t) {
+async function fixture(t: TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-edit-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }
-async function setup(t) {
+async function setup(t: TestContext) {
   const [root, library] = [await fixture(t), await fixture(t)];
   await initProject(root);
   return { root, library, options: { root, library } };
@@ -111,14 +112,14 @@ for (const placement of ['scope', 'kind', 'entry', 'file']) {
     const outside = await fixture(t);
     const scope = path.join(root, '.alp');
     const target = path.join(scope, 'skills', 'escape', 'SKILL.md');
-    const linked = { scope, kind: path.join(scope, 'skills'), entry: path.dirname(target), file: target }[placement];
+    const linked = { scope, kind: path.join(scope, 'skills'), entry: path.dirname(target), file: target }[placement as 'scope' | 'kind' | 'entry' | 'file'];
     const suffix = path.relative(linked, target);
     const external = suffix ? path.join(outside, suffix) : path.join(outside, 'secret');
     await mkdir(path.dirname(external), { recursive: true });
     await writeFile(external, 'private original');
     await mkdir(path.dirname(linked), { recursive: true });
     await symlink(placement === 'file' ? external : outside, linked);
-    const options = { root, scope: 'project' };
+    const options = { root, scope: 'project' } as const;
     for (const operation of [
       () => getEntry('skills', 'escape', options),
       () => saveEntry('skills', 'escape', { body: 'overwrite' }, options),
@@ -136,7 +137,7 @@ for (const placement of ['scope', 'kind', 'entry', 'file']) {
 test('project-data mutations support pure project agents and skills only', async t => {
   const { root, options } = await setup(t);
   const safe = { ...options, scope: 'project', policy: 'project-data' };
-  for (const [kind, content] of [['agents', { instructions: 'Write docs', config: { description: 'Writer', model: 'codex:gpt-6.1-sol' } }], ['skills', { body: 'Review docs' }]]) {
+  for (const [kind, content] of [['agents', { instructions: 'Write docs', config: { description: 'Writer', model: 'codex:gpt-6.1-sol' } }], ['skills', { body: 'Review docs' }]] as Array<['agents' | 'skills', object]>) {
     const saved = await saveEntry(kind, 'remote-writer', content, { ...safe, revision: null });
     assert.ok(saved.revision);
     await saveEntry(kind, 'remote-writer', content, { ...safe, revision: saved.revision });
@@ -151,7 +152,7 @@ test('project-data mutations support pure project agents and skills only', async
 test('project-data rejects host writes, execution references, sidecars and fallback changes before mutation', async t => {
   const { root, library, options } = await setup(t);
   const safe = { ...options, scope: 'project', policy: 'project-data' };
-  const denied = promise => assert.rejects(promise, { code: 'UNSAFE_LIBRARY_WRITE' });
+  const denied = (promise: Promise<unknown>) => assert.rejects(promise, { code: 'UNSAFE_LIBRARY_WRITE' });
   await denied(saveEntry('skills', 'remote', { body: 'text' }, { ...safe, scope: 'library' }));
   for (const kind of ['mcp', 'hooks', 'providers', 'teams']) await denied(saveEntry(kind, 'remote', {}, safe));
   for (const config of [{ hooks: [] }, { mcp: ['host-server'] }, { provider: 'host-command' }, { skills: [] }, { mode: 'full-access' }, { model: 'acp:host-command' }, { futureExec: true }]) {
@@ -183,7 +184,7 @@ test('project-data rejects host writes, execution references, sidecars and fallb
 test('a retired skill is listed and restored to its recorded roles, or to --roles for an old retirement', async t => {
   const library = await fixture(t);
   const retired = path.join(library, 'retired-skills');
-  const write = async (folder, meta) => {
+  const write = async (folder: string, meta?: object) => {
     await mkdir(path.join(retired, folder), { recursive: true });
     await writeFile(path.join(retired, folder, 'SKILL.md'), `# ${folder}\n`);
     if (meta) await writeFile(path.join(retired, folder, 'retired.json'), JSON.stringify(meta));
@@ -211,12 +212,12 @@ test('a retired skill is listed and restored to its recorded roles, or to --role
   assert.deepEqual(JSON.parse(await readFile(path.join(library, 'role-skills.json'), 'utf8')), { main: ['xia', 'style'], lead: ['style'] });
 
   // The library already has it: refused, nothing moves.
-  await assert.rejects(restoreSkill('style', { library }), error => error.code === 'ALREADY_EXISTS');
+  await assert.rejects(restoreSkill('style', { library }), (error: NodeJS.ErrnoException) => error.code === 'ALREADY_EXISTS');
   assert.equal(rows.length, 3);
   assert.equal((await listRetiredSkills({ library })).length, 2);
 
   // An old retirement records no roles: --roles or --no-roles is required.
-  await assert.rejects(restoreSkill('old', { library }), error => error.code === 'ROLES_REQUIRED' && /--roles/.test(error.message));
+  await assert.rejects(restoreSkill('old', { library }), (error: NodeJS.ErrnoException) => error.code === 'ROLES_REQUIRED' && /--roles/.test(error.message));
   assert.ok(await readFile(path.join(retired, 'old-2026-09-01T10-20-30-400Z/SKILL.md'), 'utf8'));
   assert.deepEqual((await restoreSkill('old', { library, roles: [] })).roles, []);
   assert.deepEqual(JSON.parse(await readFile(path.join(library, 'role-skills.json'), 'utf8')), { main: ['xia', 'style'], lead: ['style'] });
@@ -226,14 +227,14 @@ test('a retired skill is listed and restored to its recorded roles, or to --role
   const older = path.join(retired, 'style-2026-10-01T00-00-00-000Z');
   assert.deepEqual((await restoreSkill('style', { library, from: older, roles: ['reviewer'] })).roles, ['reviewer']);
   assert.equal(await readFile(path.join(library, 'skills/style/SKILL.md'), 'utf8'), '# style-2026-10-01T00-00-00-000Z\n');
-  await assert.rejects(restoreSkill('nope', { library }), error => error.code === 'NOT_FOUND');
-  await assert.rejects(restoreSkill('../x', { library, roles: [] }), error => error.code === 'INVALID_NAME');
+  await assert.rejects(restoreSkill('nope', { library }), (error: NodeJS.ErrnoException) => error.code === 'NOT_FOUND');
+  await assert.rejects(restoreSkill('../x', { library, roles: [] }), (error: NodeJS.ErrnoException) => error.code === 'INVALID_NAME');
 });
 
 test('a corrupt retired.json does not block other retired skills, a symlink --from is refused, and a restore that fails changes nothing', async t => {
   const library = await fixture(t);
   const retired = path.join(library, 'retired-skills');
-  const write = async (folder, metaText) => {
+  const write = async (folder: string, metaText?: string) => {
     await mkdir(path.join(retired, folder), { recursive: true });
     await writeFile(path.join(retired, folder, 'SKILL.md'), `# ${folder}\n`);
     if (metaText !== undefined) await writeFile(path.join(retired, folder, 'retired.json'), metaText);
@@ -244,13 +245,13 @@ test('a corrupt retired.json does not block other retired skills, a symlink --fr
   const rows = await listRetiredSkills({ library });
   assert.deepEqual(rows.map(row => [row.name, row.roles, Boolean(row.invalid)]), [['good', ['peer'], false], ['bad', null, true]]);
   // The corrupt copy needs explicit roles; with them it restores.
-  await assert.rejects(restoreSkill('bad', { library }), error => error.code === 'INVALID_LIBRARY');
+  await assert.rejects(restoreSkill('bad', { library }), (error: NodeJS.ErrnoException) => error.code === 'INVALID_LIBRARY');
   assert.deepEqual((await restoreSkill('bad', { library, roles: [] })).roles, []);
 
   // --from must not be a symlink.
   const link = path.join(library, 'link');
   await symlink(path.join(retired, 'good-2026-10-02T00-00-00-000Z'), link);
-  await assert.rejects(restoreSkill('good', { library, from: link }), error => error.code === 'INVALID_ENTRY');
+  await assert.rejects(restoreSkill('good', { library, from: link }), (error: NodeJS.ErrnoException) => error.code === 'INVALID_ENTRY');
 
   // role-skills.json is unreadable (a directory in its place): nothing moves.
   await rm(path.join(library, 'role-skills.json'), { force: true });
@@ -319,12 +320,12 @@ test('copying or renaming a skill sets its frontmatter name to the new directory
 
 test('a new skill saved strictly (the CLI) meets the format; editing an existing legacy skill still works (P1)', async t => {
   const { library, options } = await setup(t);
-  const scope = { ...options, scope: 'library' };
+  const scope = { ...options, scope: 'library' as const };
   await assert.rejects(saveEntry('skills', 'plain', { body: 'No frontmatter\n' }, { ...scope, revision: null, strict: true }), { code: 'INVALID_ENTRY', message: /no YAML frontmatter/ });
   await assert.rejects(saveEntry('skills', 'named', { body: '---\nname: other\ndescription: "D. Use when x."\n---\nB\n' }, { ...scope, revision: null, strict: true }), { message: /differs from its directory/ });
   await assert.rejects(saveEntry('skills', 'keys', { body: '---\nname: keys\ndescription: "D. Use when x."\ncolor: red\n---\nB\n' }, { ...scope, revision: null, strict: true }), { message: /unknown frontmatter key 'color'/ });
   const saved = await saveEntry('skills', 'linked', { body: '---\nname: linked\ndescription: "Linked. Use when testing links."\n---\nSee [references/x.md](references/x.md).\n' }, { ...scope, revision: null, strict: true });
-  assert.match(saved.warnings[0], /SKILL\.md points to references\/x\.md: add that file beside it/);
+  assert.match(saved.warnings![0]!, /SKILL\.md points to references\/x\.md: add that file beside it/);
   // Without strict (programmatic callers, the settings screen) and for edits, nothing changes.
   await saveEntry('skills', 'legacy', { body: 'Legacy body\n' }, { ...scope, revision: null });
   const entry = await getEntry('skills', 'legacy', scope);
@@ -343,8 +344,8 @@ test('retired metadata IO errors stay isolated to their entry', async t => {
   }
   const rows = await listRetiredSkills({ library });
   assert.equal(rows.length, 2);
-  assert.match(rows.find(row => row.name === 'bad').invalid, /EISDIR|illegal operation/i);
-  assert.deepEqual(rows.find(row => row.name === 'good').roles, []);
+  assert.match(rows.find(row => row.name === 'bad')!.invalid!, /EISDIR|illegal operation/i);
+  assert.deepEqual(rows.find(row => row.name === 'good')!.roles, []);
   await assert.rejects(restoreSkill('bad', { library }), { code: 'EISDIR' });
 });
 

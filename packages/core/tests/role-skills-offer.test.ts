@@ -2,6 +2,7 @@
 // skills it never was (compact, curate); what was offered is recorded so a removal is respected, and
 // nothing the user wrote is removed or reordered.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -9,7 +10,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { SHIPPED_ROLE_SKILLS, seedLibrary } from '@anhlp/alp-core/library';
 
-const sha = text => createHash('sha256').update(text.replaceAll('\r\n', '\n')).digest('hex');
+const sha = (text: string) => createHash('sha256').update(text.replaceAll('\r\n', '\n')).digest('hex');
 const SHIPPED = await readFile(new URL('../../../templates/role-skills.json', import.meta.url), 'utf8');
 const OLD = '8c5664042d4a4ecd3ded61240d8febbffa6e8965a88af0e9ba0420ad2f2ce8fe'; // before compact and curate
 const WITH_COMPACT = 'b12b52102c358119cf834e5f3be54e6a69aa4c9f388fe889dffbb529755292dc';
@@ -17,16 +18,16 @@ const WITH_CURATE = 'a84b035d0058cbfcda7e32dc1706b9e83e67764eed24e2e121bdfcd60f9
 const V2_MAIN = ['skill-authoring', 'architecture-docs', 'feature-architecture', 'test-strategy', 'safe-refactor', 'security-review', 'release-readiness'];
 const V2_PEER = ['feature-architecture', 'test-strategy', 'safe-refactor'];
 
-async function home(t) {
+async function home(t: TestContext) {
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-offer-'));
   await chmod(dir, 0o700);
   t.after(() => rm(dir, { recursive: true, force: true }));
   return dir;
 }
-const roles = async dir => JSON.parse(await readFile(path.join(dir, 'role-skills.json'), 'utf8'));
-const manifest = async dir => JSON.parse(await readFile(path.join(dir, 'library.json'), 'utf8'));
+const roles = async (dir: string) => JSON.parse(await readFile(path.join(dir, 'role-skills.json'), 'utf8'));
+const manifest = async (dir: string) => JSON.parse(await readFile(path.join(dir, 'library.json'), 'utf8'));
 /** A library ALP last seeded with the role-skills.json of `version`, whose role-skills.json the user then edited to `edited`. */
-async function editedLibrary(dir, version, edited) {
+async function editedLibrary(dir: string, version: string, edited: unknown) {
   await seedLibrary(dir);
   const recorded = await manifest(dir);
   recorded.files['role-skills.json'] = version;
@@ -36,7 +37,7 @@ async function editedLibrary(dir, version, edited) {
 }
 
 test('the role-skills.json ALP ships now is in SHIPPED_ROLE_SKILLS, with what it gives', () => {
-  assert.deepEqual(SHIPPED_ROLE_SKILLS[sha(SHIPPED)], Object.fromEntries(Object.entries(JSON.parse(SHIPPED)).filter(([, names]) => names.length)));
+  assert.deepEqual(SHIPPED_ROLE_SKILLS[sha(SHIPPED)], Object.fromEntries(Object.entries<string[]>(JSON.parse(SHIPPED)).filter(([, names]) => names.length)));
 });
 
 test('upgrade offers an edited file the new built-ins once; the user\'s own entries and order stay', async t => {
@@ -131,7 +132,7 @@ test('a shipped skill script with #! is executable where the library is seeded, 
     'skills/demo/scripts/lib.mjs': 'export {}\n',
     'skills/demo/references/x.md': '#!not a script\n',
   } });
-  const mode = file => stat(pathModule.join(home, 'skills/demo', file)).then(info => info.mode & 0o111);
+  const mode = (file: string) => stat(pathModule.join(home, 'skills/demo', file)).then(info => info.mode & 0o111);
   assert.notEqual(await mode('scripts/run.mjs'), 0);
   assert.equal(await mode('scripts/lib.mjs'), 0);
   assert.equal(await mode('references/x.md'), 0);

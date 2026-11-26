@@ -1,11 +1,12 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { resolveAgent, discoverAgents } from '@anhlp/alp-core/resolver';
 
-async function fixture(t, files = {}) {
+async function fixture(t: TestContext, files = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-test-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   for (const [name, content] of Object.entries({ '.alp/agents/main/AGENT.md': 'Main instructions', ...files })) {
@@ -36,7 +37,7 @@ for (const content of ['{', '[]', 'null', '{"defaultAgent":42}']) test(`reject m
 });
 test('reject malformed MCP with exact source path', async t => {
   const root = await fixture(t, { '.alp/agents/main/.mcp.json': '{' });
-  await assert.rejects(resolveAgent(root), e => e.code === 'INVALID_MCP' && e.message.includes('.mcp.json'));
+  await assert.rejects(resolveAgent(root), (e: NodeJS.ErrnoException) => e.code === 'INVALID_MCP' && e.message.includes('.mcp.json'));
 });
 test('discover resources without injecting skill bodies', async t => {
   const root = await fixture(t, { '.alp/agents/main/skills/demo/SKILL.md': 'SECRET SKILL BODY', '.alp/agents/main/hooks/start.sh': 'echo hello', '.alp/agents/main/.mcp.json': '{"mcpServers":{}}' });

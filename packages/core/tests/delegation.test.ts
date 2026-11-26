@@ -1,11 +1,12 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { resolveDelegation } from '@anhlp/alp-core/delegation';
 
-async function fixture(t, delegation) {
+async function fixture(t: TestContext, delegation?: unknown) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-delegation-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, '.alp'));

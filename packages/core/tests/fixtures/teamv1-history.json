@@ -1,5 +1,5 @@
 {
-  "about": "Every teamV1 hash ever on main (t-cc9e). Append-only: regenerate with node packages/core/tests/teamv1-history.js",
+  "about": "Every teamV1 hash ever on main (t-cc9e). Append-only: regenerate with node packages/core/tests/teamv1-history.ts",
   "through": "ab108481e7007adbcd8e46fbc909b0baa289e800",
   "hashes": {
     ".alp/agents/main/AGENT.md": [

@@ -1,6 +1,7 @@
 // t-3aad: the profile ALP writes for a team member that team.json gives no model is its agent.json's
 // model and effort before main's; a profile the user wrote stays; Phở's and Cafe's defaults do not change.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -20,7 +21,7 @@ const LAB = {
   delegation: { main: ['scout', 'helper', 'plain'] },
 };
 
-async function project(t) {
+async function project(t: TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-team-profiles-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(path.join(root, '.alp/teams/lab'), { recursive: true });
@@ -28,14 +29,14 @@ async function project(t) {
   return root;
 }
 
-async function agentJson(root, name, config) {
+async function agentJson(root: string, name: string, config: unknown) {
   const directory = path.join(root, '.alp/agents', name);
   await mkdir(directory, { recursive: true });
   await writeFile(path.join(directory, 'AGENT.md'), `You are ${name}.\n`);
   await writeFile(path.join(directory, 'agent.json'), JSON.stringify(config));
 }
 
-const settingsOf = async root => JSON.parse(await readFile(path.join(root, '.alp/settings.json'), 'utf8'));
+const settingsOf = async (root: string) => JSON.parse(await readFile(path.join(root, '.alp/settings.json'), 'utf8'));
 
 test('a member without a team.json model gets its agent.json model and effort; the team.json model still wins', async t => {
   const root = await project(t);
@@ -76,7 +77,8 @@ test('Phở\'s and Cafe\'s default profiles do not depend on agent.json lookups 
   for (const id of ['pho', 'cafe']) {
     for (const [name, config] of Object.entries(profiles[id])) {
       if (name === 'oracle' || name === 'supervisor') continue;
-      assert.match(config.profiles[0], /^claude:claude-opus-5-5:/, `${id}.${name}: ${config.profiles[0]}`);
+      // The shipped teams name each profile as a string ("runtime:model:effort").
+      assert.match(config.profiles![0] as string, /^claude:claude-opus-5-5:/, `${id}.${name}: ${config.profiles![0]}`);
     }
   }
 });

@@ -4,7 +4,7 @@ import { MODELS, EFFORTS, useLiveModels, knownModel } from '@anhlp/alp-core/mode
 import { fitEffort, modelEfforts } from '@anhlp/alp-core/profiles';
 import { validateSettings } from '@anhlp/alp-core/validation';
 
-const withProfile = entry => ({ team: { default: { peer: { profiles: [entry] } } } });
+const withProfile = (entry: unknown) => ({ team: { default: { peer: { profiles: [entry] } } } });
 
 test('effort checks and fitting consult the live catalog when one is loaded, never beyond EFFORTS (t-086c)', t => {
   t.after(() => useLiveModels(undefined));
@@ -15,7 +15,7 @@ test('effort checks and fitting consult the live catalog when one is loaded, nev
 
   useLiveModels([...MODELS, { runtime: 'codex', id: 'gpt-live-x', label: 'X', description: '', efforts: ['low', 'medium', 'turbo'], effort: 'turbo' }]);
   assert.deepEqual(modelEfforts('codex:gpt-live-x'), ['low', 'medium'], 'an effort ALP does not know is dropped');
-  assert.equal(knownModel('codex:gpt-live-x').effort, undefined, 'a default outside EFFORTS is dropped too');
+  assert.equal(knownModel('codex:gpt-live-x')!.effort, undefined, 'a default outside EFFORTS is dropped too');
   assert.throws(() => validateSettings(withProfile('codex:gpt-live-x:high'), 's'), /codex:gpt-live-x takes effort low, medium/);
   assert.throws(() => validateSettings(withProfile('codex:gpt-live-x:turbo'), 's'), /effort turbo is unsupported/);
   validateSettings(withProfile('codex:gpt-live-x:medium'), 's');

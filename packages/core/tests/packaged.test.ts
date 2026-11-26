@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -8,7 +9,7 @@ import { bridgeCommand, isBridgeArgs, ACP_BRIDGE, ANTIGRAVITY_BRIDGE } from '@an
 
 test('ALP starts its roles as scripts under process.execPath, and bridges as -e', () => {
   assert.deepEqual(selfCommand('daemon', { script: '/opt/alp/alpd.js', args: ['--detach'] }), { command: process.execPath, args: ['/opt/alp/alpd.js', '--detach'] });
-  assert.throws(() => selfCommand(/** @type {any} */ ('nope'), { script: 'x' }), /Unknown ALP role/);
+  assert.throws(() => selfCommand('nope' as Parameters<typeof selfCommand>[0], { script: 'x' }), /Unknown ALP role/);
   assert.equal(selfEntry('/opt/alp/alpd.js'), '/opt/alp/alpd.js');
   assert.deepEqual(scriptCommand('/x/fake.js', ['a']), { command: process.execPath, args: ['/x/fake.js', 'a'] });
   assert.deepEqual(bridgeCommand('acp'), { command: process.execPath, args: ['-e', ACP_BRIDGE] });
@@ -23,7 +24,7 @@ test('an entry found on disk runs by its kind: a script under execPath, an `alp`
   assert.deepEqual(entryCommand('C:\\alp\\alp.exe', 'dashboard', ['--rotate']), { command: 'C:\\alp\\alp.exe', args: ['dashboard', 'serve', '--rotate'] });
   // A third-party integration entry is always a script, whatever its name.
   assert.deepEqual(entryCommand('/usr/bin/alp-x-integration', 'dashboard', ['--service'], '/opt/node', { scriptOnly: true }), { command: '/opt/node', args: ['/usr/bin/alp-x-integration', '--service'] });
-  assert.throws(() => entryCommand('/bin/alp', /** @type {any} */ ('nope')), /Unknown ALP role/);
+  assert.throws(() => entryCommand('/bin/alp', 'nope' as Parameters<typeof entryCommand>[1]), /Unknown ALP role/);
   // Only alp/alp.exe/alp.cmd is a command: a TypeScript or extensionless entry still runs under execPath.
   assert.deepEqual(entryCommand('/src/alp/alpd.ts', 'daemon', ['--detach'], '/opt/node'), { command: '/opt/node', args: ['/src/alp/alpd.ts', '--detach'] });
   // An alpd that is no bundle's native alpd (no alp-bundle.json beside its bin/) is a script too (t-81b0.9).
@@ -43,7 +44,7 @@ test('an Antigravity MCP entry is recognised as ALP\'s in both launcher forms, a
 });
 
 /** <work>/app/<version>/{node/bin/node, lib/…/alpd.js, alp-bundle.json}, and app/current → version when `current`. */
-async function fakeBundle(t, { version = '1.2.3', current = true } = {}) {
+async function fakeBundle(t: TestContext, { version = '1.2.3', current = true } = {}) {
   const work = await realpath(await mkdtemp(path.join(os.tmpdir(), 'alp-bundle-test-')));
   t.after(() => rm(work, { recursive: true, force: true }));
   const app = path.join(work, 'app');
@@ -86,7 +87,7 @@ test('a bundle that current does not point at keeps its own paths', async t => {
 
 test('the native alpd (t-81b0.9): alp starts bin/alpd when the bundle ships it, through current; ALP_NATIVE_DAEMON=0 keeps alpd.js', async t => {
   const b = await fakeBundle(t);
-  const info = bundleInfo(b.node);
+  const info = bundleInfo(b.node)!;
   const current = path.join(b.app, 'current');
   assert.equal(daemonEntry(b.alpd, { bundle: info, env: {} }), path.join(current, path.relative(b.root, b.alpd)), 'no bin/alpd: alpd.js');
   const native = bundleDaemon(info);
@@ -116,7 +117,7 @@ test('inside the native alpd: it restarts itself without a script, records its e
   assert.equal(nativeDaemon(), undefined);
   assert.equal(nodeExecutable(), process.execPath);
   registerNativeDaemon({ modules: {} });
-  t.after(() => { delete globalThis[Symbol.for('alp.nativeDaemon')]; });
+  t.after(() => { delete (globalThis as Record<symbol, unknown>)[Symbol.for('alp.nativeDaemon')]; });
   // This test process is no bundle, so the Node for scripts is `node` on PATH.
   assert.equal(nodeExecutable(), 'node');
   assert.deepEqual(selfCommand('daemon', { script: '/b/alpd.js', args: ['--x'] }), { command: process.execPath, args: ['--x'] });

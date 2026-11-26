@@ -12,7 +12,7 @@ test('listProviders: with onError an invalid file is reported and skipped; witho
   await writeFile(path.join(library, 'providers', 'bad.json'), '{ not json');
   await writeFile(path.join(library, 'providers', 'good.json'), JSON.stringify({ kind: 'acp', command: 'good-agent' }));
   await assert.rejects(listProviders(library));
-  const errors = [];
+  const errors: string[] = [];
   const providers = await listProviders(library, { onError: (error, name) => errors.push(name) });
   assert.deepEqual(providers.map(provider => provider.id), ['good']);
   assert.deepEqual(errors, ['bad.json']);
@@ -29,11 +29,11 @@ test('legacy readOnlyMode loads with migration guidance but cannot be newly conf
   const file = path.join(home, 'providers/antigravity.json');
   const old = JSON.stringify({ kind: 'antigravity', command: 'agy', readOnlyMode: 'reject' });
   await writeFile(file, old);
-  const warnings = [];
+  const warnings: string[] = [];
   const warn = console.warn;
-  console.warn = message => warnings.push(message);
+  console.warn = (message: string) => warnings.push(message);
   try {
-    assert.equal(Object.hasOwn(await loadProvider(home, 'antigravity'), 'readOnlyMode'), false);
+    assert.equal(Object.hasOwn((await loadProvider(home, 'antigravity'))!, 'readOnlyMode'), false);
     await loadProvider(home, 'antigravity');
   } finally { console.warn = warn; }
   assert.equal(warnings.length, 1);
