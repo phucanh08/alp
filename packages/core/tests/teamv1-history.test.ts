@@ -1,10 +1,10 @@
 // t-cc9e: teamV1 (packages/core/src/upgrade.ts) is append-only. A hash that leaves it, removed or
 // edited, strands every project holding that role definition as customInstructions, and the guard in
-// upgrade.test.js only sees today's templates. These tests hold teamV1 to every list it has had on main:
+// upgrade.test.ts only sees today's templates. These tests hold teamV1 to every list it has had on main:
 //
 // - the snapshot fixtures/teamv1-history.json, hermetic, always runs. Appending to teamV1 keeps it
 //   green without touching the fixture; refresh the fixture now and then (it only grows) with
-//     node packages/core/tests/teamv1-history.js > packages/core/tests/fixtures/teamv1-history.json
+//     node packages/core/tests/teamv1-history.ts > packages/core/tests/fixtures/teamv1-history.json
 // - main's git history itself, which also covers hashes appended after the snapshot and a snapshot
 //   edited together with teamV1. Without history (a shallow clone) it skips, unless
 //   ALP_REQUIRE_TEAMV1_HISTORY=1, which CI's core job sets after a full-depth checkout: there it fails.

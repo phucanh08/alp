@@ -333,7 +333,7 @@ test('after a team change, the next delegation follows the new team; an earlier 
   await until(() => leadWriteStarted);
   assert.deepEqual((await runLog('root')).filter(entry => entry.event === 'assignment.started').map(entry => [entry.assignmentId, entry.agent]), [[first.assignmentId, 'peer']], 'a running lead and a returned delegation do not imply its log append finished');
   releaseWrite();
-  // The earlier assignment ran with Phở's instructions; nothing restarted it. Its record: packages/daemon/tests/configure.test.js.
+  // The earlier assignment ran with Phở's instructions; nothing restarted it. Its record: packages/daemon/tests/configure.test.ts.
   assert.equal(runtimes[1].of('thread/start').length, 1);
   assert.equal(runtimes[1].of('thread/resume').length, 0);
   await tool(lead, 'alp_handoff', { outcome: 'complete', summary: 'Done on Cafe' });
