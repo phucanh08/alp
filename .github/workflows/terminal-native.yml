@@ -53,8 +53,13 @@ jobs:
               docker run --rm -v "$PWD:/w" -v "$(dirname "$(dirname "$(command -v node)")"):/opt/hostnode:ro" -w /w "$IMAGE" \
                 sh -ec 'cc --version; ldd --version | head -1; /opt/hostnode/bin/node scripts/build-terminal-native.ts' ;;
             *-musl)
+              # Alpine's own nodejs package (Node 20 in alpine:3.20) cannot run .ts, and the runner's Node is a glibc
+              # build: the runner's Node (>=22.18) strips the types into a plain .mjs beside the script, which the
+              # container runs, so `root` (the script's parent directory) is unchanged.
+              node -e "const fs = require('node:fs'); fs.writeFileSync('scripts/build-terminal-native.musl.mjs', require('node:module').stripTypeScriptTypes(fs.readFileSync('scripts/build-terminal-native.ts', 'utf8')))"
               docker run --rm -v "$PWD:/w" -w /w "$IMAGE" \
-                sh -ec 'apk add --no-cache build-base linux-headers nodejs >/dev/null; cc --version; node scripts/build-terminal-native.ts' ;;
+                sh -ec 'apk add --no-cache build-base linux-headers nodejs >/dev/null; cc --version; node --version; node scripts/build-terminal-native.musl.mjs'
+              rm -f scripts/build-terminal-native.musl.mjs ;;
           esac
           sudo chown -R "$(id -u):$(id -g)" packages/daemon/native/prebuilt
           dir="packages/daemon/native/prebuilt/$SLOT"
