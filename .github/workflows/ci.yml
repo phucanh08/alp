@@ -205,7 +205,7 @@ jobs:
   # so the root runner never sees its tests. Unit tests, typecheck, the bundle, then the Electron e2e
   # against a disposable alp dashboard host built from this checkout (packages/cli/dist/alp-dashboard.js), with
   # Playwright's _electron from the root install. Then the two ad-hoc signed DMGs (arm64, x64; t-81b0.3,
-  # docs/alp/desktop.md §6), each tested as installed (e2e/packaged.spec.mjs; x64 under Rosetta) and
+  # docs/alp/desktop.md §6), each tested as installed (e2e/packaged.spec.ts; x64 under Rosetta) and
   # kept as a workflow artifact. Nothing is published.
   desktop-macos:
     runs-on: macos-latest

@@ -3,7 +3,7 @@
  * fake `alp` (./support.ts): notifications allowed for the dashboard's origin only, ⌘W left to the
  * dashboard page (it closes the current tab) and closing the window on a bundled page, the Dock badge
  * read from the dashboard's favicon, and the window's size and place kept across launches.
- * What the page does with the keys is apps/web's e2e (e2e/desktop-feel.spec.js); that a Browser tab is
+ * What the page does with the keys is apps/web's e2e (e2e/desktop-feel.spec.ts); that a Browser tab is
  * still denied every permission is ./browser.spec.ts.
  */
 import test from 'node:test';

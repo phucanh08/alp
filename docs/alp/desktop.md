@@ -201,7 +201,7 @@ bản sao cục bộ, **chỉ** khi app chạy từ source (`app.isPackaged` là
   ⌘Z, ⇧⌘Z, ⌘X, ⌘C, ⌘V, ⌥⇧⌘V, ⌘A, ⌘R, ⌘0, ⌘=, ⌘-, ⌃⌘F, ⌘M, ⇧⌘R (và ⌥⌘I ở bản dev) được ghi vào dòng đó
   và mục menu không chạy; hết capture thì menu nhận phím lại như cũ. Paseo cần `setCapturingShortcut`
   chỉ để tắt ba mục Zoom (`enabled: false`, dựng lại menu; `dist/features/menu.js` trong app.asar
-  của Paseo). E2E `apps/desktop/e2e/shortcut-capture.spec.mjs` kiểm bằng phím thật (CoreGraphics
+  của Paseo). E2E `apps/desktop/e2e/shortcut-capture.spec.ts` kiểm bằng phím thật (CoreGraphics
   `CGEventPostToPid` chỉ tới process của app đang test; `webContents.sendInputEvent` không đi qua
   menu), và skip, kèm lý do, khi máy không cho process gửi phím (thiếu quyền Accessibility). ⌥⌘H
   không được bấm vì nó sẽ ẩn các app khác của người dùng. Ngoại lệ đã đo: khi focus nằm trong guest
@@ -330,7 +330,7 @@ dùng `~/.alp` của người dùng (`ALP_DESKTOP_ALP`, `ALP_DESKTOP_USER_DATA`)
 
 ### 5.1 E2E
 
-`apps/desktop/e2e/shell.spec.mjs` (`node --test`, tên `*.spec.mjs` như `apps/web/e2e`, nên runner
+`apps/desktop/e2e/shell.spec.ts` (`node --test`, tên `*.spec.ts` như `apps/web/e2e`, nên runner
 gốc và luật bố cục test không chọn nó) chạy app Electron thật bằng `_electron` của `playwright-core`
 (lấy từ cài đặt gốc) và gồm hai thành phần:
 
@@ -362,7 +362,7 @@ Các ca kiểm tra:
   service đang chạy như `alp dashboard --print --json` thật, nên chỉ việc app chạy lại `--print --json` mới đưa được token
   mới vào cửa sổ; test kiểm token cũ bị 401 ở `/v1/tickets` và fail khi tắt `Reconnector.trigger`.
 
-`apps/desktop/e2e/install.spec.mjs` (t-81b0.8) chạy app với `HOME`, `ALP_HOME`, `TMPDIR` tạm, một login
+`apps/desktop/e2e/install.spec.ts` (t-81b0.8) chạy app với `HOME`, `ALP_HOME`, `TMPDIR` tạm, một login
 shell giả không tìm thấy `alp`, và một bản sao phát hành cục bộ (`releaseMirror`: `SHA256SUMS` và archive
 chứa bundle giả) qua `ALP_DESKTOP_INSTALL_MIRROR`, không dùng mạng:
 
@@ -379,7 +379,7 @@ Ca cuối cài **bản phát hành thật** từ một bản sao tài sản củ
 trỏ tới thư mục chứa `SHA256SUMS` và archive darwin: alpd thật chạy dưới ALP home tạm (kiểm đường dẫn socket
 trước khi dừng), `alp dashboard --print` chạy được và cửa sổ mở nó.
 
-`apps/desktop/e2e/owner.spec.mjs` (t-ff83) chạy app với host owner thật: một alpd và `alp dashboard`
+`apps/desktop/e2e/owner.spec.ts` (t-ff83) chạy app với host owner thật: một alpd và `alp dashboard`
 dưới `HOME`/`ALP_HOME`/`TMPDIR` tạm (đường dẫn socket trong `alpd.lock` được kiểm nằm trong thư mục tạm
 trước mọi thay đổi), `alp` là một wrapper `env -i` chỉ giữ biến ALP, PATH (có `gh` giả, không mạng),
 HOME, TMPDIR; provider là `fake-codex.js` của `apps/web/e2e/support`:
@@ -390,7 +390,7 @@ HOME, TMPDIR; provider là `fake-codex.js` của `apps/web/e2e/support`:
 - một thao tác owner trong Settings: General › Agents' language đặt English, `settings.json` ghi lại,
   `alp language` đọc ra, vẫn còn sau khi tải lại trang.
 
-`apps/desktop/e2e/browser.spec.mjs` (t-9116) dựng host giống vậy (alpd thật, một project, không
+`apps/desktop/e2e/browser.spec.ts` (t-9116) dựng host giống vậy (alpd thật, một project, không
 session, không provider) cùng một server http cục bộ của test, rồi kiểm tab Browser (§4.1): menu "+"
 có Browser sau Diff; tab tải trang cục bộ gõ không có scheme; guest ở `persist:alp-browser`, không
 preload, không đọc được token, storage, cookie, Node hay `window.top` của dashboard; điều hướng tới
@@ -402,11 +402,11 @@ lại giữ nguyên trang (cùng guest, không điều hướng mới, scroll, �
 `inert` và `visibility: hidden`; điều hướng bị chặn hiện "Blocked navigation to …" (kể cả địa chỉ sau
 redirect), chỉ ở tab của guest đó; tab đang ẩn vẫn mở được tab mới bằng `window.open`; webview không partition, partition khác
 hay `src` `file:` bị từ chối, và preload bị bỏ. Với `ALP_DESKTOP_SHOTS=<thư mục>` test lưu hai ảnh
-chụp (menu "+" và tab Browser). Phía trình duyệt thường là `apps/web/e2e/browser-tab.spec.js` (với một `<webview>` giả: lớp
+chụp (menu "+" và tab Browser). Phía trình duyệt thường là `apps/web/e2e/browser-tab.spec.ts` (với một `<webview>` giả: lớp
 resident qua đổi tab và chuyển pane, thông báo chặn điều hướng chỉ dạng chữ, dòng lỗi khi lần tải bị
 từ chối sau `dom-ready`).
 
-`apps/desktop/e2e/shortcut-capture.spec.mjs` (t-81b0.14; chạy tay trên một Mac cho phép gửi phím: `bun run build && node --test e2e/shortcut-capture.spec.mjs`, chưa nằm trong `bun run e2e` hay CI) dựng host giống vậy (alpd thật, chưa đăng ký
+`apps/desktop/e2e/shortcut-capture.spec.ts` (t-81b0.14; chạy tay trên một Mac cho phép gửi phím: `bun run build && node --test e2e/shortcut-capture.spec.ts`, chưa nằm trong `bun run e2e` hay CI) dựng host giống vậy (alpd thật, chưa đăng ký
 project) và gửi phím thật qua `osascript -l JavaScript` (CoreGraphics `CGEventCreateKeyboardEvent` +
 `CGEventPostToPid`, chỉ tới pid của app đang test): trong lúc Settings › Shortcuts chờ phím, mỗi phím
 menu (§4, trừ ⌥⌘H) được dòng đó ghi và cửa sổ không reload, zoom, thu nhỏ, ẩn, full screen hay mở
@@ -417,7 +417,7 @@ không cho process gửi phím: thiếu quyền Accessibility, có thể là CI)
 đa ba lần) khi cửa sổ mất focus trong lúc bấm; phím bị mất khi cửa sổ vẫn giữ focus thì test fail.
 
 Teardown dùng `defer` của `test/support/teardown.ts`: đóng Electron (quá 15 giây thì SIGKILL), dừng
-host (với `owner.spec.mjs`, `browser.spec.mjs` và `shortcut-capture.spec.mjs`: `alp dashboard --stop`, rồi `alp daemon stop`), rồi mới xóa thư mục. App chạy với `HOME` tạm.
+host (với `owner.spec.ts`, `browser.spec.ts` và `shortcut-capture.spec.ts`: `alp dashboard --stop`, rồi `alp daemon stop`), rồi mới xóa thư mục. App chạy với `HOME` tạm.
 
 ```sh
 pnpm install --frozen-lockfile && node scripts/build-workspace.ts cli   # ở gốc repo
@@ -439,7 +439,7 @@ hai DMG, `release/ALP-<version>-arm64.dmg` và `release/ALP-<version>-x64.dmg` (
 | Chữ ký | ad-hoc (`identity: '-'`), hardened runtime; không có Apple Developer ID, không notarize. Không ký thì Apple Silicon báo app "bị hỏng" |
 | Entitlements | `build/entitlements.mac.plist`: `allow-jit` và `disable-library-validation` (app ký ad-hoc nạp framework Electron mang Team ID khác) |
 | Electron fuses | `RunAsNode`, `EnableNodeOptionsEnvironmentVariable`, `EnableNodeCliInspectArguments` tắt; `OnlyLoadAppFromAsar`, `EnableEmbeddedAsarIntegrityValidation`, `EnableCookieEncryption` bật; `GrantFileProtocolExtraPrivileges` tắt |
-| Icon | `build/icon.png` (1024×1024), vẽ bằng `node scripts/icon.mjs`; electron-builder đổi sang `.icns` |
+| Icon | `build/icon.png` (1024×1024), vẽ bằng `node scripts/icon.ts`; electron-builder đổi sang `.icns` |
 | macOS tối thiểu | 12.0 |
 
 electron-builder dò package manager và workspace root bằng cách đi ngược lên tới `package.json` đầu
@@ -464,7 +464,7 @@ của một bản mình tự build và chép qua kênh khác: `xattr -dr com.app
 
 ### 6.2 Kiểm tra app đã đóng gói
 
-`e2e/packaged.spec.mjs` (`ALP_DESKTOP_DMG=<dmg> bun run e2e:packaged`, cần cài đặt gốc và CLI đã build
+`e2e/packaged.spec.ts` (`ALP_DESKTOP_DMG=<dmg> bun run e2e:packaged`, cần cài đặt gốc và CLI đã build
 như §5.1) mount DMG, chép `ALP.app` vào một thư mục `Applications` tạm (`HOME` tạm), rồi kiểm:
 
 - `Info.plist` (tên, bundle id), chữ ký ad-hoc có cờ `runtime` (`codesign -dv`, `codesign --verify
@@ -514,7 +514,7 @@ hai nguyên nhân chồng lên nhau, và e2e đóng gói không thấy cái nào
 
 Quy tắc: một trang hay tài nguyên mà app đóng gói nạp phải được kiểm trên **app đóng gói** và bằng
 URL nó thật sự nạp (scheme, nguồn) cùng nội dung hiển thị, không chỉ bằng việc test xanh trên máy đã
-build nó. `e2e/packaged.spec.mjs` kiểm ba trang nội bộ như vậy; DMG của ff7c98be fail cả ba.
+build nó. `e2e/packaged.spec.ts` kiểm ba trang nội bộ như vậy; DMG của ff7c98be fail cả ba.
 
 ## 7. `alp desktop`
 
