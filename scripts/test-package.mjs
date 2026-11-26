@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // @ts-check
-// `npm test` inside one workspace: build the package and the workspaces it depends on, then run
+// `pnpm test` inside one workspace: build the package and the workspaces it depends on, then run
 // only the tests in packages/<name>/tests. They import the package and its declared dependencies,
 // never a sibling that depends on them (scripts/check-boundaries.mjs enforces that).
 import { buildWorkspace, packageTests, packages, runNodeTests } from './test-lib.mjs';

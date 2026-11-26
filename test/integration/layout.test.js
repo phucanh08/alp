@@ -58,7 +58,7 @@ test('the root runner selects every test file exactly once', () => {
   assert.deepEqual([...selected].sort(), [...new Set(present)].sort());
 });
 
-test('every workspace with tests runs them through its own npm test', () => {
+test('every workspace with tests runs them through its own test script', () => {
   for (const name of packages) {
     const script = manifest(name).scripts?.test;
     if (packageTests(name).length) assert.equal(script, `node ../../scripts/test-package.mjs ${name}`, `${name} must run its own tests`);

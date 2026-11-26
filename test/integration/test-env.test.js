@@ -279,14 +279,14 @@ test('every verification entry point that drives a user-facing CLI isolates the 
   const ts = (await import('typescript')).default;
   const entries = {
     // The wrapper: its steps spawn without an env of their own, so clearing here covers the lane.
-    'scripts/validate.mjs': 'npm run validate:core / :paseo / :packages / :web',
+    'scripts/validate.mjs': 'pnpm run validate:core / :paseo / :packages / :web',
     // Also run directly, so each clears for itself rather than trusting the wrapper.
-    'scripts/core-standalone-smoke.mjs': 'npm run test:core:standalone',
-    'scripts/tarball-consumer.mjs': 'npm run release:tarball-check',
-    'scripts/package-smoke.mjs': 'npm run test:packages:smoke',
+    'scripts/core-standalone-smoke.mjs': 'pnpm run test:core:standalone',
+    'scripts/tarball-consumer.mjs': 'pnpm run release:tarball-check',
+    'scripts/package-smoke.mjs': 'pnpm run test:packages:smoke',
     'scripts/binary-smoke.mjs': 'the binary-build CI lane, and by hand on a built bundle',
   };
-  const STARTERS = /^(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork|run|npm|node)$/;
+  const STARTERS = /^(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork|run|npm|pnpm|node)$/;
   const callee = node => { const c = node.expression; return ts.isIdentifier(c) ? c.text : ts.isPropertyAccessExpression(c) ? c.name.text : ''; };
   const isFunction = node => ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node);
 

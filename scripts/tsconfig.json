@@ -1,7 +1,7 @@
 {
   // The scripts stay JavaScript (they are run by name from package.json, CI, tests and packaged code,
   // and Node 22.12-22.17 cannot run .ts without a flag); this only type-checks them strictly.
-  // Run: npx tsc -p scripts/tsconfig.json
+  // Run: pnpm exec tsc -p scripts/tsconfig.json
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022"],

@@ -11,7 +11,7 @@ import { ROOT, Run, capture } from './beta-acceptance-lib.mjs';
 const USAGE = `Usage: node scripts/beta-acceptance-r7.mjs --live --model codex:<model> [--model claude:<model>] [--sha <release SHA>] [--work DIR] [--runner NAME] [--evidence URL]
 
 Runs test/e2e/worktree-e2e.mjs in this checkout once per --model (ALP_TEST_MODEL), after
-npm ci && npm run build at the release SHA. Real model calls; there is no --fake for R7.
+pnpm install --frozen-lockfile && pnpm run build at the release SHA. Real model calls; there is no --fake for R7.
 --sha checks that HEAD is the release SHA; without it HEAD is recorded as is.
 --evidence names where the row's evidence lives (e.g. the CI run); default the results file.
 Exit 3: the row is not complete yet (e.g. one provider only); R7 needs both, on macOS and Linux.`;
@@ -35,7 +35,7 @@ await run.step('R7-source', 'checkout at the release SHA, built', async () => {
   const problems = [];
   if (values.sha && head !== values.sha) problems.push(`HEAD is ${head}, not the release SHA ${values.sha}`);
   if (dirty) problems.push('tracked files differ from HEAD; the run would not be of the release SHA');
-  if (!existsSync(path.join(ROOT, 'dist', 'runtime', 'index.js'))) problems.push('not built: run npm ci && npm run build');
+  if (!existsSync(path.join(ROOT, 'dist', 'runtime', 'index.js'))) problems.push('not built: run pnpm install --frozen-lockfile && pnpm run build');
   if (problems.length) throw new Error(problems.join('; '));
   run.record('R7-source', values.sha ? 'pass' : 'check', `HEAD ${head}${values.sha ? ' is the release SHA' : ' — compare it with RELEASE_SHA yourself'}; clean; built`);
 });

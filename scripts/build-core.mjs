@@ -3,7 +3,7 @@
 // ALP's neutral core bundles: the runtime, the daemon server, alpd and the ACP agent. They embed
 // only ALP's own templates, never the optional Paseo plugin's client or SDK, so the core six
 // workspaces stay buildable, testable and installable on their own. The optional plugin build
-// calls this too; root `npm run build` and prepack use only the neutral build path.
+// calls this too; root `pnpm run build` and prepack use only the neutral build path.
 import { copyTerminalNative } from './terminal-native-assets.mjs';
 import { build as esbuild } from 'esbuild';
 import { readFile, readdir } from 'node:fs/promises';
