@@ -1,6 +1,7 @@
 // Wire behaviour of alpd that the conformance suite cannot reach from outside: a daemon without a
 // store, an in-memory log past its limit, and frames near the size limit (docs/protocol/alp-json-rpc-v1.md).
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
@@ -11,31 +12,38 @@ import { CAPABILITY, ERROR, MAX_FRAME, PROTOCOL_VERSION } from '@anhlp/alp-proto
 import { validateParams, validateResult, validateSchema } from '@anhlp/alp-protocol/contract';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { createStore } from '@anhlp/alp-daemon/store';
+import type { AlpRuntime } from '@anhlp/alp-runtime';
+
+// `any`: alpd's frames, answers and events are JSON, and the scripted runtime's sessions are partial snapshots; the tests read the fields they assert on.
+type Json = any;
+
+/** What alpd takes as its runtime; the parts the test drives answer JSON. */
+type Scripted = { emit(sessionId: string, event: Json): void, open(id: string, spec: Json): Promise<Json> } & AlpRuntime;
 
 /** A runtime with one root whose events the test emits itself. */
-function scriptedRuntime() {
-  const listeners = new Set();
-  const sessions = new Map();
+function scriptedRuntime(): Scripted {
+  const listeners = new Set<(envelope: Json) => void>();
+  const sessions = new Map<string, Json>();
   let seq = 0;
-  const emit = (sessionId, event) => { for (const listener of listeners) listener({ sessionId, epoch: 'scripted', seq: ++seq, ts: new Date().toISOString(), event }); };
+  const emit = (sessionId: string, event: Json) => { for (const listener of listeners) listener({ sessionId, epoch: 'scripted', seq: ++seq, ts: new Date().toISOString(), event }); };
   return {
     emit,
-    onEvent(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-    snapshot: id => sessions.get(id),
+    onEvent(listener: (envelope: Json) => void) { listeners.add(listener); return () => listeners.delete(listener); },
+    snapshot: (id: Json) => sessions.get(id),
     list: () => [...sessions.values()],
     questions: () => [],
     recoverable: () => [],
-    async open(id, spec) {
+    async open(id: string, spec: Json) {
       const session = { id, projectRoot: spec.cwd, agent: 'main', runtime: 'codex', model: 'm', mode: 'read-only', thinking: 'low', workflow: { mode: 'pho', maxPeers: 0, supervisor: false }, threadId: 't', persistent: false, busy: true };
       sessions.set(id, session);
       emit(id, { type: 'session.opened', session, cwd: spec.cwd, effective: { model: 'm', thinking: 'low' } });
       return session;
     },
-    async close(id) { sessions.delete(id); emit(id, { type: 'session.closed' }); },
-  };
+    async close(id: string) { sessions.delete(id); emit(id, { type: 'session.closed' }); },
+  } as unknown as Scripted;
 }
 
-async function setup(t) {
+async function setup(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-wire-'));
   const runtime = scriptedRuntime();
   const socketPath = daemonPaths(directory).socket;
@@ -49,7 +57,7 @@ test('without a store, hello lists no prompt.receipts and a cursor before the ke
   const { runtime, server } = await setup(t);
   const client = server.local();
   t.after(() => client.close());
-  const frames = [];
+  const frames: Json[] = [];
   const raw = server.accept(frame => frames.push(frame));
   raw.receive({ jsonrpc: '2.0', id: 1, method: 'daemon.hello', params: { protocolVersion: PROTOCOL_VERSION } });
   await new Promise(resolve => setImmediate(resolve));
@@ -61,7 +69,7 @@ test('without a store, hello lists no prompt.receipts and a cursor before the ke
   // 20 000 events stay in memory: with 20 010 emitted after session.opened, the first kept cursor is 12.
   for (let index = 0; index < 20_010; index++) runtime.emit('root', { type: 'item', item: { kind: 'notice', id: `n${index}`, level: 'info', text: String(index) } });
 
-  const replayed = [];
+  const replayed: Json[] = [];
   const watcher = server.local();
   t.after(() => watcher.close());
   watcher.onEvent(envelope => replayed.push(envelope.cursor));
@@ -84,7 +92,7 @@ test('a response over the frame limit becomes response_too_large; large frames i
   server.extend('test.big', ({ bytes }) => ({ text: 'x'.repeat(bytes) }));
   const client = await connect(socketPath, { name: 'wire-test', version: '0' });
   t.after(() => client.close());
-  await assert.rejects(client.request('test.big', { bytes: MAX_FRAME }), error => error.code === ERROR.failed && error.data?.reason === 'response_too_large');
+  await assert.rejects(client.request('test.big', { bytes: MAX_FRAME }), (error: Json) => error.code === ERROR.failed && error.data?.reason === 'response_too_large');
   assert.equal((await client.request('test.big', { bytes: 10 })).text.length, 10, 'the connection stays usable');
 
   // A frame exactly at the limit followed immediately by another frame must not overflow the buffer.
@@ -94,7 +102,7 @@ test('a response over the frame limit becomes response_too_large; large frames i
   let received = '';
   socket.setEncoding('utf8');
   socket.on('data', chunk => { received += chunk; });
-  const frame = (id, pad) => `${JSON.stringify({ jsonrpc: '2.0', id, method: id === 1 ? 'daemon.hello' : 'catalog.get', params: { ...(id === 1 ? { protocolVersion: 1 } : {}), pad } })}\n`;
+  const frame = (id: number, pad: string) => `${JSON.stringify({ jsonrpc: '2.0', id, method: id === 1 ? 'daemon.hello' : 'catalog.get', params: { ...(id === 1 ? { protocolVersion: 1 } : {}), pad } })}\n`;
   socket.write(frame(1, 'h') + frame(2, 'y'.repeat(MAX_FRAME - Buffer.byteLength(frame(2, '')))) + frame(3, 'z'));
   for (let i = 0; i < 3000 && received.split('\n').filter(Boolean).length < 3; i++) await new Promise(resolve => setTimeout(resolve, 10));
   const answers = received.split('\n').filter(Boolean).map(line => JSON.parse(line));
@@ -141,7 +149,7 @@ test('stream frame limit measures received bytes rather than expanded JSON numbe
   const socket = net.createConnection(socketPath);
   await new Promise(resolve => socket.once('connect', resolve));
   t.after(() => socket.destroy());
-  const lines = [];
+  const lines: Json[] = [];
   let buffered = '';
   socket.setEncoding('utf8');
   socket.on('data', chunk => { buffered += chunk; for (let at; (at = buffered.indexOf('\n')) >= 0;) { lines.push(JSON.parse(buffered.slice(0, at))); buffered = buffered.slice(at + 1); } });
@@ -174,7 +182,7 @@ test('history tail then generation-bound attach closes a >memory-retention appen
   assert.equal(page.tipCursor, 651);
   for (let i = 0; i < 20005; i++) runtime.emit('root', { type: 'item', item: { kind: 'notice', id: `gap${i}`, level: 'info', text: i === 3 ? 'x'.repeat(MAX_FRAME + 1) : String(i) } });
   const watcher = server.local(); t.after(() => watcher.close());
-  const replay = [];
+  const replay: Json[] = [];
   watcher.onEvent(envelope => replay.push(envelope));
   const attached = await watcher.request('session.attach', { sessionId: 'root', after: page.tipCursor, generation: page.generation });
   assert.equal(attached.reset, undefined);
@@ -199,7 +207,7 @@ test('attach refuses a generation replacement whose numeric tip still exceeds th
   const file = path.join(directory, 'timeline/root.jsonl');
   await unlink(file);
   await writeFile(file, JSON.stringify({ sessionId: 'root', epoch: 'replacement', seq: 50, cursor: 50, ts: '', event: { type: 'session.closed' } }) + '\n');
-  await assert.rejects(client.request('session.attach', { sessionId: 'root', after: page.tipCursor, generation: page.generation }), error => error.code === 1004 && error.data.reason === 'stale_cursor');
+  await assert.rejects(client.request('session.attach', { sessionId: 'root', after: page.tipCursor, generation: page.generation }), (error: Json) => error.code === 1004 && error.data.reason === 'stale_cursor');
 });
 
 test('append overrunning memory during generation await refuses a replay gap, then retry catches up', async t => {
@@ -222,9 +230,9 @@ test('append overrunning memory during generation await refuses a replay gap, th
     return result;
   };
   const watcher = server.local(); t.after(() => watcher.close());
-  const replay = []; watcher.onEvent(event => replay.push(event.cursor));
+  const replay: Json[] = []; watcher.onEvent(event => replay.push(event.cursor));
   const params = { sessionId: 'root', after: page.tipCursor, generation: page.generation };
-  await assert.rejects(watcher.request('session.attach', params), error => error.code === 1005 && error.data.reason === 'history_gap');
+  await assert.rejects(watcher.request('session.attach', params), (error: Json) => error.code === 1005 && error.data.reason === 'history_gap');
   assert.equal(replay.length, 0, 'no incomplete replay is announced as successful');
   await watcher.request('session.attach', params);
   assert.equal(replay.length, 20005);

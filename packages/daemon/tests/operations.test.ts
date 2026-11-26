@@ -2,6 +2,7 @@
 // socket: params and results against the v1 schema, refusals as protocol errors, paths kept inside
 // their project, secrets kept inside alpd, and concurrent writes that never both win.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -11,19 +12,23 @@ import { addGate, getTask, loadTasks, resolveGate } from '@anhlp/alp-core/tasks'
 import { getEntry } from '@anhlp/alp-core/library-edit';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
+import type { RuntimeOptions } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { CAPABILITY } from '@anhlp/alp-protocol';
 import { validateResult } from '@anhlp/alp-protocol/contract';
 import { teardown } from '../../../test/support/teardown.ts';
 
+// `any`: alpd's answers, events and errors are JSON whose shape depends on the method; the tests read the fields they assert on.
+type Json = any;
+
 /** Agents whose turns complete by themselves, so mail they take counts as taken. */
 function fakeTransport() {
   return () => {
-    let notify = () => {};
+    let notify: (method: string, params: Json) => void = () => {};
     let turns = 0;
     return {
-      async initialize() {}, onNotification(fn) { notify = fn; }, onFailure() {}, onRequest() {}, async close() {},
-      async request(method) {
+      async initialize() {}, onNotification(fn: typeof notify) { notify = fn; }, onFailure() {}, onRequest() {}, async close() {},
+      async request(method: string) {
         if (method === 'turn/start') {
           const id = `turn-${++turns}`;
           setTimeout(() => notify('turn/completed', { threadId: 'thread-1', turn: { id, status: 'completed' } }), 5);
@@ -35,7 +40,7 @@ function fakeTransport() {
   };
 }
 
-async function setup(t, { home: withHome = true, runtimeOptions = {} } = {}) {
+async function setup(t: TestContext, { home: withHome = true, runtimeOptions = {} }: { home?: boolean, runtimeOptions?: RuntimeOptions } = {}) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-ops-'));
   // Undone LAST: teardown runs the steps in reverse, so everything living in here is released first.
@@ -51,12 +56,12 @@ async function setup(t, { home: withHome = true, runtimeOptions = {} } = {}) {
   const client = await connect(daemonPaths(directory).socket, { name: 'operations-test', version: '0' });
   defer(() => client.close());
   /** A request whose result must match the method's v1 result schema. */
-  const call = async (method, params) => {
+  const call = async (method: string, params?: unknown) => {
     const result = await client.request(method, params);
     assert.deepEqual(validateResult(method, result), [], `${method} result: ${JSON.stringify(result)}`);
     return result;
   };
-  const fails = (method, params, code, reason) => assert.rejects(client.request(method, params), error => {
+  const fails = (method: string, params: unknown, code: number, reason?: string) => assert.rejects(client.request(method, params), (error: Json) => {
     assert.equal(error.code, code, `${method}: ${error.message}`);
     if (reason) assert.equal(error.data?.reason, reason, `${method}: ${error.message}`);
     return true;
@@ -91,7 +96,7 @@ test('gates (t-ccac): task.gate.resolve approves with a choice or rejects, recor
   // Marked reported once main's turn took the mail (t-595d).
   for (let i = 0; i < 200 && !(await getTask(project, id)).gates[0].rejected?.notified; i++) await new Promise(resolve => setTimeout(resolve, 10));
   let stored = await getTask(project, id);
-  assert.deepEqual([stored.gates[0].rejected.channel, !!stored.gates[0].rejected.notified], ['web', true]);
+  assert.deepEqual([stored.gates[0].rejected!.channel, !!stored.gates[0].rejected!.notified], ['web', true]);
 
   // Answered from Paseo: the card's channel comes from the client's hello.
   const paseo = await connect(socket, { name: 'alp-paseo', version: '1' });
@@ -99,7 +104,7 @@ test('gates (t-ccac): task.gate.resolve approves with a choice or rejects, recor
   await paseo.request('question.answer', { questionId: `gate-${id}-g2`, text: 'Duyệt' });
   for (let i = 0; i < 200 && !(await getTask(project, id)).gates[1].resolved?.notified; i++) await new Promise(resolve => setTimeout(resolve, 10));
   stored = await getTask(project, id);
-  assert.deepEqual([stored.gates[1].resolved.by, stored.gates[1].resolved.channel], ['user', 'paseo']);
+  assert.deepEqual([stored.gates[1].resolved!.by, stored.gates[1].resolved!.channel], ['user', 'paseo']);
   // The answered card goes when the runtime handles the answer, not when the task file is written (t-1861).
   for (let i = 0; i < 200 && cards().length > 0; i++) await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(cards().length, 0);
@@ -108,7 +113,7 @@ test('gates (t-ccac): task.gate.resolve approves with a choice or rejects, recor
   assert.equal(approved.status, 'open');
   for (let i = 0; i < 200 && !(await getTask(project, id)).gates[0].resolved?.notified; i++) await new Promise(resolve => setTimeout(resolve, 10));
   stored = await getTask(project, id);
-  assert.deepEqual([stored.gates[0].resolved.choice, stored.gates[0].resolved.channel, !!stored.gates[0].resolved.notified], ['B', 'paseo', true]);
+  assert.deepEqual([stored.gates[0].resolved!.choice, stored.gates[0].resolved!.channel, !!stored.gates[0].resolved!.notified], ['B', 'paseo', true]);
   await fails('task.gate.resolve', { projectRoot: project, id, gate: 'g1', choice: 'A' }, 1004, 'task_state');
 });
 
@@ -124,13 +129,13 @@ test('question.answer refuses a gate card answer that decides nothing, with the 
   defer(() => viewer.close());
   const { session } = await viewer.request('session.create', { spec: { cwd: project } });
   await viewer.request('session.attach', { sessionId: session.id });
-  const open = async () => (await viewer.request('question.list', {})).questions.map(question => question.id);
+  const open = async () => (await viewer.request('question.list', {})).questions.map((question: Json) => question.id);
   for (let i = 0; i < 200 && (await open()).length < 2; i++) await new Promise(resolve => setTimeout(resolve, 10));
   assert.deepEqual((await open()).sort(), [`gate-${id}-g1`, `gate-${other}-g1`].sort());
 
   // The CLI approved it without alpd: the card's answer says so instead of vanishing.
   await resolveGate(project, id, 'g1', { by: 'user', channel: 'cli' });
-  await assert.rejects(viewer.request('question.answer', { questionId: `gate-${id}-g1`, text: 'Từ chối' }), error => {
+  await assert.rejects(viewer.request('question.answer', { questionId: `gate-${id}-g1`, text: 'Từ chối' }), (error: Json) => {
     assert.deepEqual([error.code, error.data?.reason], [1004, 'task_state'], error.message);
     assert.match(error.message, /already approved in cli/);
     return true;
@@ -138,7 +143,7 @@ test('question.answer refuses a gate card answer that decides nothing, with the 
   assert.equal((await getTask(project, id)).gates[0].rejected, undefined);
   // The write fails: the task file is unreadable.
   await writeFile(path.join(project, '.alp', 'tasks', `${other}.json`), '{ not json');
-  await assert.rejects(viewer.request('question.answer', { questionId: `gate-${other}-g1`, text: 'Duyệt' }), error => {
+  await assert.rejects(viewer.request('question.answer', { questionId: `gate-${other}-g1`, text: 'Duyệt' }), (error: Json) => {
     assert.deepEqual([error.code, error.data?.reason], [1001, 'unknown_task'], error.message);
     return true;
   });
@@ -166,7 +171,7 @@ test('tasks: create, list, close, reopen and approve a gate, with revisions and 
   const { id } = await call('task.create', { projectRoot: project, title: '  Viết test 😀  ', priority: 1 });
   let list = await call('task.list', { projectRoot: project });
   assert.equal(list.projectRoot, project);
-  assert.deepEqual(list.tasks.map(task => [task.id, task.title, task.priority, task.status]), [[id, 'Viết test 😀', 1, 'open']]);
+  assert.deepEqual(list.tasks.map((task: Json) => [task.id, task.title, task.priority, task.status]), [[id, 'Viết test 😀', 1, 'open']]);
   const before = list.revision;
 
   const closed = await call('task.update', { projectRoot: project, id, action: 'close', note: 'Xong', ifRev: list.tasks[0].rev });
@@ -190,7 +195,7 @@ test('tasks: create, list, close, reopen and approve a gate, with revisions and 
   await fails('task.gate.resolve', { projectRoot: project, id, gate: 'g1' }, 1004, 'task_state');
   assert.equal((await call('task.list', { projectRoot: project })).tasks[0].approvals, undefined);
   const [stored] = (await loadTasks(project)).tasks;
-  assert.equal(stored.log.find(entry => entry.event === 'gate cleared').by, 'user');
+  assert.equal(stored.log.find(entry => entry.event === 'gate cleared')!.by, 'user');
 
   await fails('task.update', { projectRoot: project, id: 't-ffff', action: 'close' }, 1001, 'unknown_task');
   // The schema refuses bad params before anything runs.
@@ -295,8 +300,8 @@ test('library: secrets never leave alpd, and a save keeps, replaces or removes e
   assert.deepEqual(provider.content.provider.env, { GEMINI_API_KEY: { $secret: 'keep' } });
   assert.equal(provider.content.provider.command, 'gemini');
   const { models } = await call('library.models', {});
-  assert.ok(models.some(model => model.id === 'acp:gem/g-2'));
-  assert.ok(models.some(model => model.id.startsWith('codex:')));
+  assert.ok(models.some((model: Json) => model.id === 'acp:gem/g-2'));
+  assert.ok(models.some((model: Json) => model.id.startsWith('codex:')));
   assert.equal(JSON.stringify(models).includes('g-secret') || JSON.stringify(models).includes('gemini --acp'), false);
   await fails('library.save', { kind: 'providers', name: 'gem', scope: 'project', projectRoot: project, content: provider.content }, -32602, 'invalid_scope');
 });
@@ -308,7 +313,7 @@ test('library: revisions refuse a save over another change; concurrent saves nev
   const results = await Promise.allSettled(['A', 'B', 'C'].map(body => call('library.save', { kind: 'skills', name: 'tdd', scope: 'project', projectRoot: project, content: { body }, revision: created.revision })));
   assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
   for (const result of results.filter(result => result.status === 'rejected')) assert.equal(result.reason.data.reason, 'revision_conflict');
-  const winner = results.find(result => result.status === 'fulfilled').value;
+  const winner = (results.find(result => result.status === 'fulfilled') as PromiseFulfilledResult<Json>).value;
   const current = await call('library.get', { kind: 'skills', name: 'tdd', projectRoot: project, scope: 'project' });
   assert.equal(current.revision, winner.revision);
 
@@ -337,15 +342,15 @@ test('library.list and team.list show the layers without host paths', async t =>
   const { home, project, call } = await setup(t);
   const agents = await call('library.list', { kind: 'agents', projectRoot: project });
   assert.equal(agents.projectRoot, project);
-  assert.ok(agents.entries.some(entry => entry.name === 'main' && entry.source === 'builtin'));
+  assert.ok(agents.entries.some((entry: Json) => entry.name === 'main' && entry.source === 'builtin'));
   assert.equal(JSON.stringify(agents).includes(home), false);
   assert.equal((await call('library.list', { kind: 'teams' })).projectRoot, null);
   const teams = await call('team.list', { projectRoot: project });
-  assert.deepEqual(teams.teams.slice(0, 2).map(team => [team.id, team.source]), [['pho', 'builtin'], ['cafe', 'builtin']]);
+  assert.deepEqual(teams.teams.slice(0, 2).map((team: Json) => [team.id, team.source]), [['pho', 'builtin'], ['cafe', 'builtin']]);
   const team = await call('library.get', { kind: 'teams', name: 'pho' });
   await call('library.save', { kind: 'teams', name: 'mine', scope: 'library', content: team.content, revision: null });
   const listed = await call('team.list', {});
-  assert.ok(listed.teams.some(entry => entry.id === 'mine' && entry.source === 'library' && !('path' in entry)));
+  assert.ok(listed.teams.some((entry: Json) => entry.id === 'mine' && entry.source === 'library' && !('path' in entry)));
   assert.equal(JSON.stringify(listed).includes(home), false);
 });
 
@@ -400,6 +405,6 @@ test('project-data library policy is enforced by the authoritative daemon mutati
   await fails('library.rename', { ...safe, from: 'host-entry', to: 'host-renamed' }, 1003, 'library_policy');
   await mkdir(path.join(project, '.alp/agents/project-writer/hooks'));
   await writeFile(path.join(project, '.alp/agents/project-writer/hooks/sidecar.sh'), 'echo unsafe');
-  for (const [method, params] of [['save', { name: 'project-writer', content }], ['delete', { name: 'project-writer' }], ['duplicate', { from: 'project-writer', to: 'copy' }], ['rename', { from: 'project-writer', to: 'renamed' }]]) await fails('library.' + method, { ...safe, ...params }, 1003, 'library_policy');
+  for (const [method, params] of [['save', { name: 'project-writer', content }], ['delete', { name: 'project-writer' }], ['duplicate', { from: 'project-writer', to: 'copy' }], ['rename', { from: 'project-writer', to: 'renamed' }]] as [string, Json][]) await fails('library.' + method, { ...safe, ...params }, 1003, 'library_policy');
   assert.equal(await readFile(path.join(project, '.alp/agents/project-writer/hooks/sidecar.sh'), 'utf8'), 'echo unsafe');
 });

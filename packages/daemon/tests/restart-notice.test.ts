@@ -10,8 +10,10 @@
 // Each test sets the situation up for real (alpd processes on a scratch home, or two runtimes on
 // one state directory) and also checks that a real crash is still reported and still reopens work.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { openSync, closeSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
@@ -25,7 +27,11 @@ import { connect, daemonPaths, readLock } from '@anhlp/alp-client';
 import { diagnose } from '@anhlp/alp-client/doctor';
 
 import { fakeTransport, until as soon, workspace } from '../../../test/support/recovery.ts';
+import type { FakeRuntime } from '../../../test/support/recovery.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+
+// `any`: alpd's answers, events and errors are JSON whose shape depends on the method; the tests read the fields they assert on.
+type Json = any;
 
 const ALPD = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
 const FAKE_CODEX = fileURLToPath(new URL('./support/fake-codex.js', import.meta.url));
@@ -33,19 +39,19 @@ const MODEL = 'codex:gpt-5.6-sol';
 // The fake provider is a Node script run as an executable; (a) puts a plain file where a Unix socket goes.
 const skip = process.platform === 'win32' && 'POSIX processes and sockets only';
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
-async function until(check, what) {
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (error: Json) { return error.code === 'EPERM'; } };
+async function until(check: () => unknown, what: string) {
   for (let i = 0; i < 600; i++) { if (await check()) return; await sleep(25); }
   assert.fail(`${what} did not happen`);
 }
-const text = body => [{ type: 'text', text: body }];
-const exists = file => stat(file).then(() => true, () => false);
+const text = (body: string) => [{ type: 'text', text: body }];
+const exists = (file: string) => stat(file).then(() => true, () => false);
 /** What alp doctor says of alpd while none runs; no provider command is run for it. */
-const doctorSays = async home => (await diagnose({ home, run: async () => ({ code: -1, stdout: '', stderr: 'not run by this test' }) })).find(check => check.id === 'alpd').summary;
+const doctorSays = async (home: Json) => (await diagnose({ home, run: async () => ({ code: -1, stdout: '', stderr: 'not run by this test' }) })).find(check => check.id === 'alpd')!.summary;
 
 /** A scratch home and project, and alpd processes started on them one after another. */
-async function harness(t) {
+async function harness(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-restart-'));
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -57,11 +63,11 @@ async function harness(t) {
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
   const journalFile = path.join(directory, 'provider.jsonl');
   const logFile = path.join(directory, 'alpd.log');
-  const started = [];
+  const started: ChildProcess[] = [];
   const journal = async () => (await readFile(journalFile, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
   // After the removal above in setup order, so it runs before it: no process outlives the test.
   defer(async () => {
-    for (const child of started) if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    for (const child of started) if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid!, 'SIGKILL'); } catch {}
     for (const { pid } of await journal()) if (alive(pid)) try { process.kill(pid, 'SIGKILL'); } catch {}
   });
 
@@ -78,7 +84,7 @@ async function harness(t) {
   }
 
   /** Starts alpd as a detached process group leader and waits until it is ready. */
-  async function start({ env } = {}) {
+  async function start({ env }: { env?: Record<string, string> } = {}) {
     const { child, exited } = launch(env);
     let gone = false;
     void exited.then(() => { gone = true; });
@@ -87,11 +93,11 @@ async function harness(t) {
       const lock = await readLock(home);
       return lock?.ready && lock.pid === child.pid;
     }, 'alpd to be ready');
-    const client = await connect((await readLock(home)).socket, { name: 'restart-test', version: '0' });
+    const client = await connect((await readLock(home))!.socket, { name: 'restart-test', version: '0' });
     return {
       pid: child.pid, client, exited,
-      request: (method, params) => client.request(method, params),
-      async kill() { process.kill(child.pid, 'SIGKILL'); await exited; client.close(); },
+      request: (method: string, params?: unknown) => client.request(method, params),
+      async kill() { process.kill(child.pid!, 'SIGKILL'); await exited; client.close(); },
       async stop() { await client.request('daemon.shutdown').catch(() => {}); client.close(); return exited; },
     };
   }
@@ -111,7 +117,7 @@ async function harness(t) {
       await rm(socket);
       return result;
     },
-    create: daemon => daemon.request('session.create', { spec: { cwd: project, persist: true, model: MODEL } }),
+    create: (daemon: Json) => daemon.request('session.create', { spec: { cwd: project, persist: true, model: MODEL } }),
     /** The session records on disk: file name → status. A `.tmp` among them is a write that was cut off. */
     async records() {
       const directory = path.join(home, 'state', 'sessions');
@@ -121,7 +127,7 @@ async function harness(t) {
     /** The recovery prompts the provider received, across every provider process. */
     async recoveryPrompts() { return (await journal()).filter(entry => entry.method === 'turn/start' && /during your turn/.test(entry.text ?? '')).map(entry => entry.text); },
     /** The notices kept in a root's timeline. */
-    async notices(sessionId) {
+    async notices(sessionId: string) {
       const lines = (await readFile(path.join(home, 'state', 'timeline', `${sessionId}.jsonl`), 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line));
       return lines.filter(envelope => envelope.event?.type === 'item' && envelope.event.item.kind === 'notice').map(envelope => envelope.event.item.text);
     },
@@ -244,9 +250,9 @@ test('t-11c7 (b): an ALP_STOP_TIMEOUT_MS that is not a number of milliseconds fr
 });
 
 /** Main delegates one task to a peer in a first runtime; returns what the test needs to end it either way. */
-async function delegated(t) {
+async function delegated(t: TestContext) {
   const { directory, root, options } = await workspace(t);
-  const runtimes = [];
+  const runtimes: FakeRuntime[] = [];
   const first = createAlpRuntime({ ...options, transport: fakeTransport(runtimes) });
   await first.open('root', { cwd: root, persist: true });
   await first.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: text('Build it') });
@@ -263,11 +269,11 @@ async function delegated(t) {
 }
 
 /** The next alpd's runtime on the same state, with the root open again as alpd opens it. */
-async function next(t, { options, runtimes, root }, snapshot) {
+async function next(t: TestContext, { options, runtimes, root }: Awaited<ReturnType<typeof delegated>>, snapshot: Json) {
   const defer = teardown(t);
   const second = createAlpRuntime({ ...options, transport: fakeTransport(runtimes), previousExit: { kind: 'crash', at: '2026-10-29T11:52:22.440Z' } });
   defer(() => second.shutdown());
-  const events = [];
+  const events: Json[] = [];
   second.onEvent(envelope => events.push(envelope));
   const reopen = () => second.open('root', { cwd: root, persist: true, restore: { agent: 'main', threadId: snapshot.threadId, runtime: snapshot.runtime, model: snapshot.model, workflow: snapshot.workflow } });
   const notices = () => events.filter(envelope => envelope.event.type === 'item' && envelope.event.item.kind === 'notice').map(envelope => envelope.event.item.text);
@@ -303,7 +309,7 @@ test('t-11c7 (c): a finished assignment that live.json still lists is not reopen
   assert.deepEqual(notices(), [], 'nothing was reopened, so nothing is announced');
   const settled = await getTask(work.root, task.id);
   assert.equal(settled.status, 'review');
-  assert.equal(settled.log.at(-1).event, 'submitted');
+  assert.equal(settled.log.at(-1)!.event, 'submitted');
   assert.ok((await runLog()).some(entry => entry.event === 'assignment.stale' && entry.assignmentId === id), 'the run log says why it was left alone');
 });
 
@@ -318,11 +324,11 @@ test('t-11c7 (c): an assignment that was still running when alpd crashed is reop
   assert.deepEqual(second.recoverable().map(entry => entry.assignmentId), [id]);
   await reopen();
   assert.deepEqual(await second.recover('root', { continueRoot: true }), [{ assignmentId: id, agent: 'peer', outcome: 'resumed' }]);
-  const peerAgain = runtimes.at(-1);
+  const peerAgain = runtimes.at(-1)!;
   assert.equal(peerAgain.calls[0].params.threadId, peer.threadId);
   await soon(() => peerAgain.started.length === 1, 'the peer to continue');
   assert.match(peerAgain.lastText(), /^ALP: alpd stopped unexpectedly while you worked on this assignment, and reopened this session\./);
   assert.deepEqual(notices(), ['ALP: alpd stopped unexpectedly (around 2026-10-29T11:52:22.440Z). 1 of 1 running assignments reopened, and this session.']);
-  assert.equal((await getTask(work.root, task.id)).assignee.assignment, id);
+  assert.equal((await getTask(work.root, task.id))!.assignee!.assignment, id);
   assert.equal((await live()).length, 1);
 });

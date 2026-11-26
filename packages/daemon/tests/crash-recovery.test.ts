@@ -2,8 +2,10 @@
 // process with a fake Codex app-server, killed before and after its receipt and before and after
 // the provider has the prompt, then restarted on the same home. No model is called.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { openSync, closeSync } from 'node:fs';
 import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -13,22 +15,25 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
 import { connect, readLock } from '@anhlp/alp-client';
 
+// `any`: alpd's answers, events and errors are JSON whose shape depends on the method; the tests read the fields they assert on.
+type Json = any;
+
 const ALPD = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
 const FAKE_CODEX = fileURLToPath(new URL('./support/fake-codex.js', import.meta.url));
 const MODEL = 'codex:gpt-5.6-sol';
 // The fake provider is a Node script run as an executable, and the crashed group is a POSIX process group.
 const skip = process.platform === 'win32' && 'POSIX processes only';
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
-async function until(check, what) {
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (error: Json) { return error.code === 'EPERM'; } };
+async function until(check: () => unknown, what: string) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await sleep(25); }
   assert.fail(`${what} did not happen`);
 }
-const text = body => [{ type: 'text', text: body }];
+const text = (body: string) => [{ type: 'text', text: body }];
 
 /** A home and project for one test, and alpd processes started on them one after another. */
-async function harness(t, { settings = {} } = {}) {
+async function harness(t: TestContext, { settings = {} } = {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-crash-'));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
@@ -39,14 +44,14 @@ async function harness(t, { settings = {} } = {}) {
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
   const journalFile = path.join(directory, 'provider.jsonl');
   const logFile = path.join(directory, 'alpd.log');
-  const started = [];
+  const started: ChildProcess[] = [];
 
   async function journal() {
     return (await readFile(journalFile, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
   }
 
   /** Starts alpd as a detached process group leader, as `alpd --detach` and service managers do. */
-  async function start({ crashAt, env = {} } = {}) {
+  async function start({ crashAt, env = {} }: { crashAt?: string, env?: Record<string, string> } = {}) {
     const log = openSync(logFile, 'a');
     const child = spawn(process.execPath, [ALPD], {
       detached: true,
@@ -63,21 +68,21 @@ async function harness(t, { settings = {} } = {}) {
       const lock = await readLock(home);
       return lock?.ready && lock.pid === child.pid;
     }, 'alpd to be ready');
-    const client = await connect((await readLock(home)).socket, { name: 'crash-test', version: '0' });
-    const events = [];
+    const client = await connect((await readLock(home))!.socket, { name: 'crash-test', version: '0' });
+    const events: Json[] = [];
     client.onEvent(envelope => events.push(envelope));
     return {
       pid: child.pid, client, events, exited,
-      request: (method, params) => client.request(method, params),
+      request: (method: string, params?: unknown) => client.request(method, params),
       /** Kills alpd as a crash would and waits for it to go. */
-      async kill() { process.kill(child.pid, 'SIGKILL'); await exited; client.close(); },
+      async kill() { process.kill(child.pid!, 'SIGKILL'); await exited; client.close(); },
       async crashed() { const result = await exited; client.close(); assert.equal(result.signal, 'SIGKILL'); },
       async stop() { await client.request('daemon.shutdown').catch(() => {}); client.close(); await exited; },
     };
   }
 
   t.after(async () => {
-    for (const child of started) if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    for (const child of started) if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid!, 'SIGKILL'); } catch {}
     for (const { pid } of await journal()) if (alive(pid)) try { process.kill(pid, 'SIGKILL'); } catch {}
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
@@ -86,13 +91,13 @@ async function harness(t, { settings = {} } = {}) {
     home, project, journal, logFile,
     start,
     /** The turn/starts the provider received that carry `marker`, across every provider process. */
-    async received(marker) { return (await journal()).filter(entry => entry.method === 'turn/start' && entry.text?.includes(marker)); },
-    create: (daemon, params = {}) => daemon.request('session.create', { spec: { cwd: project, persist: true, model: MODEL }, ...params }),
-    timelineFile: sessionId => path.join(home, 'state', 'timeline', `${sessionId}.jsonl`),
+    async received(marker: string) { return (await journal()).filter(entry => entry.method === 'turn/start' && entry.text?.includes(marker)); },
+    create: (daemon: { request(method: string, params?: unknown): Promise<Json> }, params = {}) => daemon.request('session.create', { spec: { cwd: project, persist: true, model: MODEL }, ...params }),
+    timelineFile: (sessionId: Json) => path.join(home, 'state', 'timeline', `${sessionId}.jsonl`),
   };
 }
 
-const outcomeUnknown = error => error?.code === 1004 && error.data?.reason === 'outcome_unknown';
+const outcomeUnknown = (error: Json) => error?.code === 1004 && error.data?.reason === 'outcome_unknown';
 
 test('killed before the pending receipt: nothing was recorded or sent, and the same id sends once after restart', { skip }, async t => {
   const h = await harness(t);
@@ -141,7 +146,7 @@ test('killed while the provider has the prompt but has not answered: outcome unk
   t.after(() => second.stop());
   const { sessions } = await second.request('session.list', { includeClosed: true });
   // It never became a running turn, so nothing reopens or continues it.
-  assert.equal(sessions.find(row => row.id === session.id).status, 'closed');
+  assert.equal(sessions.find((row: Json) => row.id === session.id).status, 'closed');
   await h.create(second, { sessionId: session.id });
   await assert.rejects(second.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('charlie [kill-parent]') }), outcomeUnknown);
   assert.equal((await second.request('session.prompt', { sessionId: session.id, clientMessageId: 'm2', content: text('delta') })).outcome, 'accepted');
@@ -161,7 +166,7 @@ test('killed after the provider accepted, before the receipt completed: the time
   const second = await h.start();
   t.after(() => second.stop());
   // The interrupted turn is reported, and with recovery parked the root does not continue by itself.
-  await until(async () => (await second.request('session.list', { includeClosed: true })).sessions.find(row => row.id === session.id)?.parked, 'the root to reopen parked');
+  await until(async () => (await second.request('session.list', { includeClosed: true })).sessions.find((row: Json) => row.id === session.id)?.parked, 'the root to reopen parked');
   await second.request('session.attach', { sessionId: session.id });
   await until(() => second.events.some(e => e.event.type === 'turn.ended' && e.event.state === 'failed' && e.event.error?.code === 'daemon_restarted'), 'the interrupted turn in the replay');
   assert.deepEqual(await second.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('echo [hold]') }), { outcome: 'accepted', duplicate: true, durable: true });
@@ -180,7 +185,7 @@ test('killed after the receipt completed: a retry is a duplicate', { skip }, asy
   t.after(() => second.stop());
   await h.create(second, { sessionId: session.id });
   assert.deepEqual(await second.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('foxtrot') }), { outcome: 'accepted', duplicate: true, durable: true });
-  await assert.rejects(second.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('other') }), error => error.code === 1004 && error.data?.reason === 'key_conflict');
+  await assert.rejects(second.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('other') }), (error: Json) => error.code === 1004 && error.data?.reason === 'key_conflict');
   assert.equal((await h.received('foxtrot')).length, 1);
 });
 
@@ -274,7 +279,7 @@ test('a timeline line cut short by a crash is dropped; cursors keep increasing a
   `);
   const second = await h.start({ env: { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${JSON.stringify(pathToFileURL(preload).href)}` } });
   t.after(() => second.stop());
-  await until(async () => (await second.request('session.list', { includeClosed: true })).sessions.find(row => row.id === session.id)?.parked, 'the root to reopen parked');
+  await until(async () => (await second.request('session.list', { includeClosed: true })).sessions.find((row: Json) => row.id === session.id)?.parked, 'the root to reopen parked');
   await until(() => readFile(gate + '.ready').then(() => true, () => false), 'the post-repair append to pause');
   const heldTail = (await readFile(h.timelineFile(session.id), 'utf8')).split('\n').at(-1);
   assert.equal(heldTail, ('{"sessionId":"' + session.id).slice(0, 15), 'attach may observe memory before this append finishes');
@@ -288,9 +293,9 @@ test('a timeline line cut short by a crash is dropped; cursors keep increasing a
   assert.equal(cursor, replayed.at(-1).cursor);
 
   // A cursor this tree never reached: the whole timeline, marked as a reset.
-  const other = await connect((await readLock(h.home)).socket, { name: 'late', version: '0' });
+  const other = await connect((await readLock(h.home))!.socket, { name: 'late', version: '0' });
   t.after(() => other.close());
-  const events = [];
+  const events: Json[] = [];
   other.onEvent(envelope => events.push(envelope));
   const reset = await other.request('session.attach', { sessionId: session.id, after: cursor + 1000 });
   assert.equal(reset.reset, true);

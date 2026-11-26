@@ -5,6 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { closeSync, openSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -14,18 +15,21 @@ import { fileURLToPath } from 'node:url';
 import { initProject } from '@anhlp/alp-core/init';
 import { connect, readLock } from '@anhlp/alp-client';
 
+// `any`: alpd's answers, events and errors are JSON whose shape depends on the method; the tests read the fields they assert on.
+type Json = any;
+
 const ALPD = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
 const FAKE_CLAUDE = fileURLToPath(new URL('./support/fake-claude.js', import.meta.url));
 const MODEL = 'claude:sonnet';
 // ClaudeTransport refuses .cmd launchers and alpd's process groups are POSIX; Windows runs the fake through `alp doctor` only.
 const skip = process.platform === 'win32' && 'POSIX processes only';
 
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(check, what) {
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+async function until(check: () => unknown, what: string) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await sleep(25); }
   assert.fail(`${what} did not happen`);
 }
-const text = body => [{ type: 'text', text: body }];
+const text = (body: string) => [{ type: 'text', text: body }];
 
 test('the fake answers --version and auth status as alp doctor reads them', { skip: process.platform === 'win32' && 'runs the script by its shebang' }, () => {
   const version = spawnSync(FAKE_CLAUDE, ['--version'], { encoding: 'utf8' });
@@ -47,9 +51,9 @@ test('alpd on the fake Claude: a prompt is answered, a held turn is interrupted,
   const journalFile = path.join(directory, 'claude.jsonl');
   const logFile = path.join(directory, 'alpd.log');
   const journal = async () => (await readFile(journalFile, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
-  const started = [];
+  const started: ChildProcess[] = [];
   t.after(async () => {
-    for (const child of started) if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    for (const child of started) if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid!, 'SIGKILL'); } catch {}
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 
@@ -69,17 +73,17 @@ test('alpd on the fake Claude: a prompt is answered, a held turn is interrupted,
       const lock = await readLock(home);
       return lock?.ready && lock.pid === child.pid;
     }, 'alpd to be ready');
-    const client = await connect((await readLock(home)).socket, { name: 'fake-claude-test', version: '0' });
-    const events = [];
+    const client = await connect((await readLock(home))!.socket, { name: 'fake-claude-test', version: '0' });
+    const events: Json[] = [];
     client.onEvent(envelope => events.push(envelope));
     return {
       events,
-      request: (method, params) => client.request(method, params),
+      request: (method: string, params?: unknown) => client.request(method, params),
       async stop() { await client.request('daemon.shutdown').catch(() => {}); client.close(); await exited; },
     };
   }
-  const ended = (daemon, after) => daemon.events.filter(e => e.event.type === 'turn.ended').slice(after);
-  const answers = daemon => daemon.events.filter(e => e.event.type === 'item' && /^ok \d+: /.test(e.event.item?.text ?? '')).map(e => e.event.item.text);
+  const ended = (daemon: { events: Json[] }, after: number) => daemon.events.filter((e: Json) => e.event.type === 'turn.ended').slice(after);
+  const answers = (daemon: { events: Json[] }) => daemon.events.filter((e: Json) => e.event.type === 'item' && /^ok \d+: /.test(e.event.item?.text ?? '')).map((e: Json) => e.event.item.text);
 
   const first = await start();
   const { session } = await first.request('session.create', { spec: { cwd: project, persist: true, model: MODEL } });
@@ -88,7 +92,7 @@ test('alpd on the fake Claude: a prompt is answered, a held turn is interrupted,
   assert.equal((await first.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('hello fake') })).outcome, 'accepted');
   await until(() => ended(first, 0).length === 1, 'the first turn to end');
   assert.equal(ended(first, 0)[0].event.state, 'completed');
-  assert.ok(answers(first).some(answer => answer.includes('hello fake')), `an answer echoing the prompt: ${JSON.stringify(answers(first))}`);
+  assert.ok(answers(first).some((answer: Json) => answer.includes('hello fake')), `an answer echoing the prompt: ${JSON.stringify(answers(first))}`);
   const [spawned] = (await journal()).filter(entry => entry.method === 'spawn' && !entry.resume);
   assert.match(spawned.sessionId, /^[0-9a-f-]{36}$/);
   assert.ok(spawned.args.includes(`--session-id=${spawned.sessionId}`));
@@ -96,7 +100,7 @@ test('alpd on the fake Claude: a prompt is answered, a held turn is interrupted,
   // t-e906: /clear and its aliases are refused by session.prompt before anything is sent or recorded.
   for (const [id, body] of [['c1', '/clear'], ['c2', '/new please'], ['c3', '  /reset']]) {
     for (let attempt = 0; attempt < 2; attempt++) {
-      await assert.rejects(first.request('session.prompt', { sessionId: session.id, clientMessageId: id, content: text(body) }), error => {
+      await assert.rejects(first.request('session.prompt', { sessionId: session.id, clientMessageId: id, content: text(body) }), (error: Json) => {
         assert.equal(error.code, -32602);
         assert.equal(error.data?.reason, 'native_command_unsupported');
         assert.match(error.message, /does not pass \/clear/);
@@ -124,8 +128,8 @@ test('alpd on the fake Claude: a prompt is answered, a held turn is interrupted,
   t.after(() => second.stop());
   await second.request('session.create', { sessionId: session.id, spec: { cwd: project, persist: true, model: MODEL } });
   assert.equal((await second.request('session.prompt', { sessionId: session.id, clientMessageId: 'm3', content: text('again after restart') })).outcome, 'accepted');
-  await until(() => ended(second, 0).some(e => e.event.state === 'completed'), 'the resumed turn to complete');
-  assert.ok(answers(second).some(answer => answer.includes('again after restart')));
+  await until(() => ended(second, 0).some((e: Json) => e.event.state === 'completed'), 'the resumed turn to complete');
+  assert.ok(answers(second).some((answer: Json) => answer.includes('again after restart')));
   const resumed = (await journal()).filter(entry => entry.method === 'spawn' && entry.resume);
   assert.ok(resumed.length >= 1, 'alpd started the fake with --resume');
   assert.ok(resumed.every(entry => entry.resume === spawned.sessionId && entry.sessionId === spawned.sessionId));

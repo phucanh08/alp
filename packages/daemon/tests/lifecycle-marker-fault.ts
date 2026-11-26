@@ -1,11 +1,19 @@
 // Fail the final journal rename after a real store commit, without replacing commit logic.
 import { mkdir, readdir, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
-export function failCommittedMarker(store, state, requestId, { renameMarker = rename, removeMarker = rm } = {}) {
+import type { SessionRecord, Store } from '@anhlp/alp-daemon';
+
+/** How the marker is moved aside and put back; a test may hold the move. */
+type MarkerOptions = {
+  renameMarker?: (from: string, to: string) => Promise<void>,
+  removeMarker?: (file: string, options: { recursive: boolean }) => Promise<void>,
+};
+
+export function failCommittedMarker(store: Store, state: string, requestId: string, { renameMarker = rename, removeMarker = rm }: MarkerOptions = {}) {
   const put = store.put;
-  let blocked;
-  let scanning;
-  const pending = new Set();
+  let blocked: string | undefined;
+  let scanning: Promise<void> | undefined;
+  const pending = new Set<Promise<void>>();
   async function install() {
     for (const name of await readdir(path.join(state, 'lifecycle')).catch(() => [])) {
       if (!name.endsWith('.json')) continue;
@@ -18,7 +26,7 @@ export function failCommittedMarker(store, state, requestId, { renameMarker = re
       break;
     }
   }
-  store.put = record => {
+  store.put = (record: SessionRecord) => {
     const task = (async () => {
       await put(record);
       // The store queue covers its write, not this post-write fault installation.

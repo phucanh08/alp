@@ -12,17 +12,20 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { teardown } from '../../../test/support/teardown.ts';
 
+// `any`: alpd's JSON-RPC errors carry code and data as alpd sent them; the tests read both.
+type Json = any;
+
 function fakeTransport() {
   return () => ({
     async initialize() {}, onNotification() {}, onFailure() {}, onRequest() {}, async close() {},
-    async request(method) { return method.startsWith('thread/') ? { thread: { id: 'thread-1' } } : {}; },
+    async request(method: string) { return method.startsWith('thread/') ? { thread: { id: 'thread-1' } } : {}; },
   });
 }
 
 // Teardown in the reverse order of setup, through the one shared helper (t-5294.2, t-5294.6).
 // In this file a failed rm (ENOTEMPTY while the runtime still scaffolded the project for a main’s supervisor) skipped the server and client closes, and their sockets kept it alive until the 300 s watchdog.
 
-async function connectAs(socket, agent) {
+async function connectAs(socket: string, agent: boolean) {
   const saved = process.env.ALP_AGENT_SESSION;
   if (agent) process.env.ALP_AGENT_SESSION = '1'; else delete process.env.ALP_AGENT_SESSION;
   try { return await connect(socket, { name: 'gate-test', version: '0' }); }
@@ -51,7 +54,7 @@ test('an agent connection cannot clear a human gate or answer a question; the us
 
   const agent = await connectAs(daemonPaths(directory).socket, true);
   defer(() => agent.close());
-  const refused = error => { assert.equal(error.code, 1003, error.message + JSON.stringify(error.data)); assert.equal(error.data?.reason, 'user_only'); return true; };
+  const refused = (error: Json) => { assert.equal(error.code, 1003, error.message + JSON.stringify(error.data)); assert.equal(error.data?.reason, 'user_only'); return true; };
   await assert.rejects(agent.request('task.gate.resolve', { projectRoot: project, id: task.id, gate: 'g1' }), refused);
   await assert.rejects(agent.request('task.gate.resolve', { projectRoot: project, id: task.id, gate: 'g1', reject: true, note: 'no' }), refused);
   await assert.rejects(agent.request('question.answer', { questionId: 'q-any', text: 'yes' }), refused);
@@ -70,9 +73,9 @@ test('an agent connection cannot clear a human gate or answer a question; the us
   defer(() => user.close());
   await user.request('task.gate.resolve', { projectRoot: project, id: task.id, gate: 'g1', note: 'OK' });
   const gate = (await loadTasks(project)).tasks[0].gates[0];
-  assert.deepEqual([gate.resolved.by, gate.resolved.channel], ['user', 'web']);
+  assert.deepEqual([gate.resolved!.by, gate.resolved!.channel], ['user', 'web']);
   // The user's answer reaches the lookup (no such question), not the refusal.
-  await assert.rejects(user.request('question.answer', { questionId: 'q-any', text: 'yes' }), error => error.code === 1001);
+  await assert.rejects(user.request('question.answer', { questionId: 'q-any', text: 'yes' }), (error: Json) => error.code === 1001);
 });
 
 test('an agent connection cannot close a task with an open human gate; the user closes it, overriding the gate (t-f438)', async t => {
@@ -95,7 +98,7 @@ test('an agent connection cannot close a task with an open human gate; the user 
   await addGate(project, task.id, { kind: 'human', note: 'Ship it?' }, 'main');
   const agent = await connectAs(daemonPaths(directory).socket, true);
   defer(() => agent.close());
-  await assert.rejects(agent.request('task.update', { projectRoot: project, id: task.id, action: 'close' }), error => error.code === 1003 && error.data?.reason === 'user_only');
+  await assert.rejects(agent.request('task.update', { projectRoot: project, id: task.id, action: 'close' }), (error: Json) => error.code === 1003 && error.data?.reason === 'user_only');
   assert.equal((await loadTasks(project)).tasks[0].status, 'open');
 
   const user = await connectAs(daemonPaths(directory).socket, false);
@@ -103,7 +106,7 @@ test('an agent connection cannot close a task with an open human gate; the user 
   await user.request('task.update', { projectRoot: project, id: task.id, action: 'close' });
   const closed = (await loadTasks(project)).tasks[0];
   assert.equal(closed.status, 'closed');
-  assert.deepEqual([closed.gates[0].resolved.overridden, closed.gates[0].resolved.channel, !!closed.gates[0].tampered], [true, 'web', false]);
+  assert.deepEqual([closed.gates[0].resolved!.overridden, closed.gates[0].resolved!.channel, !!closed.gates[0].tampered], [true, 'web', false]);
 });
 
 test('session.create from an agent connection drops spec.restore; the owner\'s reaches the runtime', async t => {
@@ -117,7 +120,7 @@ test('session.create from an agent connection drops spec.restore; the owner\'s r
   await mkdir(home, { mode: 0o700 });
   const project = path.join(directory, 'project');
   await initProject(project);
-  const threads = [];
+  const threads: { method: string, threadId: unknown }[] = [];
   const runtime = createAlpRuntime({ libraryDir: home, transport: () => ({
     async initialize() {}, onNotification() {}, onFailure() {}, onRequest() {}, async close() {},
     async request(method, params) {
@@ -158,12 +161,12 @@ test('a hello that names an agent (principal.agent, t-1c59) marks the connection
   defer(async () => { await server.close(); await runtime.shutdown(); });
   const task = await createTask(project, { title: 'Release' }, 'main');
   await addGate(project, task.id, { kind: 'human', note: 'Ship it?' }, 'main');
-  const refused = error => error.code === 1003 && error.data?.reason === 'user_only';
+  const refused = (error: Json) => error.code === 1003 && error.data?.reason === 'user_only';
 
   const bad = await connectAs(daemonPaths(directory).socket, false);
   defer(() => bad.close());
   for (const name of ['Bad', '', 7, 'a-']) {
-    await assert.rejects(bad.request('daemon.hello', { protocolVersion: 1, principal: { agent: name } }), error => error.code === -32602, JSON.stringify(name));
+    await assert.rejects(bad.request('daemon.hello', { protocolVersion: 1, principal: { agent: name } }), (error: Json) => error.code === -32602, JSON.stringify(name));
   }
   const named = await connectAs(daemonPaths(directory).socket, false);
   defer(() => named.close());

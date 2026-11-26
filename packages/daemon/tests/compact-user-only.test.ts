@@ -8,8 +8,11 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { teardown } from '../../../test/support/teardown.ts';
 
+// `any`: the daemon's JSON-RPC errors carry code and data as alpd sent them; the test reads both.
+type Json = any;
+
 // session.compact rewrites the user's conversation context, so an ALP agent's connection is refused (t-de1a review).
-async function connectAs(socket, agent) {
+async function connectAs(socket: string, agent: boolean) {
   const saved = process.env.ALP_AGENT_SESSION;
   if (agent) process.env.ALP_AGENT_SESSION = '1'; else delete process.env.ALP_AGENT_SESSION;
   try { return await connect(socket, { name: 'compact-test', version: '0' }); }
@@ -21,7 +24,7 @@ test('alpd: session.compact answers the owner and refuses an agent connection 10
   const base = await mkdtemp(path.join(tmpdir(), 'alp-compact-'));
   defer(() => rm(base, { recursive: true, force: true }));
   await mkdir(base, { recursive: true, mode: 0o700 });
-  const compacted = [];
+  const compacted: string[] = [];
   const library = path.join(base, 'library');
   await mkdir(library, { mode: 0o700 });
   const transport = () => ({ async initialize() {}, onNotification() {}, onFailure() {}, onRequest() {}, async close() {}, async request() { return {}; } });
@@ -37,7 +40,7 @@ test('alpd: session.compact answers the owner and refuses an agent connection 10
   const agent = await connectAs(daemonPaths(base).socket, true);
   defer(() => agent.close());
   await agent.request('daemon.hello', { protocolVersion: 1 }).catch(() => {});
-  await assert.rejects(agent.request('session.compact', { sessionId: 'sb' }), error => error.code === 1003 && error.data?.reason === 'user_only');
+  await assert.rejects(agent.request('session.compact', { sessionId: 'sb' }), (error: Json) => error.code === 1003 && error.data?.reason === 'user_only');
   assert.deepEqual(compacted, ['sa']);
   // fork, rewind and reload are the user's too (t-d08b): the agent is refused before anything else,
   // while the owner reaches the method (here refused only because this alpd lists no conversation capability).
@@ -48,7 +51,7 @@ test('alpd: session.compact answers the owner and refuses an agent connection 10
     'session.reload': { sessionId: 'sa', requestId: 'r3', ifGeneration },
   };
   for (const [method, params] of Object.entries(asked)) {
-    await assert.rejects(agent.request(method, params), error => error.code === 1003 && error.data?.reason === 'user_only', method);
-    await assert.rejects(owner.request(method, params), error => error.code === -32601 && error.data?.reason !== 'user_only', method);
+    await assert.rejects(agent.request(method, params), (error: Json) => error.code === 1003 && error.data?.reason === 'user_only', method);
+    await assert.rejects(owner.request(method, params), (error: Json) => error.code === -32601 && error.data?.reason !== 'user_only', method);
   }
 });

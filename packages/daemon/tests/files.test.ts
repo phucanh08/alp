@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
@@ -9,8 +10,11 @@ import { fileURLToPath } from 'node:url';
 import { WORKSPACE_FILES, blockedFilePath } from '@anhlp/alp-protocol';
 import { FIND_LIMITS, GIT_CHECK, createFindPages, findWorkspaceEntries, gitChecksRunning, listWorkspaceDirectory, previewWorkspaceFile, readWorkspaceFile, relativeSegments, resolveGit, searchHostDirectories, searchWorkspaceFiles } from '@anhlp/alp-daemon/files';
 
+// `any`: alpd's file answers and refusals are JSON, and some params are invalid on purpose; the tests read the fields they assert on.
+type Json = any;
+
 /** A workspace and a directory beside it ("outside"), both removed after the test. */
-async function workspace(t) {
+async function workspace(t: TestContext) {
   const base = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-files-')));
   t.after(() => rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const root = path.join(base, 'project');
@@ -24,7 +28,7 @@ async function workspace(t) {
 const hasGit = (() => { try { execFileSync('git', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 const noGit = !hasGit && 'git is not installed';
 /** Makes `root` a Git repository, as a workspace whose .gitignore applies is. */
-const repo = root => execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
+const repo = (root: string) => execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
 /**
  * Windows runs no script as a program without a shell, and alpd runs git with none: there the
  * stand-in git is git.exe, built once from support/fake-git.cs with the C# compiler of the .NET
@@ -40,11 +44,11 @@ const fakeGitExe = () => (launcher ??= (async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-fake-git-exe-'));
   process.once('exit', () => rmSync(directory, { recursive: true, force: true }));
   const exe = path.join(directory, 'git.exe');
-  execFileSync(csc, ['-nologo', '-optimize', `-out:${exe}`, fileURLToPath(new URL('./support/fake-git.cs', import.meta.url))], { stdio: 'pipe', windowsHide: true });
+  execFileSync(csc!, ['-nologo', '-optimize', `-out:${exe}`, fileURLToPath(new URL('./support/fake-git.cs', import.meta.url))], { stdio: 'pipe', windowsHide: true });
   return exe;
 })());
 /** A stand-in git: a Node script that does what `body` says (it gets argv, env, cwd and stdin). */
-async function fakeGit(t, body) {
+async function fakeGit(t: TestContext, body: string) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-fake-git-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const script = `const fs = require('node:fs');\nconst input = fs.readFileSync(0, 'utf8');\n${body}\n`;
@@ -61,12 +65,12 @@ async function fakeGit(t, body) {
   return { binary: file, directory };
 }
 
-const put = async (file, content) => { await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, content); };
+const put = async (file: string, content: string | Buffer) => { await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, content); };
 /** The refusal of a promise: its code and reason, and its message, which must name no host path. */
-async function refusal(promise, base) {
+async function refusal(promise: Promise<unknown>, base?: string) {
   try {
     await promise;
-  } catch (error) {
+  } catch (error: Json) {
     if (base) assert.ok(!String(error.message).includes(base), `no host path in ${error.message}`);
     return { code: error.code, reason: error.reason };
   }
@@ -102,8 +106,8 @@ test('read and list: blocked paths are refused and never listed, their content n
     assert.deepEqual(await refusal(readWorkspaceFile(root, { path: file, includeIgnored: true }), root), { code: 1003, reason: 'blocked_path' }, file);
   }
   // Listing every directory: no blocked entry, no sentinel.
-  const seen = [];
-  const walk = async relative => {
+  const seen: Json[] = [];
+  const walk = async (relative: Json) => {
     const { entries } = await listWorkspaceDirectory(root, { ...(relative ? { path: relative } : {}), includeIgnored: true });
     for (const entry of entries) {
       seen.push(entry.path);
@@ -179,7 +183,7 @@ test('races: a file or directory swapped while it is read is refused (TOCTOU)', 
   await put(path.join(outside, 'secret.txt'), 'SENTINEL-outside');
   await put(path.join(root, 'sub', 'a.txt'), 'inside');
   // The file becomes a link to a file outside between the check and the open.
-  const swapFile = async step => {
+  const swapFile = async (step: Json) => {
     if (step !== 'checked') return;
     await unlink(path.join(root, 'sub', 'a.txt'));
     await symlink(path.join(outside, 'secret.txt'), path.join(root, 'sub', 'a.txt'));
@@ -188,7 +192,7 @@ test('races: a file or directory swapped while it is read is refused (TOCTOU)', 
   // Another file takes its name between the check and the open.
   await unlink(path.join(root, 'sub', 'a.txt'));
   await put(path.join(root, 'sub', 'a.txt'), 'inside');
-  const replace = async step => {
+  const replace = async (step: Json) => {
     if (step !== 'checked') return;
     await put(path.join(root, 'other.txt'), 'SENTINEL-other');
     await rename(path.join(root, 'other.txt'), path.join(root, 'sub', 'a.txt'));
@@ -198,7 +202,7 @@ test('races: a file or directory swapped while it is read is refused (TOCTOU)', 
   // handle's identity check, or the directories' check after the read, sees it.
   await put(path.join(outside, 'sub', 'a.txt'), 'SENTINEL-outside-sub');
   await writeFile(path.join(root, 'sub', 'a.txt'), 'inside');
-  const swapDirectory = at => async step => {
+  const swapDirectory = (at: string) => async (step: Json) => {
     if (step !== at) return;
     await rename(path.join(root, 'sub'), path.join(root, 'sub-moved'));
     await symlink(path.join(outside, 'sub'), path.join(root, 'sub'));
@@ -212,8 +216,8 @@ test('races: a file or directory swapped while it is read is refused (TOCTOU)', 
   if (process.platform === 'win32') {
     // NTFS renames no directory that holds an open file: while the file is read, its directory
     // cannot be swapped, and what is read is the file inside. Where the swap does happen, it is refused.
-    let swap;
-    const probe = async step => {
+    let swap: string | undefined;
+    const probe = async (step: Json) => {
       if (step !== 'read') return;
       swap = await swapDirectory('read')(step).then(() => 'swapped', error => error.code);
     };
@@ -222,7 +226,7 @@ test('races: a file or directory swapped while it is read is refused (TOCTOU)', 
       assert.deepEqual(read, { code: 1003, reason: 'linked' });
       await swapBack();
     } else {
-      assert.ok(['EPERM', 'EACCES', 'EBUSY'].includes(swap), `the swap failed for another reason: ${swap}`);
+      assert.ok(['EPERM', 'EACCES', 'EBUSY'].includes(swap!), `the swap failed for another reason: ${swap}`);
       assert.equal(read, 'inside');
     }
   } else {
@@ -230,7 +234,7 @@ test('races: a file or directory swapped while it is read is refused (TOCTOU)', 
     await swapBack();
   }
   // A directory listed and then swapped: the listing is dropped.
-  const swapListed = async step => {
+  const swapListed = async (step: Json) => {
     if (step !== 'listed') return;
     await rename(path.join(root, 'sub'), path.join(root, 'sub-moved'));
     await mkdir(path.join(root, 'sub'));
@@ -259,7 +263,7 @@ test('.gitignore: ignored paths are hidden and refused unless includeIgnored, as
     assert.equal(result, expected ? 'ignored' : 'read', file);
     assert.equal((await readWorkspaceFile(root, { path: file, includeIgnored: true })).content, file);
   }
-  const names = async (relative, includeIgnored = false) => (await listWorkspaceDirectory(root, { ...(relative ? { path: relative } : {}), includeIgnored })).entries.map(entry => entry.name);
+  const names = async (relative?: string, includeIgnored = false) => (await listWorkspaceDirectory(root, { ...(relative ? { path: relative } : {}), includeIgnored })).entries.map(entry => entry.name);
   assert.ok(!(await names()).includes('dist') && (await names(undefined, true)).includes('dist'));
   assert.deepEqual(await names('vendor'), ['kept'], 'a re-included directory under an ignored pattern');
   assert.deepEqual(await names('pkg'), ['sub', '.gitignore', 'root-only.txt', 'x.log'], 'a deeper .gitignore re-includes and anchors to its directory');
@@ -420,7 +424,7 @@ test('git runs boxed: argv only, no shell, the real root as cwd, names on stdin 
   const saved = { dir: process.env.GIT_DIR, tree: process.env.GIT_WORK_TREE };
   process.env.GIT_DIR = path.join(root, 'elsewhere');
   process.env.GIT_WORK_TREE = '/';
-  t.after(() => { for (const [key, value] of [['GIT_DIR', saved.dir], ['GIT_WORK_TREE', saved.tree]]) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  t.after(() => { for (const [key, value] of [['GIT_DIR', saved.dir], ['GIT_WORK_TREE', saved.tree]] as [string, string | undefined][]) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
   const listed = await listWorkspaceDirectory(root, { path: 'src', git: { binary } });
   assert.deepEqual(listed.entries.map(entry => entry.name), ['weird $(touch pwned) ;name.ts']);
   const call = JSON.parse(await readFile(record, 'utf8'));
@@ -479,7 +483,7 @@ test('special files and .git as a file: a FIFO is neither listed as readable nor
 test('a file that grows past the limit while it is read is refused as too large', async t => {
   const { root } = await workspace(t);
   await put(path.join(root, 'log.txt'), 'start\n');
-  const grow = async step => { if (step === 'checked') await writeFile(path.join(root, 'log.txt'), 'a'.repeat(WORKSPACE_FILES.maxReadBytes + 10)); };
+  const grow = async (step: Json) => { if (step === 'checked') await writeFile(path.join(root, 'log.txt'), 'a'.repeat(WORKSPACE_FILES.maxReadBytes + 10)); };
   assert.deepEqual(await refusal(readWorkspaceFile(root, { path: 'log.txt', probe: grow }), root), { code: 1000, reason: 'too_large' });
 });
 
@@ -509,7 +513,7 @@ test('a git in the workspace never runs: only absolute PATH entries are searched
 });
 
 /** A git planted in `directory` that writes a marker beside the workspace when it runs. */
-async function plantGit(root, directory) {
+async function plantGit(root: string, directory: string) {
   const marker = path.join(root, '..', 'planted-ran');
   await mkdir(directory, { recursive: true });
   const file = path.join(directory, 'git');
@@ -518,7 +522,7 @@ async function plantGit(root, directory) {
   return { file, marker };
 }
 /** A read and a listing of `root` with `entries` first on PATH; the planted git must not have run. */
-async function plantedNeverRuns(root, marker, entries) {
+async function plantedNeverRuns(root: string, marker: string, entries: string[]) {
   await put(path.join(root, 'src', 'a.ts'), 'a');
   const saved = process.env.PATH;
   process.env.PATH = [...entries, saved ?? ''].join(path.delimiter);
@@ -530,9 +534,9 @@ async function plantedNeverRuns(root, marker, entries) {
   }
   await assert.rejects(readFile(marker), { code: 'ENOENT' }, 'the planted git never ran');
 }
-const flipCase = text => text.replace(/[a-z]/gi, letter => (letter === letter.toLowerCase() ? letter.toUpperCase() : letter.toLowerCase()));
+const flipCase = (text: string) => text.replace(/[a-z]/gi, (letter: Json) => (letter === letter.toLowerCase() ? letter.toUpperCase() : letter.toLowerCase()));
 /** Whether `alias` names the same directory as `directory` (a case-insensitive file system). */
-const sameDirectory = async (alias, directory) => {
+const sameDirectory = async (alias: string, directory: string) => {
   try { const [a, b] = await Promise.all([stat(alias), stat(directory)]); return a.dev === b.dev && a.ino === b.ino; } catch { return false; }
 };
 
@@ -640,9 +644,9 @@ test('a timeout kills git and whatever it started (its process group)', { skip: 
 
 const owner = {};
 /** Every page of a find, as the Paseo bridge reads one. */
-async function allPages(page, root, params, who = owner) {
-  const entries = [];
-  let cursor;
+async function allPages(page: ReturnType<typeof createFindPages>, root: string, params: Json, who: unknown = owner) {
+  const entries: Json[] = [];
+  let cursor: string | undefined;
   do {
     const answer = await page(who, root, { ...params, ...(cursor ? { cursor } : {}) });
     entries.push(...answer.entries);
@@ -658,7 +662,7 @@ test('find: pages of one snapshot cover every name once; a cursor is bound to it
   const page = createFindPages({ now: () => clock });
   const first = await page(owner, root, { limit: 1000 });
   assert.equal(first.entries.length, 1000);
-  assert.match(first.nextCursor, /^[A-Za-z0-9_-]{22}\.1000$/);
+  assert.match(first.nextCursor!, /^[A-Za-z0-9_-]{22}\.1000$/);
   // A file added after the first page is not in this snapshot: the pages stay one consistent set.
   await put(path.join(root, 'late.txt'), '');
   const second = await page(owner, root, { limit: 1000, cursor: first.nextCursor });
@@ -673,10 +677,10 @@ test('find: pages of one snapshot cover every name once; a cursor is bound to it
   assert.deepEqual(await refusal(page(owner, root, { limit: 1000, cursor: second.nextCursor })), { code: -32602, reason: 'invalid_cursor' });
   assert.ok((await allPages(page, root, {})).some(entry => entry.path === 'late.txt'));
   const again = await page(owner, root, { limit: 1000 });
-  for (const [who, params] of [[{}, {}], [owner, { query: 'f1' }], [owner, { kinds: ['directory'] }], [owner, { matchMode: 'suffix' }]]) {
+  for (const [who, params] of [[{}, {}], [owner, { query: 'f1' }], [owner, { kinds: ['directory'] }], [owner, { matchMode: 'suffix' }]] as [unknown, Json][]) {
     assert.deepEqual(await refusal(page(who, root, { limit: 1000, ...params, cursor: again.nextCursor })), { code: -32602, reason: 'invalid_cursor' }, JSON.stringify(params));
   }
-  for (const cursor of ['x', `${again.nextCursor}0`, again.nextCursor.replace(/\.\d+$/, '.99999')]) {
+  for (const cursor of ['x', `${again.nextCursor}0`, again.nextCursor!.replace(/\.\d+$/, '.99999')]) {
     assert.deepEqual(await refusal(page(owner, root, { limit: 1000, cursor })), { code: -32602, reason: 'invalid_cursor' }, cursor);
   }
   assert.equal((await page(owner, root, { limit: 1000, cursor: again.nextCursor })).entries.length, 1000, 'the right owner and params page on');
@@ -695,7 +699,7 @@ test('find: subsequence and suffix modes, files and directories, every name for 
   const { root } = await workspace(t);
   for (const file of ['README.md', 'docs/intro.md', 'docs/guide/intro.md', 'docs/guide/introduction.md', 'src/server.ts', 'src/deep/server-utils.ts', 'Sửa lỗi/ghi chú.md']) await put(path.join(root, file), 'x');
   const page = createFindPages();
-  const find = params => allPages(page, root, params);
+  const find = (params: Json) => allPages(page, root, params);
   assert.deepEqual((await find({})).map(entry => entry.path), ['README.md', 'Sửa lỗi/ghi chú.md', 'docs/guide/intro.md', 'docs/guide/introduction.md', 'docs/intro.md', 'src/deep/server-utils.ts', 'src/server.ts']);
   assert.deepEqual(await find({ kinds: ['directory'] }), [{ path: 'Sửa lỗi', kind: 'directory' }, { path: 'docs', kind: 'directory' }, { path: 'docs/guide', kind: 'directory' }, { path: 'src', kind: 'directory' }, { path: 'src/deep', kind: 'directory' }]);
   assert.deepEqual((await find({ query: 'SRV', kinds: ['file', 'directory'] })).map(entry => entry.path), ['src/deep/server-utils.ts', 'src/server.ts'], 'letters in order, without case');
@@ -803,7 +807,7 @@ test('internal links: listed and read through as what they lead to inside the wo
   assert.deepEqual(await refusal(listWorkspaceDirectory(root, { path: 'private-link', internalLinks: true }), root), { code: 1003, reason: 'ignored' });
   assert.equal((await listWorkspaceDirectory(root, { path: 'private-link', internalLinks: true, includeIgnored: true })).target, 'private');
   const read = await previewWorkspaceFile(root, { path: 'file-link.txt', internalLinks: true });
-  assert.deepEqual([read.path, read.target, Buffer.from(read.content, 'base64').toString()], ['file-link.txt', 'real/ok.txt', 'ok']);
+  assert.deepEqual([read.path, read.target, Buffer.from(read.content!, 'base64').toString()], ['file-link.txt', 'real/ok.txt', 'ok']);
   assert.equal((await previewWorkspaceFile(root, { path: 'dir-link/ok.txt', internalLinks: true })).target, 'real/ok.txt');
   for (const [file, reason] of [['outside-link.txt', 'outside'], ['outside-dir/notes.md', 'outside'], ['env-link', 'blocked_path'], ['private-link/p.txt', 'ignored'], ['dangling', 'not_found'], ['dir-link', 'not_found']]) {
     assert.deepEqual(await refusal(previewWorkspaceFile(root, { path: file, internalLinks: true }), root), { code: reason === 'not_found' ? 1001 : 1003, reason }, file);
@@ -828,7 +832,7 @@ test('preview: text, JSON, images and binaries as the Files panel shows them; re
   await put(path.join(root, '.env'), 'SENTINEL');
   await put(path.join(outside, 'secret.txt'), 'SENTINEL-outside');
   await link(path.join(outside, 'secret.txt'), path.join(root, 'hard.txt'));
-  const preview = file => previewWorkspaceFile(root, { path: file });
+  const preview = (file: string) => previewWorkspaceFile(root, { path: file });
   const text = await preview('docs/sửa lỗi.md');
   const bytes = Buffer.from('﻿# Tiêu đề\n');
   assert.deepEqual({ ...text, modifiedAt: typeof text.modifiedAt, revision: typeof text.revision }, { path: 'docs/sửa lỗi.md', kind: 'text', mimeType: 'text/plain', size: bytes.length, modifiedAt: 'string', revision: 'string', encoding: 'base64', content: bytes.toString('base64'), offset: 0 });
@@ -840,7 +844,7 @@ test('preview: text, JSON, images and binaries as the Files panel shows them; re
     const binary = await preview(file);
     assert.deepEqual([binary.kind, binary.encoding, binary.mimeType, binary.content, binary.nextOffset], ['binary', 'none', 'application/octet-stream', undefined, undefined], file);
   }
-  for (const [file, code, reason] of [['id.txt', 1003, 'blocked_path'], ['key.png', 1003, 'blocked_path'], ['.env', 1003, 'blocked_path'], ['hard.txt', 1003, 'linked'], ['missing.txt', 1001, 'not_found'], ['docs', 1001, 'not_found'], ['../outside/secret.txt', -32602, 'invalid_path']]) {
+  for (const [file, code, reason] of [['id.txt', 1003, 'blocked_path'], ['key.png', 1003, 'blocked_path'], ['.env', 1003, 'blocked_path'], ['hard.txt', 1003, 'linked'], ['missing.txt', 1001, 'not_found'], ['docs', 1001, 'not_found'], ['../outside/secret.txt', -32602, 'invalid_path']] as [string, number, string][]) {
     assert.deepEqual(await refusal(preview(file), root), { code, reason }, file);
   }
   assert.deepEqual(await refusal(previewWorkspaceFile(root, { path: 'data.json', maxBytes: 3 }), root), { code: 1000, reason: 'too_large' });
@@ -854,11 +858,11 @@ test('preview: a large file comes in chunks of one revision; a change between ch
   const first = await previewWorkspaceFile(root, { path: 'big.log' });
   assert.deepEqual([first.kind, first.size, first.offset, first.nextOffset], ['text', size, 0, WORKSPACE_FILES.maxPreviewChunkBytes]);
   assert.ok(Buffer.byteLength(JSON.stringify(first)) < 16 * 1024 * 1024, 'a chunk fits one frame');
-  const chunks = [Buffer.from(first.content, 'base64')];
+  const chunks = [Buffer.from(first.content!, 'base64')];
   for (let offset = first.nextOffset; offset !== undefined;) {
     const chunk = await previewWorkspaceFile(root, { path: 'big.log', offset, revision: first.revision });
     assert.equal(chunk.revision, first.revision);
-    chunks.push(Buffer.from(chunk.content, 'base64'));
+    chunks.push(Buffer.from(chunk.content!, 'base64'));
     offset = chunk.nextOffset;
   }
   assert.equal(chunks.length, 3);
@@ -892,7 +896,7 @@ test('preview: .gitignore\'d files only with includeIgnored, and a race on the f
   await put(path.join(root, 'a.txt'), 'inside');
   await put(path.join(outside, 'secret.txt'), 'SENTINEL-outside');
   assert.deepEqual(await refusal(previewWorkspaceFile(root, { path: 'out/app.js' }), root), { code: 1003, reason: 'ignored' });
-  assert.equal(Buffer.from((await previewWorkspaceFile(root, { path: 'out/app.js', includeIgnored: true })).content, 'base64').toString(), 'compiled');
+  assert.equal(Buffer.from((await previewWorkspaceFile(root, { path: 'out/app.js', includeIgnored: true })).content!, 'base64').toString(), 'compiled');
   const swapped = await refusal(previewWorkspaceFile(root, { path: 'a.txt', probe: async step => {
     if (step !== 'read') return;
     await rename(path.join(root, 'a.txt'), path.join(root, 'a.old'));
@@ -906,8 +910,8 @@ test('host directories: a typed path completes in its parent, a word is found un
   for (const directory of ['Code/alp', 'Code/alpha', 'Code/Alpine', 'Code/.alp-hidden', 'Code/other', 'work/clients/alp', 'work/alp-tools', 'node_modules/alp', '.cache/alp', 'Library/alp', 'deep/a/b/c/alp']) await mkdir(path.join(home, directory), { recursive: true });
   await put(path.join(home, 'Code', 'alp.txt'), 'a file');
   await symlink(outside, path.join(home, 'Code', 'alp-link'));
-  const search = (query, options = {}) => searchHostDirectories(query, { home, ...options }).then(result => result.entries.map(entry => entry.path));
-  const code = names => names.map(name => path.join(home, 'Code', name));
+  const search = (query: string, options = {}) => searchHostDirectories(query, { home, ...options }).then(result => result.entries.map(entry => entry.path));
+  const code = (names: string[]) => names.map((name: Json) => path.join(home, 'Code', name));
   assert.deepEqual(await search(`${home}/Code/al`), code(['alp', 'alpha', 'Alpine']), 'by name, links and files left out');
   assert.deepEqual(await search('~/Code/AL'), code(['alp', 'alpha', 'Alpine']), 'under ~, without case');
   assert.deepEqual(await search('~/Code/.al'), code(['.alp-hidden']), 'dot names only when asked');
@@ -917,5 +921,5 @@ test('host directories: a typed path completes in its parent, a word is found un
   assert.deepEqual(await search('alp'), [path.join(home, 'Code', 'alp'), path.join(home, 'work', 'clients', 'alp'), path.join(home, 'Code', 'alpha'), path.join(home, 'Code', 'Alpine'), path.join(home, 'work', 'alp-tools')], 'equal, then starts with; nearer first; heavy, hidden and deeper than 4 levels left out');
   assert.deepEqual(await search('ohr'), code(['other']), 'letters in order');
   assert.deepEqual(await search('   '), []);
-  assert.deepEqual(await search(42), []);
+  assert.deepEqual(await search(42 as Json), []);
 });

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,19 +7,25 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
+import type { RuntimeTransport } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { teardown } from '../../../test/support/teardown.ts';
 
-async function until(check) {
+// `any`: provider tool answers and runtime events are JSON, and the scripted transports carry helpers the tests reach by name; the tests read the fields they assert on.
+type Json = any;
+/** A scripted native transport, as fakeTransport hands it to the runtime and to the test: its helpers and handlers are reached by name. */
+type Scripted = RuntimeTransport & { calls: { method: string, params: Json }[], [member: string]: Json };
+
+async function until(check: () => unknown) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail('Expected condition did not arrive');
 }
 
 let calls = 0;
-function fakeTransport(runtimes) {
+function fakeTransport(runtimes: Scripted[]) {
   return () => {
     const index = runtimes.length;
-    const runtime = {
+    const runtime: Scripted = {
       calls: [], threadId: `thread-${index}`, turnId: `turn-${index}`,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -29,11 +36,11 @@ function fakeTransport(runtimes) {
         if (method === 'turn/start') return { turn: { id: this.turnId } };
         return {};
       },
-      async call(tool, args, callId = `${tool}-${index}-${++calls}`) {
+      async call(tool: string, args: Json, callId = `${tool}-${index}-${++calls}`) {
         return JSON.parse((await this.serverRequest('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId, namespace: null, tool, arguments: args })).contentItems[0].text);
       },
-      texts(method) {
-        return this.calls.filter(call => call.method === method).map(call => call.params.input.map(input => input.text).join('\n'));
+      texts(method: string) {
+        return this.calls.filter(call => call.method === method).map(call => call.params.input.map((input: Json) => input.text).join('\n'));
       },
     };
     runtimes.push(runtime);
@@ -41,7 +48,7 @@ function fakeTransport(runtimes) {
   };
 }
 
-async function setup(t, options = {}) {
+async function setup(t: TestContext, options: { directory?: string, boardDir?: string } = {}) {
   const defer = teardown(t);
   const directory = options.directory ?? await mkdtemp(path.join(tmpdir(), 'alp-board-'));
   // Undone LAST: teardown runs the steps in reverse, so everything living in here is released first.
@@ -51,18 +58,18 @@ async function setup(t, options = {}) {
     await initProject(root);
     await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['peer'] } }));
   }
-  const runtimes = [];
+  const runtimes: Scripted[] = [];
   const boardDir = options.boardDir ?? path.join(directory, 'boards');
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(directory, 'runs'), boardDir });
   defer(() => runtime.shutdown());
-  const envelopes = [];
+  const envelopes: Json[] = [];
   runtime.onEvent(envelope => envelopes.push(envelope));
-  const start = async (id, mode = 'workspace-write') => {
+  const start = async (id: string, mode = 'workspace-write') => {
     await runtime.open(id, { cwd: root, mode });
     await runtime.prompt(id, { clientMessageId: `${id}-m1`, delivery: 'auto', content: [{ type: 'text', text: 'Go' }] });
-    return runtimes.at(-1);
+    return runtimes.at(-1)!;
   };
-  const of = type => envelopes.filter(envelope => envelope.event.type === type);
+  const of = (type: string) => envelopes.filter(envelope => envelope.event.type === type);
   return { directory, root, boardDir, runtime, runtimes, start, of };
 }
 
@@ -77,23 +84,23 @@ test('independent agents on one project share a board: claims keep them apart, p
   // Bob is told who holds what instead of editing it.
   const refused = await bob.call('alp_pin', { kind: 'claim', body: 'Session cleanup', paths: ['src'] });
   assert.match(refused.error, /claimed overlapping paths/);
-  assert.deepEqual(refused.conflicts.map(conflict => [conflict.pinId, conflict.agent, conflict.sessionId, conflict.paths]), [[claimed.pinned, 'main', 'alice', ['src/auth']]]);
+  assert.deepEqual(refused.conflicts.map((conflict: Json) => [conflict.pinId, conflict.agent, conflict.sessionId, conflict.paths]), [[claimed.pinned, 'main', 'alice', ['src/auth']]]);
   assert.ok((await bob.call('alp_pin', { kind: 'claim', body: 'Billing', paths: ['src/billing/'] })).pinned);
 
   // A decision reaches bob's running turn as board mail, never alice's own.
   const decided = await alice.call('alp_pin', { kind: 'decision', body: 'Use JWT with 15 minute expiry everywhere' });
-  await until(() => bob.texts('turn/steer').some(text => text.includes('Use JWT')));
-  const steered = bob.texts('turn/steer').find(text => text.includes('Use JWT'));
+  await until(() => bob.texts('turn/steer').some((text: Json) => text.includes('Use JWT')));
+  const steered = bob.texts('turn/steer').find((text: Json) => text.includes('Use JWT'));
   assert.match(steered, new RegExp(`\\[#\\d+\\] board from main, pin ${decided.pinned} on the project board:\\ndecision ${decided.pinned} by main: Use JWT`));
-  assert.ok(!alice.texts('turn/steer').some(text => text.includes('Use JWT')));
+  assert.ok(!alice.texts('turn/steer').some((text: Json) => text.includes('Use JWT')));
   // Each pin reaches the other agent; nobody hears their own.
   assert.deepEqual(of('mail').map(envelope => [envelope.sessionId, envelope.event.mail.body.split(' ')[0]]), [['bob', 'claim'], ['alice', 'claim'], ['bob', 'decision']]);
 
   const board = await bob.call('alp_board', {});
-  assert.deepEqual(board.claims.map(pin => [pin.sessionId, pin.paths]), [['alice', ['src/auth', 'README.md']], ['bob', ['src/billing']]]);
-  assert.deepEqual(board.notes.map(pin => [pin.kind, pin.body]), [['decision', 'Use JWT with 15 minute expiry everywhere']]);
+  assert.deepEqual(board.claims.map((pin: Json) => [pin.sessionId, pin.paths]), [['alice', ['src/auth', 'README.md']], ['bob', ['src/billing']]]);
+  assert.deepEqual(board.notes.map((pin: Json) => [pin.kind, pin.body]), [['decision', 'Use JWT with 15 minute expiry everywhere']]);
   assert.deepEqual((await bob.call('alp_board', { kinds: ['claim'] })).notes, []);
-  assert.deepEqual(runtime.status('alice').claims.map(pin => pin.id), [claimed.pinned]);
+  assert.deepEqual(runtime.status('alice')!.claims.map(pin => pin.id), [claimed.pinned]);
 
   assert.match((await bob.call('alp_unpin', { pinId: claimed.pinned })).error, /Only main, who pinned it/);
 
@@ -152,7 +159,7 @@ test('pins are checked: kinds, bodies, project-relative paths and owners', async
     // Every tool's arguments are bounded before the tool reads them.
     [{ kind: 'claim', body: 'x', paths: [[[[[[[[['src']]]]]]]]] }, /alp_pin input is too large: nested over 8 levels deep/],
     [{ kind: 'finding', body: 'x'.repeat(128 * 1024 + 1) }, /alp_pin input is too large: a text over 131072 characters/],
-  ]) assert.match((await main.call('alp_pin', args)).error, error, JSON.stringify(args).slice(0, 200));
+  ] as [Json, RegExp][]) assert.match((await main.call('alp_pin', args)).error, error, JSON.stringify(args).slice(0, 200));
   assert.match((await main.call('alp_board', { kinds: ['claim', 'claim', 'decision', 'finding'] })).error, /kinds lists at most 3/);
   assert.ok(Array.isArray((await main.call('alp_board', { kinds: ['claim', 'decision', 'finding'] })).claims));
   assert.deepEqual((await main.call('alp_pin', { kind: 'claim', body: 'Everything', paths: ['.', 'src/../src'] })).paths, ['.', 'src']);
@@ -196,9 +203,9 @@ test('alpd serves the board by project, and status shows a tree\'s claims', asyn
   const main = await start('root');
   const claim = await main.call('alp_pin', { kind: 'claim', body: 'API', paths: ['src/api'] });
   const { pins } = await client.request('board.list', { projectRoot: root });
-  assert.deepEqual(pins.map(pin => [pin.id, pin.kind, pin.paths]), [[claim.pinned, 'claim', ['src/api']]]);
+  assert.deepEqual(pins.map((pin: Json) => [pin.id, pin.kind, pin.paths]), [[claim.pinned, 'claim', ['src/api']]]);
   assert.deepEqual((await client.request('board.list', { projectRoot: path.join(directory, 'elsewhere') })).pins, []);
-  await assert.rejects(client.request('board.list', { projectRoot: 'relative' }), error => error.code === -32602);
+  await assert.rejects(client.request('board.list', { projectRoot: 'relative' }), (error: Json) => error.code === -32602);
   const { status } = await client.request('session.status', { sessionId: 'root' });
-  assert.deepEqual(status.claims.map(pin => pin.id), [claim.pinned]);
+  assert.deepEqual(status.claims.map((pin: Json) => pin.id), [claim.pinned]);
 });

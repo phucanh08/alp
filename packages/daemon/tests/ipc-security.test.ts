@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile, readFile, chmod, lstat, unlink, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -11,7 +12,7 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { connect } from '@anhlp/alp-client';
 import { fakeTransport } from '../../../test/support/fake-agent.ts';
 
-async function fixture(t) {
+async function fixture(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-ipc-'));
   const socketPath = path.join(directory, 'alpd.sock');
   const runtime = createAlpRuntime({ transport: fakeTransport([]), supervisor: false, libraryDir: directory });
@@ -122,7 +123,7 @@ test('security: Windows daemon pipe grants no other user write or instance right
   assert.ok(user, output);
   const aces = [...output.matchAll(/^ACE\|([^|]+)\|(\w+)\|(\d+)/gm)].map(([, sid, type, rights]) => ({ sid, type, rights: Number(rights) }));
   assert.ok(aces.length, output);
-  const trusted = sid => sid === user || sid === 'S-1-5-18' || sid === 'S-1-5-32-544' || sid.startsWith('S-1-5-5-') || sid === 'S-1-3-4';
+  const trusted = (sid: string) => sid === user || sid === 'S-1-5-18' || sid === 'S-1-5-32-544' || sid.startsWith('S-1-5-5-') || sid === 'S-1-3-4';
   for (const ace of aces.filter(ace => ace.type === 'Allow')) {
     assert.ok(!BROAD.has(ace.sid) || (ace.rights & WRITE_LIKE) === 0, `broad principal ${ace.sid} has write-like rights ${ace.rights}`);
     assert.ok(trusted(ace.sid) || (ace.rights & WRITE_LIKE) === 0, `untrusted principal ${ace.sid} has write-like rights ${ace.rights}`);
@@ -152,7 +153,7 @@ test('security: Windows read-only pipe client receives no daemon data', { skip: 
 test('security: Windows daemon refuses a pipe name another process already serves', { skip: process.platform !== 'win32' }, async t => {
   const socketPath = `\\\\.\\pipe\\${pipeName()}`;
   const squatter = net.createServer(socket => socket.destroy());
-  await new Promise((resolve, reject) => { squatter.once('error', reject); squatter.listen(socketPath, resolve); });
+  await new Promise<void>((resolve, reject) => { squatter.once('error', reject); squatter.listen(socketPath, resolve); });
   t.after(() => new Promise(resolve => squatter.close(resolve)));
   const runtime = createAlpRuntime({ transport: fakeTransport([]), supervisor: false });
   const server = createDaemonServer({ runtime, socketPath, version: 'test' });

@@ -2,6 +2,7 @@
 // process with a fake Codex app-server: the runner reaches it only through its socket, as it
 // would another implementation. No model is called.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFile } from 'node:child_process';
 import { once } from 'node:events';
@@ -19,9 +20,9 @@ const ALPD = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
 const FAKE_CODEX = fileURLToPath(new URL('./support/fake-codex.js', import.meta.url));
 const RUNNER = fileURLToPath(import.meta.resolve('@anhlp/alp-protocol/conformance'));
 const skip = process.platform === 'win32' && 'the fake provider is a Node script run as an executable';
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function daemon(t) {
+async function daemon(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-conformance-'));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
@@ -35,8 +36,8 @@ async function daemon(t) {
   closeSync(log);
   const exited = once(child, 'exit');
   t.after(async () => {
-    if (child.exitCode === null && child.signalCode === null) { try { process.kill(-child.pid, 'SIGTERM'); } catch {} await Promise.race([exited, sleep(3000)]); }
-    if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    if (child.exitCode === null && child.signalCode === null) { try { process.kill(-child.pid!, 'SIGTERM'); } catch {} await Promise.race([exited, sleep(3000)]); }
+    if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid!, 'SIGKILL'); } catch {}
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
   for (let i = 0; ; i++) {
@@ -61,5 +62,5 @@ test('the runner works as a separate process against the daemon endpoint', { ski
   const { stdout } = await promisify(execFile)(process.execPath, [RUNNER, '--socket', socket, '--profiles', 'handshake,wire,errors', '--json']);
   const results = JSON.parse(stdout);
   assert.ok(results.length > 10);
-  assert.deepEqual(results.filter(result => !result.ok), []);
+  assert.deepEqual(results.filter((result: { ok: boolean }) => !result.ok), []);
 });

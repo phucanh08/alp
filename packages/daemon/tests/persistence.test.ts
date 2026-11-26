@@ -2,6 +2,7 @@
 // reconnects and cancellation (ALPD §66). In process with a scripted runtime, so each race
 // is ordered by the test rather than by timing.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdtemp, readFile, rename, rm, writeFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -9,19 +10,26 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
+import type { RuntimeTransport } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
+import type { Receipt } from '@anhlp/alp-daemon/store';
 
-async function until(check, what = 'condition') {
+// `any`: alpd's answers, events and errors are JSON whose shape depends on the method; the tests read the fields they assert on.
+type Json = any;
+/** A scripted native transport, as fakeTransport hands it to the runtime and to the test: its helpers and handlers are reached by name. */
+type Scripted = RuntimeTransport & { calls: { method: string, params: Json }[], [member: string]: Json };
+
+async function until(check: () => unknown, what = 'condition') {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`${what} did not happen`);
 }
 
 /** A scripted native runtime; set `hold` to a promise to keep turn/start unanswered until it settles. */
-function fakeTransport(runtimes) {
+function fakeTransport(runtimes: Scripted[]) {
   return () => {
     const index = runtimes.length;
     let turns = 0;
-    const runtime = {
+    const runtime: Scripted = {
       calls: [], threadId: `thread-${index}`, turnId: undefined,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -46,13 +54,13 @@ function fakeTransport(runtimes) {
 }
 
 /** A daemon with a real store in `directory`; `start` again on the same directory is a restart. */
-async function setup(t) {
+async function setup(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-persist-'));
   const project = path.join(directory, 'project');
   await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'] } }));
-  const runtimes = [];
-  const stops = [];
+  const runtimes: Json[] = [];
+  const stops: Json[] = [];
   t.after(async () => { for (const stop of stops.reverse()) await stop(); await rm(directory, { recursive: true, force: true }); });
   const state = path.join(directory, 'state');
   let count = 0;
@@ -62,13 +70,13 @@ async function setup(t) {
     const socketPath = daemonPaths(path.join(directory, `d${count++}`)).socket;
     const server = createDaemonServer({ runtime, socketPath, version: 'test', store });
     await server.listen();
-    const clients = [];
+    const clients: Json[] = [];
     const open = async () => {
       const client = await connect(socketPath, { name: 'test', version: '0' });
-      const events = [];
+      const events: Json[] = [];
       client.onEvent(envelope => events.push(envelope));
       clients.push(client);
-      return { client, events, request: (method, params) => client.request(method, params) };
+      return { client, events, request: (method: string, params?: unknown) => client.request(method, params) };
     };
     let stopped = false;
     // Without a clean runtime shutdown, as a crash leaves the store.
@@ -82,33 +90,33 @@ async function setup(t) {
     return { runtime, store, server, open, stop, crash, ...first };
   }
   /** Makes one of the store's directories unwritable by putting a file where it was; returns the undo. */
-  async function breakDir(name) {
+  async function breakDir(name: string) {
     const dir = path.join(state, name);
     await rename(dir, `${dir}.saved`);
     await writeFile(dir, 'not a directory');
     return async () => { await rm(dir, { force: true }); await rename(`${dir}.saved`, dir); };
   }
-  const create = (daemon, params = {}) => daemon.request('session.create', { spec: { cwd: project, persist: true }, ...params });
+  const create = (daemon: { request(method: string, params?: unknown): Promise<Json> }, params = {}) => daemon.request('session.create', { spec: { cwd: project, persist: true }, ...params });
   return { directory, state, project, runtimes, start, breakDir, create };
 }
 
-const text = body => [{ type: 'text', text: body }];
-const reason = expected => error => error?.data?.reason === expected;
+const text = (body: string) => [{ type: 'text', text: body }];
+const reason = (expected: string) => (error: Json) => error?.data?.reason === expected;
 
 test('store writes report their failures, keep their order, and recover once the disk does', async t => {
   const { state, breakDir } = await setup(t);
   const store = createStore(state);
-  const receipt = state => ({ version: 1, sessionId: 's', clientMessageId: 'm', fingerprint: 'f', state, updatedAt: new Date().toISOString() });
+  const receipt = (state: Receipt['state']): Receipt => ({ version: 1, sessionId: 's', clientMessageId: 'm', fingerprint: 'f', state, updatedAt: new Date().toISOString() });
   await store.putReceipt('k', receipt('pending'));
   const undo = await breakDir('receipts');
   await assert.rejects(store.putReceipt('k', receipt('completed')), process.platform === 'win32' ? /ENOENT/ : /ENOTDIR|EEXIST|not a directory/i);
   assert.equal(store.health().ok, false);
   assert.equal(store.health().failures, 1);
-  assert.match(store.health().lastError.operation, /receipt m/);
+  assert.match(store.health().lastError!.operation, /receipt m/);
   // A failed write does not stop the ones queued after it.
   await undo();
   await store.putReceipt('k', receipt('completed'));
-  assert.equal((await store.receipt('k')).state, 'completed');
+  assert.equal((await store.receipt('k'))!.state, 'completed');
   assert.deepEqual((await readdir(path.join(state, 'receipts'))).filter(name => name.endsWith('.tmp')), [], 'no temporary file is left');
 
   const undoTimeline = await breakDir('timeline');
@@ -126,7 +134,7 @@ test('a timeline line cut short is removed before the next append, or completed 
   const file = path.join(state, 'timeline', 'r.jsonl');
   // Creates the store's directories.
   await store.list();
-  const line = n => JSON.stringify({ sessionId: 'r', epoch: 'e', seq: n, cursor: n, ts: '', event: { type: 'session.ready' } });
+  const line = (n: number) => JSON.stringify({ sessionId: 'r', epoch: 'e', seq: n, cursor: n, ts: '', event: { type: 'session.ready' } });
   await writeFile(file, `${line(1)}\n${line(2).slice(0, 25)}`);
   assert.deepEqual((await store.timeline('r')).map(e => e.cursor), [1], 'reading skips the cut line');
   await store.append('r', JSON.parse(line(2)));
@@ -154,7 +162,7 @@ test('a prompt whose pending receipt cannot be written is refused and not sent; 
   // Receipts can be read but not written.
   await chmod(path.join(state, 'receipts'), 0o500);
   t.after(() => chmod(path.join(state, 'receipts'), 0o700).catch(() => {}));
-  await assert.rejects(prompt(), error => error.data?.reason === 'persistence_failed' && /it was not sent/.test(error.message));
+  await assert.rejects(prompt(), (error: Json) => error.data?.reason === 'persistence_failed' && /it was not sent/.test(error.message));
   assert.equal(runtimes[0].started.length, 0);
   assert.equal((await daemon.request('daemon.status')).persistence.ok, false);
   await chmod(path.join(state, 'receipts'), 0o700);
@@ -171,7 +179,7 @@ test('a delivered prompt whose completed receipt cannot be written says it is no
   const { runtimes, start, breakDir, create } = await setup(t);
   const first = await start();
   const { session } = await create(first);
-  let release;
+  let release!: (value?: unknown) => void;
   runtimes[0].hold = new Promise(resolve => { release = resolve; });
   const sent = first.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Hello') });
   await until(() => runtimes[0].started.length === 1, 'turn/start');
@@ -199,7 +207,7 @@ test('a pending receipt with no answer in the timeline stays outcome unknown; an
   const { runtimes, start, create, state } = await setup(t);
   const first = await start();
   const { session } = await create(first);
-  let release;
+  let release!: (value?: unknown) => void;
   runtimes[0].hold = new Promise(resolve => { release = resolve; });
   void first.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Hello') }).catch(() => {});
   await until(() => runtimes[0].started.length === 1, 'turn/start');
@@ -251,7 +259,7 @@ test('retries of one id: concurrent ones wait for the first, a failed delivery a
   const { runtimes, start, create } = await setup(t);
   const daemon = await start();
   const { session } = await create(daemon);
-  const prompt = (id, body) => daemon.request('session.prompt', { sessionId: session.id, clientMessageId: id, content: text(body) });
+  const prompt = (id: string, body: string) => daemon.request('session.prompt', { sessionId: session.id, clientMessageId: id, content: text(body) });
   const answers = await Promise.all([prompt('m1', 'Hello'), prompt('m1', 'Hello'), prompt('m1', 'Hello')]);
   assert.deepEqual(answers.map(answer => !!answer.duplicate), [false, true, true]);
   assert.equal(runtimes[0].started.length, 1);
@@ -268,7 +276,7 @@ test('cancellation races: an interrupt sent with a prompt cancels its turn; a cl
   const { runtimes, start, create } = await setup(t);
   const daemon = await start();
   const { session } = await create(daemon);
-  let release;
+  let release!: (value?: unknown) => void;
   runtimes[0].hold = new Promise(resolve => { release = resolve; });
   const prompted = daemon.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Work') });
   await until(() => runtimes[0].started.length === 1, 'turn/start');
@@ -277,7 +285,7 @@ test('cancellation races: an interrupt sent with a prompt cancels its turn; a cl
   release();
   assert.equal((await prompted).outcome, 'accepted');
   await interrupted;
-  assert.equal(runtimes[0].calls.filter(call => call.method === 'turn/interrupt').length, 1);
+  assert.equal(runtimes[0].calls.filter((call: Json) => call.method === 'turn/interrupt').length, 1);
   await until(() => daemon.events.some(e => e.event.type === 'turn.ended'), 'the turn to end');
 
   // A client that disconnects while its prompt is in flight: delivery completes, and its retry is a duplicate.
@@ -315,7 +323,7 @@ test('reconnect with a cursor replays only what the client missed, in order, and
   assert.deepEqual(back.events.map(e => e.cursor), viewer.events.map(e => e.cursor));
   assert.deepEqual(back.events.map(e => e.cursor), Array.from({ length: back.events.length }, (_, i) => seen + 1 + i));
   assert.equal(cursor, back.events.at(-1).cursor);
-  await assert.rejects(back.request('session.attach', { sessionId: session.id, after: -1 }), error => error.code === -32602);
+  await assert.rejects(back.request('session.attach', { sessionId: session.id, after: -1 }), (error: Json) => error.code === -32602);
 
   // Closed and resumed in the same alpd, the tree continues its cursors.
   viewer.client.close();

@@ -3,6 +3,7 @@
 // every platform. The tests marked "ConPTY" spawn a real cmd.exe through the installed node-pty and run
 // only on Windows (the windows-daemon CI lane runs them).
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,15 +11,18 @@ import path from 'node:path';
 import { createWindowsPtySpawn, loadNodePty, windowsPtySpawn, windowsShell, windowsTerminalCapability } from '../dist/terminals/backends/windows-terminal.js';
 import { createTerminalService, readTerminalConfig } from '../dist/terminals/terminals.js';
 
+// `any`: alpd's answers and the node-pty double (its recorded calls, the pty it hands out, the fake module a test loads) are untyped JSON-like values; the tests read the fields they assert on.
+type Json = any;
+
 const windows = process.platform === 'win32';
 const conpty = !windows && 'ConPTY exists only on Windows';
 const owner = { id: 'owner', epoch: 'e1' };
 const quiet = { info() {}, warn() {} };
 // process.kill(0, 0) probes the current process on Windows (libuv), so a pid that is not positive is a test bug.
-const alive = pid => { assert.ok(Number.isInteger(pid) && pid > 0, `a real pid, not ${pid}`); try { process.kill(pid, 0); return true; } catch { return false; } };
+const alive = (pid: number) => { assert.ok(Number.isInteger(pid) && pid > 0, `a real pid, not ${pid}`); try { process.kill(pid, 0); return true; } catch { return false; } };
 // ConPTY output is VT: the renderer may draw a run of spaces as a cursor-forward (CSI n C). Plain text for matching.
-const plain = text => text.replace(/\x1b\[(\d*)C/g, (_, n) => ' '.repeat(Number(n || 1))).replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]/g, '');
-async function until(check, what, ms = 15000) {
+const plain = (text: string) => text.replace(/\x1b\[(\d*)C/g, (_: Json, n: Json) => ' '.repeat(Number(n || 1))).replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-_]/g, '');
+async function until(check: () => unknown, what: string, ms = 15000) {
   const end = Date.now() + ms;
   while (Date.now() < end) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 25)); }
   assert.fail(`timed out waiting for ${what}`);
@@ -27,13 +31,13 @@ async function until(check, what, ms = 15000) {
  * Runs `fn` after the test, before everything deferred earlier (LIFO; t.after runs in registration
  * order): a terminal service is shut down, and its shells killed, before the home they ran in is removed.
  */
-const deferred = new WeakMap();
-function defer(t, fn) {
+const deferred = new WeakMap<TestContext, (() => unknown)[]>();
+function defer(t: TestContext, fn: () => unknown) {
   let list = deferred.get(t);
-  if (!list) { deferred.set(t, list = []); t.after(async () => { while (list.length) await list.pop()(); }); }
+  if (!list) { deferred.set(t, list = []); t.after(async () => { while (list!.length) await list!.pop()!(); }); }
   list.push(fn);
 }
-async function home(t, config = { version: 1, allowRemoteTerminal: true }) {
+async function home(t: TestContext, config: Json = { version: 1, allowRemoteTerminal: true }) {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-win-term-')));
   // A shell that ran here is gone first: service shutdown is deferred later, so runs earlier, and
   // close/shutdown wait for node-pty to report the ConPTY shell's exit (t-bfbd). The short retry stays as
@@ -45,25 +49,25 @@ async function home(t, config = { version: 1, allowRemoteTerminal: true }) {
 }
 
 /** A node-pty module double that records what the owner asks of it. */
-function fakeNodePty({ spawnError } = {}) {
-  const calls = { spawn: [], write: [], resize: [], kill: [] };
-  let data; const exits = new Set();
-  const fake = {
+function fakeNodePty({ spawnError }: { spawnError?: Error } = {}) {
+  const calls: Record<'spawn' | 'write' | 'resize' | 'kill', Json[]> = { spawn: [], write: [], resize: [], kill: [] };
+  let data: Json; const exits = new Set<(event: Json) => void>();
+  const fake: Json = {
     calls, resizeThrows: false, killThrows: false,
-    emit(text) { data?.(text); },
-    exit(event) { for (const listener of [...exits]) listener(event); },
+    emit(text: string) { data?.(text); },
+    exit(event: Json) { for (const listener of [...exits]) listener(event); },
     /** Like node-pty on ConPTY: the pid is 0 until the output worker connects. */
     connect() { fake.child.pid = 4242 + calls.spawn.length; },
-    spawn(file, args, options) {
+    spawn(file: string, args: string[], options: Json) {
       calls.spawn.push({ file, args, options });
       if (spawnError) throw spawnError;
       return fake.child = {
         pid: 0,
-        write(text) { calls.write.push(text); },
-        resize(cols, rows) { calls.resize.push([cols, rows]); if (fake.resizeThrows) throw new Error('Cannot resize a pty that has already exited'); },
-        kill(...signal) { calls.kill.push(signal); if (fake.killThrows) throw new Error('already exited'); },
-        onData(listener) { data = listener; return { dispose() { data = undefined; } }; },
-        onExit(listener) { exits.add(listener); return { dispose() { exits.delete(listener); } }; },
+        write(text: string) { calls.write.push(text); },
+        resize(cols: number, rows: number) { calls.resize.push([cols, rows]); if (fake.resizeThrows) throw new Error('Cannot resize a pty that has already exited'); },
+        kill(...signal: Json[]) { calls.kill.push(signal); if (fake.killThrows) throw new Error('already exited'); },
+        onData(listener: Json) { data = listener; return { dispose() { data = undefined; } }; },
+        onExit(listener: Json) { exits.add(listener); return { dispose() { exits.delete(listener); } }; },
       };
     },
   };
@@ -92,7 +96,7 @@ test('capability: node-pty present is protection none; absent is unavailable wit
 test('spawn: ConPTY with exactly the PTY options; no daemon-only option leaks to node-pty', () => {
   const fake = fakeNodePty();
   const controller = new AbortController();
-  const pty = createWindowsPtySpawn(() => fake)('C:\\Windows\\system32\\cmd.exe', ['/d'], spawnOptions({ killGraceMs: 5, signal: controller.signal, protection: 'none' }));
+  const pty = createWindowsPtySpawn(() => fake)('C:\\Windows\\system32\\cmd.exe', ['/d'], spawnOptions({ killGraceMs: 5, signal: controller.signal, protection: 'none' })) as Json;
   assert.equal(fake.calls.spawn.length, 1);
   const { file, args, options } = fake.calls.spawn[0];
   assert.equal(file, 'C:\\Windows\\system32\\cmd.exe');
@@ -116,7 +120,7 @@ test('spawn error paths: cancelled before load, node-pty missing, node-pty spawn
 
 test('kill: once, without a signal (node-pty refuses signals on Windows); later writes and resizes are dropped', () => {
   const fake = fakeNodePty();
-  const pty = createWindowsPtySpawn(() => fake)('cmd.exe', [], spawnOptions());
+  const pty = createWindowsPtySpawn(() => fake)('cmd.exe', [], spawnOptions()) as Json;
   pty.write('dir\r');
   pty.resize(100, 30);
   fake.resizeThrows = true;
@@ -133,7 +137,7 @@ test('kill: once, without a signal (node-pty refuses signals on Windows); later 
 
 test('exited: resolves at the node-pty exit, or after the bound when node-pty never reports one', async () => {
   const fake = fakeNodePty();
-  const pty = createWindowsPtySpawn(() => fake)('cmd.exe', [], spawnOptions());
+  const pty = createWindowsPtySpawn(() => fake)('cmd.exe', [], spawnOptions()) as Json;
   pty.kill();
   let settled = false;
   const waiting = pty.exited(60000).then(() => { settled = true; });
@@ -142,7 +146,7 @@ test('exited: resolves at the node-pty exit, or after the bound when node-pty ne
   fake.exit({ exitCode: 1 });
   await waiting;
   await pty.exited(60000);
-  const silent = createWindowsPtySpawn(() => fakeNodePty())('cmd.exe', [], spawnOptions());
+  const silent = createWindowsPtySpawn(() => fakeNodePty())('cmd.exe', [], spawnOptions()) as Json;
   silent.kill();
   const started = Date.now();
   await silent.exited(30);
@@ -151,10 +155,10 @@ test('exited: resolves at the node-pty exit, or after the bound when node-pty ne
 
 test('data and exit listeners: output passes through; exit carries only exitCode and signal', () => {
   const fake = fakeNodePty();
-  const pty = createWindowsPtySpawn(() => fake)('cmd.exe', [], spawnOptions());
-  const output = []; const exits = [];
-  const data = pty.onData(text => output.push(text));
-  pty.onExit(event => exits.push(event));
+  const pty = createWindowsPtySpawn(() => fake)('cmd.exe', [], spawnOptions()) as Json;
+  const output: Json[] = []; const exits: Json[] = [];
+  const data = pty.onData((text: Json) => output.push(text));
+  pty.onExit((event: Json) => exits.push(event));
   fake.emit('Microsoft Windows\r\n');
   data.dispose();
   fake.emit('dropped');
@@ -176,7 +180,7 @@ test('terminal.json on win32: POSIX mode bits are not checked; a directory or sy
   assert.equal((await readTerminalConfig(dir, quiet, 'win32')).reason, 'not_private', 'a directory is not the switch');
   await rm(file, { recursive: true });
   await writeFile(path.join(dir, 'elsewhere.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }));
-  try { await symlink(path.join(dir, 'elsewhere.json'), file); } catch (error) {
+  try { await symlink(path.join(dir, 'elsewhere.json'), file); } catch (error: Json) {
     if (windows && error.code === 'EPERM') { t.skip('symlink needs Developer Mode or admin on this runner'); return; }
     throw error;
   }
@@ -184,14 +188,14 @@ test('terminal.json on win32: POSIX mode bits are not checked; a directory or sy
 });
 
 /** The real service on platform win32 over a fake node-pty: the production path minus the native module. */
-async function service(t, { fake = fakeNodePty(), config, load } = {}) {
+async function service(t: TestContext, { fake = fakeNodePty(), config, load }: { fake?: Json, config?: Json, load?: () => Json } = {}) {
   const dir = await home(t, config);
   const loader = load ?? (() => fake);
-  const terminals = createTerminalService({ home: dir, resolveWorkspace: async () => dir, log: quiet, platform: 'win32', spawn: createWindowsPtySpawn(loader), capability: () => windowsTerminalCapability(loader), processes: async () => [], sweepMs: 60000, killGraceMs: 1 });
+  const terminals = createTerminalService({ home: dir, resolveWorkspace: async () => dir, log: quiet, platform: 'win32', spawn: createWindowsPtySpawn(loader), capability: (() => windowsTerminalCapability(loader)) as Json, processes: async () => [], sweepMs: 60000, killGraceMs: 1 });
   defer(t, () => terminals.shutdown());
   return { dir, fake, terminals };
 }
-const create = (terminals, requestId = 'r1') => terminals.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId });
+const create = (terminals: Json, requestId = 'r1') => terminals.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId });
 
 test('service on win32: protection none, the Windows shell, no private ALP env; close kills the pty once', async t => {
   const { dir, fake, terminals } = await service(t);
@@ -207,8 +211,8 @@ test('service on win32: protection none, the Windows shell, no private ALP env; 
   assert.equal(options.env.TERM, 'xterm-256color');
   assert.equal(options.env.ALP_TERMINAL, '1');
   assert.deepEqual(Object.keys(options.env).filter(key => /^(ALP_|npm_)/i.test(key)).sort(), ['ALP_TERMINAL', 'ALP_TERMINAL_ID']);
-  const events = [];
-  const sink = { send(message) { events.push(message.params); } };
+  const events: Json[] = [];
+  const sink = { send(message: Json) { events.push(message.params); } };
   await terminals.attach(owner, sink, { terminalId: terminal.terminalId });
   await terminals.input(owner, sink, { terminalId: terminal.terminalId, data: 'echo hi\r' });
   await terminals.resize(owner, sink, { terminalId: terminal.terminalId, cols: 100, rows: 30 });
@@ -228,7 +232,7 @@ test('service on win32: protection none, the Windows shell, no private ALP env; 
 test('service on win32: close resolves only once node-pty reports the exit of the killed shell (bounded by killGraceMs)', async t => {
   const fake = fakeNodePty();
   const dir = await home(t);
-  const terminals = createTerminalService({ home: dir, resolveWorkspace: async () => dir, log: quiet, platform: 'win32', spawn: createWindowsPtySpawn(() => fake), capability: () => windowsTerminalCapability(() => fake), processes: async () => [], sweepMs: 60000, killGraceMs: 60000 });
+  const terminals = createTerminalService({ home: dir, resolveWorkspace: async () => dir, log: quiet, platform: 'win32', spawn: createWindowsPtySpawn(() => fake), capability: (() => windowsTerminalCapability(() => fake)) as Json, processes: async () => [], sweepMs: 60000, killGraceMs: 60000 });
   defer(t, () => terminals.shutdown());
   const { terminal } = await create(terminals);
   fake.connect();
@@ -242,11 +246,11 @@ test('service on win32: close resolves only once node-pty reports the exit of th
   assert.deepEqual((await terminals.list(owner, {})).terminals, []);
 });
 
-for (const [how, end] of [['shutdown', terminals => terminals.shutdown()], ['revoke', terminals => terminals.revoke(owner.id)]]) {
+for (const [how, end] of [['shutdown', (terminals: Json) => terminals.shutdown()], ['revoke', (terminals: Json) => terminals.revoke(owner.id)]] as [string, (terminals: Json) => Promise<unknown>][]) {
   test(`service on win32: ${how} resolves only once node-pty reports the exit of the killed shell`, async t => {
     const fake = fakeNodePty();
     const dir = await home(t);
-    const terminals = createTerminalService({ home: dir, resolveWorkspace: async () => dir, log: quiet, platform: 'win32', spawn: createWindowsPtySpawn(() => fake), capability: () => windowsTerminalCapability(() => fake), processes: async () => [], sweepMs: 60000, killGraceMs: 60000 });
+    const terminals = createTerminalService({ home: dir, resolveWorkspace: async () => dir, log: quiet, platform: 'win32', spawn: createWindowsPtySpawn(() => fake), capability: (() => windowsTerminalCapability(() => fake)) as Json, processes: async () => [], sweepMs: 60000, killGraceMs: 60000 });
     defer(t, () => terminals.shutdown());
     await create(terminals);
     fake.connect();
@@ -274,15 +278,15 @@ test('service on win32: a shell that exits on its own ends the terminal; shutdow
 
 test('service on win32 error paths: switch off, node-pty missing, node-pty spawn failure', async t => {
   const off = await service(t, { config: null });
-  await assert.rejects(create(off.terminals), error => error.data?.reason === 'terminal_disabled');
+  await assert.rejects(create(off.terminals), (error: Json) => error.data?.reason === 'terminal_disabled');
   assert.equal(off.fake.calls.spawn.length, 0, 'never spawned while off');
 
   const missing = await service(t, { load: () => undefined });
-  await assert.rejects(create(missing.terminals), error => error.data?.reason === 'terminal_unsupported');
+  await assert.rejects(create(missing.terminals), (error: Json) => error.data?.reason === 'terminal_unsupported');
   assert.equal(await missing.terminals.advertised(), undefined, 'no terminal capability is advertised without node-pty');
 
   const failing = await service(t, { fake: fakeNodePty({ spawnError: new Error('CreateProcess failed: C:\\secret\\path') }) });
-  await assert.rejects(create(failing.terminals), error => error.data?.reason === 'terminal_unsupported' && !String(error.message).includes('secret'), 'a node-pty failure is refused as unsupported, without its text');
+  await assert.rejects(create(failing.terminals), (error: Json) => error.data?.reason === 'terminal_unsupported' && !String(error.message).includes('secret'), 'a node-pty failure is refused as unsupported, without its text');
   assert.deepEqual((await failing.terminals.list(owner, {})).terminals, []);
 });
 
@@ -295,12 +299,12 @@ test('ConPTY: node-pty loads on this Windows host', { skip: conpty }, () => {
 
 test('ConPTY: a real cmd.exe echoes, resizes and is killed by the owner', { skip: conpty, timeout: 60000 }, async t => {
   const shell = windowsShell();
-  const pty = windowsPtySpawn(shell, [], { name: 'xterm-256color', cols: 80, rows: 24, cwd: await realpath(tmpdir()), env: { ...process.env, TERM: 'xterm-256color' } });
+  const pty = windowsPtySpawn(shell, [], { name: 'xterm-256color', cols: 80, rows: 24, cwd: await realpath(tmpdir()), env: { ...process.env, TERM: 'xterm-256color' } }) as Json;
   t.after(() => pty.kill());
   let output = '';
-  pty.onData(text => { output += text; });
-  let exit;
-  pty.onExit(event => { exit = event; });
+  pty.onData((text: Json) => { output += text; });
+  let exit: Json;
+  pty.onExit((event: Json) => { exit = event; });
   // node-pty learns the shell's pid when the ConPTY output worker connects, after spawn returns.
   await until(() => pty.pid > 0, 'the ConPTY shell pid');
   assert.ok(Number.isInteger(pty.pid));
@@ -337,7 +341,7 @@ test('ConPTY: the terminal service end to end on Windows (terminal.json, create,
   const [pid] = terminals.pids();
   assert.equal(alive(pid), true);
   let output = '';
-  const sink = { send(message) { if (message.params?.type === 'output') output += message.params.data; } };
+  const sink = { send(message: Json) { if (message.params?.type === 'output') output += message.params.data; } };
   await terminals.attach(owner, sink, { terminalId: terminal.terminalId });
   await terminals.input(owner, sink, { terminalId: terminal.terminalId, data: 'echo %ALP_TERMINAL%_SERVICE^_OK\r' });
   await until(() => output.includes('1_SERVICE_OK'), 'service terminal output with the terminal environment');

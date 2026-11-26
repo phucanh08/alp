@@ -1,6 +1,7 @@
 // alpd's scheduled continuations (ALPD §71): a job that comes due opens a turn on the
 // session it names, without a user message, at most once, and says what became of it.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -8,19 +9,25 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
+import type { AlpRuntime, RuntimeTransport } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore, createScheduleStore, createScheduler } from '@anhlp/alp-daemon';
 
-async function until(check, what = 'condition') {
+// `any`: alpd's answers and events are JSON, and some scheduler runtimes are partial fakes of AlpRuntime; the tests read the fields they assert on.
+type Json = any;
+/** A scripted native transport, as fakeTransport hands it to the runtime and to the test: its helpers and handlers are reached by name. */
+type Scripted = RuntimeTransport & { calls: { method: string, params: Json }[], [member: string]: Json };
+
+async function until(check: () => unknown, what = 'condition') {
   for (let i = 0; i < 600; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`${what} did not happen`);
 }
 
 /** A scripted native runtime; set `hold` to a promise to keep turn/start unanswered until it settles. */
-function fakeTransport(runtimes, resumeGate) {
+function fakeTransport(runtimes: Scripted[], resumeGate?: () => Promise<unknown>) {
   return () => {
     const index = runtimes.length;
     let turns = 0;
-    const runtime = {
+    const runtime: Scripted = {
       calls: [], threadId: `thread-${index}`, turnId: undefined,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -45,42 +52,42 @@ function fakeTransport(runtimes, resumeGate) {
 }
 
 /** A daemon with a real store; `start` again on the same directory is a restart. */
-async function setup(t) {
+async function setup(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-schedule-'));
   const project = path.join(directory, 'project');
   await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'] } }));
-  const runtimes = [];
-  const stops = [];
-  const releases = [];
+  const runtimes: Json[] = [];
+  const stops: Json[] = [];
+  const releases: Json[] = [];
   t.after(async () => { for (const release of releases) release(); for (const stop of stops.reverse()) await stop(); await rm(directory, { recursive: true, force: true }); });
   const state = path.join(directory, 'state');
   let count = 0;
-  async function start(options = {}) {
+  async function start(options: Json = {}) {
     const { openDelayMs, openFailure, resumeGate, onBindSchedules, ...rest } = options;
     const runtime = createAlpRuntime({ transport: fakeTransport(runtimes, resumeGate), runLogDir: path.join(directory, 'runs') });
     // A daemon whose sessions take a moment to open again, as a real provider does,
     // or one whose sessions cannot be opened at all.
     const opened = openDelayMs || openFailure
-      ? { ...runtime, open: async (...args) => {
+      ? { ...runtime, open: async (...args: Parameters<AlpRuntime['open']>) => {
         if (openFailure) throw new Error(openFailure);
         if (openDelayMs) await new Promise(resolve => setTimeout(resolve, openDelayMs));
         return runtime.open(...args);
       } }
       : runtime;
     // The handler alpd binds for the agent path (runtime.bindSchedules), seen by the test as well.
-    const daemon = onBindSchedules ? { ...opened, bindSchedules: handler => { onBindSchedules(handler); runtime.bindSchedules(handler); } } : opened;
+    const daemon = onBindSchedules ? { ...opened, bindSchedules: (handler: Json) => { onBindSchedules(handler); runtime.bindSchedules!(handler); } } : opened;
     const store = createStore(state);
     const socketPath = daemonPaths(path.join(directory, `d${count++}`)).socket;
     const server = createDaemonServer({ runtime: daemon, socketPath, version: 'test', store, home: directory, scheduleTickMs: 20, ...rest });
     await server.listen();
-    const clients = [];
+    const clients: Json[] = [];
     const open = async () => {
       const client = await connect(socketPath, { name: 'test', version: '0' });
-      const events = [];
+      const events: Json[] = [];
       client.onEvent(envelope => events.push(envelope));
       clients.push(client);
-      return { client, events, request: (method, params) => client.request(method, params) };
+      return { client, events, request: (method: string, params?: unknown) => client.request(method, params) };
     };
     let stopped = false;
     const stop = async () => { if (stopped) return; stopped = true; clients.forEach(client => client.close()); await store.flush().catch(() => {}); await server.close().catch(() => {}); await runtime.shutdown(); };
@@ -90,18 +97,18 @@ async function setup(t) {
     await first.request('daemon.status');
     return { runtime, store, server, open, stop, project, ...first };
   }
-  const create = (daemon, params = {}) => daemon.request('session.create', { spec: { cwd: project, persist: true }, ...params });
+  const create = (daemon: Json, params = {}) => daemon.request('session.create', { spec: { cwd: project, persist: true }, ...params });
   return { directory, state, project, runtimes, start, create, releases };
 }
 
 /** The text of the user message the session received, if it received one. */
-const userTexts = events => events.filter(event => event.event.type === 'item' && event.event.item.kind === 'user_message').map(event => event.event.item.text);
-const promptOf = (events, text) => userTexts(events).find(body => body.includes(text));
-const inMs = ms => new Date(Date.now() + ms).toISOString();
+const userTexts = (events: Json[]) => events.filter((event: Json) => event.event.type === 'item' && event.event.item.kind === 'user_message').map((event: Json) => event.event.item.text);
+const promptOf = (events: Json[], text: string) => userTexts(events).find((body: Json) => body.includes(text));
+const inMs = (ms: number) => new Date(Date.now() + ms).toISOString();
 /** The job as the daemon answers it now; the project of the daemon names it. */
-const jobOf = (daemon, id) => daemon.request('schedule.get', { id, projectRoot: daemon.project }).then(answer => answer.job);
+const jobOf = (daemon: Json, id: string) => daemon.request('schedule.get', { id, projectRoot: daemon.project }).then((answer: Json) => answer.job);
 /** Waits until the job says it is through. */
-const untilStatus = (daemon, id, status) => until(async () => (await jobOf(daemon, id)).status === status, `the job did not become ${status}`);
+const untilStatus = (daemon: Json, id: string, status: string) => until(async () => (await jobOf(daemon, id)).status === status, `the job did not become ${status}`);
 
 test('a job that comes due opens a turn on its session, without a user message', async t => {
   const { start, create, project } = await setup(t);
@@ -133,10 +140,10 @@ for (const phase of ['queued wake', 'in-flight wake start']) {
     const daemon = await start();
     const { session } = await create(daemon);
     const wake = runtimes[0];
-    let releaseWake;
+    let releaseWake!: (value?: unknown) => void;
     wake.hold = new Promise(resolve => { releaseWake = resolve; });
     releases.push(() => releaseWake());
-    let releaseBlock;
+    let releaseBlock!: (value?: unknown) => void;
     let blocked;
     if (phase === 'queued wake') {
       await daemon.runtime.open('queue-blocker', { cwd: project });
@@ -148,7 +155,7 @@ for (const phase of ['queued wake', 'in-flight wake start']) {
     }
     daemon.runtime.message(session.id, 'Wake before the scheduled continuation.');
     if (phase === 'in-flight wake start') await until(() => wake.started.length === 1);
-    assert.equal(daemon.runtime.snapshot(session.id).activeTurnId, undefined);
+    assert.equal(daemon.runtime.snapshot(session.id)!.activeTurnId, undefined);
     const { job } = await daemon.request('schedule.create', { projectRoot: project, sessionId: session.id, dueAt: inMs(-1), prompt: `Continue after ${phase}.` });
     await until(async () => {
       const current = await jobOf(daemon, job.id);
@@ -163,12 +170,12 @@ for (const phase of ['queued wake', 'in-flight wake start']) {
     await blocked;
     await until(() => wake.started.length === 1);
     releaseWake();
-    await until(() => daemon.runtime.snapshot(session.id).activeTurnId);
+    await until(() => daemon.runtime.snapshot(session.id)!.activeTurnId);
     wake.finish();
     await untilStatus(daemon, job.id, 'delivered');
     assert.equal((await jobOf(daemon, job.id)).attempts, 1);
     assert.equal(wake.started.length, 2, 'one wake and exactly one scheduled turn');
-    assert.equal(userTexts(daemon.events).filter(text => text.includes(`Continue after ${phase}.`)).length, 1);
+    assert.equal(userTexts(daemon.events).filter((text: Json) => text.includes(`Continue after ${phase}.`)).length, 1);
   });
 }
 
@@ -177,7 +184,7 @@ for (const failReceipt of [false, true]) {
     const { start, create, project, runtimes, releases } = await setup(t);
     const daemon = await start();
     const { session } = await create(daemon);
-    let release;
+    let release!: (value?: unknown) => void;
     const gate = new Promise(resolve => { release = resolve; });
     releases.push(release);
     let entered = false;
@@ -192,7 +199,7 @@ for (const failReceipt of [false, true]) {
     };
     const { job } = await daemon.request('schedule.create', { projectRoot: project, sessionId: session.id, dueAt: inMs(-1), prompt: 'Persist before the wake.' });
     await until(() => entered);
-    assert.equal(daemon.runtime.starting(session.id), true, 'lifecycle operations see admission before native start');
+    assert.equal(daemon.runtime.starting!(session.id), true, 'lifecycle operations see admission before native start');
     daemon.runtime.message(session.id, 'Mail during the durable write.');
     assert.equal(runtimes[0].started.length, 0, 'neither prompt starts before durable preparation');
     await assert.rejects(daemon.request('schedule.cancel', { id: job.id, projectRoot: project }), { code: 1004 });
@@ -203,7 +210,7 @@ for (const failReceipt of [false, true]) {
     assert.equal(input.includes('Persist before the wake.'), !failReceipt, 'a write failure sends no job; success sends the admitted job first');
     assert.ok(input.includes('Mail during the durable write.'), 'mail is included in the admitted prompt or the failure wake');
     assert.equal((await jobOf(daemon, job.id)).attempts, 1);
-    assert.equal(userTexts(daemon.events).filter(text => text.includes('Persist before the wake.')).length, failReceipt ? 0 : 1);
+    assert.equal(userTexts(daemon.events).filter((text: Json) => text.includes('Persist before the wake.')).length, failReceipt ? 0 : 1);
   });
 }
 
@@ -211,8 +218,8 @@ test('the idle sender is single-use and expires when its admission callback ends
   const { start, create, runtimes } = await setup(t);
   const daemon = await start();
   const { session } = await create(daemon);
-  let escaped;
-  const result = await daemon.runtime.withIdlePrompt(session.id, async send => {
+  let escaped: Json;
+  const result = await daemon.runtime.withIdlePrompt!(session.id, async send => {
     escaped = send;
     await send({ clientMessageId: 'admitted', delivery: 'auto', content: [{ type: 'text', text: 'One admitted prompt.' }] });
     await assert.rejects(send({ clientMessageId: 'twice', delivery: 'auto', content: [] }), /no longer available/);
@@ -230,7 +237,7 @@ test('mail arriving during attempt persistence stays behind the admitted job', a
   const store = createScheduleStore(path.join(directory, 'attempt-jobs'));
   const job = await store.create({ projectRoot: project, sessionId: session.id, dueAt: inMs(-1), prompt: 'Attempt gate.' });
   let entered = false;
-  let release;
+  let release!: (value?: unknown) => void;
   const gate = new Promise(resolve => { release = resolve; });
   releases.push(release);
   const change = store.change.bind(store);
@@ -264,7 +271,7 @@ test('a cancelled job waiting for runtime admission never consumes an attempt', 
   const { session } = await create(daemon);
   await daemon.runtime.open('cancel-blocker', { cwd: project });
   const blocker = runtimes.at(-1);
-  let release;
+  let release!: (value?: unknown) => void;
   blocker.hold = new Promise(resolve => { release = resolve; });
   releases.push(release);
   const blocked = daemon.runtime.prompt('cancel-blocker', { clientMessageId: 'block', delivery: 'auto', content: [] });
@@ -272,7 +279,7 @@ test('a cancelled job waiting for runtime admission never consumes an attempt', 
   const store = createScheduleStore(path.join(directory, 'cancel-jobs'));
   const job = await store.create({ projectRoot: project, sessionId: session.id, dueAt: inMs(-1), prompt: 'Never admitted.' });
   let queued = false;
-  const runtime = { ...daemon.runtime, withIdlePrompt: (...args) => { queued = true; return daemon.runtime.withIdlePrompt(...args); } };
+  const runtime: Json = { ...daemon.runtime, withIdlePrompt: (...args: Parameters<NonNullable<AlpRuntime['withIdlePrompt']>>) => { queued = true; return daemon.runtime.withIdlePrompt!(...args); } };
   let sends = 0;
   const scheduler = createScheduler({ store, runtime, deliver: async () => { sends++; return { outcome: 'accepted' }; } });
   const tick = scheduler.tick();
@@ -281,8 +288,8 @@ test('a cancelled job waiting for runtime admission never consumes an attempt', 
   release();
   await blocked;
   assert.deepEqual(await tick, { delivered: 0, failed: 0, waiting: 0 });
-  assert.equal((await store.get(job.id)).attempts, 0);
-  assert.equal((await store.get(job.id)).status, 'cancelled');
+  assert.equal((await store.get(job.id))!.attempts, 0);
+  assert.equal((await store.get(job.id))!.status, 'cancelled');
   assert.equal(sends, 0);
 });
 
@@ -292,13 +299,13 @@ test('a scheduled continuation can still prompt a parked quota root once', async
   const { session } = await create(daemon);
   daemon.runtime.pause({ reason: 'quota test' });
   await daemon.runtime.recover(session.id, { parkedRoot: 'provider quota' });
-  assert.equal(daemon.runtime.snapshot(session.id).busy, true);
-  assert.equal(daemon.runtime.snapshot(session.id).parked, 'provider quota');
+  assert.equal(daemon.runtime.snapshot(session.id)!.busy, true);
+  assert.equal(daemon.runtime.snapshot(session.id)!.parked, 'provider quota');
   const { job } = await daemon.request('schedule.create', { projectRoot: project, sessionId: session.id, dueAt: inMs(-1), prompt: 'Recheck quota and continue.' });
   await untilStatus(daemon, job.id, 'delivered');
   assert.equal((await jobOf(daemon, job.id)).attempts, 1);
   assert.equal(runtimes[0].started.length, 1);
-  assert.equal(daemon.runtime.snapshot(session.id).parked, undefined);
+  assert.equal(daemon.runtime.snapshot(session.id)!.parked, undefined);
 });
 
 test('a job that comes due late says how late it is', async t => {
@@ -384,23 +391,23 @@ test('a job that is hours late is still delivered after a restart', async t => {
   const { job } = await daemon.request('schedule.create', { projectRoot: project, sessionId: session.id, dueAt: inMs(-3 * 60 * 60 * 1000), prompt: 'Three hours late.' });
   await daemon.stop();
 
-  let entered;
+  let entered!: (value?: unknown) => void;
   const resuming = new Promise(resolve => { entered = resolve; });
-  let release;
+  let release!: (value?: unknown) => void;
   const resume = new Promise(resolve => { release = resolve; });
   releases.push(release);
   // Do not allow any scheduler pass before native resume is gated. Otherwise an
   // opening note from before a snapshot existed could satisfy the observation.
   let allowTick = false;
   const interval = globalThis.setInterval;
-  const tickGate = t.mock.method(globalThis, 'setInterval', (callback, ms, ...args) =>
+  const tickGate = t.mock.method(globalThis, 'setInterval', (callback: Json, ms: number, ...args: Json[]) =>
     interval(() => { if (ms !== 20 || allowTick) callback(...args); }, ms));
   // Hold the actual native resume: the runtime already exposes a snapshot, but its
   // thread is not ready. A scheduler tick must observe this exact recovery phase.
   const next = await start({ resumeGate: async () => { entered(); await resume; } });
   await resuming;
   assert.ok(next.runtime.snapshot(session.id), 'a snapshot exists before native resume answers');
-  assert.equal(next.runtime.starting(session.id), true);
+  assert.equal(next.runtime.starting!(session.id), true);
   assert.equal((await jobOf(next, job.id)).lastError, undefined, 'no earlier tick supplied an opening note');
   allowTick = true;
   tickGate.mock.restore();
@@ -423,7 +430,7 @@ test('a job that is hours late is still delivered after a restart', async t => {
   assert.equal(after.attempts, 1);
   assert.equal(after.lastError, undefined);
   assert.equal(runtimes.at(-1).started.length, 1, 'the native runtime receives exactly one turn');
-  assert.equal(userTexts(next.events).filter(text => text.includes('Three hours late.')).length, 1);
+  assert.equal(userTexts(next.events).filter((text: Json) => text.includes('Three hours late.')).length, 1);
 });
 
 test('a job that is hours late waits for an active turn on a recovered session, then delivers', async t => {
@@ -438,7 +445,7 @@ test('a job that is hours late waits for an active turn on a recovered session, 
   // ticks only after that turn exists, so the test observes the busy-state contract.
   let allowTick = false;
   const interval = globalThis.setInterval;
-  const tickGate = t.mock.method(globalThis, 'setInterval', (callback, ms, ...args) =>
+  const tickGate = t.mock.method(globalThis, 'setInterval', (callback: Json, ms: number, ...args: Json[]) =>
     interval(() => { if (ms !== 20 || allowTick) callback(...args); }, ms));
   const next = await start({ scheduleTickMs: 20 });
   await until(() => next.runtime.snapshot(session.id), 'session is reopened by recovery');
@@ -533,7 +540,7 @@ test('a project is the same project, however it is spelled', async t => {
   // The same directory, named with a trailing slash: the job is found, not lost.
   const spelled = `${project}/`;
   const { jobs } = await daemon.request('schedule.list', { projectRoot: spelled });
-  assert.deepEqual(jobs.map(entry => entry.id), [job.id], 'the job of the project is listed');
+  assert.deepEqual(jobs.map((entry: Json) => entry.id), [job.id], 'the job of the project is listed');
   const found = await daemon.request('schedule.get', { id: job.id, projectRoot: spelled });
   assert.equal(found.job.id, job.id, 'the job of the project is found');
   const { job: cancelled } = await daemon.request('schedule.cancel', { id: job.id, projectRoot: spelled });
@@ -566,7 +573,7 @@ test('a project is named by the directory it is, not by the way it is written', 
   const link = path.join(directory, 'link-to-project');
   await symlink(project, link);
   const { jobs } = await daemon.request('schedule.list', { projectRoot: link });
-  assert.deepEqual(jobs.map(entry => entry.id), [job.id], 'the job is found through the link');
+  assert.deepEqual(jobs.map((entry: Json) => entry.id), [job.id], 'the job is found through the link');
   // A relative path is refused: it would be read against the daemon's own directory.
   await assert.rejects(daemon.request('schedule.list', { projectRoot: 'project' }), { code: -32602 });
   await assert.rejects(daemon.request('schedule.create', { projectRoot: 'project', sessionId: session.id, dueAt: inMs(60), prompt: 'Relative.' }), { code: -32602 });
@@ -605,9 +612,9 @@ test('the jobs of a project can be listed by their status', async t => {
   await daemon.request('schedule.cancel', { id: cancelled.id, projectRoot: project });
 
   const { jobs: pending } = await daemon.request('schedule.list', { projectRoot: project, status: 'pending' });
-  assert.deepEqual(pending.map(entry => entry.id), [job.id]);
+  assert.deepEqual(pending.map((entry: Json) => entry.id), [job.id]);
   const { jobs: cancelledJobs } = await daemon.request('schedule.list', { projectRoot: project, status: 'cancelled' });
-  assert.deepEqual(cancelledJobs.map(entry => entry.id), [cancelled.id]);
+  assert.deepEqual(cancelledJobs.map((entry: Json) => entry.id), [cancelled.id]);
   const { jobs: none } = await daemon.request('schedule.list', { projectRoot: project, status: 'delivered' });
   assert.deepEqual(none, []);
 });
@@ -624,7 +631,7 @@ test('a job runs once, however often the daemon looks for it', async t => {
   await new Promise(resolve => setTimeout(resolve, 120));
   const after = await jobOf(daemon, job.id);
   assert.equal(after.attempts, 1, 'the job was delivered once');
-  assert.equal(userTexts(daemon.events).filter(text => text.includes('Only once.')).length, 1, 'the session got one turn');
+  assert.equal(userTexts(daemon.events).filter((text: Json) => text.includes('Only once.')).length, 1, 'the session got one turn');
   assert.equal(runtimes[0].started.length, 1, 'the runtime was asked for one turn');
 });
 
@@ -675,7 +682,7 @@ test('a job file that is not a job is skipped, and the other jobs still run', as
 
   await until(() => promptOf(daemon.events, 'The good one.'), 'the good job did not fire');
   const { jobs } = await daemon.request('schedule.list', { projectRoot: project });
-  assert.deepEqual(jobs.map(entry => entry.id), [good.id], 'the broken job is not listed');
+  assert.deepEqual(jobs.map((entry: Json) => entry.id), [good.id], 'the broken job is not listed');
   assert.equal(promptOf(daemon.events, 'The broken one.'), undefined, 'the broken job did not fire');
 });
 
@@ -711,13 +718,13 @@ test('a delivery timeout retains the runtime queue until the native start settle
   const { session } = await create(daemon);
   const { session: other } = await create(daemon);
   let admissionAnswered = false;
-  const admit = daemon.runtime.withIdlePrompt.bind(daemon.runtime);
+  const admit = daemon.runtime.withIdlePrompt!.bind(daemon.runtime);
   daemon.runtime.withIdlePrompt = async (...args) => {
-    const answer = await admit(...args);
+    const answer = await admit!(...args);
     admissionAnswered = true;
     return answer;
   };
-  let release;
+  let release!: (value?: unknown) => void;
   runtimes[0].hold = new Promise(resolve => { release = resolve; });
   releases.push(release);
   const { job } = await daemon.request('schedule.create', { projectRoot: project, sessionId: session.id, dueAt: inMs(-1), prompt: 'Keep native start ownership.' });
@@ -726,7 +733,7 @@ test('a delivery timeout retains the runtime queue until the native start settle
   assert.equal((await jobOf(daemon, job.id)).lastError.code, 'delivery_timeout');
   await until(() => admissionAnswered, 'the admission caller to receive its timeout result');
   let secondAdmitted = false;
-  const queued = admit(other.id, async send => {
+  const queued = admit!(other.id, async send => {
     secondAdmitted = true;
     await send({ clientMessageId: 'after-timeout', delivery: 'auto', content: [] });
   });
@@ -745,12 +752,12 @@ test('a delivery timeout retains the runtime queue until the native start settle
 
 test('the agent path (runtime.bindSchedules) and IPC reach the same schedule handlers', async t => {
   const { start, create, project } = await setup(t);
-  let bound;
-  const daemon = await start({ onBindSchedules: handler => { bound = handler; } });
+  let bound: Json;
+  const daemon = await start({ onBindSchedules: (handler: Json) => { bound = handler; } });
   assert.equal(typeof bound, 'function', 'alpd binds a schedule handler for the agent path');
   const { session } = await create(daemon);
 
-  const { job } = await bound('create', { projectRoot: project, sessionId: session.id, dueAt: inMs(60_000), prompt: 'Agent path.' });
+  const { job } = await bound!('create', { projectRoot: project, sessionId: session.id, dueAt: inMs(60_000), prompt: 'Agent path.' });
   assert.deepEqual(await jobOf(daemon, job.id), job, 'a job the agent created is the one IPC reads');
   assert.deepEqual(await bound('list', { projectRoot: project }), await daemon.request('schedule.list', { projectRoot: project }));
   assert.deepEqual(await bound('get', { id: job.id, projectRoot: project }), { job });
@@ -758,7 +765,7 @@ test('the agent path (runtime.bindSchedules) and IPC reach the same schedule han
   await assert.rejects(bound('list', {}), { code: -32602 });
   await assert.rejects(bound('get', { id: 'sch_0000000000000000', projectRoot: project }), { code: 1001 });
 
-  const { job: cancelled } = await bound('cancel', { id: job.id, projectRoot: project });
+  const { job: cancelled } = await bound!('cancel', { id: job.id, projectRoot: project });
   assert.equal(cancelled.status, 'cancelled');
   assert.equal((await jobOf(daemon, job.id)).status, 'cancelled');
   await assert.rejects(daemon.request('schedule.cancel', { id: job.id, projectRoot: project }), { code: 1004 });
@@ -812,7 +819,7 @@ test('a job needs a live root session of its project', async t => {
   const { jobs } = await daemon.request('schedule.list', { projectRoot: '/another/project' });
   assert.deepEqual(jobs, []);
   const { jobs: mine } = await daemon.request('schedule.list', { projectRoot: project });
-  assert.deepEqual(mine.map(entry => entry.id), [job.id]);
+  assert.deepEqual(mine.map((entry: Json) => entry.id), [job.id]);
 });
 
 test('an earlier attempt with a missing or expired receipt fails closed instead of sending again', async t => {
@@ -839,12 +846,12 @@ test('the scheduled turn receives fresh provider availability and quota recheck 
   const { job } = await daemon.request('schedule.create', { projectRoot: project, sessionId: session.id, dueAt: inMs(30), prompt: 'Quota reset continuation.' });
   await untilStatus(daemon, job.id, 'delivered');
   assert.equal(reads, 1, 'availability is fetched at wake time');
-  const input = runtimes[0].started[0].params.input.map(part => part.text ?? '').join('\n');
+  const input = runtimes[0].started[0].params.input.map((part: Json) => part.text ?? '').join('\n');
   assert.match(input, /"ordinaryUsageAllowed":false/);
   assert.match(input, /"usedPercent":100/);
   assert.match(input, /Before delegating[\s\S]*recheck actual provider availability/);
   assert.match(input, /scheduled time does not guarantee quota/);
-  assert.equal(runtimes[0].calls.filter(call => call.method === 'thread/start').length, 1, 'no delegation is performed by the scheduler');
+  assert.equal(runtimes[0].calls.filter((call: Json) => call.method === 'thread/start').length, 1, 'no delegation is performed by the scheduler');
 });
 
 test('an overlapping tick cannot hide the active delivery from stop', async t => {
@@ -852,9 +859,9 @@ test('an overlapping tick cannot hide the active delivery from stop', async t =>
   t.after(() => rm(directory, { recursive: true, force: true }));
   const store = createScheduleStore(directory);
   const job = await store.create({ projectRoot: directory, sessionId: 'root', dueAt: inMs(-1000), prompt: 'Wait for ACK.' });
-  let acknowledge, started = false;
-  const delivery = new Promise(resolve => { acknowledge = resolve; });
-  const scheduler = createScheduler({ store, runtime: { snapshot: () => ({ projectRoot: directory }) }, deliver: async () => { started = true; return delivery; } });
+  let acknowledge!: (value: Json) => void, started = false;
+  const delivery = new Promise<Json>(resolve => { acknowledge = resolve; });
+  const scheduler = createScheduler({ store, runtime: { snapshot: () => ({ projectRoot: directory }) } as Json, deliver: async () => { started = true; return delivery; } });
   const first = scheduler.tick();
   await until(() => started);
   const overlap = scheduler.tick();
@@ -864,7 +871,7 @@ test('an overlapping tick cannot hide the active delivery from stop', async t =>
   assert.equal(stopped, false, 'stop must wait despite an overlapping interval tick');
   acknowledge({ outcome: 'accepted' });
   await Promise.all([first, overlap, stopping]);
-  assert.equal((await store.get(job.id)).status, 'delivered');
+  assert.equal((await store.get(job.id))!.status, 'delivered');
 });
 
 test('a busy session beyond the grace window fails without sending a prompt', async t => {
@@ -875,17 +882,17 @@ test('a busy session beyond the grace window fails without sending a prompt', as
   const store = createScheduleStore(directory, { now });
   const job = await store.create({ projectRoot: directory, sessionId: 'root', dueAt: new Date(9000).toISOString(), prompt: 'Too late.' });
   let sent = 0;
-  const scheduler = createScheduler({ store, runtime: { snapshot: () => ({ projectRoot: directory, activeTurnId: 'busy' }) }, now, graceMs: 500, deliver: async () => { sent++; return { outcome: 'accepted' }; } });
+  const scheduler = createScheduler({ store, runtime: { snapshot: () => ({ projectRoot: directory, activeTurnId: 'busy' }) } as Json, now, graceMs: 500, deliver: async () => { sent++; return { outcome: 'accepted' }; } });
   assert.equal((await scheduler.tick()).waiting, 1);
   const waiting = await store.get(job.id);
-  assert.equal(waiting.lastError.code, 'session_busy');
-  assert.equal(waiting.status, 'pending');
+  assert.equal(waiting!.lastError!.code, 'session_busy');
+  assert.equal(waiting!.status, 'pending');
 
   currentTime = 10501;
   assert.equal((await scheduler.tick()).failed, 1);
   const after = await store.get(job.id);
-  assert.equal(after.lastError.code, 'session_busy');
-  assert.equal(after.status, 'failed');
+  assert.equal(after!.lastError!.code, 'session_busy');
+  assert.equal(after!.status, 'failed');
   assert.equal(sent, 0);
 });
 
@@ -902,8 +909,8 @@ test('a job created with keepsSession false does not keep its session open, surv
   const scheduler = createScheduler({ store, runtime: daemon.runtime, deliver: async () => ({ outcome: 'accepted' }) });
   const loose = await store.create({ projectRoot: project, sessionId: 'loose', dueAt: inMs(60_000), prompt: 'Loose.', keepsSession: false });
   const kept = await store.create({ projectRoot: project, sessionId: 'kept', dueAt: inMs(60_000), prompt: 'Kept.' });
-  assert.equal((await store.get(loose.id)).keepsSession, false);
-  assert.equal((await store.get(kept.id)).keepsSession, undefined);
+  assert.equal((await store.get(loose.id))!.keepsSession, false);
+  assert.equal((await store.get(kept.id))!.keepsSession, undefined);
   scheduler.hold(loose);
   scheduler.hold(kept);
   assert.equal(scheduler.holds('loose'), false);
@@ -914,21 +921,21 @@ test('a job whose prompt opens with a native command the session refuses fails w
   const { directory, project } = await setup(t);
   const store = createScheduleStore(path.join(directory, 'refused-jobs'));
   const refused = 'ALP does not pass /clear (or /new, /reset) to Claude';
-  const seen = [];
-  const runtime = {
+  const seen: Json[] = [];
+  const runtime: Json = {
     snapshot: () => ({ projectRoot: project }),
     // A Claude session: the runtime refuses the job's own words, which start with /clear.
-    refusesPrompt: (_id, content) => { seen.push(content); return /^\s*\/(clear|new|reset)(\s|$)/.test(content[0].text) ? refused : undefined; },
+    refusesPrompt: (_id: string, content: Json) => { seen.push(content); return /^\s*\/(clear|new|reset)(\s|$)/.test(content[0].text) ? refused : undefined; },
   };
   let sends = 0;
   const scheduler = createScheduler({ store, runtime, deliver: async () => { sends++; return { outcome: 'accepted' }; } });
   const job = await store.create({ projectRoot: project, sessionId: 'root', dueAt: inMs(-1), prompt: '/clear and start over' });
   assert.deepEqual(await scheduler.tick(), { delivered: 0, failed: 1, waiting: 0 });
   const after = await store.get(job.id);
-  assert.equal(after.status, 'failed');
-  assert.equal(after.lastError.code, 'native_command_unsupported');
-  assert.equal(after.lastError.message, refused);
-  assert.equal(after.deliveredAt, undefined);
+  assert.equal(after!.status, 'failed');
+  assert.equal(after!.lastError!.code, 'native_command_unsupported');
+  assert.equal(after!.lastError!.message, refused);
+  assert.equal(after!.deliveredAt, undefined);
   assert.equal(sends, 0, 'nothing was sent');
   assert.equal(seen[0][0].text, '/clear and start over', 'the job prompt itself is checked, not the preamble');
 });
@@ -936,7 +943,7 @@ test('a job whose prompt opens with a native command the session refuses fails w
 test('a Claude runtime refuses the job prompt that the rendered preamble would hide', async () => {
   const { nativeCommandRefusal } = await import('@anhlp/alp-runtime');
   const { renderPrompt } = await import('@anhlp/alp-daemon');
-  const job = { id: 'j', dueAt: new Date().toISOString(), prompt: '/new' };
+  const job = { id: 'j', dueAt: new Date().toISOString(), prompt: '/new' } as Json;
   assert.equal(nativeCommandRefusal('claude', [{ type: 'text', text: renderPrompt(job) }]), undefined);
   assert.ok(nativeCommandRefusal('claude', [{ type: 'text', text: job.prompt }]));
 });

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm, realpath, access, rename, symlink } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
@@ -9,15 +10,19 @@ import { createRegistry } from '@anhlp/alp-daemon/registry';
 import { createWorkspaceWorktrees } from '@anhlp/alp-daemon/worktrees';
 import { teardown } from '../../../test/support/teardown.ts';
 
+// `any`: alpd's answers and refusals are JSON, and some adopt() params are malformed on purpose; the tests read the fields they assert on.
+type Json = any;
+
 // t-c1ba: owner-audited adoption of managed worktrees made before birth certification existed.
-const git = (cwd, ...args) =>
+const git = (cwd: string, ...args: string[]) =>
   execFileSync('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Test', '-c', 'user.email=test@localhost', ...args], {
     cwd,
     encoding: 'utf8',
     env: { PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' }
   }).trim();
 
-async function fixture(t) {
+type Fixture = Awaited<ReturnType<typeof fixture>>;
+async function fixture(t: TestContext) {
   const defer = teardown(t);
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'alp-adopt-')));
   defer(() => rm(root, { recursive: true, force: true }));
@@ -59,15 +64,15 @@ async function fixture(t) {
     registry,
     (dir, run) => runtime.withWorkspaceMutation(dir, run),
     (dir) => runtime.registerWorkspace(dir),
-    (dir, verify) => runtime.adoptWorkspace(dir, verify)
+    (dir, verify) => runtime.adoptWorkspace!(dir, verify)
   );
   const auditFile = path.join(home, 'state', 'workspace-adoptions.jsonl');
   const audit = async () => (await readFile(auditFile, 'utf8').catch(() => '')).split('\n').filter(Boolean).map((line) => JSON.parse(line));
   return { root, home, source, parent, registry, runtime, service, created, ledgerFile, audit };
 }
-const remove = async (f) => f.service.mutate('remove', { workspaceId: f.created.id, ifRevision: (await f.registry.snapshot()).revision, requestId: 'remove-' + Math.random() });
-const stillRefused = async (f) => {
-  await assert.rejects(remove(f), (e) => e.data?.reason === 'workspace_assignment_result');
+const remove = async (f: Fixture) => f.service.mutate('remove', { workspaceId: f.created.id, ifRevision: (await f.registry.snapshot()).revision, requestId: 'remove-' + Math.random() });
+const stillRefused = async (f: Fixture) => {
+  await assert.rejects(remove(f), (e: Json) => e.data?.reason === 'workspace_assignment_result');
   await access(path.join(f.created.directory, 'file'));
 };
 
@@ -88,8 +93,8 @@ test('the owner adopts a verified legacy worktree after confirming its facts; re
   // Previewing changes nothing, and neither does a request without the owner's confirmation.
   assert.deepEqual(await f.audit(), []);
   await stillRefused(f);
-  await assert.rejects(f.service.adopt({ workspaceId: f.created.id }), (e) => e.data?.reason === 'confirmation_mismatch');
-  await assert.rejects(f.service.adopt({ workspaceId: f.created.id, confirm: { ...facts, extra: true } }), (e) => e.data?.reason === 'confirmation_mismatch');
+  await assert.rejects(f.service.adopt({ workspaceId: f.created.id } as Json), (e: Json) => e.data?.reason === 'confirmation_mismatch');
+  await assert.rejects(f.service.adopt({ workspaceId: f.created.id, confirm: { ...facts, extra: true } as Json }), (e: Json) => e.data?.reason === 'confirmation_mismatch');
   await stillRefused(f);
   assert.deepEqual(await f.service.adopt({ workspaceId: f.created.id, confirm: facts }), { adopted: facts });
   assert.deepEqual(
@@ -102,7 +107,7 @@ test('the owner adopts a verified legacy worktree after confirming its facts; re
   assert.deepEqual(JSON.parse(await readFile(f.ledgerFile, 'utf8')).workspaces, [f.created.directory]);
   // Removal keeps its own refusals: dirty files still stop it.
   await writeFile(path.join(f.created.directory, 'notes'), 'keep\n');
-  await assert.rejects(remove(f), (e) => e.data?.reason === 'workspace_dirty');
+  await assert.rejects(remove(f), (e: Json) => e.data?.reason === 'workspace_dirty');
   await rm(path.join(f.created.directory, 'notes'));
   const removed = await remove(f);
   assert.equal(removed.filesRemoved, true);
@@ -114,26 +119,26 @@ test('only the host owner adopts, and only facts that still hold', async (t) => 
   const f = await fixture(t);
   const facts = await f.service.adoption(f.created.id);
   for (const context of [{ principalId: 'token' }, { principalEpoch: 'credential' }, { mappingIds: ['approved'] }, { authorizedRoots: [f.source] }]) {
-    await assert.rejects(f.service.adoption(f.created.id, context), (e) => e.data?.reason === 'owner_only');
-    await assert.rejects(f.service.adopt({ workspaceId: f.created.id, confirm: facts }, context), (e) => e.data?.reason === 'owner_only');
+    await assert.rejects(f.service.adoption(f.created.id, context), (e: Json) => e.data?.reason === 'owner_only');
+    await assert.rejects(f.service.adopt({ workspaceId: f.created.id, confirm: facts }, context), (e: Json) => e.data?.reason === 'owner_only');
   }
   // A commit after the owner looked: the confirmation no longer describes the checkout.
   await writeFile(path.join(f.created.directory, 'file'), 'two\n');
   git(f.created.directory, 'commit', '-qam', 'later');
-  await assert.rejects(f.service.adopt({ workspaceId: f.created.id, confirm: facts }), (e) => e.data?.reason === 'confirmation_mismatch');
+  await assert.rejects(f.service.adopt({ workspaceId: f.created.id, confirm: facts }), (e: Json) => e.data?.reason === 'confirmation_mismatch');
   await stillRefused(f);
   assert.deepEqual(await f.audit(), []);
   // A change after the first check but before the runtime's reservation is caught by the check under it.
   const racing = createWorkspaceWorktrees(f.home, f.registry, (dir, run) => f.runtime.withWorkspaceMutation(dir, run), (dir) => f.runtime.registerWorkspace(dir), async (dir, verify) => {
     git(dir, 'commit', '-q', '--allow-empty', '-m', 'raced');
-    return f.runtime.adoptWorkspace(dir, verify);
+    return f.runtime.adoptWorkspace!(dir, verify);
   });
-  await assert.rejects(racing.adopt({ workspaceId: f.created.id, confirm: await racing.adoption(f.created.id) }), (e) => e.data?.reason === 'confirmation_mismatch');
+  await assert.rejects(racing.adopt({ workspaceId: f.created.id, confirm: await racing.adoption(f.created.id) }), (e: Json) => e.data?.reason === 'confirmation_mismatch');
   assert.deepEqual((await f.audit()).map(({ event, reason }) => ({ event, reason })), [{ event: 'adoption.requested', reason: undefined }, { event: 'adoption.refused', reason: 'confirmation_mismatch' }]);
   await stillRefused(f);
-  await assert.rejects(f.service.adopt({ workspaceId: 'wks_0000000000000000', confirm: facts }), (e) => e.data?.reason === 'not_found');
+  await assert.rejects(f.service.adopt({ workspaceId: 'wks_0000000000000000', confirm: facts }), (e: Json) => e.data?.reason === 'not_found');
   const service = createWorkspaceWorktrees(f.home, f.registry, (dir, run) => f.runtime.withWorkspaceMutation(dir, run), (dir) => f.runtime.registerWorkspace(dir));
-  await assert.rejects(service.adopt({ workspaceId: f.created.id, confirm: await service.adoption(f.created.id) }), (e) => e.data?.reason === 'guard_unavailable');
+  await assert.rejects(service.adopt({ workspaceId: f.created.id, confirm: await service.adoption(f.created.id) }), (e: Json) => e.data?.reason === 'guard_unavailable');
   await stillRefused(f);
 });
 
@@ -143,10 +148,10 @@ test('each failed verification refuses adoption and leaves removal refused', asy
   const directory = f.created.directory;
   const mappings = path.join(f.home, 'worktree-destinations.json');
   const approved = await readFile(mappings, 'utf8');
-  const refusedWith = async (reason, setup, restore) => {
+  const refusedWith = async (reason: string, setup: () => unknown, restore: () => unknown) => {
     await setup();
     try {
-      await assert.rejects(f.service.adoption(id), (e) => e.data?.reason === reason, reason);
+      await assert.rejects(f.service.adoption(id), (e: Json) => e.data?.reason === reason, reason);
     } finally {
       await restore();
     }
@@ -179,10 +184,10 @@ test('each failed verification refuses adoption and leaves removal refused', asy
   pending.worktreeJournal = { stuck: { fingerprint: 'x', intent: { method: 'remove', id, branch: `alp/workspace/${id}`, directory, source: f.source, commonDir: path.join(f.source, '.git'), head: git(f.source, 'rev-parse', 'HEAD') } } };
   await writeFile(registryFile, JSON.stringify(pending));
   const reloaded = createWorkspaceWorktrees(f.home, createRegistry(f.home), async () => assert.fail('guarded'), async () => {}, async () => assert.fail('adopted'));
-  await assert.rejects(reloaded.adoption(id), (e) => e.data?.reason === 'reconciliation_required');
+  await assert.rejects(reloaded.adoption(id), (e: Json) => e.data?.reason === 'reconciliation_required');
   await writeFile(registryFile, saved);
   // Not a managed worktree at all: the source checkout itself.
-  await assert.rejects(f.service.adoption((await f.registry.snapshot()).workspaces[0].id), (e) => e.data?.reason === 'not_managed');
+  await assert.rejects(f.service.adoption((await f.registry.snapshot()).workspaces[0].id), (e: Json) => e.data?.reason === 'not_managed');
   // Every refusal above left the facts provable again, and nothing was certified.
   await f.service.adoption(id);
   assert.deepEqual(JSON.parse(await readFile(f.ledgerFile, 'utf8')).workspaces, []);
@@ -193,7 +198,7 @@ test('a checkout an assignment still owns is never adopted; the refusal is logge
   const facts = await f.service.adoption(f.created.id);
   const ledger = JSON.parse(await readFile(f.ledgerFile, 'utf8'));
   await writeFile(f.ledgerFile, JSON.stringify({ ...ledger, results: [{ assignmentId: 'retained', checkout: f.created.directory }] }));
-  await assert.rejects(f.service.adopt({ workspaceId: f.created.id, confirm: facts }), (e) => e.data?.reason === 'workspace_assignment_result');
+  await assert.rejects(f.service.adopt({ workspaceId: f.created.id, confirm: facts }), (e: Json) => e.data?.reason === 'workspace_assignment_result');
   assert.deepEqual(
     (await f.audit()).map(({ event, reason }) => ({ event, reason })),
     [{ event: 'adoption.requested', reason: undefined }, { event: 'adoption.refused', reason: 'workspace_assignment_result' }]

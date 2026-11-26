@@ -6,14 +6,17 @@ import net from 'node:net';
 import { AlpRpcClient, hello } from '@anhlp/alp-client/portable';
 import { createSocketTransport } from '@anhlp/alp-client/ipc';
 
-const [socketPath, steps] = [process.argv[2], JSON.parse(process.argv[3])];
+// `any`: the steps are JSON from argv and their results are alpd's JSON answers, of every shape.
+type Json = any;
+
+const [socketPath, steps]: [string, [string, Json][]] = [process.argv[2], JSON.parse(process.argv[3])];
 const socket = net.createConnection(socketPath);
 await new Promise((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); });
 const client = new AlpRpcClient(createSocketTransport(socket), { timeoutMs: 15_000 });
-const report = { hello: await hello(client, { name: 'remote-fixture', version: '0' }), calls: [] };
+const report: { hello: unknown, calls: Json[] } = { hello: await hello(client, { name: 'remote-fixture', version: '0' }), calls: [] };
 for (const [method, params] of steps) {
   try { report.calls.push({ method, result: await client.request(method, params) }); }
-  catch (error) { report.calls.push({ method, error: { code: error.code, reason: error.data?.reason, message: error.message } }); }
+  catch (error: Json) { report.calls.push({ method, error: { code: error.code, reason: error.data?.reason, message: error.message } }); }
 }
 client.close();
 process.stdout.write(JSON.stringify(report));

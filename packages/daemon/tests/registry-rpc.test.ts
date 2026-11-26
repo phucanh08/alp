@@ -8,19 +8,23 @@ import { createDaemonServer } from '@anhlp/alp-daemon';
 import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { fakeTransport } from '../../../test/support/fake-agent.ts';
+import type { FakeAgent } from '../../../test/support/fake-agent.ts';
+
+// `any`: alpd's answers and JSON-RPC errors are JSON; the test reads the fields it asserts on.
+type Json = any;
 test('host workspace resolution, legacy cwd, existing root mismatch and failed open placement rollback',async t=>{
  const root=await mkdtemp(path.join(tmpdir(),'alp-registry-rpc-'));const home=path.join(root,'home');await seedLibrary(home);
  const a=path.join(root,'a'),b=path.join(root,'b');await initProject(a,{library:home});await initProject(b,{library:home});
- let failOpen=false;const agents=[];const factory=fakeTransport(agents);
+ let failOpen=false;const agents: FakeAgent[]=[];const factory: (...args: unknown[]) => FakeAgent=fakeTransport(agents);
  const runtime=createAlpRuntime({libraryDir:home,supervisor:false,transport:(...args)=>{if(failOpen)throw new Error('open rejected');return factory(...args);}});
  const daemon=createDaemonServer({runtime,home,socketPath:'',version:'test'});const client=daemon.local();
  t.after(async()=>{client.close();await daemon.close();await runtime.shutdown();await rm(root,{recursive:true,force:true});});
  await client.request('project.register',{directory:a,ifRevision:0,requestId:'a'});await client.request('project.register',{directory:b,ifRevision:1,requestId:'b'});
  assert.equal((await client.request('registry.owner',{})).registry.receipts,undefined);
- const rows=await client.request('workspace.list',{});const wa=rows.workspaces.find(w=>w.directory===a).id,wb=rows.workspaces.find(w=>w.directory===b).id;
- await assert.rejects(client.request('session.create',{sessionId:'wrong',workspaceId:wa,spec:{cwd:b,workflow:'pho'}}),e=>e.code===-32602);
+ const rows=await client.request('workspace.list',{});const wa=rows.workspaces.find((w: Json)=>w.directory===a).id,wb=rows.workspaces.find((w: Json)=>w.directory===b).id;
+ await assert.rejects(client.request('session.create',{sessionId:'wrong',workspaceId:wa,spec:{cwd:b,workflow:'pho'}}),(e: Json)=>e.code===-32602);
  const old=await client.request('session.create',{sessionId:'legacy',spec:{cwd:a,workflow:'pho'}});assert.equal(old.session.projectRoot,a);
- await assert.rejects(client.request('session.create',{sessionId:'legacy',workspaceId:wb,spec:{workflow:'pho'}}),e=>e.code===1004);
+ await assert.rejects(client.request('session.create',{sessionId:'legacy',workspaceId:wb,spec:{workflow:'pho'}}),(e: Json)=>e.code===1004);
  assert.equal((await client.request('registry.owner',{})).registry.sessions.legacy,wa);
  await runtime.open('unmapped',{cwd:a,workflow:'pho'},{history:'skip',delegation:true});
  await assert.rejects(client.request('session.create',{sessionId:'unmapped',workspaceId:wb,spec:{workflow:'pho'}}),/agree/);

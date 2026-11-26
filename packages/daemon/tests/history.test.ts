@@ -1,13 +1,18 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { createStore } from '@anhlp/alp-daemon/store';
 import { validateResult } from '@anhlp/alp-protocol/contract';
+import type { Envelope } from '@anhlp/alp-runtime';
 
-const event = (cursor, text = `message ${cursor}`) => ({ sessionId: cursor % 3 ? 'r' : 'child', epoch: 'e', seq: cursor, ts: '2026-10-20T00:00:00Z', event: { type: 'item', item: { kind: cursor % 2 ? 'assistant_message' : 'notice', id: `m${cursor}`, level: 'info', text, cursor: 9999999 } }, cursor });
-async function setup(t) {
+// `any`: the mocked fs functions take and return what each overload does, handed on unchanged.
+type Json = any;
+
+const event = (cursor: number, text = `message ${cursor}`) => ({ sessionId: cursor % 3 ? 'r' : 'child', epoch: 'e', seq: cursor, ts: '2026-10-20T00:00:00Z', event: { type: 'item', item: { kind: cursor % 2 ? 'assistant_message' : 'notice', id: `m${cursor}`, level: 'info', text, cursor: 9999999 } }, cursor }) as Envelope;
+async function setup(t: TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-history-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   return { root, store: createStore(root) };
@@ -28,7 +33,7 @@ test('650 mixed events page backwards ascending, fixed watermark across append/r
     page = await restarted.history('r', 'r', { before: page.olderCursor });
     assert.equal(page.generation, generation);
     assert.equal(page.tipCursor, 650);
-    assert.ok(page.items.every((item, i, a) => !i || a[i - 1].cursor < item.cursor));
+    assert.ok(page.items.every((item, i, a) => !i || a[i - 1].cursor! < item.cursor!));
     all.unshift(...page.items);
   }
   assert.deepEqual(all.map(item => item.cursor), Array.from({ length: 650 }, (_, i) => i + 1));
@@ -40,8 +45,8 @@ test('signed cursors reject foreign session, tampering and malformed positions; 
   const page = await store.history('r', 'r', { limit: 1 });
   for (const before of ['', 'bad', page.olderCursor + 'x', 'x'.repeat(4097)]) await assert.rejects(store.history('r', 'r', { before }), { reason: 'invalid_cursor' });
   await assert.rejects(store.history('r', 'foreign', { before: page.olderCursor }), { reason: 'invalid_cursor' });
-  const [body, signature] = page.olderCursor.split('.');
-  const decoded = JSON.parse(Buffer.from(body, 'base64url'));
+  const [body, signature] = page.olderCursor!.split('.');
+  const decoded = JSON.parse(Buffer.from(body, 'base64url') as unknown as string);
   decoded.position = -1;
   await assert.rejects(store.history('r', 'r', { before: Buffer.from(JSON.stringify(decoded)).toString('base64url') + '.' + signature }), { reason: 'invalid_cursor' });
   await unlink(path.join(root, 'timeline/r.jsonl'));
@@ -55,7 +60,7 @@ test('byte budgets progress past oversized nested-cursor event and actual outer 
   const all = [...page.items];
   while (page.hasOlder) { page = await store.history('r', 'r', { before: page.olderCursor, maxBytes: 4096 }); assert.ok(Buffer.byteLength(JSON.stringify(page)) <= 4096); all.unshift(...page.items); }
   assert.deepEqual(all.map(item => item.cursor), [2, 4, 9, 20]);
-  assert.ok(all[2].oversized.bytes > 700000);
+  assert.ok((all[2] as { oversized: { bytes: number } }).oversized.bytes > 700000);
   assert.deepEqual(validateResult('session.history', { ...page, items: all }), []);
 });
 test('derived index deletion/truncation and malformed metadata rebuild safely from source', async t => {
@@ -86,17 +91,17 @@ test('indexed older pages neither scan nor readFile the JSONL and seek only thei
   const promises = await import('node:fs/promises');
   const { syncBuiltinESMExports } = await import('node:module');
   const file = path.join(root, 'timeline/r.jsonl');
-  const read = promises.default.readFile;
-  const stream = fs.default.createReadStream;
-  t.mock.method(fs.default, 'createReadStream', (name, ...args) => { assert.notEqual(name, file, 'indexed page must not scan source'); return stream(name, ...args); });
-  t.mock.method(promises.default, 'readFile', (name, ...args) => { assert.notEqual(name, file, 'indexed page must not load full source'); return read(name, ...args); });
-  const originalOpen = promises.default.open;
+  const read: (...args: Json[]) => Promise<Json> = promises.default.readFile;
+  const stream: (...args: Json[]) => Json = fs.default.createReadStream;
+  t.mock.method(fs.default, 'createReadStream', (name: Json, ...args: Json[]) => { assert.notEqual(name, file, 'indexed page must not scan source'); return stream(name, ...args); });
+  t.mock.method(promises.default, 'readFile', (name: Json, ...args: Json[]) => { assert.notEqual(name, file, 'indexed page must not load full source'); return read(name, ...args); });
+  const originalOpen: (...args: Json[]) => Promise<Json> = promises.default.open;
   let sourceBytes = 0;
-  t.mock.method(promises.default, 'open', async (name, ...args) => {
+  t.mock.method(promises.default, 'open', async (name: Json, ...args: Json[]) => {
     const handle = await originalOpen(name, ...args);
     if (name === file) {
       const originalRead = handle.read.bind(handle);
-      handle.read = async (...readArgs) => { sourceBytes += readArgs[2]; return originalRead(...readArgs); };
+      handle.read = async (...readArgs: Json[]) => { sourceBytes += readArgs[2]; return originalRead(...readArgs); };
     }
     return handle;
   });

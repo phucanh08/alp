@@ -1,13 +1,18 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { backup } from '@anhlp/alp-core';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
+import type { AlpRuntime } from '@anhlp/alp-runtime';
 import { worktreeMappings } from '@anhlp/alp-daemon/worktrees';
 
-async function fixture(t) {
+// `any`: alpd's answers, events and errors are JSON whose shape depends on the method; the tests read the fields they assert on.
+type Json = any;
+
+async function fixture(t: TestContext) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'alp-restore-authority-')));
   t.after(() => rm(root, { recursive: true, force: true }));
   const home = path.join(root, 'home');
@@ -15,7 +20,7 @@ async function fixture(t) {
   await mkdir(path.join(home, 'state'), { recursive: true });
   await mkdir(target);
   const file = path.join(home, 'state', 'assignment-results.json');
-  const options = home => ({ assignmentResultFile: path.join(home, 'state', 'assignment-results.json'), recallFile: path.join(home, 'state', 'recall.json'), liveFile: path.join(home, 'state', 'live.json') });
+  const options = (home: string) => ({ assignmentResultFile: path.join(home, 'state', 'assignment-results.json'), recallFile: path.join(home, 'state', 'recall.json'), liveFile: path.join(home, 'state', 'live.json') });
   const runtime = createAlpRuntime(options(home));
   await runtime.registerWorkspace(target);
   await runtime.shutdown();
@@ -24,7 +29,7 @@ async function fixture(t) {
   await writeFile(file, JSON.stringify(ledger));
   return { root, home, target, file, options, ledger };
 }
-const refused = (runtime, target) => assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('restore certified an old checkout')), error => error.data?.reason === 'workspace_assignment_result');
+const refused = (runtime: AlpRuntime, target: string) => assert.rejects(runtime.withWorkspaceMutation(target, async () => assert.fail('restore certified an old checkout')), (error: Json) => error.data?.reason === 'workspace_assignment_result');
 
 test('fresh and same-home restore preserve permanent owners without certifying old checkouts', async t => {
   const f = await fixture(t);
@@ -66,7 +71,7 @@ test('legacy backups preserve newer owners, lost markers and unknown checkout re
   const runtime = createAlpRuntime(f.options(f.home));
   try {
     await refused(runtime, f.target);
-    await assert.rejects(runtime.registerWorkspace(f.target), error => error.data.reason === 'workspace_assignment_result');
+    await assert.rejects(runtime.registerWorkspace(f.target), (error: Json) => error.data.reason === 'workspace_assignment_result');
   } finally { await runtime.shutdown(); }
   const fresh = path.join(f.root, 'old-fresh');
   await mkdir(fresh);
@@ -109,8 +114,8 @@ test('restore keeps result evidence and the archive, but never how a result was 
     await mkdir(home, { recursive: true });
     await backup.restoreBackup({ home, file: archive, safety: false });
     const restored = JSON.parse(await readFile(path.join(home, 'state', 'assignment-results.json'), 'utf8')).results;
-    assert.deepEqual(restored.find(owner => owner.assignmentId === 'shared'), { assignmentId: 'shared', checkout: f.target, result: { ...result, status: home === f.home ? 'failed' : 'completed' } });
-    assert.deepEqual(restored.find(owner => owner.assignmentId === 'forged'), { assignmentId: 'forged', checkout: f.target });
+    assert.deepEqual(restored.find((owner: Json) => owner.assignmentId === 'shared'), { assignmentId: 'shared', checkout: f.target, result: { ...result, status: home === f.home ? 'failed' : 'completed' } });
+    assert.deepEqual(restored.find((owner: Json) => owner.assignmentId === 'forged'), { assignmentId: 'forged', checkout: f.target });
     assert.match(await readFile(path.join(home, 'state', 'assignment-archive', '2026-10.jsonl'), 'utf8'), /"earlier"/);
     const runtime = createAlpRuntime(f.options(home));
     try { await refused(runtime, f.target); } finally { await runtime.shutdown(); }
@@ -164,7 +169,7 @@ test('mapping evidence is private and inert even with stale paths; each failed s
   const beforeLedger = await readFile(f.file, 'utf8');
   let count;
   await assert.rejects(backup.restoreBackup({ home: f.home, file: archive, safety: false, beforeSwap(_index, total) { count = total; throw new Error('stop'); } }), { code: 'RESTORE_FAILED' });
-  for (let fail = 0; fail <= count; fail++) {
+  for (let fail = 0; fail <= count!; fail++) {
     await assert.rejects(backup.restoreBackup({ home: f.home, file: archive, safety: false, beforeSwap(index) { if (index === fail) throw new Error('stop'); } }), { code: 'RESTORE_FAILED' });
     assert.equal(await readFile(map, 'utf8'), evidence);
     assert.equal(await readFile(f.file, 'utf8'), beforeLedger);
@@ -178,13 +183,13 @@ test('mapping evidence is private and inert even with stale paths; each failed s
   assert.equal(await readFile(quarantine, 'utf8'), evidence);
   if (process.platform !== 'win32') assert.equal((await stat(quarantine)).mode & 0o777, 0o600);
   // The safety archive preserves originals, but replaying it is another sanitized restore.
-  assert.ok((await backup.verifyBackup(restored.safety)).units.includes('worktree-destinations.json'));
+  assert.ok((await backup.verifyBackup(restored.safety!)).units.includes('worktree-destinations.json'));
   const { gunzipSync } = await import('node:zlib');
-  const records = gunzipSync(await readFile(restored.safety)).toString().trimEnd().split('\n').map(JSON.parse);
+  const records = gunzipSync(await readFile(restored.safety!)).toString().trimEnd().split('\n').map(JSON.parse as (text: string) => Json);
   const evidenceIndex = records.findIndex(entry => entry.t === 'file' && entry.path === 'state/worktree-destinations.quarantined.json');
   assert.ok(evidenceIndex > 0, 'safety archive must retain replaced quarantine evidence');
   assert.equal(Buffer.from(records[evidenceIndex + 1].b, 'base64').toString(), 'prior quarantine evidence');
-  await backup.restoreBackup({ home: f.home, file: restored.safety, safety: false });
+  await backup.restoreBackup({ home: f.home, file: restored.safety!, safety: false });
   assert.deepEqual(await worktreeMappings(f.home), []);
   const settings = path.join(f.root, 'settings.alpbackup');
   await backup.createBackup({ home: f.home, out: settings, units: ['settings.json'] });

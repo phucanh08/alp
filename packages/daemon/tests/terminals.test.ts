@@ -3,6 +3,7 @@
 // replay and gaps, reconnect, revocation and cleanup are checked against real shells, and every
 // test ends with no process of any terminal left alive.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
@@ -19,6 +20,9 @@ import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { createTerminalService, frames, readTerminalConfig } from '@anhlp/alp-daemon/terminals';
 import { teardown } from '../../../test/support/teardown.ts';
 
+// `any`: alpd's answers and terminal events are JSON, and the fake PTYs are partial objects the tests patch; the tests read the fields they assert on.
+type Json = any;
+
 const skip = !['darwin', 'linux'].includes(process.platform) && 'terminals are served on macOS and Linux only';
 // A predictable shell: alpd picks $SHELL when /etc/shells lists it, else /bin/sh.
 process.env.SHELL = '/bin/sh';
@@ -34,7 +38,7 @@ function table() {
   return rows.map(([pid, ppid, pgid]) => ({ pid, ppid, pgid }));
 }
 /** The shell's process tree now: descendants and their process groups. */
-function treeOf(pid) {
+function treeOf(pid: number) {
   const rows = table();
   const found = new Set([pid]);
   let grew = true;
@@ -43,16 +47,16 @@ function treeOf(pid) {
   for (const row of rows) if (groups.has(row.pgid) && row.pgid !== process.pid) found.add(row.pid);
   return [...found];
 }
-const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
-async function until(check, what = 'condition', ms = 8000) {
+async function until(check: () => unknown, what = 'condition', ms = 8000) {
   const end = Date.now() + ms;
   while (Date.now() < end) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 20)); }
   assert.fail(`${what} did not happen`);
 }
 
-async function refusal(promise) {
-  try { await promise; } catch (error) { return { code: error.code, reason: error.data?.reason, message: error.message, data: error.data }; }
+async function refusal(promise: Promise<unknown>) {
+  try { await promise; } catch (error: Json) { return { code: error.code, reason: error.data?.reason, message: error.message, data: error.data }; }
   assert.fail('expected a refusal');
 }
 
@@ -65,7 +69,8 @@ function idleTransport() {
  * A home with two registered projects and alpd in process. `allow` writes the host switch. Every
  * pid a terminal ran is remembered; after the test none may be alive.
  */
-async function setup(t, { allow = true, mode = 0o600, terminalOptions = {}, config = {} } = {}) {
+type World = Awaited<ReturnType<typeof setup>>;
+async function setup(t: TestContext, { allow = true, mode = 0o600, terminalOptions = {}, config = {} } = {}) {
   const defer = teardown(t);
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-term-')));
   const home = path.join(directory, 'home');
@@ -75,8 +80,8 @@ async function setup(t, { allow = true, mode = 0o600, terminalOptions = {}, conf
   await initProject(project);
   await initProject(other);
   if (allow) await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true, ...config }), { mode });
-  const seen = new Set();
-  const logs = [];
+  const seen = new Set<number>();
+  const logs: Json[] = [];
   const runtime = createAlpRuntime({ transport: idleTransport(), runLogDir: path.join(directory, 'runs') });
   const store = createStore(path.join(home, 'state'));
   let spawned = 0;
@@ -91,20 +96,20 @@ async function setup(t, { allow = true, mode = 0o600, terminalOptions = {}, conf
   await owner.request('project.register', { directory: project, ifRevision: 0, requestId: 'p1' });
   await owner.request('project.register', { directory: other, ifRevision: 1, requestId: 'p2' });
   const { workspaces } = await owner.request('workspace.list', {});
-  const workspaceOf = async dir => workspaces.find(w => w.directory === dir || w.canonical === dir).id;
+  const workspaceOf = async (dir: Json) => workspaces.find((w: Json) => w.directory === dir || w.canonical === dir).id;
   const ws = await workspaceOf(project);
   const wsOther = await workspaceOf(other);
   /** A connection with its own terminal output per terminal id. */
   function connect() {
     const connection = server.local();
     const out = new Map();
-    const events = [];
-    connection.onNotification((method, params) => {
+    const events: Json[] = [];
+    connection.onNotification!((method, params) => {
       if (method !== 'terminal.event') return;
       events.push(params);
       if (params.type === 'output') out.set(params.terminalId, (out.get(params.terminalId) ?? '') + params.data);
     });
-    return { connection, out, events, request: (method, params) => connection.request(method, params), text: id => out.get(id) ?? '' };
+    return { connection, out, events, request: (method: string, params?: unknown) => connection.request(method, params), text: (id: Json) => out.get(id) ?? '' };
   }
   let closed = false;
   const stop = async () => { if (closed) return; closed = true; owner.close(); await server.close().catch(() => {}); await runtime.shutdown?.(); };
@@ -118,13 +123,13 @@ async function setup(t, { allow = true, mode = 0o600, terminalOptions = {}, conf
   return { directory, home, project, other, ws, wsOther, server, owner, connect, stop, seen, logs, spawned: () => spawned };
 }
 
-async function open(world, as = alice, { cols = 80, rows = 24, workspaceId = world.ws } = {}) {
+async function open(world: World, as: Json = alice, { cols = 80, rows = 24, workspaceId = world.ws }: { cols?: number, rows?: number, workspaceId?: string } = {}) {
   const viewer = world.connect();
   const { terminal } = await viewer.request('terminal.create', { workspaceId, cols, rows, requestId: `r-${Math.random()}`, ...as });
   const attached = await viewer.request('terminal.attach', { terminalId: terminal.terminalId, ...as });
   assert.deepEqual(validateResult('terminal.attach', attached), []);
   await until(() => /PROMPT\$ $/.test(viewer.text(terminal.terminalId)), 'the first prompt');
-  const type = data => viewer.request('terminal.input', { terminalId: terminal.terminalId, data, ...as });
+  const type = (data: string) => viewer.request('terminal.input', { terminalId: terminal.terminalId, data, ...as });
   return { viewer, terminal, id: terminal.terminalId, type, text: () => viewer.text(terminal.terminalId) };
 }
 
@@ -215,11 +220,11 @@ test('a real shell: interactive prompt, Ctrl-C, resize, exit; the hello advertis
   assert.ok(job > 1 && alive(job));
   // exit ends it: the exit event, then the terminal stays listed as exited for reconnectMs.
   await term.type('exit 3\r');
-  await until(() => term.viewer.events.some(event => event.type === 'exit'), 'the exit event');
-  const exit = term.viewer.events.find(event => event.type === 'exit');
+  await until(() => term.viewer.events.some((event: Json) => event.type === 'exit'), 'the exit event');
+  const exit = term.viewer.events.find((event: Json) => event.type === 'exit');
   assert.deepEqual([exit.reason, exit.exitCode], ['exited', 3]);
-  const seqs = term.viewer.events.filter(event => event.seq).map(event => event.seq);
-  assert.deepEqual(seqs, seqs.map((_, i) => i + 1), 'seq counts every output and exit event from 1');
+  const seqs = term.viewer.events.filter((event: Json) => event.seq).map((event: Json) => event.seq);
+  assert.deepEqual(seqs, seqs.map((_: Json, i: Json) => i + 1), 'seq counts every output and exit event from 1');
   const { terminals } = await term.viewer.request('terminal.list', alice);
   assert.equal(terminals[0].state, 'exited');
   assert.equal(terminals[0].endReason, 'exited');
@@ -232,7 +237,7 @@ test('binding: foreign principals, epochs and roots get not_found; outside roots
   const term = await open(world, alice);
   const stranger = world.connect();
   for (const as of [bob, { ...alice, principalEpoch: 'e2' }, { ...alice, authorizedRoots: [world.other] }, {}]) {
-    for (const [method, params] of [['terminal.attach', {}], ['terminal.input', { data: 'id\r' }], ['terminal.resize', { cols: 10, rows: 10 }], ['terminal.close', {}]]) {
+    for (const [method, params] of [['terminal.attach', {}], ['terminal.input', { data: 'id\r' }], ['terminal.resize', { cols: 10, rows: 10 }], ['terminal.close', {}]] as [string, Json][]) {
       const refused = await refusal(stranger.request(method, { terminalId: term.id, ...params, ...as }));
       assert.deepEqual([refused.code, refused.reason], [1001, 'not_found'], `${method} as ${JSON.stringify(as)}`);
     }
@@ -267,7 +272,7 @@ test('replay, gap and reconnect: a detached terminal keeps running for reconnect
   // Suppress the next prompt too, so no output can follow the marker before reconnect.
   await term.type("stty -echo; PS1=''; echo SECRET-INPUT-$((6*7)) >/dev/null; i=0; while [ $i -lt 300 ]; do echo line-$i-xxxxxxxxxxxxxxxxxxxxxxxx; i=$((i+1)); done; printf 'TERM-%s\\n' DONE\r");
   await until(() => term.text().includes('TERM-DONE\r\n'), 'the completed output');
-  const last = Math.max(...term.viewer.events.map(event => event.seq ?? 0));
+  const last = Math.max(...term.viewer.events.map((event: Json) => event.seq ?? 0));
   // Disconnect: the terminal keeps running.
   term.viewer.connection.close();
   await new Promise(resolve => setTimeout(resolve, 300));
@@ -308,13 +313,13 @@ test('revocation and the host switch kill the whole process tree, background job
   const owner = world.connect();
   assert.deepEqual(await owner.request('terminal.revoke', { principalId: alice.principalId }), { closed: 1 });
   await until(() => before.every(pid => !alive(pid)), 'every process of the revoked terminal gone');
-  await until(() => term.viewer.events.some(event => event.type === 'exit' && event.reason === 'revoked'), 'the revoked exit');
+  await until(() => term.viewer.events.some((event: Json) => event.type === 'exit' && event.reason === 'revoked'), 'the revoked exit');
   assert.deepEqual((await owner.request('terminal.list', alice)).terminals, [], 'forgotten');
   await other.type('echo still-$((2+3))\r');
   await until(() => other.text().includes('still-5'), 'bob unaffected');
   // Turning the host switch off ends the rest at the next check.
   await rm(path.join(world.home, 'terminal.json'));
-  await until(() => other.viewer.events.some(event => event.type === 'exit' && event.reason === 'disabled'), 'disabled');
+  await until(() => other.viewer.events.some((event: Json) => event.type === 'exit' && event.reason === 'disabled'), 'disabled');
   assert.equal((await refusal(owner.request('terminal.create', { workspaceId: world.ws, cols: 80, rows: 24, requestId: 'z', ...alice }))).reason, 'terminal_disabled');
   const helloed = await owner.request('daemon.hello', { protocolVersion: 1 });
   assert.ok(!helloed.capabilities.includes(CAPABILITY.terminal));
@@ -323,27 +328,27 @@ test('revocation and the host switch kill the whole process tree, background job
 test('alpd shutdown ends every terminal with no process left; idle and lifetime end them too', { skip }, async t => {
   const world = await setup(t, { terminalOptions: { limits: { idleMs: 600 } } });
   const idle = await open(world);
-  await until(() => idle.viewer.events.some(event => event.type === 'exit' && event.reason === 'idle'), 'idle', 6000);
+  await until(() => idle.viewer.events.some((event: Json) => event.type === 'exit' && event.reason === 'idle'), 'idle', 6000);
   const busy = await open(world, bob);
   await busy.type('sleep 999 & echo bg\r');
   await until(() => busy.text().includes('bg'), 'the job');
-  const pids = treeOf([...world.seen].at(-1));
+  const pids = treeOf([...world.seen].at(-1)!);
   assert.ok(pids.length >= 2);
   await world.stop();
   assert.ok(pids.every(pid => !alive(pid)), 'nothing survives alpd');
-  assert.ok(busy.viewer.events.some(event => event.type === 'exit' && event.reason === 'shutdown'));
+  assert.ok(busy.viewer.events.some((event: Json) => event.type === 'exit' && event.reason === 'shutdown'));
 });
 
 test('lifetime, slow consumers and an audit log without keystrokes (the service on its own)', { skip }, async t => {
   const defer = teardown(t);
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alpd-term-svc-')));
   await writeFile(path.join(directory, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
-  const lines = [];
-  const log = { info: (message, fields) => lines.push(JSON.stringify({ message, ...fields })), warn: (message, fields) => lines.push(JSON.stringify({ message, ...fields })) };
+  const lines: Json[] = [];
+  const log = { info: (message: string, fields: Json) => lines.push(JSON.stringify({ message, ...fields })), warn: (message: string, fields: Json) => lines.push(JSON.stringify({ message, ...fields })) };
   const service = createTerminalService({ home: directory, resolveWorkspace: async () => directory, log, sweepMs: 50, killGraceMs: 200, limits: { maxLifetimeMs: 1500 }, maxBufferedBytes: 1024 });
   defer(async () => { await service.shutdown(); await rm(directory, { recursive: true, force: true }); });
-  const sent = [];
-  const slow = { send: message => sent.push(message), socket: { writableLength: 0 } };
+  const sent: Json[] = [];
+  const slow = { send: (message: Json) => sent.push(message), socket: { writableLength: 0 } };
   const owner = { id: 'owner', epoch: 'owner' };
   const { terminal } = await service.create(owner, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r' });
   const pid = service.pids()[0];
@@ -372,7 +377,7 @@ test('a socket client: the stream survives a disconnect only for the same princi
     await new Promise((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject); });
     const client = new AlpRpcClient(createSocketTransport(socket));
     await hello(client, { name: 'test', version: '1' });
-    const events = [];
+    const events: Json[] = [];
     client.onNotification((method, params) => { if (method === 'terminal.event') events.push(params); });
     return { client, events, text: () => events.filter(event => event.type === 'output').map(event => event.data).join('') };
   };
@@ -394,12 +399,12 @@ test('a socket client: the stream survives a disconnect only for the same princi
 });
 
 /** A spawner that runs nothing: a fake PTY whose exit the test drives. */
-function fakePty({ ptsName } = {}) {
+function fakePty({ ptsName }: { ptsName?: string } = {}) {
   let next = 70_000;
-  const made = [];
-  const spawn = (_file, _args, options) => {
-    const exits = new Set();
-    const pty = { pid: next++, ...(ptsName ? { ptsName } : {}), env: options.env, write() {}, resize() {}, kill() { queueMicrotask(() => { for (const listener of exits) listener({ exitCode: 0, signal: 1 }); }); }, onData: () => ({ dispose() {} }), onExit: listener => { exits.add(listener); return { dispose: () => exits.delete(listener) }; } };
+  const made: Json[] = [];
+  const spawn = (_file: string, _args: string[], options: Json) => {
+    const exits = new Set<(event: Json) => void>();
+    const pty: Json = { pid: next++, ...(ptsName ? { ptsName } : {}), env: options.env, write() {}, resize() {}, kill() { queueMicrotask(() => { for (const listener of exits) listener({ exitCode: 0, signal: 1 }); }); }, onData: () => ({ dispose() {} }), onExit: (listener: Json) => { exits.add(listener); return { dispose: () => exits.delete(listener) }; } };
     made.push(pty);
     return pty;
   };
@@ -413,10 +418,10 @@ test('native cleanup is delegated once; spoofed process rows never authorize JS 
   await writeFile(path.join(directory, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
   const fake = fakePty(); let snapshots = 0, cleanups = 0;
   const service = createTerminalService({ home: directory, resolveWorkspace: async () => directory, log: { info() {}, warn() {} },
-    spawn: (...args) => { const pty = fake.spawn(...args); pty.cleanup = async () => { cleanups++; pty.kill(); return { observed: 1, live: 0, uncertain: 0 }; }; return pty; },
+    spawn: (...args: [string, string[], Json]) => { const pty = fake.spawn(...args); pty.cleanup = async () => { cleanups++; pty.kill(); return { observed: 1, live: 0, uncertain: 0 }; }; return pty; },
     processes: async () => { snapshots++; return [{ pid: 80001, ppid: 1, pgid: 80001, sid: fake.made[0].pid, elapsedMs: 0, markers: [fake.made[0].env.ALP_TERMINAL_ID] }]; }, sweepMs: 60000 });
   defer(() => service.shutdown());
-  const original = process.kill, signals = [];
+  const original = process.kill, signals: Json[] = [];
   process.kill = (pid, signal) => { signals.push([pid, signal]); return true; };
   defer(() => { process.kill = original; });
   const owner = { id: 'owner', epoch: 'e' };
@@ -448,7 +453,7 @@ test('a job started just before the shell exits on its own is killed, with no sw
   const world = await setup(t, { terminalOptions: { sweepMs: 600_000 } });
   const term = await open(world);
   await term.type('sleep 995 & exit\r');
-  await until(() => term.viewer.events.some(event => event.type === 'exit'), 'the exit');
+  await until(() => term.viewer.events.some((event: Json) => event.type === 'exit'), 'the exit');
   await until(() => !execFileSync('ps', ['-A', '-o', 'command='], { encoding: 'utf8' }).split('\n').some(line => line.trim() === 'sleep 995'), 'the job killed after the exit');
 });
 
@@ -473,14 +478,14 @@ test('the process table parser: commands with spaces, a marker in the environmen
   defer(() => { process.env.PATH = saved; });
   const rows = await psProcesses('darwin')();
   const byPid = new Map(rows.map(row => [row.pid, row]));
-  assert.deepEqual(byPid.get(101).markers, [marker]);
-  assert.equal(byPid.get(101).tty, 'ttys001');
-  assert.equal(byPid.get(101).elapsedMs, 5_000);
-  assert.equal(byPid.get(102).markers, undefined, 'a marker in the arguments does not count');
-  assert.equal(byPid.get(103).markers, undefined);
-  assert.equal(byPid.get(103).elapsedMs, ((26 * 60 + 3) * 60 + 4) * 1000);
-  assert.deepEqual(byPid.get(104).markers, [marker], 'an escaped newline is one line');
-  assert.deepEqual(byPid.get(105).markers, [marker], 'a command line that starts with spaces');
+  assert.deepEqual(byPid.get(101)!.markers, [marker]);
+  assert.equal(byPid.get(101)!.tty, 'ttys001');
+  assert.equal(byPid.get(101)!.elapsedMs, 5_000);
+  assert.equal(byPid.get(102)!.markers, undefined, 'a marker in the arguments does not count');
+  assert.equal(byPid.get(103)!.markers, undefined);
+  assert.equal(byPid.get(103)!.elapsedMs, ((26 * 60 + 3) * 60 + 4) * 1000);
+  assert.deepEqual(byPid.get(104)!.markers, [marker], 'an escaped newline is one line');
+  assert.deepEqual(byPid.get(105)!.markers, [marker], 'a command line that starts with spaces');
   assert.equal(rows.length, 5, 'no forged row');
 });
 
@@ -492,7 +497,7 @@ test('simultaneous same-principal revokes count each terminal once while exit is
   await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
   const fake = fakePty();
   const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} },
-    spawn: (...args) => { const pty = fake.spawn(...args); pty.kill = () => {}; return pty; },
+    spawn: (...args: [string, string[], Json]) => { const pty = fake.spawn(...args); pty.kill = () => {}; return pty; },
     processes: async () => [], sweepMs: 60000, killGraceMs: 10, platform: 'darwin' });
   defer(() => service.shutdown());
   await service.create({ id: 'owner', epoch: 'owner' }, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'r' });
@@ -513,11 +518,11 @@ test('Linux environ reads yield to the event loop and fail closed on permission,
   process.env.PATH = `${bin}:${saved}`;
   defer(() => { process.env.PATH = saved; });
   const marker = `atm_${'b'.repeat(32)}`;
-  const read = [];
+  const read: Json[] = [];
   let yielded = false;
   const rows = await psProcesses('linux', { readEnvironment: async pid => {
     read.push(pid);
-    await new Promise(resolve => setImmediate(() => { yielded = true; resolve(); }));
+    await new Promise<void>(resolve => setImmediate(() => { yielded = true; resolve(); }));
     if (pid === 102) throw Object.assign(new Error('denied'), { code: 'EACCES' });
     if (pid === 103) throw Object.assign(new Error('gone'), { code: 'ENOENT' });
     return pid === 101 ? `ALP_TERMINAL_ID=${marker}\0` : `OTHER=ALP_TERMINAL_ID=${marker}\0`;
@@ -537,8 +542,8 @@ test('terminal watch atomically snapshots, scopes cursors, resets after reconnec
   const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} }, spawn: fake.spawn, processes: async () => [], sweepMs: 60000, killGraceMs: 1, platform: 'darwin' });
   defer(() => service.shutdown());
   const alice = { id: 'alice', epoch: 'a', roots: [home] }, bob = { id: 'bob', epoch: 'b' };
-  const events = [], others = [], outside = [];
-  const sink = { send: value => events.push(value) }, other = { send: value => others.push(value) }, excluded = { send: value => outside.push(value) };
+  const events: Json[] = [], others: Json[] = [], outside: Json[] = [];
+  const sink = { send: (value: Json) => events.push(value) }, other = { send: (value: Json) => others.push(value) }, excluded = { send: (value: Json) => outside.push(value) };
   const first = await service.watch(alice, sink, {});
   await service.watch(bob, other, {});
   await service.watch({ ...alice, roots: ['/outside'] }, excluded, {});
@@ -569,8 +574,8 @@ test('daemon capture retains rendered state across detach and bounds exited emul
   defer(() => rm(home, { recursive: true, force: true }));
   await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
   const fake = fakePty();
-  const outputs = [];
-  const spawn = (...args) => { const pty = fake.spawn(...args); pty.onData = listener => { outputs.push(listener); return { dispose() {} }; }; return pty; };
+  const outputs: Json[] = [];
+  const spawn = (...args: [string, string[], Json]) => { const pty = fake.spawn(...args); pty.onData = (listener: Json) => { outputs.push(listener); return { dispose() {} }; }; return pty; };
   const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} }, spawn, processes: async () => [], sweepMs: 60000, killGraceMs: 1, platform: 'darwin' });
   defer(() => service.shutdown());
   const principal = { id: 'owner', epoch: 'owner' };
@@ -580,19 +585,19 @@ test('daemon capture retains rendered state across detach and bounds exited emul
   await service.attach(principal, sink, { terminalId: first });
   service.disconnect(sink);
   assert.deepEqual((await service.capture(principal, { terminalId: first, start: 0, end: 1 })).lines, ['new', 'second']);
-  await assert.rejects(service.capture({ ...principal, epoch: 'other' }, { terminalId: first }), error => error.code === 1001);
-  await assert.rejects(service.capture({ ...principal, roots: ['/other'] }, { terminalId: first }), error => error.code === 1001);
+  await assert.rejects(service.capture({ ...principal, epoch: 'other' }, { terminalId: first }), (error: Json) => error.code === 1001);
+  await assert.rejects(service.capture({ ...principal, roots: ['/other'] }, { terminalId: first }), (error: Json) => error.code === 1001);
   fake.made[0].kill(); await Promise.resolve();
   // More than sixteen retained exited records cannot retain sixteen-plus emulators.
   for (let i = 0; i < 16; i++) {
     await service.create(principal, { workspaceId: 'w', cols: 20, rows: 3, requestId: `next-${i}` });
     fake.made.at(-1).kill(); await Promise.resolve();
   }
-  await assert.rejects(service.capture(principal, { terminalId: first }), error => error.data?.reason === 'terminal_capture_unavailable');
+  await assert.rejects(service.capture(principal, { terminalId: first }), (error: Json) => error.data?.reason === 'terminal_capture_unavailable');
   const last = (await service.list(principal, {})).terminals.find(term => term.terminalId !== first);
   assert.ok(last);
   await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: false }), { mode: 0o600 });
-  await assert.rejects(service.capture(principal, { terminalId: last.terminalId }), error => error.data?.reason === 'terminal_disabled');
+  await assert.rejects(service.capture(principal, { terminalId: last.terminalId }), (error: Json) => error.data?.reason === 'terminal_disabled');
 });
 
 test('historical L5: an unresponsive ps executable is killed at the existing ten-second deadline', { timeout: 15000 }, async t => {
@@ -621,7 +626,7 @@ test('historical L4 replacement: an exit racing close still invokes the native o
   await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true }), { mode: 0o600 });
   const fake = fakePty(); let cleanups = 0;
   const service = createTerminalService({ home, resolveWorkspace: async () => home, log: { info() {}, warn() {} },
-    spawn: (...args) => { const pty = fake.spawn(...args); pty.cleanup = async () => { cleanups++; pty.kill(); await Promise.resolve(); return { observed: 1, live: 0, uncertain: 0 }; }; return pty; }, sweepMs: 60000 });
+    spawn: (...args: [string, string[], Json]) => { const pty = fake.spawn(...args); pty.cleanup = async () => { cleanups++; pty.kill(); await Promise.resolve(); return { observed: 1, live: 0, uncertain: 0 }; }; return pty; }, sweepMs: 60000 });
   defer(() => service.shutdown());
   const principal = { id: 'owner', epoch: 'owner' };
   const { terminal } = await service.create(principal, { workspaceId: 'w', cols: 80, rows: 24, requestId: 'snapshot' });

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { access, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { hostname, tmpdir } from 'node:os';
@@ -9,19 +10,25 @@ import { initProject } from '@anhlp/alp-core/init';
 import { createTask } from '@anhlp/alp-core/tasks';
 import { connect, daemonPaths, ensureDaemon, findDaemonEntry, readLock, PROTOCOL_VERSION } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
+import type { RuntimeTransport } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { teardown } from '../../../test/support/teardown.ts';
 
-async function until(check) {
+// `any`: alpd's answers, events and errors are JSON whose shape depends on the method; the tests read the fields they assert on.
+type Json = any;
+/** A scripted native transport, as fakeTransport hands it to the runtime and to the test: its helpers and handlers are reached by name. */
+type Scripted = RuntimeTransport & { calls: { method: string, params: Json }[], [member: string]: Json };
+
+async function until(check: () => unknown) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail('Expected condition did not arrive');
 }
 
 /** `turns`: the native history a resumed thread answers with (Codex's thread/resume `thread.turns`). */
-function fakeTransport(runtimes, { turns } = {}) {
+function fakeTransport(runtimes: Scripted[], { turns }: { turns?: Json[] } = {}) {
   return () => {
     const index = runtimes.length;
-    const runtime = {
+    const runtime: Scripted = {
       calls: [], closed: false, threadId: `thread-${index}`, turnId: `turn-${index}`,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -33,7 +40,7 @@ function fakeTransport(runtimes, { turns } = {}) {
         if (method === 'turn/start') { await this.hold; return { turn: { id: this.turnId } }; }
         return {};
       },
-      call(tool, args) {
+      call(tool: string, args: Json) {
         return this.serverRequest('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}`, namespace: null, tool, arguments: args });
       },
       finish(text = 'done') {
@@ -46,7 +53,7 @@ function fakeTransport(runtimes, { turns } = {}) {
   };
 }
 
-async function setup(t) {
+async function setup(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-'));
   // Undone LAST: teardown runs the steps in reverse, so everything living in here is released first.
@@ -54,16 +61,16 @@ async function setup(t) {
   const project = path.join(directory, 'project');
   await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'] } }));
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes) });
   const socketPath = daemonPaths(directory).socket;
   const server = createDaemonServer({ runtime, socketPath, version: 'test' });
   await server.listen();
   defer(async () => { await server.close(); await runtime.shutdown(); });
-  const clients = [];
+  const clients: Json[] = [];
   const open = async () => {
     const client = await connect(socketPath, { name: 'test', version: '0' });
-    const events = [];
+    const events: Json[] = [];
     client.onEvent(envelope => events.push(envelope));
     clients.push(client);
     return { client, events };
@@ -72,8 +79,8 @@ async function setup(t) {
   return { project, runtimes, runtime, socketPath, server, open };
 }
 
-const types = (events, sessionId) => events.filter(e => !sessionId || e.sessionId === sessionId).map(e => e.event.type);
-const text = body => [{ type: 'text', text: body }];
+const types = (events: Json[], sessionId?: string) => events.filter((e: Json) => !sessionId || e.sessionId === sessionId).map((e: Json) => e.event.type);
+const text = (body: string) => [{ type: 'text', text: body }];
 
 test('handshake is required and versioned', async t => {
   const defer = teardown(t);
@@ -99,7 +106,7 @@ test('a local connection rejects in-flight requests and fires onClose exactly on
   const { server } = await setup(t);
   server.extend('test.never', () => new Promise(() => {}));
   const connection = server.local();
-  const closes = [];
+  const closes: Json[] = [];
   connection.onClose(error => closes.push(error));
 
   const inFlight = connection.request('test.never', {});
@@ -122,7 +129,7 @@ test('a client creates, prompts and receives the events of its whole tree over t
   assert.match(session.id, /^ses_[0-9a-f]{16}$/);
   await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Delegate') });
   const lead = runtimes[0].call('alp_delegate', { agent: 'lead', wait: true, task: 'Investigate' });
-  await until(() => runtimes[1]?.calls.some(c => c.method === 'turn/start'));
+  await until(() => runtimes[1]?.calls.some((c: Json) => c.method === 'turn/start'));
   runtimes[1].finish('lead proof');
   assert.equal(JSON.parse((await lead).contentItems[0].text).output, 'lead proof');
   await until(() => events.some(e => e.event.type === 'session.closed'));
@@ -131,7 +138,7 @@ test('a client creates, prompts and receives the events of its whole tree over t
   assert.deepEqual(types(events, child.sessionId).slice(0, 3), ['session.opened', 'session.ready', 'item']);
   assert.deepEqual(types(events, session.id).slice(0, 6), ['session.opened', 'session.ready', 'item', 'session.updated', 'prompt.accepted', 'turn.started']);
   const listed = await client.request('session.list');
-  assert.deepEqual(listed.sessions.map(s => s.id), [session.id]);
+  assert.deepEqual(listed.sessions.map((s: Json) => s.id), [session.id]);
 });
 
 test('a root keeps working after its client leaves and closes once idle', async t => {
@@ -141,7 +148,7 @@ test('a root keeps working after its client leaves and closes once idle', async 
   await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Work') });
   first.client.close();
   await new Promise(resolve => setTimeout(resolve, 20));
-  assert.equal(runtime.snapshot('paseo-1').busy, true);
+  assert.equal(runtime.snapshot('paseo-1')!.busy, true);
 
   // A viewer reopening the same root attaches to the running work instead of starting over.
   const second = await open();
@@ -178,13 +185,13 @@ test('session.prompt takes inline images within the limits and passes them to th
   const { session } = await client.request('session.create', { spec: { cwd: project } });
   assert.equal(session.promptImages, true);
   const png = { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=', name: 'shot.png' };
-  const prompt = (id, content) => client.request('session.prompt', { sessionId: session.id, clientMessageId: id, content });
-  const refused = async (id, content, pattern) => {
-    await assert.rejects(prompt(id, content), error => error.code === -32602 && pattern.test(error.message));
+  const prompt = (id: string, content: Json[]) => client.request('session.prompt', { sessionId: session.id, clientMessageId: id, content });
+  const refused = async (id: string, content: Json[], pattern: RegExp) => {
+    await assert.rejects(prompt(id, content), (error: Json) => error.code === -32602 && pattern.test(error.message));
   };
   await refused('p1', [{ ...png, path: '/etc/passwd' }], /content/);
   await refused('p2', [{ ...png, url: 'file:///etc/passwd' }], /content/);
-  const failed = async (id, content, pattern) => {
+  const failed = async (id: string, content: Json[], pattern: RegExp) => {
     await prompt(id, content);
     await until(() => events.some(e => e.event.type === 'prompt.failed' && e.event.clientMessageId === id));
     assert.match(events.find(e => e.event.type === 'prompt.failed' && e.event.clientMessageId === id).event.error.message, pattern);
@@ -195,9 +202,9 @@ test('session.prompt takes inline images within the limits and passes them to th
   await refused('p6', [{ ...png, data: 'A'.repeat(6990508) }], /at most 5242880 bytes/);
   // Three of 3.75 MiB pass one by one but not together (11 MiB), and still fit one 16 MiB frame.
   await refused('p7', Array.from({ length: 3 }, () => ({ ...png, data: 'A'.repeat(5 * 1024 * 1024) })), /at most 11534336 bytes together/);
-  assert.equal(runtimes[0].calls.filter(c => c.method === 'turn/start').length, 0);
+  assert.equal(runtimes[0].calls.filter((c: Json) => c.method === 'turn/start').length, 0);
   await prompt('m1', [...text('What is this?'), png]);
-  const input = runtimes[0].calls.find(c => c.method === 'turn/start').params.input;
+  const input = runtimes[0].calls.find((c: Json) => c.method === 'turn/start').params.input;
   assert.deepEqual(input.at(-1), { type: 'image', url: 'data:image/png;base64,iVBORw0KGgo=' });
   assert.equal(input.at(-2).text, 'What is this?');
   const message = events.map(e => e.event).find(e => e.type === 'item' && e.item.kind === 'user_message');
@@ -209,7 +216,7 @@ test('session.prompt takes inline images within the limits and passes them to th
   await until(() => events.some(e => e.event.type === 'turn.ended'));
   assert.equal((await client.request('session.get', { sessionId: session.id })).session.promptImages, undefined);
   await failed('m2', [png], /takes no images/);
-  assert.equal(runtimes[0].calls.filter(c => c.method === 'turn/start').length, 1);
+  assert.equal(runtimes[0].calls.filter((c: Json) => c.method === 'turn/start').length, 1);
 });
 
 test('alpd starts detached, publishes its socket in the lock, and shuts down cleanly', async t => {
@@ -219,13 +226,13 @@ test('alpd starts detached, publishes its socket in the lock, and shuts down cle
   const entry = fileURLToPath(new URL('../dist/alpd.js', import.meta.url));
   const socket = await ensureDaemon({ home, entry });
   const lock = await readLock(home);
-  assert.equal(lock.ready, true);
-  assert.equal(lock.socket, daemonPaths(home).socket);
-  assert.equal(socket, lock.socket);
+  assert.equal(lock!.ready, true);
+  assert.equal(lock!.socket, daemonPaths(home).socket);
+  assert.equal(socket, lock!.socket);
   assert.equal(await ensureDaemon({ home, entry }), socket, 'a second start reuses the running daemon');
   const client = await connect(socket);
   const status = await client.request('daemon.status');
-  assert.equal(status.pid, lock.pid);
+  assert.equal(status.pid, lock!.pid);
   assert.equal(status.sessions, 0);
   assert.equal(JSON.parse(await readFile(daemonPaths(home).install, 'utf8')).entry, entry, 'alpd records where it is installed');
   await client.request('daemon.shutdown');
@@ -252,8 +259,8 @@ test('alpd tells a clean stop from a crash by the marker it keeps while running'
     try { return await client.request('daemon.status'); } finally { client.close(); }
   };
   assert.deepEqual((await status()).previousExit, { kind: 'clean' });
-  assert.equal(JSON.parse(await readFile(marker, 'utf8')).pid, (await readLock(home)).pid);
-  const client = await connect((await readLock(home)).socket);
+  assert.equal(JSON.parse(await readFile(marker, 'utf8')).pid, (await readLock(home))!.pid);
+  const client = await connect((await readLock(home))!.socket);
   await client.request('daemon.shutdown');
   client.close();
   await until(async () => !(await readLock(home)));
@@ -261,7 +268,7 @@ test('alpd tells a clean stop from a crash by the marker it keeps while running'
 
   assert.deepEqual((await status()).previousExit, { kind: 'clean' });
   // The alpd of this test's own home, killed as a crash would.
-  const { pid } = await readLock(home);
+  const { pid } = (await readLock(home))!;
   assert.equal(JSON.parse(await readFile(marker, 'utf8')).pid, pid);
   process.kill(pid, 'SIGKILL');
   await until(() => { try { process.kill(pid, 0); return false; } catch { return true; } });
@@ -273,7 +280,7 @@ test('alpd tells a clean stop from a crash by the marker it keeps while running'
   const after = await status();
   assert.equal(after.previousExit.kind, 'crash');
   assert.ok(Date.parse(after.previousExit.at) > 0);
-  const last = await connect((await readLock(home)).socket);
+  const last = await connect((await readLock(home))!.socket);
   await last.request('daemon.shutdown');
   last.close();
   await until(async () => !(await readLock(home)));
@@ -373,7 +380,7 @@ test('findDaemonEntry ignores corrupt package.json without throwing SyntaxError 
 });
 
 /** A daemon over a durable store; `stop(false)` abandons it without a clean shutdown, like a crash. */
-async function durable(t, directory, project, runtimes, { turns } = {}) {
+async function durable(t: TestContext, directory: string, project: string, runtimes: Scripted[], { turns }: { turns?: Json[] } = {}) {
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes, { turns }), runLogDir: path.join(directory, 'runs') });
   const store = createStore(path.join(directory, 'state'));
   const home = path.join(directory, `d${runtimes.length}`);
@@ -382,7 +389,7 @@ async function durable(t, directory, project, runtimes, { turns } = {}) {
   const server = createDaemonServer({ runtime, socketPath, version: 'test', store, runLogDir: path.join(directory, 'runs') });
   await server.listen();
   const client = await connect(socketPath);
-  const events = [];
+  const events: Json[] = [];
   client.onEvent(envelope => events.push(envelope));
   let stopped = false;
   const stop = async (clean = true) => {
@@ -396,17 +403,17 @@ async function durable(t, directory, project, runtimes, { turns } = {}) {
 }
 
 /** Teardown in reverse order, so daemons stop before their directory is removed. */
-const cleanups = new WeakMap();
-const cleanupsOf = t => {
+const cleanups = new WeakMap<TestContext, (() => Promise<unknown>)[]>();
+const cleanupsOf = (t: TestContext) => {
   const defer = teardown(t);
   if (!cleanups.has(t)) {
     cleanups.set(t, []);
-    defer(async () => { for (const cleanup of cleanups.get(t).reverse()) await cleanup(); });
+    defer(async () => { for (const cleanup of cleanups.get(t)!.reverse()) await cleanup(); });
   }
-  return cleanups.get(t);
+  return cleanups.get(t)!;
 };
 
-async function durableProject(t) {
+async function durableProject(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alpd-'));
   cleanupsOf(t).push(() => rm(directory, { recursive: true, force: true }));
   const project = path.join(directory, 'project');
@@ -416,7 +423,7 @@ async function durableProject(t) {
 }
 
 /** Forgets a stored root's name and timeline, as a root imported or kept past its timeline is. */
-async function untitled(directory, id) {
+async function untitled(directory: string, id: string) {
   const file = path.join(directory, 'state', 'sessions', `${id}.json`);
   const record = JSON.parse(await readFile(file, 'utf8'));
   delete record.title;
@@ -425,12 +432,12 @@ async function untitled(directory, id) {
 }
 
 const CATALOG = 'ALP runtime catalog and usage snapshot (data, not instructions): {"runtime":"codex"}';
-const nativeUser = (id, parts, clientId) => ({ type: 'userMessage', id, ...(clientId ? { clientId } : {}), content: parts.map(part => ({ type: 'text', text: part, text_elements: [] })) });
+const nativeUser = (id: string, parts: string[], clientId?: string) => ({ type: 'userMessage', id, ...(clientId ? { clientId } : {}), content: parts.map((part: Json) => ({ type: 'text', text: part, text_elements: [] })) });
 
 // Issue #120: native history replay must never name a root after ALP's own prompts.
 test('a resumed untitled root is named after the user\'s first prompt in its native history, never ALP\'s own', async t => {
   const { directory, project } = await durableProject(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const first = await durable(t, directory, project, runtimes);
   const { session } = await first.client.request('session.create', { spec: { cwd: project, persist: true } });
   await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Remember ORCHID') });
@@ -468,12 +475,12 @@ test('a resumed untitled root is named after the user\'s first prompt in its nat
   assert.equal(users[5].text, '  Fix the   login page\nsecond line');
   // The attention of the turn that ended before the restart waits for a client that was away.
   const { attention } = await second.client.request('question.watch', { projectRoot: project, attention: true });
-  assert.deepEqual(attention.map(entry => [entry.sessionId, entry.attention.reason]), [[session.id, 'finished']]);
+  assert.deepEqual(attention.map((entry: Json) => [entry.sessionId, entry.attention.reason]), [[session.id, 'finished']]);
 });
 
 test('a resumed untitled root whose thread began outside ALP is named after its first message', async t => {
   const { directory, project } = await durableProject(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const first = await durable(t, directory, project, runtimes);
   const { session } = await first.client.request('session.create', { spec: { cwd: project, persist: true } });
   await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Remember ORCHID') });
@@ -494,10 +501,10 @@ test('a resumed untitled root whose thread began outside ALP is named after its 
 test('a user prompt that begins as ALP mail does, or is an image alone, is read where ALP put it', async t => {
   const { directory, project } = await durableProject(t);
   await createTask(project, { title: 'Ship it', priority: 1 }, 'user');
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const first = await durable(t, directory, project, runtimes);
   const { session } = await first.client.request('session.create', { spec: { cwd: project, persist: true } });
-  const ended = count => until(() => first.events.filter(e => e.event.type === 'turn.ended').length === count);
+  const ended = (count: number) => until(() => first.events.filter(e => e.event.type === 'turn.ended').length === count);
   await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'web-1', content: [{ type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgo=' }] });
   runtimes[0].finish();
   await ended(1);
@@ -505,17 +512,17 @@ test('a user prompt that begins as ALP mail does, or is an image alone, is read 
   await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'web-2', content: text(pasted) });
   runtimes[0].finish();
   await ended(2);
-  const inputs = runtimes[0].calls.filter(call => call.method === 'turn/start').map(call => call.params);
+  const inputs = runtimes[0].calls.filter((call: Json) => call.method === 'turn/start').map((call: Json) => call.params);
   assert.equal(inputs.length, 2);
-  for (const params of inputs) assert.ok(params.input.some(part => part.type === 'text' && part.text.startsWith('Project tasks')), 'the task digest comes before the prompt');
+  for (const params of inputs) assert.ok(params.input.some((part: Json) => part.type === 'text' && part.text.startsWith('Project tasks')), 'the task digest comes before the prompt');
   await first.stop();
   await untitled(directory, session.id);
 
   // Each message as Codex keeps the input ALP sent; once more without the empty text part, as a runtime may leave it out.
-  const native = (id, params, keep = () => true) => ({ type: 'userMessage', id, clientId: params.clientUserMessageId, content: params.input.filter(keep) });
+  const native = (id: string, params: Json, keep: (part: Json) => boolean = () => true) => ({ type: 'userMessage', id, clientId: params.clientUserMessageId, content: params.input.filter(keep) });
   const turns = [
     { id: 'n1', items: [native('u1', inputs[0])] },
-    { id: 'n2', items: [native('u2', inputs[0], part => !(part.type === 'text' && part.text === ''))] },
+    { id: 'n2', items: [native('u2', inputs[0], (part: Json) => !(part.type === 'text' && part.text === ''))] },
     { id: 'n3', items: [native('u3', inputs[1])] },
   ];
   const second = await durable(t, directory, project, runtimes, { turns });
@@ -531,17 +538,17 @@ test('a user prompt that begins as ALP mail does, or is an image alone, is read 
 // the newer attention from the clients (review finding M1, issue #120).
 test('an acknowledgement racing a new turn end leaves the newer attention with every client', async t => {
   const { directory, project } = await durableProject(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const first = await durable(t, directory, project, runtimes);
   const { session } = await first.client.request('session.create', { spec: { cwd: project, persist: true } });
-  const told = [];
+  const told: Json[] = [];
   first.client.onEvent(envelope => { if (envelope.event.type === 'attention') told.push(envelope.event.attention ?? null); });
   await first.client.request('question.watch', { projectRoot: project, attention: true });
   await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Work') });
   runtimes[0].finish();
   await until(() => told.length === 1);
   // Hold every record write until the new turn has ended.
-  let release;
+  let release!: (value?: unknown) => void;
   const held = new Promise(resolve => { release = resolve; });
   const put = first.store.put.bind(first.store);
   first.store.put = record => held.then(() => put(record));
@@ -555,7 +562,7 @@ test('an acknowledgement racing a new turn end leaves the newer attention with e
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(told.at(-1)?.reason, 'error', 'the clear that landed late does not hide the newer attention');
   const { attention } = await first.client.request('question.watch', { projectRoot: project, attention: true });
-  assert.deepEqual(attention.map(entry => entry.attention.reason), ['error']);
+  assert.deepEqual(attention.map((entry: Json) => entry.attention.reason), ['error']);
 });
 
 /**
@@ -563,25 +570,25 @@ test('an acknowledgement racing a new turn end leaves the newer attention with e
  * until `release` and failing then (issue #120 follow-up): whatever happens meanwhile decides what
  * stays.
  */
-async function failingAck(t) {
+async function failingAck(t: TestContext) {
   const { directory, project } = await durableProject(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const first = await durable(t, directory, project, runtimes);
   const { session } = await first.client.request('session.create', { spec: { cwd: project, persist: true } });
-  const told = [];
+  const told: Json[] = [];
   first.client.onEvent(envelope => { if (envelope.event.type === 'attention') told.push(envelope.event.attention ?? null); });
   await first.client.request('question.watch', { projectRoot: project, attention: true });
   await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Work') });
   runtimes[0].finish();
   await until(() => told.length === 1);
-  let release;
+  let release!: (value?: unknown) => void;
   const held = new Promise(resolve => { release = resolve; });
   const put = first.store.put.bind(first.store);
   let writes = 0;
   first.store.put = record => { const failing = writes++ === 0; return held.then(() => failing ? Promise.reject(new Error('disk full')) : put(record)); };
   const ack = first.client.request('session.attention.clear', { sessionId: session.id, at: told[0].at });
   await new Promise(resolve => setTimeout(resolve, 20));
-  const attention = async () => (await first.client.request('question.watch', { projectRoot: project, attention: true })).attention.map(entry => [entry.sessionId, entry.attention.reason]);
+  const attention = async () => (await first.client.request('question.watch', { projectRoot: project, attention: true })).attention.map((entry: Json) => [entry.sessionId, entry.attention.reason]);
   return { first, runtimes, session, told, ack, release, attention };
 }
 
@@ -628,7 +635,7 @@ test('an acknowledgement whose write fails while the root is archived leaves no 
 
 test('sessions survive a daemon restart and resume with their history', async t => {
   const { directory, project } = await durableProject(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const first = await durable(t, directory, project, runtimes);
   const { session } = await first.client.request('session.create', { spec: { cwd: project, persist: true } });
   await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Remember ORCHID') });
@@ -638,10 +645,10 @@ test('sessions survive a daemon restart and resume with their history', async t 
 
   const second = await durable(t, directory, project, runtimes);
   const { sessions } = await second.client.request('session.list', { includeClosed: true });
-  assert.deepEqual(sessions.map(s => [s.id, s.status, s.title]), [[session.id, 'closed', 'Remember ORCHID']]);
+  assert.deepEqual(sessions.map((s: Json) => [s.id, s.status, s.title]), [[session.id, 'closed', 'Remember ORCHID']]);
   const resumed = await second.client.request('session.create', { sessionId: session.id, spec: { cwd: project }, history: 'replay' });
   assert.equal(resumed.resumed, true);
-  const resumeCall = runtimes[1].calls.find(c => c.method === 'thread/resume');
+  const resumeCall = runtimes[1].calls.find((c: Json) => c.method === 'thread/resume');
   assert.equal(resumeCall.params.threadId, 'thread-0');
   const replayed = second.events.filter(e => e.event.type === 'item').map(e => e.event.item.text);
   assert.deepEqual(replayed, ['Remember ORCHID', 'Noted']);
@@ -650,25 +657,25 @@ test('sessions survive a daemon restart and resume with their history', async t 
 
 test('after a crash the next daemon reopens a root that was working; an assignment it cannot continue fails', async t => {
   const { directory, project } = await durableProject(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const first = await durable(t, directory, project, runtimes);
   const { session } = await first.client.request('session.create', { spec: { cwd: project, persist: true } });
   await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Delegate') });
   void runtimes[0].call('alp_delegate', { agent: 'lead', wait: true, task: 'Work' });
-  await until(() => runtimes[1]?.calls.some(c => c.method === 'turn/start') && first.events.some(e => e.event.type === 'session.opened' && e.event.session.parentId));
+  await until(() => runtimes[1]?.calls.some((c: Json) => c.method === 'turn/start') && first.events.some(e => e.event.type === 'session.opened' && e.event.session.parentId));
   const child = first.events.find(e => e.event.type === 'session.opened' && e.event.session.parentId).sessionId;
   await first.stop(false);
 
   // This runtime keeps running assignments in memory only, so the lead cannot continue.
   const before = runtimes.length;
   const second = await durable(t, directory, project, runtimes);
-  await until(() => runtimes[before]?.calls.some(c => c.method === 'turn/start'));
+  await until(() => runtimes[before]?.calls.some((c: Json) => c.method === 'turn/start'));
   const reopened = runtimes[before];
   assert.equal(reopened.calls[0].method, 'thread/resume');
-  assert.match(reopened.calls.find(c => c.method === 'turn/start').params.input.at(-1).text, /alpd restarted during your turn, and reopened this session\. Continue the user's request/);
+  assert.match(reopened.calls.find((c: Json) => c.method === 'turn/start').params.input.at(-1).text, /alpd restarted during your turn, and reopened this session\. Continue the user's request/);
   const { sessions } = await second.client.request('session.list', { includeClosed: true });
-  assert.equal(sessions.find(s => s.id === session.id).status, 'running');
-  assert.equal(sessions.find(s => s.id === child).status, 'closed');
+  assert.equal(sessions.find((s: Json) => s.id === session.id).status, 'running');
+  assert.equal(sessions.find((s: Json) => s.id === child).status, 'closed');
   const runLog = (await readFile(path.join(directory, 'runs', `${session.id}.jsonl`), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
   assert.ok(runLog.some(entry => entry.event === 'assignment.finished' && entry.assignmentId === child && entry.status === 'failed' && entry.reconciled));
   const timeline = await second.store.timeline(session.id);
@@ -687,10 +694,10 @@ test('closed trees older than 30 days are pruned at startup', async t => {
   await store.flush();
   // Its file was written when its record says; a file written now would be a restored tree (ALPD §68).
   await utimes(path.join(directory, 'state', 'sessions', 'old-root.json'), new Date(old), new Date(old));
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const daemon = await durable(t, directory, project, runtimes);
   const { sessions } = await daemon.client.request('session.list', { includeClosed: true });
-  assert.deepEqual(sessions.map(s => s.id), []);
+  assert.deepEqual(sessions.map((s: Json) => s.id), []);
   assert.deepEqual((await store.list()).map(r => r.id), ['recent']);
   assert.deepEqual(await store.timeline('old-root'), []);
 });
@@ -698,14 +705,14 @@ test('closed trees older than 30 days are pruned at startup', async t => {
 test('resumed history replays a grandchild while its parent is open', async t => {
   const { directory, project } = await durableProject(t);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'], lead: ['peer'] } }));
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const first = await durable(t, directory, project, runtimes);
   const { session } = await first.client.request('session.create', { spec: { cwd: project, persist: true } });
   await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Delegate') });
   const lead = runtimes[0].call('alp_delegate', { agent: 'lead', wait: true, task: 'Work' });
-  await until(() => runtimes[1]?.calls.some(c => c.method === 'turn/start'));
+  await until(() => runtimes[1]?.calls.some((c: Json) => c.method === 'turn/start'));
   const peer = runtimes[1].call('alp_delegate', { agent: 'peer', wait: true, task: 'Work' });
-  await until(() => runtimes[2]?.calls.some(c => c.method === 'turn/start'));
+  await until(() => runtimes[2]?.calls.some((c: Json) => c.method === 'turn/start'));
   runtimes[2].finish('peer done');
   await peer;
   runtimes[1].finish('lead done');
@@ -728,7 +735,7 @@ test('resumed history replays a grandchild while its parent is open', async t =>
 // t-7679.12: a session's usage reaches its viewers live, is kept in its timeline, and stays in its summary after a restart.
 test('session usage is an event in the tree\'s timeline and part of the session, also once closed and after a restart', async t => {
   const { directory, project } = await durableProject(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const first = await durable(t, directory, project, runtimes);
   const { session } = await first.client.request('session.create', { spec: { cwd: project, persist: true } });
   await first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Count tokens') });
@@ -746,7 +753,7 @@ test('session usage is an event in the tree\'s timeline and part of the session,
 
   const second = await durable(t, directory, project, runtimes);
   const { sessions } = await second.client.request('session.list', { includeClosed: true });
-  assert.deepEqual(sessions.map(s => [s.id, s.status, s.usage]), [[session.id, 'closed', usage]]);
+  assert.deepEqual(sessions.map((s: Json) => [s.id, s.status, s.usage]), [[session.id, 'closed', usage]]);
   await second.client.request('session.attach', { sessionId: session.id });
   assert.deepEqual(second.events.filter(e => e.event.type === 'usage').map(e => e.event.usage), [usage]);
   // Resumed and closed again before its runtime reports: the summary still has the last usage.
@@ -758,36 +765,36 @@ test('session usage is an event in the tree\'s timeline and part of the session,
 
 test('a clientMessageId is delivered once; reuse with other content conflicts', async t => {
   const { directory, project } = await durableProject(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const daemon = await durable(t, directory, project, runtimes);
   const { session } = await daemon.client.request('session.create', { spec: { cwd: project, persist: true } });
-  const prompt = content => daemon.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content });
+  const prompt = (content: Json) => daemon.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content });
   const [first, again] = await Promise.all([prompt(text('Hello')), prompt(text('Hello'))]);
   assert.deepEqual([first, again], [{ outcome: 'accepted', durable: true }, { outcome: 'accepted', duplicate: true, durable: true }]);
-  assert.equal(runtimes[0].calls.filter(c => c.method === 'turn/start').length, 1);
-  await assert.rejects(prompt(text('Other')), error => error.code === 1004 && error.data?.reason === 'key_conflict');
+  assert.equal(runtimes[0].calls.filter((c: Json) => c.method === 'turn/start').length, 1);
+  await assert.rejects(prompt(text('Other')), (error: Json) => error.code === 1004 && error.data?.reason === 'key_conflict');
 });
 
 test('a prompt cut off by a crash answers outcome unknown instead of sending twice', async t => {
   const { directory, project } = await durableProject(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const first = await durable(t, directory, project, runtimes);
   const { session } = await first.client.request('session.create', { spec: { cwd: project, persist: true } });
-  let release;
+  let release!: (value?: unknown) => void;
   runtimes[0].hold = new Promise(resolve => { release = resolve; });
   try {
     const cut = first.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Hello') }).catch(error => error);
-    await until(() => runtimes[0].calls.some(c => c.method === 'turn/start'));
+    await until(() => runtimes[0].calls.some((c: Json) => c.method === 'turn/start'));
     await first.stop(false);
     await cut;
 
     const second = await durable(t, directory, project, runtimes);
     await second.client.request('session.create', { sessionId: session.id, spec: { cwd: project } });
     const resent = second.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Hello') });
-    await assert.rejects(resent, error => error.code === 1004 && error.data?.reason === 'outcome_unknown');
-    assert.equal(runtimes.at(-1).calls.filter(c => c.method === 'turn/start').length, 0);
+    await assert.rejects(resent, (error: Json) => error.code === 1004 && error.data?.reason === 'outcome_unknown');
+    assert.equal(runtimes.at(-1).calls.filter((c: Json) => c.method === 'turn/start').length, 0);
     await second.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm2', content: text('Hello') });
-    assert.equal(runtimes.at(-1).calls.filter(c => c.method === 'turn/start').length, 1);
+    assert.equal(runtimes.at(-1).calls.filter((c: Json) => c.method === 'turn/start').length, 1);
   } finally {
     release();
   }
@@ -806,7 +813,7 @@ test('a root is named after its first prompt, as Paseo names an agent, and every
   await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text(first) });
   const title = `Fix the login ${'é'.repeat(46)}`;
   assert.equal([...title].length, 60);
-  const named = list => list.find(e => e.event.type === 'session.updated' && e.event.session.title);
+  const named = (list: Json[]) => list.find((e: Json) => e.event.type === 'session.updated' && e.event.session.title);
   await until(() => named(events) && named(watcher.events));
   for (const seen of [events, watcher.events]) {
     const update = named(seen);
@@ -844,7 +851,7 @@ test('a root is renamed and archived, and archived ones are listed only when ask
   const { project, open } = await setup(t);
   const { client } = await open();
   const { session } = await client.request('session.create', { spec: { cwd: project, persist: true } });
-  const listed = async params => (await client.request('session.list', { rootsOnly: true, includeClosed: true, ...params })).sessions.map(row => [row.id, row.title, !!row.archived]);
+  const listed = async (params?: Json) => (await client.request('session.list', { rootsOnly: true, includeClosed: true, ...params })).sessions.map((row: Json) => [row.id, row.title, !!row.archived]);
   assert.equal((await client.request('session.rename', { sessionId: session.id, title: '  Fix   the login  ' })).session.title, 'Fix the login');
   await assert.rejects(client.request('session.rename', { sessionId: session.id, title: ' ' }), { code: -32602 });
   await assert.rejects(client.request('session.rename', { sessionId: 'missing', title: 'x' }), /No session missing/);
@@ -868,16 +875,16 @@ test('session.list pages with a keyset cursor and searches titles on the daemon'
     ids.push(session.id);
     await new Promise(resolve => setTimeout(resolve, 3));
   }
-  const all = (await client.request('session.list', { rootsOnly: true, includeClosed: true })).sessions.map(row => row.id);
+  const all = (await client.request('session.list', { rootsOnly: true, includeClosed: true })).sessions.map((row: Json) => row.id);
   assert.deepEqual(all, [...ids].reverse(), 'newest first');
   // Without paging params the answer is the whole list with no cursor, as before.
   assert.equal((await client.request('session.list', { rootsOnly: true })).nextCursor, undefined);
   const pages = [];
-  let cursor;
+  let cursor: string | undefined;
   do {
     const page = await client.request('session.list', { rootsOnly: true, includeClosed: true, limit: 2, ...(cursor ? { cursor } : {}) });
     assert.ok(page.sessions.length <= 2);
-    pages.push(page.sessions.map(row => row.id));
+    pages.push(page.sessions.map((row: Json) => row.id));
     cursor = page.nextCursor;
   } while (cursor);
   assert.deepEqual(pages.map(page => page.length), [2, 2, 1]);
@@ -886,13 +893,13 @@ test('session.list pages with a keyset cursor and searches titles on the daemon'
   assert.equal((await client.request('session.list', { rootsOnly: true, limit: 5 })).nextCursor, undefined);
   // Search: every word, case-folded, in the title or the id; with paging.
   const found = await client.request('session.list', { rootsOnly: true, query: '  LOGIN  fix ', limit: 1 });
-  assert.deepEqual(found.sessions.map(row => row.title), ['Fix the login']);
+  assert.deepEqual(found.sessions.map((row: Json) => row.title), ['Fix the login']);
   assert.equal(found.nextCursor, undefined);
   const login = await client.request('session.list', { rootsOnly: true, query: 'login', limit: 1 });
-  assert.deepEqual(login.sessions.map(row => row.title), ['Review login page']);
+  assert.deepEqual(login.sessions.map((row: Json) => row.title), ['Review login page']);
   const rest = await client.request('session.list', { rootsOnly: true, query: 'login', limit: 1, cursor: login.nextCursor });
-  assert.deepEqual([rest.sessions.map(row => row.title), rest.nextCursor], [['Fix the login'], undefined]);
-  assert.deepEqual((await client.request('session.list', { query: ids[1] })).sessions.map(row => row.id), [ids[1]]);
+  assert.deepEqual([rest.sessions.map((row: Json) => row.title), rest.nextCursor], [['Fix the login'], undefined]);
+  assert.deepEqual((await client.request('session.list', { query: ids[1] })).sessions.map((row: Json) => row.id), [ids[1]]);
   // projectRoots: any of several projects, paged among them only.
   assert.equal((await client.request('session.list', { projectRoots: ['/elsewhere', project], limit: 10 })).sessions.length, 5);
   assert.deepEqual(await client.request('session.list', { projectRoots: ['/elsewhere'], limit: 1 }), { sessions: [] });
@@ -920,7 +927,7 @@ test('question.watch tells a connection of questions in trees it is not attached
   assert.equal(typeof kept.cursor, 'number', 'the attached client still gets the kept envelope');
   assert.equal(owner.events.filter(e => e.event.type === 'question').length, 1);
   // A watcher that calls again gets what waits now.
-  assert.deepEqual((await watcher.client.request('question.watch', { projectRoot: project })).questions.map(q => q.id), [question.event.question.id]);
+  assert.deepEqual((await watcher.client.request('question.watch', { projectRoot: project })).questions.map((q: Json) => q.id), [question.event.question.id]);
   await owner.client.request('question.answer', { questionId: question.event.question.id, text: 'yes' });
   await asked;
   await until(() => watcher.events.some(e => e.event.type === 'question.resolved'));
@@ -952,7 +959,7 @@ test('question.watch with turns tells a connection when a root it is not attache
   await owner.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Delegate') });
   // A child's turn end is not the root's: no copy.
   const lead = runtimes[0].call('alp_delegate', { agent: 'lead', wait: true, task: 'Investigate' });
-  await until(() => runtimes[1]?.calls.some(c => c.method === 'turn/start'));
+  await until(() => runtimes[1]?.calls.some((c: Json) => c.method === 'turn/start'));
   runtimes[1].finish('lead proof');
   await lead;
   await until(() => owner.events.some(e => e.event.type === 'turn.ended' && e.sessionId !== session.id));
@@ -998,7 +1005,7 @@ test('alpd keeps a root\'s attention for every client: a reconnecting client rea
   assert.ok((await first.client.request('daemon.hello', { protocolVersion: 1 })).capabilities.includes('session.attention'));
   assert.deepEqual((await first.client.request('question.watch', { projectRoot: project, attention: true })).attention, []);
   await second.client.request('question.watch', { projectRoot: project, turns: true, attention: true });
-  const told = events => events.filter(e => e.event.type === 'attention').map(e => [e.sessionId, e.event.attention?.reason ?? null, e.cursor]);
+  const told = (events: Json[]) => events.filter((e: Json) => e.event.type === 'attention').map((e: Json) => [e.sessionId, e.event.attention?.reason ?? null, e.cursor]);
   await owner.client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Work') });
   runtimes[0].finish();
   await until(() => told(first.events).length === 1 && told(second.events).length === 1);
@@ -1010,7 +1017,7 @@ test('alpd keeps a root\'s attention for every client: a reconnecting client rea
   // A client that was away when the turn ended reads it from question.watch.
   const late = await open();
   const watched = await late.client.request('question.watch', { projectRoot: project, attention: true });
-  assert.deepEqual(watched.attention.map(entry => [entry.sessionId, entry.attention.reason, entry.attention.at]), [[session.id, 'finished', listed.at]]);
+  assert.deepEqual(watched.attention.map((entry: Json) => [entry.sessionId, entry.attention.reason, entry.attention.at]), [[session.id, 'finished', listed.at]]);
   assert.equal((await late.client.request('question.watch', { projectRoot: path.join(project, 'elsewhere'), attention: true })).attention.length, 0, 'another project has none');
   assert.equal((await owner.client.request('question.watch', { projectRoot: project })).attention, undefined, 'only when asked');
   await late.client.request('question.watch', { projectRoot: project, attention: true });
@@ -1023,7 +1030,7 @@ test('alpd keeps a root\'s attention for every client: a reconnecting client rea
   assert.deepEqual(told(late.events), [[session.id, null, undefined]]);
   assert.deepEqual((await late.client.request('question.watch', { projectRoot: project, attention: true })).attention, []);
   assert.deepEqual(await second.client.request('session.attention.clear', { sessionId: session.id }), { cleared: false }, 'once');
-  await assert.rejects(second.client.request('session.attention.clear', { sessionId: 'missing' }), error => error.code === 1001);
+  await assert.rejects(second.client.request('session.attention.clear', { sessionId: 'missing' }), (error: Json) => error.code === 1001);
 
   // Mark as unread (session.attention.mark) sets a finished attention again, once, and tells the watchers.
   const marked = await first.client.request('session.attention.mark', { sessionId: session.id });
@@ -1033,7 +1040,7 @@ test('alpd keeps a root\'s attention for every client: a reconnecting client rea
   assert.deepEqual(told(late.events).at(-1), [session.id, 'finished', undefined]);
   assert.equal((await owner.client.request('session.list', { projectRoot: project })).sessions[0].attention.at, marked.attention.at);
   assert.deepEqual(await second.client.request('session.attention.mark', { sessionId: session.id }), { marked: false }, 'already asks');
-  await assert.rejects(second.client.request('session.attention.mark', { sessionId: 'missing' }), error => error.code === 1001);
+  await assert.rejects(second.client.request('session.attention.mark', { sessionId: 'missing' }), (error: Json) => error.code === 1001);
   assert.deepEqual(await second.client.request('session.attention.clear', { sessionId: session.id, at: marked.attention.at }), { cleared: true });
   await until(() => told(late.events).length === 3);
 
@@ -1077,9 +1084,9 @@ test('workspace.files.search lists matching files inside the directory only, nev
   await symlink(path.join(outside, 'secret-server.ts'), path.join(project, 'linked-server.ts'));
   const found = await client.request('workspace.files.search', { projectRoot: project, query: 'server' });
   assert.deepEqual(found, { files: [{ path: 'src/server.ts' }, { path: 'src/deep/server-utils.ts' }] }, 'exact name first; links, ignored and hidden directories left out');
-  const all = (await client.request('workspace.files.search', { projectRoot: project, limit: 100 })).files.map(f => f.path);
+  const all = (await client.request('workspace.files.search', { projectRoot: project, limit: 100 })).files.map((f: Json) => f.path);
   assert.ok(all.includes('README.md') && all.includes('src/server.ts'));
-  assert.ok(!all.some(file => file.includes('secret') || file.startsWith('.env') || file.includes('linked') || file.includes('node_modules')), all.join());
+  assert.ok(!all.some((file: Json) => file.includes('secret') || file.startsWith('.env') || file.includes('linked') || file.includes('node_modules')), all.join());
   assert.equal(all.indexOf('README.md') < all.indexOf('src/server.ts'), true, 'shallow files first');
   assert.deepEqual((await client.request('workspace.files.search', { projectRoot: project, query: 'deep/serv' })).files, [{ path: 'src/deep/server-utils.ts' }]);
   assert.equal((await client.request('workspace.files.search', { projectRoot: project, limit: 1 })).files.length, 1);
@@ -1112,15 +1119,15 @@ test('workspace.files.list and read over the socket: capability, confined answer
   await writeFile(path.join(project, 'build', 'out.js'), 'built');
   await symlink(path.join(outside, 'secret.txt'), path.join(project, 'link.txt'));
   const root = await client.request('workspace.files.list', { projectRoot: project });
-  const names = root.entries.map(entry => entry.name);
+  const names = root.entries.map((entry: Json) => entry.name);
   assert.ok(names.includes('src') && names.includes('.gitignore'));
   assert.ok(!names.includes('.env') && !names.includes('.alp') && !names.includes('build') && !names.includes('link.txt'), names.join());
-  assert.deepEqual((await client.request('workspace.files.list', { projectRoot: project, path: 'src' })).entries.map(entry => entry.path), ['src/server.ts']);
+  assert.deepEqual((await client.request('workspace.files.list', { projectRoot: project, path: 'src' })).entries.map((entry: Json) => entry.path), ['src/server.ts']);
   const read = await client.request('workspace.files.read', { projectRoot: project, path: 'src/server.ts' });
   assert.equal(read.content, 'export {};\n');
   assert.equal(read.size, 11);
   assert.equal((await client.request('workspace.files.read', { projectRoot: project, path: 'build/out.js', includeIgnored: true })).content, 'built');
-  const refused = async (params, method = 'workspace.files.read') => {
+  const refused = async (params: Json, method = 'workspace.files.read') => {
     const error = await client.request(method, { projectRoot: project, ...params }).then(() => assert.fail('expected a refusal'), caught => caught);
     assert.ok(!String(error.message).includes(project) && !String(error.message).includes(outside) && !JSON.stringify(error.data ?? {}).includes('SENTINEL'), error.message);
     return { code: error.code, reason: error.data?.reason };
@@ -1170,7 +1177,7 @@ test('workspace.files.find, preview and host.directories.search over the socket:
   assert.ok(!refused.message.includes(project) && !JSON.stringify(refused).includes('SENTINEL'));
   await assert.rejects(client.request('workspace.files.preview', { projectRoot: project, path: 'big.log', maxBytes: 50 * 1024 * 1024 + 1 }), { code: -32602 });
   const listed = await client.request('workspace.files.list', { projectRoot: project, internalLinks: true, includeIgnored: true });
-  assert.deepEqual(listed.entries.find(entry => entry.name === 'src-link')?.target, 'src');
+  assert.deepEqual(listed.entries.find((entry: Json) => entry.name === 'src-link')?.target, 'src');
   const parent = path.dirname(project);
   assert.deepEqual(await client.request('host.directories.search', { query: `${parent}${path.sep}proj` }), { entries: [{ path: project }] });
   await assert.rejects(client.request('host.directories.search', {}), { code: -32602 });
@@ -1195,23 +1202,23 @@ test('session.list finds sessions across symlink and canonical projectRoot paths
 
   // Querying with canonical projectRoot should find both s1 and s2
   const listByCanonical = await client.request('session.list', { projectRoot: canonical });
-  assert.deepEqual(listByCanonical.sessions.map(s => s.id).sort(), [s1.id, s2.id].sort());
+  assert.deepEqual(listByCanonical.sessions.map((s: Json) => s.id).sort(), [s1.id, s2.id].sort());
 
   // Querying with symlink projectRoot should find both s1 and s2
   const listBySymlink = await client.request('session.list', { projectRoot: symlinkDir });
-  assert.deepEqual(listBySymlink.sessions.map(s => s.id).sort(), [s1.id, s2.id].sort());
+  assert.deepEqual(listBySymlink.sessions.map((s: Json) => s.id).sort(), [s1.id, s2.id].sort());
 
   // Trailing slash matching works symmetrically
   const listTrailing = await client.request('session.list', { projectRoot: `${symlinkDir}/` });
-  assert.deepEqual(listTrailing.sessions.map(s => s.id).sort(), [s1.id, s2.id].sort());
+  assert.deepEqual(listTrailing.sessions.map((s: Json) => s.id).sort(), [s1.id, s2.id].sort());
 
   // Querying with projectRoots: [canonical] should find both s1 and s2
   const listByRootsCanonical = await client.request('session.list', { projectRoots: [canonical] });
-  assert.deepEqual(listByRootsCanonical.sessions.map(s => s.id).sort(), [s1.id, s2.id].sort());
+  assert.deepEqual(listByRootsCanonical.sessions.map((s: Json) => s.id).sort(), [s1.id, s2.id].sort());
 
   // Querying with projectRoots: [symlinkDir] should find both s1 and s2
   const listByRootsSymlink = await client.request('session.list', { projectRoots: [symlinkDir] });
-  assert.deepEqual(listByRootsSymlink.sessions.map(s => s.id).sort(), [s1.id, s2.id].sort());
+  assert.deepEqual(listByRootsSymlink.sessions.map((s: Json) => s.id).sort(), [s1.id, s2.id].sort());
 
   // Querying sibling should find neither
   const listSibling = await client.request('session.list', { projectRoot: sibling });
@@ -1235,7 +1242,7 @@ test('session.list rootsOnly pre-filters candidate IDs without computing child s
   const { session } = await client.request('session.create', { spec: { cwd: project, persist: true } });
   await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Delegate work') });
   const lead = runtimes[0].call('alp_delegate', { agent: 'lead', wait: true, task: 'Subtask' });
-  await until(() => runtimes[1]?.calls.some(c => c.method === 'turn/start'));
+  await until(() => runtimes[1]?.calls.some((c: Json) => c.method === 'turn/start'));
   runtimes[1].finish('subtask done');
   await lead;
   await until(() => events.some(e => e.event.type === 'session.closed'));
@@ -1243,19 +1250,19 @@ test('session.list rootsOnly pre-filters candidate IDs without computing child s
   assert.ok(child, 'child session was created');
 
   // summary() reads runtime.snapshot; count that real work, not only returned rows.
-  const summarized = [];
+  const summarized: Json[] = [];
   const snapshot = runtime.snapshot.bind(runtime);
-  t.mock.method(runtime, 'snapshot', id => { summarized.push(id); return snapshot(id); });
+  t.mock.method(runtime, 'snapshot', (id: Json) => { summarized.push(id); return snapshot(id); });
   // rootsOnly: true must only return the root session
   const roots = await client.request('session.list', { rootsOnly: true, includeClosed: true });
-  assert.deepEqual(roots.sessions.map(s => s.id), [session.id]);
-  assert.equal(roots.sessions.some(s => s.id === child.sessionId), false);
+  assert.deepEqual(roots.sessions.map((s: Json) => s.id), [session.id]);
+  assert.equal(roots.sessions.some((s: Json) => s.id === child.sessionId), false);
   assert.ok(!summarized.includes(child.sessionId), 'a child summary is never computed for a roots-only list');
   summarized.length = 0;
 
   // rootsOnly: false must return both root and child sessions
   const all = await client.request('session.list', { rootsOnly: false, includeClosed: true });
-  const allIds = all.sessions.map(s => s.id);
+  const allIds = all.sessions.map((s: Json) => s.id);
   assert.ok(allIds.includes(session.id));
   assert.ok(allIds.includes(child.sessionId));
   assert.ok(summarized.includes(child.sessionId), 'the counter observes child summary work in an unfiltered list');
