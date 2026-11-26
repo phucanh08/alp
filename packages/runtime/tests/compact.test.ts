@@ -252,6 +252,49 @@ test('a runtime that takes the native request but reports nothing, or a fresh co
   await until(() => main.started.some(call => promptText(call).includes('Status?')), 'the held message after the failure');
 });
 
+test('Codex gone from PATH (t-aad3): a fresh conversation fails the compaction without leaving main pending; a new session logs its start failure', async t => {
+  // Codex left PATH after main opened: on Windows CodexTransport throws "Codex was not found" when it is made (#396).
+  const transport = (agent: FakeAgent, index: number) => {
+    if (index > 0) throw new Error('Codex was not found: no codex.exe and no npm launcher codex.cmd in any directory of PATH.');
+    const request = agent.request.bind(agent);
+    agent.request = async (method, params) => {
+      if (method === 'thread/compact/start') { agent.calls.push({ method, params }); throw new Error('unsupported'); }
+      return request(method, params);
+    };
+    return agent;
+  };
+  const { root, runtime, runtimes, log } = await open(t, { transport });
+  const main = runtimes[0];
+  main.usage(90_000);
+  main.finish('ok');
+  await until(() => main.started.length === 2, 'the checkpoint turn');
+  main.finish(CHECKPOINT);
+  await until(async () => (await log('compact.failed')).length === 1, 'the failed fresh conversation');
+  assert.match((await log('compact.failed'))[0].error, /Codex was not found/);
+  // Main hears of the failure in a turn of its own; the restart below waits for it to end.
+  await until(() => main.started.length === 3, 'the turn after the failure');
+  main.finish('noted');
+  await until(() => runtime.snapshot('root')?.busy === false, 'main idle');
+  // Not pending: a restart is not refused as "still opening or restarting"; it fails on the missing Codex again.
+  const error = await runtime.rebind!('root', { threadId: main.threadId }).then(() => assert.fail('expected a refusal'), error => error);
+  assert.doesNotMatch(error.message, /still opening or restarting/);
+  assert.match(error.message, /Codex was not found/);
+
+  // A session opened now never gets a transport: the failure is logged as ALP_PROVIDER_START_FAILED.
+  const written: string[] = [];
+  const write = process.stderr.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => { written.push(String(chunk)); return true; }) as typeof process.stderr.write;
+  try {
+    await assert.rejects(runtime.open('other', { cwd: root }), /Codex was not found/);
+  } finally {
+    process.stderr.write = write;
+  }
+  const failed = written.flatMap(line => line.split('\n')).flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } }).filter(record => record?.code === 'ALP_PROVIDER_START_FAILED');
+  assert.equal(failed.length, 1, written.join(''));
+  assert.equal(failed[0].sessionId, 'other');
+  assert.equal(runtime.snapshot('other'), undefined);
+});
+
 test('with the supervisor on, a failed native compaction still falls back to a fresh conversation', async t => {
   const defer = teardown(t);
   const { directory, root, runs } = await project(t);

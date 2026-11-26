@@ -17,6 +17,12 @@ test('transport enforces bounded request timeout and shuts down', async t => {
   await assert.rejects(transport.request('model/list', {}), /closed/);
 });
 test('transport handles spawn error without hanging', async t => {
+  // On Windows a bare name is looked up on PATH before spawning (#396): a missing one throws at once.
+  if (process.platform === 'win32') {
+    assert.throws(() => new CodexTransport('alp-nonexistent-executable', process.cwd(), {}), /Codex was not found/);
+    return;
+  }
+  // Elsewhere the spawn itself fails, and the request rejects instead of hanging.
   const transport = new CodexTransport('alp-nonexistent-executable', process.cwd(), {});
   t.after(() => transport.close());
   await assert.rejects(transport.initialize(), /ENOENT/);

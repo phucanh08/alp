@@ -127,7 +127,7 @@ jobs:
       - run: node scripts/build-workspace.ts cli
       - run: node scripts/build-workspace.ts paseo
       # t-fa1b: run the catalog/compact/probe/migration regressions on both Windows Node versions.
-      - run: node scripts/run-tests.ts --private-home packages/daemon/tests/model-catalog.test.ts packages/runtime/tests/model-catalog.test.ts packages/runtime/tests/compact.test.ts packages/runtime/tests/antigravity-mode.test.ts packages/runtime/tests/provider-command.test.ts packages/client/tests/acp-probe.test.ts packages/core/tests/providers.test.ts test/integration/paseo-source-check-tar.test.ts
+      - run: node scripts/run-tests.ts --private-home packages/daemon/tests/model-catalog.test.ts packages/runtime/tests/model-catalog.test.ts packages/runtime/tests/compact.test.ts packages/runtime/tests/antigravity-mode.test.ts packages/runtime/tests/provider-command.test.ts packages/client/tests/acp-probe.test.ts packages/core/tests/providers.test.ts test/integration/paseo-source-check-tar.test.ts integrations/paseo/tests/transport.test.ts
       # Select recovery/CLI regressions without the older Unix-symlink library fixtures.
       - run: >-
           node -e "import('./scripts/test-lib.ts').then(({runNodeTests})=>{process.exitCode=runNodeTests(['packages/core/tests/library-edit.test.ts','packages/cli/tests/library.test.ts'],{privateHome:true,extra:['--test-name-pattern=retired metadata IO|own role key|AFTER moving|retired text lists']})})"
