@@ -83,6 +83,10 @@ if (scope === 'all' || scope === 'packages') {
   node('scripts/paseo-checkout.ts');
   buildAll();
   node('scripts/check-boundaries.ts', '--require-artifacts');
+  // The client SDK as installed from its tarballs: entries import, the portable entries bundle for a
+  // browser with nothing from Node, and the declarations type-check (t-0ec1). Its browser and metro
+  // modes need Playwright and Metro and stay manual.
+  node('scripts/client-sdk-smoke.ts', 'tarball');
   // Inspect the artifacts just built; lifecycle rebuilds could conceal missing outputs.
   node('scripts/pack-check.ts', '--ignore-scripts');
   // The release path (docs/alp/beta-scope.md §7.2): pack the tarballs once into a new
