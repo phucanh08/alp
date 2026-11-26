@@ -1,7 +1,7 @@
 /**
  * t-81b0.8: the app installs ALP when it finds none (docs/alp/desktop.md §4). The real Electron app,
  * unpackaged, with a scratch HOME, ALP_HOME and TMPDIR, a fake login shell that finds no alp, and a
- * local release mirror (./support.mjs releaseMirror) read through file:// by the app's bundled
+ * local release mirror (./support.ts releaseMirror) read through file:// by the app's bundled
  * install.sh: no network. The fake bundle's `alp dashboard --print` prints a disposable alp dashboard
  * host's address, so a finished install ends on alp dashboard.
  *
@@ -9,27 +9,30 @@
  * ALP_DESKTOP_E2E_RELEASE_MIRROR names that directory (SHA256SUMS and the darwin archives).
  */
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { chmod, lstat, mkdir, readdir, readlink, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
-import { connectedTo, freePort, host, inPage, launch, noAlpEnv, only, releaseMirror, scratch, waitFor } from './support.mjs';
+import type { ElectronApplication } from 'playwright-core';
+import { connectedTo, freePort, host, inPage, launch, noAlpEnv, only, releaseMirror, scratch, waitFor } from './support.ts';
+import type { Context, MenuItemLike } from './support.ts';
 
 const exec = promisify(execFile);
 const limit = { timeout: 180_000 };
-const exists = file => lstat(file).then(() => true, () => false);
+const exists = (file: string) => lstat(file).then(() => true, () => false);
 
 /** The app with no alp anywhere, installing from `mirror` (a directory). */
-async function launchWithout(t, context, mirror) {
+async function launchWithout(t: TestContext, context: Context, mirror: string) {
   const app = await launch(t, context, undefined, { env: { ...(await noAlpEnv(context)), ALP_DESKTOP_INSTALL_MIRROR: mirror } });
   const home = path.join(context.dir, 'app-home');
   return { app, home, alpRoot: path.join(home, '.alp'), tmp: path.join(context.dir, 'tmp') };
 }
 
 /** Waits for bundled page `name` in the single window, and returns its text. */
-async function pageText(app, name, match = /./, timeoutMs = 30_000) {
+async function pageText(app: ElectronApplication, name: string, match = /./, timeoutMs = 30_000) {
   return waitFor(async () => {
     const state = await only(app);
     if (state?.page !== name || !state.visible) return undefined;
@@ -38,10 +41,10 @@ async function pageText(app, name, match = /./, timeoutMs = 30_000) {
   }, `${name} matching ${match}`, timeoutMs);
 }
 
-const click = (app, id) => inPage(app, `document.getElementById(${JSON.stringify(id)}).click(); 1`);
+const click = (app: ElectronApplication, id: string) => inPage(app, `document.getElementById(${JSON.stringify(id)}).click(); 1`);
 
 /** install.sh's temporary directories are gone (it removes its own on exit). */
-async function noInstallerLeft(tmp) {
+async function noInstallerLeft(tmp: string) {
   assert.deepEqual((await readdir(tmp)).filter(name => name.startsWith('alp-install.')), []);
 }
 
@@ -112,7 +115,7 @@ test('Cancel installs nothing and says how to be asked again; Connect again offe
   await inPage(app, "location.href = 'alp-page://app/confirm?action=install&nonce=' + 'stale'; 1");
   await sleep(500);
   assert.equal((await only(app))?.page, 'missing-alp.html');
-  await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items.find(i => i.label === 'File')?.submenu?.items.find(i => i.label === 'Connect again')?.click());
+  await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items.find((i: MenuItemLike) => i.label === 'File')?.submenu?.items.find((i: MenuItemLike) => i.label === 'Connect again')?.click());
   await pageText(app, 'install.html', /Install ALP 9\.8\.7\?/);
   assert.equal(await exists(alpRoot), false);
 });
@@ -152,7 +155,7 @@ const RELEASE_MIRROR = process.env.ALP_DESKTOP_E2E_RELEASE_MIRROR;
 
 test('a real release installs from its own assets, alpd starts under the scratch ALP home, and the window opens alp dashboard', { ...limit, timeout: 600_000, skip: !RELEASE_MIRROR && 'set ALP_DESKTOP_E2E_RELEASE_MIRROR to a directory holding a release\'s SHA256SUMS and darwin archives' }, async t => {
   const context = await scratch(t);
-  const { app, alpRoot, tmp } = await launchWithout(t, context, path.resolve(RELEASE_MIRROR));
+  const { app, alpRoot, tmp } = await launchWithout(t, context, path.resolve(RELEASE_MIRROR!));
   const alp = path.join(alpRoot, 'bin', 'alp');
   const env = { PATH: '/usr/bin:/bin:/usr/sbin:/sbin', HOME: path.dirname(alpRoot), ALP_HOME: alpRoot, TMPDIR: tmp };
   // Registered after the app (so undone before it closes): stop the scratch alp dashboard and alpd,

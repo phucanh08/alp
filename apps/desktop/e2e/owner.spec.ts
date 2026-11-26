@@ -16,29 +16,36 @@
  * npm install; `bun run e2e` in apps/desktop runs it with the other specs.
  */
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { chmod, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import type { Locator } from 'playwright-core';
 import { connect as hostConnect } from '@anhlp/alp-client';
 import { fixtureProcesses } from '../../../test/support/fixture-processes.ts';
-import { APP, cleanEnv, connectedTo, freePort, launch, scratch, waitFor } from './support.mjs';
+import { APP, cleanEnv, connectedTo, freePort, launch, scratch, waitFor } from './support.ts';
+import type { Context } from './support.ts';
 
 const ROOT = path.resolve(APP, '..', '..');
 const CLI = path.join(ROOT, 'packages/cli/dist/cli.js');
 const FAKE_CODEX = path.join(ROOT, 'apps/web/e2e/support/fake-codex.js');
 const MODEL = 'codex:gpt-5.6-sol';
 const run = promisify(execFile);
+/** A key modifier as webContents.sendInputEvent takes it. */
+type Modifier = 'meta' | 'control' | 'alt' | 'shift';
+/** Where the batch 3 test keeps the page's own Date.prototype.toLocaleTimeString while it is broken. */
+type Clock = { __clock: Date['toLocaleTimeString'] };
 const LOGO = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" rx="3" fill="#2563eb"/></svg>\n';
 const ICON = `data:image/svg+xml;base64,${Buffer.from(LOGO).toString('base64')}`;
 
-const git = (cwd, ...args) => run('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Test', '-c', 'user.email=test@localhost', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...args],
+const git = (cwd: string, ...args: string[]) => run('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Test', '-c', 'user.email=test@localhost', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...args],
   { cwd, env: { PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } });
-const lines = (count, word) => Array.from({ length: count }, (_, i) => `${word} ${i}`).join('\n') + '\n';
+const lines = (count: number, word: string) => Array.from({ length: count }, (_, i) => `${word} ${i}`).join('\n') + '\n';
 
 /** A repository on `branch`, `change` committed over `base`, origin/main at the base: the facts handler diffs against it and asks gh. */
-async function repository(directory, { branch, base, change }) {
+async function repository(directory: string, { branch, base, change }: { branch: string, base: Record<string, string>, change: Record<string, string> }) {
   await writeFile(path.join(directory, '.gitignore'), '.alp/\nALP.md\n');
   for (const [name, content] of Object.entries(base)) await writeFile(path.join(directory, name), content);
   await git(directory, 'init', '-q');
@@ -58,7 +65,7 @@ async function repository(directory, { branch, base, change }) {
  * repository), two sessions in shop and one in secret, one schedule on shop's newest session, and the
  * `alp` wrapper the app runs. Each step is undone through the test's `defer`, in reverse order.
  */
-async function ownerHost(context, { fileManager, editor } = {}) {
+async function ownerHost(context: Context, { fileManager, editor }: { fileManager?: string, editor?: string } = {}) {
   const { dir, defer } = context;
   const home = path.join(dir, 'h', '.alp');
   await mkdir(home, { recursive: true, mode: 0o700 });
@@ -68,7 +75,7 @@ async function ownerHost(context, { fileManager, editor } = {}) {
   defer(() => processes.stop());
   const bin = path.join(dir, 'hb');
   await mkdir(bin, { recursive: true });
-  const projects = Object.fromEntries(await Promise.all(['shop', 'secret', 'plain'].map(async name => {
+  const projects: Record<string, string> = Object.fromEntries(await Promise.all(['shop', 'secret', 'plain'].map(async name => {
     const directory = path.join(dir, 'projects', name);
     await mkdir(directory, { recursive: true });
     return [name, await realpath(directory)];
@@ -95,7 +102,7 @@ async function ownerHost(context, { fileManager, editor } = {}) {
   for (const value of [env.ALP_HOME, env.HOME, env.TMPDIR, env.ALP_SERVICE_DIR]) assert.ok(value.startsWith(`${dir}${path.sep}`), `${value} is outside the scratch directory`);
   const port = await freePort();
   await writeFile(path.join(home, 'settings.json'), JSON.stringify({ dashboard: { port }, web: { relay: { enabled: false } } }));
-  const alp = (...args) => run(process.execPath, [CLI, ...args], { env, timeout: 60_000 });
+  const alp = (...args: string[]) => run(process.execPath, [CLI, ...args], { env, timeout: 60_000 });
 
   await repository(projects.shop, { branch: 'feat/desktop-sidebar', base: { 'README.md': '# shop\n', 'logo.svg': LOGO }, change: { 'catalog.txt': lines(120, 'item') } });
   await repository(projects.secret, { branch: 'fix/totals', base: { 'totals.txt': lines(10, 'total') }, change: { 'totals.txt': lines(4, 'fixed') + lines(10, 'total').split('\n').slice(4).join('\n') + lines(8, 'added') } });
@@ -121,8 +128,8 @@ async function ownerHost(context, { fileManager, editor } = {}) {
       await client.request('project.register', { directory: projects[name], ifRevision: revision, requestId: `desktop-${name}` });
     }
     const { workspaces } = await client.request('workspace.list', {});
-    const workspaceOf = Object.fromEntries(workspaces.filter(row => !row.archivedAt).map(row => [row.directory, row.id]));
-    const session = async (name, id, title) => {
+    const workspaceOf = Object.fromEntries(workspaces.filter((row: { id: string, directory: string, archivedAt?: string | null }) => !row.archivedAt).map((row: { id: string, directory: string }) => [row.directory, row.id]));
+    const session = async (name: string, id: string, title: string) => {
       await client.request('session.create', { sessionId: id, workspaceId: workspaceOf[projects[name]], spec: { workflow: 'pho', model: MODEL, persist: true } });
       await client.request('session.rename', { sessionId: id, title });
     };
@@ -166,11 +173,11 @@ test('owner: Settings › General sets the agents\' language, and the sidebar sh
   await connectedTo(app, `http://127.0.0.1:${info.port}`, 90_000);
   const page = app.windows()[0];
   await page.emulateMedia({ colorScheme: 'dark' });
-  const text = locator => locator.innerText().then(value => value.trim(), () => undefined);
-  const has = async (locator, expected, what) => waitFor(async () => (await text(locator)) === expected, `${what} to read ${JSON.stringify(expected)} (now ${JSON.stringify(await text(locator))})`, 30_000);
+  const text = (locator: Locator) => locator.innerText().then(value => value.trim(), () => undefined);
+  const has = async (locator: Locator, expected: string, what: string) => waitFor(async () => (await text(locator)) === expected, `${what} to read ${JSON.stringify(expected)} (now ${JSON.stringify(await text(locator))})`, 30_000);
   const nav = page.getByRole('navigation', { name: 'Workspaces and sessions' });
-  const project = name => page.locator(`[data-testid="sidebar-project"][data-path="${host.projects[name]}"]`);
-  const row = id => page.locator(`[data-testid="session-row"][data-session-id="${id}"]`);
+  const project = (name: string) => page.locator(`[data-testid="sidebar-project"][data-path="${host.projects[name]}"]`);
+  const row = (id: string) => page.locator(`[data-testid="session-row"][data-session-id="${id}"]`);
 
   // (ii) The sidebar: the owner's top rows, every workspace's sessions, the facts on the most recent row.
   await has(nav.getByTestId('sidebar-new-workspace'), 'New workspace', 'the New workspace row');
@@ -293,7 +300,7 @@ test('owner: batch 2 menus in ALP.app: pin and labels, Open in editor, the heade
   const client = await hostConnect(lock.socket);
   try {
     const { workspaces, revision } = await client.request('workspace.list', {});
-    const workspaceId = workspaces.find(row => row.directory === host.projects.shop && !row.archivedAt).id;
+    const workspaceId = workspaces.find((row: { id: string, directory: string, archivedAt?: string | null }) => row.directory === host.projects.shop && !row.archivedAt).id;
     let at = revision;
     for (const assigned of [true, false]) at = (await client.request('registry.owner', { operation: 'label.assign', args: { workspaceId, label: { name: 'urgent', color: 'red' }, assigned }, ifRevision: at, requestId: `desktop-label-${assigned}` })).registry.revision;
   } finally { client.close(); }
@@ -306,8 +313,8 @@ test('owner: batch 2 menus in ALP.app: pin and labels, Open in editor, the heade
   const page = app.windows()[0];
   const shots = process.env.ALP_DESKTOP_SHOTS;
   if (shots) await mkdir(shots, { recursive: true });
-  const shot = async name => { if (shots) await page.screenshot({ path: path.join(shots, name) }); };
-  const read = async id => {
+  const shot = async (name: string) => { if (shots) await page.screenshot({ path: path.join(shots, name) }); };
+  const read = async (id: string) => {
     const reader = await hostConnect(lock.socket);
     try { return (await reader.request('session.get', { sessionId: id })).session; } finally { reader.close(); }
   };
@@ -390,16 +397,16 @@ test('owner: batch 3 chat in ALP.app: find, @files, agent rows in the command ce
   const page = app.windows()[0];
   const shots = process.env.ALP_DESKTOP_SHOTS;
   if (shots) await mkdir(shots, { recursive: true });
-  const shot = async name => { if (shots) await page.screenshot({ path: path.join(shots, name) }); };
+  const shot = async (name: string) => { if (shots) await page.screenshot({ path: path.join(shots, name) }); };
   const MOD = process.platform === 'darwin' ? 'meta' : 'control';
   // A key press as the keyboard sends it: through the window (and its menu), not only the page.
-  const press = (keyCode, modifiers = []) => app.evaluate(({ BrowserWindow }, [code, mods]) => {
+  const press = (keyCode: string, modifiers: Modifier[] = []) => app.evaluate(({ BrowserWindow }, [code, mods]: [string, Modifier[]]) => {
     const contents = BrowserWindow.getAllWindows()[0].webContents;
     contents.sendInputEvent({ type: 'keyDown', keyCode: code, modifiers: mods });
     contents.sendInputEvent({ type: 'char', keyCode: code, modifiers: mods });
     contents.sendInputEvent({ type: 'keyUp', keyCode: code, modifiers: mods });
-  }, [keyCode, modifiers]);
-  const text = locator => locator.innerText().catch(() => '');
+  }, [keyCode, modifiers] as [string, Modifier[]]);
+  const text = (locator: Locator) => locator.innerText().catch(() => '');
 
   // A new session in shop, on the fake Codex.
   const project = page.locator(`[data-testid="sidebar-project"][data-path="${host.projects.shop}"]`);
@@ -484,7 +491,7 @@ test('owner: batch 3 chat in ALP.app: find, @files, agent rows in the command ce
   await shot('batch3-toasts.png');
 
   // A render error in the chat stays in its pane; Try again brings it back.
-  await page.evaluate(() => { globalThis.__clock = Date.prototype.toLocaleTimeString; Date.prototype.toLocaleTimeString = () => { throw new Error('clock broke in a test'); }; });
+  await page.evaluate(() => { (globalThis as unknown as Clock).__clock = Date.prototype.toLocaleTimeString; Date.prototype.toLocaleTimeString = () => { throw new Error('clock broke in a test'); }; });
   await composer.fill('three');
   await composer.press('Enter');
   const fallback = page.getByTestId('pane-error-boundary');
@@ -492,7 +499,7 @@ test('owner: batch 3 chat in ALP.app: find, @files, agent rows in the command ce
   assert.equal(await page.getByTestId('root-error-boundary').count(), 0);
   assert.ok(await page.getByRole('navigation').isVisible());
   await shot('batch3-pane-error.png');
-  await page.evaluate(() => { Date.prototype.toLocaleTimeString = globalThis.__clock; });
+  await page.evaluate(() => { Date.prototype.toLocaleTimeString = (globalThis as unknown as Clock).__clock; });
   await fallback.getByTestId('pane-error-boundary-retry').click();
   await waitFor(async () => (await page.getByTestId('assistant-message').allInnerTexts()).includes('Echo: three'), 'the chat back', 60_000);
 });

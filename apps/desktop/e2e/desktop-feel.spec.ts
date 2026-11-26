@@ -1,20 +1,23 @@
 /**
  * Paseo parity batch 1 (t-0166) in the real Electron app, against a disposable alp dashboard host and a
- * fake `alp` (./support.mjs): notifications allowed for the dashboard's origin only, ⌘W left to the
+ * fake `alp` (./support.ts): notifications allowed for the dashboard's origin only, ⌘W left to the
  * dashboard page (it closes the current tab) and closing the window on a bundled page, the Dock badge
  * read from the dashboard's favicon, and the window's size and place kept across launches.
  * What the page does with the keys is apps/web's e2e (e2e/desktop-feel.spec.js); that a Browser tab is
- * still denied every permission is ./browser.spec.mjs.
+ * still denied every permission is ./browser.spec.ts.
  */
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { closeWindows, connectedTo, fakeAlp, freePort, host, inPage, launch, only, scratch, waitFor } from './support.mjs';
+import type { ElectronApplication } from 'playwright-core';
+import { closeWindows, connectedTo, fakeAlp, freePort, host, inPage, launch, only, scratch, waitFor } from './support.ts';
+import type { MenuItemLike } from './support.ts';
 
 const limit = { timeout: 120_000 };
 
-async function connectedSetup(t) {
+async function connectedSetup(t: TestContext) {
   const context = await scratch(t);
   const web = await host(t, context);
   await web.start(await freePort());
@@ -23,14 +26,18 @@ async function connectedSetup(t) {
   return { context, web, alp };
 }
 
+type Modifier = 'meta' | 'control' | 'alt';
+/** A menu as the walk below reads it (Electron's Menu). */
+type MenuLike = { items: { label: string, role?: string | null, accelerator?: unknown, submenu?: MenuLike | null }[] };
+
 /** Sends a key press to the single window, as the keyboard would (before-input-event sees it). */
-const press = (app, keyCode, modifiers) => app.evaluate(({ BrowserWindow }, [code, mods]) => {
+const press = (app: ElectronApplication, keyCode: string, modifiers: Modifier[]) => app.evaluate(({ BrowserWindow }, [code, mods]: [string, Modifier[]]) => {
   const contents = BrowserWindow.getAllWindows()[0].webContents;
   contents.sendInputEvent({ type: 'keyDown', keyCode: code, modifiers: mods });
   contents.sendInputEvent({ type: 'char', keyCode: code, modifiers: mods });
   contents.sendInputEvent({ type: 'keyUp', keyCode: code, modifiers: mods });
-}, [keyCode, modifiers]);
-const windowCount = app => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+}, [keyCode, modifiers] as [string, Modifier[]]);
+const windowCount = (app: ElectronApplication) => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
 const MOD = process.platform === 'darwin' ? 'meta' : 'control';
 
 test('notifications: allowed for the alp dashboard page, denied to a bundled page; geolocation stays denied', limit, async t => {
@@ -50,7 +57,7 @@ test('notifications: allowed for the alp dashboard page, denied to a bundled pag
 
   // A bundled page (alp-page://app, here the error page after a failed connect) gets nothing.
   await alp.set("echo 'error: stopped for the test' >&2; exit 1");
-  await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items.find(item => item.label === 'File')?.submenu?.items.find(entry => entry.label === 'Connect again')?.click());
+  await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items.find((item: MenuItemLike) => item.label === 'File')?.submenu?.items.find((entry: MenuItemLike) => entry.label === 'Connect again')?.click());
   await waitFor(async () => (await only(app))?.page === 'error.html', 'the error page');
   assert.equal(await inPage(app, 'Notification.permission'), 'denied');
   assert.equal(await inPage(app, 'Notification.requestPermission()'), 'denied');
@@ -62,8 +69,8 @@ test('⌘W: no menu item takes it; the dashboard page gets it and the window sta
   await connectedTo(app, web.origin);
   // No accelerator on ⌘W (and no Close role, whose default it is) anywhere in the menu bar.
   const items = await app.evaluate(({ Menu }) => {
-    const all = [];
-    const walk = menu => { for (const item of menu?.items ?? []) { all.push({ label: item.label, role: item.role ?? '', accelerator: String(item.accelerator ?? '') }); walk(item.submenu); } };
+    const all: { label: string, role: string, accelerator: string }[] = [];
+    const walk = (menu: MenuLike | null | undefined) => { for (const item of menu?.items ?? []) { all.push({ label: item.label, role: item.role ?? '', accelerator: String(item.accelerator ?? '') }); walk(item.submenu); } };
     walk(Menu.getApplicationMenu());
     return all;
   });
@@ -85,7 +92,7 @@ test('⌘W: no menu item takes it; the dashboard page gets it and the window sta
 
   // On a bundled page there are no tabs: ⌘W closes the window, as File › Close Window does.
   await alp.set("echo 'error: stopped for the test' >&2; exit 1");
-  await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items.find(item => item.label === 'File')?.submenu?.items.find(entry => entry.label === 'Connect again')?.click());
+  await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items.find((item: MenuItemLike) => item.label === 'File')?.submenu?.items.find((entry: MenuItemLike) => entry.label === 'Connect again')?.click());
   await waitFor(async () => (await only(app))?.page === 'error.html', 'the error page');
   await press(app, 'W', [MOD]);
   await waitFor(async () => (await windowCount(app)) === 0, 'the window to close');
@@ -104,7 +111,7 @@ test('Dock badge: a dot while the dashboard shows its attention favicon, none ot
   const app = await launch(t, context, alp.file);
   await connectedTo(app, web.origin);
   const badge = () => app.evaluate(({ app: electron }) => electron.dock?.getBadge() ?? '');
-  const setIcon = href => inPage(app, `(() => { let link = document.querySelector('link[rel="icon"]'); if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.append(link); } link.href = ${JSON.stringify(href)}; return 1; })()`);
+  const setIcon = (href: string) => inPage(app, `(() => { let link = document.querySelector('link[rel="icon"]'); if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.append(link); } link.href = ${JSON.stringify(href)}; return 1; })()`);
   await setIcon('/favicon-attention.svg');
   await waitFor(async () => (await badge()) === '•', 'the attention dot');
   await setIcon('/favicon-running.svg');

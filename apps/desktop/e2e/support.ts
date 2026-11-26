@@ -10,16 +10,20 @@
  *   closes and the host stops before their directory is removed.
  */
 import { execFile, spawn } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { access, chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import net from 'node:net';
+import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import type { TestContext } from 'node:test';
 import { promisify } from 'node:util';
 import { _electron } from 'playwright-core';
+import type { ElectronApplication } from 'playwright-core';
 import { fixtureProcesses } from '../../../test/support/fixture-processes.ts';
 import { readToken } from '../../../packages/cli/dist/dashboard-service.js';
 import { teardown } from '../../../test/support/teardown.ts';
@@ -32,16 +36,34 @@ const ROOT = path.resolve(APP, '..', '..');
 const SERVICE_SOURCE = path.join(ROOT, 'packages/cli/dist/dashboard-service.js');
 export const SERVICE = process.env.ALP_DESKTOP_E2E_SERVICE || path.join(ROOT, 'packages/cli/dist/alp-dashboard.js');
 /** The Electron binary of apps/desktop's own install (require('electron') gives its path). */
-const ELECTRON = createRequire(path.join(APP, 'package.json'))('electron');
+const ELECTRON: string = createRequire(path.join(APP, 'package.json'))('electron');
+
+/** A test's scratch directory and its teardown (`scratch`). */
+export type Context = { dir: string, defer: (step: () => unknown) => void };
+/** The launched app, with its recent output (`launch`). */
+export type App = ElectronApplication & { alpOutput: () => string };
+/** What `waitFor` resolves with: the probe's answer, once truthy. */
+type Truthy<T> = Exclude<T, undefined | null | false | '' | 0>;
+/**
+ * Electron is apps/desktop's own install, not the root's, so Playwright's main-process callbacks get
+ * its API untyped: what they read of a webContents, a window or a menu item is typed by these.
+ */
+export type WebContentsLike = { id: number, getType(): string, getURL(): string, isDestroyed(): boolean, isLoading(): boolean, isWaitingForResponse(): boolean, isCrashed(): boolean, isFocused(): boolean };
+export type BrowserWindowLike = { webContents: WebContentsLike, isVisible(): boolean };
+export type MenuItemLike = { label: string };
+/** dashboard.json of a running host, with the token its token socket handed over (`host`). */
+type DashboardInfo = { url: string, port: number, pid: number, token: string };
+/** A disposable alp dashboard host (`host`). */
+export type Host = { home: string, web: DashboardInfo | undefined, readonly address: string, readonly origin: string, start(port: number): Promise<Host>, stop(): Promise<void>, rotate(): Promise<void> };
 
 /**
  * `promise`, or a rejection naming `what` after `timeoutMs`: a step that never settles (an evaluate in
  * a page that never answers, an executeJavaScript queued behind a load that never ends) fails fast and
  * says which step it was, instead of running into the test's own timeout with no message.
  */
-export async function bounded(what, promise, timeoutMs = 30_000) {
-  let timer;
-  const late = new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error(`step did not settle within ${timeoutMs} ms: ${what}`)), timeoutMs); });
+export async function bounded<T>(what: string, promise: Promise<T>, timeoutMs = 30_000): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error(`step did not settle within ${timeoutMs} ms: ${what}`)), timeoutMs); });
   try { return await Promise.race([promise, late]); } finally { clearTimeout(timer); }
 }
 
@@ -49,18 +71,18 @@ export async function bounded(what, promise, timeoutMs = 30_000) {
  * Polls `probe` until it answers something truthy; fails after `timeoutMs`. Each probe is itself
  * bounded by the time left, so a probe that hangs cannot hold the wait past its deadline.
  */
-export async function waitFor(probe, what, timeoutMs = 30_000) {
+export async function waitFor<T>(probe: () => T | Promise<T>, what: string, timeoutMs = 30_000): Promise<Truthy<T>> {
   const deadline = Date.now() + timeoutMs;
-  let last;
+  let last: unknown;
   for (;;) {
-    try { const value = await bounded(`a probe of ${what}`, Promise.resolve().then(probe), Math.max(1_000, deadline - Date.now())); if (value) return value; last = value; } catch (error) { last = error; }
+    try { const value = await bounded(`a probe of ${what}`, Promise.resolve().then(probe), Math.max(1_000, deadline - Date.now())); if (value) return value as Truthy<T>; last = value; } catch (error) { last = error; }
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what} (last: ${last instanceof Error ? last.message : JSON.stringify(last)})`);
     await sleep(100);
   }
 }
 
 /** A loopback port that is free right now (alp dashboard tries it and the next nine), other than `not`. */
-export async function freePort(...not) {
+export async function freePort(...not: number[]) {
   for (;;) {
     const port = await anyFreePort();
     if (!not.some(other => Math.abs(other - port) < 10)) return port;
@@ -69,14 +91,14 @@ export async function freePort(...not) {
 
 async function anyFreePort() {
   const server = net.createServer();
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address();
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
   await new Promise(resolve => server.close(resolve));
   return port;
 }
 
 /** One scratch directory for a test, removed last. */
-export async function scratch(t) {
+export async function scratch(t: TestContext): Promise<Context> {
   const defer = teardown(t);
   const dir = await mkdtemp(path.join(os.tmpdir(), 'alp-desktop-e2e-'));
   defer(() => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
@@ -101,21 +123,21 @@ export function cleanEnv() {
  * `alp dashboard rotate` does (the service must be stopped; the next `start()` mints a new token, as
  * every start does).
  */
-export async function host(t, { dir, defer }) {
+export async function host(t: TestContext, { dir, defer }: Context) {
   const home = path.join(dir, 'home');
   await mkdir(home, { recursive: true, mode: 0o700 });
   const processes = await fixtureProcesses(home);
   // Registered after the directory: stops every process the fixture admitted before it is removed.
   defer(() => processes.stop());
   const env = { ...cleanEnv(), ...processes.env, HOME: dir, ALP_SUPERVISE: '0' };
-  let child;
+  let child: ChildProcess | undefined;
   const log = () => readFile(path.join(home, 'logs', 'integrations', 'alp-dashboard.log'), 'utf8').catch(() => '(no log)');
-  const readJson = async file => JSON.parse(await readFile(file, 'utf8'));
-  const self = {
+  const readJson = async (file: string) => JSON.parse(await readFile(file, 'utf8'));
+  const self: Host = {
     home,
     web: undefined,
-    get address() { return `${self.web.url}#token=${self.web.token}`; },
-    get origin() { return `http://127.0.0.1:${self.web.port}`; },
+    get address() { return `${self.web!.url}#token=${self.web!.token}`; },
+    get origin() { return `http://127.0.0.1:${self.web!.port}`; },
     async start(port) {
       await writeFile(path.join(home, 'settings.json'), JSON.stringify({ dashboard: { port } }));
       const started = spawn(process.execPath, [SERVICE, '--service'], { env, stdio: 'ignore' });
@@ -176,7 +198,7 @@ const JSON_ANSWER = [
  * `--print --json`, and the fake then answers in JSON from the same body, as an alp with the contract
  * does. A body that prints `Usage:` is an alp without `alp dashboard`: it gets no JSON.
  */
-export async function fakeAlp({ dir }) {
+export async function fakeAlp({ dir }: { dir: string }) {
   const file = path.join(dir, 'bin', 'alp');
   await mkdir(path.dirname(file), { recursive: true });
   let version = '';
@@ -188,11 +210,11 @@ export async function fakeAlp({ dir }) {
     await writeFile(file, `#!/bin/sh\n${answer}[ "$1 $2" = "dashboard --print" ] || exit 64\n${old ? current : `print_address() {\n${current}\n}\n${JSON_ANSWER}\nprint_address`}\n`);
     await chmod(file, 0o755);
   };
-  const set = async body => { current = body; await write(); };
+  const set = async (body: string) => { current = body; await write(); };
   /** Makes `alp --version` print `value` (by default it exits 64, as anything else does). */
-  const setVersion = async value => { version = value; await write(); };
+  const setVersion = async (value: string) => { version = value; await write(); };
   /** Prints `address` after `delay` seconds. */
-  const prints = (address, delay = 0) => set(`${delay ? `sleep ${delay}\n` : ''}printf '%s\\n' '${address}'`);
+  const prints = (address: string, delay = 0) => set(`${delay ? `sleep ${delay}\n` : ''}printf '%s\\n' '${address}'`);
   /**
    * A stale first run: the first `alp dashboard --print` blocks until the test calls `release()`, then
    * prints `late` and writes <dir>/bin/first-done; every later run prints `address` at once. The
@@ -200,7 +222,7 @@ export async function fakeAlp({ dir }) {
    * after it, however slow the machine (a fixed sleep could answer first and test nothing).
    * `firstStarted()` and `firstDone()` say where the first run is.
    */
-  const firstGated = async (late, address) => {
+  const firstGated = async (late: string, address: string) => {
     const count = path.join(dir, 'bin', 'count');
     const gate = path.join(dir, 'bin', 'gate');
     const done = path.join(dir, 'bin', 'first-done');
@@ -211,7 +233,7 @@ export async function fakeAlp({ dir }) {
       `  printf '%s\\n' '${late}'; : > '${done}'; exit 0; fi`,
       `printf '%s\\n' '${address}'`,
     ].join('\n'));
-    const exists = file => access(file).then(() => true, () => false);
+    const exists = (file: string) => access(file).then(() => true, () => false);
     // The order of runs is the order they read the count: wait for `firstStarted` before starting a
     // second connect, or the newer connect's run could be the blocked one.
     return { firstStarted: () => exists(count), release: () => writeFile(gate, ''), firstDone: () => exists(done) };
@@ -221,7 +243,7 @@ export async function fakeAlp({ dir }) {
    * token socket and prints dashboard.json's url with that token, so after a restart it prints the
    * token the new start minted without the test telling it. Every run is counted in <dir>/bin/runs.
    */
-  const printsLive = async home => {
+  const printsLive = async (home: string) => {
     const runs = path.join(dir, 'bin', 'runs');
     const helper = path.join(dir, 'bin', 'print-live.mjs');
     await writeFile(helper, [
@@ -245,7 +267,7 @@ export async function fakeAlp({ dir }) {
 }
 
 /** A copy of the built app (package.json and dist) that a test may break. */
-export async function appCopy({ dir }) {
+export async function appCopy({ dir }: { dir: string }) {
   const copy = path.join(dir, 'app');
   await mkdir(copy, { recursive: true });
   await cp(path.join(APP, 'package.json'), path.join(copy, 'package.json'));
@@ -258,10 +280,10 @@ export async function appCopy({ dir }) {
  * ALP_HOME and TMPDIR (t-81b0.8: whatever the app installs or starts stays under `dir`), a scratch
  * profile, no ELECTRON_RUN_AS_NODE; `extra` last.
  */
-export function appEnv({ dir }, alp, extra = {}) {
+export function appEnv({ dir }: { dir: string }, alp: string | undefined, extra: NodeJS.ProcessEnv = {}) {
   // A scratch HOME too: nothing Electron writes under ~ (logs, caches) lands in the user's.
   const home = path.join(dir, 'app-home');
-  const env = { ...cleanEnv(), HOME: home, ALP_HOME: path.join(home, '.alp'), TMPDIR: path.join(dir, 'tmp'), ALP_DESKTOP_USER_DATA: path.join(dir, 'user-data'), ...extra };
+  const env: NodeJS.ProcessEnv = { ...cleanEnv(), HOME: home, ALP_HOME: path.join(home, '.alp'), TMPDIR: path.join(dir, 'tmp'), ALP_DESKTOP_USER_DATA: path.join(dir, 'user-data'), ...extra };
   if (alp !== undefined) env.ALP_DESKTOP_ALP = alp;
   return env;
 }
@@ -274,14 +296,14 @@ export function appEnv({ dir }, alp, extra = {}) {
 export const TEST_SWITCHES = ['--use-mock-keychain'];
 
 /** Launches the app; it is closed before the host stops and the directory goes. */
-export async function launch(t, context, alp, { app = APP, env = {} } = {}) {
+export async function launch(t: TestContext, context: Context, alp: string | undefined, { app = APP, env = {} }: { app?: string, env?: NodeJS.ProcessEnv } = {}): Promise<App> {
   await mkdir(path.join(context.dir, 'app-home'), { recursive: true, mode: 0o700 });
   await mkdir(path.join(context.dir, 'tmp'), { recursive: true });
-  const electronApp = await _electron.launch({ executablePath: ELECTRON, args: [...TEST_SWITCHES, app], env: appEnv(context, alp, env), timeout: 30_000 });
+  const electronApp = await _electron.launch({ executablePath: ELECTRON, args: [...TEST_SWITCHES, app], env: appEnv(context, alp, env) as Record<string, string>, timeout: 30_000 }) as App;
   // The app's own output, reported with the test if the app died, so a crash on CI says why. A link token is masked
   // (the app never prints one, but Chromium could).
   let output = '';
-  const keep = chunk => { output = (output + chunk).slice(-20_000); };
+  const keep = (chunk: Buffer | string) => { output = (output + chunk).slice(-20_000); };
   electronApp.process().stdout?.on('data', keep);
   electronApp.process().stderr?.on('data', keep);
   // Reported only when the app ended before teardown closed it (a crash or an unexpected quit).
@@ -293,9 +315,9 @@ export async function launch(t, context, alp, { app = APP, env = {} } = {}) {
   // Bounded: a close that hangs is ended with SIGKILL, so the steps after it still run.
   context.defer(async () => {
     closing = true;
-    let timer;
+    let timer: NodeJS.Timeout | undefined;
     const closed = electronApp.close().then(() => true, () => false);
-    const late = new Promise(resolve => { timer = setTimeout(() => resolve(false), 15_000); });
+    const late = new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 15_000); });
     const ok = await Promise.race([closed, late]);
     clearTimeout(timer);
     if (!ok) electronApp.process().kill('SIGKILL');
@@ -306,7 +328,7 @@ export async function launch(t, context, alp, { app = APP, env = {} } = {}) {
 }
 
 /** Starts a second instance of the app with the same profile; resolves with its exit code. */
-export function secondInstance(context, alp, { app = APP } = {}) {
+export function secondInstance(context: Context, alp: string, { app = APP }: { app?: string } = {}): Promise<number | null> {
   const child = spawn(ELECTRON, [...TEST_SWITCHES, app], { env: appEnv(context, alp), stdio: 'ignore' });
   context.defer(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); });
   return once(child, 'exit').then(([code]) => code);
@@ -316,10 +338,10 @@ export function secondInstance(context, alp, { app = APP } = {}) {
  * The app's windows as the main process sees them: what each shows, never the address itself (it
  * may still carry the token). `page` is the bundled page's file name, or undefined on alp dashboard.
  */
-export function windows(electronApp) {
-  return electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map(window => {
+export function windows(electronApp: ElectronApplication) {
+  return electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((window: BrowserWindowLike) => {
     const raw = window.webContents.getURL();
-    let url;
+    let url: URL;
     try { url = new URL(raw); } catch { return { visible: window.isVisible(), origin: '', page: undefined, token: false }; }
     return {
       visible: window.isVisible(),
@@ -331,33 +353,33 @@ export function windows(electronApp) {
 }
 
 /** The single window's state, or undefined while there is not exactly one. */
-export async function only(electronApp) {
+export async function only(electronApp: ElectronApplication) {
   const list = await windows(electronApp);
   return list.length === 1 ? list[0] : undefined;
 }
 
 /** Runs `script` in the page of the app's single window. */
-export function inPage(electronApp, script) {
+export function inPage(electronApp: ElectronApplication, script: string) {
   return electronApp.evaluate(({ BrowserWindow }, code) => BrowserWindow.getAllWindows()[0]?.webContents.executeJavaScript(code), script);
 }
 
 /** Clicks File › Connect again. */
-export function connectAgain(electronApp) {
+export function connectAgain(electronApp: ElectronApplication) {
   return electronApp.evaluate(({ Menu }) => {
-    const file = Menu.getApplicationMenu()?.items.find(item => item.label === 'File');
-    const item = file?.submenu?.items.find(entry => entry.label === 'Connect again');
+    const file = Menu.getApplicationMenu()?.items.find((item: MenuItemLike) => item.label === 'File');
+    const item = file?.submenu?.items.find((entry: MenuItemLike) => entry.label === 'Connect again');
     if (!item) throw new Error('no File › Connect again');
     item.click();
   });
 }
 
 /** Closes every window (the app keeps running, as on macOS). */
-export function closeWindows(electronApp) {
+export function closeWindows(electronApp: ElectronApplication) {
   return electronApp.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) window.close(); });
 }
 
 /** Waits until the single window shows alp dashboard at `origin` with the token taken out by apps/web. */
-export function connectedTo(electronApp, origin, timeoutMs = 30_000) {
+export function connectedTo(electronApp: ElectronApplication, origin: string, timeoutMs = 30_000) {
   return waitFor(async () => {
     const state = await only(electronApp);
     if (!state || state.origin !== origin || state.token || !state.visible) return false;
@@ -372,7 +394,7 @@ const exec = promisify(execFile);
  * that finds none, so neither the user's shell nor its PATH can hand the app the user's real alp. The
  * fixed directories outside HOME (/opt/homebrew/bin, /usr/local/bin) must not hold one either.
  */
-export async function noAlpEnv({ dir }) {
+export async function noAlpEnv({ dir }: { dir: string }) {
   for (const fixed of ['/opt/homebrew/bin/alp', '/usr/local/bin/alp']) {
     if (await access(fixed).then(() => true, () => false)) throw new Error(`${fixed} exists: the app would find it, so this test cannot run here`);
   }
@@ -388,12 +410,12 @@ export async function noAlpEnv({ dir }) {
  * Each archive is a fake ALP bundle whose `alp --version` prints `version` and whose
  * `alp dashboard --print` prints `address`.
  */
-export async function releaseMirror({ dir }, { version = '9.8.7', address }) {
+export async function releaseMirror({ dir }: { dir: string }, { version = '9.8.7', address }: { version?: string, address: string }) {
   const mirror = path.join(dir, 'mirror');
   const work = path.join(dir, 'bundles');
   await mkdir(mirror, { recursive: true });
-  const archives = [];
-  const lines = [];
+  const archives: string[] = [];
+  const lines: string[] = [];
   for (const arch of ['arm64', 'x64']) {
     const name = `alp-${version}-darwin-${arch}`;
     const root = path.join(work, name);
