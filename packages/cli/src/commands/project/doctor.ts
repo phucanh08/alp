@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 import { diagnose, repair } from '@anhlp/alp-client/doctor';
 import { alpHome } from '@anhlp/alp-client/index';
+import { claudeSandboxAvailable } from '@anhlp/alp-core/sandbox';
 import { taskProject } from '../_shared/project.ts';
 import { UsageError } from '../_shared/usage.ts';
 import { DAEMON_ENTRY } from '../../paths.ts';
@@ -11,10 +12,7 @@ export async function doctor(args: string[]) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { project: { type: 'string' }, fix: { type: 'boolean' }, json: { type: 'boolean' } } });
   if (positionals.length) throw new UsageError();
   const project = values.project ? await taskProject(values.project) : await taskProject(undefined).catch(() => undefined);
-  // This file is never built, so the import fails and doctor gets sandbox undefined; the dead
-  // import is tracked by task t-b156 and kept as it is here.
-  // @ts-expect-error TS2307: the module does not exist (see above).
-  const sandbox = await import('../../../dist/runtime/index.js').then(runtime => runtime.claudeSandboxAvailable(), () => undefined);
+  const sandbox = claudeSandboxAvailable();
   const options = { home: alpHome(), project, sandbox, daemonEntry: DAEMON_ENTRY };
   let checks = await diagnose(options);
   const fixed = values.fix ? await repair(checks) : [];

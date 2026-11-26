@@ -305,3 +305,25 @@ test('doctor warns when ALP_HOME is inside temp directory or workspace', async t
   assert.equal(tmpCheck?.status, 'warn');
   assert.match(tmpCheck?.summary, /inside the temp directory/);
 });
+
+// t-b156: doctor used to import a runtime module that never existed, so it never had a sandbox check.
+// ALP_CLAUDE_SANDBOX stands in for the host's Seatbelt or bubblewrap, so both answers are checked here.
+test('doctor reports whether Claude can sandbox Bash, both ways', async t => {
+  const { home, directory } = await privateHome(t);
+  const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
+  const sandboxCheck = (value: string) => {
+    const env = { ...process.env, ALP_HOME: home, PATH: path.join(directory, 'empty'), ALP_CLAUDE_SANDBOX: value };
+    let stdout;
+    try { stdout = execFileSync(process.execPath, [cli, 'doctor', '--json'], { env, stdio: ['ignore', 'pipe', 'ignore'] }).toString(); }
+    catch (error: Json) { stdout = error.stdout.toString(); }
+    return JSON.parse(stdout).checks.filter((check: Json) => check.id === 'sandbox');
+  };
+  const on = sandboxCheck('1');
+  assert.equal(on.length, 1);
+  assert.equal(on[0].status, 'ok');
+  assert.match(on[0].summary, /run Bash in an OS sandbox/);
+  const off = sandboxCheck('0');
+  assert.equal(off.length, 1);
+  assert.equal(off[0].status, 'warn');
+  assert.match(off[0].summary, /no Bash sandbox for Claude/);
+});

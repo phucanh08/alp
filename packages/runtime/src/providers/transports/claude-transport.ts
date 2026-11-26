@@ -13,6 +13,7 @@ import { CLOSE_REASONS, GATE_KINDS, TASK_STATUSES, TASK_TYPES } from '@anhlp/alp
 import { commandDecision, unwrapShell } from '@anhlp/alp-core/permissions';
 import { alpHome } from '@anhlp/alp-core/library';
 import { isScript, nativeDaemon, nodeExecutable } from '@anhlp/alp-core/packaged';
+import { claudeSandboxAvailable } from '@anhlp/alp-core/sandbox';
 
 // Keep the Claude SDK behind the runtime boundary. Paseo inspects static
 // imports while compiling plugin entrypoints, including their declaration
@@ -316,15 +317,8 @@ type PermissionRules = {
   floor?: 'read-only' | 'workspace-write'; floorRoot?: string;
 };
 
-/** Whether Claude Code can sandbox Bash here: Seatbelt on macOS, bubblewrap and socat on Linux. ALP_CLAUDE_SANDBOX=0 turns it off, =1 claims it (tests). */
-export function claudeSandboxAvailable() {
-  if (process.env.ALP_CLAUDE_SANDBOX === '0') return false;
-  if (process.env.ALP_CLAUDE_SANDBOX === '1') return true;
-  if (process.platform === 'darwin') return existsSync('/usr/bin/sandbox-exec');
-  if (process.platform !== 'linux') return false;
-  const onPath = (name: string) => (process.env.PATH ?? '').split(path.delimiter).some(dir => dir && existsSync(path.join(dir, name)));
-  return onPath('bwrap') && onPath('socat');
-}
+/** Whether Claude Code can sandbox Bash here; core holds it so `alp doctor` shares it (t-b156). */
+export { claudeSandboxAvailable };
 
 const WRITERS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
 /** What ALP asks the user for a permission Claude would otherwise not have. */

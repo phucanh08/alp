@@ -295,6 +295,14 @@
       "types": "./dist/packaged.d.ts",
       "default": "./dist/packaged.js"
     },
+    "./sandbox": {
+      "alp-source": {
+        "types": "./src/sandbox.ts",
+        "default": "./src/sandbox.ts"
+      },
+      "types": "./dist/sandbox.d.ts",
+      "default": "./dist/sandbox.js"
+    },
     "./skill-validate": {
       "alp-source": {
         "types": "./src/library/templates/skill-validate.ts",
