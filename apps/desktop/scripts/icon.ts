@@ -1,7 +1,7 @@
 /**
  * Draws the app icon, build/icon.png (1024×1024 RGBA), with no image tool: a macOS-style rounded
  * square with a prompt chevron and cursor. electron-builder turns it into the .icns. Run it again
- * only to change the icon: `node scripts/icon.mjs`.
+ * only to change the icon: `node scripts/icon.ts`.
  */
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -13,18 +13,18 @@ const BODY = 824, RADIUS = 185, INSET = (N - BODY) / 2;
 const TOP = [0x2b, 0x3a, 0x67], BOTTOM = [0x10, 0x16, 0x2b], INK = [0xf2, 0xf5, 0xff], ACCENT = [0x5e, 0xea, 0xd4];
 
 /** Signed distance to a rounded rectangle centred at (cx, cy). */
-function roundedBox(x, y, cx, cy, hw, hh, r) {
+function roundedBox(x: number, y: number, cx: number, cy: number, hw: number, hh: number, r: number) {
   const qx = Math.abs(x - cx) - hw + r, qy = Math.abs(y - cy) - hh + r;
   return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
 }
 /** Signed distance to a segment of half-width w. */
-function segment(x, y, ax, ay, bx, by, w) {
+function segment(x: number, y: number, ax: number, ay: number, bx: number, by: number, w: number) {
   const px = x - ax, py = y - ay, dx = bx - ax, dy = by - ay;
   const h = Math.max(0, Math.min(1, (px * dx + py * dy) / (dx * dx + dy * dy)));
   return Math.hypot(px - dx * h, py - dy * h) - w;
 }
-const cover = d => Math.max(0, Math.min(1, 0.5 - d));
-const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+const cover = (d: number) => Math.max(0, Math.min(1, 0.5 - d));
+const mix = (a: number[], b: number[], t: number) => a.map((v, i) => v + (b[i] - v) * t);
 
 const rows = [];
 for (let y = 0; y < N; y++) {
@@ -43,8 +43,8 @@ for (let y = 0; y < N; y++) {
 }
 
 const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
-const crc = buf => { let c = 0xffffffff; for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
-function chunk(type, data) {
+const crc = (buf: Buffer) => { let c = 0xffffffff; for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+function chunk(type: string, data: Buffer) {
   const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
   const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
   const sum = Buffer.alloc(4); sum.writeUInt32BE(crc(body));

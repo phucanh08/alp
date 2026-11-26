@@ -1,0 +1,19 @@
+{
+  // Type-checks the desktop end-to-end specs, their support and the icon script strictly, with the
+  // options of test/tsconfig.json (Node >= 22.18 runs them directly by stripping types), plus the
+  // browser lib for the callbacks Playwright runs in a page, and Bundler resolution: apps/desktop's
+  // package.json has no "type", so NodeNext would take these ES modules for CommonJS (Node itself
+  // detects their module syntax). The specs import packages/cli built into
+  // dist/*.js; rootDirs types those imports against the src/*.ts they are built from, so the check
+  // needs no build. electron is apps/desktop's own (bun) install, which the root does not have:
+  // Playwright's Electron callbacks get its API untyped, and what they read is typed here by hand.
+  // Run: pnpm exec tsc -p apps/desktop/e2e
+  "extends": "../../../test/tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "rootDirs": ["../../../packages/cli/src", "../../../packages/cli/dist"]
+  },
+  "include": ["**/*.ts", "../scripts/*.ts"]
+}

@@ -1,7 +1,7 @@
 /**
  * The packaged app (t-81b0.3, docs/alp/desktop.md §6): ALP.app taken out of a DMG built by
  * `bun run dist`, installed into a scratch Applications directory and run against the same
- * disposable alp dashboard host and fake `alp` as shell.spec.mjs (./support.mjs). Never the user's
+ * disposable alp dashboard host and fake `alp` as shell.spec.ts (./support.ts). Never the user's
  * ~/.alp, ~/Applications or /Applications.
  *
  *   ALP_DESKTOP_DMG=release/ALP-<version>-arm64.dmg bun run e2e:packaged
@@ -12,6 +12,7 @@
  */
 
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -19,11 +20,16 @@ import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright-core';
-import { appEnv, fakeAlp, freePort, host, noAlpEnv, releaseMirror, scratch, TEST_SWITCHES, waitFor } from './support.mjs';
+import { appEnv, fakeAlp, freePort, host, noAlpEnv, releaseMirror, scratch, TEST_SWITCHES, waitFor } from './support.ts';
+import type { Context } from './support.ts';
 import { hermeticEnv } from '../../../scripts/test-lib.ts';
 import { DESKTOP_BUNDLE_ID, readBundleId } from '../../../packages/cli/dist/commands/desktop/index.js';
 
 const run = promisify(execFile);
+/** What a failed execFile rejects with, as far as this file reads it. */
+type ExecError = { code?: number | string, stderr?: string, message?: string };
+/** An on-screen window as `screenWindows` reads it. */
+type ScreenWindow = { pid: number, owner: string, layer: number };
 const limit = { timeout: 420_000 };
 const DMG = process.env.ALP_DESKTOP_DMG ? path.resolve(process.env.ALP_DESKTOP_DMG) : undefined;
 const ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
@@ -32,7 +38,7 @@ const CLI = path.join(ROOT, 'packages', 'cli', 'dist', 'cli.js');
 const DEV_ELECTRON = path.join(import.meta.dirname, '..', 'node_modules', 'electron', 'dist', 'Electron.app', 'Contents', 'MacOS', 'Electron');
 
 /** hdiutil's "Resource busy" (exit 16): something (Spotlight, fseventsd) still holds the volume briefly. */
-const busy = error => error?.code === 16 || /Resource busy/i.test(`${error?.stderr ?? ''}${error?.message ?? ''}`);
+const busy = (error: ExecError | undefined) => error?.code === 16 || /Resource busy/i.test(`${error?.stderr ?? ''}${error?.message ?? ''}`);
 
 /**
  * Detaches the image mounted at `mount` (t-81b0.10). A volume that was just read can stay busy for a
@@ -40,24 +46,24 @@ const busy = error => error?.code === 16 || /Resource busy/i.test(`${error?.stde
  * detach is retried with a short backoff, then forced; any other error, or a volume still busy after
  * the forced attempts, fails the test with every attempt's message.
  */
-async function detachImage(mount) {
-  const attempts = [[0, false], [1_000, false], [2_000, false], [4_000, false], [4_000, true], [8_000, true]];
-  const failures = [];
+async function detachImage(mount: string) {
+  const attempts: [number, boolean][] = [[0, false], [1_000, false], [2_000, false], [4_000, false], [4_000, true], [8_000, true]];
+  const failures: string[] = [];
   for (const [delay, force] of attempts) {
     if (delay) await new Promise(resolve => setTimeout(resolve, delay));
     try {
       await run('hdiutil', ['detach', mount, ...(force ? ['-force'] : [])], { timeout: 60_000 });
       return;
     } catch (error) {
-      failures.push(`${force ? 'detach -force' : 'detach'}: ${String(error?.stderr || error?.message).trim()}`);
-      if (!busy(error)) break;
+      failures.push(`${force ? 'detach -force' : 'detach'}: ${String((error as ExecError)?.stderr || (error as ExecError)?.message).trim()}`);
+      if (!busy(error as ExecError)) break;
     }
   }
   throw new Error(`hdiutil could not detach ${mount}:\n${failures.join('\n')}`);
 }
 
 /** Copies ALP.app out of the DMG into <dir>/home/Applications, as a user would; returns its path. */
-async function install({ dir, defer }) {
+async function install({ dir, defer }: Context) {
   if (!DMG) throw new Error('set ALP_DESKTOP_DMG to the DMG built by `bun run dist`');
   const mount = path.join(dir, 'mnt');
   await mkdir(mount);
@@ -78,7 +84,7 @@ async function install({ dir, defer }) {
  * Recording permission). A keychain or Gatekeeper prompt is a window of the app itself or of one of
  * the system agents below.
  */
-async function screenWindows() {
+async function screenWindows(): Promise<ScreenWindow[]> {
   const script = `ObjC.import('CoreGraphics');
 function run() {
   const list = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, 0)));
@@ -88,9 +94,9 @@ function run() {
   return JSON.parse((await run('osascript', ['-l', 'JavaScript', '-e', script], { timeout: 5_000 })).stdout);
 }
 const PROMPT_OWNERS = new Set(['SecurityAgent', 'UserNotificationCenter', 'CoreServicesUIAgent', 'coreautha']);
-const windowKey = w => `${w.pid}/${w.owner}/${w.layer}`;
+const windowKey = (w: ScreenWindow) => `${w.pid}/${w.owner}/${w.layer}`;
 /** Windows not in `baseline` that look like a prompt: a system agent's, or the app's above its normal layer. */
-function newPrompts(windows, baseline, pid) {
+function newPrompts(windows: ScreenWindow[], baseline: Set<string>, pid: number | undefined) {
   const found = windows.filter(w => !baseline.has(windowKey(w)) && (PROMPT_OWNERS.has(w.owner) || (w.pid === pid && w.layer !== 0)));
   // The app's own alert may sit on the normal layer: a second normal window is one too.
   const own = windows.filter(w => w.pid === pid && w.layer === 0);
@@ -101,7 +107,7 @@ function newPrompts(windows, baseline, pid) {
  * Starts the packaged app's executable with a DevTools port; it is ended (SIGTERM, then SIGKILL)
  * before the host stops and the directory goes. Returns its output so far and the DevTools port.
  */
-async function start(context, app, alp, extraEnv = {}, args = []) {
+async function start(context: Context, app: string, alp: string | undefined, extraEnv: NodeJS.ProcessEnv = {}, args: string[] = []) {
   await mkdir(path.join(context.dir, 'app-home'), { recursive: true, mode: 0o700 });
   await mkdir(path.join(context.dir, 'tmp'), { recursive: true });
   const port = await freePort();
@@ -115,24 +121,24 @@ async function start(context, app, alp, extraEnv = {}, args = []) {
   // the possibly cut first line is dropped, so no half token is shown either.
   let output = '';
   let cut = false;
-  const keep = chunk => { output += chunk; if (output.length > 20_000) { output = output.slice(-20_000); cut = true; } };
+  const keep = (chunk: Buffer | string) => { output += chunk; if (output.length > 20_000) { output = output.slice(-20_000); cut = true; } };
   const masked = () => (cut ? output.slice(output.indexOf('\n') + 1) : output).replace(/alpgw1\.[A-Za-z0-9_.-]+/g, 'alpgw1.<masked>');
   child.stdout.on('data', keep);
   child.stderr.on('data', keep);
   // A spawn failure (ENOENT, EACCES) is an 'exit'-less 'error': recorded, and the waits see `failed`.
-  let failed;
+  let failed: Error | undefined;
   child.once('error', error => { failed = error; keep(`\n[spawn error: ${error.message}]\n`); });
   // A watchdog: should a prompt appear anyway, the app is killed at once and the test fails, so a
   // dialog never waits on the user's screen. It fails closed: when the windows cannot be read three
   // times in a row, the app is killed too, since a prompt could no longer be seen.
-  let prompted;
+  let prompted: string | ScreenWindow[] | undefined;
   let watching = true;
   const watchdog = (async () => {
     let failures = 0;
     while (watching && child.exitCode === null && child.signalCode === null) {
-      let found;
+      let found: ScreenWindow[];
       try { found = newPrompts(await screenWindows(), baseline, child.pid); failures = 0; } catch (error) {
-        if (++failures >= 3) { prompted = `the on-screen windows could not be read: ${error.message}`; child.kill('SIGKILL'); return; }
+        if (++failures >= 3) { prompted = `the on-screen windows could not be read: ${(error as Error).message}`; child.kill('SIGKILL'); return; }
         found = [];
       }
       if (found.length) { prompted = found; child.kill('SIGKILL'); return; }
@@ -151,22 +157,25 @@ async function start(context, app, alp, extraEnv = {}, args = []) {
   return { child, port, baseline, rosetta, ended, output: masked };
 }
 
+/** The app as `start` started it. */
+type Started = Awaited<ReturnType<typeof start>>;
+
 /** `promise`, or a rejection naming `what` after `ms`. */
-function bounded(promise, ms, what) {
-  let timer;
-  const late = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${what} took over ${ms / 1000} s`)), ms); });
+function bounded<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${what} took over ${ms / 1000} s`)), ms); });
   return Promise.race([promise, late]).finally(() => clearTimeout(timer));
 }
 
 /**
  * Polls `probe` until it answers something truthy, the app ends (at once, with its state) or
- * `deadline` passes. Unlike support.mjs's waitFor, it stops as soon as the app is gone.
+ * `deadline` passes. Unlike support.ts's waitFor, it stops as soon as the app is gone.
  */
-async function whileRunning(started, probe, what, deadline) {
-  let last;
+async function whileRunning<T>(started: Started, probe: () => T | Promise<T>, what: string, deadline: number): Promise<Exclude<T, undefined | null | false | '' | 0>> {
+  let last: unknown;
   for (;;) {
     if (started.ended()) throw new Error(`the app ended while waiting for ${what}`);
-    try { const value = await probe(); if (value) return value; last = value; } catch (error) { last = error; }
+    try { const value = await probe(); if (value) return value as Exclude<T, undefined | null | false | '' | 0>; last = value; } catch (error) { last = error; }
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what} (last: ${last instanceof Error ? last.message : JSON.stringify(last)})`);
     await new Promise(resolve => setTimeout(resolve, 100));
   }
@@ -177,7 +186,7 @@ async function whileRunning(started, probe, what, deadline) {
  * Both waits share one deadline, kept below the per-test limit, so a slow start fails with the
  * app's state and output rather than with node:test's bare timeout.
  */
-async function connectedPage(context, started, origin) {
+async function connectedPage(context: Context, started: Started, origin: string) {
   // Under Rosetta (an x64 app on an arm64 Mac) the first start translates Electron and is much
   // slower, above all on a CI VM.
   const deadline = Date.now() + (started.rosetta ? 300_000 : 60_000);
@@ -199,7 +208,7 @@ async function connectedPage(context, started, origin) {
       return undefined;
     }, `the window on ${origin} with the token taken out of the address`, deadline);
   } catch (error) {
-    throw new Error(`${error.message}\n${state()}`);
+    throw new Error(`${(error as Error).message}\n${state()}`);
   }
 }
 
@@ -208,7 +217,7 @@ async function connectedPage(context, started, origin) {
  * page in its place: a page that failed to load is chrome-error://), parsed and with its heading, and
  * returns its URL, heading and text (read together, from one evaluate).
  */
-async function bundledPage(context, started, skip) {
+async function bundledPage(context: Context, started: Started, skip?: string) {
   const deadline = Date.now() + (started.rosetta ? 300_000 : 60_000);
   try {
     const browser = await whileRunning(started, () => chromium.connectOverCDP(`http://127.0.0.1:${started.port}`, { timeout: 10_000 }), 'the DevTools endpoint', deadline);
@@ -218,7 +227,7 @@ async function bundledPage(context, started, skip) {
         const url = page.url();
         if (!url.startsWith('alp-page:') && !url.startsWith('file:') && !url.startsWith('chrome-error:')) continue;
         if (skip && url.split('?')[0].endsWith(`/${skip}`)) continue;
-        const read = script => bounded(page.evaluate(script), 10_000, 'reading the page');
+        const read = <R>(script: () => R) => bounded(page.evaluate(script), 10_000, 'reading the page');
         // The URL changes before the document is parsed (CI run 45017772537 read an empty heading): a
         // bundled page counts once it is past loading and its heading has text; Chromium's error page
         // (or a file: page, which is a failure here) once it is past loading.
@@ -230,12 +239,12 @@ async function bundledPage(context, started, skip) {
       return undefined;
     }, `a bundled page${skip ? ` other than ${skip}` : ''}`, deadline);
   } catch (error) {
-    throw new Error(`${error.message}\napp output:\n${started.output()}`);
+    throw new Error(`${(error as Error).message}\napp output:\n${started.output()}`);
   }
 }
 
 /** Asserts that `url` is bundled page `name` (alp-page://app/<name>, served from the app's own asar). */
-function assertBundled(url, name) {
+function assertBundled(url: string, name: string) {
   assert.equal(url.split('?')[0], `alp-page://app/${name}`, `${name} loaded`);
 }
 
@@ -286,7 +295,7 @@ test('no alp: ALP.app ignores the test mirror and looks up GitHub Releases only'
   const app = await install(context);
   const mirror = await releaseMirror(context, { address: 'http://127.0.0.1:9/#token=unused' });
   const started = await start(context, app, undefined, { ...(await noAlpEnv(context)), ALP_DESKTOP_INSTALL_MIRROR: mirror.dir }, ['--proxy-server=127.0.0.1:9']);
-  let shown;
+  let shown!: Awaited<ReturnType<typeof bundledPage>>;
   for (let i = 0; i < 60; i++) {
     shown = await bundledPage(context, started, 'connecting.html');
     if (/Could not read the latest ALP release/.test(shown.text)) break;
@@ -298,7 +307,7 @@ test('no alp: ALP.app ignores the test mirror and looks up GitHub Releases only'
   assert.equal(await stat(path.join(context.dir, 'app-home', '.alp')).then(() => true, () => false), false);
 });
 
-async function connectedSetup(t) {
+async function connectedSetup(t: TestContext) {
   const context = await scratch(t);
   const web = await host(t, context);
   await web.start(await freePort());
@@ -327,7 +336,7 @@ test('the DMG holds ALP.app, ad-hoc signed with hardened runtime, and its fuses 
     EnableEmbeddedAsarIntegrityValidation: FuseState.ENABLE,
     OnlyLoadAppFromAsar: FuseState.ENABLE,
   };
-  for (const [name, state] of Object.entries(expected)) assert.equal(wire[FuseV1Options[name]], state, `fuse ${name}`);
+  for (const [name, state] of Object.entries(expected)) assert.equal(wire[FuseV1Options[name as keyof typeof FuseV1Options]], state, `fuse ${name}`);
 });
 
 test('the installed app connects to alp dashboard, and apps/web takes the token out of the address', limit, async t => {
@@ -340,7 +349,7 @@ test('the installed app connects to alp dashboard, and apps/web takes the token 
   assert.deepEqual(newPrompts(await screenWindows(), started.baseline, started.child.pid), [], 'no prompt appeared');
   assert.equal((await screenWindows()).filter(w => w.pid === started.child.pid && w.layer === 0).length, 1, 'the app shows one window');
   assert.equal(await page.evaluate(() => location.hash), '');
-  assert.equal(await page.evaluate(() => sessionStorage.getItem('alp-web:link-token')) === web.web.token, true, 'apps/web kept the link token in the tab only');
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('alp-web:link-token')) === web.web!.token, true, 'apps/web kept the link token in the tab only');
 });
 
 test('ELECTRON_RUN_AS_NODE=1 does not make the packaged app run as Node (RunAsNode fuse off)', limit, async t => {
@@ -372,7 +381,7 @@ test('`alp desktop` finds ALP.app by its documented lookup', limit, async t => {
   const ours = present && (await readBundleId(system)) === DESKTOP_BUNDLE_ID;
   const expected = ours ? system : app;
   t.diagnostic(`${system}: ${present ? (ours ? 'ALP' : `another app (${await readBundleId(system)})`) : 'absent'}; expected: ${expected}`);
-  const env = { ...hermeticEnv(process.env), HOME: home, PATH: `${bin}:${process.env.PATH}` };
+  const env: NodeJS.ProcessEnv = { ...hermeticEnv(process.env), HOME: home, PATH: `${bin}:${process.env.PATH}` };
   delete env.ALP_DESKTOP_CHECKOUT;
   const { stdout, stderr } = await run(process.execPath, [CLI, 'desktop'], { env });
   assert.equal(stdout.trim(), `Opened ${expected}.`);

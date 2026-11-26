@@ -1,21 +1,23 @@
 /**
  * The desktop shell end to end (docs/alp/desktop.md): the real Electron app, driven by Playwright's
- * `_electron`, against a disposable alp dashboard host and a fake `alp` (./support.mjs). Run with
+ * `_electron`, against a disposable alp dashboard host and a fake `alp` (./support.ts). Run with
  * `bun run e2e` in apps/desktop after building packages/cli (`node scripts/build-workspace.ts cli`).
  */
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { cp, mkdir, readFile, rm } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { APP, appCopy, closeWindows, connectAgain, connectedTo, fakeAlp, freePort, host, inPage, launch, only, scratch, secondInstance, waitFor, windows } from './support.mjs';
+import type { ElectronApplication } from 'playwright-core';
+import { APP, appCopy, closeWindows, connectAgain, connectedTo, fakeAlp, freePort, host, inPage, launch, only, scratch, secondInstance, waitFor, windows } from './support.ts';
 
 const limit = { timeout: 120_000 };
 
 /** A host on a free port and a fake alp that prints its address. */
-async function connectedSetup(t) {
+async function connectedSetup(t: TestContext) {
   const context = await scratch(t);
   const web = await host(t, context);
   await web.start(await freePort());
@@ -25,8 +27,8 @@ async function connectedSetup(t) {
 }
 
 /** Polls the single window's page while `during` runs, and returns every bundled page it showed. */
-async function pagesShown(electronApp, during) {
-  const seen = new Set();
+async function pagesShown(electronApp: ElectronApplication, during: () => Promise<void>) {
+  const seen = new Set<string>();
   let done = false;
   const watcher = (async () => {
     while (!done) {
@@ -44,7 +46,7 @@ test('connects to alp dashboard, and apps/web takes the token out of the address
   const app = await launch(t, context, alp.file);
   await connectedTo(app, web.origin);
   assert.equal(await inPage(app, 'location.hash'), '');
-  assert.equal(await inPage(app, "sessionStorage.getItem('alp-web:link-token')") === web.web.token, true, 'apps/web kept the link token in the tab only');
+  assert.equal(await inPage(app, "sessionStorage.getItem('alp-web:link-token')") === web.web!.token, true, 'apps/web kept the link token in the tab only');
 });
 
 test('t-81b0.7: the alp dashboard page can neither load nor open a bundled page', limit, async t => {
@@ -114,7 +116,7 @@ test('a window reopened from the Dock during a connect shows the newer connect, 
   const { context, web, alp } = await connectedSetup(t);
   // The first connect's alp answers only when released, with an address nothing listens on: if its
   // result were used, the window would load it and show the error page.
-  const dead = web.address.replace(/:\d+\//, `:${await freePort(web.web.port)}/`);
+  const dead = web.address.replace(/:\d+\//, `:${await freePort(web.web!.port)}/`);
   const first = await alp.firstGated(dead, web.address);
   const app = await launch(t, context, alp.file);
   await waitFor(async () => (await only(app))?.page === 'connecting.html', 'Connecting');
@@ -152,7 +154,7 @@ test('L1: a superseded connect that ends with a failing load does not cover the 
   // case that can really happen is the older connect's result arriving after the newer one: it must
   // be dropped, not loaded (its address refuses connections, so loading it would show the error page).
   const { context, web, alp } = await connectedSetup(t);
-  const dead = web.address.replace(/:\d+\//, `:${await freePort(web.web.port)}/`);
+  const dead = web.address.replace(/:\d+\//, `:${await freePort(web.web!.port)}/`);
   const first = await alp.firstGated(dead, web.address);
   const app = await launch(t, context, alp.file);
   await waitFor(async () => (await only(app))?.page === 'connecting.html', 'Connecting');
@@ -204,21 +206,21 @@ test('alp dashboard restarting on another port: the window follows it', limit, a
   assert.notEqual(web.origin, before);
   await alp.prints(web.address);
   await connectedTo(app, web.origin, 60_000);
-  assert.equal(await inPage(app, "sessionStorage.getItem('alp-web:link-token')") === web.web.token, true);
+  assert.equal(await inPage(app, "sessionStorage.getItem('alp-web:link-token')") === web.web!.token, true);
 });
 
 test('alp dashboard rotate: the window reloads with the new token', limit, async t => {
   const { context, web, alp } = await connectedSetup(t);
   const app = await launch(t, context, alp.file);
   await connectedTo(app, web.origin);
-  const old = web.web.token;
-  const port = web.web.port;
+  const old = web.web!.token;
+  const port = web.web!.port;
   await web.stop();
   await web.rotate();
   await web.start(port);
-  assert.notEqual(web.web.token, old);
+  assert.notEqual(web.web!.token, old);
   await alp.prints(web.address);
-  await waitFor(async () => (await only(app))?.origin === web.origin && await inPage(app, `sessionStorage.getItem('alp-web:link-token') === ${JSON.stringify(web.web.token)}`), 'the window on the rotated token', 60_000);
+  await waitFor(async () => (await only(app))?.origin === web.origin && await inPage(app, `sessionStorage.getItem('alp-web:link-token') === ${JSON.stringify(web.web!.token)}`), 'the window on the rotated token', 60_000);
   assert.equal(await inPage(app, 'location.hash'), '');
 });
 
@@ -233,24 +235,24 @@ test('t-cee3: alp dashboard restarting on the same port with a fresh token: the 
   const live = await alp.printsLive(web.home);
   const app = await launch(t, context, alp.file);
   await connectedTo(app, web.origin);
-  const old = web.web.token;
+  const old = web.web!.token;
   const origin = web.origin;
   assert.equal(await inPage(app, `sessionStorage.getItem('alp-web:link-token') === ${JSON.stringify(old)}`), true);
   const runsBefore = await live.runs();
   await web.stop();
-  await web.start(web.web.port);
+  await web.start(web.web!.port);
   assert.equal(web.origin, origin, 'the same port');
-  assert.notEqual(web.web.token, old, 'a new start minted a new token');
+  assert.notEqual(web.web!.token, old, 'a new start minted a new token');
   assert.equal(await ticketStatus(origin, old), 401, 'the token of the last start is refused at the ticket endpoint');
-  await waitFor(async () => (await only(app))?.origin === origin && await inPage(app, `sessionStorage.getItem('alp-web:link-token') === ${JSON.stringify(web.web.token)}`), 'the window on the new start\'s token', 60_000);
+  await waitFor(async () => (await only(app))?.origin === origin && await inPage(app, `sessionStorage.getItem('alp-web:link-token') === ${JSON.stringify(web.web!.token)}`), 'the window on the new start\'s token', 60_000);
   assert.ok(await live.runs() > runsBefore, 'the app ran `alp dashboard --print` again');
   assert.equal(await inPage(app, 'location.hash'), '');
   assert.equal((await only(app))?.page, undefined, 'no bundled (error) page');
-  assert.equal(await ticketStatus(origin, web.web.token), 201, 'the token the window holds is live');
+  assert.equal(await ticketStatus(origin, web.web!.token), 201, 'the token the window holds is live');
 });
 
 /** POST /v1/tickets with `token`: 201 for a live credential, 401 otherwise. */
-async function ticketStatus(origin, token) {
+async function ticketStatus(origin: string, token: string) {
   const response = await fetch(`${origin}/v1/tickets`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
   await response.body?.cancel();
   return response.status;

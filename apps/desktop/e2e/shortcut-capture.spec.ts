@@ -14,15 +14,19 @@
  * never pressed: it would hide the user's other apps if it ran.
  */
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { chmod, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import type { ElectronApplication, Locator, Page } from 'playwright-core';
 import { fixtureProcesses } from '../../../test/support/fixture-processes.ts';
-import { APP, bounded, cleanEnv, connectedTo, freePort, launch, scratch, waitFor } from './support.mjs';
+import { APP, bounded, cleanEnv, connectedTo, freePort, launch, scratch, waitFor } from './support.ts';
+import type { App, Context, WebContentsLike } from './support.ts';
 
 const CLI = path.join(APP, '..', '..', 'packages/cli/dist/cli.js');
 
@@ -42,13 +46,20 @@ function run(argv) {
 }`;
 /** macOS virtual key codes (Carbon kVK_ANSI_*). */
 const KEY_CODES = { a: 0, h: 4, z: 6, x: 7, c: 8, v: 9, f: 3, q: 12, r: 15, eq: 24, minus: 27, d0: 29, i: 34, m: 46 };
+type Key = keyof typeof KEY_CODES;
+/** A menu key: what the row shows once recorded, the key and its CGEventFlags. */
+type MenuKey = [string, Key, number];
+/** What the tests keep on the main process's globalThis. */
+type MainGlobals = { __dashboardId: number, __blurs: number, __other: { focus(): void, destroy(): void } };
+/** What the tests keep on the dashboard page's window. */
+type PageGlobals = { __notReloaded?: boolean, __probe: number, __seen: string[] };
 
 /**
- * A scratch host with alpd (Settings needs a dashboard that reached its host), as ./browser.spec.mjs
+ * A scratch host with alpd (Settings needs a dashboard that reached its host), as ./browser.spec.ts
  * builds one: everything under the test's scratch directory, never the user's ~/.alp or alpd. The app
  * runs the `alp` wrapper.
  */
-async function alpdHost(context) {
+async function alpdHost(context: Context) {
   const { dir, defer } = context;
   const home = path.join(dir, 'h', '.alp');
   await mkdir(home, { recursive: true, mode: 0o700 });
@@ -64,7 +75,7 @@ async function alpdHost(context) {
   };
   for (const value of [env.ALP_HOME, env.HOME, env.TMPDIR, env.ALP_SERVICE_DIR]) assert.ok(value.startsWith(`${dir}${path.sep}`), `${value} is outside the scratch directory`);
   await writeFile(path.join(home, 'settings.json'), JSON.stringify({ dashboard: { port: await freePort() }, web: { relay: { enabled: false } } }));
-  const alp = (...args) => exec(process.execPath, [CLI, ...args], { env, timeout: 60_000 });
+  const alp = (...args: string[]) => exec(process.execPath, [CLI, ...args], { env, timeout: 60_000 });
   await alp('init', await realpath(project));
   await alp('daemon', 'start');
   defer(() => alp('daemon', 'stop').catch(() => {}));
@@ -78,7 +89,7 @@ async function alpdHost(context) {
   return { home, wrapper };
 }
 
-async function connectedSetup(t) {
+async function connectedSetup(t: TestContext) {
   const context = await scratch(t);
   const alp = await alpdHost(context);
   const app = await launch(t, context, alp.wrapper);
@@ -95,9 +106,9 @@ async function connectedSetup(t) {
   // front, as on a desktop someone is using) is pressed again, never counted as a pass.
   await app.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows()[0];
-    globalThis.__dashboardId = window.id;
-    globalThis.__blurs = 0;
-    window.on('blur', () => { globalThis.__blurs += 1; });
+    (globalThis as unknown as MainGlobals).__dashboardId = window.id;
+    (globalThis as unknown as MainGlobals).__blurs = 0;
+    window.on('blur', () => { (globalThis as unknown as MainGlobals).__blurs += 1; });
   });
   return { context, origin, app, page };
 }
@@ -107,54 +118,54 @@ async function connectedSetup(t) {
  * and waits until its page has focus. A window already in front is left alone: activating the app
  * again for every key let a key posted during the activation get lost.
  */
-async function front(app, page) {
+async function front(app: ElectronApplication, page?: Page) {
   await app.evaluate(({ app: electron, BrowserWindow }) => {
-    const window = BrowserWindow.fromId(globalThis.__dashboardId);
+    const window = BrowserWindow.fromId((globalThis as unknown as MainGlobals).__dashboardId)!;
     if (window.isFocused()) return;
     electron.focus({ steal: true });
     window.show();
     window.focus();
   });
-  await waitFor(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.fromId(globalThis.__dashboardId)?.isFocused()), 'the window to have focus');
+  await waitFor(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.fromId((globalThis as unknown as MainGlobals).__dashboardId)?.isFocused()), 'the window to have focus');
   if (page) await waitFor(() => page.evaluate(() => document.hasFocus()), 'the page to have focus');
 }
 
 /** A real key press, from the system, to the test app's process. */
-async function realKey(app, key, flags, page) {
+async function realKey(app: ElectronApplication, key: Key, flags: number, page?: Page) {
   await front(app, page);
   await bounded(`posting key ${key}`, exec('osascript', ['-l', 'JavaScript', '-e', POST_KEY, String(app.process().pid), String(KEY_CODES[key]), String(flags)]));
 }
 
-const blurs = app => app.evaluate(() => globalThis.__blurs);
+const blurs = (app: ElectronApplication) => app.evaluate(() => (globalThis as unknown as MainGlobals).__blurs);
 
 /**
  * Presses `key` until `done` answers true. A press is repeated (three at most) only when the window
  * lost focus while it was pressed; a key lost while the window kept focus fails the test.
  */
-async function press(app, page, key, flags, done, what, timeoutMs = 5_000) {
+async function press(app: ElectronApplication, page: Page, key: Key, flags: number, done: () => Promise<boolean>, what: string, timeoutMs = 5_000) {
   for (let attempt = 1; ; attempt += 1) {
     await front(app, page);
     const before = await blurs(app);
     await realKey(app, key, flags, page);
     try { return await waitFor(done, what, timeoutMs); } catch (error) {
-      const lostFocus = (await blurs(app)) !== before || !await app.evaluate(({ BrowserWindow }) => BrowserWindow.fromId(globalThis.__dashboardId).isFocused());
+      const lostFocus = (await blurs(app)) !== before || !await app.evaluate(({ BrowserWindow }) => BrowserWindow.fromId((globalThis as unknown as MainGlobals).__dashboardId)!.isFocused());
       if (!lostFocus || attempt >= 3) throw error;
     }
   }
 }
 
-const settingsRow = (page, id) => page.getByTestId(`shortcut-setting-${id}`);
-async function openShortcuts(page) {
+const settingsRow = (page: Page, id: string) => page.getByTestId(`shortcut-setting-${id}`);
+async function openShortcuts(page: Page) {
   const open = page.getByTestId('sidebar-settings');
   await open.waitFor({ timeout: 60_000 });
   await open.click();
   try { await page.getByTestId('settings-shortcuts').click({ timeout: 10_000 }); } catch (error) {
-    throw new Error(`${error.message}\npage: ${(await page.evaluate(() => [document.body.innerText.slice(0, 1500), [...document.querySelectorAll('[data-testid]')].map(e => e.dataset.testid).slice(0, 60).join(' ')].join('\n---\n')))}`);
+    throw new Error(`${(error as Error).message}\npage: ${(await page.evaluate(() => [document.body.innerText.slice(0, 1500), [...document.querySelectorAll<HTMLElement>('[data-testid]')].map(e => e.dataset.testid).slice(0, 60).join(' ')].join('\n---\n')))}`);
   }
   await page.getByTestId('shortcuts-page').waitFor();
 }
 /** Opens row `id`'s menu and chooses Bind/Rebind: the row waits for keys. */
-async function startCapture(page, id) {
+async function startCapture(page: Page, id: string) {
   const item = page.getByTestId(`shortcut-bind-${id}`);
   await settingsRow(page, id).scrollIntoViewIfNeeded();
   await waitFor(async () => {
@@ -165,13 +176,13 @@ async function startCapture(page, id) {
   await page.getByTestId('shortcut-capture').waitFor();
 }
 /** A mark that only a reload of the page takes away. */
-const mark = page => page.evaluate(() => { window.__notReloaded = true; });
-const reloaded = page => page.evaluate(() => window.__notReloaded !== true).catch(() => false);
+const mark = (page: Page) => page.evaluate(() => { (window as unknown as PageGlobals).__notReloaded = true; });
+const reloaded = (page: Page) => page.evaluate(() => (window as unknown as PageGlobals).__notReloaded !== true).catch(() => false);
 
 
 const F = { shift: 1 << 17, ctrl: 1 << 18, alt: 1 << 19, cmd: 1 << 20 };
 /** The app menu's keys (main.ts buildMenu, the roles' defaults), as the row shows them once recorded. */
-const MENU_KEYS = [
+const MENU_KEYS: MenuKey[] = [
   ['⌘Q', 'q', F.cmd], ['⌘H', 'h', F.cmd], ['⌘Z', 'z', F.cmd], ['⇧⌘Z', 'z', F.cmd | F.shift], ['⌘X', 'x', F.cmd],
   ['⌘C', 'c', F.cmd], ['⌘V', 'v', F.cmd], ['⌥⇧⌘V', 'v', F.cmd | F.alt | F.shift], ['⌘A', 'a', F.cmd], ['⌘R', 'r', F.cmd],
   ['⌘0', 'd0', F.cmd], ['⌘=', 'eq', F.cmd], ['⌘-', 'minus', F.cmd], ['⌃⌘F', 'f', F.cmd | F.ctrl], ['⌘M', 'm', F.cmd],
@@ -179,39 +190,39 @@ const MENU_KEYS = [
 ];
 
 /** What a menu item would have changed in the dashboard window. */
-const windowState = app => app.evaluate(({ BrowserWindow }) => {
-  const window = BrowserWindow.fromId(globalThis.__dashboardId);
+const windowState = (app: ElectronApplication) => app.evaluate(({ BrowserWindow }) => {
+  const window = BrowserWindow.fromId((globalThis as unknown as MainGlobals).__dashboardId)!;
   return { zoom: window.webContents.getZoomLevel(), fullScreen: window.isFullScreen(), minimized: window.isMinimized(), visible: window.isVisible(), devTools: window.webContents.isDevToolsOpened() };
 });
 const CALM = { zoom: 0, fullScreen: false, minimized: false, visible: true, devTools: false };
-const shownKeys = row => row.getByTestId('shortcut-keys').innerText({ timeout: 1_000 }).catch(() => '');
+const shownKeys = (row: Locator) => row.getByTestId('shortcut-keys').innerText({ timeout: 1_000 }).catch(() => '');
 
 /** Skips the test unless a key posted to the app reaches its page. */
-async function canPostKeys(t, app, page) {
+async function canPostKeys(t: TestContext, app: ElectronApplication, page: Page) {
   // Registered before any capture starts, so it sees every key before the capture's own listener
   // (window, capture phase, which stops the key there).
   await page.evaluate(() => {
-    window.__probe = 0;
-    window.__seen = [];
-    window.addEventListener('keydown', event => { window.__seen.push(event.code); if (event.code === 'KeyA' && !event.metaKey) window.__probe += 1; }, true);
+    (window as unknown as PageGlobals).__probe = 0;
+    (window as unknown as PageGlobals).__seen = [];
+    window.addEventListener('keydown', event => { (window as unknown as PageGlobals).__seen.push(event.code); if (event.code === 'KeyA' && !event.metaKey) (window as unknown as PageGlobals).__probe += 1; }, true);
   });
   // The skip says what failed, so a window that never got focus is not mistaken for a missing permission.
-  const reached = await press(app, page, 'a', 0, () => page.evaluate(() => window.__probe > 0), 'a posted key').catch(error => error);
+  const reached = await press(app, page, 'a', 0, () => page.evaluate(() => (window as unknown as PageGlobals).__probe > 0), 'a posted key').catch(error => error);
   if (reached !== true) t.skip(`this host does not deliver posted key events (no Accessibility permission for the test runner?): ${reached instanceof Error ? reached.message : 'the key never reached the page'}`);
   return reached === true;
 }
 
 /** Presses `key` while row `id` captures and checks that the row recorded it and no menu item ran. */
-async function recordedWithoutMenu(app, page, [shown, key, flags], id = 'sidebar.left') {
+async function recordedWithoutMenu(app: App, page: Page, [shown, key, flags]: MenuKey, id = 'sidebar.left') {
   const row = settingsRow(page, id);
   await mark(page);
-  await page.evaluate(() => { window.__seen = []; });
+  await page.evaluate(() => { (window as unknown as PageGlobals).__seen = []; });
   try {
     await press(app, page, key, flags, async () => (await shownKeys(row)) === shown, `the row to record ${shown}`);
   } catch (error) {
     const exit = app.process().exitCode ?? app.process().signalCode;
-    const seen = await page.evaluate(() => window.__seen ?? []).catch(failure => failure.message);
-    throw new Error(`${error.message}\nwindow: ${JSON.stringify(await windowState(app).catch(failure => failure.message))}\nkeys the page saw: ${JSON.stringify(seen)}\napp process: ${exit === null ? 'running' : `ended (${exit})`}\nrow: ${await row.innerText({ timeout: 2_000 }).catch(failure => failure.message)}\napp output:\n${app.alpOutput().slice(-3_000)}`);
+    const seen = await page.evaluate(() => (window as unknown as PageGlobals).__seen ?? []).catch(failure => failure.message);
+    throw new Error(`${(error as Error).message}\nwindow: ${JSON.stringify(await windowState(app).catch(failure => failure.message))}\nkeys the page saw: ${JSON.stringify(seen)}\napp process: ${exit === null ? 'running' : `ended (${exit})`}\nrow: ${await row.innerText({ timeout: 2_000 }).catch(failure => failure.message)}\napp output:\n${app.alpOutput().slice(-3_000)}`);
   }
   // A menu item runs at once if it runs; give a late one time to show.
   await sleep(300);
@@ -232,9 +243,9 @@ test('real keys: every menu key is recorded during capture and runs no menu item
   }
   // Out of capture the menu has its keys: View › Zoom In, Window › Minimize, View › Reload.
   await press(app, page, 'eq', F.cmd, async () => (await windowState(app)).zoom > 0, 'View › Zoom In (⌘=)');
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.fromId(globalThis.__dashboardId).webContents.setZoomLevel(0));
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.fromId((globalThis as unknown as MainGlobals).__dashboardId)!.webContents.setZoomLevel(0));
   await press(app, page, 'm', F.cmd, async () => (await windowState(app)).minimized, 'Window › Minimize (⌘M)');
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.fromId(globalThis.__dashboardId).restore());
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.fromId((globalThis as unknown as MainGlobals).__dashboardId)!.restore());
   await waitFor(async () => !(await windowState(app)).minimized, 'the window back from the Dock');
   await mark(page);
   await press(app, page, 'r', F.cmd, () => reloaded(page), 'View › Reload (⌘R)');
@@ -242,11 +253,11 @@ test('real keys: every menu key is recorded during capture and runs no menu item
 });
 
 /** A page on another origin, for a Browser tab guest. */
-async function localSite(context) {
+async function localSite(context: Context) {
   const server = http.createServer((_request, response) => { response.writeHead(200, { 'content-type': 'text/html' }); response.end('<!doctype html><title>Local page</title><p>local</p>'); });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   context.defer(() => new Promise(resolve => server.close(resolve)));
-  return `http://127.0.0.1:${server.address().port}`;
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
 
 test('real keys: a capture that outlives a blur still records the menu keys; focus inside a Browser tab guest', macOnly, async t => {
@@ -259,13 +270,13 @@ test('real keys: a capture that outlives a blur still records the menu keys; foc
   await startCapture(page, 'sidebar.left');
   await app.evaluate(({ BrowserWindow }) => {
     const other = new BrowserWindow({ width: 200, height: 120, show: true, webPreferences: { sandbox: true, contextIsolation: true } });
-    globalThis.__other = other;
+    (globalThis as unknown as MainGlobals).__other = other;
     other.focus();
   });
-  await waitFor(() => app.evaluate(({ BrowserWindow }) => !BrowserWindow.fromId(globalThis.__dashboardId).isFocused()), 'the dashboard window to lose focus', 10_000);
-  await app.evaluate(() => globalThis.__other.destroy());
+  await waitFor(() => app.evaluate(({ BrowserWindow }) => !BrowserWindow.fromId((globalThis as unknown as MainGlobals).__dashboardId)!.isFocused()), 'the dashboard window to lose focus', 10_000);
+  await app.evaluate(() => (globalThis as unknown as MainGlobals).__other.destroy());
   assert.equal(await page.getByTestId('shortcut-capture').count(), 1, 'the capture ended on blur');
-  for (const entry of [['⌘R', 'r', F.cmd], ['⌘M', 'm', F.cmd]]) {
+  for (const entry of [['⌘R', 'r', F.cmd], ['⌘M', 'm', F.cmd]] as MenuKey[]) {
     if (await page.getByTestId('shortcut-capture').count() === 0) await startCapture(page, 'sidebar.left');
     await recordedWithoutMenu(app, page, entry);
   }
@@ -283,23 +294,23 @@ test('real keys: a capture that outlives a blur still records the menu keys; foc
     view.dataset.probe = 'capture';
     document.body.append(view);
   }, `${site}/guest`);
-  const guest = await waitFor(() => app.evaluate(({ webContents }, url) => webContents.getAllWebContents().find(contents => contents.getType() === 'webview' && contents.getURL() === url && !contents.isLoading())?.id, `${site}/guest`), 'the guest to load');
+  const guest = await waitFor(() => app.evaluate(({ webContents }, url) => webContents.getAllWebContents().find((contents: WebContentsLike) => contents.getType() === 'webview' && contents.getURL() === url && !contents.isLoading())?.id, `${site}/guest`), 'the guest to load');
   const results = [];
-  for (const [shown, key, flags] of [['⌘=', 'eq', F.cmd], ['⌘R', 'r', F.cmd], ['⌘M', 'm', F.cmd]]) {
+  for (const [shown, key, flags] of [['⌘=', 'eq', F.cmd], ['⌘R', 'r', F.cmd], ['⌘M', 'm', F.cmd]] as MenuKey[]) {
     if (await page.getByTestId('shortcut-capture').count() === 0) await startCapture(page, 'sidebar.left');
     const before = await shownKeys(row);
     await mark(page);
     await front(app);
-    await page.evaluate(() => document.querySelector('webview[data-probe="capture"]')?.focus());
-    await app.evaluate(({ webContents }, id) => webContents.fromId(id).focus(), guest);
-    const guestFocused = await waitFor(() => app.evaluate(({ webContents }, id) => webContents.fromId(id).executeJavaScript('document.hasFocus()'), guest), 'the guest to have focus', 5_000).catch(() => false);
+    await page.evaluate(() => document.querySelector<HTMLElement>('webview[data-probe="capture"]')?.focus());
+    await app.evaluate(({ webContents }, id) => webContents.fromId(id)!.focus(), guest);
+    const guestFocused = await waitFor(() => app.evaluate(({ webContents }, id) => webContents.fromId(id)!.executeJavaScript('document.hasFocus()'), guest), 'the guest to have focus', 5_000).catch(() => false);
     await bounded(`posting ${shown}`, exec('osascript', ['-l', 'JavaScript', '-e', POST_KEY, String(app.process().pid), String(KEY_CODES[key]), String(flags)]));
     await sleep(1_500);
     const state = await windowState(app);
     results.push({ key: shown, guestFocused, recorded: (await shownKeys(row)) === shown && before !== shown, capturing: await page.getByTestId('shortcut-capture').count().catch(() => -1), reloaded: await reloaded(page), ...state });
-    await app.evaluate(({ BrowserWindow }) => { const window = BrowserWindow.fromId(globalThis.__dashboardId); window.webContents.setZoomLevel(0); if (window.isMinimized()) window.restore(); });
+    await app.evaluate(({ BrowserWindow }) => { const window = BrowserWindow.fromId((globalThis as unknown as MainGlobals).__dashboardId)!; window.webContents.setZoomLevel(0); if (window.isMinimized()) window.restore(); });
     await waitFor(async () => !(await windowState(app)).minimized, 'the window back from the Dock');
-    if (results.at(-1).reloaded) { await page.waitForLoadState(); await openShortcuts(page); }
+    if (results.at(-1)!.reloaded) { await page.waitForLoadState(); await openShortcuts(page); }
   }
   t.diagnostic(`focus in a Browser tab guest during capture: ${JSON.stringify(results)}`);
   for (const result of results) {

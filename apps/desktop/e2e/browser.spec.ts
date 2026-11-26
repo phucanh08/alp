@@ -20,21 +20,31 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { once } from 'node:events';
 import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { chmod, mkdir, readdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
+import type { ElectronApplication } from 'playwright-core';
 import { connect as hostConnect } from '@anhlp/alp-client';
 import { fixtureProcesses } from '../../../test/support/fixture-processes.ts';
-import { APP, bounded, cleanEnv, connectedTo, freePort, launch, scratch, waitFor } from './support.mjs';
+import { APP, bounded, cleanEnv, connectedTo, freePort, launch, scratch, waitFor } from './support.ts';
+import type { App, Context, WebContentsLike } from './support.ts';
 
 const ROOT = path.resolve(APP, '..', '..');
 const CLI = path.join(ROOT, 'packages/cli/dist/cli.js');
 const run = promisify(execFile);
+/** What the test keeps on the main process's globalThis while it watches a guest. */
+type Probes = { keptProbe: { navigations: number }, browserProbe: { failed: { code: number, url: string }[], redirects: string[] } };
+/** A guest's last web preferences, as the test reads them (webContents.getLastWebPreferences, where Electron has it). */
+type WebPrefs = { preload?: string | null, sandbox?: boolean, contextIsolation?: boolean, nodeIntegration?: boolean };
+type LastPrefs = { getLastWebPreferences?: () => WebPrefs | undefined };
+/** A Browser tab guest as `guests` lists it. */
+type Guest = { id: number, url: string };
 
 /** A scratch host with alpd and one registered project, and the `alp` wrapper the app runs. */
-async function browserHost(context, step = () => {}) {
+async function browserHost(context: Context, step: (what: string) => void = () => {}) {
   const { dir, defer } = context;
   const home = path.join(dir, 'h', '.alp');
   await mkdir(home, { recursive: true, mode: 0o700 });
@@ -55,7 +65,7 @@ async function browserHost(context, step = () => {}) {
   for (const value of [env.ALP_HOME, env.HOME, env.TMPDIR, env.ALP_SERVICE_DIR]) assert.ok(value.startsWith(`${dir}${path.sep}`), `${value} is outside the scratch directory`);
   const port = await freePort();
   await writeFile(path.join(home, 'settings.json'), JSON.stringify({ dashboard: { port }, web: { relay: { enabled: false } } }));
-  const alp = (...args) => run(process.execPath, [CLI, ...args], { env, timeout: 60_000 });
+  const alp = (...args: string[]) => run(process.execPath, [CLI, ...args], { env, timeout: 60_000 });
   step('host: alp init');
   await alp('init', directory);
   step('host: alp daemon start');
@@ -80,10 +90,10 @@ async function browserHost(context, step = () => {}) {
 }
 
 /** The tail of every log under the scratch host's ALP home, for a failure report (tokens masked). */
-async function hostLogs(dir) {
+async function hostLogs(dir: string) {
   const logs = path.join(dir, 'h', '.alp', 'logs');
-  const found = [];
-  const walk = async at => {
+  const found: string[] = [];
+  const walk = async (at: string): Promise<void> => {
     for (const entry of await readdir(at, { withFileTypes: true }).catch(() => [])) {
       const file = path.join(at, entry.name);
       if (entry.isDirectory()) await walk(file);
@@ -97,10 +107,10 @@ async function hostLogs(dir) {
 const PAGE_STYLE = '<style>body{font:16px -apple-system,system-ui,sans-serif;background:#101418;color:#e8edf2;margin:0;padding:40px}h1{font-weight:600}code{color:#8ab4f8}</style>';
 
 /** A local site the Browser tab visits; `hits` counts the requests per path. */
-async function localSite(context) {
-  const hits = [];
+async function localSite(context: Context) {
+  const hits: string[] = [];
   const server = http.createServer((request, response) => {
-    const url = new URL(request.url, 'http://x');
+    const url = new URL(request.url!, 'http://x');
     hits.push(url.pathname);
     if (url.pathname === '/redirect') { response.writeHead(302, { location: url.searchParams.get('to') ?? '/' }); response.end(); return; }
     if (url.pathname === '/download') { response.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': 'attachment; filename="payload.bin"' }); response.end('payload'); return; }
@@ -110,18 +120,18 @@ async function localSite(context) {
   });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
-  context.defer(() => new Promise(resolve => { server.closeAllConnections(); server.close(() => resolve()); }));
-  return { origin: `http://127.0.0.1:${server.address().port}`, hits };
+  context.defer(() => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }));
+  return { origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, hits };
 }
 
 /** The Browser tab guests: id and address. */
-const guests = app => bounded('listing the Browser tab guests', app.evaluate(({ webContents }) => webContents.getAllWebContents().filter(contents => contents.getType() === 'webview' && !contents.isDestroyed()).map(contents => ({ id: contents.id, url: contents.getURL() }))));
+const guests = (app: ElectronApplication) => bounded<Guest[]>('listing the Browser tab guests', app.evaluate(({ webContents }) => webContents.getAllWebContents().filter((contents: WebContentsLike) => contents.getType() === 'webview' && !contents.isDestroyed()).map((contents: WebContentsLike) => ({ id: contents.id, url: contents.getURL() }))));
 /** Runs `code` in guest `id` (as a user gesture, so window.open and permission prompts are honest). */
-const inGuest = (app, id, code) => bounded(`running ${code.slice(0, 80)} in guest ${id}`, app.evaluate(({ webContents }, [guest, script]) => webContents.fromId(guest).executeJavaScript(script, true), [id, code]));
-const windowCount = app => bounded('counting windows', app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length));
+const inGuest = (app: ElectronApplication, id: number, code: string) => bounded(`running ${code.slice(0, 80)} in guest ${id}`, app.evaluate(({ webContents }, [guest, script]: [number, string]) => webContents.fromId(guest)!.executeJavaScript(script, true), [id, code] as [number, string]));
+const windowCount = (app: ElectronApplication) => bounded('counting windows', app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length));
 /** What every guest is doing, for a failure report: a step stuck on a guest shows here. */
-const guestStates = app => bounded('reading the guest states', app.evaluate(({ webContents }) => webContents.getAllWebContents().filter(contents => contents.getType() === 'webview').map(contents => contents.isDestroyed() ? { destroyed: true } : { id: contents.id, url: contents.getURL(), loading: contents.isLoading(), waiting: contents.isWaitingForResponse(), crashed: contents.isCrashed(), focused: contents.isFocused() })), 5_000);
-const capture = async (app, file) => {
+const guestStates = (app: ElectronApplication) => bounded('reading the guest states', app.evaluate(({ webContents }) => webContents.getAllWebContents().filter((contents: WebContentsLike) => contents.getType() === 'webview').map((contents: WebContentsLike) => contents.isDestroyed() ? { destroyed: true } : { id: contents.id, url: contents.getURL(), loading: contents.isLoading(), waiting: contents.isWaitingForResponse(), crashed: contents.isCrashed(), focused: contents.isFocused() })), 5_000);
+const capture = async (app: ElectronApplication, file: string) => {
   const png = await app.evaluate(async ({ BrowserWindow }) => (await BrowserWindow.getAllWindows()[0].capturePage()).toPNG().toString('base64'));
   await writeFile(file, Buffer.from(png, 'base64'));
 };
@@ -130,8 +140,8 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   // Which step the test reached: logged as it goes, and reported (with the host's logs, and once the
   // app runs, its guests and output) when the test ends before its last step.
   let reached = 'start';
-  let app;
-  const step = what => { reached = what; console.log(`# browser.spec ${new Date().toISOString()} ${what}`); };
+  let app: App;
+  const step = (what: string) => { reached = what; console.log(`# browser.spec ${new Date().toISOString()} ${what}`); };
   const context = await scratch(t);
   context.defer(async () => {
     if (reached === 'done') return;
@@ -164,7 +174,7 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   context.defer(async () => {
     if (reached === 'done') return;
     const state = await bounded('reading the Browser tab state', page.evaluate(() => ({
-      addresses: [...document.querySelectorAll('[data-testid="browser-address"]')].map(element => element.value),
+      addresses: [...document.querySelectorAll<HTMLInputElement>('[data-testid="browser-address"]')].map(element => element.value),
       errors: [...document.querySelectorAll('[data-testid="browser-error"]')].map(element => element.textContent),
       focused: document.activeElement?.getAttribute('data-testid') ?? document.activeElement?.tagName ?? null,
       webviews: [...document.querySelectorAll('webview')].map(element => element.getAttribute('src')),
@@ -173,9 +183,9 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   });
   // No evaluate in the app's main process or in the dashboard page may hang the test without a word.
   const appEvaluate = app.evaluate.bind(app);
-  app.evaluate = (fn, arg) => bounded(`a main-process evaluate during ${reached}`, appEvaluate(fn, arg));
+  app.evaluate = ((fn: Parameters<typeof appEvaluate>[0], arg?: unknown) => bounded(`a main-process evaluate during ${reached}`, appEvaluate(fn, arg))) as typeof app.evaluate;
   const pageEvaluate = page.evaluate.bind(page);
-  page.evaluate = (fn, arg) => bounded(`a dashboard page evaluate during ${reached}`, pageEvaluate(fn, arg));
+  page.evaluate = ((fn: Parameters<typeof pageEvaluate>[0], arg?: unknown) => bounded(`a dashboard page evaluate during ${reached}`, pageEvaluate(fn, arg))) as typeof page.evaluate;
   await page.emulateMedia({ colorScheme: 'dark' });
   const shots = process.env.ALP_DESKTOP_SHOTS;
   if (shots) await mkdir(shots, { recursive: true });
@@ -212,8 +222,8 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   // (1b) t-a35b: the page stays alive behind another tab (same guest, no new navigation, its scroll,
   // input and script state kept); hidden, it is invisible and inert.
   await app.evaluate(({ webContents }, id) => {
-    globalThis.keptProbe = { navigations: 0 };
-    webContents.fromId(id).on('did-start-navigation', details => { if (details.isMainFrame && !details.isSameDocument) globalThis.keptProbe.navigations += 1; });
+    (globalThis as unknown as Probes).keptProbe = { navigations: 0 };
+    webContents.fromId(id)!.on('did-start-navigation', (details: { isMainFrame: boolean, isSameDocument: boolean }) => { if (details.isMainFrame && !details.isSameDocument) (globalThis as unknown as Probes).keptProbe.navigations += 1; });
   }, guest.id);
   const scrolled = await inGuest(app, guest.id, `document.body.style.height = '4000px'; const field = document.createElement('input'); field.id = 'kept'; document.body.prepend(field); field.value = 'typed'; window.__kept = 'yes'; window.scrollTo(0, 900); window.scrollY`);
   assert.equal(scrolled, 900);
@@ -221,7 +231,7 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   await newTab.click();
   await page.getByRole('menuitem', { name: 'Tasks' }).click();
   await waitFor(async () => (await resident.getAttribute('data-shown')) === 'false', 'the Browser tab to be hidden behind Tasks');
-  const hidden = await resident.evaluate(element => ({ inert: element.inert, visibility: getComputedStyle(element).visibility, pointer: getComputedStyle(element).pointerEvents }));
+  const hidden = await resident.evaluate((element: HTMLElement) => ({ inert: element.inert, visibility: getComputedStyle(element).visibility, pointer: getComputedStyle(element).pointerEvents }));
   assert.deepEqual(hidden, { inert: true, visibility: 'hidden', pointer: 'none' });
   assert.deepEqual((await guests(app)).map(entry => entry.id), [guest.id], 'the hidden tab lost its guest');
   await sleep(300);
@@ -229,14 +239,14 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   await waitFor(async () => (await resident.getAttribute('data-shown')) === 'true', 'the Browser tab to be shown again');
   assert.deepEqual(JSON.parse(await inGuest(app, guest.id, `JSON.stringify({ kept: window.__kept ?? null, field: document.getElementById('kept')?.value ?? null, scroll: window.scrollY })`)), { kept: 'yes', field: 'typed', scroll: 900 });
   assert.deepEqual((await guests(app)).map(entry => entry.id), [guest.id]);
-  assert.equal((await app.evaluate(() => globalThis.keptProbe)).navigations, 0, 'the page loaded again');
+  assert.equal((await app.evaluate(() => (globalThis as unknown as Probes).keptProbe)).navigations, 0, 'the page loaded again');
   await inGuest(app, guest.id, `document.getElementById('kept').remove(); document.body.style.height = ''; window.scrollTo(0, 0); 'ok'`);
 
   step('(2) partition and isolation');
   // (2) Its own partition, and nothing of the dashboard's: no token, storage, cookies, Node or parent.
   const where = await app.evaluate(({ webContents, session }, id) => {
-    const contents = webContents.fromId(id);
-    const prefs = contents.getLastWebPreferences?.() ?? {};
+    const contents = webContents.fromId(id)!;
+    const prefs: WebPrefs = (contents as unknown as LastPrefs).getLastWebPreferences?.() ?? {};
     return { own: contents.session === session.fromPartition('persist:alp-browser'), shared: contents.session === session.defaultSession, preload: prefs.preload ?? null, sandbox: prefs.sandbox, isolation: prefs.contextIsolation, node: prefs.nodeIntegration };
   }, guest.id);
   assert.deepEqual(where, { own: true, shared: false, preload: null, sandbox: true, isolation: true, node: false });
@@ -256,17 +266,17 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   // guard fails a load with -20 (ERR_BLOCKED_BY_CLIENT); a navigation the navigation guard prevents
   // never gets that far, so this tells the two guards apart (either would leave the page in place).
   await app.evaluate(({ webContents }, id) => {
-    const contents = webContents.fromId(id);
-    globalThis.browserProbe = { failed: [], redirects: [] };
-    contents.on('did-fail-load', (_event, code, _description, url) => globalThis.browserProbe.failed.push({ code, url }));
-    contents.on('did-redirect-navigation', details => globalThis.browserProbe.redirects.push(details.url));
+    const contents = webContents.fromId(id)!;
+    (globalThis as unknown as Probes).browserProbe = { failed: [], redirects: [] };
+    contents.on('did-fail-load', (_event: unknown, code: number, _description: string, url: string) => (globalThis as unknown as Probes).browserProbe.failed.push({ code, url }));
+    contents.on('did-redirect-navigation', (details: { url: string }) => (globalThis as unknown as Probes).browserProbe.redirects.push(details.url));
   }, guest.id);
-  const probeLog = () => app.evaluate(() => globalThis.browserProbe);
+  const probeLog = () => app.evaluate(() => (globalThis as unknown as Probes).browserProbe);
   // The tab says which navigation the main process stopped (BLOCKED_EVENT, as text): every http one
   // here, as the address the guest asked for. file:, data:, chrome: and devtools: never reach the guard
   // (Chromium refuses them in the page), so the tab has nothing to say about them.
   const redirect = `${site.origin}/redirect?to=${encodeURIComponent(`http://localhost:${info.port}/`)}`;
-  const noticed = new Map([...dashboardSpellings.map(target => [target, new URL(target).href]), [redirect, `http://localhost:${info.port}/`]]);
+  const noticed = new Map<string, string>([...dashboardSpellings.map((target): [string, string] => [target, new URL(target).href]), [redirect, `http://localhost:${info.port}/`]]);
   const noticeOf = async () => {
     const line = page.locator('[data-testid="browser-resident"][data-shown="true"]').getByTestId('browser-error');
     return (await line.count()) ? line.innerText({ timeout: 2_000 }).catch(() => '') : '';
@@ -293,14 +303,14 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   // Frames: an iframe pointed at the dashboard never shows it.
   await inGuest(app, guest.id, `const f = document.createElement('iframe'); f.id = 'probe'; f.src = ${JSON.stringify(`http://localhost:${info.port}/`)}; document.body.append(f); 'ok'`);
   await sleep(800);
-  const frames = await app.evaluate(({ webContents }, id) => webContents.fromId(id).mainFrame.frames.map(frame => ({ url: frame.url, origin: frame.origin })), guest.id);
+  const frames: { url: string, origin: string }[] = await app.evaluate(({ webContents }, id) => webContents.fromId(id)!.mainFrame.frames.map((frame: { url: string, origin: string }) => ({ url: frame.url, origin: frame.origin })), guest.id);
   assert.ok(!frames.some(frame => frame.origin === `http://localhost:${info.port}`), JSON.stringify(frames));
   step('(3) webview.loadURL from the dashboard page');
   // Loads the dashboard page starts itself (webview.loadURL, as an XSS there could) emit no
   // will-navigate: they are stopped when they start, and file: is refused by the partition.
   for (const target of ['file:///etc/hosts', 'chrome://version', 'devtools://devtools/bundled/inspector.html', `http://localhost:${info.port}/`, `http://[::1]:${info.port}/`, 'data:text/html,<p>x</p>']) {
     step(`(3) loadURL ${target}`);
-    await page.evaluate(url => document.querySelector('[data-testid="browser-webview"]').loadURL(url).catch(() => undefined), target);
+    await page.evaluate(url => (document.querySelector('[data-testid="browser-webview"]') as Element & { loadURL(url: string): Promise<void> }).loadURL(url).catch(() => undefined), target);
     await sleep(600);
     const now = (await guests(app)).find(entry => entry.id === guest.id)?.url;
     assert.equal(now, pageUrl, `a load of ${target} from the dashboard page was not stopped (guest at ${now})`);
@@ -319,7 +329,7 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   step('(4) requests to the dashboard port');
   // (4) Requests: fetch, XHR and WebSocket to the dashboard's port are cancelled by onBeforeRequest
   // (no-cors fetch resolves whenever a request went out; the control request to the site does).
-  const probe = target => inGuest(app, guest.id, `fetch(${JSON.stringify(target)}, { mode: 'no-cors' }).then(() => 'sent', () => 'blocked')`);
+  const probe = (target: string) => inGuest(app, guest.id, `fetch(${JSON.stringify(target)}, { mode: 'no-cors' }).then(() => 'sent', () => 'blocked')`);
   assert.equal(await probe(`${site.origin}/control`), 'sent');
   for (const target of dashboardSpellings.slice(0, 7)) assert.equal(await probe(`${target}v1/tickets`), 'blocked', target);
   const xhr = await inGuest(app, guest.id, `new Promise(resolve => { const x = new XMLHttpRequest(); x.open('GET', ${JSON.stringify(`http://127.0.0.1:${info.port}/`)}); x.onload = () => resolve('loaded'); x.onerror = () => resolve('blocked'); x.send(); })`);
@@ -337,7 +347,7 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   assert.equal(await inGuest(app, guest.id, `navigator.mediaDevices.getUserMedia({ audio: true }).then(() => 'granted', () => 'denied')`), 'denied');
   assert.equal(await inGuest(app, guest.id, `navigator.clipboard.readText().then(() => 'granted', () => 'denied')`), 'denied');
   step('(5) devtools');
-  const devtools = await app.evaluate(async ({ webContents }, id) => { const contents = webContents.fromId(id); contents.openDevTools(); await new Promise(resolve => setTimeout(resolve, 500)); return contents.isDevToolsOpened(); }, guest.id);
+  const devtools = await app.evaluate(async ({ webContents }, id) => { const contents = webContents.fromId(id)!; contents.openDevTools(); await new Promise(resolve => setTimeout(resolve, 500)); return contents.isDevToolsOpened(); }, guest.id);
   assert.equal(devtools, false);
   step('(5) download');
   await inGuest(app, guest.id, `location.href = '/download'; 'ok'`);
@@ -389,13 +399,13 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   const preload = path.join(context.dir, 'preload.js');
   await writeFile(preload, "window.addEventListener('DOMContentLoaded', () => { document.documentElement.dataset.preloaded = 'yes'; });\n");
   const before = (await guests(app)).length;
-  const attach = (attributes, testId) => page.evaluate(([attrs, id]) => {
+  const attach = (attributes: Record<string, string>, testId: string) => page.evaluate(([attrs, id]: [Record<string, string>, string]) => {
     const view = document.createElement('webview');
     for (const [name, value] of Object.entries(attrs)) view.setAttribute(name, value);
     view.dataset.probe = id;
     view.style.cssText = 'position:fixed;width:10px;height:10px;bottom:0;right:0';
     document.body.append(view);
-  }, [attributes, testId]);
+  }, [attributes, testId] as [Record<string, string>, string]);
   await attach({ src: `${site.origin}/page` }, 'default');
   await attach({ src: `${site.origin}/page`, partition: 'persist:other' }, 'other');
   await attach({ src: 'file:///etc/hosts', partition: 'persist:alp-browser' }, 'file');
@@ -406,8 +416,8 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   await sleep(500);
   assert.equal(await inGuest(app, preloaded.id, 'document.documentElement.dataset.preloaded ?? null'), null, 'the preload ran');
   const forced = await app.evaluate(({ webContents, session }, id) => {
-    const contents = webContents.fromId(id);
-    return { own: contents.session === session.fromPartition('persist:alp-browser'), preload: contents.getLastWebPreferences?.()?.preload ?? null };
+    const contents = webContents.fromId(id)!;
+    return { own: contents.session === session.fromPartition('persist:alp-browser'), preload: (contents as unknown as LastPrefs).getLastWebPreferences?.()?.preload ?? null };
   }, preloaded.id);
   assert.deepEqual(forced, { own: true, preload: null });
   await page.evaluate(() => { for (const view of document.querySelectorAll('webview[data-probe]')) view.remove(); });
@@ -419,16 +429,16 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
   if (process.platform === 'darwin') {
     const tabsBefore = await page.locator('[data-tab^="browser:"]').count();
     const shown = await waitFor(async () => {
-      const ids = await app.evaluate(({ webContents }) => webContents.getAllWebContents().filter(contents => contents.getType() === 'webview' && !contents.isDestroyed()).map(contents => contents.id));
+      const ids = await app.evaluate(({ webContents }) => webContents.getAllWebContents().filter((contents: WebContentsLike) => contents.getType() === 'webview' && !contents.isDestroyed()).map((contents: WebContentsLike) => contents.id));
       return ids.at(-1);
     }, 'a Browser tab guest');
     await inGuest(app, shown, "window.__keys = []; window.addEventListener('keydown', e => window.__keys.push(e.code)); 'ok'");
-    const pressIn = (code, keyCode) => app.evaluate(({ webContents }, [id, key]) => {
-      const contents = webContents.fromId(id);
+    const pressIn = (code: string, keyCode: string) => app.evaluate(({ webContents }, [id, key]: [number, string]) => {
+      const contents = webContents.fromId(id)!;
       contents.focus();
       contents.sendInputEvent({ type: 'keyDown', keyCode: key, modifiers: ['meta'] });
       contents.sendInputEvent({ type: 'keyUp', keyCode: key, modifiers: ['meta'] });
-    }, [shown, keyCode]);
+    }, [shown, keyCode] as [number, string]);
     await pressIn('KeyC', 'C');
     await waitFor(async () => (await inGuest(app, shown, 'window.__keys.join()')).includes('KeyC'), 'the page to get ⌘C');
     await pressIn('KeyW', 'W');
@@ -437,11 +447,11 @@ test('browser: a Browser tab shows a local page and is held to its guards', { ti
     // ⌥⌘1 in a Browser tab's page goes to the dashboard's first tab.
     await page.locator('[data-tab^="browser:"]').last().click();
     const next = await waitFor(async () => {
-      const ids = await app.evaluate(({ webContents }) => webContents.getAllWebContents().filter(contents => contents.getType() === 'webview' && !contents.isDestroyed()).map(contents => contents.id));
+      const ids = await app.evaluate(({ webContents }) => webContents.getAllWebContents().filter((contents: WebContentsLike) => contents.getType() === 'webview' && !contents.isDestroyed()).map((contents: WebContentsLike) => contents.id));
       return ids.at(-1);
     }, 'the next Browser tab guest');
     await app.evaluate(({ webContents }, id) => {
-      const contents = webContents.fromId(id);
+      const contents = webContents.fromId(id)!;
       contents.focus();
       contents.sendInputEvent({ type: 'keyDown', keyCode: '1', modifiers: ['meta', 'alt'] });
       contents.sendInputEvent({ type: 'keyUp', keyCode: '1', modifiers: ['meta', 'alt'] });
