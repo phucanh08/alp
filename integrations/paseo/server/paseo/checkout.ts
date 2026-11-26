@@ -6,7 +6,7 @@ import { realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
 import type { GitDiffFile, GitDiffPage, GitStatus } from '@anhlp/alp-protocol';
-import type { ClientContext, Handler } from './gateway.js';
+import type { ClientContext, Handler } from './gateway.ts';
 
 /**
  * A checkout's git state and changes for the app (D31 step 8, ALPD §62): the branch, base and how

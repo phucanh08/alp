@@ -1,5 +1,5 @@
-import { isLoopbackHost } from './config.js';
-import type { GatewayConfig } from './config.js';
+import { isLoopbackHost } from './config.ts';
+import type { GatewayConfig } from './config.ts';
 
 /**
  * The host owner (t-a95b, docs/alp/remote-gateway.md §5.19): the one connection that may call the

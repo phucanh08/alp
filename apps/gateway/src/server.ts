@@ -3,18 +3,18 @@ import { readFile } from 'node:fs/promises';
 import http from 'node:http';
 import https from 'node:https';
 import { WebSocketServer } from 'ws';
-import { ClientConnection, CLOSE_CODE } from './connection.js';
-import { isLoopbackAddress } from './config.js';
-import { directLoopback, ownerOptionError } from './owner.js';
-import { TicketBook } from './tickets.js';
-import { daemonMonitor, upstreamConnector } from './upstream.js';
+import { ClientConnection, CLOSE_CODE } from './connection.ts';
+import { isLoopbackAddress } from './config.ts';
+import { directLoopback, ownerOptionError } from './owner.ts';
+import { TicketBook } from './tickets.ts';
+import { daemonMonitor, upstreamConnector } from './upstream.ts';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import type { Logger } from '@anhlp/alp-core/log';
-import type { GatewayConfig } from './config.js';
-import type { CredentialStore } from './credentials.js';
-import type { OwnerOption } from './owner.js';
-import type { OpenTransport } from './upstream.js';
+import type { GatewayConfig } from './config.ts';
+import type { CredentialStore } from './credentials.ts';
+import type { OwnerOption } from './owner.ts';
+import type { OpenTransport } from './upstream.ts';
 
 /**
  * The gateway's HTTP side (docs/alp/remote-gateway.md §3, §4, §7):

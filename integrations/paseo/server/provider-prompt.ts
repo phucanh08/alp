@@ -4,7 +4,7 @@
 // Copyright (c) 2025-present Mohamed Boudra. Apache-2.0; see integrations/paseo/NOTICE.
 // Changes: only render textual context; preserve images/uploads for their dedicated paths;
 // normalize text-context to plain user text; apply the protocol's absent-forge GitHub default.
-import { getForgeDefinitionOrNeutral, type ProviderContent } from './compat.js';
+import { getForgeDefinitionOrNeutral, type ProviderContent } from './compat.ts';
 
 const REVIEW_LINE_MARKERS = { add: '+', remove: '-', context: ' ' } as const;
 

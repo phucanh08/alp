@@ -1,6 +1,6 @@
 import type { AgentTimelineItem } from '@getpaseo/protocol/agent-types';
 import type { TimelineItem } from '@anhlp/alp-protocol';
-import { paseoDetail } from '../tool-detail.js';
+import { paseoDetail } from '../tool-detail.ts';
 
 export { paseoDetail };
 

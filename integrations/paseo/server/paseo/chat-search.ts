@@ -3,7 +3,7 @@
 // Changed for ALP: it searches the store's projected rows, and an assistant message's Markdown source as a whole
 // (Paseo counts rendered blocks with markdown-it); the app recounts on the rendered text either way. See ALPD §62.
 
-import type { ProjectedTimelineRow } from './timeline-projection.js';
+import type { ProjectedTimelineRow } from './timeline-projection.ts';
 
 const PAGE_SIZE = 200;
 

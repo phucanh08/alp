@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { ProviderSessionConfig, ProviderPersistence } from './compat.js';
+import type { ProviderSessionConfig, ProviderPersistence } from './compat.ts';
 
 /**
  * The parts of the Paseo ↔ ALP mapping that need nothing but the wire: no core, no runtime, no

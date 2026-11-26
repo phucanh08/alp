@@ -1,1 +1,1 @@
-export * from './panel/session-tasks.js';
+export * from './panel/session-tasks.ts';

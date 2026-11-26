@@ -1,10 +1,10 @@
-import type { PluginServerContext } from '../compat.js';
-import { sessionTasks } from '../session-tasks.js';
-import { tasksAdd, tasksChange, tasksList, type TaskRow } from '../../shared/tasks.js';
-import { languageGet, languageSet, libraryDelete, libraryDuplicate, libraryGet, libraryList, libraryModels, libraryRename, librarySave, librarySkills, libraryTest } from '../../shared/library.js';
-import { usageGet } from '../../shared/usage.js';
-import { agentCompact, compactFirst } from '../../shared/compact.js';
-import { openGateway, workspaceFor, type GatewayConfig, type GatewayLink, type Principal } from './link.js';
+import type { PluginServerContext } from '../compat.ts';
+import { sessionTasks } from '../session-tasks.ts';
+import { tasksAdd, tasksChange, tasksList, type TaskRow } from '../../shared/tasks.ts';
+import { languageGet, languageSet, libraryDelete, libraryDuplicate, libraryGet, libraryList, libraryModels, libraryRename, librarySave, librarySkills, libraryTest } from '../../shared/library.ts';
+import { usageGet } from '../../shared/usage.ts';
+import { agentCompact, compactFirst } from '../../shared/compact.ts';
+import { openGateway, workspaceFor, type GatewayConfig, type GatewayLink, type Principal } from './link.ts';
 
 /**
  * The plugin's panels in remote mode (docs/alp/paseo-remote.md §4): the same RPC contracts the

@@ -1,4 +1,4 @@
-import type { UploadedFile } from '../upload-names.js';
+import type { UploadedFile } from '../upload-names.ts';
 
 /** Inline images remain inline; uploaded files are resolved by the socket-owned staging store
  * before an agent is created or a message interrupts a turn. Other context kinds are refused. */

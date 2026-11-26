@@ -1,1 +1,1 @@
-export * from './panel/compact.js';
+export * from './panel/compact.ts';

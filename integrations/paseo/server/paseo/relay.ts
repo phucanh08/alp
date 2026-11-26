@@ -2,9 +2,9 @@ import { readFile } from 'node:fs/promises';
 import type { SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
 import { exportPublicKey, exportSecretKey, generateKeyPair, importPublicKey, importSecretKey, type KeyPair } from '@getpaseo/relay/e2ee';
 import { setWebRelay } from '@anhlp/alp-core/user-settings';
-import { NOT_IMPLEMENTED, type Handler, type Outbound } from './gateway.js';
-import { startRelayTransport, type RelaySocketLike, type RelayTransportController, type RelayWebSocketFactory } from './relay-transport.js';
-import { ensureCredentialDir, keepPrivate, moveLegacyRelayKey, relayKeyFile, writePrivate } from '../web.js';
+import { NOT_IMPLEMENTED, type Handler, type Outbound } from './gateway.ts';
+import { startRelayTransport, type RelaySocketLike, type RelayTransportController, type RelayWebSocketFactory } from './relay-transport.ts';
+import { ensureCredentialDir, keepPrivate, moveLegacyRelayKey, relayKeyFile, writePrivate } from '../web.ts';
 
 /**
  * Paseo's relay for alpd (D32, ALPD §64): with it on, alpd keeps a socket open to the relay, and

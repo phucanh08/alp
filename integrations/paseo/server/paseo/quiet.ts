@@ -1,5 +1,5 @@
 import type { SessionInboundMessage, SessionOutboundMessage } from '@getpaseo/protocol/messages';
-import type { Handler } from './gateway.js';
+import type { Handler } from './gateway.ts';
 
 /**
  * What the app reads by itself, all the time, for features ALP has not got yet: project icons,

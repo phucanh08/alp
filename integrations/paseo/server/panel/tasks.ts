@@ -3,9 +3,9 @@ import path from 'node:path';
 import { closeTask, createTask, epicReport, loadTasks, rejectGate, reopenTask, resolveGate } from '@anhlp/alp-core/tasks';
 import { taskRows } from '@anhlp/alp-core/task-rows';
 import { alpHome } from '@anhlp/alp-client/index';
-import type { PluginServerContext } from './compat.js';
-import { tasksAdd, tasksChange, tasksList, type TaskRow } from '../../shared/tasks.js';
-import { sessionTasks } from './session-tasks.js';
+import type { PluginServerContext } from './compat.ts';
+import { tasksAdd, tasksChange, tasksList, type TaskRow } from '../../shared/tasks.ts';
+import { sessionTasks } from './session-tasks.ts';
 
 /**
  * The nearest directory at or above `directory` that holds an ALP project. The user's library,

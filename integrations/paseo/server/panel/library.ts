@@ -5,10 +5,10 @@ import { deleteEntry, duplicateEntry, getEntry, listEntries, renameEntry, saveEn
 import { testEntry } from '@anhlp/alp-client/library-test';
 import { alpHome } from '@anhlp/alp-client/index';
 import { languageSetting, setLanguage } from '@anhlp/alp-core/user-settings';
-import type { PluginServerContext } from './compat.js';
-import { templates } from './mapping.js';
-import { projectOf } from './tasks.js';
-import { languageGet, languageSet, libraryDelete, libraryDuplicate, libraryGet, libraryList, libraryModels, libraryRename, librarySave, librarySkills, libraryTest } from '../../shared/library.js';
+import type { PluginServerContext } from './compat.ts';
+import { templates } from './mapping.ts';
+import { projectOf } from './tasks.ts';
+import { languageGet, languageSet, libraryDelete, libraryDuplicate, libraryGet, libraryList, libraryModels, libraryRename, librarySave, librarySkills, libraryTest } from '../../shared/library.ts';
 
 /** The library Save also updates known project snapshots before acknowledging success. */
 export function registerLibraryRpc(server: PluginServerContext, { home = alpHome(), projectDirectories }: { home?: string; projectDirectories?: () => Promise<string[]> } = {}) {

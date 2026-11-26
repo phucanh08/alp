@@ -8,17 +8,17 @@ import type { DaemonConnection, Envelope, UserQuestion } from '@anhlp/alp-protoc
 import type { HistoryPage } from '@anhlp/alp-protocol';
 import type { SessionSummary } from '@anhlp/alp-protocol/session';
 import { alpHome, connect, readLock } from '@anhlp/alp-client/index';
-import type { ClientContext, Handler } from './gateway.js';
-import type { AgentsView, CreateAgentInput, Placement } from './workspaces.js';
-import { searchTimeline } from './chat-search.js';
-import { TimelineDeltas } from './timeline-items.js';
-import { InMemoryAgentTimelineStore } from './timeline-store.js';
-import { agentUsage } from '../session-usage.js';
-import { firstMessage, messageContent, type MessagePart } from './prompt-content.js';
+import type { ClientContext, Handler } from './gateway.ts';
+import type { AgentsView, CreateAgentInput, Placement } from './workspaces.ts';
+import { searchTimeline } from './chat-search.ts';
+import { TimelineDeltas } from './timeline-items.ts';
+import { InMemoryAgentTimelineStore } from './timeline-store.ts';
+import { agentUsage } from '../session-usage.ts';
+import { firstMessage, messageContent, type MessagePart } from './prompt-content.ts';
 import { attachments as attachmentStore } from '@anhlp/alp-client/portable';
-import { createFacadeUploads } from './uploads.js';
-import { uploadRequestId } from '../upload-names.js';
-import { createCreationReceipts, creationDigest, type CreationReceipts, type CreationAttempt } from './create-receipts.js';
+import { createFacadeUploads } from './uploads.ts';
+import { uploadRequestId } from '../upload-names.ts';
+import { createCreationReceipts, creationDigest, type CreationReceipts, type CreationAttempt } from './create-receipts.ts';
 
 /**
  * ALP's roots as Paseo's agents (D31 step 3, ALPD §62). Each root session is one agent of the

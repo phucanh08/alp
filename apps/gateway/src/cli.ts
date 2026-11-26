@@ -4,12 +4,12 @@ import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { isAgentProcess } from '@anhlp/alp-core/tasks';
 import { alpHome, connectSocket, daemonPaths } from '@anhlp/alp-client';
-import { resolveConfig } from './config.js';
-import { CredentialStore, createCredential, gatewayHome, listCredentials, reissueCredential, revokeCredential, rotateCredential } from './credentials.js';
-import { createGatewayLogger } from './log.js';
-import { DEFAULT_PERMISSIONS, PERMISSIONS, TERMINAL_EXEC_WARNING } from './policy.js';
-import { createGateway } from './server.js';
-import type { GatewayConfigInput } from './config.js';
+import { resolveConfig } from './config.ts';
+import { CredentialStore, createCredential, gatewayHome, listCredentials, reissueCredential, revokeCredential, rotateCredential } from './credentials.ts';
+import { createGatewayLogger } from './log.ts';
+import { DEFAULT_PERMISSIONS, PERMISSIONS, TERMINAL_EXEC_WARNING } from './policy.ts';
+import { createGateway } from './server.ts';
+import type { GatewayConfigInput } from './config.ts';
 
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 

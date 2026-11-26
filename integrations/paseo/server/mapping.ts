@@ -4,10 +4,10 @@ import { resolveSession, models as runtimeModels } from '@anhlp/alp-runtime/inde
 import type { HostMcpServer, SessionSpec } from '@anhlp/alp-protocol/session';
 import { listTeams, teamOf } from '@anhlp/alp-core/teams';
 import { alpHome } from '@anhlp/alp-client/index';
-import type { ProviderSessionConfig, ProviderPersistence } from './compat.js';
-import { alpdSessionOf, configModels as wireConfigModels, DEFAULT_TEAM } from './mapping-wire.js';
+import type { ProviderSessionConfig, ProviderPersistence } from './compat.ts';
+import { alpdSessionOf, configModels as wireConfigModels, DEFAULT_TEAM } from './mapping-wire.ts';
 
-export { alpdSessionOf, DEFAULT_TEAM, handleFor, type AlpdHandle } from './mapping-wire.js';
+export { alpdSessionOf, DEFAULT_TEAM, handleFor, type AlpdHandle } from './mapping-wire.ts';
 
 export { DEFAULT_MODEL, DEFAULT_CLAUDE_MODEL, models, modes, thinkingOptions, thinkingOptionsFor, InstructionsAdapter as PaseoAdapter } from '@anhlp/alp-runtime/index';
 

@@ -1,1 +1,1 @@
-export * from './panel/library.js';
+export * from './panel/library.ts';

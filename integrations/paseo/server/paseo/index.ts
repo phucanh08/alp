@@ -2,22 +2,22 @@ import { userLanguage } from '@anhlp/alp-core/user-settings';
 import { alpHome, connect, readLock } from '@anhlp/alp-client/index';
 import type { DaemonConnection } from '@anhlp/alp-protocol';
 import { words } from '@anhlp/alp-runtime/language';
-import { createAgents } from './agents.js';
-import { createPaseoGateway, type Handler } from './gateway.js';
-import { quietHandlers } from './quiet.js';
-import { createCheckouts } from './checkout.js';
-import { createTerminals } from './terminals.js';
-import { directorySuggestions, fileExplorer } from './files.js';
-import { createPlugins } from './plugins.js';
-import { createUsage } from './usage.js';
-import { createWorkspaces } from './workspaces.js';
-import { createDaemonConfig, createRelay, type RelaySettings } from './relay.js';
-import { createProviders } from './providers.js';
-import { createCreationReceipts } from './create-receipts.js';
+import { createAgents } from './agents.ts';
+import { createPaseoGateway, type Handler } from './gateway.ts';
+import { quietHandlers } from './quiet.ts';
+import { createCheckouts } from './checkout.ts';
+import { createTerminals } from './terminals.ts';
+import { directorySuggestions, fileExplorer } from './files.ts';
+import { createPlugins } from './plugins.ts';
+import { createUsage } from './usage.ts';
+import { createWorkspaces } from './workspaces.ts';
+import { createDaemonConfig, createRelay, type RelaySettings } from './relay.ts';
+import { createProviders } from './providers.ts';
+import { createCreationReceipts } from './create-receipts.ts';
 
 
-export { createPaseoGateway, NOT_IMPLEMENTED, PASEO_PROTOCOL_VERSION } from './gateway.js';
-export type { PaseoGateway } from './gateway.js';
+export { createPaseoGateway, NOT_IMPLEMENTED, PASEO_PROTOCOL_VERSION } from './gateway.ts';
+export type { PaseoGateway } from './gateway.ts';
 
 /**
  * Features whose buttons the app shows only when the daemon says it has them, and which send a

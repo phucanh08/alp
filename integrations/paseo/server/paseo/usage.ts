@@ -1,6 +1,6 @@
 import type { SessionOutboundMessage } from '@getpaseo/protocol/messages';
 import type { AlpRuntime } from '@anhlp/alp-runtime/runtime';
-import type { Handler } from './gateway.js';
+import type { Handler } from './gateway.ts';
 
 type Snapshot = Awaited<ReturnType<AlpRuntime['usage']>>;
 const id = (runtime: string) => `alp-${runtime}`;
