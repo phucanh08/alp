@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -8,19 +8,25 @@ import { initProject } from '@anhlp/alp-core/init';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createDaemonServer } from '../../dist/daemon/index.js';
 import { createAcpAgent, hostServers, promptText } from '../../dist/acp/agent.js';
-import { fakeTransport, until } from '../support/fake-agent.ts';
+import { fakeTransport, until, type FakeAgent } from '../support/fake-agent.ts';
+
+// `any`: ACP session/update notifications are JSON of many shapes; the tests read the fields they assert on.
+type Json = any;
+// The team picker: a select whose choices are flat { value, name } options (the SDK type also allows groups and booleans).
+type TeamPicker = { currentValue: string, options: Array<{ value: string, name: string }> };
+const teamOf = (options: acp.SessionConfigOption[] | null | undefined) => options!.find(option => option.id === 'team') as unknown as TeamPicker;
 
 /** alpd in this process with scripted agents, and an editor that talks to `alp acp`. */
-async function setup(t) {
+async function setup(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-acp-'));
   const root = path.join(directory, 'project');
   await initProject(root);
-  const agents = [];
+  const agents: FakeAgent[] = [];
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport(agents), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: path.join(directory, 'runs') });
   const server = createDaemonServer({ runtime, socketPath: '', version: 'test' });
   t.after(async () => { await runtime.shutdown(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
   const editor = () => {
-    const updates = [];
+    const updates: Json[] = [];
     // ndjson both ways, as on stdio.
     const up = new TransformStream();
     const down = new TransformStream();
@@ -29,7 +35,7 @@ async function setup(t) {
       .onNotification('session/update', ({ params }) => { updates.push(params); })
       .connect(acp.ndJsonStream(up.writable, down.readable));
     t.after(() => connection.close());
-    const of = (sessionId, kind) => updates.filter(entry => entry.sessionId === sessionId && entry.update.sessionUpdate === kind).map(entry => entry.update);
+    const of = (sessionId: string, kind: string): Json[] => updates.filter(entry => entry.sessionId === sessionId && entry.update.sessionUpdate === kind).map(entry => entry.update);
     return { agent: connection.agent, updates, of };
   };
   return { root, runtime, agents, editor };
@@ -39,31 +45,31 @@ test('an editor starts an ALP session, chooses its team, and sees main answer an
   const { root, runtime, agents, editor } = await setup(t);
   const { agent, of } = editor();
   const init = await agent.request('initialize', { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} });
-  assert.equal(init.agentInfo.name, 'alp');
-  assert.equal(init.agentCapabilities.loadSession, true);
+  assert.equal(init.agentInfo!.name, 'alp');
+  assert.equal(init.agentCapabilities!.loadSession, true);
 
   const created = await agent.request('session/new', { cwd: root, mcpServers: [] });
-  const team = created.configOptions.find(option => option.id === 'team');
+  const team = teamOf(created.configOptions);
   assert.equal(team.currentValue, 'pho');
   assert.deepEqual(team.options.map(option => option.value).slice(0, 2), ['pho', 'cafe']);
   // Nothing runs until the first prompt.
   assert.equal(agents.length, 0);
 
   const changed = await agent.request('session/set_config_option', { sessionId: created.sessionId, configId: 'team', value: 'cafe' });
-  assert.equal(changed.configOptions.find(option => option.id === 'team').currentValue, 'cafe');
+  assert.equal(teamOf(changed.configOptions).currentValue, 'cafe');
   await agent.request('session/set_config_option', { sessionId: created.sessionId, configId: 'mode', value: 'read-only' });
 
   const answered = agent.request('session/prompt', { sessionId: created.sessionId, prompt: [{ type: 'text', text: 'Run the tests' }, { type: 'resource_link', uri: 'file:///x/a.ts', name: 'a.ts' }] });
   await until(() => agents[0]?.started.length === 1, 'the first turn');
   const main = agents[0];
-  assert.equal(runtime.snapshot(created.sessionId).workflow.mode, 'cafe');
-  assert.equal(runtime.snapshot(created.sessionId).mode, 'read-only');
-  assert.match(main.started[0].params.input.map(part => part.text).join('\n'), /Run the tests @\/x\/a\.ts/);
+  assert.equal(runtime.snapshot(created.sessionId)!.workflow.mode, 'cafe');
+  assert.equal(runtime.snapshot(created.sessionId)!.mode, 'read-only');
+  assert.match(main.started[0].params.input.map((part: Json) => part.text).join('\n'), /Run the tests @\/x\/a\.ts/);
 
-  main.notification('item/agentMessage/delta', { threadId: main.threadId, itemId: 'a1', delta: 'Running ' });
-  main.notification('item/agentMessage/delta', { threadId: main.threadId, itemId: 'a1', delta: 'them.' });
-  main.notification('item/started', { threadId: main.threadId, item: { type: 'commandExecution', id: 'c1', command: 'npm test', cwd: root, status: 'inProgress' } });
-  main.notification('item/completed', { threadId: main.threadId, item: { type: 'commandExecution', id: 'c1', command: 'npm test', cwd: root, status: 'completed', aggregatedOutput: '300 pass', exitCode: 0 } });
+  main.notification!('item/agentMessage/delta', { threadId: main.threadId, itemId: 'a1', delta: 'Running ' });
+  main.notification!('item/agentMessage/delta', { threadId: main.threadId, itemId: 'a1', delta: 'them.' });
+  main.notification!('item/started', { threadId: main.threadId, item: { type: 'commandExecution', id: 'c1', command: 'npm test', cwd: root, status: 'inProgress' } });
+  main.notification!('item/completed', { threadId: main.threadId, item: { type: 'commandExecution', id: 'c1', command: 'npm test', cwd: root, status: 'completed', aggregatedOutput: '300 pass', exitCode: 0 } });
   main.finish('All pass.');
   assert.deepEqual(await answered, { stopReason: 'end_turn' });
 
@@ -89,23 +95,23 @@ test('a project whose settings name no team offers its custom graph, and the edi
   const { agent } = editor();
   await agent.request('initialize', { protocolVersion: acp.PROTOCOL_VERSION, clientCapabilities: {} });
   const created = await agent.request('session/new', { cwd: root, mcpServers: [] });
-  const team = created.configOptions.find(option => option.id === 'team');
+  const team = teamOf(created.configOptions);
   assert.equal(team.currentValue, 'custom');
   assert.deepEqual(team.options[0], { value: 'custom', name: 'Custom' });
   assert.ok(team.options.some(option => option.value === 'pho'));
 
   const away = await agent.request('session/set_config_option', { sessionId: created.sessionId, configId: 'team', value: 'pho' });
-  const awayTeam = away.configOptions.find(option => option.id === 'team');
+  const awayTeam = teamOf(away.configOptions);
   assert.equal(awayTeam.currentValue, 'pho');
   assert.deepEqual(awayTeam.options.filter(option => option.value === 'custom'), [{ value: 'custom', name: 'Custom' }]);
   const back = await agent.request('session/set_config_option', { sessionId: created.sessionId, configId: 'team', value: 'custom' });
-  const backTeam = back.configOptions.find(option => option.id === 'team');
+  const backTeam = teamOf(back.configOptions);
   assert.equal(backTeam.currentValue, 'custom');
   assert.deepEqual(backTeam.options.map(option => option.value).filter(value => value === 'custom'), ['custom']);
 
   const answered = agent.request('session/prompt', { sessionId: created.sessionId, prompt: [{ type: 'text', text: 'Go' }] });
   await until(() => agents[0]?.started.length === 1, 'the first turn');
-  assert.equal(runtime.snapshot(created.sessionId).workflow.mode, 'custom');
+  assert.equal(runtime.snapshot(created.sessionId)!.workflow.mode, 'custom');
   agents[0].finish('Done.');
   assert.deepEqual(await answered, { stopReason: 'end_turn' });
 });

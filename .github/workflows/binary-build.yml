@@ -100,7 +100,7 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/binary-smoke-nodeless.ps1 $env:LAUNCHER
       - name: install.ps1 against a local mirror
         if: runner.os == 'Windows'
-        run: node --test test/integration/binary-install-ps1.test.js
+        run: node --test test/integration/binary-install-ps1.test.ts
       - name: Pack
         run: node scripts/package-binary.ts pack --bundle "$BUNDLE" --out dist/release
       - name: Size

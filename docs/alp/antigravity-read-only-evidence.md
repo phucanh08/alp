@@ -172,7 +172,7 @@ the denial. The assignment fails because agy listed a denied action and the turn
 with no answer and no handoff. It never fails on ALP's inference alone: with no
 `denied_actions`, a `DONE` read with no output stays completed. This changes no flag, no
 allowlist and no read containment (t-ffa1, t-c8ee); it is reporting only.
-`test/integration/antigravity-denied-turn.test.js` replays the M0 frames in both variants,
+`test/integration/antigravity-denied-turn.test.ts` replays the M0 frames in both variants,
 and the T1 sequence, and asserts this result. Not yet checked on a real agy (chưa kiểm bằng
 agy thật).
 

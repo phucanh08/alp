@@ -13,7 +13,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { follow, userTurnAnswers } from '../../scripts/beta-acceptance-lib.ts';
+import { follow, userTurnAnswers, type Envelope, type Run } from '../../scripts/beta-acceptance-lib.ts';
 import { teardown } from '../support/teardown.ts';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -24,7 +24,7 @@ const MODEL = 'codex:gpt-5.6-sol';
 const NOTE = 'Supervisor check-in: did you verify the listing before you answered?';
 
 const PROXY = `#!/usr/bin/env node
-// Test-only proxy in front of the fake Codex (t-beb5); see beta-acceptance-user-turn.test.js.
+// Test-only proxy in front of the fake Codex (t-beb5); see beta-acceptance-user-turn.test.ts.
 const { spawn } = require('node:child_process');
 const { createInterface } = require('node:readline');
 const child = spawn(process.execPath, [${JSON.stringify(FAKE_CODEX)}, ...process.argv.slice(2)], { stdio: ['pipe', 'pipe', 'inherit'] });
@@ -63,12 +63,12 @@ test('C4 reads the answer of the user turn, not main\'s reply to the supervisor 
   mkdirSync(project);
   const proxy = path.join(base, 'codex-proxy.cjs');
   writeFileSync(proxy, PROXY, { mode: 0o755 });
-  const env = {
+  const env: NodeJS.ProcessEnv = {
     ...process.env, ALP_HOME: home, ALP_CODEX_BIN: proxy, ALP_CLAUDE_BIN: FAKE_CLAUDE, ALP_MODEL_CATALOG: 'static',
     FAKE_CODEX_STATE: path.join(base, 'fake-codex-threads.jsonl'), ALP_ACCEPT_TIMEOUT_MS: '60000',
   };
   delete env.ALP_AGENT_SESSION;
-  const cli = (...args) => spawnSync(process.execPath, [ALP, ...args], { env, cwd: project, encoding: 'utf8' });
+  const cli = (...args: string[]) => spawnSync(process.execPath, [ALP, ...args], { env, cwd: project, encoding: 'utf8' });
 
   const init = cli('init');
   assert.equal(init.status, 0, init.stderr);
@@ -81,7 +81,8 @@ test('C4 reads the answer of the user turn, not main\'s reply to the supervisor 
   assert.equal(started.status, 0, started.stderr);
   defer(() => { cli('daemon', 'stop'); });
 
-  const stream = follow({ log() {} }, 'C4', ['run', '--json', '--team', 'pho', '--model', MODEL, 'Read this folder and say which files it has. Change nothing.'], { env, cwd: project, alp: ALP });
+  // follow() only calls run.log(); a full Run would write a results file.
+  const stream = follow({ log() {} } as unknown as Run, 'C4', ['run', '--json', '--team', 'pho', '--model', MODEL, 'Read this folder and say which files it has. Change nothing.'], { env, cwd: project, alp: ALP });
   defer(() => stream.stop());
   assert.equal(await stream.exit, 0, stream.stderr());
 
@@ -98,15 +99,15 @@ test('C4 reads the answer of the user turn, not main\'s reply to the supervisor 
   assert.notEqual(all.at(-1), answers.at(-1));
   // ... the kit now reads the user turn's answer.
   assert.deepEqual(answers, userTurnAnswers(stream.envelopes, root));
-  const userTurn = stream.envelopes.find(e => e.sessionId === root && e.event?.type === 'turn.started' && e.event.origin === 'user').event.turnId;
+  const userTurn = stream.envelopes.find(e => e.sessionId === root && e.event?.type === 'turn.started' && e.event.origin === 'user')!.event.turnId;
   const userEnd = stream.envelopes.findIndex(e => e.sessionId === root && e.event?.type === 'turn.ended' && e.event.turnId === userTurn);
-  const lastUserMessage = stream.envelopes.slice(0, userEnd).filter(e => e.sessionId === root && e.event?.type === 'item' && e.event.item?.kind === 'assistant_message').at(-1).event.item.text;
+  const lastUserMessage = stream.envelopes.slice(0, userEnd).filter(e => e.sessionId === root && e.event?.type === 'item' && e.event.item?.kind === 'assistant_message').at(-1)!.event.item!.text;
   assert.equal(answers.at(-1), lastUserMessage);
 });
 
 test('userTurnAnswers keeps only the root\'s messages in turns of origin user', () => {
-  const e = (sessionId, event) => ({ sessionId, event });
-  const say = text => ({ type: 'item', item: { kind: 'assistant_message', id: text, text } });
+  const e = (sessionId: string, event: Envelope['event']): Envelope => ({ sessionId, event });
+  const say = (text: string) => ({ type: 'item', item: { kind: 'assistant_message', id: text, text } });
   const envelopes = [
     e('root', { type: 'turn.started', origin: 'user', turnId: 't1' }), e('root', say('answer')), e('child', say('child talk')),
     e('root', { type: 'turn.ended', turnId: 't1', state: 'completed' }), e('root', say('between turns')),

@@ -1,9 +1,9 @@
 // Backup, restore, migration and downgrade with a real alpd (ALPD §68): a fake Codex app-server
 // stands in for the provider, `alp backup` and `alp restore` run as the user runs them, and alpd
 // is started on the result. No model is called.
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { closeSync, openSync } from 'node:fs';
@@ -24,18 +24,24 @@ const BACKUP_MODULE = fileURLToPath(new URL('../../packages/core/dist/backup.js'
 const MODEL = 'codex:gpt-5.6-sol';
 const skip = process.platform === 'win32' && 'POSIX processes and sockets only';
 const execute = promisify(execFile);
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const text = body => [{ type: 'text', text: body }];
+// `any`: alpd answers, log records and doctor's report are JSON whose shape depends on the method or record.
+type Json = any;
+/** A started alpd as the tests drive it. */
+type Daemon = { request: (method: string, params?: unknown) => Promise<Json> };
+type Started = Daemon & { pid: number | undefined, stop: () => Promise<void> };
 
-async function until(check, what) {
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const text = (body: string) => [{ type: 'text', text: body }];
+
+async function until(check: () => unknown, what: string) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await sleep(25); }
   assert.fail(`${what} did not happen`);
 }
 
 /** Every file under `root` with its hash; logs, backups and alpd's process files are left out. */
-async function tree(root) {
-  const found = {};
-  async function walk(relative) {
+async function tree(root: string) {
+  const found: Record<string, string> = {};
+  async function walk(relative: string) {
     for (const entry of await readdir(path.join(root, relative), { withFileTypes: true }).catch(() => [])) {
       const name = relative ? `${relative}/${entry.name}` : entry.name;
       if (['logs', 'backups', 'alpd.lock', 'alpd.sock', 'alpd.json', 'state/alpd.running', 'state/alpd.held'].includes(name)) continue;
@@ -49,7 +55,7 @@ async function tree(root) {
   return found;
 }
 
-async function harness(t) {
+async function harness(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-backup-it-'));
   const home = path.join(directory, 'home');
   await mkdir(home, { mode: 0o700 });
@@ -59,15 +65,17 @@ async function harness(t) {
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
   const logFile = path.join(directory, 'alpd.log');
   const env = { ...process.env, ALP_HOME: home, ALP_CODEX_BIN: FAKE_CODEX, FAKE_CODEX_JOURNAL: path.join(directory, 'provider.jsonl'), ALP_SUPERVISE: '0' };
-  const started = [];
+  const started: ChildProcess[] = [];
 
   /** alpd as `alpd --detach` leaves it: its own process group, output to a log. Resolves once ready, or with its exit. */
-  async function start({ expectExit = false } = {}) {
+  async function start(options: { expectExit: true }): Promise<{ code: number | null }>;
+  async function start(options?: { expectExit?: false }): Promise<Started>;
+  async function start({ expectExit = false } = {}): Promise<{ code: number | null } | Started> {
     const log = openSync(logFile, 'a');
     const child = spawn(process.execPath, [ALPD], { detached: true, stdio: ['ignore', log, log], env });
     closeSync(log);
     started.push(child);
-    const exited = once(child, 'exit').then(([code]) => code);
+    const exited = once(child, 'exit').then(([code]) => code as number | null);
     if (expectExit) return { code: await exited };
     let gone = false;
     void exited.then(() => { gone = true; });
@@ -76,30 +84,30 @@ async function harness(t) {
       const lock = await readLock(home);
       return lock?.ready && lock.pid === child.pid;
     }, 'alpd to be ready');
-    const client = await connect((await readLock(home)).socket, { name: 'backup-test', version: '0' });
+    const client = await connect((await readLock(home))!.socket, { name: 'backup-test', version: '0' });
     return {
       pid: child.pid,
-      request: (method, params) => client.request(method, params),
+      request: (method: string, params?: unknown) => client.request(method, params),
       async stop() { await client.request('daemon.shutdown').catch(() => {}); client.close(); await exited; },
     };
   }
 
   /** `alp …` as the user runs it, against this home. */
-  const alp = (...args) => execute(process.execPath, [CLI, ...args], { env, cwd: directory }).then(({ stdout }) => stdout, error => { throw Object.assign(error, { message: `${error.message}\n${error.stdout}${error.stderr}` }); });
+  const alp = (...args: string[]) => execute(process.execPath, [CLI, ...args], { env, cwd: directory }).then(({ stdout }) => stdout, error => { throw Object.assign(error, { message: `${error.message}\n${error.stdout}${error.stderr}` }); });
   /** alp doctor --json, with no provider on PATH to probe; it exits 1 when a check fails. */
   const doctor = () => execute(process.execPath, [CLI, 'doctor', '--json'], { env: { ...env, PATH: path.join(directory, 'empty') }, cwd: directory })
     .then(({ stdout }) => JSON.parse(stdout), error => JSON.parse(error.stdout));
   /** Log records of the alpd processes this test started and of those `alp` started (they log in the home). */
   const logRecords = async () => [logFile, path.join(home, 'logs', 'alpd.log')]
     .flatMap(async file => (await readFile(file, 'utf8').catch(() => '')).split('\n').filter(line => line.startsWith('{')).map(line => JSON.parse(line)))
-    .reduce(async (all, part) => [...await all, ...await part], []);
+    .reduce<Promise<Json[]> | Json[]>(async (all, part) => [...await all, ...await part], []);
 
   t.after(async () => {
-    for (const child of started) if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid, 'SIGKILL'); } catch {}
-    for (const line of (await readFile(env.FAKE_CODEX_JOURNAL, 'utf8').catch(() => '')).split('\n').filter(Boolean)) try { process.kill(JSON.parse(line).pid, 'SIGKILL'); } catch {}
+    for (const child of started) if (child.exitCode === null && child.signalCode === null) try { process.kill(-child.pid!, 'SIGKILL'); } catch {}
+    for (const line of (await readFile(env.FAKE_CODEX_JOURNAL!, 'utf8').catch(() => '')).split('\n').filter(Boolean)) try { process.kill(JSON.parse(line).pid, 'SIGKILL'); } catch {}
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
-  return { directory, home, project, start, alp, doctor, logRecords, create: (daemon, params = {}) => daemon.request('session.create', { spec: { cwd: project, persist: true, model: MODEL }, ...params }) };
+  return { directory, home, project, start, alp, doctor, logRecords, create: (daemon: Daemon, params = {}) => daemon.request('session.create', { spec: { cwd: project, persist: true, model: MODEL }, ...params }) };
 }
 
 test('alp backup and alp restore round-trip sessions, receipts, timelines, tasks and settings through alpd', { skip }, async t => {
@@ -107,7 +115,7 @@ test('alp backup and alp restore round-trip sessions, receipts, timelines, tasks
   const first = await h.start();
   const { session } = await h.create(first);
   assert.equal((await first.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('kept') })).outcome, 'accepted');
-  await until(async () => (await first.request('session.list', { includeClosed: true })).sessions.find(row => row.id === session.id)?.status === 'idle', 'the turn to end');
+  await until(async () => (await first.request('session.list', { includeClosed: true })).sessions.find((row: Json) => row.id === session.id)?.status === 'idle', 'the turn to end');
   await first.request('session.rename', { sessionId: session.id, title: 'before the backup' });
   const kept = await createTask(h.project, { title: 'kept task' }, 'user');
   await first.stop();
@@ -135,16 +143,16 @@ test('alp backup and alp restore round-trip sessions, receipts, timelines, tasks
   assert.equal(safetyFiles.length, 1);
   const safety = path.join(h.home, 'backups', safetyFiles[0]);
   assert.ok(restored.split('\n').includes(`the data it replaced is in ${safety}; alp restore ${safety} restores that data with the same workspace authority checks`));
-  await until(async () => { const lock = await readLock(h.home); return lockAlive(lock) && lock.ready && lock.pid !== second.pid; }, 'alpd to start again');
+  await until(async () => { const lock = await readLock(h.home); return lockAlive(lock) && lock!.ready && lock!.pid !== second.pid; }, 'alpd to start again');
 
   const third = await (async () => {
     const lock = await readLock(h.home);
-    const client = await connect(lock.socket, { name: 'backup-test', version: '0' });
+    const client = await connect(lock!.socket, { name: 'backup-test', version: '0' });
     t.after(async () => { await client.request('daemon.shutdown').catch(() => {}); client.close(); await until(async () => !lockAlive(await readLock(h.home)), 'alpd to stop'); });
-    return { request: (method, params) => client.request(method, params) };
+    return { request: (method: string, params?: unknown) => client.request(method, params) };
   })();
   const { sessions } = await third.request('session.list', { includeClosed: true });
-  assert.deepEqual(sessions.map(row => [row.id, row.title]), [[session.id, 'before the backup']]);
+  assert.deepEqual(sessions.map((row: Json) => [row.id, row.title]), [[session.id, 'before the backup']]);
   // The receipt came back with its timeline: a retried prompt is answered, not sent again.
   await h.create(third, { sessionId: session.id });
   const repeat = await third.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('kept') });
@@ -175,7 +183,7 @@ test('state from a newer ALP: alpd refuses to start and changes nothing; alp res
 
   await assert.rejects(h.alp('restore', file), /STATE_SCHEMA_TOO_NEW|schema 99/);
   assert.deepEqual(await tree(h.home), before);
-  assert.equal((await h.doctor()).checks.find(check => check.id === 'schema').status, 'fail');
+  assert.equal((await h.doctor()).checks.find((check: Json) => check.id === 'schema').status, 'fail');
 });
 
 test('alpd migrates schema 1 state at start, keeps a backup of it, and continues a migration cut short', { skip }, async t => {
@@ -183,7 +191,7 @@ test('alpd migrates schema 1 state at start, keeps a backup of it, and continues
   const daemon = await h.start();
   const { session } = await h.create(daemon);
   await daemon.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('legacy') });
-  await until(async () => (await daemon.request('session.list', { includeClosed: true })).sessions.find(row => row.id === session.id)?.status === 'idle', 'the turn to end');
+  await until(async () => (await daemon.request('session.list', { includeClosed: true })).sessions.find((row: Json) => row.id === session.id)?.status === 'idle', 'the turn to end');
   await daemon.stop();
   // Make it a schema 1 state as an ALP before 0.11 left it: no marker, timeline lines without cursors.
   const timeline = path.join(h.home, 'state', 'timeline', `${session.id}.jsonl`);
@@ -222,13 +230,13 @@ test('a restore killed part way is rolled back when alpd next starts', { skip },
     await restoreBackup({ home: process.argv[1], file: process.argv[2], beforeSwap: index => { if (index === 5) process.kill(process.pid, 'SIGKILL'); } });`;
   await assert.rejects(execute(process.execPath, ['--input-type=module', '-e', script, h.home, file]));
   assert.ok((await readdir(h.home)).includes('restore-journal.json'));
-  assert.equal((await h.doctor()).checks.find(check => check.id === 'restore').status, 'warn');
+  assert.equal((await h.doctor()).checks.find((check: Json) => check.id === 'restore').status, 'warn');
 
   const next = await h.start();
   t.after(() => next.stop());
   assert.ok((await h.logRecords()).some(record => record.code === 'ALP_RESTORE_SETTLED'));
   const { sessions } = await next.request('session.list', { includeClosed: true });
-  assert.deepEqual(sessions.map(row => row.id), [session.id]);
+  assert.deepEqual(sessions.map((row: Json) => row.id), [session.id]);
   const after = await tree(h.home);
   assert.equal(after['settings.json'], before['settings.json']);
   assert.ok(!Object.keys(after).some(name => name.includes('pre-restore-') || name.startsWith('.restore-')));

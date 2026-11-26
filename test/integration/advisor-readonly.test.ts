@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,14 +7,14 @@ import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { profileFor } from '@anhlp/alp-core/permissions';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
-import { fakeTransport, until } from '../support/fake-agent.ts';
+import { fakeTransport, until, type FakeAgent } from '../support/fake-agent.ts';
 import { teardown } from '../support/teardown.ts';
 
 /**
  * A custom agent serving as a team's advisor or reviewer is read-only, whatever its name, its
  * agent.json mode, or a permission profile that gives it more (P0: no name-based exemption).
  */
-async function setup(t, members) {
+async function setup(t: TestContext, members: Record<string, { role: string }>) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-advisor-'));
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -36,7 +36,7 @@ async function setup(t, members) {
   }));
   // Conflicting profiles: settings give both agents more than read-only.
   await writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify({ defaultAgent: 'main', workflow: { mode: 'squad', supervisor: false }, permissions: { agents: { auditor: 'full-access', checker: 'workspace-write' } } }));
-  const agents = [];
+  const agents: FakeAgent[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(agents), supervisor: false, libraryDir: library, runLogDir: path.join(directory, 'runs') });
   defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, workflow: 'squad' });
@@ -47,8 +47,8 @@ async function setup(t, members) {
 test('profileFor caps a read-only member at read-only, even over a profile that gives more; others keep theirs', async t => {
   const { root, library } = await setup(t, { auditor: { role: 'advisor' } });
   assert.deepEqual(await profileFor(root, library, 'auditor', { readOnly: true }), { name: 'full-access', base: 'read-only', cappedFrom: 'full-access', allow: [], ask: [], deny: [], beyondMode: 'refuse' });
-  assert.equal((await profileFor(root, library, 'auditor')).base, 'full-access', 'outside a read-only role the profile applies as before');
-  assert.equal((await profileFor(root, library, 'nobody', { readOnly: true })).base, 'read-only', 'no profile at all: read-only');
+  assert.equal((await profileFor(root, library, 'auditor'))!.base, 'full-access', 'outside a read-only role the profile applies as before');
+  assert.equal((await profileFor(root, library, 'nobody', { readOnly: true }))!.base, 'read-only', 'no profile at all: read-only');
 });
 
 test('a custom advisor and a custom reviewer run read-only when delegated, whatever the caller, agent.json or settings ask', async t => {

@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import { validateUserSettings } from '@anhlp/alp-core/validation';
 const exec = promisify(execFile);
 const root = path.resolve(import.meta.dirname, '../..');
-const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
 for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-failure', 'package-startup-failure']) {
   test(`fake web acceptance cleans owned processes on ${scenario}`, async () => {
@@ -127,7 +127,7 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
     let pids = [];
     try {
       const result = await exec(process.execPath, [entry, ...(scenario === 'package-startup-failure' ? ['--packs', base] : [])], { env, timeout: 20_000 }).catch(error => error);
-      pids = (await readFile(journal, 'utf8')).trim().split('\n').map(JSON.parse);
+      pids = (await readFile(journal, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
       assert.equal(result.code ?? 0, scenario === 'pass' ? 0 : 1, result.stderr);
       assert.equal(pids.length, scenario === 'setup-failure' ? 1 : 2);
       for (const entry of pids) assert.equal(alive(entry.pid), false, `${entry.role} ${entry.pid} leaked on ${scenario}`);
@@ -140,7 +140,7 @@ for (const scenario of ['pass', 'setup-failure', 'web-startup-failure', 'step-fa
       assert.equal(settings.web.relay.enabled, false);
     } finally {
       // Test failure must not reproduce the leak in the test runner itself.
-      if (!pids.length) pids = (await readFile(journal, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(JSON.parse);
+      if (!pids.length) pids = (await readFile(journal, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
       for (const { pid } of pids) if (alive(pid)) process.kill(pid, 'SIGKILL');
       for (let i = 0; i < 200 && pids.some(({ pid }) => alive(pid)); i++) await new Promise(resolve => setTimeout(resolve, 10));
       if (scenario === 'package-startup-failure') {

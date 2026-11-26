@@ -3,37 +3,42 @@
 // gateway and its authentication are Task 08). Also: a local abort does not cancel on alpd, a
 // reconnect resends nothing and reattaches with the current cursor contract, and the portable
 // entries bundle for browsers and React Native with no Node built-in.
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
+import type { AddressInfo, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { build } from 'esbuild';
+import { build, type Platform } from 'esbuild';
 import WebSocket, { WebSocketServer } from 'ws';
 
 import { createAlpRuntime } from '../../dist/runtime/index.js';
 import { createDaemonServer } from '../../dist/daemon/index.js';
 import { initProject } from '@anhlp/alp-core/init';
-import { fakeTransport } from '../support/fake-agent.ts';
+import { fakeTransport, type FakeAgent } from '../support/fake-agent.ts';
 import { connect, connectSocket, daemonPaths } from '../../packages/client/dist/index.js';
 import { AlpRpcClient, MAX_FRAME, createReconnectingClient, hello, isAlpClientError } from '../../packages/client/dist/portable.js';
 import { connectWebSocket } from '../../packages/client/dist/connection/websocket.js';
 
 const root = path.resolve(import.meta.dirname, '..', '..');
-const text = body => [{ type: 'text', text: body }];
+// `any`: event envelopes and WebSocket frames are JSON of every shape; the tests read the fields they assert on.
+type Json = any;
+type Transport = Awaited<ReturnType<typeof connectSocket>>;
 
-async function until(check, what = 'condition') {
+const text = (body: string) => [{ type: 'text', text: body }];
+
+async function until(check: () => unknown, what = 'condition') {
   for (let i = 0; i < 1000; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`${what} never arrived`);
 }
 
-async function daemon(t) {
+async function daemon(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-sdk-'));
   const project = path.join(directory, 'project');
   await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'] } }));
-  const agents = [];
+  const agents: FakeAgent[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(agents) });
   const socketPath = daemonPaths(directory).socket;
   const server = createDaemonServer({ runtime, socketPath, version: 'test' });
@@ -47,15 +52,15 @@ async function daemon(t) {
  * A test-only WebSocket bridge: each WebSocket connection gets its own connection to alpd's
  * socket and frames pass through unchanged. No authentication (Task 08 designs that).
  */
-async function bridge(t, socketPath) {
+async function bridge(t: TestContext, socketPath: string) {
   const server = http.createServer();
   const sockets = new WebSocketServer({ server, maxPayload: MAX_FRAME });
-  const connections = [];
+  const connections: Array<{ ws: WebSocket, frames: Json[] }> = [];
   sockets.on('connection', ws => {
-    const frames = [];
+    const frames: Json[] = [];
     connections.push({ ws, frames });
-    const early = [];
-    let transport;
+    const early: string[] = [];
+    let transport: Transport | undefined;
     ws.on('message', (data, binary) => {
       const frame = binary ? '' : data.toString('utf8');
       frames.push(JSON.parse(frame));
@@ -67,13 +72,13 @@ async function bridge(t, socketPath) {
       for (const frame of early.splice(0)) transport.send(frame);
       transport.onMessage(frame => ws.send(frame));
       transport.onClose(() => ws.close(1011, 'alpd connection ended'));
-      ws.on('close', () => transport.close());
+      ws.on('close', () => transport!.close());
     }, () => ws.close(1011, 'alpd unreachable'));
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { for (const client of sockets.clients) client.terminate(); await new Promise(resolve => server.close(resolve)); });
   return {
-    url: `ws://127.0.0.1:${server.address().port}/rpc`,
+    url: `ws://127.0.0.1:${(server.address() as AddressInfo).port}/rpc`,
     connections,
     /** Ends every bridged connection from the server side with `code`. */
     kick(code = 4000, reason = 'kicked') { for (const { ws } of connections) if (ws.readyState === WebSocket.OPEN) ws.close(code, reason); },
@@ -81,15 +86,15 @@ async function bridge(t, socketPath) {
 }
 
 /** The same scenario over any transport: handshake, a session's events, and a local abort. */
-async function scenario(client, { project, agents }) {
+async function scenario(client: AlpRpcClient, { project, agents }: { project: string, agents: FakeAgent[] }) {
   assert.equal((await hello(client, { name: 'sdk-test', version: '0' })).protocolVersion, 1);
-  const events = [];
+  const events: Json[] = [];
   client.onEvent(envelope => events.push(envelope));
   const status = await client.request('daemon.status');
   assert.equal(status.health.live, true);
   const { session } = await client.request('session.create', { spec: { cwd: project } });
   await client.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('Hello') });
-  agents.at(-1).finish('Hi there');
+  agents.at(-1)!.finish('Hi there');
   await until(() => events.some(e => e.sessionId === session.id && e.event.type === 'turn.ended'), 'turn.ended');
   const types = events.filter(e => e.sessionId === session.id).map(e => e.event.type);
   for (const type of ['session.opened', 'session.ready', 'prompt.accepted', 'turn.started', 'turn.ended']) assert.ok(types.includes(type), `${type} in ${types}`);
@@ -100,7 +105,7 @@ async function scenario(client, { project, agents }) {
   controller.abort();
   await assert.rejects(prompt, error => isAlpClientError(error, 'aborted'));
   await until(() => events.some(e => e.event.type === 'prompt.accepted' && e.event.clientMessageId === 'm2'), 'the aborted prompt accepted by alpd');
-  agents.at(-1).finish('Again done');
+  agents.at(-1)!.finish('Again done');
   return session;
 }
 
@@ -137,7 +142,7 @@ test('a WebSocket disconnect rejects the waiting request with the close code', a
   const waiting = client.request('test.never');
   await until(() => ws.connections[0]?.frames.some(frame => frame.method === 'test.never'), 'the request at alpd');
   ws.kick(4000, 'kicked');
-  await assert.rejects(waiting, error => isAlpClientError(error, 'disconnected') && error.data?.code === 4000 && error.data?.reason === 'kicked');
+  await assert.rejects(waiting, error => isAlpClientError(error, 'disconnected') && (error as { data?: { code?: number, reason?: string } }).data?.code === 4000 && (error as { data?: { code?: number, reason?: string } }).data?.reason === 'kicked');
   assert.equal(closes.length, 1);
 });
 
@@ -149,8 +154,8 @@ test('reconnecting over WebSocket resends nothing and reattaches after the last 
   t.after(() => viewer.close());
   const { session } = await viewer.request('session.create', { spec: { cwd: alpd.project } });
 
-  const seen = [];
-  let cursor;
+  const seen: number[] = [];
+  let cursor: number | undefined;
   const reconnecting = createReconnectingClient({
     connect: ({ signal }) => connectWebSocket(ws.url, { WebSocket, signal }),
     // The caller's hook: handshake, then reattach with the cursor contract alpd has today (ALPD §66).
@@ -166,7 +171,7 @@ test('reconnecting over WebSocket resends nothing and reattaches after the last 
 
   await viewer.request('session.prompt', { sessionId: session.id, clientMessageId: 'm1', content: text('One') });
   alpd.agents[0].finish('First');
-  await until(() => seen.length && seen.at(-1) >= 1 && ws.connections.length === 1, 'events over WebSocket');
+  await until(() => seen.length && seen.at(-1)! >= 1 && ws.connections.length === 1, 'events over WebSocket');
   const inFlight = reconnecting.request('test.never');
   await until(() => ws.connections[0].frames.some(frame => frame.method === 'test.never'), 'the request at alpd');
   ws.kick(1012, 'restart');
@@ -184,16 +189,16 @@ test('reconnecting over WebSocket resends nothing and reattaches after the last 
 
 test('the portable entries bundle for browsers and React Native with no Node built-in or global', async () => {
   const allowed = /^packages\/(client\/dist\/(portable|connection\/websocket|rpc\/(client|errors|framing|connection\/handshake|connection\/reconnect|registry|terminal-directory|timers))|protocol\/dist\/(public|wire))\.js$/;
-  for (const [platform, conditions] of [['browser', []], ['neutral', ['react-native', 'import']]]) {
+  for (const [platform, conditions] of [['browser', []], ['neutral', ['react-native', 'import']]] as Array<[Platform, string[]]>) {
     const result = await build({
       absWorkingDir: root, bundle: true, write: false, metafile: true, format: 'esm', platform, conditions, mainFields: ['react-native', 'browser', 'module', 'main'],
       stdin: { contents: "export * from '@anhlp/alp-client/portable';\nexport * from '@anhlp/alp-client/websocket';", resolveDir: root, loader: 'js' },
       logLevel: 'silent',
     });
-    const inputs = Object.keys(result.metafile.inputs).filter(input => input !== '<stdin>');
+    const inputs = Object.keys(result.metafile!.inputs).filter(input => input !== '<stdin>');
     for (const input of inputs) assert.match(input, allowed, `${platform} bundle pulls in ${input}`);
     assert.ok(inputs.length >= 8, `${platform}: ${inputs}`);
-    const output = result.outputFiles[0].text;
+    const output = result.outputFiles![0].text;
     assert.doesNotMatch(output, /\bnode:|\bprocess\.|\bBuffer\b|\brequire\(/, `${platform} bundle`);
   }
   // The Node entry stays Node-only: bundling it for a browser fails on its built-ins.
@@ -202,7 +207,7 @@ test('the portable entries bundle for browsers and React Native with no Node bui
 
 test('real ws timeout and abort reject without an unhandled socket error', async t => {
   const net = await import('node:net');
-  const peers = new Set();
+  const peers = new Set<Socket>();
   const server = net.createServer(socket => {
     peers.add(socket);
     socket.on('close', () => peers.delete(socket));
@@ -213,8 +218,8 @@ test('real ws timeout and abort reject without an unhandled socket error', async
     for (const peer of peers) peer.destroy();
     await new Promise(resolve => server.close(resolve));
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const url = `ws://127.0.0.1:${server.address().port}`;
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`;
   await assert.rejects(connectWebSocket(url, { WebSocket, timeoutMs: 20 }), error => isAlpClientError(error, 'timeout'));
   const abort = new AbortController();
   const pending = connectWebSocket(url, { WebSocket, signal: abort.signal });

@@ -281,7 +281,7 @@ JSON. Khi gặp đúng trường hợp đó (không có dòng JSON, có `Usage:`
 (DMG) và CLI được cài và cập nhật riêng: một ALP.app mới vẫn phải mở được alp `beta.9`–`beta.13`. Bỏ nó
 khi các bản đó không còn được hỗ trợ.
 
-Test: `test/integration/dashboard-process.test.js` (hai test `t-81b0.4`: định dạng và exit code),
+Test: `test/integration/dashboard-process.test.ts` (hai test `t-81b0.4`: định dạng và exit code),
 `apps/desktop/test/dashboard.test.ts`.
 
 ## 4. Thiết kế
@@ -783,7 +783,7 @@ thì bỏ qua, hàng giữ dữ liệu cũ. Schedules đọc khi mở màn và m
 - Chỉ một cây session được attach tại một thời điểm. Session khác cập nhật qua poll list mỗi 15
   giây.
 - Children/delegation chỉ có unit test. Fake provider của E2E không delegate.
-- E2E thường dùng fake provider. Riêng `e2e/attachment-files-real.spec.js` (opt-in, không chạy trong CI) gửi file qua trình duyệt tới Codex và Claude thật; các lần chạy thật khác của #121 là script `test/e2e/*-real-e2e.mjs` không qua trình duyệt ([issue-121-acceptance.md](issue-121-acceptance.md)).
+- E2E thường dùng fake provider. Riêng `e2e/attachment-files-real.spec.js` (opt-in, không chạy trong CI) gửi file qua trình duyệt tới Codex và Claude thật; các lần chạy thật khác của #121 là script `test/e2e/*-real-e2e.ts` không qua trình duyệt ([issue-121-acceptance.md](issue-121-acceptance.md)).
 - Library qua gateway mở nội dung đã redaction bằng `library.get` với `project.read`
   trong workspace được cấp: file Markdown hiển thị dưới dạng text, cấu hình dưới dạng JSON,
   secret hiển thị là `‹hidden on the host›`. Ghi chỉ dành cho instruction agents/skills riêng của project

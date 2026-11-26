@@ -8,7 +8,7 @@
 // it DONE with no output, so only `denied_actions` shows the refusal. A third follows T1 (agy
 // 1.5.16, as the evidence doc records it): the refused read, then a read of a workspace file that
 // does not exist, reported DONE with no output, which must not be taken for the denial.
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -60,7 +60,10 @@ if (at < 0 || args[at + 1] !== 'accept-edits') {
 }
 `;
 
-async function setup(t, variant) {
+// `any`: event envelopes are a union over every event type; the tests read the fields of the ones they filter.
+type Json = any;
+
+async function setup(t: TestContext, variant: string) {
   const defer = teardown(t);
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-denied-'));
   // Undone LAST: the runtime and every agy child have stopped before the directory goes.
@@ -94,14 +97,14 @@ async function setup(t, variant) {
     libraryDir: home,
     runLogDir: path.join(dir, 'runs'),
   });
-  const events = [];
+  const events: Json[] = [];
   runtime.onEvent(envelope => events.push(envelope));
   defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, model: MODEL, mode: 'full-access' });
   return { dir, runtime, events };
 }
 
-async function until(check, what) {
+async function until(check: () => unknown, what: string) {
   for (let i = 0; i < 2000; i++) {
     if (await check()) return;
     await new Promise(resolve => setTimeout(resolve, 5));
@@ -110,19 +113,19 @@ async function until(check, what) {
 }
 
 /** Delegates one workspace-write assignment that agy's denial fails, and returns what the requester's alp_delegate got back. */
-async function delegate({ runtime, events }) {
+async function delegate({ runtime, events }: { runtime: ReturnType<typeof createAlpRuntime>, events: Json[] }) {
   const task = 'Open the library skill you need, then make the change and file your handoff.';
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: `call_tool alp_delegate ${JSON.stringify({ agent: 'peer', model: MODEL, mode: 'workspace-write', wait: true, task })}` }] });
-  const ended = entry => entry.sessionId === 'root' && entry.event.type === 'turn.ended';
+  const ended = (entry: Json) => entry.sessionId === 'root' && entry.event.type === 'turn.ended';
   await until(() => events.some(ended), 'the requester turn');
-  const said = events.filter(entry => entry.sessionId === 'root' && entry.event.type === 'item' && entry.event.item.kind === 'assistant_message').map(entry => entry.event.item.text).at(-1);
+  const said = events.filter((entry: Json) => entry.sessionId === 'root' && entry.event.type === 'item' && entry.event.item.kind === 'assistant_message').map(entry => entry.event.item.text).at(-1);
   const match = /^tool alp_delegate: (.*)$/s.exec(said ?? '');
   assert.ok(match, `the requester got the delegate result: ${said}`);
   const reply = JSON.parse(match[1]);
   // A failed assignment comes back to alp_delegate as an error result (t-a648); its payload is checked by each test.
   assert.equal(reply.isError, true, said);
   const result = JSON.parse(reply.content[0].text);
-  const child = events.filter(entry => entry.sessionId === result.sessionId).map(entry => entry.event);
+  const child: Json[] = events.filter(entry => entry.sessionId === result.sessionId).map(entry => entry.event);
   return { result, child };
 }
 

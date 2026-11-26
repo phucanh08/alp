@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -11,6 +11,16 @@ import { exportBeads, importBeads, parseJsonl } from '@anhlp/alp-core/beads';
 import { findFormula, listFormulas, pourFormula, validateFormula } from '@anhlp/alp-core/formulas';
 import { addGate, closeTask, createTask, getTask, linkTask, loadTasks, readyTasks, resolveGate, startTask, submitTask } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime } from '../../dist/runtime/index.js';
+import type { RuntimeOptions, RuntimeTransport } from '@anhlp/alp-runtime';
+
+// `any`: app-server messages and tool results are JSON of every shape; the tests read the fields they assert on.
+type Json = any;
+/** The fake app-server at the end of this file: the transport the runtime drives, plus what the tests call on it. */
+type FakeRuntime = RuntimeTransport & {
+  kind?: string, calls: Array<{ method: string, params: Json }>, threadId: string, turnId: string | undefined, closed?: boolean,
+  notification?: (method: string, params: Json) => void, failure?: (error: unknown) => void, serverRequest?: (method: string, params: Json) => Promise<Json>,
+  call(tool: string, args: Json): Promise<Json>, finish(text?: string): void,
+};
 
 const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.url));
 
@@ -20,20 +30,20 @@ const CLI = fileURLToPath(new URL('../../packages/cli/dist/cli.js', import.meta.
  * the runtime's 5 s gate-watch timer could still write a gate card into runs/ (t-d29a). Teardowns
  * given to `cleanup` run first, last added first, and the directory goes once they have finished.
  */
-async function project(t) {
+async function project(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-beads-'));
-  const cleanups = [];
+  const cleanups: Array<() => unknown> = [];
   t.after(async () => {
     try { for (const cleanup of cleanups.reverse()) await cleanup(); }
     finally { await rm(directory, { recursive: true, force: true }); }
   });
   const root = path.join(directory, 'project');
   await mkdir(path.join(root, '.alp'), { recursive: true });
-  return { directory, root, cleanup: fn => cleanups.push(fn) };
+  return { directory, root, cleanup: (fn: () => unknown) => cleanups.push(fn) };
 }
 
-const jsonl = records => records.map(record => JSON.stringify(record)).join('\n') + '\n';
-const strip = ({ rev: _rev, log: _log, updatedAt: _updatedAt, ...task }) => task;
+const jsonl = (records: object[]) => records.map(record => JSON.stringify(record)).join('\n') + '\n';
+const strip = ({ rev: _rev, log: _log, updatedAt: _updatedAt, ...task }: { rev?: unknown, log?: unknown, updatedAt?: unknown, [key: string]: unknown }) => task;
 
 // --- beads JSONL -----------------------------------------------------------------
 
@@ -55,13 +65,13 @@ test('export writes beads issues, and importing them into another project gives 
   const issues = exportBeads(tasks);
   assert.deepEqual(issues.map(issue => issue.id), [epic.id, first.id, second.id, found.id].sort());
   const byId = new Map(issues.map(issue => [issue.id, issue]));
-  assert.deepEqual(byId.get(first.id).dependencies, [{ issue_id: first.id, depends_on_id: epic.id, type: 'parent-child' }]);
-  assert.deepEqual(byId.get(second.id).dependencies.map(dep => [dep.depends_on_id, dep.type]), [[first.id, 'blocks'], [epic.id, 'parent-child']]);
-  assert.deepEqual(byId.get(found.id).dependencies.map(dep => [dep.depends_on_id, dep.type]), [[first.id, 'discovered-from'], [second.id, 'related']]);
+  assert.deepEqual(byId.get(first.id)!.dependencies, [{ issue_id: first.id, depends_on_id: epic.id, type: 'parent-child' }]);
+  assert.deepEqual(byId.get(second.id)!.dependencies!.map(dep => [dep.depends_on_id, dep.type]), [[first.id, 'blocks'], [epic.id, 'parent-child']]);
+  assert.deepEqual(byId.get(found.id)!.dependencies!.map(dep => [dep.depends_on_id, dep.type]), [[first.id, 'discovered-from'], [second.id, 'related']]);
   // beads has no review: it is in progress there, and the metadata keeps the rest.
-  assert.deepEqual([byId.get(first.id).status, byId.get(first.id).assignee, byId.get(first.id).metadata.alp.status], ['in_progress', 'peer', 'review']);
-  assert.equal(byId.get(second.id).defer_until, until);
-  assert.deepEqual([byId.get(found.id).status, byId.get(found.id).close_reason, byId.get(found.id).issue_type], ['closed', 'Not ours', 'bug']);
+  assert.deepEqual([byId.get(first.id)!.status, byId.get(first.id)!.assignee, byId.get(first.id)!.metadata!.alp.status], ['in_progress', 'peer', 'review']);
+  assert.equal(byId.get(second.id)!.defer_until, until);
+  assert.deepEqual([byId.get(found.id)!.status, byId.get(found.id)!.close_reason, byId.get(found.id)!.issue_type], ['closed', 'Not ours', 'bug']);
 
   const other = path.join(directory, 'other');
   await mkdir(path.join(other, '.alp'), { recursive: true });
@@ -73,7 +83,7 @@ test('export writes beads issues, and importing them into another project gives 
   for (const task of tasks) {
     const copy = copied.find(entry => entry.id === task.id);
     // Nobody holds the copy of a task in review, so it has no assignee.
-    assert.deepEqual({ ...strip(copy), assignee: null }, { ...strip(task), assignee: null }, task.id);
+    assert.deepEqual({ ...strip(copy!), assignee: null }, { ...strip(task), assignee: null }, task.id);
   }
   assert.deepEqual(readyTasks(copied).map(task => task.id), []);
 
@@ -123,7 +133,7 @@ test('import takes beads-native issues: new ids, dependencies after the fact, an
   assert.deepEqual([notes.type, notes.status, notes.labels, notes.blockedBy], ['chore', 'open', ['docs'], [made['bd-a1b2.1']]]);
   assert.deepEqual(notes.gates.map(gate => [gate.kind, gate.until]), [['timer', later]]);
   const old = await getTask(root, made['bd-0000']);
-  assert.deepEqual([old.type, old.labels, old.status, old.closed.summary, old.closed.at], ['task', ['beads:message'], 'closed', 'Shipped', '2026-01-01T00:00:00Z']);
+  assert.deepEqual([old.type, old.labels, old.status, old.closed!.summary, old.closed!.at], ['task', ['beads:message'], 'closed', 'Shipped', '2026-01-01T00:00:00Z']);
   assert.deepEqual(report.warnings, [
     'bd-c3d4: was in progress with alice in beads; imported as open',
     'bd-c3d4: blocks bd-zzzz is not in the file or the project; skipped',
@@ -135,7 +145,7 @@ test('import takes beads-native issues: new ids, dependencies after the fact, an
   const update = await importBeads(root, changed);
   assert.deepEqual([update.created, update.updated], [[], [{ id: made['bd-c3d4'], from: 'bd-c3d4' }]]);
   const closed = await getTask(root, made['bd-c3d4']);
-  assert.deepEqual([closed.title, closed.status, closed.closed.by, closed.log.at(-1).event], ['Write the notes', 'closed', 'beads', 'imported']);
+  assert.deepEqual([closed.title, closed.status, closed.closed!.by, closed.log.at(-1)!.event], ['Write the notes', 'closed', 'beads', 'imported']);
 });
 
 // --- formulas --------------------------------------------------------------------
@@ -180,9 +190,9 @@ test('formulas are found by name, checked, and poured into an epic with a task p
   await writeFile(path.join(home, 'formulas', 'release.formula.json'), JSON.stringify({ formula: 'release', steps: [{ id: 'x', title: 'Other' }] }));
   await writeFile(path.join(home, 'formulas', 'review.formula.json'), JSON.stringify({ formula: 'review', steps: [{ id: 'read', title: 'Read it' }] }));
   await writeFile(path.join(root, '.beads', 'formulas', 'broken.formula.toml'), 'formula = "broken"\n[[steps]]\nid = "a"\ntitle = "A"\nneeds = ["b"]\n');
-  assert.deepEqual((await listFormulas(root, home)).map(entry => entry.error ?? entry.formula.formula), ['reading TOML formulas needs a TOML parser', 'review', 'reading TOML formulas needs a TOML parser']);
+  assert.deepEqual((await listFormulas(root, home)).map(entry => entry.error ?? entry.formula!.formula), ['reading TOML formulas needs a TOML parser', 'review', 'reading TOML formulas needs a TOML parser']);
   const found = await listFormulas(root, home, { toml });
-  assert.deepEqual(found.map(entry => [entry.name, entry.error ?? entry.formula.steps.length]), [['release', 3], ['review', 1], ['broken', 'Step a needs unknown step b']]);
+  assert.deepEqual(found.map(entry => [entry.name, entry.error ?? entry.formula!.steps.length]), [['release', 3], ['review', 1], ['broken', 'Step a needs unknown step b']]);
   await assert.rejects(findFormula(root, home, 'broken', { toml }), /broken\.formula\.toml: Step a needs unknown step b/);
   await assert.rejects(findFormula(root, home, 'nope', { toml }), /No formula nope in/);
 
@@ -202,14 +212,14 @@ test('formulas are found by name, checked, and poured into an epic with a task p
   const [changelog, approve, publish] = tasks;
   assert.deepEqual(tasks.map(task => task.id), [1, 2, 3].map(n => `${epic.id}.${n}`));
   assert.deepEqual([changelog.title, changelog.paths, changelog.step], ['Write the changelog for 0.4.0', ['CHANGELOG.md'], { formula: 'release', id: 'changelog' }]);
-  assert.deepEqual([approve.blockedBy, approve.step.human, approve.gates.map(gate => [gate.kind, gate.note])], [[changelog.id], true, [['human', 'Your step: Approve the 0.4.0 changelog']]]);
+  assert.deepEqual([approve.blockedBy, approve.step!.human, approve.gates.map(gate => [gate.kind, gate.note])], [[changelog.id], true, [['human', 'Your step: Approve the 0.4.0 changelog']]]);
   assert.deepEqual([publish.title, publish.type, publish.blockedBy], ['Publish 0.4.0 from main', 'chore', [approve.id]]);
   assert.deepEqual(readyTasks((await loadTasks(root)).tasks).map(task => task.id), [changelog.id]);
 
   // The user approving a human step completes it, and the next step is ready.
   await closeTask(root, changelog.id, { summary: 'Written' }, 'main');
   const approved = await resolveGate(root, approve.id, 'g1', { by: 'user', note: 'Looks right' });
-  assert.deepEqual([approved.status, approved.closed.by, approved.closed.summary], ['closed', 'user', 'Approved by user: Looks right']);
+  assert.deepEqual([approved.status, approved.closed!.by, approved.closed!.summary], ['closed', 'user', 'Approved by user: Looks right']);
   assert.deepEqual(readyTasks((await loadTasks(root)).tasks).map(task => task.id), [publish.id]);
 });
 
@@ -220,7 +230,7 @@ test('main lists and pours formulas with alp_task; the CLI pours, exports and im
   await mkdir(path.join(root, '.alp', 'formulas'), { recursive: true });
   await writeFile(path.join(root, '.alp', 'formulas', 'release.formula.toml'), RELEASE);
 
-  const runtimes = [];
+  const runtimes: FakeRuntime[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), libraryDir: home, runLogDir: path.join(directory, 'runs') });
   // Shut down before the directory goes: shutdown stops the gate watch and waits for the run log.
   cleanup(() => runtime.shutdown());
@@ -239,12 +249,12 @@ test('main lists and pours formulas with alp_task; the CLI pours, exports and im
   }
   assert.equal((await loadTasks(root)).tasks.length, 0);
   const poured = await main.call('alp_task', { action: 'pour', formula: 'release', vars: { version: '0.4.0' } });
-  assert.deepEqual([poured.task.type, poured.steps.map(step => step.title)], ['epic', ['Write the changelog for 0.4.0', 'Approve the 0.4.0 changelog', 'Publish 0.4.0 from main']]);
+  assert.deepEqual([poured.task.type, poured.steps.map((step: Json) => step.title)], ['epic', ['Write the changelog for 0.4.0', 'Approve the 0.4.0 changelog', 'Publish 0.4.0 from main']]);
   assert.equal((await getTask(root, poured.task.id)).createdBy, 'main');
   assert.match((await main.call('alp_task', { action: 'clear', id: poured.steps[1].id, gate: 'g1' })).error, /Only the user clears a human gate/);
   main.finish('Poured');
 
-  const run = (...args) => spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, ALP_HOME: home } });
+  const run = (...args: string[]) => spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, ALP_HOME: home } });
   assert.match(run('formula', 'list').stdout, /^release {2}3 steps {2}Ship \{\{version\}\}$/m);
   assert.match(run('formula', 'show', 'release').stdout, /--var version=… \(required\) {2}The version to ship\n {2}--var branch=… \(default main\)\n {2}changelog: Write the changelog for \{\{version\}\}\n {2}approve \[you\]: Approve the \{\{version\}\} changelog {2}after changelog/);
   const missing = run('formula', 'pour', 'release');
@@ -272,27 +282,27 @@ test('main lists and pours formulas with alp_task; the CLI pours, exports and im
 // --- helpers ------------------------------------------------------------------------
 
 let calls = 0;
-function fakeTransport(runtimes) {
+function fakeTransport(runtimes: FakeRuntime[]): NonNullable<RuntimeOptions['transport']> {
   return (cwd, env, kind) => {
     const index = runtimes.length;
     let turns = 0;
-    const runtime = {
+    const runtime: FakeRuntime = {
       kind, calls: [], threadId: `thread-${index}`, turnId: undefined,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
       async close() { this.closed = true; },
-      async request(method, params) {
+      async request(method: string, params: Json) {
         this.calls.push({ method, params });
         if (method.startsWith('thread/')) return { thread: { id: this.threadId } };
         if (method === 'turn/start') { this.turnId = `turn-${index}-${++turns}`; return { turn: { id: this.turnId } }; }
         return {};
       },
-      async call(tool, args) {
-        return JSON.parse((await this.serverRequest('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text);
+      async call(tool: string, args: Json) {
+        return JSON.parse((await this.serverRequest!('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text);
       },
       finish(text = 'done') {
-        this.notification('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}-${turns}`, text } });
-        this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
+        this.notification!('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}-${turns}`, text } });
+        this.notification!('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
       },
     };
     runtimes.push(runtime);
@@ -300,7 +310,7 @@ function fakeTransport(runtimes) {
   };
 }
 
-async function until(check) {
+async function until(check: () => unknown) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail('Expected condition did not arrive');
 }

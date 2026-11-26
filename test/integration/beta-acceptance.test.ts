@@ -1,12 +1,16 @@
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { follow, interruptTurn, Run } from '../../scripts/beta-acceptance-lib.ts';
+import { follow, interruptTurn, Run, type Envelope } from '../../scripts/beta-acceptance-lib.ts';
+
+type FixtureEvent = { sessionId: string, event: Record<string, unknown> };
+// follow() only calls run.log(); a full Run would write a results file.
+const quiet = { log() {} } as unknown as Run;
 
 // Real child stdout, including multiple envelopes in one chunk, rather than a mocked next().
-async function fixture(t, events, { hold = false, afterInterrupt, resistTermination = false, startupDelay = 0 } = {}) {
+async function fixture(t: TestContext, events: FixtureEvent[], { hold = false, afterInterrupt, resistTermination = false, startupDelay = 0 }: { hold?: boolean, afterInterrupt?: string, resistTermination?: boolean, startupDelay?: number } = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'alp-c5-'));
   const script = path.join(dir, 'stream.cjs');
   const trigger = path.join(dir, 'interrupt');
@@ -20,16 +24,15 @@ async function fixture(t, events, { hold = false, afterInterrupt, resistTerminat
     clearInterval(gateTimer); emit();
   }, 5);` : 'emit();';
   writeFileSync(script, `${resistTermination ? "process.on('SIGTERM', () => {});" : ''}function emit() { console.log(${JSON.stringify(events.map(e => JSON.stringify(e)).join('\n'))});${tail} } ${startup}`);
-  const stream = follow({ log() {} }, 'fixture', ['run'], { alp: script, cwd: dir, env: process.env });
+  const stream = follow(quiet, 'fixture', ['run'], { alp: script, cwd: dir, env: process.env });
   const release = startupDelay ? setTimeout(() => writeFileSync(gate, 'ready'), startupDelay) : undefined;
   t.after(async () => { clearTimeout(release); stream.child.kill(); await stream.exit.catch(() => {}); rmSync(dir, { recursive: true, force: true }); });
-  stream.interrupt = () => writeFileSync(trigger, 'interrupt');
-  return stream;
+  return Object.assign(stream, { interrupt: () => writeFileSync(trigger, 'interrupt') });
 }
-const event = (type, extra = {}, sessionId = 'root') => ({ sessionId, event: { type, ...extra } });
+const event = (type: string, extra: Record<string, unknown> = {}, sessionId = 'root'): FixtureEvent => ({ sessionId, event: { type, ...extra } });
 const opened = event('session.opened', { session: {} });
 const started = event('turn.started', { turnId: 'initial', origin: 'user' });
-const end = state => event('turn.ended', { turnId: 'initial', state });
+const end = (state: string) => event('turn.ended', { turnId: 'initial', state });
 
 test('C5 fast completed turn is inconclusive without sending interrupt', async t => {
   const stream = await fixture(t, [opened, started, end('completed')]);
@@ -100,7 +103,7 @@ test('follow missing event after close rejects immediately; timed-out waits do n
   // Child startup and the fixture's 5 ms polling are not what this test measures: give them room
   // on a loaded machine (t-e706). The fixture keeps polling for the interrupt for 10 s.
   await stream.next(e => e.event.type === 'turn.started', 'start', 5000);
-  const terminal = e => e.event.type === 'turn.ended';
+  const terminal = (e: Envelope) => e.event.type === 'turn.ended';
   await assert.rejects(stream.next(terminal, 'end', 20), /no end within/);
   const next = stream.next(terminal, 'end', 5000);
   stream.interrupt();

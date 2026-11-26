@@ -1,10 +1,11 @@
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { initProject } from '@anhlp/alp-core/init';
 import { getEntry, listEntries, saveEntry } from '@anhlp/alp-core/library-edit';
 import { testEntry } from '../../packages/client/dist/library-test.js';
@@ -13,10 +14,14 @@ import { probeAntigravity } from '../../packages/client/dist/antigravity-probe.j
 import { validateProvider } from '@anhlp/alp-core/providers';
 import { createAlpRuntime, resolveSession, AntigravityTransport } from '../../dist/runtime/index.js';
 import { teardown } from '../support/teardown.ts';
+import type { AcpProbe } from '../../packages/client/src/acp-probe.ts';
+
+// `any`: event envelopes, transport notifications and agy's logged arguments are JSON of every shape; the tests read the fields they assert on.
+type Json = any;
 
 const FAKE_AGY = fileURLToPath(new URL('../support/fake-agy.ts', import.meta.url));
 
-async function until(check, what = 'Expected condition') {
+async function until(check: () => unknown, what = 'Expected condition') {
   for (let i = 0; i < 1000; i++) {
     if (await check()) return;
     await new Promise(resolve => setTimeout(resolve, 5));
@@ -24,7 +29,7 @@ async function until(check, what = 'Expected condition') {
   assert.fail(`${what} did not arrive`);
 }
 
-async function setup(t, { env = {}, settings = {}, provider = {}, supervisor = false } = {}) {
+async function setup(t: TestContext, { env = {}, settings = {}, provider = {}, supervisor = false }: { env?: Record<string, string>, settings?: object, provider?: object, supervisor?: boolean } = {}) {
   const defer = teardown(t);
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-'));
   // Undone LAST: teardown runs the steps in reverse, so the runtime (and any agy child it started)
@@ -58,16 +63,16 @@ async function setup(t, { env = {}, settings = {}, provider = {}, supervisor = f
     runLogDir: path.join(dir, 'runs'),
   });
 
-  const events = [];
+  const events: Json[] = [];
   runtime.onEvent(envelope => events.push(envelope));
   defer(() => runtime.shutdown());
 
   let prompts = 0;
-  const turn = async (text, sessionId = 'root') => {
+  const turn = async (text: string, sessionId = 'root') => {
     const id = `m${++prompts}`;
     const start = events.length;
     await runtime.prompt(sessionId, { clientMessageId: id, delivery: 'auto', content: [{ type: 'text', text }] });
-    const ended = entry => entry.sessionId === sessionId && (entry.event.type === 'turn.ended' || (entry.event.type === 'prompt.failed' && entry.event.clientMessageId === id));
+    const ended = (entry: Json) => entry.sessionId === sessionId && (entry.event.type === 'turn.ended' || (entry.event.type === 'prompt.failed' && entry.event.clientMessageId === id));
     await until(() => events.slice(start).some(ended), `the turn of ${text}`);
     const mine = events.slice(start).filter(entry => entry.sessionId === sessionId);
     const said = mine.filter(entry => entry.event.type === 'item' && entry.event.item.kind === 'assistant_message').map(entry => entry.event.item.text);
@@ -103,9 +108,9 @@ test('antigravity probing via probeAntigravity', async () => {
   const result = await probeAntigravity({
     command: process.execPath,
     args: [FAKE_AGY],
-    env: { PATH: process.env.PATH },
+    env: { PATH: process.env.PATH! },
   });
-  assert.equal(result.agent.name, 'antigravity');
+  assert.equal(result.agent!.name, 'antigravity');
   assert.ok(result.version.includes('1.3.4'));
   assert.ok(result.models.length >= 3);
   assert.equal(result.currentMode, 'full-access');
@@ -148,7 +153,7 @@ test('resolveSession resolves antigravity models without elevating permissions',
   const res3 = await resolveSession({ cwd: root, model: 'acp:antigravity/gemini-3.8-flash-high' }, { library: home });
   assert.equal(res3.runtimeKind, 'antigravity');
   assert.equal(res3.model, 'gemini-3.8-flash-high');
-  assert.equal(res3.antigravity?.kind, 'antigravity');
+  assert.equal((res3.antigravity as { kind?: string } | undefined)?.kind, 'antigravity');
 });
 
 test('antigravity doctor check reports ok', async () => {
@@ -179,11 +184,12 @@ test('antigravity library entry test', async t => {
     },
   }, { scope: 'library', library: home });
 
-  const result = await testEntry('providers', 'antigravity', { root, library: home });
+  // A provider entry answers with its ACP probe.
+  const result = await testEntry('providers', 'antigravity', { root, library: home }) as Awaited<ReturnType<typeof testEntry>> & AcpProbe;
   assert.equal(result.ok, true);
   assert.equal(result.agent?.name, 'antigravity');
   assert.equal(result.currentMode, 'full-access');
-  assert.ok(result.models.length > 0);
+  assert.ok(result.models!.length > 0);
 });
 
 test('antigravity session: turn streaming, tool bridge, and turn end', async t => {
@@ -217,11 +223,11 @@ test('antigravity keeps separate assistant messages within a turn', async t => {
   const defer = teardown(t);
   const transport = new AntigravityTransport();
   defer(() => transport.close());
-  const completed = [];
+  const completed: string[] = [];
   transport.onNotification((method, params) => { if (method === 'item/completed') completed.push(params.item.text); });
-  transport.activeTurn = 'test-turn';
+  transport['activeTurn'] = 'test-turn';
   for (const [step_index, text_delta] of [[1, 'First'], [3, 'Second']]) {
-    transport.receiveLine(JSON.stringify({event: 'step_update', step_update: {step_type: 'agent_response', step_index, text_delta, state: 'DONE'}}));
+    transport['receiveLine'](JSON.stringify({event: 'step_update', step_update: {step_type: 'agent_response', step_index, text_delta, state: 'DONE'}}));
   }
   assert.deepEqual(completed, ['First', 'Second']);
 });
@@ -233,16 +239,16 @@ test('antigravity never reports an edit as done in read-only mode, even when agy
   for (const [mode, want] of [['read-only', 'failed'], ['workspace-write', 'completed']]) {
     const transport = new AntigravityTransport();
     defer(() => transport.close());
-    transport.config = { sandbox: mode };
-    const completed = [];
+    transport['config'] = { sandbox: mode };
+    const completed: Json[] = [];
     transport.onNotification((method, params) => { if (method === 'item/completed') completed.push(params.item); });
-    transport.activeTurn = 'test-turn';
+    transport['activeTurn'] = 'test-turn';
     // edit_file is the name agy 1.5.2 reports for an accepted edit, observed live in a real
     // workspace-write session; read-only must refuse it like every other edit name.
     for (const tool_name of ['edit_file', 'view_file']) {
-      transport.receiveLine(JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 2, tool_name, state: 'DONE', tool_info: { name: tool_name, parameters: { Path: '/w/x.txt' } } } }));
+      transport['receiveLine'](JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 2, tool_name, state: 'DONE', tool_info: { name: tool_name, parameters: { Path: '/w/x.txt' } } } }));
     }
-    transport.receiveLine(JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 3, state: 'DONE', tool_info: { name: 'replace_file_content' } } }));
+    transport['receiveLine'](JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 3, state: 'DONE', tool_info: { name: 'replace_file_content' } } }));
     assert.equal(completed[0].status, want, mode);
     assert.equal(completed[1].status, 'completed', mode);
     assert.equal(completed[2].status, want, mode);
@@ -256,8 +262,8 @@ test('antigravity never reports an edit as done in read-only mode, even when agy
     // which stay as agy reported them.
     for (const [index, tool_name] of ['write_file', 'write_to_file', 'edit_file', 'replace_file_content', 'multi_replace_file_content', 'sed_file', 'notebook_edit'].entries()) {
       completed.length = 0;
-      transport.receiveLine(JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 10 + index, tool_name, state: 'DONE', tool_info: { name: tool_name, parameters: { Path: '/w/x.txt' }, output: 'written' } } }));
-      transport.receiveLine(JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 30 + index, state: 'DONE', tool_info: { name: tool_name } } }));
+      transport['receiveLine'](JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 10 + index, tool_name, state: 'DONE', tool_info: { name: tool_name, parameters: { Path: '/w/x.txt' }, output: 'written' } } }));
+      transport['receiveLine'](JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 30 + index, state: 'DONE', tool_info: { name: tool_name } } }));
       assert.deepEqual(completed.map(item => item.status), [want, want], `${mode} ${tool_name}`);
       if (want === 'failed') for (const item of completed) {
         assert.equal(item.aggregatedOutput, `Antigravity denied ${tool_name} in read-only mode`, tool_name);
@@ -266,7 +272,7 @@ test('antigravity never reports an edit as done in read-only mode, even when agy
     }
     completed.length = 0;
     for (const [index, tool_name] of ['view_file', 'read_file'].entries()) {
-      transport.receiveLine(JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 50 + index, tool_name, state: 'DONE', tool_info: { name: tool_name, parameters: { Path: '/w/x.txt' }, output: '1 lines' } } }));
+      transport['receiveLine'](JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index: 50 + index, tool_name, state: 'DONE', tool_info: { name: tool_name, parameters: { Path: '/w/x.txt' }, output: '1 lines' } } }));
     }
     assert.deepEqual(completed.map(item => [item.status, item.aggregatedOutput]), [['completed', '1 lines'], ['completed', '1 lines']], mode);
   }
@@ -274,15 +280,15 @@ test('antigravity never reports an edit as done in read-only mode, even when agy
 
 test('antigravity records a refused terminal command as failed in read-only mode, even when agy says DONE', async t => {
   const defer = teardown(t);
-  const lines = { 'ls -la src': 'failed', 'pwd': 'completed', 'cat /etc/passwd': 'failed', 'tail -f log': 'failed', 'ls; rm -rf x': 'failed', 'ls $(whoami)': 'failed', 'rm x': 'failed', [undefined]: 'failed' };
+  const lines = { 'ls -la src': 'failed', 'pwd': 'completed', 'cat /etc/passwd': 'failed', 'tail -f log': 'failed', 'ls; rm -rf x': 'failed', 'ls $(whoami)': 'failed', 'rm x': 'failed', [String(undefined)]: 'failed' };
   for (const mode of ['read-only', 'workspace-write']) {
     const transport = new AntigravityTransport();
     defer(() => transport.close());
-    transport.config = { sandbox: mode };
-    const completed = [];
+    transport['config'] = { sandbox: mode };
+    const completed: Json[] = [];
     transport.onNotification((method, params) => { if (method === 'item/completed') completed.push(params.item); });
-    transport.activeTurn = 'test-turn';
-    Object.keys(lines).forEach((CommandLine, step_index) => transport.receiveLine(JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index, tool_name: 'RunCommand', state: 'DONE', tool_info: { name: 'run_command', parameters: CommandLine === 'undefined' ? {} : { CommandLine }, output: 'x' } } })));
+    transport['activeTurn'] = 'test-turn';
+    Object.keys(lines).forEach((CommandLine, step_index) => transport['receiveLine'](JSON.stringify({ event: 'step_update', step_update: { step_type: 'tool', step_index, tool_name: 'RunCommand', state: 'DONE', tool_info: { name: 'run_command', parameters: CommandLine === 'undefined' ? {} : { CommandLine }, output: 'x' } } })));
     Object.values(lines).forEach((want, i) => {
       assert.equal(completed[i].status, mode === 'read-only' ? want : 'completed', `${mode} ${Object.keys(lines)[i]}`);
       if (mode === 'read-only' && want === 'failed') { assert.notEqual(completed[i].aggregatedOutput, 'x'); assert.match(completed[i].error, /denied run_command in read-only/); }
@@ -296,18 +302,18 @@ test('antigravity records a refused terminal command as failed in read-only mode
  * that registered the removal, to reach the back of a FIFO queue; teardown(t) reverses the list for
  * it, and unlike that trick it still runs the removal when an earlier step throws (t-5294.6).
  */
-const removeLast = (t, dir) => teardown(t)(() => rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
+const removeLast = (t: TestContext, dir: string) => teardown(t)(() => rm(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
 
-async function transportFixture(t, directory, tools, mcpServers = {}) {
+async function transportFixture(t: TestContext, directory: string, tools: string[], mcpServers: Record<string, object> = {}) {
   const defer = teardown(t);
   const configFile = path.join(directory, 'mcp_config.json');
   const transport = new AntigravityTransport(process.execPath, directory,
     { ...process.env, ALP_AGY_MCP_CONFIG: configFile }, { id: 'antigravity', label: 'fake', command: process.execPath, args: [FAKE_AGY] });
   defer(() => transport.close());
-  const events = [];
+  const events: Array<{ method: string, params: Json }> = [];
   transport.onNotification((method, params) => events.push({ method, params }));
   await transport.request('thread/start', { cwd: directory, sandbox: 'full-access', mcpServers, dynamicTools: tools.map(name => ({ name, description: name })) });
-  const turn = async text => {
+  const turn = async (text: string) => {
     const start = events.length;
     await transport.request('turn/start', { input: [{ text }] });
     await until(() => events.slice(start).some(e => e.method === 'turn/completed'));
@@ -329,8 +335,8 @@ test('MCP routes concurrent sessions separately without persisting session crede
   const config = JSON.parse(await readFile(a.configFile, 'utf8'));
   assert.deepEqual(config.mcpServers.unrelated, existing.mcpServers.unrelated);
   assert.equal(config.custom, true);
-  assert.equal(JSON.stringify(config).includes(a.transport.bridge.token), false);
-  assert.equal(JSON.stringify(config).includes(a.transport.bridge.socket), false);
+  assert.equal(JSON.stringify(config).includes(a.transport['bridge']!.token), false);
+  assert.equal(JSON.stringify(config).includes(a.transport['bridge']!.socket), false);
   await a.transport.close();
   assert.equal(await b.turn('tools'), 'tools: only_b');
 });
@@ -338,7 +344,7 @@ test('MCP routes concurrent sessions separately without persisting session crede
 test('Antigravity bridges session MCP tools without persisting external server credentials', async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-external-mcp-'));
   removeLast(t, dir);
-  const server = label => ({ command: process.execPath, args: [path.resolve('test/support/fake-mcp.ts')], env: { FAKE_MCP_LABEL: label } });
+  const server = (label: string) => ({ command: process.execPath, args: [path.resolve('test/support/fake-mcp.ts')], env: { FAKE_MCP_LABEL: label } });
   const a = await transportFixture(t, dir, ['alp_test'], { docs: server('session-a') });
   const b = await transportFixture(t, dir, [], { docs: server('session-b') });
   const one = await a.turn('tools');
@@ -373,9 +379,9 @@ test('Antigravity forwards HTTP MCP authentication and preserves rich tool resul
     if (message.method === 'tools/call') result = { content: [{ type: 'text', text: 'http-session-result' }], structuredContent: { source: 'http-session' }, isError: true };
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result }));
   });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   defer(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
-  const port = server.address().port;
+  const port = (server.address() as AddressInfo).port;
   const { turn, configFile } = await transportFixture(t, dir, [], { docs: { url: `http://127.0.0.1:${port}/mcp`, http_headers: { Authorization: 'Bearer session-private-token' } } });
   const search = (await turn('tools')).slice('tools: '.length).split(',').find(name => name.includes('search'));
   const result = await turn(`call_tool ${search} {}`);
@@ -392,7 +398,7 @@ test('failed external MCP startup closes servers already opened and names do not
   const server = { command: process.execPath, args: [path.resolve('test/support/fake-mcp.ts')], env: { FAKE_MCP_PID_FILE: pidFile } };
   await assert.rejects(transportFixture(t, dir, [], { docs: server, broken: { command: 'alp-test-missing-mcp-command' } }), /External MCP server 'broken'/);
   const pid = Number(await readFile(pidFile, 'utf8'));
-  await until(() => { try { process.kill(pid, 0); return false; } catch (e) { return e.code === 'ESRCH'; } }, 'MCP process cleanup');
+  await until(() => { try { process.kill(pid, 0); return false; } catch (e) { return (e as NodeJS.ErrnoException).code === 'ESRCH'; } }, 'MCP process cleanup');
   const { turn } = await transportFixture(t, dir, [], { 'a-b': server, a_b: server });
   const aliases = (await turn('tools')).slice('tools: '.length).split(',');
   assert.equal(aliases.length, 4);
@@ -414,7 +420,7 @@ test('closing while the MCP config is locked cannot launch a late AGY process', 
   const opening = transport.request('thread/start', { cwd: dir, sandbox: 'full-access', mcpServers: {
     docs: { command: process.execPath, args: [path.resolve('test/support/fake-mcp.ts')], env: { FAKE_MCP_PID_FILE: pidFile } },
   } }).then(() => null, error => error);
-  await until(() => transport.bridge, 'bridge waiting for the config lock');
+  await until(() => transport['bridge'], 'bridge waiting for the config lock');
   await transport.close();
   await rm(`${configFile}.alp-lock`);
   assert.match((await opening).message, /Runtime is closed/);
@@ -453,16 +459,16 @@ test('interrupt ends one turn and the next prompt resumes the conversation', asy
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-interrupt-'));
   removeLast(t, dir);
   const { transport, turn, events } = await transportFixture(t, dir, []);
-  const threadId = transport.conversationId;
+  const threadId = transport['conversationId'];
   await transport.request('turn/start', { input: [{ text: 'hang' }] });
   await transport.request('turn/interrupt', {});
   await until(() => events.some(e => e.method === 'turn/completed' && e.params.turn.status === 'interrupted'));
   assert.equal(await turn('say after interrupt'), 'after interrupt');
-  assert.equal(transport.conversationId, threadId);
+  assert.equal(transport['conversationId'], threadId);
 });
 
-const startArgs = async file => (await readFile(file, 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.op === 'start').map(entry => entry.args);
-const settingsOf = args => JSON.parse(args[args.indexOf('--settings') + 1]);
+const startArgs = async (file: string): Promise<string[][]> => (await readFile(file, 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.op === 'start').map(entry => entry.args);
+const settingsOf = (args: string[]) => JSON.parse(args[args.indexOf('--settings') + 1]);
 
 test('Antigravity runs each ALP mode with the agy flags that enforce it', async t => {
   const { root, runtime, turn, dir } = await setup(t);
@@ -502,7 +508,7 @@ test('Antigravity changes mode between turns by resuming its conversation with n
   assert.equal((await runtime.configure('root', { mode: 'read-only' })).mode, 'read-only');
   assert.equal((await turn('say two')).text, 'two');
   const starts = await startArgs(log);
-  const last = starts.at(-1);
+  const last = starts.at(-1)!;
   assert.equal(starts.length, 2);
   assert.ok(last.includes('--conversation'));
   assert.ok(!last.includes('--dangerously-skip-permissions'));

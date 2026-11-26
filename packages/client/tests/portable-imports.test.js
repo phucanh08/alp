@@ -1,6 +1,6 @@
 // The portable entries must not reach Node: every module they import, followed through
 // @anhlp/alp-protocol too, uses no Node built-in, no other package, and no process, Buffer or
-// require. Bundles are inspected too (test/integration/client-sdk.test.js); this guard needs no
+// require. Bundles are inspected too (test/integration/client-sdk.test.ts); this guard needs no
 // bundler and fails at the import that broke it.
 import test from 'node:test';
 import assert from 'node:assert/strict';
