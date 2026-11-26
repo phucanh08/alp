@@ -3,7 +3,7 @@
 // them to typed details, and the stream shows each as Paseo does: a one-line row (label, path
 // relative to the workspace, query, diff stat) that opens into its view (a numbered diff, a
 // file with a line gutter, a sub-agent's task, an MCP call's input and output). Read, fetch and
-// plan details have no Codex item; tests/tool-calls.test.js covers their rows.
+// plan details have no Codex item; tests/tool-calls.test.ts covers their rows.
 import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 import { startWorld } from './support/world.ts';

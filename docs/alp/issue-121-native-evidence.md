@@ -526,7 +526,7 @@ prompt id still answers `duplicate`. `packages/daemon/tests/conversation.test.ts
 the fence after a failed commit, mail held during a rewind and delivered after the rebind, a whole fork
 holding the live source's prompts, and `store.rewind` keeping lines after the marker in cursor order. `packages/runtime/tests/{conversation,claude-fork}.test.ts` cover the
 Codex fork parameters, verification and error mapping, the Claude cut over tool-result entries, pending
-bases and boot refusals, and rebind's idle barrier. `apps/web/e2e/conversation.spec.js` drives fork, rewind,
+bases and boot refusals, and rebind's idle barrier. `apps/web/e2e/conversation.spec.ts` drives fork, rewind,
 reload and branch restore in a browser through the gateway.
 
 ### Limits

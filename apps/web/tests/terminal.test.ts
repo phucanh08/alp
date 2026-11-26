@@ -2,7 +2,7 @@
 // token's terminal.exec, create/attach, replay bookkeeping by seq, gaps, input batching within
 // maxInputBytes, debounced resize, reconnect, replaced and exit — and the controller's routing of
 // terminal.event notifications through a fake host. No real shell is reached here; the e2e
-// (e2e/terminal.spec.js) runs a real PTY through the real gateway and alpd.
+// (e2e/terminal.spec.ts) runs a real PTY through the real gateway and alpd.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { AlpRpcError } from '@anhlp/alp-client/portable';
