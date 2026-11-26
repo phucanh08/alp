@@ -160,7 +160,7 @@ test('the lint does not flag hooks that cannot skip each other', () => {
 test('one', async t => { t.after(() => rm(a)); });
 test('two', async t => { t.after(() => server.close()); });`), []);
 
-  // A file-level test.after always runs after every per-test hook (packages/runtime/tests/claude-fork.test.ts:18).
+  // A file-level test.after always runs after every per-test hook (packages/runtime/tests/claude-fork.test.ts:19).
   assert.deepEqual(teardownProblems('f.test.js', `import test from 'node:test';
 test.after(() => rm(directory, { recursive: true, force: true }));
 test('one', async t => { t.after(() => transport.close()); });`), []);

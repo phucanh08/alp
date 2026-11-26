@@ -301,8 +301,8 @@ export function teardownProblems(relative: string, source: string, allowed: Reco
       // tracked as its own task instead: a lint that fails the build on 31 files nobody is
       // converting gets switched off, and then it protects nothing.
       //
-      // The live one worth knowing: packages/daemon/tests/model-catalog.test.ts:155 kills a real
-      // alpd child and THEN removes its directory, registered before the `client.close()` at :161 —
+      // The live one worth knowing: packages/daemon/tests/model-catalog.test.ts:145 kills a real
+      // alpd child and THEN removes its directory, registered before the `client.close()` at :151 —
       // in the same file that hung core-paseo-macos twice on 2026-11-06, in the `core` lane that
       // runs today. If that rm throws, the IPC socket stays open and the file sits to the watchdog.
       if (entry.removes && !entry.releasesFirst) {
