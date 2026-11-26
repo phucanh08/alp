@@ -1,7 +1,7 @@
 // The gateway's network side against a fake daemon (docs/alp/remote-gateway.md §3, §4, §6, §7):
 // health and readiness, the ticket flow, Origin and Host checks, unauthorized and revoked
 // credentials, the frame checks of protocol §5.2, limits, slow consumers, two clients at once,
-// and losing alpd. Nothing here starts alpd; test/integration/gateway.test.js does.
+// and losing alpd. Nothing here starts alpd; test/integration/gateway.test.ts does.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';

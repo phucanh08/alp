@@ -317,7 +317,7 @@ session, khác origin), Node, preload, cửa sổ mới, quyền, file trên đ�
 `apps/desktop` là project **bun** độc lập, không nằm trong `workspaces` của `package.json` gốc, có
 `bun.lock` riêng và không phụ thuộc package `@anhlp/*` nào; `pnpm install --frozen-lockfile` và runner test gốc không chạy
 nó. Test của nó (`apps/desktop/test`, `bun:test`) được miễn khỏi luật bố cục test trong
-`test/integration/layout.test.js` chỉ khi script `test` của nó là `bun test test`; job CI
+`test/integration/layout.test.ts` chỉ khi script `test` của nó là `bun test test`; job CI
 `desktop-macos` chạy `bun install --frozen-lockfile`, `bun test test`, typecheck và build, rồi
 `pnpm install --frozen-lockfile`, `node scripts/build-workspace.ts cli`, e2e (`bun run e2e`), rồi build hai DMG và chạy
 e2e của app đã đóng gói trên từng DMG (§6). Lệnh: xem `apps/desktop/README.md` (`bun install`, `bun test test`, `bun run build`,

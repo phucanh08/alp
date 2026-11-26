@@ -25,7 +25,7 @@ web facade cannot upload attachments yet (t-4f38); this is a known limit of chec
 **Credentials.**
 - *scoped*: a gateway credential with explicit permissions. The web e2e worlds
   (`apps/web/e2e/support/world.js`) and the gateway suites (`apps/gateway/tests/*`,
-  `test/integration/gateway.test.js`) cover these.
+  `test/integration/gateway.test.ts`) cover these.
 - *owner*: a local IPC client or the facade. The real-runtime scripts (`test/e2e/*-real-e2e.mjs`), the
   daemon suites and the facade suites cover these.
 

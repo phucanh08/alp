@@ -4,7 +4,7 @@
 // on every call whatever the client sends; terminal.event passed on only for terminals this connection
 // attached, projected; alpd's refusals rewritten; and a revoked or changed credential's terminals ended
 // through terminal.revoke. alpd's own binding and real PTYs are tested in packages/daemon/tests and
-// test/integration/gateway.test.js.
+// test/integration/gateway.test.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';

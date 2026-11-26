@@ -1,5 +1,5 @@
 {
-  "description": "Skill trigger scenarios: which skills an agent of a role should open for a task, from its Level 0 index alone. expect: must be chosen; forbid: must not be; kind: positive | negative | ambiguous | role | multi. Checked statically by test/integration/skill-eval.test.js; run against a model with node scripts/skill-eval.ts triggers --live.",
+  "description": "Skill trigger scenarios: which skills an agent of a role should open for a task, from its Level 0 index alone. expect: must be chosen; forbid: must not be; kind: positive | negative | ambiguous | role | multi. Checked statically by test/integration/skill-eval.test.ts; run against a model with node scripts/skill-eval.ts triggers --live.",
   "scenarios": [
     { "id": "p-feature-boilerplate", "kind": "positive", "role": "peer", "task": "Add an invoices feature to this service. docs/architecture/ describes layers and templates/features/ has the boilerplate.", "expect": ["feature-architecture"], "forbid": ["safe-refactor", "bug-loop"] },
     { "id": "p-adr-docs", "kind": "positive", "role": "lead", "task": "Write the architecture overview and module boundaries for this repository, with an ADR for the queue choice we made last week.", "expect": ["architecture-docs"], "forbid": ["feature-architecture"] },

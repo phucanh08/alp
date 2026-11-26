@@ -13,7 +13,7 @@ type Message = any;
 type Handler = (method: string, params: Message) => Message;
 /** One fake native harness, as fakeTransport hands it to the runtime and to the test. */
 export type FakeRuntime = {
-  kind: string, cwd: string, calls: { method: string, params: Message }[], threadId: string, turnId: string | undefined, closed: boolean,
+  kind: string | undefined, cwd: string, calls: { method: string, params: Message }[], threadId: string, turnId: string | undefined, closed: boolean,
   notification?: Handler, failure?: (error: unknown) => void, serverRequest?: Handler,
   initialize(): Promise<void>,
   onNotification(fn: Handler): void, onFailure(fn: (error: unknown) => void): void, onRequest(fn: Handler): void,
@@ -27,7 +27,8 @@ export type FakeRuntime = {
 };
 /** A fake native harness; resuming a thread keeps its id, as Codex and Claude do. */
 export function fakeTransport(runtimes: FakeRuntime[]) {
-  return (cwd: string, env: unknown, kind: string) => {
+  // The runtime's transport signature (RuntimeOptions.transport): it passes the kind, typed optional there.
+  return (cwd: string, env: NodeJS.ProcessEnv, kind?: string) => {
     const index = runtimes.length;
     let turns = 0;
     // The handlers are set by the runtime before it starts a turn; the `!`s below rely on that, as before.

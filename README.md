@@ -94,7 +94,7 @@ Tests are split by owner:
 | E2E (live providers, opt-in) | `test/e2e/` | `pnpm run test:e2e` or one of `test:e2e:*` |
 | Shared fixtures such as fake transports | `test/support/` | imported by package and integration tests |
 
-`pnpm test` runs unit and integration; `pnpm run test:all` adds E2E. A package test imports only its own package and the packages it declares as dependencies; `pnpm run check:boundaries` and `test/integration/layout.test.js` enforce that. The core packages (protocol, core, runtime, client, daemon, cli) test without installing Paseo.
+`pnpm test` runs unit and integration; `pnpm run test:all` adds E2E. A package test imports only its own package and the packages it declares as dependencies; `pnpm run check:boundaries` and `test/integration/layout.test.ts` enforce that. The core packages (protocol, core, runtime, client, daemon, cli) test without installing Paseo.
 
 Runtime tests drive scripted agents from `test/support/fake-agent.ts` instead of Codex or Claude: they call ALP tools, report context fill, hand off slowly, crash mid-turn or hit a usage limit on cue. `packages/client/tests/golden.test.js` compares what `alp log`, `alp ps` and `alp task report` print with `packages/client/tests/golden/*.txt`; after checking an intended change, accept it with `ALP_UPDATE_GOLDEN=1 pnpm --filter @anhlp/alp-client test`.
 

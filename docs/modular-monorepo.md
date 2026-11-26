@@ -81,7 +81,7 @@ pnpm run test:all            # all of the above
 pnpm --filter @anhlp/alp-core test # one package, independently
 ```
 
-Every run uses an isolated `ALP_HOME`. `pnpm run test:packages` runs each package's own `pnpm test` in turn; it overlaps with `test:unit` and is meant for checking that a package tests on its own. Live `test:e2e:*` scripts require authenticated providers (and sometimes a running Paseo host). `test/integration/layout.test.js` fails when a test file sits outside these directories, is selected twice, or names a package its own package does not depend on.
+Every run uses an isolated `ALP_HOME`. `pnpm run test:packages` runs each package's own `pnpm test` in turn; it overlaps with `test:unit` and is meant for checking that a package tests on its own. Live `test:e2e:*` scripts require authenticated providers (and sometimes a running Paseo host). `test/integration/layout.test.ts` fails when a test file sits outside these directories, is selected twice, or names a package its own package does not depend on.
 
 Every core workspace — protocol, core, runtime, client, daemon and CLI — compiles and tests without a web build; `scripts/build-core.ts` emits the neutral core bundles and the six core packages' tests never build the plugin. Packing needs only the packages' own builds:
 

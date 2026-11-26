@@ -3,7 +3,7 @@
 // the gateway forwards from fixture sessions and questions, records every request it receives
 // (to prove refused requests reach nothing), keeps per-connection attachments and emits events
 // to the connections attached to a tree, with cursors, as alpd does. The end-to-end test against
-// a real alpd is test/integration/gateway.test.js.
+// a real alpd is test/integration/gateway.test.ts.
 
 /** A session summary in `projectRoot`. @param {string} id @param {string} projectRoot @param {Record<string, unknown>} [extra] */
 export function summary(id, projectRoot, extra = {}) {
