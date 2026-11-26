@@ -4,12 +4,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_PREFERENCES, LIMITS, PREFERENCES_KEY, PREFERENCES_VERSION, loadPreferences, parsePreferences, rememberChoices, savePreferences, serializePreferences } from '../dist-lib/preferences.js';
+import type { Preferences } from '../dist-lib/preferences.js';
 
-const memory = (initial = {}) => {
+const memory = (initial: Record<string, string> = {}) => {
   const entries = new Map(Object.entries(initial));
-  return { entries, getItem: key => entries.get(key) ?? null, setItem: (key, value) => { entries.set(key, String(value)); } };
+  return { entries, getItem: (key: string) => entries.get(key) ?? null, setItem: (key: string, value: string) => { entries.set(key, String(value)); } };
 };
-const parse = value => parsePreferences(JSON.stringify({ v: PREFERENCES_VERSION, ...value }));
+const parse = (value: Record<string, unknown>) => parsePreferences(JSON.stringify({ v: PREFERENCES_VERSION, ...value }));
 
 /** Paseo 0.14's defaults (hooks/use-settings/storage.ts DEFAULT_CLIENT_SETTINGS) as ALP keeps them. */
 const DEFAULTS = {
@@ -97,7 +98,7 @@ test('sidebar sections keep the stored order and switches; unknown rows are drop
 });
 
 test('serialize writes the version and known fields only: a token on the object never reaches storage', () => {
-  const stored = serializePreferences({ ...DEFAULT_PREFERENCES, sendBehavior: 'queue', theme: 'dark', newSession: { model: 'codex:gpt', thinkingByModel: { 'codex:gpt': 'high' } }, token: 'alpgw1.secret', gateway: 'https://h' });
+  const stored = serializePreferences({ ...DEFAULT_PREFERENCES, sendBehavior: 'queue', theme: 'dark', newSession: { model: 'codex:gpt', thinkingByModel: { 'codex:gpt': 'high' } }, token: 'alpgw1.secret', gateway: 'https://h' } as Preferences);
   const object = JSON.parse(stored);
   assert.deepEqual(Object.keys(object), ['v', ...Object.keys(DEFAULTS)]);
   assert.equal(object.v, 1);
@@ -108,7 +109,7 @@ test('serialize writes the version and known fields only: a token on the object 
 test('load and save through a storage; one that throws gives the defaults and reports the failed save', () => {
   const storage = memory();
   assert.equal(savePreferences(storage, { ...DEFAULT_PREFERENCES, sendBehavior: 'queue', theme: 'light' }), true);
-  assert.equal(JSON.parse(storage.entries.get(PREFERENCES_KEY)).sendBehavior, 'queue');
+  assert.equal(JSON.parse(storage.entries.get(PREFERENCES_KEY)!).sendBehavior, 'queue');
   assert.deepEqual(loadPreferences(storage), { ...DEFAULTS, sendBehavior: 'queue', theme: 'light' });
   const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('quota'); } };
   assert.deepEqual(loadPreferences(broken), DEFAULTS);
@@ -118,7 +119,7 @@ test('load and save through a storage; one that throws gives the defaults and re
   const dirty = memory({ [PREFERENCES_KEY]: '{oops' });
   assert.equal(loadPreferences(dirty).theme, 'system');
   savePreferences(dirty, loadPreferences(dirty));
-  assert.equal(JSON.parse(dirty.entries.get(PREFERENCES_KEY)).v, 1);
+  assert.equal(JSON.parse(dirty.entries.get(PREFERENCES_KEY)!).v, 1);
 });
 
 test('remembered New session choices: thinking per model, the team default under "default", empty choices forgotten', () => {
@@ -142,7 +143,7 @@ test('thinking per model never keeps a model named after an Object.prototype mem
     assert.deepEqual(remembered.thinkingByModel, { 'codex:a': 'high' }, model);
     assert.equal(Object.getPrototypeOf(remembered.thinkingByModel), Object.prototype, model);
   }
-  assert.equal(({}).polluted, undefined);
+  assert.equal(({} as { polluted?: unknown }).polluted, undefined);
 });
 
 test('sidebar display preferences: Paseo\'s choices kept, anything else its default, filters de-duplicated and bounded', () => {
@@ -175,6 +176,6 @@ test('Settings › Shortcuts keys are stored: known ids with valid combos or nul
   assert.deepEqual(parse({ shortcutOverrides: 'Mod+J' }).shortcutOverrides, {});
   const stored = memory();
   assert.equal(savePreferences(stored, { ...parsed, shortcutOverrides: { ...parsed.shortcutOverrides, extra: 'Mod+X' } }), true);
-  assert.deepEqual(JSON.parse(stored.entries.get(PREFERENCES_KEY)).shortcutOverrides, { 'sidebar.left': 'Mod+J', 'sidebar.right': null });
+  assert.deepEqual(JSON.parse(stored.entries.get(PREFERENCES_KEY)!).shortcutOverrides, { 'sidebar.left': 'Mod+J', 'sidebar.right': null });
   assert.deepEqual(loadPreferences(stored).shortcutOverrides, { 'sidebar.left': 'Mod+J', 'sidebar.right': null });
 });

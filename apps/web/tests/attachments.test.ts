@@ -4,10 +4,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Controller } from '../dist-lib/controller.js';
 import { IMAGE_LIMITS, imageLimits, addImages, filesOf, fitImages, imageType, promptContent, readImages, toBase64 } from '../dist-lib/attachments.js';
-import { FakeHost, until } from './support/fake-host.js';
+import type { ImageAttachment } from '../dist-lib/attachments.js';
+import { FakeHost, until } from './support/fake-host.ts';
 
 /** A File-like value of `size` bytes. */
-const file = (name, type, size = 4) => ({ name, type, size, arrayBuffer: async () => new Uint8Array(size).fill(65).buffer });
+const file = (name: string, type: string, size = 4) => ({ name, type, size, arrayBuffer: async () => new Uint8Array(size).fill(65).buffer }) as unknown as File;
 
 test('imageType takes PNG, JPEG, GIF and WebP only (image/jpg as JPEG)', () => {
   assert.deepEqual(['image/png', 'image/jpg', 'IMAGE/WEBP', 'image/gif; x=1', 'image/svg+xml', 'application/pdf', ''].map(type => imageType({ type })),
@@ -18,15 +19,15 @@ test('addImages reads what fits and says why the rest was left out', async () =>
   const one = await addImages([], [file('a.png', 'image/png')]);
   assert.equal(one.error, null);
   assert.deepEqual(one.attachments.map(({ type, mimeType, data, name, size }) => ({ type, mimeType, data, name, size })), [{ type: 'image', mimeType: 'image/png', data: 'QUFBQQ==', name: 'a.png', size: 4 }]);
-  assert.match((await addImages([], [file('doc.pdf', 'application/pdf')])).error, /doc\.pdf is not a PNG, JPEG, GIF or WebP image/);
-  assert.match((await addImages([], [file('big.png', 'image/png', IMAGE_LIMITS.maxBytes + 1)])).error, /an image is at most 2 MB/);
+  assert.match((await addImages([], [file('doc.pdf', 'application/pdf')])).error!, /doc\.pdf is not a PNG, JPEG, GIF or WebP image/);
+  assert.match((await addImages([], [file('big.png', 'image/png', IMAGE_LIMITS.maxBytes + 1)])).error!, /an image is at most 2 MB/);
   const five = await addImages([], Array.from({ length: 5 }, (_, index) => file(`${index}.png`, 'image/png')));
   assert.equal(five.attachments.length, 4);
-  assert.match(five.error, /at most 4 images/);
+  assert.match(five.error!, /at most 4 images/);
   const half = IMAGE_LIMITS.maxBytes - 1;
   const two = await addImages([], [file('x.png', 'image/png', half), file('y.png', 'image/png', half)]);
   assert.equal(two.attachments.length, 1);
-  assert.match(two.error, /at most 2\.5 MB together/);
+  assert.match(two.error!, /at most 2\.5 MB together/);
 });
 
 test('images read while the attached list changed join the list as it is then, within the limits again', async () => {
@@ -37,7 +38,7 @@ test('images read while the attached list changed join the list as it is then, w
   // Meanwhile another paste filled the box: only what still fits joins, with the reason.
   const fitted = fitImages(three, added);
   assert.deepEqual(fitted.attachments.map(image => image.name), ['1.png', '2.png', '3.png', 'late.png']);
-  assert.match(fitted.error, /at most 4 images/);
+  assert.match(fitted.error!, /at most 4 images/);
 });
 
 test('toBase64 handles more than one chunk; filesOf reads files or file items', () => {
@@ -50,7 +51,7 @@ test('toBase64 handles more than one chunk; filesOf reads files or file items', 
 });
 
 test('promptContent: the text, then each image inline; an image-only message has no empty text', () => {
-  const image = { id: 'i', type: 'image', mimeType: 'image/png', data: 'QUFBQQ==', name: 'a.png', size: 4 };
+  const image: ImageAttachment = { id: 'i', type: 'image', mimeType: 'image/png', data: 'QUFBQQ==', name: 'a.png', size: 4 };
   assert.deepEqual(promptContent('hi'), [{ type: 'text', text: 'hi' }]);
   assert.deepEqual(promptContent('hi', [image]), [{ type: 'text', text: 'hi' }, { type: 'image', mimeType: 'image/png', data: 'QUFBQQ==', name: 'a.png' }]);
   assert.deepEqual(promptContent('', [image]), [{ type: 'image', mimeType: 'image/png', data: 'QUFBQQ==', name: 'a.png' }]);
@@ -87,7 +88,7 @@ test('negotiated image limits shrink reads and fits, with safe older-peer fallba
   const small = imageLimits({ maxCount: 2, maxBytes: 6, maxTotalBytes: 8 });
   const read = await addImages([], [file('one.png', 'image/png', 4), file('two.png', 'image/png', 5)], small);
   assert.equal(read.attachments.length, 1);
-  assert.match(read.error, /together/);
+  assert.match(read.error!, /together/);
   assert.equal((await readImages([], [file('big.png', 'image/png', 7)], small)).added.length, 0);
   assert.equal(fitImages([], read.attachments, imageLimits(undefined, false)).attachments.length, 0);
   for (const malformed of [null, {}, { maxCount: -1, maxBytes: 4, maxTotalBytes: 4 }, { maxCount: 1, maxBytes: Infinity, maxTotalBytes: 4 }]) assert.equal(imageLimits(malformed).maxCount, 0);
@@ -114,7 +115,7 @@ test('controller adopts smaller hello limits, rejects attachments before RPC and
   assert.equal(host.count('session.prompt'), 0);
   offer = { maxCount: 1, maxBytes: 8, maxTotalBytes: 8 };
   host.drop();
-  await until(() => controller.getState().connection.phase === 'open' && controller.getState().connection.promptImageLimits.maxBytes === 8);
+  await until(() => controller.getState().connection.phase === 'open' && controller.getState().connection.promptImageLimits!.maxBytes === 8);
   await controller.sendPrompt('look', undefined, attachments);
   assert.equal(host.count('session.prompt'), 1);
 });

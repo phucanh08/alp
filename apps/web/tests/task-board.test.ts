@@ -3,9 +3,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { age, boardColumns, epicGroups, filterCounts, filterTasks, listSections, stateOf } from '../dist-lib/task-board.js';
+import type { TaskRow } from '../dist-lib/task-board.js';
 
 const at = '2026-10-01T00:00:00.000Z';
-const task = (id, extra = {}) => ({ id, title: `Task ${id}`, type: 'task', priority: 2, status: 'open', ready: false, updatedAt: at, ...extra });
+const task = (id: string, extra: Partial<TaskRow> = {}): TaskRow => ({ id, title: `Task ${id}`, type: 'task', priority: 2, status: 'open', ready: false, updatedAt: at, ...extra });
 
 const rows = [
   task('t-1', { ready: true, priority: 3, labels: ['web'] }),
@@ -23,7 +24,7 @@ const rows = [
 ];
 
 test('stateOf: what the user acts on first; an epic is never blocked by its own tasks', () => {
-  assert.deepEqual(['t-1', 't-3', 't-4', 't-5', 't-6', 't-7', 't-9'].map(id => stateOf(rows.find(row => row.id === id))),
+  assert.deepEqual(['t-1', 't-3', 't-4', 't-5', 't-6', 't-7', 't-9'].map(id => stateOf(rows.find(row => row.id === id)!)),
     ['ready', 'blocked', 'progress', 'review', 'approve', 'closed', 'progress']);
   assert.equal(stateOf(task('e', { type: 'epic', progress: { done: 0, total: 2 } })), 'ready');
 });

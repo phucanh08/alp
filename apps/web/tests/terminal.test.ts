@@ -9,44 +9,55 @@ import { AlpRpcError } from '@anhlp/alp-client/portable';
 import { TERMINAL } from '@anhlp/alp-protocol';
 import { Controller } from '../dist-lib/controller.js';
 import { TERMINAL_MESSAGES, TerminalSession, clampSize, exitText, gapMarker, splitUtf8, terminalGate, terminalLimits, protectionNotice, TERMINAL_PROTECTION_NOTICES } from '../dist-lib/terminal.js';
-import { FakeHost, until } from './support/fake-host.js';
+import type { TestContext } from 'node:test';
+import type { TerminalLimits } from '@anhlp/alp-protocol';
+import type { ControllerOptions } from '../dist-lib/controller.js';
+import type { TerminalOptions } from '../dist-lib/terminal.js';
+import { FakeHost, until } from './support/fake-host.ts';
+
+// any: terminal.* params and answers as the scripted host sees them (untrusted JSON, as TerminalOptions.request).
+type Json = any;
+/** A scripted answer to one terminal.* method. */
+type Handler = (params: Json, session: TerminalSession) => unknown;
+/** What terminalGate says when it refuses. */
+type Refused = Extract<ReturnType<typeof terminalGate>, { ok: false }>;
 
 const ID = `term_${'a'.repeat(32)}`;
 const ID2 = `term_${'b'.repeat(32)}`;
 const tick = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));
 const info = (terminalId = ID, extra = {}) => ({ terminalId, workspaceId: 'wks_a', title: 'sh', cols: 80, rows: 24, state: 'running', attached: true, createdAt: 'x', lastActivityAt: 'x', expiresAt: 'x', ...extra });
-const out = (seq, data, terminalId = ID) => ({ terminalId, type: 'output', seq, data });
-const rpcError = (code, reason, message = 'refused') => new AlpRpcError({ code, message, data: { reason } });
+const out = (seq: number, data: string, terminalId = ID) => ({ terminalId, type: 'output', seq, data });
+const rpcError = (code: number, reason: string, message = 'refused') => new AlpRpcError({ code, message, data: { reason } });
 
 /** A memory sessionStorage. */
 function memoryStorage() {
-  const map = new Map();
-  return { map, getItem: key => map.get(key) ?? null, setItem: (key, value) => { map.set(key, String(value)); }, removeItem: key => { map.delete(key); } };
+  const map = new Map<string, string>();
+  return { map, getItem: (key: string) => map.get(key) ?? null, setItem: (key: string, value: string) => { map.set(key, String(value)); }, removeItem: (key: string) => { map.delete(key); } };
 }
 
 /**
  * A TerminalSession on a scripted host: `handlers[method](params, session)` answers (or throws);
  * every call is recorded. Output written goes to `screen`.
  */
-function rig({ handlers = {}, limits, storage = memoryStorage(), ...options } = {}) {
-  const calls = [];
-  let session;
-  const defaults = {
+function rig({ handlers = {}, limits, storage = memoryStorage(), ...options }: { handlers?: Record<string, Handler>, limits?: TerminalLimits, storage?: ReturnType<typeof memoryStorage> } & Omit<Partial<TerminalOptions>, 'limits' | 'storage'> = {}) {
+  const calls: [string, Json][] = [];
+  let session: TerminalSession;
+  const defaults: Record<string, Handler> = {
     'terminal.create': () => ({ terminal: info() }),
     'terminal.attach': () => ({ terminal: info(), nextSeq: 1 }),
     'terminal.input': params => ({ bytes: Buffer.byteLength(params.data) }),
     'terminal.resize': params => ({ cols: params.cols, rows: params.rows }),
     'terminal.close': () => ({ closed: true }),
   };
-  const request = async (method, params) => {
+  const request = async (method: string, params: Json) => {
     calls.push([method, params]);
     const handler = handlers[method] ?? defaults[method];
     return handler(params, session);
   };
   session = new TerminalSession({ workspaceId: 'wks_a', request, storage, storageKey: 'k', inputDelayMs: 1, resizeDelayMs: 5, newRequestId: (() => { let n = 0; return () => `req-${++n}`; })(), ...(limits ? { limits } : {}), ...options });
-  const screen = [];
+  const screen: string[] = [];
   session.onOutput(text => screen.push(text));
-  return { session, calls, screen, storage, of: method => calls.filter(([name]) => name === method).map(([, params]) => params) };
+  return { session, calls, screen, storage, of: (method: string) => calls.filter(([name]) => name === method).map(([, params]) => params) };
 }
 
 // ---- pure helpers ----------------------------------------------------------------------------
@@ -60,7 +71,7 @@ test('splitUtf8 cuts at most max UTF-8 bytes and never inside a character', () =
 });
 
 test('terminalLimits takes the hello\'s values, never above TERMINAL, and TERMINAL\'s for what is missing or bad', () => {
-  assert.deepEqual(terminalLimits(undefined), Object.fromEntries(['maxPerPrincipal', 'maxPerDaemon', 'maxInputBytes', 'maxOutputFrameBytes', 'replayBytes', 'idleMs', 'maxLifetimeMs', 'reconnectMs'].map(key => [key, TERMINAL[key]])));
+  assert.deepEqual(terminalLimits(undefined), Object.fromEntries(['maxPerPrincipal', 'maxPerDaemon', 'maxInputBytes', 'maxOutputFrameBytes', 'replayBytes', 'idleMs', 'maxLifetimeMs', 'reconnectMs'].map(key => [key, TERMINAL[key as keyof typeof TERMINAL]])));
   const limits = terminalLimits({ maxInputBytes: 1024, reconnectMs: 10 * TERMINAL.reconnectMs, idleMs: -1, maxPerDaemon: 'x' });
   assert.equal(limits.maxInputBytes, 1024);
   assert.equal(limits.reconnectMs, TERMINAL.reconnectMs);
@@ -82,21 +93,21 @@ test('exitText: "Process exited (code N / reason)"', () => {
 });
 
 test('terminalGate: the host\'s switch and the token\'s terminal.exec, each said plainly, then the registry workspace', () => {
-  const principal = permissions => ({ id: 'p', permissions, workspaces: ['/w/a'], workspaceRoots: [{ path: '/w/a', canonical: '/real/a' }] });
+  const principal = (permissions: string[]) => ({ id: 'p', permissions, workspaces: ['/w/a'], workspaceRoots: [{ path: '/w/a', canonical: '/real/a' }] });
   const row = { id: 'wks_a', projectId: 'p', directory: '/real/a', labels: [], createdAt: 'x' };
-  const state = (capabilities, permissions, rows = [row], extra = {}) => ({ connection: { phase: 'open', capabilities }, principal: principal(permissions), workspace: '/w/a', registry: { workspaces: rows, ...extra } });
+  const state = (capabilities: string[], permissions: string[], rows = [row], extra = {}) => ({ connection: { phase: 'open', capabilities }, principal: principal(permissions), workspace: '/w/a', registry: { workspaces: rows, ...extra } });
   const all = ['terminal', 'workspace.registry'];
   assert.deepEqual(terminalGate(state(all, ['terminal.exec'])), { ok: true, workspaceId: 'wks_a' });
-  assert.deepEqual(terminalGate(state(['workspace.registry'], ['terminal.exec'])).messages, ['The host has not allowed remote terminals (its owner runs: alp terminal allow --yes)']);
-  assert.deepEqual(terminalGate(state(all, ['session.read', 'session.write', 'project.read'])).messages, ['Your access token cannot open terminals (it needs terminal.exec)']);
-  assert.deepEqual(terminalGate(state(['workspace.registry'], ['session.write'])).reasons, ['capability', 'permission']);
+  assert.deepEqual((terminalGate(state(['workspace.registry'], ['terminal.exec'])) as Refused).messages, ['The host has not allowed remote terminals (its owner runs: alp terminal allow --yes)']);
+  assert.deepEqual((terminalGate(state(all, ['session.read', 'session.write', 'project.read'])) as Refused).messages, ['Your access token cannot open terminals (it needs terminal.exec)']);
+  assert.deepEqual((terminalGate(state(['workspace.registry'], ['session.write'])) as Refused).reasons, ['capability', 'permission']);
   // session.write implies nothing: only terminal.exec opens terminals.
   assert.equal(terminalGate(state(all, ['session.write', 'session.team.write', 'workspace.manage'])).ok, false);
-  assert.deepEqual(terminalGate(state(['terminal'], ['terminal.exec'])).reasons, ['registry']);
-  assert.deepEqual(terminalGate(state(all, ['terminal.exec'], [], { loading: true })).reasons, ['loading']);
-  assert.deepEqual(terminalGate(state(all, ['terminal.exec'], [])).reasons, ['unregistered']);
-  assert.deepEqual(terminalGate(state(all, ['terminal.exec'], [{ ...row, directory: '/elsewhere' }])).reasons, ['unregistered']);
-  assert.deepEqual(terminalGate({ ...state(all, ['terminal.exec']), workspace: null }).reasons, ['workspace']);
+  assert.deepEqual((terminalGate(state(['terminal'], ['terminal.exec'])) as Refused).reasons, ['registry']);
+  assert.deepEqual((terminalGate(state(all, ['terminal.exec'], [], { loading: true })) as Refused).reasons, ['loading']);
+  assert.deepEqual((terminalGate(state(all, ['terminal.exec'], [])) as Refused).reasons, ['unregistered']);
+  assert.deepEqual((terminalGate(state(all, ['terminal.exec'], [{ ...row, directory: '/elsewhere' }])) as Refused).reasons, ['unregistered']);
+  assert.deepEqual((terminalGate({ ...state(all, ['terminal.exec']), workspace: null }) as Refused).reasons, ['workspace']);
   assert.equal(TERMINAL_MESSAGES.permission, 'Your access token cannot open terminals (it needs terminal.exec)');
 });
 
@@ -149,11 +160,11 @@ test('input is batched and in order, one request at a time, each at most maxInpu
   r.session.input(' héllo wörld\r');
   await tick(10);
   assert.equal(r.of('terminal.input').length, 1);
-  release();
+  release!();
   await until(() => r.of('terminal.input').length === 2, 'second');
-  release();
+  release!();
   await until(() => r.of('terminal.input').length === 3, 'third');
-  release();
+  release!();
   await tick(10);
   const sent = r.of('terminal.input').map(params => params.data);
   assert.deepEqual(sent, ['echo', ' héllo ', 'wörld\r']);
@@ -181,7 +192,7 @@ test('exit ends input and says how; a new terminal can replace it', async () => 
   await until(() => r.session.accepting, 'running');
   r.session.event({ terminalId: ID, type: 'exit', seq: 1, exitCode: 0, signal: null, reason: 'exited' });
   assert.equal(r.session.getState().status, 'exited');
-  assert.equal(exitText(r.session.getState().exit), 'Process exited (code 0)');
+  assert.equal(exitText(r.session.getState().exit!), 'Process exited (code 0)');
   assert.equal(r.session.input('ls\r'), false);
   await tick(10);
   assert.equal(r.of('terminal.input').length, 0);
@@ -285,7 +296,7 @@ test('refusals are said plainly and never shown as a running terminal', async ()
   const full = rig({ handlers: { 'terminal.create': () => { throw rpcError(1005, 'terminal_limit'); } } });
   full.session.start(80, 24);
   await until(() => full.session.getState().status === 'failed', 'failed');
-  assert.match(full.session.getState().error, /Too many terminals/);
+  assert.match(full.session.getState().error!, /Too many terminals/);
 });
 
 test('a create whose answer was lost is repeated with the same requestId once the connection is back', async () => {
@@ -325,13 +336,13 @@ function hostWith({ permissions = ['session.read', 'session.write', 'project.rea
   host.intercept.set('terminal.create', (_params, _connection, { answer }) => { answer({ terminal: info() }); return 'handled'; });
   host.intercept.set('terminal.attach', (params, connection, { answer }) => {
     // Replay before the answer, as alpd sends it: everything after `after`.
-    for (let at = (params.after ?? 0) + 1; at <= seq; at++) connection.deliver(JSON.stringify({ jsonrpc: '2.0', method: 'terminal.event', params: out(at, `#${at}`) }));
+    for (let at = (params.after ?? 0) + 1; at <= seq; at++) connection.deliver!(JSON.stringify({ jsonrpc: '2.0', method: 'terminal.event', params: out(at, `#${at}`) }));
     answer({ terminal: info(), nextSeq: seq + 1 });
     return 'handled';
   });
   host.intercept.set('terminal.input', (params, connection, { answer }) => {
     seq += 1;
-    connection.deliver(JSON.stringify({ jsonrpc: '2.0', method: 'terminal.event', params: out(seq, `echo:${params.data}`) }));
+    connection.deliver!(JSON.stringify({ jsonrpc: '2.0', method: 'terminal.event', params: out(seq, `echo:${params.data}`) }));
     answer({ bytes: params.data.length });
     return 'handled';
   });
@@ -340,8 +351,8 @@ function hostWith({ permissions = ['session.read', 'session.write', 'project.rea
   return host;
 }
 
-async function connectController(t, host, options = {}) {
-  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, attentionWatchPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500, terminalStorage: memoryStorage(), terminalOptions: { inputDelayMs: 1, resizeDelayMs: 5 }, ...options });
+async function connectController(t: TestContext, host: FakeHost, options = {}) {
+  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, attentionWatchPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500, terminalStorage: memoryStorage(), terminalOptions: { inputDelayMs: 1, resizeDelayMs: 5 }, ...options } as ControllerOptions);
   t.after(() => controller.disconnect());
   controller.connect({ url: 'http://127.0.0.1:7434', token: 'alpgw1.0123456789abcdef.secret' });
   await until(() => controller.getState().connection.phase === 'open', 'open');
@@ -357,7 +368,7 @@ test('controller: terminal.event notifications reach the terminal; a dropped con
   assert.equal(controller.getState().connection.terminalLimits?.maxInputBytes, TERMINAL.maxInputBytes);
   const session = controller.terminal('wks_a');
   assert.equal(controller.terminal('wks_a'), session);
-  const screen = [];
+  const screen: string[] = [];
   session.onOutput(text => screen.push(text));
   session.start(80, 24);
   await until(() => session.accepting, 'running');
@@ -383,12 +394,12 @@ test('controller: no terminal without terminal.exec or the host\'s switch, and n
   assert.throws(() => controller.terminal('wks_a'), /terminal\.exec/);
   const off = hostWith({ capabilities: ['workspace.registry'] });
   const other = await connectController(t, off);
-  assert.deepEqual(other.terminalGate().messages, [TERMINAL_MESSAGES.capability]);
+  assert.deepEqual((other.terminalGate() as Refused).messages, [TERMINAL_MESSAGES.capability]);
   assert.equal(host.calls.concat(off.calls).some(call => call.method.startsWith('terminal.')), false);
 });
 
 test('controller: a page going away keeps its terminal for the reload; a person\'s Disconnect ends it', async t => {
-  const closes = host => host.calls.filter(call => call.method === 'terminal.close').length;
+  const closes = (host: FakeHost) => host.calls.filter(call => call.method === 'terminal.close').length;
   const kept = hostWith();
   const reloading = await connectController(t, kept);
   const first = reloading.terminal('wks_a');
@@ -425,12 +436,12 @@ test('controller: sibling terminal tabs keep independent identity, output, selec
   assert.notEqual(first, second);
   assert.equal(first.getState().terminalId, ID);
   assert.equal(second.getState().terminalId, ID2);
-  host.connections.values().next().value.deliver(JSON.stringify({ jsonrpc: '2.0', method: 'terminal.event', params: out(1, 'only second', ID2) }));
+  host.connections.values().next().value!.deliver!(JSON.stringify({ jsonrpc: '2.0', method: 'terminal.event', params: out(1, 'only second', ID2) }));
   await until(() => second.history() === 'only second', 'routing');
   assert.equal(first.history(), '');
-  controller.selectTerminal('wks_a', firstKey);
+  controller.selectTerminal('wks_a', firstKey!);
   assert.equal(controller.terminal('wks_a'), first);
-  await controller.closeTerminalTab('wks_a', secondKey);
+  await controller.closeTerminalTab('wks_a', secondKey!);
   assert.equal(first.accepting, true);
   assert.deepEqual(host.calls.filter(c => c.method === 'terminal.close').map(c => c.params.terminalId), [ID2]);
   const thirdKey = controller.addTerminal('wks_a');
@@ -464,7 +475,7 @@ test('closing during terminal.create closes the late shell instead of orphaning 
   const r = rig({ handlers: { 'terminal.create': () => new Promise(resolve => { answer = resolve; }) } });
   r.session.start();
   await r.session.close();
-  answer({ terminal: info() });
+  answer!({ terminal: info() });
   await until(() => r.of('terminal.close').length === 1, 'late shell closed');
   assert.equal(r.session.getState().status, 'closed');
   assert.equal(r.storage.map.has('k'), false);

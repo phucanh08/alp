@@ -9,7 +9,12 @@ import { AlpClientError, AlpRpcError } from '@anhlp/alp-client/portable';
 import { Controller } from '../dist-lib/controller.js';
 import { COMPACT_MESSAGES, RELOAD_MESSAGES, agentControlsGate, describeCompactError, allTurnsEnded, branchTurns, conversationGate, conversationMarker, describeConversationError, describeReloadError, turnsByMessage } from '../dist-lib/conversation.js';
 import { emptyProjection, entriesOf, project, prependHistory } from '../dist-lib/timeline.js';
-import { FakeHost, until } from './support/fake-host.js';
+import type { TestContext } from 'node:test';
+import type { Envelope } from '../dist-lib/timeline.js';
+import { FakeHost, until } from './support/fake-host.ts';
+
+// any: workspace.worktree.create params as the controller sends them.
+type Json = any;
 
 const CAPS = ['session.history', 'session.fork', 'session.rewind'];
 
@@ -24,7 +29,7 @@ test('controls show only with the capability, the summary saying so, the token a
   assert.equal(conversationGate({ ...base, summary: {} }).fork.shown, false);
   const unsupported = conversationGate({ ...base, summary: { conversation: { fork: false, rewind: false, reason: 'runtime_unsupported' } } });
   assert.equal(unsupported.rewind.shown, false);
-  assert.match(unsupported.rewind.reason, /runtime that cannot fork or rewind/);
+  assert.match(unsupported.rewind.reason!, /runtime that cannot fork or rewind/);
   assert.equal(conversationGate({ ...base, summary: { conversation: { fork: true, rewind: false } } }).rewind.shown, false);
   // A viewer token: neither; a write token without read (hand-edited): no fork.
   assert.equal(conversationGate({ ...base, canWrite: false }).rewind.shown, false);
@@ -43,7 +48,7 @@ test('controls show only with the capability, the summary saying so, the token a
 // ---- errors -------------------------------------------------------------------------------
 
 test('refusals read as words; only a lost answer keeps the request id', () => {
-  const rpc = (code, reason, message = reason) => new AlpRpcError({ code, message, data: { reason } });
+  const rpc = (code: number, reason: string, message = reason) => new AlpRpcError({ code, message, data: { reason } });
   const busy = describeConversationError(rpc(1004, 'session_busy'));
   assert.match(busy.message, /still working/);
   assert.equal(busy.retrySame, false);
@@ -63,7 +68,7 @@ test('refusals read as words; only a lost answer keeps the request id', () => {
   const timeout = describeConversationError(rpc(1000, 'gateway_timeout'));
   assert.equal(timeout.retrySame, true);
   assert.match(timeout.message, /same request/);
-  assert.equal(describeConversationError(new AlpClientError('closed', 'connection closed')).retrySame, true);
+  assert.equal(describeConversationError(new (AlpClientError as unknown as new (...args: unknown[]) => AlpClientError)('closed', 'connection closed')).retrySame, true);
   assert.equal(describeConversationError(rpc(1000, 'persistence_failed')).retrySame, true);
   assert.match(describeConversationError(new AlpRpcError({ code: 1003, message: 'no', data: { reason: 'grant', permission: 'session.write' } })).message, /needs session\.write/);
   assert.equal(describeConversationError(rpc(1004, 'key_conflict')).retrySame, false);
@@ -87,10 +92,10 @@ test('a token outside the session\'s mode and invalid parameters read as their o
 // ---- turns --------------------------------------------------------------------------------
 
 /** A root timeline: user messages, their prompt.accepted, turn start/end, replies. */
-function timeline(root, turns, { steerInto } = {}) {
+function timeline(root: string, turns: string[], { steerInto }: { steerInto?: number } = {}) {
   let projection = emptyProjection(root);
   let cursor = 0;
-  const add = event => { projection = project(projection, { sessionId: root, epoch: 'e', seq: ++cursor, cursor, ts: '', event }); };
+  const add = (event: unknown) => { projection = project(projection, { sessionId: root, epoch: 'e', seq: ++cursor, cursor, ts: '', event } as Envelope); };
   turns.forEach((text, index) => {
     const turnId = `turn-${index + 1}`;
     add({ type: 'item', item: { kind: 'user_message', id: `u${index}`, text, clientMessageId: `m${index}` } });
@@ -112,10 +117,10 @@ test('user messages map to their turns: not the first, steers never, later turns
   const turns = turnsByMessage(projection);
   assert.deepEqual([...turns.keys()], ['r:u0', 'r:u1', 'r:u2'], 'the steer started no turn');
   assert.deepEqual(turns.get('r:u0'), { turnId: 'turn-1', index: 0, later: 3, rewindable: false, ended: true, text: 'one' });
-  assert.equal(turns.get('r:u1').rewindable, true);
-  assert.equal(turns.get('r:u2').later, 1);
+  assert.equal(turns.get('r:u1')!.rewindable, true);
+  assert.equal(turns.get('r:u2')!.later, 1);
   // With older history not loaded, the first loaded turn may not be the first.
-  assert.equal(turnsByMessage(projection, { hasOlder: true }).get('r:u0').rewindable, true);
+  assert.equal(turnsByMessage(projection, { hasOlder: true }).get('r:u0')!.rewindable, true);
   assert.equal(allTurnsEnded(projection), true);
   // An older page brings its turns and prompt outcomes along.
   const older = [
@@ -128,8 +133,8 @@ test('user messages map to their turns: not the first, steers never, later turns
   tail = project(tail, { sessionId: 'r', epoch: 't', seq: 5, cursor: 5, ts: '', event: { type: 'prompt.accepted', clientMessageId: 'm1', result: 'turn', turnId: 'turn-2' } });
   const merged = prependHistory(tail, older);
   assert.deepEqual(merged.turnOrder, ['turn-1', 'turn-2']);
-  assert.equal(turnsByMessage(merged).get('r:u0').turnId, 'turn-1');
-  assert.equal(turnsByMessage(merged).get('r:u1').rewindable, true);
+  assert.equal(turnsByMessage(merged).get('r:u0')!.turnId, 'turn-1');
+  assert.equal(turnsByMessage(merged).get('r:u1')!.rewindable, true);
 });
 
 test('conversation markers are recognised; the branch size comes from the summary or the text', () => {
@@ -143,7 +148,7 @@ test('conversation markers are recognised; the branch size comes from the summar
 
 // ---- the controller against a host --------------------------------------------------------
 
-function setup(t) {
+function setup(t: TestContext) {
   const host = new FakeHost();
   host.capabilities.push(...CAPS);
   const make = () => {
@@ -154,7 +159,7 @@ function setup(t) {
   return { host, make };
 }
 
-async function open(controller, root) {
+async function open(controller: Controller, root: string) {
   controller.connect({ url: 'http://127.0.0.1:7434', token: 'alpgw1.0123456789abcdef.secret' });
   await until(() => controller.getState().connection.phase === 'open', 'open');
   controller.selectWorkspace('/w/a');
@@ -163,9 +168,9 @@ async function open(controller, root) {
   await until(() => controller.getState().tree?.status === 'attached', 'attached');
 }
 
-const texts = controller => entriesOf(controller.getState().tree.projection, controller.getState().tree.rootId).map(entry => entry.item.text);
+const texts = (controller: Controller) => entriesOf(controller.getState().tree!.projection, controller.getState().tree!.rootId).map(entry => (entry.item as { text?: string }).text);
 
-async function say(controller, text) {
+async function say(controller: Controller, text: string) {
   await controller.sendPrompt(text);
   await until(() => texts(controller).includes(`echo: ${text}`), `reply to ${text}`);
 }
@@ -181,27 +186,27 @@ test('a rewind sends the held generation, then the view reloads the new history 
   await say(controller, 'codeword CHARLIE');
   const gate = controller.conversationGate();
   assert.deepEqual(gate, { fork: { shown: true }, rewind: { shown: true } });
-  const turns = turnsByMessage(controller.getState().tree.projection);
+  const turns = turnsByMessage(controller.getState().tree!.projection);
   const bravo = [...turns.values()].find(turn => turn.text === 'codeword BRAVO');
-  assert.equal(bravo.later, 2);
+  assert.equal(bravo!.later, 2);
   const historyReads = host.count('session.history');
 
-  const result = await controller.rewindConversation({ beforeTurnId: bravo.turnId, requestId: 'r1' });
+  const result = await controller.rewindConversation({ beforeTurnId: bravo!.turnId, requestId: 'r1' });
   assert.equal(result.generation, 'gen-ses_a-2');
-  const sent = host.calls.find(call => call.method === 'session.rewind').params;
-  assert.deepEqual(sent, { sessionId: 'ses_a', requestId: 'r1', ifGeneration: 'gen-ses_a-1', beforeTurnId: bravo.turnId });
-  await until(() => controller.historyGeneration('ses_a') === 'gen-ses_a-2' && controller.getState().tree.status === 'attached', 'reloaded');
+  const sent = host.calls.find(call => call.method === 'session.rewind')!.params;
+  assert.deepEqual(sent, { sessionId: 'ses_a', requestId: 'r1', ifGeneration: 'gen-ses_a-1', beforeTurnId: bravo!.turnId });
+  await until(() => controller.historyGeneration('ses_a') === 'gen-ses_a-2' && controller.getState().tree!.status === 'attached', 'reloaded');
   await until(() => !texts(controller).includes('codeword BRAVO'), 'the later turns are gone');
-  assert.deepEqual(texts(controller).filter(text => /ALPHA|BRAVO|CHARLIE/.test(text)), ['codeword ALPHA', 'echo: codeword ALPHA']);
-  assert.match(texts(controller).at(-1), /Files were not changed/);
+  assert.deepEqual(texts(controller).filter(text => /ALPHA|BRAVO|CHARLIE/.test(text!)), ['codeword ALPHA', 'echo: codeword ALPHA']);
+  assert.match(texts(controller).at(-1)!, /Files were not changed/);
   assert.equal(controller.getState().selected, 'ses_a', 'the same session');
   // One reload for the answer and the live history.reset together.
   assert.equal(host.count('session.history') - historyReads, 1);
-  const attach = host.calls.filter(call => call.method === 'session.attach').at(-1).params;
+  const attach = host.calls.filter(call => call.method === 'session.attach').at(-1)!.params;
   assert.equal(attach.generation, 'gen-ses_a-2');
   assert.deepEqual(controller.rootSummary().branches?.map(branch => branch.turns), [2]);
   // The same request again (a lost answer) is the first result, not a second rewind.
-  const again = await controller.rewindConversation({ beforeTurnId: bravo.turnId, requestId: 'r1' });
+  const again = await controller.rewindConversation({ beforeTurnId: bravo!.turnId, requestId: 'r1' });
   assert.equal(again.duplicate, true);
   assert.equal(again.branch.branchId, result.branch.branchId);
 });
@@ -216,8 +221,8 @@ test('another client\'s rewind resets this view: its history.reset drops the cac
   await say(watcher, 'two');
   const other = make();
   await open(other, 'ses_a');
-  const turn = [...turnsByMessage(other.getState().tree.projection).values()].find(entry => entry.text === 'two');
-  await other.rewindConversation({ beforeTurnId: turn.turnId, requestId: 'elsewhere' });
+  const turn = [...turnsByMessage(other.getState().tree!.projection).values()].find(entry => entry.text === 'two');
+  await other.rewindConversation({ beforeTurnId: turn!.turnId, requestId: 'elsewhere' });
   await until(() => watcher.historyGeneration('ses_a') === 'gen-ses_a-2', 'the watcher reloaded');
   await until(() => !texts(watcher).includes('two'), 'the watcher no longer shows the cut turn');
   assert.ok(texts(watcher).includes('one'));
@@ -234,17 +239,17 @@ test('a stale generation is refused, explained, and the view reloads; a busy roo
   await open(controller, 'ses_a');
   await say(controller, 'one');
   await say(controller, 'two');
-  const turn = [...turnsByMessage(controller.getState().tree.projection).values()].find(entry => entry.text === 'two');
+  const turn = [...turnsByMessage(controller.getState().tree!.projection).values()].find(entry => entry.text === 'two');
   // The host moved on without this view knowing (no event reached it).
   host.root('ses_a').generation = 'gen-elsewhere';
   const reads = host.count('session.history');
-  await assert.rejects(controller.rewindConversation({ beforeTurnId: turn.turnId, requestId: 'x1' }), error => describeConversationError(error).reason === 'stale_generation');
+  await assert.rejects(controller.rewindConversation({ beforeTurnId: turn!.turnId, requestId: 'x1' }), error => describeConversationError(error).reason === 'stale_generation');
   await until(() => controller.historyGeneration('ses_a') === 'gen-elsewhere', 'reloaded after the refusal');
   assert.equal(host.count('session.history'), reads + 1);
   await controller.sendPrompt('hold [hold]');
-  await until(() => 'ses_a' in controller.getState().tree.projection.running, 'running');
+  await until(() => 'ses_a' in controller.getState().tree!.projection.running, 'running');
   assert.equal(controller.conversationGate().rewind.reason, 'Wait until main and its agents are idle.');
-  await assert.rejects(controller.rewindConversation({ beforeTurnId: turn.turnId, requestId: 'x2' }), error => /still working/.test(describeConversationError(error).message));
+  await assert.rejects(controller.rewindConversation({ beforeTurnId: turn!.turnId, requestId: 'x2' }), error => /still working/.test(describeConversationError(error).message));
 });
 
 test('a fork opens the new root with the conversation through its turn; a branch restores as a new session', async t => {
@@ -255,24 +260,24 @@ test('a fork opens the new root with the conversation through its turn; a branch
   await open(controller, 'ses_a');
   await say(controller, 'codeword ALPHA');
   await say(controller, 'codeword BRAVO');
-  const [alpha, bravo] = [...turnsByMessage(controller.getState().tree.projection).values()];
+  const [alpha, bravo] = [...turnsByMessage(controller.getState().tree!.projection).values()];
   const fork = await controller.forkConversation({ requestId: 'f1', boundary: { throughTurnId: alpha.turnId }, title: 'Codes (fork)' });
   const forkId = fork.session.id;
-  assert.equal(host.calls.find(call => call.method === 'session.fork').params.ifGeneration, 'gen-ses_a-1');
+  assert.equal(host.calls.find(call => call.method === 'session.fork')!.params.ifGeneration, 'gen-ses_a-1');
   await until(() => controller.getState().selected === forkId && controller.getState().tree?.status === 'attached', 'the fork is open');
   assert.ok(controller.getState().sessions.list.some(row => row.id === forkId), 'listed at once');
-  assert.deepEqual(texts(controller).filter(text => /ALPHA|BRAVO/.test(text)), ['codeword ALPHA', 'echo: codeword ALPHA']);
-  assert.equal(controller.rootSummary().forkedFrom.sessionId, 'ses_a');
+  assert.deepEqual(texts(controller).filter(text => /ALPHA|BRAVO/.test(text!)), ['codeword ALPHA', 'echo: codeword ALPHA']);
+  assert.equal(controller.rootSummary().forkedFrom!.sessionId, 'ses_a');
 
   // Back to the source: rewind before BRAVO, then restore that branch.
   controller.selectSession('ses_a');
-  await until(() => controller.getState().tree?.rootId === 'ses_a' && controller.getState().tree.status === 'attached', 'source again');
+  await until(() => controller.getState().tree?.rootId === 'ses_a' && controller.getState().tree!.status === 'attached', 'source again');
   const rewound = await controller.rewindConversation({ beforeTurnId: bravo.turnId, requestId: 'r1' });
   await until(() => controller.historyGeneration('ses_a') === 'gen-ses_a-2', 'reloaded');
   const restored = await controller.forkConversation({ requestId: 'f2', branchId: rewound.branch.branchId, title: 'Codes (restored)' });
   await until(() => controller.getState().selected === restored.session.id && controller.getState().tree?.status === 'attached', 'the restored session is open');
-  assert.deepEqual(texts(controller).filter(text => /ALPHA|BRAVO/.test(text)), ['codeword ALPHA', 'echo: codeword ALPHA', 'codeword BRAVO', 'echo: codeword BRAVO']);
-  assert.equal(host.calls.filter(call => call.method === 'session.fork').at(-1).params.ifGeneration, 'gen-ses_a-2', 'the root\'s current generation');
+  assert.deepEqual(texts(controller).filter(text => /ALPHA|BRAVO/.test(text!)), ['codeword ALPHA', 'echo: codeword ALPHA', 'codeword BRAVO', 'echo: codeword BRAVO']);
+  assert.equal(host.calls.filter(call => call.method === 'session.fork').at(-1)!.params.ifGeneration, 'gen-ses_a-2', 'the root\'s current generation');
 });
 
 test('without the capability the controller offers nothing and the summary alone is not enough', async t => {
@@ -290,7 +295,7 @@ test('a token limited to modes is not offered fork or rewind of a tree it may no
   const gate = conversationGate({ capabilities: ['session.fork', 'session.rewind', 'session.history'], canRead: true, canWrite: true, summary: { conversation: { fork: true, rewind: true } }, generation: 'g', driveBlock: 'Your access token can only drive sessions in read-only mode; this conversation runs in full-access.' });
   assert.equal(gate.fork.shown, false);
   assert.equal(gate.rewind.shown, false);
-  assert.match(gate.rewind.reason, /read-only mode/);
+  assert.match(gate.rewind.reason!, /read-only mode/);
 });
 
 test('a fork into a worktree reuses the worktree it made for that destination after a refused fork; another destination makes its own', async t => {
@@ -300,7 +305,7 @@ test('a fork into a worktree reuses the worktree it made for that destination af
   host.seed('ses_a', { title: 'Codes' });
   host.root('ses_a').summary.conversation = { fork: true, rewind: true };
   host.intercept.set('workspace.list', (_params, _connection, { answer }) => { answer({ workspaces: [{ id: 'wks_a', projectId: 'prj', directory: '/w/a', canonical: '/w/a', labels: [], createdAt: 'x', revision: 1 }], revision: 1, total: 1, nextCursor: null }); return 'handled'; });
-  const created = [];
+  const created: Json[] = [];
   host.intercept.set('workspace.worktree.create', (params, _connection, { answer }) => {
     created.push(params);
     answer({ workspace: { id: `wks_${params.mappingId}_${created.length}`, projectId: 'prj', directory: `/w/${params.mappingId}-${created.length}`, labels: [], createdAt: 'x', revision: 2 }, revision: 2 });
@@ -316,20 +321,20 @@ test('a fork into a worktree reuses the worktree it made for that destination af
   await controller.refreshRegistry();
   await until(() => controller.worktreeForkSource()?.id === 'wks_a', 'the registry');
   await say(controller, 'codeword ALPHA');
-  const [alpha] = [...turnsByMessage(controller.getState().tree.projection).values()];
+  const [alpha] = [...turnsByMessage(controller.getState().tree!.projection).values()];
   // Refused after its worktree was made; the retry (a new fork request id) forks into the same worktree.
   assert.equal(controller.worktreeForkSource()?.id, 'wks_a');
-  await assert.rejects(controller.forkIntoWorktree({ requestId: 'f1', worktreeKey: 'dialog:m1', mappingId: 'm1', boundary: { throughTurnId: alpha.turnId } }), error => error?.data?.reason === 'session_busy');
+  await assert.rejects(controller.forkIntoWorktree({ requestId: 'f1', worktreeKey: 'dialog:m1', mappingId: 'm1', boundary: { throughTurnId: alpha.turnId } }), (error: { data?: { reason?: string } } | undefined) => error?.data?.reason === 'session_busy');
   assert.equal(controller.worktreeForkSource()?.id, 'wks_a');
   const fork = await controller.forkIntoWorktree({ requestId: 'f2', worktreeKey: 'dialog:m1', mappingId: 'm1', boundary: { throughTurnId: alpha.turnId } });
   assert.equal(created.length, 1);
-  assert.equal(host.calls.filter(call => call.method === 'session.fork').at(-1).params.workspaceId, 'wks_m1_1');
+  assert.equal(host.calls.filter(call => call.method === 'session.fork').at(-1)!.params.workspaceId, 'wks_m1_1');
   assert.ok(fork.session.id);
   // The fork opened in its worktree; back in the source's workspace, another destination is its own worktree.
   controller.selectWorkspace('/w/a');
   await until(() => controller.worktreeForkSource()?.id === 'wks_a', 'the source workspace again');
   controller.selectSession('ses_a');
-  await until(() => controller.getState().tree?.rootId === 'ses_a' && controller.getState().tree.status === 'attached', 'the source again');
+  await until(() => controller.getState().tree?.rootId === 'ses_a' && controller.getState().tree!.status === 'attached', 'the source again');
   await controller.forkIntoWorktree({ requestId: 'f3', worktreeKey: 'dialog:m2', mappingId: 'm2', boundary: { throughTurnId: alpha.turnId } });
   assert.equal(created.length, 2);
   assert.equal(created[1].mappingId, 'm2');
@@ -342,7 +347,7 @@ test('a fork into a worktree whose answer was lost goes to the same worktree aga
   host.seed('ses_a', { title: 'Codes' });
   host.root('ses_a').summary.conversation = { fork: true, rewind: true };
   host.intercept.set('workspace.list', (_params, _connection, { answer }) => { answer({ workspaces: [{ id: 'wks_a', projectId: 'prj', directory: '/w/a', canonical: '/w/a', labels: [], createdAt: 'x', revision: 1 }], revision: 1, total: 1, nextCursor: null }); return 'handled'; });
-  const created = [];
+  const created: Json[] = [];
   host.intercept.set('workspace.worktree.create', (params, _connection, { answer }) => {
     created.push(params);
     answer({ workspace: { id: `wks_${params.mappingId}_${created.length}`, projectId: 'prj', directory: `/w/${params.mappingId}-${created.length}`, labels: [], createdAt: 'x', revision: 2 }, revision: 2 });
@@ -359,7 +364,7 @@ test('a fork into a worktree whose answer was lost goes to the same worktree aga
   await controller.refreshRegistry();
   await until(() => controller.worktreeForkSource()?.id === 'wks_a', 'the registry');
   await say(controller, 'codeword ALPHA');
-  const [alpha] = [...turnsByMessage(controller.getState().tree.projection).values()];
+  const [alpha] = [...turnsByMessage(controller.getState().tree!.projection).values()];
   await assert.rejects(controller.forkIntoWorktree({ requestId: 'f1', worktreeKey: 'dialog:m1', mappingId: 'm1', boundary: { throughTurnId: alpha.turnId } }), error => describeConversationError(error).retrySame);
   assert.equal(created.length, 1);
   // The same request id, now asked for another destination: no second worktree; the same fork goes again.
@@ -372,7 +377,7 @@ test('a fork into a worktree whose answer was lost goes to the same worktree aga
   controller.selectWorkspace('/w/a');
   await until(() => controller.worktreeForkSource()?.id === 'wks_a', 'the source workspace again');
   controller.selectSession('ses_a');
-  await until(() => controller.getState().tree?.rootId === 'ses_a' && controller.getState().tree.status === 'attached', 'the source again');
+  await until(() => controller.getState().tree?.rootId === 'ses_a' && controller.getState().tree!.status === 'attached', 'the source again');
   await controller.forkIntoWorktree({ requestId: 'f2', worktreeKey: 'dialog:m2', mappingId: 'm2', boundary: { throughTurnId: alpha.turnId } });
   assert.equal(created.length, 2);
   assert.equal(created[1].mappingId, 'm2');
@@ -384,16 +389,16 @@ test('tab controls: hidden without the capability; reload only for an idle open 
   const base = { capabilities: ['session.history', 'session.reload', 'session.resumeCommand'], canRead: true, canWrite: true, summary: { conversation: { fork: true, rewind: true, reload: true } }, root: true, generation: 'g' };
   assert.deepEqual(agentControlsGate(base), { reload: { shown: true, enabled: true }, compact: { shown: true, enabled: true }, resume: { shown: true, enabled: true } });
   assert.deepEqual(agentControlsGate({ ...base, capabilities: ['session.history'] }), { reload: { shown: false, enabled: false }, compact: { shown: true, enabled: true }, resume: { shown: false, enabled: false } });
-  const reason = input => agentControlsGate({ ...base, ...input }).reload;
+  const reason = (input: Record<string, unknown>) => agentControlsGate({ ...base, ...input }).reload;
   assert.deepEqual(reason({ root: false }), { shown: true, enabled: false, reason: RELOAD_MESSAGES.not_root });
   assert.equal(reason({ summary: { conversation: { fork: false, rewind: false, reload: false, reason: 'runtime_unsupported' } } }).enabled, false);
-  assert.match(reason({ canWrite: false }).reason, /session\.write/);
+  assert.match(reason({ canWrite: false }).reason!, /session\.write/);
   assert.equal(reason({ driveBlock: 'Not in your modes' }).reason, 'Not in your modes');
   assert.equal(reason({ closed: true }).reason, RELOAD_MESSAGES.session_closed);
-  assert.match(reason({ busy: true }).reason, /idle/);
-  assert.match(reason({ generation: null }).reason, /loading/);
-  assert.match(reason({ online: false }).reason, /Reconnecting/);
-  assert.match(agentControlsGate({ ...base, canRead: false }).resume.reason, /cannot read/);
+  assert.match(reason({ busy: true }).reason!, /idle/);
+  assert.match(reason({ generation: null }).reason!, /loading/);
+  assert.match(reason({ online: false }).reason!, /Reconnecting/);
+  assert.match(agentControlsGate({ ...base, canRead: false }).resume.reason!, /cannot read/);
   // Refusals read as reload's own words.
   assert.equal(describeReloadError(new AlpRpcError({ code: 1005, message: 'x', data: { reason: 'native_refused' } })).message, RELOAD_MESSAGES.native_refused);
   assert.equal(describeReloadError(new AlpRpcError({ code: 1004, message: 'x', data: { reason: 'session_busy' } })).message, RELOAD_MESSAGES.session_busy);
@@ -411,8 +416,8 @@ test('Reload agent sends the held generation once per request id; history and th
   const before = texts(controller);
   const result = await controller.reloadAgent({ sessionId: 'ses_a', requestId: 'rl1' });
   assert.equal(result.session.id, 'ses_a');
-  assert.deepEqual(host.calls.find(call => call.method === 'session.reload').params, { sessionId: 'ses_a', requestId: 'rl1', ifGeneration: 'gen-ses_a-1' });
-  assert.match(controller.getState().notice.text, /Reloaded/);
+  assert.deepEqual(host.calls.find(call => call.method === 'session.reload')!.params, { sessionId: 'ses_a', requestId: 'rl1', ifGeneration: 'gen-ses_a-1' });
+  assert.match(controller.getState().notice!.text, /Reloaded/);
   assert.deepEqual(texts(controller), before, 'the conversation shown stays');
   assert.equal(controller.getState().selected, 'ses_a');
   assert.equal(controller.historyGeneration('ses_a'), 'gen-ses_a-1', 'the generation does not change');
@@ -421,8 +426,8 @@ test('Reload agent sends the held generation once per request id; history and th
   // A refusal: a notice in reload's words, the error to the caller.
   host.reloadError = new AlpRpcError({ code: 1005, message: 'The agent could not be restarted: /secret/path', data: { reason: 'native_refused' } });
   await assert.rejects(controller.reloadAgent({ sessionId: 'ses_a', requestId: 'rl2' }));
-  assert.equal(controller.getState().notice.level, 'error');
-  assert.equal(controller.getState().notice.text, RELOAD_MESSAGES.native_refused);
+  assert.equal(controller.getState().notice!.level, 'error');
+  assert.equal(controller.getState().notice!.text, RELOAD_MESSAGES.native_refused);
   host.reloadError = undefined;
   // Not the main agent: refused here, nothing sent.
   const sent = host.count('session.reload');
@@ -432,14 +437,14 @@ test('Reload agent sends the held generation once per request id; history and th
 
 test('tab controls: Compact context only for the open root the token may drive; busy is fine (t-de1a)', () => {
   const base = { capabilities: [], canRead: true, canWrite: true, summary: {}, root: true, generation: null };
-  const compact = input => agentControlsGate({ ...base, ...input }).compact;
+  const compact = (input: Record<string, unknown>) => agentControlsGate({ ...base, ...input }).compact;
   assert.deepEqual(compact({}), { shown: true, enabled: true });
   assert.deepEqual(compact({ busy: true }), { shown: true, enabled: true }, 'alpd waits for the turn boundary');
   assert.deepEqual(compact({ root: false }), { shown: false, enabled: false });
-  assert.match(compact({ canWrite: false }).reason, /session\.write/);
+  assert.match(compact({ canWrite: false }).reason!, /session\.write/);
   assert.equal(compact({ driveBlock: 'Not in your modes' }).reason, 'Not in your modes');
   assert.equal(compact({ closed: true }).reason, COMPACT_MESSAGES.session_closed);
-  assert.match(compact({ online: false }).reason, /Reconnecting/);
+  assert.match(compact({ online: false }).reason!, /Reconnecting/);
   assert.equal(describeCompactError(new AlpRpcError({ code: 1005, message: '/secret', data: { reason: 'session_busy' } })).message, COMPACT_MESSAGES.session_busy);
   assert.match(describeCompactError(new AlpRpcError({ code: -32601, message: 'x' })).message, /Update ALP on the host/);
 });
@@ -450,16 +455,16 @@ test('Compact context sends session.compact for the open root and says what happ
   const controller = make();
   await open(controller, 'ses_a');
   assert.deepEqual(await controller.compactAgent({ sessionId: 'ses_a' }), { status: 'started' });
-  assert.deepEqual(host.calls.find(call => call.method === 'session.compact').params, { sessionId: 'ses_a' });
-  assert.match(controller.getState().notice.text, /checkpoint/);
+  assert.deepEqual(host.calls.find(call => call.method === 'session.compact')!.params, { sessionId: 'ses_a' });
+  assert.match(controller.getState().notice!.text, /checkpoint/);
   host.compactError = new AlpRpcError({ code: 1005, message: 'The session is not open', data: { reason: 'session_busy' } });
   await assert.rejects(controller.compactAgent({ sessionId: 'ses_a' }));
-  assert.equal(controller.getState().notice.level, 'error');
-  assert.equal(controller.getState().notice.text, COMPACT_MESSAGES.session_busy);
+  assert.equal(controller.getState().notice!.level, 'error');
+  assert.equal(controller.getState().notice!.text, COMPACT_MESSAGES.session_busy);
   host.compactError = undefined;
   host.compactUnknown = true;
   await assert.rejects(controller.compactAgent({ sessionId: 'ses_a' }));
-  assert.match(controller.getState().notice.text, /Update ALP on the host/);
+  assert.match(controller.getState().notice!.text, /Update ALP on the host/);
   const sent = host.count('session.compact');
   await assert.rejects(controller.compactAgent({ sessionId: 'ses_other' }), /main agent/);
   assert.equal(host.count('session.compact'), sent);
@@ -472,14 +477,14 @@ test('Copy resume command writes the host\'s command to the clipboard only, and 
   host.seed('ses_a', { title: 'Codes' });
   const controller = make();
   await open(controller, 'ses_a');
-  const written = [];
+  const written: string[] = [];
   const command = await controller.copyResumeCommand('ses_a', async text => { written.push(text); });
-  assert.deepEqual(command.argv, ['alp', 'attach', 'ses_a']);
+  assert.deepEqual(command!.argv, ['alp', 'attach', 'ses_a']);
   assert.deepEqual(written, ['alp attach ses_a']);
-  assert.match(controller.getState().notice.text, /Copied the resume command: alp attach ses_a/);
+  assert.match(controller.getState().notice!.text, /Copied the resume command: alp attach ses_a/);
   // A clipboard the browser refuses: nothing copied, a notice says so.
   assert.equal(await controller.copyResumeCommand('ses_a', async () => { throw new Error('denied'); }), undefined);
-  assert.equal(controller.getState().notice.level, 'error');
+  assert.equal(controller.getState().notice!.level, 'error');
   assert.equal(await controller.copyResumeCommand('ses_missing', async text => { written.push(text); }), undefined);
   assert.equal(written.length, 1);
 });

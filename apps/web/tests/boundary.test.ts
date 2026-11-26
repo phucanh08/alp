@@ -27,7 +27,7 @@ test('a transitive import of the Node client fails the build', async () => {
     await assert.rejects(build({
       configFile: false, root: web, logLevel: 'silent',
       plugins: [browserBoundary({ repository })],
-      build: { outDir: out, write: false, rollupOptions: { input: path.join(web, 'tests/fixtures/forbidden-entry.js') } },
+      build: { outDir: out, write: false, rollupOptions: { input: path.join(web, 'tests/fixtures/forbidden-entry.ts') } },
     }), /portable/);
   } finally { await rm(out, { recursive: true, force: true }); }
 });
@@ -36,7 +36,7 @@ test('the app build lists only portable SDK modules', async () => {
   const out = await mkdtemp(path.join(tmpdir(), 'alp-web-build-'));
   try {
     await build({ configFile: path.join(web, 'vite.config.ts'), logLevel: 'silent', build: { outDir: out, emptyOutDir: true } });
-    const { alpModules } = JSON.parse(await readFile(path.join(out, 'alp-boundary.json'), 'utf8'));
+    const { alpModules }: { alpModules: string[] } = JSON.parse(await readFile(path.join(out, 'alp-boundary.json'), 'utf8'));
     assert.ok(alpModules.includes('packages/client/dist/portable.js'));
     assert.ok(alpModules.every(file => /^packages\/(client\/dist\/(portable|connection\/websocket|rpc\/)|protocol\/dist\/(public|wire)\.js)/.test(file)), alpModules.join(', '));
   } finally { await rm(out, { recursive: true, force: true }); }

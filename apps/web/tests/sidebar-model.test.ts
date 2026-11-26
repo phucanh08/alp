@@ -3,8 +3,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { GROUP_LIMIT, STATUS_GROUPS, filterProjects, groupByStatus, limitRows, resolveProjectFilters, sortSessions } from '../dist-lib/sidebar-model.js';
+import type { Bucket, SessionSummary } from '../dist-lib/sidebar-model.js';
 
-const session = (id, createdAt, updatedAt, status = 'idle') => ({ id, createdAt, updatedAt, status });
+const session = (id: string, createdAt: string, updatedAt?: string, status = 'idle') => ({ id, createdAt, updatedAt, status }) as SessionSummary;
 
 test('Created and Last prompt sort newest first; ties by id', () => {
   const list = [session('a', '2026-10-01T00:00:00Z', '2026-10-05T00:00:00Z'), session('b', '2026-10-03T00:00:00Z', '2026-10-03T00:00:00Z'), session('c', '2026-10-02T00:00:00Z', undefined)];
@@ -14,7 +15,7 @@ test('Created and Last prompt sort newest first; ties by id', () => {
 });
 
 test('a group shows seven rows and every unfinished one past them; Show more shows all', () => {
-  const rows = Array.from({ length: 10 }, (_, index) => ({ id: index, bucket: index === 9 ? 'running' : 'done' }));
+  const rows: { id: number, bucket: Bucket }[] = Array.from({ length: 10 }, (_, index) => ({ id: index, bucket: index === 9 ? 'running' : 'done' }));
   const limited = limitRows(rows, false, row => row.bucket);
   assert.equal(GROUP_LIMIT, 7);
   assert.deepEqual(limited.visible.map(row => row.id), [0, 1, 2, 3, 4, 5, 6, 9]);
@@ -25,8 +26,8 @@ test('a group shows seven rows and every unfinished one past them; Show more sho
 
 test('status sections in Paseo\'s order, empty ones left out', () => {
   assert.deepEqual(STATUS_GROUPS.map(([, label]) => label), ['Needs input', 'Failed', 'Ready to review', 'Working', 'Done']);
-  const buckets = { a: 'done', b: 'running', c: 'needs_input', d: 'running' };
-  const groups = groupByStatus(['a', 'b', 'c', 'd'].map(id => ({ id })), row => buckets[row.id]);
+  const buckets: Record<string, Bucket> = { a: 'done', b: 'running', c: 'needs_input', d: 'running' };
+  const groups = groupByStatus(['a', 'b', 'c', 'd'].map(id => ({ id }) as SessionSummary), row => buckets[row.id]!);
   assert.deepEqual(groups.map(group => [group.label, group.sessions.map(row => row.id)]), [['Needs input', ['c']], ['Working', ['b', 'd']], ['Done', ['a']]]);
 });
 

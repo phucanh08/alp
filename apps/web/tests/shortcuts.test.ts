@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { BINDINGS, formatShortcut, helpSections, isEditable, matchShortcut, shortcutKeys, shortcutLabel } from '../dist-lib/shortcuts.js';
 import { dateSection, groupHistory } from '../dist-lib/history.js';
 
-const press = (code, key, mods = {}) => ({ code, key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
+const press = (code: string, key: string, mods = {}) => ({ code, key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
 
 test('Mod is Cmd on a Mac and Ctrl elsewhere; other modifiers must match exactly', () => {
   assert.equal(matchShortcut(press('KeyN', 'n', { metaKey: true }), { mac: true })?.binding.action, 'session.new');
@@ -76,7 +76,7 @@ test('ALP.app uses Paseo\'s desktop set; a browser keeps the web set', () => {
   assert.equal(shortcutLabel('tab.close', true), '⌥⇧W');
   assert.equal(shortcutLabel('session.index', true, true), '⌘1-9');
   assert.equal(shortcutLabel('session.relative', true, true, -1), '⌘[');
-  const rows = (/** @type {boolean} */ isDesktop) => helpSections(true, '', isDesktop).flatMap(section => section.rows);
+  const rows = (isDesktop: boolean) => helpSections(true, '', isDesktop).flatMap(section => section.rows);
   assert.deepEqual(rows(true).filter(row => row.label === 'Jump to tab').map(row => row.keys), ['⌥⌘1-9']);
   assert.deepEqual(rows(false).filter(row => row.label === 'Jump to tab').map(row => row.keys), ['⌥⇧1-9']);
   assert.deepEqual(helpSections(false, '', true).flatMap(section => section.rows).filter(row => row.label === 'Jump to tab').map(row => row.keys), ['Alt+1-9']);
@@ -86,7 +86,7 @@ test('ALP.app uses Paseo\'s desktop set; a browser keeps the web set', () => {
 });
 
 test('text fields are editable; buttons and checkboxes are not', () => {
-  const element = (tagName, extra = {}) => ({ tagName, closest: () => null, ...extra });
+  const element = (tagName: string, extra = {}) => ({ tagName, closest: () => null, ...extra }) as unknown as EventTarget;
   assert.equal(isEditable(element('TEXTAREA')), true);
   assert.equal(isEditable(element('INPUT', { type: 'search' })), true);
   assert.equal(isEditable(element('INPUT', { type: 'checkbox' })), false);
@@ -97,7 +97,7 @@ test('text fields are editable; buttons and checkboxes are not', () => {
 
 test('History groups by the calendar day of the last activity, newest first, and filters by title', () => {
   const now = new Date(2026, 9, 17, 10, 0);
-  const at = (days, hours = 9) => new Date(2026, 9, 17 - days, hours).toISOString();
+  const at = (days: number, hours = 9) => new Date(2026, 9, 17 - days, hours).toISOString();
   assert.equal(dateSection(at(0, 0), now), 'today');
   assert.equal(dateSection(at(1, 23), now), 'yesterday');
   assert.equal(dateSection(at(5), now), 'thisWeek');
@@ -125,8 +125,8 @@ test('every rebindable row has one id per platform; aliases and the composer key
     assert.equal(new Set(ids).size, ids.length, `${mac} ${desktop}`);
   }
   assert.deepEqual(BINDINGS.filter(binding => binding.action === 'session.relative').map(bindingId), ['session.relative:previous@desktop', 'session.relative:next@desktop', 'session.relative:previous@browser', 'session.relative:next@browser']);
-  for (const action of ['composer.focus', 'composer.mode', 'agent.interrupt', 'pane.find']) assert.equal(isRebindable(BINDINGS.find(binding => binding.action === action)), false, action);
-  assert.equal(isRebindable(BINDINGS.find(binding => binding.combo === 'Ctrl+`')), false);
+  for (const action of ['composer.focus', 'composer.mode', 'agent.interrupt', 'pane.find']) assert.equal(isRebindable(BINDINGS.find(binding => binding.action === action)!), false, action);
+  assert.equal(isRebindable(BINDINGS.find(binding => binding.combo === 'Ctrl+`')!), false);
 });
 
 test('stored overrides are parsed tolerantly: known ids, valid combos or null, digits only for 1-9 rows', () => {
@@ -188,25 +188,25 @@ test('capture reads the physical key with Mod for the platform\'s main modifier'
 test('capture refuses keys that would type, keys taken by another shortcut, and a 1-9 row without a number', () => {
   const mac = { mac: true };
   assert.deepEqual(checkCapture('sidebar.left', 'Mod+J', mac), { combo: 'Mod+J' });
-  assert.match(/** @type {any} */ (checkCapture('sidebar.left', 'J', mac)).error, /Add ⌘/);
-  assert.match(/** @type {any} */ (checkCapture('sidebar.left', 'Shift+J', { mac: false })).error, /Add Ctrl or Alt/);
+  assert.match((checkCapture('sidebar.left', 'J', mac) as { error: string }).error, /Add ⌘/);
+  assert.match((checkCapture('sidebar.left', 'Shift+J', { mac: false }) as { error: string }).error, /Add Ctrl or Alt/);
   assert.deepEqual(checkCapture('sidebar.left', 'F6', mac), { combo: 'F6' });
   // Outside text fields only: Shift+? may be any typing key.
   assert.deepEqual(checkCapture('shortcuts.toggle', 'Shift+/', mac), { combo: 'Shift+/' });
-  assert.equal(/** @type {any} */ (checkCapture('sidebar.left', 'Mod+E', mac)).error, '⌘E is already used by Toggle Explorer sidebar.');
-  assert.equal(/** @type {any} */ (checkCapture('sidebar.left', 'Mod+L', mac)).error, '⌘L is already used by Focus message input.');
-  assert.equal(/** @type {any} */ (checkCapture('sidebar.left', 'Ctrl+`', mac)).error, '⌃` is already used by Toggle Explorer sidebar.');
+  assert.equal((checkCapture('sidebar.left', 'Mod+E', mac) as { error: string }).error, '⌘E is already used by Toggle Explorer sidebar.');
+  assert.equal((checkCapture('sidebar.left', 'Mod+L', mac) as { error: string }).error, '⌘L is already used by Focus message input.');
+  assert.equal((checkCapture('sidebar.left', 'Ctrl+`', mac) as { error: string }).error, '⌃` is already used by Toggle Explorer sidebar.');
   // A number collides with the 1-9 wildcard; the desktop build's Mod+1-9 is not in a browser's set.
-  assert.match(/** @type {any} */ (checkCapture('sidebar.left', 'Alt+4', mac)).error, /Jump to session/);
+  assert.match((checkCapture('sidebar.left', 'Alt+4', mac) as { error: string }).error, /Jump to session/);
   assert.deepEqual(checkCapture('sidebar.left', 'Mod+4', mac), { combo: 'Mod+4' });
-  assert.match(/** @type {any} */ (checkCapture('sidebar.left', 'Mod+4', { mac: true, desktop: true })).error, /Jump to session/);
+  assert.match((checkCapture('sidebar.left', 'Mod+4', { mac: true, desktop: true }) as { error: string }).error, /Jump to session/);
   // A cleared shortcut frees its keys; a shortcut moved away frees its default.
   assert.deepEqual(checkCapture('sidebar.left', 'Mod+E', { mac: true, overrides: { 'sidebar.right': null } }), { combo: 'Mod+E' });
-  assert.match(/** @type {any} */ (checkCapture('sidebar.right', 'Mod+J', { mac: true, overrides: { 'sidebar.left': 'Mod+J' } })).error, /Toggle left sidebar/);
+  assert.match((checkCapture('sidebar.right', 'Mod+J', { mac: true, overrides: { 'sidebar.left': 'Mod+J' } }) as { error: string }).error, /Toggle left sidebar/);
   assert.deepEqual(checkCapture('session.index@browser', 'Ctrl+Alt+7', mac), { combo: 'Ctrl+Alt+Digit' });
-  assert.equal(/** @type {any} */ (checkCapture('session.index@browser', 'Ctrl+Alt+K', mac)).error, 'End with a number from 1 to 9.');
-  assert.equal(/** @type {any} */ (checkCapture('composer.focus', 'Mod+J', mac)).error, 'This shortcut cannot be changed.');
-  assert.equal(/** @type {any} */ (checkCapture('tab.close@desktop', 'Mod+J', mac)).error, 'This shortcut cannot be changed.');
+  assert.equal((checkCapture('session.index@browser', 'Ctrl+Alt+K', mac) as { error: string }).error, 'End with a number from 1 to 9.');
+  assert.equal((checkCapture('composer.focus', 'Mod+J', mac) as { error: string }).error, 'This shortcut cannot be changed.');
+  assert.equal((checkCapture('tab.close@desktop', 'Mod+J', mac) as { error: string }).error, 'This shortcut cannot be changed.');
   assert.equal(combosCollide('Shift+?', 'Shift+/', true), true);
   assert.equal(combosCollide('Mod+K', 'Ctrl+K', true), false);
   assert.equal(combosCollide('Mod+K', 'Ctrl+K', false), true);
@@ -220,12 +220,12 @@ test('Reset to default is refused while another shortcut holds the default keys 
   assert.deepEqual(checkReset('sidebar.left', { mac: true, overrides: { 'sidebar.left': 'Mod+J' } }), { ok: true });
   // Explorer cleared, its ⌘E given to the left sidebar: resetting Explorer would put two shortcuts on ⌘E.
   const taken = { 'sidebar.right': null, 'sidebar.left': 'Mod+E' };
-  assert.equal(/** @type {any} */ (checkReset('sidebar.right', { ...mac, overrides: taken })).error, 'Its default ⌘E is now used by Toggle left sidebar. Change that shortcut first.');
+  assert.equal((checkReset('sidebar.right', { ...mac, overrides: taken }) as { error: string }).error, 'Its default ⌘E is now used by Toggle left sidebar. Change that shortcut first.');
   // The alias's keys count too: Ctrl+` given to another row.
   const alias = { 'sidebar.right': null, 'sidebar.both': 'Ctrl+`' };
-  assert.match(/** @type {any} */ (checkReset('sidebar.right', { ...mac, overrides: alias })).error, /now used by Toggle both sidebars/);
+  assert.match((checkReset('sidebar.right', { ...mac, overrides: alias }) as { error: string }).error, /now used by Toggle both sidebars/);
   // Freed again: allowed.
   assert.deepEqual(checkReset('sidebar.right', { ...mac, overrides: { 'sidebar.right': null, 'sidebar.left': 'Mod+J' } }), { ok: true });
   // A 1-9 row: its digits are checked against the other rows.
-  assert.match(/** @type {any} */ (checkReset('session.index@browser', { ...mac, overrides: { 'session.index@browser': null, 'sidebar.left': 'Alt+4' } })).error, /Toggle left sidebar/);
+  assert.match((checkReset('session.index@browser', { ...mac, overrides: { 'session.index@browser': null, 'sidebar.left': 'Alt+4' } }) as { error: string }).error, /Toggle left sidebar/);
 });

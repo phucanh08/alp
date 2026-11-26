@@ -7,7 +7,7 @@ import { INLINE, splitLink } from '../dist-lib/inline-markdown.js';
 
 const KINDS = ['code', 'strong', 'strike', 'link', 'url', 'em'];
 /** The tokens RichText's Inline makes of `text`, as it walks it: [kind, token] or ['text', text]. */
-function tokens(text) {
+function tokens(text: string) {
   const out = [];
   let rest = text;
   while (rest) {
@@ -47,7 +47,7 @@ test('a target is bounded: 2048 characters on either side of its parentheses at 
 
 test('long adversarial lines are read in linear time', () => {
   const size = 1024 * 1024;
-  const fill = unit => unit.repeat(Math.ceil(size / unit.length)).slice(0, size);
+  const fill = (unit: string) => unit.repeat(Math.ceil(size / unit.length)).slice(0, size);
   const lines = {
     'open brackets': fill('['),
     'link openings': fill('[a]('),

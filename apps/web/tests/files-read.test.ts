@@ -10,12 +10,15 @@ import { FILE_MESSAGES, FileAccessError, describeFileError } from '../dist-lib/e
 import { cleanListing, flattenTree, formatSize, lineCount, nextSort, relativeFilePath, sortEntries, toggleExpanded } from '../dist-lib/file-tree.js';
 import { parseFileLink } from '../dist-lib/file-links.js';
 import { parseLayout, workspaceScope } from '../dist-lib/layout.js';
-import { FakeHost, until } from './support/fake-host.js';
+import type { TestContext } from 'node:test';
+import type { ControllerOptions } from '../dist-lib/controller.js';
+import type { FileEntry, Listing } from '../dist-lib/file-tree.js';
+import { FakeHost, until } from './support/fake-host.ts';
 
 const READER = { id: 'p1', label: 'tests', permissions: ['session.read', 'session.write', 'project.read', 'files.read'], workspaces: ['/w/a'], workspaceRoots: [{ path: '/w/a', canonical: '/w/a' }] };
 const NO_FILES = { ...READER, permissions: ['session.read', 'session.write', 'project.read'] };
 
-function setup(t, { principal = READER, capability = true } = {}) {
+function setup(t: TestContext, { principal = READER, capability = true } = {}) {
   const host = new FakeHost({ principal });
   if (capability) host.capabilities.push('workspace.files.read');
   host.tree.set('/w/a', {
@@ -30,23 +33,23 @@ function setup(t, { principal = READER, capability = true } = {}) {
     'link.ts': { linked: true },
     '.env': { content: 'SECRET=1', blocked: true },
   });
-  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, attentionWatchPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500 });
+  const controller = new Controller({ open: host.open, backoff: { initialMs: 5, maxMs: 20, jitter: 0 }, stableMs: 1, taskPollMs: 60_000, sessionPollMs: 60_000, attentionWatchPollMs: 60_000, requestTimeoutMs: 2_000, releaseTimeoutMs: 500 } as ControllerOptions);
   t.after(() => controller.disconnect());
   return { host, controller, state: () => controller.getState() };
 }
 
-async function connected({ controller, state }) {
+async function connected({ controller, state }: Pick<ReturnType<typeof setup>, 'controller' | 'state'>) {
   controller.connect({ url: 'http://127.0.0.1:7434', token: 'alpgw1.0123456789abcdef.secret' });
   await until(() => state().connection.phase === 'open', 'open');
   controller.selectWorkspace('/w/a');
   await until(() => state().sessions.status === 'ready', 'sessions');
 }
 
-const fileCalls = host => host.calls.filter(call => call.method.startsWith('workspace.files.'));
+const fileCalls = (host: FakeHost) => host.calls.filter(call => call.method.startsWith('workspace.files.'));
 
 /** The FileAccessError a promise rejects with. */
-async function refusal(promise) {
-  try { await promise; } catch (error) { assert.ok(error instanceof FileAccessError, `a FileAccessError, not ${error?.name}: ${error?.message}`); return error; }
+async function refusal(promise: Promise<unknown>) {
+  try { await promise; } catch (error) { assert.ok(error instanceof FileAccessError, `a FileAccessError, not ${(error as Error | undefined)?.name}: ${(error as Error | undefined)?.message}`); return error; }
   assert.fail('expected a refusal');
 }
 
@@ -109,7 +112,7 @@ test('files: the gateway\'s grant refusal (1003 grant) says files.read is needed
 test('files: each refusal reason has its own message', async t => {
   const w = setup(t);
   await connected(w);
-  const reasonOf = async path => {
+  const reasonOf = async (path: string) => {
     const error = await refusal(w.controller.readWorkspaceFile({ path }));
     return [error.failure.code, error.reason, error.message];
   };
@@ -164,7 +167,7 @@ test('files: no workspace or connection: a refusal, no request', async t => {
 // ---- errors ----------------------------------------------------------------------------------
 
 test('describeFileError: file reasons get their words; other failures as describe()', () => {
-  const rpc = (code, reason) => Object.assign(new Error('x'), { code, data: { reason } });
+  const rpc = (code: number, reason: string) => Object.assign(new Error('x'), { code, data: { reason } });
   assert.equal(describeFileError(rpc(1000, 'too_large')).message, FILE_MESSAGES.too_large);
   assert.equal(describeFileError(rpc(1001, 'not_found')).message, FILE_MESSAGES.not_found);
   assert.equal(describeFileError(rpc(1003, 'outside_workspace')).message, 'That workspace is not granted to your access token.');
@@ -173,7 +176,7 @@ test('describeFileError: file reasons get their words; other failures as describ
 
 // ---- the tree ---------------------------------------------------------------------------------
 
-const entries = [
+const entries: FileEntry[] = [
   { name: 'b.ts', path: 'b.ts', kind: 'file', size: 10, modifiedAt: '2026-10-03T00:00:00.000Z' },
   { name: 'src', path: 'src', kind: 'directory', modifiedAt: '2026-10-01T00:00:00.000Z' },
   { name: '.hidden', path: '.hidden', kind: 'file', size: 1, modifiedAt: '2026-10-05T00:00:00.000Z' },
@@ -191,7 +194,7 @@ test('file tree: directories first; name, modified and size sorts; the sort cycl
 });
 
 test('file tree: flatten shows open directories under their parent, hides dot-names unless asked', () => {
-  const listings = {
+  const listings: Record<string, Listing> = {
     '': { status: 'ready', entries },
     src: { status: 'ready', entries: [{ name: 'x.ts', path: 'src/x.ts', kind: 'file' }], truncated: true },
     '.github': { status: 'loading' },
@@ -230,8 +233,8 @@ test('file tree: cleanListing caps at maxListEntries; paths, sizes and line coun
 
 test('file links: workspace paths with lines are accepted, absolute ones under the root made relative', () => {
   const roots = ['/w/a', '/private/w/a'];
-  const code = raw => parseFileLink(raw, { roots, kind: 'code' });
-  const href = raw => parseFileLink(raw, { roots, kind: 'href' });
+  const code = (raw: string) => parseFileLink(raw, { roots, kind: 'code' });
+  const href = (raw: string) => parseFileLink(raw, { roots, kind: 'href' });
   assert.deepEqual(code('src/a.ts'), { path: 'src/a.ts' });
   assert.deepEqual(code('./a.ts'), { path: 'a.ts' });
   assert.deepEqual(code('src/a.ts:12'), { path: 'src/a.ts', line: 12 });
@@ -248,8 +251,8 @@ test('file links: workspace paths with lines are accepted, absolute ones under t
 
 test('file links: URLs, ~, .., outside the root, blocked paths and bare names are refused', () => {
   const roots = ['/w/a'];
-  const code = raw => parseFileLink(raw, { roots, kind: 'code' });
-  const href = raw => parseFileLink(raw, { roots, kind: 'href' });
+  const code = (raw: string) => parseFileLink(raw, { roots, kind: 'code' });
+  const href = (raw: string) => parseFileLink(raw, { roots, kind: 'href' });
   for (const raw of ['https://x.dev/a.ts', 'http://a/b.ts', 'mailto:a@b.c', 'javascript:alert(1)', '#top']) assert.equal(href(raw), undefined, raw);
   for (const raw of ['~/a.ts', '../a.ts', 'src/../../a.ts', '/etc/passwd', '/w/ab/x.ts', '/w/a', '.env', 'config/.env.local', '.git/config', '.alp/settings.json', 'keys/id_rsa', 'certs/a.pem']) {
     assert.equal(code(raw), undefined, raw);

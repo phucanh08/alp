@@ -2,21 +2,69 @@
 // in-memory transport, a per-root stored timeline with cursors (§8), replay before the attach
 // answer, idle roots closed when nobody watches, prompt receipts, tasks with revisions. Tests drop
 // connections and fail requests at chosen points to prove the recovery rules.
+import type { AlpTransport, TransportClose } from '@anhlp/alp-client/portable';
+
+// any: the fake reads and builds JSON-RPC params, results, events and records as the wire carries
+// them, unchecked like a host's own JSON; tests reach into the same records to arrange a case.
+type Json = any;
+export type PromptTiming = { gapMs?: number, gate?: Promise<void>, answer: 'before' | 'middle' | 'after' };
+/** One client connection of the fake: what it attached and watches, and its transport ends. */
+export type FakeConnection = {
+  attached: Set<string>,
+  watching: string | null | undefined,
+  watchTurns: boolean,
+  watchAttention: boolean,
+  transport: AlpTransport | undefined,
+  deliver: ((frame: string) => void) | undefined,
+  end: ((close: TransportClose) => void) | undefined,
+};
+/** A file-tree node of workspace.files.list / read. */
+export type TreeNode = { kind?: 'file' | 'directory', content?: string, size?: number, modifiedAt?: string, binary?: boolean, tooLarge?: boolean, ignored?: boolean, linked?: boolean, blocked?: boolean };
+/** method → handler run before the default; 'handled' when it answered or failed the call itself. */
+export type Intercept = (params: Json, connection: FakeConnection, reply: { answer: (result: unknown) => void, fail: (code: number, message: string, data?: unknown) => void }) => unknown;
 
 export class FakeHost {
+  declare separateTasks: boolean;
+  declare promptTiming: PromptTiming | undefined;
+  declare principal: Json;
+  declare capabilities: string[];
+  declare roots: Map<string, Json>;
+  declare connections: Set<FakeConnection>;
+  declare calls: { method: string, params: Json }[];
+  declare opens: number;
+  declare refuse: unknown;
+  declare intercept: Map<string, Intercept>;
+  declare loseAnswer: Set<string>;
+  declare receipts: Map<string, Json>;
+  declare tasks: Json[];
+  declare taskRev: number;
+  declare questions: Map<string, Json>;
+  declare epoch: string;
+  declare files: Map<string, string[]>;
+  declare tree: Map<string, Record<string, TreeNode>>;
+  declare attentionSkewMs?: number;
+  declare lifecycle?: Map<string, { fingerprint: string, result: Json }>;
+  declare reloadError?: unknown;
+  declare reloads?: number;
+  declare configureError?: unknown;
+  declare configures?: number;
+  declare forks?: number;
+  declare compactUnknown?: boolean;
+  declare compactError?: unknown;
+  declare compacts?: number;
+  declare extraEntries?: Json[];
   /**
-   * @param {{ principal?: any, separateTasks?: boolean, promptTiming?: { gapMs?: number, gate?: Promise<void>, answer: 'before' | 'middle' | 'after' } }} [options]
+   * @param options
    *   separateTasks: each frame reaches the client in a task of its own, as a browser WebSocket
    *   delivers messages (no microtask run of several events in a row).
    *   promptTiming: a prompt's user message, then `gapMs` later prompt.accepted and turn.started,
    *   with its answer before, between or after those events.
    */
-  constructor({ principal, separateTasks = false, promptTiming } = {}) {
+  constructor({ principal, separateTasks = false, promptTiming }: { principal?: Json, separateTasks?: boolean, promptTiming?: PromptTiming } = {}) {
     this.separateTasks = separateTasks;
     this.promptTiming = promptTiming;
     this.principal = principal ?? { id: 'p1', label: 'tests', permissions: ['session.read', 'session.write', 'project.read', 'project.write'], workspaces: ['/w/a', '/w/b'], workspaceRoots: [{ path: '/w/a', canonical: '/w/a' }, { path: '/w/b', canonical: '/w/b' }] };
     this.capabilities = ['session.interrupt.turn', 'attach.after', 'prompt.receipts', 'task', 'team', 'library', 'settings.language'];
-    /** @type {Map<string, any>} */
     this.roots = new Map();
     this.connections = new Set();
     this.calls = [];
@@ -24,7 +72,7 @@ export class FakeHost {
     this.refuse = undefined;
     /** method → handler(params, connection) run before the default; return undefined to go on. */
     this.intercept = new Map();
-    /** Methods whose next answer is lost: run, then the asking connection drops. @type {Set<string>} */
+    /** Methods whose next answer is lost: run, then the asking connection drops. */
     this.loseAnswer = new Set();
     this.receipts = new Map();
     this.tasks = [];
@@ -43,15 +91,15 @@ export class FakeHost {
   }
 
   /** The entries of directory `directory` ('' the root) of a project's tree. */
-  #listTree(projectRoot, directory) {
+  #listTree(projectRoot: string, directory: string) {
     const nodes = this.tree.get(projectRoot) ?? {};
     const prefix = directory ? `${directory}/` : '';
-    const found = new Map();
+    const found = new Map<string, { name: string, path: string, kind: 'file' | 'directory', node: TreeNode }>();
     for (const [path, node] of Object.entries(nodes)) {
       if (!path.startsWith(prefix)) continue;
       const rest = path.slice(prefix.length);
       if (!rest) continue;
-      const [name, ...deeper] = rest.split('/');
+      const [name, ...deeper] = rest.split('/') as [string, ...string[]];
       const child = `${prefix}${name}`;
       if (deeper.length) { if (!found.has(child)) found.set(child, { name, path: child, kind: 'directory', node: nodes[child] ?? {} }); continue; }
       found.set(child, { name, path: child, kind: node.kind ?? 'file', node });
@@ -59,10 +107,10 @@ export class FakeHost {
     return [...found.values()];
   }
 
-  count(method) { return this.calls.filter(call => call.method === method).length; }
+  count(method: string) { return this.calls.filter(call => call.method === method).length; }
 
   /** The controller's `open` option. */
-  open = async ({ signal } = {}) => {
+  open = async ({ signal }: { signal?: AbortSignal } = {}) => {
     this.opens++;
     if (this.refuse) throw this.refuse;
     if (signal?.aborted) throw signal.reason;
@@ -70,11 +118,11 @@ export class FakeHost {
   };
 
   #connect() {
-    const messages = new Set();
-    const closes = new Set();
+    const messages = new Set<(frame: string) => void>();
+    const closes = new Set<(close: TransportClose) => void>();
     let ended = false;
-    const connection = { attached: new Set(), watching: undefined, watchTurns: false, watchAttention: false, transport: undefined, deliver: undefined, end: undefined };
-    const end = close => {
+    const connection: FakeConnection = { attached: new Set(), watching: undefined, watchTurns: false, watchAttention: false, transport: undefined, deliver: undefined, end: undefined };
+    const end = (close: TransportClose) => {
       if (ended) return;
       ended = true;
       this.connections.delete(connection);
@@ -84,7 +132,7 @@ export class FakeHost {
       // alpd detaches a connection that went away: an idle root nobody watches is closed.
       for (const root of connection.attached) this.#reap(root);
     };
-    connection.deliver = frame => {
+    connection.deliver = (frame: string) => {
       if (ended) return;
       const run = () => { if (!ended) for (const listener of [...messages]) listener(frame); };
       if (this.separateTasks) setTimeout(run, 0); else queueMicrotask(run);
@@ -92,13 +140,13 @@ export class FakeHost {
     connection.end = end;
     connection.transport = {
       get state() { return ended ? 'closed' : 'open'; },
-      send: frame => {
+      send: (frame: string) => {
         if (ended) throw new Error('closed');
         const message = JSON.parse(frame);
         queueMicrotask(() => { if (!ended) void this.#handle(connection, message); });
       },
-      onMessage(listener) { messages.add(listener); return () => messages.delete(listener); },
-      onClose(listener) { closes.add(listener); return () => closes.delete(listener); },
+      onMessage(listener: (frame: string) => void) { messages.add(listener); return () => messages.delete(listener); },
+      onClose(listener: (close: TransportClose) => void) { closes.add(listener); return () => closes.delete(listener); },
       close: () => end({ code: 1000 }),
     };
     this.connections.add(connection);
@@ -106,14 +154,14 @@ export class FakeHost {
   }
 
   /** Drops every connection as a gateway restart or a network cut would. */
-  drop() { for (const connection of [...this.connections]) connection.end({ code: 1006, error: new Error('dropped') }); }
+  drop() { for (const connection of [...this.connections]) connection.end!({ code: 1006, error: new Error('dropped') }); }
 
-  #send(connection, message) { connection.deliver(JSON.stringify({ jsonrpc: '2.0', ...message })); }
+  #send(connection: FakeConnection, message: Json) { connection.deliver!(JSON.stringify({ jsonrpc: '2.0', ...message })); }
 
-  async #handle(connection, { id, method, params = {} }) {
+  async #handle(connection: FakeConnection, { id, method, params = {} }: Json) {
     this.calls.push({ method, params });
-    const answer = result => this.#send(connection, { id, result });
-    const fail = (code, message, data) => this.#send(connection, { id, error: { code, message, ...(data ? { data } : {}) } });
+    const answer = (result: unknown) => this.#send(connection, { id, result });
+    const fail = (code: number, message: string, data?: unknown) => this.#send(connection, { id, error: { code, message, ...(data ? { data } : {}) } });
     const hook = this.intercept.get(method);
     if (hook) {
       const verdict = await hook(params, connection, { answer, fail });
@@ -122,20 +170,20 @@ export class FakeHost {
     try {
       const result = await this.#run(connection, method, params, id);
       // Taken, but this connection drops before the answer leaves (a lost answer).
-      if (this.loseAnswer?.delete(method)) { connection.end({ code: 1006, error: new Error('dropped') }); return; }
+      if (this.loseAnswer?.delete(method)) { connection.end!({ code: 1006, error: new Error('dropped') }); return; }
       if (result === undefined) return;
       answer(result);
-    } catch (error) {
+    } catch (error: Json) {
       fail(error.code ?? 1000, error.message, error.data);
     }
   }
 
   // ---- the daemon ----
 
-  root(id) { return this.roots.get(id); }
+  root(id: string) { return this.roots.get(id); }
 
   /** Creates a root with no viewer, as a session a local client started. */
-  seed(id, { projectRoot = '/w/a', title, status = 'idle', mode = 'full-access' } = {}) {
+  seed(id: string, { projectRoot = '/w/a', title, status = 'idle', mode = 'full-access' }: { projectRoot?: string, title?: string, status?: string, mode?: string } = {}) {
     const root = this.#newRoot(id, { cwd: projectRoot, mode });
     if (title) root.summary.title = title;
     this.#emit(root, id, { type: 'session.opened', session: this.#snapshot(root, id), cwd: projectRoot, effective: { model: 'm', thinking: 'low' } });
@@ -144,13 +192,13 @@ export class FakeHost {
     return root;
   }
 
-  #newRoot(id, spec) {
-    const root = { id, cursor: 0, timeline: [], generation: `gen-${id}-1`, branches: [], live: true, viewers: new Set(), spec, children: new Map(), running: undefined, turns: 0, summary: { id, projectRoot: spec.cwd, agent: 'main', runtime: 'codex', model: 'm', mode: spec.mode ?? 'full-access', thinking: 'low', workflow: { mode: 'pho', maxPeers: 2, supervisor: false }, threadId: `t-${id}`, persistent: true, busy: false, status: 'idle', createdAt: new Date(Date.now() - 1000).toISOString(), updatedAt: new Date().toISOString() } };
+  #newRoot(id: string, spec: Json) {
+    const root: Json = { id, cursor: 0, timeline: [], generation: `gen-${id}-1`, branches: [], live: true, viewers: new Set(), spec, children: new Map(), running: undefined, turns: 0, summary: { id, projectRoot: spec.cwd, agent: 'main', runtime: 'codex', model: 'm', mode: spec.mode ?? 'full-access', thinking: 'low', workflow: { mode: 'pho', maxPeers: 2, supervisor: false }, threadId: `t-${id}`, persistent: true, busy: false, status: 'idle', createdAt: new Date(Date.now() - 1000).toISOString(), updatedAt: new Date().toISOString() } };
     this.roots.set(id, root);
     return root;
   }
 
-  #snapshot(root, sessionId) {
+  #snapshot(root: Json, sessionId: string) {
     if (sessionId === root.id) return { ...root.summary, busy: !!root.running };
     return root.children.get(sessionId);
   }
@@ -159,7 +207,7 @@ export class FakeHost {
    * With session.attention, as alpd: a root's attention kept for every client, told (no cursor) to
    * the connections watching attention in its project, attached or not.
    */
-  #setAttention(root, attention) {
+  #setAttention(root: Json, attention: Json) {
     if (!this.capabilities.includes('session.attention') || (!root.summary.attention && !attention)) return;
     if (attention) root.summary.attention = attention; else delete root.summary.attention;
     const envelope = { sessionId: root.id, epoch: 'attention', seq: 0, ts: new Date().toISOString(), event: { type: 'attention', ...(attention ? { attention } : {}) } };
@@ -171,7 +219,7 @@ export class FakeHost {
   }
 
   /** Appends a kept event to a root's timeline and sends it to its viewers. */
-  #emit(root, sessionId, event, { kept = true } = {}) {
+  #emit(root: Json, sessionId: string, event: Json, { kept = true } = {}) {
     const envelope = { sessionId, epoch: this.epoch, seq: root.timeline.length + 1, ts: new Date().toISOString(), event, ...(kept ? { cursor: ++root.cursor } : {}) };
     if (kept) root.timeline.push(envelope);
     for (const connection of root.viewers) this.#send(connection, { method: 'event', params: envelope });
@@ -194,7 +242,7 @@ export class FakeHost {
   }
 
   /** A turn of a root nobody watches starts (as a local client's prompt would). */
-  startTurn(rootId) {
+  startTurn(rootId: string) {
     const root = this.roots.get(rootId);
     const turnId = `turn-${++root.turns}`;
     root.running = turnId;
@@ -204,7 +252,7 @@ export class FakeHost {
   }
 
   /** Ends the running turn of a root as `state` ('completed' | 'failed' | 'canceled'). */
-  endTurn(rootId, state = 'completed', error) {
+  endTurn(rootId: string, state = 'completed', error?: Json) {
     const root = this.roots.get(rootId);
     const turnId = root.running;
     if (!turnId) return;
@@ -214,16 +262,16 @@ export class FakeHost {
   }
 
   /** Emits an event as the host would while a turn runs. */
-  emit(rootId, sessionId, event) { return this.#emit(this.roots.get(rootId), sessionId, event); }
+  emit(rootId: string, sessionId: string, event: Json) { return this.#emit(this.roots.get(rootId), sessionId, event); }
 
-  openChild(rootId, childId, agent = 'peer') {
+  openChild(rootId: string, childId: string, agent = 'peer') {
     const root = this.roots.get(rootId);
     const snapshot = { ...root.summary, id: childId, agent, parentId: rootId, busy: true };
     root.children.set(childId, snapshot);
     this.#emit(root, childId, { type: 'session.opened', session: snapshot, cwd: root.spec.cwd, effective: { model: 'm', thinking: 'low' } });
   }
 
-  ask(rootId, sessionId, questionId, body = 'Go on?') {
+  ask(rootId: string, sessionId: string, questionId: string, body = 'Go on?') {
     const question = { id: questionId, sessionId, rootId, agent: 'main', body, options: ['yes', 'no'], askedAt: new Date().toISOString() };
     this.questions.set(questionId, question);
     const root = this.roots.get(rootId);
@@ -231,7 +279,7 @@ export class FakeHost {
   }
 
   /** A question event to the tree's viewers, and as alpd's question.watch to the watchers of its project (no cursor). */
-  #tell(root, envelope) {
+  #tell(root: Json, envelope: Json) {
     for (const connection of root.viewers) this.#send(connection, { method: 'event', params: envelope });
     const { cursor: _cursor, ...announced } = envelope;
     for (const connection of this.connections) {
@@ -242,14 +290,14 @@ export class FakeHost {
   }
 
   /** A question answered or ended elsewhere: question.resolved to the viewers and watchers. */
-  resolve(questionId, outcome = 'answered', answer) {
+  resolve(questionId: string, outcome = 'answered', answer?: string) {
     const question = this.questions.get(questionId);
     if (!question) return;
     this.questions.delete(questionId);
     this.#tell(this.roots.get(question.rootId), { sessionId: question.sessionId, epoch: this.epoch, seq: 0, ts: new Date().toISOString(), event: { type: 'question.resolved', questionId, outcome, ...(answer ? { answer } : {}) } });
   }
 
-  close(rootId) {
+  close(rootId: string) {
     const root = this.roots.get(rootId);
     if (!root.live) return;
     root.live = false;
@@ -258,19 +306,19 @@ export class FakeHost {
     this.#emit(root, rootId, { type: 'session.closed' });
   }
 
-  #reap(rootId) {
+  #reap(rootId: string) {
     const root = this.roots.get(rootId);
     if (!root) return;
     for (const connection of [...root.viewers]) if (!this.connections.has(connection)) root.viewers.delete(connection);
     if (root.viewers.size === 0 && !root.running && root.live) this.close(rootId);
   }
 
-  #attach(connection, root) {
+  #attach(connection: FakeConnection, root: Json) {
     root.viewers.add(connection);
     connection.attached.add(root.id);
   }
 
-  finishTurn(rootId, text = 'done') {
+  finishTurn(rootId: string, text = 'done') {
     const root = this.roots.get(rootId);
     const turnId = root.running;
     if (!turnId) return;
@@ -281,9 +329,9 @@ export class FakeHost {
   }
 
   /** The root's turns in timeline order, each with the cursor its first line has (§12.7). */
-  #turns(root) {
-    const prompts = new Map();
-    const turns = [];
+  #turns(root: Json) {
+    const prompts = new Map<string, number>();
+    const turns: { id: string, start: number, ended?: boolean }[] = [];
     for (const envelope of root.timeline) {
       if (envelope.sessionId !== root.id) continue;
       const event = envelope.event;
@@ -297,7 +345,7 @@ export class FakeHost {
   }
 
   /** A journaled answer per (session, operation, requestId), as alpd's lifecycle journal. */
-  #journaled(key, fingerprint, run) {
+  #journaled(key: string, fingerprint: string, run: () => Json) {
     this.lifecycle ??= new Map();
     const known = this.lifecycle.get(key);
     if (known) {
@@ -310,7 +358,7 @@ export class FakeHost {
   }
 
   /** session.reload (§12.8): a live idle root restarts; its timeline, receipts and generation stay. */
-  #reload(params) {
+  #reload(params: Json) {
     if (!this.capabilities.includes('session.reload')) throw Object.assign(new Error('unknown method session.reload'), { code: -32601 });
     const root = this.roots.get(params.sessionId);
     if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
@@ -325,16 +373,16 @@ export class FakeHost {
   }
 
   /** Teams a live configure may switch to (§12.9): id → { label, agent, runtime }. */
-  configureTeams = { pho: { label: 'Phở', agent: 'main' }, cafe: { label: 'Cafe', agent: 'main' }, solo: { label: 'Solo', agent: 'builder' } };
+  configureTeams: Record<string, { label: string, agent: string }> = { pho: { label: 'Phở', agent: 'main' }, cafe: { label: 'Cafe', agent: 'main' }, solo: { label: 'Solo', agent: 'builder' } };
   /** Models the host offers a live root, per runtime, with the efforts each takes. */
-  configureModels = { codex: { m: ['low', 'high'], 'gpt-5.6-sol': ['low', 'medium', 'high'] }, claude: { 'claude-haiku-4-5': [] } };
+  configureModels: Record<string, Record<string, string[]>> = { codex: { m: ['low', 'high'], 'gpt-5.6-sol': ['low', 'medium', 'high'] }, claude: { 'claude-haiku-4-5': [] } };
 
   /** What a change would run a live root with, or a refusal reason (§12.9). */
-  #resolveConfigure(root, params) {
+  #resolveConfigure(root: Json, params: Json) {
     const summary = root.summary;
-    const current = { team: summary.workflow.mode, teamLabel: summary.teamLabel ?? this.configureTeams[summary.workflow.mode]?.label, agent: summary.agent, runtime: summary.runtime, model: summary.model, thinking: summary.thinking, mode: summary.mode, supervisor: false, maxPeers: 2, delegates: [], tools: [], mcpServers: [], hooks: 0 };
+    const current: Json = { team: summary.workflow.mode, teamLabel: summary.teamLabel ?? this.configureTeams[summary.workflow.mode]?.label, agent: summary.agent, runtime: summary.runtime, model: summary.model, thinking: summary.thinking, mode: summary.mode, supervisor: false, maxPeers: 2, delegates: [], tools: [], mcpServers: [], hooks: 0 };
     const proposed = { ...current };
-    let refusal;
+    let refusal: string | undefined;
     if (params.model !== undefined) {
       const match = /^(codex|claude|acp|antigravity)[:/](.*)$/.exec(params.model);
       if (match && match[1] !== summary.runtime) refusal = 'runtime_mismatch';
@@ -356,7 +404,7 @@ export class FakeHost {
     return { current, proposed, changes, refusal };
   }
 
-  #configurePreview(params) {
+  #configurePreview(params: Json) {
     if (!this.capabilities.includes('session.configure.live')) throw Object.assign(new Error('unknown method session.configure.preview'), { code: -32601 });
     const root = this.roots.get(params.sessionId);
     if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
@@ -368,7 +416,7 @@ export class FakeHost {
   }
 
   /** session.configure with model, thinking or team (§12.9): a live idle root restarts with them, journaled per requestId. */
-  #configureLive(params) {
+  #configureLive(params: Json) {
     if (!this.capabilities.includes('session.configure.live')) throw Object.assign(new Error('mode only'), { code: 1005, data: { reason: 'capability' } });
     if (typeof params.requestId !== 'string' || typeof params.ifGeneration !== 'string') throw Object.assign(new Error('needs requestId and ifGeneration'), { code: -32602, data: { reason: 'invalid_params' } });
     if (params.team !== undefined && !this.principal.permissions.includes('session.team.write')) throw Object.assign(new Error('This credential lacks session.team.write'), { code: 1003, data: { reason: 'grant', permission: 'session.team.write' } });
@@ -394,7 +442,7 @@ export class FakeHost {
     });
   }
 
-  #rewind(params) {
+  #rewind(params: Json) {
     const root = this.roots.get(params.sessionId);
     if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
     return this.#journaled(`${root.id}:rewind:${params.requestId}`, params.beforeTurnId, () => {
@@ -411,7 +459,7 @@ export class FakeHost {
       root.summary.branches = root.branches.slice();
       root.generation = `gen-${root.id}-${root.branches.length + 1}`;
       const marker = { sessionId: root.id, epoch: `rewind-${branchId}`, seq: 0, ts: branch.at, cursor: ++root.cursor, event: { type: 'item', item: { kind: 'notice', id: `rewind:${branchId}`, level: 'info', text: `Conversation rewound to before a message: ${branch.turns} later turns moved to a recoverable branch. Files were not changed.` } } };
-      root.timeline = [...root.timeline.filter(envelope => envelope.cursor < turns[index].start), marker];
+      root.timeline = [...root.timeline.filter((envelope: Json) => envelope.cursor < turns[index]!.start), marker];
       for (const connection of root.viewers) {
         this.#send(connection, { method: 'event', params: { sessionId: root.id, epoch: `rewind-${branchId}`, seq: 0, ts: branch.at, event: { type: 'history.reset', generation: root.generation, reason: 'rewind', branchId } } });
         this.#send(connection, { method: 'event', params: marker });
@@ -420,26 +468,26 @@ export class FakeHost {
     });
   }
 
-  #fork(params) {
+  #fork(params: Json) {
     const root = this.roots.get(params.sessionId);
     if (!root) throw Object.assign(new Error('no such session'), { code: 1001 });
     return this.#journaled(`${root.id}:fork:${params.requestId}`, JSON.stringify([params.boundary ?? null, params.branchId ?? null, params.workspaceId ?? null, params.title ?? null]), () => {
       if (params.ifGeneration !== root.generation) throw Object.assign(new Error('stale'), { code: 1004, data: { reason: 'stale_generation' } });
-      const source = params.branchId ? root.setAside?.find(entry => entry.branchId === params.branchId)?.timeline : root.timeline;
+      const source = params.branchId ? root.setAside?.find((entry: Json) => entry.branchId === params.branchId)?.timeline : root.timeline;
       if (!source) throw Object.assign(new Error('no branch'), { code: 1001, data: { reason: 'branch_not_found' } });
       const turns = this.#turns({ ...root, timeline: source });
       let cut = Infinity;
       if (params.boundary?.throughTurnId) {
         const index = turns.findIndex(turn => turn.id === params.boundary.throughTurnId);
         if (index < 0) throw Object.assign(new Error('no turn'), { code: 1001, data: { reason: 'turn_not_found' } });
-        if (!turns[index].ended) throw Object.assign(new Error('running'), { code: 1004, data: { reason: 'turn_in_progress' } });
+        if (!turns[index]!.ended) throw Object.assign(new Error('running'), { code: 1004, data: { reason: 'turn_in_progress' } });
         cut = turns[index + 1]?.start ?? Infinity;
       }
       this.forks = (this.forks ?? 0) + 1;
       const id = `ses_fork_${this.forks}`;
       const fork = this.#newRoot(id, { cwd: params.workspaceId ? `/w/${params.workspaceId}` : root.spec.cwd, mode: root.spec.mode });
       const forkedFrom = { sessionId: root.id, ...(params.boundary?.throughTurnId ? { turnId: params.boundary.throughTurnId, boundary: 'through' } : { boundary: 'whole' }), ...(params.branchId ? { branchId: params.branchId } : {}), at: new Date().toISOString() };
-      fork.timeline = source.filter(envelope => envelope.sessionId === root.id && envelope.cursor < cut).map(envelope => ({ ...envelope, sessionId: id }));
+      fork.timeline = source.filter((envelope: Json) => envelope.sessionId === root.id && envelope.cursor < cut).map((envelope: Json) => ({ ...envelope, sessionId: id }));
       fork.cursor = fork.timeline.at(-1)?.cursor ?? 0;
       fork.timeline.push({ sessionId: id, epoch: 'fork', seq: 0, ts: forkedFrom.at, cursor: ++fork.cursor, event: { type: 'item', item: { kind: 'notice', id: `fork:${id}`, level: 'info', text: 'Forked.' } } });
       fork.live = false;
@@ -448,7 +496,7 @@ export class FakeHost {
     });
   }
 
-  async #run(connection, method, params, requestId) {
+  async #run(connection: FakeConnection, method: string, params: Json, requestId: unknown) {
     switch (method) {
       case 'daemon.hello': return { protocolVersion: 1, daemonVersion: '0.10.0', capabilities: this.capabilities };
       case 'catalog.get': return { models: [], modes: [{ id: 'read-only' }, { id: 'workspace-write' }, { id: 'full-access' }], defaultModel: 'm' };
@@ -524,7 +572,7 @@ export class FakeHost {
       }
       case 'session.resumeCommand': {
         if (!this.capabilities.includes('session.resumeCommand')) throw Object.assign(new Error('unknown method session.resumeCommand'), { code: -32601 });
-        if (!this.roots.has(params.sessionId) && ![...this.roots.values()].some(root => root.children?.some?.(child => child.id === params.sessionId))) throw Object.assign(new Error('no such session'), { code: 1001 });
+        if (!this.roots.has(params.sessionId) && ![...this.roots.values()].some(root => root.children?.some?.((child: Json) => child.id === params.sessionId))) throw Object.assign(new Error('no such session'), { code: 1001 });
         const line = `alp attach ${params.sessionId}`;
         return { argv: ['alp', 'attach', params.sessionId], posix: line, windows: line, display: line, platform: 'posix' };
       }
@@ -543,7 +591,7 @@ export class FakeHost {
         if (!root?.live) throw Object.assign(new Error(`ALP session ${params.sessionId} is not open`), { code: 1001 });
         const key = `${params.sessionId}:${params.clientMessageId}`;
         if (this.receipts.has(key)) return { ...this.receipts.get(key), duplicate: true };
-        const text = params.content.map(part => part.text).join('\n');
+        const text: string = params.content.map((part: Json) => part.text).join('\n');
         if (params.delivery === 'steer' && !root.running) { const outcome = { outcome: 'failed', error: { message: 'No active turn to steer' }, durable: true }; this.receipts.set(key, outcome); return outcome; }
         if (params.delivery !== 'steer' && root.running) { const outcome = { outcome: 'failed', error: { message: 'Turn already active; use steering or interrupt first' }, durable: true }; this.receipts.set(key, outcome); return outcome; }
         const outcome = { outcome: 'accepted', durable: true };
@@ -570,7 +618,7 @@ export class FakeHost {
         };
         const timing = this.promptTiming;
         if (!timing) { userMessage(); accepted(); return outcome; }
-        const gap = () => timing.gate ?? new Promise(resolve => setTimeout(resolve, timing.gapMs));
+        const gap = () => timing.gate ?? new Promise<void>(resolve => setTimeout(resolve, timing.gapMs));
         const reply = () => this.#send(connection, { id: requestId, result: outcome });
         if (timing.answer === 'before') reply();
         userMessage();
@@ -662,7 +710,7 @@ export class FakeHost {
         if (!this.capabilities.includes('workspace.files.read')) throw Object.assign(new Error(`unknown method ${method}`), { code: -32601 });
         if (!this.principal.permissions.includes('files.read')) throw Object.assign(new Error('The credential is not allowed this method.'), { code: 1003, data: { reason: 'grant', permission: 'files.read' } });
         const path = params.path ?? '';
-        const refuse = (code, reason) => { throw Object.assign(new Error(`refused: ${reason}`), { code, data: { reason } }); };
+        const refuse = (code: number, reason: string): never => { throw Object.assign(new Error(`refused: ${reason}`), { code, data: { reason } }); };
         if (typeof path !== 'string' || path.startsWith('/') || path.split('/').includes('..')) refuse(-32602, 'invalid_path');
         const nodes = this.tree.get(params.projectRoot) ?? {};
         const node = nodes[path];
@@ -693,7 +741,7 @@ export class FakeHost {
         const task = this.tasks.find(entry => entry.id === params.id);
         if (!task) throw Object.assign(new Error('unknown task'), { code: 1001, data: { reason: 'unknown_task' } });
         if (params.ifRev !== undefined && params.ifRev !== task.rev) throw Object.assign(new Error('changed'), { code: 1004, data: { reason: 'revision_conflict' } });
-        if (method === 'task.gate.resolve') { task.approvals = (task.approvals ?? []).filter(approval => approval.gate !== params.gate); if (!task.approvals.length) delete task.approvals; }
+        if (method === 'task.gate.resolve') { task.approvals = (task.approvals ?? []).filter((approval: Json) => approval.gate !== params.gate); if (!task.approvals.length) delete task.approvals; }
         else task.status = params.action === 'close' ? 'closed' : 'open';
         task.rev++;
         this.taskRev++;
@@ -706,7 +754,7 @@ export class FakeHost {
 }
 
 /** Waits until `check` holds, polling through microtasks and short timers. */
-export async function until(check, what = 'condition', ms = 3000) {
+export async function until(check: () => unknown, what = 'condition', ms = 3000) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
     if (await check()) return;

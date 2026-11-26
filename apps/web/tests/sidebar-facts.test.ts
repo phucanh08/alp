@@ -4,17 +4,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FACTS_BATCH, batches, cleanFacts, excerpt, formatDiffCount, mostRecentSession, prLabel, readFacts, scheduleRows, usageLine } from '../dist-lib/sidebar-facts.js';
+import type { SessionSummary, UsageProvider } from '../dist-lib/sidebar-facts.js';
 
 test('facts are read 50 workspace ids per call, duplicates once, a failed batch left out', async () => {
   const ids = Array.from({ length: 120 }, (_, index) => `ws_${index}`);
   assert.deepEqual(batches(ids).map(batch => batch.length), [50, 50, 20]);
   assert.equal(FACTS_BATCH, 50);
-  const calls = [];
+  const calls: { method: string, params: { workspaceIds: string[], refresh?: boolean } }[] = [];
   const controller = {
-    async ownerRequest(method, params) {
+    // any: the params readFacts passes, read here as the host would read them.
+    async ownerRequest(method: string, params?: any) {
       calls.push({ method, params });
       if (params.workspaceIds.includes('ws_60')) throw new Error('boom');
-      return { workspaces: Object.fromEntries(params.workspaceIds.map(id => [id, { additions: 1 }])).valueOf() };
+      return { workspaces: Object.fromEntries(params.workspaceIds.map((id: string) => [id, { additions: 1 }])).valueOf() };
     },
   };
   const facts = await readFacts(controller, [...ids, 'ws_0', ''], { refresh: true });
@@ -47,7 +49,7 @@ test('the most recent session carries the facts: last update, else creation; tie
     { id: 'a', createdAt: '2026-11-02T00:00:00Z' },
     { id: 'c', createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-11-03T00:00:00Z' },
   ];
-  assert.equal(mostRecentSession(rows)?.id, 'b');
+  assert.equal(mostRecentSession(rows as SessionSummary[])?.id, 'b');
   assert.equal(mostRecentSession([])?.id, undefined);
 });
 
@@ -58,7 +60,7 @@ test('the usage line shows each provider\'s default pins (5h and weekly) with a 
     { runtime: 'other', windows: [] },
     { runtime: 'down', available: false, windows: [{ name: 'five_hour', usedPercent: NaN }] },
   ];
-  const line = usageLine(providers).map(entry => ({ runtime: entry.runtime, parts: entry.windows.map(window => `${window.text} ${window.shortLabel}`) }));
+  const line = usageLine(providers as UsageProvider[]).map(entry => ({ runtime: entry.runtime, parts: entry.windows.map(window => `${window.text} ${window.shortLabel}`) }));
   assert.deepEqual(line, [
     { runtime: 'claude', parts: ['98% 5h', '61% wk'] },
     { runtime: 'codex', parts: ['82% 5h'] },

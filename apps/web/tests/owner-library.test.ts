@@ -15,7 +15,7 @@ test('an MCP server round-trips through its form; an untouched hidden value stay
   const form = mcpForm(content);
   assert.deepEqual(form.env, [{ key: 'TOKEN', value: null }, { key: 'MODE', value: 'fast' }]);
   assert.deepEqual(mcpContent(form), content);
-  assert.deepEqual(mcpContent({ ...form, env: [{ key: 'TOKEN', value: 'new' }] }).server.env, { TOKEN: 'new' });
+  assert.deepEqual((mcpContent({ ...form, env: [{ key: 'TOKEN', value: 'new' }] }) as { server: { env: unknown } }).server.env, { TOKEN: 'new' });
   assert.throws(() => mcpContent({ ...form, env: [{ key: 'TOKEN', value: HIDDEN }] }), /keep the hidden one/);
   assert.throws(() => mcpContent({ ...form, env: [{ key: 'A', value: '1' }, { key: 'A', value: '2' }] }), /twice/);
   const url = mcpForm({ server: { url: 'https://x.example/mcp', headers: { Authorization: { ...KEEP } } } });

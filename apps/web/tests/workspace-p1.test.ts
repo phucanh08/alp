@@ -5,10 +5,12 @@ import assert from 'node:assert/strict';
 import { DOCK_WIDTH, LAYOUT_KEY, SIDEBAR_WIDTH, clampWidth, loadLayout, moveKey, orderTabs, parseLayout, serializeLayout, updateLayout, workspaceScope } from '../dist-lib/layout.js';
 import { commandResults, matchScore, matchTier, sortSessions } from '../dist-lib/command-center.js';
 import { faviconStatus, newlyWaiting, notificationBody, userSees } from '../dist-lib/attention.js';
+import type { Layout } from '../dist-lib/layout.js';
+import type { CommandAction, CommandSession } from '../dist-lib/command-center.js';
 
-const memory = (initial = {}) => {
+const memory = (initial: Record<string, string> = {}) => {
   const entries = new Map(Object.entries(initial));
-  return { entries, getItem: key => entries.get(key) ?? null, setItem: (key, value) => { entries.set(key, String(value)); } };
+  return { entries, getItem: (key: string) => entries.get(key) ?? null, setItem: (key: string, value: string) => { entries.set(key, String(value)); } };
 };
 
 test('layout: garbage, another version or nothing give an empty layout', () => {
@@ -27,7 +29,7 @@ test('layout: fields validated one by one; widths clamped; panels known; unknown
   } });
   const layout = parseLayout(raw);
   assert.deepEqual(layout, { sidebarWidth: SIDEBAR_WIDTH.max, workspaces: { [scope]: { session: 's1', agents: ['s2'], tasks: ['t-1'], panels: ['terminal'], order: ['agent:s1', 'panel:terminal'], active: 'panel:terminal', at: 5 } } });
-  assert.ok(!serializeLayout({ ...layout, token: 'alpgw1.secret' }).includes('secret'));
+  assert.ok(!serializeLayout({ ...layout, token: 'alpgw1.secret' } as Layout).includes('secret'));
   // No session: no agent tabs kept.
   assert.deepEqual(parseLayout(JSON.stringify({ v: 1, workspaces: { a: { agents: ['x'] } } })).workspaces.a.agents, []);
 });
@@ -40,7 +42,7 @@ test('layout: at most 20 workspaces, the most recent kept; updates keep the othe
   const storage = memory();
   updateLayout(storage, layout => ({ ...layout, sidebarWidth: 400 }));
   updateLayout(storage, layout => ({ ...layout, workspaces: { w: { agents: [], tasks: ['t'], panels: [], order: [], at: 1 } } }));
-  const stored = JSON.parse(storage.entries.get(LAYOUT_KEY));
+  const stored = JSON.parse(storage.entries.get(LAYOUT_KEY)!);
   assert.equal(stored.v, 1);
   assert.equal(stored.sidebarWidth, 400);
   assert.deepEqual(stored.workspaces.w.tasks, ['t']);
@@ -69,30 +71,30 @@ test('command center: tiers of a match, every word must match, hidden words rank
   assert.equal(matchTier('xyz', 'Close current tab'), undefined);
   assert.equal(matchScore('close tab', ['Close current tab']), 2);
   assert.equal(matchScore('close zebra', ['Close current tab']), undefined);
-  assert.ok(matchScore('agent', ['New session'], ['new agent']) > matchScore('agent', ['Open Agents']));
+  assert.ok(matchScore('agent', ['New session'], ['new agent'])! > matchScore('agent', ['Open Agents'])!);
 });
 
 test('command center: empty query shows the always actions and five sessions; a query filters and ranks', () => {
-  const actions = [
+  const actions: CommandAction[] = [
     { id: 'history', label: 'History', group: 'actions', always: true },
     { id: 'new', label: 'New session', group: 'workspace', always: true },
     { id: 'term', label: 'New terminal', group: 'workspace' },
     { id: 'side', label: 'Toggle left sidebar', group: 'actions' },
   ];
-  const sessions = Array.from({ length: 7 }, (_, index) => ({ id: `s${index}`, title: `Session ${index}`, bucket: 'done', updatedAt: new Date(2026, 0, index + 1).toISOString() }));
+  const sessions: CommandSession[] = Array.from({ length: 7 }, (_, index) => ({ id: `s${index}`, title: `Session ${index}`, bucket: 'done', updatedAt: new Date(2026, 0, index + 1).toISOString() }));
   sessions[2].bucket = 'needs_input';
   sessions[3].bucket = 'running';
   const empty = commandResults({ actions, sessions, query: '' });
   assert.deepEqual(empty.map(section => section.title), ['Workspace actions', 'Actions', 'Sessions']);
-  assert.deepEqual(empty[0].rows.map(row => row.item.id), ['new']);
-  assert.deepEqual(empty[2].rows.map(row => row.item.id), ['s2', 's3', 's6', 's5', 's4']);
+  assert.deepEqual(empty[0].rows.map(row => (row.item as CommandAction).id), ['new']);
+  assert.deepEqual(empty[2].rows.map(row => (row.item as CommandAction).id), ['s2', 's3', 's6', 's5', 's4']);
   // The best match's section first.
   const sidebar = commandResults({ actions, sessions, query: 'sidebar' });
   assert.deepEqual(sidebar.map(section => section.title), ['Actions']);
   const session = commandResults({ actions, sessions, query: 'session 5' });
-  assert.deepEqual(session.at(-1).rows.map(row => row.item.id), ['s5']);
+  assert.deepEqual(session.at(-1)!.rows.map(row => (row.item as CommandAction).id), ['s5']);
   assert.deepEqual(commandResults({ actions, sessions, query: 'qqq' }), []);
-  assert.deepEqual(sortSessions([{ id: 'a', title: 'a', bucket: 'done' }, { id: 'b', title: 'b', bucket: 'running' }]).map(entry => entry.id), ['b', 'a']);
+  assert.deepEqual(sortSessions([{ id: 'a', title: 'a', bucket: 'done' }, { id: 'b', title: 'b', bucket: 'running' }] as CommandSession[]).map(entry => entry.id), ['b', 'a']);
 });
 
 test('attention: favicon status, new waits, the notification body, quiet when the user sees it', () => {
@@ -111,9 +113,10 @@ test('attention: favicon status, new waits, the notification body, quiet when th
 });
 
 import { closeRange, planClose } from '../dist-lib/tab-close.js';
+import type { TabRef } from '../dist-lib/tab-close.js';
 
-const T = (kind, id) => ({ kind, id });
-const keys = list => list.map(tab => `${tab.kind}:${tab.id}`);
+const T = (kind: string, id: string) => ({ kind, id });
+const keys = (list: TabRef[]) => list.map(tab => `${tab.kind}:${tab.id}`);
 
 test('tab close: ranges, and the session tab stays for one of its agents', () => {
   const tabs = [T('agent', 'S'), T('panel', 'terminal'), T('agent', 'C'), T('task', 't1')];
