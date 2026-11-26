@@ -1,4 +1,5 @@
-import { open, readdir, realpath } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open, readdir, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 /**
@@ -23,6 +24,10 @@ const FILE_CHARS = 512;
  * loads skills natively and Codex reads them with its own tools, so they keep the file paths.
  */
 export const readsSkillsByTool = (runtimeKind: string | undefined, skills: readonly unknown[]) => runtimeKind === 'antigravity' && skills.length > 0;
+
+/** Whether the supervisor may call `tool`: alp_send, alp_board and alp_task, and alp_skill_read where its skills need it. */
+export const supervisorMayCall = (tool: string, runtimeKind: string | undefined, skills: readonly unknown[]) =>
+  ['alp_send', 'alp_board', 'alp_task'].includes(tool) || (tool === 'alp_skill_read' && readsSkillsByTool(runtimeKind, skills));
 
 export type SkillRef = { name: string; path: string };
 export type SkillFile = { skill: string; file: string; bytes: number; content: string; files?: string[] };
@@ -61,6 +66,8 @@ async function skillFiles(directory: string) {
  * (default SKILL.md). Refused: a skill not in `skills`, an absolute path, a hidden entry, a path
  * that leaves the skill's directory (also through a link), a directory, a file over
  * SKILL_FILE_BYTES, and a binary file. The answer for SKILL.md also lists the skill's other files.
+ * A SKILL.md that is itself a link to a file outside its directory is refused too: ALP's library
+ * keeps no links in a skill (library-edit), and following one would read outside the skill.
  */
 export async function readSkillFile(skills: readonly SkillRef[], args: unknown, { maxBytes = SKILL_FILE_BYTES } = {}): Promise<SkillFileResult> {
   if (!args || typeof args !== 'object' || Array.isArray(args) || !Object.keys(args).every(key => key === 'skill' || key === 'file')) return refuse('alp_skill_read takes {skill, file?}');
@@ -83,11 +90,16 @@ export async function readSkillFile(skills: readonly SkillRef[], args: unknown, 
   catch { return refuse(`Skill '${name}' has no file ${parts.join('/')}`); }
   if (!inside(directory, target)) return refuse(`file must stay inside skill '${name}'`);
 
-  const handle = await open(target, 'r').catch(() => undefined);
+  // Only a regular file is opened (a FIFO would block the open), and not through a link swapped in
+  // since realpath (O_NOFOLLOW where the platform has it); the open file is checked again.
+  const notFile = refuse(`${parts.join('/')} in skill '${name}' is not a file`);
+  if (!(await stat(target).then(found => found.isFile(), () => false))) return notFile;
+  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+  const handle = await open(target, flags).catch(() => undefined);
   if (!handle) return refuse(`Skill '${name}' has no readable file ${parts.join('/')}`);
   try {
     const stats = await handle.stat();
-    if (!stats.isFile()) return refuse(`${parts.join('/')} in skill '${name}' is not a file`);
+    if (!stats.isFile()) return notFile;
     if (stats.size > maxBytes) return refuse(`${parts.join('/')} in skill '${name}' has ${stats.size} bytes; ALP returns at most ${maxBytes}`);
     const buffer = Buffer.alloc(stats.size);
     const { bytesRead } = stats.size ? await handle.read(buffer, 0, stats.size, 0) : { bytesRead: 0 };

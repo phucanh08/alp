@@ -22,7 +22,7 @@ import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, watch as wat
 import { appendFile, mkdir, open, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { checkFrontmatter, skillReferences, splitSkill } from '@anhlp/alp-core/skill-validate';
 import { resourceUses } from './skill-resources.ts';
-import { readSkillFile, readsSkillsByTool } from './skill-files.ts';
+import { readSkillFile, readsSkillsByTool, supervisorMayCall } from './skill-files.ts';
 import { moveFile, writeAtomic } from '@anhlp/alp-core/atomic';
 import os from 'node:os';
 import path from 'node:path';
@@ -3232,7 +3232,7 @@ export function createAlpRuntime(options: RuntimeOptions = {}): AlpRuntime {
     if (oversized) return toolResult(false, { error: oversized });
     // The supervisor only reads the board and tasks, and writes to main.
     // An Antigravity supervisor may also open its own skills (t-4b59).
-    if (session.role === 'supervisor' && !['alp_send', 'alp_board', 'alp_task'].includes(params.tool) && !(params.tool === 'alp_skill_read' && readsSkillsByTool(session.runtimeKind, session.mapping.agent.skills))) return toolResult(false, { error: 'The supervisor only uses alp_send, alp_board and alp_task' });
+    if (session.role === 'supervisor' && !supervisorMayCall(params.tool, session.runtimeKind, session.mapping.agent.skills)) return toolResult(false, { error: 'The supervisor only uses alp_send, alp_board and alp_task' });
     if (params.tool === 'alp_skill_read' && !readsSkillsByTool(session.runtimeKind, session.mapping.agent.skills)) return toolResult(false, { error: 'Read your skills with your own file tools; alp_skill_read is for Antigravity sessions' });
     if (['alp_lesson', 'alp_lesson_curate', 'alp_skill', 'alp_skill_retire'].includes(params.tool) && !supervises(session)) return toolResult(false, { error: 'Only a supervised main records lessons and skills' });
     if (params.tool === 'alp_issue' && (session.parent || session.mapping.agent.name !== mainOf(session.mapping))) return toolResult(false, { error: 'Only main files issues; report the problem to your requester' });
