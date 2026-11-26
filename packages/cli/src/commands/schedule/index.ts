@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { running } from '../daemon.js';
-import { UsageError } from './usage.js';
+import { running } from '../daemon/index.js';
+import { UsageError } from '../_shared/usage.js';
 
 /** One-shot continuations of an existing root session; timestamps need an explicit offset. */
 export async function scheduleCommand(args: string[]) {

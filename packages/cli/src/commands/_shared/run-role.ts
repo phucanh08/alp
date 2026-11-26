@@ -1,6 +1,4 @@
 import { pathToFileURL } from 'node:url';
-import { runBridge } from '@anhlp/alp-core/bridges';
-import { UsageError } from './usage.js';
 
 /**
  * The role subcommands (t-1e02): `alp daemon run`, `alp dashboard serve` and `alp bridge acp|antigravity`
@@ -16,10 +14,4 @@ import { UsageError } from './usage.js';
 export async function runRole(role: 'daemon' | 'dashboard' | 'acp', file: string, args: string[]) {
   process.argv = [process.argv[0], file, ...args];
   return import(pathToFileURL(file).href);
-}
-
-/** alp bridge acp|antigravity: the stdio MCP bridge an agent CLI starts to reach alpd's tools. */
-export function bridgeCommand(args: string[]) {
-  if (args.length !== 1 || !['acp', 'antigravity'].includes(args[0])) throw new UsageError();
-  runBridge(args[0]);
 }

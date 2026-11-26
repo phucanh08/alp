@@ -8,7 +8,7 @@ import { hostname, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { diagnoseProviders, editorCommand, editorHost, EDITORS, installedEditors, locateEditor, methods, ownerRegistry, projectDirectory, providerOptions, PROVIDER_CHECKS, revealCommand, revealer } from '../dist/dashboard/owner/host.js';
-import { TERMINAL_WARNING, terminalCommand } from '../dist/terminal.js';
+import { TERMINAL_WARNING, terminalCommand } from '../dist/commands/terminal/index.js';
 
 const FAKE_ACP = fileURLToPath(new URL('../../../test/support/fake-acp.js', import.meta.url));
 

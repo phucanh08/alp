@@ -15,8 +15,8 @@
     "types": ["node"],
     // Workspace imports (@anhlp/*) resolve to their TypeScript sources: no build needed to check.
     "customConditions": ["alp-source"],
-    // binary-smoke.mjs imports ../packages/cli/dist/self-update.js (built at run time); this lets the
-    // checker read packages/cli/src/self-update.ts in its place, without a build.
+    // binary-smoke.mjs imports ../packages/cli/dist/commands/update/self-update.js (built at run time); this lets the
+    // checker read packages/cli/src/commands/update/self-update.ts in its place, without a build.
     "rootDirs": ["../packages/cli/src", "../packages/cli/dist"]
   },
   // ../apps/web/scripts/*.mjs: the web lib build script carries // @ts-check too.

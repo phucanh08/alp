@@ -89,7 +89,7 @@ test('Claude Code\'s Read through the Agent SDK is a read with the SDK\'s struct
 
 test('alp acp shows typed calls to the editor: kinds, titles relative to the session, diffs, locations', async () => {
   const { toolInput, toolKind, toolLocations, toolOutput, toolTitle } = await import('../../dist/acp/agent.js');
-  const { toolLine } = await import('../../packages/cli/dist/commands/sessions.js');
+  const { toolLine } = await import('../../packages/cli/dist/commands/session/output.js');
   const item = (name, detail, extra = {}) => ({ kind: 'tool_call', id: 't', callId: 't', name, status: 'completed', detail, ...extra });
   const read = item('Read', { type: 'read', filePath: '/p/src/a.ts', content: 'const a = 1;', offset: 7, limit: 20 });
   assert.deepEqual([toolKind(read), toolTitle(read, '/p'), toolTitle(read, '/q'), toolOutput(read), toolInput(read), toolLocations(read)], [
