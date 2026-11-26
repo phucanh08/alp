@@ -211,27 +211,27 @@ console.log('plugin runtime imports ok');
   const support = readFileSync(path.join(root, 'test/support/fake-agent.ts'), 'utf8');
   writeFileSync(path.join(pluginDir, 'test/support/fake-agent.ts'), support);
   // Everything else under test/support that a copied suite imports. teardown.ts arrived with
-  // t-5294.6, which converted paseo/team/human.test.js to the shared `defer` helper: those three now
+  // t-5294.6, which converted paseo/team/human.test.js (now .ts) to the shared `defer` helper: those three now
   // import ../../../test/support/teardown.ts, and without it here the isolated run dies on
   // ERR_MODULE_NOT_FOUND before a single regression executes. It imports nothing itself, so it is
   // copied verbatim.
   copyFileSync(path.join(root, 'test/support/teardown.ts'), path.join(pluginDir, 'test/support/teardown.ts'));
-  // t-814a, same reason: paseo.test.js and team.test.js now read the shipped role definitions from
+  // t-814a, same reason: paseo.test.ts and team.test.ts now read the shipped role definitions from
   // the template root instead of keeping a copy of a sentence. It imports only published package
   // specifiers (@anhlp/alp-core/template-path, @anhlp/alp-runtime), both of which this project
   // installs, so it too is copied verbatim.
   copyFileSync(path.join(root, 'test/support/template-text.ts'), path.join(pluginDir, 'test/support/template-text.ts'));
   for (const name of tests) {
-    const source = readFileSync(path.join(root, 'integrations/paseo/tests', `${name}.test.js`), 'utf8')
+    const source = readFileSync(path.join(root, 'integrations/paseo/tests', `${name}.test.ts`), 'utf8')
       .replace("new URL('../server/dist/index.js', import.meta.url)", "import.meta.resolve('@anhlp/alp-paseo')");
-    writeFileSync(path.join(suite, `${name}.test.js`), source);
+    writeFileSync(path.join(suite, `${name}.test.ts`), source);
   }
   // Say which support file is missing, here, instead of leaving a module-resolution error 180 s into
   // `node --test`: the copied suite is a moving target, and the next test to gain a support import
   // would otherwise fail with nothing pointing at this block. Parsed, so every import form counts
   // (scripts/relative-imports.ts).
-  for (const name of tests) await requireRelativeImports(path.join(suite, `${name}.test.js`), 'scripts/tarball-consumer.ts');
-  const regression = spawnSync(process.execPath, ['--test', ...tests.map(name => path.join(suite, `${name}.test.js`))], {
+  for (const name of tests) await requireRelativeImports(path.join(suite, `${name}.test.ts`), 'scripts/tarball-consumer.ts');
+  const regression = spawnSync(process.execPath, ['--test', ...tests.map(name => path.join(suite, `${name}.test.ts`))], {
     cwd: pluginDir, stdio: 'inherit', timeout: 180_000,
     env: { ...process.env, ALP_HOME: path.join(pluginDir, 'home'), NODE_PATH: '' },
   });
