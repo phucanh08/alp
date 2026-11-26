@@ -19,6 +19,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import { pathToFileURL } from 'node:url';
+// Imported for its effect: pnpm's npm_config_* variables do not reach the npm this smoke starts.
+import './spawn-command.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 // A throwaway ALP_HOME, set before any ALP module loads: the smoke never reads or writes ~/.alp.
