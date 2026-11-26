@@ -16,7 +16,7 @@ Supported: Linux or macOS, Node.js 22 (22.12 or later) or 24, and a signed-in Co
 Claude Code on PATH. Windows and Node.js 26 are experimental; Node.js 20 is not supported.
 
 ```sh
-npm install -g @anhlp/alp@beta
+npm install -g @anhlp/alp@beta   # or: pnpm add -g @anhlp/alp@beta
 alp doctor          # checks Codex and Claude, settings, and leftovers; --fix repairs the safe ones
 alp daemon start
 ```
@@ -59,7 +59,7 @@ The package provides the `alp` command and `alpd`, the per-user daemon that runs
 
 ## Initialize a project
 
-Run `alp init [directory]` (or `node /path/to/alp/packages/cli/dist/cli.js init [directory]` when running a source checkout after `npm run build`). The directory defaults to the current working directory.
+Run `alp init [directory]` (or `node /path/to/alp/packages/cli/dist/cli.js init [directory]` when running a source checkout after `pnpm run build`). The directory defaults to the current working directory.
 
 When the Paseo plugin opens an ALP session in a repository that lacks `ALP.md` or `.alp/settings.json`, it performs this initialization automatically. Initialization fills missing scaffold files and never replaces existing files, so partial and customized ALP setups are preserved.
 
@@ -69,7 +69,7 @@ The default settings select main with the Phở team. Main runs on Opus 5.5 with
 
 Fifteen core [role skills](docs/alp/role-skills.md) cover intake, research, planning, delegation briefs, bug diagnosis, commit packaging, compaction, curation, skill authoring, architecture docs, feature architecture, test strategy, safe refactoring, security review and release readiness. They live in your skill library in `$ALP_HOME` (default `~/.alp`), seeded on first use, together with `role-skills.json`, which assigns fifteen to main, eleven to lead, six to peer and two to reviewer. Edit either freely: app updates replace only library files you have not changed. Each agent sees only its own skills' names and descriptions, and opens a skill, and then only the references a step needs, when its work matches ([skill system](docs/alp/skill-system.md)). Specialist skills and agents (backend, frontend, testing tools, design, MCP, operations, architect) come as optional packs: `alp packs`, `alp pack install <id>`.
 
-Repeated runs fill in missing files and preserve existing file contents, including custom settings. Conflicting filesystem entry types cause an error; files already created before an error remain available for a later retry. Run `npm run test:init` to verify initialization independently.
+Repeated runs fill in missing files and preserve existing file contents, including custom settings. Conflicting filesystem entry types cause an error; files already created before an error remain available for a later retry. Run `pnpm run test:init` to verify initialization independently.
 
 For projects created with an earlier scaffold, run `alp update-template [directory]` (or the built CLI above). This backs up and updates recognized original instructions, adds team settings, renames the old `smart`/`supervised` profiles to `pho`/`cafe`, and archives project copies of skills that still match the shipped ones, so the library applies. Copies of the built-in agents that are still as ALP shipped them are put away too, so the project uses the built-ins; a copy you edited, or added skills, MCP servers or hooks to, stays as the project's override. The old shipped graph migrates to Cafe; custom graphs and customized instructions/skills remain unchanged.
 
@@ -78,25 +78,25 @@ For projects created with an earlier scaffold, run `alp update-template [directo
 Use Node 22 (22.12 or later) or 24 and an npm version compatible with your Node installation:
 
 ```sh
-npm ci
-npm run check
-npm test
+pnpm install --frozen-lockfile
+pnpm run check
+pnpm test
 ```
 
-`npm test` builds every workspace and runs the hermetic suites (unit and integration together, each file once) in a throwaway `ALP_HOME`. `npm run build` builds only the core CLI, daemon, ACP and runtime bundles; `npm run build:paseo` builds the optional plugin. The runtime in `packages/runtime/src` owns native harnesses, sessions, delegation, and mail without importing Paseo; `alpd` hosts it, and the plugin is a viewer over the daemon ([design](plans/reference/ALPD.md)).
+`pnpm test` builds every workspace and runs the hermetic suites (unit and integration together, each file once) in a throwaway `ALP_HOME`. `pnpm run build` builds only the core CLI, daemon, ACP and runtime bundles; `pnpm run build:paseo` builds the optional plugin. The runtime in `packages/runtime/src` owns native harnesses, sessions, delegation, and mail without importing Paseo; `alpd` hosts it, and the plugin is a viewer over the daemon ([design](plans/reference/ALPD.md)).
 
 Tests are split by owner:
 
 | Group | Location | Run |
 | --- | --- | --- |
-| Unit and package-level contract | `packages/<name>/tests/` (plugin: `integrations/paseo/tests/`) | `npm test -w @anhlp/alp-core` (or `-runtime`, `-client`, `-daemon`, `-cli`, `-protocol`, `@anhlp/alp-paseo`); all at once: `npm run test:unit` |
-| Integration (several packages, CLI processes, repository checks) | `test/integration/` | `npm run test:integration` |
-| E2E (live providers, opt-in) | `test/e2e/` | `npm run test:e2e` or one of `test:e2e:*` |
+| Unit and package-level contract | `packages/<name>/tests/` (plugin: `integrations/paseo/tests/`) | `pnpm --filter @anhlp/alp-core test` (or `-runtime`, `-client`, `-daemon`, `-cli`, `-protocol`, `@anhlp/alp-paseo`); all at once: `pnpm run test:unit` |
+| Integration (several packages, CLI processes, repository checks) | `test/integration/` | `pnpm run test:integration` |
+| E2E (live providers, opt-in) | `test/e2e/` | `pnpm run test:e2e` or one of `test:e2e:*` |
 | Shared fixtures such as fake transports | `test/support/` | imported by package and integration tests |
 
-`npm test` runs unit and integration; `npm run test:all` adds E2E. A package test imports only its own package and the packages it declares as dependencies; `npm run check:boundaries` and `test/integration/layout.test.js` enforce that. The core packages (protocol, core, runtime, client, daemon, cli) test without installing Paseo.
+`pnpm test` runs unit and integration; `pnpm run test:all` adds E2E. A package test imports only its own package and the packages it declares as dependencies; `pnpm run check:boundaries` and `test/integration/layout.test.js` enforce that. The core packages (protocol, core, runtime, client, daemon, cli) test without installing Paseo.
 
-Runtime tests drive scripted agents from `test/support/fake-agent.js` instead of Codex or Claude: they call ALP tools, report context fill, hand off slowly, crash mid-turn or hit a usage limit on cue. `packages/client/tests/golden.test.js` compares what `alp log`, `alp ps` and `alp task report` print with `packages/client/tests/golden/*.txt`; after checking an intended change, accept it with `ALP_UPDATE_GOLDEN=1 npm test -w @anhlp/alp-client`.
+Runtime tests drive scripted agents from `test/support/fake-agent.js` instead of Codex or Claude: they call ALP tools, report context fill, hand off slowly, crash mid-turn or hit a usage limit on cue. `packages/client/tests/golden.test.js` compares what `alp log`, `alp ps` and `alp task report` print with `packages/client/tests/golden/*.txt`; after checking an intended change, accept it with `ALP_UPDATE_GOLDEN=1 pnpm --filter @anhlp/alp-client test`.
 
 ## Project files
 
@@ -205,7 +205,7 @@ Use `resolveAgent(projectRoot, { agent: 'your-agent' })` from `src/core/resolver
 
 ## Daemon and CLI
 
-`alpd` hosts ALP sessions for all projects of a user. After `npm run build`:
+`alpd` hosts ALP sessions for all projects of a user. After `pnpm run build`:
 
 ```sh
 alp daemon start          # or: status [--json] | stop | restart | install | uninstall (install: experimental)
@@ -365,9 +365,9 @@ This section builds the plugin from a checkout of this repository. Prerequisites
 Install dependencies, type-check the plugin, and build its server bundle:
 
 ```sh
-npm ci
-npm run check
-npm run build:paseo
+pnpm install --frozen-lockfile
+pnpm run check
+pnpm run build:paseo
 ```
 
 The build output is written to `integrations/paseo/server/dist/index.js`. Paseo plugins are trusted, unsandboxed code, so enable plugins only on a daemon where you trust this repository. In Paseo, open **Settings → Plugins** and turn on **Enable plugins**.
@@ -402,8 +402,8 @@ paseo provider models alp
 After changing the plugin source, rebuild and reload the installed plugin:
 
 ```sh
-npm run check
-npm run build:paseo
+pnpm run check
+pnpm run build:paseo
 paseo plugin reload alp-provider
 ```
 
@@ -434,7 +434,7 @@ repositories) and scout (code locations) advisors and the `pho-research` and
 
 ## Modular monorepo development
 
-ALP is organized into npm workspaces for protocol, core, runtime, daemon, client, CLI, a reserved TUI, and the Paseo integration. See [package boundaries, build/test/release commands and the Rust migration seam](docs/modular-monorepo.md). Existing commands and checkout entry points remain compatible.
+ALP is organized into pnpm workspaces for protocol, core, runtime, daemon, client, CLI, a reserved TUI, and the Paseo integration. See [package boundaries, build/test/release commands and the Rust migration seam](docs/modular-monorepo.md). Existing commands and checkout entry points remain compatible.
 
 ## License
 

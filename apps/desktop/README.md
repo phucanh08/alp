@@ -3,7 +3,7 @@
 An Electron shell over the ALP already installed on this Mac (D32, `docs/alp/desktop.md`). It runs
 `alp dashboard --print` and shows the ALP dashboard app in its own window. With no `alp` on the Mac it offers to install
 the latest ALP release with the `install.sh` it was built with, after the user confirms (D35, `docs/alp/desktop.md` §3.2). It is a standalone **bun** project,
-not one of the root npm workspaces: it has its own `bun.lock` and depends on no `@anhlp/*` package.
+not one of the root pnpm workspaces: it has its own `bun.lock` and depends on no `@anhlp/*` package.
 
 ```sh
 cd apps/desktop
@@ -12,7 +12,7 @@ bun test test      # unit tests of the pure modules
 bun run typecheck
 bun run build      # dist/main.cjs + dist/pages
 bun run start      # build, then run Electron (ELECTRON_RUN_AS_NODE unset)
-bun run e2e        # Electron e2e; needs the root `npm ci` and `node scripts/build-workspace.mjs cli`
+bun run e2e        # Electron e2e; needs the root `pnpm install --frozen-lockfile` and `node scripts/build-workspace.mjs cli`
 bun run dist       # release/ALP-<version>-arm64.dmg and -x64.dmg: ad-hoc signed, not notarized, not published
 ALP_DESKTOP_DMG=release/ALP-0.0.0-arm64.dmg bun run e2e:packaged   # tests ALP.app from that DMG
 ```

@@ -2,7 +2,7 @@
 
 ALP ships two ways. Both run the same JavaScript, `@anhlp/alp-cli`, on Node:
 
-- **npm**: `npm install -g @anhlp/alp@beta` (see [npm packages](#npm-packages)). It uses your Node (22.12 or later).
+- **npm**: `npm install -g @anhlp/alp@beta`, or with pnpm `pnpm add -g @anhlp/alp@beta` (see [npm packages](#npm-packages)). It uses your Node (22.12 or later).
 - **The ALP bundle** (`install.sh`, `install.ps1`, GitHub Releases): macOS and Linux (glibc), arm64 and x64, and Windows x64 (best-effort). It needs no Node: it carries the official Node release it runs on, the way Paseo's daemon runs on Electron's Node. From 0.0.1-beta.9 its alpd is a native executable on macOS and Linux (see [The native alpd](#the-native-alpd-t-81b09)); the `alp` command still runs on the bundled Node.
 
 Up to 0.0.1-beta.6 the release was one file built with `bun build --compile` (t-1e02). That build needed a special case for every computed import, native add-on and `process.execPath` spawn (0.0.1-beta.5 lost the Claude Agent SDK). The bundle is the npm install itself, so those special cases are gone; see [Upgrading from the single-file alp](#upgrading-from-the-single-file-alp-001-beta5beta6).
@@ -126,7 +126,7 @@ alp daemon restart
 ## Build and test locally
 
 ```sh
-npm ci && node scripts/build-bundle.mjs                 # dist/bundle/alp-<version>-<this platform>
+pnpm install --frozen-lockfile && node scripts/build-bundle.mjs                 # dist/bundle/alp-<version>-<this platform>
 node scripts/binary-smoke.mjs                           # full smoke: launcher, (native) daemon, web, terminal, fake Codex, Claude and ACP agent, bridge
 node scripts/binary-update-smoke.mjs                    # install.sh into a temporary root, then alp update from file:// and HTTP mirrors
 env -i PATH=/usr/bin:/bin sh scripts/binary-smoke-nodeless.sh dist/bundle/alp-<version>-<platform>/bin/alp   # no system Node
@@ -137,7 +137,7 @@ node --test test/integration/binary-release.test.js     # archive layout and ins
 On Windows (PowerShell, from the repository):
 
 ```powershell
-npm ci; node scripts/build-bundle.mjs                   # dist\bundle\alp-<version>-windows-x64
+pnpm install --frozen-lockfile; node scripts/build-bundle.mjs                   # dist\bundle\alp-<version>-windows-x64
 node scripts/binary-smoke.mjs
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\binary-smoke-nodeless.ps1 dist\bundle\alp-<version>-windows-x64\bin\alp.cmd
 node --test test/integration/binary-install-ps1.test.js  # changes your user Path and restores it
@@ -155,6 +155,6 @@ node --test test/integration/binary-install-ps1.test.js  # changes your user Pat
 
 The libraries (`@anhlp/alp-protocol`, `-core`, `-runtime`, `-client`, `-daemon`, `-cli`) and the Paseo plugin `@anhlp/alp-paseo` are JavaScript packages too. No package imports `@anhlp/alp`. The repository root is the private `alp-monorepo`.
 
-A release is 8 tarballs, packed once from a clean clone at the release tag with `npm run release:pack -- --out <dir>`, then `npm run release:verify -- <dir>` and `npm run release:consumer -- <dir>` (the directory is a positional argument, not `--out`) on the saved files (`release-acceptance.yml` does this in CI). Publish order: the seven JavaScript packages, then `@anhlp/alp` last, so the wrapper never points at an `@anhlp/alp-cli` that is not on the registry. A5 (`release:verify`, `launcherProblems`) refuses a wrapper whose dependencies are not exactly `@anhlp/alp-cli@<version>`, one with optional dependencies or install scripts, or one that ships anything beyond `bin/alp.js` and its licence files.
+A release is 8 tarballs, packed once from a clean clone at the release tag with `pnpm run release:pack --out <dir>`, then `pnpm run release:verify <dir>` and `pnpm run release:consumer <dir>` (the directory is a positional argument, not `--out`) on the saved files (`release-acceptance.yml` does this in CI). Publish order: the seven JavaScript packages, then `@anhlp/alp` last, so the wrapper never points at an `@anhlp/alp-cli` that is not on the registry. A5 (`release:verify`, `launcherProblems`) refuses a wrapper whose dependencies are not exactly `@anhlp/alp-cli@<version>`, one with optional dependencies or install scripts, or one that ships anything beyond `bin/alp.js` and its licence files.
 
 `scripts/npm-wrapper-smoke.mjs` installs the wrapper as a user would: `npm install -g` of the 8 tarballs into a temporary prefix (with a throwaway HOME, ALP_HOME and npm cache), then npm's `alp --version`, `alp init` and `alp update`. `validate:packages` (CI `packages-and-web`) runs it on the rehearsal release; without an argument it packs the built workspaces itself. `test/integration/npm-wrapper.test.js` covers the wrapper's manifest and the passthrough of argv, stdio and exit codes. Each `npm install -g` attempt has a timeout of `ALP_SMOKE_INSTALL_TIMEOUT_MS` (default 480000 ms, 8 minutes); a slow registry or cold cache, as on the Windows CI runner, may need more. A failed or timed-out attempt is retried on a fresh prefix, up to 3 attempts in total, with the npm cache kept.

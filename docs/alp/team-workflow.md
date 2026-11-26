@@ -1659,7 +1659,7 @@ Claude's experimental usage API may be unavailable for some versions/accounts.
 ```sh
 alp init /absolute/project
 alp update-template /absolute/existing-project
-npm run build
+pnpm run build
 paseo plugin reload alp-provider
 ```
 
@@ -1694,7 +1694,7 @@ Run the opt-in real-model smoke tests against a running daemon (default loopback
 port 6767):
 
 ```sh
-npm run test:e2e:workflow
+pnpm run test:e2e:workflow
 node test/e2e/workflow-e2e.mjs pho
 ```
 

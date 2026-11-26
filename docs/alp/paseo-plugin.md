@@ -13,9 +13,9 @@ The same range is in `paseo-plugin.json` (`requirements.paseo`, which the Paseo 
 From this repository:
 
 ```sh
-npm ci
-npm run check
-npm run build:paseo
+pnpm install --frozen-lockfile
+pnpm run check
+pnpm run build:paseo
 paseo daemon config set pluginsEnabled true
 paseo plugin install /absolute/path/to/alp-workspace/integrations/paseo
 paseo provider models alp
@@ -212,7 +212,7 @@ The journal requires private directories and one exclusive `writer.lock` for its
 
 ## Repeat verification
 
-`npm test` uses fixture transports and real public SDK schemas. It makes no model calls. `node test/e2e/runtime-e2e.mjs` is an opt-in real Codex lifecycle check; set `ALP_CODEX_BIN` if necessary. `npm run test:e2e:paseo` invokes the real model through an already running isolated Paseo daemon with the plugin installed. It creates a new fixture project, runs main/custom/reload, archives test agents, and compares every fixture file byte-for-byte.
+`pnpm test` uses fixture transports and real public SDK schemas. It makes no model calls. `node test/e2e/runtime-e2e.mjs` is an opt-in real Codex lifecycle check; set `ALP_CODEX_BIN` if necessary. `pnpm run test:e2e:paseo` invokes the real model through an already running isolated Paseo daemon with the plugin installed. It creates a new fixture project, runs main/custom/reload, archives test agents, and compares every fixture file byte-for-byte.
 
 E2E variables:
 

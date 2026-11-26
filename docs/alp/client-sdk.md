@@ -216,7 +216,7 @@ await hello(client, { name: 'web', version });
 | React Native / Metro | `node scripts/client-sdk-smoke.mjs metro` | Metro 0.83.8 resolve và bundle `ios`/`android` qua package exports; bundle chạy trong VM context trần (không `process`, `Buffer`, `require`) với WebSocket double. **Chưa chạy Hermes hay thiết bị**: repo không có `@react-native/babel-preset` và runtime RN. Private class field (`#x`) cần preset RN như mọi app RN |
 | Tarball | `node scripts/client-sdk-smoke.mjs tarball` | pack protocol/core/client, cài offline vào project rỗng; mọi entry import được; bundle browser từ package đã cài chỉ có module portable; `.d.ts` type-check với project chỉ có DOM (không `@types/node`) và project Node, cả `bundler` lẫn `node16` |
 
-Chạy: `npm test --workspace=@anhlp/alp-client`; `node scripts/test.mjs integration`;
+Chạy: `pnpm --filter @anhlp/alp-client test`; `node scripts/test.mjs integration`;
 `node scripts/client-sdk-smoke.mjs [browser|metro|tarball]` sau
 `node scripts/build-workspace.mjs client && node scripts/build-core.mjs`. Smoke dùng
 `ALP_HOME` tạm, không đọc hay ghi `~/.alp`.

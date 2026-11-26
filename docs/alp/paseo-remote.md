@@ -148,7 +148,7 @@ Paseo UI ─▶ Paseo daemon ─▶ plugin (remote) ─▶ @anhlp/alp-client/por
 | `test/integration/paseo-remote.test.js` | `node scripts/test.mjs integration`; lane paseo | 3 process không chung file: alpd (`ALP_HOME` A, **fake Codex**), `alp-gateway serve`, phía Paseo (`dist/remote/index.js` + plugin host giả) chạy với `node --permission --allow-fs-read=<repo> --allow-net`. Probe: đọc A/project và spawn → `ERR_ACCESS_DENIED`. Catalog, create (notice env), prompt + stream, câu hỏi allow/deny, tasks add/list/close, library list/models/language, các RPC unavailable, interrupt → `canceled`, gateway restart giữa turn → `turn.ended` tới đúng một lần bằng replay, alpd restart → prompt tiếp được, không item trùng, mỗi prompt tới provider một lần, không token trong output/log. Credential `read-only`: catalog chỉ có `read-only`, full-access và thư mục ngoài grant bị từ chối |
 | `apps/gateway/tests/*.test.js` | lane core | `workspaceRoots` trong principal; `workflow` theo quy tắc tên |
 | Local/embedded regression | `integrations/paseo/tests/*` (lane paseo) | toàn bộ test cũ của provider/panels chạy trên `provider.ts` mới |
-| Gate build | `npm run build` / lane packages | `assertRemoteInputs`, `check-boundaries` |
+| Gate build | `pnpm run build` / lane packages | `assertRemoteInputs`, `check-boundaries` |
 
 ## 7. E2E thật trên macOS (real provider)
 
@@ -203,7 +203,7 @@ Ký hiệu: ✅ có qua remote, có test; ◐ một phần; ❌ unavailable (UI 
 macOS (Darwin 27, Apple silicon), Node 26.3, Paseo 0.11.1, Codex CLI 0.162.1 đã đăng nhập; tarballs
 0.10.0 của nhánh này. SHA và log đầy đủ ở PR.
 
-| Flow | Fake (`paseo-remote.test.js`) | Thật (`npm run test:e2e:paseo-remote`) |
+| Flow | Fake (`paseo-remote.test.js`) | Thật (`pnpm run test:e2e:paseo-remote`) |
 |---|---|---|
 | Cài sạch từ tarball (host / client tách) | — | pass (8 tarball) |
 | alpd + gateway khởi động, xác thực (không token → 401) | pass | pass |
@@ -274,10 +274,10 @@ paseo plugin install /đường/dẫn/@anhlp/alp-paseo --home ~/.paseo-alp-remot
 ```
 
 Trong Paseo app, thêm host `127.0.0.1:6868` để xem daemon này. `/đường/dẫn/@anhlp/alp-paseo` là
-thư mục `integrations/paseo` đã build (`npm run build`), hoặc `node_modules/@anhlp/alp-paseo` của
+thư mục `integrations/paseo` đã build (`pnpm run build`), hoặc `node_modules/@anhlp/alp-paseo` của
 một project đã `npm install` tarball plugin.
 
 Rồi mở workspace có thư mục **đúng bằng** đường dẫn đã cấp, chọn ALP → Phở/Cafe. Thử nhanh không
-cần UI: `npm run test:e2e:paseo-remote` (tự dựng mọi thứ trong thư mục tạm).
+cần UI: `pnpm run test:e2e:paseo-remote` (tự dựng mọi thứ trong thư mục tạm).
 
 Xử lý sự cố: §5. Thu hồi: `alp-gateway credential revoke <id>` trên host.

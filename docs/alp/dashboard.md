@@ -48,18 +48,18 @@ thiếu thì panel ghi lý do và không mở terminal.
 ## 2. Cài đặt, chạy, build
 
 ```sh
-npm ci                       # ở gốc repo
-npm run dev:alp-dashboard          # Vite dev server: http://127.0.0.1:7435
-npm run build:alp-dashboard        # bundle tĩnh ở apps/web/dist
-npm run typecheck:alp-dashboard
-npm run test:alp-dashboard         # unit test (node:test)
-npm run test:alp-web:e2e     # build cli, daemon, web rồi chạy Playwright
-npm run validate:web         # cả lane CI: tsc, unit, boundary, build, E2E
+pnpm install --frozen-lockfile                       # ở gốc repo
+pnpm run dev:alp-dashboard          # Vite dev server: http://127.0.0.1:7435
+pnpm run build:alp-dashboard        # bundle tĩnh ở apps/web/dist
+pnpm run typecheck:alp-dashboard
+pnpm run test:alp-dashboard         # unit test (node:test)
+pnpm run test:alp-web:e2e     # build cli, daemon, web rồi chạy Playwright
+pnpm run validate:web         # cả lane CI: tsc, unit, boundary, build, E2E
 ```
 
 - Port mặc định: Vite dev server **7435**, `alp-gateway` riêng **7434**, `alp dashboard` (alp-dashboard: app và
   gateway trên một listener) **7433**. Test dùng port ngẫu nhiên.
-- E2E cần Chromium của Playwright: `npx playwright install chromium` (Linux:
+- E2E cần Chromium của Playwright: `pnpm exec playwright install chromium` (Linux:
   `--with-deps`).
 - Thử bằng tay với host dùng một lần (alpd + fake Codex + gateway trong thư mục tạm):
   `node apps/web/e2e/support/serve.js`. Script in URL và token. Ctrl-C dừng mọi thứ và xóa thư mục
@@ -728,7 +728,7 @@ thì bỏ qua, hàng giữ dữ liệu cũ. Schedules đọc khi mở màn và m
 
 ## 7. Kiểm thử
 
-- Unit (`apps/web/tests`, 392 test ngày 2026-11-21; `cd apps/web && npm test`):
+- Unit (`apps/web/tests`, 392 test ngày 2026-11-21; `cd apps/web && pnpm test`):
   - timeline projection;
   - controller, chạy với host JSON-RPC trong bộ nhớ: reconnect, resume, terminal, idle-close,
     stale answers, outcome unknown, task ifRev, create, children/questions, cancel, mode limit,
@@ -764,16 +764,16 @@ thì bỏ qua, hàng giữ dữ liệu cũ. Schedules đọc khi mở màn và m
       process dashboard (không ra mạng); `schedule.list` đi qua gateway thật; chỉ `daemon.usage` là
       fixture trong WebSocket của trang (usage thật cần tài khoản provider thật);
     - mobile.
-- Chạy E2E: `npm ci` ở gốc repo một lần (workspace dùng chung `node_modules` gốc), rồi
-  `npm run test:alp-web:e2e` ở gốc hoặc `npm run test:e2e` trong `apps/web`. Cả hai đi qua
+- Chạy E2E: `pnpm install --frozen-lockfile` ở gốc repo một lần (workspace dùng chung `node_modules` gốc), rồi
+  `pnpm run test:alp-web:e2e` ở gốc hoặc `pnpm run test:e2e` trong `apps/web`. Cả hai đi qua
   `pretest:e2e` của `apps/web`: build lại `packages/cli`, `packages/daemon` và bundle web trước
   Playwright, nên dist cũ (lỗi "host too old: lacks attach.after") không còn xảy ra. Gọi thẳng
-  `npx playwright test` thì bỏ qua bước này.
+  `pnpm exec playwright test` thì bỏ qua bước này.
 - Chạy E2E với `ALP_AGENT_SESSION` và `ALP_HOME` **không đặt** (ví dụ `env -u ALP_AGENT_SESSION -u
-  ALP_HOME npx playwright test`): trong session của agent, `alp-gateway credential create` từ chối
+  ALP_HOME pnpm exec playwright test`): trong session của agent, `alp-gateway credential create` từ chối
   chạy nên world không dựng được. Mỗi world tự dùng `ALP_HOME`/`ALP_GATEWAY_HOME` tạm của nó; đặt
   `TMPDIR` riêng ngoài mọi checkout (không có thư mục `.alp` ở trên) và xoá đúng thư mục đó khi xong.
-- CI: job `alp-dashboard` trên `ubuntu-latest` và `macos-latest`, Node 22, chạy `npm run validate:web`.
+- CI: job `alp-dashboard` trên `ubuntu-latest` và `macos-latest`, Node 22, chạy `pnpm run validate:web`.
   Khi lỗi, CI upload trace và ảnh. Service alp-dashboard và gateway cũng chạy trong job `windows-daemon` trên Windows (Node 22 và 24; xem §3.1).
 
 ## 8. Giới hạn đã biết
@@ -815,4 +815,4 @@ Commit implementation `739ebc0` (nhánh `feat/alp-web`), macOS, Node 26 cục b�
   - sidebar mobile, panel mobile, settings mobile.
 
 Kiểm lại ngày 2026-10-17 (HEAD `e5e5ae9`, macOS): `cd apps/web && npm test` 107/107 pass;
-`npm run test:alp-web:e2e` 21/21 pass. Vẫn chỉ fake provider.
+`pnpm run test:alp-web:e2e` 21/21 pass. Vẫn chỉ fake provider.
