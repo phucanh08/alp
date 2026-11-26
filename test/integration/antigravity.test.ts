@@ -472,14 +472,16 @@ test('non-JSON MCP configuration is preserved and the error names antigravity, t
   const dir = await mkdtemp(path.join(tmpdir(), 'alp-agy-bad-json-'));
   removeLast(t, dir);
   const file = path.join(dir, 'mcp_config.json');
-  await writeFile(file, '{"mcpServers": {');
+  const content = 'secret-321a {"mcpServers": {}}'; // V8 quotes the start of the text on an unexpected token
+  await writeFile(file, content);
   const error = await transportFixture(t, dir, ['test']).then(() => null, (e: Error) => e);
   assert.ok(error);
   assert.match(error.message, /antigravity/i);
   assert.ok(error.message.includes(file), error.message);
   assert.match(error.message, /not valid JSON/);
   assert.match(error.message, /fix|delete/i);
-  assert.equal(await readFile(file, 'utf8'), '{"mcpServers": {');
+  assert.equal(error.message.includes('secret'), false, 'the error does not quote the file');
+  assert.equal(await readFile(file, 'utf8'), content);
 });
 
 test('a valid MCP configuration that already has the ALP launcher is not rewritten', async t => {
