@@ -1,7 +1,7 @@
 import { lstat, readFile, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { migrateDashboardSettings } from '@anhlp/alp-core/user-settings';
-import { LEGACY_WEB, refusal, serviceOwner, stopService } from './dashboard-service.js';
+import { LEGACY_WEB, refusal, serviceOwner, stopService } from '../../dashboard-service.js';
 
 /**
  * The move from `alp web` (0.0.1-beta.8 and earlier) to `alp dashboard` (t-81b0.5), run by every

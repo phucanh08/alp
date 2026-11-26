@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { requestPairing } from '../dist/interfaces.js';
+import { requestPairing } from '../dist/commands/dashboard/pair.js';
 
 /**
  * `alp dashboard pair` runs right after `alp daemon restart`, where the integration is still

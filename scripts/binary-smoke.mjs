@@ -17,7 +17,7 @@ import WebSocket from 'ws';
 import { AlpRpcClient, hello } from '@anhlp/alp-client/portable';
 import { connectWebSocket } from '@anhlp/alp-client/websocket';
 
-import { bundleCommand } from '../packages/cli/dist/self-update.js';
+import { bundleCommand } from '../packages/cli/dist/commands/update/self-update.js';
 import { hostPlatform } from './build-bundle.mjs';
 import { clearCallerSession } from './test-lib.mjs';
 

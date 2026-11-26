@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   allowedHop, bundleCommand, retryBusy, compareVersions, fetchBytes, npmMessage, pruneVersions, releaseBaseUrl, releasePlatform,
   selectAsset, selfUpdate, sha256, switchCurrent, systemTar, verifyChecksum, verifyProvenance,
-} from '../dist/self-update.js';
+} from '../dist/commands/update/self-update.js';
 
 const H = c => c.repeat(64);
 const SUMS = [

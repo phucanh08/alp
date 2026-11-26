@@ -181,7 +181,7 @@ const MAX_REQUEST = 256;
 /**
  * Where the integration of `home` answers for its token: a Unix socket in the credential directory,
  * or under /tmp when that path is too long for a socket address (/tmp, not TMPDIR, so a client with
- * another TMPDIR finds it); a named pipe on Windows. Must match packages/cli/src/interfaces.ts.
+ * another TMPDIR finds it); a named pipe on Windows. Must match packages/cli/src/commands/dashboard/paseo.ts.
  */
 export function tokenSocketPath(home: string, { platform = process.platform, uid = process.getuid?.() }: { platform?: NodeJS.Platform; uid?: number } = {}) {
   const hash = createHash('sha256').update(home).digest('hex');

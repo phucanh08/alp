@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { daemonPaths } from '@anhlp/alp-client/index';
-import { registerProject } from '../dist/interfaces.js';
+import { registerProject } from '../dist/commands/dashboard/start.js';
 
 for (const stage of ['connect', 'project.list', 'project.register']) test(`best-effort project registration bounds stalled ${stage} and closes late clients`, async () => {
   let release;

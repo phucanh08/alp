@@ -1105,7 +1105,7 @@ test('alp dashboard pair prints the password it gets over the token socket; --ro
   if (process.platform !== 'win32') {
     assert.equal((await stat(path.join(home, 'paseo'))).mode & 0o777, 0o700);
     // <home>/paseo/token.sock, or under /tmp for a home whose path is too long (macOS CI's TMPDIR).
-    const { paseoTokenSocketPath } = await import('../../packages/cli/dist/interfaces.js');
+    const { paseoTokenSocketPath } = await import('../../packages/cli/dist/commands/dashboard/paseo.js');
     const socket = await stat(paseoTokenSocketPath(home));
     assert.equal(socket.isSocket() && (socket.mode & 0o777) === 0o600, true, 'the token socket is 0600');
   }
@@ -1136,7 +1136,7 @@ test('alp dashboard pair prints the password it gets over the token socket; --ro
 
 test('t-cde5: the CLI finds the Paseo integration\'s token socket where the integration serves it, on every platform', async () => {
   const { tokenSocketPath } = await import('../../integrations/paseo/server/dist/web.js');
-  const { paseoTokenSocketPath } = await import('../../packages/cli/dist/interfaces.js');
+  const { paseoTokenSocketPath } = await import('../../packages/cli/dist/commands/dashboard/paseo.js');
   const { tokenSocketFallback } = await import('@anhlp/alp-runtime/claude-transport');
   for (const home of ['/Users/someone/.alp', `/home/someone/${'y'.repeat(110)}/.alp`, '/tmp/a b/.alp', 'C:\\Users\\someone\\.alp']) {
     for (const platform of ['darwin', 'linux', 'win32']) {
