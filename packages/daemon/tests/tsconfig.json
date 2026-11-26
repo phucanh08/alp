@@ -1,0 +1,13 @@
+{
+  // Type-checks daemon's tests and the native helper's lifecycle check (native/tests) strictly, with the options of test/tsconfig.json
+  // (Node >= 22.18 runs them directly by stripping types). The tests import the build output
+  // (../dist/*.js) as they run; rootDirs types those imports against the src/*.ts they are built
+  // from, so the check needs no build. Run: pnpm run check:test
+  "extends": "../../../test/tsconfig.json",
+  "compilerOptions": {
+    "rootDirs": ["../src", "../dist"]
+  },
+  "include": ["**/*.ts", "../native/tests/**/*.ts"],
+  // Data the tests copy or read, not code checked here.
+  "exclude": ["fixtures/**"]
+}
