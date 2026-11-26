@@ -10,6 +10,6 @@ Fork recovery keeps an exact journal-attempt completion witness on the source af
 
 Pre-upgrade applied forks have no recovery version. A present target with matching stable fork provenance can finish recovery; an absent target cannot distinguish an interrupted creation from prior retention deletion. That ambiguous legacy case stays applied and returns `persistence_failed` instead of recreating history. Newly prepared forks still recover automatically when interrupted before their target record exists. These writes cover process crashes, with the existing no-fsync/power-loss limitation.
 
-Build: `npm run build --workspace=@anhlp/alp-daemon`. Test: `npm run test --workspace=@anhlp/alp-daemon`.
+Build: `pnpm --filter @anhlp/alp-daemon run build`. Test: `pnpm --filter @anhlp/alp-daemon run test`.
 
 Public imports use the package root and its explicitly exported subpaths. See [architecture, provider extension, compatibility and release instructions](../../docs/modular-monorepo.md).
