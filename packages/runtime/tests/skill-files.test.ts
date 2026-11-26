@@ -1,10 +1,11 @@
 // t-4b59: alp_skill_read returns a file only from the directory of one of the caller's own skills.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { readSkillFile, readsSkillsByTool } from '@anhlp/alp-runtime';
+import { readSkillFile, readsSkillsByTool, supervisorMayCall } from '@anhlp/alp-runtime';
 import { teardown } from '../../../test/support/teardown.ts';
 
 async function library(t: test.TestContext) {
@@ -64,8 +65,49 @@ test('refuses another skill, paths leaving the skill, hidden files, directories,
   await refused({ skill: 'bug-loop', file: 'references/blob.bin' }, /binary/);
 });
 
-test('only Antigravity sessions with skills read them through the tool', () => {
+test('edge cases: a prefix sibling, a hidden directory, an empty file, a FIFO, a linked skill directory and a project skill', async t => {
+  const { dir, skill, skills } = await library(t);
+  const refused = async (list: typeof skills, args: unknown, pattern: RegExp) => {
+    const result = await readSkillFile(list, args);
+    assert.equal(result.ok, false, JSON.stringify(args));
+    if (!result.ok) assert.match(result.error, pattern);
+  };
+  // A sibling whose name starts with the skill's own (bug-loop2) is outside it, reached through a link.
+  await mkdir(path.join(dir, 'home', 'skills', 'bug-loop2'), { recursive: true });
+  await writeFile(path.join(dir, 'home', 'skills', 'bug-loop2', 'x.md'), 'sibling\n');
+  await symlink(path.join(dir, 'home', 'skills', 'bug-loop2', 'x.md'), path.join(skill, 'sibling.md'));
+  await refused(skills, { skill: 'bug-loop', file: 'sibling.md' }, /stay inside skill 'bug-loop'/);
+  await mkdir(path.join(skill, '.private'));
+  await writeFile(path.join(skill, '.private', 'x.md'), 'hidden\n');
+  await refused(skills, { skill: 'bug-loop', file: '.private/x.md' }, /Hidden/);
+  await writeFile(path.join(skill, 'references', 'empty.md'), '');
+  const empty = await readSkillFile(skills, { skill: 'bug-loop', file: 'references/empty.md' });
+  assert.ok(empty.ok);
+  assert.equal(empty.value.content, '');
+  // A FIFO is refused without being opened, so the call cannot block.
+  if (process.platform !== 'win32' && spawnSync('mkfifo', [path.join(skill, 'references', 'pipe.md')]).status === 0) {
+    await refused(skills, { skill: 'bug-loop', file: 'references/pipe.md' }, /not a file/);
+  }
+  // A skill whose directory is itself a link (an installed skill) is read through the link.
+  await symlink(skill, path.join(dir, 'linked'));
+  const linked = await readSkillFile([{ name: 'bug-loop', path: path.join(dir, 'linked', 'SKILL.md') }], { skill: 'bug-loop', file: 'references/test-proof.md' });
+  assert.ok(linked.ok, JSON.stringify(linked));
+  // A project skill in .alp/skills is served the same way; the dot in its directory's path is not the file's.
+  const project = path.join(dir, 'project', '.alp', 'skills', 'local');
+  await mkdir(project, { recursive: true });
+  await writeFile(path.join(project, 'SKILL.md'), '# local\n');
+  const local = await readSkillFile([{ name: 'local', path: path.join(project, 'SKILL.md') }], { skill: 'local' });
+  assert.ok(local.ok, JSON.stringify(local));
+  assert.equal(local.value.content, '# local\n');
+});
+
+test('only Antigravity sessions with skills read them through the tool; a supervisor too, and nothing else new', () => {
   assert.equal(readsSkillsByTool('antigravity', [{}]), true);
   assert.equal(readsSkillsByTool('antigravity', []), false);
   for (const kind of ['claude', 'codex', 'acp']) assert.equal(readsSkillsByTool(kind, [{}]), false);
+  assert.equal(supervisorMayCall('alp_skill_read', 'antigravity', [{}]), true);
+  assert.equal(supervisorMayCall('alp_skill_read', 'antigravity', []), false);
+  assert.equal(supervisorMayCall('alp_skill_read', 'claude', [{}]), false);
+  for (const tool of ['alp_send', 'alp_board', 'alp_task']) assert.equal(supervisorMayCall(tool, 'claude', []), true);
+  for (const tool of ['alp_pin', 'alp_delegate', 'alp_handoff']) assert.equal(supervisorMayCall(tool, 'antigravity', [{}]), false);
 });
