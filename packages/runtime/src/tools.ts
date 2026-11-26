@@ -305,6 +305,22 @@ export const SKILL_TOOL = {
   },
 };
 
+/** t-4b59: reads one of the caller's own skill files where its runtime's file tools cannot reach them (skill-files.ts). */
+export const SKILL_READ_TOOL = {
+  type: 'function',
+  name: 'alp_skill_read',
+  description: 'Read one of your own skills: its SKILL.md, or a file inside the skill such as references/guide.md. Returns the text, and for SKILL.md also the skill\'s other files. Only the skills listed in your instructions; nothing outside a skill\'s directory.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      skill: { type: 'string', description: 'The skill\'s name, as your instructions list it.' },
+      file: { type: 'string', description: 'A path inside the skill, relative to its directory. Default SKILL.md.' },
+    },
+    required: ['skill'],
+    additionalProperties: false,
+  },
+};
+
 export const SKILL_RETIRE_TOOL = {
   type: 'function',
   name: 'alp_skill_retire',

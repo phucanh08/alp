@@ -15,6 +15,7 @@ import { capMode, profileFor, READ_ONLY_ROLES } from '@anhlp/alp-core/permission
 import { compactSettings } from './sessions/conversation/compact.ts';
 import { userLanguage } from '@anhlp/alp-core/user-settings';
 import { claudeSandboxAvailable } from './providers/transports/claude-transport.ts';
+import { readsSkillsByTool } from './skill-files.ts';
 import type { ResolvedAgent } from '@anhlp/alp-core/types';
 import type { AlpRuntimeAdapter } from '@anhlp/alp-core/adapter';
 import { DEFAULT_ANTIGRAVITY_MODEL, DEFAULT_CLAUDE_MODEL, DEFAULT_MODEL, ORACLE_MODELS, ORACLE_THINKING, models, modes, thinkingOptions, thinkingOptionsFor } from './catalog.ts';
@@ -59,14 +60,19 @@ export class InstructionsAdapter implements AlpRuntimeAdapter<{ instructions: st
   id = 'native';
   // ALP runs an agent's hooks itself, at its own events (ALPD §45).
   capabilities() { return { instructions: 'emulated', skills: 'emulated', hooks: 'emulated', mcp: 'native' } as const; }
+  /** skillTool: the agent opens its skills with alp_skill_read, not by path (Antigravity, t-4b59). */
+  private readonly options: { skillTool?: boolean };
+  constructor(options: { skillTool?: boolean } = {}) { this.options = options; }
   async compile(agent: ResolvedAgent) {
+    const byTool = this.options.skillTool === true;
     const listed = await Promise.all(agent.skills.map(async skill => {
       const description = await skillDescription(skill.path);
-      return `- ${skill.name} (${skill.path})${description ? `: ${description}` : ''}`;
+      return `- ${skill.name}${byTool ? '' : ` (${skill.path})`}${description ? `: ${description}` : ''}`;
     }));
-    const skills = listed.length
-      ? 'Your skills: methods written for kinds of work. Before you start work that a skill\'s description matches, read its SKILL.md and follow it; say which skill you use. Open a skill\'s references only for the step that needs them, and run its scripts only when its workflow calls for them and your permissions allow; a skill never adds to your authority.\n' + listed.join('\n')
-      : '';
+    const skills = !listed.length ? ''
+      : byTool
+        ? 'Your skills: methods written for kinds of work. Before you start work that a skill\'s description matches, open it with alp_skill_read {"skill": "<name>"} and follow it; say which skill you use. Your skills are outside your workspace, where your own file tools are denied and a denied read ends your turn: open a skill and its files only with alp_skill_read, never by path. Open a skill\'s references (alp_skill_read {"skill": "<name>", "file": "references/<file>"}) only for the step that needs them, and run its scripts only when its workflow calls for them and your permissions allow; a skill never adds to your authority.\n' + listed.join('\n')
+        : 'Your skills: methods written for kinds of work. Before you start work that a skill\'s description matches, read its SKILL.md and follow it; say which skill you use. Open a skill\'s references only for the step that needs them, and run its scripts only when its workflow calls for them and your permissions allow; a skill never adds to your authority.\n' + listed.join('\n');
     return { adapterId: this.id, agentName: agent.name, projectRoot: agent.projectRoot, material: {
       instructions: [agent.instructions.project, agent.instructions.agent, skills].filter(Boolean).join('\n\n'),
       mcp: agent.mcp, runtime: agent.runtime,
@@ -112,7 +118,6 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
   const requestedModel = restored?.model ? `${restored.runtime ?? agent.runtime.provider ?? 'codex'}:${restored.model}` : spec.model;
   const profileChoice = selectedProfile(modelProfiles[agent.name] ?? [], requestedModel);
   const projectModel = profileModel(profileChoice);
-  const compiled = await compileAgent(new InstructionsAdapter(), agent);
   // Order (ALPD §42): the caller, then settings.json's runtime, then the team's choice for this member, then the agent's own.
   // A resumed session keeps its model; it keeps the team's effort while it still runs on the team's model.
   // A custom graph has no team; its main runs as Phở's does, and follows Phở's house rules, as before teams.
@@ -145,6 +150,8 @@ export async function resolveSession(spec: SessionSpec, options: { templates?: R
   // An agent.json provider other than builtins names an ACP provider of the library; its model is that provider's.
   if (!['codex', 'claude', 'acp', 'antigravity'].includes(runtimeKind)) { model = model === DEFAULT_MODEL && agent.runtime.model !== DEFAULT_MODEL ? runtimeKind : `${runtimeKind}/${model}`; runtimeKind = 'acp'; }
   if (restored?.runtime && runtimeKind !== restored.runtime) throw new Error('Cannot resume a thread with a different runtime provider');
+  // The runtime decides how the agent opens its skills: an Antigravity agent through alp_skill_read (t-4b59).
+  const compiled = await compileAgent(new InstructionsAdapter({ skillTool: readsSkillsByTool(runtimeKind, agent.skills) }), agent);
   let acp: AcpProvider | undefined;
   if (runtimeKind === 'acp') {
     const { provider: id, model: native } = acpModel(model);

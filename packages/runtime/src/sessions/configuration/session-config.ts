@@ -6,9 +6,10 @@ import { models, thinkingOptionsFor } from '../../catalog.ts';
 import { claudeSandboxAvailable, SKILL_PLUGIN } from '../../providers/transports/claude-transport.ts';
 import { languageInstruction } from '../../language.ts';
 import { antigravityModeText } from '../../providers/transports/antigravity-transport.ts';
-import { HANDOFF_TOOL, WAIT_TOOL, SEND_TOOL, MERGE_TOOL, VERIFY_TOOL, DISCARD_TOOL, RESOLVE_TOOL, CANCEL_TOOL, RECALL_TOOL, PIN_TOOL, BOARD_TOOL, UNPIN_TOOL, ASK_TOOL, LESSON_TOOL, LESSON_CURATE_TOOL, SKILL_TOOL, SKILL_RETIRE_TOOL, ISSUE_TOOL, SCHEDULE_TOOL, STRATEGY_TOOL, choosesStrategy, mainOf, roleOf, taskActions, taskTool } from '../../tools.ts';
+import { HANDOFF_TOOL, WAIT_TOOL, SEND_TOOL, MERGE_TOOL, VERIFY_TOOL, DISCARD_TOOL, RESOLVE_TOOL, CANCEL_TOOL, RECALL_TOOL, PIN_TOOL, BOARD_TOOL, UNPIN_TOOL, ASK_TOOL, LESSON_TOOL, LESSON_CURATE_TOOL, SKILL_TOOL, SKILL_READ_TOOL, SKILL_RETIRE_TOOL, ISSUE_TOOL, SCHEDULE_TOOL, STRATEGY_TOOL, choosesStrategy, mainOf, roleOf, taskActions, taskTool } from '../../tools.ts';
 
 import { COMPACT_SHARE } from '../../runtime-context.ts';
+import { readsSkillsByTool } from '../../skill-files.ts';
 
 /** The mode the native harness runs with: a session in a copy writes the copy, though ALP treats it as read-only. */
 export const nativeMode = (mapping: Pick<ResolvedSession, 'mode' | 'copy'> & Partial<Pick<ResolvedSession, 'runtimeKind' | 'antigravity'>>) =>
@@ -156,7 +157,7 @@ export function nativeSessionConfig(
       ...contextConfig(runtimeKind, mapping),
       ...skillConfig(runtimeKind, mapping),
       nativeMultiAgent: false,
-      dynamicTools: [SEND_TOOL, BOARD_TOOL, taskTool(taskActions(mapping, parentAgent, role))],
+      dynamicTools: [SEND_TOOL, BOARD_TOOL, taskTool(taskActions(mapping, parentAgent, role)), ...(readsSkillsByTool(runtimeKind, mapping.agent.skills) ? [SKILL_READ_TOOL] : [])],
     };
   }
   const delegationInstruction = targets.length
@@ -318,6 +319,7 @@ export function nativeSessionConfig(
       BOARD_TOOL,
       UNPIN_TOOL,
       taskTool(taskActions(mapping, parentAgent)),
+      ...(readsSkillsByTool(runtimeKind, mapping.agent.skills) ? [SKILL_READ_TOOL] : []),
     ],
   };
 }
