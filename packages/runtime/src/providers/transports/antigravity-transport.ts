@@ -683,7 +683,13 @@ export class AntigravityTransport {
     try {
       let text = '{}';
       try { text = await readFile(configFile, 'utf8'); } catch (error: any) { if (error.code !== 'ENOENT') throw error; }
-      const config = JSON.parse(text);
+      // agy can leave an empty file behind (issue #310): treat empty or whitespace-only as {}.
+      if (!text.trim()) text = '{}';
+      let config;
+      try { config = JSON.parse(text); } catch (error: any) {
+        throw new Error(`antigravity: MCP configuration ${configFile} is not valid JSON (${error.message}); ` +
+          'ALP left it unchanged. Fix the JSON, or delete the file (or replace it with {}) and ALP will register its server again.');
+      }
       if (!config || typeof config !== 'object' || Array.isArray(config) ||
           (config.mcpServers !== undefined && (!config.mcpServers || typeof config.mcpServers !== 'object' || Array.isArray(config.mcpServers)))) {
         throw new Error('Invalid Antigravity MCP configuration; existing file was preserved');
