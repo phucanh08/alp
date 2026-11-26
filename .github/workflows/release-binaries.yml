@@ -102,7 +102,7 @@ jobs:
           for arch in arm64 x64; do
             test -f "release/ALP-$VERSION-$arch.dmg" || { echo "missing ALP-$VERSION-$arch.dmg"; exit 1; }
           done
-      # The packaged app as installed from each DMG (e2e/packaged.spec.mjs; x64 under Rosetta), so the
+      # The packaged app as installed from each DMG (e2e/packaged.spec.ts; x64 under Rosetta), so the
       # DMGs the draft carries are the ones tested.
       - run: ALP_DESKTOP_DMG="release/ALP-$VERSION-arm64.dmg" bun run e2e:packaged
       - run: arch -x86_64 /usr/bin/true || softwareupdate --install-rosetta --agree-to-license

@@ -1,7 +1,7 @@
 // ALP.app's Browser tab (t-9116) as a normal browser sees it: the + menu and a New tab pane do not
 // offer Browser, and a Browser tab kept from ALP.app (same layout in localStorage) says where it works.
 // With ALP.app's marker in the user agent the menu offers it after Diff, as Paseo's. What a Browser
-// tab may load is apps/desktop's e2e (e2e/browser.spec.mjs).
+// tab may load is apps/desktop's e2e (e2e/browser.spec.ts).
 import { expect, test } from '@playwright/test';
 import { startWorld } from './support/world.ts';
 import type { World } from './support/world.ts';

@@ -22,7 +22,7 @@ Packaging (`electron-builder.yml`, `build/`): bundle `ALP.app`, id `com.anhlp.al
 `"packageManager"` and an empty `"workspaces"` only so electron-builder treats this directory, not the
 npm root, as the project root. A downloaded DMG is quarantined: on macOS 15 open it once, then
 System Settings › Privacy & Security › Open Anyway (`docs/alp/desktop.md` §6.1). The icon is drawn by
-`node scripts/icon.mjs`.
+`node scripts/icon.ts`.
 
 | Variable | Use |
 |---|---|
