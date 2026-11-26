@@ -9,7 +9,7 @@ import { tree, until } from '../../../test/support/fake-agent.js';
 /**
  * Golden output of `alp log`, `alp ps` and `alp task report` (ALPD §39). A change to
  * what users read shows up as a diff of packages/client/tests/golden/*.txt; after checking it, run
- * ALP_UPDATE_GOLDEN=1 npm test -w @anhlp/alp-client to accept it.
+ * ALP_UPDATE_GOLDEN=1 pnpm --filter @anhlp/alp-client test to accept it.
  */
 async function golden(name, text) {
   const file = fileURLToPath(new URL(`./golden/${name}.txt`, import.meta.url));

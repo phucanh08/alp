@@ -24,7 +24,7 @@
 //
 // Usage: node scripts/check-teardown-order.mjs [--root <dir>] [--json]
 // Exit 0 when clean, 1 with a report when not. Run by scripts/validate.mjs (scope all|core, so the
-// CI lanes `core` and `core-paseo-macos`), as `npm run check:teardown-order`, and by
+// CI lanes `core` and `core-paseo-macos`), as `pnpm run check:teardown-order`, and by
 // test/integration/teardown-order.test.js, which also fails on a STALE entry in ALLOWED below.
 import { readFileSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';

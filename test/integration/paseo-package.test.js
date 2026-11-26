@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { workspaceLocations } from '../../scripts/workspaces.mjs';
 
 /**
  * The canonical Paseo plugin and the root compatibility distribution. This lives with the Paseo
@@ -14,8 +15,9 @@ const root = path.resolve(import.meta.dirname, '..', '..');
 
 test('canonical Paseo plugin remains buildable without legacy folders; the private root and the npm launcher carry no Paseo', async () => {
   const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
-  assert.ok(manifest.workspaces.includes('integrations/paseo'));
-  assert.ok(!manifest.workspaces.includes('integrations/paseo-plugin'));
+  const workspaces = workspaceLocations(root);
+  assert.ok(workspaces.includes('integrations/paseo'));
+  assert.ok(!workspaces.includes('integrations/paseo-plugin'));
   assert.equal(manifest.bin.alp, 'packages/cli/dist/cli.js');
   const pkg = JSON.parse(await readFile(path.join(root, 'integrations/paseo/package.json'), 'utf8'));
   assert.equal(pkg.name, '@anhlp/alp-paseo');

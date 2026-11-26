@@ -24,7 +24,7 @@ import { workspaceLocations } from './workspaces.mjs';
 // "alp dashboard is not built" (:138, through cli-standalone-driver.mjs:43), so this script could not pass
 // for any agent — scripts/validate.mjs exited 1 there with 145/145 test files already green. The
 // product guard is right and is untouched; inheriting the caller's session into the child is not.
-// Also for a direct `node scripts/core-standalone-smoke.mjs` / `npm run test:core:standalone`, which
+// Also for a direct `node scripts/core-standalone-smoke.mjs` / `pnpm run test:core:standalone`, which
 // does not go through the validate wrapper.
 const clearedSession = clearCallerSession();
 if (clearedSession.length) console.log(`standalone core smoke: cleared the caller's ALP session variables, so the installed CLI runs as the user's: ${clearedSession.join(', ')}`);

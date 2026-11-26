@@ -20,7 +20,7 @@ import { THIRD_PARTY_NOTICES, writeThirdPartyNotices } from './third-party-notic
 process.chdir(path.resolve(import.meta.dirname, '..'));
 
 // The optional plugin ships beside the neutral core; build the core bundles first so a full
-// `npm run build:paseo` also produces the neutral bundles tests import from dist/.
+// `pnpm run build:paseo` also produces the neutral bundles tests import from dist/.
 await buildCore({ log: message => console.log(message) });
 
 // The native Paseo app evaluates clientBundle from the plugin catalog as a CommonJS factory.
