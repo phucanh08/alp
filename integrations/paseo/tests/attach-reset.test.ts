@@ -14,34 +14,38 @@ import { connect, daemonPaths } from '@anhlp/alp-client';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { createAgents } from '../server/dist/paseo/agents.js';
+import type { TestContext } from 'node:test';
 
-const directory = {
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+const directory: Json = {
   load: async () => {}, prepare: async () => {}, workspaceIdFor: () => 'workspace',
   placement: () => ({ projectKey: 'p', projectName: 'p', directory: '/' }), assign: async () => {}, changed: () => {},
 };
 
-async function until(check, what = 'condition') {
+async function until(check: Json, what = 'condition') {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`${what} did not happen`);
 }
 
 /** A scripted native runtime: each turn/start answers a new turn id; finish() completes the latest. */
-function fakeTransport(transports) {
+function fakeTransport(transports: Json) {
   return () => {
     const index = transports.length;
     let turns = 0;
-    const transport = {
+    const transport: Json = {
       threadId: `thread-${index}`, turnId: undefined,
       async initialize() {},
-      onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
+      onNotification(fn: Json) { this.notification = fn; }, onFailure(fn: Json) { this.failure = fn; }, onRequest(fn: Json) { this.serverRequest = fn; },
       async close() {},
-      async request(method, params) {
+      async request(method: Json, params: Json) {
         if (method === 'thread/resume') { this.threadId = params.threadId; return { thread: { id: params.threadId } }; }
         if (method.startsWith('thread/')) return { thread: { id: this.threadId } };
         if (method === 'turn/start') { this.turnId = `turn-${index}-${++turns}`; return { turn: { id: this.turnId } }; }
         return {};
       },
-      finish(text) {
+      finish(text: Json) {
         this.notification('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `out-${index}-${turns}`, text } });
         this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
       },
@@ -52,24 +56,24 @@ function fakeTransport(transports) {
 }
 
 /** A real alpd with a store, whose runtime's native rewind (branch, rebind) is scripted. */
-async function daemon(t) {
+async function daemon(t: TestContext) {
   const dir = await mkdtemp(path.join(tmpdir(), 'paseo-attach-reset-'));
   const project = path.join(dir, 'project');
   await initProject(project);
-  const transports = [];
+  const transports: Json[] = [];
   const runtime = createAlpRuntime({ supervisor: false, transport: fakeTransport(transports), runLogDir: path.join(dir, 'runs') });
   let branches = 0;
   runtime.branch = async () => ({ threadId: `thread-branch-${++branches}` });
-  runtime.rebind = async sessionId => runtime.snapshot(sessionId);
+  runtime.rebind = (async (sessionId: string) => runtime.snapshot(sessionId)) as Json;
   const store = createStore(path.join(dir, 'state'));
   const socketPath = daemonPaths(path.join(dir, 'd')).socket;
   const server = createDaemonServer({ runtime, socketPath, version: 'test', store });
   await server.listen();
   const client = await connect(socketPath, { name: 'test', version: '0' });
   t.after(async () => { client.close(); await store.flush().catch(() => {}); await server.close().catch(() => {}); await runtime.shutdown(); await rm(dir, { recursive: true, force: true }); });
-  const request = (method, params) => client.request(method, params);
+  const request = (method: Json, params: Json) => client.request(method, params);
   /** Runs one completed turn of `text` on the root; answers its turn id. */
-  async function turn(sessionId, text, answer) {
+  async function turn(sessionId: Json, text: Json, answer: Json) {
     const transport = transports.at(-1);
     const before = transport.turnId;
     await request('session.prompt', { sessionId, clientMessageId: `${sessionId}-${text}`, content: [{ type: 'text', text }] });
@@ -83,11 +87,11 @@ async function daemon(t) {
 }
 
 /** What Paseo shows of a timeline entry: its kind and its text. */
-const shown = entries => entries.map(({ item }) => `${item.type}:${item.text ?? item.message}`);
+const shown = (entries: Json) => entries.map(({ item }: Json) => `${item.type}:${item.text ?? item.message}`);
 /** The same for alpd's own history: the root's message and notice items. */
-const historyShown = items => items.filter(item => item.event?.type === 'item').map(({ event: { item } }) =>
+const historyShown = (items: Json) => items.filter((item: Json) => item.event?.type === 'item').map(({ event: { item } }: Json) =>
   item.kind === 'user_message' ? `user_message:${item.text}` : item.kind === 'assistant_message' ? `assistant_message:${item.text}` : `notification:${item.text}`);
-const timeline = (agents, agentId) => agents.handlers.fetch_agent_timeline_request({ type: 'fetch_agent_timeline_request', agentId, requestId: `timeline-${Math.random()}`, direction: 'tail', limit: 200 });
+const timeline = (agents: Json, agentId: Json) => agents.handlers.fetch_agent_timeline_request({ type: 'fetch_agent_timeline_request', agentId, requestId: `timeline-${Math.random()}`, direction: 'tail', limit: 200 });
 
 test('a rewind between the bridge\'s history read and its attach: the bridge reads the rewound history, each item once', async t => {
   const d = await daemon(t);
@@ -97,27 +101,27 @@ test('a rewind between the bridge\'s history read and its attach: the bridge rea
   await d.turn('r1', 'three', 'answer three');
 
   // The bridge's connection to alpd, held at its first attach of r1: its history read is done by then.
-  let reached; const atAttach = new Promise(resolve => { reached = resolve; });
+  let reached: Json; const atAttach = new Promise(resolve => { reached = resolve; });
   let release; const gate = new Promise(resolve => { release = resolve; });
   let held = false;
-  const clientFactory = async onEvent => {
+  const clientFactory: Json = async (onEvent: Json) => {
     const client = await connect(d.socketPath, { name: 'paseo-bridge', version: '0' });
     client.onEvent(onEvent);
     return {
       get capabilities() { return client.capabilities; },
       get closed() { return client.closed; },
-      onEvent: listener => client.onEvent(listener), onClose: listener => client.onClose(listener), close: () => client.close(),
-      async request(method, params) {
+      onEvent: (listener: Json) => client.onEvent(listener), onClose: (listener: Json) => client.onClose(listener), close: () => client.close(),
+      async request(method: Json, params: Json) {
         if (method === 'session.attach' && params?.sessionId === 'r1' && !held) { held = true; reached(params); await gate; }
         return client.request(method, params);
       },
     };
   };
-  const frames = [];
-  const agents = createAgents({ clientFactory, broadcast: frame => frames.push(frame), directory });
+  const frames: Json[] = [];
+  const agents: Json = createAgents({ clientFactory, broadcast: frame => frames.push(frame), directory });
   t.after(() => agents.close());
   await agents.start();
-  const attach = await atAttach;
+  const attach: Json = await atAttach;
   assert.equal(typeof attach.generation, 'string', 'the bridge attaches under the generation it read');
 
   // A Paseo client opens the agent while the bridge waits; another client rewinds in that window.
@@ -125,7 +129,7 @@ test('a rewind between the bridge\'s history read and its attach: the bridge rea
   const { generation } = await d.request('session.history', { sessionId: 'r1', limit: 1 });
   assert.equal(generation, attach.generation);
   const rewound = await d.request('session.rewind', { sessionId: 'r1', requestId: 'rw-1', ifGeneration: generation, beforeTurnId: second });
-  release();
+  release!();
 
   const { payload } = await opened;
   assert.equal(payload.error, null, 'the open succeeds');
@@ -154,22 +158,22 @@ test('a rewind between the bridge\'s history read and its attach: the bridge rea
 test('an attach that answers reset makes the bridge read the history again, without the stale page or a doubled replay', async t => {
   const STALE = 'a'.repeat(32);
   const CURRENT = 'b'.repeat(32);
-  const env = (cursor, item) => ({ sessionId: 'r1', epoch: 'e', seq: cursor, ts: '2026-10-23T00:00:00.000Z', cursor, event: { type: 'item', item } });
-  const user = (cursor, text) => env(cursor, { kind: 'user_message', id: `user:${text}`, clientMessageId: text, text });
-  const answer = (cursor, text) => env(cursor, { kind: 'assistant_message', id: `out:${text}`, text });
+  const env = (cursor: Json, item: Json) => ({ sessionId: 'r1', epoch: 'e', seq: cursor, ts: '2026-10-23T00:00:00.000Z', cursor, event: { type: 'item', item } });
+  const user = (cursor: Json, text: Json) => env(cursor, { kind: 'user_message', id: `user:${text}`, clientMessageId: text, text });
+  const answer = (cursor: Json, text: Json) => env(cursor, { kind: 'assistant_message', id: `out:${text}`, text });
   // The conversation now: the first turn and the rewind's marker. The stale page: the turns it set aside.
   const current = [user(1, 'one'), answer(2, 'answer one'), env(9, { kind: 'notice', id: 'rewind:br', level: 'info', text: 'Conversation rewound' })];
   const stalePage = { generation: STALE, hasOlder: true, olderCursor: 'older', tipCursor: 8, items: [user(5, 'three'), answer(6, 'answer three')] };
   const currentPage = { generation: CURRENT, hasOlder: false, tipCursor: 9, items: current };
   const live = answer(10, 'live');
   const session = { id: 'r1', projectRoot: '/work', agent: 'main', runtime: 'codex', model: 'gpt-5.5', mode: 'workspace-write', thinking: 'medium', workflow: { mode: 'pho', maxPeers: 2, supervisor: false }, threadId: 't', persistent: true, busy: false, status: 'idle' };
-  const calls = [];
-  let listener = () => {};
+  const calls: Json[] = [];
+  let listener: (envelope: Json) => void = () => {};
   let histories = 0;
   const connection = {
     capabilities: ['session.history', 'session.rewind'],
     onEvent: () => {}, onClose: () => {}, close() {},
-    async request(method, params) {
+    async request(method: Json, params: Json) {
       calls.push({ method, params });
       if (method === 'session.list') return { sessions: [session] };
       if (method === 'question.list') return { questions: [] };
@@ -188,7 +192,7 @@ test('an attach that answers reset makes the bridge read the history again, with
       throw new Error(`unexpected request ${method}`);
     },
   };
-  const agents = createAgents({ clientFactory: async onEvent => { listener = onEvent; return connection; }, broadcast: () => {}, directory });
+  const agents: Json = createAgents({ clientFactory: (async (onEvent: Json) => { listener = onEvent; return connection; }) as Json, broadcast: () => {}, directory });
   t.after(() => agents.close());
   await agents.start();
   const { payload } = await timeline(agents, 'r1');
@@ -201,19 +205,19 @@ test('an attach that answers reset makes the bridge read the history again, with
 
 test('without durable history, the attach\'s replay and the live events after it reach the timeline', async t => {
   const session = { id: 'r1', projectRoot: '/work', agent: 'main', runtime: 'codex', model: 'gpt-5.5', mode: 'workspace-write', thinking: 'medium', workflow: { mode: 'pho', maxPeers: 2, supervisor: false }, threadId: 't', persistent: true, busy: false, status: 'idle' };
-  const env = (cursor, text) => ({ sessionId: 'r1', epoch: 'e', seq: cursor, ts: '2026-10-23T00:00:00.000Z', cursor, event: { type: 'item', item: { kind: 'assistant_message', id: `out:${text}`, text } } });
-  let listener = () => {};
+  const env = (cursor: Json, text: Json) => ({ sessionId: 'r1', epoch: 'e', seq: cursor, ts: '2026-10-23T00:00:00.000Z', cursor, event: { type: 'item', item: { kind: 'assistant_message', id: `out:${text}`, text } } });
+  let listener: (envelope: Json) => void = () => {};
   const connection = {
     capabilities: [],
     onEvent: () => {}, onClose: () => {}, close() {},
-    async request(method, params) {
+    async request(method: Json, params: Json) {
       if (method === 'session.list') return { sessions: [session] };
       if (method === 'question.list') return { questions: [] };
       if (method === 'session.attach') { assert.equal(params.after, undefined); listener(env(1, 'replayed')); setTimeout(() => listener(env(2, 'live')), 0); return { session, cursor: 1 }; }
       throw new Error(`unexpected request ${method}`);
     },
   };
-  const agents = createAgents({ clientFactory: async onEvent => { listener = onEvent; return connection; }, broadcast: () => {}, directory });
+  const agents: Json = createAgents({ clientFactory: (async (onEvent: Json) => { listener = onEvent; return connection; }) as Json, broadcast: () => {}, directory });
   t.after(() => agents.close());
   await agents.start();
   assert.deepEqual(shown((await timeline(agents, 'r1')).payload.entries), ['assistant_message:replayed']);
@@ -227,18 +231,18 @@ test('without durable history, the attach\'s replay and the live events after it
  * An event the attach replays may thus come after a later live one; the bridge applies them in cursor
  * order, once. A history.reset that comes before the attach's answer is not lost: the bridge reads again.
  */
-function attachedWorld({ duringAttach }) {
+function attachedWorld({ duringAttach }: Json) {
   const STALE = 'a'.repeat(32);
   const CURRENT = 'b'.repeat(32);
-  const env = (cursor, item) => ({ sessionId: 'r1', epoch: 'e', seq: cursor, ts: '2026-10-23T00:00:00.000Z', cursor, event: { type: 'item', item } });
-  const answer = (cursor, text) => env(cursor, { kind: 'assistant_message', id: `out:${text}`, text });
+  const env = (cursor: Json, item: Json) => ({ sessionId: 'r1', epoch: 'e', seq: cursor, ts: '2026-10-23T00:00:00.000Z', cursor, event: { type: 'item', item } });
+  const answer = (cursor: Json, text: Json) => env(cursor, { kind: 'assistant_message', id: `out:${text}`, text });
   const current = [env(1, { kind: 'user_message', id: 'user:one', clientMessageId: 'one', text: 'one' }), answer(2, 'answer one')];
   const session = { id: 'r1', projectRoot: '/work', agent: 'main', runtime: 'codex', model: 'gpt-5.5', mode: 'workspace-write', thinking: 'medium', workflow: { mode: 'pho', maxPeers: 2, supervisor: false }, threadId: 't', persistent: true, busy: false, status: 'idle' };
-  const world = { calls: [], live: [answer(3, 'three'), answer(4, 'four')], generations: [STALE, CURRENT], histories: 0, listener: () => {} };
+  const world: Json = { calls: [] as Json[], live: [answer(3, 'three'), answer(4, 'four')], generations: [STALE, CURRENT], histories: 0, listener: () => {} };
   const connection = {
     capabilities: ['session.history'],
     onEvent: () => {}, onClose: () => {}, close() {},
-    async request(method, params) {
+    async request(method: Json, params: Json) {
       world.calls.push({ method, params });
       if (method === 'session.list') return { sessions: [session] };
       if (method === 'question.list') return { questions: [] };
@@ -253,13 +257,13 @@ function attachedWorld({ duringAttach }) {
       throw new Error(`unexpected request ${method}`);
     },
   };
-  world.agents = createAgents({ clientFactory: async onEvent => { world.listener = onEvent; return connection; }, broadcast: () => {}, directory });
+  world.agents = createAgents({ clientFactory: (async (onEvent: Json) => { world.listener = onEvent; return connection; }) as Json, broadcast: () => {}, directory });
   return world;
 }
 
 test('on an attached connection, live events and the attach\'s replay apply in cursor order, once', async t => {
-  const world = attachedWorld({
-    duringAttach(world, params) {
+  const world: Json = attachedWorld({
+    duringAttach(world: Json, params: Json) {
       // Four comes live while alpd's attach awaits its store; then the replay brings three and four.
       world.listener(world.live[1]);
       for (const envelope of world.live) if (envelope.cursor > params.after) world.listener(envelope);
@@ -276,8 +280,8 @@ test('on an attached connection, live events and the attach\'s replay apply in c
 test('a history.reset that comes before the attach\'s answer makes the bridge read the history again', async t => {
   const NEXT = 'c'.repeat(32);
   let resets = 0;
-  const world = attachedWorld({
-    duringAttach(world, params) {
+  const world: Json = attachedWorld({
+    duringAttach(world: Json, params: Json) {
       // A rewind commits after the attach checked its generation: its history.reset precedes the answer.
       if (resets++ === 0) { world.generations.push(NEXT); world.listener({ sessionId: 'r1', epoch: 'rewind-br', seq: 0, ts: '2026-10-23T00:00:00.000Z', event: { type: 'history.reset', generation: NEXT, reason: 'rewind', branchId: 'br' } }); }
       return { session: {}, cursor: params.after };
@@ -286,14 +290,14 @@ test('a history.reset that comes before the attach\'s answer makes the bridge re
   t.after(() => world.agents.close());
   await world.agents.start();
   assert.equal((await timeline(world.agents, 'r1')).payload.error, null);
-  await until(() => world.calls.filter(call => call.method === 'session.attach').at(-1)?.params.generation === NEXT, 'an attach under the generation after the reset');
+  await until(() => world.calls.filter((call: Json) => call.method === 'session.attach').at(-1)?.params.generation === NEXT, 'an attach under the generation after the reset');
 });
 
 test('team members that open while the bridge holds a root\'s events keep theirs: timeline, description, status', async t => {
   const root = { id: 'r1', projectRoot: '/work', agent: 'main', runtime: 'codex', model: 'gpt-5.5', mode: 'workspace-write', thinking: 'medium', workflow: { mode: 'pho', maxPeers: 2, supervisor: false }, threadId: 't', persistent: true, busy: false, status: 'idle' };
-  const env = (cursor, sessionId, event) => ({ sessionId, epoch: 'e', seq: cursor, ts: '2026-10-23T00:00:00.000Z', cursor, event });
-  const opened = (cursor, id, parentId) => env(cursor, id, { type: 'session.opened', session: { ...root, id, parentId, rootId: 'r1', agent: id === 'c1' ? 'peer' : 'reviewer' }, cwd: '/work', effective: { model: 'gpt-5.5', thinking: 'medium' } });
-  const say = (cursor, sessionId, kind, text) => env(cursor, sessionId, { type: 'item', item: kind === 'user_message' ? { kind, id: `user:${text}`, text } : { kind, id: `out:${text}`, text } });
+  const env = (cursor: Json, sessionId: Json, event: Json) => ({ sessionId, epoch: 'e', seq: cursor, ts: '2026-10-23T00:00:00.000Z', cursor, event });
+  const opened = (cursor: Json, id: Json, parentId: Json) => env(cursor, id, { type: 'session.opened', session: { ...root, id, parentId, rootId: 'r1', agent: id === 'c1' ? 'peer' : 'reviewer' }, cwd: '/work', effective: { model: 'gpt-5.5', thinking: 'medium' } });
+  const say = (cursor: Json, sessionId: Json, kind: Json, text: Json) => env(cursor, sessionId, { type: 'item', item: kind === 'user_message' ? { kind, id: `user:${text}`, text } : { kind, id: `out:${text}`, text } });
   // The tree after the page's tip: a member opens, works, opens one of its own, and ends its turn.
   const after = [
     opened(2, 'c1', 'r1'), say(3, 'c1', 'user_message', 'review this'), say(4, 'c1', 'assistant_message', 'child says hi'),
@@ -304,17 +308,17 @@ test('team members that open while the bridge holds a root\'s events keep theirs
   const shapes = {
     // A first attach: alpd replays what follows the page, then live events come after its answer, whose
     // cursor (the tip when it attached) is below theirs (§8.3).
-    first(listener, params) { for (const envelope of after) if (envelope.cursor > params.after) listener(envelope); setTimeout(() => listener(later), 0); return 7; },
+    first(listener: Json, params: Json) { for (const envelope of after) if (envelope.cursor > params.after) listener(envelope); setTimeout(() => listener(later), 0); return 7; },
     // An attached connection (a re-read): live events come in cursor order while alpd's attach awaits its
     // store, then its replay brings them again.
-    attached(listener, params) { for (const envelope of [...after, later]) listener(envelope); for (const envelope of [...after, later]) if (envelope.cursor > params.after) listener(envelope); return 8; },
+    attached(listener: Json, params: Json) { for (const envelope of [...after, later]) listener(envelope); for (const envelope of [...after, later]) if (envelope.cursor > params.after) listener(envelope); return 8; },
   };
   for (const [name, deliver] of Object.entries(shapes)) {
-    let listener = () => {};
+    let listener: (envelope: Json) => void = () => {};
     const connection = {
       capabilities: ['session.history'],
       onEvent: () => {}, onClose: () => {}, close() {},
-      async request(method, params) {
+      async request(method: Json, params: Json) {
         if (method === 'session.list') return { sessions: [root] };
         if (method === 'question.list') return { questions: [] };
         if (method === 'session.history') return { generation: 'a'.repeat(32), hasOlder: false, tipCursor: 1, items: [say(1, 'r1', 'user_message', 'one')] };
@@ -322,16 +326,16 @@ test('team members that open while the bridge holds a root\'s events keep theirs
         throw new Error(`unexpected request ${method}`);
       },
     };
-    const agents = createAgents({ clientFactory: async onEvent => { listener = onEvent; return connection; }, broadcast: () => {}, directory });
+    const agents: Json = createAgents({ clientFactory: (async (onEvent: Json) => { listener = onEvent; return connection; }) as Json, broadcast: () => {}, directory });
     try {
       await agents.start();
-      const list = await agents.handlers['agent.provider_subagents.list.request']({ type: 'agent.provider_subagents.list.request', requestId: 'l', parentAgentId: 'r1' });
+      const list: Json = await agents.handlers['agent.provider_subagents.list.request']({ type: 'agent.provider_subagents.list.request', requestId: 'l', parentAgentId: 'r1' });
       assert.equal(list.payload.error, null, name);
-      const byId = Object.fromEntries(list.payload.subagents.map(subagent => [subagent.id, subagent]));
+      const byId = Object.fromEntries(list.payload.subagents.map((subagent: Json) => [subagent.id, subagent]));
       assert.deepEqual(Object.keys(byId).sort(), ['c1', 'g1'], name);
       assert.equal(byId.c1.description, 'review this', name);
       assert.equal(byId.g1.parentSubagentId, 'c1', name);
-      const rows = async subagentId => shown((await agents.handlers['agent.provider_subagents.timeline.get.request']({ type: 'agent.provider_subagents.timeline.get.request', requestId: subagentId, parentAgentId: 'r1', subagentId, direction: 'tail', limit: 50 })).payload.rows);
+      const rows = async (subagentId: Json) => shown((await agents.handlers['agent.provider_subagents.timeline.get.request']({ type: 'agent.provider_subagents.timeline.get.request', requestId: subagentId, parentAgentId: 'r1', subagentId, direction: 'tail', limit: 50 })).payload.rows);
       await until(async () => (await rows('c1')).length === 3, `${name}: the live item`);
       assert.deepEqual(await rows('c1'), ['user_message:review this', 'assistant_message:child says hi', 'assistant_message:later'], name);
       assert.deepEqual(await rows('g1'), ['assistant_message:grandchild says hi'], name);

@@ -10,28 +10,32 @@ import { createDaemonServer } from '@anhlp/alp-daemon';
 import { createProvider } from '@anhlp/alp-paseo';
 import { PROVIDER_CAPABILITIES, ProviderEventSchema } from '@getpaseo/plugin/server/provider';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
 
-async function until(check) {
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+async function until(check: Json) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail('Expected condition did not arrive');
 }
 
 let calls = 0;
-function fakeTransport(runtimes) {
+function fakeTransport(runtimes: Json) {
   return () => {
     const index = runtimes.length;
-    const runtime = {
-      calls: [], threadId: `thread-${index}`, turnId: `turn-${index}`,
+    const runtime: Json = {
+      calls: [] as Json[], threadId: `thread-${index}`, turnId: `turn-${index}`,
       async initialize() {},
-      onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
+      onNotification(fn: Json) { this.notification = fn; }, onFailure(fn: Json) { this.failure = fn; }, onRequest(fn: Json) { this.serverRequest = fn; },
       async close() {},
-      async request(method, params) {
+      async request(method: Json, params: Json) {
         this.calls.push({ method, params });
         if (method.startsWith('thread/')) return { thread: { id: this.threadId } };
         if (method === 'turn/start') return { turn: { id: this.turnId } };
         return {};
       },
-      async call(tool, args, callId = `${tool}-${index}-${++calls}`) {
+      async call(tool: Json, args: Json, callId = `${tool}-${index}-${++calls}`) {
         return JSON.parse((await this.serverRequest('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId, namespace: null, tool, arguments: args })).contentItems[0].text);
       },
       finish(text = 'done') {
@@ -44,7 +48,7 @@ function fakeTransport(runtimes) {
   };
 }
 
-async function project(t) {
+async function project(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-human-'));
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -54,17 +58,17 @@ async function project(t) {
   return { directory, root };
 }
 
-async function setup(t, options = {}) {
+async function setup(t: TestContext, options: Json = {}) {
   const defer = teardown(t);
   const { directory, root } = await project(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(directory, 'runs'), silentForMs: 40, ...options });
   defer(() => runtime.shutdown());
-  const envelopes = [];
+  const envelopes: Json[] = [];
   runtime.onEvent(envelope => envelopes.push(envelope));
   await runtime.open('root', { cwd: root, mode: 'workspace-write' });
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Go' }] });
-  const of = type => envelopes.filter(envelope => envelope.event.type === type);
+  const of = (type: Json) => envelopes.filter(envelope => envelope.event.type === type);
   const log = async () => (await readFile(path.join(directory, 'runs', 'root.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
   return { root, runtime, runtimes, envelopes, of, log };
 }
@@ -95,10 +99,10 @@ test('only main talks to the user until the user writes to an assignment; its re
   // Waiting for the user is not silence: the watchdog (40 ms here) leaves the assignment alone.
   await new Promise(resolve => setTimeout(resolve, 150));
   const status = runtime.status(sessionId);
-  assert.equal(status.rootId, 'root');
-  assert.deepEqual(status.sessions.map(session => [session.agent, session.state]), [['main', 'running'], ['peer', 'waiting_user']]);
-  assert.equal(status.assignments[0].status, 'waiting_user');
-  assert.equal(status.questions[0].id, question.id);
+  assert.equal(status!.rootId, 'root');
+  assert.deepEqual(status!.sessions.map(session => [session.agent, session.state]), [['main', 'running'], ['peer', 'waiting_user']]);
+  assert.equal(status!.assignments[0].status, 'waiting_user');
+  assert.equal(status!.questions[0].id, question.id);
 
   runtime.answer(question.id, { text: 'SQLite' });
   assert.deepEqual(await asked, { status: 'answered', from: 'user', answer: 'SQLite' });
@@ -141,7 +145,7 @@ test('ask arguments are checked: a root has no requester, options are for the us
   const peer = runtimes[1];
   assert.match((await peer.call('alp_ask', { question: 'A or B?', options: ['A'] })).error, /options are up to 10 short answers, for questions to the user/);
   void peer.call('alp_ask', { question: 'First?' });
-  await until(() => runtime.status('root').assignments[0]?.status === 'waiting_parent');
+  await until(() => runtime.status('root')!.assignments[0]?.status === 'waiting_parent');
   assert.match((await peer.call('alp_ask', { question: 'Second?' })).error, /already waiting/);
 });
 
@@ -150,8 +154,8 @@ test('the user can mail an assignment directly; it arrives as a user instruction
   const delegated = await runtimes[0].call('alp_delegate', { agent: 'peer', task: 'Work', wait: false });
   await until(() => runtimes.length === 2);
   runtime.message(delegated.assignmentId, 'Use SQLite, not Postgres');
-  await until(() => runtimes[1].calls.some(call => call.method === 'turn/steer'));
-  const steer = runtimes[1].calls.find(call => call.method === 'turn/steer');
+  await until(() => runtimes[1].calls.some((call: Json) => call.method === 'turn/steer'));
+  const steer = runtimes[1].calls.find((call: Json) => call.method === 'turn/steer');
   assert.match(steer.params.input[0].text, /Mail sent by "user" is the user writing to you directly/);
   assert.match(steer.params.input[0].text, /ALP has told main about it[\s\S]*your handoff must say what the user asked/);
   assert.match(steer.params.input[0].text, /note from user[\s\S]*Use SQLite, not Postgres/);
@@ -161,7 +165,7 @@ test('the user can mail an assignment directly; it arrives as a user instruction
 test('alpd lists and answers questions by id prefix, reports tree status and the log, and re-announces pending questions', async t => {
   const defer = teardown(t);
   const { directory, root } = await project(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), runLogDir: path.join(directory, 'runs') });
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(directory).socket, version: 'test', runLogDir: path.join(directory, 'runs') });
   await server.listen();
@@ -170,7 +174,7 @@ test('alpd lists and answers questions by id prefix, reports tree status and the
   defer(() => client.close());
   await client.request('session.create', { sessionId: 'root', spec: { cwd: root, mode: 'workspace-write' } });
   await client.request('session.prompt', { sessionId: 'root', clientMessageId: 'm1', content: [{ type: 'text', text: 'Go' }] });
-  await until(() => runtimes[0]?.calls.some(call => call.method === 'turn/start'));
+  await until(() => runtimes[0]?.calls.some((call: Json) => call.method === 'turn/start'));
   const asked = runtimes[0].call('alp_ask', { question: 'Which name?' });
   await until(async () => (await client.request('question.list')).questions.length === 1);
   const [question] = (await client.request('question.list', { projectRoot: root })).questions;
@@ -182,30 +186,30 @@ test('alpd lists and answers questions by id prefix, reports tree status and the
   // A second viewer attaching to the tree learns about the open question.
   const viewer = await connect(daemonPaths(directory).socket);
   defer(() => viewer.close());
-  const seen = [];
+  const seen: Json[] = [];
   viewer.onEvent(envelope => seen.push(envelope.event));
   await viewer.request('session.attach', { sessionId: 'root', replay: false });
   await until(() => seen.some(event => event.type === 'question' && event.question.id === question.id));
 
   assert.deepEqual(await client.request('question.answer', { questionId: question.id.slice(0, 5), text: 'Orchid' }), { questionId: question.id });
   assert.deepEqual(await asked, { status: 'answered', from: 'user', answer: 'Orchid' });
-  await assert.rejects(client.request('question.answer', { questionId: question.id, text: 'x' }), error => error.code === 1001);
-  const logged = async () => (await client.request('session.log', { sessionId: 'root' })).entries.filter(entry => entry.event !== 'instructions');
+  await assert.rejects(client.request('question.answer', { questionId: question.id, text: 'x' }), (error: Json) => error.code === 1001);
+  const logged = async () => (await client.request('session.log', { sessionId: 'root' })).entries.filter((entry: Json) => entry.event !== 'instructions');
   await until(async () => (await logged()).length === 2);
   const entries = await logged();
-  assert.deepEqual(entries.map(entry => entry.event), ['human.question', 'human.answer']);
-  await assert.rejects(client.request('session.status', { sessionId: 'nope' }), error => error.code === 1001);
+  assert.deepEqual(entries.map((entry: Json) => entry.event), ['human.question', 'human.answer']);
+  await assert.rejects(client.request('session.status', { sessionId: 'nope' }), (error: Json) => error.code === 1001);
 });
 
 test('Paseo shows main\'s question to the user as a question prompt and returns the answer, or the dismissal', async t => {
   const defer = teardown(t);
   const { root } = await project(t);
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const provider = createProvider({ transport: fakeTransport(runtimes) });
   const connection = await provider.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
   defer(() => connection.close());
-  const events = [];
-  connection.onEvent(event => { ProviderEventSchema.parse(event); events.push(event); });
+  const events: Json[] = [];
+  connection.onEvent((event: Json) => { ProviderEventSchema.parse(event); events.push(event); });
   await connection.send({ type: 'session.open', requestId: 'open', sessionId: 'paseo-root', history: 'skip', config: { cwd: root, env: {}, mcpServers: {}, settings: {}, persist: true, mode: 'workspace-write' } });
   await connection.send({ type: 'session.prompt', sessionId: 'paseo-root', prompt: { clientMessageId: 'first', delivery: 'auto', input: { type: 'message', content: [{ type: 'text', text: 'Go' }] } } });
   await connection.send({ type: 'session.prompt', sessionId: 'paseo-root', prompt: { clientMessageId: 'second', delivery: 'auto', input: { type: 'message', content: [{ type: 'text', text: 'Go' }] } } });
@@ -234,12 +238,12 @@ test('Paseo shows an open human gate as an approval card; picking an option appr
   const { createTask, addGate, getTask } = await import('@anhlp/alp-core/tasks');
   const task = await createTask(root, { title: 'Release' }, 'user');
   await addGate(root, task.id, { kind: 'human', note: 'Ship?', options: ['Now', 'Friday'] }, 'main');
-  const runtimes = [];
+  const runtimes: Json[] = [];
   const provider = createProvider({ transport: fakeTransport(runtimes) });
   const connection = await provider.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
   defer(() => connection.close());
-  const events = [];
-  connection.onEvent(event => { ProviderEventSchema.parse(event); events.push(event); });
+  const events: Json[] = [];
+  connection.onEvent((event: Json) => { ProviderEventSchema.parse(event); events.push(event); });
   await connection.send({ type: 'session.open', requestId: 'open', sessionId: 'paseo-root', history: 'skip', config: { cwd: root, env: {}, mcpServers: {}, settings: {}, persist: true, mode: 'workspace-write' } });
   await connection.send({ type: 'session.prompt', sessionId: 'paseo-root', prompt: { clientMessageId: 'first', delivery: 'auto', input: { type: 'message', content: [{ type: 'text', text: 'Go' }] } } });
   await until(() => events.some(event => event.type === 'session.permission'));
@@ -251,6 +255,6 @@ test('Paseo shows an open human gate as an approval card; picking an option appr
   await connection.send({ type: 'session.permission', sessionId: 'paseo-root', permissionId: card.request.id, response: { behavior: 'allow', updatedInput: { answers: { Answer: 'Friday' } } } });
   await until(async () => (await getTask(root, task.id)).gates[0].resolved);
   const { resolved } = (await getTask(root, task.id)).gates[0];
-  assert.deepEqual([resolved.choice, resolved.channel], ['Friday', 'paseo']);
+  assert.deepEqual([resolved!.choice, resolved!.channel], ['Friday', 'paseo']);
   await until(() => events.some(event => event.type === 'session.permission_resolved' && event.permissionId === card.request.id));
 });

@@ -9,14 +9,17 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { teardown } from '../../../test/support/teardown.ts';
 
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
 const entry = path.resolve(import.meta.dirname, '..', 'server', 'dist', 'main.js');
-const logFile = home => path.join(home, 'logs', 'integrations', 'paseo.log');
+const logFile = (home: Json) => path.join(home, 'logs', 'integrations', 'paseo.log');
 
 // The advertised log path is what the launcher's failure messages point at. A normal, detached
 // `alp dashboard` launch must create it and capture a startup failure there; before the fix the entry only
 // logged under `--service`, which the launcher never passed, so the file never appeared.
 
-function listen(port) {
+function listen(port: Json) {
   return new Promise(resolve => {
     const server = createServer();
     server.once('error', () => resolve(undefined));
@@ -24,18 +27,18 @@ function listen(port) {
   });
 }
 
-function close(server) {
-  return new Promise(resolve => server.close(() => resolve()));
+function close(server: Json) {
+  return new Promise<void>(resolve => server.close(() => resolve()));
 }
 
 async function freePort() {
-  const server = await listen(0);
+  const server: Json = await listen(0);
   const { port } = server.address();
   await close(server);
   return port;
 }
 
-async function waitFor(file, timeoutMs = 20_000) {
+async function waitFor(file: Json, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (existsSync(file)) return true;
@@ -45,7 +48,7 @@ async function waitFor(file, timeoutMs = 20_000) {
 }
 
 /** Polls `file` until its text matches `pattern`; returns the last text read (empty if never). */
-async function waitForText(file, pattern, timeoutMs = 20_000) {
+async function waitForText(file: Json, pattern: Json, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
   let text = '';
   while (Date.now() < deadline) {

@@ -13,11 +13,15 @@ import { decodeBinaryFrame, TerminalStreamOpcode } from '@getpaseo/protocol/bina
 import { TerminalInputModeTracker } from '@getpaseo/protocol/terminal-input-mode';
 import { createTerminals, TERMINALS_OFF } from '@anhlp/alp-paseo/paseo/terminals';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
+
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 
 const decoder = new TextDecoder();
-const text = bytes => decoder.decode(bytes);
+const text = (bytes: Json) => decoder.decode(bytes);
 
-async function until(check, what = 'condition', ms = 5000) {
+async function until(check: Json, what = 'condition', ms = 5000) {
   const end = Date.now() + ms;
   while (Date.now() < end) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`${what} did not happen`);
@@ -25,7 +29,7 @@ async function until(check, what = 'condition', ms = 5000) {
 const tick = (ms = 20) => new Promise(resolve => setTimeout(resolve, ms));
 
 /** A home whose terminal.json (owner-private) says what the owner allowed; none when `config` is null. */
-async function homeWith(t, config = { version: 1, allowRemoteTerminal: true, allowPaseoTerminal: true }) {
+async function homeWith(t: TestContext, config = { version: 1, allowRemoteTerminal: true, allowPaseoTerminal: true }) {
   const defer = teardown(t);
   const home = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-paseo-term-')));
   defer(() => rm(home, { recursive: true, force: true }));
@@ -45,9 +49,9 @@ const WORKSPACES = [
  * alpd's terminal service as §12.10 says, without a PTY: one attached connection per terminal,
  * replay of the ring before the attach answers, a gap when the ring moved on, detached events.
  */
-function fakeAlpd({ protection, capabilities = ['terminal'], replayBytes = 1024 * 1024, maxInputBytes = 64 * 1024 } = {}) {
-  const calls = [];
-  const conns = [];
+function fakeAlpd({ protection, capabilities = ['terminal'], replayBytes = 1024 * 1024, maxInputBytes = 64 * 1024 }: Json = {}) {
+  const calls: Json[] = [];
+  const conns: Json[] = [];
   const terminals = new Map();
   let made = 0;
   let revision = 0;
@@ -57,10 +61,10 @@ function fakeAlpd({ protection, capabilities = ['terminal'], replayBytes = 1024 
       for (const listener of conn.listeners) listener('terminal.changed', { watchId: conn.watchId, cursor: conn.cursor });
     }
   }
-  const error = (code, reason, message = reason) => Object.assign(new Error(message), { code, data: { reason } });
-  const send = (conn, params) => { if (conn && !conn.closed) for (const listener of [...conn.listeners]) listener('terminal.event', params); };
-  const info = term => ({ terminalId: term.id, workspaceId: term.workspaceId, title: 'sh', cols: term.cols, rows: term.rows, state: term.state, createdAt: '2026-01-01T00:00:00.000Z', ...(protection ? { protection } : {}) });
-  function handle(conn, method, params) {
+  const error = (code: Json, reason: Json, message = reason) => Object.assign(new Error(message), { code, data: { reason } });
+  const send = (conn: Json, params: Json) => { if (conn && !conn.closed) for (const listener of [...conn.listeners]) listener('terminal.event', params); };
+  const info = (term: Json) => ({ terminalId: term.id, workspaceId: term.workspaceId, title: 'sh', cols: term.cols, rows: term.rows, state: term.state, createdAt: '2026-01-01T00:00:00.000Z', ...(protection ? { protection } : {}) });
+  function handle(conn: Json, method: Json, params: Json) {
     if (method === 'daemon.hello') return { protocolVersion: 1, capabilities, ...(capabilities.includes('terminal') ? { terminalLimits: { maxPerPrincipal: 4, maxPerDaemon: 16, maxInputBytes, maxOutputFrameBytes: 65536, replayBytes, idleMs: 1e6, maxLifetimeMs: 1e7, reconnectMs: 60000 } } : {}) };
     if (method === 'registry.owner') return { registry: { projects: [{ id: 'p1' }, { id: 'p2', removedAt: '2026-03-01T00:00:00.000Z' }], workspaces: WORKSPACES } };
     if (method === 'terminal.create') {
@@ -95,17 +99,17 @@ function fakeAlpd({ protection, capabilities = ['terminal'], replayBytes = 1024 
     throw error(-32601, 'unknown');
   }
   function connect() {
-    const conn = {
-      closed: false, listeners: new Set(), closes: new Set(),
-      async request(method, params) {
+    const conn: Json = {
+      closed: false, listeners: new Set<Json>(), closes: new Set<Json>(),
+      async request(method: Json, params: Json) {
         if (conn.closed) throw new Error('ALP daemon connection closed');
         calls.push({ method, params, conn });
         await Promise.resolve();
         return handle(conn, method, params);
       },
       onEvent() { return () => {}; },
-      onNotification(listener) { conn.listeners.add(listener); return () => conn.listeners.delete(listener); },
-      onClose(listener) { conn.closes.add(listener); return () => conn.closes.delete(listener); },
+      onNotification(listener: Json) { conn.listeners.add(listener); return () => conn.listeners.delete(listener); },
+      onClose(listener: Json) { conn.closes.add(listener); return () => conn.closes.delete(listener); },
       close() { if (conn.closed) return; conn.closed = true; for (const listener of [...conn.closes]) listener(new Error('closed')); },
     };
     conns.push(conn);
@@ -116,16 +120,16 @@ function fakeAlpd({ protection, capabilities = ['terminal'], replayBytes = 1024 
     terminalCalls: () => calls.filter(call => call.method.startsWith('terminal.')),
     methods: () => calls.map(call => call.method),
     /** A terminal made by another ALP client: nobody attached. */
-    async create(workspaceId = 'ws-a') { return handle(null, 'terminal.create', { workspaceId, cols: 80, rows: 24 }).terminal.terminalId; },
-    out(id, data) {
+    async create(workspaceId = 'ws-a') { return handle(null, 'terminal.create', { workspaceId, cols: 80, rows: 24 }).terminal!.terminalId; },
+    out(id: Json, data: Json) {
       const term = terminals.get(id);
       const event = { terminalId: id, type: 'output', seq: ++term.seq, data };
       term.events.push(event);
-      let bytes = term.events.reduce((sum, item) => sum + (item.data ? Buffer.byteLength(item.data) : 0), 0);
+      let bytes = term.events.reduce((sum: Json, item: Json) => sum + (item.data ? Buffer.byteLength(item.data) : 0), 0);
       while (bytes > replayBytes && term.events.length > 1) bytes -= Buffer.byteLength(term.events.shift().data ?? '');
       send(term.attached, event);
     },
-    exit(id, reason = 'exited') {
+    exit(id: Json, reason = 'exited') {
       const term = terminals.get(id);
       term.state = 'exited';
       changed();
@@ -134,8 +138,8 @@ function fakeAlpd({ protection, capabilities = ['terminal'], replayBytes = 1024 
       send(term.attached, event);
     },
     /** The ring forgets everything before seq `from`. */
-    forget(id, from) { const term = terminals.get(id); term.events = term.events.filter(event => event.seq >= from); },
-    detach(id, reason) { const term = terminals.get(id); const conn = term.attached; term.attached = null; send(conn, { terminalId: id, type: 'detached', reason }); },
+    forget(id: Json, from: Json) { const term = terminals.get(id); term.events = term.events.filter((event: Json) => event.seq >= from); },
+    detach(id: Json, reason: Json) { const term = terminals.get(id); const conn = term.attached; term.attached = null; send(conn, { terminalId: id, type: 'detached', reason }); },
   };
   return alpd;
 }
@@ -149,48 +153,48 @@ function fakeAlpd({ protection, capabilities = ['terminal'], replayBytes = 1024 
 const COLLECTION = validateWSOutboundMessage({ type: 'session', message: { type: 'terminals_changed', payload: { terminals: [] } } }).success;
 
 function fakeClient(name = 'c1') {
-  const log = [];
+  const log: Json[] = [];
   let buffered = 0;
   const client = {
     clientId: name, log,
-    emit(message) {
+    emit(message: Json) {
       if (!COLLECTION && message.type === 'terminals_changed' && message.payload.cwd === undefined) { log.push({ json: message }); return; }
-      const checked = validateWSOutboundMessage({ type: 'session', message });
+      const checked: Json = validateWSOutboundMessage({ type: 'session', message });
       assert.ok(checked.success, `the bridge sent a message Paseo's app drops: ${JSON.stringify(message).slice(0, 300)}\n${checked.error}`);
       log.push({ json: message });
     },
-    emitBinary(bytes) {
+    emitBinary(bytes: Json) {
       assert.ok(bytes instanceof Uint8Array);
       const decoded = decodeBinaryFrame(bytes);
       assert.equal(decoded?.kind, 'terminal', 'a terminal stream frame');
       log.push({ opcode: decoded.frame.opcode, slot: decoded.frame.slot, data: text(decoded.frame.payload) });
     },
     buffered: () => buffered,
-    setBuffered(value) { buffered = value; },
-    json: type => log.filter(entry => entry.json?.type === type).map(entry => entry.json),
-    frames: (slot, opcode) => log.filter(entry => entry.opcode !== undefined && (slot === undefined || entry.slot === slot) && (opcode === undefined || entry.opcode === opcode)),
-    output: slot => client.frames(slot, TerminalStreamOpcode.Output).map(entry => entry.data).join(''),
+    setBuffered(value: Json) { buffered = value; },
+    json: (type: Json) => log.filter(entry => entry.json?.type === type).map(entry => entry.json),
+    frames: (slot?: Json, opcode?: Json) => log.filter(entry => entry.opcode !== undefined && (slot === undefined || entry.slot === slot) && (opcode === undefined || entry.opcode === opcode)),
+    output: (slot: Json) => client.frames(slot, TerminalStreamOpcode.Output).map(entry => entry.data).join(''),
   };
   return client;
 }
 
 /** The bridge's terminals on a fake alpd; `call` answers like the gateway (a returned reply is emitted). */
-async function setup(t, { protection, config, capabilities, timing, replayBytes, maxInputBytes, archiveAgent } = {}) {
+async function setup(t: TestContext, { protection, config, capabilities, timing, replayBytes, maxInputBytes, archiveAgent }: Json = {}) {
   const defer = teardown(t);
   const home = await homeWith(t, config);
   const alpd = fakeAlpd({ protection, capabilities, replayBytes, maxInputBytes });
-  const logs = [];
-  const terminals = createTerminals({ home, connect: alpd.connect, log: message => logs.push(message), archiveAgent, timing: { retryMs: 10, drainMs: 10, ...timing } });
+  const logs: Json[] = [];
+  const terminals = createTerminals({ home, connect: alpd.connect, log: (message: Json) => logs.push(message), archiveAgent, timing: { retryMs: 10, drainMs: 10, ...timing } });
   defer(() => terminals.close());
-  const call = async (client, message) => {
+  const call = async (client: Json, message: Json): Promise<Json> => {
     const reply = await terminals.handlers[message.type](message, client);
     if (reply) client.emit(reply);
     return reply;
   };
-  const create = async (client, fields = {}) => (await call(client, { type: 'create_terminal_request', requestId: `r-${Math.random()}`, cwd: '/w/a', ...fields })).payload;
-  const subscribe = async (client, terminalId) => {
+  const create = async (client: Json, fields = {}) => (await call(client, { type: 'create_terminal_request', requestId: `r-${Math.random()}`, cwd: '/w/a', ...fields })).payload;
+  const subscribe = async (client: Json, terminalId: Json) => {
     await call(client, { type: 'subscribe_terminal_request', terminalId, requestId: `s-${Math.random()}` });
-    return client.json('subscribe_terminal_response').filter(entry => entry.payload.terminalId === terminalId).at(-1).payload;
+    return client.json('subscribe_terminal_response').filter((entry: Json) => entry.payload.terminalId === terminalId).at(-1).payload;
   };
   return { home, alpd, terminals, call, create, subscribe, logs };
 }
@@ -200,9 +204,9 @@ for (const [label, options] of [
   ['the switch is on but Paseo devices are not allowed', { config: { version: 1, allowRemoteTerminal: true } }],
   ['Paseo is allowed without the host switch', { config: { version: 1, allowRemoteTerminal: false, allowPaseoTerminal: true } }],
   ['alpd does not list the terminal capability', { capabilities: [] }],
-]) {
+] as Json[][]) {
   test(`off when ${label}: empty lists, clear refusals, and no terminal.* call`, async t => {
-    const world = await setup(t, options);
+    const world: Json = await setup(t, options);
     const client = fakeClient();
     assert.equal(await world.terminals.refresh(), false);
     assert.equal(world.terminals.features.workspaceTerminals, false);
@@ -232,7 +236,7 @@ for (const [label, options] of [
 }
 
 test('on: features follow the switch; turning Paseo off ends every stream and closes the connection', async t => {
-  const world = await setup(t, { timing: { checkMs: 0 } });
+  const world: Json = await setup(t, { timing: { checkMs: 0 } });
   const client = fakeClient();
   assert.equal(await world.terminals.refresh(), true);
   assert.equal(world.terminals.features.workspaceTerminals, true);
@@ -248,8 +252,8 @@ test('on: features follow the switch; turning Paseo off ends every stream and cl
   assert.deepEqual(client.json('terminal_stream_exit').map(entry => entry.payload), [{ terminalId: terminal.id, error: TERMINALS_OFF }]);
   await tick();
   // The shell it held is closed in alpd at once, not left for alpd's reconnect time; then the connection goes.
-  assert.deepEqual(world.alpd.terminalCalls().slice(before).map(call => [call.method, call.params.terminalId]), [['terminal.close', terminal.id]]);
-  assert.ok(world.alpd.conns.every(conn => conn.closed), 'the terminals connection is closed');
+  assert.deepEqual(world.alpd.terminalCalls().slice(before).map((call: Json) => [call.method, call.params.terminalId]), [['terminal.close', terminal.id]]);
+  assert.ok(world.alpd.conns.every((conn: Json) => conn.closed), 'the terminals connection is closed');
   await world.call(client, { type: 'terminal_input', terminalId: terminal.id, message: { type: 'input', data: 'x' } });
   await tick();
   assert.equal(world.alpd.terminalCalls().length, before + 1, 'nothing more reaches alpd');
@@ -282,9 +286,9 @@ test('alpd away, then Paseo turned off: the reconnect does not attach again', as
 });
 
 test('create: exactly a live registry workspace\'s directory, ALP\'s shell only; attached at once', async t => {
-  const world = await setup(t);
+  const world: Json = await setup(t);
   const client = fakeClient();
-  const refused = async (fields, pattern) => {
+  const refused = async (fields: Json, pattern: Json) => {
     const reply = await world.create(client, fields);
     assert.equal(reply.terminal, null, JSON.stringify(fields));
     assert.match(reply.error, pattern, JSON.stringify(fields));
@@ -303,7 +307,7 @@ test('create: exactly a live registry workspace\'s directory, ALP\'s shell only;
   await refused({ args: ['-c', 'id'] }, /not accepted/);
   await refused({ args: [] }, /not accepted/);
   await refused({ agentId: 'agent-1' }, /not accepted.*not a sandbox/);
-  assert.equal(world.alpd.calls.filter(call => call.method === 'terminal.create').length, 0, 'no refused request reached alpd');
+  assert.equal(world.alpd.calls.filter((call: Json) => call.method === 'terminal.create').length, 0, 'no refused request reached alpd');
 
   const oldest = await world.create(client, { requestId: 'c1', cwd: '/w/a/', name: 'ignored' });
   assert.equal(oldest.error, null);
@@ -312,14 +316,14 @@ test('create: exactly a live registry workspace\'s directory, ALP\'s shell only;
   assert.equal(oldest.terminal.title, 'sh');
   const chosen = await world.create(client, { cwd: '/w/a', workspaceId: 'ws-a2', size: { cols: 1000, rows: 0 } });
   assert.equal(chosen.terminal.workspaceId, 'ws-a2');
-  const creates = world.alpd.calls.filter(call => call.method === 'terminal.create').map(call => call.params);
+  const creates = world.alpd.calls.filter((call: Json) => call.method === 'terminal.create').map((call: Json) => call.params);
   assert.deepEqual({ ...creates[0], requestId: undefined }, { workspaceId: 'ws-a', cols: 80, rows: 24, requestId: undefined });
   assert.match(creates[0].requestId, /^paseo:[0-9a-f]{64}$/, 'namespaced per client');
   assert.deepEqual([creates[1].cols, creates[1].rows], [500, 1], 'sizes are clamped to alpd\'s bounds');
   // Attached right away, so the terminal outlives a client that went away (alpd kills an unattached one).
-  assert.deepEqual(world.alpd.methods().filter(method => method.startsWith('terminal.')), ['terminal.create', 'terminal.attach', 'terminal.create', 'terminal.attach']);
+  assert.deepEqual(world.alpd.methods().filter((method: Json) => method.startsWith('terminal.')), ['terminal.create', 'terminal.attach', 'terminal.create', 'terminal.attach']);
   const listed = (await world.call(client, { type: 'list_terminals_request', requestId: 'l1', cwd: '/w/a' })).payload.terminals;
-  assert.deepEqual(listed.map(entry => entry.workspaceId), ['ws-a']);
+  assert.deepEqual(listed.map((entry: Json) => entry.workspaceId), ['ws-a']);
   assert.equal((await world.call(client, { type: 'list_terminals_request', requestId: 'l2', cwd: '/w/a', workspaceId: 'ws-a2' })).payload.terminals.length, 1);
   assert.equal((await world.call(client, { type: 'list_terminals_request', requestId: 'l3', cwd: '/w/a/sub' })).payload.terminals.length, 0);
   assert.equal((await world.call(client, { type: 'list_terminals_request', requestId: 'l4' })).payload.terminals.length, 2);
@@ -394,13 +398,13 @@ test('two clients share one attach, each with its own slots', async t => {
 });
 
 test('exit and replaced end the stream for every client; directory subscriptions hear of it', async t => {
-  const world = await setup(t);
+  const world: Json = await setup(t);
   const one = fakeClient('one');
   const two = fakeClient('two');
   const a = (await world.create(one)).terminal.id;
   const b = (await world.create(one)).terminal.id;
   const initial = (await world.call(two, { type: 'subscribe_terminals_request', requestId: 'w1', cwd: '/w/a' })).payload;
-  assert.deepEqual(initial.terminals.map(entry => entry.id).sort(), [a, b].sort());
+  assert.deepEqual(initial.terminals.map((entry: Json) => entry.id).sort(), [a, b].sort());
   await world.subscribe(one, a);
   await world.subscribe(two, a);
   await world.subscribe(one, b);
@@ -414,13 +418,13 @@ test('exit and replaced end the stream for every client; directory subscriptions
   const c = (await world.create(one)).terminal.id;
   assert.equal((await world.subscribe(one, c)).slot, 0);
   // Another ALP client took b: the app is told, and the bridge does not take it back by itself.
-  const attaches = world.alpd.calls.filter(call => call.method === 'terminal.attach').length;
+  const attaches = world.alpd.calls.filter((call: Json) => call.method === 'terminal.attach').length;
   const thief = await world.alpd.connect();
   await thief.request('terminal.attach', { terminalId: b });
   assert.match(one.json('terminal_stream_exit').at(-1).payload.error, /opened in another ALP client/);
   assert.equal(one.json('terminal_stream_exit').at(-1).payload.terminalId, b);
   await tick(50);
-  assert.equal(world.alpd.calls.filter(call => call.method === 'terminal.attach').length, attaches + 1, 'no re-attach');
+  assert.equal(world.alpd.calls.filter((call: Json) => call.method === 'terminal.attach').length, attaches + 1, 'no re-attach');
 });
 
 test('slow_consumer: the bridge attaches again after its last seq; a gap shows a marker, in order', async t => {
@@ -524,7 +528,7 @@ test('input: in order, in whole-character pieces of at most 64 KiB; mouse and st
   const inputs = world.alpd.terminals.get(id).inputs;
   await until(() => inputs.at(-1) === '\u0003', 'every piece written');
   assert.ok(inputs.length >= 4, 'split');
-  assert.ok(inputs.every(piece => Buffer.byteLength(piece) <= 1000));
+  assert.ok(inputs.every((piece: Json) => Buffer.byteLength(piece) <= 1000));
   assert.equal(inputs.join(''), big + '\u0003', 'in order, nothing from before subscribe, the mouse or a stranger');
 
   const world2 = await setup(t);
@@ -533,12 +537,12 @@ test('input: in order, in whole-character pieces of at most 64 KiB; mouse and st
   const huge = 'a'.repeat(200 * 1024);
   await world2.call(client, { type: 'terminal_input', terminalId: id2, message: { type: 'input', data: huge } });
   await until(() => world2.alpd.terminals.get(id2).inputs.join('').length === huge.length, 'all of it');
-  assert.ok(world2.alpd.terminals.get(id2).inputs.every(piece => Buffer.byteLength(piece) <= 64 * 1024));
+  assert.ok(world2.alpd.terminals.get(id2).inputs.every((piece: Json) => Buffer.byteLength(piece) <= 64 * 1024));
 });
 
 test('kill and close_items close terminals and report successful agent archives', async t => {
-  const archived = [];
-  const world = await setup(t, { archiveAgent: async agentId => {
+  const archived: Json[] = [];
+  const world: Json = await setup(t, { archiveAgent: async (agentId: Json) => {
     if (agentId === 'missing') throw new Error('No agent missing');
     archived.push(agentId);
     return { agentId, archivedAt: '2026-01-01T00:00:00.000Z' };
@@ -552,7 +556,7 @@ test('kill and close_items close terminals and report successful agent archives'
   await world.call(watcher, { type: 'subscribe_terminals_request', requestId: 'w1', cwd: '/w/a', workspaceId: 'ws-a' });
   const killed = (await world.call(client, { type: 'kill_terminal_request', terminalId: a, requestId: 'k1' })).payload;
   assert.deepEqual(killed, { terminalId: a, success: true, requestId: 'k1' });
-  assert.deepEqual(world.alpd.calls.filter(call => call.method === 'terminal.close').map(call => call.params), [{ terminalId: a }]);
+  assert.deepEqual(world.alpd.calls.filter((call: Json) => call.method === 'terminal.close').map((call: Json) => call.params), [{ terminalId: a }]);
   assert.deepEqual(client.json('terminal_stream_exit').map(entry => entry.payload), [{ terminalId: a }]);
   await until(() => watcher.json('terminals_changed').at(-1).payload.terminals.length === 2, 'the list without it');
   assert.equal((await world.call(client, { type: 'kill_terminal_request', terminalId: a, requestId: 'k2' })).payload.success, false, 'gone');
@@ -564,7 +568,7 @@ test('kill and close_items close terminals and report successful agent archives'
   assert.deepEqual(archived, ['agent-1', 'agent-2']);
   assert.match(world.logs.at(-1), /No agent missing/);
   assert.deepEqual((await world.call(client, { type: 'close_items_request', agentIds: [], terminalIds: [], requestId: 'empty' })).payload, { agents: [], terminals: [], requestId: 'empty' });
-  const replay = await world.call(client, { type: 'close_items_request', agentIds: ['agent-1'], terminalIds: [c], requestId: 'x2' });
+  const replay: Json = await world.call(client, { type: 'close_items_request', agentIds: ['agent-1'], terminalIds: [c], requestId: 'x2' });
   assert.deepEqual(replay.payload, { requestId: 'x2', agents: [{ agentId: 'agent-1', archivedAt: '2026-01-01T00:00:00.000Z' }], terminals: [{ terminalId: c, success: false }] });
   assert.equal(world.alpd.terminals.get(c).state, 'exited', 'its terminals closed all the same');
   const renamed = (await world.call(client, { type: 'terminal.rename.request', terminalId: c, title: 'x', requestId: 'n1' })).payload;
@@ -597,13 +601,13 @@ test('a client that leaves loses its slots and subscriptions; the terminal keeps
 });
 
 test('a subscription without cwd (Paseo 0.16+) lists every workspace\'s terminals, each with its cwd, and hears of changes', async t => {
-  const world = await setup(t, { timing: { pollMs: 20 } });
+  const world: Json = await setup(t, { timing: { pollMs: 20 } });
   assert.equal(world.terminals.features.terminalCollection, true, 'the 0.16 client subscribes without cwd only to a host that says so');
   const client = fakeClient();
   const a = await world.alpd.create('ws-a');
   const b = await world.alpd.create('ws-b');
-  const row = (id, workspaceId, cwd) => ({ id, name: 'sh', cwd, workspaceId, title: 'sh' });
-  const byId = terminals => [...terminals].sort((x, y) => x.id.localeCompare(y.id));
+  const row = (id: Json, workspaceId: Json, cwd: Json) => ({ id, name: 'sh', cwd, workspaceId, title: 'sh' });
+  const byId = (terminals: Json) => [...terminals].sort((x, y) => x.id.localeCompare(y.id));
   const all = (await world.call(client, { type: 'subscribe_terminals_request', requestId: 'all' })).payload;
   assert.deepEqual({ ...all, terminals: byId(all.terminals) }, { requestId: 'all', terminals: byId([row(a, 'ws-a', '/w/a'), row(b, 'ws-b', '/w/b')]) });
   assert.equal('cwd' in all, false, 'the client matches the reply to its cwd-less query by an absent cwd');
@@ -614,15 +618,15 @@ test('a subscription without cwd (Paseo 0.16+) lists every workspace\'s terminal
   assert.deepEqual(dir, { requestId: 'dir', cwd: '/w/a', terminals: [{ id: a, name: 'sh', workspaceId: 'ws-a', title: 'sh' }] });
   // A terminal made elsewhere reaches the collection and the directory it is in; ws-b's list is unchanged.
   // (A push may also precede a subscription's own reply, so messages are read by subscription, not counted.)
-  const pushes = from => client.json('terminals_changed').slice(from).map(message => message.payload).filter(payload => payload.requestId === undefined);
-  const of = (payloads, cwd, workspaceId) => payloads.filter(payload => payload.cwd === cwd && payload.workspaceId === workspaceId);
+  const pushes = (from: Json) => client.json('terminals_changed').slice(from).map(message => message.payload).filter(payload => payload.requestId === undefined);
+  const of = (payloads: Json, cwd: Json, workspaceId: Json) => payloads.filter((payload: Json) => payload.cwd === cwd && payload.workspaceId === workspaceId);
   await tick(60);
   let mark = client.json('terminals_changed').length;
   const c = await world.alpd.create('ws-a');
   await until(() => of(pushes(mark), undefined, undefined).length && of(pushes(mark), '/w/a', undefined).length, 'the collection and the directory hear of the new terminal');
   await tick(60);
-  assert.deepEqual(of(pushes(mark), undefined, undefined).map(payload => byId(payload.terminals)), [byId([row(a, 'ws-a', '/w/a'), row(b, 'ws-b', '/w/b'), row(c, 'ws-a', '/w/a')])]);
-  assert.deepEqual(of(pushes(mark), '/w/a', undefined).map(payload => payload.terminals.map(entry => entry.id).sort()), [[a, c].sort()]);
+  assert.deepEqual(of(pushes(mark), undefined, undefined).map((payload: Json) => byId(payload.terminals)), [byId([row(a, 'ws-a', '/w/a'), row(b, 'ws-b', '/w/b'), row(c, 'ws-a', '/w/a')])]);
+  assert.deepEqual(of(pushes(mark), '/w/a', undefined).map((payload: Json) => payload.terminals.map((entry: Json) => entry.id).sort()), [[a, c].sort()]);
   assert.deepEqual(of(pushes(mark), undefined, 'ws-b'), [], 'ws-b did not change');
   // Unsubscribing without cwd ends the collection only.
   await world.call(client, { type: 'unsubscribe_terminals_request' });
@@ -634,12 +638,12 @@ test('a subscription without cwd (Paseo 0.16+) lists every workspace\'s terminal
 });
 
 test('a subscription without cwd lists exactly the union of every live workspace\'s own list: no archived, removed-project or exited terminal', async t => {
-  const world = await setup(t);
+  const world: Json = await setup(t);
   const client = fakeClient();
-  const live = { 'ws-a': '/w/a', 'ws-a2': '/w/a', 'ws-b': '/w/b' };
+  const live: Record<string, Json> = { 'ws-a': '/w/a', 'ws-a2': '/w/a', 'ws-b': '/w/b' };
   for (const workspaceId of [...Object.keys(live), 'ws-old', 'ws-gone']) await world.alpd.create(workspaceId);
   world.alpd.exit(await world.alpd.create('ws-b'));
-  const key = rows => rows.map(row => `${row.workspaceId}/${row.id}`).sort();
+  const key = (rows: Json) => rows.map((row: Json) => `${row.workspaceId}/${row.id}`).sort();
   const collection = (await world.call(client, { type: 'subscribe_terminals_request', requestId: 'all' })).payload.terminals;
   const union = [];
   for (const [workspaceId, cwd] of Object.entries(live)) {
@@ -651,7 +655,7 @@ test('a subscription without cwd lists exactly the union of every live workspace
 });
 
 test('a subscription without cwd is empty while terminals are off', async t => {
-  const world = await setup(t, { config: null });
+  const world: Json = await setup(t, { config: null });
   const client = fakeClient();
   assert.deepEqual((await world.call(client, { type: 'subscribe_terminals_request', requestId: 'all' })).payload, { requestId: 'all', terminals: [] });
 });
@@ -691,7 +695,7 @@ test('real: create, type, see the output; a new client gets a Restore holding it
   const project = path.join(directory, 'project');
   await initProject(project);
   await writeFile(path.join(home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: true, allowPaseoTerminal: true }), { mode: 0o600 });
-  const pids = new Set();
+  const pids = new Set<number>();
   const runtime = createAlpRuntime({ transport: () => ({ async initialize() {}, onNotification() {}, onFailure() {}, onRequest() {}, async close() {}, async request() { return {}; } }), runLogDir: path.join(directory, 'runs') });
   const socketPath = path.join(directory, 's', 'alpd.sock');
   const server = createDaemonServer({
@@ -704,7 +708,7 @@ test('real: create, type, see the output; a new client gets a Restore holding it
   const token = 'a'.repeat(64);
   const bridge = createPaseoBridge({
     version: 'test', home, token: () => token, serverId: () => 'alp-0000000000000000',
-    clientFactory: async onEvent => { const connection = await connect(socketPath); connection.onEvent(onEvent); return connection; },
+    clientFactory: async (onEvent: Json) => { const connection = await connect(socketPath); connection.onEvent(onEvent); return connection; },
   });
   const tree = () => {
     const rows = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,pgid='], { encoding: 'utf8' }).trim().split('\n').map(line => line.trim().split(/\s+/).map(Number));
@@ -715,8 +719,8 @@ test('real: create, type, see the output; a new client gets a Restore holding it
     for (const [pid, , pgid] of rows) if (groups.has(pgid) && pgid !== process.pid) found.add(pid);
     return [...found];
   };
-  const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
-  const seen = new Set();
+  const alive = (pid: Json) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const seen = new Set<number>();
   defer(async () => {
     try {
       for (const pid of tree()) seen.add(pid);
@@ -732,16 +736,16 @@ test('real: create, type, see the output; a new client gets a Restore holding it
     }
   });
   /** A socket as the app's: JSON frames pass Paseo's validator, binary ones decode as terminal frames. */
-  const app = async name => {
-    const listeners = { message: [], close: [], error: [] };
-    const json = [];
-    const frames = [];
+  const app = async (name: Json) => {
+    const listeners: Record<string, Json> = { message: [], close: [], error: [] };
+    const json: Json[] = [];
+    const frames: Json[] = [];
     const ws = {
       readyState: 1, bufferedAmount: 0,
-      send(data) {
+      send(data: Json) {
         if (typeof data === 'string') {
           const frame = JSON.parse(data);
-          const checked = validateWSOutboundMessage(frame);
+          const checked: Json = validateWSOutboundMessage(frame);
           assert.ok(checked.success, `${data.slice(0, 300)}\n${checked.error}`);
           json.push(frame.message ?? frame);
         } else {
@@ -751,18 +755,18 @@ test('real: create, type, see the output; a new client gets a Restore holding it
         }
       },
       close() { ws.readyState = 3; for (const listener of listeners.close) listener(1000, ''); },
-      on(event, listener) { listeners[event].push(listener); },
+      on(event: Json, listener: Json) { listeners[event].push(listener); },
     };
     bridge.attach(ws);
-    const send = frame => { for (const listener of listeners.message) listener(JSON.stringify(frame), false); };
+    const send = (frame: Json) => { for (const listener of listeners.message) listener(JSON.stringify(frame), false); };
     send({ type: 'hello', clientId: name, clientType: 'browser', protocolVersion: 1, auth: { kind: 'password', password: token } });
     await until(() => json.some(message => message.payload?.status === 'server_info'), 'server_info');
-    const ask = async (message, type) => {
+    const ask = async (message: Json, type: Json) => {
       send({ type: 'session', message });
       await until(() => json.some(entry => entry.type === type && entry.payload?.requestId === message.requestId), type);
       return json.find(entry => entry.type === type && entry.payload?.requestId === message.requestId).payload;
     };
-    return { ws, json, frames, send: message => send({ type: 'session', message }), ask, output: () => frames.filter(frame => frame.opcode === TerminalStreamOpcode.Output).map(frame => frame.data).join('') };
+    return { ws, json, frames, send: (message: Json) => send({ type: 'session', message }), ask, output: () => frames.filter(frame => frame.opcode === TerminalStreamOpcode.Output).map(frame => frame.data).join('') };
   };
 
   const first = await app('first');
@@ -781,7 +785,7 @@ test('real: create, type, see the output; a new client gets a Restore holding it
 
   const captured = await first.ask({ type: 'capture_terminal_request', terminalId: id, stripAnsi: true, requestId: 'screen1' }, 'capture_terminal_response');
   assert.equal(captured.terminalId, id);
-  assert.ok(captured.lines.some(line => line === 'alp-ok'), JSON.stringify(captured));
+  assert.ok(captured.lines.some((line: Json) => line === 'alp-ok'), JSON.stringify(captured));
   assert.ok(captured.totalLines >= 30);
   const lastLine = await first.ask({ type: 'capture_terminal_request', terminalId: id, start: -1, end: -1, requestId: 'screen2' }, 'capture_terminal_response');
   assert.equal(lastLine.lines.length, 1);
@@ -808,8 +812,8 @@ test('a create requestId is namespaced per Paseo client: two devices never share
   const world = await setup(t);
   const one = fakeClient('device-1');
   const two = fakeClient('device-2');
-  const a = await world.call(one, { type: 'create_terminal_request', requestId: 'same', cwd: '/w/a' });
-  const b = await world.call(two, { type: 'create_terminal_request', requestId: 'same', cwd: '/w/a' });
+  const a: Json = await world.call(one, { type: 'create_terminal_request', requestId: 'same', cwd: '/w/a' });
+  const b: Json = await world.call(two, { type: 'create_terminal_request', requestId: 'same', cwd: '/w/a' });
   const ids = world.alpd.terminalCalls().filter(call => call.method === 'terminal.create').map(call => call.params.requestId);
   assert.equal(ids.length, 2);
   assert.notEqual(ids[0], ids[1]);
@@ -826,7 +830,7 @@ test('close during opt-out shutdown closes the retiring connection and clears it
   await world.subscribe(client, created.terminal.id);
   const connection = world.alpd.conns.at(-1);
   const request = connection.request;
-  connection.request = (method, params) => method === 'terminal.close' ? new Promise(() => {}) : request(method, params);
+  connection.request = (method: Json, params: Json) => method === 'terminal.close' ? new Promise(() => {}) : request(method, params);
   await writeFile(path.join(world.home, 'terminal.json'), JSON.stringify({ version: 1, allowRemoteTerminal: false }), { mode: 0o600 });
   await world.terminals.refresh();
   assert.equal(connection.closed, false, 'allow the in-flight close a deadline');
@@ -876,7 +880,7 @@ test('event-capable terminal directory reports external create/exit immediately 
   await world.call(client, { type: 'subscribe_terminals_request', cwd: '/w/a', requestId: 'watch' });
   await until(() => world.alpd.calls.some(call => call.method === 'terminal.watch'), 'atomic watch');
   const id = await world.alpd.create();
-  await until(() => client.json('terminals_changed').some(message => message.payload.terminals.some(term => term.id === id)), 'external create invalidation');
+  await until(() => client.json('terminals_changed').some(message => message.payload.terminals.some((term: Json) => term.id === id)), 'external create invalidation');
   world.alpd.exit(id);
   await until(() => client.json('terminals_changed').at(-1).payload.terminals.length === 0, 'external exit invalidation');
   assert.ok(world.logs.some(line => line.includes('directory mode events')));

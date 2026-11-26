@@ -15,22 +15,26 @@ import { daemonPaths } from '@anhlp/alp-client';
 import { ATTACHMENT_HEADER, attachmentStageDir, createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer, createStore } from '@anhlp/alp-daemon';
 import { createPaseoBridge } from '../server/dist/paseo/index.js';
+import type { TestContext } from 'node:test';
 
-const hash = data => createHash('sha256').update(data).digest('hex');
-const pause = ms => new Promise(r => setTimeout(r, ms));
-async function until(fn) { for (let i=0;i<600;i++) { const value = await fn(); if (value) return value; await pause(5); } assert.fail('condition timed out'); }
-const deferred = () => { let resolve; const promise = new Promise(r => resolve=r); return {promise, resolve}; };
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 
-async function fixture(t, limits, { manualTurns = false } = {}) {
+const hash = (data: Json) => createHash('sha256').update(data).digest('hex');
+const pause = (ms: Json) => new Promise(r => setTimeout(r, ms));
+async function until(fn: Json) { for (let i=0;i<600;i++) { const value = await fn(); if (value) return value; await pause(5); } assert.fail('condition timed out'); }
+const deferred = () => { let resolve!: (value?: unknown) => void; const promise = new Promise(r => resolve=r); return {promise, resolve}; };
+
+async function fixture(t: TestContext, limits?: Json, { manualTurns = false } = {}) {
   const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'alp-facade-files-')));
   const home = path.join(dir, 'home'), project = path.join(dir, 'project');
   await mkdir(home, { mode: 0o700 }); await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
   if (limits) await writeFile(path.join(home,'attachments.json'), JSON.stringify({limits}));
-  const native = [], steers = [], completions = [];
+  const native: Json[] = [], steers: Json[] = [], completions: Json[] = [];
   const runtime = createAlpRuntime({ supervisor:false, runLogDir:path.join(dir,'runs'), attachmentStageDir:attachmentStageDir(home), transport:() => {
-    const tr = { async initialize() {}, onNotification(fn) { this.notify=fn; }, onFailure() {}, onRequest() {}, async close() {},
-      async request(method, params) {
+    const tr: Json = { async initialize() {}, onNotification(fn: Json) { this.notify=fn; }, onFailure() {}, onRequest() {}, async close() {},
+      async request(method: Json, params: Json) {
         if (method.startsWith('thread/')) return {thread:{id:'thread-'+native.length}};
         if (method === 'turn/steer') { steers.push(params); return {}; }
         if (method === 'turn/start') {
@@ -49,24 +53,24 @@ async function fixture(t, limits, { manualTurns = false } = {}) {
   const server=createDaemonServer({runtime, socketPath:daemonPaths(path.join(dir,'d')).socket, version:'test',store,home,attachmentOptions:{limits}});
   const rpc=server.local();
   await rpc.request('session.create',{sessionId:'root',spec:{cwd:project,persist:true}});
-  const calls=[]; let gate; let failure;
+  const calls: Json[]=[]; let gate: Json; let failure: Json;
   const bridge=createPaseoBridge({home,version:'test',token:()=> 'secret', serverId:()=> 'server',
     clientFactory:async onEvent => { const conn=server.local(); conn.onEvent(onEvent); return {...conn, async request(method,params) { calls.push({method,params}); if(failure===method) { failure=undefined; throw new Error('controlled attachment failure'); } if(gate?.method===method) { const g=gate; gate=undefined; g.entered.resolve(); await g.release.promise; } return conn.request(method,params); }}; },
   });
-  const wss=new WebSocketServer({port:0,host:'127.0.0.1'}); await once(wss,'listening');
-  wss.on('connection',ws=>bridge.attach(ws));
-  const clients=[];
+  const wss: Json=new WebSocketServer({port:0,host:'127.0.0.1'}); await once(wss,'listening');
+  wss.on('connection',(ws: Json)=>bridge.attach(ws));
+  const clients: Json[]=[];
   t.after(async()=> { for(const c of clients) c.ws.terminate(); for(const ws of wss.clients) ws.terminate(); await new Promise(r=>wss.close(r)); await bridge.close(); rpc.close(); await store.flush(); await server.close(); await runtime.shutdown(); await rm(dir,{recursive:true,force:true,maxRetries:5,retryDelay:50}); });
   async function connect() {
-    const ws=new WebSocket(`ws://127.0.0.1:${wss.address().port}`), frames=[];
+    const ws=new WebSocket(`ws://127.0.0.1:${wss.address().port}`), frames: Json[]=[];
     ws.on('message',(data,binary)=>{if(!binary) frames.push(JSON.parse(String(data)));}); await once(ws,'open');
-    const send=m=>ws.send(JSON.stringify({type:'session',message:m}));
-    const take=async(type,id)=> (await until(()=>frames.find(f=>f.message?.type===type && (id===undefined || f.message.payload?.requestId===id)))).message;
+    const send=(m: Json)=>ws.send(JSON.stringify({type:'session',message:m}));
+    const take=async(type: Json,id?: Json)=> (await until(()=>frames.find(f=>f.message?.type===type && (id===undefined || f.message.payload?.requestId===id)))).message;
     ws.send(JSON.stringify({type:'hello',clientId:'SAME-UNTRUSTED-ID',protocolVersion:1,auth:{kind:'password',password:'secret'}}));
     await take('status');
     const c={ws,frames,send,take};clients.push(c);return c;
   }
-  async function upload(c,id='u',data=Buffer.from([0,255,2]),name='report.bin') {
+  async function upload(c: Json,id='u',data=Buffer.from([0,255,2]),name='report.bin') {
     const r={type:'file.upload.request',requestId:id,fileName:name,mimeType:'application/octet-stream',size:data.length,modifiedAt:'2026-10-24T00:00:00Z'};
     c.send(r);
     c.ws.send(encode({opcode:O.FileBegin,requestId:id,metadata:{mime:r.mimeType,size:r.size,encoding:'binary',modifiedAt:r.modifiedAt,fileName:name}}));
@@ -75,7 +79,7 @@ async function fixture(t, limits, { manualTurns = false } = {}) {
     c.ws.send(encode({opcode:O.FileEnd,requestId:id}));
     const response=await c.take('file.upload.response',id);assert.ok(FileUploadResponseSchema.safeParse(response).success);assert.equal(response.payload.error,null);return response.payload.file;
   }
-  return {url:`ws://127.0.0.1:${wss.address().port}`,home,project,native,steers,rpc,calls,connect,upload, completeTurn(index) { completions[index](); }, failNext(method) { failure=method; }, block(method) { const g={method,entered:deferred(),release:deferred()};gate=g;return g; }};
+  return {url:`ws://127.0.0.1:${wss.address().port}`,home,project,native,steers,rpc,calls,connect,upload, completeTurn(index: Json) { completions[index](); }, failNext(method: Json) { failure=method; }, block(method: Json) { const g={method,entered:deferred(),release:deferred()};gate=g;return g; }};
 }
 const skip=process.platform==='win32' && 'daemon attachments require POSIX';
 
@@ -86,7 +90,7 @@ test('facade binary upload reaches runtime byte-for-byte, no provider; retry and
   c.send({type:'send_agent_message_request',requestId:'p',agentId:'root',text:'read',messageId:'same-message',attachments:[file]});
   const reply=await c.take('send_agent_message_response','p');assert.ok(SendAgentMessageResponseMessageSchema.safeParse(reply).success);assert.equal(reply.payload.error,null);
   await until(()=>f.native.length===1);
-  const named=f.native[0].input.filter(p=>p.type==='text'&&p.text.startsWith(ATTACHMENT_HEADER)).map(p=>JSON.parse(p.text.slice(ATTACHMENT_HEADER.length).split('\n')[0]));
+  const named=f.native[0].input.filter((p: Json)=>p.type==='text'&&p.text.startsWith(ATTACHMENT_HEADER)).map((p: Json)=>JSON.parse(p.text.slice(ATTACHMENT_HEADER.length).split('\n')[0]));
   assert.equal(named.length,1);assert.equal(named[0].sha256,hash(data));assert.equal(path.dirname(named[0].path),attachmentStageDir(f.home));assert.deepEqual(await readFile(named[0].path),data);assert.equal((await lstat(named[0].path)).mode&0o777,0o400);
   assert.ok(!JSON.stringify(f.native).includes('alp-upload:'));
   c.send({type:'send_agent_message_request',requestId:'p2',agentId:'root',text:'read',messageId:'same-message',attachments:[file]});
@@ -125,8 +129,8 @@ for (const followup of ['after completion', 'during active turn']) {
     const delivered=followup==='after completion' ? f.native : f.steers;
     await until(()=>delivered.length===(followup==='after completion' ? 2 : 1));
     const legacy=delivered.at(-1);
-    assert.ok(legacy.input.some(p=>p.type==='image'));
-    const attachment=legacy.input.find(p=>p.type==='text'&&p.text.startsWith(ATTACHMENT_HEADER));
+    assert.ok(legacy.input.some((p: Json)=>p.type==='image'));
+    const attachment=legacy.input.find((p: Json)=>p.type==='text'&&p.text.startsWith(ATTACHMENT_HEADER));
     assert.ok(attachment);
     const named=JSON.parse(attachment.text.slice(ATTACHMENT_HEADER.length).split('\n')[0]);
     assert.deepEqual(await readFile(named.path),Buffer.from([0,255,2]));
@@ -164,7 +168,7 @@ test('disconnect during daemon hello prevents late upload or prompt; connection 
 test('Paseo SDK uploadFile uses its own codec against facade hello and prompt delivery', {skip}, async t => {
   const { DaemonClient } = await import(process.env.ALP_TEST_PASEO_CLIENT_MODULE ?? '@getpaseo/client/internal/daemon-client');
   const f=await fixture(t);
-  const client = new DaemonClient({ url:f.url, clientId:'sdk', password:'secret', webSocketFactory:(url, options) => new WebSocket(url, options?.protocols), reconnect:{enabled:false} });
+  const client = new DaemonClient({ url:f.url, clientId:'sdk', password:'secret', webSocketFactory:(url: Json, options: Json) => new WebSocket(url, options?.protocols), reconnect:{enabled:false} });
   t.after(()=>client.close());
   await client.connect();
   const bytes=Buffer.from([0,255,2,0,3,10]);
@@ -172,7 +176,7 @@ test('Paseo SDK uploadFile uses its own codec against facade hello and prompt de
   assert.equal(result.error,null);assert.ok(result.file?.path.startsWith('alp-upload:'));
   await client.sendAgentMessage('root','SDK binary',{attachments:[result.file],messageId:'sdk-message'});
   await until(()=>f.native.length===1);
-  const part=f.native[0].input.find(p=>p.type==='text'&&p.text.startsWith(ATTACHMENT_HEADER));
+  const part=f.native[0].input.find((p: Json)=>p.type==='text'&&p.text.startsWith(ATTACHMENT_HEADER));
   const named=JSON.parse(part.text.slice(ATTACHMENT_HEADER.length).split('\n')[0]);
   assert.deepEqual(await readFile(named.path),bytes);
 });
@@ -231,7 +235,7 @@ test('workspace first-agent file is authorized before mutation and delivered as 
   assert.equal(f.calls.filter(x=>x.method==='workspace.registry.mutate').length,before);
   c.send({...request,requestId:'workspace-file'});
   const made=await c.take('workspace.create.response','workspace-file');assert.equal(made.payload.error,null);assert.ok(made.payload.agent?.id);
-  await until(()=>f.native.length===1);assert.ok(f.native[0].input.some(x=>x.type==='text'&&x.text.startsWith(ATTACHMENT_HEADER)));
+  await until(()=>f.native.length===1);assert.ok(f.native[0].input.some((x: Json)=>x.type==='text'&&x.text.startsWith(ATTACHMENT_HEADER)));
 });
 
 test('creation replay survives a lost socket response and sends one native first prompt', {skip}, async t => {

@@ -10,36 +10,40 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { CAPABILITY } from '@anhlp/alp-protocol';
 import { EXPOSURE, FORWARDING_HEADERS, OWNER_LOOPBACK, createGateway, createGatewayLogger, CredentialStore, credentialsFile, directLoopback, isForwardingHeader, ownerOptionError, resolveConfig, revokeCredential } from '../dist/index.js';
-import { fakeDaemon } from './support/fake-daemon.js';
+import { fakeDaemon } from './support/fake-daemon.ts';
 import WebSocket from 'ws';
 import { AGENT_CAPABILITY, AlpRpcClient } from '@anhlp/alp-client/portable';
 import { connectWebSocket } from '@anhlp/alp-client/websocket';
-import { ORIGIN, startGateway } from './support/harness.js';
+import { ORIGIN, startGateway } from './support/harness.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
+
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 
 const OWNER_METHODS = Object.entries(EXPOSURE).filter(([, entry]) => entry.status === 'owner').map(([method]) => method);
 const USAGE = { providers: [{ provider: 'claude', windows: [] }] };
 
 /** What a denied method answers today: the refusal every non-owner gets for an owner method. */
-const notExposed = method => error => error.code === -32601 && error.message === `${method} is not available through the gateway` && error.data?.reason === 'not_exposed';
+const notExposed = (method: Json) => (error: Json) => error.code === -32601 && error.message === `${method} is not available through the gateway` && error.data?.reason === 'not_exposed';
 
 /**
  * A gateway in front of a fake alpd that answers daemon.usage. With `owner`, the gateway is created
  * with the owner option naming credential `owner` (as alp dashboard names grant.id); `current` lets
  * a test change which credential that is, as `alp dashboard rotate` does.
  */
-async function world(t, { owner = true, handlers } = {}) {
+async function world(t: TestContext, { owner = true, handlers }: Json = {}) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-owner-'));
   defer(() => rm(directory, { recursive: true, force: true }));
   const daemon = fakeDaemon();
   daemon.state.handlers['daemon.usage'] = () => USAGE;
-  const current = { id: /** @type {string | undefined} */ (undefined) };
+  const current = { id: undefined as string | undefined };
   const gw = await startGateway(t, {
     daemon,
     config: { limits: { rate: 100_000, burst: 100_000 } },
     credentials: { owner: { workspaces: [path.join(directory, 'a')] }, other: { workspaces: [path.join(directory, 'a')] } },
-    ...(owner ? { owner: ids => { current.id = ids.owner; return { credentialId: () => current.id, ...(handlers ? { methods: handlers } : {}) }; } } : {}),
+    ...(owner ? { owner: (ids: Json) => { current.id = ids.owner; return { credentialId: () => current.id, ...(handlers ? { methods: handlers } : {}) }; } } : {}),
   });
   return { daemon, current, ...gw };
 }
@@ -78,7 +82,7 @@ test('owner (b, f): the owner credential on a direct loopback socket gets host.o
   // Still a denied method for the owner: only `owner` entries open.
   await assert.rejects(client.request('daemon.status', {}), notExposed('daemon.status'));
   // Params are checked as for any v1 method.
-  await assert.rejects(client.request('daemon.usage', { refresh: 'yes' }), error => error.code === -32602);
+  await assert.rejects(client.request('daemon.usage', { refresh: 'yes' }), (error: Json) => error.code === -32602);
 });
 
 test('owner (c, f): another credential of the same owner gateway is refused, and its hello has no host.owner', async t => {
@@ -137,7 +141,7 @@ test('owner (e): the owner credential through a forwarding hop (a proxy or tunne
 test('owner (e): only a direct loopback peer counts; a non-loopback, proxied or forwarded one never does', () => {
   // directLoopback reads the socket's own peer address, which a client cannot set: these requests
   // stand in for sockets from the network (remoteAddress) and for server.ts peerOf's verdict.
-  const request = (remoteAddress, headers = {}) => ({ socket: { remoteAddress }, headers });
+  const request = (remoteAddress: Json, headers = {}) => ({ socket: { remoteAddress }, headers });
   for (const address of OWNER_LOOPBACK) assert.equal(directLoopback(request(address), { proxied: false }), true, address);
   for (const address of ['192.168.1.5', '10.0.0.2', '203.0.113.9', '::ffff:192.168.1.5', 'fe80::1', '127.0.0.2', '127.1.2.3', '', undefined]) {
     assert.equal(directLoopback(request(address), { proxied: false }), false, String(address));
@@ -162,21 +166,21 @@ test('owner: an owner gateway is a plain loopback listener; any other config is 
   assert.match(ownerOptionError(owner, resolveConfig({ port: 0, trustProxy: ['127.0.0.1'] })) ?? '', /trusts no proxy/);
   assert.match(ownerOptionError(owner, resolveConfig({ host: '0.0.0.0', port: 0, allowInsecure: true })) ?? '', /loopback only/);
   assert.match(ownerOptionError(owner, resolveConfig({ port: 0, allowInsecure: true })) ?? '', /insecure/);
-  assert.match(ownerOptionError(/** @type {any} */ ({ credentialId: 'c' }), resolveConfig({ port: 0 })) ?? '', /function/);
-  assert.match(ownerOptionError(/** @type {any} */ ({ credentialId: () => 'c', methods: { x: 1 } }), resolveConfig({ port: 0 })) ?? '', /not a function/);
+  assert.match(ownerOptionError(({ credentialId: 'c' } as Json), resolveConfig({ port: 0 })) ?? '', /function/);
+  assert.match(ownerOptionError(({ credentialId: () => 'c', methods: { x: 1 } } as Json), resolveConfig({ port: 0 })) ?? '', /not a function/);
   const store = new CredentialStore({ home: path.join(directory, 'gateway'), logger: createGatewayLogger({ write: () => {} }) });
   defer(() => store.close());
   assert.throws(() => createGateway({ config: resolveConfig({ port: 0, trustProxy: ['127.0.0.1'] }), store, logger: createGatewayLogger({ write: () => {} }), version: 'test', openTransport: fakeDaemon().open, owner }), /trusts no proxy/);
 });
 
 test('owner: an owner handler answers its method for the owner only, with its params and the owner\'s alpd connection', async t => {
-  const seen = [];
+  const seen: Json[] = [];
   const handlers = {
     // A handler for a method the matrix does not mark owner is never reachable.
     'daemon.status': () => 'never',
-    'daemon.usage': async ({ method, params, principal, daemon }) => {
+    'daemon.usage': async ({ method, params, principal, daemon }: Json) => {
       seen.push({ method, params, principal });
-      const answer = /** @type {any} */ (await daemon.request('daemon.usage', { refresh: false }));
+      const answer = await daemon.request('daemon.usage', { refresh: false }) as Json;
       return { providers: [...answer.providers, { provider: 'handled' }] };
     },
   };
@@ -197,7 +201,7 @@ test('owner: a connection marked as an ALP agent\'s is never the owner, even wit
   const transport = await connectWebSocket(wsUrl, { protocols: body.subprotocols, createSocket: (url, protocols) => new WebSocket(url, protocols, { origin: ORIGIN }) });
   const client = new AlpRpcClient(transport);
   teardown(t)(() => client.close());
-  const hello = /** @type {any} */ (await client.request('daemon.hello', { protocolVersion: 1, client: { name: 'agent', version: '0' }, capabilities: [AGENT_CAPABILITY] }));
+  const hello = (await client.request('daemon.hello', { protocolVersion: 1, client: { name: 'agent', version: '0' }, capabilities: [AGENT_CAPABILITY] }) as Json);
   assert.ok(!hello.capabilities.includes(CAPABILITY.hostOwner));
   await assert.rejects(client.request('daemon.usage', {}), notExposed('daemon.usage'));
 });
@@ -208,12 +212,12 @@ test('owner: no credential permission makes a credential the owner, even one add
   // mistaken for: the store drops what is not a permission when it reads the file.
   const file = credentialsFile(home);
   const stored = JSON.parse(await readFile(file, 'utf8'));
-  const entry = stored.credentials.find(credential => credential.id === ids.other);
+  const entry = stored.credentials.find((credential: Json) => credential.id === ids.other);
   assert.ok(entry, 'the other credential is in the file');
   entry.permissions = [...entry.permissions, 'host.owner', 'owner', 'host.admin', 'daemon.usage'];
   await writeFile(file, JSON.stringify(stored), { mode: 0o600 });
   await store.reload();
-  assert.deepEqual([...store.grant(ids.other).permissions].filter(name => /owner|admin|usage/.test(name)), []);
+  assert.deepEqual([...store.grant(ids.other)!.permissions].filter(name => /owner|admin|usage/.test(name)), []);
   const { client, hello } = await sdk('other');
   assert.ok(!hello.capabilities.includes(CAPABILITY.hostOwner));
   const mark = daemon.calls().length;

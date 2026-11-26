@@ -13,9 +13,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, PERMISSIONS, projectBranch, projectForkedFrom } from '../dist/policy.js';
 import { credentialsFile, renameWithRetry } from '../dist/credentials.js';
-import { fakeDaemon, summary } from './support/fake-daemon.js';
-import { startGateway, until } from './support/harness.js';
+import { fakeDaemon, summary } from './support/fake-daemon.ts';
+import { startGateway, until } from './support/harness.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
+
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 
 const CAPABILITIES = ['attach.after', 'prompt.receipts', 'workspace.registry', 'session.history', 'session.fork', 'session.rewind'];
 const GEN = '0123456789abcdef0123456789abcdef';
@@ -24,7 +28,7 @@ const BRANCH = { branchId: 'br_0123456789abcdef', beforeTurnId: 'turn-2', turns:
 const AT = '2026-10-23T00:00:00.000Z';
 const CONVERSATION = { fork: true, rewind: true };
 
-async function world(t, { capabilities = CAPABILITIES } = {}) {
+async function world(t: TestContext, { capabilities = CAPABILITIES } = {}) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-conv-'));
   defer(() => rm(directory, { recursive: true, force: true }));
@@ -40,13 +44,13 @@ async function world(t, { capabilities = CAPABILITIES } = {}) {
       summary('fy', ca, { status: 'closed', forkedFrom: { sessionId: 'sa', boundary: 'whole', branchId: BRANCH.branchId, at: AT, path: '/home/u/.alp/x' }, branches: [{ ...BRANCH, file: '/home/u/x' }, { branchId: '../x', beforeTurnId: 't', turns: 1, at: AT }] }),
     ],
   });
-  const workspaces = { wks_a: ca, wks_a2: ca2, wks_b: cb };
-  daemon.state.handlers['workspace.get'] = ({ workspaceId }) => {
+  const workspaces: Record<string, Json> = { wks_a: ca, wks_a2: ca2, wks_b: cb };
+  daemon.state.handlers['workspace.get'] = ({ workspaceId }: Json) => {
     if (!Object.hasOwn(workspaces, workspaceId)) throw { code: 1001, message: `No workspace ${workspaceId}` };
     return { workspace: { id: workspaceId, projectId: 'prj', directory: workspaces[workspaceId], canonical: workspaces[workspaceId], createdAt: 'old', labels: [] }, revision: 1 };
   };
   let forks = 0;
-  daemon.state.handlers['session.fork'] = params => {
+  daemon.state.handlers['session.fork'] = (params: Json) => {
     const source = daemon.state.sessions.get(params.sessionId);
     const forkedFrom = { sessionId: params.sessionId, ...(params.boundary?.throughTurnId ? { turnId: params.boundary.throughTurnId, boundary: 'through' } : params.boundary?.beforeTurnId ? { turnId: params.boundary.beforeTurnId, boundary: 'before' } : { boundary: 'whole' }), ...(params.branchId ? { branchId: params.branchId } : {}), at: AT };
     const id = params.newSessionId ?? `ses_fork${++forks}`;
@@ -54,7 +58,7 @@ async function world(t, { capabilities = CAPABILITIES } = {}) {
     daemon.state.sessions.set(id, created);
     return { session: created, forkedFrom };
   };
-  daemon.state.handlers['session.rewind'] = params => {
+  daemon.state.handlers['session.rewind'] = (params: Json) => {
     const session = daemon.state.sessions.get(params.sessionId);
     session.branches = [BRANCH];
     daemon.emit(params.sessionId, { type: 'history.reset', generation: NEXT, reason: 'rewind', branchId: BRANCH.branchId }, { keep: false });
@@ -71,7 +75,7 @@ async function world(t, { capabilities = CAPABILITIES } = {}) {
   return { daemon, a, a2, b, ca, ca2, cb, ...gw };
 }
 
-const conversationCalls = (daemon, mark) => daemon.calls().slice(mark).filter(call => call.method === 'session.fork' || call.method === 'session.rewind');
+const conversationCalls = (daemon: Json, mark: Json) => daemon.calls().slice(mark).filter((call: Json) => call.method === 'session.fork' || call.method === 'session.rewind');
 const fork = (extra = {}) => ({ sessionId: 'sa', requestId: 'f1', ifGeneration: GEN, boundary: { throughTurnId: 'turn-1' }, ...extra });
 const rewind = (extra = {}) => ({ sessionId: 'sa', requestId: 'r1', ifGeneration: GEN, beforeTurnId: 'turn-2', ...extra });
 
@@ -84,7 +88,7 @@ test('the matrix: session.write (fork also session.read), no new permission, for
   assert.equal(EXPOSURE['session.rewind'].alsoRequires, undefined);
   assert.deepEqual(EXPOSURE['session.rewind'].params, ['sessionId', 'requestId', 'ifGeneration', 'beforeTurnId']);
   for (const method of ['session.fork', 'session.rewind']) {
-    for (const field of ['principalId', 'principalEpoch', 'authorizedRoots', 'cwd', 'spec', 'mode']) assert.ok(!EXPOSURE[method].params.includes(field), `${method} ${field}`);
+    for (const field of ['principalId', 'principalEpoch', 'authorizedRoots', 'cwd', 'spec', 'mode']) assert.ok(!EXPOSURE[method].params!.includes(field), `${method} ${field}`);
   }
   assert.ok(FORWARDED_CAPABILITIES.includes('session.fork') && FORWARDED_CAPABILITIES.includes('session.rewind'));
   assert.deepEqual(PERMISSIONS, ['session.read', 'session.write', 'project.read', 'project.write', 'files.read', 'library.write', 'workspace.write', 'workspace.manage', 'attachments.write', 'session.team.write', 'terminal.exec']);
@@ -112,25 +116,25 @@ test('hello forwards session.fork and session.rewind only when alpd lists them',
 test('permissions: 1003 grant naming what is missing, before alpd hears of the method', async t => {
   const { daemon, sdk, store, ids, home } = await world(t);
   const { client: reader } = await sdk('reader');
-  for (const [method, params] of [['session.fork', fork()], ['session.rewind', rewind()]]) {
+  for (const [method, params] of [['session.fork', fork()], ['session.rewind', rewind()]] as Json[][]) {
     const mark = daemon.calls().length;
-    await assert.rejects(reader.request(method, params), error => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === 'session.write', method);
+    await assert.rejects(reader.request(method, params), (error: Json) => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === 'session.write', method);
     assert.deepEqual(daemon.calls().slice(mark), [], `${method} reached alpd`);
   }
   // A stored grant of session.write alone (the CLI always adds session.read, a hand-edited file may not):
   // a fork reads the source's conversation, so it is refused; a rewind is not.
   const file = credentialsFile(home);
   const data = JSON.parse(await readFile(file, 'utf8'));
-  data.credentials.find(entry => entry.id === ids.noread).permissions = ['session.write'];
+  data.credentials.find((entry: Json) => entry.id === ids.noread).permissions = ['session.write'];
   await writeFile(`${file}.tmp`, JSON.stringify(data), { mode: 0o600 });
   await chmod(`${file}.tmp`, 0o600);
   // The running gateway's CredentialStore reads this file every 25 ms (harness pollMs); on Windows a plain
   // rename onto it fails with EPERM while that read holds it (t-5294.1), so replace it as the CLI does.
   await renameWithRetry(`${file}.tmp`, file);
-  await until(() => store.grant(ids.noread) && !store.grant(ids.noread).permissions.has('session.read'), 'the edited grant to load');
+  await until(() => store.grant(ids.noread) && !store.grant(ids.noread)!.permissions.has('session.read'), 'the edited grant to load');
   const { client: noread } = await sdk('noread');
   const mark = daemon.calls().length;
-  await assert.rejects(noread.request('session.fork', fork()), error => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === 'session.read');
+  await assert.rejects(noread.request('session.fork', fork()), (error: Json) => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === 'session.read');
   assert.deepEqual(daemon.calls().slice(mark), []);
   assert.equal((await noread.request('session.rewind', rewind())).generation, NEXT);
 });
@@ -138,7 +142,7 @@ test('permissions: 1003 grant naming what is missing, before alpd hears of the m
 test('scope: a source outside the grant, a child, a destination or new id outside it are refused before alpd', async t => {
   const { daemon, sdk } = await world(t);
   const { client } = await sdk('writer');
-  const cases = [
+  const cases: Json[][] = [
     ['session.fork', fork({ sessionId: 'sb' }), 1001],
     ['session.fork', fork({ sessionId: 'ses_missing' }), 1001],
     ['session.fork', fork({ sessionId: 'sa-c' }), 1003, 'not_root'],
@@ -155,7 +159,7 @@ test('scope: a source outside the grant, a child, a destination or new id outsid
   ];
   const mark = daemon.calls().length;
   for (const [method, params, code, reason] of cases) {
-    await assert.rejects(client.request(method, params), error => error.code === code && (reason === undefined || error.data?.reason === reason), `${method} ${JSON.stringify(params)}`);
+    await assert.rejects(client.request(method, params), (error: Json) => error.code === code && (reason === undefined || error.data?.reason === reason), `${method} ${JSON.stringify(params)}`);
   }
   assert.deepEqual(conversationCalls(daemon, mark), [], 'alpd never heard of a fork or rewind outside the grant');
   // The source is looked up afresh on each request, not taken from what this connection saw.
@@ -169,10 +173,10 @@ test('fork: the gateway\'s principal context and a per-credential requestId reac
   const { daemon, sdk, ids, store, ca, ca2 } = await world(t);
   const { client } = await sdk('writer');
   const answer = await client.request('session.fork', { ...fork({ title: 'Try again', newSessionId: 'ses_mine', workspaceId: 'wks_a2' }), principalId: 'owner', principalEpoch: 'owner', authorizedRoots: ['/'] });
-  const sent = daemon.calls('session.fork').at(-1).params;
+  const sent = daemon.calls('session.fork').at(-1)!.params;
   const grant = store.grant(ids.writer);
   assert.deepEqual(Object.keys(sent).sort(), ['authorizedRoots', 'boundary', 'ifGeneration', 'newSessionId', 'principalEpoch', 'principalId', 'requestId', 'sessionId', 'title', 'workspaceId']);
-  assert.deepEqual([sent.principalId, sent.principalEpoch, [...sent.authorizedRoots].sort()], [ids.writer, grant.scopeId, [ca, ca2].sort()]);
+  assert.deepEqual([sent.principalId, sent.principalEpoch, [...sent.authorizedRoots].sort()], [ids.writer, grant!.scopeId, [ca, ca2].sort()]);
   assert.match(sent.requestId, /^gw:[0-9a-f]{64}$/);
   assert.deepEqual(sent.boundary, { throughTurnId: 'turn-1' });
   assert.equal(answer.session.id, 'ses_mine');
@@ -182,23 +186,23 @@ test('fork: the gateway\'s principal context and a per-credential requestId reac
   assert.deepEqual(answer.session.conversation, CONVERSATION);
   // The same requestId again maps to the same key; another credential's to another.
   await client.request('session.fork', fork({ requestId: 'f1' }));
-  const again = daemon.calls('session.fork').at(-1).params.requestId;
+  const again = daemon.calls('session.fork').at(-1)!.params.requestId;
   await client.request('session.fork', fork({ requestId: 'f1' }));
-  assert.equal(daemon.calls('session.fork').at(-1).params.requestId, again);
+  assert.equal(daemon.calls('session.fork').at(-1)!.params.requestId, again);
   const { client: both } = await sdk('both');
   await both.request('session.fork', fork({ requestId: 'f1' }));
-  assert.notEqual(daemon.calls('session.fork').at(-1).params.requestId, again);
+  assert.notEqual(daemon.calls('session.fork').at(-1)!.params.requestId, again);
   // Without workspaceId the fork stays in the source's workspace; a branch fork passes branchId.
   const whole = await client.request('session.fork', { sessionId: 'sa', requestId: 'f2', ifGeneration: GEN, branchId: BRANCH.branchId });
   assert.equal(whole.session.projectRoot, ca);
   assert.deepEqual(whole.forkedFrom, { sessionId: 'sa', boundary: 'whole', branchId: BRANCH.branchId, at: AT });
   // A rewind's schema has no principal context: one from the client is refused before alpd.
   const before = daemon.calls().length;
-  await assert.rejects(client.request('session.rewind', { ...rewind(), principalId: 'owner' }), error => error.code === -32602);
+  await assert.rejects(client.request('session.rewind', { ...rewind(), principalId: 'owner' }), (error: Json) => error.code === -32602);
   assert.deepEqual(conversationCalls(daemon, before), []);
   // A rewind sends exactly its four params.
   await client.request('session.rewind', rewind());
-  const rewound = daemon.calls('session.rewind').at(-1).params;
+  const rewound = daemon.calls('session.rewind').at(-1)!.params;
   assert.deepEqual(Object.keys(rewound).sort(), ['beforeTurnId', 'ifGeneration', 'requestId', 'sessionId']);
   assert.match(rewound.requestId, /^gw:[0-9a-f]{64}$/);
 });
@@ -207,7 +211,7 @@ test('fork answers: a created root outside the grant or the destination, a child
   const { daemon, sdk, ca, cb } = await world(t);
   const { client } = await sdk('writer');
   const provenance = { sessionId: 'sa', boundary: 'whole', at: AT };
-  const answers = [
+  const answers: Json[][] = [
     [{ session: summary('ses_out', cb, { status: 'closed' }), forkedFrom: provenance }, 1003, 'outside_workspace'],
     [{ session: summary('ses_kid', ca, { parentId: 'sa' }), forkedFrom: provenance }, 1003, 'outside_workspace'],
     [{ session: summary('sa', ca), forkedFrom: provenance }, 1003, 'outside_workspace'],
@@ -223,9 +227,9 @@ test('fork answers: a created root outside the grant or the destination, a child
   }
   // A destination asked for is the one answered: a fork alpd put elsewhere in the grant is refused too.
   daemon.state.handlers['session.fork'] = () => ({ session: summary('ses_ok', ca), forkedFrom: provenance });
-  await assert.rejects(client.request('session.fork', fork({ workspaceId: 'wks_a2' })), error => error.code === 1003 && error.data?.reason === 'outside_workspace');
+  await assert.rejects(client.request('session.fork', fork({ workspaceId: 'wks_a2' })), (error: Json) => error.code === 1003 && error.data?.reason === 'outside_workspace');
   // A newSessionId asked for is the one answered.
-  await assert.rejects(client.request('session.fork', fork({ newSessionId: 'ses_asked' })), error => error.code === 1003);
+  await assert.rejects(client.request('session.fork', fork({ newSessionId: 'ses_asked' })), (error: Json) => error.code === 1003);
   // A repeated request passes duplicate on.
   daemon.state.handlers['session.fork'] = () => ({ session: summary('ses_ok', ca), forkedFrom: provenance, duplicate: true, host: '/home/u' });
   const repeated = await client.request('session.fork', fork());
@@ -245,7 +249,7 @@ test('summaries: forkedFrom only when its source is in the grant, branches and c
   assert.deepEqual(fy.branches, [BRANCH], 'extra fields and a malformed branch dropped');
   assert.deepEqual((await client.request('session.get', { sessionId: 'sa' })).session.conversation, CONVERSATION);
   const { sessions } = await client.request('session.list', { includeClosed: true });
-  const rows = Object.fromEntries(sessions.map(row => [row.id, row]));
+  const rows = Object.fromEntries(sessions.map((row: Json) => [row.id, row]));
   assert.equal(Object.hasOwn(rows.fx, 'forkedFrom'), false);
   assert.equal(rows.fy.forkedFrom.sessionId, 'sa');
   // A credential granted b as well sees fx's source.
@@ -253,11 +257,11 @@ test('summaries: forkedFrom only when its source is in the grant, branches and c
   assert.equal((await both.request('session.get', { sessionId: 'fx' })).session.forkedFrom.sessionId, 'sb');
   // Events: a summary naming a source this connection has not looked up holds its place until it is.
   const { client: fresh } = await sdk('writer');
-  const seen = [];
+  const seen: Json[] = [];
   fresh.onEvent(envelope => seen.push(envelope));
   await fresh.request('session.attach', { sessionId: 'sa', replay: false });
   const sa = daemon.state.sessions.get('sa');
-  const lookups = id => daemon.calls('session.get').filter(call => call.params.sessionId === id).length;
+  const lookups = (id: Json) => daemon.calls('session.get').filter(call => call.params.sessionId === id).length;
   daemon.emit('sa', { type: 'session.updated', session: { ...sa, forkedFrom: { sessionId: 'sb2', boundary: 'whole', at: AT } } });
   daemon.emit('sa', { type: 'session.updated', session: { ...sa, forkedFrom: { sessionId: 'sa3', boundary: 'whole', at: AT }, branches: [{ ...BRANCH, extra: 1 }] } });
   daemon.emit('sa', { type: 'session.ready' });
@@ -273,23 +277,23 @@ test('summaries: forkedFrom only when its source is in the grant, branches and c
   assert.equal(lookups('sb2'), 1);
   assert.equal(Object.hasOwn(seen[3].event.session, 'forkedFrom'), false);
   // History items are projected the same way.
-  daemon.state.handlers['session.history'] = ({ sessionId }) => {
+  daemon.state.handlers['session.history'] = ({ sessionId }: Json) => {
     const items = daemon.state.timelines.get(daemon.rootOf(sessionId)) ?? [];
     return { generation: GEN, items, hasOlder: false, tipCursor: items.at(-1)?.cursor ?? 0 };
   };
   const history = await fresh.request('session.history', { sessionId: 'sa' });
-  const updates = history.items.filter(item => item.event?.type === 'session.updated');
-  assert.deepEqual(updates.map(item => item.event.session.forkedFrom?.sessionId), [undefined, 'sa3', undefined]);
+  const updates = history.items.filter((item: Json) => item.event?.type === 'session.updated');
+  assert.deepEqual(updates.map((item: Json) => item.event.session.forkedFrom?.sessionId), [undefined, 'sa3', undefined]);
 });
 
 test('rewind: the same session, its branch and generation projected; history.reset reaches attached connections unchanged', async t => {
   const { daemon, sdk } = await world(t);
   const { client } = await sdk('writer');
-  const seen = [];
+  const seen: Json[] = [];
   client.onEvent(envelope => seen.push(envelope));
   await client.request('session.attach', { sessionId: 'sa', replay: false });
   const { client: elsewhere } = await sdk('both');
-  const other = [];
+  const other: Json[] = [];
   elsewhere.onEvent(envelope => other.push(envelope));
   await elsewhere.request('session.attach', { sessionId: 'sb', replay: false });
   const answer = await client.request('session.rewind', rewind());
@@ -306,7 +310,7 @@ test('rewind: the same session, its branch and generation projected; history.res
   // An answer for another session, or without its branch or generation, is refused.
   for (const bad of [{ session: summary('sa-c', daemon.state.sessions.get('sa').projectRoot), generation: NEXT, branch: BRANCH }, { session: daemon.state.sessions.get('sa'), generation: 'g1', branch: BRANCH }, { session: daemon.state.sessions.get('sa'), generation: NEXT }]) {
     daemon.state.handlers['session.rewind'] = () => bad;
-    await assert.rejects(client.request('session.rewind', rewind()), error => error.code === 1000 && error.data?.reason === 'outcome_unknown');
+    await assert.rejects(client.request('session.rewind', rewind()), (error: Json) => error.code === 1000 && error.data?.reason === 'outcome_unknown');
   }
 });
 
@@ -336,12 +340,12 @@ test('alpd\'s refusals: fixed text, code, reason, a generation and plain numbers
 
 test('a grant with modes forks and rewinds only sessions whose tree runs within them, looked up afresh, as session.prompt drives', async t => {
   const { daemon, sdk } = await world(t);
-  assert.ok(EXPOSURE['session.fork'].tests.includes('mode'));
-  assert.ok(EXPOSURE['session.rewind'].tests.includes('mode'));
+  assert.ok(EXPOSURE['session.fork'].tests!.includes('mode'));
+  assert.ok(EXPOSURE['session.rewind'].tests!.includes('mode'));
   const limited = (await sdk('limited')).client;
   const mark = daemon.calls().length;
   // sa runs workspace-write: a read-only grant may neither fork nor rewind its conversation.
-  for (const [method, params] of [['session.fork', fork()], ['session.rewind', rewind()]]) {
+  for (const [method, params] of [['session.fork', fork()], ['session.rewind', rewind()]] as Json[][]) {
     const error = await limited.request(method, params).catch(failure => failure);
     assert.equal(error.code, 1003, method);
     assert.equal(error.data?.reason, 'mode', method);

@@ -11,49 +11,53 @@ import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary } from '@anhlp/alp-core/library';
 import { fakeTransport } from '../../../test/support/fake-agent.ts';
 import { SessionInboundMessageSchema, SessionOutboundMessageSchema } from '@getpaseo/protocol/messages';
+import type { TestContext } from 'node:test';
 
-async function fixture(t) {
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+async function fixture(t: TestContext) {
   const directory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'alp-facade-remove-')));
   const home = path.join(directory, 'home'), source = path.join(directory, 'repo'), parent = path.join(directory, 'dest');
   await mkdir(home, { mode: 0o700 }); await mkdir(source); await mkdir(parent, { mode: 0o700 });
-  const git = (...args) => execFileSync('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', ...args], {
+  const git = (...args: Json[]) => execFileSync('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', ...args], {
     cwd: source, encoding: 'utf8', env: { PATH: '/usr/bin:/bin', ALP_HOME: home, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
   }).trim();
   git('init', '-q'); await writeFile(path.join(source, 'tracked'), 'keep'); git('add', '.');
   git('-c', 'user.name=Test', '-c', 'user.email=test@localhost', 'commit', '-qm', 'initial');
   await writeFile(path.join(home, 'worktree-destinations.json'), JSON.stringify({ version: 1, mappings: [{ id: 'approved', source, commonDir: path.join(source, '.git'), parent }] }), { mode: 0o600 });
-  const agents = [];
+  const agents: Json[] = [];
   const runtime = createAlpRuntime({ supervisor: false, libraryDir: home, transport: fakeTransport(agents), assignmentResultFile: path.join(home, 'results.json'), liveFile: path.join(home, 'live.json'), recallFile: path.join(home, 'recall.json') });
   const daemon = createDaemonServer({ runtime, home, socketPath: '', version: 'test' });
   const client = daemon.local();
-  const calls = [], events = [], failures = [];
+  const calls: Json[] = [], events: Json[] = [], failures: Json[] = [];
   let unsupported = false;
   const facade = createWorkspaces({
-    rpc: async (method, params) => {
+    rpc: async (method: Json, params: Json) => {
       calls.push({ method, params });
       try {
         if (unsupported && method === 'workspace.worktree.remove') throw Object.assign(new Error('Method not found'), { code: -32601 });
         return await client.request(method, params);
       } catch (error) { failures.push(error); throw error; }
     },
-    broadcast: event => events.push(event), agents: () => ({ roots: () => [], archive: async () => assert.fail('Removal must not archive sessions before daemon safety checks') }), inDevelopment: async () => 'unsupported',
+    broadcast: (event: Json) => events.push(event), agents: (() => ({ roots: () => [], archive: async () => assert.fail('Removal must not archive sessions before daemon safety checks') })) as Json, inDevelopment: async () => 'unsupported',
   });
   t.after(async () => { await facade.close(); client.close(); await runtime.shutdown(); await rm(directory, { recursive: true, force: true }); });
-  const call = async request => {
+  const call = async (request: Json) => {
     const parsed = SessionInboundMessageSchema.parse(request);
     assert.equal(typeof facade.handlers[parsed.type], 'function', 'native managed-worktree removal request must be implemented');
-    const response = await facade.handlers[parsed.type](parsed, {});
+    const response: Json = await facade.handlers[parsed.type](parsed, {} as Json);
     SessionOutboundMessageSchema.parse(response);
     return response.payload;
   };
   const opened = await call({ type: 'open_project_request', cwd: source, requestId: 'open' });
-  const create = async (id, context = {}) => {
+  const create = async (id: Json, context = {}) => {
     const { registry } = await client.request('registry.owner', {});
     return (await client.request('workspace.worktree.create', { workspaceId: opened.workspace.id, mappingId: 'approved', ifRevision: registry.revision, requestId: id, ...context })).workspace;
   };
-  const remove = (entry, requestId, extra = {}) => call({ type: 'paseo_worktree_archive_request', workspaceId: entry.id, worktreePath: entry.directory, scope: 'worktree', requestId, ...extra });
+  const remove = (entry: Json, requestId: Json, extra = {}) => call({ type: 'paseo_worktree_archive_request', workspaceId: entry.id, worktreePath: entry.directory, scope: 'worktree', requestId, ...extra });
   const snapshot = () => readFile(path.join(home, 'state', 'web-workspaces.json'), 'utf8');
-  return { home, source, runtime, client, git, create, remove, call, snapshot, calls, events, failures, agents, opened, unsupported: value => { unsupported = value; } };
+  return { home, source, runtime, client, git, create, remove, call, snapshot, calls, events, failures, agents, opened, unsupported: (value: Json) => { unsupported = value; } };
 }
 
 test('native explicit worktree scope removes a disposable managed checkout; archive-only preserves it', async t => {
@@ -69,7 +73,7 @@ test('native explicit worktree scope removes a disposable managed checkout; arch
   assert.equal(await readFile(path.join(f.source, 'tracked'), 'utf8'), 'keep');
   assert.equal(await readFile(path.join(f.home, 'worktree-destinations.json'), 'utf8'), mapping);
   const registry = JSON.parse(await f.snapshot());
-  assert.ok(registry.workspaces.find(entry => entry.id === made.id).worktree.removedAt);
+  assert.ok(registry.workspaces.find((entry: Json) => entry.id === made.id).worktree.removedAt);
   assert.deepEqual(registry.worktreeJournal, {});
   assert.equal(f.calls.filter(c => c.method === 'workspace.worktree.remove').length, 1);
   assert.deepEqual(Object.keys(f.calls.find(c => c.method === 'workspace.worktree.remove').params).sort(), ['ifRevision', 'requestId', 'workspaceId']);
@@ -94,9 +98,9 @@ test('a real runtime writer assignment prevents facade deletion and retains its 
   await f.runtime.prompt('root', { clientMessageId: 'start', delivery: 'auto', content: [{ type: 'text', text: 'Work' }] });
   const assignment = await f.agents[0].call('alp_delegate', { agent: 'peer', task: 'Keep this checkout', mode: 'workspace-write', writeRoot: made.directory, wait: false });
   assert.ok(assignment.assignmentId, JSON.stringify(assignment));
-  assert.ok(f.runtime.status('root').leases.some(lease => lease.assignmentId === assignment.assignmentId && lease.checkout === made.directory), 'writer holds the real runtime checkout lease');
+  assert.ok(f.runtime.status('root')!.leases.some(lease => lease.assignmentId === assignment.assignmentId && lease.checkout === made.directory), 'writer holds the real runtime checkout lease');
   const ledger = JSON.parse(await readFile(path.join(f.home, 'results.json'), 'utf8'));
-  assert.ok(ledger.results.some(entry => entry.assignmentId === assignment.assignmentId && entry.checkout === made.directory));
+  assert.ok(ledger.results.some((entry: Json) => entry.assignmentId === assignment.assignmentId && entry.checkout === made.directory));
   const before = await f.snapshot();
   const result = await f.remove(made, 'writer');
   assert.equal(result.success, false); assert.equal(f.failures.at(-1).data.reason, 'workspace_assignment_result');
@@ -105,7 +109,7 @@ test('a real runtime writer assignment prevents facade deletion and retains its 
 
 test('dirty, nonowner, external and unsupported removals preserve checkout and registry metadata', async t => {
   const f = await fixture(t), made = await f.create('new');
-  const deny = async (entry, id, pattern, extra) => {
+  const deny = async (entry: Json, id: Json, pattern: Json, extra?: Json) => {
     const before = await f.snapshot();
     const result = await f.remove(entry, id, extra);
     assert.equal(result.success, false); assert.match(result.error.message, pattern);
@@ -125,7 +129,7 @@ test('dirty, nonowner, external and unsupported removals preserve checkout and r
 
 test('runtime admission, retained assignments and saved sessions refuse removal without orphaning metadata', async t => {
   const f = await fixture(t), made = await f.create('new');
-  let release, entered;
+  let release, entered: Json;
   const gate = new Promise(resolve => { release = resolve; });
   const ready = new Promise(resolve => { entered = resolve; });
   const holding = f.runtime.withWorkspaceMutation(made.directory, async () => { entered(); await gate; });
@@ -136,7 +140,7 @@ test('runtime admission, retained assignments and saved sessions refuse removal 
     assert.equal(busy.success, false); assert.match(busy.error.message, /in use|retained/i);
     assert.equal(f.failures.at(-1).data.reason, 'workspace_busy');
     assert.equal(await f.snapshot(), before); await access(made.directory);
-  } finally { release(); await holding; }
+  } finally { release!(); await holding; }
   await writeFile(path.join(f.home, 'recall.json'), JSON.stringify([{ assignmentId: 'retained', cwd: made.directory }]));
   const retained = await f.remove(made, 'retained');
   assert.equal(f.failures.at(-1).data.reason, 'workspace_assignment_result');

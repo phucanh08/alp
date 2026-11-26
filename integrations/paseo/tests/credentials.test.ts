@@ -7,6 +7,10 @@ import path from 'node:path';
 import { createWebServer, credentialDir, legacyRelayKeyFile, relayKeyFile, serveToken, tokenFile, tokenSocketPath, webFile } from '@anhlp/alp-paseo/web';
 import { relayKeyPair } from '@anhlp/alp-paseo/paseo/relay';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
+
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 
 /**
  * t-cde5: the Paseo password and the relay's secret key live only in the credential directory
@@ -16,9 +20,9 @@ import { teardown } from '../../../test/support/teardown.ts';
  */
 
 const posix = process.platform !== 'win32';
-const mode = async file => (await stat(file)).mode & 0o777;
+const mode = async (file: Json) => (await stat(file)).mode & 0o777;
 
-async function scratch(t) {
+async function scratch(t: TestContext) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-cde5-'));
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -31,7 +35,7 @@ async function scratch(t) {
 }
 
 /** Every regular file under `root` whose bytes contain `needle`, relative to root. */
-async function filesHolding(root, needle) {
+async function filesHolding(root: Json, needle: Json) {
   const found = [];
   for (const entry of await readdir(root, { recursive: true, withFileTypes: true })) {
     if (!entry.isFile()) continue;
@@ -42,7 +46,7 @@ async function filesHolding(root, needle) {
 }
 
 /** Asks the socket at `socketPath` with one request line; resolves with what it answered. */
-const ask = (socketPath, line) => new Promise((resolve, reject) => {
+const ask = (socketPath: Json, line?: Json) => new Promise<string>((resolve, reject) => {
   const socket = net.connect(socketPath);
   let received = '';
   socket.setEncoding('utf8');
@@ -136,7 +140,7 @@ test('t-cde5: the token socket answers only a request line, with the password, a
   assert.equal(web.tokenSocket, socketPath);
   const preferred = path.join(home, 'paseo', 'token.sock');
   if (Buffer.byteLength(preferred) < 100) assert.equal(socketPath, preferred);
-  else assert.match(socketPath, new RegExp(`^/tmp/alp-paseo-${process.getuid()}-[0-9a-f]{12}/token\\.sock$`), 'a long home: under /tmp, not TMPDIR');
+  else assert.match(socketPath, new RegExp(`^/tmp/alp-paseo-${process.getuid!()}-[0-9a-f]{12}/token\\.sock$`), 'a long home: under /tmp, not TMPDIR');
   assert.equal((await stat(socketPath)).isSocket(), true);
   assert.equal(await mode(socketPath), 0o600);
   assert.equal(await mode(path.dirname(socketPath)), 0o700);
@@ -149,7 +153,7 @@ test('t-cde5: the token socket answers only a request line, with the password, a
 
   // A socket that is not 0600 stops the start, and none is left.
   const other = (await scratch(t)).home;
-  await assert.rejects(serveToken({ home: other, answer: async () => ({}), afterListen: file => chmod(file, 0o644) }), /must have mode 0600, not 0644/);
+  await assert.rejects(serveToken({ home: other, answer: async () => ({}), afterListen: (file: Json) => chmod(file, 0o644) }), /must have mode 0600, not 0644/);
   await assert.rejects(stat(tokenSocketPath(other)), { code: 'ENOENT' });
   if (path.dirname(tokenSocketPath(other)) !== credentialDir(other)) await assert.rejects(stat(path.dirname(tokenSocketPath(other))), { code: 'ENOENT' }, 'the /tmp directory goes too');
   // A credential directory that is not 0700 (and holds something) stops the start.

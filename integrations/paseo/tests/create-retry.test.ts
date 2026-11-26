@@ -11,19 +11,23 @@ import { createAgents } from '../server/dist/paseo/agents.js';
 import { createWorkspaces } from '../server/dist/paseo/workspaces.js';
 import { createCreationReceipts } from '../server/dist/paseo/create-receipts.js';
 import { writeAtomic } from '@anhlp/alp-core/atomic';
+import type { TestContext } from 'node:test';
 
-async function fixture(t) {
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+async function fixture(t: TestContext) {
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-create-retry-'));
   const cwd = path.join(home, 'project'); await mkdir(cwd);
-  const registry = createRegistry(home), sessions = [], calls = [], frames = [];
-  let fault, gate, journalWrite, active = true;
-  const summary = id => ({ id, status: 'idle', projectRoot: cwd, agent: 'main', title: 'root', runtime: 'codex', model: 'test', mode: 'workspace-write', workflow: { mode: 'custom' }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
-  const request = async (method, params) => {
+  const registry = createRegistry(home), sessions: Json[] = [], calls: Json[] = [], frames: Json[] = [];
+  let fault: Json, gate: Json, journalWrite: Json, active = true;
+  const summary = (id: Json) => ({ id, status: 'idle', projectRoot: cwd, agent: 'main', title: 'root', runtime: 'codex', model: 'test', mode: 'workspace-write', workflow: { mode: 'custom' }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+  const request = async (method: Json, params: Json) => {
     calls.push({ method, params });
     if (gate?.method === method) { const held = gate; gate = undefined; held.enter(); await held.promise; }
     const faultMatches = () => fault && (fault.method === method || (method === 'registry.owner' && fault.method === params.operation));
     if (faultMatches() && !fault.after) { const held = fault; fault = undefined; throw held.error; }
-    let result = {};
+    let result: Record<string, Json> = {};
     if (method === 'registry.owner') result = { registry: await registry.snapshot(), ...(params.operation ? { result: await registry.mutate(params.operation, params.args, { requestId: params.requestId }) } : {}) };
     // Return the committed snapshot after the mutation, as alpd does.
     if (method === 'registry.owner') result.registry = await registry.snapshot();
@@ -38,25 +42,25 @@ async function fixture(t) {
     return result;
   };
   const connection = { closed: false, onEvent() {}, onClose() {}, close() {}, request };
-  let agents, workspaces;
+  let agents: Json, workspaces: Json;
   const setup = () => {
-    const receipts = createCreationReceipts(home, { write: async (...args) => { await writeAtomic(...args); if (journalWrite) await journalWrite(JSON.parse(args[1])); } });
+    const receipts = createCreationReceipts(home, { write: async (...args: Parameters<typeof writeAtomic>) => { await writeAtomic(...args); if (journalWrite) await journalWrite(JSON.parse(args[1] as string)); } });
     workspaces = createWorkspaces({ rpc: request, receipts, broadcast() {}, agents: () => agents.view, inDevelopment: async () => 'unsupported' });
-    agents = createAgents({ home, receipts, clientFactory: async () => connection, directory: workspaces, broadcast() {} });
+    agents = createAgents({ home, receipts, clientFactory: (async () => connection) as Json, directory: workspaces, broadcast() {} });
   };
   setup();
   t.after(async () => { await agents.close(); await workspaces.close(); await rm(home, { recursive: true, force: true }); });
   await agents.start();
-  const client = { clientId: 'untrusted', emit: frame => frames.push(frame), assertActive() { if (!active) throw new Error('socket disconnected'); } };
-  const send = (message, context = client) => agents.handlers.create_agent_request(message, context);
+  const client = { clientId: 'untrusted', emit: (frame: Json) => frames.push(frame), assertActive() { if (!active) throw new Error('socket disconnected'); } };
+  const send = (message: Json, context: Json = client) => agents.handlers.create_agent_request(message, context);
   const agentRequest = { type: 'create_agent_request', requestId: 'once', config: { provider: 'alp', cwd }, initialPrompt: 'hello' };
   const workspaceRequest = { type: 'workspace.create.request', requestId: 'workspace-once', idempotencyKey: 'workspace-key', source: { kind: 'directory', path: cwd }, agent: { config: { provider: 'alp', cwd }, initialPrompt: 'hello' } };
   return { home, cwd, get agents() { return agents; }, get workspaces() { return workspaces; }, registry, calls, sessions, frames, client, send, agentRequest, workspaceRequest,
     async restart() { await agents.close(); await workspaces.close(); setup(); await agents.start(); },
-    onJournal(fn) { journalWrite = fn; }, active(value) { active = value; },
-    fail(method, error, after = false) { fault = { method, error, after }; },
-    hold(method) { let release, enter; const entered = new Promise(r => enter = r), promise = new Promise(r => release = r); gate = { method, promise, enter }; return { entered, release }; },
-    count: method => calls.filter(c => c.method === method).length,
+    onJournal(fn: Json) { journalWrite = fn; }, active(value: Json) { active = value; },
+    fail(method: Json, error: Json, after = false) { fault = { method, error, after }; },
+    hold(method: Json) { let release!: (value?: unknown) => void, enter!: (value?: unknown) => void; const entered = new Promise(r => enter = r), promise = new Promise(r => release = r); gate = { method, promise, enter }; return { entered, release }; },
+    count: (method: Json) => calls.filter(c => c.method === method).length,
   };
 }
 
@@ -165,8 +169,8 @@ test('a read failure after native creation resumes the unfinished workflow witho
 for (const kind of ['agent', 'workspace']) {
   test(`disconnect while persisting ${kind} write-ahead state cannot dispatch late creation`, async t => {
     const f = await fixture(t);
-    f.onJournal(value => {
-      if (Object.values(value.receipts).some(row => row.state.phase === (kind === 'agent' ? 'create_pending' : 'workspace_pending'))) { f.active(false); f.onJournal(undefined); }
+    f.onJournal((value: Json) => {
+      if (Object.values(value.receipts).some((row: Json) => row.state.phase === (kind === 'agent' ? 'create_pending' : 'workspace_pending'))) { f.active(false); f.onJournal(undefined); }
     });
     const send = () => kind === 'agent' ? f.send(f.agentRequest) : f.workspaces.handlers['workspace.create.request'](f.workspaceRequest, f.client);
     assert.match((await send()).payload.error, /disconnected/);
@@ -176,21 +180,21 @@ for (const kind of ['agent', 'workspace']) {
   });
 }
 
-async function journalFixture(t) {
+async function journalFixture(t: TestContext) {
   const home = await mkdtemp(path.join(os.tmpdir(), 'alp-create-journal-'));
-  const stores = [];
+  const stores: Json[] = [];
   t.after(async () => { for (const store of stores) await store.close(); await rm(home, { recursive: true, force: true }); });
   return { home, file: path.join(home, 'state/paseo-create/receipts.json'), lock: path.join(home, 'state/paseo-create/writer.lock'),
-    store(options) { const store = createCreationReceipts(home, options); stores.push(store); return store; } };
+    store(options?: Json) { const store = createCreationReceipts(home, options); stores.push(store); return store; } };
 }
 
 test('journal excludes concurrent writers, never reclaims malformed/stale locks, and drains before releasing', async t => {
-  const f = await journalFixture(t), a = f.store(); let release, entered;
+  const f = await journalFixture(t), a = f.store(); let release, entered: Json;
   const entry = new Promise(r => entered = r), held = new Promise(r => release = r);
   const first = a.run('test', 'key', {}, false, async () => { entered(); await held; }); await entry;
   const b = f.store(); await assert.rejects(b.run('test', 'key', {}, false, async () => assert.fail()), /writer lock exists/);
   let closed = false; const close = a.close().then(() => closed = true);
-  await new Promise(r => setImmediate(r)); assert.equal(closed, false); release(); await first; await close;
+  await new Promise(r => setImmediate(r)); assert.equal(closed, false); release!(); await first; await close;
   await writeFile(f.lock, '', { mode: 0o600 });
   const c = f.store(); await assert.rejects(c.run('test', 'another', {}, false, async () => assert.fail()), /writer lock exists/);
   assert.equal(await readFile(f.lock, 'utf8'), ''); await unlink(f.lock);
@@ -200,9 +204,9 @@ test('journal excludes concurrent writers, never reclaims malformed/stale locks,
 test('failed atomic reservation/request writes authorize no mutation and retain the previous valid journal', async t => {
   const f = await journalFixture(t); let writes = 0, mutations = 0;
   const { writeAtomic } = await import('@anhlp/alp-core/atomic');
-  const a = f.store({ write: async (...args) => { if (++writes === 2) throw new Error('disk fault'); return writeAtomic(...args); } });
+  const a = f.store({ write: async (...args: Parameters<typeof writeAtomic>) => { if (++writes === 2) throw new Error('disk fault'); return writeAtomic(...args); } });
   await assert.rejects(a.run('test', 'key', { secret: 'not-on-disk' }, false, async (_state, checkpoint) => { await checkpoint({ phase: 'create_pending' }); mutations++; }), /disk fault/);
-  assert.equal(mutations, 0); assert.deepEqual(Object.values(JSON.parse(await readFile(f.file, 'utf8')).receipts)[0].state, {});
+  assert.equal(mutations, 0); assert.deepEqual(Object.values<Json>(JSON.parse(await readFile(f.file, 'utf8')).receipts)[0].state, {});
   assert.ok(!(await readFile(f.file, 'utf8')).includes('not-on-disk'));
 });
 

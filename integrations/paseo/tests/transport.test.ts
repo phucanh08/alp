@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CodexTransport } from '@anhlp/alp-paseo';
 
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
 test('transport closes pending requests if child exits', async t => {
   const transport = new CodexTransport(process.execPath, process.cwd(), {}, ['-e', 'setTimeout(() => process.exit(7), 20)']);
   t.after(() => transport.close());
@@ -38,7 +41,7 @@ test('transport answers dynamic tool requests while rejecting approval requests'
   const transport = new CodexTransport(process.execPath, process.cwd(), {}, ['-e', script]);
   t.after(() => transport.close());
   let calls = 0;
-  transport.onRequest(async (method, params) => {
+  transport.onRequest(async (method: Json, params: Json) => {
     assert.equal(method, 'item/tool/call'); assert.equal(params.tool, 'alp_delegate'); calls++;
     return { success: true, contentItems: [{ type: 'inputText', text: 'real result' }] };
   });

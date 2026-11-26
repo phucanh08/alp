@@ -4,34 +4,37 @@
 import fs from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
+
+// `any`: the parent's IPC messages are JSON of every shape; this reads their fields.
+type Json = any;
 const home = process.env.ALP_HOME;
 if (!home || !process.env.ALP_LOCK_FIXTURE || !home.startsWith(process.env.ALP_LOCK_FIXTURE + path.sep)) throw new Error('private fixture home required');
 const guard = path.join(home, 'integrations/paseo.lock.reclaim');
 let armed = false, attempts = 0, signals = 0;
 const mkdir = fs.mkdir;
-fs.mkdir = async (...args) => {
+fs.mkdir = (async (...args: Parameters<typeof mkdir>) => {
   if (!armed || String(args[0]) !== guard) return mkdir(...args);
   attempts++;
-  if (attempts <= 3) process.send({ event: 'release-attempt', attempts });
+  if (attempts <= 3) process.send!({ event: 'release-attempt', attempts });
   if (attempts === 1) {
-    process.send({ event: 'gate' });
-    await new Promise(resolve => { const receive = m => { if (m.command === 'resume') { process.off('message', receive); resolve(); } }; process.on('message', receive); });
+    process.send!({ event: 'gate' });
+    await new Promise<void>(resolve => { const receive = (m: Json) => { if (m.command === 'resume') { process.off('message', receive); resolve(); } }; process.on('message', receive); });
   }
   throw Object.assign(new Error('injected release guard failure'), { code: 'EIO' });
-};
+}) as typeof fs.mkdir;
 syncBuiltinESMExports();
 // Registered before the integration's own handler, so it runs first on each signal.
-process.on('SIGTERM', () => { armed = true; signals++; process.send({ event: 'signal', signals }); });
+process.on('SIGTERM', () => { armed = true; signals++; process.send!({ event: 'signal', signals }); });
 // The integration registers uncaughtException last; its handlers are then all installed.
 const on = process.on.bind(process);
-process.on = (event, listener) => {
+process.on = ((event: string | symbol, listener: (...args: Json[]) => void) => {
   const result = on(event, listener);
-  if (event === 'uncaughtException') queueMicrotask(() => process.send({ event: 'handlers' }));
+  if (event === 'uncaughtException') queueMicrotask(() => process.send!({ event: 'handlers' }));
   return result;
-};
-process.on('message', message => {
+}) as typeof process.on;
+process.on('message', (message: Json) => {
   if (message.command !== 'throw') return;
   // Acknowledge after the integration's uncaughtException handler has run for this error.
-  on('uncaughtException', () => process.send({ event: 'thrown' }));
+  on('uncaughtException', () => process.send!({ event: 'thrown' }));
   setImmediate(() => { throw new Error('injected uncaught exception during shutdown'); });
 });

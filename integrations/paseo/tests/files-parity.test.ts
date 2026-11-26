@@ -12,6 +12,10 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { createDaemonServer } from '@anhlp/alp-daemon';
 import { fakeTransport } from '../../../test/support/fake-agent.ts';
 import { directorySuggestions, fileExplorer } from '../server/dist/paseo/files.js';
+import type { TestContext } from 'node:test';
+
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 
 const hasGit = (() => { try { execFileSync('git', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 
@@ -21,9 +25,9 @@ const SKIPPED = new Set(['node_modules', 'Library', '.git', 'dist', 'build', '.c
 const HOME_SCAN_LIMIT = 5_000;
 const HOME_DEPTH = 4;
 const WORKSPACE_SCAN_LIMIT = 20_000;
-const children = directory => readdir(directory, { withFileTypes: true }).catch(() => []);
-const expand = query => query === '~' ? os.homedir() : query.startsWith('~/') ? path.join(os.homedir(), query.slice(2)) : query;
-function rank(candidate, query) {
+const children = (directory: Json) => readdir(directory, { withFileTypes: true }).catch(() => []);
+const expand = (query: Json) => query === '~' ? os.homedir() : query.startsWith('~/') ? path.join(os.homedir(), query.slice(2)) : query;
+function rank(candidate: Json, query: Json) {
   const name = candidate.toLowerCase();
   const wanted = query.toLowerCase();
   if (name === wanted) return 0;
@@ -33,7 +37,7 @@ function rank(candidate, query) {
   for (const char of name) if (char === wanted[at]) at += 1;
   return at === wanted.length ? 3 : undefined;
 }
-async function pathCompletions(query, limit) {
+async function pathCompletions(query: Json, limit: Json) {
   const typed = expand(query.trim());
   const folder = typed.endsWith('/') || typed.endsWith(path.sep);
   const parent = folder ? typed : path.dirname(typed);
@@ -43,7 +47,7 @@ async function pathCompletions(query, limit) {
     .map(entry => entry.name).sort((a, b) => a.localeCompare(b)).slice(0, limit)
     .map(name => ({ path: path.join(parent, name), kind: 'directory' }));
 }
-async function homeSearch(query, limit) {
+async function homeSearch(query: Json, limit: Json) {
   const found = [];
   let queue = [os.homedir()];
   let scanned = 0;
@@ -65,7 +69,7 @@ async function homeSearch(query, limit) {
   }
   return found.sort((a, b) => a.score - b.score || a.depth - b.depth || a.path.localeCompare(b.path)).slice(0, limit).map(entry => ({ path: entry.path, kind: 'directory' }));
 }
-async function workspaceEntries(root) {
+async function workspaceEntries(root: Json) {
   let listed;
   try { listed = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }); } catch { listed = undefined; }
   if (listed !== undefined) {
@@ -74,8 +78,8 @@ async function workspaceEntries(root) {
     for (const file of files) for (let dir = path.posix.dirname(file); dir !== '.'; dir = path.posix.dirname(dir)) directories.add(dir);
     return [...[...directories].map(dir => ({ path: dir, kind: 'directory' })), ...files.map(file => ({ path: file, kind: 'file' }))];
   }
-  const entries = [];
-  const walk = async relative => {
+  const entries: Json[] = [];
+  const walk = async (relative: Json) => {
     for (const entry of await children(path.join(root, relative))) {
       if (entries.length >= WORKSPACE_SCAN_LIMIT) return;
       if (entry.name.startsWith('.') || SKIPPED.has(entry.name)) continue;
@@ -87,10 +91,10 @@ async function workspaceEntries(root) {
   await walk('');
   return entries;
 }
-async function legacyWorkspaceSearch(message, root, limit) {
+async function legacyWorkspaceSearch(message: Json, root: Json, limit: Json) {
   const wantFiles = message.includeFiles === true;
   const wantDirectories = message.includeDirectories !== false;
-  const keep = entry => entry.kind === 'file' ? wantFiles : wantDirectories;
+  const keep = (entry: Json) => entry.kind === 'file' ? wantFiles : wantDirectories;
   const query = message.query.trim().replace(/^\.\//, '');
   if (!query) {
     return (await children(root)).filter(entry => !entry.name.startsWith('.'))
@@ -107,10 +111,10 @@ async function legacyWorkspaceSearch(message, root, limit) {
     const byPath = rank(entry.path, query);
     return { entry, score: byName ?? (byPath === undefined ? undefined : byPath + 4) };
   }).filter(row => row.score !== undefined)
-    .sort((a, b) => a.score - b.score || a.entry.path.length - b.entry.path.length || a.entry.path.localeCompare(b.entry.path))
+    .sort((a, b) => a.score! - b.score! || a.entry.path.length - b.entry.path.length || a.entry.path.localeCompare(b.entry.path))
     .slice(0, limit).map(row => row.entry);
 }
-async function legacySuggestions(message) {
+async function legacySuggestions(message: Json) {
   const limit = message.limit ?? 30;
   const cwd = message.cwd?.trim();
   const query = message.query.trim();
@@ -118,16 +122,16 @@ async function legacySuggestions(message) {
     : !query ? [] : path.isAbsolute(query) || query.startsWith('~') ? await pathCompletions(query, limit) : await homeSearch(query, limit);
   return { requestId: message.requestId, directories: entries.filter(entry => entry.kind === 'directory').map(entry => entry.path), entries, error: null };
 }
-const IMAGES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
-async function inside(root, relative) {
+const IMAGES: Record<string, Json> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
+async function inside(root: Json, relative: Json) {
   const realRoot = await realpath(root);
   const target = path.resolve(realRoot, relative || '.');
   const real = await realpath(target);
   if (real !== realRoot && !real.startsWith(realRoot + path.sep)) throw new Error('Access outside of workspace is not allowed');
   return { realRoot, real, target };
 }
-const posixRelative = (root, target) => path.relative(root, target).split(path.sep).join('/') || '.';
-function textOf(buffer) {
+const posixRelative = (root: Json, target: Json) => path.relative(root, target).split(path.sep).join('/') || '.';
+function textOf(buffer: Json) {
   if (buffer.includes(0)) return undefined;
   let control = 0;
   const head = buffer.subarray(0, 16 * 1024);
@@ -135,8 +139,8 @@ function textOf(buffer) {
   if (head.length && control / head.length > 0.3) return undefined;
   try { return new TextDecoder('utf-8', { fatal: true }).decode(buffer); } catch { return undefined; }
 }
-async function legacyExplorer(message) {
-  const reply = fields => ({ requestId: message.requestId, cwd: message.cwd, path: message.path ?? '.', mode: message.mode, directory: null, file: null, error: null, ...fields });
+async function legacyExplorer(message: Json) {
+  const reply = (fields: Json) => ({ requestId: message.requestId, cwd: message.cwd, path: message.path ?? '.', mode: message.mode, directory: null, file: null, error: null, ...fields });
   try {
     const root = path.resolve(expand(message.cwd));
     const { realRoot, real, target } = await inside(root, message.path ?? '.');
@@ -164,26 +168,26 @@ async function legacyExplorer(message) {
     const text = textOf(buffer);
     if (text === undefined) return reply({ path: relative, file: { ...base, kind: 'binary', encoding: 'none', mimeType: 'application/octet-stream' } });
     return reply({ path: relative, file: { ...base, kind: 'text', encoding: 'utf-8', content: text, mimeType: path.extname(real).toLowerCase() === '.json' ? 'application/json' : 'text/plain' } });
-  } catch (error) {
+  } catch (error: Json) {
     return reply({ error: error?.code === 'ENOENT' ? 'No such file or directory' : error?.message ?? String(error) });
   }
 }
 
 // ---- alpd behind the bridge ----
 
-async function alpd(t) {
+async function alpd(t: TestContext) {
   const runtime = createAlpRuntime({ language: 'English', transport: fakeTransport([]), supervisor: false });
   const daemon = createDaemonServer({ runtime, socketPath: '', version: 'test' });
   const client = daemon.local();
   t.after(async () => { client.close(); await runtime.shutdown(); });
-  return (method, params) => client.request(method, params);
+  return (method: Json, params: Json) => client.request(method, params);
 }
 
-async function tree(t, files, { git = false } = {}) {
+async function tree(t: TestContext, files: Json, { git = false } = {}) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'alp-files-parity-')));
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   if (git) execFileSync('git', ['init', '-q'], { cwd: root, stdio: 'ignore' });
-  for (const [file, content] of Object.entries(files)) {
+  for (const [file, content] of Object.entries<Json>(files)) {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true });
     await writeFile(path.join(root, file), content);
   }
@@ -201,13 +205,13 @@ const QUERIES = ['intro', 'server', 'srv', 'guide', 'ci', 'readme', 'deep', 'sá»
 const SUFFIXES = ['intro.md', 'guide/intro.md', 'ci.yml', 'README.md', 'deep-notes.md', 'server.ts'];
 const SHAPES = [{ includeFiles: true, includeDirectories: false }, { includeFiles: false, includeDirectories: true }, { includeFiles: true, includeDirectories: true }, {}];
 
-async function sameSuggestions(rpc, root) {
+async function sameSuggestions(rpc: Json, root: Json) {
   let compared = 0;
   for (const shape of SHAPES) {
     for (const [query, matchMode] of [...QUERIES.map(query => [query]), ...SUFFIXES.map(query => [query, 'suffix']), ['']]) {
       for (const limit of [30, 3]) {
-        const message = { type: 'directory_suggestions_request', requestId: 'p', cwd: root, query, ...shape, ...(matchMode ? { matchMode } : {}), limit };
-        assert.deepEqual((await directorySuggestions(message, rpc)).payload, await legacySuggestions(message), JSON.stringify(message));
+        const message: Json = { type: 'directory_suggestions_request', requestId: 'p', cwd: root, query, ...shape, ...(matchMode ? { matchMode } : {}), limit };
+        assert.deepEqual((await directorySuggestions(message, rpc) as Json).payload, await legacySuggestions(message), JSON.stringify(message));
         compared++;
       }
     }
@@ -221,7 +225,7 @@ test('workspace suggestions: every query, mode and shape answers as the local ba
   await symlink(path.join(root, 'README.md'), path.join(root, 'readme-link.md'));
   assert.equal(await sameSuggestions(rpc, root), SHAPES.length * (QUERIES.length + SUFFIXES.length + 1) * 2);
   // Deeper than workspace.files.search walks (12 levels), as git ls-files lists it.
-  const deep = await directorySuggestions({ type: 'directory_suggestions_request', requestId: 'd', cwd: root, query: 'deep-notes', includeFiles: true, includeDirectories: false }, rpc);
+  const deep: Json = await directorySuggestions({ type: 'directory_suggestions_request', requestId: 'd', cwd: root, query: 'deep-notes', includeFiles: true, includeDirectories: false }, rpc);
   assert.deepEqual(deep.payload.entries, [{ path: DEEP, kind: 'file' }]);
 });
 
@@ -233,15 +237,15 @@ test('workspace suggestions outside a repository answer as the local walk did', 
 
 test('more names than one page: the complete set is ranked, as the local backend ranked it', { skip: !hasGit && 'git is not installed' }, async t => {
   const rpc = await alpd(t);
-  const files = {};
+  const files: Record<string, Json> = {};
   for (let index = 0; index < 2600; index++) files[`pkg${index % 13}/mod${String(index).padStart(4, '0')}.ts`] = 'x';
   files['zz/last/mod.ts'] = 'x';
   const root = await tree(t, files, { git: true });
   const calls = [];
-  const counted = (method, params) => { calls.push(method); return rpc(method, params); };
+  const counted = (method: Json, params: Json) => { calls.push(method); return rpc(method, params); };
   for (const query of ['mod', 'mod.ts', 'zz', 'pkg12/mod2599']) {
-    const message = { type: 'directory_suggestions_request', requestId: 'm', cwd: root, query, includeFiles: true, includeDirectories: true, limit: 100 };
-    assert.deepEqual((await directorySuggestions(message, counted)).payload, await legacySuggestions(message), query);
+    const message: Json = { type: 'directory_suggestions_request', requestId: 'm', cwd: root, query, includeFiles: true, includeDirectories: true, limit: 100 };
+    assert.deepEqual((await directorySuggestions(message, counted) as Json).payload, await legacySuggestions(message), query);
   }
   assert.ok(calls.length > 4, 'the bridge read more than one page');
 });
@@ -259,8 +263,8 @@ test('host folders: typed paths and names under home answer as the local backend
   assert.equal(os.homedir(), home);
   for (const query of ['alp', 'ALP', 'ohr', 'notes', 'zzz', '~', '~/', '~/Code/al', '~/Code/', '~/Code/.a', `${home}/Code/AL`, `${home}/work/`, '/no/such/dir/x', '']) {
     for (const limit of [30, 2]) {
-      const message = { type: 'directory_suggestions_request', requestId: 'h', query, limit };
-      assert.deepEqual((await directorySuggestions(message, rpc)).payload, await legacySuggestions(message), `${query} ${limit}`);
+      const message: Json = { type: 'directory_suggestions_request', requestId: 'h', query, limit };
+      assert.deepEqual((await directorySuggestions(message, rpc) as Json).payload, await legacySuggestions(message), `${query} ${limit}`);
     }
   }
 });
@@ -283,22 +287,22 @@ test('the Files panel: listings and text, image, binary and large files answer a
   let second = 0;
   for (const name of await readdir(root)) await utimes(path.join(root, name), new Date(Date.UTC(2026, 0, 1, 0, 0, ++second)), new Date(Date.UTC(2026, 0, 1, 0, 0, second)));
   for (const name of await readdir(path.join(root, 'docs'))) await utimes(path.join(root, 'docs', name), new Date(Date.UTC(2026, 0, 2, 0, 0, ++second)), new Date(Date.UTC(2026, 0, 2, 0, 0, second)));
-  const ask = async message => {
+  const ask = async (message: Json) => {
     const full = { type: 'file_explorer_request', requestId: 'x', cwd: root, ...message };
-    return [(await fileExplorer(full, rpc)).payload, await legacyExplorer(full)];
+    return [(await fileExplorer(full, rpc) as Json).payload, await legacyExplorer(full)];
   };
   // alpd's block list is a floor the local backend did not have: .git and .env are never listed.
   const BLOCKED = new Set(['.git', '.env']);
   // A directory's own size means nothing (alpd answers 0); entries of one time (a link and its target) in any order.
-  const comparable = entries => entries.map(entry => entry.kind === 'directory' ? { ...entry, size: 'directory' } : entry).sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt) || a.name.localeCompare(b.name));
+  const comparable = (entries: Json) => entries.map((entry: Json) => entry.kind === 'directory' ? { ...entry, size: 'directory' } : entry).sort((a: Json, b: Json) => b.modifiedAt.localeCompare(a.modifiedAt) || a.name.localeCompare(b.name));
   for (const listed of ['.', 'docs', 'docs-link', 'dist']) {
     const [now, before] = await ask({ path: listed, mode: 'list' });
-    assert.deepEqual(now.directory.entries.map(entry => entry.modifiedAt), [...now.directory.entries.map(entry => entry.modifiedAt)].sort().reverse(), 'newest first');
+    assert.deepEqual(now.directory.entries.map((entry: Json) => entry.modifiedAt), [...now.directory.entries.map((entry: Json) => entry.modifiedAt)].sort().reverse(), 'newest first');
     assert.deepEqual({ ...now, directory: { ...now.directory, entries: comparable(now.directory.entries) } },
-      { ...before, directory: { ...before.directory, entries: comparable(before.directory.entries.filter(entry => !BLOCKED.has(entry.name))) } }, listed);
+      { ...before, directory: { ...before.directory, entries: comparable(before.directory.entries.filter((entry: Json) => !BLOCKED.has(entry.name))) } }, listed);
   }
   const [root0] = await ask({ path: '.', mode: 'list' });
-  assert.ok(!root0.directory.entries.some(entry => BLOCKED.has(entry.name) || entry.name.startsWith('outside')), 'neither blocked names nor links that lead outside');
+  assert.ok(!root0.directory.entries.some((entry: Json) => BLOCKED.has(entry.name) || entry.name.startsWith('outside')), 'neither blocked names nor links that lead outside');
   for (const file of ['README.md', 'bom.md', 'data.json', 'dot.png', 'logo.svg', 'blob.bin', 'latin1.txt', 'control.txt', 'empty.txt', 'big.log', 'docs/guide.md', 'docs-link/guide.md', 'guide-link.md', 'dist/out.js']) {
     const [now, before] = await ask({ path: file, mode: 'file' });
     assert.equal(typeof now.file?.revision, 'string', file);

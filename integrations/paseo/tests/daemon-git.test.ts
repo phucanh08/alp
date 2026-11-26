@@ -6,6 +6,9 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
 test('Windows checkout polling hides every Git child console and preserves checkout facts', async t => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'alp-git-test-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
@@ -49,9 +52,9 @@ test('Windows checkout polling hides every Git child console and preserves check
 
 test('POSIX checkout cache preserves facts and caching without executing repository fsmonitor',async t=>{
  if(process.platform==='win32')return t.skip('POSIX hardened read adapter');
- const assert=(await import('node:assert/strict')).default;const {mkdir,writeFile,realpath,access}=await import('node:fs/promises');
+ const assert: typeof import('node:assert').strict=(await import('node:assert/strict')).default;const {mkdir,writeFile,realpath,access}=await import('node:fs/promises');
  const directory=await realpath(await mkdtemp(path.join(os.tmpdir(),'alp-safe-checkout-')));t.after(()=>rm(directory,{recursive:true,force:true}));const repo=path.join(directory,'repo');await mkdir(repo);
- const native=(...args)=>execFileSync('/usr/bin/git',['-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false',...args],{cwd:repo,env:{PATH:'/usr/bin:/bin',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'},encoding:'utf8'}).trim();
+ const native=(...args: Json[])=>execFileSync('/usr/bin/git',['-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false',...args],{cwd:repo,env:{PATH:'/usr/bin:/bin',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'},encoding:'utf8'}).trim();
  native('init','-qb','main');await writeFile(path.join(repo,'file'),'one');native('add','.');native('-c','user.name=Test','-c','user.email=test@localhost','commit','-qm','initial');native('config','remote.origin.url','https://example.com/repo.git');const trap=path.join(directory,'TRAP');native('config','core.fsmonitor',`touch '${trap}'`);
  const outfile=path.join(directory,'git.mjs');await build({entryPoints:[fileURLToPath(new URL('../server/paseo/git.ts',import.meta.url))],outfile,bundle:true,platform:'node',format:'esm'});const {checkoutCache,checkoutFacts}=await import(pathToFileURL(outfile).href);const cache=checkoutCache(10_000,checkoutFacts);
  assert.deepEqual(await cache.read(repo),{isGit:true,repoRoot:repo,currentBranch:'main',remoteUrl:'https://example.com/repo.git',isDirty:false});await writeFile(path.join(repo,'file'),'two');assert.equal((await cache.read(repo)).isDirty,false);assert.equal((await cache.read(repo,true)).isDirty,true);await assert.rejects(access(trap));

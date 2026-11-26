@@ -17,22 +17,25 @@ import { createUploadReader } from '../server/dist/uploads.js';
 import { createAlpProvider } from '../server/dist/provider-core.js';
 import { teardown } from '../../../test/support/teardown.ts';
 
-const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+const sha256 = (bytes: Json) => createHash('sha256').update(bytes).digest('hex');
 const skip = process.platform === 'win32' && 'attachments are macOS and Linux only';
 
-async function until(check, what = 'condition') {
+async function until(check: Json, what = 'condition') {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail(`${what} did not happen`);
 }
 
-function fakeTransport(transports) {
+function fakeTransport(transports: Json) {
   return () => {
-    const transport = {
-      calls: [], threadId: `thread-${transports.length}`,
+    const transport: Json = {
+      calls: [] as Json[], threadId: `thread-${transports.length}`,
       async initialize() {},
-      onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
+      onNotification(fn: Json) { this.notification = fn; }, onFailure(fn: Json) { this.failure = fn; }, onRequest(fn: Json) { this.serverRequest = fn; },
       async close() {},
-      async request(method, params) {
+      async request(method: Json, params: Json) {
         this.calls.push({ method, params });
         if (method.startsWith('thread/')) return { thread: { id: this.threadId } };
         if (method === 'turn/start') {
@@ -57,7 +60,7 @@ test('a Paseo upload becomes one alpd object the runtime reads from a staged cop
   const project = path.join(directory, 'project');
   await initProject(project);
   await writeFile(path.join(project, '.alp/settings.json'), JSON.stringify({ workflow: { supervisor: false } }));
-  const transports = [];
+  const transports: Json[] = [];
   const runtime = createAlpRuntime({ supervisor: false, transport: fakeTransport(transports), runLogDir: path.join(directory, 'runs'), attachmentStageDir: attachmentStageDir(home) });
   const store = createStore(path.join(home, 'state'));
   const server = createDaemonServer({ runtime, socketPath: daemonPaths(path.join(directory, 'd')).socket, version: 'test', store, home });
@@ -87,18 +90,18 @@ test('a Paseo upload becomes one alpd object the runtime reads from a staged cop
   });
   const connection = await registration.connect({ versions: [1], capabilities: PROVIDER_CAPABILITIES });
   defer(() => connection.close());
-  const events = [];
+  const events: Json[] = [];
   connection.onEvent(event => events.push(event));
   await connection.send({ type: 'session.open', requestId: 'open', sessionId: 's', config: { cwd: project, model: 'pho', mode: 'full-access', settings: {}, env: {}, mcpServers: {}, persist: true }, history: 'skip' });
-  const prompt = content => connection.send({ type: 'session.prompt', sessionId: 's', prompt: { clientMessageId: 'p1', delivery: 'auto', input: { type: 'message', content } } });
+  const prompt = (content: Json) => connection.send({ type: 'session.prompt', sessionId: 's', prompt: { clientMessageId: 'p1', delivery: 'auto', input: { type: 'message', content } } });
   await prompt([{ type: 'text', text: 'read it' }, part]);
-  await until(() => transports.some(transport => transport.calls.some(call => call.method === 'turn/start')), 'turn started');
+  await until(() => transports.some(transport => transport.calls.some((call: Json) => call.method === 'turn/start')), 'turn started');
   const results = () => events.filter(event => event.type === 'session.prompt_result');
   await until(() => results().length, 'prompt answered');
   assert.deepEqual(results().map(event => event.result.type), ['turn']);
 
   const start = transports.flatMap(transport => transport.calls).find(call => call.method === 'turn/start');
-  const named = start.params.input.filter(input => input.type === 'text' && input.text.startsWith(ATTACHMENT_HEADER)).map(input => JSON.parse(input.text.slice(ATTACHMENT_HEADER.length).split('\n', 1)[0]));
+  const named = start.params.input.filter((input: Json) => input.type === 'text' && input.text.startsWith(ATTACHMENT_HEADER)).map((input: Json) => JSON.parse(input.text.slice(ATTACHMENT_HEADER.length).split('\n', 1)[0]));
   assert.equal(named.length, 1);
   assert.equal(named[0].name, 'report.pdf');
   assert.equal(named[0].sha256, sha256(bytes));

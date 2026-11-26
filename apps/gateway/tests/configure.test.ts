@@ -10,9 +10,13 @@ import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DEFAULT_PERMISSIONS, EXPOSURE, FORWARDED_CAPABILITIES, PERMISSIONS, projectConfigurePreview, projectConfigured, projectConversation, projectEffective } from '../dist/policy.js';
-import { fakeDaemon, summary } from './support/fake-daemon.js';
-import { startGateway } from './support/harness.js';
+import { fakeDaemon, summary } from './support/fake-daemon.ts';
+import { startGateway } from './support/harness.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
+
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 
 const CAPABILITIES = ['attach.after', 'prompt.receipts', 'session.history', 'session.reload', 'session.configure.live'];
 const GEN = '0123456789abcdef0123456789abcdef';
@@ -22,7 +26,7 @@ const effective = (extra = {}) => ({
   delegates: ['peer'], tools: ['alp_delegate'], mcpServers: [{ name: 'docs', kind: 'stdio', command: '/usr/bin/secret-server' }], hooks: 1, instructionsSha: 'abcdef012345', ...extra,
 });
 
-async function world(t, { capabilities = CAPABILITIES } = {}) {
+async function world(t: TestContext, { capabilities = CAPABILITIES } = {}) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-configure-'));
   defer(() => rm(directory, { recursive: true, force: true }));
@@ -33,11 +37,11 @@ async function world(t, { capabilities = CAPABILITIES } = {}) {
     capabilities,
     sessions: [summary('sa', ca, { conversation: CONVERSATION }), summary('sa-c', ca, { parentId: 'sa' }), summary('sb', cb, { conversation: CONVERSATION })],
   });
-  daemon.state.handlers['session.configure.preview'] = params => {
+  daemon.state.handlers['session.configure.preview'] = (params: Json) => {
     if (daemon.state.previewError) throw daemon.state.previewError;
     return daemon.state.previewAnswer ?? { preview: { current: effective(), proposed: effective({ model: params.model ?? 'gpt', thinking: params.thinking ?? 'medium', team: params.team ?? 'pho', mode: daemon.state.proposedMode ?? params.mode ?? 'workspace-write' }), changes: ['model'], restart: true, allowed: true, teams: [{ id: 'pho', label: 'Phở' }, { id: 'cafe', label: 'Cafe', path: '/host/teams/cafe' }] } };
   };
-  daemon.state.handlers['session.configure'] = params => {
+  daemon.state.handlers['session.configure'] = (params: Json) => {
     if (params.model === undefined && params.thinking === undefined && params.team === undefined) return { session: { ...daemon.state.sessions.get(params.sessionId), mode: params.mode ?? 'workspace-write' } };
     if (daemon.state.configureError) throw daemon.state.configureError;
     const session = daemon.state.configureAnswer ?? { ...daemon.state.sessions.get(params.sessionId), model: params.model ?? 'gpt' };
@@ -55,12 +59,12 @@ async function world(t, { capabilities = CAPABILITIES } = {}) {
 }
 
 const live = (extra = {}) => ({ sessionId: 'sa', model: 'codex:gpt-6.1-sol', requestId: 'c1', ifGeneration: GEN, ...extra });
-const calls = (daemon, mark, method) => daemon.calls().slice(mark).filter(call => call.method === method);
+const calls = (daemon: Json, mark: Json, method: Json) => daemon.calls().slice(mark).filter((call: Json) => call.method === method);
 
 test('the matrix: configure is session.write with modes, its preview session.read; session.team.write is opt-in and implies nothing; the capability is forwarded', () => {
   assert.equal(EXPOSURE['session.configure'].permission, 'session.write');
   assert.deepEqual(EXPOSURE['session.configure'].params, ['sessionId', 'mode', 'model', 'thinking', 'team', 'requestId', 'ifGeneration']);
-  assert.ok(EXPOSURE['session.configure'].tests.includes('mode'));
+  assert.ok(EXPOSURE['session.configure'].tests!.includes('mode'));
   assert.equal(EXPOSURE['session.configure.preview'].permission, 'session.read');
   assert.deepEqual(EXPOSURE['session.configure.preview'].params, ['sessionId', 'mode', 'model', 'thinking', 'team']);
   assert.ok(PERMISSIONS.includes('session.team.write'));
@@ -69,13 +73,13 @@ test('the matrix: configure is session.write with modes, its preview session.rea
   assert.deepEqual(projectConversation({ fork: false, rewind: false, configure: true, reason: 'not_root' }), { fork: false, rewind: false, configure: true, reason: 'not_root' });
   // Projections keep names and counts; never a command, path or unknown field.
   const shown = projectEffective(effective({ secret: '/Users/u' }));
-  assert.deepEqual(shown.mcpServers, [{ name: 'docs', kind: 'stdio' }]);
-  assert.equal(shown.secret, undefined);
+  assert.deepEqual(shown!.mcpServers, [{ name: 'docs', kind: 'stdio' }]);
+  assert.equal((shown as Json).secret, undefined);
   assert.equal(projectEffective(effective({ model: '/etc/passwd' })), undefined);
   const preview = projectConfigurePreview({ current: effective(), proposed: effective(), changes: ['team', 'path'], restart: true, allowed: false, reason: 'permission_escalation', message: 'hook /Users/u/.alp/hooks/x.json', teams: [{ id: 'cafe', label: 'Cafe', path: '/x' }] });
-  assert.deepEqual(preview.changes, ['team']);
-  assert.match(preview.message, /more permissions or new commands/);
-  assert.deepEqual(preview.teams, [{ id: 'cafe', label: 'Cafe' }]);
+  assert.deepEqual(preview!.changes, ['team']);
+  assert.match(preview!.message!, /more permissions or new commands/);
+  assert.deepEqual(preview!.teams, [{ id: 'cafe', label: 'Cafe' }]);
   assert.equal(projectConfigured({ status: 'maybe', requested: {}, effective: effective(), restarted: true }), undefined);
 });
 
@@ -87,7 +91,7 @@ test('hello forwards session.configure.live only when alpd lists it; a live chan
   const { client, hello } = await older.sdk('writer');
   assert.ok(!hello.capabilities.includes('session.configure.live'));
   const mark = older.daemon.calls().length;
-  await assert.rejects(client.request('session.configure', live()), error => error.code === 1005 && error.data?.reason === 'capability');
+  await assert.rejects(client.request('session.configure', live()), (error: Json) => error.code === 1005 && error.data?.reason === 'capability');
   assert.deepEqual(calls(older.daemon, mark, 'session.configure'), []);
 });
 
@@ -98,20 +102,20 @@ test('configure: permission, team grant, scope, a child and the grant\'s modes a
   const { client: teamOnly } = await sdk('teamOnly');
   const { client: limited } = await sdk('limited');
   const mark = daemon.calls().length;
-  await assert.rejects(reader.request('session.configure', live()), error => error.code === 1003 && error.data?.permission === 'session.write');
-  await assert.rejects(teamOnly.request('session.configure', live({ model: undefined, team: 'cafe' })), error => error.code === 1003 && error.data?.permission === 'session.write');
-  await assert.rejects(writer.request('session.configure', live({ model: undefined, team: 'cafe' })), error => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === 'session.team.write');
-  await assert.rejects(writer.request('session.configure', live({ sessionId: 'sb' })), error => error.code === 1001);
-  await assert.rejects(writer.request('session.configure', live({ sessionId: 'sa-c' })), error => error.code === 1003 && error.data?.reason === 'not_root');
-  await assert.rejects(writer.request('session.configure', live({ requestId: undefined })), error => error.code === -32602);
+  await assert.rejects(reader.request('session.configure', live()), (error: Json) => error.code === 1003 && error.data?.permission === 'session.write');
+  await assert.rejects(teamOnly.request('session.configure', live({ model: undefined, team: 'cafe' })), (error: Json) => error.code === 1003 && error.data?.permission === 'session.write');
+  await assert.rejects(writer.request('session.configure', live({ model: undefined, team: 'cafe' })), (error: Json) => error.code === 1003 && error.data?.reason === 'grant' && error.data.permission === 'session.team.write');
+  await assert.rejects(writer.request('session.configure', live({ sessionId: 'sb' })), (error: Json) => error.code === 1001);
+  await assert.rejects(writer.request('session.configure', live({ sessionId: 'sa-c' })), (error: Json) => error.code === 1003 && error.data?.reason === 'not_root');
+  await assert.rejects(writer.request('session.configure', live({ requestId: undefined })), (error: Json) => error.code === -32602);
   // A read-only grant may not drive a workspace-write root, nor ask for a mode it lacks.
-  await assert.rejects(limited.request('session.configure', live()), error => error.code === 1003 && error.data?.reason === 'mode');
+  await assert.rejects(limited.request('session.configure', live()), (error: Json) => error.code === 1003 && error.data?.reason === 'mode');
   assert.deepEqual(calls(daemon, mark, 'session.configure'), [], 'alpd changed nothing for a refused request');
   const { client: fitting } = await sdk('fitting');
   // The mode alpd would run the root with after the change must be one of the grant's too.
   daemon.state.proposedMode = 'full-access';
   const before = daemon.calls().length;
-  await assert.rejects(fitting.request('session.configure', live({ requestId: 'up' })), error => error.code === 1003 && error.data?.reason === 'mode');
+  await assert.rejects(fitting.request('session.configure', live({ requestId: 'up' })), (error: Json) => error.code === 1003 && error.data?.reason === 'mode');
   assert.deepEqual(calls(daemon, before, 'session.configure'), []);
   assert.equal(calls(daemon, before, 'session.configure.preview').length, 1, 'asked first');
   daemon.state.proposedMode = undefined;
@@ -133,7 +137,7 @@ test('configure: a team with session.team.write; the requestId is per credential
   assert.equal(answer.configured.native, undefined);
   assert.deepEqual(answer.session.conversation, CONVERSATION);
   daemon.state.configureAnswer = summary('sb', ca);
-  await assert.rejects(client.request('session.configure', live({ requestId: 'other' })), error => error.code === 1000 && error.data?.reason === 'outcome_unknown');
+  await assert.rejects(client.request('session.configure', live({ requestId: 'other' })), (error: Json) => error.code === 1000 && error.data?.reason === 'outcome_unknown');
   daemon.state.configureAnswer = undefined;
   daemon.state.configureError = { code: 1005, message: 'A session keeps its runtime (Codex) at /Users/u/.codex', data: { reason: 'runtime_mismatch', action: 'session.create', path: '/Users/u' } };
   const migration = await client.request('session.configure', live({ requestId: 'mig' })).catch(failure => failure);
@@ -141,7 +145,7 @@ test('configure: a team with session.team.write; the requestId is per credential
   assert.deepEqual(migration.data, { reason: 'runtime_mismatch', action: 'session.create' });
   assert.ok(!migration.message.includes('/Users'), migration.message);
   assert.match(migration.message, /start a new session/);
-  for (const [code, reason, words] of [[1004, 'session_busy', /idle/], [1003, 'permission_escalation', /more permissions/], [1001, 'team_not_found', /no such team/], [1005, 'native_refused', /keeps its own/], [1004, 'stale_generation', /history again/], [1004, 'outcome_unknown', /read the session/]]) {
+  for (const [code, reason, words] of [[1004, 'session_busy', /idle/], [1003, 'permission_escalation', /more permissions/], [1001, 'team_not_found', /no such team/], [1005, 'native_refused', /keeps its own/], [1004, 'stale_generation', /history again/], [1004, 'outcome_unknown', /read the session/]] as Array<[number, string, RegExp]>) {
     daemon.state.configureError = { code, message: `secret ${reason} /Users/u`, data: { reason } };
     const refused = await client.request('session.configure', live({ requestId: `r-${reason}` })).catch(failure => failure);
     assert.equal(refused.code, code);
@@ -159,9 +163,9 @@ test('preview: session.read in scope, a root only, projected with fixed messages
   assert.deepEqual(preview.teams, [{ id: 'pho', label: 'Phở' }, { id: 'cafe', label: 'Cafe' }]);
   assert.equal(preview.current.mcpServers[0].command, undefined);
   const mark = daemon.calls().length;
-  await assert.rejects(reader.request('session.configure.preview', { sessionId: 'sb' }), error => error.code === 1001);
-  await assert.rejects(reader.request('session.configure.preview', { sessionId: 'sa-c' }), error => error.code === 1003 && error.data?.reason === 'not_root');
-  await assert.rejects(reader.request('session.configure.preview', { sessionId: 'sa', requestId: 'x' }), error => error.code === -32602);
+  await assert.rejects(reader.request('session.configure.preview', { sessionId: 'sb' }), (error: Json) => error.code === 1001);
+  await assert.rejects(reader.request('session.configure.preview', { sessionId: 'sa-c' }), (error: Json) => error.code === 1003 && error.data?.reason === 'not_root');
+  await assert.rejects(reader.request('session.configure.preview', { sessionId: 'sa', requestId: 'x' }), (error: Json) => error.code === -32602);
   assert.deepEqual(calls(daemon, mark, 'session.configure.preview'), []);
   daemon.state.previewAnswer = { preview: { current: effective(), proposed: effective({ runtime: 'claude', model: 'opus' }), changes: ['model'], restart: true, allowed: false, reason: 'runtime_mismatch', message: 'Claude CLI at /Users/u/.local/bin/claude', teams: [] } };
   const refused = (await reader.request('session.configure.preview', { sessionId: 'sa', model: 'claude:opus' })).preview;

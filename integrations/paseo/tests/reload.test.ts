@@ -9,36 +9,39 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAgents } from '../server/dist/paseo/agents.js';
 
-const directory = {
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
+
+const directory: Json = {
   load: async () => {}, prepare: async () => {}, workspaceIdFor: () => 'workspace',
   placement: () => ({ projectKey: 'p', projectName: 'p', directory: '/' }), assign: () => {}, changed: () => {},
 };
 const GENERATION = '0123456789abcdef0123456789abcdef';
-const summary = (id, extra = {}) => ({ id, projectRoot: '/work', agent: 'main', runtime: 'codex', model: 'gpt-5.5', mode: 'workspace-write', thinking: 'medium', workflow: { mode: 'pho', maxPeers: 2, supervisor: false }, threadId: 't', persistent: true, busy: false, status: 'idle', conversation: { fork: true, rewind: true, reload: true }, ...extra });
+const summary = (id: Json, extra = {}) => ({ id, projectRoot: '/work', agent: 'main', runtime: 'codex', model: 'gpt-5.5', mode: 'workspace-write', thinking: 'medium', workflow: { mode: 'pho', maxPeers: 2, supervisor: false }, threadId: 't', persistent: true, busy: false, status: 'idle', conversation: { fork: true, rewind: true, reload: true }, ...extra });
 
-function world({ sessions, capabilities = ['session.history', 'session.reload'], reloadError }) {
-  const calls = [];
+function world({ sessions, capabilities = ['session.history', 'session.reload'], reloadError }: Json) {
+  const calls: Json[] = [];
   const connection = {
     capabilities,
     onEvent: () => {}, onClose: () => {}, close() {},
-    async request(method, params) {
+    async request(method: Json, params: Json) {
       calls.push({ method, params });
       if (method === 'session.list') return { sessions };
       if (method === 'question.list') return { questions: [] };
-      if (method === 'session.attach') return { session: sessions.find(session => session.id === params.sessionId), cursor: 0 };
+      if (method === 'session.attach') return { session: sessions.find((session: Json) => session.id === params.sessionId), cursor: 0 };
       if (method === 'session.history') return { generation: GENERATION, hasOlder: false, tipCursor: 0, items: [] };
-      if (method === 'session.reload') { if (reloadError) throw reloadError; return { session: sessions.find(session => session.id === params.sessionId) }; }
-      if (method === 'session.create') { const session = sessions.find(row => row.id === params.sessionId); session.status = 'idle'; return { session }; }
-      if (method === 'session.archive') { const session = sessions.find(row => row.id === params.sessionId); session.archived = params.archived !== false; return { session }; }
+      if (method === 'session.reload') { if (reloadError) throw reloadError; return { session: sessions.find((session: Json) => session.id === params.sessionId) }; }
+      if (method === 'session.create') { const session = sessions.find((row: Json) => row.id === params.sessionId); session.status = 'idle'; return { session }; }
+      if (method === 'session.archive') { const session = sessions.find((row: Json) => row.id === params.sessionId); session.archived = params.archived !== false; return { session }; }
       throw new Error(`unexpected request ${method}`);
     },
   };
-  const agents = createAgents({ clientFactory: async () => connection, broadcast: () => {}, directory });
+  const agents: Json = createAgents({ clientFactory: (async () => connection) as Json, broadcast: () => {}, directory });
   return { agents, calls };
 }
 
-const refreshAgent = (agents, agentId = 'ses_a', requestId = 'req-1') => agents.handlers.refresh_agent_request({ type: 'refresh_agent_request', agentId, requestId });
-const sent = (calls, method) => calls.filter(call => call.method === method).map(call => call.params);
+const refreshAgent = (agents: Json, agentId = 'ses_a', requestId = 'req-1') => agents.handlers.refresh_agent_request({ type: 'refresh_agent_request', agentId, requestId });
+const sent = (calls: Json, method: Json) => calls.filter((call: Json) => call.method === method).map((call: Json) => call.params);
 
 test('Reload agent on a live root is session.reload; Paseo gets agent_refreshed', async () => {
   const { agents, calls } = world({ sessions: [summary('ses_a')] });

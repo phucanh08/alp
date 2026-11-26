@@ -2,7 +2,7 @@
 // the `// --- owner: host (group B) ---` block. Only the owner gateway's owner credential on a direct
 // loopback socket reaches their handlers, with only the params the matrix lists; a standalone gateway
 // and any other credential get exactly a denied method's refusal, and neither the handler nor alpd
-// sees anything. The handlers themselves are tested in packages/cli/tests/dashboard-owner-host.test.js.
+// sees anything. The handlers themselves are tested in packages/cli/tests/dashboard-owner-host.test.ts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -10,12 +10,16 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { CAPABILITY } from '@anhlp/alp-protocol';
 import { EXPOSURE } from '../dist/index.js';
-import { fakeDaemon } from './support/fake-daemon.js';
-import { startGateway } from './support/harness.js';
+import { fakeDaemon } from './support/fake-daemon.ts';
+import { startGateway } from './support/harness.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
+
+// `any`: daemon answers, events and fixtures are JSON of every shape; the tests read their fields.
+type Json = any;
 
 /** The host pages' owner methods, and a valid request of each. */
-const HOST = {
+const HOST: Record<string, Json> = {
   'host.provider.add': { id: 'echo-agent', command: '/usr/bin/true', args: ['--acp'], env: { TOKEN: 's3cret' }, label: 'Echo', description: 'test', models: ['m1'] },
   'host.provider.test': { name: 'echo-agent' },
   'host.provider.diagnose': {},
@@ -35,29 +39,28 @@ const HOST = {
 };
 const METHODS = Object.keys(HOST);
 
-const notExposed = method => error => error.code === -32601 && error.message === `${method} is not available through the gateway` && error.data?.reason === 'not_exposed';
+const notExposed = (method: Json) => (error: Json) => error.code === -32601 && error.message === `${method} is not available through the gateway` && error.data?.reason === 'not_exposed';
 
 /** A gateway (owner or not) whose host handlers record what reached them. */
-async function world(t, { owner = true, registered = METHODS } = {}) {
+async function world(t: TestContext, { owner = true, registered = METHODS } = {}) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-gw-owner-host-'));
   defer(() => rm(directory, { recursive: true, force: true }));
   const daemon = fakeDaemon();
-  /** @type {Array<{ method: string, params: Record<string, unknown> }>} */
-  const reached = [];
-  const handlers = Object.fromEntries(registered.map(method => [method, async ({ params, daemon: upstream }) => {
+  const reached: Array<{ method: string, params: Record<string, unknown> }> = [];
+  const handlers = Object.fromEntries(registered.map(method => [method, async ({ params, daemon: upstream }: Json) => {
     reached.push({ method, params });
     // A handler may call alpd on the owner's own connection.
     if (method === 'host.registry') return upstream.request('registry.owner', {});
     return { ok: method };
   }]));
   daemon.state.handlers['registry.owner'] = () => ({ registry: { revision: 7, projects: [], workspaces: [], sessions: {}, labels: { catalog: [] } } });
-  const current = { id: /** @type {string | undefined} */ (undefined) };
+  const current = { id: undefined as string | undefined };
   const gw = await startGateway(t, {
     daemon,
     config: { limits: { rate: 100_000, burst: 100_000 } },
     credentials: { owner: { workspaces: [path.join(directory, 'a')] }, other: { workspaces: [path.join(directory, 'a')] } },
-    ...(owner ? { owner: ids => { current.id = ids.owner; return { credentialId: () => current.id, methods: handlers }; } } : {}),
+    ...(owner ? { owner: (ids: Json) => { current.id = ids.owner; return { credentialId: () => current.id, methods: handlers }; } } : {}),
   });
   return { daemon, reached, ...gw };
 }
@@ -70,12 +73,12 @@ test('owner host: every host page method is an owner entry with a handler, its p
     assert.equal(entry.handler, true, method);
     assert.equal(entry.permission, undefined, method);
     assert.ok(Array.isArray(entry.params), method);
-    assert.ok(entry.tests.includes('owner'), method);
+    assert.ok(entry.tests!.includes('owner'), method);
     for (const key of Object.keys(HOST[method])) assert.ok(entry.params.includes(key), `${method} lists ${key}`);
   }
   // Remote credentials keep today's workspace.update: no labels, no placement.
   assert.equal(EXPOSURE['workspace.update'].status, 'exposed');
-  assert.ok(!EXPOSURE['workspace.update'].params.includes('labels'));
+  assert.ok(!EXPOSURE['workspace.update'].params!.includes('labels'));
   assert.equal(EXPOSURE['registry.owner'].status, 'prohibited');
 });
 
