@@ -21,12 +21,12 @@ test('agy read-only matches its allowlist the way agy does, on a word boundary',
   const args = antigravityModeArgs('read-only', '/tmp');
   const settings = JSON.parse(args[args.indexOf('--settings') + 1]);
   assert.deepEqual(settings.permissions.allow, ['mcp(alp/*)', 'command(pwd)']);
-  const write = JSON.parse(antigravityModeArgs('workspace-write', '/tmp').at(-1));
+  const write = JSON.parse(antigravityModeArgs('workspace-write', '/tmp').at(-1)!);
   assert.deepEqual(write.permissions.allow, ['mcp(alp/*)']);
   // This branch changes no agy flag (t-9ae1): no read rule, no allowNonWorkspaceAccess, in any mode.
   for (const mode of ['read-only', 'workspace-write']) {
-    const sent = JSON.parse(antigravityModeArgs(mode, '/tmp').at(-1));
+    const sent = JSON.parse(antigravityModeArgs(mode, '/tmp').at(-1)!);
     assert.deepEqual(Object.keys(sent).sort(), ['enableTerminalSandbox', 'permissions', 'toolPermission', 'trustedWorkspaces'], mode);
-    assert.ok(!sent.permissions.allow.some(rule => rule.startsWith('read_file(')), mode);
+    assert.ok(!sent.permissions.allow.some((rule: string) => rule.startsWith('read_file(')), mode);
   }
 });

@@ -16,7 +16,7 @@ import { claudeToolShapes } from '@anhlp/alp-runtime';
 const zodVersion = createRequire(import.meta.url)('zod/package.json').version;
 
 /** `length` elements that each fail their schema, counting how many zod reads. */
-function oversized(length, element = 1) {
+function oversized(length: number, element: unknown = 1) {
   const counter = { read: 0 };
   const list = new Array(length);
   for (let i = 0; i < length; i++) {
@@ -35,30 +35,31 @@ test('an oversized constrained array, set or map fails its cap without zod readi
   const array = z.array(z.string()).max(10).safeParse(list);
   assert.equal(array.success, false);
   assert.equal(counter.read, 0, 'zod read elements of an array already over its cap');
-  assert.deepEqual(array.error.issues.map(issue => issue.code), ['too_big']);
+  assert.deepEqual(array.error!.issues.map(issue => issue.code), ['too_big']);
 
   const set = z.set(z.string()).max(10).safeParse(new Set(Array.from({ length: 10_000 }, (_, i) => i)));
-  assert.deepEqual(set.error.issues.map(issue => issue.code), ['too_big']);
+  assert.deepEqual(set.error!.issues.map(issue => issue.code), ['too_big']);
 
   const map = z.map(z.string(), z.string()).max(10).safeParse(new Map(Array.from({ length: 10_000 }, (_, i) => [i, i])));
-  assert.deepEqual(map.error.issues.map(issue => issue.code), ['too_big']);
+  assert.deepEqual(map.error!.issues.map(issue => issue.code), ['too_big']);
 
   // Within the cap, elements are still validated one by one.
-  assert.equal(z.array(z.string()).max(10).safeParse(['a', 1]).error.issues[0].path[0], 1);
+  assert.equal(z.array(z.string()).max(10).safeParse(['a', 1]).error!.issues[0].path[0], 1);
 });
 
 test('every capped array in ALP\'s Claude tool shapes refuses an oversized list before reading it', () => {
-  const checked = [];
+  const checked: string[] = [];
   for (const [tool, shape] of Object.entries(claudeToolShapes)) {
     const schema = z.object(shape);
     const properties = z.toJSONSchema(schema, { io: 'input' }).properties ?? {};
-    for (const [field, json] of Object.entries(properties)) {
+    // The tool shapes' properties are object schemas; the walk reads only their type and cap.
+    for (const [field, json] of Object.entries(properties) as [string, { type?: unknown, maxItems?: unknown }][]) {
       if (json.type !== 'array' || typeof json.maxItems !== 'number') continue;
       const { list, counter } = oversized(json.maxItems + 1_000);
       const result = schema.safeParse({ [field]: list });
       assert.equal(result.success, false, `${tool}.${field}`);
       assert.equal(counter.read, 0, `${tool}.${field}: zod read elements of a list over its ${json.maxItems}-item cap`);
-      const issues = result.error.issues.filter(issue => issue.path[0] === field);
+      const issues = result.error!.issues.filter(issue => issue.path[0] === field);
       assert.equal(issues.length, 1, `${tool}.${field}: ${issues.length} issues for one oversized list`);
       checked.push(`${tool}.${field}`);
     }
@@ -71,12 +72,12 @@ test('every capped array in ALP\'s Claude tool shapes refuses an oversized list 
 
 test('the nested reviewer verdict lists refuse an oversized list before reading it', () => {
   const handoff = z.object(claudeToolShapes.alp_handoff);
-  for (const [field, cap] of [['criteria', 50], ['findings', 100]]) {
+  for (const [field, cap] of [['criteria', 50], ['findings', 100]] as [string, number][]) {
     const { list, counter } = oversized(cap + 1_000, {});
     const verdict = { result: 'pass', criteria: [{ criterion: 'c', result: 'pass', evidence: 'e' }], [field]: list };
     const result = handoff.safeParse({ outcome: 'complete', summary: 's', verdict });
     assert.equal(result.success, false, field);
     assert.equal(counter.read, 0, `verdict.${field}: zod read elements of a list over its ${cap}-item cap`);
-    assert.deepEqual(result.error.issues.map(issue => [issue.code, issue.path.join('.')]), [['too_big', `verdict.${field}`]]);
+    assert.deepEqual(result.error!.issues.map(issue => [issue.code, issue.path.join('.')]), [['too_big', `verdict.${field}`]]);
   }
 });

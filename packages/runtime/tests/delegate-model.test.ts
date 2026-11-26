@@ -9,7 +9,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
+import type { FakeAgent } from '../../../test/support/fake-agent.ts';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
+import type { PromptInput } from '@anhlp/alp-runtime';
+import type { TestContext } from 'node:test';
+
+// `any`: alp_delegate's answers are JSON of every shape; the tests read their fields.
+type Json = any;
 
 const TEAM = {
   label: 'Lab',
@@ -27,16 +33,16 @@ const TEAM = {
   maxPeers: 6,
 };
 
-async function agentDir(root, name, config) {
+async function agentDir(root: string, name: string, config?: object) {
   const directory = path.join(root, '.alp', 'agents', name);
   await mkdir(directory, { recursive: true });
   await writeFile(path.join(directory, 'AGENT.md'), `You are ${name}.\n`);
   if (config) await writeFile(path.join(directory, 'agent.json'), JSON.stringify(config));
 }
 
-async function lab(t) {
+async function lab(t: TestContext) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-delegate-model-'));
-  const agents = [];
+  const agents: FakeAgent[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(agents), libraryDir: root, supervisor: false });
   t.after(async () => { await runtime.shutdown(); await rm(root, { recursive: true, force: true }); });
   await initProject(root, { library: root });
@@ -53,14 +59,15 @@ async function lab(t) {
   await writeFile(file, JSON.stringify(settings));
   await runtime.open('root', { cwd: root });
   const main = agents[0];
-  await runtime.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Go' }] });
+  // No delivery, as before: the type requires one, the runtime does not.
+  await runtime.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Go' }] } as PromptInput);
   return { root, agents, runtime, main };
 }
 
 /** A custom delegation graph: no team, so no target has a model profile. */
-async function graph(t, settings = {}) {
+async function graph(t: TestContext, settings = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'alp-delegate-graph-'));
-  const agents = [];
+  const agents: FakeAgent[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(agents), libraryDir: root, supervisor: false });
   t.after(async () => { await runtime.shutdown(); await rm(root, { recursive: true, force: true }); });
   await agentDir(root, 'scout', { model: 'claude:claude-haiku-4-5-20251001' });
@@ -71,12 +78,13 @@ async function graph(t, settings = {}) {
   await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['scout', 'helper', 'plain', 'astra'] }, ...settings }));
   await runtime.open('root', { cwd: root, model: 'codex:gpt-6.1-sol', thinking: 'high' });
   const main = agents[0];
-  await runtime.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Go' }] });
+  // No delivery, as before: the type requires one, the runtime does not.
+  await runtime.prompt('root', { clientMessageId: 'm1', content: [{ type: 'text', text: 'Go' }] } as PromptInput);
   return { root, agents, runtime, main };
 }
 
 /** Starts an assignment and returns the answer and the child's thread/start params. */
-async function start(agents, main, args) {
+async function start(agents: FakeAgent[], main: FakeAgent, args: Json) {
   const before = agents.length;
   const answer = await main.call('alp_delegate', { mode: 'read-only', task: 'Inspect A', ...args });
   assert.ok(answer.assignmentId, JSON.stringify(answer));
@@ -131,7 +139,7 @@ test('two peers on different providers each run on the model and effort chosen f
   const b = await start(agents, main, { agent: 'peer', model: 'codex:gpt-5.6-terra', thinking: 'xhigh', modelReason: 'a plain read' });
   assert.deepEqual([a.child.runtime, a.child.model, a.child.thinking], ['claude', 'claude-sonnet-5', 'medium']);
   assert.deepEqual([b.child.runtime, b.child.model, b.child.thinking], ['codex', 'gpt-5.6-terra', 'xhigh']);
-  const snapshot = runtime.snapshot('root');
+  const snapshot = runtime.snapshot('root')!;
   assert.equal(snapshot.model, 'gpt-6.1-sol');
   assert.equal(snapshot.thinking, 'high');
 });
@@ -147,7 +155,7 @@ test('oracle takes a thinking its model offers, refuses another with the list, a
   assert.equal(low.answer.thinkingNote, undefined);
   const fallback = await start(agents, main, { agent: 'oracle', task: 'Advise', model: lens });
   assert.equal(fallback.child.thinking, 'high');
-  const snapshot = runtime.snapshot('root');
+  const snapshot = runtime.snapshot('root')!;
   assert.equal(snapshot.model, 'gpt-6.1-sol');
   assert.equal(snapshot.thinking, 'high');
 });

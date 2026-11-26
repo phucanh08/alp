@@ -38,9 +38,9 @@ test('OpenCode is told to ask before it edits, runs or fetches, over the config 
   for (const command of ['opencode', '/usr/local/bin/opencode', 'C:\\tools\\OpenCode.exe']) {
     const env = acpEnv({ command, env: { OPENCODE_CONFIG_CONTENT: user } }, { PATH: '/bin' });
     assert.equal(env.PATH, '/bin');
-    assert.deepEqual(JSON.parse(env.OPENCODE_CONFIG_CONTENT), { model: 'x/y', permission: { edit: 'ask', read: 'allow', bash: 'ask', webfetch: 'ask' } });
+    assert.deepEqual(JSON.parse(env.OPENCODE_CONFIG_CONTENT!), { model: 'x/y', permission: { edit: 'ask', read: 'allow', bash: 'ask', webfetch: 'ask' } });
   }
-  assert.deepEqual(JSON.parse(acpEnv({ command: 'opencode', env: {} }, { OPENCODE_CONFIG_CONTENT: 'not json' }).OPENCODE_CONFIG_CONTENT), { permission: { edit: 'ask', bash: 'ask', webfetch: 'ask' } });
+  assert.deepEqual(JSON.parse(acpEnv({ command: 'opencode', env: {} }, { OPENCODE_CONFIG_CONTENT: 'not json' }).OPENCODE_CONFIG_CONTENT!), { permission: { edit: 'ask', bash: 'ask', webfetch: 'ask' } });
   assert.deepEqual(acpEnv({ command: 'gemini', env: { A: '1' } }, { PATH: '/bin' }), { PATH: '/bin', A: '1' });
 });
 
@@ -68,9 +68,11 @@ test('security: claude sandbox floors do not grant broad host socket access', as
     allowUnsandboxedCommands: true,
   });
 
+  // Neither floor's sandbox names a network; the test checks that no socket access slipped in.
+  type Network = { network?: { allowAllUnixSockets?: boolean, allowLocalBinding?: boolean } };
   for (const permissions of [readOnly, workspace]) {
-    assert.notEqual(permissions.sandbox.network?.allowAllUnixSockets, true, 'no arbitrary host Unix service access');
-    assert.notEqual(permissions.sandbox.network?.allowLocalBinding, true, 'no broad macOS localhost access');
+    assert.notEqual((permissions.sandbox as Network).network?.allowAllUnixSockets, true, 'no arbitrary host Unix service access');
+    assert.notEqual((permissions.sandbox as Network).network?.allowLocalBinding, true, 'no broad macOS localhost access');
   }
 
   // Without floor: sandbox configuration is omitted
@@ -82,18 +84,18 @@ test('security: claude sandbox floors do not grant broad host socket access', as
 // which would match them as written and run them (outside the sandbox too) without asking canUseTool.
 test('security: Bash allow rules reach canUseTool; every role keeps the outcome it had', async () => {
   const root = path.join(os.tmpdir(), 'alp-test-repo-root');
-  const bash = (gate, command, leave = false) => gate.canUseTool('Bash', { command, ...(leave ? { dangerouslyDisableSandbox: true } : {}) }).then(result => result.behavior);
+  const bash = (gate: ReturnType<typeof claudePermissions>, command: string, leave = false) => gate.canUseTool('Bash', { command, ...(leave ? { dangerouslyDisableSandbox: true } : {}) }).then(result => result.behavior);
   const verify = ['git diff', 'git diff HEAD~1 --stat', 'git log --oneline -5', 'git show HEAD:package.json', 'node scripts/test.ts unit'];
 
   // Reviewer, its default profile (read-only, no rules) under the read-only floor: its checks run in the sandbox, as before.
-  const reviewer = claudePermissions('read-only', () => 'read-only', { allow: [], ask: [], deny: [], beyondMode: 'refuse', floor: 'read-only', floorRoot: root });
+  const reviewer = claudePermissions('read-only', () => 'read-only', { allow: [], ask: [], deny: [], beyondMode: 'refuse' as const, floor: 'read-only', floorRoot: root });
   assert.equal(reviewer.allowedTools, undefined);
   for (const command of verify) assert.equal(await bash(reviewer, command), 'allow', command);
   // Leaving the sandbox needed an allow rule before and still does.
   for (const command of verify) assert.equal(await bash(reviewer, command, true), 'deny', command);
 
   // A reviewer given allow rules (the docs' review profile): what they cover runs, in the sandbox or out of it.
-  const review = { allow: ['Bash(npm test:*)', 'Bash(node --test:*)', 'Bash(node scripts/test.ts:*)', 'Bash(git diff:*)'], ask: ['Bash(npm install *)'], deny: ['Bash(rm:*)', 'Bash(git push:*)'], beyondMode: 'refuse' };
+  const review = { allow: ['Bash(npm test:*)', 'Bash(node --test:*)', 'Bash(node scripts/test.ts:*)', 'Bash(git diff:*)'], ask: ['Bash(npm install *)'], deny: ['Bash(rm:*)', 'Bash(git push:*)'], beyondMode: 'refuse' as const };
   const reviewing = claudePermissions('read-only', () => 'read-only', { ...review, floor: 'read-only', floorRoot: root });
   assert.equal(reviewing.allowedTools, undefined, 'no Bash allow rule goes to Claude');
   // The user's deny rules stay native, followed (a read-only session, t-cde5) by the Paseo credentials' denials.
@@ -127,7 +129,7 @@ test('security: Bash allow rules reach canUseTool; every role keeps the outcome 
   try {
     const librarian = {
       allow: [`Bash(@git-clone-public ${clones})`, `Bash(@git-read ${clones})`, 'WebFetch(domain:github.com)'],
-      ask: ['Bash(git clone:*)', 'Bash(git -C:*)'], deny: ['Bash(@git-unsafe)', 'Bash(git push:*)', 'Bash(rm:*)'], beyondMode: 'refuse',
+      ask: ['Bash(git clone:*)', 'Bash(git -C:*)'], deny: ['Bash(@git-unsafe)', 'Bash(git push:*)', 'Bash(rm:*)'], beyondMode: 'refuse' as const,
     };
     const library = claudePermissions('read-only', () => 'read-only', { ...librarian, floor: 'read-only', floorRoot: root });
     assert.deepEqual(library.allowedTools, ['WebFetch(domain:github.com)']);

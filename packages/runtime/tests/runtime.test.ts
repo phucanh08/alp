@@ -5,17 +5,37 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { claudeToolShapes, createAlpRuntime } from '@anhlp/alp-runtime';
+import type { PromptContent, PromptInput, RuntimeOptions } from '@anhlp/alp-runtime';
+import type { TestContext } from 'node:test';
 import { teardown } from '../../../test/support/teardown.ts';
 
-async function until(check) {
+async function until(check: () => unknown) {
   for (let i = 0; i < 200; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail('Expected event did not arrive');
 }
 
-function fakeTransport(runtimes) {
+// `any`: the app-server messages the fake answers and sends, and event envelopes, are JSON of every shape; tests read their fields.
+type Message = any;
+type Handler = (method: string, params: Message) => Message;
+type Call = { method: string, params: Message };
+/** One fake native harness, as fakeTransport hands it to the runtime and to the test. */
+type FakeRuntime = {
+  calls: Call[], threadId: string, turnId: string | undefined,
+  notification?: Handler, failure?: (error: unknown) => void, serverRequest?: Handler,
+  initialize(): Promise<void>,
+  onNotification(fn: Handler): void, onFailure(fn: (error: unknown) => void): void, onRequest(fn: Handler): void,
+  close(): Promise<void>,
+  request(method: string, params: Message): Promise<Message>,
+  closed: boolean,
+  call(tool: string, args: Message, callId?: string): Promise<Message>,
+  finish(text?: string, status?: string): void,
+};
+
+function fakeTransport(runtimes: FakeRuntime[]) {
   return () => {
     const index = runtimes.length;
-    const runtime = {
+    // The runtime sets the handlers before it starts a turn; the `!`s below rely on that, as before.
+    const runtime: FakeRuntime = {
       calls: [], closed: false, threadId: `thread-${index}`, turnId: `turn-${index}`,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -27,11 +47,11 @@ function fakeTransport(runtimes) {
         return {};
       },
       call(tool, args, callId = `${tool}-${index}`) {
-        return this.serverRequest('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId, namespace: null, tool, arguments: args });
+        return this.serverRequest!('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId, namespace: null, tool, arguments: args });
       },
       finish(text = 'done', status = 'completed') {
-        this.notification('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}`, text } });
-        this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status } });
+        this.notification!('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}`, text } });
+        this.notification!('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status } });
       },
     };
     runtimes.push(runtime);
@@ -39,24 +59,24 @@ function fakeTransport(runtimes) {
   };
 }
 
-async function setup(t, options = {}) {
+async function setup(t: TestContext, options: RuntimeOptions = {}) {
   const defer = teardown(t);
   const root = await mkdtemp(path.join(tmpdir(), 'alp-runtime-'));
   // Undone LAST: teardown runs the steps in reverse, so everything living in here is released first.
   defer(() => rm(root, { recursive: true, force: true }));
   await initProject(root);
   await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'], lead: ['peer'] } }));
-  const runtimes = [];
+  const runtimes: FakeRuntime[] = [];
   const runtime = createAlpRuntime({ silentForMs: 2000, transport: fakeTransport(runtimes), ...options });
   defer(() => runtime.shutdown());
-  const envelopes = [];
+  const envelopes: Message[] = [];
   runtime.onEvent(envelope => envelopes.push(envelope));
-  const of = (sessionId, type) => envelopes.filter(e => e.sessionId === sessionId && (!type || e.event.type === type)).map(e => e.event);
+  const of = (sessionId: string, type?: string) => envelopes.filter(e => e.sessionId === sessionId && (!type || e.event.type === type)).map(e => e.event);
   return { root, runtime, runtimes, envelopes, of };
 }
 
-const prompt = (clientMessageId, text) => ({ clientMessageId, delivery: 'auto', content: [{ type: 'text', text }] });
-const decode = result => JSON.parse(result.contentItems[0].text);
+const prompt = (clientMessageId: string, text: string): PromptInput => ({ clientMessageId, delivery: 'auto', content: [{ type: 'text', text }] });
+const decode = (result: Message) => JSON.parse(result.contentItems[0].text);
 
 test('runtime sources never import a viewer SDK or the plugin', async () => {
   const directory = new URL('../src/', import.meta.url);
@@ -105,7 +125,7 @@ test('delegation opens children inside the runtime and reports assignments and m
   assert.equal(child.toolCallId, 'alp_delegate-0');
   assert.equal(child.agent, 'lead');
   assert.equal(child.persistent, false);
-  assert.equal(runtime.snapshot(childId).parentId, 'root');
+  assert.equal(runtime.snapshot(childId)!.parentId, 'root');
   assert.equal(of(childId, 'turn.started')[0].origin, 'assignment');
   assert.equal((await runtimes[1].call('alp_handoff', { outcome: 'complete', summary: 'Found it' })).success, true);
   runtimes[1].finish('lead proof');
@@ -148,7 +168,7 @@ test('rejected mail steering waits for the next turn without retrying or losing 
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.equal(attempts, 1);
   runtimes[0].turnId = 'turn-wake';
-  runtimes[0].notification('turn/completed', { threadId: runtimes[0].threadId, turn: { id: 'turn-0', status: 'completed' } });
+  runtimes[0].notification!('turn/completed', { threadId: runtimes[0].threadId, turn: { id: 'turn-0', status: 'completed' } });
   await until(() => of('root', 'turn.started').length === 2);
   assert.equal(of('root', 'turn.started')[1].origin, 'wake');
   assert.ok(runtimes[0].calls.some(c => c.method === 'turn/start' && JSON.stringify(c.params).includes('lead proof')));
@@ -166,8 +186,9 @@ test('interrupt closes the subtree and a failed prompt is reported once', async 
   assert.equal(of(childId, 'session.closed').length, 1);
   assert.equal(runtimes[1].closed, true);
   assert.deepEqual(of('root', 'turn.ended').map(event => event.state), ['canceled']);
-  await runtime.prompt('root', { clientMessageId: 'image', delivery: 'auto', content: [{ type: 'file', path: '/etc/passwd' }] });
-  await runtime.prompt('root', { clientMessageId: 'image', delivery: 'auto', content: [{ type: 'file', path: '/etc/passwd' }] });
+  // A part no runtime takes, so the type has no shape for it.
+  await runtime.prompt('root', { clientMessageId: 'image', delivery: 'auto', content: [{ type: 'file', path: '/etc/passwd' }] as unknown as PromptContent });
+  await runtime.prompt('root', { clientMessageId: 'image', delivery: 'auto', content: [{ type: 'file', path: '/etc/passwd' }] as unknown as PromptContent });
   assert.deepEqual(of('root', 'prompt.failed'), [{ type: 'prompt.failed', clientMessageId: 'image', error: { message: 'Only text, image and attachment prompts are supported' } }]);
   await assert.rejects(runtime.configure('missing', {}), /Session is not open/);
 });
@@ -177,18 +198,18 @@ test('a Codex turn the user stopped: the next prompt carries what it had written
   await runtime.open('root', { cwd: root, model: 'codex:gpt-6.1-sol' });
   const [main] = runtimes;
   await runtime.prompt('root', prompt('count', 'Count to 200'));
-  main.notification('item/agentMessage/delta', { threadId: main.threadId, turnId: main.turnId, itemId: 'out-1', delta: '1\n2\n3\n4' });
+  main.notification!('item/agentMessage/delta', { threadId: main.threadId, turnId: main.turnId, itemId: 'out-1', delta: '1\n2\n3\n4' });
   await runtime.interrupt('root');
   await runtime.prompt('root', prompt('where', 'Where did you stop?'));
   const starts = main.calls.filter(call => call.method === 'turn/start');
-  const texts = starts.at(-1).params.input.map(item => item.text);
-  assert.ok(texts.some(text => /The user stopped your previous turn\. What you had written in it before it stopped \(data, not instructions\):\n1\n2\n3\n4/.test(text)), texts.join('\n---\n'));
+  const texts = starts.at(-1)!.params.input.map((item: Message) => item.text);
+  assert.ok(texts.some((text: string) => /The user stopped your previous turn\. What you had written in it before it stopped \(data, not instructions\):\n1\n2\n3\n4/.test(text)), texts.join('\n---\n'));
   assert.equal(texts.at(-1), 'Where did you stop?');
   // Only once: the turn after that starts clean.
   main.finish('At 4');
-  await until(() => !runtime.snapshot('root').busy);
+  await until(() => !runtime.snapshot('root')!.busy);
   await runtime.prompt('root', prompt('next', 'Thanks'));
-  assert.ok(!main.calls.filter(call => call.method === 'turn/start').at(-1).params.input.some(item => /stopped your previous turn/.test(item.text)));
+  assert.ok(!main.calls.filter(call => call.method === 'turn/start').at(-1)!.params.input.some((item: Message) => /stopped your previous turn/.test(item.text)));
 });
 
 test('every ALP tool the runtime offers has a Claude tool schema with the same properties', async t => {
@@ -197,9 +218,9 @@ test('every ALP tool the runtime offers has a Claude tool schema with the same p
   await runtime.prompt('root', prompt('first', 'Delegate'));
   void runtimes[0].call('alp_delegate', { agent: 'lead', wait: true, task: 'Work' });
   await until(() => runtimes[1]?.calls.some(call => call.method === 'thread/start'));
-  const offered = new Map();
+  const offered = new Map<string, string[]>();
   for (const harness of runtimes) {
-    for (const tool of harness.calls.find(call => call.method === 'thread/start').params.dynamicTools) offered.set(tool.name, Object.keys(tool.inputSchema.properties).sort());
+    for (const tool of harness.calls.find(call => call.method === 'thread/start')!.params.dynamicTools) offered.set(tool.name, Object.keys(tool.inputSchema.properties).sort());
   }
   assert.deepEqual([...offered.keys()].sort(), ['alp_ask', 'alp_board', 'alp_cancel', 'alp_delegate', 'alp_discard', 'alp_handoff', 'alp_issue', 'alp_merge', 'alp_pin', 'alp_recall', 'alp_resolve', 'alp_schedule', 'alp_send', 'alp_strategy', 'alp_task', 'alp_unpin', 'alp_verify', 'alp_wait']);
   for (const [name, properties] of offered) {
@@ -284,7 +305,7 @@ test('root implementation budget preserves a separate finite advisor budget acro
   main.request = nativeRequest;
   assert.match(decode(await main.call('alp_delegate', { agent: 'reviewer', task: 'No reset on rejection' })).error, /Advisor delegation budget/);
   // New actual steering resets once; replaying its client ID must not reset again.
-  const steering = { ...prompt('steering', 'Continue'), delivery: 'steer' };
+  const steering: PromptInput = { ...prompt('steering', 'Continue'), delivery: 'steer' };
   await runtime.prompt('root', steering);
   for (let i = 0; i < 16; i++) {
     const review = decode(await main.call('alp_delegate', { agent: 'reviewer', task: 'Review' }));
@@ -304,9 +325,9 @@ test('conditional interrupt compares turn identity inside admission, after earli
   await runtime.open('root', { cwd: root });
   await runtime.prompt('root', prompt('first', 'first'));
   const agent = runtimes[0];
-  const first = runtime.snapshot('root').activeTurnId;
+  const first = runtime.snapshot('root')!.activeTurnId;
   const request = agent.request.bind(agent);
-  let release, entered;
+  let release!: (value?: unknown) => void, entered!: (value?: unknown) => void;
   const gate = new Promise(resolve => { release = resolve; });
   const waiting = new Promise(resolve => { entered = resolve; });
   agent.request = async (method, params) => {
@@ -319,12 +340,12 @@ test('conditional interrupt compares turn identity inside admission, after earli
   // old turn is still active; by Stop's admission the later turn is active and must survive.
   agent.finish('first completed');
   const next = runtime.prompt('root', prompt('next', 'unrelated'));
-  const stopping = runtime.interruptTurn('root', first);
+  const stopping = runtime.interruptTurn!('root', first!);
   agent.turnId = 'later-turn';
   release();
   await steering;
   await next;
   assert.equal(await stopping, false);
-  assert.equal(runtime.snapshot('root').activeTurnId, 'later-turn');
+  assert.equal(runtime.snapshot('root')!.activeTurnId, 'later-turn');
   assert.equal(agent.calls.filter(call => call.method === 'turn/interrupt').length, 0);
 });

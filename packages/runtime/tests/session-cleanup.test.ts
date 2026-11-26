@@ -6,24 +6,42 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
+import type { SessionSnapshot } from '@anhlp/alp-runtime';
+import type { TestContext } from 'node:test';
 
-const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
-async function until(check) {
+// `any`: the app-server messages the fake answers and sends, and event envelopes, are JSON of every shape; tests read their fields.
+type Message = any;
+type Handler = (method: string, params: Message) => Message;
+/** One fake native harness, as the transport factory hands it to the runtime and to the test. */
+type Harness = {
+  closeCalls: number, calls: { method: string, params: Message }[],
+  notification?: Handler, failure?: (error: unknown) => void, serverRequest?: Handler,
+  initialize(): Promise<void>,
+  onNotification(fn: Handler): void, onFailure(fn: (error: unknown) => void): void, onRequest(fn: Handler): void,
+  close(): Promise<void>,
+  request(method: string, params: Message): Promise<Message>,
+  call(tool: string, args: Message): Promise<Message>,
+};
+type Side = 'public' | 'delegated';
+
+const deferred = () => { let resolve!: () => void, reject!: (error: unknown) => void; const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
+async function until(check: () => unknown) {
   for (let i = 0; i < 300; i++) { if (check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail('Expected lifecycle boundary did not arrive');
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
-async function setup(t, configure = () => {}) {
+async function setup(t: TestContext, configure: (transport: Harness, index: number, cwd: string, env: NodeJS.ProcessEnv) => void = () => {}) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-cleanup-'));
   const root = path.join(directory, 'project');
   const home = path.join(directory, 'home');
   await initProject(root);
   await writeFile(path.join(root, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['lead'], lead: ['peer'] } }));
-  const transports = [];
+  const transports: Harness[] = [];
   const manager = createAlpRuntime({ supervisor: false, libraryDir: home, environment: { ...process.env, ALP_HOME: home }, transport: (cwd, env) => {
     const index = transports.length;
-    const transport = {
+    // The runtime sets the handlers before it starts a turn; the `!` below relies on that, as before.
+    const transport: Harness = {
       closeCalls: 0, calls: [],
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -34,7 +52,7 @@ async function setup(t, configure = () => {}) {
         if (method === 'turn/start') return { turn: { id: `turn-${index}` } };
         return {};
       },
-      call(tool, args) { return this.serverRequest('item/tool/call', { threadId: `thread-${index}`, turnId: `turn-${index}`, callId: `${tool}-${index}`, namespace: null, tool, arguments: args }); },
+      call(tool, args) { return this.serverRequest!('item/tool/call', { threadId: `thread-${index}`, turnId: `turn-${index}`, callId: `${tool}-${index}`, namespace: null, tool, arguments: args }); },
     };
     transports.push(transport);
     configure(transport, index, cwd, env);
@@ -42,18 +60,18 @@ async function setup(t, configure = () => {}) {
   } });
   t.after(() => manager.shutdown());
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const events = [];
+  const events: Message[] = [];
   manager.onEvent(event => events.push(event));
-  const lifecycle = id => events.filter(e => e.sessionId === id && ['session.opened', 'session.failed', 'session.closed'].includes(e.event.type)).map(e => e.event.type);
+  const lifecycle = (id: string) => events.filter(e => e.sessionId === id && ['session.opened', 'session.failed', 'session.closed'].includes(e.event.type)).map(e => e.event.type);
   return { root, manager, transports, events, lifecycle };
 }
 
 // Gate only filesystem stat at the real resolveSession boundary. Both opens have
 // passed the id check before either can register; then select each ordering explicitly.
-async function overlappingChild(t, { lateClose = false, older = 'public', beforeRegistration = false } = {}) {
+async function overlappingChild(t: TestContext, { lateClose = false, older = 'public', beforeRegistration = false }: { lateClose?: boolean, older?: Side, beforeRegistration?: boolean } = {}) {
   const initialization = deferred();
   const closing = deferred();
-  let first;
+  let first: Harness | undefined;
   const state = await setup(t, (transport, index) => {
     if (beforeRegistration) return;
     if (index === 1) {
@@ -61,10 +79,10 @@ async function overlappingChild(t, { lateClose = false, older = 'public', before
       transport.initialize = () => initialization.promise;
       transport.close = async () => { transport.closeCalls++; await closing.promise; };
     }
-    if (index === 2 && lateClose) first.failure(new Error('process exited during initialization'));
+    if (index === 2 && lateClose) first!.failure!(new Error('process exited during initialization'));
   });
   const { manager, root, transports } = state;
-  const workdirs = { public: path.join(root, 'public'), delegated: path.join(root, 'delegated') };
+  const workdirs: Record<Side, string> = { public: path.join(root, 'public'), delegated: path.join(root, 'delegated') };
   await Promise.all(Object.values(workdirs).map(dir => mkdir(dir)));
   await manager.open('root', { cwd: root, workdir: workdirs.delegated });
   await manager.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Delegate' }] });
@@ -72,16 +90,17 @@ async function overlappingChild(t, { lateClose = false, older = 'public', before
   const reached = new Set();
   const stat = fsPromises.stat;
   let enabled = false;
-  const mocked = t.mock.method(fsPromises, 'stat', async (target, ...args) => {
-    const owner = Object.keys(workdirs).find(owner => workdirs[owner] === target);
+  const mocked = t.mock.method(fsPromises, 'stat', async (target: string, ...args: unknown[]) => {
+    const owner = (Object.keys(workdirs) as Side[]).find(owner => workdirs[owner] === target);
     if (enabled && owner) {
       reached.add(owner); await gates[owner].promise;
       if (beforeRegistration && owner === 'delegated') throw new Error('delegated config refused before registration');
     }
-    return stat(target, ...args);
+    // `as`: the mock passes on whatever stat was called with.
+    return (stat as (...passed: unknown[]) => Promise<unknown>)(target, ...args);
   });
   syncBuiltinESMExports();
-  let publicOpen, id;
+  let publicOpen!: Promise<SessionSnapshot>, id!: string;
   const unsubscribe = manager.onEvent(envelope => {
     if (envelope.event.type !== 'assignment' || id) return;
     id = envelope.event.assignment.id;
@@ -109,7 +128,7 @@ async function overlappingChild(t, { lateClose = false, older = 'public', before
   return { ...state, id, initialization, closing, publicOpen, delegated, older };
 }
 
-async function settledOpens(s) {
+async function settledOpens(s: Awaited<ReturnType<typeof overlappingChild>>) {
   const [publicResult, delegatedResult] = await Promise.allSettled([s.publicOpen, s.delegated]);
   assert.equal(delegatedResult.status, 'fulfilled');
   if (s.older === 'public') {
@@ -123,7 +142,7 @@ async function settledOpens(s) {
   await tick();
 }
 
-for (const older of ['public', 'delegated']) {
+for (const older of ['public', 'delegated'] as const) {
   test(`late close preserves replacement and parent membership (old ${older})`, async t => {
     const s = await overlappingChild(t, { lateClose: true, older });
     s.closing.resolve();
@@ -135,7 +154,7 @@ for (const older of ['public', 'delegated']) {
     assert.equal(s.manager.snapshot(s.id)?.threadId, 'thread-2');
     assert.equal(s.transports[1].closeCalls, 1);
     assert.equal(s.transports[2].closeCalls, 0);
-    assert.ok(s.manager.status('root').sessions.some(session => session.id === s.id), 'parent still reaches replacement');
+    assert.ok(s.manager.status('root')!.sessions.some(session => session.id === s.id), 'parent still reaches replacement');
     assert.equal(s.lifecycle(s.id).filter(type => type === 'session.closed').length, 0);
   });
 
@@ -148,13 +167,13 @@ for (const older of ['public', 'delegated']) {
     assert.equal(s.transports[1].closeCalls, 1);
     assert.equal(s.transports[2].closeCalls, 0);
     assert.deepEqual(s.lifecycle(s.id), ['session.opened']);
-    assert.ok(s.manager.status('root').sessions.some(session => session.id === s.id), 'parent still reaches replacement');
+    assert.ok(s.manager.status('root')!.sessions.some(session => session.id === s.id), 'parent still reaches replacement');
     const transport = s.transports[2];
     const before = transport.calls.filter(call => call.method === 'turn/start').length;
-    if (before) transport.notification('turn/completed', { threadId: 'thread-2', turn: { id: 'turn-2', status: 'completed' } });
+    if (before) transport.notification!('turn/completed', { threadId: 'thread-2', turn: { id: 'turn-2', status: 'completed' } });
     await s.manager.prompt(s.id, { clientMessageId: 'replacement-prompt', delivery: 'auto', content: [{ type: 'text', text: 'Still available' }] });
     assert.equal(transport.calls.filter(call => call.method === 'turn/start').length, before + 1);
-    transport.notification('turn/completed', { threadId: 'thread-2', turn: { id: 'turn-2', status: 'completed' } });
+    transport.notification!('turn/completed', { threadId: 'thread-2', turn: { id: 'turn-2', status: 'completed' } });
   });
 
   test(`late successful initialization cannot publish a superseded open (old ${older})`, async t => {
@@ -166,12 +185,12 @@ for (const older of ['public', 'delegated']) {
     assert.equal(s.transports[1].closeCalls, 1);
     assert.equal(s.transports[2].closeCalls, 0);
     assert.deepEqual(s.lifecycle(s.id), ['session.opened']);
-    assert.ok(s.manager.status('root').sessions.some(session => session.id === s.id));
+    assert.ok(s.manager.status('root')!.sessions.some(session => session.id === s.id));
   });
 
   test(`superseded transport failure leaves replacement live (old ${older})`, async t => {
     const s = await overlappingChild(t, { older });
-    s.transports[1].failure(new Error('superseded process exited'));
+    s.transports[1].failure!(new Error('superseded process exited'));
     await tick();
     const afterFailure = s.manager.snapshot(s.id);
     const closedReplacement = s.transports[2].closeCalls;
@@ -193,7 +212,7 @@ test('assignment failure before registration does not harvest or close another o
   assert.equal(s.manager.snapshot(s.id)?.threadId, 'thread-1');
   assert.equal(s.transports[1].closeCalls, 0);
   assert.deepEqual(s.lifecycle(s.id), ['session.opened']);
-  assert.ok(s.manager.status('root').sessions.some(session => session.id === s.id));
+  assert.ok(s.manager.status('root')!.sessions.some(session => session.id === s.id));
   await s.manager.close(s.id);
   assert.equal(s.transports[1].closeCalls, 1);
 });
@@ -204,7 +223,7 @@ test('failure while open is pending closes its transport once and reports only f
   const opening = s.manager.open('root', { cwd: s.root });
   const rejected = assert.rejects(opening, /initialization rejected/);
   await until(() => s.transports.length === 1);
-  s.transports[0].failure(new Error('process exited'));
+  s.transports[0].failure!(new Error('process exited'));
   await tick();
   initialization.reject(new Error('initialization rejected'));
   await rejected;
@@ -219,7 +238,7 @@ test('a transport failure while open is pending waits for the open: it fails wit
   const opening = s.manager.open('root', { cwd: s.root });
   const rejected = assert.rejects(opening, /process exited/);
   await until(() => s.transports.length === 1);
-  s.transports[0].failure(new Error('process exited'));
+  s.transports[0].failure!(new Error('process exited'));
   await tick();
   // The open still runs: nothing closed or reported under it yet.
   assert.equal(s.transports[0].closeCalls, 0);
@@ -229,7 +248,7 @@ test('a transport failure while open is pending waits for the open: it fails wit
   await rejected;
   assert.equal(s.transports[0].closeCalls, 1);
   assert.deepEqual(s.lifecycle('root'), ['session.failed']);
-  assert.equal(s.events.find(e => e.event.type === 'session.failed').event.error.message, 'process exited');
+  assert.equal(s.events.find(e => e.event.type === 'session.failed')!.event.error.message, 'process exited');
   assert.equal(s.transports[0].calls.filter(call => call.method.startsWith('thread/')).length, 0, 'no thread is asked for after the failure');
   assert.equal(s.manager.snapshot('root'), undefined);
 });
@@ -249,9 +268,9 @@ test('a live nonpersistent transport failure ends its turn and emits failed then
   const s = await setup(t);
   await s.manager.open('root', { cwd: s.root });
   await s.manager.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Work' }] });
-  s.transports[0].failure(new Error('process exited'));
+  s.transports[0].failure!(new Error('process exited'));
   await until(() => s.lifecycle('root').includes('session.closed'));
-  s.transports[0].failure(new Error('duplicate callback'));
+  s.transports[0].failure!(new Error('duplicate callback'));
   assert.equal(s.transports[0].closeCalls, 1);
   assert.deepEqual(s.lifecycle('root'), ['session.opened', 'session.failed', 'session.closed']);
   assert.deepEqual(s.events.filter(e => e.event.type === 'turn.ended').map(e => e.event.state), ['failed']);

@@ -5,18 +5,23 @@
 // permission makes every write fail (EACCES); the disk guard, not the runtime, decides which
 // errors are a full disk.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createAlpRuntime } from '../dist/runtime.js';
 import { createLiveBook } from '../dist/sessions/lifecycle/live.js';
+import type { LiveEntry } from '../dist/sessions/lifecycle/live.js';
 import { createRecallBook } from '../dist/assignments/recall.js';
 import { createAssignmentResults } from '../dist/assignments/completion/assignment-results.js';
 
 const skip = (process.platform === 'win32' || process.getuid?.() === 0) && 'POSIX permissions, not as root';
 
-async function unwritable(t) {
+/** What the tests read of a failed write: its code. */
+type WriteError = { code?: string };
+
+async function unwritable(t: TestContext) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-write-errors-'));
   const state = path.join(directory, 'state');
   await mkdir(state, { mode: 0o700 });
@@ -26,19 +31,19 @@ async function unwritable(t) {
   return { directory, state };
 }
 
-const until = async (check, what) => {
+const until = async (check: () => unknown, what: string) => {
   for (let i = 0; i < 200; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
   assert.fail(`${what} did not happen`);
 };
 
 test('a failed pause write reaches onWriteError at once, and the pause holds in memory as before', { skip }, async t => {
   const { state } = await unwritable(t);
-  const heard = [];
-  const runtime = createAlpRuntime({ language: 'English', transport: () => { throw new Error('no sessions here'); }, supervisor: false, pauseFile: path.join(state, 'pause.json'), onWriteError: error => heard.push(error) });
+  const heard: WriteError[] = [];
+  const runtime = createAlpRuntime({ language: 'English', transport: () => { throw new Error('no sessions here'); }, supervisor: false, pauseFile: path.join(state, 'pause.json'), onWriteError: error => heard.push(error as WriteError) });
   runtime.pause({ reason: 'Lunch' });
   await until(() => heard.length === 1, 'the failed pause write to be reported');
   assert.equal(heard[0].code, 'EACCES');
-  assert.equal(runtime.pauses().all.reason, 'Lunch');
+  assert.equal(runtime.pauses().all!.reason, 'Lunch');
   runtime.resume();
   await until(() => heard.length === 2, 'the second failed pause write to be reported');
   assert.equal(runtime.pauses().all, undefined);
@@ -56,12 +61,12 @@ test('an onWriteError that throws does not change how a pause write fails', { sk
 
 test('failed live and recall writes reach onError and still resolve; the books keep their entries in memory', { skip }, async t => {
   const { state } = await unwritable(t);
-  const heard = [];
-  const live = createLiveBook(path.join(state, 'live.json'), error => heard.push(['live', error.code]));
-  const entry = { assignmentId: 'a1', rootId: 'r', parentId: 'r', callId: 'c', agent: 'peer', project: '/p', ancestry: [], runtime: 'codex', model: 'm', threadId: 't', spec: {}, delegation: false, mode: 'read-only', isolation: 'shared', startedAt: 1, epoch: 'e' };
+  const heard: [string, string | undefined][] = [];
+  const live = createLiveBook(path.join(state, 'live.json'), error => heard.push(['live', (error as WriteError).code]));
+  const entry: LiveEntry = { assignmentId: 'a1', rootId: 'r', parentId: 'r', callId: 'c', agent: 'peer', project: '/p', ancestry: [], runtime: 'codex', model: 'm', threadId: 't', spec: {} as LiveEntry['spec'], delegation: false, mode: 'read-only', isolation: 'shared', startedAt: 1, epoch: 'e' };
   await live.put(entry);
   assert.deepEqual(live.all().map(item => item.assignmentId), ['a1']);
-  const recall = createRecallBook(path.join(state, 'recall.json'), error => heard.push(['recall', error.code]));
+  const recall = createRecallBook(path.join(state, 'recall.json'), error => heard.push(['recall', (error as WriteError).code]));
   await recall.add({ assignmentId: 'a1', rootId: 'r', requesters: [], agent: 'peer', project: '/p', runtime: 'codex', threadId: 't', cwd: '/p', model: 'm', status: 'completed', finishedAt: new Date().toISOString() });
   assert.equal((await recall.all()).length, 1);
   assert.deepEqual(heard, [['live', 'EACCES'], ['recall', 'EACCES']]);
@@ -71,8 +76,8 @@ test('failed live and recall writes reach onError and still resolve; the books k
 
 test('failed result ledger and archive writes reach onError and still fail their caller', { skip }, async t => {
   const { state } = await unwritable(t);
-  const heard = [];
-  const ledger = createAssignmentResults(path.join(state, 'assignment-results.json'), error => heard.push(error.code));
+  const heard: (string | undefined)[] = [];
+  const ledger = createAssignmentResults(path.join(state, 'assignment-results.json'), error => heard.push((error as WriteError).code));
   await assert.rejects(ledger.put({ assignmentId: 'a1', checkout: '/p' }), { code: 'EACCES' });
   assert.deepEqual(heard, ['EACCES']);
 
@@ -80,10 +85,10 @@ test('failed result ledger and archive writes reach onError and still fail their
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-write-errors-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await writeFile(path.join(directory, 'assignment-archive'), '');
-  const archived = [];
-  const kept = createAssignmentResults(path.join(directory, 'assignment-results.json'), error => archived.push(error.code));
+  const archived: (string | undefined)[] = [];
+  const kept = createAssignmentResults(path.join(directory, 'assignment-results.json'), error => archived.push((error as WriteError).code));
   await kept.put({ assignmentId: 'a2', checkout: '/p' });
   await assert.rejects(kept.resolve('a2', { outcome: 'applied', by: 'main', at: new Date().toISOString() }));
   assert.equal(archived.length, 1);
-  assert.match(archived[0], /^E(EXIST|NOTDIR)$/);
+  assert.match(archived[0]!, /^E(EXIST|NOTDIR)$/);
 });

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -7,15 +8,37 @@ import path from 'node:path';
 import { initProject } from '@anhlp/alp-core/init';
 import { createTask, getTask, loadTasks, releaseOrphans, startTask, taskDigest } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
+import type { RuntimeOptions } from '@anhlp/alp-runtime';
 
-const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
+
+// `any`: the app-server messages the fake answers and sends are JSON of every shape; tests read their fields.
+type Message = any;
+type Handler = (method: string, params: Message) => Message;
+type Call = { method: string, params: Message };
+/** One fake native harness, as fakeTransport hands it to the runtime and to the test. */
+type FakeRuntime = {
+  calls: Call[], threadId: string, turnId: string | undefined,
+  notification?: Handler, failure?: (error: unknown) => void, serverRequest?: Handler,
+  initialize(): Promise<void>,
+  onNotification(fn: Handler): void, onFailure(fn: (error: unknown) => void): void, onRequest(fn: Handler): void,
+  close(): Promise<void>,
+  request(method: string, params: Message): Promise<Message>,
+  kind: string | undefined, cwd: string, closed?: boolean,
+  readonly started: Call[],
+  readonly config: Message,
+  call(tool: string, args: Message): Promise<Message>,
+  finish(text?: string): void,
+};
 
 let calls = 0;
-function fakeTransport(runtimes) {
-  return (cwd, env, kind) => {
+function fakeTransport(runtimes: FakeRuntime[]) {
+  // The runtime's transport signature (RuntimeOptions.transport): it passes the kind, typed optional there.
+  return (cwd: string, env: NodeJS.ProcessEnv, kind?: string) => {
     const index = runtimes.length;
     let turns = 0;
-    const runtime = {
+    // The runtime sets the handlers before it starts a turn; the `!`s below rely on that, as before.
+    const runtime: FakeRuntime = {
       kind, cwd, calls: [], threadId: `thread-${index}`, turnId: undefined,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -29,11 +52,11 @@ function fakeTransport(runtimes) {
       get started() { return this.calls.filter(call => call.method === 'turn/start'); },
       get config() { return this.calls.find(call => call.method === 'thread/start')?.params; },
       async call(tool, args) {
-        return JSON.parse((await this.serverRequest('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text);
+        return JSON.parse((await this.serverRequest!('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text);
       },
       finish(text = 'done') {
-        this.notification('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}-${turns}`, text } });
-        this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
+        this.notification!('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}-${turns}`, text } });
+        this.notification!('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
       },
     };
     runtimes.push(runtime);
@@ -41,12 +64,16 @@ function fakeTransport(runtimes) {
   };
 }
 
-async function until(check) {
+async function until(check: () => unknown) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail('Expected condition did not arrive');
 }
 
-async function setup(t, options = {}) {
+/** What a test sets up: runtime options, and the project's settings. */
+type Options = (directory: string) => RuntimeOptions & { settings?: object };
+
+// Every test passes `options`; the default is kept as it was.
+async function setup(t: TestContext, options: Options = {} as Options) {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-recall-'));
   const root = path.join(directory, 'project');
   await initProject(root);
@@ -55,10 +82,10 @@ async function setup(t, options = {}) {
   git(root, 'init', '--quiet', '-b', 'main');
   git(root, 'add', '-A');
   git(root, '-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'init');
-  const runtimes = [];
+  const runtimes: FakeRuntime[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: path.join(directory, 'runs'), boardDir: path.join(directory, 'boards'), ...runtimeOptions });
   t.after(async () => { await runtime.shutdown(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); });
-  const prompt = (session, id, text) => runtime.prompt(session, { clientMessageId: id, delivery: 'auto', content: [{ type: 'text', text }] });
+  const prompt = (session: string, id: string, text: string) => runtime.prompt(session, { clientMessageId: id, delivery: 'auto', content: [{ type: 'text', text }] });
   return { directory, root, runtime, runtimes, prompt };
 }
 
@@ -79,7 +106,7 @@ test('releaseOrphans puts back tasks whose assignment is gone, and the digest sa
   await startTask(root, gone.id, { agent: 'peer', assignment: 'a-old', epoch: 'e1' }, 'main');
   await startTask(root, live.id, { agent: 'lead', assignment: 'a-live', epoch: 'e2' }, 'main');
   await startTask(root, mine.id, { agent: 'main', session: 'root' }, 'main');
-  assert.equal((await getTask(root, gone.id)).log.at(-1).assignment, 'a-old');
+  assert.equal((await getTask(root, gone.id)).log.at(-1)!.assignment, 'a-old');
 
   const released = await releaseOrphans(root, assignee => assignee.epoch === 'e1', async assignee => `work kept on branch alp/${assignee.assignment}`, 'alpd');
   assert.deepEqual(released.map(task => task.id), [gone.id]);
@@ -122,7 +149,7 @@ test('main\'s first turn puts back tasks an earlier alpd\'s assignments held, no
   // Its own assignments carry its pid and epoch, so a later alpd can tell.
   const fresh = await createTask(root, { title: 'Fresh' }, 'user');
   await main.call('alp_delegate', { agent: 'peer', task: 'Do it', taskId: fresh.id, wait: false });
-  const assignee = (await getTask(root, fresh.id)).assignee;
+  const assignee = (await getTask(root, fresh.id)).assignee!;
   assert.equal(assignee.pid, process.pid);
   assert.equal(typeof assignee.epoch, 'string');
 });
@@ -132,7 +159,7 @@ test('alp_recall forks a finished assignment read-only and returns its answer', 
   await runtime.open('root', { cwd: root });
   await prompt('root', 'm1', 'Fix it');
   const [main] = runtimes;
-  assert.ok(main.config.dynamicTools.some(tool => tool.name === 'alp_recall'));
+  assert.ok(main.config.dynamicTools.some((tool: Message) => tool.name === 'alp_recall'));
   assert.match(main.config.developerInstructions, /ask it with alp_recall/);
   assert.equal(main.config.ephemeral, true);
 
@@ -144,7 +171,7 @@ test('alp_recall forks a finished assignment read-only and returns its answer', 
   assert.equal(lead.config.ephemeral, false);
   assert.match((await main.call('alp_recall', { assignmentId: started.assignmentId, question: 'Why?' })).error, /still running; ask it with alp_send/);
   // Lead gets the tool too, but only for assignments in its own line.
-  assert.ok(lead.config.dynamicTools.some(tool => tool.name === 'alp_recall'));
+  assert.ok(lead.config.dynamicTools.some((tool: Message) => tool.name === 'alp_recall'));
   assert.match((await lead.call('alp_recall', { taskId: task.id, question: 'Why?' })).error, /Only main recalls by task/);
   await lead.call('alp_handoff', { outcome: 'complete', summary: 'Rewrote the tokenizer' });
   lead.finish('Done');
@@ -156,15 +183,15 @@ test('alp_recall forks a finished assignment read-only and returns its answer', 
   const asking = main.call('alp_recall', { taskId: task.id, question: 'Why rewrite the tokenizer instead of patching it?' });
   await until(() => runtimes.length === 3 && runtimes[2].started.length === 1);
   const recalled = runtimes[2];
-  const fork = recalled.calls.find(call => call.method === 'thread/fork').params;
+  const fork = recalled.calls.find(call => call.method === 'thread/fork')!.params;
   assert.deepEqual([fork.threadId, fork.sandbox, fork.approvalPolicy, fork.ephemeral, fork.cwd], [lead.threadId, 'read-only', 'never', true, root]);
   assert.equal(recalled.calls.some(call => call.method === 'thread/start'), false);
   const turn = recalled.started[0].params;
   assert.deepEqual(turn.sandboxPolicy, { type: 'readOnly', networkAccess: false });
   assert.match(turn.input[0].text, /^ALP recall: main asks about the assignment you finished[\s\S]*Question: Why rewrite the tokenizer instead of patching it\?$/);
   // The fork cannot use ALP tools or get approvals.
-  assert.match(JSON.parse((await recalled.serverRequest('item/tool/call', { tool: 'alp_delegate', arguments: {} })).contentItems[0].text).error, /unavailable in a recall/);
-  assert.deepEqual(await recalled.serverRequest('item/commandExecution/requestApproval', { command: 'rm -rf /' }), { decision: 'decline' });
+  assert.match(JSON.parse((await recalled.serverRequest!('item/tool/call', { tool: 'alp_delegate', arguments: {} })).contentItems[0].text).error, /unavailable in a recall/);
+  assert.deepEqual(await recalled.serverRequest!('item/commandExecution/requestApproval', { command: 'rm -rf /' }), { decision: 'decline' });
   recalled.finish('Patching kept the quadratic scan; the rewrite made it linear.');
   const answer = await asking;
   assert.deepEqual([answer.assignmentId, answer.agent, answer.taskId, answer.answer], [started.assignmentId, 'lead', task.id, 'Patching kept the quadratic scan; the rewrite made it linear.']);
@@ -192,7 +219,7 @@ test('a recall that runs into a failed fork reports the error', async t => {
   await main.call('alp_wait', {});
   const asking = main.call('alp_recall', { assignmentId, question: 'Why a map?' });
   await until(() => runtimes[2]?.started.length === 1);
-  runtimes[2].notification('turn/completed', { threadId: runtimes[2].threadId, turn: { id: runtimes[2].turnId, status: 'failed', error: { message: 'thread not found' } } });
+  runtimes[2].notification!('turn/completed', { threadId: runtimes[2].threadId, turn: { id: runtimes[2].turnId, status: 'failed', error: { message: 'thread not found' } } });
   assert.deepEqual(await asking, { assignmentId, error: 'thread not found' });
   main.finish('Done');
 });
@@ -200,9 +227,9 @@ test('a recall that runs into a failed fork reports the error', async t => {
 test('threads past their recall time are deleted when the runtime starts', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-recall-expire-'));
   const file = path.join(directory, 'recall.json');
-  const entry = (id, days, runtime = 'codex') => ({ assignmentId: id, rootId: 'r', requesters: ['r'], agent: 'peer', project: directory, runtime, threadId: `thread-${id}`, cwd: directory, model: 'm', status: 'completed', finishedAt: new Date(Date.now() - days * 86_400_000).toISOString() });
+  const entry = (id: string, days: number, runtime = 'codex') => ({ assignmentId: id, rootId: 'r', requesters: ['r'], agent: 'peer', project: directory, runtime, threadId: `thread-${id}`, cwd: directory, model: 'm', status: 'completed', finishedAt: new Date(Date.now() - days * 86_400_000).toISOString() });
   await writeFile(file, JSON.stringify([entry('old', 20), entry('older', 30, 'claude'), entry('new', 1), { broken: true }]));
-  const runtimes = [];
+  const runtimes: FakeRuntime[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, recallFile: file });
   t.after(() => runtime.shutdown());
   // After hooks run in the order they are added: remove the files only once that has stopped.
@@ -210,5 +237,5 @@ test('threads past their recall time are deleted when the runtime starts', async
   await until(() => runtimes.length === 2 && runtimes.every(harness => harness.closed));
   assert.deepEqual(runtimes.map(harness => [harness.kind, harness.calls.map(call => `${call.method} ${call.params.threadId}`)]).sort(), [['claude', ['thread/delete thread-older']], ['codex', ['thread/delete thread-old']]]);
   await until(async () => JSON.parse(await readFile(file, 'utf8')).length === 1);
-  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).map(kept => kept.assignmentId), ['new']);
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).map((kept: { assignmentId: string }) => kept.assignmentId), ['new']);
 });

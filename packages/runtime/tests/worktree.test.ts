@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, utimes, writeFile } from 'node:fs/promises';
@@ -9,16 +10,34 @@ import { initProject } from '@anhlp/alp-core/init';
 import { createTask, getTask } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime, reclaimWorktrees } from '@anhlp/alp-runtime';
 
-async function until(check) {
+async function until(check: () => unknown) {
   for (let i = 0; i < 400; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail('Expected condition did not arrive');
 }
 
 /** Fake native harnesses that remember the directory they were started in. */
-function fakeTransport(runtimes) {
-  return cwd => {
+// `any`: the app-server messages the fake answers and sends, and the result ledger the test reads, are JSON of every shape; tests read their fields.
+type Message = any;
+type Handler = (method: string, params: Message) => Message;
+type Call = { method: string, params: Message };
+/** One fake native harness, as fakeTransport hands it to the runtime and to the test. */
+type FakeRuntime = {
+  calls: Call[], threadId: string, turnId: string | undefined,
+  notification?: Handler, failure?: (error: unknown) => void, serverRequest?: Handler,
+  initialize(): Promise<void>,
+  onNotification(fn: Handler): void, onFailure(fn: (error: unknown) => void): void, onRequest(fn: Handler): void,
+  close(): Promise<void>,
+  request(method: string, params: Message): Promise<Message>,
+  cwd: string,
+  call(tool: string, args: Message, callId?: string): Promise<Message>,
+  finish(text?: string): void,
+};
+
+function fakeTransport(runtimes: FakeRuntime[]) {
+  return (cwd: string) => {
     const index = runtimes.length;
-    const runtime = {
+    // The runtime sets the handlers before it starts a turn; the `!`s below rely on that, as before.
+    const runtime: FakeRuntime = {
       cwd, calls: [], threadId: `thread-${index}`, turnId: `turn-${index}`,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -30,11 +49,11 @@ function fakeTransport(runtimes) {
         return {};
       },
       async call(tool, args, callId) {
-        return JSON.parse((await this.serverRequest('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId, namespace: null, tool, arguments: args })).contentItems[0].text);
+        return JSON.parse((await this.serverRequest!('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId, namespace: null, tool, arguments: args })).contentItems[0].text);
       },
       finish(text = 'done') {
-        this.notification('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}`, text } });
-        this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
+        this.notification!('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}`, text } });
+        this.notification!('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
       },
     };
     runtimes.push(runtime);
@@ -42,9 +61,9 @@ function fakeTransport(runtimes) {
   };
 }
 
-const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
 
-async function setup(t) {
+async function setup(t: TestContext) {
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-worktree-')));
   const project = path.join(directory, 'project');
   await initProject(project);
@@ -54,16 +73,16 @@ async function setup(t) {
   git(project, 'config', 'core.autocrlf', 'false'); // the host's global setting must not turn the files' LF into CRLF
   git(project, 'add', '-A');
   git(project, '-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'init');
-  const runtimes = [];
+  const runtimes: FakeRuntime[] = [];
   const worktreeDir = path.join(directory, 'worktrees');
   const assignmentResultFile = path.join(directory, 'assignment-results.json');
   const runtime = createAlpRuntime({ assignmentResultFile, transport: fakeTransport(runtimes), worktreeDir, runLogDir: path.join(directory, 'runs') });
   t.after(() => runtime.shutdown());
   // After hooks run in the order they are added: remove the files only once that has stopped.
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const open = async (id) => {
+  const open = async (id: string) => {
     await runtime.open(id, { cwd: project, mode: 'workspace-write', persist: true });
-    const harness = runtimes.at(-1);
+    const harness = runtimes.at(-1)!;
     await runtime.prompt(id, { clientMessageId: `${id}-1`, delivery: 'auto', content: [{ type: 'text', text: 'Go' }] });
     return harness;
   };
@@ -71,14 +90,14 @@ async function setup(t) {
   return { directory, project, runtime, runtimes, worktreeDir, open, branches, assignmentResultFile };
 }
 
-const isolated = (task, extra = {}) => ({ agent: 'peer', task, mode: 'workspace-write', isolation: 'worktree', wait: false, ...extra });
+const isolated = (task: string, extra = {}) => ({ agent: 'peer', task, mode: 'workspace-write', isolation: 'worktree', wait: false, ...extra });
 
 /** Collects results from alp_wait until `count` arrive. */
-async function results(harness, count) {
-  const collected = [];
+async function results(harness: FakeRuntime, count: number) {
+  const collected: Message[] = [];
   for (let call = 0; collected.length < count; call++) {
     const { events } = await harness.call('alp_wait', { timeoutMs: 2000 }, `wait-${call}-${Date.now()}`);
-    collected.push(...events.filter(event => event.kind === 'result').map(event => event.result));
+    collected.push(...events.filter((event: Message) => event.kind === 'result').map((event: Message) => event.result));
   }
   return collected;
 }
@@ -99,7 +118,7 @@ test('writing peers run in parallel worktrees and their changes merge into the c
     assert.equal(await readFile(path.join(peer.cwd, 'shared.txt'), 'utf8'), 'one\ntwo\nthree\nfour\n');
   }
   assert.notEqual(a.cwd, b.cwd);
-  assert.equal(a.calls.find(c => c.method === 'turn/start').params.sandboxPolicy.writableRoots[0], a.cwd);
+  assert.equal(a.calls.find(c => c.method === 'turn/start')!.params.sandboxPolicy.writableRoots[0], a.cwd);
   await writeFile(path.join(a.cwd, 'a.txt'), 'from a\n');
   await writeFile(path.join(b.cwd, 'b.txt'), 'from b\n');
   a.finish();
@@ -112,7 +131,7 @@ test('writing peers run in parallel worktrees and their changes merge into the c
   }
   const owners = JSON.parse(await readFile(assignmentResultFile, 'utf8')).results;
   assert.equal(owners.length, 2);
-  assert.ok(owners.every(owner => owner.checkout === project && owner.worktree.startsWith(worktreeDir)));
+  assert.ok(owners.every((owner: Message) => owner.checkout === project && owner.worktree.startsWith(worktreeDir)));
   assert.equal(existsSync(path.join(project, 'a.txt')), false, 'nothing reaches the checkout before a merge');
   // Models may merge in parallel, and repeat a call; each change applies once.
   const merges = await Promise.all([
@@ -156,7 +175,7 @@ test('a conflicting change is applied with markers and keeps its branch; discard
   assert.equal(existsSync(path.join(project, 'c.txt')), false);
   const again = await main.call('alp_merge', { assignmentId: extra.sessionId }, 'merge-again');
   assert.match(again.error, /No unmerged worktree change/);
-  assert.deepEqual(JSON.parse(await readFile(assignmentResultFile, 'utf8')).results.map(owner => owner.assignmentId), [edit.sessionId]);
+  assert.deepEqual(JSON.parse(await readFile(assignmentResultFile, 'utf8')).results.map((owner: Message) => owner.assignmentId), [edit.sessionId]);
 });
 
 test('worktrees are for writers, and only isolated or read-only peers run beside others', async t => {
@@ -212,7 +231,7 @@ test('worktree isolation outside git fails clearly', async t => {
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-nogit-')));
   await initProject(directory);
   await writeFile(path.join(directory, '.alp/settings.json'), JSON.stringify({ delegation: { main: ['peer'] } }));
-  const runtimes = [];
+  const runtimes: FakeRuntime[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), worktreeDir: path.join(directory, '.wt') });
   t.after(() => runtime.shutdown());
   // After hooks run in the order they are added: remove the files only once that has stopped.
@@ -242,10 +261,10 @@ test('shared writers in different repositories run together, with external board
   const second = await main.call('alp_delegate', { agent: 'peer', task: 'Write only in core', taskId: coreTask.id, mode: 'workspace-write', writeRoot: '../core' }, 'b');
   assert.equal(first.status, 'running');
   assert.equal(second.status, 'running', JSON.stringify(second));
-  const corePeer = runtimes.at(-1);
+  const corePeer = runtimes.at(-1)!;
   assert.equal(corePeer.cwd, core);
-  assert.deepEqual(corePeer.calls.find(c => c.method === 'turn/start').params.sandboxPolicy.writableRoots, [core]);
-  assert.match(corePeer.calls.find(c => c.method === 'thread/start').params.developerInstructions, /Write scope:/);
+  assert.deepEqual(corePeer.calls.find(c => c.method === 'turn/start')!.params.sandboxPolicy.writableRoots, [core]);
+  assert.match(corePeer.calls.find(c => c.method === 'thread/start')!.params.developerInstructions, /Write scope:/);
   assert.equal(existsSync(worktreeDir), false, 'no unused project worktree');
   const projectPeer = runtimes[runtimes.length - 2];
   assert.ok((await projectPeer.call('alp_pin', { kind: 'claim', body: 'Project', paths: ['.'] }, 'pin-a')).pinned);
@@ -260,7 +279,7 @@ test('shared writers in different repositories run together, with external board
   assert.match(alias.error, /another session is writing/);
   // The original project's verification command must never run in the external repository.
   // Use Node so these real shell commands also work on Windows without POSIX utilities.
-  const markerCommand = file => `"${process.execPath}" -e "require('node:fs').writeFileSync('${file}', '')"`;
+  const markerCommand = (file: string) => `"${process.execPath}" -e "require('node:fs').writeFileSync('${file}', '')"`;
   const settings = path.join(project, '.alp/settings.json');
   await writeFile(settings, JSON.stringify({ ...JSON.parse(await readFile(settings, 'utf8')), verify: { test: markerCommand('wrong-project-check') } }));
   await mkdir(path.join(core, '.alp'));
@@ -274,7 +293,7 @@ test('shared writers in different repositories run together, with external board
   assert.equal(existsSync(path.join(core, 'core-check')), true);
   const takeover = await other.call('alp_delegate', { agent: 'peer', task: 'Write core now', mode: 'workspace-write', writeRoot: core }, 'takeover');
   assert.equal(takeover.status, 'running', JSON.stringify(takeover));
-  assert.ok(runtime.status('root').assignments.some(assignment => assignment.id === first.assignmentId));
+  assert.ok(runtime.status('root')!.assignments.some(assignment => assignment.id === first.assignmentId));
 });
 
 test('writeRoot is validated and cannot be combined with worktrees or read-only assignments', async t => {
@@ -287,7 +306,7 @@ test('writeRoot is validated and cannot be combined with worktrees or read-only 
     [{ writeRoot: 'shared.txt' }, /writeRoot/],
     [{ writeRoot: project, mode: 'read-only' }, /writing/],
     [{ writeRoot: project, isolation: 'worktree' }, /shared/],
-  ]) {
+  ] as [object, RegExp][]) {
     const result = await main.call('alp_delegate', { agent: 'peer', task: 'Write', mode: 'workspace-write', ...extra }, JSON.stringify(extra));
     assert.match(result.error, error, JSON.stringify(result));
   }
@@ -318,7 +337,7 @@ test('t-eae4: reclaim never deletes work it could not commit or read', async t =
   assert.equal(byName.partial.reason, 'invalid');
   assert.equal(byName.partial.path, partial);
   assert.equal(byName.locked.reason, 'commit-failed');
-  assert.match(byName.locked.detail, /alp\/locked\.lock/);
+  assert.match(byName.locked.detail!, /alp\/locked\.lock/);
   assert.equal(byName.switched.reason, 'other-branch');
   assert.equal(byName.switched.branch, 'fix/own');
   assert.equal(byName.detached.reason, 'other-branch');
@@ -360,7 +379,7 @@ test('t-eae4: reattaching reuses a valid worktree and preserves an invalid one b
 });
 
 /** A worktree under `worktreeDir` on its own `alp/<name>` branch, as an assignment leaves it. */
-function addWorktree(project, worktreeDir, name) {
+function addWorktree(project: string, worktreeDir: string, name: string) {
   const target = path.join(worktreeDir, name);
   git(project, 'worktree', 'add', '--quiet', '-b', `alp/${name}`, target);
   return { target, gitdir: git(target, 'rev-parse', '--absolute-git-dir') };

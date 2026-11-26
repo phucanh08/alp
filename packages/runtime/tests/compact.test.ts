@@ -7,11 +7,20 @@ import { initProject } from '@anhlp/alp-core/init';
 import { seedLibrary, librarySkills } from '@anhlp/alp-core/library';
 import { ClaudeTransport, createAlpRuntime, checkpointPrompt, compactDue, compactSettings, contextFill, seedPrompt } from '@anhlp/alp-runtime';
 import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
+import type { FakeAgent } from '../../../test/support/fake-agent.ts';
 import { teardown } from '../../../test/support/teardown.ts';
+import type { TestContext } from 'node:test';
+
+// `any`: events and the transport's notifications are JSON of every shape; the tests read their fields.
+type Json = any;
+/** ClaudeTransport's public members, and the private ones this test sets: the SDK query, the thread and the input queue. */
+type ClaudeInternals = Omit<ClaudeTransport, never> & { query: Json, threadId?: string, input: { push(message: Json): unknown } };
+/** Wraps an agent the fake transport made, to change what it answers. */
+type Wrap = (agent: FakeAgent, index: number) => FakeAgent;
 
 const CHECKPOINT = '**Assignment đang chạy:** none\n**Bước tiếp theo:** review PR #9';
 
-async function project(t, settings) {
+async function project(t: TestContext, settings?: object) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-compact-'));
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -24,17 +33,18 @@ async function project(t, settings) {
   return { directory, root, runs: path.join(directory, 'runs') };
 }
 
-const logOf = runs => async event => (await readFile(path.join(runs, 'root.jsonl'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.event === event);
-const promptText = call => call.params.input.map(part => part.text ?? '').join('\n');
+const logOf = (runs: string) => async (event: string) => (await readFile(path.join(runs, 'root.jsonl'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => entry.event === event);
+const promptText = (call: { params: Json }) => call.params.input.map((part: { text?: string }) => part.text ?? '').join('\n');
 const settle = () => new Promise(resolve => setTimeout(resolve, 40));
 
-async function open(t, { settings, model, transport } = {}) {
+async function open(t: TestContext, { settings, model, transport }: { settings?: object, model?: string, transport?: Wrap } = {}) {
   const defer = teardown(t);
   const { directory, root, runs } = await project(t, settings);
-  const runtimes = [];
-  const events = [];
+  const runtimes: FakeAgent[] = [];
+  const events: Json[] = [];
   const factory = fakeTransport(runtimes);
-  const runtime = createAlpRuntime({ transport: transport ? (...args) => transport(factory(...args), runtimes.length - 1) : factory, supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: runs });
+  // The fake's factory ignores the transport arguments; the runtime passes them all the same.
+  const runtime = createAlpRuntime({ transport: transport ? (...args: unknown[]) => transport((factory as (...passed: unknown[]) => FakeAgent)(...args), runtimes.length - 1) : factory, supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: runs });
   defer(() => runtime.shutdown());
   runtime.onEvent(envelope => events.push(envelope.event));
   await runtime.open('root', { cwd: root, ...(model ? { model } : {}) });
@@ -42,9 +52,9 @@ async function open(t, { settings, model, transport } = {}) {
   return { root, runtime, runtimes, events, log: logOf(runs), main: runtimes[0] };
 }
 
-const notices = events => events.filter(event => event.type === 'item' && event.item.kind === 'notice').map(event => event.item.text);
+const notices = (events: Json[]) => events.filter(event => event.type === 'item' && event.item.kind === 'notice').map(event => event.item.text);
 /** User messages in the timeline that are ALP's compact prompts: there are none (t-b3cd #6). */
-const compactPrompts = events => events.filter(event => event.type === 'item' && event.item.kind === 'user_message' && (String(event.item.clientMessageId ?? '').startsWith('alp-wake-compact-') || /ALP compact checkpoint|Your context was compacted/.test(event.item.text))).map(event => event.item.text);
+const compactPrompts = (events: Json[]) => events.filter(event => event.type === 'item' && event.item.kind === 'user_message' && (String(event.item.clientMessageId ?? '').startsWith('alp-wake-compact-') || /ALP compact checkpoint|Your context was compacted/.test(event.item.text))).map(event => event.item.text);
 
 test('compact settings, fill and the decision', () => {
   assert.deepEqual(compactSettings(undefined), { auto: true, threshold: 0.7 });
@@ -88,7 +98,7 @@ test('auto compaction: deferred while main holds its turn, checkpoint at the bou
   main.finish(CHECKPOINT);
   await until(() => main.calls.some(call => call.method === 'thread/compact/start'), 'the native compaction');
   // Codex takes the thread alone.
-  assert.deepEqual(main.calls.find(call => call.method === 'thread/compact/start').params, { threadId: main.threadId });
+  assert.deepEqual(main.calls.find(call => call.method === 'thread/compact/start')!.params, { threadId: main.threadId });
   main.compact(75_000, 9_000);
   await until(async () => (await log('compact')).length === 1, 'the compact run-log entry');
   const [entry] = await log('compact');
@@ -122,16 +132,16 @@ test('Claude compacts with /compact keeping the checkpoint', async t => {
   await until(() => main.started.length === 2, 'the checkpoint turn');
   main.finish(CHECKPOINT);
   await until(() => main.calls.some(call => call.method === 'thread/compact/start'), 'the native compaction');
-  const { params } = main.calls.find(call => call.method === 'thread/compact/start');
+  const { params } = main.calls.find(call => call.method === 'thread/compact/start')!;
   assert.ok(params.instructions.includes(CHECKPOINT));
   main.compact(80_000, 10_000);
   await until(async () => (await log('compact')).length === 1);
 });
 
 test('the Claude transport turns thread/compact/start into a /compact turn', async () => {
-  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env);
-  const pushed = [];
-  const seen = [];
+  const transport = new ClaudeTransport(process.execPath, tmpdir(), process.env) as unknown as ClaudeInternals;
+  const pushed: Json[] = [];
+  const seen: Json[] = [];
   transport.query = {};
   transport.threadId = 'claude-thread';
   transport.input = { push: message => pushed.push(message) };
@@ -144,7 +154,7 @@ test('the Claude transport turns thread/compact/start into a /compact turn', asy
 });
 
 test('without native compaction, a fresh conversation is seeded with the checkpoint and the last user message', async t => {
-  const transport = agent => {
+  const transport = (agent: FakeAgent) => {
     const request = agent.request.bind(agent);
     agent.request = async (method, params) => {
       if (method === 'thread/compact/start') { agent.calls.push({ method, params }); throw new Error('unsupported'); }
@@ -174,11 +184,11 @@ test('without native compaction, a fresh conversation is seeded with the checkpo
 
 test('manual trigger: now when idle, deferred while a turn runs; user words during it wait for its end', async t => {
   const { runtime, main, log } = await open(t);
-  assert.deepEqual(runtime.compact('root'), { status: 'deferred' });
+  assert.deepEqual(runtime.compact!('root'), { status: 'deferred' });
   main.finish('ok');
   await until(() => main.started.length === 2, 'the manual checkpoint turn');
   assert.match(promptText(main.started[1]), /The user asked to compact your context/);
-  assert.deepEqual(runtime.compact('root'), { status: 'running' });
+  assert.deepEqual(runtime.compact!('root'), { status: 'running' });
 
   // The user writes while main writes its checkpoint: held, not steered into it.
   await runtime.prompt('root', { clientMessageId: 'm2', delivery: 'auto', content: [{ type: 'text', text: 'Also check CI' }] });
@@ -195,7 +205,7 @@ test('manual trigger: now when idle, deferred while a turn runs; user words duri
 test('with the supervisor on, its review neither stops nor stalls the compaction, and the user\'s words reach main after', async t => {
   const defer = teardown(t);
   const { directory, root, runs } = await project(t);
-  const runtimes = [];
+  const runtimes: FakeAgent[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), libraryDir: path.join(directory, 'home'), runLogDir: runs });
   defer(() => runtime.shutdown());
   await runtime.open('root', { cwd: root, model: 'codex:gpt-5.6-sol' });
@@ -220,7 +230,7 @@ test('with the supervisor on, its review neither stops nor stalls the compaction
 });
 
 test('a runtime that takes the native request but reports nothing, or a fresh conversation refused, fails the compaction and releases main', async t => {
-  const transport = agent => {
+  const transport = (agent: FakeAgent) => {
     const request = agent.request.bind(agent);
     agent.request = async (method, params) => {
       if (method === 'thread/compact/start') { agent.calls.push({ method, params }); throw new Error('unsupported'); }
@@ -245,10 +255,11 @@ test('a runtime that takes the native request but reports nothing, or a fresh co
 test('with the supervisor on, a failed native compaction still falls back to a fresh conversation', async t => {
   const defer = teardown(t);
   const { directory, root, runs } = await project(t);
-  const runtimes = [];
+  const runtimes: FakeAgent[] = [];
   const factory = fakeTransport(runtimes);
-  const transport = (...args) => {
-    const agent = factory(...args);
+  const transport = (...args: unknown[]) => {
+    // The fake's factory ignores the transport arguments; the runtime passes them all the same.
+    const agent = (factory as (...passed: unknown[]) => FakeAgent)(...args);
     const request = agent.request.bind(agent);
     agent.request = async (method, params) => {
       if (method === 'thread/compact/start') { agent.calls.push({ method, params }); throw new Error('unsupported'); }
@@ -274,7 +285,7 @@ test('with the supervisor on, a failed native compaction still falls back to a f
 // t-de1a: the 5-minute deadlines (COMPACT_NATIVE_MS) with node:test's mock timers. Only setTimeout is
 // mocked, once main is in the step under test; waits use setImmediate, which stays real.
 const FIVE_MINUTES = 5 * 60_000;
-async function untilReal(check, what) {
+async function untilReal(check: () => unknown, what: string) {
   for (let i = 0; i < 2000; i++) { if (await check()) return; await new Promise(resolve => setImmediate(resolve)); }
   assert.fail(`Expected ${what} did not arrive`);
 }
@@ -340,8 +351,8 @@ test('a native compaction the runtime takes but never reports fails at 5 minutes
 });
 
 test('old Codex compact echoes require actual accepted turn and exact input; spoofed user history stays visible', async t => {
-  let turns = [];
-  const { root, runtime, main, events } = await open(t, { model: 'codex:gpt-5.6-sol', transport: agent => {
+  let turns: Json[] = [];
+  const { root, runtime, main, events } = await open(t, { model: 'codex:gpt-5.6-sol', transport: (agent: FakeAgent) => {
     const request = agent.request.bind(agent);
     agent.request = async (method, params) => {
       const result = await request(method, params);
@@ -377,8 +388,8 @@ test('old Codex compact echoes require actual accepted turn and exact input; spo
 });
 
 test('public compact-prefixed IDs remain user messages, including exact old Codex replays', async t => {
-  let turns = [];
-  const { root, runtime, main, events } = await open(t, { model: 'codex:gpt-5.6-sol', transport: agent => {
+  let turns: Json[] = [];
+  const { root, runtime, main, events } = await open(t, { model: 'codex:gpt-5.6-sol', transport: (agent: FakeAgent) => {
     const request = agent.request.bind(agent);
     agent.request = async (method, params) => {
       const result = await request(method, params);
@@ -392,8 +403,8 @@ test('public compact-prefixed IDs remain user messages, including exact old Code
   const clientMessageId = 'alp-wake-compact-user-chosen';
   await runtime.prompt('root', { clientMessageId, delivery: 'auto', content: [{ type: 'text', text: 'Ordinary user text' }] });
   turns = [{ id: main.turnId, items: [
-    { type: 'userMessage', id: 'public-no-id', content: main.started.at(-1).params.input },
-    { type: 'userMessage', id: 'public-with-id', clientId: clientMessageId, content: main.started.at(-1).params.input },
+    { type: 'userMessage', id: 'public-no-id', content: main.started.at(-1)!.params.input },
+    { type: 'userMessage', id: 'public-with-id', clientId: clientMessageId, content: main.started.at(-1)!.params.input },
   ] }];
   await runtime.open('public-replay', { cwd: root, restore: { agent: 'main', threadId: main.threadId, runtime: 'codex', model: 'gpt-5.6-sol' } }, { history: 'replay' });
   for (const id of ['public-no-id', 'public-with-id']) assert.ok(events.some(event => event.type === 'item' && event.item.id === id && event.item.text === 'Ordinary user text'), id);
@@ -402,7 +413,7 @@ test('public compact-prefixed IDs remain user messages, including exact old Code
 
 test('closing a compact owner releases its old threads after restart, preserving other owners', async t => {
   const histories = new Map();
-  const { root, runtime, main, runtimes, events } = await open(t, { model: 'codex:gpt-5.6-sol', transport: agent => {
+  const { root, runtime, main, runtimes, events } = await open(t, { model: 'codex:gpt-5.6-sol', transport: (agent: FakeAgent) => {
     const request = agent.request.bind(agent);
     agent.request = async (method, params) => {
       if (method === 'thread/compact/start') throw new Error('unsupported');
@@ -425,8 +436,8 @@ test('closing a compact owner releases its old threads after restart, preserving
   // A second live session owns its own compact record, even while replaying the same old thread.
   await runtime.open('other', { cwd: root, restore: { agent: 'main', threadId: main.threadId, runtime: 'codex', model: 'gpt-5.6-sol' } }, { history: 'replay' });
   assert.equal(events.some(event => event.type === 'item' && event.item.id === 'owner-A'), false, 'shared replay works while owner lives');
-  const other = runtimes.at(-1);
-  runtime.compact('other');
+  const other = runtimes.at(-1)!;
+  runtime.compact!('other');
   await until(() => other.started.length === 1);
   await settle();
   const otherItem = { type: 'userMessage', id: 'other-owner', content: other.started[0].params.input };
@@ -442,7 +453,7 @@ test('closing a compact owner releases its old threads after restart, preserving
 });
 
 test('failed checkpoint start reports failure without claiming checkpoint started', async t => {
-  const { main, events } = await open(t, { transport: agent => {
+  const { main, events } = await open(t, { transport: (agent: FakeAgent) => {
     const request = agent.request.bind(agent);
     agent.request = async (method, params) => {
       if (method === 'turn/start' && String(params.clientUserMessageId).startsWith('alp-wake-compact-')) throw new Error('checkpoint start refused');

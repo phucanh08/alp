@@ -10,6 +10,9 @@ import { providerUsage } from '@anhlp/alp-runtime/usage';
 import { CodexTransport } from '@anhlp/alp-runtime/transport';
 import { ClaudeTransport } from '@anhlp/alp-runtime/claude-transport';
 
+// `any`: a usage report is a union of its available and unavailable shapes; the tests read the available one's fields.
+type Json = any;
+
 const EMAIL = 'private-owner@example.com';
 const checkedAt = '2026-11-22T00:00:00.000Z';
 
@@ -34,7 +37,7 @@ const CLAUDE = {
 };
 
 /** GetAccountRateLimitsResponse: the default bucket and a model bucket, credits, a Plus plan. */
-const window = (usedPercent, windowDurationMins, resetsAt) => ({ usedPercent, windowDurationMins, resetsAt });
+const window = (usedPercent: number, windowDurationMins: number, resetsAt: number) => ({ usedPercent, windowDurationMins, resetsAt });
 const CODEX_MAIN = { limitId: 'codex', limitName: null, normalModelSlug: null, planType: 'plus', primary: window(42, 300, 1_800_000_000), secondary: window(7, 10080, 1_800_500_000),
   credits: { hasCredits: false, unlimited: false, balance: '0' }, spendControlReached: false, rateLimitReachedType: null, individualLimit: null };
 const CODEX = {
@@ -47,8 +50,8 @@ const CODEX = {
 const CODEX_ACCOUNT = { account: { type: 'chatgpt', email: EMAIL, planType: 'plus', workspaceName: null }, requiresOpenaiAuth: true, userId: 'user-PRIVATE' };
 
 test('Claude: Session, Weekly and one Weekly · <Model> per model, extra usage a detail and never a window', () => {
-  const report = claudeUsage(CLAUDE);
-  assert.ok(!report.windows.some(item => item.name === 'extra_usage'), 'extra_usage is not a window of the report');
+  const report: Json = claudeUsage(CLAUDE);
+  assert.ok(!report.windows.some((item: Json) => item.name === 'extra_usage'), 'extra_usage is not a window of the report');
   assert.equal(report.extraUsage, true);
   const usage = providerUsage('claude', report, checkedAt);
   assert.deepEqual(usage.windows, [
@@ -114,7 +117,7 @@ test('Codex: the default bucket by length, another bucket scoped by its limit id
 });
 
 test('an unavailable provider answers the new fields empty', () => {
-  for (const runtime of ['codex', 'claude']) {
+  for (const runtime of ['codex', 'claude'] as const) {
     const usage = providerUsage(runtime, undefined, checkedAt);
     assert.deepEqual({ ...usage, runtime: undefined }, { runtime: undefined, available: false, checkedAt, plan: null, planLabel: null, limited: false, windows: [], details: [], balances: [], account: null });
   }
@@ -130,15 +133,15 @@ test('account emails: read from account/read and accountInfo only', () => {
 });
 
 test('Codex: orchestrationContext carries no email; usageReport does, for daemon.usage', async () => {
-  const requests = [];
-  const fake = { request: async (method, params) => {
+  const requests: string[] = [];
+  const fake = { request: async (method: string, params: unknown) => {
     requests.push(method);
     if (method === 'model/list') return { data: [] };
     if (method === 'account/rateLimits/read') return CODEX;
     if (method === 'account/read') { assert.deepEqual(params, { refreshToken: false }); return CODEX_ACCOUNT; }
     throw new Error(`unexpected ${method}`);
   } };
-  const context = await CodexTransport.prototype.orchestrationContext.call(fake);
+  const context: Json = await CodexTransport.prototype.orchestrationContext.call(fake);
   assert.ok(!requests.includes('account/read'), 'orchestrationContext never reads the account');
   assert.doesNotMatch(JSON.stringify(context), /private-owner|PRIVATE|email/);
   assert.equal(context.usage.credits.balance, 0);
@@ -156,10 +159,10 @@ test('Claude: orchestrationContext carries no email; usageReport does, for daemo
     usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => CLAUDE,
     accountInfo: async () => { asked++; return { email: EMAIL, organization: 'Org PRIVATE', subscriptionType: 'max' }; },
   };
-  const context = await ClaudeTransport.prototype.orchestrationContext.call({ query });
+  const context: Json = await ClaudeTransport.prototype.orchestrationContext.call({ query });
   assert.equal(asked, 0, 'orchestrationContext never reads the account');
   assert.doesNotMatch(JSON.stringify(context), /private-owner|PRIVATE|email/);
-  assert.deepEqual(context.usage.models.map(model => model.name), ['Opus', 'Fable']);
+  assert.deepEqual(context.usage.models.map((model: Json) => model.name), ['Opus', 'Fable']);
   const report = await ClaudeTransport.prototype.usageReport.call({ query });
   assert.deepEqual(report.account, { email: EMAIL });
   assert.doesNotMatch(JSON.stringify(report.usage), /private-owner|PRIVATE|email/);
@@ -180,7 +183,8 @@ test('the limit watch reads orchestrationContext, never usageReport: no email on
   let reads = 0;
   const factory = fakeTransport([]);
   const runtime = createAlpRuntime({ supervisor: false, pauseFile: file, limitCheckMs: 20,
-    transport: (...args) => Object.assign(factory(...args), {
+    // The fake's factory ignores the transport arguments; the runtime passes them all the same.
+    transport: (...args) => Object.assign((factory as (...passed: unknown[]) => ReturnType<typeof factory>)(...args), {
       async orchestrationContext() { reads++; return { usage: codexUsage(CODEX) }; },
       async usageReport() { accounts++; return { usage: codexUsage(CODEX), account: codexAccount(CODEX_ACCOUNT) }; },
     }),
@@ -192,6 +196,6 @@ test('the limit watch reads orchestrationContext, never usageReport: no email on
   assert.ok(runtime.pauses().runtimes.codex);
   const { providers } = await runtime.usage(true, true);
   assert.equal(accounts, 2, 'daemon.usage asks each runtime once');
-  assert.deepEqual(providers.find(provider => provider.runtime === 'codex').account, { email: EMAIL });
-  assert.equal((await runtime.usage()).providers.find(provider => provider.runtime === 'codex').account, null, 'no email unless asked');
+  assert.deepEqual(providers.find(provider => provider.runtime === 'codex')!.account, { email: EMAIL });
+  assert.equal((await runtime.usage()).providers.find(provider => provider.runtime === 'codex')!.account, null, 'no email unless asked');
 });

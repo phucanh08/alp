@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -14,12 +15,34 @@ import { createAlpRuntime } from '@anhlp/alp-runtime';
 // workflow.maxLeads (t-672e): in Cafe a lead runs beside read-only assignments, and up to maxLeads
 // leads run together when each has its own worktree and a task whose paths no other lead's overlaps.
 
+// `any`: the app-server messages the fake answers and sends are JSON of every shape; tests read their fields.
+type Message = any;
+type Handler = (method: string, params: Message) => Message;
+type Call = { method: string, params: Message };
+/** One fake native harness, as fakeTransport hands it to the runtime and to the test. */
+type FakeRuntime = {
+  calls: Call[], threadId: string, turnId: string | undefined,
+  notification?: Handler, failure?: (error: unknown) => void, serverRequest?: Handler,
+  initialize(): Promise<void>,
+  onNotification(fn: Handler): void, onFailure(fn: (error: unknown) => void): void, onRequest(fn: Handler): void,
+  close(): Promise<void>,
+  request(method: string, params: Message): Promise<Message>,
+  kind: string | undefined, cwd: string, closed?: boolean,
+  readonly started: Call[],
+  readonly config: Message,
+  call(tool: string, args: Message): Promise<Message>,
+  finish(text?: string): void,
+  limit(): void,
+};
+
 let calls = 0;
-function fakeTransport(runtimes) {
-  return (cwd, env, kind) => {
+function fakeTransport(runtimes: FakeRuntime[]) {
+  // The runtime's transport signature (RuntimeOptions.transport): it passes the kind, typed optional there.
+  return (cwd: string, env: NodeJS.ProcessEnv, kind?: string) => {
     const index = runtimes.length;
     let turns = 0;
-    const runtime = {
+    // The runtime sets the handlers before it starts a turn; the `!`s below rely on that, as before.
+    const runtime: FakeRuntime = {
       kind, cwd, calls: [], threadId: `thread-${index}`, turnId: undefined,
       async initialize() {},
       onNotification(fn) { this.notification = fn; }, onFailure(fn) { this.failure = fn; }, onRequest(fn) { this.serverRequest = fn; },
@@ -33,14 +56,14 @@ function fakeTransport(runtimes) {
       get started() { return this.calls.filter(call => call.method === 'turn/start'); },
       get config() { return this.calls.find(call => call.method === 'thread/start')?.params; },
       async call(tool, args) {
-        return JSON.parse((await this.serverRequest('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text);
+        return JSON.parse((await this.serverRequest!('item/tool/call', { threadId: this.threadId, turnId: this.turnId, callId: `${tool}-${index}-${++calls}`, namespace: null, tool, arguments: args })).contentItems[0].text);
       },
       finish(text = 'done') {
-        this.notification('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}-${turns}`, text } });
-        this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
+        this.notification!('item/completed', { threadId: this.threadId, item: { type: 'agentMessage', id: `output-${index}-${turns}`, text } });
+        this.notification!('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'completed' } });
       },
       limit() {
-        this.notification('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'failed', error: { message: 'You have hit your usage limit', codexErrorInfo: 'usageLimitExceeded', additionalDetails: null } } });
+        this.notification!('turn/completed', { threadId: this.threadId, turn: { id: this.turnId, status: 'failed', error: { message: 'You have hit your usage limit', codexErrorInfo: 'usageLimitExceeded', additionalDetails: null } } });
       },
     };
     runtimes.push(runtime);
@@ -48,15 +71,15 @@ function fakeTransport(runtimes) {
   };
 }
 
-async function until(check) {
+async function until(check: () => unknown) {
   for (let i = 0; i < 600; i++) { if (await check()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail('Expected condition did not arrive');
 }
 
-const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
 
 /** A Cafe project in git, its main on Codex; `workflow` adds maxLeads/maxPeers. */
-async function setup(t, workflow = {}) {
+async function setup(t: TestContext, workflow = {}) {
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-multi-lead-')));
   const root = path.join(directory, 'project');
   await initProject(root);
@@ -66,7 +89,7 @@ async function setup(t, workflow = {}) {
   git(root, 'config', 'core.autocrlf', 'false');
   git(root, 'add', '-A');
   git(root, '-c', 'user.name=T', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'init');
-  const runtimes = [];
+  const runtimes: FakeRuntime[] = [];
   const runtime = createAlpRuntime({
     language: 'English', transport: fakeTransport(runtimes), supervisor: false, silentForMs: 3_600_000,
     libraryDir: path.join(directory, 'home'), runLogDir: path.join(directory, 'runs'), boardDir: path.join(directory, 'boards'),
@@ -78,12 +101,12 @@ async function setup(t, workflow = {}) {
   t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   await runtime.open('root', { cwd: root, model: 'codex:gpt-5.6-sol' });
   await runtime.prompt('root', { clientMessageId: 'm1', delivery: 'auto', content: [{ type: 'text', text: 'Work' }] });
-  const task = (title, paths) => createTask(root, { title, ...(paths ? { paths } : {}) }, 'user');
+  const task = (title: string, paths?: string[]) => createTask(root, { title, ...(paths ? { paths } : {}) }, 'user');
   return { directory, root, runtime, runtimes, main: runtimes[0], task };
 }
 
-const lead = (task, extra = {}) => ({ agent: 'lead', task, mode: 'workspace-write', model: 'claude:claude-sonnet-4-6', wait: false, ...extra });
-const isolatedLead = (task, taskId, extra = {}) => lead(task, { isolation: 'worktree', taskId, ...extra });
+const lead = (task: string, extra = {}) => ({ agent: 'lead', task, mode: 'workspace-write', model: 'claude:claude-sonnet-4-6', wait: false, ...extra });
+const isolatedLead = (task: string, taskId: string, extra = {}) => lead(task, { isolation: 'worktree', taskId, ...extra });
 
 test('maxLeads 1: a lead starts beside a reviewer, a second lead is refused as before, and main is told so', async t => {
   const { runtimes, main, task } = await setup(t);
@@ -140,7 +163,7 @@ test('maxLeads 2: two isolated leads with separate task paths run together, and 
   const done = [];
   for (let call = 0; done.length < 2; call++) {
     const { events } = await main.call('alp_wait', { timeoutMs: 2000 });
-    done.push(...events.filter(event => event.kind === 'result').map(event => event.result));
+    done.push(...events.filter((event: Message) => event.kind === 'result').map((event: Message) => event.result));
   }
   // One merge at a time, as main's guidance says.
   for (const result of done) {
@@ -237,7 +260,7 @@ test('the session tree runs maxPeers × maxLeads peers', async t => {
   await main.call('alp_delegate', isolatedLead('Build the API', api.id));
   await until(() => runtimes[1]?.started.length === 1);
   const first = runtimes[1];
-  const look = n => first.call('alp_delegate', { agent: 'peer', task: `Look ${n}`, mode: 'read-only', model: 'claude:claude-sonnet-4-6', wait: false });
+  const look = (n: number) => first.call('alp_delegate', { agent: 'peer', task: `Look ${n}`, mode: 'read-only', model: 'claude:claude-sonnet-4-6', wait: false });
   assert.equal((await look(1)).status, 'running');
   assert.equal((await look(2)).status, 'running');
   assert.match((await look(3)).error, /Concurrent peer limit reached \(2 in this session tree\)/);
@@ -256,7 +279,7 @@ test('workflow.maxLeads is a positive integer in settings and teams, and a resum
   t.after(() => rm(directory, { recursive: true, force: true }));
   const root = path.join(directory, 'project');
   await initProject(root);
-  const settings = maxLeads => writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify({ workflow: { mode: 'cafe', ...(maxLeads ? { maxLeads } : {}) } }));
+  const settings = (maxLeads?: number) => writeFile(path.join(root, '.alp', 'settings.json'), JSON.stringify({ workflow: { mode: 'cafe', ...(maxLeads ? { maxLeads } : {}) } }));
   await settings();
   assert.equal((await resolveWorkflow(root, undefined, undefined, { library: path.join(directory, 'home') })).maxLeads, 1);
   await settings(3);

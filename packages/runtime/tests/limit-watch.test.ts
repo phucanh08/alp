@@ -6,9 +6,14 @@ import path from 'node:path';
 import { createAlpRuntime, usageAllows } from '@anhlp/alp-runtime';
 import { codexUsage } from '@anhlp/alp-runtime/runtime-context';
 import { fakeTransport, tree, until } from '../../../test/support/fake-agent.ts';
+import type { FakeAgent } from '../../../test/support/fake-agent.ts';
+import type { PromptInput } from '@anhlp/alp-runtime';
 
-const codex = (...used) => ({ available: true, limits: [{ windows: used.map(usedPercent => ({ usedPercent, windowMinutes: 300, resetsAt: 1_900_000_000 })), spendControlReached: false }] });
-const noticesOf = (events, sessionId = 'root') => events.filter(envelope => envelope.sessionId === sessionId && envelope.event.type === 'item' && envelope.event.item.kind === 'notice').map(envelope => envelope.event.item.text);
+// `any`: event envelopes are a union over every event type, and usage reports a union of shapes; the tests read the fields they filter.
+type Json = any;
+
+const codex = (...used: number[]) => ({ available: true, limits: [{ windows: used.map(usedPercent => ({ usedPercent, windowMinutes: 300, resetsAt: 1_900_000_000 })), spendControlReached: false }] });
+const noticesOf = (events: Json[], sessionId = 'root') => events.filter(envelope => envelope.sessionId === sessionId && envelope.event.type === 'item' && envelope.event.item.kind === 'notice').map(envelope => envelope.event.item.text);
 
 test('a usage report says whether the runtime may work again, or nothing when it cannot tell', () => {
   assert.equal(usageAllows(codex(0, 55)), true);
@@ -22,7 +27,7 @@ test('a usage report says whether the runtime may work again, or nothing when it
 });
 
 test('Codex denial survives normalization and vetoes window capacity without granting on true alone', () => {
-  const report = allowed => codexUsage({ ordinaryUsageAllowed: allowed, rateLimits: {
+  const report = (allowed: boolean | null): Json => codexUsage({ ordinaryUsageAllowed: allowed, rateLimits: {
     primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1_900_000_000 },
   } });
   assert.equal(report(false).ordinaryUsageAllowed, false);
@@ -44,10 +49,10 @@ for (const expired of [false, true]) {
       resetsAt: new Date(Date.now() + (expired ? -120_000 : 3_600_000)).toISOString(),
     } } }));
     let usage = { ...codex(20), ordinaryUsageAllowed: false };
-    const agents = [];
+    const agents: FakeAgent[] = [];
     const factory = fakeTransport(agents);
     const runtime = createAlpRuntime({ supervisor: false, pauseFile: file, limitCheckMs: 20,
-      transport: (...args) => Object.assign(factory(...args), { async orchestrationContext() { return { usage }; } }),
+      transport: (...args) => Object.assign((factory as (...passed: unknown[]) => ReturnType<typeof factory>)(...args), { async orchestrationContext() { return { usage }; } }),
     });
     t.after(async () => { await runtime.shutdown(); await rm(directory, { recursive: true, force: true }); });
     await until(() => runtime.pauses().runtimes.codex?.checkedAt || !runtime.pauses().runtimes.codex, 'the denial check');
@@ -66,7 +71,7 @@ test('an unavailable usage report retains the elapsed reset fallback', async t =
     since: new Date().toISOString(), by: 'alpd', reason: 'Codex usage limit reached',
     resetsAt: new Date(Date.now() - 120_000).toISOString(),
   } } }));
-  const agents = [];
+  const agents: FakeAgent[] = [];
   const runtime = createAlpRuntime({ supervisor: false, pauseFile: file, transport: fakeTransport(agents) });
   t.after(async () => { await runtime.shutdown(); await rm(directory, { recursive: true, force: true }); });
   await until(() => !runtime.pauses().runtimes.codex, 'resume after elapsed reset without usage information');
@@ -74,7 +79,7 @@ test('an unavailable usage report retains the elapsed reset fallback', async t =
 });
 
 test('while a limit pauses Codex, alpd asks it every interval and resumes it once the limit lifts', async t => {
-  const events = [];
+  const events: Json[] = [];
   const { runtime, main } = await tree(t, { prefix: 'alp-limit-', open: { model: 'codex:gpt-5.6-sol' }, options: () => ({ language: 'English', limitCheckMs: 20 }) });
   runtime.onEvent(envelope => events.push(envelope));
   main.limits = codex(100);
@@ -116,7 +121,7 @@ test('a delegation to a paused runtime asks it first, and goes ahead when the li
 });
 
 test('with autoResume off, alpd tells the user once that the limit lifted and leaves the resume to them', async t => {
-  const events = [];
+  const events: Json[] = [];
   const { runtime, main } = await tree(t, { prefix: 'alp-limit-', open: { model: 'codex:gpt-5.6-sol' }, options: () => ({ language: 'English', limitCheckMs: 20, autoResume: false }) });
   runtime.onEvent(envelope => events.push(envelope));
   main.limits = codex(100);
@@ -140,17 +145,17 @@ test('a limit pause an earlier alpd left is checked at start, by a runtime proce
   await writeFile(file, JSON.stringify({ runtimes: { codex: { since: new Date().toISOString(), by: 'alpd', reason: 'Codex usage limit reached', resetsAt: future } } }));
 
   // The runtime cannot tell, and the reset is ahead: it stays paused.
-  const silent = [];
+  const silent: FakeAgent[] = [];
   const kept = createAlpRuntime({ language: 'English', transport: fakeTransport(silent), supervisor: false, pauseFile: file });
   await until(() => kept.pauses().runtimes.codex?.checkedAt, 'the start check');
-  assert.equal(kept.pauses().runtimes.codex.reason, 'Codex usage limit reached');
+  assert.equal(kept.pauses().runtimes.codex!.reason, 'Codex usage limit reached');
   assert.ok(silent.length >= 1 && silent.every(agent => agent.closed), 'the probe process is closed');
   await kept.shutdown();
 
   // The runtime says the limit lifted before the reset time: resumed at start.
-  const probes = [];
+  const probes: FakeAgent[] = [];
   const factory = fakeTransport(probes);
-  const lifted = createAlpRuntime({ language: 'English', transport: (...args) => Object.assign(factory(...args), { limits: codex(0) }), supervisor: false, pauseFile: file });
+  const lifted = createAlpRuntime({ language: 'English', transport: (...args) => Object.assign((factory as (...passed: unknown[]) => ReturnType<typeof factory>)(...args), { limits: codex(0) }), supervisor: false, pauseFile: file });
   t.after(() => lifted.shutdown());
   // After hooks run in the order they are added: remove the files only once that has stopped.
   t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
@@ -172,9 +177,9 @@ test('root resume coalesces with repeated resume and keeps a simultaneous user p
     const { runtime, main } = await tree(t, { options: () => ({ limitCheckMs: 3_600_000 }) });
     main.limits = codex(100);
     main.limit();
-    await until(() => runtime.snapshot('root').parked);
-    const input = { clientMessageId: 'concurrent', delivery: 'auto', content: [{ type: 'text', text: 'Keep this instruction' }] };
-    let sent;
+    await until(() => runtime.snapshot('root')!.parked);
+    const input: PromptInput = { clientMessageId: 'concurrent', delivery: 'auto', content: [{ type: 'text', text: 'Keep this instruction' }] };
+    let sent: Promise<unknown> | undefined;
     if (userFirst) sent = runtime.prompt('root', input);
     main.limits = codex(0);
     runtime.resume();
@@ -182,7 +187,7 @@ test('root resume coalesces with repeated resume and keeps a simultaneous user p
     if (!userFirst) sent = runtime.prompt('root', input);
     await sent;
     await until(() => main.started.length === 2);
-    assert.equal(runtime.snapshot('root').parked, undefined);
+    assert.equal(runtime.snapshot('root')!.parked, undefined);
     assert.match([...main.started, ...main.calls.filter(call => call.method === 'turn/steer')].map(call => call.params.input.at(-1).text).join('\n'), /Keep this instruction/);
     assert.equal(main.started.length, 2);
   }
@@ -191,7 +196,7 @@ test('root resume coalesces with repeated resume and keeps a simultaneous user p
 test('a failed root continuation start stays parked for retry; interruption and close revoke it', async t => {
   const { runtime, main } = await tree(t, { options: () => ({ limitCheckMs: 3_600_000 }) });
   main.limit();
-  await until(() => runtime.snapshot('root').parked);
+  await until(() => runtime.snapshot('root')!.parked);
   const request = main.request.bind(main);
   let fail = true;
   main.request = async (method, params) => {
@@ -200,17 +205,17 @@ test('a failed root continuation start stays parked for retry; interruption and 
   };
   runtime.resume();
   await until(() => !fail);
-  await until(() => runtime.snapshot('root').parked);
+  await until(() => runtime.snapshot('root')!.parked);
   assert.equal(main.started.length, 1);
   runtime.resume();
   await until(() => main.started.length === 2);
   main.limit();
-  await until(() => runtime.snapshot('root').parked);
+  await until(() => runtime.snapshot('root')!.parked);
   await runtime.interrupt('root');
   runtime.resume();
   await new Promise(resolve => setTimeout(resolve, 40));
   assert.equal(main.started.length, 2);
-  assert.equal(runtime.snapshot('root').parked, undefined);
+  assert.equal(runtime.snapshot('root')!.parked, undefined);
   await runtime.close('root');
   runtime.resume();
   assert.equal(main.started.length, 2);
@@ -219,7 +224,7 @@ test('a failed root continuation start stays parked for retry; interruption and 
 for (const timing of ['before failure', 'during reset lookup']) {
   test(`an explicit runtime pause survives a usage failure ${timing}`, async t => {
     const { runtime, main } = await tree(t, { open: { model: 'codex:gpt-5.6-sol' }, options: () => ({ limitCheckMs: 20 }) });
-    let release;
+    let release!: (value?: unknown) => void;
     let looking = false;
     if (timing === 'before failure') {
       await runtime.pause({ runtime: 'codex' });
@@ -227,12 +232,12 @@ for (const timing of ['before failure', 'during reset lookup']) {
     } else {
       const reset = new Promise(resolve => { release = resolve; });
       main.orchestrationContext = async () => { looking = true; await reset; return { usage: codex(0) }; };
-      main.notification('turn/completed', { threadId: main.threadId, turn: { id: main.turnId, status: 'failed', error: { message: 'limit', codexErrorInfo: 'usageLimitExceeded' } } });
+      main.notification!('turn/completed', { threadId: main.threadId, turn: { id: main.turnId, status: 'failed', error: { message: 'limit', codexErrorInfo: 'usageLimitExceeded' } } });
       await until(() => looking, 'reset lookup started');
       await runtime.pause({ runtime: 'codex' });
       release();
     }
-    await until(() => runtime.snapshot('root').parked);
+    await until(() => runtime.snapshot('root')!.parked);
     main.limits = codex(0);
     await new Promise(resolve => setTimeout(resolve, 80));
     assert.equal(runtime.pauses().runtimes.codex?.by, 'the user');

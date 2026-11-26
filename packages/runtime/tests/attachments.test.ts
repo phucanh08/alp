@@ -8,16 +8,17 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { createAttachmentStager, stagedName } from '@anhlp/alp-runtime/attachments';
+import type { RuntimeAttachment } from '@anhlp/alp-protocol/session';
 
 const skip = process.platform === 'win32' && 'attachments are macOS and Linux only';
 const bytes = Buffer.from('slow bytes');
-const attachment = { type: 'attachment', attachmentId: `att_${'a'.repeat(32)}`, name: 'slow.txt', mimeType: 'text/plain', detectedMimeType: 'text/plain', size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+const attachment: RuntimeAttachment = { type: 'attachment', attachmentId: `att_${'a'.repeat(32)}`, name: 'slow.txt', mimeType: 'text/plain', detectedMimeType: 'text/plain', size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
 
 test('a drop while the same attachment is being staged waits for it: no copy of a collected object stays', { skip }, async t => {
   const root = path.join(await mkdtemp(path.join(tmpdir(), 'alp-stager-')), 'staged');
   t.after(() => rm(path.dirname(root), { recursive: true, force: true }));
   const stager = createAttachmentStager(root);
-  let release;
+  let release!: (value?: unknown) => void;
   const gate = new Promise(resolve => { release = resolve; });
   const reader = { async open() { await gate; return { stream: Readable.from([bytes]), attachment }; } };
   const staging = stager.stage(reader, attachment, 's1');

@@ -7,16 +7,17 @@ import { initProject } from '@anhlp/alp-core/init';
 import { createTask, getTask, loadTasks, startTask, submitTask, taskDigest } from '@anhlp/alp-core/tasks';
 import { createAlpRuntime } from '@anhlp/alp-runtime';
 import { fakeTransport, until } from '../../../test/support/fake-agent.ts';
+import type { FakeAgent } from '../../../test/support/fake-agent.ts';
 import { literal, templateLineWith } from '../../../test/support/template-text.ts';
 
-const criterion = (result, text = 'Retries stop after three attempts') => ({ criterion: text, result, evidence: `src/retry.ts:40 ${result}` });
+const criterion = (result: string, text = 'Retries stop after three attempts') => ({ criterion: text, result, evidence: `src/retry.ts:40 ${result}` });
 
 test('a reviewer files a verdict whose result follows from its criteria and findings', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-verdict-'));
   const root = path.join(directory, 'project');
   await initProject(root);
   const runs = path.join(directory, 'runs');
-  const runtimes = [];
+  const runtimes: FakeAgent[] = [];
   const runtime = createAlpRuntime({ transport: fakeTransport(runtimes), supervisor: false, libraryDir: path.join(directory, 'home'), runLogDir: runs });
   t.after(() => runtime.shutdown());
   // After hooks run in the order they are added: remove the files only once that has stopped.
@@ -27,12 +28,12 @@ test('a reviewer files a verdict whose result follows from its criteria and find
   const { assignmentId } = await main.call('alp_delegate', { agent: 'reviewer', task: 'Review the retry change', wait: false });
   const reviewer = runtimes[1];
   await until(() => reviewer.started.length === 1);
-  const instructions = reviewer.calls.find(call => call.method === 'thread/start').params.developerInstructions;
+  const instructions = reviewer.calls.find(call => call.method === 'thread/start')!.params.developerInstructions;
   assert.match(instructions, /## Verdict/);
   // The one line of the reviewer template that defines pass_with_findings, read from it.
   assert.match(instructions, literal(templateLineWith('agents/reviewer/AGENT.md', '`pass_with_findings`')));
 
-  const refused = async (args, pattern) => {
+  const refused = async (args: object, pattern: RegExp) => {
     const answer = await reviewer.call('alp_handoff', { outcome: 'complete', summary: 'Reviewed', ...args });
     assert.match(answer.error ?? '', pattern);
   };
@@ -69,6 +70,6 @@ test('a task keeps the verdict of the handoff that submitted it, and main sees i
   await startTask(root, task.id, { agent: 'reviewer', assignment: 'a1' }, 'main');
   const verdict = { result: 'pass_with_findings', criteria: [criterion('pass')], findings: [{ severity: 'low', where: 'a:1', problem: 'Name' }] };
   await submitTask(root, task.id, { assignment: 'a1', agent: 'reviewer', handoff: { outcome: 'complete', summary: 'Fine', verdict } }, 'alpd');
-  assert.deepEqual((await getTask(root, task.id)).handoff.verdict, verdict);
+  assert.deepEqual((await getTask(root, task.id)).handoff!.verdict, verdict);
   assert.match(taskDigest((await loadTasks(root)).tasks), new RegExp(`review: ${task.id} .* handoff complete, verdict pass_with_findings`));
 });
