@@ -1,21 +1,22 @@
 // The host owner's connection for e2e specs (t-a95b; docs/alp/remote-gateway.md §5.19): `alp
-// dashboard --print` on a disposable host from startWorld, as local.spec.js runs it. Its gateway is
+// dashboard --print` on a disposable host from startWorld, as local.spec.ts runs it. Its gateway is
 // created with the owner option, and the printed link's token is the dashboard's own credential on
 // a direct loopback socket, so the page it opens is the host owner (state.owner). The standalone
 // alp-gateway of the same world (startWorld's gateway) has no owner: its tokens are the non-owners.
-// One helper for every owner spec (settings-host.spec.js, settings-library.spec.js).
+// One helper for every owner spec (settings-host.spec.ts, settings-library.spec.ts).
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { WEB, freePort } from './world.js';
+import { WEB, freePort } from './world.ts';
+import type { World } from './world.ts';
 
 const run = promisify(execFile);
 const LINK = /^http:\/\/127\.0\.0\.1:(\d+)\/#token=(alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43})$/m;
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /** The dashboard settings a world needs for startDashboard: its port, no relay. Pass as startWorld's `settings`. */
-export async function dashboardSettings(extra = {}) {
+export async function dashboardSettings(extra: object = {}) {
   return { dashboard: { port: await freePort(), ...extra }, web: { relay: { enabled: false } } };
 }
 
@@ -23,13 +24,11 @@ export async function dashboardSettings(extra = {}) {
  * Starts alp-dashboard for `world` (started with dashboardSettings()) serving this checkout's built
  * app (apps/web/dist), and answers its link: `url` (with the token fragment), `origin`, `token`.
  * `stop()` ends the service; call it before world.close().
- * @param {Awaited<ReturnType<typeof import('./world.js').startWorld>>} world
- * @param {{ env?: Record<string, string> }} [options]
  */
-export async function startDashboard(world, { env: extra = {} } = {}) {
+export async function startDashboard(world: World, { env: extra = {} }: { env?: Record<string, string> } = {}) {
   // This world's alpd (no supervision of its own), the freshly built app, and a fast registry refresh
   // so a project registered or removed reaches the grant (and the page) quickly. `env` adds to the
-  // dashboard process's environment (sidebar-facts.spec.js puts a fake gh first on its PATH).
+  // dashboard process's environment (sidebar-facts.spec.ts puts a fake gh first on its PATH).
   const env = { ...world.env, ...extra, ALP_SUPERVISE: '0', ALP_DASHBOARD_APP: path.join(WEB, 'dist'), ALP_DASHBOARD_GRANT_REFRESH_MS: '200' };
   const printed = (await run(process.execPath, [world.cli, 'dashboard', '--print'], { env, cwd: world.projects.main, timeout: 120_000 })).stdout.trim();
   const link = LINK.exec(printed);
@@ -46,3 +45,6 @@ export async function startDashboard(world, { env: extra = {} } = {}) {
     },
   };
 }
+
+/** A running alp-dashboard service startDashboard started. */
+export type Dashboard = Awaited<ReturnType<typeof startDashboard>>;

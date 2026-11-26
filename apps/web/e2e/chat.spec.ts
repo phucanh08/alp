@@ -2,15 +2,16 @@
 // controls, a second message sent before the first one's turn shows, the question card in the
 // stream, the jump-to-bottom button and ALP's Tasks pill, through the real UI, gateway and alpd.
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { assistant, connect, idle, newSession, send } from './support/app.js';
+import type { Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { assistant, connect, idle, newSession, send } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
-const composer = page => page.getByLabel('Message', { exact: true });
+const composer = (page: Page) => page.getByLabel('Message', { exact: true });
 
 test('composer: focus key, a quick second message steers, Escape interrupts, mode control', async ({ page }) => {
   await connect(page, world);

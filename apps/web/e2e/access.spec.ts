@@ -2,12 +2,12 @@
 // a wrong token, a read-only token, a token limited to read-only mode, another workspace's token,
 // a revoked token, and a page origin the gateway does not allow.
 import { expect, test } from '@playwright/test';
-import { freePort, serveStatic, startWorld, WEB } from './support/world.js';
-import { connect, newSession, openTasks, send } from './support/app.js';
+import { freePort, serveStatic, startWorld, WEB } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect, newSession, openTasks, send } from './support/app.ts';
 import path from 'node:path';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 

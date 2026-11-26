@@ -7,15 +7,16 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { assistant, connect, idle, newSession, users } from './support/app.js';
+import type { Locator, Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { assistant, connect, idle, newSession, users } from './support/app.ts';
 
 const run = promisify(execFile);
 const gitEnv = { PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' };
-const git = (cwd, ...args) => run('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Test', '-c', 'user.email=test@localhost', ...args], { cwd, env: gitEnv });
+const git = (cwd: string, ...args: string[]) => run('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Test', '-c', 'user.email=test@localhost', ...args], { cwd, env: gitEnv });
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => {
   world = await startWorld();
   const root = world.projects.main;
@@ -34,24 +35,24 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await world?.close(); });
 
-const dock = page => page.getByRole('complementary', { name: 'Explorer' });
-const file = (scope, name) => scope.locator(`[data-testid="git-file"][data-path="${name}"]`);
+const dock = (page: Page) => page.getByRole('complementary', { name: 'Explorer' });
+const file = (scope: Locator, name: string) => scope.locator(`[data-testid="git-file"][data-path="${name}"]`);
 
 /** Picks a row of the Changes options menu (Paseo's "…"); the menu is closed after. */
-async function option(page, panel, id) {
+async function option(page: Page, panel: Locator, id: string) {
   await panel.getByTestId('changes-options-menu').click();
   await page.getByTestId(id).click();
   if (await page.getByRole('menu', { name: 'Diff options' }).count()) await page.keyboard.press('Escape');
 }
 /** Whether Split is on, as the options menu shows it. */
-async function split(page, panel) {
+async function split(page: Page, panel: Locator) {
   await panel.getByTestId('changes-options-menu').click();
   const checked = await page.getByTestId('git-layout').getAttribute('aria-checked');
   await page.keyboard.press('Escape');
   return checked;
 }
 
-async function openCart(page) {
+async function openCart(page: Page) {
   await dock(page).getByRole('tab', { name: 'Changes' }).click();
   const panel = dock(page).getByTestId('changes-panel');
   await expect(panel).toHaveAttribute('data-content', 'diff');

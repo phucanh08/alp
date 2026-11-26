@@ -3,17 +3,18 @@
 // archived sessions and Unarchive, and Paseo's workspace keyboard shortcuts, through the real UI,
 // gateway and alpd.
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect, newSession, send } from './support/app.js';
+import type { Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect, newSession, send } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
-const nav = page => page.getByRole('navigation', { name: 'Workspaces and sessions' });
-const row = (page, title) => nav(page).getByTestId('session-row').filter({ hasText: title });
-const heading = (page, title) => page.getByRole('heading', { level: 1, name: title });
+const nav = (page: Page) => page.getByRole('navigation', { name: 'Workspaces and sessions' });
+const row = (page: Page, title: string) => nav(page).getByTestId('session-row').filter({ hasText: title });
+const heading = (page: Page, title: string) => page.getByRole('heading', { level: 1, name: title });
 
 test('tab title, attention on every session, History with archived sessions and Unarchive', async ({ page }) => {
   await connect(page, world);
@@ -149,7 +150,7 @@ test('keyboard shortcuts: help, sidebars, sessions, tabs, search, settings', asy
   await expect(nav(page)).toBeVisible();
   await expect(explorer).toBeVisible();
 
-  // Mod+K opens Paseo's command center (tests in e2e/tabs.spec.js); the sidebar's session search
+  // Mod+K opens Paseo's command center (tests in e2e/tabs.spec.ts); the sidebar's session search
   // stays on its Search row and in the command center.
   await page.keyboard.press('ControlOrMeta+K');
   await expect(page.getByRole('dialog', { name: 'Command center' })).toBeVisible();
@@ -197,12 +198,12 @@ test('keyboard shortcuts: help, sidebars, sessions, tabs, search, settings', asy
 // Keep the real gateway/daemon, but hold the rename response so create completion cannot
 // race ahead of React's selected/focus effects. A selected tree is not a finished draft.
 test('a creating draft stays in front until its final rename response', async ({ page }) => {
-  let release;
-  let held;
+  let release: (() => void) | undefined;
+  let held: (value?: unknown) => void;
   const intercepted = new Promise(resolve => { held = resolve; });
   await page.routeWebSocket('**/*', socket => {
     const server = socket.connectToServer();
-    let rename;
+    let rename: unknown;
     let captured = false;
     socket.onMessage(message => {
       const packet = JSON.parse(String(message));

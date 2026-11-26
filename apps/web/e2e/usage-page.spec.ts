@@ -8,10 +8,13 @@
 // this spec in the page's WebSocket (fixture data: real usage needs real provider accounts; the
 // setting is the host's, implemented beside this page).
 import { expect, test } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { mkdir } from 'node:fs/promises';
-import { startWorld } from './support/world.js';
-import { closeWorldAfter } from './support/cleanup.js';
-import { dashboardSettings, startDashboard } from './support/dashboard.js';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { closeWorldAfter } from './support/cleanup.ts';
+import { dashboardSettings, startDashboard } from './support/dashboard.ts';
+import type { Dashboard } from './support/dashboard.ts';
 
 const SHOT_DIR = process.env.ALP_WEB_USAGE_SHOT_DIR;
 const HOST = 'test-host.local';
@@ -25,10 +28,8 @@ const NOON = Date.parse('2026-11-18T12:00:00.000Z');
 /** The same Wednesday, 21:00 UTC: the 3h 46m session reset falls on Thursday. */
 const EVENING = Date.parse('2026-11-18T21:00:00.000Z');
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
-/** @type {Awaited<ReturnType<typeof startDashboard>>} */
-let dashboard;
+let world: World;
+let dashboard: Dashboard;
 
 test.beforeAll(async () => {
   test.setTimeout(240_000);
@@ -39,12 +40,11 @@ test.afterAll(async () => {
   if (world) await closeWorldAfter(world, async () => { await dashboard?.stop(); });
 });
 
-/** @param {number} now @param {number} count */
-const minutes = (now, count) => new Date(now + count * 60_000 + 30_000).toISOString();
+const minutes = (now: number, count: number) => new Date(now + count * 60_000 + 30_000).toISOString();
 
 /** The providers as the screenshot's: Claude Max 5x (Session, Weekly, Weekly · Fable; Extra usage), Codex plus (5-hour, Weekly; Credits).
- * @param {number} now the page's frozen clock */
-function providers(now) {
+ * now: the page's frozen clock */
+function providers(now: number) {
   const checkedAt = new Date(now).toISOString();
   return [
     {
@@ -70,15 +70,17 @@ function providers(now) {
 }
 
 /** Answers daemon.usage and the Check usage setting in the page's socket; the rest goes to the real gateway.
- * @param {number} now the page's frozen clock */
-async function intercept(page, now) {
-  const state = { enabled: true, sent: /** @type {any[]} */ ([]) };
+ * now: the page's frozen clock */
+async function intercept(page: Page, now: number) {
+  // any: JSON-RPC requests the page sent, parsed from the socket.
+  const state = { enabled: true, sent: [] as any[] };
   await page.routeWebSocket(() => true, socket => {
     const server = socket.connectToServer();
     socket.onMessage(message => {
-      let request;
+      // any: a JSON-RPC request the page sent, parsed from the socket.
+      let request: any;
       try { request = JSON.parse(String(message)); } catch {}
-      const answer = result => socket.send(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }));
+      const answer = (result: object) => socket.send(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }));
       if (request?.method) state.sent.push(request);
       if (request?.method === 'daemon.usage') return answer(state.enabled ? { providers: providers(now) } : { disabled: true, providers: [] });
       if (request?.method === 'host.usage.setting.get') return answer({ enabled: state.enabled, host: HOST });
@@ -90,16 +92,16 @@ async function intercept(page, now) {
   return state;
 }
 
-async function openUsage(page) {
+async function openUsage(page: Page) {
   await page.getByRole('button', { name: 'Settings' }).click();
   const settings = page.getByRole('region', { name: 'Settings' });
   await settings.getByTestId('settings-usage').click();
   return settings;
 }
 
-const card = (settings, runtime) => settings.locator(`[data-testid="usage-provider"][data-runtime="${runtime}"]`);
-const row = (settings, runtime, id) => card(settings, runtime).locator(`[data-testid="usage-window"][data-window-id="${id}"]`);
-const summary = (page, runtime) => page.getByTestId('sidebar-usage-line').locator(`[data-runtime="${runtime}"]`);
+const card = (settings: Locator, runtime: string) => settings.locator(`[data-testid="usage-provider"][data-runtime="${runtime}"]`);
+const row = (settings: Locator, runtime: string, id: string) => card(settings, runtime).locator(`[data-testid="usage-window"][data-window-id="${id}"]`);
+const summary = (page: Page, runtime: string) => page.getByTestId('sidebar-usage-line').locator(`[data-runtime="${runtime}"]`);
 
 test('owner › Usage: Paseo\'s cards, options, pins and card switches, and the sidebar summary they drive', async ({ page }) => {
   test.setTimeout(150_000);

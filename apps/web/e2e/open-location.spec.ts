@@ -5,11 +5,12 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect, newSession } from './support/app.js';
+import type { Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect, newSession } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => {
   world = await startWorld();
   const root = world.projects.main;
@@ -20,11 +21,11 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await world?.close(); });
 
-const pane = (page, id) => page.getByTestId(`workspace-pane-${id}`);
-const dock = page => page.getByRole('complementary', { name: 'Explorer' });
-const entry = (page, name) => dock(page).locator(`[data-testid="files-entry"][data-path="${name}"]`);
+const pane = (page: Page, id: string) => page.getByTestId(`workspace-pane-${id}`);
+const dock = (page: Page) => page.getByRole('complementary', { name: 'Explorer' });
+const entry = (page: Page, name: string) => dock(page).locator(`[data-testid="files-entry"][data-path="${name}"]`);
 
-async function setFromFiles(page, value) {
+async function setFromFiles(page: Page, value: string) {
   await page.getByRole('button', { name: 'Settings' }).click();
   const settings = page.getByRole('region', { name: 'Settings' });
   const select = settings.getByLabel('Clicking a file in the Explorer sidebar');
@@ -59,7 +60,7 @@ test('Open location: Explorer files open on the side (one side pane, reused) or 
   await page.screenshot({ path: test.info().outputPath('open-location-side.png') });
 
   // Kept across a reload; Main panel opens in the focused pane again.
-  expect(JSON.parse(await page.evaluate(() => localStorage.getItem('alp-web:preferences'))).openInSidePane).toEqual({ explorerFiles: true, diffs: false, chatFiles: false });
+  expect(JSON.parse((await page.evaluate(() => localStorage.getItem('alp-web:preferences')))!).openInSidePane).toEqual({ explorerFiles: true, diffs: false, chatFiles: false });
   await page.reload();
   await connect(page, world, world.tokens.filesReader);
   await setFromFiles(page, 'main');

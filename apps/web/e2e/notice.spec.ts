@@ -1,9 +1,11 @@
 // Real host notices must leave every composer control usable, even on a narrow phone.
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect, newSession } from './support/app.js';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect, newSession } from './support/app.ts';
+import type { Box } from './support/app.ts';
 
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
@@ -34,10 +36,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 700 
         await page.keyboard.press('Escape');
         await expect(control).toBeFocused();
         await expect(notice).toBeVisible();
-        const [button, toast] = await Promise.all([control.boundingBox(), notice.boundingBox()]);
+        const [button, toast] = (await Promise.all([control.boundingBox(), notice.boundingBox()])) as [Box, Box];
         expect(button.y + button.height <= toast.y || toast.y + toast.height <= button.y || button.x + button.width <= toast.x || toast.x + toast.width <= button.x).toBe(true);
       }
-      const [workspace, toast] = await Promise.all([page.getByTestId('workspace-panes').boundingBox(), notice.boundingBox()]);
+      const [workspace, toast] = (await Promise.all([page.getByTestId('workspace-panes').boundingBox(), notice.boundingBox()])) as [Box, Box];
       expect(workspace.y + workspace.height).toBeLessThanOrEqual(toast.y);
       expect(toast.y + toast.height).toBeLessThanOrEqual(viewport.height);
       await expect(page.getByLabel('Message', { exact: true })).toBeEnabled();

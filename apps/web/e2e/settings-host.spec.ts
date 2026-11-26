@@ -5,23 +5,25 @@
 // a directory; each with an effect seen on the host. The same pages through the world's standalone
 // alp-gateway (never the owner) keep their Unavailable panels. Real alpd, fake Codex, no fixed waits.
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { mkdir, readFile, realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { startWorld } from './support/world.js';
-import { closeWorldAfter } from './support/cleanup.js';
-import { dashboardSettings, startDashboard } from './support/dashboard.js';
-import { connect } from './support/app.js';
+import type { RegistryProject, RegistryWorkspace } from '@anhlp/alp-protocol';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { closeWorldAfter } from './support/cleanup.ts';
+import { dashboardSettings, startDashboard } from './support/dashboard.ts';
+import type { Dashboard } from './support/dashboard.ts';
+import { connect } from './support/app.ts';
 
 const FAKE_ACP = fileURLToPath(new URL('../../../test/support/fake-acp.ts', import.meta.url));
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
-/** @type {Awaited<ReturnType<typeof startDashboard>>} */
-let dashboard;
+let world: World;
+let dashboard: Dashboard;
 
-async function host(method, params = {}) {
+async function host(method: string, params = {}) {
   const client = await hostConnect(world.socket);
   try { return await client.request(method, params); } finally { client.close(); }
 }
@@ -40,13 +42,13 @@ test.afterAll(async () => {
   if (world) await closeWorldAfter(world, async () => { await dashboard?.stop(); });
 });
 
-const openSettings = async page => {
+const openSettings = async (page: Page) => {
   await page.getByRole('button', { name: 'Settings' }).click();
   return page.getByRole('region', { name: 'Settings' });
 };
 
 /** Opens alp dashboard's link: this page is the host owner. */
-async function asOwner(page) {
+async function asOwner(page: Page) {
   await page.goto(dashboard.url);
   await expect(page.getByLabel('Access token')).toHaveCount(0);
   await expect(page.locator('main header')).toBeVisible();
@@ -161,7 +163,7 @@ test('owner › Workspaces labels, archives and unarchives a workspace in alpd\'
   await row.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(row.getByTestId('workspace-label')).toHaveText(/Client/);
   const registryOf = async () => (await host('registry.owner', {})).registry;
-  const workspaceOf = async () => (await registryOf()).workspaces.find(entry => entry.directory === custom && entry.projectId);
+  const workspaceOf = async () => (await registryOf()).workspaces.find((entry: RegistryWorkspace) => entry.directory === custom && entry.projectId);
   await expect.poll(async () => (await workspaceOf())?.labels).toEqual(['Client']);
   expect((await registryOf()).labels.catalog).toEqual([{ name: 'Client', color: 'sky' }]);
 
@@ -194,12 +196,12 @@ test('owner › Projects registers any existing directory and removes it; a bad 
   await settings.getByRole('button', { name: 'Register', exact: true }).click();
   const row = settings.locator(`[data-testid="owner-project-row"][data-project-root="${directory}"]`);
   await expect(row).toBeVisible();
-  await expect.poll(async () => (await host('project.list', {})).projects.some(project => project.root === directory && !project.removedAt)).toBe(true);
+  await expect.poll(async () => (await host('project.list', {})).projects.some((project: RegistryProject) => project.root === directory && !project.removedAt)).toBe(true);
   // The dashboard grant follows alpd's registry: the page gets the new project too.
   await expect(page.locator(`[data-testid="project-row"][data-workspace="${directory}"]`)).toBeAttached({ timeout: 30_000 });
 
   await row.getByRole('button', { name: /^Remove project/ }).click();
   await row.getByRole('button', { name: 'Remove', exact: true }).click();
   await expect(row).toHaveCount(0);
-  await expect.poll(async () => (await host('project.list', {})).projects.some(project => project.root === directory)).toBe(false);
+  await expect.poll(async () => (await host('project.list', {})).projects.some((project: RegistryProject) => project.root === directory)).toBe(false);
 });

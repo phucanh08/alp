@@ -3,14 +3,17 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import type { RegistryWorkspace, RpcMethodMap } from '@anhlp/alp-protocol';
 import { connect as hostConnect } from '@anhlp/alp-client';
 import { AlpRpcClient, hello } from '@anhlp/alp-client/portable';
 import { openGateway } from '../dist-lib/gateway.js';
-import { startWorld, REPOSITORY } from './support/world.js';
-import { connect, newSession } from './support/app.js';
+import { startWorld, REPOSITORY } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect, newSession } from './support/app.ts';
 
-let world;
-let token;
+let world: World;
+let token: string;
 const run = promisify(execFile);
 test.beforeAll(async () => {
   world = await startWorld({ terminal: true });
@@ -29,21 +32,21 @@ test.beforeAll(async () => {
   await world.restartGateway();
 });
 test.afterAll(async () => { await world?.close(); });
-const panel = page => page.locator('[data-testid="terminal-panel"]:visible');
-const screen = page => panel(page).getByTestId('terminal-screen');
-const rows = page => screen(page).locator('.xterm-rows');
-async function line(page, text) { await screen(page).click(); await page.keyboard.type(text); await page.keyboard.press('Enter'); }
-async function open(page) {
+const panel = (page: Page) => page.locator('[data-testid="terminal-panel"]:visible');
+const screen = (page: Page) => panel(page).getByTestId('terminal-screen');
+const rows = (page: Page) => screen(page).locator('.xterm-rows');
+async function line(page: Page, text: string) { await screen(page).click(); await page.keyboard.type(text); await page.keyboard.press('Enter'); }
+async function open(page: Page) {
   await page.getByRole('button', { name: 'New tab', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
   await expect(panel(page)).toHaveAttribute('data-status', 'running');
 }
-async function list() {
+async function list(): Promise<RpcMethodMap['terminal.list']['result']['terminals']> {
   const { transport } = await openGateway({ url: world.gatewayUrl, token });
   const remote = new AlpRpcClient(transport);
   try { await hello(remote); return (await remote.request('terminal.list', {})).terminals; } finally { remote.close(); }
 }
-async function dismiss(page) {
+async function dismiss(page: Page) {
   const notice = panel(page).getByTestId('terminal-notice');
   if (await notice.isVisible()) await notice.getByRole('button', { name: 'Got it' }).click();
 }
@@ -96,9 +99,9 @@ test('independent terminal tabs survive settings, search, links, workspace switc
   const firstMatch = await selection.boundingBox();
   await panel(page).getByRole('button', { name: 'Next terminal match' }).click();
   // The selection rectangle is briefly absent while xterm re-renders; absent counts as unmoved.
-  await expect.poll(async () => (await selection.boundingBox())?.y ?? firstMatch.y).not.toBe(firstMatch.y);
+  await expect.poll(async () => (await selection.boundingBox())?.y ?? firstMatch!.y).not.toBe(firstMatch!.y);
   await panel(page).getByRole('button', { name: 'Previous terminal match' }).click();
-  await expect.poll(async () => (await selection.boundingBox())?.y).toBe(firstMatch.y);
+  await expect.poll(async () => (await selection.boundingBox())?.y).toBe(firstMatch!.y);
   await panel(page).getByRole('textbox', { name: 'Search terminal', exact: true }).fill('missing-value');
   await panel(page).getByRole('button', { name: 'Next terminal match' }).click();
   await expect(panel(page).getByRole('status', { name: 'Terminal search result' })).toHaveText('No matches');
@@ -108,7 +111,7 @@ test('independent terminal tabs survive settings, search, links, workspace switc
   await line(page, "clear; printf 'https://example.test/%s\\n' alp-terminal");
   const linkRow = rows(page).locator('div').filter({ hasText: /^https:\/\/example\.test\/alp-terminal\s*$/ }).last();
   await expect(linkRow).toBeVisible();
-  const box = await linkRow.boundingBox();
+  const box = (await linkRow.boundingBox())!;
   await page.mouse.move(box.x + 24, box.y + box.height / 2);
   const popupPromise = page.waitForEvent('popup');
   await page.mouse.click(box.x + 24, box.y + box.height / 2);
@@ -120,7 +123,7 @@ test('independent terminal tabs survive settings, search, links, workspace switc
 
   // Stable shell identity and content on selecting a sibling.
   await page.getByRole('tab', { name: 'Shell 1', exact: true }).click();
-  await expect(panel(page)).toHaveAttribute('data-terminal-key', firstKey);
+  await expect(panel(page)).toHaveAttribute('data-terminal-key', firstKey!);
   await expect(rows(page)).toContainText('FIRST-121');
   await line(page, 'echo WORKSPACE-$((13*13))');
   await expect(rows(page)).toContainText('WORKSPACE-169');
@@ -131,7 +134,7 @@ test('independent terminal tabs survive settings, search, links, workspace switc
   await expect(rows(page)).toContainText('OTHER-196');
   await page.getByRole('tab', { name: 'Terminal', exact: true }).press('Delete');
   await page.getByTestId('project-row').filter({ hasText: 'shop' }).click();
-  await expect(panel(page)).toHaveAttribute('data-terminal-key', firstKey);
+  await expect(panel(page)).toHaveAttribute('data-terminal-key', firstKey!);
   await expect(rows(page)).toContainText('WORKSPACE-169');
   await expect.poll(async () => (await list()).filter(t => t.state === 'running').map(t => t.terminalId).sort()).toEqual(originalIds);
 
@@ -139,7 +142,7 @@ test('independent terminal tabs survive settings, search, links, workspace switc
   await page.getByRole('tab', { name: 'Shell 2', exact: true }).click();
   await page.reload();
   await connect(page, world, token);
-  await expect(panel(page)).toHaveAttribute('data-terminal-key', secondKey);
+  await expect(panel(page)).toHaveAttribute('data-terminal-key', secondKey!);
   await expect(panel(page)).toHaveAttribute('data-status', 'running');
   await expect(screen(page).locator('.xterm-rows')).toHaveCSS('font-size', '16px');
   await expect(screen(page).locator('.xterm-scrollable-element')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
@@ -158,14 +161,14 @@ test('independent terminal tabs survive settings, search, links, workspace switc
   await page.setViewportSize({ width: 1000, height: 600 });
   await expect.poll(async () => {
     const now = (await list()).find(t => t.terminalId === firstIds[0]);
-    return now.cols < originalSize.cols && now.rows < originalSize.rows;
+    return now!.cols < originalSize!.cols && now!.rows < originalSize!.rows;
   }).toBe(true);
   const resized = (await list()).find(t => t.terminalId === firstIds[0]);
   await page.getByRole('tab', { name: 'Shell 2', exact: true }).click();
   await expect.poll(async () => {
     const sibling = (await list()).find(t => t.terminalId !== firstIds[0] && t.state === 'running');
-    return { cols: sibling.cols, rows: sibling.rows };
-  }).toEqual({ cols: resized.cols, rows: resized.rows });
+    return { cols: sibling!.cols, rows: sibling!.rows };
+  }).toEqual({ cols: resized!.cols, rows: resized!.rows });
   await page.getByRole('tab', { name: 'Shell 1', exact: true }).click();
   await line(page, 'echo SIZE=$(stty size)');
   await expect(rows(page)).toContainText(/SIZE=\d+ \d+/);
@@ -202,9 +205,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 700 
       await expect(notice).toBeVisible();
       await expect(panel(page).getByTestId('terminal-notice')).toBeVisible();
       const [shell, toast, host] = await Promise.all([panel(page).boundingBox(), notice.boundingBox(), screen(page).boundingBox()]);
-      expect(shell.y + shell.height).toBeLessThanOrEqual(toast.y);
-      expect(host.height).toBeGreaterThan(24);
-      expect(toast.y + toast.height).toBeLessThanOrEqual(viewport.height);
+      expect(shell!.y + shell!.height).toBeLessThanOrEqual(toast!.y);
+      expect(host!.height).toBeGreaterThan(24);
+      expect(toast!.y + toast!.height).toBeLessThanOrEqual(viewport.height);
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
       await page.screenshot({ path: test.info().outputPath(`terminal-full-notice-${viewport.width}.png`) });
       await dismiss(page);
@@ -215,7 +218,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 700 
       const targets = [page.getByRole('tab', { name: 'Shell 1', exact: true }), page.getByRole('button', { name: 'Close shell 1', exact: true }), page.getByRole('button', { name: 'Add terminal', exact: true })];
       const boxes = await Promise.all(targets.map(target => target.boundingBox()));
       for (let a = 0; a < boxes.length; a++) for (let b = a + 1; b < boxes.length; b++) {
-        const one = boxes[a], two = boxes[b];
+        const one = boxes[a]!, two = boxes[b]!;
         expect(one.x + one.width <= two.x || two.x + two.width <= one.x || one.y + one.height <= two.y || two.y + two.height <= one.y, `toolbar targets ${a}/${b} overlap`).toBe(true);
       }
       const add = page.getByRole('button', { name: 'Add terminal', exact: true });
@@ -247,9 +250,9 @@ test('terminal directory events show external shells without stealing their stre
     const greeting = await hello(remote);
     expect(greeting.capabilities).toContain('terminal.watch');
     const { workspaces } = await remote.request('workspace.list', {});
-    const workspaceId = workspaces.find(workspace => workspace.directory === world.projects.main || workspace.canonical === world.projects.main).id;
+    const workspaceId = workspaces.find((workspace: RegistryWorkspace) => workspace.directory === world.projects.main || workspace.canonical === world.projects.main)!.id;
     const { terminal } = await remote.request('terminal.create', { workspaceId, cols: 80, rows: 24, requestId: 'external-list' });
-    const output = [];
+    const output: string[] = [];
     remote.onNotification((method, event) => { if (method === 'terminal.event' && event.terminalId === terminal.terminalId && event.type === 'output') output.push(event.data); });
     await remote.request('terminal.attach', { terminalId: terminal.terminalId });
     const available = page.getByRole('button', { name: `Open ${terminal.title}`, exact: true });
@@ -263,7 +266,7 @@ test('terminal directory events show external shells without stealing their stre
     await expect(rows(page)).toContainText('EXTERNAL-361');
     await assertRemoteDetached(remote, terminal.terminalId);
     const captured = await remote.request('terminal.capture', { terminalId: terminal.terminalId });
-    expect(captured.lines.some(line => line.includes('EXTERNAL-361'))).toBe(true);
+    expect(captured.lines.some((line: string) => line.includes('EXTERNAL-361'))).toBe(true);
     // Closing elsewhere is reflected without a list timer; this page keeps its own stable tabs.
     await remote.request('terminal.close', { terminalId: terminal.terminalId });
     await expect(panel(page)).toHaveAttribute('data-status', 'exited');
@@ -289,10 +292,11 @@ test('terminal directory events show external shells without stealing their stre
   await expect.poll(async () => (await list()).filter(item => item.state === 'running').length).toBe(0);
 });
 
-async function assertRemoteDetached(remote, terminalId) {
+async function assertRemoteDetached(remote: AlpRpcClient, terminalId: string) {
   await expect(async () => {
     try { await remote.request('terminal.input', { terminalId, data: 'x' }); throw new Error('still attached'); }
-    catch (error) { expect(error.data?.reason).toBe('not_attached'); }
+    // any: the RPC error AlpRpcClient rejects with carries the host's `data`.
+    catch (error: any) { expect(error.data?.reason).toBe('not_attached'); }
   }).toPass();
 }
 
@@ -300,7 +304,8 @@ async function assertRemoteDetached(remote, terminalId) {
 // UI and a real macOS shell show the notice. This is browser notice evidence, not Linux/Windows runtime proof.
 for (const [protection, text] of [['root-only', 'Limited protection on this Linux host'], ['none', 'not guaranteed on Windows']]) {
   test(`reduced protection (${protection}) opens directly with a non-blocking notice`, async ({ page }) => {
-    const sent = [];
+    // any: JSON-RPC requests the page sent, parsed from the socket.
+    const sent: any[] = [];
     await page.routeWebSocket(url => url.host === new URL(world.gatewayUrl).host, ws => {
       const server = ws.connectToServer();
       ws.onMessage(message => {

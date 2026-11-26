@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect, fullChat, newSession, send, idle, assistant } from './support/app.js';
-let world;
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect, fullChat, newSession, send, idle, assistant } from './support/app.ts';
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 test('650 history items load older with a stable visible anchor, then append and reconnect once', async ({ page }, info) => {
@@ -25,7 +26,7 @@ test('650 history items load older with a stable visible anchor, then append and
   await page.getByRole('button', { name: 'Load older messages' }).click();
   await expect(page.getByRole('button', { name: 'Loading…', exact: true })).toBeHidden();
   const after = await page.locator('[data-entry-key]').evaluateAll((elements, key) => elements.find(element => element.dataset.entryKey === key)?.getBoundingClientRect().top, anchor.key);
-  expect(Math.abs(after - anchor.top)).toBeLessThan(3);
+  expect(Math.abs(after! - anchor.top)).toBeLessThan(3);
   await page.screenshot({ path: info.outputPath('history-anchor.png') });
   let rounds = 0;
   while (await page.getByRole('button', { name: 'Load older messages' }).count()) {

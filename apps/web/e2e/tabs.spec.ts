@@ -2,21 +2,29 @@
 // context menu, drag reordering of the tab row and the tabs kept across a reload, through the
 // real UI, gateway and alpd.
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect, newSession } from './support/app.js';
+import type { Locator, Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect, newSession } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
+
+// The page globals the notification init script below sets and the page callbacks read.
+declare global {
+  interface Window { __focused: boolean, __asked?: number, __last: { onclick: (() => void) | null } }
+}
+/** What the fake Notification records in window.__notes (__notes is not global: other specs record other shapes). */
+type NotesWindow = typeof window & { __notes: { title: string, body?: string }[] };
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
-const tabs = page => page.getByTestId('workspace-tab');
-const tabMenu = page => page.getByRole('menu', { name: 'Tab actions' });
+const tabs = (page: Page) => page.getByTestId('workspace-tab');
+const tabMenu = (page: Page) => page.getByRole('menu', { name: 'Tab actions' });
 
 /** Presses `tab` and moves it over `target`'s left edge, as a person drags it. */
-async function drag(page, tab, target) {
-  const from = await tab.boundingBox();
-  const to = await target.boundingBox();
+async function drag(page: Page, tab: Locator, target: Locator) {
+  const from = (await tab.boundingBox())!;
+  const to = (await target.boundingBox())!;
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
   await page.mouse.down();
   await page.mouse.move(to.x + 4, to.y + to.height / 2, { steps: 8 });
@@ -37,7 +45,7 @@ test('tab menu, drag order and the tabs kept across a reload', async ({ page, co
   // The agent's tab: Copy resume command, Copy agent id (with its first characters), Rename, then the close actions and Reload agent.
   await page.getByRole('tab', { name: 'Tab work' }).click({ button: 'right' });
   const menu = tabMenu(page);
-  // Copy resume command and Reload agent: reload.spec.js.
+  // Copy resume command and Reload agent: reload.spec.ts.
   await expect(menu.getByRole('menuitem')).toHaveText(['Copy resume command', /^Copy agent id\s*\w{7}$/, 'Rename', 'Close to the left', 'Close to the right', 'Close other tabs', 'Reload agent', 'Compact context', 'Close']);
   await expect(menu.getByRole('menuitem', { name: 'Close to the left' })).toBeDisabled();
   await menu.getByRole('menuitem', { name: /^Copy agent id/ }).click();
@@ -192,8 +200,8 @@ test('sidebar and explorer resize, kept across a reload', async ({ page }) => {
   await expect(sidebar).toHaveCSS('width', '320px');
   await expect(explorer).toHaveCSS('width', '320px');
 
-  const dragBy = async (handle, dx) => {
-    const box = await handle.boundingBox();
+  const dragBy = async (handle: Locator, dx: number) => {
+    const box = (await handle.boundingBox())!;
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
     await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2, { steps: 6 });
@@ -226,7 +234,7 @@ test('sidebar and explorer resize, kept across a reload', async ({ page }) => {
   await page.keyboard.press('End');
   await expect(page.getByTestId('sidebar-column')).toHaveCSS('width', '600px');
   await expect(page.getByTestId('explorer-column')).toHaveCSS('width', '280px');
-  expect((await page.locator('main').boundingBox()).width).toBeGreaterThanOrEqual(399);
+  expect((await page.locator('main').boundingBox())!.width).toBeGreaterThanOrEqual(399);
   // Hiding the sidebar gives the explorer its saved width back.
   await page.locator('body').click({ position: { x: 900, y: 400 } });
   await page.keyboard.press('ControlOrMeta+B');
@@ -236,18 +244,22 @@ test('sidebar and explorer resize, kept across a reload', async ({ page }) => {
 test('favicon, title and a browser notification when a session waits for an answer', async ({ page }) => {
   // The browser's Notification, recorded (headless Chromium shows none); hasFocus under the test's control.
   await page.addInitScript(() => {
-    window.__notes = [];
+    (window as NotesWindow).__notes = [];
     window.__focused = true;
     class FakeNotification {
+      declare title: string;
+      declare body: string | undefined;
+      // The app sets it, as on a real Notification.
+      declare onclick: (() => void) | null;
       static permission = 'default';
       static async requestPermission() { window.__asked = (window.__asked ?? 0) + 1; FakeNotification.permission = 'granted'; return 'granted'; }
-      constructor(title, options) { this.title = title; this.body = options?.body; window.__notes.push({ title, body: options?.body }); window.__last = this; }
+      constructor(title: string, options?: NotificationOptions) { this.title = title; this.body = options?.body; (window as NotesWindow).__notes.push({ title, body: options?.body }); window.__last = this; }
       close() {}
     }
-    window.Notification = FakeNotification;
+    window.Notification = FakeNotification as unknown as typeof Notification;
     document.hasFocus = () => window.__focused;
   });
-  const notes = () => page.evaluate(() => window.__notes);
+  const notes = () => page.evaluate(() => (window as NotesWindow).__notes);
   const favicon = page.locator('link[rel="icon"]');
   await connect(page, world);
 
@@ -282,7 +294,7 @@ test('favicon, title and a browser notification when a session waits for an answ
   await newSession(page, 'Elsewhere');
   await expect(page).toHaveTitle('Elsewhere');
   await expect(favicon).toHaveAttribute('data-status', 'attention');
-  await page.evaluate(() => window.__last.onclick());
+  await page.evaluate(() => window.__last.onclick!());
   await expect(page.getByRole('heading', { level: 1, name: 'Watcher' })).toBeVisible();
   await expect(page).toHaveTitle('Watcher');
 

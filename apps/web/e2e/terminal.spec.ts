@@ -8,14 +8,15 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { startWorld } from './support/world.js';
-import { connect } from './support/app.js';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect } from './support/app.ts';
 
 test.describe.configure({ mode: 'serial' });
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 /** Every shell process alpd ran for this spec: none may outlive the host. */
 const shells = new Map();
 const run = promisify(execFile);
@@ -32,15 +33,15 @@ test.beforeAll(async () => {
 test.afterAll(async () => {
   await world?.close();
   // alpd is stopped: no shell (or its children) it started for this spec may still run.
-  const alive = [...shells].filter(([pid]) => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } });
+  const alive = [...shells].filter(([pid]) => { try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; } });
   expect(alive.map(([pid, command]) => `${pid} ${command}`)).toEqual([]);
 });
 
 /** The processes below alpd now (the PTY shells and what they run), remembered for the final check. */
 async function underDaemon() {
   const { stdout } = await run('/bin/ps', ['-A', '-o', 'pid=,ppid=,command=']);
-  const rows = stdout.split('\n').map(line => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/)).filter(Boolean).map(match => ({ pid: Number(match[1]), ppid: Number(match[2]), command: match[3] }));
-  const found = [];
+  const rows = stdout.split('\n').map(line => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/)).filter(Boolean).map(match => ({ pid: Number(match![1]), ppid: Number(match![2]), command: match![3]! }));
+  const found: typeof rows = [];
   const queue = [world.daemonPid];
   while (queue.length) {
     const parent = queue.shift();
@@ -48,33 +49,33 @@ async function underDaemon() {
   }
   // What a terminal starts: not a fake Codex, nor alpd's own process listing (ps, which it runs to
   // find a terminal's process tree; briefly a zombie "(ps)").
-  const ownHelper = row => row.command.includes('fake-codex') || /^(\(ps\)|(\/bin\/)?ps(\s|$))/.test(row.command);
+  const ownHelper = (row: typeof rows[number]) => row.command.includes('fake-codex') || /^(\(ps\)|(\/bin\/)?ps(\s|$))/.test(row.command);
   const terminalProcesses = found.filter(row => !ownHelper(row) && !found.some(parent => parent.pid === row.ppid && ownHelper(parent)));
   for (const row of terminalProcesses) shells.set(row.pid, row.command);
   return terminalProcesses;
 }
 
-const panel = page => page.getByTestId('terminal-panel');
-const rows = page => page.getByTestId('terminal-screen').locator('.xterm-rows');
-const screenText = async page => (await rows(page).innerText()).replace(/ /g, ' ');
+const panel = (page: Page) => page.getByTestId('terminal-panel');
+const rows = (page: Page) => page.getByTestId('terminal-screen').locator('.xterm-rows');
+const screenText = async (page: Page) => (await rows(page).innerText()).replace(/ /g, ' ');
 
 /** Types a line into the terminal as a person does (xterm's own textarea takes the keys). */
-async function typeLine(page, text) {
+async function typeLine(page: Page, text: string) {
   await page.getByTestId('terminal-screen').click();
   await page.keyboard.type(text);
   await page.keyboard.press('Enter');
 }
 
 /** The terminal's size as the shell sees it (stty size: rows cols). */
-async function sttySize(page) {
+async function sttySize(page: Page) {
   const marker = `SZ${Date.now() % 100000}`;
   await typeLine(page, `clear; echo ${marker}=$(stty size)`);
   let size;
   await expect.poll(async () => { size = (await screenText(page)).match(new RegExp(`${marker}=(\\d+) (\\d+)`)); return !!size; }).toBe(true);
-  return { rows: Number(size[1]), cols: Number(size[2]) };
+  return { rows: Number(size![1]), cols: Number(size![2]) };
 }
 
-async function openTerminal(page) {
+async function openTerminal(page: Page) {
   await page.getByRole('button', { name: 'New tab' }).click();
   await page.getByRole('menuitem', { name: 'Terminal' }).click();
   await expect(page.getByRole('tab', { name: 'Terminal' })).toHaveAttribute('aria-selected', 'true');

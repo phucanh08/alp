@@ -3,20 +3,23 @@
 // kept history, so what a fork or rewind cut away is shown to be invisible to the next reply. Files
 // are never copied, restored or changed: a workspace file stays byte-identical throughout.
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { readFile, readdir, writeFile, access } from 'node:fs/promises';
 import path from 'node:path';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { startWorld } from './support/world.js';
-import { assistant, connect, idle, newSession, send, users } from './support/app.js';
+import type { SessionSummary } from '@anhlp/alp-protocol';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { assistant, connect, idle, newSession, send, users } from './support/app.ts';
 
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld({ worktrees: true }); });
 test.afterAll(async () => { await world?.close(); });
 
-const header = page => page.getByTestId('workspace-header-title');
+const header = (page: Page) => page.getByTestId('workspace-header-title');
 
 /** Sends a message and waits for the reply count to grow by one and the turn to end; the reply's text. */
-async function ask(page, text) {
+async function ask(page: Page, text: string) {
   const before = await assistant(page).count();
   await send(page, text);
   await expect(assistant(page)).toHaveCount(before + 1);
@@ -25,11 +28,11 @@ async function ask(page, text) {
 }
 
 /** The host's row of the root titled `title` (the owner's local connection). */
-async function hostSession(title) {
+async function hostSession(title: string): Promise<SessionSummary[]> {
   const owner = await hostConnect(world.socket);
   try {
     const { sessions } = await owner.request('session.list', { rootsOnly: true, includeClosed: true });
-    return sessions.filter(session => session.title === title);
+    return sessions.filter((session: SessionSummary) => session.title === title);
   } finally {
     owner.close();
   }
@@ -108,7 +111,7 @@ test('fork through a turn, rewind before one, reload, restore the branch, fork i
     const after = await hostSession('Codes');
     expect(after.map(session => session.id)).toEqual([source.id]);
     expect(after[0].branches).toHaveLength(1);
-    expect(after[0].branches[0]).toMatchObject({ turns: 2 });
+    expect(after[0].branches![0]).toMatchObject({ turns: 2 });
     expect(await ask(page, '[codewords]')).toBe('Codewords: ALPHA');
   });
 
@@ -150,9 +153,9 @@ test('fork through a turn, rewind before one, reload, restore the branch, fork i
     const forks = await hostSession('Fork of a session');
     const moved = forks.find(fork => fork.projectRoot !== source.projectRoot);
     expect(moved, 'a fork in another directory').toBeTruthy();
-    expect(moved.forkedFrom).toMatchObject({ sessionId: source.id, boundary: 'through' });
+    expect(moved!.forkedFrom).toMatchObject({ sessionId: source.id, boundary: 'through' });
     // A clean checkout of the commit: the untracked fixture was not copied into it.
-    await expect(access(path.join(moved.projectRoot, 'conversation-fixture.txt'))).rejects.toThrow();
+    await expect(access(path.join(moved!.projectRoot, 'conversation-fixture.txt'))).rejects.toThrow();
   });
 
   // Nothing above touched the workspace's files.
@@ -176,7 +179,7 @@ test('another browser\'s rewind resets this one\'s view through history.reset, w
     await expect(header(watcher)).toHaveText('Two views');
     await expect(users(watcher)).toHaveText(['codeword ALPHA', 'codeword BRAVO']);
     await expect(assistant(watcher)).toHaveText(['Echo: codeword ALPHA', 'Echo: codeword BRAVO']);
-    const loads = [];
+    const loads: number[] = [];
     watcher.on('load', () => loads.push(Date.now()));
 
     await test.step('the first browser rewinds to before BRAVO', async () => {

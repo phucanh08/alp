@@ -3,16 +3,16 @@
 // search, in the Tasks tab and on the full-screen Tasks screen, through the real UI, gateway and
 // alpd; tasks seeded and changed with the alp CLI on the host, as main and its agents would.
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect, openTasks } from './support/app.js';
+import type { Locator } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect, openTasks } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
-/** @type {Record<string, string>} */
-const ids = {};
+let world: World;
+const ids: Record<string, string> = {};
 
 /** Adds a task with the CLI and returns its id. */
-async function add(...args) {
+async function add(...args: string[]) {
   const out = await world.alp('task', 'add', ...args);
   const id = /tasks\/(t-[\w.]+)\.json/.exec(out)?.[1];
   if (!id) throw new Error(`no task id in: ${out}`);
@@ -30,8 +30,8 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await world?.close(); });
 
-const filter = (scope, key) => scope.getByTestId(`tasks-filter-${key}`);
-const view = (scope, name) => scope.getByRole('group', { name: 'Task view' }).getByRole('button', { name });
+const filter = (scope: Locator, key: string) => scope.getByTestId(`tasks-filter-${key}`);
+const view = (scope: Locator, name: string) => scope.getByRole('group', { name: 'Task view' }).getByRole('button', { name });
 
 test('Tasks tab: List groups, filters with counts, search, Board columns, Epics progress', async ({ page }) => {
   await connect(page, world);
@@ -127,8 +127,8 @@ test('Tasks screen: the board over the whole width; a card shows its task beside
   const board = screen.getByTestId('task-board');
   await expect(board).toBeVisible();
   // Nothing picked: the board takes the screen (no empty detail beside it).
-  const full = (await screen.boundingBox()).width;
-  expect((await board.boundingBox()).width).toBeGreaterThan(full - 40);
+  const full = (await screen.boundingBox())!.width;
+  expect((await board.boundingBox())!.width).toBeGreaterThan(full - 40);
   await view(board, 'Board').click();
   await expect(board.getByTestId(/^tasks-column-/)).toHaveCount(3);
   await board.getByRole('searchbox', { name: 'Filter tasks' }).fill('deploy');
@@ -139,7 +139,7 @@ test('Tasks screen: the board over the whole width; a card shows its task beside
   await board.getByTestId('task-card').click();
   await expect(screen.getByTestId('task-detail').getByRole('heading', { name: 'Deploy' })).toBeVisible();
   await expect(board.getByTestId('task-card')).toHaveAttribute('aria-current', 'true');
-  expect((await board.boundingBox()).width).toBeLessThan(full / 2);
+  expect((await board.boundingBox())!.width).toBeLessThan(full / 2);
   await expect(page.getByRole('tab', { name: 'Deploy' })).toHaveCount(0);
   // The detail's parent link opens the epic beside the board.
   await screen.getByTestId('task-detail').getByRole('button', { name: ids.epic }).click();

@@ -6,11 +6,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect } from './support/app.js';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => {
   world = await startWorld();
   // A library MCP server and a project hook, each holding secrets where they can be.
@@ -26,7 +26,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => { await world?.close(); });
 
 test('library entries open read only with their secrets hidden, and the host is labelled with its machine name', async ({ page }) => {
-  const frames = [];
+  const frames: string[] = [];
   page.on('websocket', socket => socket.on('framereceived', frame => frames.push(String(frame.payload))));
   await connect(page, world);
   await page.getByRole('button', { name: 'Settings' }).click();

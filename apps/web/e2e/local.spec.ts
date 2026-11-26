@@ -7,19 +7,26 @@
 // shows the connect form with a message to run `alp dashboard` again. No fixed waits: every step waits
 // for what it needs, in the page or on the host.
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { mkdir, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { freePort, startWorld } from './support/world.js';
-import { closeWorldAfter } from './support/cleanup.js';
+import type { SessionSummary } from '@anhlp/alp-protocol';
+import { freePort, startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { closeWorldAfter } from './support/cleanup.ts';
 
 const run = promisify(execFile);
 const LINK = /^http:\/\/127\.0\.0\.1:(\d+)\/#token=(alpgw1\.[0-9a-f]{16}\.[A-Za-z0-9_-]{43})$/m;
 
-let world;
-let env;
+let world: World;
+let env: NodeJS.ProcessEnv;
+// The page global the init script below sets.
+declare global {
+  interface Window { __alp: { hashAtLoad: boolean, formSeen: boolean } }
+}
 test.beforeAll(async () => {
   const port = await freePort();
   world = await startWorld({ serveWeb: false, gateway: false, settings: { dashboard: { port }, web: { relay: { enabled: false } } } });
@@ -41,15 +48,15 @@ test.afterAll(async () => {
 });
 
 /** The CLI on the host, in the main project, as its owner runs it. */
-const alp = async (...args) => (await run(process.execPath, [world.cli, ...args], { env, cwd: world.projects.main, timeout: 120_000 })).stdout;
+const alp = async (...args: string[]) => (await run(process.execPath, [world.cli, ...args], { env, cwd: world.projects.main, timeout: 120_000 })).stdout;
 
-async function host(method, params) {
+async function host(method: string, params: unknown) {
   const owner = await hostConnect(world.socket);
   try { return await owner.request(method, params); } finally { owner.close(); }
 }
 
 /** Everything that could carry the token out of the page: console, errors, request URLs and Referer. */
-function watchLeaks(page, leaks) {
+function watchLeaks(page: Page, leaks: string[]) {
   page.on('console', message => leaks.push(`console: ${message.text()}`));
   page.on('pageerror', error => leaks.push(`pageerror: ${error.message}`));
   page.on('request', request => leaks.push(`request: ${request.url()} referer=${request.headers().referer ?? ''}`));
@@ -62,11 +69,11 @@ const observeForm = () => {
   new MutationObserver(check).observe(document, { childList: true, subtree: true });
 };
 
-const tokenInput = page => page.getByLabel('Access token');
-const sessionRow = (page, title) => page.getByRole('navigation', { name: 'Workspaces and sessions' }).getByTestId('session-row').filter({ hasText: title });
+const tokenInput = (page: Page) => page.getByLabel('Access token');
+const sessionRow = (page: Page, title: string) => page.getByRole('navigation', { name: 'Workspaces and sessions' }).getByTestId('session-row').filter({ hasText: title });
 
 /** What the page stores: every localStorage entry, and this tab's sessionStorage. */
-const storage = page => page.evaluate(() => ({
+const storage = (page: Page) => page.evaluate(() => ({
   local: Object.keys(localStorage).map(key => `${key}=${localStorage.getItem(key)}`).join('\n'),
   session: Object.fromEntries(Object.keys(sessionStorage).map(key => [key, sessionStorage.getItem(key)])),
 }));
@@ -81,17 +88,17 @@ test('alp dashboard opens the app connected by its link token, kept in the tab o
   const ran = await alp('run', '--json', 'hello from the cli');
   const sessionId = JSON.parse(ran.split('\n')[0]).sessionId;
   const { sessions } = await host('session.list', { projectRoot: project, rootsOnly: true, includeClosed: true });
-  expect(sessions.map(row => row.id)).toEqual([sessionId]);
+  expect(sessions.map((row: SessionSummary) => row.id)).toEqual([sessionId]);
   const session = sessions[0];
   const title = session.title || session.id;
 
   const printed = await alp('dashboard', '--print');
   const link = LINK.exec(printed.trim());
   expect(link, printed).not.toBeNull();
-  const [url, , token] = link;
+  const [url, , token] = link!;
   const origin = new URL(url).origin;
 
-  const leaks = [];
+  const leaks: string[] = [];
   watchLeaks(page, leaks);
   const tickets = [];
   page.on('request', request => { if (request.method() === 'POST' && new URL(request.url()).pathname === '/v1/tickets') tickets.push(request.url()); });
@@ -148,17 +155,17 @@ test('alp dashboard opens the app connected by its link token, kept in the tab o
   // The new link works in a new tab.
   const fresh = LINK.exec((await alp('dashboard', '--print')).trim());
   expect(fresh?.[2]).toBeTruthy();
-  expect(fresh[2]).not.toBe(token);
+  expect(fresh![2]).not.toBe(token);
   const other = await browser.newPage();
   watchLeaks(other, leaks);
-  await other.goto(fresh[0]);
+  await other.goto(fresh![0]);
   await expect(sessionRow(other, title)).toBeVisible();
   expect(await other.evaluate(() => location.hash)).toBe('');
   await other.close();
 
   // Nothing carried either token out: console, page errors, request URLs, Referer; nor alp-dashboard's log.
-  for (const secret of [token, fresh[2], 'alpgw1.']) expect(leaks.filter(entry => entry.includes(secret))).toEqual([]);
+  for (const secret of [token, fresh![2], 'alpgw1.']) expect(leaks.filter(entry => entry.includes(secret))).toEqual([]);
   const log = await readFile(path.join(world.home, 'logs', 'integrations', 'alp-dashboard.log'), 'utf8').catch(() => '');
   expect(log).not.toContain(token);
-  expect(log).not.toContain(fresh[2]);
+  expect(log).not.toContain(fresh![2]);
 });

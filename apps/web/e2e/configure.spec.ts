@@ -5,16 +5,19 @@
 // session.team.write; a refusal while a turn runs says why and changes nothing; close/reopen and a
 // page reload keep the configuration.
 import { expect, test } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { startWorld } from './support/world.js';
-import { assistant, connect, idle, newSession, send } from './support/app.js';
+import type { SessionSummary } from '@anhlp/alp-protocol';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { assistant, connect, idle, newSession, send } from './support/app.ts';
 
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
-async function ask(page, text) {
+async function ask(page: Page, text: string) {
   const before = await assistant(page).count();
   await send(page, text);
   await expect(assistant(page)).toHaveCount(before + 1);
@@ -22,24 +25,24 @@ async function ask(page, text) {
   return (await assistant(page).last().textContent())?.trim();
 }
 
-async function host(method, params) {
+async function host(method: string, params: unknown) {
   const owner = await hostConnect(world.socket);
   try { return await owner.request(method, params); } finally { owner.close(); }
 }
 
 const journal = async () => (await readFile(world.journal, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(line => JSON.parse(line));
-const sessionNamed = async title => (await host('session.list', { rootsOnly: true })).sessions.find(row => row.title === title);
-const status = page => page.getByRole('status').filter({ hasText: /^Changed:/ });
+const sessionNamed = async (title: string) => (await host('session.list', { rootsOnly: true })).sessions.find((row: SessionSummary) => row.title === title);
+const status = (page: Page) => page.getByRole('status').filter({ hasText: /^Changed:/ });
 /** Checks the notice says `text`, then dismisses it before the next configuration assertion. */
-async function noticed(locator, text) {
+async function noticed(locator: Locator, text: string) {
   await expect(locator).toContainText(text);
   await locator.getByRole('button', { name: 'Dismiss' }).click();
   await expect(locator).toBeHidden();
 }
-const alert = (page, text) => page.getByRole('alert').filter({ hasText: text });
+const alert = (page: Page, text: string) => page.getByRole('alert').filter({ hasText: text });
 
 /** Chooses `item` in the agent control menu `testId` (session-team, session-model, session-thinking). */
-async function choose(page, testId, item) {
+async function choose(page: Page, testId: string, item: string) {
   await page.getByTestId(testId).click();
   await page.getByRole('menu').getByRole('menuitemradio', { name: item, exact: true }).click();
 }
@@ -122,7 +125,7 @@ test('a change the host refuses because a turn runs says why and changes nothing
   test.setTimeout(150_000);
   // Event frames can be held, so the page still thinks the session is idle when the host is not.
   let holding = false;
-  const held = [];
+  const held: (string | Buffer)[] = [];
   let release = () => {};
   await page.routeWebSocket('**/*', socket => {
     const server = socket.connectToServer();

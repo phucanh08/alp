@@ -4,11 +4,12 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect } from './support/app.js';
+import type { Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => {
   world = await startWorld();
   await mkdir(path.join(world.projects.main, 'src'), { recursive: true });
@@ -16,9 +17,9 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await world?.close(); });
 
-const dock = page => page.getByRole('complementary', { name: 'Explorer' });
-const entry = (page, name) => dock(page).locator(`[data-testid="files-entry"][data-path="${name}"]`);
-const menu = page => page.getByTestId('files-context-menu');
+const dock = (page: Page) => page.getByRole('complementary', { name: 'Explorer' });
+const entry = (page: Page, name: string) => dock(page).locator(`[data-testid="files-entry"][data-path="${name}"]`);
+const menu = (page: Page) => page.getByTestId('files-context-menu');
 
 test('right click: open, expand, copy path, relative path and name; nothing that writes', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);

@@ -5,17 +5,18 @@
 // file with a line gutter, a sub-agent's task, an MCP call's input and output). Read, fetch and
 // plan details have no Codex item; tests/tool-calls.test.js covers their rows.
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { assistant, connect, fullChat, idle, newSession, send } from './support/app.js';
+import type { Locator, Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { assistant, connect, fullChat, idle, newSession, send } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
-const tool = (page, kind) => page.locator(`[data-testid="tool-call"][data-tool-kind="${kind}"]`);
+const tool = (page: Page, kind: string) => page.locator(`[data-testid="tool-call"][data-tool-kind="${kind}"]`);
 /** Opens a row and returns it. */
-async function open(row) {
+async function open(row: Locator) {
   await row.getByRole('button').first().click();
   await expect(row.getByRole('button').first()).toHaveAttribute('aria-expanded', 'true');
   return row;

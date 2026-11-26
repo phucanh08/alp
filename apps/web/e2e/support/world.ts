@@ -5,11 +5,13 @@
 import assert from 'node:assert/strict';
 import { alpHome } from '@anhlp/alp-client';
 import { spawn, execFile } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { chmodSync, closeSync, existsSync, openSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import net from 'node:net';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,28 +25,29 @@ const CLI = path.join(REPOSITORY, 'packages/cli/dist/cli.js');
 const GATEWAY = path.join(REPOSITORY, 'apps/gateway/dist/cli.js');
 const FAKE_CODEX = path.join(here, 'fake-codex.js');
 const run = promisify(execFile);
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /** A loopback port nobody listens on now. */
-export function freePort() {
+export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
     server.unref();
     server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => { const { port } = server.address(); server.close(() => resolve(port)); });
+    server.listen(0, '127.0.0.1', () => { const { port } = server.address() as AddressInfo; server.close(() => resolve(port)); });
   });
 }
 
-async function readJson(file) { try { return JSON.parse(await readFile(file, 'utf8')); } catch { return undefined; } }
+// any: JSON read from alpd's state files; each caller reads the fields it needs.
+async function readJson(file: string): Promise<any> { try { return JSON.parse(await readFile(file, 'utf8')); } catch { return undefined; } }
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png' };
+const TYPES: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png' };
 
 /**
  * Serves the built app on 127.0.0.1:`port`, as any static host would (unknown paths get
  * index.html). Vite's preview server is not used here: it exits the process on SIGTERM before
  * the host's processes are stopped.
  */
-export async function serveStatic(root, port) {
+export async function serveStatic(root: string, port: number) {
   const server = http.createServer(async (request, response) => {
     const pathname = decodeURIComponent(new URL(request.url ?? '/', 'http://web').pathname);
     let file = path.join(root, path.normalize(pathname).replace(/^([/\\])+/, ''));
@@ -54,28 +57,34 @@ export async function serveStatic(root, port) {
     response.writeHead(200, { 'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-store' });
     response.end(body);
   });
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   return { close: () => new Promise(resolve => { server.close(() => resolve(undefined)); server.closeAllConnections(); }) };
 }
 
 /** Stops a detached process group, politely first. */
-async function stop(child) {
+async function stop(child: ChildProcess | undefined) {
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
   const exited = once(child, 'exit');
-  try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch {} }
+  try { process.kill(-child.pid!, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch {} }
   await Promise.race([exited, sleep(5000)]);
-  if (child.exitCode === null && child.signalCode === null) { try { process.kill(-child.pid, 'SIGKILL'); } catch {} await exited; }
+  if (child.exitCode === null && child.signalCode === null) { try { process.kill(-child.pid!, 'SIGKILL'); } catch {} await exited; }
 }
 
+/** The options of startWorld. */
+export type WorldOptions = { webPort?: number, gatewayPort?: number, provider?: 'fake' | 'real', serveWeb?: boolean, worktrees?: boolean, terminal?: boolean, gateway?: boolean, settings?: object };
+
+/** A credential alp-gateway's `credential create --json` printed. */
+type CreatedCredential = { token: string, credential: { id: string } };
+
 /**
- * @param {{ webPort?: number, gatewayPort?: number, provider?: 'fake' | 'real', serveWeb?: boolean, worktrees?: boolean, terminal?: boolean, gateway?: boolean, settings?: object }} [options]
+ * options (WorldOptions):
  *   gateway: false starts no standalone alp-gateway and creates no credentials (a spec that runs
  *   `alp dashboard`, whose service is its own gateway). settings: the host's settings.json.
  *   terminal (#121 H): the host's owner allows remote terminals (alp terminal allow --yes writes
  *   <home>/terminal.json, 0600) before alpd starts, alpd's shell is /bin/sh, and the credential
  *   `terminal` holds terminal.exec.
  */
-export async function startWorld({ webPort, gatewayPort, provider = 'fake', serveWeb = true, worktrees = false, terminal = false, gateway: standalone = true, settings: hostSettings = {} } = {}) {
+export async function startWorld({ webPort, gatewayPort, provider = 'fake', serveWeb = true, worktrees = false, terminal = false, gateway: standalone = true, settings: hostSettings = {} }: WorldOptions = {}) {
   for (const file of [ALPD, CLI]) if (!existsSync(file)) throw new Error(`${path.relative(REPOSITORY, file)} is missing: run pnpm run build:alp-web:e2e-deps (node scripts/build-workspace.ts cli && node scripts/build-workspace.ts daemon)`);
   if (serveWeb && !existsSync(path.join(WEB, 'dist/index.html'))) throw new Error('apps/web/dist is missing: run pnpm run build:alp-web');
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-web-e2e-'));
@@ -84,7 +93,7 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
   await mkdir(home, { mode: 0o700 });
   await writeFile(path.join(home, 'settings.json'), JSON.stringify(hostSettings));
   const journal = path.join(directory, 'codex.jsonl');
-  const env = { ...process.env, ALP_HOME: home, ALP_GATEWAY_HOME: gatewayHome, ALP_LOG_LEVEL: 'info' };
+  const env: NodeJS.ProcessEnv = { ...process.env, ALP_HOME: home, ALP_GATEWAY_HOME: gatewayHome, ALP_LOG_LEVEL: 'info' };
   // Fail before any CLI/daemon starts if fixture paths ever escape its owned root.
   for (const fixturePath of [alpHome(env), path.join(alpHome(env), 'state'), path.join(alpHome(env), 'logs'), gatewayHome]) {
     assert.ok(path.resolve(fixturePath).startsWith(`${path.resolve(directory)}${path.sep}`), fixturePath);
@@ -93,7 +102,7 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
   delete env.ALP_GATEWAY_TOKEN;
   // Fake runs never reach a real model: Codex is the fake, and the other runtimes point at a
   // program that does not exist, so a session that lands on them fails loudly instead.
-  const runtimeBins = provider === 'fake' ? { ALP_CODEX_BIN: FAKE_CODEX, FAKE_CODEX_JOURNAL: journal, FAKE_CODEX_STATE: path.join(directory, 'codex-threads.json'), ALP_CLAUDE_BIN: path.join(directory, 'no-real-claude'), ALP_ANTIGRAVITY_BIN: path.join(directory, 'no-real-antigravity') } : {};
+  const runtimeBins: Record<string, string> = provider === 'fake' ? { ALP_CODEX_BIN: FAKE_CODEX, FAKE_CODEX_JOURNAL: journal, FAKE_CODEX_STATE: path.join(directory, 'codex-threads.json'), ALP_CLAUDE_BIN: path.join(directory, 'no-real-claude'), ALP_ANTIGRAVITY_BIN: path.join(directory, 'no-real-antigravity') } : {};
   Object.assign(env, runtimeBins);
   chmodSync(FAKE_CODEX, 0o755);
 
@@ -130,7 +139,7 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
   }
 
   const logs = { alpd: path.join(directory, 'alpd.log'), gateway: path.join(directory, 'gateway.log') };
-  let daemon;
+  let daemon: ChildProcess | undefined;
   let socket = '';
   async function startDaemon() {
     const log = openSync(logs.alpd, 'a');
@@ -145,11 +154,11 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
   }
   await startDaemon();
 
-  const credential = async (label, extra = []) => {
+  const credential = async (label: string, extra: string[] = []): Promise<CreatedCredential> => {
     const { stdout } = await run(process.execPath, [GATEWAY, 'credential', 'create', '--label', label, ...extra, '--json'], { env });
     return JSON.parse(stdout);
   };
-  const created = !standalone ? {} : {
+  const created: Record<string, CreatedCredential> = !standalone ? {} : {
     libraryWriter: await credential('library-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'project.read', '--permission', 'library.write']),
     worktreeWriter: await credential('worktree-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'workspace.write', '--permission', 'workspace.manage','--worktree-mapping','browser']),
     registryWriter: await credential('registry-writer', ['--workspace', projects.main, '--permission', 'session.read', '--permission', 'session.write', '--permission', 'project.read', '--permission', 'workspace.write']),
@@ -180,14 +189,14 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
   webPort ??= await freePort();
   gatewayPort ??= await freePort();
   const webOrigin = `http://127.0.0.1:${webPort}`;
-  let gateway;
+  let gateway: ChildProcess | undefined;
   async function startGateway() {
     const log = openSync(logs.gateway, 'a');
     gateway = spawn(process.execPath, [GATEWAY, 'serve', '--port', String(gatewayPort), '--origin', webOrigin, '--socket', socket], { detached: true, stdio: ['ignore', 'pipe', log], env });
     closeSync(log);
     let output = '';
-    gateway.stdout.setEncoding('utf8');
-    gateway.stdout.on('data', chunk => { output += chunk; });
+    gateway.stdout!.setEncoding('utf8');
+    gateway.stdout!.on('data', (chunk: string) => { output += chunk; });
     for (let i = 0; ; i++) {
       if (output.includes('"listening"')) break;
       if (gateway.exitCode !== null || i > 400) throw new Error(`gateway did not start:\n${await readFile(logs.gateway, 'utf8').catch(() => '')}`);
@@ -211,7 +220,7 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
   const nonFakeSessions = async () => {
     const folder = path.join(home, 'state', 'sessions');
     const files = (await readdir(folder).catch(() => [])).filter(name => name.endsWith('.json'));
-    const found = [];
+    const found: string[] = [];
     for (const name of files) {
       const record = await readJson(path.join(folder, name));
       const runtime = record?.session?.runtime;
@@ -224,7 +233,7 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
   const storedAttachments = async () => {
     const folder = path.join(home, 'state', 'attachments');
     const entries = await readdir(folder, { withFileTypes: true }).catch(() => []);
-    const found = [];
+    const found: { id: string, state?: string, sessionId?: string, name?: string, size?: number, sha256?: string }[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const meta = await readJson(path.join(folder, entry.name, 'meta.json'));
@@ -233,9 +242,9 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     return found;
   };
   /** The prompt receipts alpd keeps for a session (§10): one per clientMessageId it took. */
-  const promptReceipts = async sessionId => {
+  const promptReceipts = async (sessionId?: string) => {
     const folder = path.join(home, 'state', 'receipts');
-    const found = [];
+    const found: object[] = [];
     for (const name of (await readdir(folder).catch(() => [])).filter(file => file.endsWith('.json'))) {
       const receipt = await readJson(path.join(folder, name));
       if (!sessionId || receipt?.sessionId === sessionId) found.push(receipt);
@@ -259,9 +268,9 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     /** alpd's process id now (a restart changes it), to find what it started. */
     get daemonPid() { return daemon?.pid; },
     /** Runs the alp CLI on the host as its owner would. */
-    alp: async (...args) => (await run(process.execPath, [CLI, ...args], { env, cwd: projects.main })).stdout,
+    alp: async (...args: string[]) => (await run(process.execPath, [CLI, ...args], { env, cwd: projects.main })).stdout,
     /** Runs alp-gateway's CLI on the host (credential list/revoke/rotate). */
-    gatewayCli: async (...args) => (await run(process.execPath, [GATEWAY, ...args], { env })).stdout,
+    gatewayCli: async (...args: string[]) => (await run(process.execPath, [GATEWAY, ...args], { env })).stdout,
     startDaemon, startGateway,
     stopDaemon: () => stop(daemon),
     stopGateway: () => stop(gateway),
@@ -284,3 +293,6 @@ export async function startWorld({ webPort, gatewayPort, provider = 'fake', serv
     },
   };
 }
+
+/** A disposable host startWorld started. */
+export type World = Awaited<ReturnType<typeof startWorld>>;

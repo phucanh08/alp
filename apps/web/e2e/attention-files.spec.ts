@@ -4,11 +4,12 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect, newSession, send } from './support/app.js';
+import type { Page } from '@playwright/test';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect, newSession, send } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => {
   world = await startWorld();
   await mkdir(path.join(world.projects.main, 'src', 'checkout'), { recursive: true });
@@ -17,10 +18,10 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await world?.close(); });
 
-const nav = page => page.getByRole('navigation', { name: 'Workspaces and sessions' });
-const row = (page, title) => nav(page).getByTestId('session-row').filter({ hasText: title });
-const center = page => page.getByRole('dialog', { name: 'Command center' });
-const body = page => page.locator('body').click({ position: { x: 700, y: 300 } });
+const nav = (page: Page) => page.getByRole('navigation', { name: 'Workspaces and sessions' });
+const row = (page: Page, title: string) => nav(page).getByTestId('session-row').filter({ hasText: title });
+const center = (page: Page) => page.getByRole('dialog', { name: 'Command center' });
+const body = (page: Page) => page.locator('body').click({ position: { x: 700, y: 300 } });
 
 test('a turn that finishes in a session not open marks its row and the favicon; opening it clears them', async ({ page }) => {
   await connect(page, world);
@@ -65,7 +66,7 @@ test('Cmd/Ctrl+P searches the workspace\'s files; without files.read picking one
   await expect(file).toContainText('src/checkout');
   await page.keyboard.press('Enter');
   await expect(dialog).toBeHidden();
-  // Paseo opens the file; this token has no files.read (never a default, e2e/files.spec.js has
+  // Paseo opens the file; this token has no files.read (never a default, e2e/files.spec.ts has
   // one that does): the relative path goes to the clipboard.
   await expect(page.getByRole('status').filter({ hasText: 'Copied src/checkout/cart-total.ts' })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('src/checkout/cart-total.ts');

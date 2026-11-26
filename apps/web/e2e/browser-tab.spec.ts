@@ -3,11 +3,26 @@
 // With ALP.app's marker in the user agent the menu offers it after Diff, as Paseo's. What a Browser
 // tab may load is apps/desktop's e2e (e2e/browser.spec.mjs).
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { connect } from './support/app.js';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { connect } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
+
+/** ALP.app's <webview> as the fakes below make it: a guest id and the dom-ready trigger. */
+type FakeWebview = HTMLElement & { __id: number, __ready(): void };
+// The page globals the init scripts below set and the page callbacks read.
+declare global {
+  interface Window {
+    // any: the URLs loadURL got (first test), or [guest id, URL] pairs (fakeWebview)
+    __loads: any[],
+    __thrown: number,
+    __readyAll(): void,
+    __views: FakeWebview[],
+    __refuse: string,
+    __owned?: number,
+  }
+}
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
@@ -56,16 +71,16 @@ test('an address submitted before the Browser tab guest is ready loads once it i
   // emitted dom-ready. On a slow start (a cold machine) a user types an address before then.
   const marked = await browser.newContext({ userAgent: 'Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/140 Safari/537.36 ALPDesktop/1', viewport: { width: 1440, height: 900 } });
   await marked.addInitScript(() => {
-    const views = [];
+    const views: FakeWebview[] = [];
     window.__loads = [];
     window.__thrown = 0;
     const create = Document.prototype.createElement;
-    Document.prototype.createElement = function (name, options) {
+    Document.prototype.createElement = function (name: string, options?: ElementCreationOptions) {
       const element = create.call(this, name, options);
       if (String(name).toLowerCase() !== 'webview') return element;
       let ready = false;
       Object.assign(element, {
-        loadURL(url) {
+        loadURL(url: string) {
           if (!ready) { window.__thrown += 1; throw new Error('The WebView must be attached to the DOM and the dom-ready event emitted before this method can be called.'); }
           window.__loads.push(url);
           return Promise.resolve();
@@ -73,7 +88,7 @@ test('an address submitted before the Browser tab guest is ready loads once it i
         getWebContentsId: () => 7, canGoBack: () => false, canGoForward: () => false,
         __ready() { ready = true; element.dispatchEvent(new Event('dom-ready')); },
       });
-      views.push(element);
+      views.push(element as FakeWebview);
       return element;
     };
     window.__readyAll = () => { for (const view of views) if (view.isConnected) view.__ready(); };
@@ -87,7 +102,7 @@ test('an address submitted before the Browser tab guest is ready loads once it i
   await address.press('Enter');
   // Not loaded, not thrown, not refused: it waits for the guest. The guest's first about:blank,
   // arriving meanwhile, leaves the submitted address in the bar (t-a5d8).
-  await desktop.evaluate(() => document.querySelector('webview').dispatchEvent(Object.assign(new Event('did-navigate'), { url: 'about:blank' })));
+  await desktop.evaluate(() => document.querySelector('webview')!.dispatchEvent(Object.assign(new Event('did-navigate'), { url: 'about:blank' })));
   await expect(address).toHaveValue('http://127.0.0.1:5173/early');
   await expect(desktop.getByTestId('browser-error')).toHaveCount(0);
   expect(await desktop.evaluate(() => [window.__loads, window.__thrown])).toEqual([[], 0]);
@@ -107,19 +122,19 @@ test('an address submitted before the Browser tab guest is ready loads once it i
  * refuses (a rejected promise, or a throw) while window.__refuse says so.
  */
 const fakeWebview = () => {
-  const views = [];
+  const views: FakeWebview[] = [];
   window.__views = views;
   window.__loads = [];
   window.__refuse = '';
   const create = Document.prototype.createElement;
-  Document.prototype.createElement = function (name, options) {
+  Document.prototype.createElement = function (name: string, options?: ElementCreationOptions) {
     const element = create.call(this, name, options);
     if (String(name).toLowerCase() !== 'webview') return element;
     let ready = false;
     const id = 100 + views.length;
     Object.assign(element, {
       __id: id,
-      loadURL(url) {
+      loadURL(url: string) {
         if (!ready || window.__refuse === 'throw') throw new Error('The WebView must be attached to the DOM and the dom-ready event emitted before this method can be called.');
         if (window.__refuse === 'reject') return Promise.reject(new Error('ERR_BLOCKED_BY_CLIENT'));
         window.__loads.push([id, url]);
@@ -128,7 +143,7 @@ const fakeWebview = () => {
       getWebContentsId: () => id, canGoBack: () => false, canGoForward: () => false,
       __ready() { ready = true; element.dispatchEvent(new Event('dom-ready')); },
     });
-    views.push(element);
+    views.push(element as FakeWebview);
     return element;
   };
   window.__readyAll = () => { for (const view of views) if (view.isConnected) view.__ready(); };
@@ -178,8 +193,8 @@ test('an address typed before the guest\'s first page arrives is kept and loads 
   await desktop.getByRole('menuitem', { name: 'Browser' }).click();
   const address = desktop.getByTestId('browser-address');
   await address.fill('127.0.0.1:5173/typed');
-  const navigate = url => desktop.evaluate(target => {
-    const view = window.__views.at(-1);
+  const navigate = (url: string) => desktop.evaluate(target => {
+    const view = window.__views.at(-1)!;
     view.dispatchEvent(Object.assign(new Event('did-navigate'), { url: target }));
   }, url);
   await navigate('about:blank');
@@ -228,7 +243,7 @@ test('Browser tab pages stay alive behind other tabs and across panes; blocked n
   await expect(first).toBeHidden();
   expect(await first.evaluate(element => [getComputedStyle(element).visibility, getComputedStyle(element).pointerEvents])).toEqual(['hidden', 'none']);
   expect(await desktop.evaluate(() => window.__views.map(view => [view.__id, view.isConnected]))).toEqual([[100, true]]);
-  const center = await desktop.getByTestId('workspace-pane-main').boundingBox();
+  const center = (await desktop.getByTestId('workspace-pane-main').boundingBox())!;
   expect(await desktop.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('[data-testid="browser-resident"]'), [center.x + center.width / 2, center.y + center.height / 2])).toBe(false);
 
   // A hidden page's window.open still opens a tab (the opener is not unmounted).
@@ -258,8 +273,8 @@ test('Browser tab pages stay alive behind other tabs and across panes; blocked n
   await palette.getByTestId('command-center-action-pane-move-tab-right').click();
   await expect(desktop.getByTestId('workspace-pane-pane-1').locator('[data-tab="browser:b1"]')).toHaveCount(1);
   await expect(first).toHaveAttribute('data-shown', 'true');
-  const right = await desktop.getByTestId('workspace-pane-pane-1').locator('[data-testid="browser-slot"]').boundingBox();
-  const shown = await first.boundingBox();
+  const right = (await desktop.getByTestId('workspace-pane-pane-1').locator('[data-testid="browser-slot"]').boundingBox())!;
+  const shown = (await first.boundingBox())!;
   expect(Math.abs(shown.x - right.x) + Math.abs(shown.y - right.y) + Math.abs(shown.width - right.width) + Math.abs(shown.height - right.height)).toBeLessThan(4);
   expect(await desktop.evaluate(() => window.__views.map(view => [view.__id, view.isConnected]))).toEqual([[100, true], [101, true]]);
   expect(await desktop.evaluate(() => window.__loads.filter(([id]) => id === 100).length)).toBe(1);

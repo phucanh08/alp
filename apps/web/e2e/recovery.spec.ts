@@ -2,15 +2,15 @@
 // root nobody watches), alpd restarts, the page reloads. The view continues from its cursor, keeps
 // its sessions, shows each message once, and never sends a message again by itself.
 import { expect, test } from '@playwright/test';
-import { startWorld } from './support/world.js';
-import { assistant, connect, idle, newSession, send, users } from './support/app.js';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { assistant, connect, idle, newSession, send, users } from './support/app.ts';
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
+let world: World;
 test.beforeAll(async () => { world = await startWorld(); });
 test.afterAll(async () => { await world?.close(); });
 
-const count = async (world, text) => (await world.turnStarts()).filter(entry => entry.text?.includes(text)).length;
+const count = async (world: World, text: string) => (await world.turnStarts()).filter(entry => entry.text?.includes(text)).length;
 
 test('gateway restart mid-turn, twice while idle, then alpd restart and a reload', async ({ page }) => {
   await connect(page, world);

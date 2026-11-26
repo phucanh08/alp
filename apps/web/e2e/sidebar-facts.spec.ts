@@ -11,15 +11,20 @@
 // real gateway to alpd. Only daemon.usage is answered by this spec in the page's WebSocket (fixture
 // data): real usage needs real provider accounts.
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { execFile } from 'node:child_process';
 import { chmod, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { connect as hostConnect } from '@anhlp/alp-client';
-import { startWorld } from './support/world.js';
-import { closeWorldAfter } from './support/cleanup.js';
-import { dashboardSettings, startDashboard } from './support/dashboard.js';
-import { connect } from './support/app.js';
+import type { AlpClient } from '@anhlp/alp-client';
+import type { RegistryProject } from '@anhlp/alp-protocol';
+import { startWorld } from './support/world.ts';
+import type { World } from './support/world.ts';
+import { closeWorldAfter } from './support/cleanup.ts';
+import { dashboardSettings, startDashboard } from './support/dashboard.ts';
+import type { Dashboard } from './support/dashboard.ts';
+import { connect } from './support/app.ts';
 
 const SHOT_DIR = process.env.ALP_WEB_SIDEBAR_SHOT_DIR;
 const execute = promisify(execFile);
@@ -28,36 +33,34 @@ const LOGO = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect 
 const ICON = `data:image/svg+xml;base64,${Buffer.from(LOGO).toString('base64')}`;
 const OWNER_ONLY = ['host.workspace.facts', 'schedule.list', 'schedule.get', 'daemon.usage'];
 
-/** @type {Awaited<ReturnType<typeof startWorld>>} */
-let world;
-/** @type {Awaited<ReturnType<typeof startDashboard>>} */
-let dashboard;
+let world: World;
+let dashboard: Dashboard;
 /** Workspace id by directory, and the directories by name. */
-const ids = {};
-const dirs = {};
+const ids: Record<string, string> = {};
+const dirs: Record<string, string> = {};
 let remoteToken = '';
 let jobId = '';
 let ghLog = '';
 
-async function host(method, params = {}) {
+async function host(method: string, params = {}) {
   const client = await hostConnect(world.socket);
   try { return await client.request(method, params); } finally { client.close(); }
 }
 
-async function sessionIn(client, directory, id, title) {
+async function sessionIn(client: AlpClient, directory: string, id: string, title: string) {
   await client.request('session.create', { sessionId: id, workspaceId: ids[directory], spec: { workflow: 'pho', model: 'codex:gpt-5.6-sol', persist: true } });
   await client.request('session.rename', { sessionId: id, title });
 }
 
-const git = (cwd, ...args) => execute('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Test', '-c', 'user.email=test@localhost', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...args],
+const git = (cwd: string, ...args: string[]) => execute('/usr/bin/git', ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Test', '-c', 'user.email=test@localhost', '-c', 'init.defaultBranch=main', '-c', 'commit.gpgsign=false', ...args],
   { cwd, env: { PATH: '/usr/bin:/bin', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } });
-const lines = (count, word) => Array.from({ length: count }, (_, i) => `${word} ${i}`).join('\n') + '\n';
+const lines = (count: number, word: string) => Array.from({ length: count }, (_, i) => `${word} ${i}`).join('\n') + '\n';
 
 /**
  * A repository in `directory` (alp init's .alp ignored): main with `base` committed and pointed at by
  * origin/main, then `branch` committing `change`; a remote, so the facts handler asks gh.
  */
-async function repository(directory, { branch, base, change }) {
+async function repository(directory: string, { branch, base, change }: { branch: string, base: Record<string, string>, change: Record<string, string> }) {
   await writeFile(path.join(directory, '.gitignore'), '.alp/\n');
   for (const [name, content] of Object.entries(base)) await writeFile(path.join(directory, name), content);
   await git(directory, 'init', '-q');
@@ -75,7 +78,7 @@ async function repository(directory, { branch, base, change }) {
  * A fake gh in `bin`: logs "<cwd> <args>" and prints `gh pr view --json` for the workspace it runs
  * in (shop: PR 2 open, a failed check; secret: PR 344 merged, checks passed); fails elsewhere.
  */
-async function fakeGh(bin) {
+async function fakeGh(bin: string) {
   await mkdir(bin, { recursive: true });
   const log = path.join(bin, 'gh.log');
   const open = JSON.stringify({ number: 2, state: 'OPEN', isDraft: false, statusCheckRollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }, { status: 'COMPLETED', conclusion: 'FAILURE' }] });
@@ -135,8 +138,9 @@ test.afterAll(async () => {
  * Routes the page's gateway socket: records every method the page sends and answers daemon.usage
  * (fixture: real usage needs real provider accounts); everything else goes to the real gateway.
  */
-async function intercept(page) {
-  const sent = [];
+async function intercept(page: Page) {
+  // any: JSON-RPC requests the page sent, parsed from the socket.
+  const sent: any[] = [];
   await page.routeWebSocket(() => true, socket => {
     const server = socket.connectToServer();
     socket.onMessage(message => {
@@ -158,13 +162,13 @@ async function intercept(page) {
 }
 
 /** The session of `directory` alpd updated last: the row that carries its workspace's facts. */
-async function latestIn(directory) {
+async function latestIn(directory: string) {
   const { sessions } = await host('session.list', { projectRoot: directory, rootsOnly: true, includeClosed: true });
   return [...sessions].sort((a, b) => String(b.updatedAt ?? b.createdAt).localeCompare(String(a.updatedAt ?? a.createdAt)) || a.id.localeCompare(b.id))[0].id;
 }
 
-const project = (page, directory) => page.locator(`[data-testid="sidebar-project"][data-path="${directory}"]`);
-const row = (page, id) => page.locator(`[data-testid="session-row"][data-session-id="${id}"]`);
+const project = (page: Page, directory: string) => page.locator(`[data-testid="sidebar-project"][data-path="${directory}"]`);
+const row = (page: Page, id: string) => page.locator(`[data-testid="session-row"][data-session-id="${id}"]`);
 
 test('owner: sessions under every workspace, facts on the most recent row, icon or letter tile, usage, Schedules, New workspace', async ({ page }) => {
   test.setTimeout(150_000);
@@ -273,7 +277,7 @@ test('owner: sessions under every workspace, facts on the most recent row, icon 
   const added = nav.getByTestId('sidebar-project').filter({ has: page.getByRole('button', { name: 'fresh', exact: true }) });
   await expect(added).toBeVisible({ timeout: 30_000 });
   await expect(added.getByTestId('project-letter-tile')).toHaveText('F');
-  await expect.poll(async () => (await host('project.list', {})).projects.some(entry => entry.root.endsWith('/projects/fresh') && !entry.removedAt)).toBe(true);
+  await expect.poll(async () => (await host('project.list', {})).projects.some((entry: RegistryProject) => entry.root.endsWith('/projects/fresh') && !entry.removedAt)).toBe(true);
 });
 
 test('a remote credential (not the owner): sessions of both workspaces, no owner calls, no Schedules, New session at the top', async ({ page }) => {
