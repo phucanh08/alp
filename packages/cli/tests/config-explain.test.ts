@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -9,9 +10,12 @@ import { initProject } from '@anhlp/alp-core/init';
 import { profileFor } from '@anhlp/alp-core/permissions';
 import { teardown } from '../../../test/support/teardown.ts';
 
+// `any`: results and fakes here are JSON or tagged unions the tests read field by field after asserting which case they hold.
+type Json = any;
+
 const CLI = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
 
-async function project(t, permissions, userPermissions) {
+async function project(t: TestContext, permissions: unknown, userPermissions?: unknown) {
   const defer = teardown(t);
   // Resolved: the CLI names the project by its working directory, which the system reports without links (/tmp on macOS).
   const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'alp-config-')));
@@ -24,7 +28,7 @@ async function project(t, permissions, userPermissions) {
   const userFile = path.join(home, 'settings.json');
   if (permissions) await writeFile(projectFile, JSON.stringify({ ...JSON.parse(await readFile(projectFile, 'utf8')), permissions }));
   if (userPermissions) await writeFile(userFile, JSON.stringify({ permissions: userPermissions }));
-  const run = (...args) => spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, ALP_HOME: home, HOME: directory, USERPROFILE: directory } });
+  const run = (...args: string[]) => spawnSync(process.execPath, [CLI, ...args], { cwd: root, encoding: 'utf8', env: { ...process.env, ALP_HOME: home, HOME: directory, USERPROFILE: directory } });
   return { root, home, projectFile, userFile, run };
 }
 
@@ -65,17 +69,17 @@ test('alp config explain names the file and scope of each value and warns, witho
   ]);
   // An agent nothing maps keeps the default, and says so.
   assert.equal(lines[lines.indexOf('main') + 1], '  no profile: no settings file maps main to one; the mode its requester or the user chooses applies (default)');
-  assert.match(lines.at(-2), /^3 warnings: the project's settings give more than your own settings do\. They apply as written; ALP only reports them\./);
+  assert.match(lines.at(-2)!, /^3 warnings: the project's settings give more than your own settings do\. They apply as written; ALP only reports them\./);
 
   // --json carries the same, and the profile is the one ALP enforces.
   const json = run('config', 'explain', '--agent', 'peer', '--json');
   assert.equal(json.status, 0, json.stderr);
   const parsed = JSON.parse(json.stdout);
   assert.deepEqual(parsed.scopes, [{ scope: 'project', file: projectFile, exists: true }, { scope: 'user', file: userFile, exists: true }]);
-  assert.deepEqual(parsed.agents.map(row => row.agent), ['peer']);
+  assert.deepEqual(parsed.agents.map((row: Json) => row.agent), ['peer']);
   assert.deepEqual(parsed.agents[0].profile, await profileFor(root, home, 'peer'));
   assert.deepEqual(parsed.agents[0].provenance.base, { value: 'full-access', scope: 'project', file: projectFile, key: 'permissions.profiles.dev.base' });
-  assert.deepEqual(parsed.warnings.map(warning => warning.code), ['project-base-higher', 'project-allow-rules', 'project-beyond-mode']);
+  assert.deepEqual(parsed.warnings.map((warning: Json) => warning.code), ['project-base-higher', 'project-allow-rules', 'project-beyond-mode']);
   // Explaining reads only.
   assert.deepEqual([await readFile(projectFile, 'utf8'), await readFile(userFile, 'utf8')], before);
 });

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
@@ -8,12 +9,15 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+// `any`: the fake alpd and the facts handler exchange JSON params and results of the registry and facts methods; the tests read the fields they assert on.
+type Json = any;
 import {
   allowedHop, bundleCommand, retryBusy, compareVersions, fetchBytes, npmMessage, pruneVersions, releaseBaseUrl, releasePlatform,
   selectAsset, selfUpdate, sha256, switchCurrent, systemTar, verifyChecksum, verifyProvenance,
 } from '../dist/commands/update/self-update.js';
 
-const H = c => c.repeat(64);
+const H = (c: string) => c.repeat(64);
 const SUMS = [
   `${H('a')}  alp-1.2.0-darwin-arm64.tar.gz`,
   `${H('b')}  alp-1.2.0-darwin-x64.tar.gz`,
@@ -52,7 +56,7 @@ test('the release mirror must be https, file or loopback http', () => {
 });
 
 /** A fetch that serves `routes`: url → [status, location] for a redirect, or a body string. */
-const fakeFetch = (routes, seen = []) => async (url, init) => {
+const fakeFetch = (routes: Record<string, string | [number, string]>, seen: unknown[] = []) => async (url: Json, init: Json) => {
   seen.push(url);
   assert.equal(init.redirect, 'manual');
   const route = routes[url];
@@ -71,7 +75,7 @@ test('every redirect hop of a download must be https; only an explicit loopback 
   const ok = await fetchBytes('https://a.test/x', { fetch: fakeFetch({ 'https://a.test/x': [302, 'https://b.test/y'], 'https://b.test/y': [307, '/z'], 'https://b.test/z': 'payload' }) });
   assert.equal(new TextDecoder().decode(ok), 'payload');
   // https → http → https: refused at the http hop, which is never requested.
-  const seen = [];
+  const seen: unknown[] = [];
   await assert.rejects(fetchBytes('https://a.test/x', { fetch: fakeFetch({ 'https://a.test/x': [302, 'http://mitm.test/y'], 'http://mitm.test/y': [302, 'https://b.test/z'], 'https://b.test/z': 'evil' }, seen) }), /redirected to http:\/\/mitm\.test\/y, which is not https; refused/);
   assert.deepEqual(seen, ['https://a.test/x']);
   await assert.rejects(fetchBytes('http://example.com/x', { fetch: fakeFetch({}) }), /not https/);
@@ -83,17 +87,17 @@ test('every redirect hop of a download must be https; only an explicit loopback 
 test('a download that stalls before its headers or in its body fails at timeoutMs (t-598d)', async t => {
   // A loopback http mirror (allowed for an explicit loopback start) that never answers /headers and
   // sends the start of /body and then nothing more.
-  const sockets = new Set();
+  const sockets = new Set<import('node:net').Socket>();
   const server = createServer((request, response) => {
     if (request.url === '/body') { response.writeHead(200, { 'content-length': '1000' }); response.write('partial'); }
   });
   server.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => { for (const socket of sockets) socket.destroy(); server.close(); });
-  const base = `http://127.0.0.1:${server.address().port}`;
+  const base = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
   for (const route of ['/headers', '/body']) {
     const started = Date.now();
-    await assert.rejects(fetchBytes(`${base}${route}`, { timeoutMs: 200 }), error => error.name === 'TimeoutError' || error.cause?.name === 'TimeoutError', route);
+    await assert.rejects(fetchBytes(`${base}${route}`, { timeoutMs: 200 }), (error: Json) => error.name === 'TimeoutError' || error.cause?.name === 'TimeoutError', route);
     const elapsed = Date.now() - started;
     assert.ok(elapsed >= 150 && elapsed < 5000, `${route} gave up after ${elapsed} ms`);
   }
@@ -108,15 +112,15 @@ test('a checksum mismatch is refused', () => {
 test('provenance: gh absent warns, gh present runs attestation verify with the release workflow and refuses a failure', () => {
   assert.equal(verifyProvenance('/x.tar.gz', { repo: 'o/r', find: () => undefined }), 'unavailable');
   assert.equal(verifyProvenance('/x.tar.gz', { repo: 'o/r', env: { ALP_UPDATE_NO_GH: '1' }, find: () => '/bin/gh' }), 'unavailable');
-  const calls = [];
-  assert.equal(verifyProvenance('/x.tar.gz', { repo: 'o/r', env: {}, find: () => '/bin/gh', run: (cmd, args) => { calls.push([cmd, ...args]); return { status: 0 }; } }), 'verified');
+  const calls: unknown[] = [];
+  assert.equal(verifyProvenance('/x.tar.gz', { repo: 'o/r', env: {}, find: () => '/bin/gh', run: ((cmd: string, args: string[]) => { calls.push([cmd, ...args]); return { status: 0 }; }) as Json }), 'verified');
   assert.deepEqual(calls[0], ['/bin/gh', 'attestation', 'verify', '/x.tar.gz', '--repo', 'o/r', '--source-ref', 'refs/heads/main', '--signer-workflow', 'o/r/.github/workflows/release-binaries.yml']);
-  assert.throws(() => verifyProvenance('/x.tar.gz', { repo: 'o/r', env: {}, find: () => '/bin/gh', run: () => ({ status: 1, stderr: 'no attestations' }) }), /gh attestation verify refused x.tar.gz: no attestations/);
+  assert.throws(() => verifyProvenance('/x.tar.gz', { repo: 'o/r', env: {}, find: () => '/bin/gh', run: (): Json => ({ status: 1, stderr: 'no attestations' }) }), /gh attestation verify refused x.tar.gz: no attestations/);
 });
 
 test('a briefly busy file (a virus scan after its --version run) is retried, a lasting one is not hidden', () => {
   let calls = 0;
-  const sleeps = [];
+  const sleeps: unknown[] = [];
   assert.throws(() => retryBusy(() => { calls++; throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); }, ms => sleeps.push(ms), 4), /EBUSY/);
   assert.equal(calls, 4);
   assert.deepEqual(sleeps, [50, 100, 150]);
@@ -127,31 +131,31 @@ test('a briefly busy file (a virus scan after its --version run) is retried, a l
 
 test('outside the ALP bundle (npm) it prints how to update with npm and exits 0; template arguments get a hint', async () => {
   for (const args of [[], ['--check'], ['--yes']]) {
-    const out = [];
+    const out: unknown[] = [];
     assert.equal(await selfUpdate(args, { bundle: undefined, log: l => out.push(l), warn: l => out.push(l) }), 0);
     assert.match(out.join('\n'), /npm install -g @anhlp\/alp@beta/);
     assert.doesNotMatch(out.join('\n'), /did you mean/);
   }
-  const out = [];
+  const out: unknown[] = [];
   assert.equal(await selfUpdate(['/some/project'], { bundle: undefined, log: l => out.push(l), warn: l => out.push(l) }), 0);
   assert.match(out.join('\n'), /did you mean `alp update-template`\?/);
   assert.match(npmMessage(['.']), /did you mean `alp update-template`/);
-  const unknown = [];
+  const unknown: unknown[] = [];
   assert.equal(await selfUpdate(['--force'], { bundle: undefined, log: l => unknown.push(l), warn: l => unknown.push(l) }), 0);
   assert.match(unknown.join('\n'), /did you mean `alp update-template`/);
-  const bundled = [];
+  const bundled: unknown[] = [];
   assert.equal(await selfUpdate(['.'], { bundle: { root: '/a/app/1.0.0', app: '/a/app', version: '1.0.0', platform: 'x', current: '/a/app/current' }, log: l => bundled.push(l), warn: l => bundled.push(l) }), 1);
   assert.match(bundled.join('\n'), /did you mean `alp update-template`/);
 });
 
 test('a bundle that install.sh did not install (no app/current) is not updated in place', async () => {
-  const out = [];
+  const out: unknown[] = [];
   assert.equal(await selfUpdate(['--yes'], { bundle: { root: '/tmp/alp-1.0.0-x', app: '/tmp', version: '1.0.0', platform: 'x' }, fetchBytes: async () => assert.fail('no download'), log: l => out.push(l), warn: l => out.push(l) }), 1);
   assert.match(out.join('\n'), /not an installed ALP.*install\.sh/s);
 });
 
 /** An installed bundle (<app>/1.0.0, current → it) and a file:// mirror with one archive for this host. */
-async function mirror(t, { version = '9.9.9', corrupt = false, bundleVersion = version, nativeDaemon = false } = {}) {
+async function mirror(t: TestContext, { version = '9.9.9', corrupt = false, bundleVersion = version, nativeDaemon = false }: { version?: string, corrupt?: boolean, bundleVersion?: string, nativeDaemon?: boolean } = {}) {
   const work = await mkdtemp(path.join(tmpdir(), 'alp-self-update-'));
   t.after(() => rm(work, { recursive: true, force: true }));
   const platform = releasePlatform();
@@ -179,22 +183,22 @@ async function mirror(t, { version = '9.9.9', corrupt = false, bundleVersion = v
   return { work, mirrorDir, app, root, version, bundle: { root, app, version: '1.0.0', platform, current: path.join(app, 'current') } };
 }
 
-const currentVersion = async m => JSON.parse(await readFile(path.join(m.app, 'current', 'alp-bundle.json'), 'utf8')).version;
+const currentVersion = async (m: Json) => JSON.parse(await readFile(path.join(m.app, 'current', 'alp-bundle.json'), 'utf8')).version;
 
-const baseDeps = (m, out) => ({
+const baseDeps = (m: Json, out: unknown[]): Json => ({
   bundle: m.bundle, version: '1.0.0', env: { ALP_UPDATE_BASE_URL: pathToFileURL(m.mirrorDir).href },
-  log: l => out.push(l), warn: l => out.push(l), interactive: false, provenance: () => 'unavailable',
-  runVersion: root => JSON.parse(readFileSync(path.join(root, 'alp-bundle.json'), 'utf8')).version,
+  log: (l: unknown) => out.push(l), warn: (l: unknown) => out.push(l), interactive: false, provenance: () => 'unavailable',
+  runVersion: (root: string) => JSON.parse(readFileSync(path.join(root, 'alp-bundle.json'), 'utf8')).version,
 });
 
 test('bundle: --check reports only; --yes installs app/<version> from a file:// mirror, switches current and prunes', async t => {
   const m = await mirror(t);
-  const out = [];
+  const out: unknown[] = [];
   assert.equal(await selfUpdate(['--check'], baseDeps(m, out)), 0);
   assert.match(out.join('\n'), /1\.0\.0 → 9\.9\.9 available/);
   assert.equal(await currentVersion(m), '1.0.0');
   await assert.rejects(selfUpdate([], baseDeps(m, [])), /pass --yes/);
-  const out2 = [];
+  const out2: unknown[] = [];
   assert.equal(await selfUpdate(['--yes'], { ...baseDeps(m, out2), daemon: async () => ({ version: '1.0.0', sessions: 2 }), restartDaemon: () => assert.fail('never restarts on its own') }), 0);
   assert.equal(await currentVersion(m), '9.9.9');
   // The running version stays (this process and alpd still use it); older versions and staging go.
@@ -203,10 +207,10 @@ test('bundle: --check reports only; --yes installs app/<version> from a file:// 
   const text = out2.join('\n');
   assert.match(text, /only the SHA256SUMS checksum was verified/);
   assert.match(text, /alpd 1\.0\.0 is still running with 2 live sessions; .*alp daemon restart/);
-  const older = [];
+  const older: unknown[] = [];
   assert.equal(await selfUpdate(['--check'], { ...baseDeps(m, older), version: '10.0.0' }), 0);
   assert.match(older.join('\n'), /10\.0\.0 is newer than the latest release 9\.9\.9/);
-  const out3 = [];
+  const out3: unknown[] = [];
   assert.equal(await selfUpdate(['--yes'], { ...baseDeps(m, out3), version: '9.9.9' }), 0);
   assert.match(out3.join('\n'), /up to date/);
 });
@@ -228,7 +232,7 @@ test('bundle: a native alpd that cannot run here refuses the update and changes 
 
 test('bundle: --version of the running version reinstalls it and keeps the running copy aside', async t => {
   const m = await mirror(t, { version: '1.0.0' });
-  const unknown = [];
+  const unknown: unknown[] = [];
   assert.equal(await selfUpdate(['--version', '1.0.0'], { ...baseDeps(m, unknown), interactive: true, daemon: async () => ({ version: '0.9.0' }), confirm: async q => /^Install/.test(q) || assert.fail('no restart offer when the sessions are unknown') }), 0);
   assert.match(unknown.join('\n'), /its live sessions could not be read/);
   const names = readdirSync(m.app).sort();
@@ -238,7 +242,7 @@ test('bundle: --version of the running version reinstalls it and keeps the runni
 test('bundle: a reinstall whose final move fails puts the running copy back (t-1f14)', async t => {
   const m = await mirror(t, { version: '1.0.0' });
   // The unpacked copy disappears after its version check, so moving it into place fails.
-  const runVersion = root => { const version = JSON.parse(readFileSync(path.join(root, 'alp-bundle.json'), 'utf8')).version; rmSync(root, { recursive: true, force: true }); return version; };
+  const runVersion = (root: string) => { const version = JSON.parse(readFileSync(path.join(root, 'alp-bundle.json'), 'utf8')).version; rmSync(root, { recursive: true, force: true }); return version; };
   await assert.rejects(selfUpdate(['--version', '1.0.0', '--yes'], { ...baseDeps(m, []), runVersion }), /ENOENT/);
   assert.equal(await currentVersion(m), '1.0.0');
   assert.ok(!readdirSync(m.app).some(name => name.startsWith('.alp-old-')), readdirSync(m.app).join(','));
@@ -247,7 +251,7 @@ test('bundle: a reinstall whose final move fails puts the running copy back (t-1
 
 test('bundle: when the running copy cannot be put back either, the error says where it is (t-bf7f)', async t => {
   const m = await mirror(t, { version: '1.0.0' });
-  const runVersion = root => { const version = JSON.parse(readFileSync(path.join(root, 'alp-bundle.json'), 'utf8')).version; rmSync(root, { recursive: true, force: true }); return version; };
+  const runVersion = (root: string) => { const version = JSON.parse(readFileSync(path.join(root, 'alp-bundle.json'), 'utf8')).version; rmSync(root, { recursive: true, force: true }); return version; };
   // Moving the aside copy back into app/1.0.0 fails too (self-update.js uses the node:fs namespace).
   const original = fs.renameSync;
   fs.renameSync = (from, to) => {
@@ -274,14 +278,14 @@ test('bundle: when the running copy cannot be put back either, the error says wh
  * test. Every step runs; the first error is rethrown.
  * @param {import('node:test').TestContext} t
  */
-function defer(t) {
-  const steps = [];
+function defer(t: TestContext) {
+  const steps: Array<() => unknown> = [];
   t.after(async () => {
     let failure;
     for (const step of steps.reverse()) try { await step(); } catch (error) { failure ??= error; }
     if (failure) throw failure;
   });
-  return (/** @type {() => unknown} */ step) => { steps.push(step); };
+  return (step: () => unknown) => { steps.push(step); };
 }
 
 /**
@@ -289,7 +293,7 @@ function defer(t) {
  * reinstall of the running version can be driven with platform 'win32' on this host. Only the move
  * of <app>/1.0.0 is real; unpacking is the injected extract (no zip tool needed).
  */
-async function winMirror(t, { renameSync } = {}) {
+async function winMirror(t: TestContext, { renameSync }: { renameSync?: (original: Json) => Json } = {}) {
   const after = defer(t);
   const work = await mkdtemp(path.join(tmpdir(), 'alp-self-update-win-'));
   after(() => rm(work, { recursive: true, force: true }));
@@ -314,12 +318,12 @@ async function winMirror(t, { renameSync } = {}) {
     syncBuiltinESMExports();
     after(() => { fs.renameSync = original; syncBuiltinESMExports(); });
   }
-  const out = [];
-  const deps = {
+  const out: unknown[] = [];
+  const deps: Json = {
     bundle: { root, app, version: '1.0.0', platform: 'windows-x64', current: path.join(app, 'current') },
     version: '1.0.0', platform: 'win32', arch: 'x64', env: { ALP_UPDATE_BASE_URL: pathToFileURL(mirrorDir).href },
-    log: l => out.push(l), warn: l => out.push(l), interactive: false, provenance: () => 'unavailable',
-    extract: (archive, directory, asset) => {
+    log: (l: unknown) => out.push(l), warn: (l: unknown) => out.push(l), interactive: false, provenance: () => 'unavailable',
+    extract: (archive: string, directory: string, asset: { name: string }) => {
       const unpacked = path.join(directory, asset.name.replace(/\.zip$/, ''));
       fs.mkdirSync(unpacked, { recursive: true });
       fs.writeFileSync(path.join(unpacked, 'alp-bundle.json'), JSON.stringify({ name: 'alp', version: '1.0.0', platform: 'windows-x64' }));
@@ -347,7 +351,7 @@ test('bundle: on Windows a reinstall of the running version moves it aside, not 
 test('bundle: when the move aside fails, the error names what really holds the directory (t-5294.7)', async t => {
   // EXDEV is not retried, so the message arrives without retryBusy's 8 s of attempts.
   const m = await winMirror(t, {
-    renameSync: original => (from, to) => {
+    renameSync: (original: Json) => (from: string, to: string) => {
       if (path.basename(String(to)).startsWith('.alp-old-')) throw Object.assign(new Error(`EXDEV: cross-device link not permitted, rename '${from}' -> '${to}'`), { code: 'EXDEV' });
       return original(from, to);
     },
@@ -367,7 +371,7 @@ test('bundle: a checksum mismatch, a failed provenance check or a wrong version 
     [{}, { provenance: () => { throw new Error('gh attestation verify refused'); } }, /refused/],
     [{}, { runVersion: () => '6.6.6' }, /reports version "6.6.6", not 9.9.9/],
     [{ bundleVersion: '9.9.8' }, {}, /holds ALP 9\.9\.8/],
-  ]) {
+  ] as Array<[Json, Json, RegExp]>) {
     const m = await mirror(t, options);
     const before = readdirSync(m.app).sort();
     await assert.rejects(selfUpdate(['--yes'], { ...baseDeps(m, []), ...deps }), error);
@@ -378,11 +382,12 @@ test('bundle: a checksum mismatch, a failed provenance check or a wrong version 
 
 test('switchCurrent on Windows replaces the junction and puts the old one back on failure', () => {
   const links = new Map([['C:\\a\\current', 'C:\\a\\1.0.0']]);
-  const calls = [];
-  const fs = {
-    readlinkSync: file => { if (!links.has(file)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); return links.get(file); },
-    unlinkSync: file => { calls.push(['unlink', file]); links.delete(file); },
-    symlinkSync: (target, file, type) => { calls.push(['link', target, file, type]); if (target.endsWith('bad')) throw new Error('EPERM'); links.set(file, target); },
+  const calls: unknown[] = [];
+  // The three fs calls switchCurrent makes on Windows; the rest of node:fs is never reached.
+  const fs: Json = {
+    readlinkSync: (file: string) => { if (!links.has(file)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); return links.get(file); },
+    unlinkSync: (file: string) => { calls.push(['unlink', file]); links.delete(file); },
+    symlinkSync: (target: string, file: string, type: string) => { calls.push(['link', target, file, type]); if (target.endsWith('bad')) throw new Error('EPERM'); links.set(file, target); },
   };
   switchCurrent('C:\\a', '2.0.0', { platform: 'win32', fs });
   assert.equal(links.get('C:\\a\\current'), 'C:\\a\\2.0.0');

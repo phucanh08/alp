@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import net from 'node:net';
@@ -23,13 +24,13 @@ test('t-cde5: the token socket: in <home>/paseo, under /tmp (not TMPDIR) for a l
 });
 
 /** A socket as the integration serves it: 0600 in a 0700 <home>/paseo; it answers one request line. */
-async function fakeIntegration(t, answers) {
+async function fakeIntegration(t: TestContext, answers: Record<string, unknown>) {
   const defer = teardown(t);
   const directory = await mkdtemp(path.join(tmpdir(), 'alp-cli-cde5-'));
   defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }));
   const home = path.join(directory, 'home');
   await mkdir(path.join(home, 'paseo'), { recursive: true, mode: 0o700 });
-  const requests = [];
+  const requests: unknown[] = [];
   const server = net.createServer(socket => {
     let received = '';
     socket.setEncoding('utf8');
@@ -47,7 +48,7 @@ async function fakeIntegration(t, answers) {
     await mkdir(path.dirname(socketPath), { recursive: true, mode: 0o700 });
     defer(() => rm(path.dirname(socketPath), { recursive: true, force: true }));
   }
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
   defer(() => new Promise(resolve => server.close(resolve)));
   await chmod(socketPath, 0o600);
   return { home, requests };
@@ -74,9 +75,9 @@ test('t-cde5: readPaseoToken refuses a socket that is not 0600 in a 0700 directo
   const shared = path.join(directory, 'shared');
   await mkdir(shared, { mode: 0o700 });
   const socketPath = path.join(shared, 'token.sock');
-  const answered = [];
+  const answered: unknown[] = [];
   const server = net.createServer(socket => { answered.push(socket); socket.end(`${JSON.stringify({ token: 'a'.repeat(64) })}\n`); });
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
   defer(() => new Promise(resolve => server.close(resolve)));
   await chmod(socketPath, 0o600);
   await chmod(shared, 0o755);

@@ -15,12 +15,12 @@ test('fresh and upgraded libraries include OpenCode and native Antigravity witho
   const seeded = await seedLibrary(home);
   assert.ok(seeded.created.includes('providers/opencode.json'));
   assert.ok(seeded.created.includes('providers/antigravity.json'));
-  const opencode = await loadProvider(home, 'opencode');
+  const opencode = (await loadProvider(home, 'opencode'))!;
   assert.equal(opencode.kind, 'acp');
   assert.equal(opencode.command, 'opencode');
   assert.deepEqual(opencode.args, ['acp']);
   assert.equal(opencode.enabled, true);
-  const antigravity = await loadProvider(home, 'antigravity');
+  const antigravity = (await loadProvider(home, 'antigravity'))!;
   assert.equal(antigravity.kind, 'antigravity');
   assert.equal(antigravity.command, 'agy');
   assert.equal(antigravity.enabled, true);
@@ -39,5 +39,5 @@ test('alp providers seeds defaults without requiring project initialization', as
   const rows = JSON.parse(execFileSync(process.execPath, [fileURLToPath(new URL('../dist/cli.js', import.meta.url)), 'providers', '--json'], {
     env: { ...process.env, ALP_HOME: home }, encoding: 'utf8',
   }));
-  assert.deepEqual(rows.map(row => row.name), ['antigravity', 'opencode']);
+  assert.deepEqual(rows.map((row: { name: string }) => row.name), ['antigravity', 'opencode']);
 });

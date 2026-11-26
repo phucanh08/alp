@@ -2,6 +2,7 @@
 // ALP_DAEMON_START_TIMEOUT_MS says. A lock that is alive but not ready stands in for an alpd that is
 // still starting; ALP_HOME is a private throwaway directory.
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -9,7 +10,7 @@ import path from 'node:path';
 import { acquireDaemonLock, daemonPaths, releaseDaemonLock } from '@anhlp/alp-client/index';
 import { ready } from '../dist/commands/daemon/index.js';
 
-async function startingHome(t, timeout) {
+async function startingHome(t: TestContext, timeout: string) {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-cli-ready-'));
   await chmod(home, 0o700);
   const saved = { ALP_HOME: process.env.ALP_HOME, ALP_DAEMON_START_TIMEOUT_MS: process.env.ALP_DAEMON_START_TIMEOUT_MS };

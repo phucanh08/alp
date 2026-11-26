@@ -12,8 +12,9 @@ test('alp dashboard refuses to hand out its user credential to a process an ALP 
   t.after(async () => { if (saved === undefined) delete process.env.ALP_AGENT_SESSION; else process.env.ALP_AGENT_SESSION = saved; await rm(home, { recursive: true, force: true }); });
   let touched = false;
   const store = { reload: async () => { touched = true; }, verify: () => { touched = true; return undefined; } };
-  const grant = createGrant({ home, store, permissions: [], socket: () => undefined });
-  await assert.rejects(grant.ensure({}), /started by an ALP agent/);
+  // The store and socket are stand-ins: the refusal must come before either is used.
+  const grant = createGrant({ home, store, permissions: [], socket: () => undefined } as unknown as Parameters<typeof createGrant>[0]);
+  await assert.rejects((grant.ensure as (options: object) => Promise<unknown>)({}), /started by an ALP agent/);
   assert.equal(touched, false);
   assert.deepEqual(await readdir(home), [], 'no credentials directory or file was written');
 });

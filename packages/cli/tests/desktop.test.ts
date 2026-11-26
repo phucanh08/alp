@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import { execFile } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -6,14 +7,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { DESKTOP_BUNDLE_ID, desktopCommand, readBundleId, resolveDesktop } from '../dist/commands/desktop/index.js';
 
-async function scratch(t) {
+// `any`: results and fakes here are JSON or tagged unions the tests read field by field after asserting which case they hold.
+type Json = any;
+
+async function scratch(t: TestContext) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'alp-desktop-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
 }
 
 /** A checkout whose apps/desktop is built (or not). */
-async function checkout(root, { built = true } = {}) {
+async function checkout(root: string, { built = true } = {}) {
   const desktop = path.join(root, 'apps', 'desktop');
   await mkdir(path.join(desktop, 'node_modules', '.bin'), { recursive: true });
   await writeFile(path.join(desktop, 'package.json'), JSON.stringify({ name: 'alp-desktop' }));
@@ -26,7 +30,7 @@ async function checkout(root, { built = true } = {}) {
 }
 
 /** An app bundle at `app` whose Info.plist (XML, as electron-builder writes it) names `id`; no plist when `id` is null. */
-async function bundle(app, id = DESKTOP_BUNDLE_ID) {
+async function bundle(app: string, id: string | null = DESKTOP_BUNDLE_ID) {
   await mkdir(path.join(app, 'Contents'), { recursive: true });
   if (id === null) return app;
   await writeFile(path.join(app, 'Contents', 'Info.plist'), `<?xml version="1.0" encoding="UTF-8"?>
@@ -53,9 +57,9 @@ test('ALP.app in /Applications, then ~/Applications, wins over a checkout', asyn
   assert.deepEqual(await resolveDesktop({ platform: 'darwin', env, applications: [system, user] }),
     { kind: 'app', app: path.join(user, 'ALP.app'), command: 'open', args: [path.join(user, 'ALP.app')] });
   await bundle(path.join(system, 'ALP.app'));
-  assert.equal((await resolveDesktop({ platform: 'darwin', env, applications: [system, user] })).app, path.join(system, 'ALP.app'));
+  assert.equal(((await resolveDesktop({ platform: 'darwin', env, applications: [system, user] })) as Json).app, path.join(system, 'ALP.app'));
   // The default places are /Applications and ~/Applications.
-  const found = await resolveDesktop({ platform: 'darwin', home: path.join(directory, 'empty-home'), env: {} });
+  const found: Json = await resolveDesktop({ platform: 'darwin', home: path.join(directory, 'empty-home'), env: {} });
   assert.ok(found.kind === 'missing' || found.app === '/Applications/ALP.app', JSON.stringify(found));
 });
 
@@ -67,10 +71,10 @@ test('an ALP.app with another bundle id is skipped with one line naming it, and 
   const desktop = await checkout(env.ALP_DESKTOP_CHECKOUT);
   const old = await bundle(path.join(system, 'ALP.app'), 'com.anhlp.alp.desktop');
   const ours = await bundle(path.join(user, 'ALP.app'));
-  let skipped = [];
-  const onSkip = message => skipped.push(message);
+  let skipped: unknown[] = [];
+  const onSkip = (message: string) => skipped.push(message);
   // /Applications holds another app: it is passed over for the one in ~/Applications.
-  assert.equal((await resolveDesktop({ platform: 'darwin', env, applications: [system, user], onSkip })).app, ours);
+  assert.equal(((await resolveDesktop({ platform: 'darwin', env, applications: [system, user], onSkip })) as Json).app, ours);
   assert.deepEqual(skipped, [`Skipped ${old}: its bundle id is "com.anhlp.alp.desktop", not ${DESKTOP_BUNDLE_ID} (ALP's desktop app).`]);
   // Neither is ours (one without an Info.plist): the checkout is next.
   skipped = [];
@@ -89,7 +93,7 @@ test('readBundleId reads an XML Info.plist, and a binary one through plutil on m
   const directory = await scratch(t);
   const app = await bundle(path.join(directory, 'ALP.app'));
   assert.equal(await readBundleId(app), DESKTOP_BUNDLE_ID);
-  await new Promise((resolve, reject) => execFile('/usr/bin/plutil', ['-convert', 'binary1', path.join(app, 'Contents', 'Info.plist')], error => (error ? reject(error) : resolve())));
+  await new Promise<void>((resolve, reject) => execFile('/usr/bin/plutil', ['-convert', 'binary1', path.join(app, 'Contents', 'Info.plist')], error => (error ? reject(error) : resolve())));
   assert.equal(await readBundleId(app), DESKTOP_BUNDLE_ID);
   assert.equal(await readBundleId(path.join(directory, 'nothing.app')), undefined);
 });
@@ -105,12 +109,12 @@ test('without ALP.app, ALP_DESKTOP_CHECKOUT (the root or its apps/desktop) runs 
   }
   const unbuilt = path.join(directory, 'unbuilt');
   await checkout(unbuilt, { built: false });
-  assert.match((await resolveDesktop({ platform: 'darwin', env: { ALP_DESKTOP_CHECKOUT: unbuilt }, applications: [] })).reason, /is not built: run `bun install && bun run build`/);
-  assert.match((await resolveDesktop({ platform: 'darwin', env: { ALP_DESKTOP_CHECKOUT: directory }, applications: [] })).reason, /is not an ALP checkout/);
+  assert.match(((await resolveDesktop({ platform: 'darwin', env: { ALP_DESKTOP_CHECKOUT: unbuilt }, applications: [] })) as Json).reason, /is not built: run `bun install && bun run build`/);
+  assert.match(((await resolveDesktop({ platform: 'darwin', env: { ALP_DESKTOP_CHECKOUT: directory }, applications: [] })) as Json).reason, /is not an ALP checkout/);
 });
 
 test('neither: alp desktop says how to get the app and exits 1; a found app is launched without ELECTRON_RUN_AS_NODE', async t => {
-  const errors = [], logs = [];
+  const errors: unknown[] = [], logs: unknown[] = [];
   const { error, log } = console;
   console.error = message => errors.push(message);
   console.log = message => logs.push(message);
@@ -124,15 +128,15 @@ test('neither: alp desktop says how to get the app and exits 1; a found app is l
 
   // The lookup's skip lines go to stderr.
   errors.length = 0;
-  await desktopCommand([], { resolve: async ({ onSkip }) => { onSkip('Skipped /Applications/ALP.app: …'); return { kind: 'missing' }; }, launch: async () => assert.fail('nothing to launch') });
+  await desktopCommand([], { resolve: async ({ onSkip }: Json) => { onSkip('Skipped /Applications/ALP.app: …'); return { kind: 'missing' }; }, launch: async () => assert.fail('nothing to launch') });
   assert.equal(errors[0], 'Skipped /Applications/ALP.app: …');
   process.exitCode = exitCode;
 
-  const launched = [];
+  const launched: unknown[] = [];
   process.env.ELECTRON_RUN_AS_NODE = '1';
   t.after(() => { delete process.env.ELECTRON_RUN_AS_NODE; });
   await desktopCommand([], { resolve: async () => ({ kind: 'app', app: '/Applications/ALP.app', command: 'open', args: ['/Applications/ALP.app'] }), launch: async (command, args, env) => { launched.push({ command, args, electron: env.ELECTRON_RUN_AS_NODE }); } });
   assert.deepEqual(launched, [{ command: 'open', args: ['/Applications/ALP.app'], electron: undefined }]);
   assert.deepEqual(logs, ['Opened /Applications/ALP.app.']);
-  await assert.rejects(desktopCommand(['--now']), error => error?.constructor?.name === 'UsageError');
+  await assert.rejects(desktopCommand(['--now']), (error: NodeJS.ErrnoException) => error?.constructor?.name === 'UsageError');
 });

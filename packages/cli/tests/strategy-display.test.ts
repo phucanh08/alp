@@ -3,10 +3,13 @@ import assert from 'node:assert/strict';
 import { renderLog } from '@anhlp/alp-client/render';
 import { latestStrategies, renderStatus } from '../dist/commands/session/top.js';
 
+// `any`: results and fakes here are JSON or tagged unions the tests read field by field after asserting which case they hold.
+type Json = any;
+
 // alp top and alp log show the strategy main and lead chose with alp_strategy (t-003a).
 
-const session = (id, agent, parentId) => ({ id, agent, ...(parentId ? { parentId } : {}), state: 'running', idleMs: 0, runtime: 'claude', model: 'opus', mode: 'full-access', unreadMail: 0 });
-const status = sessions => ({ rootId: 'root', sessions, assignments: [], questions: [], worktrees: [], leases: [], claims: [] });
+const session = (id: string, agent: string, parentId?: string) => ({ id, agent, ...(parentId ? { parentId } : {}), state: 'running', idleMs: 0, runtime: 'claude', model: 'opus', mode: 'full-access', unreadMail: 0 });
+const status = (sessions: Json[]): Json => ({ rootId: 'root', sessions, assignments: [], questions: [], worktrees: [], leases: [], claims: [] });
 
 test('latestStrategies keeps the last strategy entry of each session and ignores other events', () => {
   const latest = latestStrategies([

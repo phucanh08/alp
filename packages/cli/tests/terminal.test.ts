@@ -11,8 +11,8 @@ import { read, terminalCommand, TERMINAL_WARNING } from '../dist/commands/termin
 test('allow needs --yes after the warning; the file is private; deny keeps limits; status reads it', async t => {
   const home = await mkdtemp(path.join(tmpdir(), 'alp-terminal-cli-'));
   t.after(() => rm(home, { recursive: true, force: true }));
-  const lines = [];
-  const out = line => lines.push(line);
+  const lines: string[] = [];
+  const out = (line: string) => lines.push(line);
   const exitCode = process.exitCode;
   t.after(() => { process.exitCode = exitCode; });
   await terminalCommand(['allow'], { home, out });
@@ -59,8 +59,8 @@ test('corrupt terminal.json falls back to default off status without throwing Sy
   t.after(() => rm(home, { recursive: true, force: true }));
   const file = path.join(home, 'terminal.json');
   await writeFile(file, 'INVALID JSON { truncated: true', { mode: 0o600 });
-  const lines = [];
-  const out = line => lines.push(line);
+  const lines: string[] = [];
+  const out = (line: string) => lines.push(line);
   // Status must not throw SyntaxError and must report off
   await terminalCommand(['status', '--json'], { home, out });
   const status = JSON.parse(lines[0]);
