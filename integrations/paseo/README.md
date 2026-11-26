@@ -185,9 +185,9 @@ tests, usage, git and files are shown as unavailable. See
 From the repository root:
 
 ```sh
-npm run build -w @anhlp/alp-paseo
-npm run test -w @anhlp/alp-paseo
-npm pack -w @anhlp/alp-paseo
+pnpm --filter @anhlp/alp-paseo run build
+pnpm --filter @anhlp/alp-paseo run test
+npm pack ./integrations/paseo
 ```
 
 `integrations/paseo` owns the plugin client, server, shared types and manifest. The build writes the self-contained server bundles (including the integration entry `server/dist/main.js` and `server/dist/alpd.js`) to `server/dist`; only the plugin package ships these Paseo artifacts. It no longer builds or ships Paseo's web app (removed in t-55ce.3); the package ships Paseo's licence as `LICENSE.paseo.txt` for the code it takes from Paseo. The npm package is `@anhlp/alp-paseo` (`alp-paseo-plugin` up to 0.10.0); the Paseo plugin ID remains `alp-provider`.
@@ -258,5 +258,5 @@ daemon supervision/reconnection are unchanged. `release:tarball-check` runs the
 existing provider, team, human, web, relay and transport regressions against a
 separately installed plugin and real SDK peers.
 
-For source builds, `npm run build:paseo` builds the server (plugin prepack runs it). It
+For source builds, `pnpm run build:paseo` builds the server (plugin prepack runs it). It
 is not required by core build/prepack.
