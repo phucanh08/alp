@@ -38,7 +38,7 @@ Vì vậy, khi viết một field mới nhận đầu vào từ bên ngoài:
 - Giới hạn một collection thì dùng `z.array` (hoặc `map`/`set`) kèm `.max()`. Đổi một field đang là
   array có `.max()` sang `z.record` là **mất** lớp bảo vệ, kể cả khi vẫn khai giới hạn.
 - Nếu thật cần một record có giới hạn, phải chặn kích thước **trước** khi zod parse, bằng
-  `bounded()` trong `packages/runtime/src/claude-transport.ts` (nó đo kích thước trong
+  `bounded()` trong `packages/runtime/src/providers/transports/claude-transport.ts` (nó đo kích thước trong
   `z.preprocess` rồi mới cho schema chạy). `vars` của `alp_pour` là đúng mẫu này.
 - Field nào dựa vào `.max()` của array thì nên có test ghim **cả hình dạng** chứ không chỉ con số,
   để lần sau ai đổi sang record thì test kêu. Hai ví dụ:
@@ -50,7 +50,7 @@ Rà toàn repo ngày 2026-11-06 (t-5294.4, mục 3) — **không có** `z.record
 
 | Chỗ dùng | Đầu vào hay đầu ra | Giới hạn | Trạng thái |
 | --- | --- | --- | --- |
-| `packages/runtime/src/claude-transport.ts:138` (`alp_pour.vars`) | đầu vào | có | đã qua `bounded()` — đúng mẫu |
+| `packages/runtime/src/providers/transports/claude-transport.ts:164` (`alp_pour.vars`) | đầu vào | có | đã qua `bounded()` — đúng mẫu |
 | `integrations/paseo/shared/library.ts:68` (`alp.library.save.content`) | đầu vào | không | không khai giới hạn (giá trị là `z.unknown()`, zod không parse sâu); t-32c1 chặn kích thước ở tầng trước |
 | `integrations/paseo/shared/library.ts:46` (`alp.library.get.content`) | đầu ra | không | dữ liệu do ALP tạo, không phải đầu vào ngoài |
 | `integrations/paseo/shared/tasks.ts:48` (`alp.tasks.list.sessions`) | đầu ra | không | dữ liệu do ALP tạo, không phải đầu vào ngoài |

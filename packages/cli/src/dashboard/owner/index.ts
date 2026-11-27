@@ -20,7 +20,7 @@ import type { OwnerHandler } from '@anhlp/alp-gateway/owner';
  * It returns the result, or throws: an error with a numeric `code` (and `data`) reaches the app as
  * that JSON-RPC error; any other is logged and answered "<method> failed in the gateway".
  *
- * host.js (group B), library.js (group C) and workspace-facts.js (t-ff83, the sidebar's
+ * host.ts (group B), library.ts (group C) and workspace-facts.ts (t-ff83, the sidebar's
  * host.workspace.facts) each own their methods; a name in both is a mistake
  * and stops the dashboard at start rather than letting one silently win.
  */

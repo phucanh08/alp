@@ -478,7 +478,7 @@ function setupBrowserSession() {
 function buildMenu() {
   const template: MenuItemConstructorOptions[] = [
     { role: 'appMenu' },
-    // No ⌘W here: the dashboard page takes it to close its current tab (apps/web lib/shortcuts.js, as
+    // No ⌘W here: the dashboard page takes it to close its current tab (apps/web/src/lib/shortcuts.ts, as
     // Paseo's desktop app does); before-input-event closes the window on a bundled page.
     { label: 'File', submenu: [{ label: 'Connect again', accelerator: 'CmdOrCtrl+Shift+R', click: () => void connect() }, { type: 'separator' }, { label: 'Close Window', click: (_item, window) => { if (window instanceof BrowserWindow) window.close(); } }] },
     { role: 'editMenu' },

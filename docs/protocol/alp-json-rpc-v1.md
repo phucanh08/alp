@@ -626,8 +626,12 @@ fragments at stable source positions. Virtualization of already-loaded web rows 
 
 `packages/protocol/conformance/run.mjs` checks an implementation from outside, over its stream endpoint.
 It imports no implementation code, only `node:net` and the protocol's schemas.
+It loads the contract checks from the package's built `dist/contract.js`, so in a source checkout
+build the protocol package first (`pnpm --filter @anhlp/alp-protocol run build`); the published
+package ships `dist/` already.
 
 ```sh
+pnpm --filter @anhlp/alp-protocol run build                                                    # source checkout only
 node packages/protocol/conformance/run.mjs --socket /path/to/alpd.sock                       # handshake, wire, errors, limits
 node packages/protocol/conformance/run.mjs --socket S --profiles handshake,wire,errors,limits,session \
   --project /tmp/project --model codex:gpt-5.6-sol --hold-marker '[hold]' --json
