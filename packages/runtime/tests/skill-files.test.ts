@@ -101,6 +101,24 @@ test('edge cases: a prefix sibling, a hidden directory, an empty file, a FIFO, a
   assert.equal(local.value.content, '# local\n');
 });
 
+test('a link inside the skill to a hidden entry of the same skill is refused; a link to a normal file is read', async t => {
+  const { skill, skills } = await library(t);
+  await mkdir(path.join(skill, '.private'));
+  await writeFile(path.join(skill, '.private', 'x.md'), 'hidden\n');
+  await symlink(path.join(skill, '.notes'), path.join(skill, 'references', 'notes.md'));
+  await symlink(path.join(skill, '.private', 'x.md'), path.join(skill, 'references', 'private.md'));
+  await symlink(path.join(skill, '.private'), path.join(skill, 'open'));
+  for (const file of ['references/notes.md', 'references/private.md', 'open/x.md']) {
+    const result = await readSkillFile(skills, { skill: 'bug-loop', file });
+    assert.equal(result.ok, false, file);
+    if (!result.ok) assert.match(result.error, /Hidden/, file);
+  }
+  await symlink(path.join(skill, 'references', 'test-proof.md'), path.join(skill, 'proof.md'));
+  const normal = await readSkillFile(skills, { skill: 'bug-loop', file: 'proof.md' });
+  assert.ok(normal.ok, JSON.stringify(normal));
+  assert.equal(normal.value.content, 'proof\n');
+});
+
 test('only Antigravity sessions with skills read them through the tool; a supervisor too, and nothing else new', () => {
   assert.equal(readsSkillsByTool('antigravity', [{}]), true);
   assert.equal(readsSkillsByTool('antigravity', []), false);

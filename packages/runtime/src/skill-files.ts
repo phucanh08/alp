@@ -89,6 +89,9 @@ export async function readSkillFile(skills: readonly SkillRef[], args: unknown, 
   try { target = await realpath(path.join(directory, ...parts)); }
   catch { return refuse(`Skill '${name}' has no file ${parts.join('/')}`); }
   if (!inside(directory, target)) return refuse(`file must stay inside skill '${name}'`);
+  // A link inside the skill may point at a hidden entry of the same skill (.env, .git/config): the
+  // real path is checked too, segment by segment, not only the path the caller named.
+  if (path.relative(directory, target).split(path.sep).some(part => part.startsWith('.'))) return refuse('Hidden files of a skill are not returned');
 
   // Only a regular file is opened (a FIFO would block the open), and not through a link swapped in
   // since realpath (O_NOFOLLOW where the platform has it); the open file is checked again.
