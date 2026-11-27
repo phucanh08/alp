@@ -1620,3 +1620,40 @@ test('a user prompt "/<skill> ..." reaches Codex with that skill as a skill inpu
   assert.ok(input.some((part: Json) => part.type === 'text' && part.text === '/xia find the README'), 'the words stay as typed');
   for (const body of ['/xiax no such skill', 'see /xia later', '/nope']) assert.ok(!(await send(body)).some((part: Json) => part.type === 'skill'), body);
 });
+
+test('a summary lists at most the last 100 branches of a root (LISTED_BRANCHES)', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'lb', ['one']);
+  await d.request('session.close', { sessionId: 'lb' });
+  await d.stop();
+  const file = path.join(world.state, 'sessions', 'lb.json');
+  const stored = JSON.parse(await readFile(file, 'utf8'));
+  stored.branches = Array.from({ length: 101 }, (_, index) => ({ branchId: `br_${index.toString(16).padStart(16, '0')}`, beforeTurnId: `turn-${index}`, turns: 1, at: new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString(), threadId: `thread-old-${index}`, cut: 1, marker: 2 }));
+  await writeFile(file, JSON.stringify(stored));
+  const restarted = { ...await world.start(), ...world };
+  const listed = (await restarted.request('session.get', { sessionId: 'lb' })).session.branches;
+  assert.equal(listed.length, 100);
+  assert.equal(listed[0].branchId, stored.branches[1].branchId, 'the oldest one is left out');
+  assert.equal(listed.at(-1).branchId, stored.branches[100].branchId);
+  assert.deepEqual(Object.keys(listed[0]).sort(), ['at', 'beforeTurnId', 'branchId', 'turns'], 'the public fields only');
+});
+
+test('a root of a runtime other than Codex or Claude cannot be forked, rewound, reloaded or configured (runtime_unsupported)', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'ru', ['one']);
+  await d.request('session.close', { sessionId: 'ru' });
+  await d.stop();
+  const file = path.join(world.state, 'sessions', 'ru.json');
+  const stored = JSON.parse(await readFile(file, 'utf8'));
+  assert.ok(['codex', 'claude'].includes(stored.session.runtime), stored.session.runtime);
+  stored.session.runtime = 'antigravity';
+  await writeFile(file, JSON.stringify(stored));
+  const restarted = { ...await world.start(), ...world };
+  const session = (await restarted.request('session.get', { sessionId: 'ru' })).session;
+  assert.deepEqual(session.conversation, { fork: false, rewind: false, reload: false, configure: false, reason: 'runtime_unsupported' });
+  const generation = await generationOf(restarted, 'ru');
+  await assert.rejects(restarted.request('session.fork', { sessionId: 'ru', requestId: 'fk-ru', ifGeneration: generation }), rpcError(1005, 'runtime_unsupported'));
+  assert.equal(world.native.branches.length, 0, 'nothing reached the runtime');
+});

@@ -905,3 +905,24 @@ test('legacy applied configure with newer journal evidence stays unfinished with
   assert.equal((await journalOf(world.state)).find(entry => entry.key === old.key).state, 'applied');
   assert.equal(world.native.configures.length, 2);
 });
+
+test('configure refusals the runtime gives map to protocol errors: another agent, more permissions, a malformed change', async t => {
+  const world = await setup(t);
+  const d = { ...await world.start(), ...world };
+  await conversation(d, 'cr', ['one']);
+  const refuse = (reason: string) => { d.runtime.previewConfigure = async () => { const error: Json = new Error(`refused: ${reason}`); error.data = { reason }; throw error; }; };
+  const preview = () => d.request('session.configure.preview', { sessionId: 'cr', model: 'gpt-6.1-sol' });
+  refuse('agent_mismatch');
+  await assert.rejects(preview(), (error: Json) => error.code === 1005 && error.data?.reason === 'agent_mismatch' && error.data?.action === 'session.create' && error.message === 'refused: agent_mismatch');
+  refuse('permission_escalation');
+  await assert.rejects(preview(), (error: Json) => error.code === 1003 && error.data?.reason === 'permission_escalation' && error.data?.action === undefined);
+  refuse('invalid_params');
+  await assert.rejects(preview(), rpcError(-32602, 'invalid_params'));
+  refuse('not_root');
+  await assert.rejects(preview(), rpcError(-32602, 'invalid_params'));
+  // The same mapping when session.configure itself is refused by the preview it runs first.
+  refuse('permission_escalation');
+  await assert.rejects(d.request('session.configure', { sessionId: 'cr', model: 'gpt-6.1-sol', requestId: 'cr1', ifGeneration: await generationOf(d, 'cr') }), rpcError(1003, 'permission_escalation'));
+  assert.equal(world.native.configures.length, 0, 'no refusal reached the runtime');
+  assert.deepEqual(await journalFiles(d.state), [], 'nothing journaled');
+});
