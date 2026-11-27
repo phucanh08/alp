@@ -3,13 +3,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { CALLER_SESSION_VARIABLES, XDG_BASE_DIRECTORIES, clearCallerSession, hermeticEnv, homelessEnv, isCallerBinary } from '../../scripts/test-lib.ts';
+import { CALLER_SESSION_VARIABLES, SCRATCH_BASE_BYTES, XDG_BASE_DIRECTORIES, clearCallerSession, hermeticEnv, homelessEnv, isCallerBinary, scratchBase } from '../../scripts/test-lib.ts';
 import { teardown } from '../support/teardown.ts';
 // Types only: the test loads typescript itself, where it needs it.
 import type * as TS from 'typescript';
 
 /** The POSIX base directories homelessEnv points at the private home, for a deepEqual on its output. */
 const xdg = (home: string) => Object.fromEntries(Object.entries(XDG_BASE_DIRECTORIES).map(([name, relative]) => [name, path.join(home, relative)]));
+
+test('scratchBase: a long Unix TMPDIR is swapped for /tmp so socket paths under the scratch fit; Windows keeps its own (t-5a44)', () => {
+  const macos = '/var/folders/8x/abcdefghijklmnopqrstuvwxyz00gn/T';
+  assert.equal(Buffer.byteLength(macos), SCRATCH_BASE_BYTES);
+  assert.equal(scratchBase(macos, { platform: 'darwin', exists: () => true }), macos);
+  assert.equal(scratchBase('/tmp', { platform: 'linux', exists: () => true }), '/tmp');
+  const long = `/private/tmp/${'x'.repeat(80)}`;
+  assert.equal(scratchBase(long, { platform: 'darwin', exists: () => true }), '/tmp');
+  assert.equal(scratchBase(long, { platform: 'linux', exists: () => true }), '/tmp');
+  assert.equal(scratchBase(long, { platform: 'darwin', exists: () => false }), long, 'no /tmp: keep the temp dir');
+  const windows = `C:\\Users\\${'x'.repeat(80)}\\Temp`;
+  assert.equal(scratchBase(windows, { platform: 'win32', exists: () => true }), windows);
+  // The deepest socket the tests make under a scratch at the limit still fits macOS's sun_path (macOS user ids start at 501).
+  const deepest = `${macos}/alpt-XXXXXX/alp-dashboard-501-0123456789ab/token.sock`;
+  assert.ok(Buffer.byteLength(deepest) < 104, `${Buffer.byteLength(deepest)} bytes`);
+});
 
 test('isCallerBinary: ALP_<NAME>_BIN in any case, nothing else', () => {
   for (const name of ['ALP_CODEX_BIN', 'ALP_CLAUDE_BIN', 'ALP_ANTIGRAVITY_BIN', 'ALP_GH_BIN', 'alp_codex_bin', 'ALP_X2_BIN']) assert.equal(isCallerBinary(name), true, name);
