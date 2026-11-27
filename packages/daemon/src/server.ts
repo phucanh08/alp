@@ -12,7 +12,7 @@ import { createLogger } from '@anhlp/alp-core/log';
 import { AGENT_NAME, AlpRpcError, CAPABILITY, MAX_FRAME, PROMPT_IMAGES, PROTOCOL_VERSION, ERROR, RPC_ERROR, RPC_METHODS, base64Bytes, encodeFrame } from '@anhlp/alp-protocol';
 import { validateParams } from '@anhlp/alp-protocol/contract';
 export { ERROR } from '@anhlp/alp-protocol';
-import { DEFAULT_MODEL, models, modes, type ModelCatalog, thinkingOptions, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '@anhlp/alp-runtime/index';
+import { type ModelCatalog, type AlpEvent, type AlpRuntime, type Envelope, type SessionSnapshot } from '@anhlp/alp-runtime/index';
 import { replayedNotice } from '@anhlp/alp-runtime/mailbox';
 import type { Receipt, SessionRecord, SessionStatus, Store, UnreadableReceipt } from './persistence/store.ts';
 import type { PromptContent, SessionSummary } from '@anhlp/alp-protocol/session';
@@ -25,6 +25,7 @@ import { createFindPages, FileAccessError, FilesError, listWorkspaceDirectory, p
 import { createGitReader } from './workspaces/git.ts';
 import { createScheduleStore, projectKey } from './schedules/schedules.ts';
 import { createScheduleHandlers } from './schedules/rpc/handlers.ts';
+import { createCatalogHandlers } from './catalog/rpc/handlers.ts';
 import { createAttachmentStore, type AttachmentRuntime, type AttachmentStoreOptions } from './attachments/attachments.ts';
 import type { RuntimeAttachment } from '@anhlp/alp-protocol/session';
 import { clientMessageId as scheduleMessageId, createScheduler, SCHEDULE_TICK_MS, type ScheduleDelivery } from './schedules/scheduler.ts';
@@ -149,18 +150,6 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   terminalOptions?: Partial<Pick<TerminalServiceOptions, 'limits' | 'now' | 'spawn' | 'processes' | 'sweepMs' | 'killGraceMs' | 'maxBufferedBytes' | 'platform'>>;
 }): DaemonServer {
   const connections = new Set<Connection>();
-  const catalogResult = () => {
-    const state = modelCatalog?.state();
-    // ACP providers' rows (t-d0b0), from their files and what sessions or an explicit probe taught.
-    const acpRows = modelCatalog?.acpRows() ?? [];
-    const acpModels = acpRows.map(row => ({ id: `acp:${row.id}`, label: row.label, description: row.description, thinkingOptions: [], runtime: 'acp', provider: row.provider, source: row.source, enabled: row.enabled, status: row.status }));
-    const acpProviders = Object.fromEntries([...new Set(acpRows.map(row => row.provider))].map(id => {
-      const acp = state?.acp?.[id];
-      return [`acp:${id}`, { status: acp?.status ?? 'unprobed', ...(acp?.fetchedAt ? { fetchedAt: acp.fetchedAt } : {}), ...(acp?.error ? { error: acp.error } : {}) }];
-    }));
-    return { models: [...models, ...acpModels], modes, thinkingOptions, defaultModel: `codex:${DEFAULT_MODEL}`,
-      ...(state ? { fetchedAt: state.fetchedAt, providers: { ...Object.fromEntries(Object.entries(state.providers).map(([runtime, provider]) => [runtime, { status: provider!.status, fetchedAt: provider!.fetchedAt, ...(provider!.error ? { error: provider!.error } : {}) }])), ...acpProviders, ...(modelCatalog?.acpLoadError() ? { acp: { status: 'failed', error: modelCatalog.acpLoadError() } } : {}) } } : {}) };
-  };
   // Every helloed connection learns that the catalog changed, and re-reads it (catalog.updated).
   const unsubscribeCatalog = modelCatalog?.onUpdated(snapshot => {
     for (const connection of connections) if (connection.helloed) { try { connection.send({ jsonrpc: '2.0', method: 'catalog.updated', params: { fetchedAt: snapshot.fetchedAt } }); } catch { /* a gone connection */ } }
@@ -1101,6 +1090,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
   const extensionOwners = new Map<string, Connection>();
   /** workspace.files.find's snapshots, each for the connection that asked. */
   const findPages = createFindPages();
+  const catalogHandlers = createCatalogHandlers({ modelCatalog });
   const scheduleHandlers = createScheduleHandlers({ schedules, scheduler, runtime, log });
   const handlers: Record<string, (connection: Connection, params: any) => Promise<unknown> | unknown> = {
     'extension.register': async (connection, params) => {
@@ -1361,14 +1351,7 @@ export function createDaemonServer({ runtime, socketPath, version, onShutdown, s
     'project.register': (_c, p) => registryMutation('project.register', p),
     'project.remove': (_c, p) => registryMutation('project.remove', p),
     'workspace.update': (_c, p) => registryMutation('workspace.update', p),
-    'catalog.get': () => catalogResult(),
-    'catalog.refresh': async () => {
-      if (!modelCatalog) throw new RpcError(ERROR.unavailable, 'The live model catalog is not available');
-      // The one place, with a provider's enabling, where ALP starts ACP providers to list their models.
-      // An ACP failure must not hide the providers' refresh: each records its own error.
-      await Promise.all([modelCatalog.refresh(), modelCatalog.refreshAcp().catch(() => {})]);
-      return catalogResult();
-    },
+    ...catalogHandlers,
     // attachment.* (§12.6): each call acts for its principal context; without the store (no home or
     // store, or Windows) alpd does not serve them, as for any method it does not know.
     // terminal.* (§12.10): each call acts for its principal context; input, resize and the stream
